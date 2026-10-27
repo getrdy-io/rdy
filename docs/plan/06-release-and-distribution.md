@@ -269,7 +269,7 @@ Other checks a security reviewer can run: `gh attestation verify <file> --repo g
 
 Served at `https://getrdy.io/install`, and attached to every release as a signed asset. POSIX `sh` only (must run under dash, busybox ash and macOS sh). `shellcheck` clean. No `sudo`, ever.
 
-Environment variables (all optional): `RDY_VERSION`, `RDY_INSTALL_DIR`, `RDY_ALLOW_ROOT=1`, `RDY_VERIFY=full|checksum`, `RDY_BASE_URL` (tests only; prints a warning when set).
+Environment variables (all optional): `RDY_VERSION`, `RDY_INSTALL_DIR`, `RDY_ALLOW_ROOT=1`, `RDY_VERIFY=full|checksum`. There is no variable that changes the download host. Tests put a stub `curl` first on `PATH` (agreed in review of `09-docs-site.md`).
 
 Step by step:
 
@@ -292,7 +292,7 @@ Step by step:
 
 Every error follows one shape: what happened, the most likely cause, what to do next, in under five lines. Corporate TLS interception gets its own message: name `SSL_CERT_FILE` and `CURL_CA_BUNDLE`, and the manual route.
 
-Tests (ticket "install.sh CI tests"): `shellcheck`; a local fixture server (`python3 -m http.server`) with a fake release plus a stub cosign, run under `dash` and `busybox sh`; negative cases for bad hash, bad signature, root refusal, unsupported OS and an unwritable dir. After each real release, a post-release job installs from the real GitHub release on ubuntu x64, ubuntu arm64, macOS arm64 and an Alpine container, then runs `cosign verify-blob` on the Windows zip (ticket "Post-release verify job").
+Tests (ticket "install.sh CI tests"): `shellcheck`; a stub `curl` on `PATH` that serves a fake release from a local directory, plus a stub cosign, run under `dash` and `busybox sh`; negative cases for bad hash, bad signature, root refusal, unsupported OS and an unwritable dir. After each real release, a post-release job installs from the real GitHub release on ubuntu x64, ubuntu arm64, macOS arm64 and an Alpine container, then runs `cosign verify-blob` on the Windows zip (ticket "Post-release verify job").
 
 ### Air-gapped alternative
 
@@ -305,7 +305,7 @@ The documented manual route (docs-writer turns this into a page):
 
 M2 ticket: `RDY_LOCAL_DIR=/media/dl sh install.sh` runs the same checks against local files, so the air-gapped path is one command.
 
-Serving: `curl -sSf https://getrdy.io/install | sh` has no `-L`, so the endpoint must answer 200 with the script bytes, not a redirect. Mechanism (ticket "Serve install.sh at getrdy.io/install"): a Cloudflare Pages project fed by `wrangler pages deploy` from the release workflow, using an API token scoped to that one project. Docs examples should use `curl --proto '=https' --tlsv1.2 -sSf`.
+Serving: `curl -sSf https://getrdy.io/install | sh` has no `-L`, so the endpoint must answer 200 with the script bytes, not a redirect. Mechanism (ticket "Serve install.sh at getrdy.io/install"): the apex `getrdy.io` is already a Pages custom domain for the marketing site, and Pages cannot route a single path to a second project. So use a tiny Cloudflare Worker with a route on `getrdy.io/install`, deployed once with `wrangler deploy` (not on every release). It fetches `install.sh` from the newest release (through the same version resolution as step 8) and returns it with a 200. That removes the per-release deploy and keeps Cloudflare tokens out of the release workflow. Cloudflare API tokens are account-scoped, not project-scoped, so the Worker token lives in a GitHub Environment limited to `main`, and ideally in a separate Cloudflare account from the docs site. Docs examples should use `curl --proto '=https' --tlsv1.2 -sSf`.
 
 ## Package managers
 
@@ -388,12 +388,12 @@ Known deviations (to be listed in docs as they are found):
 | Item | Cost | Notes |
 | --- | --- | --- |
 | GitHub Actions, public repo, standard runners (Linux x64, Linux arm64, Windows, macOS arm64 and Intel) | $0, no minute cap | Verify that arm64 Linux and `macos-15-intel` remain free for public repos when writing tickets 3 and 7. |
-| GitHub Actions, if the repo were private | 2,000 min/month, with macOS counted 10x and Windows 2x | One full CI run is roughly 160 billable minutes. That is about 12 runs a month. Not workable. So: public from the first commit. Nothing sensitive goes in (CLAUDE.md already bans real specs and secrets). |
+| GitHub Actions, if the repo were private | 2,000 min/month, with macOS counted 10x and Windows 2x | One full CI run is roughly 160 billable minutes. That is about 12 runs a month. Not workable. So: public from the first commit. CLAUDE.md already bans real specs and secrets, but `docs/plan/rdy-plan.md` holds pricing, an employment-agreement risk row and trademark history. The founder must decide what stays in the public tree before the repo goes public (see `09-docs-site.md`, first correction). |
 | Larger paid runners | avoid | Never needed if CI meets the budget above. |
 | Sigstore (Fulcio, Rekor, TUF root) | $0 | Public-good service, no SLA. An outage delays a release; it does not break installed binaries. Rerun the job later. |
 | GitHub Releases storage and bandwidth, Actions cache (10 GB) | $0 | |
 | GitHub artifact attestations | $0 for public repos | |
-| Cloudflare Pages for `getrdy.io/install` | $0 | |
+| Cloudflare Worker route for `getrdy.io/install` | $0 | Free Workers plan covers 100,000 requests a day. |
 | crates.io, Homebrew tap, winget | $0 | |
 | Apple Developer ID | about $99/year | Deferred to M3 decision. |
 | Windows code signing | roughly $10/month to a few hundred dollars a year | Deferred to M3 decision. |
@@ -423,7 +423,7 @@ Total new spend in M1: $0.
 - install.sh signature verification default. Chosen (most conservative): verify with cosign by default, downloading a pinned cosign when absent, with `RDY_VERIFY=checksum` as a loud opt-out. Alternatives: (a) verify only if cosign is already installed, else sha256 only; (b) require cosign installed or fail; (c) embed hashes in the script. (a) is the weakest. (b) breaks the one-liner. (c) needs a script deploy on each release.
 - Release signing order. Chosen: sign before the release is published (`github-release = "host"` plus `publish-jobs`) if dist leaves a draft. Alternative: `post-announce-jobs` with fail-closed install, which rules out GitHub immutable releases.
 - Musl builds on native runners instead of cross-compiling. Chosen: native `ubuntu-24.04-arm` plus `musl-tools`. Alternatives: `cargo-zigbuild`, `cross`, or a container. This belongs in the existing "musl vs glibc" ADR family as a build-method note.
-- How `getrdy.io/install` is served. Chosen: Cloudflare Pages direct upload from the release workflow with a one-project token. Alternatives: a Cloudflare Worker proxying the GitHub release, or a manual copy per release. This adds the first non-keyless secret to the release path, so security-reviewer should review it.
+- How `getrdy.io/install` is served. Chosen: a Cloudflare Worker route on `getrdy.io/install` that proxies the newest release's `install.sh`, deployed once. Alternatives: the marketing site build copying the script per release (needs a deploy per release), or a manual copy. Cloudflare tokens are account-scoped, so the token must sit in a restricted GitHub Environment, apart from any docs-deploy token. Security-reviewer should review it.
 - Self-update trust model (M3). Alternatives: shell out to cosign, `sigstore` crate, or an offline ed25519 release key. Decide after the spike.
 - macOS notarization and Windows Authenticode (M3). Paid services. Alternatives: do neither and document, buy both, or use Homebrew and winget only.
 - apt and yum hosting and the repo signing key (M5). Alternatives: self-hosted on object storage with a GPG key, or a hosted free OSS tier with its own key.

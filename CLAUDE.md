@@ -39,6 +39,7 @@ product plan doc). Read it before planning anything.
 - GitHub org: `getrdy-io`. Repos: `rdy` (public, Apache-2.0) and `rdy-cloud` (private).
 - crates: `rdy`, `rdy-spec`, `rdy-engine`, `rdy-bundle`, `rdy-checks-host`, `rdy-checks-net`, `rdy-checks-k8s`, `rdy-checks-cloud`, `rdy-checks-gpu`.
 - Do not use the old working name (dropped 2026-10-20 after a trademark search) anywhere in code, docs or copy.
+- Do not name competitor companies or competitor products anywhere in this repo (code, docs, copy, examples, URLs). Describe them by category instead. Vendors Rdy builds on or checks (clouds, Kubernetes distros, NVIDIA, GitHub, Sigstore, Cloudflare, Stripe) may be named.
 
 ## Founder context
 
