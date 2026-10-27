@@ -6,29 +6,29 @@ Oct 19, 2026 · Rdy
 
 Build Rdy (command: rdy, site: getrdy.io): a vendor-neutral readiness and diagnostics tool for software that ships into customer environments (on-prem, BYOC, air-gapped, GPU clusters). The customer runs one signed Rust binary. It checks their environment against the vendor's requirements, scores readiness with fixes, and packages a redacted diagnostics bundle. The vendor's sales engineers and support team see the result in a portal before install day.
 
-**Why now.** Enterprises are pulling SaaS into their own clouds. A CISO at a $100B+ revenue firm told [The Stack](https://www.thestack.technology/bring-your-own-cloud-how-it-works/) in 2026 that BYOC is now their preferred deployment model and most of their SaaS partners have it on the roadmap. [Nuon](https://techcrunch.com/2024/12/17/nuon-helps-companies-deploy-their-software-into-their-customers-cloud-accounts) raised $16.5M to help vendors deploy into customer accounts, and most of its customers are early-stage AI companies. Every one of those vendors hits the same wall. As [Replicated](https://replicated.com/blog/for-faster-installs-and-fewer-calls-codify-what-you-can-document-the-rest) puts it, installs fail because the environment isn't ready, not because the product is broken.
+**Why now.** Enterprises are pulling SaaS into their own clouds. A CISO at a $100B+ revenue firm told [The Stack](https://www.thestack.technology/bring-your-own-cloud-how-it-works/) in 2026 that BYOC is now their preferred deployment model and most of their SaaS partners have it on the roadmap. A BYOC deployment platform raised $16.5M to help vendors deploy into customer accounts, and most of its customers are early-stage AI companies. Every one of those vendors hits the same wall. As the incumbent Kubernetes-only preflight and support-bundle vendor puts it, installs fail because the environment isn't ready, not because the product is broken.
 
-**The gap.** The only established tooling is Replicated's open-source Troubleshoot: a kubectl plugin, Kubernetes-first, built for Replicated's own platform. Everyone else writes bash scripts (GitHub, Anchore, HPE and BloodHound each ship their own homegrown support-bundle tool). Nothing covers VMs, cloud accounts, GPUs and Kubernetes in one signed binary with a sales-facing workflow.
+**The gap.** The only established tooling is the incumbent vendor's open-source preflight and support-bundle tool: a kubectl plugin, Kubernetes-first, built for that vendor's own platform. Everyone else writes bash scripts (a code host, a container-security vendor, an enterprise-software vendor and a security-analytics vendor each ship their own homegrown support-bundle tool). Nothing covers VMs, cloud accounts, GPUs and Kubernetes in one signed binary with a sales-facing workflow.
 
-**Revenue thesis.** Replicated's median buyer pays about [$87k a year](https://www.vendr.com/marketplace/replicated) for its distribution platform. Rdy sells one focused piece of that job at $6k to $24k a year, with enterprise deals above $50k. 300 paying vendors at a $15k average is $4.5M ARR. A free open-source CLI drives adoption. The portal is the paid product.
+**Revenue thesis.** The incumbent's median buyer pays about $87k a year (third-party pricing data) for its distribution platform. Rdy sells one focused piece of that job at $6k to $24k a year, with enterprise deals above $50k. 300 paying vendors at a $15k average is $4.5M ARR. A free open-source CLI drives adoption. The portal is the paid product.
 
-**One caveat.** Nothing in software is fully non-existent. The real claim is that nobody sells this as a standalone product, and the two closest players (Replicated, Nuon) are busy elsewhere. The Risks section has the validation gates to prove demand before the heavy build. Option B, a customer-side BYOC control tower, is laid out near the end as the phase-two company built on the same agent. Three other options (model delivery, document accessibility, CNC verification) were researched and dropped on 2026-10-20; A and B are the plan.
+**One caveat.** Nothing in software is fully non-existent. The real claim is that nobody sells this as a standalone product, and the two closest players (the incumbent preflight vendor and a BYOC deployment platform) are busy elsewhere. The Risks section has the validation gates to prove demand before the heavy build. Option B, a customer-side BYOC control tower, is laid out near the end as the phase-two company built on the same agent. Three other options (model delivery, document accessibility, CNC verification) were researched and dropped on 2026-10-20; A and B are the plan.
 
 ## The gap and the evidence
 
 The deployment-into-customer-environments market is growing fast, but readiness tooling has not kept up. Four signals from the research:
 
-1. **BYOC is a buyer-driven trend, not a vendor fad.** [Northflank](https://northflank.com/blog/is-byoc-the-future-of-software-deployment) and [Railway](https://blog.railway.com/p/what-is-byoc-developer-guide-2026) both published 2026 BYOC guides. The driver is compliance, data residency, and committed cloud spend that CFOs want to burn down. A US government agency compared it to the Kubernetes mandate of a decade ago ([Nuon](https://scour.ing/@minezone/p/https://nuon.co/blog/the-enterprise-pull-why-the-fortune-500-is-rewriting-the-software-delivery-playbook)).
-2. **Readiness checks are proven to work.** Replicated found vendors using its preflight checks get customers running [7x faster](https://replicated.com/blog/the-value-of-preflight-checks-for-software-installation) than market average (2022 study). Their advice to vendors: build a catalog of checks from past install failures (CPU, RAM, ports, proxies, GPUs, antivirus conflicts) and make customers run it before install day.
-3. **The one open-source tool is Kubernetes-bound.** Troubleshoot is a [kubectl plugin](https://docs.replicated.com/vendor/preflight-support-bundle-about). Its host collectors [cannot run on remote nodes](https://community.replicated.com/t/kurl-how-can-i-generate-a-support-bundle-when-my-kubernetes-cluster-is-down/911), so multi-node VM installs mean one bundle per machine, by hand.
-4. **Everyone else rolls their own.** [GitHub Enterprise Server](https://docs.github.com/en/enterprise-server@3.20/admin/monitoring-and-managing-your-instance/monitoring-your-instance/about-support-bundles), [Anchore](https://docs.anchore.com/current/docs/troubleshooting/diagnostic_bundle/), [HPE Ezmeral](https://docs.ezmeral.hpe.com/runtime-enterprise/57/reference/support-troubleshooting/operations-and-troubleshooting/support-bundles/Support_Bundle_Contents.html) and [BloodHound](https://bloodhound.specterops.io/collect-data/enterprise-collection/collector-support-bundles) each maintain a bespoke support-bundle tool. That is engineering time every vendor spends on the same problem. [NVIDIA NIM](https://docs.nvidia.com/nim/large-language-models/2.0.13/index.html) alone documents Kubernetes, CSP, air-gap, multi-node and vGPU deployments, with GPU OOM and OpenShift admission failures as top troubleshooting topics.
+1. **BYOC is a buyer-driven trend, not a vendor fad.** Two BYOC platform vendors both published 2026 BYOC guides. The driver is compliance, data residency, and committed cloud spend that CFOs want to burn down. A US government agency compared it to the Kubernetes mandate of a decade ago (as reported by a BYOC deployment platform).
+2. **Readiness checks are proven to work.** The incumbent preflight vendor found vendors using its preflight checks get customers running 7x faster than market average (2022 study, vendor-reported). Their advice to vendors: build a catalog of checks from past install failures (CPU, RAM, ports, proxies, GPUs, antivirus conflicts) and make customers run it before install day.
+3. **The one open-source tool is Kubernetes-bound.** The incumbent tool is a kubectl plugin. Its host collectors cannot run on remote nodes, so multi-node VM installs mean one bundle per machine, by hand.
+4. **Everyone else rolls their own.** A code host ([GitHub Enterprise Server](https://docs.github.com/en/enterprise-server@3.20/admin/monitoring-and-managing-your-instance/monitoring-your-instance/about-support-bundles)) and container-security, enterprise-software and security-analytics vendors each maintain a bespoke support-bundle tool. That is engineering time every vendor spends on the same problem. [NVIDIA NIM](https://docs.nvidia.com/nim/large-language-models/2.0.13/index.html) alone documents Kubernetes, CSP, air-gap, multi-node and vGPU deployments, with GPU OOM and OpenShift admission failures as top troubleshooting topics.
 
 | Player | What it does | Where it stops |
 | --- | --- | --- |
-| [Replicated Troubleshoot](https://docs.replicated.com/vendor/preflight-support-bundle-about) | Open-source preflights and support bundles, YAML specs, redactors, analyzers | Kubernetes-first kubectl plugin; no cloud-account or GPU checks; no hosted results or sales workflow outside Replicated's platform |
-| [Replicated Platform](https://www.vendr.com/marketplace/replicated) | Full on-prem distribution: installers, licensing, portal | Median $87k/yr; you adopt the whole platform to get the checks |
-| [Nuon](https://techcrunch.com/2024/12/17/nuon-helps-companies-deploy-their-software-into-their-customers-cloud-accounts) | BYOC deployment platform, $16.5M raised; Runner and Actions for in-account health checks | Checks only exist inside Nuon deployments; nothing pre-sale, nothing for VMs or air-gap |
-| [Tensor9](https://luma.com/2709f44u) | BYOC platform with an egress-only vendor access connector | Deployment and access, not readiness; tied to its own packaging |
+| The incumbent Kubernetes-only preflight and support-bundle tool | Open-source preflights and support bundles, YAML specs, redactors, analyzers | Kubernetes-first kubectl plugin; no cloud-account or GPU checks; no hosted results or sales workflow outside its vendor's platform |
+| The incumbent's distribution platform | Full on-prem distribution: installers, licensing, portal | Median $87k/yr; you adopt the whole platform to get the checks |
+| A BYOC deployment platform that raised $16.5M | BYOC deployment platform; runner and actions for in-account health checks | Checks only exist inside its own deployments; nothing pre-sale, nothing for VMs or air-gap |
+| A second BYOC platform | BYOC platform with an egress-only vendor access connector | Deployment and access, not readiness; tied to its own packaging |
 | Homegrown scripts | Bash, PowerShell, per-vendor binaries | No signing, inconsistent redaction, no shared results, rebuilt by every vendor |
 | **Rdy** | Signed single binary, any target (VM, K8s, cloud account, GPU, air-gap), readiness score, redacted bundle, SE and support portal | New entrant; must earn trust running inside customer environments |
 
@@ -124,8 +124,8 @@ Open-core: the CLI is free and Apache-2.0, the portal is paid per vendor, not pe
 
 **Why the numbers hold up**
 
-- Buyers already pay [$76k to $796k a year](https://www.vendr.com/marketplace/replicated) for Replicated. A $6k to $24k line item for the readiness piece is an easy add, or a cheap partial replacement for vendors who only wanted the checks.
-- Investors are funding the category: Nuon's $16.5M round was [led by M12 and Uncork](https://www.dbta.com/Editorial/News-Flashes/Nuon-Emerges-from-Stealth-with-165M-to-Empower-Bring-Your-Own-Cloud-BYOC-Initiatives-167367.aspx), with angels from Sourcegraph, WarpStream and WorkOS. That is the same buyer set Rdy targets.
+- Buyers already pay $76k to $796k a year (third-party pricing data) for the incumbent platform. A $6k to $24k line item for the readiness piece is an easy add, or a cheap partial replacement for vendors who only wanted the checks.
+- Investors are funding the category: a BYOC deployment platform's $16.5M round was led by M12 and Uncork, with angels from Sourcegraph, WarpStream and WorkOS. That is the same buyer set Rdy targets.
 - Gross margin should exceed 85%. Results are small JSON documents. Bundles are the only real storage cost and can be capped per tier.
 - Every prospect who runs the CLI sees the Rdy name. The product markets itself to the next vendor through the customer's own engineers.
 
@@ -210,7 +210,7 @@ Sell to sales engineering leaders first. They feel the pain weekly, control a to
 
 **Positioning**
 
-For sales engineering and support teams at vendors who ship into customer environments, Rdy is the readiness check that catches install blockers before install day. Unlike Replicated's Troubleshoot (Kubernetes only, tied to their platform) or homegrown scripts, Rdy runs anywhere as one signed binary and shows results to both sides of the deal.
+For sales engineering and support teams at vendors who ship into customer environments, Rdy is the readiness check that catches install blockers before install day. Unlike the incumbent Kubernetes-only preflight tool (tied to its vendor's platform) or homegrown scripts, Rdy runs anywhere as one signed binary and shows results to both sides of the deal.
 
 Tagline to test first: **Install day should be boring.**
 
@@ -218,7 +218,7 @@ Tagline to test first: **Install day should be boring.**
 
 - B2B software vendors with a self-hosted, BYOC or agent-based deployment option. Categories: data platforms, observability, security, developer tools, AI inference and agent platforms.
 - 5 to 60 sales engineers. Series A through public. Below 5 SEs the budget is thin; above 60 they often have a platform team that wants to build it.
-- Trigger events: a new BYOC offering, a GPU-heavy product, a support org hiring to keep up with install tickets, a Replicated renewal.
+- Trigger events: a new BYOC offering, a GPU-heavy product, a support org hiring to keep up with install tickets, a renewal of the incumbent distribution platform.
 
 **Message by persona**
 
@@ -237,7 +237,7 @@ Tagline to test first: **Install day should be boring.**
 | [PreSales Collective](https://www.presalescollective.com/community-overview) | 50,000+ member Slack, community roundtables, regional meetups, Sol/Con. Give a talk on POC readiness, run a roundtable, sponsor one event | $0 to $5k | 500 waitlist signups, 25 design-partner conversations |
 | Founder-led content | Weekly LinkedIn post on a real POC failure pattern; monthly blog teardown; yearly "State of Enterprise Installs" report from anonymized data | Time | 5,000 followers inside the ICP |
 | Warm network | Direct outreach to SE leaders you already know at DevOps, observability, data and security vendors | Time | 5 design partners, 3 case studies |
-| Ecosystem partners | Nuon, Tensor9, Omnistrate, Rancher, OpenShift. Rdy is the pre-flight for their deployments, not a competitor | Time | 3 listed integrations, 1 co-marketing webinar |
+| Ecosystem partners | BYOC deployment platforms, Rancher, OpenShift (named targets are in a private note outside the repo). Rdy is the pre-flight for their deployments, not a competitor | Time | 3 listed integrations, 1 co-marketing webinar |
 | Built-in loop | Every prospect who runs the CLI sees the brand and a "Use Rdy for your product" link in the report | Built-in | 10% of paying vendors sourced from a prospect-side run |
 | Outbound (after launch) | Build a list of vendors whose pricing page says self-hosted or BYOC; sequence SE leaders with a free readiness spec for their product | $200/month tooling | 100 targeted sequences a month, 5% reply rate |
 
@@ -280,7 +280,7 @@ The site has one job at each stage: collect a waitlist in M0, convert design par
 | Pricing | Convert self-serve | Four tiers, yearly pricing, FAQ, "book a demo" for Enterprise |
 | Docs | Make the CLI usable without talking to you | Install, first run, spec reference, check catalog, portal API |
 | Open source | Build trust with security reviewers | License, repo link, signing and SBOM details, security policy |
-| Compare | Win the comparison searches | Rdy vs Troubleshoot, Rdy vs homegrown scripts |
+| Compare | Win the comparison searches | Rdy vs the incumbent Kubernetes-only preflight tool, Rdy vs homegrown scripts |
 | Blog and changelog | SEO and proof of momentum | Monthly posts, every release noted |
 | Trust | Pass procurement | Security practices, data handling, roadmap to SOC 2 |
 
@@ -307,7 +307,7 @@ The site has one job at each stage: collect a waitlist in M0, convert design par
 
 - Head terms: preflight checks, support bundle, deployment readiness, customer environment validation.
 - Trend terms: BYOC deployment, bring your own cloud readiness, air-gapped installation checklist, GPU deployment prerequisites.
-- Comparison terms: troubleshoot.sh alternative, Replicated preflight alternative.
+- Comparison terms: alternative-to searches for the incumbent preflight tool (exact terms are in a private note outside the repo).
 - Long tail from the docs: one page per check family, which doubles as a reference for people searching how to verify egress through a proxy or check CUDA versions on Kubernetes.
 
 ## Risks, validation gates, and alternatives
@@ -318,7 +318,7 @@ The biggest risk is not competition. It is spending six months on Rust before fi
 
 | Risk | Why it is real | Mitigation |
 | --- | --- | --- |
-| Replicated or Nuon ships the same thing | Both own an adjacent workflow and could add it | Stay vendor-neutral and any-target, which neither can do without hurting their platform story. Partner with Nuon and Tensor9 early. Move fast on cloud-account and GPU checks. |
+| The incumbent preflight vendor or a BYOC deployment platform ships the same thing | Both own an adjacent workflow and could add it | Stay vendor-neutral and any-target, which neither can do without hurting their platform story. Partner with BYOC deployment platforms early. Move fast on cloud-account and GPU checks. |
 | Trust: a new binary with root in a customer's environment | Security reviewers will push back on day one | Open source, signed releases, SBOM, least privilege, no upload by default, independent audit before Enterprise. |
 | No competitor can mean no market | Vendors may be fine with their bash scripts | The validation gates below. Charge from the first paying tier; free users are not proof. |
 | Founder capacity | 10 to 15 hours a week next to a full-time job | MVP is CLI plus report plus share link, nothing more. Lean on an AI coding agent. Find a GTM-side cofounder by M3 if it is working. |
@@ -341,10 +341,10 @@ Kill rule: fewer than 3 design partners after 30 outreach attempts means the pai
 | Idea | Why it lost (for now) |
 | --- | --- |
 | Customer-side BYOC control tower: inventory and govern every vendor data plane running in an enterprise's cloud (IAM, egress, update cadence, audit evidence) | Most unique and the biggest ACV, but a top-down enterprise security sale with SOC 2 and long cycles. Keep it as phase two. The same Rust agent powers it. |
-| Demo environment control plane for SE teams | Real pain you know well, but [Saleo](https://www.gartner.com/reviews/product/saleo-platform), Demostack and Reprise already own the demo budget. Rust gives no edge. |
-| Telemetry cost firewall | Rust fits, but Cribl, Vector, Edge Delta and Observo are already there. |
+| Demo environment control plane for SE teams | Real pain you know well, but demo-environment vendors already own the demo budget. Rust gives no edge. |
+| Telemetry cost firewall | Rust fits, but established observability-pipeline vendors are already there. |
 | AI agent sandbox and governance | Dozens of funded startups since 2025. No gap. |
-| Rust-native observability backend | OpenObserve, Quickwit and Parseable already did it. |
+| Rust-native observability backend | several open-source observability backends already did it. |
 
 ## Next 30 days
 
@@ -423,17 +423,17 @@ Flip Rdy around and sell to the enterprise instead of the vendor. Every BYOC ven
 **The evidence**
 
 - Vendors are shipping data planes into customer accounts at scale. [Pinecone](https://www.pinecone.io/blog/byoc/), [Zilliz](https://docs.zilliz.com/docs/byoc/byoc-intro), [StarTree](https://startree.ai/resources/byoc-beyond-the-checkbox/), [Braintrust](https://braintrust.dev/docs/admin/deployment/byoc), [Stigg](https://docs.stigg.io/documentation/high-availability-and-scale/byoc/networking-and-security), [Ververica](https://docs.ververica.com/docs/zero-trust-architecture) and [Restate](https://docs.restate.dev/byoc/security) all published BYOC security models in 2025 and 2026. Each one brings a runner, a scoped role, an egress-only tunnel and its own definition of least privilege.
-- The customer is told to govern it themselves. Braintrust's docs say the customer [remains responsible](https://braintrust.dev/docs/admin/deployment/byoc) for IAM constraints, allowed regions, audit-log export and SIEM routing in the BYOC account. Northflank's buyer guide says enterprise BYOC [requires visibility](https://northflank.com/blog/how-to-choose-a-bring-your-own-cloud-platform-for-your-enterprise) into both platform events and application activity.
-- Standing vendor access is the known failure. The Non-Human Identity Management Group maps it to [NIST SP 800-207 and the OWASP NHI Top 10](https://nhimg.org/faq/what-breaks-when-a-byoc-model-still-relies-on-standing-vendor-access/): continuous vendor reach breaks zero-trust assumptions, and the fix is short-lived, customer-approved access per event. [Twingate](https://www.twingate.com/blog/what-is-bring-your-own-cloud) frames every vendor in the stack as an extension of the customer's attack surface.
-- The detection playbook exists but nobody packages it. Mitigant's threat catalog tells defenders to [track vendor-managed role usage](https://threats.mitigant.io/techniques/?id=T1199) against expected patterns; Binadox lists [third-party roles without an ExternalId](https://www.binadox.com/?p=12605) and roles never decommissioned after a contract ends as top findings. Today that is CloudTrail queries and spreadsheets.
+- The customer is told to govern it themselves. Braintrust's docs say the customer [remains responsible](https://braintrust.dev/docs/admin/deployment/byoc) for IAM constraints, allowed regions, audit-log export and SIEM routing in the BYOC account. A BYOC platform vendor's buyer guide says enterprise BYOC requires visibility into both platform events and application activity.
+- Standing vendor access is the known failure. A non-human identity research group maps it to NIST SP 800-207 and the OWASP NHI Top 10: continuous vendor reach breaks zero-trust assumptions, and the fix is short-lived, customer-approved access per event. A zero-trust access vendor frames every vendor in the stack as an extension of the customer's attack surface.
+- The detection playbook exists but nobody packages it. A cloud security vendor's threat catalog tells defenders to track vendor-managed role usage against expected patterns; a cloud governance vendor lists third-party roles without an ExternalId and roles never decommissioned after a contract ends as top findings. Today that is CloudTrail queries and spreadsheets.
 
 | What exists | What it does | Where it stops |
 | --- | --- | --- |
-| CSPM and CNAPP (Wiz, Orca, Prisma) | Finds misconfigured resources across accounts | Sees a role or a pod, not which vendor owns it or what was agreed at procurement |
-| Non-human identity tools (Astrix, Entro, Oasis, Aembit) | Inventory and risk of service accounts and API keys | Identity-centric; no view of the data plane, its egress, its updates or drift from the contract |
-| SaaS security posture (AppOmni, Obsidian, Valence) | Governs SaaS apps the vendor hosts | Built for the opposite deployment model |
-| Vendor-side BYOC platforms (Nuon, Tensor9) | Help vendors deploy and operate | Serve the vendor; the customer gets whatever audit trail the vendor chooses to expose |
-| Third-party risk management (OneTrust, Prevalent) | Questionnaires and contract evidence | Paper, not runtime truth |
+| CSPM and CNAPP (cloud security posture vendors) | Finds misconfigured resources across accounts | Sees a role or a pod, not which vendor owns it or what was agreed at procurement |
+| Non-human identity tools (NHI vendors) | Inventory and risk of service accounts and API keys | Identity-centric; no view of the data plane, its egress, its updates or drift from the contract |
+| SaaS security posture (SSPM vendors) | Governs SaaS apps the vendor hosts | Built for the opposite deployment model |
+| Vendor-side BYOC platforms (BYOC deployment platforms) | Help vendors deploy and operate | Serve the vendor; the customer gets whatever audit trail the vendor chooses to expose |
+| Third-party risk management (TPRM vendors) | Questionnaires and contract evidence | Paper, not runtime truth |
 | **Tower** | Per-vendor inventory of data planes, access ledger, permission drift, egress map, update log, offboarding, audit evidence packs | New entrant; needs SOC 2 and a reference customer before anyone signs |
 
 **Product**
@@ -481,7 +481,7 @@ Ten Standard customers is $900k ARR. Forty customers at a $120k blend is $4.8M. 
 
 **Risks and gates**
 
-- Wiz or a CNAPP adds vendor attribution as a feature. Mitigation: the fingerprint catalog, the contract-drift view and the evidence packs are workflow, not a scan.
+- A CSPM or CNAPP vendor adds vendor attribution as a feature. Mitigation: the fingerprint catalog, the contract-drift view and the evidence packs are workflow, not a scan.
 - Long cycles and SOC 2 before revenue. Mitigation: paid pilots at $25k.
 - Gates before building: 10 CISO or cloud-security-lead conversations, 6 confirm they cannot answer "which vendors have roles in our accounts" today, 3 agree to a paid pilot.
 
@@ -490,24 +490,12 @@ Ten Standard customers is $900k ARR. Forty customers at a $120k blend is $4.8M. 
 All pages below were read on 2026-10-19. Pricing and funding figures are as reported by those pages and should be re-checked before any pitch.
 
 - [The Stack: Bring your own cloud, how it works](https://www.thestack.technology/bring-your-own-cloud-how-it-works/)
-- [Northflank: Is BYOC the future of software deployment?](https://northflank.com/blog/is-byoc-the-future-of-software-deployment)
-- [Railway: What is BYOC, developer guide 2026](https://blog.railway.com/p/what-is-byoc-developer-guide-2026)
-- [Nuon: The enterprise pull](https://scour.ing/@minezone/p/https://nuon.co/blog/the-enterprise-pull-why-the-fortune-500-is-rewriting-the-software-delivery-playbook)
-- [TechCrunch: Nuon helps companies deploy into customers' cloud accounts](https://techcrunch.com/2024/12/17/nuon-helps-companies-deploy-their-software-into-their-customers-cloud-accounts)
-- [DBTA: Nuon emerges from stealth with $16.5M](https://www.dbta.com/Editorial/News-Flashes/Nuon-Emerges-from-Stealth-with-165M-to-Empower-Bring-Your-Own-Cloud-BYOC-Initiatives-167367.aspx)
-- [Tensor9 event listing: Running software in customer environments](https://luma.com/2709f44u)
-- [Replicated docs: About preflight checks and support bundles](https://docs.replicated.com/vendor/preflight-support-bundle-about)
-- [Replicated: The value of preflight checks](https://replicated.com/blog/the-value-of-preflight-checks-for-software-installation)
-- [Replicated: Codify what you can, document the rest](https://replicated.com/blog/for-faster-installs-and-fewer-calls-codify-what-you-can-document-the-rest)
-- [Replicated community: Host collectors when the cluster is down](https://community.replicated.com/t/kurl-how-can-i-generate-a-support-bundle-when-my-kubernetes-cluster-is-down/911)
-- [Vendr: Replicated pricing](https://www.vendr.com/marketplace/replicated)
+- (source link withheld from the public repo: names a competitor)
 - [GitHub Enterprise Server: About support bundles](https://docs.github.com/en/enterprise-server@3.20/admin/monitoring-and-managing-your-instance/monitoring-your-instance/about-support-bundles)
-- [Anchore: Diagnostic bundle](https://docs.anchore.com/current/docs/troubleshooting/diagnostic_bundle/)
-- [HPE Ezmeral: Support bundle contents](https://docs.ezmeral.hpe.com/runtime-enterprise/57/reference/support-troubleshooting/operations-and-troubleshooting/support-bundles/Support_Bundle_Contents.html)
-- [BloodHound Enterprise: Collector support bundles](https://bloodhound.specterops.io/collect-data/enterprise-collection/collector-support-bundles)
+- (source link withheld from the public repo: names a competitor)
 - [NVIDIA NIM for LLMs documentation](https://docs.nvidia.com/nim/large-language-models/2.0.13/index.html)
 - [PreSales Collective: Community overview](https://www.presalescollective.com/community-overview)
-- [Gartner reviews: Saleo platform](https://www.gartner.com/reviews/product/saleo-platform)
+- (source link withheld from the public repo: names a competitor)
 
 Added for Option B and the dropped model-delivery option, read 2026-10-19:
 
@@ -518,19 +506,7 @@ Added for Option B and the dropped model-delivery option, read 2026-10-19:
 - [Stigg: BYOC networking and security](https://docs.stigg.io/documentation/high-availability-and-scale/byoc/networking-and-security)
 - [Ververica: Zero trust BYOC architecture](https://docs.ververica.com/docs/zero-trust-architecture)
 - [Restate: BYOC security](https://docs.restate.dev/byoc/security)
-- [Northflank: How to choose a BYOC platform](https://northflank.com/blog/how-to-choose-a-bring-your-own-cloud-platform-for-your-enterprise)
-- [NHIMG: What breaks when BYOC relies on standing vendor access](https://nhimg.org/faq/what-breaks-when-a-byoc-model-still-relies-on-standing-vendor-access/)
-- [Twingate: What is BYOC](https://www.twingate.com/blog/what-is-bring-your-own-cloud)
-- [Mitigant threat catalog: trusted relationship abuse](https://threats.mitigant.io/techniques/?id=T1199)
-- [Binadox: Untrusted cross-account roles](https://www.binadox.com/?p=12605)
+- (source link withheld from the public repo: names a competitor)
 - [Lyzr: On-premise AI vs cloud AI 2026 (Broadcom figure)](https://www.lyzr.ai/blog/on-premise-ai-vs-cloud-ai/)
 - [Taazaa: Practical guide to sovereign AI (McKinsey figures)](https://www.taazaa.com/blog/a-practical-guide-to-sovereign-ai-for-enterprises)
-- [Jina on-prem wiki](https://github.com/jina-ai/jina-on-prem/wiki)
-- [Fireworks AI: Air-gapped EKS](https://docs.fireworks.ai/ecosystem/integrations/eks/airgapped)
-- [Replicated and H2O.ai: Distributing AI models into self-hosted environments](https://replicated.com/blog/distributing-ai-models-into-self-hosted-environments---lessons-from-replicated-and-h2o-ai)
-- [TrueFoundry: Air-gapped AI](https://www.truefoundry.com/blog/air-gapped-ai-deploying-enterprise-llms-in-highly-regulated-industries)
-- [KitOps on GitHub](https://github.com/kitops-ml/kitops)
-- [Defense Unicorns contributes Zarf to OpenSSF](https://www.businesswire.com/news/home/20240626960909/en/Defense-Unicorns-Announces-Contribution-of-Zarf-to-OpenSSF)
-- [Help Net Security: Defense Unicorns raises $35M](https://www.helpnetsecurity.com/2024/03/07/defense-unicorns-funding-35-million/)
-- [Intelligence Community News: UDS Registry launch](https://intelligencecommunitynews.com/tag/air-gap)
-- [Replicated for AI companies](https://www.replicated.com/ai)
+- (source link withheld from the public repo: names a competitor)

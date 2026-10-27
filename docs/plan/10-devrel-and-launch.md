@@ -26,7 +26,7 @@ Terminal samples below are drafts. The output format belongs to cli-ux (`docs/pl
 | 6 | Security and trust | Each claim and how to verify it | 15 lines |
 | 7 | Check families and status | What ships now, what is next | 12 lines |
 | 8 | Write your own spec | Pointer to docs and to `examples/specs/` | 8 lines |
-| 9 | Rdy and Troubleshoot | Honest comparison | 10 lines |
+| 9 | Rdy and the Kubernetes-only preflight tool | Honest comparison | 10 lines |
 | 10 | Project status | Alpha warning, roadmap, license | 8 lines |
 | 11 | Contributing, security, license | Links | 5 lines |
 
@@ -256,14 +256,15 @@ Kubernetes only, an air-gapped host, and a GPU workload. Run `rdy spec lint
 your-spec.yaml` to catch mistakes. The reference is at
 [docs.getrdy.io](https://docs.getrdy.io).
 
-## Rdy and Troubleshoot
+## Rdy and the Kubernetes-only preflight tool
 
-[Troubleshoot](https://troubleshoot.sh) is a good project. If you ship to
-Kubernetes through Replicated, use it. rdy aims at a wider job: one binary
-that checks a VM, a Kubernetes cluster and (soon) a cloud account, with signed
-specs and a report a non-engineer can read. Both tools run on the machine
-where you start them. If your target is one cluster you may need only
-Troubleshoot. If it is a mix of hosts, clusters and accounts, try rdy.
+The open-source Kubernetes preflight and support-bundle tool most vendors
+already know is a good project. If you ship to Kubernetes through its vendor's
+platform, use it. rdy aims at a wider job: one binary that checks a VM, a
+Kubernetes cluster and (soon) a cloud account, with signed specs and a report
+a non-engineer can read. Both tools run on the machine where you start them.
+If your target is one cluster you may need only that tool. If it is a mix of
+hosts, clusters and accounts, try rdy.
 
 ## Status
 
@@ -428,8 +429,9 @@ Where it is rough: it is alpha. Host, network, Kubernetes and AWS account
 checks exist. GPU checks are not there yet. Linux x86_64 is best tested.
 Windows has the fewest checks. The spec format can still change before 1.0.
 
-If you know Replicated's Troubleshoot: it is good, and if you are a
-Kubernetes shop on Replicated you may not need this. I wanted one binary
+If you know the Kubernetes-only preflight tool most vendors use: it is
+good, and if you are a Kubernetes shop on its vendor's platform you may not
+need this. I wanted one binary
 for a VM, a cluster and a cloud account, with signed specs and a report the
 customer's manager can read.
 
@@ -482,8 +484,8 @@ fail for boring reasons: a proxy that blocks the registry, a node with half
 the RAM we asked for, a storage class that cannot do RWO. We used to send a
 PDF checklist, then a bash script. Both rot.
 
-How do you handle this? Docs, scripts, Troubleshoot preflights, something
-else?
+How do you handle this? Docs, scripts, Kubernetes preflight tooling,
+something else?
 
 Disclosure: I got tired of rewriting the script and built an open-source
 tool for it (rdy, Apache-2.0, one Rust binary, signed specs). Link below.
@@ -547,8 +549,8 @@ Example (kind cluster, acme-k8s-only.yaml in the repo):
     [paste real output here]
 
 Honest limits: it runs from one kube context at a time, it is alpha, and it
-is not a replacement for Troubleshoot if you already use Replicated. I
-would like to know which admission and storage failures you see most, so I
+is not a replacement for the established Kubernetes-only preflight tool if
+you already use it with its vendor's platform. I would like to know which admission and storage failures you see most, so I
 can add checks for them.
 
 https://github.com/getrdy-io/rdy
@@ -636,13 +638,13 @@ Do not sponsor an event at launch. Plan allows $0 to $5k later; spend nothing un
 
 ### Partner announcements
 
+The BYOC platforms are described by category here on purpose. This repo does not name competitors or incumbents. The list of target companies and contacts lives in a private note outside the repo and is never committed.
+
 Rule: nobody is called a partner, and no logo is used, until they say yes in writing. First contact is a short note and a specific ask. Talk to each at least three weeks before launch (week -3). Do not claim integrations that do not exist.
 
 | Partner | What they are (as the plan describes them) | What to ask | What to offer |
 | --- | --- | --- | --- |
-| Nuon | BYOC deployment platform. Checks run inside its deployments. | A 20-minute call with someone on solutions or docs. Whether a pre-flight step before a Nuon deployment is useful. A line in their docs or community page if so. | An example spec for an AWS BYOC install. A sample CI step that runs `rdy` before `nuon` deploys. A joint post when it works. |
-| Tensor9 | BYOC platform with an egress-only vendor access connector. | Which environment problems their customers hit before the connector can come up. Permission to link their docs from ours. | A spec that checks the egress path a connector needs. |
-| Omnistrate | Platform for running SaaS in customer accounts. | The same two questions: what breaks before deployment, and is a pre-flight useful. | A spec for cloud-account prerequisites once `rdy-checks-cloud` exists. |
+| BYOC deployment platforms (three to contact) | Platforms that help vendors deploy and run software in customer cloud accounts. Their checks run inside their own deployments. | A 20-minute call with someone on solutions or docs. Which environment problems their customers hit before a deployment or an egress-only access connector can come up. Whether a pre-flight step is useful. A line in their docs or community page if so. | An example spec for an AWS BYOC install. A spec that checks the egress path a connector needs. A sample CI step that runs `rdy` before the platform deploys. A joint post when it works. |
 | Rancher (SUSE) | Kubernetes management. RKE2 has its own host prerequisites. | Someone to review the Kubernetes and host checks against RKE2 and Rancher-managed clusters. A mention in community docs or a slot at a community meetup. | A tested example spec for Rancher-managed clusters. Credit for the reviewers. |
 | OpenShift (Red Hat) | Kubernetes distribution with security constraints and its own admission rules. | A review of the admission and SCC checks by someone who runs OpenShift. A place to publish a how-to. | A tested example spec. We say "tested on OpenShift" only after we run it on a real cluster (OpenShift Local or the developer sandbox). |
 
@@ -783,7 +785,7 @@ The GPU post is not in this series because the GPU family ships in M4. It become
 | --- | --- |
 | "`curl \| sh` is a bad idea." | Agreed that it is a trust leap. The script is short, does one thing, and never needs root: it installs to `~/.local/bin` after checking SHA-256 and the Sigstore signature. If you do not want to pipe it, the README shows the download, `cosign verify-blob` and unpack steps. Packages (Homebrew, winget, apt) come later. |
 | "It runs as root in a customer's environment. Why would I trust that?" | It does not need root and does not ask for it. Each check declares the privilege it needs. Without it, the check is skipped and the report says which one and why. The binary is open source, signed, has an SBOM, and we publish a threat model. The only code that can send anything off the machine is the upload client, it is off by default, and it is in the repo. An independent audit comes before we sell to enterprises. |
-| "Just use Troubleshoot." | Maybe you should. If you are on Kubernetes and Replicated, Troubleshoot is mature and has far more mileage than rdy. rdy is for a wider mix: one binary for a VM, a cluster and a cloud account, with signed specs and a report a non-engineer can read. Both tools run on the machine where you start them, so that is not a difference today. |
+| "Just use the existing Kubernetes preflight tool." | Maybe you should. If you are on Kubernetes and its vendor's platform, that tool is mature and has far more mileage than rdy. rdy is for a wider mix: one binary for a VM, a cluster and a cloud account, with signed specs and a report a non-engineer can read. Both tools run on the machine where you start them, so that is not a difference today. |
 | "Why Rust?" | A static binary with no runtime installs in locked-down and air-gapped boxes. Memory safety matters for something that may run as root in someone else's environment. The check engine will later be built as a library other installers can embed. Go would have met the first goal too. Rust met all three. |
 | "What about telemetry?" | None. The binary makes no network call unless a check exists to make it, or you run `self-update`, or you pass the upload flag. We count downloads from GitHub and requests to the install script, nothing else. The network-off test is in CI. |
 | "Another YAML DSL." | It is a list of built-in checks with thresholds. No logic, no templating. If you can read a Kubernetes manifest you can read a spec. Tell me what you cannot express and I will look. |
@@ -888,10 +890,10 @@ Used for the pre-launch walk. Ownership in brackets.
 - `docs/plan/rdy-plan.md`, "Website plan, Stack": "Install endpoint: `get.<domain>`". The naming section and `CLAUDE.md` say `getrdy.io/install`. Fix: use `https://getrdy.io/install` everywhere and drop `get.<domain>`.
 - `docs/plan/rdy-plan.md`, "Check families at launch" lists GPU, data stores and custom script checks as launch families. The milestone table puts cloud in M3 and GPU in M4, and gives data stores and custom checks no milestone. Fix: add a column to the check list saying which milestone each family ships in, give data stores and custom checks a milestone or move them to "later". Launch copy only claims what ships by the end of M3: host, network, Kubernetes, AWS account, bundle and redaction.
 - `docs/plan/rdy-plan.md`, example spec: `registry.acme.io` and `license.acme.io` may be real domains. Every machine that runs the example would query them. Fix: use `.example` names (RFC 2606), as `examples/specs/` now does. Update the plan's sample.
-- `docs/plan/rdy-plan.md`, "Positioning" says Troubleshoot is "Kubernetes only". Troubleshoot also has host collectors and preflights. The evidence section's claim that its host collectors cannot run on remote nodes is also not an rdy advantage in M1, because rdy also runs on the machine where you start it. Fix: change to "Kubernetes-first" and keep any multi-node claim out of public copy until rdy can run against remote hosts.
+- `docs/plan/rdy-plan.md`, "Positioning" says the incumbent preflight tool is "Kubernetes only". It also has host collectors and preflights. The evidence section's claim that its host collectors cannot run on remote nodes is also not an rdy advantage in M1, because rdy also runs on the machine where you start it. Fix: change to "Kubernetes-first" and keep any multi-node claim out of public copy until rdy can run against remote hosts.
 - `docs/plan/rdy-plan.md`, "Metrics that matter" and "Conversion flow" step 4 ("see which prospects clicked through"): sits badly next to "nothing leaves the machine" and the no-telemetry promise. Fix: the report link carries only the public product name, and clicks are counted by Plausible on getrdy.io, never by the CLI. State this on the trust page.
 - `docs/plan/rdy-plan.md`, "Milestones": M3 scope includes the public launch but the M3 exit test is "First 10 paying vendors", which can only be measured after launch. Fix: say the launch happens when M3 scope is done and the exit test is measured over the following eight weeks. Also state that the 12-month star and install targets start on launch day.
-- `docs/plan/rdy-plan.md`, "Home page copy outline": "7x faster installs with preflight checks" is a 2022 study by Replicated about its own preflight checks. Fix: in any rdy copy, give the source and the year in the same sentence, and do not use it in the HN post.
+- `docs/plan/rdy-plan.md`, "Home page copy outline": "7x faster installs with preflight checks" is a 2022 study by the incumbent preflight vendor about its own preflight checks. Fix: in any rdy copy, give the source and the year in the same sentence, and do not use it in the HN post.
 - `CLAUDE.md`, "Commands": `cargo run -p rdy-cli -- run examples/specs/acme-platform.yaml --json` is wrong in two ways. The package is named `rdy` (the directory is `crates/rdy-cli`), so it is `-p rdy`. And the example is unsigned, so it needs `--allow-unsigned`. Fix: `cargo run -p rdy -- run examples/specs/acme-platform.yaml --allow-unsigned --json`.
 - Gap, not an error: security reviewers on HN will ask what rdy will do before they run it. Neither the plan nor `CLAUDE.md` has a way to list each check's commands and privilege needs without running anything. Proposed fix, owned by cli-ux: a dry-run mode (for example `rdy run --dry-run` or `rdy spec lint --show-needs`) that prints per check what it will read or run and what privilege it needs. It backs the "least privilege" claim better than prose does.
 

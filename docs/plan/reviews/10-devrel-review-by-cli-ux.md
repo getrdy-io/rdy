@@ -192,7 +192,7 @@ Fix: "The CLI does not need it. Every command works offline."
 - Plan corrections section is accurate and matches ADR 0011 on `-p rdy`.
 - `.example` hostnames throughout. No real customers.
 - Check ids in the examples match the plan's five ids and CLAUDE.md families. Provisional ids are flagged.
-- r/devops "lead with the question" framing, the Troubleshoot paragraph, and the objections table are plain and not hype.
+- r/devops "lead with the question" framing, the incumbent-tool paragraph, and the objections table are plain and not hype.
 - HN mechanics stated correctly: URL or text not both (so the text goes in the first comment), no upvote asks, weekday morning ET, stay on the thread. Lobsters: invite needed, "I am the author" box, `show` tag, history first. All correct as far as I know.
 - Tone: short sentences, no corporate language beyond "funnel" and "lead generation" in internal notes.
 
