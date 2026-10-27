@@ -1,0 +1,50 @@
+# Synthetic example. Host-only, air-gapped: one VM, no internet, no
+# Kubernetes. The customer runs rdy, copies the report file out on a USB
+# stick, and sends it to the vendor by hand. Nothing here needs network
+# access to the public internet. The only endpoint is an internal mirror.
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-edge
+  version: ">=1.4"
+checks:
+  - id: host.cpu
+    min: 4
+    severity: block
+  - id: host.memory
+    min: 16Gi
+    severity: block
+    fix: "Add RAM or choose a larger VM size."
+  - id: host.disk
+    path: /opt/acme
+    min: 50Gi
+    severity: block
+    fix: "Mount a volume with at least 50 GiB free at /opt/acme."
+  - id: host.kernel
+    min: "5.10"
+    severity: block
+    fix: "Upgrade to a distribution kernel 5.10 or newer."
+  - id: host.cgroups
+    version: 2
+    severity: warn
+    fix: "Boot with systemd.unified_cgroup_hierarchy=1."
+  - id: host.time_sync
+    max_skew: 5s
+    severity: warn
+    fix: "Point chrony or systemd-timesyncd at an internal time source."
+  - id: host.ports
+    free: [8443, 9100]
+    severity: block
+    fix: "Stop whatever is listening on these ports, or ask us for a port override."
+  - id: host.selinux
+    allow: [permissive, disabled]
+    severity: warn
+    fix: "Install the acme-edge SELinux policy module, or set permissive mode."
+  - id: net.egress
+    endpoints: ["mirror.corp.acme.example:443"]
+    via_proxy: never
+    severity: block
+    fix: "Make the internal artifact mirror reachable from this host."
+bundle:
+  collect: ["journal:7d", "file:/etc/acme/*.yaml"]
+  redact: ["bearer_tokens", "emails"]

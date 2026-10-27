@@ -1,0 +1,49 @@
+# Synthetic example. "Acme Platform" is a made-up product. Every hostname
+# ends in .example (RFC 2606), so nothing here points at a real service.
+#
+# This is the canonical example spec. The docs, the README and the CI
+# integration tests all use it. Checks marked (later) parse today but
+# only run once their check family ships. Until then rdy reports them as
+# skipped, never as passed.
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+  version: ">=4.2"
+checks:
+  - id: host.cpu
+    min: 8
+    severity: block
+    fix: "Use a node with at least 8 vCPUs."
+  - id: host.memory
+    min: 32Gi
+    severity: block
+    fix: "Add RAM or choose a larger node class."
+  - id: host.disk
+    path: /var/lib
+    min: 100Gi
+    severity: warn
+    fix: "Mount a larger volume at /var/lib before install."
+  - id: net.egress
+    endpoints: ["registry.acme.example:443", "license.acme.example:443"]
+    via_proxy: auto
+    severity: block
+    fix: "Ask your network team to allow these endpoints through the proxy."
+  - id: k8s.version
+    min: "1.28"
+    severity: block
+  - id: k8s.storageclass
+    needs: ["ReadWriteOnce"]
+    severity: warn
+    fix: "Mark a storage class that supports ReadWriteOnce as the default."
+  # (later) gpu family, M4
+  - id: gpu.cuda
+    min: "12.4"
+    severity: block
+  # (later) cloud family, M3
+  - id: aws.iam
+    simulate: ["eks:DescribeCluster", "ec2:CreateSecurityGroup"]
+    severity: block
+bundle:
+  collect: ["journal:7d", "k8s:events", "file:/etc/acme/*.yaml"]
+  redact: ["aws_keys", "bearer_tokens", "emails"]

@@ -1,0 +1,39 @@
+# Synthetic example. Kubernetes-only: the vendor ships a Helm chart and an
+# operator, and the customer runs the check from a laptop that has a
+# kubeconfig. No host checks, because the nodes are not where rdy runs.
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-operator
+  version: ">=2.0"
+checks:
+  - id: k8s.version
+    min: "1.27"
+    max: "1.31"
+    severity: block
+    fix: "Upgrade or pin the cluster to a supported Kubernetes minor version."
+  - id: k8s.node_resources
+    nodes: 3
+    cpu_per_node: 4
+    memory_per_node: 16Gi
+    severity: block
+    fix: "Add worker nodes or use a larger instance type."
+  - id: k8s.storageclass
+    needs: ["ReadWriteOnce", "ReadWriteMany"]
+    severity: warn
+    fix: "Install a storage class that supports ReadWriteMany, or turn off shared volumes in the chart."
+  - id: k8s.rbac
+    can_i: ["create clusterroles", "create customresourcedefinitions", "create namespaces"]
+    severity: block
+    fix: "Run the install with an identity that can create cluster-scoped resources."
+  - id: k8s.admission
+    pod_security: baseline
+    severity: warn
+    fix: "Label the target namespace with pod-security.kubernetes.io/enforce=baseline or looser."
+  - id: net.egress
+    endpoints: ["charts.acme.example:443", "registry.acme.example:443"]
+    via_proxy: auto
+    severity: block
+bundle:
+  collect: ["k8s:events", "file:/etc/acme/*.yaml"]
+  redact: ["bearer_tokens", "emails"]
