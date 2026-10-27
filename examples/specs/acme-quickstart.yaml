@@ -1,0 +1,31 @@
+# Synthetic example. Four checks, no Kubernetes, nothing that needs root.
+# This is the spec the README and the quickstart use, so a laptop can reach
+# a real result in a few seconds.
+#
+# Expect net.egress to BLOCK on the first run: registry.acme.example is a
+# made-up name that does not resolve. To see READY, copy this file and point
+# net.egress at a host you can reach, for example github.com:443.
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-quickstart
+  version: ">=1.0"
+checks:
+  - id: host.cpu
+    min: 4
+    severity: block
+    fix: "Use a machine with at least 4 CPU cores."
+  - id: host.memory
+    min: 8Gi
+    severity: block
+    fix: "Add RAM or choose a larger node class."
+  - id: host.disk
+    path: /
+    min: 20Gi
+    severity: warn
+    fix: "Free space on / or mount a larger volume."
+  - id: net.egress
+    endpoints: ["registry.acme.example:443", "license.acme.example:443"]
+    via_proxy: auto
+    severity: block
+    fix: "Ask your network team to allow these endpoints through the proxy."

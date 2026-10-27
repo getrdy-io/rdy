@@ -36,11 +36,27 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo deny check
-cargo run -p rdy -- run examples/specs/acme-platform.yaml --allow-unsigned
 ```
 
-All of these must pass before a PR is reviewed. The Rust version is pinned in
-`rust-toolchain.toml`.
+All of these must pass before a PR is reviewed. CI also runs on Linux (x86_64
+and aarch64), macOS and Windows for every PR, so expect your change to be
+tested on all four. The Rust version is pinned in `rust-toolchain.toml`.
+
+To try your change by hand:
+
+```sh
+cargo run -p rdy -- run examples/specs/acme-quickstart.yaml --allow-unsigned
+```
+
+The exit code is not the point here. It is 2 on most machines, because the
+example's endpoints do not exist. That is expected.
+
+## Where things go
+
+- A new check goes in the `rdy-checks-<family>` crate for its family, one module
+  per check, with its fixture and golden test.
+- Golden files live under `tests/fixtures/`. The testing docs say how to
+  regenerate them. Read the diff before you commit it.
 
 ## Pull requests
 
@@ -51,7 +67,7 @@ All of these must pass before a PR is reviewed. The Rust version is pinned in
   it, or you have the right to submit it, under Apache-2.0.
 - If an AI tool wrote most of the change, say so in the PR description. That is
   fine. You are still responsible for reading it and understanding it.
-- Reviews are blunt and about the code. Expect questions about privileges,
+- Reviews are direct and about the code. Expect questions about privileges,
   failure modes and what happens on Windows.
 
 ## Spec and result formats

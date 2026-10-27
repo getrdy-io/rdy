@@ -11,6 +11,7 @@ checks:
   - id: host.cpu
     min: 4
     severity: block
+    fix: "Use a VM with at least 4 CPU cores."
   - id: host.memory
     min: 16Gi
     severity: block
@@ -25,7 +26,7 @@ checks:
     severity: block
     fix: "Upgrade to a distribution kernel 5.10 or newer."
   - id: host.cgroups
-    version: 2
+    require: v2
     severity: warn
     fix: "Boot with systemd.unified_cgroup_hierarchy=1."
   - id: host.time_sync
@@ -35,7 +36,7 @@ checks:
   - id: host.ports
     free: [8443, 9100]
     severity: block
-    fix: "Stop whatever is listening on these ports, or ask us for a port override."
+    fix: "Stop whatever is listening on these ports, or ask the vendor for a different port."
   - id: host.selinux
     allow: [permissive, disabled]
     severity: warn

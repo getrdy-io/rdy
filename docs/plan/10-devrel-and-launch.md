@@ -12,6 +12,10 @@ Three rules run through all of it.
 
 Terminal samples below are drafts. The output format belongs to cli-ux (`docs/plan/07-cli-ux.md`). Re-sync every sample with that document when the README ticket starts.
 
+Style: the product is Rdy and the command is `rdy`. Prose about the product says Rdy at the start of a sentence and `rdy` when it means the command. Titles say Rdy.
+
+Skipped required checks: the samples below assume the rule proposed by cli-ux. A skipped, timed-out or errored `severity: block` check is an unverified blocker. It gives NOT READY, exit 2, and the last line `NOT READY: 1 required check was not run`. This is pending rust-architect confirmation in `02-engine-design`. It tightens accepted ADR 0008, which lowers the verdict only to `Warnings`. If the rule changes, the transcripts in this document change with it.
+
 ## 1. README plan
 
 ### Outline
@@ -20,13 +24,13 @@ Terminal samples below are drafts. The output format belongs to cli-ux (`docs/pl
 | --- | --- | --- | --- |
 | 1 | Title, tagline, badges | Say what it is in one line | 5 lines |
 | 2 | The problem | Name the pain in three sentences | 5 lines |
-| 3 | What it looks like | Terminal transcript: NOT READY, then READY | 50 lines |
+| 3 | What it looks like | The signing refusal, then NOT READY, then READY, then the skipped-required case | 80 lines |
 | 4 | Quickstart | Zero to a real report in under five minutes | 40 lines |
 | 5 | How it works | Spec, checks, report, exit codes | 20 lines |
 | 6 | Security and trust | Each claim and how to verify it | 15 lines |
 | 7 | Check families and status | What ships now, what is next | 12 lines |
 | 8 | Write your own spec | Pointer to docs and to `examples/specs/` | 8 lines |
-| 9 | Rdy and the Kubernetes-only preflight tool | Honest comparison | 10 lines |
+| 9 | Rdy and the Kubernetes-only preflight tool | Comparison | 10 lines |
 | 10 | Project status | Alpha warning, roadmap, license | 8 lines |
 | 11 | Contributing, security, license | Links | 5 lines |
 
@@ -37,6 +41,7 @@ Rules for the README:
 - No badges beyond CI, release and license. Three is plenty.
 - The five-minute path is timed on a clean VM by someone who has never seen rdy. The ticket does not close until that is done.
 - Every command in the README is run in CI against the release build (a docs test). A README that lies is worse than none.
+- The README demo uses `acme-quickstart.yaml`, which can reach READY today. `acme-platform.yaml` appears only in the skipped-required snippet.
 
 ### Draft copy
 
@@ -63,33 +68,43 @@ it.
 
 ## What it looks like
 
-This run was recorded on a lab VM. Your output will differ.
+A vendor signs its spec. rdy refuses a spec with no signature:
 
 ```console
-$ rdy run acme-platform.yaml --allow-unsigned
+$ rdy run acme-quickstart.yaml
+error: acme-quickstart.yaml has no signature.
+fix:   Ask the vendor for the .minisig file and public key, then run
+       rdy run acme-quickstart.yaml --key <key>. To run it anyway: --allow-unsigned.
+$ echo $?
+64
+```
+
+The example specs in this repo are not signed, so the rest of this page uses
+`--allow-unsigned`. rdy says so loudly each time.
+
+This run was recorded on a lab VM behind a test proxy. Your output will differ.
+
+```console
+$ rdy run acme-quickstart.yaml --allow-unsigned
+WARNING: this spec is UNSIGNED. rdy cannot tell who wrote it.
 rdy 0.1.0
-spec    acme-platform >=4.2   UNSIGNED (allowed by --allow-unsigned)
-target  acme-vm-03   linux x86_64   8 cpu   16.0 GiB
+spec    acme-quickstart >=1.0   UNSIGNED (allowed by --allow-unsigned)
+target  acme-vm-03   linux x86_64   4 cpu   4.0 GiB
 
-  PASS   host.cpu            8 cores (need 8)
-  BLOCK  host.memory         16.0 GiB found, 32 GiB needed
-  PASS   host.disk           212 GiB free on /var/lib (need 100 GiB)
-  BLOCK  net.egress          registry.acme.example:443 refused by proxy
-                             http://proxy.acme.example:3128 (HTTP 403)
-                             license.acme.example:443 ok via proxy
-  PASS   k8s.version         v1.29.4 (need 1.28 or newer)
-  WARN   k8s.storageclass    no default class supports ReadWriteOnce
-  SKIP   gpu.cuda            not available in this build
-  SKIP   aws.iam             not available in this build
+  PASS   host.cpu       4 cores (need 4)
+  BLOCK  host.memory    4.0 GiB found, 8 GiB needed
+  WARN   host.disk      12 GiB free on / (need 20 GiB)
+  BLOCK  net.egress     registry.acme.example:443 refused by proxy
+                        http://proxy.acme.example:3128 (HTTP 403)
+                        license.acme.example:443 ok via proxy
 
-2 blocks, 1 warning, 4 passed, 2 skipped
+2 blocks, 1 warning, 1 passed
 
-Fix these first:
-  1. host.memory       Add RAM or choose a larger node class.
-  2. net.egress        Ask your network team to allow these endpoints
-                       through the proxy.
-  3. k8s.storageclass  Mark a storage class that supports ReadWriteOnce
-                       as the default.
+Fixes:
+  BLOCK  host.memory  Add RAM or choose a larger node class.
+  BLOCK  net.egress   Ask your network team to allow these endpoints
+                      through the proxy.
+  WARN   host.disk    Free space on / or mount a larger volume.
 
 Report written to ./rdy-report.html and ./rdy-report.json
 
@@ -98,25 +113,23 @@ $ echo $?
 2
 ```
 
-The team resizes the VM, opens the proxy rule and sets a default storage class.
-Then they run it again.
+The team resizes the VM, opens the proxy rule and frees some disk. Then they
+run it again.
 
 ```console
-$ rdy run acme-platform.yaml --allow-unsigned
+$ rdy run acme-quickstart.yaml --allow-unsigned
+WARNING: this spec is UNSIGNED. rdy cannot tell who wrote it.
 rdy 0.1.0
-spec    acme-platform >=4.2   UNSIGNED (allowed by --allow-unsigned)
-target  acme-vm-03   linux x86_64   16 cpu   64.0 GiB
+spec    acme-quickstart >=1.0   UNSIGNED (allowed by --allow-unsigned)
+target  acme-vm-03   linux x86_64   4 cpu   16.0 GiB
 
-  PASS   host.cpu            16 cores (need 8)
-  PASS   host.memory         64.0 GiB found, 32 GiB needed
-  PASS   host.disk           212 GiB free on /var/lib (need 100 GiB)
-  PASS   net.egress          2 endpoints reachable via proxy
-  PASS   k8s.version         v1.29.4 (need 1.28 or newer)
-  PASS   k8s.storageclass    local-path (default) supports ReadWriteOnce
-  SKIP   gpu.cuda            not available in this build
-  SKIP   aws.iam             not available in this build
+  PASS   host.cpu       4 cores (need 4)
+  PASS   host.memory    16.0 GiB found, 8 GiB needed
+  PASS   host.disk      48 GiB free on / (need 20 GiB)
+  PASS   net.egress     2 endpoints reachable via proxy
+                        http://proxy.acme.example:3128
 
-6 passed, 2 skipped
+4 passed
 
 Report written to ./rdy-report.html and ./rdy-report.json
 
@@ -125,8 +138,33 @@ $ echo $?
 0
 ```
 
-Exit codes: `0` ready, `1` warnings only, `2` blockers, `64` usage error,
-`70` internal error. Skipped checks are listed, never counted as passed.
+The last line is one of three: `READY` (exit 0), `READY with warnings` (exit 1),
+`NOT READY` (exit 2). Exit 64 is a usage error and 70 is an internal error. Both
+print `error:` and `fix:` lines and no verdict.
+
+### A required check that cannot run is not a pass
+
+A check the spec marks `severity: block` that rdy could not run (a missing
+privilege, no kubeconfig, a check family this build does not have) is an
+unverified blocker. It never produces READY.
+
+```console
+$ rdy run acme-platform.yaml --allow-unsigned
+  ...
+  SKIP   gpu.cuda    not run, no gpu checks in this build (required)
+  SKIP   aws.iam     not run, no aws checks in this build (required)
+
+0 blocks, 0 warnings, 6 passed, 2 required checks not run
+
+Fixes:
+  1. gpu.cuda  Not run. This rdy build has no GPU checks. Install a newer
+               rdy, or ask the vendor to mark this check as warn.
+  ...
+
+NOT READY: 2 required checks were not run
+```
+
+A skipped check marked `severity: warn` only gives `READY with warnings`.
 
 ## Quickstart
 
@@ -139,47 +177,53 @@ curl -sSf https://getrdy.io/install | sh
 rdy version
 ```
 
-The script puts one binary in `~/.local/bin`, checks its SHA-256 and its
-Sigstore signature, and does nothing else. Read it first if you like:
-`curl -sSf https://getrdy.io/install | less`. Windows: download the zip from
-the [releases page](https://github.com/getrdy-io/rdy/releases). `[M3]`
+The script puts one binary in `~/.local/bin` after checking its SHA-256 and
+its Sigstore signature. It refuses to run as root. It never edits your shell
+profile. Read it first if you like: `curl -sSf https://getrdy.io/install | less`.
+Windows: download the zip from the
+[releases page](https://github.com/getrdy-io/rdy/releases) and verify it as
+below. A PowerShell installer comes later. `[M3]`
 
 Rather not pipe to a shell? Download, verify and unpack by hand:
 
 ```sh
-# Pick the file for your platform from the latest release.
-curl -sSfLO https://github.com/getrdy-io/rdy/releases/download/v0.1.0/rdy-x86_64-unknown-linux-musl.tar.gz
-curl -sSfLO https://github.com/getrdy-io/rdy/releases/download/v0.1.0/rdy-x86_64-unknown-linux-musl.tar.gz.sigstore.json
+TAG=v0.1.0-alpha.3   # use the newest tag on the releases page
+BASE=https://github.com/getrdy-io/rdy/releases/download/$TAG
+F=rdy-x86_64-unknown-linux-musl.tar.gz   # pick the file for your platform
+curl -sSfL -O "$BASE/$F" -O "$BASE/$F.sha256" -O "$BASE/$F.sigstore.json"
+sha256sum -c "$F.sha256"
 cosign verify-blob \
-  --bundle rdy-x86_64-unknown-linux-musl.tar.gz.sigstore.json \
-  --certificate-identity-regexp 'https://github.com/getrdy-io/rdy/' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  rdy-x86_64-unknown-linux-musl.tar.gz
-tar xzf rdy-x86_64-unknown-linux-musl.tar.gz && ./rdy version
+  --bundle "$F.sigstore.json" \
+  --certificate-identity "https://github.com/getrdy-io/rdy/.github/workflows/sign-release.yml@refs/tags/$TAG" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "$F"
+tar xzf "$F" && ./rdy-x86_64-unknown-linux-musl/rdy version
 ```
 
 **2. Get an example spec.**
 
 ```sh
-curl -sSfO https://raw.githubusercontent.com/getrdy-io/rdy/v0.1.0/examples/specs/acme-platform.yaml
+curl -sSfO "https://raw.githubusercontent.com/getrdy-io/rdy/$TAG/examples/specs/acme-quickstart.yaml"
+rdy run acme-quickstart.yaml
 ```
 
-It describes a made-up product called Acme Platform. It is not signed, so rdy
-will refuse it unless you pass `--allow-unsigned`. That refusal is the point.
-Real specs are signed by the vendor, and rdy checks the signature.
+The second command fails on purpose, with the error shown above. The example
+describes a made-up product and is not signed. Real specs are signed by the
+vendor, and rdy checks the signature.
 
 **3. Run it.**
 
 ```sh
-rdy run acme-platform.yaml --allow-unsigned
+rdy run acme-quickstart.yaml --allow-unsigned
 ```
 
 It takes a few seconds. rdy runs what it can, and tells you what it could not
-run and why. For example, `k8s.*` checks are skipped if you have no kubeconfig.
-It never asks for sudo.
+run and why. It never asks for sudo.
 
-You will probably see at least one BLOCK. The example talks to
-`registry.acme.example`, which does not exist. That is expected.
+Expect `net.egress` to BLOCK. The example talks to `registry.acme.example`,
+which does not exist, so you will see `registry.acme.example does not resolve`.
+That is expected. The `refused by proxy` line in the recording above only
+happens on a network with a proxy that says no.
 
 **4. Read the report.**
 
@@ -190,34 +234,51 @@ xdg-open rdy-report.html    # Linux
 
 Each check shows what rdy measured, what the spec asked for, and the fix. The
 page is one file with no external requests. You can email it or print it.
-`rdy-report.json` has the same data for scripts.
+`rdy-report.json` has the same data for scripts. Both are written to the
+current directory and overwrite the last run. `--out-dir` picks another
+directory `[sync with 07]`. If it is not writable, rdy exits 70 and says so.
 
 **5. Make it green.**
 
-Copy the spec and change it to match your machine.
+Copy the spec and point it at something you can reach.
 
 ```sh
-cp acme-platform.yaml my-spec.yaml
-$EDITOR my-spec.yaml   # lower host.memory min, point net.egress at hosts you can reach
+cp acme-quickstart.yaml my-spec.yaml
+$EDITOR my-spec.yaml   # set net.egress endpoints to ["github.com:443"]
 rdy run my-spec.yaml --allow-unsigned
 ```
 
+On a machine with 4 cores, 8 GiB of RAM and 20 GiB free, that ends in `READY`.
 In a real install you fix the machine, not the spec. Here we edit the spec so
 you can see a green run on whatever you are holding.
 
 ## How it works
 
 - A **spec** is a YAML file of requirements. `apiVersion: rdy/v1`, `kind:
-  Readiness`, a list of checks with `severity: block` or `warn`, and a `fix`
-  message for each.
+  Readiness`, a list of checks with `severity: block` or `warn`, and an
+  optional `fix` message. A check without one uses its built-in fix text. The
+  spec's `fix` is printed after the check's own cause line, so a DNS failure and
+  a proxy refusal each show what actually went wrong.
 - A **check** measures one thing: memory, an egress path, a storage class. Each
   check declares what it needs (root, a kube context, cloud credentials). rdy
   runs what it can and reports what it could not.
-- A **report** is HTML and JSON. The result is `READY`, `READY with warnings`
+- A **report** is HTML and JSON. The verdict is `READY`, `READY with warnings`
   or `NOT READY`.
-- A **signature** from the vendor's ed25519 key covers the spec. `rdy verify`
-  checks it. rdy refuses unsigned or tampered specs unless you say
-  `--allow-unsigned`, and then says so loudly.
+- A **signature** from the vendor's key covers the spec. `rdy verify` checks it.
+  rdy refuses unsigned or tampered specs unless you say `--allow-unsigned`, and
+  then says so loudly.
+- **Output.** The reading output goes to stderr. With `--json`, stdout carries
+  only the JSON result. `NO_COLOR` or a pipe turns colour off. The words PASS,
+  WARN, BLOCK and SKIP carry the meaning, so nothing depends on colour.
+- **Proxy URLs** are printed without any `user:password@` part, in the terminal,
+  the HTML report and the JSON.
+
+Use it as a CI gate:
+
+```sh
+rdy run spec.yaml --json > result.json
+test $? -eq 0   # 0 ready, 1 warnings, 2 blockers
+```
 
 ## Security and trust
 
@@ -226,12 +287,13 @@ for what it does. Here is how to check.
 
 | Claim | How to verify |
 | --- | --- |
-| Nothing leaves the machine by default | Run it with the network off: `unshare -rn rdy run spec.yaml` (Linux). Read `crates/rdy-cli/src/upload.rs`, the only code that sends anything. |
+| Checks connect only to the endpoints in the spec | Run `rdy run --dry-run spec.yaml` to see what each check reads or connects to before it runs `[M1 stretch]`. Run it with the network off: `unshare -rn rdy run spec.yaml --allow-unsigned` (needs unprivileged user namespaces; Ubuntu 24.04 blocks them by default, so use `sudo unshare -n` there). Network checks BLOCK, nothing else changes. |
+| Nothing is uploaded by default | Upload is a separate command that needs your approval. Read `crates/rdy-cli/src/upload.rs`, the only code that sends results anywhere `[M2]`. |
 | It never asks for sudo | It does not call sudo. Skipped checks say which privilege they needed. |
 | Releases are signed | `cosign verify-blob`, as above. SBOM attached to every release. |
-| One static binary, no OpenSSL | `ldd rdy` says "not a dynamic executable". rustls only. |
+| One static binary, no OpenSSL | `ldd rdy` says "not a dynamic executable" (wording varies by libc). rustls only. |
 | Specs cannot run arbitrary commands | At this stage specs only select built-in checks. Custom script checks do not exist yet. |
-| No telemetry | There is none. The only network traffic is what a check exists to make, and `rdy self-update` when you run it. |
+| No telemetry | There is none. The only network traffic is what a check exists to make. |
 
 Found a problem? See [SECURITY.md](SECURITY.md).
 
@@ -251,9 +313,9 @@ Missing a check that would have saved you an install? Open a
 
 ## Write your own spec
 
-Start from a file in [`examples/specs/`](examples/specs/): a full platform,
-Kubernetes only, an air-gapped host, and a GPU workload. Run `rdy spec lint
-your-spec.yaml` to catch mistakes. The reference is at
+Start from a file in [`examples/specs/`](examples/specs/): a quickstart, a
+full platform, Kubernetes only, an air-gapped host, and a GPU workload. Run
+`rdy spec lint your-spec.yaml` to catch mistakes. The reference is at
 [docs.getrdy.io](https://docs.getrdy.io).
 
 ## Rdy and the Kubernetes-only preflight tool
@@ -271,7 +333,7 @@ hosts, clusters and accounts, try rdy.
 rdy is alpha software. The spec format (`rdy/v1`) can still change before 1.0,
 and we will say so in the changelog. Linux x86_64 is the best tested platform.
 Apache-2.0 licensed. A hosted portal for vendors is in development. The CLI
-does not need it and never will.
+does not need it. Every command works offline.
 
 ## Contributing
 
@@ -280,10 +342,11 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md). Bugs and check requests are welcome.
 
 Notes for the README ticket:
 
-- The `unshare -rn` line and the `ldd` line must be tested on the release build before they ship. Replace them if they do not hold.
-- The `cosign` identity regexp and artifact names must match `docs/plan/06-release-and-distribution.md` exactly.
-- `rdy spec lint` is on the CLAUDE.md command list. If it is not in M1, delete that sentence.
-- `~/.local/bin` and "does nothing else" must match what `install.sh` actually does.
+- The `unshare` line and the `ldd` line must be tested on the release build before they ship. Replace them if they do not hold.
+- The `cosign` identity, tag form (`v0.1.0-alpha.N`, every release is a prerelease through M1) and archive layout (`rdy-<triple>/rdy`) come from `docs/plan/06-release-and-distribution.md`. Re-copy them from there when 06 changes.
+- `rdy spec lint`, `--out-dir`, `--key` and `--dry-run` are provisional command surface. Sync with 07 and ADR 0002 and delete any that is not in the build.
+- The install paragraph must match what `install.sh` does: `~/.local/bin`, refuses root, never edits the shell profile.
+- The proxy line in the first transcript only appears on a network with a proxy that refuses. Do not present it as what a reader will see.
 - The "Both tools run on the machine where you start them" line is deliberate. See the corrections section: the plan's multi-node claim is not an rdy advantage in M1.
 
 ## 2. `examples/specs/` plan
@@ -292,20 +355,23 @@ All specs are synthetic. Every hostname ends in `.example` (RFC 2606). The produ
 
 | File | Product | Purpose | Families used | Runs fully in |
 | --- | --- | --- | --- | --- |
-| `acme-platform.yaml` | acme-platform | The canonical spec from the plan. Used by the README, the docs, the integration tests and `cargo run`. Mixed families, so it shows skip behaviour for families not built yet. | host, net, k8s, gpu, aws | M1 (host, net, k8s), M3 (aws), M4 (gpu) |
-| `acme-k8s-only.yaml` | acme-operator | A Helm chart plus operator vendor. Run from a laptop with a kubeconfig. Shows RBAC for the install identity, storage classes, admission. Good first spec for the kind-cluster demo. | k8s, net | M1 |
+| `acme-quickstart.yaml` | acme-quickstart | The README and quickstart spec. Four checks, no Kubernetes, nothing that needs root. A laptop reaches a real result in seconds and can reach READY after one edit. Also the golden-test spec. | host, net | M1 |
+| `acme-platform.yaml` | acme-platform | The canonical spec from the plan. Used by the docs, the integration tests and `cargo run`. Mixed families. It ends NOT READY until the cloud (M3) and gpu (M4) families ship, because those checks are required and cannot run. | host, net, k8s, gpu, aws | M1 (host, net, k8s), M3 (aws), M4 (gpu) |
+| `acme-k8s-only.yaml` | acme-operator | A Helm chart plus operator vendor. Run from a laptop with a kubeconfig. Shows RBAC for the install identity, storage classes, admission. Good first spec for the kind-cluster demo. No `net.egress`: from a laptop it would test the laptop, not the pods. | k8s | M1 |
 | `acme-airgap-host.yaml` | acme-edge | One VM, no internet, no Kubernetes. Only endpoint is an internal mirror. Shows the offline flow: run, carry the report out by hand. Exercises most host checks. | host, net | M1 |
-| `acme-inference-gpu.yaml` | acme-inference | GPU inference on Kubernetes. Parses now, runs fully in M4. Proves the spec format already has room for the GPU family, and gives gpu-expert a target. | gpu, k8s, net | M4 |
+| `acme-inference-gpu.yaml` | acme-inference | GPU inference on Kubernetes. Parses now, runs fully in M4. Ends NOT READY until then. Proves the spec format already has room for the GPU family, and gives gpu-expert a target. | gpu, k8s, net | M4 |
 
 Rules:
 
 - Files are checked in unsigned. They are never real design-partner prerequisites.
 - Every file starts with a comment saying it is synthetic and what it is for.
 - A CI job runs `rdy spec lint` on every file in `examples/specs/`. A schema change that breaks an example fails the build. The example gets fixed in the same PR.
+- Every block and warn check in every file has a `fix`. Examples teach by imitation. A spec may omit `fix`, and the check then uses its built-in text. The spec `fix` is printed after the check's own cause line.
 - Each file has an integration test that runs it against a fixture environment and compares the output to a golden report (qa-engineer owns the fixtures).
 - Check ids and parameter names in these files are provisional until `01-spec-format.md` and `03-check-catalog.md` land. Where they differ, the schema wins and the examples change. Provisional ids: `host.cpu`, `host.disk`, `host.kernel`, `host.cgroups`, `host.time_sync`, `host.ports`, `host.selinux`, `k8s.version`, `k8s.node_resources`, `k8s.rbac`, `k8s.admission`, `gpu.driver`, `gpu.vram`, `gpu.device_plugin`. Ids from the plan (`host.memory`, `net.egress`, `k8s.storageclass`, `gpu.cuda`, `aws.iam`) are kept as written.
+- Known open points on field names, to settle with `01-spec-format.md`: `gpu.vram` uses `per: gpu` plus `min`; `host.cgroups` uses `require: v2`; `k8s.rbac` entries are `verb resource.group`, as in `kubectl auth can-i`. Numeric checks use `min` everywhere else.
 
-`acme-platform.yaml` is written to `/home/user/rdy/examples/specs/acme-platform.yaml` with this planning pass. It keeps the plan's five checks and adds `host.cpu`, `host.disk` and `k8s.version` so the README demo has passes between the failures. The other three files are written there too.
+All five files are written to `/home/user/rdy/examples/specs/` with this planning pass. `acme-platform.yaml` keeps the plan's five checks and adds `host.cpu`, `host.disk` and `k8s.version`. Its `fix` lines were added to every check. The file on disk is the source of truth; this copy shows the shape.
 
 ```yaml
 apiVersion: rdy/v1
@@ -335,6 +401,7 @@ checks:
   - id: k8s.version
     min: "1.28"
     severity: block
+    fix: "Upgrade the cluster to Kubernetes 1.28 or newer."
   - id: k8s.storageclass
     needs: ["ReadWriteOnce"]
     severity: warn
@@ -342,9 +409,11 @@ checks:
   - id: gpu.cuda
     min: "12.4"
     severity: block
+    fix: "Install CUDA 12.4 or newer on every GPU node."
   - id: aws.iam
     simulate: ["eks:DescribeCluster", "ec2:CreateSecurityGroup"]
     severity: block
+    fix: "Add the missing actions to the install role. The report lists them."
 bundle:
   collect: ["journal:7d", "k8s:events", "file:/etc/acme/*.yaml"]
   redact: ["aws_keys", "bearer_tokens", "emails"]
@@ -352,7 +421,9 @@ bundle:
 
 The file on disk also carries comments that mark `gpu.cuda` and `aws.iam` as "later".
 
-**Behaviour the examples depend on.** The canonical spec holds checks that no M1 binary can run. The engine must parse them and report `SKIP` with the reason "not available in this build". It must never fail the parse and never report a pass. See "Decisions needing an ADR" for how skipped blockers affect the verdict.
+**Behaviour the examples depend on.** The canonical spec holds checks that no M1 binary can run. The engine must parse them and report `SKIP` with the reason "not run, no gpu checks in this build (required)". It must never fail the parse and never report a pass.
+
+Required checks that cannot run make the verdict NOT READY, exit 2, last line `NOT READY: N required check(s) not run`. So `acme-platform.yaml` and `acme-inference-gpu.yaml` will not reach READY until their families ship. That is correct, and the docs say it out loud. This is the cli-ux proposal, pending rust-architect confirmation in `02-engine-design`. The README demo avoids the question by using `acme-quickstart.yaml`, which holds only checks every M1 build can run.
 
 ## 3. Public launch checklist (end of M3)
 
@@ -363,8 +434,10 @@ The launch is an announcement, not a first exposure. The repo and releases are p
 - [ ] M3 scope is done: AWS account checks, Stripe, docs, Team tier on sale. The portal is not needed to try the CLI.
 - [ ] Three people who have never seen rdy ran the README quickstart on a clean VM. Median time under five minutes. Fix every stumble first.
 - [ ] Every sentence in the posts is true of the release candidate. Walk the claims table at the end of section 7.
+- [ ] Every personal claim (the founder's stories, numbers and history) was written by the founder from memory. Nothing in these drafts is a fact until then.
+- [ ] The founder's HN account has a comment history. The founder's Reddit accounts have history on each of r/devops, r/rust and r/kubernetes. The current rules of each sub were read this week.
 - [ ] Release is signed, `cosign verify-blob` passes from a clean machine, SBOM is attached, `cargo deny check` and `cargo audit` are clean.
-- [ ] `install.sh` tested on Ubuntu LTS, Debian, RHEL-family, Alpine, macOS arm64 and macOS x86_64. Windows zip tested by hand.
+- [ ] `install.sh` tested on Ubuntu LTS, Debian, RHEL-family, Alpine, macOS arm64 and macOS x86_64. Windows zip tested by hand. `install.ps1` is M3 and is checked here too.
 - [ ] Repo hygiene: `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and PR templates, `CHANGELOG.md`, topics set, social preview image, Discussions on, private vulnerability reporting on.
 - [ ] Ten issues labelled `good first issue` or `check request`, each with a clear exit test.
 - [ ] docs.getrdy.io has install, first run, spec reference and one page per shipped check family.
@@ -378,7 +451,7 @@ The launch is an announcement, not a first exposure. The repo and releases are p
 
 ### Show HN
 
-Rules we follow: submit the GitHub repo URL, no signup, nothing to buy, no asking anyone to upvote, post on a weekday morning US Eastern time, stay on the thread. HN takes either a URL or text, not both. We submit the URL, so the text below goes in as the author's first comment, posted within a minute. The second comment, further down, is posted after it only if the thread asks for the background.
+Rules we follow: submit the GitHub repo URL, no signup, nothing to buy, no asking anyone to upvote, post on a weekday morning US Eastern time, stay on the thread. Post from the founder's own HN account, not a new or throwaway one. Do not email the waitlist a link to the HN item and do not mention HN to them: it looks like a voting ring. If the post sinks unseen, email the HN moderators and ask about the second-chance pool. Do not repost. HN takes either a URL or text, not both. We submit the URL, so the text below goes in as the author's first comment, posted within a minute. The second comment, further down, is posted after it only if the thread asks for the background.
 
 **Title** (63 characters):
 
@@ -386,46 +459,55 @@ Rules we follow: submit the GitHub repo URL, no signup, nothing to buy, no askin
 Show HN: Rdy, check a customer's environment before install day
 ```
 
-**Body** (posted as the first comment; it leads with the problem):
+**Body** (posted as the first comment; it leads with the problem). Bracketed lines are placeholders. The founder fills them from real experience or deletes them:
 
 ```text
-I'm a sales engineer. At three companies I have written the same bash
-script: the one a customer runs before a POC or an on-prem install, to find
-out whether their machines can run the product. Enough RAM. DNS. Egress
-through the corporate proxy. The right Kubernetes version. A storage class
-that can do ReadWriteOnce.
+I'm a sales engineer. [FOUNDER: one true sentence about the script you have
+written before, and where. Use the real number of times and companies.]
 
-Most failed installs I have seen were not product bugs. The environment was
-not ready, and we found out on install day.
+[FOUNDER: one true story, with the real number of days a POC or install was
+lost to the environment.]
 
-rdy is that script, done properly. One static Rust binary. The vendor writes
-a YAML spec of what the product needs and signs it. The customer runs:
+Most failed installs have the same shape. The product works. The
+environment was not ready: not enough RAM, a proxy that blocks the registry,
+a storage class that cannot do ReadWriteOnce. Somebody finds out on install
+day.
 
-    $ rdy run acme-platform.yaml
-      PASS   host.cpu            8 cores (need 8)
-      BLOCK  host.memory         16.0 GiB found, 32 GiB needed
-      BLOCK  net.egress          registry.acme.example:443 refused by proxy
-                                 http://proxy.acme.example:3128 (HTTP 403)
-      WARN   k8s.storageclass    no default class supports ReadWriteOnce
-    2 blocks, 1 warning, 4 passed
+rdy is that checklist as a program. One static Rust binary. The vendor
+writes a YAML spec of what the product needs and signs it. The customer runs
+it. This example spec is unsigned, hence the flag. Output is from the
+release candidate on a lab VM behind a test proxy:
+
+    $ rdy run acme-quickstart.yaml --allow-unsigned
+      PASS   host.cpu       4 cores (need 4)
+      BLOCK  host.memory    4.0 GiB found, 8 GiB needed
+      WARN   host.disk      12 GiB free on / (need 20 GiB)
+      BLOCK  net.egress     registry.acme.example:443 refused by proxy
+                            http://proxy.acme.example:3128 (HTTP 403)
+    2 blocks, 1 warning, 1 passed
     NOT READY
 
 Each result has a fix. The run writes an HTML report and a JSON report. Exit
-codes are 0 ready, 1 warnings, 2 blockers, so CI can gate on it.
+codes are 0 ready, 1 warnings, 2 blockers, so CI can gate on it. If a check
+the spec requires cannot run (no root, no kubeconfig), the answer is NOT
+READY, not a quiet pass.
 
 What it does and does not do:
 
 - Runs what it can without root and tells you what it could not check. It
   never asks for sudo.
-- Nothing leaves the machine. There is an upload flag and it is off by
-  default. The upload code and the report renderer are in the repo so you
-  can read exactly what would leave.
+- Checks connect only to the endpoints in the spec. Results leave the
+  machine only if you run the separate upload command and approve it. The
+  upload code and the report renderer are in the repo so you can read
+  exactly what would leave.
 - Specs are signed with ed25519. Unsigned or tampered specs are refused
   unless you pass --allow-unsigned.
 - Static musl binary, rustls, no OpenSSL, no runtime. It works offline.
 - Specs only select built-in checks. They cannot run commands.
+- rdy run --dry-run prints what each check will read or connect to, and the
+  privilege it needs, without running anything. [verify it exists]
 
-Where it is rough: it is alpha. Host, network, Kubernetes and AWS account
+Where it is rough: it is alpha. [verify against the release candidate] Host, network, Kubernetes and AWS account
 checks exist. GPU checks are not there yet. Linux x86_64 is best tested.
 Windows has the fewest checks. The spec format can still change before 1.0.
 
@@ -456,10 +538,9 @@ Check before posting: the sample output in the body is pasted from the release c
 ```text
 Author here. Some context that did not fit in the post.
 
-Why a new tool: the checks I kept rewriting were never about Kubernetes
-alone. They were a VM with an old kernel, a proxy doing TLS interception,
-a cluster with the wrong default storage class. I wanted one thing that
-covers all of it.
+Why a new tool: [FOUNDER: from your own experience, which failures were not
+about Kubernetes alone? Name only ones you saw.] I wanted one thing that
+covers a VM, a cluster and a cloud account.
 
 How to verify what it does: releases are signed with cosign (command is in
 the README), the SBOM is attached, and the threat model is in docs/. The
@@ -474,15 +555,16 @@ I will be here all day.
 
 ### r/devops
 
-Lead with the question. Disclose that you built the tool. Check the subreddit's current self-promotion rules the week before and follow them. If promotion is limited to a weekly thread, post there.
+Lead with the question. Disclose that you built the tool. Read the subreddit's current self-promotion and AI-assistance rules the week before and follow them. If promotion is limited to a weekly thread, post there. The same rule applies to r/rust and r/kubernetes below.
 
 **Title:** `How do you check a customer's environment before an on-prem or BYOC install?`
 
 ```text
-I do pre-sales engineering for a self-hosted product. Our worst installs
-fail for boring reasons: a proxy that blocks the registry, a node with half
-the RAM we asked for, a storage class that cannot do RWO. We used to send a
-PDF checklist, then a bash script. Both rot.
+I do pre-sales engineering for a self-hosted product. [FOUNDER: one true
+story of an install or POC that failed for a boring environment reason, from
+your own history or from interview N.] The usual suspects are a proxy that
+blocks the registry, a node with less RAM than asked for, and a storage class
+that cannot do RWO. A PDF checklist rots, and so does a bash script.
 
 How do you handle this? Docs, scripts, Kubernetes preflight tooling,
 something else?
@@ -536,19 +618,21 @@ Check each bullet against the repo on launch day. If a bullet is not true, cut i
 ```text
 Vendors who ship a chart or operator into customer clusters keep hitting the
 same failures: the install identity cannot create ClusterRoles, there is no
-default storage class that supports RWO, a pod security policy rejects the
-workload, the nodes are smaller than the docs assumed.
+default storage class that supports RWO, Pod Security Admission or another
+admission policy rejects the workload, the nodes are smaller than the docs
+assumed.
 
 rdy is an Apache-2.0 CLI that runs these checks from a kubeconfig before
 install day and prints a fix for each failure. It is read-only. RBAC is
 checked with SelfSubjectAccessReview, so it asks the API server what you
 can do instead of guessing.
 
-Example (kind cluster, acme-k8s-only.yaml in the repo):
+Example (kind cluster, acme-k8s-only.yaml in the repo; use the full output
+from the release candidate, see series day 3):
 
     [paste real output here]
 
-Honest limits: it runs from one kube context at a time, it is alpha, and it
+Limits: it runs from one kube context at a time, it is alpha, and it
 is not a replacement for the established Kubernetes-only preflight tool if
 you already use it with its vendor's platform. I would like to know which admission and storage failures you see most, so I
 can add checks for them.
@@ -560,7 +644,7 @@ Verify before posting that RBAC really uses `SelfSubjectAccessReview` and that t
 
 ### lobste.rs
 
-Lobsters wants authors to be honest about self-promotion and does not like launch hype. Submit the repo link once, with the tags `rust`, `devops` and `show` (use whichever tags the site currently offers). Tick "I am the author". Needs an account with an invite, so start in week -3. Comment on other people's posts for a while first. Submit on a different day from HN.
+Lobsters expects authors to say plainly when they wrote the thing, and does not like launch hype. Submit the repo link once, with the tags `rust`, `devops` and `show` (use whichever tags the site currently offers). Tick "I am the author". Needs an account with an invite, so start in week -3. Comment on other people's posts for a while first. Submit on a different day from HN.
 
 Submission text:
 
@@ -584,14 +668,14 @@ Ask the community managers before posting anything that links to a product. Read
 ```text
 The POC that stalled on a proxy.
 
-Last year a POC of mine lost nine days. Product worked. The customer's
-network did not let the cluster pull from our registry, and nobody knew
-until kickoff day. It was the third time that quarter.
+[FOUNDER: one true story of a POC that stalled on the customer's
+environment. Use the real number of days. See interview N for a second
+story if you want one that is not yours.]
 
-I ended up writing a script that the customer runs before kickoff. Is the
-machine big enough, can it reach our endpoints through their proxy, is the
-cluster the right version. Then I turned it into a small open-source tool
-called rdy so I would stop rewriting it at each job.
+[FOUNDER: one true sentence on the script you wrote for it.] I turned it
+into a small open-source tool called rdy so I stop rewriting it. It checks
+whether the machine is big enough, whether it can reach your endpoints
+through their proxy, and whether the cluster is the right version.
 
 Three questions for this group:
 
@@ -607,7 +691,7 @@ first version.
 I am running a roundtable on this on <date>. Details in the events channel.
 ```
 
-The last offer is a founder decision, see "Decisions needing an ADR".
+The last offer is a founder decision, see "Decisions needing an ADR". Bracketed lines are placeholders for the founder's own words.
 
 **Roundtable pitch** (to the community team):
 
@@ -618,8 +702,9 @@ Format: 45 minutes, cameras optional, not recorded unless the room agrees.
 Max 25 people.
 
 Plan:
-  10 min  Three anonymous POC failure stories from the host, mapped to the
-          check that would have caught each.
+  10 min  Three anonymous POC failure stories, mapped to the check that
+          would have caught each. [FOUNDER: use real stories, e.g. from
+          interviews N, N and N, with permission.]
   20 min  Open floor. Everyone brings one install failure. We write down the
           check as we go, in plain English: what to measure, what is good,
           what to tell the customer.
@@ -630,8 +715,8 @@ Plan:
 Leave with: a one-page list of your top ten environment checks, and a spec
 file if you want one.
 
-About me: sales engineer, DevOps background, built an open-source tool for
-this. I will say so once at the start.
+About me: sales engineer with a DevOps background. I built an open-source
+tool for this and will say so once at the start.
 ```
 
 Do not sponsor an event at launch. Plan allows $0 to $5k later; spend nothing until there are numbers.
@@ -664,7 +749,7 @@ Dates are relative. Launch day is a Tuesday.
 | Week -2 | Feature freeze. Cut release candidate. Run the three-stranger quickstart test. Fix what they hit. |
 | Week -1 | Verify every claim in the posts against the release candidate. Record the cast. Write and schedule the five series posts. Draft the waitlist email. Pre-write the launch FAQ. Tag the stable release. |
 | Mon (day -1) | Series post 1 (host checks) goes out. Final check of install script, docs links, Plausible goals. Sleep. |
-| **Tue (launch)** | 08:30 US Eastern: post Show HN. Post the author comment. Stay on the thread, reply to every comment. 10:00: post series day 2 (network). After the HN post is live: send the waitlist email. Fix real bugs fast. Do not post anywhere else today. |
+| **Tue (launch)** | 08:30 US Eastern: post Show HN. Post the author comment. Stay on the thread, reply to every comment. 10:00: post series day 2 (network). After the HN post is live: send the waitlist email, linking to the repo and not to the HN item. Fix real bugs fast. No other community posts today. |
 | Wed | 09:00: r/rust post. 12:00: PreSales Collective post (if the community team agreed). Series day 3 (Kubernetes). Triage overnight issues. Cut 0.x.1 if there are real bugs. |
 | Thu | 09:00: r/kubernetes post. Afternoon: roundtable. Send partner announcements that were approved in writing. Series day 4 (cloud account). |
 | Fri | 09:00: r/devops post (or the weekly thread). Submit to lobste.rs. Series day 5 (bundle and redaction). Write the week's notes. |
@@ -674,7 +759,7 @@ If HN does not take off, do nothing dramatic. Do not repost within a week. The R
 
 ## 4. "One check family a day" series
 
-Five short posts, one per weekday of launch week. LinkedIn is the main home. Each also goes on the blog at getrdy.io as a short page with the same terminal output, and each links to its docs page. Each post is about 150 words and one terminal block. Never longer than a screen.
+Five short posts, one per weekday of launch week. LinkedIn is the main home. Terminal samples that show a partial run say "output trimmed". Each also goes on the blog at getrdy.io as a short page with the same terminal output, and each links to its docs page. Each post is about 150 words and one terminal block. Never longer than a screen.
 
 Format for each post:
 
@@ -694,18 +779,27 @@ All terminal output below is a draft. Replace each with real output from the rel
 ```console
   BLOCK  host.kernel      4.18.0 found, 5.10 needed
   WARN   host.cgroups     cgroup v1 in use, v2 wanted
-  BLOCK  host.ports       8443 in use by pid 1214 (nginx)
+  BLOCK  host.ports       8443 in use (process unknown without root)
   WARN   host.selinux     enforcing, spec allows permissive or disabled
   WARN   host.time_sync   clock skew 94s, limit 5s
 ```
 
-**CTA:** Run it on the oldest server you have. Tell us which host check we are missing: open a check request.
+**CTA:** Run it on the oldest server you have. Tell us which host check we are missing: open a check request. If you want the process name behind a busy port, run it as root yourself. rdy never asks you to.
 
 ### Day 2 (Tue): Network
 
 **Angle:** "Works on my laptop. The proxy has other ideas." Proxy allowlists, TLS interception and DNS cause most failed POCs.
 
-**Demo:** the egress and TLS checks behind a proxy.
+**Demo:** the egress, DNS and TLS checks behind a proxy. No example file holds `net.dns` or `net.tls`, so the post carries the spec snippet and the reader can paste it into a copy of `acme-quickstart.yaml`. Check ids and fields are provisional until `01-spec-format.md` and `03-check-catalog.md` are final.
+
+```yaml
+  - id: net.dns
+    names: ["registry.acme.example"]
+    severity: block
+  - id: net.tls
+    endpoints: ["registry.acme.example:443"]
+    severity: warn
+```
 
 ```console
   BLOCK  net.egress       registry.acme.example:443 refused by proxy (HTTP 403)
@@ -730,7 +824,12 @@ $ rdy run examples/specs/acme-k8s-only.yaml --allow-unsigned
   WARN   k8s.storageclass   "standard" supports ReadWriteOnce only
   PASS   k8s.rbac           3 of 3 verbs allowed
   PASS   k8s.admission      namespace allows baseline
+
+1 block, 1 warning, 3 passed
+NOT READY
 ```
+
+That is the whole run. A one-node kind cluster fails the node count on purpose.
 
 **CTA:** Run it on a cluster you can throw away. Tell us which admission policies bite you most.
 
@@ -738,7 +837,7 @@ $ rdy run examples/specs/acme-k8s-only.yaml --allow-unsigned
 
 **Angle:** "Find out the IAM role is missing a permission before step 14 of the install."
 
-**Demo:** the AWS IAM dry run. The policy needed to run the check itself is shown, to make the least-privilege point.
+**Demo:** the AWS IAM dry run with a read-only role. The policy needed to run the check itself is shown, to make the least-privilege point.
 
 ```console
   BLOCK  aws.iam   ec2:CreateSecurityGroup denied for role acme-install
@@ -759,10 +858,13 @@ $ rdy bundle examples/specs/acme-platform.yaml --allow-unsigned
   collected   journal:7d, k8s:events, 2 files
   redacted    3 aws_keys, 2 bearer_tokens, 14 emails
   wrote       ./rdy-bundle.tar.zst (1.2 MiB)
-  uploaded    nothing. Use --upload to send it, and read the manifest first.
+  not uploaded. To send it: rdy upload ./rdy-bundle.tar.zst
+              (read the manifest first)
 ```
 
 **CTA:** Try to break the redactor. If a secret gets through, report it privately under SECURITY.md. We will credit you.
+
+Command names in the day 5 sample (`rdy bundle`, `rdy upload`) are provisional until `07-cli-ux.md`.
 
 The GPU post is not in this series because the GPU family ships in M4. It becomes a stand-alone post when it does (backlog, M4).
 
@@ -781,13 +883,13 @@ The GPU post is not in this series because the GPU family ships in M4. It become
 
 ### Likely objections
 
-| Objection | Honest answer |
+| Objection | Answer |
 | --- | --- |
-| "`curl \| sh` is a bad idea." | Agreed that it is a trust leap. The script is short, does one thing, and never needs root: it installs to `~/.local/bin` after checking SHA-256 and the Sigstore signature. If you do not want to pipe it, the README shows the download, `cosign verify-blob` and unpack steps. Packages (Homebrew, winget, apt) come later. |
-| "It runs as root in a customer's environment. Why would I trust that?" | It does not need root and does not ask for it. Each check declares the privilege it needs. Without it, the check is skipped and the report says which one and why. The binary is open source, signed, has an SBOM, and we publish a threat model. The only code that can send anything off the machine is the upload client, it is off by default, and it is in the repo. An independent audit comes before we sell to enterprises. |
+| "`curl \| sh` is a bad idea." | Agreed that it is a trust leap. The script is short, does one thing, and never needs root: it installs to `~/.local/bin` after checking SHA-256 and the Sigstore signature, refuses to run as root, and never edits your shell profile. If you do not want to pipe it, the README shows the download, `cosign verify-blob` and unpack steps. Packages (Homebrew, winget, apt) come later. |
+| "It runs as root in a customer's environment. Why would I trust that?" | It does not need root and does not ask for it. Each check declares the privilege it needs. Without it, the check is skipped and the report says which one and why. The binary is open source, signed, has an SBOM, and we publish a threat model. Checks connect only to the endpoints in the spec. The only code that sends results anywhere is the upload client (from M2), it is a separate command that needs your approval, and it is in the repo. An independent audit comes before we sell to enterprises. |
 | "Just use the existing Kubernetes preflight tool." | Maybe you should. If you are on Kubernetes and its vendor's platform, that tool is mature and has far more mileage than rdy. rdy is for a wider mix: one binary for a VM, a cluster and a cloud account, with signed specs and a report a non-engineer can read. Both tools run on the machine where you start them, so that is not a difference today. |
 | "Why Rust?" | A static binary with no runtime installs in locked-down and air-gapped boxes. Memory safety matters for something that may run as root in someone else's environment. The check engine will later be built as a library other installers can embed. Go would have met the first goal too. Rust met all three. |
-| "What about telemetry?" | None. The binary makes no network call unless a check exists to make it, or you run `self-update`, or you pass the upload flag. We count downloads from GitHub and requests to the install script, nothing else. The network-off test is in CI. |
+| "What about telemetry?" | None. The binary makes no network call unless a check exists to make it, or you run the separate upload command and approve it. We count downloads from GitHub and requests to the install script, nothing else. The network-off test is in CI. |
 | "Another YAML DSL." | It is a list of built-in checks with thresholds. No logic, no templating. If you can read a Kubernetes manifest you can read a spec. Tell me what you cannot express and I will look. |
 | "Can a malicious spec run commands?" | At this stage no. Specs only select built-in checks and set parameters. Custom script checks are planned later, with a sandbox, and they will need a signature. |
 | "Is this AI slop?" | I used an AI coding agent for most of the typing and I review all of it. Judge the repo: tests, golden files, clippy with warnings denied, cargo-deny, a threat model. If you find something sloppy, open an issue. |
@@ -883,6 +985,9 @@ Used for the pre-launch walk. Ownership in brackets.
 | Releases are signed with an SBOM | Release workflow, verified from a clean machine. [release-engineer] |
 | Redaction runs before write | Golden-file redaction tests. [qa-engineer] |
 | Specs cannot run commands | Schema has no field that executes a command. [rust-architect] |
+| Report has no external requests | Golden HTML test that fails on any `src=`, `href=` or `url(` pointing off the file. [qa-engineer] |
+| Proxy credentials are never printed | Golden test with `HTTPS_PROXY=http://user:pass@proxy.acme.example:3128` that finds no `user` or `pass` in terminal, HTML or JSON output. [qa-engineer] |
+| A required check that cannot run gives NOT READY | Golden transcript for a skipped `severity: block` check. [qa-engineer] |
 
 ## Plan corrections found
 
@@ -895,12 +1000,13 @@ Used for the pre-launch walk. Ownership in brackets.
 - `docs/plan/rdy-plan.md`, "Milestones": M3 scope includes the public launch but the M3 exit test is "First 10 paying vendors", which can only be measured after launch. Fix: say the launch happens when M3 scope is done and the exit test is measured over the following eight weeks. Also state that the 12-month star and install targets start on launch day.
 - `docs/plan/rdy-plan.md`, "Home page copy outline": "7x faster installs with preflight checks" is a 2022 study by the incumbent preflight vendor about its own preflight checks. Fix: in any rdy copy, give the source and the year in the same sentence, and do not use it in the HN post.
 - `CLAUDE.md`, "Commands": `cargo run -p rdy-cli -- run examples/specs/acme-platform.yaml --json` is wrong in two ways. The package is named `rdy` (the directory is `crates/rdy-cli`), so it is `-p rdy`. And the example is unsigned, so it needs `--allow-unsigned`. Fix: `cargo run -p rdy -- run examples/specs/acme-platform.yaml --allow-unsigned --json`.
-- Gap, not an error: security reviewers on HN will ask what rdy will do before they run it. Neither the plan nor `CLAUDE.md` has a way to list each check's commands and privilege needs without running anything. Proposed fix, owned by cli-ux: a dry-run mode (for example `rdy run --dry-run` or `rdy spec lint --show-needs`) that prints per check what it will read or run and what privilege it needs. It backs the "least privilege" claim better than prose does.
+- `docs/adr/0008-errors-and-result-model.md`, run verdict: a `Skipped`, `Timeout` or `Error` result lowers the verdict only to `Warnings` (exit 1). For a `severity: block` check that is a false green: a CI gate written as `[ $? -le 1 ]` would pass an environment nobody checked. Proposed fix (cli-ux, in review of this document): a required check that did not run is an unverified blocker, verdict NOT READY, exit 2, last line `NOT READY: 1 required check was not run`. Pending rust-architect confirmation in `02-engine-design`. The samples here use the proposal.
+- Gap, accepted from review: security reviewers on HN will ask what rdy will do before they run it. Fix, owned by cli-ux: `rdy run --dry-run` prints per check its id, what it reads or connects to, and the privilege it needs, then exits 0 without running anything. M1 stretch, M2 at the latest. The README trust table refers to it as `[M1 stretch]`.
 
 ## Decisions needing an ADR
 
-- **How the example specs are signed.** Nothing in the plan says how a first-time user runs a spec. Options: (a) ship examples unsigned and use `--allow-unsigned` in the README; (b) sign the examples with a published demo key and ship its public key in the binary or docs; (c) a `rdy demo` command that bundles its own spec. Chosen for now: (a). It is the most conservative: it needs no demo key in the trust root, and it makes the first thing a new user sees the signing boundary. Cost: a first-run flag that teaches people to type `--allow-unsigned`. Revisit with security-reviewer and cli-ux.
-- **How skipped checks affect the verdict.** The canonical spec contains `gpu.cuda` and `aws.iam`, which no M1 binary can run. Options: (a) skipped checks are listed but do not change the verdict; (b) a skipped check with `severity: block` means the verdict cannot be plain `READY` (for example `READY with gaps`, exit 1); (c) the parse fails for unknown families. The README transcript uses (a), which is provisional. (b) is the more honest choice for a readiness tool, and the safer one: it never says READY about something it did not check. Under (b) the demo needs a variant spec with only built-in checks, or an extra line in the READY output. Owners: rust-architect and cli-ux decide. The README ticket waits on it.
+- **How the example specs are signed.** Nothing in the plan says how a first-time user runs a spec. Options: (a) ship examples unsigned and show the refusal and then `--allow-unsigned` in the README (consistent with ADR 0002, which exits 64 on an unsigned spec); (b) sign the examples with a published demo key and ship its public key in the binary or docs; (c) a `rdy demo` command that bundles its own spec. Chosen for now: (a). It is the most conservative: it needs no demo key in the trust root, and it makes the first thing a new user sees the signing boundary. Cost: a first-run flag that teaches people to type `--allow-unsigned`. Revisit with security-reviewer and cli-ux.
+- **Skipped required checks.** Not an open decision here. See the ADR 0008 item under "Plan corrections found". rust-architect decides in `02-engine-design`.
 - **Contributor terms.** Options: (a) DCO sign-off (chosen in CONTRIBUTING.md); (b) a CLA, which lets the company relicense; (c) nothing but Apache-2.0 inbound equals outbound. DCO is light and does not give the company extra rights. If the company ever needs to relicense, a CLA now would be easier than later. Chosen: (a), as the lowest friction for contributors.
 - **Public from M1 or private until launch.** Options: (a) public repo and public signed releases from M1, no promotion; (b) private until launch. Design partners need to download the binary, and their security reviewers need to read the code, so (b) breaks the install flow. Chosen: (a). It means stars and early readers may arrive before launch. That is acceptable.
 - **The free-spec offer in the PreSales Collective post.** The plan sells spec-authoring at $5k for the first ten customers. The post offers a free first draft to anyone who sends a prerequisites page. Options: (a) offer it, as lead generation; (b) leave it out until the paid offer is decided. Chosen: (b) is more conservative, so the draft copy marks the offer as optional and the founder decides before week -1.
@@ -909,23 +1015,31 @@ Used for the pre-launch walk. Ownership in brackets.
 
 M1 tickets cover the pre-launch work that has to exist while the alpha is in design partners' hands. Dependency titles for tickets owned by other agents are placeholders and must be reconciled in `docs/plan/11-backlog.md`.
 
-- [M1] Write example specs (4 files) | owner: devrel | est: 3h | depends on: Spec parser and JSON schema | exit test: all four files in `examples/specs/` parse and pass `rdy spec lint`, and the acme-platform file matches the plan's example shape.
-- [M1] CI job: lint every example spec | owner: qa-engineer | est: 1h | depends on: Write example specs (4 files) | exit test: a PR that breaks an example spec fails CI with the file name in the error.
-- [M1] Golden report for acme-platform fixture | owner: qa-engineer | est: 3h | depends on: Write example specs (4 files) | exit test: `rdy run` against the synthetic lab fixture reproduces the NOT READY transcript and the READY rerun byte for byte.
-- [M1] Review CONTRIBUTING.md on a fresh clone | owner: devrel | est: 1h | depends on: Workspace and CI | exit test: every command in CONTRIBUTING.md runs green on a clean checkout.
+- [M1] Review and lint example specs (5 files) | owner: devrel | est: 2h | depends on: Spec parser and JSON schema; rdy spec lint command | exit test: all five files in `examples/specs/` pass `rdy spec lint` and every block and warn check has a `fix`.
+- [M1] CI job: lint every example spec | owner: qa-engineer | est: 1h | depends on: rdy spec lint command; Review and lint example specs (5 files) | exit test: a PR that breaks an example spec fails CI with the file name in the error.
+- [M1] Fixture lab for golden transcripts (test proxy, fake kube API) | owner: qa-engineer | est: 4h | depends on: Host checks and HTML report; Network checks; Kubernetes checks | exit test: a script starts a refusing proxy and a fake kube API, and `rdy run` against them gives stable output twice in a row.
+- [M1] Golden transcripts for acme-quickstart (NOT READY, READY, unsigned refusal) | owner: qa-engineer | est: 2h | depends on: Fixture lab for golden transcripts (test proxy, fake kube API); rdy verify command and refuse-unsigned behaviour | exit test: the three README transcripts reproduce byte for byte from fixtures, with exit codes 2, 0 and 64.
+- [M1] Golden transcript for a skipped required check (acme-platform) | owner: qa-engineer | est: 1h | depends on: Skipped-check verdict decision in 02-engine-design | exit test: `rdy run acme-platform.yaml --allow-unsigned` on the fixture ends `NOT READY: 2 required checks were not run` with exit 2.
+- [M1] Review CONTRIBUTING.md on a fresh clone | owner: devrel | est: 1h | depends on: Workspace and CI | exit test: every command in the "Build and test" block of CONTRIBUTING.md runs green on a clean checkout.
+- [M1] DCO sign-off check in CI | owner: release-engineer | est: 1h | depends on: Workspace and CI | exit test: a PR with an unsigned commit fails the check and one with `Signed-off-by` passes.
 - [M1] Issue forms and config (bug report, check request, security contact link) | owner: devrel | est: 2h | depends on: none | exit test: the New Issue page on a test fork shows the two forms and the private security link, and blank issues are off.
 - [M1] PR template and labels | owner: devrel | est: 1h | depends on: none | exit test: a test PR shows the checklist from CLAUDE.md and the labels from section 6 exist.
-- [M1] CODE_OF_CONDUCT.md and SECURITY.md link check | owner: devrel | est: 1h | depends on: Threat model v1 (security-reviewer) | exit test: both files exist, and the repo Security tab shows the policy and private reporting.
-- [M1] README first draft with verified commands | owner: devrel | est: 4h | depends on: Host checks and HTML report; Skipped-check verdict ADR | exit test: every command in the README runs in a docs test against the build, and the transcript is pasted from a real run.
-- [M1] Time the quickstart with two design-partner SEs | owner: devrel | est: 2h | depends on: README first draft with verified commands; Signing and rdy verify | exit test: both reach a report in under five minutes and every stumble is a filed issue.
-- [M1] Alpha announcement to design partners | owner: devrel | est: 2h | depends on: Time the quickstart with two design-partner SEs | exit test: a short email with the install command, the example spec, what is rough and how to report a blocker is sent to every design partner.
-- [M1] Public claims audit table in docs | owner: devrel | est: 2h | depends on: README first draft with verified commands | exit test: each claim in the README security table links to a test or a file, and any without one is removed or ticketed.
+- [M1] CODE_OF_CONDUCT.md and link SECURITY.md | owner: devrel | est: 1h | depends on: SECURITY.md (security-reviewer) | exit test: both files exist and the repo Security tab shows the policy and private reporting.
+- [M1] Repo hygiene: topics, social preview, Discussions, private vulnerability reporting | owner: devrel | est: 1h | depends on: none | exit test: all four settings are on in the repo and a screenshot of the repo page is in the PR.
+- [M1] README docs-test harness | owner: qa-engineer | est: 3h | depends on: Fixture lab for golden transcripts (test proxy, fake kube API); install.sh CI tests | exit test: a CI job extracts every fenced command marked testable from README.md, runs it against the build and fails on a non-matching exit code or output.
+- [M1] README draft from section 1 | owner: devrel | est: 3h | depends on: Review and lint example specs (5 files); Golden transcripts for acme-quickstart (NOT READY, READY, unsigned refusal); Signing and rdy verify | exit test: README.md exists, all testable commands pass the docs-test harness, and transcripts are pasted from the golden files.
+- [M1] Sync README and series samples with 07-cli-ux | owner: devrel | est: 1h | depends on: README draft from section 1; 07-cli-ux.md | exit test: no sample in the README or this document differs from an output sample in 07 without a note.
+- [M1] Record the README terminal cast | owner: devrel | est: 2h | depends on: README draft from section 1 | exit test: an asciinema cast of the NOT READY then READY runs, from the release build, is linked from the README.
+- [M1] rdy run --dry-run (stretch) | owner: cli-ux | est: 2h | depends on: Host checks and HTML report | exit test: dry-run on acme-quickstart.yaml lists each check's reads and needs, runs nothing, and exits 0.
+- [M1] Time the quickstart with two design-partner SEs | owner: devrel | est: 2h | depends on: README draft from section 1; Signing and rdy verify | exit test: both reach a report in under five minutes and every stumble is a filed issue.
+- [M1] Alpha announcement to design partners | owner: devrel | est: 2h | depends on: Time the quickstart with two design-partner SEs | exit test: a short email with the install command, the quickstart spec, what is rough and how to report a blocker is sent to every design partner.
+- [M1] Public claims audit table in docs | owner: devrel | est: 2h | depends on: README draft from section 1 | exit test: each claim in the README security table links to a test or a file, and any without one is removed or ticketed.
 - [M2] README update for bundle and redaction | owner: devrel | est: 2h | depends on: Redacted bundle command | exit test: the README shows `rdy bundle` output pasted from a real run and the claims table has the redaction test.
-- [M2] lobste.rs invite and account history | owner: devrel | est: 1h | depends on: none | exit test: an account exists with at least ten helpful comments before week -3.
+- [M2] lobste.rs account and weekly comment habit | owner: devrel | est: 6h | depends on: none | exit test: an account exists with an invite and at least ten useful comments on other people's posts before week -3, spread over the weeks.
 - [M2] First case study draft from a design-partner run | owner: devrel | est: 4h | depends on: Design partner POC runs | exit test: one written, approved, anonymised case study exists.
-- [M3] Launch assets final (HN post, first comment, Reddit and lobste.rs posts, FAQ) | owner: devrel | est: 8h | depends on: Release candidate | exit test: every sentence is checked against the release candidate and the claims table has no gaps.
+- [M3] Launch assets final (HN post, first comment, Reddit and lobste.rs posts, FAQ) | owner: devrel | est: 8h | depends on: Release candidate | exit test: every sentence is checked against the release candidate, every founder placeholder is filled by the founder or deleted, and the claims table has no gaps.
 - [M3] Series posts 1 to 5 written, recorded and scheduled | owner: devrel | est: 12h | depends on: Release candidate | exit test: five posts exist with terminal output pasted from the release candidate and are scheduled.
-- [M3] Partner outreach (five emails, reply tracker) | owner: devrel | est: 5h | depends on: none | exit test: five emails sent in week -3, reply status tracked, nothing announced without written approval.
+- [M3] Partner outreach (five emails, reply tracker) | owner: devrel | est: 5h | depends on: none | exit test: emails sent in week -3 to each category, reply status tracked, nothing announced without written approval.
 - [M3] PreSales Collective post and roundtable booked | owner: devrel | est: 5h | depends on: none | exit test: the community team approved the post and the roundtable has a date and a listing.
 - [M3] Ten good-first-issue and check-request issues | owner: devrel | est: 3h | depends on: M2 check catalog | exit test: ten issues exist, each with an exit test and a pointer to the code.
 - [M3] Metrics script and weekly routine | owner: devrel | est: 3h | depends on: none | exit test: `scripts/metrics.sh` writes one CSV row with stars, release downloads and crates.io downloads.
