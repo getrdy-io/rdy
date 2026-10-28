@@ -120,16 +120,16 @@ The ticket's exit test needs a tag in `getrdy-io/release-sandbox`. The repo-side
 3. Wait for the `Release` run. Five `build-local-artifacts` jobs, one `build-global-artifacts`, `host`, `custom-check-release-artifacts` and `announce` must be green. Open `custom-check-release-artifacts` and confirm every line is PASS, including `cargo audit bin lists N dependencies` for all five targets.
 4. Download the release assets with `gh release download v0.1.0-alpha.0 --repo getrdy-io/release-sandbox --dir /tmp/sbx`, then run `scripts/check-release-artifacts.sh /tmp/sbx` on a clean Linux machine with `cargo-audit` installed. It must print `release artifacts ok`.
 5. By hand, on that machine: `tar -xzf rdy-x86_64-unknown-linux-musl.tar.gz`, then `cargo audit bin rdy-x86_64-unknown-linux-musl/rdy` lists the dependencies, and `scripts/check-static.sh rdy-x86_64-unknown-linux-musl/rdy` passes. Unzip the Windows archive and run `objdump -p rdy.exe | grep 'DLL Name'`: no `VCRUNTIME140.dll`.
-6. Open `rdy.cdx.xml`. It is CycloneDX XML (see ADR 0019, decision 7), not JSON.
+6. Open `rdy.cdx.xml`. It is CycloneDX XML (see ADR 0020, decision 8), not JSON.
 7. Negative test: in the sandbox only, change `scripts/check-static.sh` to `exit 1` on its first line, tag `v0.1.0-alpha.1` after bumping the crate versions, and confirm `custom-check-release-artifacts` fails and `announce` does not run, so no release exists. Delete the tag and the change.
 8. Record in the Done log of `11-backlog.md`: the run URL, the output of step 4, and the `ls` of the release assets. Add the observed `release` state after `announce` (published, `immutable` false in the sandbox unless the setting is on).
 
-If step 3 fails on the `aarch64-apple-darwin` leg because dist asks for `cargo-zigbuild`, stop: dist's wrapper rule changed, and ADR 0019 decision 6 and ADR 0006 decision 8 need a new look.
+If step 3 fails on the `aarch64-apple-darwin` leg because dist asks for `cargo-zigbuild`, stop: dist's wrapper rule changed, and ADR 0020 decision 7 and ADR 0006 decision 8 need a new look.
 
 ## SBOM and auditable binaries
 
 - `cargo-auditable` (`cargo-auditable = true`) embeds the dependency list in every binary. `cargo audit bin ./rdy` works on any shipped file. Confirmed in M1-007: the section survives `strip = "symbols"` (`[profile.dist]`), and `scripts/check-release-artifacts.sh` runs `cargo audit bin` on all five binaries.
-- `cargo-cyclonedx` via dist (`cargo-cyclonedx = true`) produces one SBOM per package, not per target. M1 ships the SBOM dist makes for `rdy`, listed in `SHA256SUMS`. It is CycloneDX XML (`rdy.cdx.xml`): dist runs a fixed `cargo cyclonedx -v` and has no JSON setting (ADR 0019, decision 7). If per-target SBOMs are wanted later, generate them in `sign-release` from each shipped binary with `auditable2cdx`. That needs no build and describes the bytes we ship.
+- `cargo-cyclonedx` via dist (`cargo-cyclonedx = true`) produces one SBOM per package, not per target. M1 ships the SBOM dist makes for `rdy`, listed in `SHA256SUMS`. It is CycloneDX XML (`rdy.cdx.xml`): dist runs a fixed `cargo cyclonedx -v` and has no JSON setting (ADR 0020, decision 8; correction 07, PR #46). If per-target SBOMs are wanted later, generate them in `sign-release` from each shipped binary with `auditable2cdx`. That needs no build and describes the bytes we ship.
 
 ## install.sh behaviour
 
@@ -285,11 +285,12 @@ x86_64-pc-windows-msvc = "windows-2022"
 sign-release = { contents = "write", id-token = "write" }
 ```
 
-Key names were confirmed in M1-007 by running `dist generate` 0.33.0. The live file is `dist-workspace.toml` at the repo root and wins over this block. It differs in these ways (ADR 0019 has the reasons):
+Key names were confirmed in M1-007 by running `dist generate` 0.33.0. The live file is `dist-workspace.toml` at the repo root and wins over this block. It differs in these ways (ADR 0020 has the reasons):
 
 - `github-release = "announce"`, not `"host"`. With `"host"`, dist 0.33.0 publishes the release in the host job, before any publish job runs.
 - `github-attestations` is off. It gives the build jobs `id-token: write`, and the signing job is meant to be the only job with it.
 - `publish-jobs = ["./check-release-artifacts"]` for now, with `publish-prereleases = true`. M1-010 adds `./sign-release`. The check is a publish job because only publish jobs hold back the announce job when they fail.
+- `allow-dirty = ["ci"]` turns off dist's own drift check. `release.yml` is dist's output plus `scripts/harden-release-workflow.py` (no default token, `contents: write` only in `announce`, tag shape check and tag passed through `env:`, pinned tool files, no containers). The CI job `release-workflow` regenerates it with `scripts/gen-release-workflow.sh --check` and fails on any difference (ADR 0020, decisions 1 and 5).
 - `github-build-setup = "../build-setup.yml"` installs the pinned toolchain and the target, and points C code at `musl-gcc`.
 - `[dist.github-action-commits]` pins the three actions dist uses to commit SHAs.
 - `aarch64-apple-darwin` builds on `macos-15-intel` while the org has no macOS arm64 runners (ADR 0006, decision 8).
@@ -318,7 +319,7 @@ File names carry the target, not the version. The version is in the download URL
 | C code in dependencies (`ring`) | Compiler version differences | Same pinned container |
 | Signatures differ each run | Per-signing certificates and timestamps | Expected. The bytes are what we claim to reproduce |
 | SBOM names the runner's build path | cargo-cyclonedx writes `bom-ref` values like `path+file:///home/runner/work/rdy/rdy/crates/rdy-cli#rdy@...` and a timestamp | Expected and public. Not a secret. Per-target SBOMs from `auditable2cdx` would avoid it |
-| Release tools installed by `curl \| sh` | dist, cargo-auditable (`latest`) and cargo-cyclonedx have no hash pin in the generated workflow (ADR 0019, decision 5) | M2: hand-written install steps with pinned hashes, or a hand-written workflow |
+| Release tool hashes are trusted on first read | dist and cargo-cyclonedx are pinned in `.github/release-tools.txt` with hashes read from the projects' release pages. cargo-auditable is pinned by version through a SHA-pinned install action (ADR 0020, decision 6) | A later change fails the build. A tool that was already malicious on the day it was pinned is not caught. M2 can add a rebuild check |
 | tar and zip metadata | Mtimes, file order | `SOURCE_DATE_EPOCH`; check whether dist honors it, else repack in `sign-release` |
 
 ## Plan corrections found
@@ -333,8 +334,9 @@ File names carry the target, not the version. The version is in the download URL
 - `docs/plan/rdy-plan.md`, public repo: nothing says the repo is public from week one. Private CI runs out of free minutes in about a dozen runs. Fix: create `getrdy-io/rdy` as public before the first CI ticket. The plan file also holds pricing and employment-agreement rows; the founder decides what stays public first (see `09-docs-site.md`).
 - `KICKOFF.md`, M1 scope: "signing" reads as spec signing only. Release signing lands in weeks 1 to 2. Fix: say "spec signing and release signing".
 - Runner label `macos-13` is retired; any template using it is stale.
-- Appendix B and the immutable-release note (found in M1-007, ADR 0019): `github-release = "host"` publishes the release in the host job in dist 0.33.0, so it is not a draft until announce. Use `"announce"`. A failed host job does not stop announce, so the artifact check is a publish job. `github-attestations = true` conflicts with the one-job `id-token` rule.
-- M1-007 exit test: "the SBOM is valid JSON". dist's SBOM is CycloneDX XML. Fix: "the SBOM is valid CycloneDX" (the check accepts XML or JSON).
+- Appendix B and the immutable-release note (found in M1-007, ADR 0020): `github-release = "host"` publishes the release in the host job in dist 0.33.0, so it is not a draft until announce. Use `"announce"`. A failed host job does not stop announce, so the artifact check is a publish job. `github-attestations = true` conflicts with the one-job `id-token` rule.
+- dist 0.33.0 writes a workflow with a `contents: write` token in every job, unhashed `curl | sh` tool installers, a trigger that matches any tag, and the tag name inside shell text (found in the PR #47 security review). `scripts/harden-release-workflow.py` fixes each and a CI job checks the result (ADR 0020, decision 5).
+- M1-007 exit test: "the SBOM is valid JSON". dist's SBOM is CycloneDX XML. Fix: "the SBOM is valid CycloneDX (XML or JSON)" (correction 07, PR #46).
 
 ## Decisions needing an ADR
 

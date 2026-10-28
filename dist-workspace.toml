@@ -1,14 +1,19 @@
 # dist release config (docs/plan/06-release-and-distribution.md, Appendix B). The workflow
-# .github/workflows/release.yml is generated from this file by `dist generate`. Never edit it by hand.
-# Change this file, then run `dist generate` with the pinned version below and commit both.
+# .github/workflows/release.yml is generated from this file by dist and then hardened by
+# scripts/harden-release-workflow.py (ADR 0020). Never edit it by hand.
+# Change this file, run `sh scripts/gen-release-workflow.sh` with the pinned dist
+# (`sh scripts/install-release-tool.sh dist`) and commit both. CI fails on any drift.
 
 [workspace]
 members = ["cargo:."]
 
 [dist]
-# Exact pin. Bump it by hand, run `dist generate`, and review the workflow diff.
+# Exact pin. Bump it with .github/release-tools.txt (the file hashes), regenerate, and review the diff.
 cargo-dist-version = "0.33.0"
 ci = "github"
+# `dist generate` skips release.yml when this is set, and dist plan skips its drift check. The CI job
+# release-workflow replaces both: scripts/gen-release-workflow.sh --check (ADR 0020).
+allow-dirty = ["ci"]
 targets = [
   "x86_64-unknown-linux-musl",
   "aarch64-unknown-linux-musl",
@@ -46,7 +51,8 @@ publish-jobs = ["./check-release-artifacts"]
 # Every alpha tag is a prerelease. Without this, dist skips publish jobs for prereleases, and a
 # skipped check counts as passed.
 publish-prereleases = true
-# On pull requests dist only plans. Its plan job fails if release.yml has drifted from this file.
+# On pull requests dist only plans. (Its own drift check is off because of allow-dirty. The CI job
+# release-workflow checks the file instead.)
 pr-run-mode = "plan"
 
 [dist.github-custom-runners]

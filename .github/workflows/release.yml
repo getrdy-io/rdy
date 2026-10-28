@@ -14,8 +14,9 @@
 # title/body based on your changelogs.
 
 name: Release
-permissions:
-  "contents": "write"
+# Hardened by scripts/harden-release-workflow.py (ADR 0020). No job has a token unless it
+# names one. Only `announce` can write.
+permissions: {}
 
 # This task will run whenever you push a git tag that looks like a version
 # like "1.0.0", "v0.1.0-prerelease.1", "my-app/0.1.0", "releases/v1.0.0", etc.
@@ -42,16 +43,17 @@ on:
   pull_request:
   push:
     tags:
-      - '**[0-9]+.[0-9]+.[0-9]+*'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
+    permissions:
+      contents: read
     runs-on: "ubuntu-22.04"
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
       tag: ${{ !github.event.pull_request && github.ref_name || '' }}
-      tag-flag: ${{ !github.event.pull_request && format('--tag={0}', github.ref_name) || '' }}
       publishing: ${{ !github.event.pull_request }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -61,10 +63,9 @@ jobs:
           persist-credentials: false
           submodules: recursive
       - name: Install dist
-        # we specify bash to get pipefail; it guards against the `curl` command
-        # failing. otherwise `sh` won't catch that `curl` returned non-0
+        # A pinned release file, checked against a committed sha256 (ADR 0020).
         shell: bash
-        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.33.0/cargo-dist-installer.sh | sh"
+        run: sh scripts/install-release-tool.sh dist
       - name: Cache dist
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -76,8 +77,22 @@ jobs:
       # (PRs run on the *source* but secrets are usually on the *target* -- that's *good*
       # but also really annoying to build CI around when it needs secrets to work right.)
       - id: plan
+        shell: bash
+        env:
+          IS_PR: ${{ github.event.pull_request && 'true' || 'false' }}
+          TAG: ${{ github.ref_name }}
         run: |
-          dist ${{ (!github.event.pull_request && format('host --steps=create --tag={0}', github.ref_name)) || 'plan' }} --output-format=json > plan-dist-manifest.json
+          if [ "$IS_PR" = true ]; then
+            dist plan --output-format=json > plan-dist-manifest.json
+          else
+            # The tag reaches the shell as data. Check its shape before anything uses it.
+            if ! printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+              echo "error: the tag is not a release tag: $TAG" >&2
+              echo "fix: tag releases as v<major>.<minor>.<patch>, with an optional -<prerelease>, for example v0.1.0-alpha.1" >&2
+              exit 1
+            fi
+            dist host --steps=create "--tag=$TAG" --output-format=json > plan-dist-manifest.json
+          fi
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
@@ -90,6 +105,8 @@ jobs:
   # Build and packages all the platform-specific things
   build-local-artifacts:
     name: build-local-artifacts (${{ join(matrix.targets, ', ') }})
+    permissions:
+      contents: read
     # Let the initial task tell us to not run (currently very blunt)
     needs:
       - plan
@@ -108,7 +125,6 @@ jobs:
       # - N "local" tasks that build each platform's binaries and platform-specific installers
       matrix: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix }}
     runs-on: ${{ matrix.runner }}
-    container: ${{ matrix.container && matrix.container.image || null }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
@@ -120,13 +136,6 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Install Rust non-interactively if not already installed
-        if: ${{ matrix.container }}
-        run: |
-          if ! command -v cargo > /dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          fi
       - name: "Install the pinned toolchain and the target"
         run: |
           rustup toolchain install --no-self-update
@@ -148,7 +157,8 @@ jobs:
         env:
           "TARGETS": "${{ join(matrix.targets, ' ') }}"
       - name: Install dist
-        run: ${{ matrix.install_dist.run }}
+        shell: bash
+        run: sh scripts/install-release-tool.sh dist
       # Get the dist-manifest
       - name: Fetch local artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
@@ -157,14 +167,22 @@ jobs:
           path: target/distrib/
           merge-multiple: true
       - name: Install cargo-auditable
-        run: ${{ matrix.install_cargo_auditable.run }}
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cargo-auditable@0.7.7
       - name: Install dependencies
+        if: runner.os == 'Linux'
         run: |
-          ${{ matrix.packages_install }}
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
       - name: Build artifacts
+        shell: bash
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+          DIST_ARGS: ${{ matrix.dist_args }}
         run: |
           # Actually do builds and make zips and whatnot
-          dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
+          dist build ${TAG:+"--tag=$TAG"} --print=linkage --output-format=json $DIST_ARGS > dist-manifest.json
           echo "dist ran successfully"
       - id: cargo-dist
         name: Post-build
@@ -189,6 +207,8 @@ jobs:
 
   # Build and package all the platform-agnostic(ish) things
   build-global-artifacts:
+    permissions:
+      contents: read
     needs:
       - plan
       - build-local-artifacts
@@ -208,10 +228,8 @@ jobs:
           path: ~/.cargo/bin/
       - run: chmod +x ~/.cargo/bin/dist
       - name: Install cargo-cyclonedx
-        # we specify bash to get pipefail; it guards against the `curl` command
-        # failing. otherwise `sh` won't catch that `curl` return non-0
-        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.5/cargo-cyclonedx-installer.sh | sh"
         shell: bash
+        run: sh scripts/install-release-tool.sh cargo-cyclonedx
       # Get all the local artifacts for the global tasks to use (for e.g. checksums)
       - name: Fetch local artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
@@ -221,8 +239,10 @@ jobs:
           merge-multiple: true
       - id: cargo-dist
         shell: bash
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          dist build ${{ needs.plan.outputs.tag-flag }} --output-format=json "--artifacts=global" > dist-manifest.json
+          dist build ${TAG:+"--tag=$TAG"} --output-format=json "--artifacts=global" > dist-manifest.json
           echo "dist ran successfully"
 
           # Parse out what we just built and upload it to scratch storage
@@ -250,10 +270,12 @@ jobs:
           name: artifacts-build-global
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
-            ${{ steps.cargo-cyclonedx.output.paths }}
+            ${{ steps.cargo-cyclonedx.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
   # Determines if we should publish/announce
   host:
+    permissions:
+      contents: read
     needs:
       - plan
       - build-local-artifacts
@@ -286,8 +308,10 @@ jobs:
       # This is a harmless no-op for GitHub Releases, hosting for that happens in "announce"
       - id: host
         shell: bash
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          dist host ${{ needs.plan.outputs.tag-flag }} --steps=upload --steps=release --output-format=json > dist-manifest.json
+          dist host ${TAG:+"--tag=$TAG"} --steps=upload --steps=release --output-format=json > dist-manifest.json
           echo "artifacts uploaded and released successfully"
           cat dist-manifest.json
           echo "manifest=$(jq -c "." dist-manifest.json)" >> "$GITHUB_OUTPUT"
@@ -306,13 +330,14 @@ jobs:
     uses: ./.github/workflows/check-release-artifacts.yml
     with:
       plan: ${{ needs.plan.outputs.val }}
-    secrets: inherit
     # publish jobs get escalated permissions
     permissions:
       "contents": "read"
 
   # Create a GitHub Release while uploading all files to it
   announce:
+    permissions:
+      contents: write
     needs:
       - plan
       - host
@@ -340,14 +365,18 @@ jobs:
         run: |
           # Remove the granular manifests
           rm -f artifacts/*-dist-manifest.json
+      - name: Check the files to publish
+        # Only the expected names, regular files only (ADR 0020).
+        run: sh scripts/check-release-artifacts.sh --files-only artifacts
       - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(needs.host.outputs.val).announcement_is_prerelease && '--prerelease' || '' }}"
           ANNOUNCEMENT_TITLE: "${{ fromJson(needs.host.outputs.val).announcement_title }}"
           ANNOUNCEMENT_BODY: "${{ fromJson(needs.host.outputs.val).announcement_github_body }}"
           RELEASE_COMMIT: "${{ github.sha }}"
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
 
-          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+          gh release create "$TAG" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*

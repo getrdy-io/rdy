@@ -580,6 +580,7 @@ before".
 | security@getrdy.io mailbox, and security.txt served at `https://getrdy.io/.well-known/security.txt` | M1-011 | sending the M1-139 announcement | Send a test mail and note that it arrived. Run `curl -sSf https://getrdy.io/.well-known/security.txt` and check it matches the repo file. Note both in the Done log. |
 | Send the alpha announcement to every design partner | M1-139 | M1 complete | Pin the install command to the immutable tag from the step above. Tick the recipient checklist and add the Done log line in the M1-139 format with the sent date and recipient count. |
 | Run the timed quickstart with two design-partner SEs | M1-167 | M1 complete | Follow the session script. Both reach a report in under five minutes and every stumble is filed with the issue template. Put both times and the issue links in the Done log. |
+| Create a ruleset on getrdy-io/rdy that restricts creation of `v*` tags to admins (no update, no delete), so only an admin can start a release (the workflow also accepts only `v<major>.<minor>.<patch>[-<pre>]` tags) | M1-007 | M1-010 | `scripts/check-org-settings.sh` (M1-011) shows PASS for the tag ruleset and a `v0.0.0-test` tag push from a non-admin test account is rejected. Paste both into the Done log. |
 
 ## How to work the backlog
 

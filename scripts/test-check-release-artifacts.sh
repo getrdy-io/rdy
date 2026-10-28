@@ -21,8 +21,14 @@ bad() {
     fail=1
 }
 
-for tool in musl-gcc readelf unzip zip jq python3 tar; do
+# A missing tool skips the tests on a developer machine. In CI ($CI is set) it is a failure, so a
+# runner image change cannot turn the tests into a silent pass.
+for tool in musl-gcc readelf objdump unzip zip jq python3 tar; do
     if ! command -v "$tool" > /dev/null 2>&1; then
+        if [ -n "${CI:-}" ]; then
+            echo "FAIL $tool is missing in CI"
+            exit 1
+        fi
         echo "SKIP all: $tool is missing here (the Linux CI legs have it)"
         exit 0
     fi
@@ -30,6 +36,10 @@ done
 
 printf 'int main(void) { return 0; }\n' > "$tmp/hello.c"
 if ! musl-gcc -static-pie -Wl,-z,relro,-z,now -o "$tmp/good" "$tmp/hello.c" 2> /dev/null; then
+    if [ -n "${CI:-}" ]; then
+        echo "FAIL musl-gcc cannot build a static-pie in CI"
+        exit 1
+    fi
     echo "SKIP all: musl-gcc cannot build a static-pie here"
     exit 0
 fi
@@ -45,6 +55,11 @@ done
 EOF
 cat > "$tmp/stubs/cargo" << 'EOF'
 #!/bin/sh
+# `cargo tree` prints $STUB_TREE. Anything else is `cargo audit`.
+if [ "$1" = "tree" ]; then
+    printf '%s\n' "${STUB_TREE:-rdy v0.1.0}"
+    exit "${STUB_TREE_CODE:-0}"
+fi
 cat "$STUB_AUDIT_FILE"
 exit "${STUB_CODE:-0}"
 EOF
@@ -100,7 +115,11 @@ cp "$tmp/good" "$tmp/elf-arm64"
 set_machine "$tmp/elf-arm64" 267
 { printf '\317\372\355\376\007\000\000\001'; head -c 64 /dev/zero; } > "$tmp/macho-x64"
 { printf '\317\372\355\376\014\000\000\001'; head -c 64 /dev/zero; } > "$tmp/macho-arm64"
-{ printf 'MZ'; head -c 64 /dev/zero; } > "$tmp/pe"
+# A PE header: MZ, e_lfanew = 64 at byte 60, then "PE\0\0" and the machine 0x8664 (x86-64).
+{ printf 'MZ'; head -c 58 /dev/zero; printf '\100\000\000\000'; printf 'PE\000\000\144\206'; head -c 64 /dev/zero; } > "$tmp/pe"
+# The same with machine 0x014c (i386), and a bare MZ with no PE header.
+{ printf 'MZ'; head -c 58 /dev/zero; printf '\100\000\000\000'; printf 'PE\000\000\114\001'; head -c 64 /dev/zero; } > "$tmp/pe-i386-bin"
+{ printf 'MZ'; head -c 64 /dev/zero; } > "$tmp/mz-only"
 
 cat > "$tmp/sbom.xml" << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
@@ -196,6 +215,15 @@ make_archive "$tmp/wrongelf" aarch64-unknown-linux-musl "$tmp/elf-x64"
 hash_all "$tmp/wrongelf"
 check "an x86-64 ELF in the aarch64 archive fails" 1 "FAIL aarch64-unknown-linux-musl binary is an AArch64 ELF" "$tmp/wrongelf"
 
+fresh pe32
+make_archive "$tmp/pe32" x86_64-pc-windows-msvc "$tmp/pe-i386-bin"
+hash_all "$tmp/pe32"
+check "a 32-bit PE in the x86-64 Windows archive fails" 1 "FAIL x86_64-pc-windows-msvc binary is an x86-64 PE file" "$tmp/pe32"
+fresh mzonly
+make_archive "$tmp/mzonly" x86_64-pc-windows-msvc "$tmp/mz-only"
+hash_all "$tmp/mzonly"
+check "a file with only an MZ header fails" 1 "FAIL x86_64-pc-windows-msvc binary is an x86-64 PE file" "$tmp/mzonly"
+
 # 4. Static-pie.
 if musl-gcc -static -no-pie -o "$tmp/nopie-bin" "$tmp/hello.c" 2> /dev/null; then
     set_machine "$tmp/nopie-bin" 267
@@ -245,6 +273,44 @@ fresh jsonsbom
 rm "$tmp/jsonsbom/rdy.cdx.xml"
 echo '{"bomFormat":"CycloneDX","specVersion":"1.5","components":[{"name":"serde"}]}' > "$tmp/jsonsbom/rdy.cdx.json"
 check "a CycloneDX JSON SBOM passes" 0 "rdy.cdx.json is CycloneDX JSON" "$tmp/jsonsbom"
+
+# 0. Only the expected files.
+fresh extra
+echo surprise > "$tmp/extra/install-me.sh"
+check "an unexpected file fails and is named" 1 "FAIL install-me.sh is an expected release file" "$tmp/extra"
+fresh extradir
+mkdir "$tmp/extradir/sub"
+check "a folder fails" 1 "FAIL sub is a regular file" "$tmp/extradir"
+fresh nested
+mkdir "$tmp/nested/sub"
+echo nested > "$tmp/nested/sub/sha256.sum"
+check "a file in a folder fails even with an allowed name" 1 "FAIL sub/sha256.sum is an expected release file" "$tmp/nested"
+fresh link
+ln -s /etc/passwd "$tmp/link/sha256.sum.link"
+check "a symlink fails" 1 "FAIL sha256.sum.link is not a symlink" "$tmp/link"
+fresh linkallowed
+rm "$tmp/linkallowed/sha256.sum"
+ln -s /etc/passwd "$tmp/linkallowed/sha256.sum"
+check "a symlink with an allowed name fails" 1 "FAIL sha256.sum is not a symlink" "$tmp/linkallowed"
+fresh manifests
+for m in dist-manifest.json plan-dist-manifest.json global-dist-manifest.json x86_64-unknown-linux-musl-dist-manifest.json source.tar.gz source.tar.gz.sha256; do
+    echo '{}' > "$tmp/manifests/$m"
+done
+check "dist's own manifests and the source tarball are allowed" 0 "release artifacts ok" "$tmp/manifests"
+check "--files-only passes a clean folder without any tool" 0 "release files ok" --files-only "$tmp/good"
+check "--files-only fails on an unexpected file" 1 "FAIL install-me.sh" --files-only "$tmp/extra"
+check "--files-only does not look at the contents" 0 "release files ok" --files-only "$tmp/badsbom"
+
+# 8. Features. The stub `cargo tree` prints what it is told.
+STUB_TREE='rdy v0.1.0 / serde_json feature preserve_order'
+export STUB_TREE
+check "preserve_order in the rdy build fails" 1 "FAIL no preserve_order in the x86_64-unknown-linux-musl build" "$tmp/good"
+unset STUB_TREE
+STUB_TREE_CODE=101
+export STUB_TREE_CODE
+check "a failing cargo tree fails" 1 "FAIL cargo tree runs for" "$tmp/good"
+unset STUB_TREE_CODE
+check "a clean feature tree passes" 0 "PASS no preserve_order in the aarch64-apple-darwin build" "$tmp/good"
 
 # Usage.
 check "no argument is a usage error" 64 "usage:"

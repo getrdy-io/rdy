@@ -29,7 +29,7 @@ our checks directly, so they belong in writing.
    run `scripts/check-static.sh` before anyone ships it. M1-007 (dist) must run
    `scripts/check-static.sh` on both Linux release artifacts, not only rely on the CI test job. Done in
    M1-007: `scripts/check-release-artifacts.sh` runs it on both archives before the release is created,
-   see ADR 0019.)
+   see ADR 0020.)
 3. aarch64 Linux builds and tests run natively on GitHub's `ubuntu-24.04-arm` runners with `musl-tools`.
    `cargo-zigbuild` is the fallback and the documented local cross path. `cross` is not used.
 4. Allocator: musl's default in M1. An M2 benchmark compares with a glibc build; above a 20% slowdown we

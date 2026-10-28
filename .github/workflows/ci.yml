@@ -227,11 +227,35 @@ jobs:
         if: matrix.name == 'linux-x64'
         run: cargo test --doc --workspace --locked
 
+  # release.yml is dist's output plus scripts/harden-release-workflow.py (ADR 0020). dist's own drift
+  # check is off (`allow-dirty`), so this job is the drift check: it regenerates the file from a
+  # hash-checked dist and fails on any difference. It also runs the tests of the release scripts.
+  release-workflow:
+    name: release-workflow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - name: Install dist (pinned file, sha256 checked)
+        run: sh scripts/install-release-tool.sh dist
+      - name: Script tests
+        run: |
+          sh scripts/test-install-release-tool.sh
+          sh scripts/test-harden-release-workflow.sh
+      - name: release.yml matches dist and the hardening script
+        run: sh scripts/gen-release-workflow.sh --check
+
   # The only required check. Keep `needs:` equal to the list of gating jobs.
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, zizmor, deny, dco, test]
+    needs: [lint, zizmor, deny, dco, test, release-workflow]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

@@ -1,21 +1,32 @@
 #!/bin/sh
 # check-release-artifacts.sh: prove the files dist built are the files we mean to ship (M1-007).
 #
-# Usage: scripts/check-release-artifacts.sh <dir>
+# Usage: scripts/check-release-artifacts.sh [--skip-audit | --files-only] <dir>
 # <dir> holds the release assets in one flat folder: what dist writes to target/distrib, or what
-# `gh release download` fetches. The release workflow runs this on the built artifacts before the
-# GitHub Release is created (.github/workflows/check-release-artifacts.yml).
+# `gh release download` fetches. The release workflow runs this on the built artifacts in a publish
+# job before the GitHub Release is created (.github/workflows/check-release-artifacts.yml). Its
+# `announce` job runs it again with --files-only on the folder it publishes.
 #
 # Checks:
+#   0. The folder holds only files from the expected list (below), as regular files. Any other
+#      name, folder or symlink fails, so nothing unexpected is published. --files-only runs just this.
+#      The expected files, with <t> a target triple from the list in this script: rdy-<t>.tar.gz
+#      (rdy-<t>.zip on Windows) and its .sha256, source.tar.gz and its .sha256, sha256.sum,
+#      rdy.cdx.xml (or rdy.cdx.json), dist-manifest.json, and dist's per-job manifests (plan-,
+#      global- and <t>-dist-manifest.json), which the announce job deletes before it publishes.
 #   1. All five archives exist, each with its .sha256 file, and the hashes match. If dist's
 #      sha256.sum exists, it must agree too.
 #   2. Each archive holds only safe paths and rdy-<triple>/{rdy|rdy.exe,LICENSE,README.md,CHANGELOG.md}.
 #   3. Each binary has the format and CPU its file name says (ELF, Mach-O or PE).
 #   4. Both Linux binaries pass scripts/check-static.sh (ADR 0006, decision 2). A linker override
 #      such as cargo-zigbuild would bypass scripts/musl-pie-linker.sh. This catches it.
-#   5. rdy.exe imports no VCRUNTIME DLL (the C runtime is linked in).
+#   5. rdy.exe is an x86-64 PE file and imports no VCRUNTIME DLL (the C runtime is linked in).
 #   6. `cargo audit bin` finds the embedded dependency list in every binary and no vulnerability.
 #   7. The SBOM is well-formed CycloneDX with components.
+#   8. `cargo tree -p rdy -e features` for each target shows no `preserve_order`. That feature of
+#      serde_json belongs to the schema tooling (rdy-spec's optional `schema` feature, used only by
+#      xtask). It would reach the binary if dist built the whole workspace, so a build with
+#      `precise-builds = false` fails here. Run from a full checkout: it reads Cargo.lock.
 # Exit: 0 all checks pass, 1 at least one fails, 64 usage error or a missing tool.
 #
 # Needs: tar, unzip, readelf, objdump, od, awk, jq, python3, cargo with cargo-audit, and sha256sum or
@@ -29,15 +40,23 @@ export LC_ALL
 here=$(cd "$(dirname "$0")" && pwd)
 
 skip_audit=0
-if [ "$#" -eq 2 ] && [ "$1" = "--skip-audit" ]; then
-    skip_audit=1
+files_only=0
+if [ "$#" -eq 2 ]; then
+    case $1 in
+        --skip-audit) skip_audit=1 ;;
+        --files-only) files_only=1 ;;
+        *)
+            echo "usage: scripts/check-release-artifacts.sh [--skip-audit | --files-only] <dir>" >&2
+            exit 64
+            ;;
+    esac
     shift
 fi
 if [ "$#" -ne 1 ]; then
-    echo "usage: scripts/check-release-artifacts.sh [--skip-audit] <dir>" >&2
+    echo "usage: scripts/check-release-artifacts.sh [--skip-audit | --files-only] <dir>" >&2
     exit 64
 fi
-dir=$1
+dir=${1%/}
 if [ ! -d "$dir" ]; then
     echo "error: $dir is not a directory" >&2
     echo "fix: pass the folder with the release assets, for example target/distrib" >&2
@@ -51,25 +70,26 @@ need() {
         exit 64
     fi
 }
-need tar "install tar"
-need unzip "install unzip (on Debian or Ubuntu, 'apt-get install unzip')"
-need readelf "install binutils (on Debian or Ubuntu, 'apt-get install binutils')"
-need objdump "install binutils (on Debian or Ubuntu, 'apt-get install binutils')"
-need od "install coreutils"
 need awk "install awk"
-need jq "install jq (on Debian or Ubuntu, 'apt-get install jq')"
-need python3 "install python3"
-if [ "$skip_audit" -eq 0 ]; then
+need find "install findutils"
+if [ "$files_only" -eq 0 ]; then
+    need tar "install tar"
+    need unzip "install unzip (on Debian or Ubuntu, 'apt-get install unzip')"
+    need readelf "install binutils (on Debian or Ubuntu, 'apt-get install binutils')"
+    need objdump "install binutils (on Debian or Ubuntu, 'apt-get install binutils')"
+    need od "install coreutils"
+    need jq "install jq (on Debian or Ubuntu, 'apt-get install jq')"
+    need python3 "install python3"
     need cargo "install the Rust toolchain from rust-toolchain.toml"
-fi
-if command -v sha256sum > /dev/null 2>&1; then
-    sha256_of() { sha256sum "$1" | awk '{ print $1 }'; }
-elif command -v shasum > /dev/null 2>&1; then
-    sha256_of() { shasum -a 256 "$1" | awk '{ print $1 }'; }
-else
-    echo "error: neither sha256sum nor shasum is installed" >&2
-    echo "fix: install coreutils (sha256sum) or perl (shasum)" >&2
-    exit 64
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256_of() { sha256sum "$1" | awk '{ print $1 }'; }
+    elif command -v shasum > /dev/null 2>&1; then
+        sha256_of() { shasum -a 256 "$1" | awk '{ print $1 }'; }
+    else
+        echo "error: neither sha256sum nor shasum is installed" >&2
+        echo "fix: install coreutils (sha256sum) or perl (shasum)" >&2
+        exit 64
+    fi
 fi
 
 work=$(mktemp -d)
@@ -92,6 +112,42 @@ archive_of() {
         *) echo "rdy-$1.tar.gz" ;;
     esac
 }
+
+# ---- 0. Only the expected files ------------------------------------------------------------
+{
+    for t in $targets; do
+        a=$(archive_of "$t")
+        printf '%s\n' "$a" "$a.sha256" "$t-dist-manifest.json"
+    done
+    printf '%s\n' source.tar.gz source.tar.gz.sha256 sha256.sum rdy.cdx.xml rdy.cdx.json \
+        dist-manifest.json plan-dist-manifest.json global-dist-manifest.json
+} > "$work/allowed.txt"
+find "$dir" -mindepth 1 > "$work/found.txt"
+unexpected=0
+while IFS= read -r f; do
+    rel=${f#"$dir"/}
+    if [ -L "$f" ]; then
+        fail "$rel is not a symlink" "a symlink could publish a file from outside this folder. Remove it and find out what made it."
+        unexpected=1
+    elif [ ! -f "$f" ]; then
+        fail "$rel is a regular file" "folders and special files are not release assets. Remove it and find out what made it."
+        unexpected=1
+    elif ! grep -Fxq -- "$rel" "$work/allowed.txt"; then
+        fail "$rel is an expected release file" "it is not on the list in scripts/check-release-artifacts.sh. If it should ship, add it there with a ticket. If not, find out what wrote it."
+        unexpected=1
+    fi
+done < "$work/found.txt"
+if [ "$unexpected" -eq 0 ]; then
+    pass "the folder holds only expected release files"
+fi
+if [ "$files_only" -eq 1 ]; then
+    if [ "$bad" -gt 0 ]; then
+        printf 'error: %s holds files that must not be published (%s check(s) failed)\n' "$dir" "$bad" >&2
+        exit 1
+    fi
+    echo "release files ok: $dir"
+    exit 0
+fi
 
 # first_hash <file>: the first field of the first line, which is the sha256 in dist's files.
 first_hash() { awk 'NR == 1 { print $1; exit }' "$1"; }
@@ -175,10 +231,17 @@ check_format() {
             fi
             ;;
         x86_64-pc-windows-msvc)
-            if [ "$(magic "$b" 2)" = "4d5a" ]; then
-                pass "$t binary is a PE file"
+            # MZ header, then at the offset in e_lfanew (byte 60) "PE\0\0" and machine 0x8664.
+            off=$(od -An -tu4 -j60 -N4 "$b" 2> /dev/null | tr -d ' \n')
+            case $off in
+                '' | *[!0-9]*) off="" ;;
+                *) ;;
+            esac
+            if [ "$(magic "$b" 2)" = "4d5a" ] && [ -n "$off" ] &&
+                [ "$(od -An -tx1 -j"$off" -N6 "$b" 2> /dev/null | tr -d ' \n')" = "504500006486" ]; then
+                pass "$t binary is an x86-64 PE file"
             else
-                fail "$t binary is a PE file" "the archive holds another kind of file. Check the matrix in the release run."
+                fail "$t binary is an x86-64 PE file" "the archive holds another kind of file or another CPU. Check the matrix in the release run."
             fi
             ;;
         *) fail "$t is a known target" "add it to scripts/check-release-artifacts.sh" ;;
@@ -331,6 +394,21 @@ done
 if [ "$sbom_seen" -eq 0 ]; then
     fail "an SBOM exists" "dist should write rdy.cdx.xml. Check 'cargo-cyclonedx = true' in dist-workspace.toml and the cargo-cyclonedx step of build-global-artifacts."
 fi
+
+# ---- 8. No schema-tooling feature in the release build -------------------------------------
+# The features that `cargo build --package rdy` would turn on, for each release target. cargo-dist
+# builds one package at a time (precise-builds), so this must match what was shipped.
+for t in $targets; do
+    if tree=$(cd "$here/.." && cargo tree --locked --package rdy --edges features --target "$t" 2> "$work/tree.err"); then
+        if printf '%s\n' "$tree" | grep -q 'preserve_order'; then
+            fail "no preserve_order in the $t build" "the schema feature of rdy-spec leaked into the rdy build. Keep 'precise-builds = true' in dist-workspace.toml and make sure only xtask enables the feature."
+        else
+            pass "no preserve_order in the $t build"
+        fi
+    else
+        fail "cargo tree runs for $t" "cargo tree failed: $(head -c 300 "$work/tree.err"). Run this script from a full checkout with the pinned toolchain."
+    fi
+done
 
 if [ "$bad" -gt 0 ]; then
     printf 'error: the release artifacts in %s are not ready to ship (%s check(s) failed)\n' "$dir" "$bad" >&2
