@@ -44,8 +44,8 @@ cannot check, so each milestone also gets an engineering "done" test (proposed, 
 | M0 Validate | 15 interviews, 5 design partners signed, landing page waitlist live | 5 vendors agree to run the alpha on a real POC | Not engineering. Go or no-go on Nov 20, 2026. |
 | M1 CLI alpha | Spec format, host, network and Kubernetes checks, HTML and JSON report, signed specs | One design partner catches a real install blocker with it | On Linux x86_64 and aarch64 (musl), macOS and Windows, `rdy run` on a signed fixture spec writes JSON and HTML into a new report directory and exits 0, 1 and 2 on the ready, warning and not-ready fixtures; an unsigned spec exits 64; a tampered spec exits 64 even with `--allow-unsigned`; every "0.1.0 gate" security ticket is closed. |
 | M2 Portal MVP | Share links, results dashboard, redacted bundles, bundle viewer, Slack alerts | Design partners run it on 20 prospect environments | `rdy run <product>` with the token from `RDY_TOKEN`, `--token-file` or a prompt (never argv) fetches a signed spec from staging, the redaction golden suite passes, nothing uploads without the flag or a yes. |
-| M3 Launch | AWS account checks, Stripe billing, docs, public open-source launch, Team tier on sale | First 10 paying vendors | AWS checks pass against recorded fixtures, the docs site builds its reference from the schema, `rdy-spec` and `rdy-engine` are 1.0, `custom.exec` runs only with hash-bound consent. |
-| M4 Business tier | GPU and AI checks, CRM sync, analytics, custom-branded CLI, SSO | First Business-tier deal | GPU checks pass on fixtures and one real node, branded report renders from data, data store checks ship. |
+| M3 Launch | AWS account checks, Stripe billing, docs, public open-source launch, Team tier on sale | First 10 paying vendors | AWS checks pass against recorded fixtures, the docs site builds its reference from the schema, `rdy-spec` and `rdy-engine` are 1.0. |
+| M4 Business tier | GPU and AI checks, CRM sync, analytics, custom-branded CLI, SSO | First Business-tier deal | GPU checks pass on fixtures and one real node, branded report renders from data, data store checks ship, `custom.exec` runs only with hash-bound consent. |
 | M5 Enterprise | Embed SDK, self-hosted portal, air-gapped licensing, security audit | First $50k+ contract | C-ABI and WASM builds of the engine pass the same golden tests; audit findings closed. |
 
 ## Public and private
@@ -63,62 +63,137 @@ path (ADR 0007). The wire types for both specs and results live in `rdy-spec` (A
 
 ## M1 calendar
 
-### The honest count
+`docs/plan/11-backlog.md` is the source of truth for every M1 ticket, estimate and week. This section
+copies its totals, calendar and cut list. If the two ever differ, 11 wins and this section is re-synced.
 
-| Slice | Source | Hours |
+### Founder decision (2026-10-28)
+
+M1 is extended, not cut. It is planned at its real size, at 13 founder hours a week, starting Monday Nov
+23, 2026, after a "go" on Nov 20. Each document's cut list is kept as a `core: no` marker so the founder
+can still trim. The 03 M1-late tier stays in M1, marked `core: no`. A tagged binary ships every week.
+
+- **M1 ends: Sunday Oct 10, 2027** (week 46).
+- **0.1.0, the build design partners get, ships in week 36 (Jul 26 to Aug 1, 2027),** with the
+  alpha announcement. Core tickets come first, so this is also the core-only end date.
+- At 10 hours a week: 0.1.0 in early October 2027, M1 end in early January 2028. At 15 hours a week:
+  0.1.0 in late June 2027, M1 end in late August 2027.
+
+### Totals
+
+| | Tickets | Hours |
 | --- | --- | --- |
-| Architecture, engine, report, signing, CLI edge | tickets at the end of this file (excluding the SEC tickets) | 81 |
-| Security, 11 standalone tickets | security-reviewer review, "M1 security budget" | 27 |
-| Release, CI, signing of binaries, install.sh | 06-release-and-distribution.md, 8 M1 tickets | 24 |
-| Check families, core (not marked M1-late) | 03-check-catalog.md, 19 tickets plus 2 reviews | 62 |
-| **Total M1** | | **about 194** |
+| M1, all | 235 | 571 |
+| M1, core | 178 | 438 |
+| M1, `core: no` (the cut list) | 57 | 133 |
 
-The budget in KICKOFF.md is six weeks at 10 to 15 hours: **60 to 90 hours**. M1 as scoped, with the
-security work that a root binary on customer boxes needs, is about twice that. The check catalog's 25
-"M1-late" tickets (about 75 hours) are **not** in the total: this plan moves them to M2. Two overlaps
-should be merged in 11-backlog.md, saving about 4 hours: 03's "Command runner" with "Blocking helper and
-subprocess kill on timeout", and 03's "Kube mock harness" with "Read-only guard layer and test".
-
-A six-week M1 is not possible without dropping a whole family or the security gate. 90 hours covers the
-release pipeline, the spec, engine, report and signing core, and the gate security tickets, with no check
-families at all, which cannot meet the plan's exit test.
-
-**Recommendation (founder decides):** extend M1 to **15 weeks at about 13 hours a week, Nov 23, 2026 to
-Mar 7, 2027**, keeping the plan's build order and a usable binary every week. Two alternatives:
-
-- **14 weeks (Feb 28, 2027)** by taking the cut list: parser property and fuzz tests (3h), SEC-22,
-  SEC-24 and SEC-31 (marked "by 0.1.1", 6h), the second half of the SEC-26 corpus (1.5h), TLS issuer
-  naming and print stylesheet polish (2h). About 12 hours. Those land in 0.1.1, two weeks after 0.1.0.
-- **At 10 hours a week**, the same scope takes about 19 weeks (early April 2027).
-
-Never on the cut list: the "0.1.0 gate" security tickets, the root-only system trust store, verify
-before parse, the egress address policy and the kube guard layer.
+The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is about five times that.
+The earlier counts here (about 194 hours, then 248 in 02) left out the cli-ux, testing, docs and devrel
+tickets and the 03 M1-late tier. M2 to M5 totals are in 11.
 
 ### Week by week
 
-Hours are founder hours including review of agent-written code. Ticket names from 03 and 06 are
-abbreviated; full titles live in those files.
+Hours are founder hours including review of agent-written code. Ticket ids are 11's. The weeks of Dec 21
+and Dec 28 run at half capacity.
 
-| Week | Dates | Build order step | Ships at the end of the week | Tickets | Hours |
-| --- | --- | --- | --- | --- | --- |
-| 1 | Nov 23 to 29 (Thanksgiving) | 1. Workspace, CI, release | `rdy version` as a CI artefact for five targets on every push | Create workspace skeleton; Reserve crates.io names; deny.toml; Package rdy; CLAUDE.md commands; confirm ADR reviews (2); SEC-04; 06 CI lint and deny job | 13 |
-| 2 | Nov 30 to Dec 6 | 1 | First cosign-signed pre-release `rdy version` on GitHub Releases | 06 CI test matrix with static-pie proof; 06 rulesets; 06 dist init; 06 sign-release; SEC-05 | 14 |
-| 3 | Dec 7 to 13 | 1 | `curl -sSf https://getrdy.io/install \| sh` installs a verified alpha | 06 first signed alpha; 06 install.sh core; 06 install.sh signature check; SEC-32; Define public spec types | 14 |
-| 4 | Dec 14 to 20 | 2. Spec parser and result model | `rdy spec lint` with line and column; `rdy run --allow-unsigned --json` lists every check as SKIP "not built yet" and exits 2; published JSON schemas | Wire serde-saphyr; Result model and verdict; JSON schemas; Error types and exit codes; example spec | 13.5 |
-| 5 | Dec 21 to 27 (Christmas) | 2 | Engine runs fixture checks with timeouts; unknown ids reported | Check trait, Need and Context; Scheduler; Unknown check ids | 9.5 |
-| 6 | Dec 28 to Jan 3 (New Year) | 3. Host checks and HTML | Same binary with the fixture harness; first host check behind it | Blocking helper; 03 command runner; 03 fixture loader | 10 |
-| 7 | Jan 4 to 10 | 3 | Real host checks: memory, disk, cpu; action log in the JSON | 03 units helpers; host.memory; host.disk; host.cpu; SEC-17 | 15 |
-| 8 | Jan 11 to 17 | 3 | The demo: host checks plus the HTML report | host.ports; host.os; HTML report; Embed JSON safely; Golden tests | 13.5 |
-| 9 | Jan 18 to 24 | 3 | Reports land in a fresh 0700 directory; evidence and errors redacted | SEC-19; SEC-25; SEC-26; 03 loopback network test support | 13 |
-| 10 | Jan 25 to 31 | 4. Network checks | Egress direct and through the customer's proxy, with the address policy | HTTP client builder; SEC-21; net.egress core; net.egress via proxy | 13 |
-| 11 | Feb 1 to 7 | 4 | Proxy discovery and TLS interception detection | net.proxy; net.tls_intercept; 03 TLS probe security review; musl resolver fixture; SEC-22 | 13 |
-| 12 | Feb 8 to 14 | 5. Kubernetes checks | k8s access with context, server and user shown; guarded client | Kube client; Read-only guard layer; 03 kube mock harness; k8s.access | 13 |
-| 13 | Feb 15 to 21 | 5 | k8s version, storage classes, RBAC, nodes | k8s.version; k8s.storageclass; k8s.rbac; k8s.nodes; 03 k8s review | 14 |
-| 14 | Feb 22 to 28 | 6. Signing and `rdy verify` | Signed specs verified before parsing; keygen and sign | Verify minisign signatures; Trust store; spec keygen and sign; rdy verify and refuse-unsigned | 14.5 |
-| 15 | Mar 1 to 7 | 6 | **0.1.0**, the build design partners get | trust add, list, remove; Security review of signing; SEC-24; SEC-31; parser property tests; tag and release | 11 |
+| Week | Dates | Capacity | Hours | Build step | Tickets | Ships |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | Nov 23 to Nov 29, 2026 | 13 | 13 | 1 Workspace, CI, release | M1-001 to M1-007 | `v0.1.0-alpha.0` (CI artefacts): `rdy version` built and tested on five CI legs |
+| 2 | Nov 30 to Dec 6, 2026 | 13 | 13 | 1 Workspace, CI, release; plus non-core | M1-008 to M1-013 | sandbox pre-release: the same binary built by dist and cosign-signed in `getrdy-io/release-sandbox` |
+| 3 | Dec 7 to Dec 13, 2026 | 13 | 13 | 1 Workspace, CI, release; 2 Spec parser, result model, engine core; plus non-core | M1-014 to M1-021 | `v0.1.0-alpha.1`: first signed pre-release on GitHub Releases; org and domain hardened |
+| 4 | Dec 14 to Dec 20, 2026 | 13 | 12 | 1 Workspace, CI, release; 2 Spec parser, result model, engine core | M1-022 to M1-025 | `v0.1.0-alpha.2`: install.sh that checks the cosign signature, from the pinned release URL |
+| 5 | Dec 21 to Dec 27, 2026 | 6.5 | 7 | 2 Spec parser, result model, engine core | M1-026 to M1-028 | `v0.1.0-alpha.3`: same CLI; rdy-spec parses specs with limits and line and column errors |
+| 6 | Dec 28, 2026 to Jan 3, 2027 | 6.5 | 6.5 | 2 Spec parser, result model, engine core | M1-029 to M1-031 | `v0.1.0-alpha.4`: same CLI; result model and verdict mapping in rdy-spec |
+| 7 | Jan 4 to Jan 10, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-032 to M1-035 | `v0.1.0-alpha.5`: generated JSON schemas in `crates/rdy-spec/schema/`; errors carry fix hints |
+| 8 | Jan 11 to Jan 17, 2027 | 13 | 13 | 2 Spec parser, result model, engine core | M1-036 to M1-040 | `v0.1.0-alpha.6`: `rdy spec lint <file>` with line and column |
+| 9 | Jan 18 to Jan 24, 2027 | 13 | 12.5 | 2 Spec parser, result model, engine core | M1-041 to M1-046 | `v0.1.0-alpha.7`: lint with did-you-mean and `--json`; bad flags exit 64; the quickstart example lints clean |
+| 10 | Jan 25 to Jan 31, 2027 | 13 | 11.5 | 2 Spec parser, result model, engine core | M1-047 to M1-050 | `v0.1.0-alpha.8`: engine runs checks with timeouts and panic isolation; unknown ids SKIP |
+| 11 | Feb 1 to Feb 7, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-051 to M1-056 | `v0.1.0-alpha.9`: `rdy run <file> --allow-unsigned --json` writes a 0700 report dir, every check SKIP, exit 2 |
+| 12 | Feb 8 to Feb 14, 2027 | 13 | 12 | 2 Spec parser, result model, engine core | M1-057 to M1-060 | `v0.1.0-alpha.10`: commands run only through the mediated runner; action log in the JSON |
+| 13 | Feb 15 to Feb 21, 2027 | 13 | 13 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-061 to M1-066 | `v0.1.0-alpha.11`: privilege snapshot, run deadline and watchdog, Ctrl-C exits 70 cleanly |
+| 14 | Feb 22 to Feb 28, 2027 | 13 | 13 | 3 Host checks, HTML report | M1-067 to M1-071 | `v0.1.0-alpha.12`: facade file policy and replay fixtures (internal, same CLI) |
+| 15 | Mar 1 to Mar 7, 2027 | 13 | 12.5 | 3 Host checks, HTML report | M1-072 to M1-076 | `v0.1.0-alpha.13`: fixture lint, golden helpers, redactor core |
+| 16 | Mar 8 to Mar 14, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-077 to M1-082 | `v0.1.0-alpha.14`: every report string, log line and error redacted; 30-case corpus gates CI |
+| 17 | Mar 15 to Mar 21, 2027 | 13 | 13 | 3 Host checks, HTML report | M1-083 to M1-088 | `v0.1.0-alpha.15`: first real check: host.memory with the nominal band |
+| 18 | Mar 22 to Mar 28, 2027 | 13 | 13 | 3 Host checks, HTML report | M1-089 to M1-092 | `v0.1.0-alpha.16`: host.disk, host.cpu, host.ports, host.os on Linux |
+| 19 | Mar 29 to Apr 4, 2027 | 13 | 13 | 3 Host checks, HTML report | M1-093 to M1-097 | `v0.1.0-alpha.17`: first HTML report next to the JSON |
+| 20 | Apr 5 to Apr 11, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-098 to M1-106 | `v0.1.0-alpha.18`: finished HTML report and golden reports; `rdy version --json` |
+| 21 | Apr 12 to Apr 18, 2027 | 13 | 12.5 | 3 Host checks, HTML report | M1-107 to M1-111 | `v0.1.0-alpha.19`: the demo: bucket-sorted terminal output with fix lines and the verdict last |
+| 22 | Apr 19 to Apr 25, 2027 | 13 | 13 | 3 Host checks, HTML report | M1-112 to M1-115 | `v0.1.0-alpha.20`: docs.getrdy.io live: overview and concepts |
+| 23 | Apr 26 to May 2, 2027 | 13 | 13 | 3 Host checks, HTML report | M1-116 to M1-119 | `v0.1.0-alpha.21`: spec and result reference generated from the schema |
+| 24 | May 3 to May 9, 2027 | 13 | 13 | 3 Host checks, HTML report; 4 Network checks | M1-120 to M1-123 | `v0.1.0-alpha.22`: host checks page; facade TCP and TLS (internal) |
+| 25 | May 10 to May 16, 2027 | 13 | 12 | 4 Network checks | M1-124 to M1-127 | `v0.1.0-alpha.23`: net.egress direct, with the egress address policy |
+| 26 | May 17 to May 23, 2027 | 13 | 12 | 4 Network checks | M1-128 to M1-131 | `v0.1.0-alpha.24`: net.egress through the customer's proxy, net.proxy, net.tls_intercept |
+| 27 | May 24 to May 30, 2027 | 13 | 12 | 4 Network checks; 5 Kubernetes checks | M1-132 to M1-135 | `v0.1.0-alpha.25`: network checks page; kube client shows context, server and user |
+| 28 | May 31 to Jun 6, 2027 | 13 | 12 | 5 Kubernetes checks | M1-136 to M1-139 | `v0.1.0-alpha.26`: read-only kube guard, lazy kube probe, kind job in CI |
+| 29 | Jun 7 to Jun 13, 2027 | 13 | 12 | 5 Kubernetes checks | M1-140 to M1-143 | `v0.1.0-alpha.27`: k8s.access, k8s.version, k8s.storageclass |
+| 30 | Jun 14 to Jun 20, 2027 | 13 | 13 | 5 Kubernetes checks | M1-144 to M1-148 | `v0.1.0-alpha.28`: k8s.rbac, k8s.nodes, k8s.admission (PSA); Kubernetes page |
+| 31 | Jun 21 to Jun 27, 2027 | 13 | 13 | 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-149 to M1-154 | `v0.1.0-alpha.29`: fixture envs for every verdict and for timeouts; compatibility page |
+| 32 | Jun 28 to Jul 4, 2027 | 13 | 13 | 6 Signing, `rdy verify`, 0.1.0 | M1-155 to M1-159 | `v0.1.0-alpha.30`: signatures verified before parsing; trust store (library); /unsigned page |
+| 33 | Jul 5 to Jul 11, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-160 to M1-165 | `v0.1.0-alpha.31`: `rdy spec keygen`, `rdy spec sign`, `rdy verify`; unsigned refused without the flag |
+| 34 | Jul 12 to Jul 18, 2027 | 13 | 13 | 6 Signing, `rdy verify`, 0.1.0 | M1-166 to M1-172 | `v0.1.0-alpha.32`: `rdy trust add\|list\|remove`; signing review closed; install, first-run, exit-code pages |
+| 35 | Jul 19 to Jul 25, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0; plus non-core | M1-173 to M1-178 | `v0.1.0-alpha.33`: sign and verify page; README transcripts and docs-test; 60-case redaction corpus |
+| 36 | Jul 26 to Aug 1, 2027 | 13 | 13 | 6 Signing, `rdy verify`, 0.1.0; plus non-core | M1-179 to M1-185 | **`v0.1.0`**: README ready, core done, announcement sent to design partners; SEC-22, SEC-24, SEC-31 closed |
+| 37 | Aug 2 to Aug 8, 2027 | 13 | 13.5 | Non-core, steps 2 and 3 and 6 | M1-186 to M1-194 | `v0.1.1`: quickstart timed with two SEs; issue forms, repo hygiene, claims audit, cast; all example specs lint in CI |
+| 38 | Aug 9 to Aug 15, 2027 | 13 | 12.5 | Non-core, steps 2 and 3 | M1-195 to M1-200 | `v0.1.2`: parser property tests; HTML bdi and headless checks; progress line |
+| 39 | Aug 16 to Aug 22, 2027 | 13 | 12.5 | Non-core, step 3 | M1-201 to M1-204 | `v0.1.3`: quiet and verbose; macOS and Windows host checks from sysinfo; UDP and socket facade |
+| 40 | Aug 23 to Aug 29, 2027 | 13 | 13 | Non-core, step 3 | M1-205 to M1-208 | `v0.1.4`: Windows job objects; host.lsm, host.security_agents, host.firewall |
+| 41 | Aug 30 to Sep 5, 2027 | 13 | 13 | Non-core, step 3 | M1-209 to M1-212 | `v0.1.5`: host.time_sync, host.sysctl, host.container_runtime, host.cgroups |
+| 42 | Sep 6 to Sep 12, 2027 | 13 | 13 | Non-core, steps 3 and 4 | M1-213 to M1-217 | `v0.1.6`: host.kernel; macOS and Windows host sources |
+| 43 | Sep 13 to Sep 19, 2027 | 13 | 12 | Non-core, step 4 | M1-218 to M1-221 | `v0.1.7`: net.dns system and direct answers; net.registry |
+| 44 | Sep 20 to Sep 26, 2027 | 13 | 13 | Non-core, steps 4 and 5 | M1-222 to M1-227 | `v0.1.8`: net.mtu, net.bandwidth, macOS and Windows net sources; k8s.nodes free capacity; admission webhooks |
+| 45 | Sep 27 to Oct 3, 2027 | 13 | 13 | Non-core, step 5 | M1-228 to M1-232 | `v0.1.9`: k8s.namespace, k8s.ingress, k8s.crds, k8s.cni, k8s.dns |
+| 46 | Oct 4 to Oct 10, 2027 | 13 | 7 | Non-core, steps 5 and 6 | M1-233 to M1-235 | `v0.1.10`: k8s.device_plugins, air-gapped fixture env, full help text; M1 complete |
 
-Builds before week 14 are tagged `0.1.0-alpha.N`, run specs only with `--allow-unsigned` (so rule 3
-holds before signing exists), and are not handed to design partners for real POCs.
+Builds before 0.1.0 (weeks 1 to 35) are `0.1.0-alpha.N` and are not handed to design partners for real
+POCs. Until `rdy verify` lands in week 33 they run specs only with `--allow-unsigned`, so rule 3 holds
+before signing exists. The week 21 build is the demo shown on calls.
+
+### Cut list
+
+These are every M1 ticket marked `core: no` in 11. They come after the 0.1.0 tag in the calendar,
+except M1-013, M1-017 and M1-178 (the PR template, the DCO check and the second half of the SEC-26
+corpus), which are cheap and fill earlier weeks.
+
+- 03 M1-late host checks: M1-206, M1-207, M1-208, M1-209, M1-210, M1-211, M1-212, M1-213, M1-214, M1-215, M1-216 (11 tickets, 35 h).
+- 03 M1-late network checks: M1-218, M1-220, M1-221, M1-222, M1-223, M1-224 (6 tickets, 17 h).
+- 03 M1-late Kubernetes checks: M1-226, M1-228, M1-229, M1-230, M1-231, M1-232, M1-233 (7 tickets, 20 h).
+- M1-013 PR template and labels (1 h).
+- M1-017 DCO sign-off check in CI (1 h).
+- M1-178 SEC-26 M1 redaction corpus, cases 31 to 60 with chunk-boundary cases (1.5 h).
+- M1-182 SEC-31 Docs security page and verify-first install (2 h).
+- M1-183 SEC-22 No-phone-home strace test on Linux CI (2 h).
+- M1-184 SEC-24 Read-only ClusterRole example and kube identity display (2 h).
+- M1-185 CODE_OF_CONDUCT.md and link SECURITY.md (1 h).
+- M1-186 Time the quickstart with two design-partner SEs (2 h).
+- M1-187 Issue forms and config (bug report, check request, security contact link) (2 h).
+- M1-188 Repo hygiene: topics, social preview, Discussions (1 h).
+- M1-189 Sync README and series samples with 07-cli-ux (1 h).
+- M1-190 Public claims audit table in docs (2 h).
+- M1-191 Record the README terminal cast (2 h).
+- M1-192 Review and lint the other four example specs, acme-platform.yaml included (1.5 h).
+- M1-193 CI job: lint every example spec (1 h).
+- M1-194 HTML next-step sentences and the nothing-verified wording (1 h).
+- M1-195 Property tests for rdy_spec::parse (3 h).
+- M1-196 HTML untrusted strings in bdi with bidi controls shown as escapes (1 h).
+- M1-197 Headless browser render of the golden HTML with no network (3 h).
+- M1-198 Headless layout checks: 320 px and print with dark preferred (1 h).
+- M1-199 Unicode choice for the spinner: locale, WT_SESSION and TERM_PROGRAM (1.5 h).
+- M1-200 Progress line with indicatif, TTY only (3 h).
+- M1-201 Quiet and verbose output modes (2.5 h).
+- M1-202 sysinfo NativeCall variants without process environ or cmdline (3 h).
+- M1-203 sysinfo-only subset on macOS and Windows for host.disk, memory, cpu and os (3 h).
+- M1-204 Facade methods for UDP exchanges and unix sockets with a GET-only Docker API guard (4 h).
+- M1-205 Windows job objects so a timeout kills the whole process tree (3 h).
+- M1-217 Amend ADR 0006 item 5 for getent as the Linux system answer (1 h).
+- M1-219 musl resolver behaviour fixture for net.dns (2 h).
+- M1-225 k8s.nodes free capacity from pod requests (cut 2) (2 h).
+- M1-227 Fixture env windows-2022-stub (1 h).
+- M1-234 Fixture env net-airgapped (2 h).
+- M1-235 Full help text for spec, trust and version commands (1 h).
+- Total: 57 tickets, 133 h.
+
+Never on the cut list: the "0.1.0 gate" security tickets, the root-only system trust store, verify
+before parse, the egress address policy, the kube guard and the facade policies.
 
 ## Crates and their public API
 
@@ -271,8 +346,8 @@ pub mod report {
 }
 ```
 
-**rdy-checks-host (M1).** CPU, memory, disk, ports and OS in the core M1 set, then kernel, cgroups, time
-sync, SELinux and AppArmor, security agents and the rest in M2 (03-check-catalog.md marks them M1-late).
+**rdy-checks-host (M1).** CPU, memory, disk, ports and OS in the core M1 set. Kernel, cgroups, time sync,
+SELinux and AppArmor, security agents and the rest are 03's M1-late tier: still M1, marked `core: no`.
 Reads `/proc` and `/sys` only through `HostFs`, so fixtures are directories, and runs commands only
 through `Exec`. Uses `sysinfo`, `nix` on Unix, `windows-sys` on Windows. Refuses to run setuid. No
 stability promise.
@@ -283,9 +358,10 @@ impl rdy_engine::Family for HostFamily { /* host.* */ }
 ```
 
 **rdy-checks-net (M1).** Egress direct and through the customer's proxy, proxy discovery, TLS
-interception detection. DNS, MTU and bandwidth are M1-late in 03 and move to M2. One policy client
-(ADR 0009): no redirects, metadata and link-local addresses blocked, spec endpoints only, bodies
-discarded. The recording TLS verifier is private to the interception probe. No stability promise.
+interception detection. DNS, registry, MTU and bandwidth are 03's M1-late tier: still M1, marked `core:
+no`. One policy client (ADR 0009): no redirects, metadata and link-local addresses blocked, spec
+endpoints only, bodies discarded. The recording TLS verifier is private to the interception probe. No
+stability promise.
 
 ```rust
 pub struct NetFamily { /* policy client, endpoint allowlist from the spec, ActionLog */ }
@@ -296,9 +372,10 @@ pub struct ProxyUrl(/* private */);                          // Debug and Displa
 ```
 
 **rdy-checks-k8s (M1).** Access and identity, server version, storage classes, RBAC through
-`SelfSubjectAccessReview`, node resources. Admission, CRDs, CNI, DNS and device plugins are M1-late in
-03 and move to M2. Read-only by a runtime guard layer that rejects writes, non-review POSTs and Secrets
-(ADR 0010); the family accepts only the guarded client type.
+`SelfSubjectAccessReview`, node resources. Admission webhooks, namespace, ingress, CRDs, CNI, DNS and
+device plugins are 03's M1-late tier: still M1, marked `core: no`. Read-only by a runtime guard layer
+that rejects writes, non-review POSTs and Secrets (ADR 0010); the family accepts only the guarded client
+type.
 
 ```rust
 pub struct ReadOnlyClient(/* kube::Client wrapped in the guard layer */);
@@ -312,11 +389,11 @@ impl K8sFamily { pub fn new(client: Option<ReadOnlyClient>) -> Self; }
 `verify`, `spec lint`, `spec sign`, `spec keygen`, `trust add`, `trust list`, `trust remove`, `version`;
 M2 `bundle`, `upload`, `report`; M3 `spec init`, `self-update`. `run` flags in M1: `--allow-unsigned`
 (argv only), `--key` (one run, never pinned), `--sig`, `--json`, `--out-dir`, `--no-report`,
-`--kube-context`, `--kubeconfig`, `--timeout`, `--jobs`, `--dry-run`; `--allow-exec=<hash>` in M3. Pinning
-happens only in `trust add`, with `--yes` for scripts. Builds the tokio runtime, installs the ring
-provider, probes needs (euid, kube, proxy env), assembles the families, writes reports, maps errors to
-exit codes and the `--json` error object with `anyhow` at the edge, and shows progress on stderr only
-when it is a TTY. No library API.
+`--kube-context`, `--kubeconfig`, `--jobs`, `--no-network`; `--timeout` and `--dry-run` in M2 (07);
+`--allow-exec=<hash>` in M4. Pinning happens only in `trust add`, with `--yes` for scripts. Builds the
+tokio runtime, installs the ring provider, probes needs (euid, kube, proxy env), assembles the families,
+writes reports, maps errors to exit codes and the `--json` error object with `anyhow` at the edge, and
+shows progress on stderr only when it is a TTY. No library API.
 
 **rdy-bundle (M2).** Collectors (journal, Kubernetes events, files by glob), redactors (AWS keys, bearer
 tokens, emails, custom regex) applied before any byte is written, `tar` plus `zstd`, and a manifest that
@@ -398,15 +475,15 @@ the fallback. `cargo-zigbuild` for local cross builds, `release-plz` and `cargo-
   ("Risks, validation gates" and "Next 30 days") says no Rust until the gates are met, go or no-go on
   Nov 20, 2026. Fix: KICKOFF starts M1 only after a recorded "go"; the founder picks an option at the
   top of this file.
-- KICKOFF.md constraints and CLAUDE.md founder context: "M1 is six weeks". M1 as scoped plus the
-  security and release work is about 194 hours against a 60 to 90 hour budget. Fix: founder chooses
-  15 weeks (recommended, to Mar 7, 2027), 14 weeks with the cut list, or a smaller M1 scope.
-- docs/plan/03-check-catalog.md: 25 tickets marked M1-late (about 75 hours) cannot fit M1. Fix: move
-  them to M2 in 11-backlog.md, and merge the two overlaps named in the calendar section.
+- KICKOFF.md constraints: "M1 is six weeks". M1 is 571 hours (438 core) against a 60 to 90 hour
+  budget. Decision made (2026-10-28): M1 is extended to Oct 10, 2027 at 13 hours a week; see the M1
+  calendar. Fix: KICKOFF points to 11-backlog.md for the M1 length.
+- docs/plan/03-check-catalog.md: 24 tickets marked M1-late (72 hours). Decision made: they stay in M1,
+  marked `core: no` in 11-backlog.md, after the 0.1.0 tag.
 - docs/plan/rdy-plan.md, Milestones table: every exit test is a business outcome CI cannot check. Fix:
   add the engineering done test column above.
 - docs/plan/rdy-plan.md, Rust build plan: "Ship a usable CLI in about 12 weeks" while M1 is six weeks.
-  Fix: state M1 at its real length once the founder decides.
+  Fix: state M1 at its real length from 11-backlog.md (46 weeks at 13 hours, to Oct 10, 2027).
 - docs/plan/rdy-plan.md, "Build order inside M1": signing is last, but CLAUDE.md rule 3 says refuse
   unsigned specs. Fix: alpha builds run only with `--allow-unsigned`, are tagged alpha, and are not
   given to design partners.
@@ -432,6 +509,9 @@ the fallback. `cargo-zigbuild` for local cross builds, `release-plz` and `cargo-
   without a milestone) are listed in docs/adr/README.md.
 
 ## Tickets implied
+
+These are merged into `docs/plan/11-backlog.md`, which holds the ids, final estimates, dependencies and
+order. Change tickets there, not here.
 
 - [M1] Create workspace skeleton | owner: rust-engineer | est: 2h | depends on: none | exit test: `cargo build`, `clippy -D warnings`, `fmt --check` and `cargo doc` with warnings as errors pass on edition 2024 crates with `forbid(unsafe_code)`, a pinned toolchain and shared lints.
 - [M1] Reserve crates.io names with 0.0.1 placeholders | owner: release-engineer | est: 1h | depends on: none | exit test: every crate name in CLAUDE.md plus `rdy-cli` resolves on crates.io to a getrdy-io-owned 0.0.1, and `rdy-cli`'s description says "install rdy".
@@ -475,7 +555,6 @@ the fallback. `cargo-zigbuild` for local cross builds, `release-plz` and `cargo-
 - [M1] SEC-24 Read-only ClusterRole example and kube identity display | owner: k8s-expert | est: 2h | depends on: Read-only guard layer and test for rdy-checks-k8s | exit test: M1 k8s checks pass on kind with only `examples/rbac/rdy-readonly.yaml`, and the report shows context, server and user.
 - [M1] SEC-31 Docs security page and verify-first install | owner: docs-writer | est: 2h | depends on: sign-release with cosign keyless, SHA256SUMS and self-verify (SEC-06, SEC-07) | exit test: the page lists what rdy reads and contacts, the report fields and link parameters, and CI runs its verify commands against the latest release.
 - [M1] SEC-32 Enable vulnerability reporting channels | owner: security-reviewer | est: 1h | depends on: SEC-04 Harden GitHub org and repo settings | exit test: private vulnerability reporting is on, security@getrdy.io receives mail and security.txt is served on getrdy.io.
-- [M2] Move the 03-check-catalog M1-late tickets into M2 | owner: rust-architect | est: 1h | depends on: none | exit test: 11-backlog.md lists all 25 under M2 with unchanged estimates.
 - [M2] cargo-semver-checks in CI for rdy-spec and rdy-engine | owner: release-engineer | est: 2h | depends on: none | exit test: a PR that removes a public field without a version bump fails CI.
 - [M2] release-plz config with trusted publishing for per-crate versions and changelogs | owner: release-engineer | est: 3h | depends on: none | exit test: a dry run opens a release PR bumping only the crates that changed, and the publish job holds no crates.io token secret.
 - [M2] Keep golden result files per released version and parse them in CI | owner: qa-engineer | est: 1h | depends on: none | exit test: CI deserializes every file under tests/fixtures/results/ with the current rdy-engine.
@@ -485,8 +564,8 @@ the fallback. `cargo-zigbuild` for local cross builds, `release-plz` and `cargo-
 - [M2] rdy-bundle: collectors, redactors, tar plus zstd, manifest | owner: rust-engineer | est: 24h | depends on: none | exit test: the redaction golden suite in 04-bundle-and-redaction.md passes on all four CI targets.
 - [M2] Opt-in upload client and share-link spec fetch | owner: rust-engineer | est: 10h | depends on: First crates.io release of rdy-spec and rdy-engine for rdy-cloud | exit test: `rdy run acme-platform` with a synthetic token from RDY_TOKEN fetches a signed spec from staging, shows the key fingerprint before pinning, and uploads only after a yes.
 - [M2] rdy report re-renders HTML from a result JSON | owner: rust-engineer | est: 2h | depends on: none | exit test: rendering a golden result file reproduces the golden HTML byte for byte.
-- [M3] Threat model and design note for custom.exec | owner: security-reviewer | est: 4h | depends on: none | exit test: section added to 05-threat-model.md and reviewed by rust-architect.
-- [M3] Implement custom.exec with argv, expectations, caps and hash-bound consent | owner: check-author | est: 14h | depends on: Threat model and design note for custom.exec | exit test: pass, fail, timeout, refused-without-consent, wrong-hash and unsigned-spec fixtures produce the documented statuses and exit codes on Linux, macOS and Windows.
+- [M4] Threat model and design note for custom.exec | owner: security-reviewer | est: 4h | depends on: none | exit test: section added to 05-threat-model.md and reviewed by rust-architect.
+- [M4] Implement custom.exec with argv, expectations, caps and hash-bound consent | owner: check-author | est: 14h | depends on: Threat model and design note for custom.exec | exit test: pass, fail, timeout, refused-without-consent, wrong-hash and unsigned-spec fixtures produce the documented statuses and exit codes on Linux, macOS and Windows.
 - [M3] rdy-checks-cloud AWS family | owner: check-author | est: 30h | depends on: Verify the AWS SDK runs on rustls with ring | exit test: IAM simulate, quotas, regions and subnet capacity pass against recorded fixtures, reviewed by cloud-iam-expert.
 - [M3] Signed self-update | owner: release-engineer | est: 6h | depends on: none | exit test: a tampered release asset is refused and the old binary keeps working.
 - [M3] Release rdy-spec and rdy-engine 1.0 | owner: rust-architect | est: 4h | depends on: none | exit test: 1.0 published and the cargo-semver-checks baseline moved to 1.0.
