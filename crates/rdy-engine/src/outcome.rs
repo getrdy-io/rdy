@@ -245,7 +245,7 @@ fn missing_need_text(need: &Need, os: Os) -> (String, String) {
     }
 }
 
-fn os_name(os: Os) -> &'static str {
+pub(crate) fn os_name(os: Os) -> &'static str {
     match os {
         Os::Linux => "Linux",
         Os::Macos => "macOS",

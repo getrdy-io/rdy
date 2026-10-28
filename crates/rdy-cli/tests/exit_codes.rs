@@ -120,14 +120,14 @@ fn version_flag_is_top_level_only() {
 
 #[test]
 fn a_usage_error_never_echoes_what_was_typed() {
-    // M1-030 adds the full no-echo suite. This is the floor: nothing typed comes back.
+    // The full no-echo suite is in no_echo.rs (M1-030). This is the floor: no value comes back.
     for args in [
         &["run", "spec.yaml", "--tokne=CANARY-7f3a"][..],
         &["run", "spec.yaml", "--pasword", "CANARY-7f3a"],
         &["run", "spec.yaml", "CANARY-7f3a"],
         &["CANARY-7f3a"],
         &["--color", "CANARY-7f3a", "version"],
-        &["--CANARY-7f3a=x"],
+        &["--CANARY_7f3a=x"],
         &["run", "spec.yaml", "--jobs=CANARY-7f3a"],
         &["run", "spec.yaml", "-qCANARY-7f3a"],
         &["help", "CANARY-7f3a"],
