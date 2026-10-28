@@ -60,6 +60,7 @@ macro_rules! open_enum {
             }
         }
 
+        #[cfg(feature = "schema")]
         impl ::schemars::JsonSchema for $name {
             fn schema_name() -> ::std::borrow::Cow<'static, str> {
                 stringify!($name).into()
@@ -102,8 +103,10 @@ pub(crate) use open_enum;
 /// Any snake_case code: the second alternative of every open enum in the schema.
 ///
 /// It exists only to give the schema one shared definition. No value of this type is ever built.
+#[cfg(feature = "schema")]
 pub(crate) struct OpenCode;
 
+#[cfg(feature = "schema")]
 impl ::schemars::JsonSchema for OpenCode {
     fn schema_name() -> ::std::borrow::Cow<'static, str> {
         "OpenCode".into()

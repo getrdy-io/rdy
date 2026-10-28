@@ -152,6 +152,15 @@ macro_rules! known_checks {
             }
         }
 
+        /// The keys the parameter struct of `id` accepts, for the test that keeps the schema equal to them.
+        #[cfg(all(test, feature = "schema"))]
+        pub(crate) fn param_fields(id: &str) -> Option<&'static [&'static str]> {
+            match id {
+                $($id => Some(<$ty as ParamSet>::FIELDS),)*
+                _ => None,
+            }
+        }
+
         /// Every check id that this build implements.
         pub const KNOWN_IDS: &[&str] = &[$($id),*];
     };

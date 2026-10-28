@@ -72,3 +72,23 @@ fn the_output_is_stable_and_ends_with_one_newline() {
     assert_eq!(spec_schema_json(), spec_schema_json());
     assert_eq!(result_schema_json(), result_schema_json());
 }
+
+/// The parameter fragment is written by hand, so nothing but this test ties its field names to the
+/// parameter structs. A field added to a struct and left out of the fragment (or the reverse) fails here.
+#[test]
+fn each_parameter_definition_lists_the_fields_of_its_struct() {
+    let defs = fragment(CHECK_PARAMS)
+        .remove("$defs")
+        .expect("the fragment has definitions");
+    for (id, def) in check_param_defs() {
+        let Some(fields) = crate::check::param_fields(&id) else {
+            panic!("{id} has no parameter struct");
+        };
+        let properties = defs[def.as_str()]["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{def} has no properties"));
+        let in_schema: BTreeSet<&str> = properties.keys().map(String::as_str).collect();
+        let in_struct: BTreeSet<&str> = fields.iter().copied().collect();
+        assert_eq!(in_schema, in_struct, "{id}: {def} and the struct disagree");
+    }
+}

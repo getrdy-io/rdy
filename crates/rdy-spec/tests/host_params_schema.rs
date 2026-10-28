@@ -19,12 +19,7 @@ fn check_validator() -> TestResult<Validator> {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("schema/spec.v1.schema.json"),
     )?;
     let whole: Value = serde_json::from_str(&text)?;
-    // Only the definitions a check entry uses. The `Bundle` definition has a pattern
-    // (`^file:/[^\0]{0,1023}$`) that this validator refuses as a regex, so it is left out.
-    let mut defs = whole["$defs"].clone();
-    defs.as_object_mut()
-        .ok_or("$defs is an object")?
-        .remove("Bundle");
+    let defs = whole["$defs"].clone();
     let schema = json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$ref": "#/$defs/Check",

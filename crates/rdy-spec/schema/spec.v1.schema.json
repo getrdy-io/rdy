@@ -413,7 +413,7 @@
       "pattern": "^[a-z][a-z0-9]{0,15}\\.[a-z][a-z0-9_]{0,47}$"
     },
     "Cidr": {
-      "description": "An IPv4 or IPv6 address range: an address, a slash and a prefix length, such as 10.0.0.0/8.",
+      "description": "An IPv4 or IPv6 address range such as 10.0.0.0/8 or fd00::/8.",
       "type": "string",
       "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(3[0-2]|[12]?[0-9])|[0-9A-Fa-f:]+/(12[0-8]|1[01][0-9]|[1-9]?[0-9]))$"
     },

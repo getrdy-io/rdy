@@ -5,7 +5,7 @@
 //! [`check`], the signature checks in [`sig`], the result types and the verdict rule in [`result`], and
 //! the [`LoadedSpec`] guarantee. [`reserved`] lists the check ids that are reserved and [`lint`] turns a
 //! decoded entry into a finding. The JSON schemas of the spec and the result are generated from these
-//! types by [`schema`].
+//! types by the `schema` module, which the `schema` feature turns on.
 //!
 //! Two kinds of spec value exist, on purpose:
 //!
@@ -31,6 +31,7 @@ mod parse;
 pub mod reserved;
 pub mod result;
 pub mod scalar;
+#[cfg(feature = "schema")]
 pub mod schema;
 pub mod sig;
 pub mod spec;

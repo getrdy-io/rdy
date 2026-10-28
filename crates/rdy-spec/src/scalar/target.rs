@@ -1,10 +1,12 @@
 //! [`Target`]: a network endpoint a check talks to.
 
+#[cfg(feature = "schema")]
 use std::borrow::Cow;
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
+#[cfg(feature = "schema")]
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
@@ -412,6 +414,7 @@ impl fmt::Display for Target {
     }
 }
 
+#[cfg(feature = "schema")]
 impl JsonSchema for Target {
     fn schema_name() -> Cow<'static, str> {
         "Target".into()

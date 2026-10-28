@@ -111,7 +111,7 @@ fn text_problems(text: &str) -> Vec<String> {
     if has_section_reference(text) {
         why.push("refers to a section of a plan document. Say it in words".to_owned());
     }
-    if text.contains("::") {
+    if has_rust_path(text) {
         why.push("holds a Rust path. Name the value as it is written on the wire".to_owned());
     }
     why
@@ -140,7 +140,27 @@ fn has_word(text: &str, word: &str) -> bool {
     })
 }
 
-/// The first milestone (`M1` to `M9`) or ticket (`M1-022`) name in `text`.
+/// True when `text` holds a Rust path: an identifier, `::`, then another identifier, as in
+/// `TrustSource::Flag`. IPv6 text such as `fd00::/8` or `2001:db8::1` is not a path.
+fn has_rust_path(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let ident_start = |b: u8| b.is_ascii_alphabetic() || b == b'_';
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    text.match_indices("::").any(|(at, _)| {
+        let after = bytes.get(at + 2).is_some_and(|b| ident_start(*b));
+        // Walk back over the word before the `::`. It must start with a letter or an underscore.
+        let mut start = at;
+        while start > 0 && word(bytes[start - 1]) {
+            start -= 1;
+        }
+        let before = start < at && ident_start(bytes[start]);
+        before && after
+    })
+}
+
+/// The first ticket id (`M1-022`) or parenthesized milestone (`(M3)`) in `text`.
+///
+/// A bare `M2` is allowed: it can be a product name or a size, as in "Apple M1".
 fn milestone_name(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     for (start, _) in text.match_indices('M') {
@@ -149,19 +169,20 @@ fn milestone_name(text: &str) -> Option<String> {
         if !(boundary_before && digit) {
             continue;
         }
-        let mut end = start + 2;
+        let end = start + 2;
         // A ticket id: M1-022.
         if bytes.get(end) == Some(&b'-') {
             let digits = bytes[end + 1..]
                 .iter()
                 .take_while(|b| b.is_ascii_digit())
                 .count();
-            if digits > 0 {
-                end += 1 + digits;
+            let stop = end + 1 + digits;
+            if digits > 0 && bytes.get(stop).is_none_or(|b| !b.is_ascii_alphanumeric()) {
+                return Some(text[start..stop].to_owned());
             }
         }
-        let after_ok = bytes.get(end).is_none_or(|b| !b.is_ascii_alphanumeric());
-        if after_ok {
+        // A milestone in parentheses: (M3).
+        if start > 0 && bytes[start - 1] == b'(' && bytes.get(end) == Some(&b')') {
             return Some(text[start..end].to_owned());
         }
     }
@@ -191,14 +212,21 @@ mod tests {
     #[test]
     fn a_description_that_names_a_milestone_fails() {
         for bad in [
-            "Arrives in M2.",
             "Added by M1-022 for the report.",
+            "Arrives later (M3).",
             "(M3)",
-            "M4",
+            "See M2-017",
         ] {
             assert!(!text_problems(bad).is_empty(), "{bad}");
         }
-        for fine in ["MB of memory", "the M row", "HTTPM2", "Mi and Gi suffixes"] {
+        for fine in [
+            "MB of memory",
+            "the M row",
+            "HTTPM2",
+            "Mi and Gi suffixes",
+            "Runs on an Apple M1 or M2 host.",
+            "A model called M4.",
+        ] {
             assert!(text_problems(fine).is_empty(), "{fine}");
         }
     }
@@ -215,6 +243,11 @@ mod tests {
         assert!(!text_problems("Counts as block (01 section 5.3).").is_empty());
         assert!(!text_problems("See sections 2 and 5.").is_empty());
         assert!(!text_problems("Treated like `TrustSource::Flag`.").is_empty());
+        // IPv6 text is not a path.
+        assert!(text_problems("An address range such as 10.0.0.0/8 or fd00::/8.").is_empty());
+        assert!(text_problems("Like 2001:db8::1 or ::1 or [::]:443.").is_empty());
+        assert!(!text_problems("Like Foo::bar.").is_empty());
+        assert!(!text_problems("Like _x::_y.").is_empty());
         // Ordinary uses of the word are fine.
         assert!(text_problems("Each section of the report has a title.").is_empty());
         assert!(text_problems("The intersection 5 times.").is_empty());
@@ -224,7 +257,7 @@ mod tests {
     fn the_lint_finds_a_description_anywhere_in_the_schema() -> Result<()> {
         let schema: Value = serde_json::from_str(
             r#"{"$defs": {"A": {"properties": {"description": {"description": "ok"},
-                "b": {"description": "Added in M2."}}}}}"#,
+                "b": {"description": "Added by M2-001."}}}}}"#,
         )?;
         let mut problems = Vec::new();
         lint_value(&schema, "x.json", "", &mut problems);

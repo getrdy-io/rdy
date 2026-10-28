@@ -17,7 +17,6 @@
 
 use std::collections::BTreeMap;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
@@ -28,6 +27,7 @@ use super::codes::{
 };
 use super::verdict::{classify, verdict};
 use crate::API_VERSION;
+#[cfg(feature = "schema")]
 use crate::schema::{
     action_fields, check_result_rules, exit_code_schema, host_rules, identity_rules, report_rules,
     signature_rules,
@@ -66,20 +66,21 @@ fn de_producer_name<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error>
 /// `exit_code` and `summary` follow from `checks` through [`verdict`] and [`Summary::from_checks`].
 /// [`Report::new`] fills them in, and [`Report::refresh_verdict`] fills them in again after `checks`
 /// changes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(
     description = "One run of rdy run: who ran what, where, and what came of it. Ignore fields you do not know. Use verdict as written.",
     transform = report_rules
-)]
+))]
 #[non_exhaustive]
 pub struct Report {
     /// Always `rdy/v1`.
     #[serde(deserialize_with = "de_api_version")]
-    #[schemars(extend("const" = "rdy/v1"))]
+    #[cfg_attr(feature = "schema", schemars(extend("const" = "rdy/v1")))]
     pub api_version: String,
     /// Always `Report`.
     #[serde(deserialize_with = "de_report_kind")]
-    #[schemars(extend("const" = "Report"))]
+    #[cfg_attr(feature = "schema", schemars(extend("const" = "Report")))]
     pub kind: String,
     /// The rdy build that wrote this.
     pub producer: Producer,
@@ -106,14 +107,14 @@ pub struct Report {
     pub verdict_reason: Option<VerdictReason>,
     /// The exit code for this verdict: 0, 1 or 2. When rdy cannot write the report it exits 70 instead
     /// and `complete` is false.
-    #[schemars(schema_with = "exit_code_schema")]
+    #[cfg_attr(feature = "schema", schemars(schema_with = "exit_code_schema"))]
     pub exit_code: u8,
     /// Counts of the results.
     pub summary: Summary,
     /// One entry per spec check, in spec order. Sort by bucket for display.
     pub checks: Vec<CheckResult>,
     /// Every file read, command, lookup, connection and API request, in order. At most 5000 entries.
-    #[schemars(length(max = 5000))]
+    #[cfg_attr(feature = "schema", schemars(length(max = 5000)))]
     pub actions: Vec<Action>,
     /// `true` when the log hit its 5000 entry cap. `exec`, `connect`, `tls`, `http`, `dns`, `lookup` and
     /// `kube` entries are never dropped.
@@ -181,12 +182,13 @@ impl Report {
 }
 
 /// The rdy build that wrote a report.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct Producer {
     /// Always `rdy`.
     #[serde(deserialize_with = "de_producer_name")]
-    #[schemars(extend("const" = "rdy"))]
+    #[cfg_attr(feature = "schema", schemars(extend("const" = "rdy")))]
     pub name: String,
     /// Version of the rdy binary.
     pub version: String,
@@ -218,17 +220,18 @@ impl Producer {
 }
 
 /// When a run happened and the options it ran with.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct Run {
     /// Random UUID v4.
-    #[schemars(extend("format" = "uuid"))]
+    #[cfg_attr(feature = "schema", schemars(extend("format" = "uuid")))]
     pub id: String,
     /// UTC, with milliseconds.
-    #[schemars(extend("format" = "date-time"))]
+    #[cfg_attr(feature = "schema", schemars(extend("format" = "date-time")))]
     pub started_at: String,
     /// UTC, with milliseconds.
-    #[schemars(extend("format" = "date-time"))]
+    #[cfg_attr(feature = "schema", schemars(extend("format" = "date-time")))]
     pub finished_at: String,
     /// Wall time of the run.
     pub duration_ms: u64,
@@ -257,14 +260,15 @@ impl Run {
 }
 
 /// The options of a run that change what a reader should expect.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct RunOptions {
     /// Checks that ran at once, 1 to 32.
-    #[schemars(range(min = 1, max = 32))]
+    #[cfg_attr(feature = "schema", schemars(range(min = 1, max = 32)))]
     pub jobs: u32,
     /// The run limit in milliseconds.
-    #[schemars(range(min = 1))]
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub deadline_ms: u64,
     /// Whether `--allow-unsigned` was set.
     pub allow_unsigned: bool,
@@ -290,7 +294,8 @@ impl RunOptions {
 }
 
 /// Which spec ran: the signed metadata and the hash of the exact bytes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct SpecRef {
     /// `metadata.product`.
@@ -299,7 +304,7 @@ pub struct SpecRef {
     #[serde(default)]
     pub version: Option<String>,
     /// SHA-256 of the exact bytes that were verified and parsed, 64 lowercase hex digits.
-    #[schemars(regex(pattern = "^[0-9a-f]{64}$"))]
+    #[cfg_attr(feature = "schema", schemars(regex(pattern = "^[0-9a-f]{64}$")))]
     pub sha256: String,
     /// Base name only, never the full path.
     pub file_name: String,
@@ -310,7 +315,7 @@ pub struct SpecRef {
     pub serial: Option<u64>,
     /// `metadata.expires`.
     #[serde(default)]
-    #[schemars(extend("format" = "date-time"))]
+    #[cfg_attr(feature = "schema", schemars(extend("format" = "date-time")))]
     pub expires: Option<String>,
     /// `metadata.contact`.
     #[serde(default)]
@@ -344,8 +349,9 @@ impl SpecRef {
 }
 
 /// Who signed the spec, as far as rdy could tell.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(transform = signature_rules)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(transform = signature_rules))]
 #[non_exhaustive]
 pub struct Signature {
     /// `verified` is signed by a trusted key. `unsigned` is no signature, run with `--allow-unsigned`.
@@ -354,18 +360,18 @@ pub struct Signature {
     pub state: SignatureState,
     /// Minisign key id, 16 uppercase hex digits.
     #[serde(default)]
-    #[schemars(regex(pattern = "^[0-9A-F]{16}$"))]
+    #[cfg_attr(feature = "schema", schemars(regex(pattern = "^[0-9A-F]{16}$")))]
     pub key_id: Option<String>,
     /// SHA-256 of the 32 byte ed25519 public key, 64 hex digits. The key id alone is not an identity.
     #[serde(default)]
-    #[schemars(regex(pattern = "^[0-9a-f]{64}$"))]
+    #[cfg_attr(feature = "schema", schemars(regex(pattern = "^[0-9a-f]{64}$")))]
     pub key_fingerprint: Option<String>,
     /// Product from the signed trusted comment.
     #[serde(default)]
     pub product: Option<String>,
     /// From the signed trusted comment.
     #[serde(default)]
-    #[schemars(extend("format" = "date-time"))]
+    #[cfg_attr(feature = "schema", schemars(extend("format" = "date-time")))]
     pub signed_at: Option<String>,
     /// The local note from the trust store entry. Never text from the spec.
     #[serde(default)]
@@ -405,8 +411,9 @@ impl Signature {
 
 /// The machine, coarsely. No MAC addresses, environment values, command line, working directory, home
 /// paths, kubeconfig contents, raw machine id or serial numbers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(transform = host_rules)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(transform = host_rules))]
 #[non_exhaustive]
 pub struct Host {
     /// As the OS reports it.
@@ -414,7 +421,7 @@ pub struct Host {
     /// First 16 hex digits of an HMAC-SHA256 of the OS machine id with key `rdy-host-id-v1` plus the
     /// product. The same host and product give the same value. Different products give unrelated
     /// values. `null` when there is no usable machine id (macOS for now).
-    #[schemars(regex(pattern = "^[0-9a-f]{16}$"))]
+    #[cfg_attr(feature = "schema", schemars(regex(pattern = "^[0-9a-f]{16}$")))]
     pub host_id: Option<String>,
     /// The operating system.
     pub os: HostOs,
@@ -425,7 +432,7 @@ pub struct Host {
     pub arch: String,
     /// Whether the host is a virtual machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Virtualization")]
+    #[cfg_attr(feature = "schema", schemars(with = "Virtualization"))]
     pub virtualization: Option<Virtualization>,
     /// rdy ran inside a container or WSL.
     #[serde(default)]
@@ -449,7 +456,8 @@ impl Host {
 }
 
 /// The operating system of the host.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct HostOs {
     /// Linux, macOS or Windows.
@@ -479,8 +487,9 @@ impl HostOs {
 }
 
 /// Who ran rdy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(transform = identity_rules)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(transform = identity_rules))]
 #[non_exhaustive]
 pub struct Identity {
     /// Effective uid on Unix, `null` on Windows.
@@ -508,7 +517,8 @@ impl Identity {
 }
 
 /// The Kubernetes identity of a run.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct KubeIdentity {
     /// The kubeconfig context in use.
@@ -533,7 +543,8 @@ pub struct KubeIdentity {
 }
 
 /// Proxy settings in effect, user info stripped from URLs.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct Proxy {
     /// The HTTPS proxy URL.
@@ -548,7 +559,8 @@ pub struct Proxy {
 }
 
 /// One thing rdy probed before running checks, such as root or a reachable cluster.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct Capability {
     /// What was probed.
@@ -587,7 +599,8 @@ impl Capability {
 /// `required_not_run` and `optional_not_run` are views inside that sum. A result whose status this
 /// version does not know counts in `total` and in `required_not_run` or `optional_not_run` only. The
 /// summary may gain keys, so never sum every key.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct Summary {
     /// Number of results.
@@ -646,8 +659,9 @@ impl Summary {
 }
 
 /// The outcome of one check entry.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(transform = check_result_rules)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(transform = check_result_rules))]
 #[non_exhaustive]
 pub struct CheckResult {
     /// `id`, or `id/name` when the spec gave a name. Unique in the report.
@@ -669,22 +683,22 @@ pub struct CheckResult {
     /// Present when `status` is `skipped`. `not_applicable` comes only from the spec's `os` list. A
     /// check that cannot work on this OS is `not_yet_on_os`. Open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "SkipKind")]
+    #[cfg_attr(feature = "schema", schemars(with = "SkipKind"))]
     pub skip_kind: Option<SkipKind>,
     /// For `unsupported_spec`: the fields this rdy could not read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Vec<String>")]
+    #[cfg_attr(feature = "schema", schemars(with = "Vec<String>"))]
     pub unsupported_fields: Option<Vec<String>>,
     /// Present when `status` is `timeout`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "u64")]
+    #[cfg_attr(feature = "schema", schemars(with = "u64"))]
     pub timeout_after_ms: Option<u64>,
     /// Present when `status` is `error`. Open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "ErrorKind")]
+    #[cfg_attr(feature = "schema", schemars(with = "ErrorKind"))]
     pub error_kind: Option<ErrorKind>,
     /// One line, at most 1 KiB, such as `15.4 GiB found, 32 GiB needed`.
-    #[schemars(length(max = 1024))]
+    #[cfg_attr(feature = "schema", schemars(length(max = 1024)))]
     pub message: String,
     /// What to do. `null` only for pass and not applicable.
     #[serde(default)]
@@ -710,7 +724,10 @@ pub struct CheckResult {
     /// A size cap cut `message`, `fix`, `observed` or `expected`.
     pub truncated: bool,
     /// Up to 20 notes of 1 KiB each.
-    #[schemars(length(max = 20), inner(length(max = 1024)))]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(max = 20), inner(length(max = 1024)))
+    )]
     pub notes: Vec<String>,
     /// Milliseconds after `run.started_at`.
     pub started_ms: u64,
@@ -780,7 +797,8 @@ impl CheckResult {
 }
 
 /// A need a check declared and whether it was met.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct NeedState {
     /// What the check needs.
@@ -808,7 +826,8 @@ impl NeedState {
 }
 
 /// Which sources a check could not read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct Partial {
     /// The needs that were missing.
@@ -832,15 +851,16 @@ impl Partial {
 ///
 /// The fields that depend on `kind` (`path`, `program`, `host` and so on, 01 section 5.4) stay in
 /// [`Action::fields`] as JSON until the action log ticket types them.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[schemars(
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(
     description = "One side effect, recorded as it happened. Fields beyond the required ones depend on kind.",
     transform = action_fields
-)]
+))]
 #[non_exhaustive]
 pub struct Action {
     /// Position in the log, from 1.
-    #[schemars(range(min = 1))]
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub seq: u64,
     /// Check key, or `null` for run level probes.
     pub check: Option<String>,
@@ -854,7 +874,7 @@ pub struct Action {
     pub outcome: ActionOutcome,
     /// The fields of this `kind`, flattened into the entry.
     #[serde(flatten)]
-    #[schemars(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     pub fields: Map<String, Value>,
 }
 
@@ -882,7 +902,8 @@ impl Action {
 }
 
 /// What the redactor changed in a report. Counts only, never the matched text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct Redaction {
     /// Which compiled rule set ran.

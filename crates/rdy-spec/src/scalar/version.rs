@@ -1,9 +1,11 @@
 //! [`Version`]: a dotted numeric version.
 
+#[cfg(feature = "schema")]
 use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
+#[cfg(feature = "schema")]
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -176,6 +178,7 @@ impl fmt::Display for Version {
     }
 }
 
+#[cfg(feature = "schema")]
 impl JsonSchema for Version {
     fn schema_name() -> Cow<'static, str> {
         "Version".into()

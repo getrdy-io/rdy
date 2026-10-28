@@ -13,7 +13,7 @@
 //!
 //! The error object (`ErrorOutput`), the `rdy verify` object and the lint report are not here yet. The
 //! error types, `verify` and `spec lint` tickets add them. Until then the schema for those three comes
-//! from a fragment (see [`crate::schema`]).
+//! from a fragment (see the `schema` module).
 
 mod codes;
 mod model;

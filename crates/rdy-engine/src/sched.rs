@@ -107,9 +107,9 @@ impl std::fmt::Debug for Planned {
 pub enum End {
     /// The check returned, or was never started because a hard need was missing.
     ///
-    /// The outcome is boxed. A finding carries two JSON values, and with `serde_json`'s
-    /// `preserve_order` feature on (ADR 0019) those are large enough that an unboxed outcome would make
-    /// every `End`, even a timeout, as big as a finding.
+    /// The outcome is boxed. A finding carries two JSON values, and in a `--workspace` build
+    /// `serde_json`'s `preserve_order` feature is on (ADR 0019), which makes them large enough that an
+    /// unboxed outcome would make every `End`, even a timeout, as big as a finding.
     Done(Box<CheckOutcome>),
     /// The check was still running at its timeout and was aborted.
     TimedOut {

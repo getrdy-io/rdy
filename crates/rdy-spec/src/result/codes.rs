@@ -4,7 +4,6 @@
 //! besides. A reader keeps an unknown value as `Unknown(text)` and applies the rule in the doc comment of
 //! that type. Only [`Verdict`] is closed, because a new verdict needs `rdy/v2`.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::open::open_enum;
@@ -270,7 +269,8 @@ open_enum! {
 }
 
 /// The overall answer of a run. Closed in v1: a new value needs `rdy/v2`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Verdict {

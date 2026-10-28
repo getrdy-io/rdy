@@ -896,6 +896,7 @@ dependencies = [
  "jsonschema",
  "minisign",
  "proptest",
+ "rdy-spec",
  "schemars",
  "serde",
  "serde-saphyr",

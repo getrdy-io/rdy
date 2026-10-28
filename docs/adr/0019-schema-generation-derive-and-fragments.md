@@ -32,15 +32,16 @@ makes that true and removes the hand-written files. Three things were not ready 
 3. **A pass over the finished schema** makes descriptions plain text, drops Rust integer widths from
    `format`, removes `null` alternatives in the spec schema, and gives every result text with no other limit
    `maxLength` 4096. The last step makes the size cap of SEC-63 hold for fields added later.
-4. **`serde_json/preserve_order` is on for the whole workspace**, through `schemars`. Code that relied on a
-   sorted map must sort. `check.rs` now names the first unknown key in sorted order, and the result
-   schema test compares sorted copies. **Runtime cost:** every `serde_json::Map` in the runtime crates is an
-   `IndexMap`, which is larger than the default map and keeps
-   insertion order. That made `CheckOutcome` big enough to trip `clippy::large_enum_variant` on
-   `rdy_engine::End`, so `End::Done` holds a `Box<CheckOutcome>`. Keeping the feature out of the runtime
-   crates is not possible: `schemars` has no other way to keep field order, Cargo unifies the feature across
-   a `--workspace` build, and sorting the properties by an explicit table would have to list every field of
-   every type and keep up with each new one.
+4. **The generator is the `schema` feature of `rdy-spec`, off by default.** The derives, the `schema` module
+   and `schemars` itself (with `serde_json/preserve_order`, which keeps field order in `properties`) exist only
+   with the feature. `xtask` and the `rdy-spec` tests turn it on. A build of `-p rdy` or of `rdy-spec` from
+   crates.io has neither `schemars` nor the ordered map. Code that relied on a sorted map must sort:
+   `check.rs` names the first unknown key in sorted order, and the result schema test compares sorted copies.
+   **Runtime cost:** Cargo unifies features across a `--workspace` build, so `cargo build --workspace`,
+   `cargo test --workspace` and `cargo clippy --workspace` still build every `serde_json::Map` as an
+   `IndexMap`, which is larger and keeps insertion order. That made `CheckOutcome` big enough to trip
+   `clippy::large_enum_variant` on `rdy_engine::End`, so `End::Done` holds a `Box<CheckOutcome>`. This is a
+   change to a public type of `rdy-engine`. The released binary is built with `-p rdy` and is unaffected.
 5. **Lint in `cargo xtask schema`.** A description that names an ADR, a milestone or ticket, a plan document
    or a plan section, a rustdoc link or a Rust path fails the command, written or checked.
 
@@ -62,4 +63,4 @@ makes that true and removes the hand-written files. Three things were not ready 
 | Generate from the empty parameter structs | The spec schema would stop checking parameters until two tickets land. |
 | Keep the hand-written files and test them against the types | Two sources, which is what ADR 0012 set out to end. |
 | Sorted `properties`, no `preserve_order` | The writer order and the docs tables would be alphabetical, not the order of 07 and the samples. |
-| `preserve_order` only in the tool | Cargo unifies features, so the library would change with the tool present and not without it. |
+| `preserve_order` always on, no feature | `schemars` and the ordered map would reach the binary and every reader of the published crate. |
