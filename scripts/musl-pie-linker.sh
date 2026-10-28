@@ -6,6 +6,8 @@
 # with -static -no-pie and musl's crt1.o: no ASLR, and no dynamic section for full RELRO. Rust 1.99.1
 # has no stable switch for this. This wrapper rewrites the link line rustc built:
 #   - crt1.o becomes rcrt1.o from the same directory (rcrt1.o relocates the binary at start);
+#   - crtbegin.o and crtend.o become crtbeginS.o and crtendS.o, their position-independent forms,
+#     when those files exist next to them;
 #   - -static and -no-pie are dropped and -static-pie is added.
 # rustc already passes -Wl,-z,relro,-z,now and compiles position-independent code.
 #
@@ -44,6 +46,11 @@ while [ "$i" -lt "$n" ]; do
     i=$((i + 1))
     case $arg in
         */self-contained/crt1.o) set -- "$@" "${arg%crt1.o}rcrt1.o" ;;
+        */self-contained/crtbegin.o | */self-contained/crtend.o)
+            # Use the position-independent variant when it exists. Otherwise keep what rustc chose.
+            pic="${arg%.o}S.o"
+            if [ -f "$pic" ]; then set -- "$@" "$pic"; else set -- "$@" "$arg"; fi
+            ;;
         -static | -no-pie) ;;
         *) set -- "$@" "$arg" ;;
     esac

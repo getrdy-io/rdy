@@ -68,6 +68,20 @@ if command -v musl-gcc > /dev/null 2>&1 &&
     else
         echo "SKIP norelro fixture: musl-gcc -z norelro did not build"
     fi
+    # A shared library is type DYN but not a PIE executable. DYN alone must not pass.
+    if musl-gcc -shared -fPIC -Wl,-z,relro,-z,now -o "$tmp/lib.so" "$tmp/hello.c" 2> /dev/null; then
+        check "a shared library fails the PIE check" 1 "FAIL position independent" "$tmp/lib.so"
+    else
+        echo "SKIP shared library fixture: musl-gcc -shared did not build"
+    fi
+    # A data word in .text with an absolute relocation forces a text relocation at load time.
+    printf 'int g;\n__asm__(".text\\n.quad g\\n");\nint main(void) { return g; }\n' > "$tmp/textrel.c"
+    if musl-gcc -static-pie -Wl,-z,relro,-z,now -Wl,-z,notext -o "$tmp/textrel" "$tmp/textrel.c" 2> /dev/null &&
+        readelf -dW "$tmp/textrel" | grep -q TEXTREL; then
+        check "a text relocation fails the TEXTREL check" 1 "FAIL no text relocations" "$tmp/textrel"
+    else
+        echo "SKIP TEXTREL fixture: this architecture did not produce a text relocation"
+    fi
 else
     echo "SKIP musl-gcc fixtures: musl-gcc is missing or cannot build a static-pie"
 fi

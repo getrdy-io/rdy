@@ -21,8 +21,13 @@ our checks directly, so they belong in writing.
    recorded here. (Amended 2026-10-28 in M1-006: rustc 1.99.1 does not mark `aarch64-unknown-linux-musl`
    as able to build static-pie, so it links `-static -no-pie` with `crt1.o`, giving no ASLR and no
    RELRO flags. That target links through `scripts/musl-pie-linker.sh`, set in `.cargo/config.toml`. It
-   swaps `crt1.o` for musl's `rcrt1.o` and passes `-static-pie` to `cc`. The CI check stays strict, so
-   it fails if the wrapper stops working. Delete the wrapper when rustc supports the target itself.)
+   swaps `crt1.o`, `crtbegin.o` and `crtend.o` for musl's `rcrt1.o`, `crtbeginS.o` and `crtendS.o` and
+   passes `-static-pie` to `cc`. The CI check stays strict, so it fails if the wrapper stops working.
+   Delete the wrapper when rustc supports the target itself. Caveat: a build that sets
+   `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER` (for example a cross build with `cargo-zigbuild`)
+   overrides the linker in `.cargo/config.toml`, so it can produce a non-PIE binary. Such a build must
+   run `scripts/check-static.sh` before anyone ships it. M1-007 (dist) must run
+   `scripts/check-static.sh` on both Linux release artifacts, not only rely on the CI test job.)
 3. aarch64 Linux builds and tests run natively on GitHub's `ubuntu-24.04-arm` runners with `musl-tools`.
    `cargo-zigbuild` is the fallback and the documented local cross path. `cross` is not used.
 4. Allocator: musl's default in M1. An M2 benchmark compares with a glibc build; above a 20% slowdown we

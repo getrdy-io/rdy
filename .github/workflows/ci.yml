@@ -185,6 +185,7 @@ jobs:
       - name: Static-musl proof (readelf)
         if: runner.os == 'Linux'
         run: |
+          sh scripts/test-musl-pie-linker.sh
           sh scripts/test-check-static.sh
           scripts/check-static.sh "target/$TARGET/debug/rdy"
       # `scratch` is not a pullable image, so import an empty one. It has no shell and no libc, so

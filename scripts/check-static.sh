@@ -5,9 +5,11 @@
 # Checks, with readelf only:
 #   1. No INTERP program header (no dynamic loader is needed).
 #   2. No NEEDED entry in the dynamic section (no shared library is needed).
-#   3. ELF type DYN, so the binary is position independent and gets ASLR.
-#   4. A GNU_RELRO segment and immediate binding (BIND_NOW or the NOW flag): full RELRO.
-#   5. A GNU_STACK segment that is not executable.
+#   3. ELF type DYN and the PIE flag (FLAGS_1) in the dynamic section, so the binary is a
+#      position-independent executable and gets ASLR. DYN alone also matches a shared library.
+#   4. No text relocations (TEXTREL): code that needs fixing up at load time is not truly PIE.
+#   5. A GNU_RELRO segment and immediate binding (BIND_NOW or the NOW flag): full RELRO.
+#   6. A GNU_STACK segment that is not executable.
 # Exit:  0 all checks pass, 1 at least one fails, 64 usage error or no readelf.
 #
 # Since Rust 1.59 the musl targets build static-pie, so `file` and `ldd` output varies. This
@@ -65,10 +67,17 @@ else
     pass "no NEEDED entry"
 fi
 
-if printf '%s\n' "$header" | grep -Eq '^[[:space:]]*Type:[[:space:]]+DYN'; then
+if printf '%s\n' "$header" | grep -Eq '^[[:space:]]*Type:[[:space:]]+DYN' &&
+    printf '%s\n' "$dynamic" | grep -Eq '\(FLAGS_1\).*[[:space:]]PIE([[:space:]]|$)'; then
     pass "position independent (static-pie)"
 else
-    fail "position independent (static-pie)" "the binary is not PIE, so it has no ASLR. On aarch64 musl, rustc links non-PIE unless scripts/musl-pie-linker.sh is the linker (.cargo/config.toml)."
+    fail "position independent (static-pie)" "the binary is not a PIE executable, so it has no ASLR. On aarch64 musl, rustc links non-PIE unless scripts/musl-pie-linker.sh is the linker (.cargo/config.toml)."
+fi
+
+if printf '%s\n' "$dynamic" | grep -Eq '\(TEXTREL\)|\(FLAGS\).*TEXTREL'; then
+    fail "no text relocations" "the code segment is patched at load time. Rebuild every object with position-independent code (-fPIC), including C code in dependencies."
+else
+    pass "no text relocations"
 fi
 
 if printf '%s\n' "$programs" | grep -Eq '^[[:space:]]*GNU_RELRO[[:space:]]' &&
