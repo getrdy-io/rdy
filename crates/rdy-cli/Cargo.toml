@@ -11,7 +11,7 @@ keywords = ["readiness", "diagnostics", "preflight", "kubernetes", "on-prem"]
 categories = ["command-line-utilities"]
 # The package is `rdy`, the directory is `crates/rdy-cli` (ADR 0011).
 build = "build.rs"
-include = ["src/**", "build.rs", "Cargo.toml"]
+include = ["src/**", "build.rs", "Cargo.toml", "LICENSE"]
 
 [[bin]]
 name = "rdy"
