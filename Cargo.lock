@@ -839,10 +839,15 @@ dependencies = [
 name = "rdy"
 version = "0.1.0-alpha.0"
 dependencies = [
+ "anyhow",
  "clap",
+ "jsonschema",
+ "rdy-spec",
  "rexpect",
  "rpassword",
  "rustix",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "zeroize",

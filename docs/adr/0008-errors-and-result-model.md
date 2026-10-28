@@ -49,7 +49,7 @@ usage, 70 internal. We must separate "the environment failed a check" from "rdy 
    Where the honest fix is "this is a bug", the hint says `this is a bug in rdy. Please report it at
    https://github.com/getrdy-io/rdy/issues and include the output of rdy version.` A unit test matches
    every variant and asserts a non-empty hint. `rdy` uses `anyhow` with `.context(..)` and downcasts to
-   pick the exit code. Terminal output strips control characters from any untrusted string.
+   pick the exit code. Terminal output escapes control characters (as `\x1b`) in any untrusted string.
 6. **First lines differ by kind.** Usage: `error: unknown flag --keey`. Signature: `error: the signature
    on acme-platform.yaml does not match the file. It may have been changed after signing.`
 7. **`--json` on any non-verdict exit** prints one object on stdout, and the same text on stderr:
@@ -88,4 +88,4 @@ usage, 70 internal. We must separate "the environment failed a check" from "rdy 
 ## Tickets implied
 
 - [M1] Define result model and verdict mapping in rdy-spec | owner: rust-engineer | est: 3h | depends on: Define public spec types in rdy-spec | exit test: unit tests cover every row of the status and verdict tables, including a skipped block check giving not_ready with exit 2.
-- [M1] Error types with fix hints and exit code mapping at the CLI edge | owner: rust-engineer | est: 3.5h | depends on: Define result model and verdict mapping in rdy-spec | exit test: every error variant has a non-empty hint, exit 64 and 70 cases print `fix:`, `--json` failures print the error object with a stable code, and control characters in a spec string are stripped.
+- [M1] Error types with fix hints and exit code mapping at the CLI edge | owner: rust-engineer | est: 3.5h | depends on: Define result model and verdict mapping in rdy-spec | exit test: every error variant has a non-empty hint, exit 64 and 70 cases print `fix:`, `--json` failures print the error object with a stable code, and control characters in a spec string are escaped.
