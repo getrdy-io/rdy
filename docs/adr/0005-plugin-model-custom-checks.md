@@ -1,6 +1,7 @@
-# ADR 0005: No plugins in M1; a sandboxed `custom.exec` check in M3; no dynamic loading or WASM in v1
+# ADR 0005: No plugins in M1; a sandboxed `custom.exec` check in M4; no dynamic loading or WASM in v1
 
-- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review)
+- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review); amended 2026-10-28
+  (`custom.exec` moves from M3 to M4, see Amendment)
 - Date: 2026-10-27
 
 ## Context
@@ -16,7 +17,7 @@ spec into code execution, often as root, on a customer box. M1 scope (KICKOFF) d
    arrive as PRs adding a crate to this workspace and are compiled in.
 2. **The `Check` trait** is public Rust API (families live in separate crates) but documented as "no
    stability promise" until 1.0 (ADR 0007).
-3. **M3: `custom.exec`.** Constraints, detailed in 02-engine-design.md and the threat model first:
+3. **M4: `custom.exec`.** Constraints, detailed in 02-engine-design.md and the threat model first:
    - `argv` list only. No `shell: true`. A vendor who needs a shell writes `["/bin/sh", "-c", "..."]`,
      and the report and the consent list show it as written.
    - Declared expectations: exit code, stdout regex or JSON pointer equals, max duration.
@@ -39,16 +40,26 @@ spec into code execution, often as root, on a customer box. M1 scope (KICKOFF) d
 ## Consequences
 
 - M1 cannot express vendor-specific checks. Design partners get them as built-in checks if they
-  generalize, or wait for M3.
+  generalize, or wait for M4.
 - Everything compiled in keeps one static binary (ADR 0006) and one reviewable source tree.
 - A pasted share-link command cannot carry a blanket yes: the hash changes when the commands do.
 - The Embed SDK (M5) is where WASM may come back, as a build target of the engine, not a plugin host.
+
+## Amendment (2026-10-28): M4, not M3
+
+The code-reviewer review of `docs/plan/11-backlog.md` moved `custom.exec` to M4, and this ADR follows.
+M3 already carries the AWS family, the public launch and about 270 hours. A check that turns a signed
+spec into code execution, often as root, should not ship in the same milestone as the launch. Its
+consent list reuses the `rdy run --dry-run` plan (M2), which gets a milestone of use first. The launch
+claim "specs cannot run commands" stays true on launch day. No design partner has asked for it. The
+constraints in decision 3 are unchanged.
 
 ## Alternatives considered
 
 | Option | Why it lost |
 | --- | --- |
 | `custom.exec` in M1 | Not in M1 scope; needs its own threat model and review. |
+| `custom.exec` in M3 | Lands in the launch milestone, which already carries AWS checks and the launch; see Amendment. |
 | Blanket `--allow-exec` | Copies into a share-link command and approves whatever the spec says next week. |
 | `shell: true` | Brings back the shell and its quoting bugs; `sh -c` in argv is explicit and visible. |
 | Dynamic libraries | Impossible from a static musl binary, unsafe FFI, ABI churn. |
@@ -58,5 +69,6 @@ spec into code execution, often as root, on a customer box. M1 scope (KICKOFF) d
 ## Tickets implied
 
 - [M1] Unknown check ids report Skipped with a "needs a newer rdy" reason | owner: rust-engineer | est: 2h | depends on: Check trait, Need and Context in rdy-engine | exit test: the plan's example spec, which contains gpu.cuda and aws.iam, runs on M1 and reports both as SKIP with the reason and fix line, not as a parse error.
-- [M3] Threat model and design note for custom.exec | owner: security-reviewer | est: 4h | depends on: none | exit test: section added to 05-threat-model.md and reviewed by rust-architect.
-- [M3] Implement custom.exec with argv, expectations, caps and hash-bound consent | owner: check-author | est: 14h | depends on: Threat model and design note for custom.exec | exit test: pass, fail, timeout, refused-without-consent, wrong-hash and unsigned-spec fixtures produce the documented statuses and exit codes on Linux, macOS and Windows.
+- [M4] Threat model and design note for custom.exec | owner: security-reviewer | est: 4h | depends on: none | exit test: section added to 05-threat-model.md and reviewed by rust-architect.
+- [M4] Spec-origin exec policy, hash-bound consent and temp workdir for custom.exec | owner: rust-engineer | est: 4h | depends on: Threat model and design note for custom.exec | exit test: a bare --allow-exec is refused, the right hash runs commands as an unprivileged user under euid 0 in a fresh temp dir with 64 KiB caps, and a wrong hash runs nothing.
+- [M4] Implement custom.exec with argv, expectations, caps and hash-bound consent | owner: check-author | est: 16h | depends on: Spec-origin exec policy, hash-bound consent and temp workdir for custom.exec | exit test: pass, fail, timeout, refused-without-consent, wrong-hash and unsigned-spec fixtures produce the documented statuses and exit codes on Linux, macOS and Windows.

@@ -441,7 +441,7 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
 
 ## Custom checks later (ADR 0005)
 
-None in M1; unknown ids skip and count as not run. M3 `custom.exec` reuses `Probe::exec` with a second
+None in M1; unknown ids skip and count as not run. M4 `custom.exec` reuses `Probe::exec` with a second
 policy: commands from the spec, consent bound to the plan by `--allow-exec=<sha256 of the exec plan>` or
 an interactive yes (a bare flag is refused), cwd in a fresh 0700 temp directory, 64 KiB caps. Under
 euid 0 a custom command runs as an unprivileged user unless it declares `needs: [root]`. `Cmd` gets an
@@ -606,7 +606,7 @@ revision.
 - [M2] Windows job objects so a timeout kills the whole process tree | owner: rust-engineer | est: 3h | depends on: Blocking helper and subprocess kill on timeout | exit test: a Windows fixture command that spawns a grandchild leaves no process after its timeout, and the Windows exec allowlist then opens to Appendix A's Windows rows.
 - [M2] SEC-40 `rdy run --plan` preview | owner: rust-engineer | est: 6h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: plan output matches the action log of a real run on the same fixtures.
 - [M2] Amend ADR 0006 item 5 for getent as the Linux system answer | owner: rust-architect | est: 1h | depends on: none | exit test: ADR 0006 names getent ahosts with hickory as fallback, and net.dns cites it.
-- [M3] Spec-origin exec policy, hash-bound consent and temp workdir for custom.exec | owner: rust-engineer | est: 4h | depends on: SEC-53 Threat model for custom.exec | exit test: a bare --allow-exec is refused, the right hash runs commands as an unprivileged user under euid 0 in a fresh temp dir with 64 KiB caps, and a wrong hash runs nothing.
+- [M4] Spec-origin exec policy, hash-bound consent and temp workdir for custom.exec | owner: rust-engineer | est: 4h | depends on: SEC-53 Threat model for custom.exec | exit test: a bare --allow-exec is refused, the right hash runs commands as an unprivileged user under euid 0 in a fresh temp dir with 64 KiB caps, and a wrong hash runs nothing.
 - [M3] http_exchange and Need::Consent for SDK adapters | owner: rust-engineer | est: 4h | depends on: Facade HTTP/1.1 probe with 64 KiB discard and no redirects | exit test: the AWS SDK adapter fixture runs through the facade with every call in the action log and no body in the report, and assume-role without consent is skipped missing_need.
 - [M3] Decide the 1.0 stability scope of Check, Family and Probe | owner: rust-architect | est: 3h | depends on: none | exit test: an ADR says whether these modules are semver-covered at 1.0 or move under rdy_engine::unstable, before rdy-engine 1.0 ships.
 

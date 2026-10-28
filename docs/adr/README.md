@@ -12,7 +12,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0002](0002-spec-signatures-ed25519-minisign.md) | Specs are signed with ed25519 in minisign format, verified before parsing, keys pinned per product | Accepted |
 | [0003](0003-report-format-html-json.md) | Reports are one JSON file plus one self-contained HTML file, rendered with askama | Accepted |
 | [0004](0004-async-runtime-tokio.md) | tokio multi-thread runtime, blocking work on spawn_blocking, every check under a timeout | Accepted; decision 5 tightened by 0014 |
-| [0005](0005-plugin-model-custom-checks.md) | No plugins in M1; a sandboxed `custom.exec` check in M3; no dynamic loading or WASM in v1 | Accepted |
+| [0005](0005-plugin-model-custom-checks.md) | No plugins in M1; a sandboxed `custom.exec` check in M4; no dynamic loading or WASM in v1 | Accepted; amended 2026-10-28 (`custom.exec` in M4, not M3) |
 | [0006](0006-static-musl-linux.md) | Linux binaries are static musl for x86_64 and aarch64, built on native runners | Accepted |
 | [0007](0007-crate-publishing-and-versioning.md) | Crate publishing and versioning policy | Accepted |
 | [0008](0008-errors-and-result-model.md) | Error handling and the result model; Timeout and Skipped are outcomes, never crashes | Accepted; decision 3 refined by 0013 |
@@ -77,7 +77,7 @@ What gets easier, what gets harder, what we now have to watch.
 - docs/plan/rdy-plan.md, crate table, `rdy-checks-gpu` row: `nvml-wrapper` needs `dlopen`, which a
   static musl binary cannot do. Fix: `nvidia-smi` and `/proc/driver/nvidia` on Linux (ADR 0006).
 - docs/plan/rdy-plan.md, Product definition, "Check families at launch": lists Custom (script check) and
-  Data stores, but no milestone owns them. Fix: `custom.exec` in M3 (ADR 0005), data stores in M4.
+  Data stores, but no milestone owns them. Fix: `custom.exec` in M4 (ADR 0005, amended 2026-10-28), data stores in M4.
 - docs/plan/rdy-plan.md, crate table, `rdy-checks-net` row: "reqwest with rustls" is not enough since
   reqwest 0.13 defaults to `aws-lc-rs`. Fix: "reqwest with rustls on ring, no default features" (ADR 0009).
 - CLAUDE.md, Commands: `cargo run -p rdy-cli` fails once the package is named `rdy`. Fix:

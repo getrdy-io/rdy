@@ -6,7 +6,7 @@ How to read this: section 1 holds the rules for every check. Sections 2 to 8 are
 
 ## 1. Conventions
 
-**Ids.** `<family>.<name>`, lowercase, snake_case name, stable forever (a rename keeps the old id as an alias for one major spec version). Families: `host`, `net`, `k8s`, `gpu`, `store`, `custom`. Cloud checks use the provider as the prefix, not `cloud.`: `aws.iam`, `gcp.iam`, `azure.rbac`. This matches the plan's example spec. In this catalog and in the crate (`rdy-checks-cloud`) they are the "cloud" family. The vendor-command check is `custom.exec` (ADR 0005), M3.
+**Ids.** `<family>.<name>`, lowercase, snake_case name, stable forever (a rename keeps the old id as an alias for one major spec version). Families: `host`, `net`, `k8s`, `gpu`, `store`, `custom`. Cloud checks use the provider as the prefix, not `cloud.`: `aws.iam`, `gcp.iam`, `azure.rbac`. This matches the plan's example spec. In this catalog and in the crate (`rdy-checks-cloud`) they are the "cloud" family. The vendor-command check is `custom.exec` (ADR 0005), M4.
 
 **Tiers.**
 
@@ -14,7 +14,7 @@ How to read this: section 1 holds the rules for every check. Sections 2 to 8 are
 | --- | --- |
 | M1 | In the six-week alpha. Needed for the "one design partner catches a real blocker" exit test. |
 | M1-late | Inside the M1 families, but first to slip to the start of M2 if hours run out. |
-| M2 to M5 | Not in the alpha. Custom file M2, cloud M3, store M3, `custom.exec` M3, GPU M4. |
+| M2 to M5 | Not in the alpha. Custom file M2, cloud M3, store M3, `custom.exec` M4, GPU M4. |
 
 **Capacity and cut order.** Plan hours for M1 are 60 to 90 (six weeks at 10 to 15 hours). About 42 of those go to workspace, spec, engine, report, signing and release, leaving 18 to 48 hours for checks. The review pass made the real cost clear:
 
@@ -623,7 +623,7 @@ Placement: `custom.file` in `rdy-checks-host` (it only reads files), `custom.exe
 | Order | Id | Tier | Privilege | One line |
 | --- | --- | --- | --- | --- |
 | 1 | `custom.file` | M2 | reads only | File exists, mode, owner, content, certificate expiry |
-| 2 | `custom.exec` | M3 | whatever the command needs | Run a vendor command, compare exit code and output |
+| 2 | `custom.exec` | M4 | whatever the command needs | Run a vendor command, compare exit code and output |
 
 ### custom.file (M2)
 - **Measures:** vendor-specific files: a license, a config, a certificate.
@@ -633,7 +633,7 @@ Placement: `custom.file` in `rdy-checks-host` (it only reads files), `custom.exe
 - **Fix:** required in the spec for this check; `rdy spec lint` warns when it is missing.
 - **Fixture:** a fake file tree with a good license, an expired one, a world-readable key (mode in `root.manifest.json`), a certificate expiring in 10 days, an unreadable file.
 
-### custom.exec (M3, ADR 0005)
+### custom.exec (M4, ADR 0005)
 - **Measures:** whatever the vendor's command prints or returns.
 - **Source:** the rules of ADR 0005 and `02-engine-design.md`, summarised here so the catalog is complete: `argv` list only (a vendor who needs a shell writes `["/bin/sh", "-c", "..."]` and the consent list shows it as written); declared expectations `expect: {exit: 0, stdout_regex, stdout_json: {path, op, value}}` and a maximum duration; same subprocess policy (fixed PATH, cleared environment, fresh temp directory, 64 KiB caps, process-group kill); when euid is 0 the command runs as an unprivileged user unless the check declares `needs: [root]`; Linux hardening `no_new_privs` and Landlock where available, absent on macOS and Windows, and the docs say so. This is contained execution, not a sandbox, and the docs use that word.
 - **Needs:** `Need::Consent`: consent is bound to the exact command list (interactive yes, or `--allow-exec=<sha256 of the exec plan>`; a bare `--allow-exec` is refused); an unsigned spec with `custom.exec` exits 64 and `--allow-unsigned` never implies consent. Without consent the check is `Skipped`, and under block severity the run is NOT READY.
@@ -704,7 +704,7 @@ Embedded at build time, versioned with the release, one unit test per entry. Eac
 - `docs/adr/0006-static-musl-linux.md`, item 5 (`net.dns` is hickory plus an `nsswitch.conf` warning): this catalog makes `getent ahosts` the Linux system answer, because that is what glibc-linked products see; hickory remains the fallback and the per-nameserver tool. Amend the ADR; `rust-architect`.
 - `docs/adr/0010-kubernetes-client-kube-rs.md`: (1) decision 1 allows only `client` and `rustls-tls`, but `kube` takes a proxy only from the kubeconfig `proxy-url` and needs the proxy feature, and ignores `HTTPS_PROXY`; (2) decision 5 meets `KubeContext` on "`GET /version` answers", but `/version` is open to anonymous callers, so `k8s.access` calls `SelfSubjectReview` and warns on `system:anonymous`; (3) decision 2 allows two review kinds, the facade allows three plus an opt-in dry-run Pod create; (4) flag `--kube-context` versus `--context`; (5) decision 3 says one client shared through the engine `Context`, 02 says the k8s family owns it; (6) Context lists admission and device plugins in the week-5 slice, while this catalog splits admission (PSA, engines and SCC in M1, webhooks late) and puts device plugins late.
 - `docs/plan/rdy-plan.md`, "Example spec": `gpu.cuda min: "12.4"` is ambiguous and, read as "driver must support 12.4", false-blocks most products because CUDA minor version compatibility lets a 12.x build run on any driver at or above 525. Fix: `built_with`, `source: driver|toolkit`, `compat: minor|strict|forward`. `host.memory min: 32Gi` would block a nominal 32 GiB VM that reports 31.3 GiB: the nominal band. `aws.iam simulate:` needs the caller to hold `iam:SimulatePrincipalPolicy` and cannot take an assumed-role ARN; the plan's "IAM permissions dry-run" should say "simulation, with EC2 dry-run as an opt-in fallback".
-- `docs/plan/rdy-plan.md`, "Check families at launch" (Data stores, Custom), `CLAUDE.md` repo layout and the milestone table: these families have no crate and no milestone. Fix: stores as a feature-gated module in `rdy-checks-net` (M3), `custom.file` in `rdy-checks-host` (M2), `custom.exec` in `rdy-engine` (M3, ADR 0005). The earlier name `custom.script` at M4 is gone.
+- `docs/plan/rdy-plan.md`, "Check families at launch" (Data stores, Custom), `CLAUDE.md` repo layout and the milestone table: these families have no crate and no milestone. Fix: stores as a feature-gated module in `rdy-checks-net` (M3), `custom.file` in `rdy-checks-host` (M2), `custom.exec` in `rdy-engine` (M4, ADR 0005). The earlier name `custom.script` at M4 is gone.
 - `docs/plan/rdy-plan.md`, "Milestones" and "Build order inside M1", and `KICKOFF.md` ("M1 is six weeks"): see "Capacity and cut order" in section 1: 79 hours for the minimum useful check set plus 72 more for all M1 families, against a window of 18 to 48 hours (02 independently puts the whole of M1 near 160 hours). Fix: either M1 becomes eight to ten weeks or only the `M1` tier ships in M1 and `M1-late` becomes the first milestone after it.
 - `CLAUDE.md`, "Engineering standards", Cross-platform bullet ("from day one ... CI runs all four"): with the hours above, data sources for macOS and Windows cannot all land in M1. Fix wording: every check compiles and runs on all four targets from day one; M1 ships a sysinfo-only subset of four host checks there; the rest returns `Skipped(NotYetOnOs)` until the catch-up tickets, and under the verdict rule that is a required check not run, which is true.
 - `docs/plan/02-engine-design.md`, host coverage table: says host is `NotYet` for all checks on macOS and Windows. Fix: `Partial` for `host.memory`, `host.cpu`, `host.disk`, `host.os` (the sysinfo subset); `NotApplicable` for `host.firewall`, `host.lsm`, `host.cgroups`, `host.kernel`, `host.sysctl`, `host.container_runtime` on macOS and Windows.
@@ -844,7 +844,7 @@ Later milestones
 - [M4] gpu.fabric | owner: check-author | est: 6h | depends on: GPU XML parser: three value states, units, DTD test, no-DTD-fetch parser | exit test: NVSwitch with no fabric manager blocks, the `comm` truncation tree does not false-block, IB `INIT` blocks only on InfiniBand.
 - [M4] gpu.model_egress with offline mode | owner: check-author | est: 5h | depends on: net.egress via proxy (own CONNECT, absolute-form for http, 407) and redirect host evidence | exit test: an unlisted redirect host warns "add it", `HF_HUB_OFFLINE=1` switches to the offline path check, a gated 401 warns.
 - [M4] Review GPU checks end to end | owner: gpu-expert | est: 3h | depends on: gpu.fabric | exit test: written review with every finding fixed or filed.
-- [M3] custom.exec (ADR 0005 owns the implementation ticket "Implement custom.exec with argv, expectations, caps and hash-bound consent"); catalog work is the fixture set above | owner: check-author | est: 2h | depends on: Replay backend and fixture loader | exit test: the six synthetic commands behave as specified on Linux, macOS and Windows CI.
+- [M4] custom.exec (ADR 0005 owns the implementation ticket "Implement custom.exec with argv, expectations, caps and hash-bound consent"); catalog work is the fixture set above | owner: check-author | est: 2h | depends on: Replay backend and fixture loader | exit test: the six synthetic commands behave as specified on Linux, macOS and Windows CI.
 - [M5] Provider-neutral cloud session before GCP and Azure checks | owner: cloud-iam-expert | est: 4h | depends on: AWS common: credential chain without credential_process, source detection, session cache, assume with consent and the RDY_ id rule, replay harness | exit test: GCP and Azure stubs use the same facade `Http`, action log and degrade rules with no AWS types.
 - [M5] gcp.iam, gcp.quota, gcp.apis, gcp.region | owner: check-author | est: 14h | depends on: Provider-neutral cloud session before GCP and Azure checks | exit test: recorded REST responses for allowed, denied and quota-short cases.
 - [M5] azure.rbac, azure.quota, azure.providers, azure.region | owner: check-author | est: 14h | depends on: Provider-neutral cloud session before GCP and Azure checks | exit test: recorded ARM responses for allowed, denied and quota-short cases.
