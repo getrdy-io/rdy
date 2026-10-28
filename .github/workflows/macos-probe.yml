@@ -1,0 +1,40 @@
+# Throwaway probe: does each macOS label get a runner? Lives on tmp/m1-006-macos-probe only.
+name: macos-probe
+
+on:
+  push:
+    branches: [tmp/m1-006-macos-probe]
+
+permissions: {}
+
+jobs:
+  macos-15:
+    runs-on: macos-15
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: uname -m && sw_vers
+  macos-latest:
+    runs-on: macos-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: uname -m && sw_vers
+  macos-14:
+    runs-on: macos-14
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: uname -m && sw_vers
+  macos-26:
+    runs-on: macos-26
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: uname -m && sw_vers
+  macos-15-intel:
+    runs-on: macos-15-intel
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: uname -m && sw_vers
