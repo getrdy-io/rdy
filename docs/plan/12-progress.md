@@ -55,7 +55,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-022 | todo | | Generate JSON schemas with schemars behind cargo xtask schema and check drift in CI
 
-- M1-023 | todo | | Reserved check ids and the not_in_build lint rule
+- M1-023 | PR #TBD | | per-line locations and did-you-mean are M1-031; `min: 32G` reads as an unknown field until M1-024 gives host.memory its parameters
 
 - M1-024 | todo | | Typed parameters for M1 host check ids
 
