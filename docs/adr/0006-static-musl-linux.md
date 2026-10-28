@@ -17,7 +17,17 @@ our checks directly, so they belong in writing.
    Linux build is published.
 2. Hardening is kept: Linux binaries are `static-pie` (ASLR), with full RELRO and a non-executable stack.
    The CI proof accepts `static-pie linked`, fails on a non-PIE binary, and checks RELRO and the stack
-   flag with `readelf` on both arches. A target that cannot be static-pie is recorded here.
+   flag with `readelf` on both arches (`scripts/check-static.sh`). A target that cannot be static-pie is
+   recorded here. (Amended 2026-10-28 in M1-006: rustc 1.99.1 does not mark `aarch64-unknown-linux-musl`
+   as able to build static-pie, so it links `-static -no-pie` with `crt1.o`, giving no ASLR and no
+   RELRO flags. That target links through `scripts/musl-pie-linker.sh`, set in `.cargo/config.toml`. It
+   swaps `crt1.o`, `crtbegin.o` and `crtend.o` for musl's `rcrt1.o`, `crtbeginS.o` and `crtendS.o` and
+   passes `-static-pie` to `cc`. The CI check stays strict, so it fails if the wrapper stops working.
+   Delete the wrapper when rustc supports the target itself. Caveat: a build that sets
+   `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER` (for example a cross build with `cargo-zigbuild`)
+   overrides the linker in `.cargo/config.toml`, so it can produce a non-PIE binary. Such a build must
+   run `scripts/check-static.sh` before anyone ships it. M1-007 (dist) must run
+   `scripts/check-static.sh` on both Linux release artifacts, not only rely on the CI test job.)
 3. aarch64 Linux builds and tests run natively on GitHub's `ubuntu-24.04-arm` runners with `musl-tools`.
    `cargo-zigbuild` is the fallback and the documented local cross path. `cross` is not used.
 4. Allocator: musl's default in M1. An M2 benchmark compares with a glibc build; above a 20% slowdown we
@@ -36,6 +46,15 @@ our checks directly, so they belong in writing.
    use `nvidia-smi` and `/proc/driver/nvidia`.
 7. User and group lookups skip NSS too. Host checks that need a user read `/etc/passwd` and say "local
    users only" in their evidence.
+8. Temporary CI fallback for macOS arm64 (amended 2026-10-28 in M1-006, correction 05). The org has no
+   macOS arm64 runners: `macos-15` was never assigned a runner in four PR runs, and a probe (run
+   40737208354) got a runner only for `macos-15-intel`. The PR gate (`ci-ok`) therefore runs four
+   native test legs (linux-x64, linux-arm64, windows-x64, macos-x64) and an `aarch64-apple-darwin`
+   compile leg on `macos-15-intel` (build and `cargo test --no-run`), so every check still compiles for
+   all five release targets on every PR. `macos-arm64.yml` runs the full test job on `macos-15`
+   nightly, on push to `main` and by `workflow_dispatch`, outside `ci-ok`. This mirrors the fallback in
+   06 for a retired Intel image. It ends when a founder hand step enables macOS arm64 runners for the org
+   and moves the macos-arm64 test leg back into `ci-ok`.
 
 ## Consequences
 

@@ -40,7 +40,10 @@ the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixtu
 
 Tooling. `cargo nextest` does not run doc tests, so CI also runs `cargo test --doc --workspace --locked`.
 The nextest `ci` profile has `retries = 0`, `fail-fast = false` and `slow-timeout = { period = "30s",
-terminate-after = 4 }`, so a hung test dies in two minutes and names itself. Shared data comes from
+terminate-after = 4 }`, so a hung test dies in two minutes and names itself. The one exception is
+trybuild: its compile-fail tests run a nested `cargo build`, which took 90 seconds on the Intel macOS
+runner. A test binary named `*_guarantee` is one test group with one thread and a ten-minute limit
+(`.config/nextest.toml`). Name every trybuild test binary that way. Shared data comes from
 `testing::fixtures_dir()`, which resolves `tests/fixtures` from `CARGO_MANIFEST_DIR`. The fixtures sit at
 the repo root, outside every crate, so `cargo package` never ships them and the tests do not run from a
 crates.io tarball (the fixtures README says so). `rdy_engine::testing` is `#[doc(hidden)]`, unstable and
