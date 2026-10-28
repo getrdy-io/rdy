@@ -104,15 +104,18 @@ defaults, so they appear in the schema and the docs. The check copies effective 
 `Family` (three in M1, so a trait): `name`, `checks()` (static infos), `probe()` for needs only it can
 probe (k8s owns `kube_context`; cloud will own `cloud_credentials`), and `build(check, spec)`, which
 returns the check plus its own host set computed from its params, derived defaults included
-(`net.tls_intercept` defaults to the `net.egress` hosts). `Engine::plan` maps every spec entry to a
-built check or a skip kind with no I/O:
+(`net.tls_intercept` defaults to the `net.egress` hosts). `Registry::plan` (M1-035; `Engine::plan` will call it) maps every spec entry to a
+built check or a skip kind with no I/O. The first row that fits wins, in this order:
 
 | Situation | `skip_kind` (01) |
 | --- | --- |
+| Spec `os` list is empty (it would hide the check everywhere) | `unsupported_spec` |
 | Spec `os` list leaves this OS out | `not_applicable` (never counts) |
-| Family reserved, not built into this rdy | `not_in_build` |
-| Family built, id unknown | `unknown_check` |
+| Id reserved, not built into this rdy | `not_in_build` |
+| Id not reserved | `unknown_check` |
+| Known id that no registered family builds (checked before its fields) | `not_in_build` |
 | Known id, field or value this rdy cannot read | `unsupported_spec` |
+| The family refuses to build the entry | `unsupported_spec` |
 | `CheckInfo::os` is `NotYet` here | `not_yet_on_os` |
 | Hard need missing after probing | `missing_need` |
 | Run deadline passed before start | `run_deadline` |
@@ -660,9 +663,12 @@ pub trait Family: Send + Sync + 'static {
     fn name(&self) -> &'static str;
     fn checks(&self) -> &'static [&'static CheckInfo];
     fn probe<'a>(&'a self, wanted: &'a [Need], probe: &'a Probe) -> BoxFuture<'a, Vec<Capability>>;
-    fn build(&self, check: &CheckSpec, spec: &Spec) -> Result<Built, BuildError>;
+    fn build(&self, entry: &CheckSpec, params: CheckParams, spec: &Spec) -> Result<Built, BuildError>;
 }
-pub struct Built { pub check: Box<dyn Check>, pub hosts: HostSet }
+pub struct Built { pub check: Box<dyn Check>, pub hosts: HostSet }  // HostSet: deduplicated Vec<Target>
+// plan.rs (M1-035): Registry::plan is pure and takes a &Spec (from LoadedSpec::spec()) and the binary's version.
+// INV-01 (no parse before verification) is enforced where a LoadedSpec is required: Engine::run (M1-057).
+impl Registry { pub fn plan(&self, spec: &Spec, os: Os, rdy_version: &str) -> RunPlan; }
 
 // privilege.rs, sched.rs
 pub struct Privilege { pub uid: [u32; 4], pub gid: [u32; 4], // real, effective, saved, filesystem
