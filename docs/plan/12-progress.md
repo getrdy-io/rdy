@@ -41,7 +41,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-016 | [#10](https://github.com/getrdy-io/rdy/pull/10) | 2026-10-28 | check params stay a raw map (M1-019), timeout, max_size and expires stay text (M1-018, M1-026), load() is a fail-closed stub (M1-017, M1-120)
 
-- M1-017 | PR #TBD | | none. load() still fails closed until M1-120. Leading-zero and over-u64 integers reach params as floats, M1-019 must reject them
+- M1-017 | [#24](https://github.com/getrdy-io/rdy/pull/24) | 2026-10-28 | none. load() still fails closed until M1-120. Leading-zero and over-u64 integers reach params as floats, M1-019 must reject them
 
 - M1-018 | todo | | Scalar types Quantity, Duration, Version and Target with strict grammars
 
