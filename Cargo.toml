@@ -25,6 +25,10 @@ homepage = "https://getrdy.io"
 # Each ticket adds the lines it needs. Nothing is listed ahead of use.
 # Default features are off. The crate that uses a dependency names its features.
 clap = { version = "4.6", default-features = false }
+serde = { version = "1", default-features = false }
+serde_json = { version = "1", default-features = false }
+trybuild = "1"
+thiserror = { version = "2", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
