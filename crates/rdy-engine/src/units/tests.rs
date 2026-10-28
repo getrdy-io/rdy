@@ -104,17 +104,22 @@ fn a_small_machine_gets_the_floor_not_the_percent() {
     );
 }
 
-// The plan says a "4 GB" VM shows 3.7 GiB and that this passes with a note. With the documented
-// default, max(5%, 256 MiB), the lowest value that passes against 4Gi is 3.75 GiB, so 3.7 GiB is
-// Below. Both facts are pinned here so the conflict stays visible until the plan is corrected.
+// A 4096 MiB VM shows about 3.8 GiB. With the default band, max(5%, 256 MiB), the lowest value that
+// passes against 4Gi is 3.75 GiB, so 3.8 GiB passes with a note and 3.7 GiB blocks (correction 06).
 #[test]
-fn a_3_7_gib_machine_against_4gi_needs_a_wider_floor_than_the_plan_documents() {
+fn a_4096_mib_vm_passes_against_4gi_with_a_note_and_3_7_gib_blocks() {
+    let fit = Band::MEMORY.assess(gib(38), q("4Gi"));
+    assert_eq!(fit.level(Level::Pass), Level::Pass);
+    assert!(fit.note().is_some());
     assert!(matches!(
         Band::MEMORY.assess(gib(37), q("4Gi")),
         SizeFit::Below { .. }
     ));
-    let wider = Band::new(5.0, q("512Mi"));
-    let fit = wider.assess(gib(37), q("4Gi"));
+}
+
+#[test]
+fn a_wider_floor_lets_3_7_gib_pass() {
+    let fit = Band::new(5.0, q("512Mi")).assess(gib(37), q("4Gi"));
     assert_eq!(fit.level(Level::Pass), Level::Pass);
     assert!(fit.note().is_some());
 }
