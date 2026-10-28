@@ -7,6 +7,8 @@ that each touch one line do not conflict.
 Start: the founder approved the planning pass and started M1 on 2026-10-28, ahead of the Nov 20, 2026
 go or no-go in the plan. This is recorded as decision 2 under "Decisions made" in `13-plan-corrections.md`.
 
+The build process, the implementer brief and the state at each pause are in `m1-build-runbook.md`.
+
 ## Tickets
 
 - M1-001 | [#6](https://github.com/getrdy-io/rdy/pull/6) | 2026-10-28 | none; MF-04 was reopened and closed after 74e162a, 05 revision 3 applied, follow-ups CF-01 to CF-07 are filed in both review files for their owners
@@ -49,7 +51,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-020 | [#22](https://github.com/getrdy-io/rdy/pull/22) | 2026-10-28 | The evidence_only and pass_by_absence snapshot of ADR 0013 decision 6 waits for the check registry (nothing to list yet). `ErrorOutput`, `Verification` and `LintReport` are not typed (M1-021, `rdy verify` and `spec lint` own them). The action log keeps kind-specific fields as a JSON map until M1-040 types them. The 7.x samples round-trip as canonical JSON (equal keys and values), not as raw text, because the samples are hand formatted; the writer's byte layout is M1-055. `FixSource::FromSpec` is not called `Spec` because a variant of that name breaks the M1-016 compile-fail goldens.
 
-- M1-021 | todo | | Error types with fix hints and exit code mapping at the CLI edge
+- M1-021 | [#31](https://github.com/getrdy-io/rdy/pull/31) | 2026-10-28 | `spec_expired` and `trust_store_insecure` are in the code list with exit 64 but have no `CliError` source: rdy-spec does not check `metadata.expires` and the trust file loader is not built (M1-126 adds the variants and fixtures). The signature codes `spec_unsigned`, `spec_key_unknown` and `spec_signature_invalid` are mapped from `SignatureError`; the exact 01 section 4.8 first-line wording is M1-126's golden. `ErrorOutput` is typed in rdy-cli, not rdy-spec (rdy-spec is in parallel work); move it to `rdy_spec::result` when rdy-cloud needs it. Did-you-mean for unknown spec keys needs the key lists from rdy-spec (M1-031); `SkipWhy` and `timeout_text` hold the 01 section 5.2 words but nothing builds results yet (M1-057). Control characters are escaped as `\x1b` or `\u{202e}` per 07 section 9 rule 9, not deleted. A new `SpecError` variant in rdy-spec falls into `spec_invalid` through a wildcard (the enum is non-exhaustive), so rdy-spec's own hint test is its guard.
 
 - M1-022 | todo | | Generate JSON schemas with schemars behind cargo xtask schema and check drift in CI
 
@@ -71,7 +73,9 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-031 | todo | | rdy spec lint with errors, warnings and did-you-mean
 
-- M1-032 | todo | | Check trait, Need and Context in rdy-engine
+- M1-032 | [#32](https://github.com/getrdy-io/rdy/pull/32) | 2026-10-28 | The row's exit test is split across later tickets: `Engine::run` is M1-034/M1-035, `HostFs` is superseded by the Probe facade (02, M1-040/M1-038), and the setuid refusal is the privilege snapshot ticket. Built here: Check, CheckInfo, Need, CheckContext, Finding, CheckOutcome, with fake-check tests for pass, missing_need skip and no not_applicable. `CheckContext::probe()` and `remaining()` and `CheckError::Probe` wait for M1-040 and M1-034. `rdy_spec::result` is not re-exported yet.
+
+- M1-032 correction-04 | backlog corrected 2026-10-28: exit test narrowed to the outcome types; pass and missing_need through the scheduler moved to M1-034, HostFs reads under host_root moved to M1-045 as the `reads` prefix rule, setuid refusal (INV-10) already in M1-042
 
 - M1-033 | todo | | Map outcomes to CheckResult with fix source, partial and needs
 
@@ -231,7 +235,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-111 | todo | | k8s.rbac (SelfSubjectReview, access reviews, non-resource items, escalate and bind as warn)
 
-- M1-112 | [#19](https://github.com/getrdy-io/rdy/pull/19) | 2026-10-28 | The "sign a spec in CI" half of the exit test is proved at the helper level (`RDY_KEY_PASSWORD` and `--password-file -` through `rdy_cli::password`); `spec sign` itself is M1-125, which must call `read_key_password`. `--password` is refused by a raw argv check, not a hidden clap flag, so it wins over missing-argument errors; only `spec sign` and `spec keygen` get the reason. Windows checks the file type and refuses reparse points but not ACLs; its file tests run on the Windows CI leg only (compiled here, not run). `read_key_password` now takes stderr for the env-variable note (tty only); it adds the `rustix` dependency (Unix only) for O_NOFOLLOW and geteuid without unsafe.
+- M1-112 | [#19](https://github.com/getrdy-io/rdy/pull/19) | 2026-10-28 | The "sign a spec in CI" half of the exit test is proved at the helper level (`RDY_KEY_PASSWORD` and `--password-file -` through `rdy_cli::password`); `spec sign` itself is M1-125, which must call `read_key_password`. `--password` is refused by a raw argv check, not a hidden clap flag, so it wins over missing-argument errors; only `spec sign` and `spec keygen` get the reason. Windows checks the file type and refuses reparse points but not ACLs; its file tests run on the Windows CI leg only (compiled here, not run). `read_key_password` now takes stderr for the env-variable note (tty only); it adds the `rustix` dependency (Unix only) for O_NOFOLLOW and geteuid without unsafe. Follow-up fix PR for macOS test build.
 
 - M1-113 | todo | | k8s.nodes allocatable, node filters, conditions, zones and pod-count limit
 
@@ -247,7 +251,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-119 | todo | | Timeouts env and scheduler timeout and deadline tests under paused time
 
-- M1-120 | todo | | Verify minisign signatures in rdy-spec against a trust store with product binding
+- M1-120 | [#27](https://github.com/getrdy-io/rdy/pull/27) | 2026-10-28 | The verifier is ed25519-dalek verify_strict over our own minisign envelope reader, not minisign-verify (ADR 0018). The Windows autocrlf case is covered by tests (`-text` and `eol=lf` rules in .gitattributes and a CR-free fixture test); the Windows CI leg arrives with M1-006 (#21) and M1-047. Deferred: signed_at future-date warning and expiry check (need a clock, M1-026), trust.yaml I/O (M1-121), key text files for --key (M1-121), CLI wiring and error codes (M1-126), the CRLF note on every error kind (today only `Tampered` carries it, M1-126) and reading the .minisig exactly once (M1-126)
 
 - M1-121 | todo | | Trust store load and save in user and system locations
 

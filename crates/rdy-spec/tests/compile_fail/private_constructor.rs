@@ -1,4 +1,5 @@
 use rdy_spec::spec::{CheckId, CheckSpec, Metadata, ProductSlug, Spec};
+use rdy_spec::sig::SignatureState;
 use rdy_spec::LoadedSpec;
 
 fn sample() -> Spec {
@@ -8,5 +9,5 @@ fn sample() -> Spec {
 }
 
 fn main() {
-    let _ = LoadedSpec::new(sample());
+    let _ = LoadedSpec::new(sample(), SignatureState::Unsigned, String::new());
 }

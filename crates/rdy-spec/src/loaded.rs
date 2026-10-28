@@ -9,7 +9,11 @@
 //! The compile-fail tests in `tests/compile_fail/` pin each way of getting this wrong: a struct literal,
 //! the private constructor, `From<Spec>` and `Default`. The unit test below pins `Deserialize`.
 
+use sha2::{Digest, Sha256};
+
 use crate::SpecError;
+use crate::parse::{MAX_SPEC_BYTES, parse_bytes};
+use crate::sig::{Policy, SignatureError, SignatureState, TrustStore, verify_sidecar};
 use crate::spec::Spec;
 
 /// A spec that [`load`] verified and parsed. This is the only kind of spec the engine runs.
@@ -20,19 +24,18 @@ use crate::spec::Spec;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedSpec {
     spec: Spec,
+    signature: SignatureState,
+    sha256: String,
 }
 
 impl LoadedSpec {
     /// The only constructor. It is private to this module, and so only [`load`] can call it.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "load() cannot verify yet. M1-120 wires it and removes this attribute"
-        )
-    )]
-    fn new(spec: Spec) -> Self {
-        Self { spec }
+    fn new(spec: Spec, signature: SignatureState, sha256: String) -> Self {
+        Self {
+            spec,
+            signature,
+            sha256,
+        }
     }
 
     /// The verified spec.
@@ -40,20 +43,70 @@ impl LoadedSpec {
     pub fn spec(&self) -> &Spec {
         &self.spec
     }
+
+    /// How the spec was authenticated: verified with a pinned key, or unsigned and allowed.
+    #[must_use]
+    pub fn signature(&self) -> &SignatureState {
+        &self.signature
+    }
+
+    /// SHA-256 of the raw spec bytes, 64 lowercase hex digits. Reports record it (threat model R1).
+    #[must_use]
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
 }
 
-/// The only way to get a [`LoadedSpec`]: verify the raw bytes, then parse, then validate.
+/// The only way to get a [`LoadedSpec`]: check the signature on the raw bytes, then parse, then check
+/// the product.
 ///
-/// This is a stub. Signature checking (M1-120) is not wired in, and `load` must never hand back a spec
-/// that nothing verified, even though [`crate::parse_unverified`] can already read the YAML. So for now
-/// it always fails closed with [`SpecError::LoadNotWired`]. The final signature also takes the trust
-/// store and the signature policy, and it will parse only after the signature verified.
+/// The order is the security property (ADR 0002, threat model INV-01):
+///
+/// 1. The spec is at most [`MAX_SPEC_BYTES`], or the call fails with [`SpecError::TooLarge`].
+/// 2. With a signature (`sig` is the contents of the `.minisig` file), the file must verify. The signature
+///    file must be in the minisign form, the signed comment must be `rdy-spec-v1 product=<slug>
+///    signed_at=<time>`, and a key pinned in `trust` for that product must verify the exact bytes. This
+///    happens whatever the policy says. A signature that fails is never treated as a missing one.
+/// 3. Without a signature, [`Policy::RequireSigned`] fails with [`SignatureError::Missing`] and
+///    [`Policy::AllowUnsigned`] goes on, and the result says [`SignatureState::Unsigned`].
+/// 4. Only now are the bytes parsed. A spec that was refused above is never given to the YAML reader.
+/// 5. For a signed spec, `metadata.product` must equal the product in the signed comment.
+///
+/// Expiry (`metadata.expires`) is not checked here.
 ///
 /// # Errors
 ///
-/// Always [`SpecError::LoadNotWired`] in this build.
-pub fn load(_bytes: &[u8], _sig: Option<&[u8]>) -> Result<LoadedSpec, SpecError> {
-    Err(SpecError::LoadNotWired)
+/// [`SpecError::Signature`] for every signature problem, and the usual parse errors of
+/// [`crate::parse_unverified`] after that.
+pub fn load(
+    bytes: &[u8],
+    sig: Option<&[u8]>,
+    trust: &TrustStore,
+    policy: Policy,
+) -> Result<LoadedSpec, SpecError> {
+    if bytes.len() > MAX_SPEC_BYTES {
+        return Err(SpecError::TooLarge {
+            size: bytes.len(),
+            limit: MAX_SPEC_BYTES,
+        });
+    }
+    let signature = match (sig, policy) {
+        (Some(sidecar), _) => verify_sidecar(bytes, sidecar, trust)?,
+        (None, Policy::AllowUnsigned) => SignatureState::Unsigned,
+        (None, Policy::RequireSigned) => return Err(SignatureError::Missing.into()),
+    };
+    let spec = parse_bytes(bytes)?;
+    if let SignatureState::Verified { product, .. } = &signature
+        && *product != spec.metadata.product
+    {
+        return Err(SignatureError::ProductMismatch {
+            signed: product.clone(),
+            spec: spec.metadata.product.clone(),
+        }
+        .into());
+    }
+    let sha256 = crate::sig::hex(&Sha256::digest(bytes));
+    Ok(LoadedSpec::new(spec, signature, sha256))
 }
 
 #[cfg(test)]
@@ -68,14 +121,23 @@ mod tests {
     }
 
     #[test]
-    fn the_stub_fails_closed_for_every_input() {
+    fn load_fails_closed_without_a_pinned_key() {
         let yaml = b"apiVersion: rdy/v1\nkind: Readiness\n";
-        assert_eq!(load(yaml, None).unwrap_err(), SpecError::LoadNotWired);
+        let trust = TrustStore::new();
+        // No signature under the strict policy.
         assert_eq!(
-            load(yaml, Some(b"sig")).unwrap_err(),
-            SpecError::LoadNotWired
+            load(yaml, None, &trust, Policy::RequireSigned).unwrap_err(),
+            SpecError::Signature(SignatureError::Missing)
         );
-        assert_eq!(load(b"", None).unwrap_err(), SpecError::LoadNotWired);
+        // A signature that is not a signature never becomes "unsigned".
+        for policy in [Policy::RequireSigned, Policy::AllowUnsigned] {
+            for sig in [&b""[..], b"sig", b"untrusted comment: x\n"] {
+                assert!(matches!(
+                    load(yaml, Some(sig), &trust, policy).unwrap_err(),
+                    SpecError::Signature(SignatureError::Malformed { .. })
+                ));
+            }
+        }
     }
 
     /// Fails to compile if `LoadedSpec` ever implements `Deserialize`. Two blanket impls give the call
@@ -92,7 +154,9 @@ mod tests {
 
     #[test]
     fn the_accessor_returns_what_the_constructor_was_given() {
-        let loaded = LoadedSpec::new(sample());
+        let loaded = LoadedSpec::new(sample(), SignatureState::Unsigned, "ab".to_owned());
         assert_eq!(loaded.spec(), &sample());
+        assert_eq!(loaded.signature(), &SignatureState::Unsigned);
+        assert_eq!(loaded.sha256(), "ab");
     }
 }

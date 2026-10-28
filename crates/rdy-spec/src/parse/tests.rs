@@ -157,15 +157,22 @@ fn the_reader_reports_the_problem_nearest_the_top() {
 }
 
 #[test]
-fn parse_unverified_returns_a_plain_spec_and_load_still_fails_closed() {
+fn parse_unverified_returns_a_plain_spec_and_load_still_wants_a_signature() {
     let yaml = entry("    min: 8\n");
     let Ok(spec) = parse_unverified(yaml.as_bytes()) else {
         panic!("the spec must parse");
     };
     assert_eq!(spec.metadata.product.as_str(), "acme");
-    // Nothing turns that `Spec` into a `LoadedSpec`. Only `load` can, and it cannot verify yet.
+    // Nothing turns that `Spec` into a `LoadedSpec`. Only `load` can, and it wants a signature.
+    let trust = crate::sig::TrustStore::new();
     assert_eq!(
-        crate::load(yaml.as_bytes(), None).unwrap_err(),
-        SpecError::LoadNotWired
+        crate::load(
+            yaml.as_bytes(),
+            None,
+            &trust,
+            crate::sig::Policy::RequireSigned
+        )
+        .unwrap_err(),
+        SpecError::Signature(crate::sig::SignatureError::Missing)
     );
 }

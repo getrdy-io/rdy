@@ -9,5 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 include = ["src/**", "Cargo.toml", "LICENSE"]
 
+[dependencies]
+rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
+serde_json = { workspace = true, features = ["std"] }
+thiserror = { workspace = true, features = ["std"] }
+
 [lints]
 workspace = true

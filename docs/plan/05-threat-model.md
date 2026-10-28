@@ -125,7 +125,7 @@ customer's decision to run.
                   \--- public key and fingerprint, out of band (vendor docs, SE) ----^
 ```
 
-The design is ADR 0002: minisign format, verified with `minisign-verify`, keys pinned per product in
+The design is ADR 0002: minisign format, verified by `rdy-spec` over strict ed25519 (ADR 0018), keys pinned per product in
 `trust.yaml` by `rdy trust add`, and `rdy run --key` for one run. There is no `--trust-key`. This model
 adds these requirements on top:
 
@@ -134,7 +134,7 @@ adds these requirements on top:
    raw bytes with `allow_legacy = false`. Only then parse. After parsing, `metadata.product` must equal the
    pinned product and the trusted-comment product. This is compatible with ADR 0002 and gives INV-01.
 2. **Weak keys.** Small-order and malformed public keys are refused at `rdy trust add` and `--key`, using
-   test vectors run against `minisign-verify`.
+   the Wycheproof vectors run against the verifier.
 3. **Trust store ownership.** A user run reads `$XDG_CONFIG_HOME/rdy/trust.yaml`, then `/etc/rdy/trust.yaml`.
    A root run (euid 0) reads only `/etc/rdy/trust.yaml`, whatever `HOME` or `XDG_CONFIG_HOME` say, because
    macOS `sudo`, `sudo -E` and `su` without `-` keep them. The file and its directory must be root-owned
