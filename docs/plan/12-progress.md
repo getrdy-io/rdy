@@ -87,7 +87,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-037 | todo | | Windows output directory default and reparse-point checks
 
-- M1-038 | todo | | Blocking helper and subprocess kill on timeout
+- M1-038 | PR #TBD | | Built as `rdy_engine::blocking` and `rdy_engine::exec` (async `tokio::process`, so no command runs on an abandoned blocking thread). Windows kills only the child, not its tree, until job objects (M2-006): `KILLS_PROCESS_TREE` is false there and M1-039 limits Windows to `whoami.exe`. Shell and sudo refusal, PATH, cwd and env-name policy are M1-039. Wiring into `Probe` and `ProbeError` is M1-040. The watchdog and Ctrl-C callers of `kill_all_groups` are M1-043 and M1-058. The Hung proof uses a no-op kill function because a test cannot make a process survive SIGKILL.
 
 - M1-039 | todo | | SEC-18 Command policy: search path, declared directories, caps and Windows whoami only
 

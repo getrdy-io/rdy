@@ -11,17 +11,22 @@ include = ["src/**", "Cargo.toml", "LICENSE"]
 
 [features]
 default = ["runtime"]
-# The scheduler and its tokio dependency (02, "Crate layout").
-runtime = ["dep:tokio"]
+# The scheduler, the blocking helper, the process runner and their dependencies (02, "Crate layout").
+runtime = ["dep:tokio", "dep:rustix"]
 
 [dependencies]
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["rt", "sync", "time"], optional = true }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "sync", "time"], optional = true }
+
+# Process group kill on Unix (M1-038). Safe wrappers, so the crate keeps `forbid(unsafe_code)`.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["std", "process"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
