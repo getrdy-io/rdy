@@ -172,12 +172,12 @@ The `did you mean` part appears only when the edit distance is small; otherwise 
 
 | Type | Grammar | Notes |
 | --- | --- | --- |
-| Quantity (bytes) | integer, or integer plus `Ki`, `Mi`, `Gi`, `Ti`, `Pi` | `32G` and `32GB` are bad values: "write 32Gi, not 32G". Lint warns on a bare integer under 1 MiB ("32 bytes, did you mean 32Gi?"). |
-| Duration | integer plus `ms`, `s`, `m`, `h` or `d` | `10s`, `7d`. No compound forms. |
-| Version | quoted dotted string, or bare integer | Compared per numeric component, not as semver. |
+| Quantity (bytes) | integer, or integer plus `Ki`, `Mi`, `Gi`, `Ti`, `Pi` | `32G` and `32GB` are bad values: "write 32Gi, not 32G". Lint warns on a bare integer under 1 MiB ("32 bytes, did you mean 32Gi?"). At most 15 digits and 2^53 - 1 bytes. Units are case sensitive. |
+| Duration | integer plus `ms`, `s`, `m`, `h` or `d` | `10s`, `7d`. No compound forms. The number is 1 to 999999999, so `0s` is a bad value. |
+| Version | quoted dotted string, or bare integer | Compared per numeric component, not as semver. One to four parts of up to 9 digits; a leading `v` is allowed. The text is kept as written. An unquoted `1.30` is a bad value (ADR 0001 decision 4). |
 | Path | absolute (`/...`, `C:\...`), max 1024 | Normalized. Never reaches a shell; there is none. |
 | Regex | Rust `regex` syntax, max 256 chars | Linear time, size-limited when compiled. Lint and sign compile every pattern. |
-| Target | `host:port` (port 1 to 65535), `[v6]:port`, or `http(s)://` URL | At most 64 per spec (ADR 0009). Specs never carry credentials: user info in a URL is a bad value, and fragments are not allowed. Query strings never enter the action log. Link-local and metadata addresses parse; the egress policy refuses them at run time and the check reports `block` with the reason (ADR 0009). |
+| Target | `host:port` (port 1 to 65535), `[v6]:port`, or `http(s)://` URL | At most 64 per spec (ADR 0009). Specs never carry credentials: user info in a URL is a bad value, and fragments are not allowed. Query strings never enter the action log. A host name has no trailing dot (write `example.com`, not `example.com.`) and cannot end in a number. An IPv4 address is four plain decimal parts: `2852039166`, `0xa9.0xfe.0xa9.0xfe`, `0251.0376.0251.0376` and `127.1` are bad values, because resolvers read them as other addresses than they look like. IPv6 forms of an IPv4 address (`::ffff:a9fe:a9fe`) are bad values: write the IPv4 form. Parsing does not classify addresses: `localhost`, `0.0.0.0`, `[::]`, NAT64 and unique local literals, wildcard DNS names, link-local and metadata addresses all parse; the egress policy refuses them at run time and the check reports `block` with the reason (ADR 0009). |
 
 **Severity.** `severity: block` means required and `severity: warn` means optional. A check computes a
 level from its thresholds: pass, warn or fail. `block` (default) maps fail to `block`; `warn` maps fail
@@ -478,6 +478,7 @@ known (ADR 0008 decision 7). Spec content errors are in 2.5.
 
 | Code | When | First line | Fix line |
 | --- | --- | --- | --- |
+| `spec_unreadable` | the spec file is missing, not a regular file, or unreadable | `error: cannot read acme-platfrom.yaml: no such file` | `fix: check the file name and the folder you are in` (07 C.6) |
 | `spec_unsigned` | no sidecar, no flag | `error: no signature found at acme-platform.yaml.minisig` | `fix: ask the vendor for acme-platform.yaml.minisig and put it next to the spec.` and `If you wrote this spec yourself, see https://docs.getrdy.io/unsigned` |
 | `spec_key_unknown` | no pinned key matches | `error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05 (fingerprint 4d2a...0a1c), which you have not trusted for acme-platform` | `fix: get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then run: rdy trust add acme-platform --key <file>` |
 | `spec_signature_invalid`, tampered | bytes or comment do not verify | `error: the signature on acme-platform.yaml does not match the file. It may have been changed after signing.` | `fix: get a fresh copy and its .minisig from the vendor. Do not run this file.` |
@@ -487,8 +488,9 @@ known (ADR 0008 decision 7). Spec content errors are in 2.5.
 | `spec_expired` | `metadata.expires` has passed | `error: acme-platform.yaml expired on 2027-01-31. This machine's clock says 2027-02-03.` | `fix: ask the vendor for a current spec. If this machine's clock is wrong, set it and run again.` |
 | `trust_store_insecure` | 4.3 | `error: /etc/rdy/trust.yaml is writable by other users` | `fix: chmod 644 /etc/rdy/trust.yaml` (Windows: `fix: run rdy trust add from an elevated prompt to recreate the store`) |
 
-`spec_expired` and `trust_store_insecure` are new codes, added to ADR 0008's list under ADR 0007's
-additive rule. cli-ux proposed naming `--allow-unsigned` in the `spec_unsigned` fix line; security's
+`spec_unreadable`, `spec_expired` and `trust_store_insecure` are new codes, added to ADR 0008's list
+under ADR 0007's additive rule. One more ErrorOutput code is not about spec loading: `interrupted`
+(exit 70, Ctrl-C in M1, 07 section 5.1). cli-ux proposed naming `--allow-unsigned` in the `spec_unsigned` fix line; security's
 MF-01 forbids it, and security rules win.
 
 ## 5. The JSON result
@@ -503,7 +505,7 @@ Top level (`$defs/Report`). ADR 0012 decision 3 fixes the provenance fields; thi
 | `spec` | `product`, `version`, `sha256` of the verified bytes, `file_name` (base name only), `size_bytes`, `serial`, `expires`, `contact`, `annotations` |
 | `signature` | `state` (`verified`, `unsigned`), `key_id`, `key_fingerprint`, `product` and `signed_at` from the signed comment, `trust_note`, `trust_source` (`system`, `user`, `flag`) |
 | `host` | 5.1 |
-| `identity` | `euid`, `user`, `elevated`, `kube` (`context`, `server`, `user`, `exec_plugin`, `insecure_tls`). In M1 `kube.user` is the user entry named in the kubeconfig context; the authenticated user from `SelfSubjectReview` waits for the ADR 0010 amendment that allows that POST. |
+| `identity` | `euid`, `user`, `elevated`, `kube` (`context`, `server`, `user`, `user_verified`, `exec_plugin`, `insecure_tls`). `kube.user` is the authenticated user from `SelfSubjectReview` (ADR 0010 decision 2), with `user_verified: true`. When that API is missing (1.27 and older) or the call fails, it is the user entry named in the kubeconfig context with `user_verified: false`, shown as "not verified by the API server". `user_verified` is required whenever `kube` is an object. |
 | `proxy` | proxy URLs in effect, user info stripped, and `no_proxy`; null when none |
 | `capabilities` | each probed need: `need`, `name`, `available`, `detail`, `hint` (02) |
 | `verdict`, `verdict_reason`, `exit_code` | 5.3 |
@@ -623,7 +625,8 @@ Section 7.4 has a JSON sample of each harder case.
 ### 5.3 The verdict rule and the summary line
 
 ```text
-not_run(c)  = c.status in {skipped, timeout, error, <unknown>} and c.skip_kind != not_applicable
+not_run(c)  = (c.status == skipped and c.skip_kind != not_applicable)
+              or c.status in {timeout, error, <unknown>}
 required(c) = c.severity != warn          # unreadable or unknown severity counts as block
 
 not_ready            if any c.status == block, or any c is required and not_run
@@ -733,12 +736,12 @@ upload.
 
 **Content, in this order** (ADR 0003 decision 6, 02 renderers, cli-ux labels):
 
-1. Header: "For acme-platform >=4.2", "Spec revision 7" when `serial` is set, the verdict word, the summary
+1. The UNSIGNED SPEC or KEY NOT PINNED banner, by the 4.7 rule. It comes first, as in the terminal.
+2. Header: "For acme-platform >=4.2", "Spec revision 7" when `serial` is set, the verdict word, the summary
    line (5.3), run time in UTC, hostname. Below it the legend: "BLOCK: fix before install. WARN: fix if you
    can. SKIP: rdy could not check it." and the rule in plain words: "NOT READY if anything blocks or a
    required check could not run. READY with warnings if only optional things are wrong. READY if every
    check ran and passed." The same three sentences are in `rdy run --help`.
-2. The UNSIGNED SPEC or KEY NOT PINNED banner, by the 4.7 rule.
 3. "This file lists hostnames and addresses from this machine. Read it before you send it."
 4. Sections by `bucket`: **Blocks**, **Required checks not run**, **Warnings**, **Passed**, **Does not
    apply here**. Each check shows its status word, `id (name)`, message, fix with its label (2.6) and "More
@@ -873,8 +876,8 @@ the system file, and found the key there. The READY run is root and read only th
 ### 7.2 NOT READY run (rdy 0.1.0, M1)
 
 A RHEL 9 VM with 16 GB of RAM behind a proxy that does not allow the license host, run as a normal user
-with a kubeconfig. `identity.kube.user` comes from the kubeconfig (no `SelfSubjectReview` call until ADR
-0010 allows it). Two blocks, one warning, two required checks not run, exit 2. The terminal ends with
+with a kubeconfig. `identity.kube.user` comes from `SelfSubjectReview` (`user_verified: true`). Two
+blocks, one warning, two required checks not run, exit 2. The terminal ends with
 `2 blocks, 1 warning, 3 passed, 2 required checks not run` and `NOT READY`. `verdict_reason` is null
 because blocks were observed.
 
@@ -945,6 +948,7 @@ because blocks were observed.
       "context": "acme-staging",
       "server": "https://api.k8s.acme.example:6443",
       "user": "acme-installer",
+      "user_verified": true,
       "exec_plugin": null,
       "insecure_tls": false
     }
@@ -1266,6 +1270,7 @@ role, run as root. Every family is built and every check passes, exit 0. `produc
       "context": "acme-staging",
       "server": "https://api.k8s.acme.example:6443",
       "user": "acme-installer",
+      "user_verified": true,
       "exec_plugin": null,
       "insecure_tls": false
     }

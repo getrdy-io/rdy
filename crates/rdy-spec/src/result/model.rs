@@ -1,9 +1,12 @@
 //! The structs of the JSON result (01 section 5), matching `schema/result.v1.schema.json` field for field.
 //!
-//! Reading follows the schema's rules: fields this version does not know are ignored, a field the schema
-//! requires must be present, and every open value (see [`super::codes`]) is accepted. Writing emits
-//! fields in schema order. A field the schema allows to be `null` is written as `null` when unset. A
-//! field it does not allow to be `null` is left out when unset.
+//! Reading follows the schema's rules: fields this version does not know are ignored, and every open
+//! value (see [`super::codes`]) is accepted. A field typed as a plain value without a default must be
+//! present. A field typed `Option` may also be missing, which reads as `null`. So reading is a little
+//! more lenient than the schema: a few fields the schema lists as required (such as `fix`, `observed`
+//! and `partial` of a check) read as `null` when missing, and the schema's size caps are not checked
+//! here. Writing emits fields in schema order. A field the schema allows to be `null` is written as
+//! `null` when unset. A field it does not allow to be `null` is left out when unset.
 //!
 //! Timestamps and the run id are kept as text. This crate has no clock and no UUID generator. The
 //! producer writes UTC timestamps with milliseconds and a random v4 UUID.
@@ -451,7 +454,7 @@ pub struct Identity {
     pub user: Option<String>,
     /// Effective uid 0 on Unix, a high integrity token on Windows.
     pub elevated: bool,
-    /// The Kubernetes identity in use, `null` when no cluster was used.
+    /// The Kubernetes identity in use. `null` when no k8s check ran.
     #[serde(default)]
     pub kube: Option<KubeIdentity>,
 }
@@ -479,9 +482,13 @@ pub struct KubeIdentity {
     /// The API server URL.
     #[serde(default)]
     pub server: Option<String>,
-    /// The user entry named in the kubeconfig context.
+    /// The authenticated user from `SelfSubjectReview`. When that API is missing or the call fails, the
+    /// user entry named in the kubeconfig context, with `user_verified` false.
     #[serde(default)]
     pub user: Option<String>,
+    /// `true` when `user` came from `SelfSubjectReview`. `false` when it is the kubeconfig user, which
+    /// the API server did not verify.
+    pub user_verified: bool,
     /// Base name of the kubeconfig credential plugin that ran, if any.
     #[serde(default)]
     pub exec_plugin: Option<String>,

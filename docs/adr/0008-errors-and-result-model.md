@@ -1,6 +1,6 @@
 # ADR 0008: Error handling and the result model; Timeout and Skipped are outcomes, never crashes
 
-- Status: Accepted (revised 2026-10-28 after cli-ux and security-reviewer review); decision 3 refined by ADR 0013
+- Status: Accepted (revised 2026-10-28 after cli-ux and security-reviewer review); decision 3 refined by ADR 0013; decisions 4 and 7 amended 2026-10-28 in M1-009 (ADR 0016 timing, Ctrl-C, new codes, `report_write`)
 - Date: 2026-10-27
 
 ## Context
@@ -41,8 +41,9 @@ usage, 70 internal. We must separate "the environment failed a check" from "rdy 
    The summary counts them apart: `0 blocks, 1 warning, 3 passed, 1 required check not run`.
 4. **Exit 64** when the input must change: bad flags, unreadable spec, parse or validation error,
    missing signature without `--allow-unsigned`, any invalid signature. **Exit 70** when `rdy` cannot
-   deliver its result: report directory not writable (the terminal result still prints in full, ADR
-   0003), runtime failed, a panic outside a check.
+   deliver its result: the report directory cannot be created (before the first check, ADR 0016), the
+   report files cannot be written at the end (the terminal result still prints in full, ADR 0003),
+   Ctrl-C (M1: the run stops with no report; 07 section 5.1), runtime failed, a panic outside a check.
 5. **Errors.** Each library crate has one public `thiserror` enum (`SpecError`, `SignatureError`,
    `EngineError`, `ReportError`), `#[non_exhaustive]`, with `fn hint(&self) -> &str`, never optional.
    Where the honest fix is "this is a bug", the hint says `this is a bug in rdy. Please report it at
@@ -53,9 +54,13 @@ usage, 70 internal. We must separate "the environment failed a check" from "rdy 
    on acme-platform.yaml does not match the file. It may have been changed after signing.`
 7. **`--json` on any non-verdict exit** prints one object on stdout, and the same text on stderr:
    `{"error": {"code": "spec_signature_invalid", "message": "...", "fix": "..."}, "verdict": null,
-   "complete": false}`. Codes are stable and part of `rdy/v1` (ADR 0007): `usage`, `spec_parse`,
-   `spec_invalid`, `spec_unsigned`, `spec_signature_invalid`, `spec_key_unknown`, `report_write`,
-   `internal`. A partial result after exit 70 carries `"complete": false`.
+   "complete": false}`. Codes are stable and part of `rdy/v1` (ADR 0007): `usage`, `spec_unreadable`
+   (exit 64), `spec_parse`, `spec_invalid`, `spec_unsigned`, `spec_signature_invalid`,
+   `spec_key_unknown`, `spec_expired`, `trust_store_insecure` (01 section 4.8), `report_write`,
+   `interrupted` (exit 70, Ctrl-C), `internal`. `report_write` is an error object only when no verdict
+   exists: the report directory could not be created before the first check, or `rdy report` or
+   `rdy bundle` could not write. When a verdict exists and the files cannot be written, stdout holds the
+   Report with `"complete": false` and the error is on stderr (07 section 4.1).
 8. **Panics.** Release profile keeps `panic = "unwind"` so a panicking check is caught by its join
    handle and becomes `Error` with "internal error in <id>" and the bug hint. The panic hook logs the
    message only, never environment or arguments.

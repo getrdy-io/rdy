@@ -688,6 +688,10 @@
             "object",
             "null"
           ],
+          "description": "null when no k8s check ran. When an object, user_verified is required.",
+          "required": [
+            "user_verified"
+          ],
           "properties": {
             "context": {
               "type": [
@@ -708,8 +712,12 @@
                 "string",
                 "null"
               ],
-              "description": "The user entry named in the kubeconfig context. The authenticated user from SelfSubjectReview replaces it once that call is allowed.",
+              "description": "The authenticated user from SelfSubjectReview. When that API is missing or the call fails, the user entry named in the kubeconfig context, with user_verified false.",
               "maxLength": 4096
+            },
+            "user_verified": {
+              "description": "true when user came from SelfSubjectReview; false when it is the kubeconfig user, not verified by the API server.",
+              "type": "boolean"
             },
             "exec_plugin": {
               "description": "Base name of the kubeconfig credential plugin that ran, if any.",
@@ -1556,7 +1564,7 @@
           ],
           "properties": {
             "code": {
-              "description": "Stable code: usage, spec_parse, spec_invalid, spec_unsigned, spec_signature_invalid, spec_key_unknown, spec_expired, trust_store_insecure, report_write, internal. Open.",
+              "description": "Stable code: usage, spec_unreadable, spec_parse, spec_invalid, spec_unsigned, spec_signature_invalid, spec_key_unknown, spec_expired, trust_store_insecure, report_write, interrupted, internal. Open.",
               "$ref": "#/$defs/OpenCode"
             },
             "message": {

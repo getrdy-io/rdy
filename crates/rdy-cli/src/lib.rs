@@ -20,6 +20,8 @@ use clap::{Arg, ArgAction, CommandFactory, FromArgMatches};
 
 #[doc(hidden)]
 pub mod cli;
+#[doc(hidden)]
+pub mod password;
 
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
 
@@ -66,6 +68,11 @@ where
     T: Into<OsString> + Clone,
 {
     let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    // A password on argv is refused before clap sees it, so that the refusal wins over every other
+    // usage error and the value is never parsed (07 section 10).
+    if password::argv_has_password_flag(&args) && takes_key_password(&command_path(&args)) {
+        return password::refuse_argv_password(stderr);
+    }
     let parsed = command()
         .try_get_matches_from(&args)
         .and_then(|matches| Cli::from_arg_matches(&matches));
@@ -73,6 +80,11 @@ where
         Ok(cli) => dispatch(&cli.command, stdout, stderr),
         Err(err) => report_parse_error(&err, &args, stdout, stderr),
     }
+}
+
+/// True for the commands that read a key password: `spec sign` and `spec keygen`.
+fn takes_key_password(path: &str) -> bool {
+    matches!(path, "rdy spec sign" | "rdy spec keygen")
 }
 
 /// Run a parsed command.

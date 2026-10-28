@@ -17,7 +17,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-004 | [#9](https://github.com/getrdy-io/rdy/pull/9) | 2026-10-28 | Exit test proven locally in a scratch copy, not in CI (M1-005 adds CI). Wrappers that keep I/O crates out of check crates are not set; they need `ci/check-crate-deps.toml` from the lint-wall ticket. `reqwest` is banned per 05 and ADR 0014; the M2 upload ticket must lift it with a reviewed change
 
-- M1-005 | todo | | CI lint and deny job: fmt, clippy, doc, cargo-deny, zizmor (SEC-01)
+- M1-005 | [#14](https://github.com/getrdy-io/rdy/pull/14) | 2026-10-28 | zizmor ran with --offline locally only (online audits run in CI); the exit-test throwaway PRs are run by the coordinator
 
 - M1-006 | todo | | CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006)
 
@@ -25,7 +25,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-008 | [#3](https://github.com/getrdy-io/rdy/pull/3) | 2026-10-28 | Founder-only, account side: hardware-key MFA on registrar and Cloudflare, recovery codes offline, registrar lock, DNSSEC (DS at registrar), CAA records, HSTS after the Pages site is live. The script cannot read MFA. First run 2026-10-28 shows 0 of 4 passing; rerun `scripts/check-domain.sh` after the founder acts and paste the PASS output into the PR. Also: install whois on the founder machine (.io has no RDAP), shellcheck not run (not installed here) | backlog corrected 2026-10-28: account steps moved to Founder hand steps
 
-- M1-009 | todo | | Close the planning pass: apply plan corrections and amend ADRs 0006 and 0015
+- M1-009 | [#13](https://github.com/getrdy-io/rdy/pull/13) | 2026-10-28 | none for the repo: CLAUDE.md edits C-1 to C-9 (rust-architect's exact text) applied by the coordinator in this PR; ADR 0015 sign-off is security-reviewer's in this PR; PC-35 and PC-37 left as cosmetic
 
 - M1-010 | todo | | sign-release with cosign keyless, SHA256SUMS and self-verify (SEC-06, SEC-07)
 
@@ -43,7 +43,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-017 | todo | | Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits
 
-- M1-018 | todo | | Scalar types Quantity, Duration, Version and Target with strict grammars
+- M1-018 | [#20](https://github.com/getrdy-io/rdy/pull/20) | 2026-10-28 | version constraints such as ">=4.2" are not a type: metadata.version stays free text per 01 (not evaluated); Version has no ordering yet (first comparing check adds it); CheckParams wiring is M1-019, M1-024, M1-025; timeout range 1s to 60s is checked by the field that uses Duration
 
 - M1-019 | todo | | Two-step check decoding with Unknown and Unsupported variants
 
@@ -231,7 +231,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-111 | todo | | k8s.rbac (SelfSubjectReview, access reviews, non-resource items, escalate and bind as warn)
 
-- M1-112 | todo | | Refuse --password on argv and read key passwords from env or file
+- M1-112 | [#19](https://github.com/getrdy-io/rdy/pull/19) | 2026-10-28 | The "sign a spec in CI" half of the exit test is proved at the helper level (`RDY_KEY_PASSWORD` and `--password-file -` through `rdy_cli::password`); `spec sign` itself is M1-125, which must call `read_key_password`. `--password` is refused by a raw argv check, not a hidden clap flag, so it wins over missing-argument errors; only `spec sign` and `spec keygen` get the reason. Windows checks the file type and refuses reparse points but not ACLs; its file tests run on the Windows CI leg only (compiled here, not run). `read_key_password` now takes stderr for the env-variable note (tty only); it adds the `rustix` dependency (Unix only) for O_NOFOLLOW and geteuid without unsafe.
 
 - M1-113 | todo | | k8s.nodes allocatable, node filters, conditions, zones and pod-count limit
 

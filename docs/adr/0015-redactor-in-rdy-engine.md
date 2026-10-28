@@ -1,6 +1,7 @@
 # ADR 0015: The minimal redactor lives in rdy-engine and runs on whole strings before any cap or write
 
-- Status: Accepted (2026-10-28, after the security-reviewer review of ADRs 0013 to 0016)
+- Status: Accepted (security-reviewer sign-off in PR #13, 2026-10-28). First accepted 2026-10-28 after
+  the security-reviewer review of ADRs 0013 to 0016; decision 10 added in M1-009 from 04 section 3.
 - Date: 2026-10-28
 
 ## Context
@@ -39,6 +40,18 @@ at either layer leaves a fragment no pattern matches.
 8. Checks still record env var names, not values, and strip URL userinfo themselves. The redactor is
    the second line, not the first.
 9. The M1 corpus includes, for each facade cap, a canary at offsets cap minus 1 to cap minus 64.
+10. **Span union, keyed tags, `Redacted<T>` and `ring`** (04 sections 3.1 to 3.4). Every rule runs on
+    the original text and reports `(start, end, rule, priority)`. Overlapping or touching spans merge
+    into one span covering their union, named after the highest priority rule in it, and the output is
+    written once, so no rule sees a placeholder and no partly overlapped span leaves bytes behind. The
+    placeholder is `[REDACTED:<rule>:<tag>]`; the tag is the first 4 bytes of HMAC-SHA256 over the
+    secret bytes, under a 32-byte key made once per process from `ring::rand::SystemRandom`, held in
+    memory only and never written, logged or put in an error. HMAC, SHA-256 and the RNG come from
+    `ring`; nothing hashes raw content (no raw digests). `Redacted<T>` has no public constructor,
+    `From`, `Default`, `Deserialize` or `DerefMut`, and `RedactedReport` is `Redacted<Report>`.
+    `redact_report` is a schema-aware walk over the report with its own per-call counts. Rules are
+    compiled in: a spec can only add. Redaction fails closed: an error drops the string, never falls
+    back to raw text, and if the RNG cannot make a key rdy exits 70.
 
 ## Consequences
 
@@ -56,6 +69,8 @@ at either layer leaves a fragment no pattern matches.
 | Redact at render time | Three renderers, three chances to forget; the JSON on stdout would bypass it. |
 | Cap, then redact | Leaves unmatchable fragments; redaction can lengthen a value past its cap. |
 | Raise facade caps until truncation is rare | Moves the boundary, does not remove it, and costs memory on big hosts. |
+| Highest priority span wins where spans overlap | Leaves the bytes of the lower priority span that stick out (01 review, security MF-04). |
+| Unkeyed hash as the tag | A hash of a short password is a lookup table. |
 
 ## Tickets implied
 

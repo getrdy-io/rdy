@@ -97,7 +97,10 @@ use `--out-dir` or `--no-report` to keep your checkout clean.
   never conflict. The release ticket collects the fragments into `CHANGELOG.md`. The PR template has the box.
 - Sign off your commits (`git commit -s`). This is the
   [Developer Certificate of Origin](https://developercertificate.org/): you wrote
-  it, or you have the right to submit it, under Apache-2.0.
+  it, or you have the right to submit it, under Apache-2.0. CI fails a PR with a commit that has no
+  `Signed-off-by:` line. To fix the last commit run `git commit --amend -s`. For a whole branch run
+  `git rebase --signoff origin/main`, then force-push. The check accepts any well-formed
+  `Signed-off-by: Name <email>` line. It does not compare the name or email with the commit author.
 - If an AI tool wrote most of the change, say so in the PR description. That is
   fine. You are still responsible for reading it and understanding it.
 - Reviews are direct and about the code. Expect questions about privileges,

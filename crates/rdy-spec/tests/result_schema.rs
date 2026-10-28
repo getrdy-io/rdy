@@ -54,17 +54,152 @@ fn is_valid(v: &Validator, instance: &Value) -> bool {
     v.iter_errors(instance).next().is_none()
 }
 
-/// The first fenced `json` block after the heading that starts with `heading`.
+/// The first fenced `json` block inside the section whose `###` heading starts with `heading`, and not
+/// beyond the next heading. Line endings are normalized first, so a Windows checkout with CRLF reads
+/// the same as a Unix one.
 fn sample(heading: &str) -> TestResult<Value> {
-    let doc = std::fs::read_to_string(repo_root().join("docs/plan/01-spec-format.md"))?;
+    let doc = std::fs::read_to_string(repo_root().join("docs/plan/01-spec-format.md"))?
+        .replace("\r\n", "\n");
     let start = doc
         .find(&format!("\n### {heading}"))
         .ok_or("heading not found")?;
-    let rest = &doc[start..];
-    let open = rest.find("```json\n").ok_or("no json block")? + "```json\n".len();
-    let body = &rest[open..];
+    let after_heading = start + "\n### ".len();
+    let end = doc[after_heading..]
+        .find("\n#")
+        .map_or(doc.len(), |i| after_heading + i);
+    let section = &doc[start..end];
+    let open = section
+        .find("```json\n")
+        .ok_or("no json block in section")?
+        + "```json\n".len();
+    let body = &section[open..];
     let close = body.find("\n```").ok_or("unterminated json block")?;
     Ok(serde_json::from_str(&body[..close])?)
+}
+
+/// JSON with object keys kept in file order, which `serde_json::Value` does not do. Strings are kept
+/// because `$ref` targets are strings. Other leaves are dropped.
+#[derive(Debug)]
+enum Ordered {
+    Obj(Vec<(String, Ordered)>),
+    Arr(Vec<Ordered>),
+    Str(String),
+    Other,
+}
+
+impl Ordered {
+    fn get(&self, key: &str) -> Option<&Ordered> {
+        match self {
+            Self::Obj(fields) => fields.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Ordered {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = Ordered;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("any JSON value")
+            }
+            fn visit_bool<E>(self, _: bool) -> Result<Ordered, E> {
+                Ok(Ordered::Other)
+            }
+            fn visit_i64<E>(self, _: i64) -> Result<Ordered, E> {
+                Ok(Ordered::Other)
+            }
+            fn visit_u64<E>(self, _: u64) -> Result<Ordered, E> {
+                Ok(Ordered::Other)
+            }
+            fn visit_f64<E>(self, _: f64) -> Result<Ordered, E> {
+                Ok(Ordered::Other)
+            }
+            fn visit_unit<E>(self) -> Result<Ordered, E> {
+                Ok(Ordered::Other)
+            }
+            fn visit_str<E>(self, s: &str) -> Result<Ordered, E> {
+                Ok(Ordered::Str(s.to_owned()))
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut a: A,
+            ) -> Result<Ordered, A::Error> {
+                let mut items = Vec::new();
+                while let Some(item) = a.next_element()? {
+                    items.push(item);
+                }
+                Ok(Ordered::Arr(items))
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut a: A,
+            ) -> Result<Ordered, A::Error> {
+                let mut fields = Vec::new();
+                while let Some(entry) = a.next_entry::<String, Ordered>()? {
+                    fields.push(entry);
+                }
+                Ok(Ordered::Obj(fields))
+            }
+        }
+        d.deserialize_any(V)
+    }
+}
+
+/// Follows a `$ref` to `#/$defs/<Name>`. Returns the node and the definition name, if any.
+fn resolve<'a>(node: &'a Ordered, defs: &'a Ordered) -> TestResult<(&'a Ordered, Option<&'a str>)> {
+    match node.get("$ref") {
+        Some(Ordered::Str(r)) => {
+            let name = r.strip_prefix("#/$defs/").ok_or("unexpected $ref form")?;
+            Ok((defs.get(name).ok_or("dangling $ref")?, Some(name)))
+        }
+        _ => Ok((node, None)),
+    }
+}
+
+/// Checks a written value against the schema node for it: every object key is a schema property and
+/// the keys come in the schema's `properties` order. Free-form objects (no `properties`) are skipped.
+///
+/// An `Action` is checked only up to its common fields. The fields that depend on `kind` are kept in a
+/// map until the action log ticket types them, so they come out sorted by name, not in schema order.
+fn check_order(out: &Ordered, node: &Ordered, defs: &Ordered, path: &str) -> TestResult {
+    let (node, name) = resolve(node, defs)?;
+    match out {
+        Ordered::Arr(items) => {
+            let item_node = node
+                .get("items")
+                .ok_or_else(|| format!("{path}: no items"))?;
+            for item in items {
+                check_order(item, item_node, defs, path)?;
+            }
+        }
+        Ordered::Obj(fields) => {
+            let Some(Ordered::Obj(props)) = node.get("properties") else {
+                return Ok(());
+            };
+            let keep = if name == Some("Action") {
+                6
+            } else {
+                usize::MAX
+            };
+            let mut last_rank = None;
+            for (key, value) in fields.iter().take(keep) {
+                let rank = props
+                    .iter()
+                    .position(|(k, _)| k == key)
+                    .ok_or_else(|| format!("{path}/{key} is not a schema property"))?;
+                if last_rank.is_some_and(|prev| rank <= prev) {
+                    return Err(format!("{path}/{key} is out of schema order").into());
+                }
+                last_rank = Some(rank);
+                let child = props.get(rank).map(|(_, v)| v).ok_or("rank in range")?;
+                check_order(value, child, defs, &format!("{path}/{key}"))?;
+            }
+        }
+        Ordered::Str(_) | Ordered::Other => {}
+    }
+    Ok(())
 }
 
 fn canonical(v: &Value) -> TestResult<String> {
@@ -90,6 +225,40 @@ fn samples_7_2_and_7_3_validate_and_round_trip() -> TestResult {
         // The text form reads back to the same report.
         let text = serde_json::to_string_pretty(&report)?;
         assert_eq!(serde_json::from_str::<Report>(&text)?, report);
+    }
+    Ok(())
+}
+
+/// The typed model writes its keys in the schema's `properties` order, so a writer that serializes the
+/// model gets schema order for free. This does not test the writer itself (indent, trailing newline,
+/// `<` escapes, size caps). That layout is M1-055's job.
+#[test]
+fn typed_model_writes_keys_in_schema_order() -> TestResult {
+    let schema_text = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("schema/result.v1.schema.json"),
+    )?;
+    let schema: Ordered = serde_json::from_str(&schema_text)?;
+    let defs = schema.get("$defs").ok_or("no $defs")?;
+    let root = defs.get("Report").ok_or("no Report")?;
+    for heading in ["7.2 ", "7.3 "] {
+        let report: Report = serde_json::from_value(sample(heading)?)?;
+        let text = serde_json::to_string(&report)?;
+        let written: Ordered = serde_json::from_str(&text)?;
+        check_order(&written, root, defs, heading.trim())?;
+    }
+    // The checker is not vacuous: swapped keys are caught.
+    let swapped: Ordered = serde_json::from_str(r#"{"kind":"Report","api_version":"rdy/v1"}"#)?;
+    assert!(check_order(&swapped, root, defs, "swapped").is_err());
+    let items = sample("7.4 ")?;
+    for item in items.as_array().ok_or("array")? {
+        let result: CheckResult = serde_json::from_value(item.clone())?;
+        let written: Ordered = serde_json::from_str(&serde_json::to_string(&result)?)?;
+        check_order(
+            &written,
+            defs.get("CheckResult").ok_or("no CheckResult")?,
+            defs,
+            "7.4",
+        )?;
     }
     Ok(())
 }
