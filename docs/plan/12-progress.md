@@ -65,7 +65,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-028 | todo | | linux-x64 root job: nextest archive under sudo, root_* filter, strace installed
 
-- M1-029 | todo | | clap command tree in rdy-cli exposed as library rdy_cli
+- M1-029 | [#12](https://github.com/getrdy-io/rdy/pull/12) | 2026-10-28 | `spec init` is M3 (07 section 1) so it is not in the tree; `version --json` waits for the Version schema and exits 70; usage errors print generic text with no flag names or did-you-mean until M1-030; `--help` puts each option text on the line below the flag (clap layout), see 07 Appendix A note
 
 - M1-030 | todo | | No-echo rule for usage errors: canaries and near-miss flags (extends M1 error types)
 

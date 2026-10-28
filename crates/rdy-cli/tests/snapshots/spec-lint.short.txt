@@ -1,0 +1,14 @@
+Check a spec file for mistakes
+
+Usage: rdy spec lint [OPTIONS] <SPEC>
+
+Arguments:
+  <SPEC>  The spec file, for example acme-platform.yaml
+
+Options:
+      --json             Print a JSON result on stdout
+      --color <WHEN>     Colors: auto, always, never [default: auto]
+      --progress <WHEN>  Live progress: auto, never [default: auto]
+  -q, --quiet            Print less
+  -v, --verbose          Print more
+  -h, --help             Print help (see more with '--help')

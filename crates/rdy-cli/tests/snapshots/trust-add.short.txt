@@ -1,0 +1,16 @@
+Trust a vendor key for one product
+
+Usage: rdy trust add [OPTIONS] --key <KEY> <PRODUCT>
+
+Arguments:
+  <PRODUCT>  The product the key may sign for, for example acme-platform
+
+Options:
+      --key <KEY>        The vendor's public key: a .pub file, or the key text
+      --yes              Do not ask. For scripts
+      --note <TEXT>      A note for yourself
+      --color <WHEN>     Colors: auto, always, never [default: auto]
+      --progress <WHEN>  Live progress: auto, never [default: auto]
+  -q, --quiet            Print less
+  -v, --verbose          Print more
+  -h, --help             Print help (see more with '--help')

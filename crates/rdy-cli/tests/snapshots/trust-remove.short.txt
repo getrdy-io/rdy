@@ -1,0 +1,14 @@
+Stop trusting a key
+
+Usage: rdy trust remove [OPTIONS] <PRODUCT>
+
+Arguments:
+  <PRODUCT>  The product to stop trusting, for example acme-platform
+
+Options:
+      --key-id <ID>      Remove only the key with this id
+      --color <WHEN>     Colors: auto, always, never [default: auto]
+      --progress <WHEN>  Live progress: auto, never [default: auto]
+  -q, --quiet            Print less
+  -v, --verbose          Print more
+  -h, --help             Print help (see more with '--help')

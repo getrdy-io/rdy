@@ -1,0 +1,16 @@
+Check a spec's signature without running any checks
+
+Usage: rdy verify [OPTIONS] <SPEC>
+
+Arguments:
+  <SPEC>  The spec file, for example acme-platform.yaml
+
+Options:
+      --sig <FILE>       Read the signature from this file
+      --key <KEY>        Check against this public key only, for this command
+      --json             Print a JSON result on stdout
+      --color <WHEN>     Colors: auto, always, never [default: auto]
+      --progress <WHEN>  Live progress: auto, never [default: auto]
+  -q, --quiet            Print less
+  -v, --verbose          Print more
+  -h, --help             Print help (see more with '--help')

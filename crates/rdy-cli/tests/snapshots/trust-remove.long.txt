@@ -1,0 +1,40 @@
+Stop trusting a key
+
+Removes the key for a product from the trust file you can write: yours as a
+normal user, the system file as root. Specs signed by it are refused after
+this. If the product has two keys, say which one with --key-id.
+
+Usage: rdy trust remove [OPTIONS] <PRODUCT>
+
+Arguments:
+  <PRODUCT>
+          The product to stop trusting, for example acme-platform
+
+Options:
+      --key-id <ID>
+          Remove only the key with this id, as 'rdy trust list'
+          shows it
+
+      --color <WHEN>
+          Colors: auto, always, never [default: auto]
+
+      --progress <WHEN>
+          Live progress: auto, never [default: auto]
+
+  -q, --quiet
+          Print less
+
+  -v, --verbose
+          Print more
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Examples:
+  Stop trusting a vendor:
+    rdy trust remove acme-platform
+
+Exit codes:
+  0   Key removed
+  64  Not removed: no such key, or the product has two keys and no --key-id
+  70  Internal error
