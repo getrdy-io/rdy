@@ -365,7 +365,11 @@ fn expires_must_be_the_full_utc_form() {
 }
 
 fn at(secs: u64) -> SystemTime {
-    UNIX_EPOCH + Duration::from_secs(secs)
+    // `UNIX_EPOCH + Duration` panics where the sum does not fit (Windows), so add with a check.
+    match UNIX_EPOCH.checked_add(Duration::from_secs(secs)) {
+        Some(time) => time,
+        None => panic!("{secs} seconds after 1970 does not fit in SystemTime"),
+    }
 }
 
 #[test]

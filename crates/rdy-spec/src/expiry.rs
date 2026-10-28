@@ -3,6 +3,13 @@
 //! The time is `YYYY-MM-DDTHH:MM:SSZ`, in UTC, and nothing else. The comparison needs no calendar crate:
 //! it turns the date into a count of days since 1970-01-01 with the proleptic Gregorian rules and back.
 //! The clock is passed in, so tests never read the real one.
+//!
+//! Cross-platform: `SystemTime` holds a different range on each OS. On Unix it is seconds and nanoseconds
+//! from 1970 in an `i64`. On Windows it is 100 ns ticks from 1601 in an `i64` (a FILETIME), which ends
+//! in the year 30828. `UNIX_EPOCH + Duration` panics when the sum does not fit, so nothing here builds an
+//! instant. The code only subtracts with `duration_since`, which returns an error and never panics, and
+//! a failed subtraction reads as the epoch. Tests build instants with `checked_add`, and stay inside
+//! the year 9999, which every OS can hold.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -83,8 +90,13 @@ mod tests {
 
     use super::*;
 
+    /// The year 9999, the latest date a spec can name, and a time every OS can hold.
+    const END_OF_9999: u64 = 253_402_300_799;
+
     fn at(secs: u64) -> SystemTime {
-        UNIX_EPOCH + Duration::from_secs(secs)
+        UNIX_EPOCH
+            .checked_add(Duration::from_secs(secs))
+            .expect("this instant fits in SystemTime on every OS")
     }
 
     #[test]
@@ -157,7 +169,7 @@ mod tests {
 
     #[test]
     fn no_expiry_never_expires_and_a_bad_one_fails_closed() {
-        assert_eq!(check_not_expired(None, at(u64::MAX / 4)), Ok(()));
+        assert_eq!(check_not_expired(None, at(END_OF_9999)), Ok(()));
         assert_eq!(
             check_not_expired(Some("2027-01-31"), at(0)),
             Err(SpecError::BadExpires)
@@ -165,8 +177,28 @@ mod tests {
     }
 
     #[test]
+    fn an_instant_the_os_cannot_hold_is_not_built_and_the_latest_date_still_compares() {
+        // Windows cannot hold a time this far out, so the add reports it instead of panicking.
+        let huge = UNIX_EPOCH.checked_add(Duration::from_secs(u64::MAX / 4));
+        if let Some(huge) = huge {
+            assert_eq!(check_not_expired(None, huge), Ok(()));
+        }
+        let expires = Some("9999-12-31T23:59:59Z");
+        assert_eq!(check_not_expired(expires, at(END_OF_9999)), Ok(()));
+        assert_eq!(
+            check_not_expired(expires, at(END_OF_9999 + 1)),
+            Err(SpecError::Expired {
+                expired_on: "9999-12-31".to_owned(),
+                today: "10000-01-01".to_owned(),
+            })
+        );
+    }
+
+    #[test]
     fn a_clock_before_1970_expires_nothing() {
-        let before = UNIX_EPOCH - Duration::from_secs(10);
+        let before = UNIX_EPOCH
+            .checked_sub(Duration::from_secs(10))
+            .expect("1969 fits in SystemTime on every OS");
         assert_eq!(
             check_not_expired(Some("1970-01-01T00:00:00Z"), before),
             Ok(())
