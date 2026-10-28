@@ -14,15 +14,21 @@ include = ["src/**", "Cargo.toml", "LICENSE"]
 # (see `rdy_engine::redact`). CI also keeps it out of the release binary (04 section 3.3).
 testing = []
 
+default = ["runtime"]
+# The scheduler and its tokio dependency (02, "Crate layout").
+runtime = ["dep:tokio"]
+
 [dependencies]
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 regex = { workspace = true, features = ["std", "perf", "unicode"] }
 ring = { workspace = true, features = ["alloc"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["rt", "sync", "time"], optional = true }
 
 [dev-dependencies]
 serde = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 trybuild = { workspace = true }
 
 [lints]

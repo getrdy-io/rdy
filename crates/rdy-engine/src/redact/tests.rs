@@ -252,6 +252,19 @@ fn no_byte_of_a_matched_secret_survives() {
         format!("k:\n  y: 1\u{2028}password:\n {secret}"),
         format!("k:\n  y: 1\u{2029}password:\n {secret}"),
         format!("token: |\n  # {secret}"),
+        // Fifth review round: values that continue at the same column.
+        format!("password: [a,\n{secret}]"),
+        format!("password: {{\nv: {secret}}}"),
+        format!("password: \"a\n{secret}\""),
+        format!("{{\n\"password\": [\n\"{secret}\"\n]\n}}"),
+        format!("TOKEN=\"a\n{secret}\""),
+        format!("TOKEN='a\n{secret}'"),
+        format!("password: [[a], {{b: [\n{secret}]}}]\nnext: 1"),
+        format!("password: \"a\\\"\n{secret}\"\nnext: 1"),
+        format!("password: 'it''s\n{secret}'\nnext: 1"),
+        format!("password: [a,\n{secret}\nnext: 1"),
+        format!("password: \"a\nb\"{secret} x\nnext: 1"),
+        format!("password: [a,\nb]\n  {secret}\nnext: 1"),
     ];
     let r = redactor();
     for form in &forms {

@@ -107,6 +107,9 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
     // that value, so it is skipped. This also keeps the scan linear on input such as `pass=pass=...`.
     let mut covered_until = 0;
     let lines = OnceCell::new();
+    // What is known about the key line of the last key. Many keys on one line share it, so the lines
+    // below are scanned once per line, not once per key.
+    let mut line_ctx: Option<LineCtx> = None;
     for caps in assignment.captures_iter(text) {
         let (Some(whole), Some(key)) = (caps.get(0), caps.get(1)) else {
             continue;
@@ -118,24 +121,43 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
             continue;
         }
         let value = value_range(text, whole.end());
+        let lines = lines.get_or_init(|| Lines::new(text));
+        let line_start = lines.line_start(key.start());
+        let ctx = match &mut line_ctx {
+            Some(c) if c.start == line_start => c,
+            slot => slot.insert(LineCtx::new(text, line_start)),
+        };
         // A comment line has no continuation, so a key inside one takes only its own line. That also keeps
         // the scan below linear on a run of comment lines that all mention a key.
-        let lines = lines.get_or_init(|| Lines::new(text));
-        let body = if lines.is_comment(text, key.start()) {
+        let open_end = if ctx.is_comment {
             None
         } else {
-            // A quoted key with nothing after it, as in `{"password":` then `"x"}`, takes the next line.
-            let force_next = value.is_empty() && text[..key.start()].ends_with(['"', '\'']);
-            body_lines(text, lines, key.start(), value.end, force_next)
+            open_construct_end(text, lines, whole.end())
         };
-        if let Some(body) = body {
-            covered_until = body.end;
-            let from = if value.is_empty() {
-                body.start
-            } else {
-                value.start
+        // A quoted key with nothing after it, as in `{"password":` then `"x"}`, takes the next line.
+        let force_next = value.is_empty() && text[..key.start()].ends_with(['"', '\'']);
+        let body = if ctx.is_comment {
+            None
+        } else if open_end.is_some() || force_next {
+            let value_end = open_end.unwrap_or(value.end);
+            body_lines(text, lines, ctx.key_ws(text), value_end, force_next)
+        } else {
+            // The same for every key on this line, so it is computed once.
+            if ctx.body.is_none() {
+                ctx.body = Some(body_lines(text, lines, ctx.key_ws(text), value.end, false));
+            }
+            ctx.body.clone().flatten()
+        };
+        if open_end.is_some() || body.is_some() {
+            let end = open_end
+                .unwrap_or(0)
+                .max(body.as_ref().map_or(0, |b| b.end));
+            let from = match (&body, open_end) {
+                (Some(b), None) if value.is_empty() => b.start,
+                _ => value.start,
             };
-            out.push(from..body.end);
+            covered_until = end;
+            out.push(from..end);
         } else if !value.is_empty() {
             covered_until = value.end;
             // References, plain words and placeholders are exempt only when the value is one line
@@ -145,6 +167,111 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
             }
         }
     }
+}
+
+/// What is known about one key line: where it starts, whether it is a comment, how far its indent runs,
+/// and (once computed) the lines below it that belong to a value on this line.
+struct LineCtx {
+    start: usize,
+    is_comment: bool,
+    indent: usize,
+    body: Option<Option<Range<usize>>>,
+}
+
+impl LineCtx {
+    fn new(text: &str, start: usize) -> Self {
+        let line = &text[start..];
+        let rest = line.trim_start_matches([' ', '\t']);
+        Self {
+            start,
+            is_comment: rest.starts_with('#'),
+            indent: line.len() - rest.len(),
+            body: None,
+        }
+    }
+
+    /// The leading blanks of the key's line.
+    fn key_ws<'t>(&self, text: &'t str) -> &'t str {
+        &text[self.start..self.start + self.indent]
+    }
+}
+
+/// Where a quoted string or a `[` or `{` value that starts at `start` ends, if it does not end on the
+/// key's own line. It is followed across lines at any indent, honoring nesting, quotes and escapes, to its
+/// close or to the end of the text if it never closes. `None` if the value does not open one, or if it
+/// closes on the key's line (the line rules handle that). For a quote the result is the offset of the
+/// closing quote, so quotes stay in the output. For a bracket it is the offset after the closing bracket.
+/// Text glued to a closing quote is taken to the end of that line, as on the key's line.
+///
+/// The scan runs once per value, and the caller skips every key inside the span it returns.
+fn open_construct_end(text: &str, lines: &Lines, start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let first = *bytes.get(start)?;
+    let (mut depth, mut quote) = match first {
+        b'"' | b'\'' => (0_usize, Some(first)),
+        b'[' | b'{' => (1, None),
+        _ => return None,
+    };
+    let quote_only = depth == 0;
+    let key_line_end = lines.line_end(start).0;
+    let mut i = start + 1;
+    let closed_at = loop {
+        let Some(&b) = bytes.get(i) else {
+            break None;
+        };
+        match (quote, b) {
+            // A backslash escapes the next byte. Only ASCII bytes are compared, so a multi-byte
+            // character is never split.
+            (Some(_), b'\\') => i += 2,
+            (Some(q), b) if b == q => {
+                // YAML writes a quote inside a single-quoted string by doubling it.
+                if q == b'\'' && bytes.get(i + 1) == Some(&q) {
+                    i += 2;
+                } else if quote_only {
+                    break Some(i);
+                } else {
+                    quote = None;
+                    i += 1;
+                }
+            }
+            (Some(_), _) => i += 1,
+            (None, b'"' | b'\'') => {
+                quote = Some(b);
+                i += 1;
+            }
+            (None, b'[' | b'{') => {
+                depth += 1;
+                i += 1;
+            }
+            (None, b']' | b'}') => {
+                depth -= 1;
+                i += 1;
+                if depth == 0 {
+                    break Some(i);
+                }
+            }
+            (None, _) => i += 1,
+        }
+    };
+    let Some(end) = closed_at else {
+        // Never closes. Take everything to the end of the text.
+        let end = text.trim_end().len().max(start + 1);
+        return (end > key_line_end).then_some(end);
+    };
+    if end <= key_line_end {
+        return None;
+    }
+    if quote_only {
+        let glued = text[end + 1..]
+            .chars()
+            .next()
+            .is_some_and(|c| !(c.is_whitespace() || matches!(c, ',' | ';' | ')' | ']' | '}')));
+        if glued {
+            let close_line_end = lines.line_end(end).0;
+            return Some(text[..close_line_end].trim_end().len().max(end));
+        }
+    }
+    Some(end)
 }
 
 /// True if `pos` is inside one of the sorted, disjoint ranges.
@@ -330,13 +457,6 @@ impl Lines {
         let i = self.breaks.partition_point(|&(start, _)| start < pos);
         i.checked_sub(1).map_or(0, |j| self.breaks[j].1)
     }
-
-    /// True if the first non-blank character of the line that holds `pos` is `#`.
-    fn is_comment(&self, text: &str, pos: usize) -> bool {
-        text[self.line_start(pos)..]
-            .trim_start_matches([' ', '\t'])
-            .starts_with('#')
-    }
 }
 
 /// True if a line with indent `line_ws` and text `rest` still belongs to the value of a key whose line
@@ -378,16 +498,14 @@ fn continues_value(key_ws: &str, line_ws: &str, rest: &str) -> bool {
 /// against the corpus.
 ///
 /// Returns the span from the start of the first taken line to the end of the last, or `None` if no line
-/// is taken. `value_end` is the end of the key's value, on the key's line.
+/// is taken. `key_ws` is the indent of the key's line and `value_end` the end of the key's value.
 fn body_lines(
     text: &str,
     lines: &Lines,
-    key_start: usize,
+    key_ws: &str,
     value_end: usize,
     mut force_next: bool,
 ) -> Option<Range<usize>> {
-    let key_line = &text[lines.line_start(key_start)..];
-    let key_ws = &key_line[..key_line.len() - key_line.trim_start_matches([' ', '\t']).len()];
     let mut pos = lines.line_end(value_end).1?;
     let mut first = None;
     let mut last_end = 0;
@@ -547,8 +665,10 @@ mod tests {
     }
 
     #[test]
-    fn an_unterminated_quote_runs_to_the_end_of_the_line() {
-        assert_eq!(found("password=\"hunter2\nnext=1"), ["hunter2"]);
+    fn an_unterminated_quote_runs_to_the_end_of_the_text() {
+        assert_eq!(found("password=\"hunter2\nnext=1"), ["hunter2\nnext=1"]);
+        assert_eq!(found("password='hunter2\nnext=1\n"), ["hunter2\nnext=1"]);
+        assert_eq!(found("password=\"hunter2"), ["hunter2"]);
     }
 
     #[test]
@@ -568,7 +688,7 @@ mod tests {
 
     #[test]
     fn a_backslash_before_a_line_break_does_not_skip_it() {
-        assert_eq!(found("password=\"abc\\\nnext=1"), ["abc\\"]);
+        assert_eq!(found("password=\"abc\\\nnext=1"), ["abc\\\nnext=1"]);
     }
 
     #[test]
@@ -681,10 +801,10 @@ mod tests {
                 "password: correct horse\n  battery staple",
                 "correct horse\n  battery staple",
             ),
-            ("password: \"hunter\n  2\"", "hunter\n  2\""),
-            ("password: 'hunter\n  2'", "hunter\n  2'"),
-            ("password: {\n  a: hunter2\n}", "{\n  a: hunter2"),
-            ("password: [\n  hunter2\n]", "[\n  hunter2"),
+            ("password: \"hunter\n  2\"", "hunter\n  2"),
+            ("password: 'hunter\n  2'", "hunter\n  2"),
+            ("password: {\n  a: hunter2\n}", "{\n  a: hunter2\n}"),
+            ("password: [\n  hunter2\n]", "[\n  hunter2\n]"),
             ("password: null\n  hunter2", "null\n  hunter2"),
             ("password: ${DB}\n  hunter2", "${DB}\n  hunter2"),
             ("password: true\n  hunter2", "true\n  hunter2"),
@@ -700,7 +820,7 @@ mod tests {
             ("k:\n  y: 1\u{2029}password:\n hunter2", " hunter2"),
             ("password:\u{85}  hunter2", "  hunter2"),
             ("password:\u{2028}  hunter2\u{2029}next: 1", "  hunter2"),
-            ("password=\"a\\\u{85}b", "a\\"),
+            ("password=\"a\\\u{85}b", "a\\\u{85}b"),
         ] {
             assert_eq!(found(text), [want], "{text:?}");
         }
@@ -822,32 +942,144 @@ mod tests {
     }
 
     #[test]
-    fn many_assignments_on_one_line_stay_linear() {
-        let started = std::time::Instant::now();
-        let text = "pass=".repeat(100_000);
-        assert_eq!(found(&text).len(), 1);
-        for (unit, spans) in [
-            ("password:\n", 0),
-            ("- token: |\n", 1),
-            ("password:\n\n", 0),
-            ("password:\n# password:\n", 0),
-            ("password:\n  a\n", 100_000),
-            ("# password: x\n", 100_000),
-            ("password: \"a\"\n", 100_000),
+    fn a_quote_or_bracket_that_stays_open_is_followed_across_lines_at_any_indent() {
+        for (text, want) in [
+            ("password: [a,\nhunter2]", "[a,\nhunter2]"),
+            ("password: {\nv: hunter2}", "{\nv: hunter2}"),
+            ("password: \"a\nhunter2\"", "a\nhunter2"),
+            ("password: 'a\nhunter2'", "a\nhunter2"),
+            ("{\n\"password\": [\n\"hunter2\"\n]\n}", "[\n\"hunter2\"\n]"),
+            ("TOKEN=\"a\nhunter2\"", "a\nhunter2"),
+            ("TOKEN='a\nhunter2'\nnext=1", "a\nhunter2"),
+            // Nesting, quotes and escapes inside the value.
+            (
+                "password: [[a], {b: [\nhunter2]}]\nnext: 1",
+                "[[a], {b: [\nhunter2]}]",
+            ),
+            ("password: [\"]\",\nhunter2]\nnext: 1", "[\"]\",\nhunter2]"),
+            ("password: \"a\\\"\nhunter2\"\nnext: 1", "a\\\"\nhunter2"),
+            ("password: 'it''s\nhunter2'\nnext: 1", "it''s\nhunter2"),
+            // Never closes: to the end of the text.
+            ("password: [a,\nhunter2\nnext: 1", "[a,\nhunter2\nnext: 1"),
+            // Text glued to the closing quote is taken to the end of that line.
+            ("password: \"a\nb\"hunter2 x\nnext: 1", "a\nb\"hunter2 x"),
+            // The deeper-line rule applies after the close.
+            (
+                "password: [a,\nb]\n  hunter2\nnext: 1",
+                "[a,\nb]\n  hunter2",
+            ),
+            (
+                "  password: \"a\nb\"\n    hunter2\n  next: 1",
+                "a\nb\"\n    hunter2",
+            ),
         ] {
-            let text = unit.repeat(100_000);
-            assert_eq!(found(&text).len(), spans, "{unit:?}");
+            assert_eq!(found(text), [want], "{text:?}");
         }
-        let quoted = "password=\"a\" ".repeat(100_000);
-        assert_eq!(found(&quoted).len(), 100_000);
-        let placeholders = "[REDACTED:x:00000000] ".repeat(100_000) + "password=a";
-        assert_eq!(found(&placeholders), ["a"]);
-        let nulls = "password=null ".repeat(100_000);
-        assert_eq!(found(&nulls).len(), 1);
+    }
+
+    #[test]
+    fn a_quote_or_bracket_that_closes_on_the_key_line_is_left_to_the_line_rules() {
+        assert_eq!(found("password: [a, b]\nnext: 1"), ["[a, b]"]);
+        assert_eq!(found("password: {a: 1}\n"), ["{a: 1}"]);
+        assert_eq!(found("password: \"a\"\nnext: 1"), ["a"]);
+        assert!(found("password: [REDACTED:x:00000000]\nnext: 1").is_empty());
+        assert!(found("password: {{ .Values.pw }}\nnext: 1").is_empty());
+        assert_eq!(found("{\"a\": [1,\n2], \"password\": \"x\"}"), ["x"]);
+    }
+
+    /// Timing tests take turns, so they do not disturb each other's measurements.
+    static TIMING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn time_once(text: &str) -> (std::time::Duration, usize) {
+        let started = std::time::Instant::now();
+        let spans = found(text).len();
+        (started.elapsed(), spans)
+    }
+
+    /// Asserts that doubling the input does not much more than double the time. A quadratic rule shows a
+    /// ratio near 4, a linear one near 2.
+    ///
+    /// It works in debug and release alike: the size starts small and doubles until one run takes at
+    /// least 15 ms, then `make(n)` and `make(2n)` are timed alternately, three times each, and the best
+    /// time of each is compared.
+    fn assert_linear(name: &str, make: impl Fn(usize) -> String) {
+        let _turn = TIMING
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut n = 256;
+        while time_once(&make(n)).0 < std::time::Duration::from_millis(15) && n < (1 << 24) {
+            n *= 2;
+        }
+        let (small_text, large_text) = (make(n), make(2 * n));
+        let (mut small, mut large) = (std::time::Duration::MAX, std::time::Duration::MAX);
+        let mut spans = 0;
+        for _ in 0..3 {
+            small = small.min(time_once(&small_text).0);
+            let (took, found) = time_once(&large_text);
+            large = large.min(took);
+            spans = found;
+        }
+        let ratio = large.as_secs_f64() / small.as_secs_f64().max(1e-6);
+        eprintln!("{name}: n={n} ratio {ratio:.2}, {spans} spans");
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(60),
-            "took {:?}",
-            started.elapsed()
+            ratio < 3.0,
+            "{name}: doubling the input took {ratio:.2} times as long"
         );
+    }
+
+    #[test]
+    fn many_assignments_on_one_line_stay_linear() {
+        assert_linear("pass=", |n| "pass=".repeat(n));
+        assert_linear("quoted keys", |n| "password=\"a\" ".repeat(n));
+        assert_linear("placeholders", |n| {
+            "[REDACTED:x:00000000] ".repeat(n) + "password=a"
+        });
+        assert_linear("null", |n| "password=null ".repeat(n));
+    }
+
+    #[test]
+    fn many_keys_on_one_line_followed_by_many_lines_stay_linear() {
+        // One key line, so the lines below must be scanned once, not once per key.
+        assert_linear("keys then blank lines", |n| {
+            "password=\"a\" ".repeat(n) + &"\n".repeat(4 * n)
+        });
+        assert_linear("keys then comment lines", |n| {
+            "password=\"a\" ".repeat(n) + &"# c\n".repeat(4 * n)
+        });
+        assert_linear("keys then blank lines, CRLF", |n| {
+            "password=\"a\" ".repeat(n) + &"\r\n".repeat(4 * n)
+        });
+        // A huge indent is trimmed once per line, not once per key.
+        assert_linear("huge indent", |n| {
+            " ".repeat(8 * n) + &"password=\"a\" ".repeat(n / 4)
+        });
+        assert_linear("huge indent then lines", |n| {
+            " ".repeat(8 * n) + &"password=\"a\" ".repeat(n / 4) + &"\n".repeat(n)
+        });
+    }
+
+    #[test]
+    fn many_lines_stay_linear() {
+        assert_linear("password:", |n| "password:\n".repeat(n));
+        assert_linear("- token: |", |n| "- token: |\n".repeat(n));
+        assert_linear("password: blank", |n| "password:\n\n".repeat(n));
+        assert_linear("password: comment", |n| {
+            "password:\n# password:\n".repeat(n)
+        });
+        assert_linear("password: body", |n| "password:\n  a\n".repeat(n));
+        assert_linear("comment keys", |n| "# password: x\n".repeat(n));
+        assert_linear("quoted lines", |n| "password: \"a\"\n".repeat(n));
+    }
+
+    #[test]
+    fn open_quotes_and_brackets_stay_linear() {
+        // Each open value is followed once and the keys inside it are skipped.
+        assert_linear("open quotes", |n| "password=\"a\n".repeat(n));
+        assert_linear("open brackets", |n| "password=[a\n".repeat(n));
+        assert_linear("deep brackets", |n| "password=".to_owned() + &"[".repeat(n));
+        assert_linear("open then closed", |n| "password: [a,\nb]\n".repeat(n));
+        assert_linear("backslashes", |n| {
+            "password=\"".to_owned() + &"\\".repeat(n)
+        });
     }
 }
