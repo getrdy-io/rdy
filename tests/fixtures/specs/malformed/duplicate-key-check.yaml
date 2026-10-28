@@ -1,0 +1,9 @@
+# Synthetic fixture. Not a real spec.
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+checks:
+  - id: host.memory
+    min: 32Gi
+    min: 64Gi

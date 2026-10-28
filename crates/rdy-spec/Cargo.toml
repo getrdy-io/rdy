@@ -11,6 +11,7 @@ include = ["src/**", "Cargo.toml", "LICENSE"]
 
 [dependencies]
 serde = { workspace = true, features = ["std", "derive"] }
+serde-saphyr = { workspace = true, features = ["deserialize"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 
