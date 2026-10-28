@@ -1,0 +1,40 @@
+# Issue labels (docs/plan/10-devrel-and-launch.md, section 6).
+# This file is the source of truth. A maintainer creates the labels on GitHub with:
+#   gh label create <name> --color <color> --description "<description>" --force
+# Colors are hex without the leading #. Descriptions stay under 100 characters.
+- name: bug
+  color: d73a4a
+  description: Something is broken. Include the output of `rdy version`.
+- name: check request
+  color: 0e8a16
+  description: Propose a new check. Fill in the template.
+- name: good first issue
+  color: 7057ff
+  description: Small, well scoped, with a clear exit test.
+- name: help wanted
+  color: 008672
+  description: We would like a contributor to take this.
+- name: needs info
+  color: fbca04
+  description: Waiting for more detail from the reporter.
+- name: security-followup
+  color: b60205
+  description: Maintainers only. A hardening task from a security report or review.
+- name: launch-fix
+  color: e99695
+  description: A problem found in launch week that gets fixed first.
+- name: host
+  color: 1d76db
+  description: The host check family (host.*).
+- name: net
+  color: 1d76db
+  description: The network check family (net.*).
+- name: k8s
+  color: 1d76db
+  description: The Kubernetes check family (k8s.*).
+- name: cloud
+  color: 1d76db
+  description: The cloud account check family (aws.*, gcp.*, azure.*).
+- name: gpu
+  color: 1d76db
+  description: The GPU check family (gpu.*).

@@ -1,0 +1,13 @@
+[package]
+name = "rdy-spec"
+version = "0.1.0-alpha.0"
+description = "The rdy/v1 spec and result formats, signature checks and JSON schemas."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+include = ["src/**", "Cargo.toml"]
+
+[lints]
+workspace = true

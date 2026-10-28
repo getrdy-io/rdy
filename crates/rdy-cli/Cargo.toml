@@ -1,0 +1,24 @@
+[package]
+name = "rdy"
+version = "0.1.0-alpha.0"
+description = "Check an environment against a vendor's requirements before install day."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["readiness", "diagnostics", "preflight", "kubernetes", "on-prem"]
+categories = ["command-line-utilities"]
+# The package is `rdy`, the directory is `crates/rdy-cli` (ADR 0011).
+build = "build.rs"
+include = ["src/**", "build.rs", "Cargo.toml"]
+
+[[bin]]
+name = "rdy"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+
+[lints]
+workspace = true

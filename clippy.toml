@@ -1,0 +1,3 @@
+# unwrap_used and expect_used are denied in [workspace.lints.clippy]. Tests may use them.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

@@ -1,0 +1,3 @@
+# `cargo doc` fails on any rustdoc warning, locally and in CI.
+[build]
+rustdocflags = ["-D", "warnings"]
