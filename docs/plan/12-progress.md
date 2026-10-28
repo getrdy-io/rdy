@@ -33,7 +33,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-012 | todo | | First signed alpha, scripts/verify-release.sh and RELEASING.md
 
-- M1-013 | todo | | xtask skeleton with schema, docs, docs-lint and --check modes, dist and publish off
+- M1-013 | PR #TBD | | `schema` writes no file yet (M1-022 adds the schemars output). `docs` writes one placeholder page under `docs/src/content/docs/reference/spec/`, and M1-076 replaces it. The page is not published yet because the Starlight scaffold is not in the repo. `docs --check` and `docs-lint` are not in `ci.yml`. 09 section 10 puts the docs-gen job in M1, but the backlog has it only at M3-002, so the coordinator should file a correction. The banned-token list holds only the synthetic test hash until the coordinator supplies the real list. The check does not yet find stale generated files that no generator emits
 
 - M1-014 | todo | | install.sh core with root refusal, truncation guard, sha256 and shell tests (SEC-08)
 

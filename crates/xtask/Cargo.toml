@@ -1,0 +1,30 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+description = "Repo tasks for rdy: generated docs, the schema and the docs lint. Not published."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Repo tool. It never goes to crates.io (docs/plan/09-docs-site.md, section 2).
+publish = false
+
+# dist must not treat this binary as an app to package (docs/plan/06-release-and-distribution.md).
+[package.metadata.dist]
+dist = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true, features = ["std"] }
+clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+sha2 = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

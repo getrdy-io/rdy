@@ -1,0 +1,6 @@
+# SHA-256 of each banned token, as 64 lowercase hex characters, one per line.
+# The file holds hashes of lowercase tokens only. Never write a banned token in plain text in this repo.
+# Empty lines and lines that start with # are ignored.
+# The one entry below is the synthetic token that the xtask tests use. The coordinator replaces this
+# file with the real list.
+655f74be0126413d30708afddc3a5a4334f6b3577bf4ee3a83ad1a1297df0332
