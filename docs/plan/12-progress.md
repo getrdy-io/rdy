@@ -140,6 +140,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-063 | todo | | SEC-26 M1 redaction corpus, first 30 cases (0.1.0 gate)
 
 - M1-064 | todo | | Shared helpers: units, quantities, dotted version compare, nominal band, severity cap
+- M1-064 correction-06 | backlog corrected 2026-10-28: exit test uses 3.8 GiB against `4Gi`, not 3.7 GiB; the band max(5%, 256 MiB) puts the lowest passing value at 4 GiB minus 256 MiB = 3.75 GiB
 
 - M1-065 | todo | | cgroup helper for memory, cpu and controllers
 
