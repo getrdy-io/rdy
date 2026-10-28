@@ -69,7 +69,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-029 | [#12](https://github.com/getrdy-io/rdy/pull/12) | 2026-10-28 | `spec init` is M3 (07 section 1) so it is not in the tree; `version --json` waits for the Version schema and exits 70; usage errors print generic text with no flag names or did-you-mean until M1-030; `--help` puts each option text on the line below the flag (clap layout), see 07 Appendix A note
 
-- M1-030 | todo | | No-echo rule for usage errors: canaries and near-miss flags (extends M1 error types)
+- M1-030 | [#38](https://github.com/getrdy-io/rdy/pull/38) | 2026-10-28 | An unknown flag name is echoed only when it is a typo of a known flag (every long flag in the tree, hidden ones included, plus token, secret, yes, password), so `--hunter2`, UUIDs and hex keys get the generic line; typos that contain `--key` or `--allow-unsigned` are never echoed. Short flags get no did-you-mean. Also bans `parse_from`, `get_matches_from`, `get_matches_mut`, `update_from` and `Error::print`. The did-you-mean limit is capped at 2 and 07 now says swaps count as one. No test greps clippy.toml: M1-044 proves the lint wall. The M1-029 floor test now uses `--CANARY_7f3a=x`
 
 - M1-031 | todo | | rdy spec lint with errors, warnings and did-you-mean
 
