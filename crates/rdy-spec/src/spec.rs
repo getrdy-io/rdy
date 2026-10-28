@@ -42,7 +42,9 @@ macro_rules! checked_string {
                 if $valid(&value) {
                     Ok(Self(value))
                 } else {
-                    Err(SpecError::$error { value })
+                    Err(SpecError::$error {
+                        value: crate::error::echo_safe(&value),
+                    })
                 }
             }
 
