@@ -1,6 +1,6 @@
 # ADR 0014: The probe facade owns every check side effect, including TCP, proxy CONNECT, TLS and HTTP
 
-- Status: Accepted (2026-10-28, after the security-reviewer review of ADRs 0013 to 0016). Supersedes ADR 0009 decisions 1, 2, 3 and 5; tightens ADR 0004 decision 5.
+- Status: Accepted (2026-10-28, after the security-reviewer review of ADRs 0013 to 0016). Supersedes ADR 0009 decisions 1, 2, 3 and 5; tightens ADR 0004 decision 5. Decision 7 amended 2026-10-28 in M1-001 (PR #6, security MF-04): the lint wall lists std and kube items only, and the direct dependency allowlist keeps every other crate's I/O out of check crates.
 - Date: 2026-10-28
 
 ## Context
@@ -53,7 +53,9 @@ wildcards clippy cannot match, and nothing stopping a check crate from adding a 
      `rdy_engine::live_backend`.
    - Other crates' I/O APIs are not listed. The direct dependency allowlist below keeps those crates
      out of check crates. The guarantee is the wall and the allowlist together: a check crate can
-     reach the OS or a cluster only through the facade or the guarded kube client.
+     reach the OS or a cluster only through the facade or the guarded kube client. (Amendment, MF-04:
+     the first version promised a wall over every crate's I/O; clippy cannot match wildcards, so the
+     promise is narrowed to std and kube, with the allowlist covering the rest.)
    - A `tests/lint-wall` crate uses each item, and CI expects each one to fail.
    - `allow(clippy::disallowed_` is legal only in allowlisted facade files and the k8s client module.
    - **Direct dependency allowlist.** `ci/check-crate-deps.toml` names the allowed direct

@@ -1,0 +1,10 @@
+error[E0624]: associated function `new` is private
+  --> tests/compile_fail/private_constructor.rs:11:25
+   |
+11 |     let _ = LoadedSpec::new(sample());
+   |                         ^^^ private associated function
+   |
+  ::: src/loaded.rs
+   |
+   |     fn new(spec: Spec) -> Self {
+   |     -------------------------- private associated function defined here

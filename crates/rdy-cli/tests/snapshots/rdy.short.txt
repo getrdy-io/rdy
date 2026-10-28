@@ -1,0 +1,19 @@
+Check an environment against a vendor's requirements before install day
+
+Usage: rdy [OPTIONS] <COMMAND>
+
+Commands:
+  run      Run the checks in a spec and write the reports
+  verify   Check a spec's signature without running any checks
+  spec     Lint, sign and make keys for spec files
+  trust    Choose which vendor keys rdy trusts
+  version  Print the version
+  help     Print help for a command
+
+Options:
+      --color <WHEN>     Colors: auto, always, never [default: auto]
+      --progress <WHEN>  Live progress: auto, never [default: auto]
+  -q, --quiet            Print less
+  -v, --verbose          Print more
+  -h, --help             Print help (see more with '--help')
+  -V, --version          Print the version

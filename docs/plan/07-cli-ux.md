@@ -543,6 +543,12 @@ This is what the M1 build prints. The wording, the order of sections and the exa
 sets the column alignment, and the snapshot (the plain-file helper of 08) is taken from the first build
 whose text matches this. `-h` prints the compact form (the first sentence of each option, no examples).
 `--help` prints the full form shown here. Later milestones add their commands and flags to these pages.
+
+M1-029 built these pages. Three layout facts of the clap build change no wording. In `--help`, clap puts each
+option's text on the line below the flag. The global options come after the command's own options, and for
+`run` before its grouped sections (`Signature`, `Output`, `Scope`). `rdy spec` and `rdy trust` have no `help`
+subcommand, only `-h` and `--help`. The snapshots are in `crates/rdy-cli/tests/snapshots/`.
+
 Lines are 80 columns or fewer. `--timeout` (M2) and `--dry-run` (M2) are not in the M1 pages.
 
 **Flags by command** (moved here from section 1). `verify`: `--sig`, `--key`, `--json`, no `--allow-unsigned`.

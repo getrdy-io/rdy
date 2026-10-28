@@ -1,6 +1,6 @@
 # ADR 0002: Specs are signed with ed25519 in minisign format, verified before parsing, keys pinned per product
 
-- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review)
+- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review; decision 5 amended 2026-10-28 in M1-009: a declined `trust add` exits 64)
 - Date: 2026-10-27
 
 ## Context
@@ -32,8 +32,9 @@ envelope is a classic way to get crypto wrong. Untrusted bytes should not reach 
      by anyone but root. Written atomically, mode 0644. Not on any cut list.
 5. **Pinning only in `rdy trust add <product> --key <file or base64>`.** It prints key id and
    fingerprint and asks `Trust this key for <product>? [y/N]`; `--yes` skips the question; with no TTY
-   and no `--yes` it exits 64. `rdy run <spec> --key <pubkey>` verifies for that run only and writes
-   nothing. There is no `--trust-key`. `rdy trust list` and `rdy trust remove <product> [--key-id]`.
+   and no `--yes` it exits 64. A declined question (no, or an empty answer) also exits 64 and writes
+   nothing, so a chain with `&&` stops. `rdy run <spec> --key <pubkey>` verifies for that run only and
+   writes nothing. There is no `--trust-key`. `rdy trust list` and `rdy trust remove <product> [--key-id]`.
 6. **Key distribution in M1** is out of band: the vendor's docs page and the SE's email. From M2, a key
    served with a share link is shown with its fingerprint and pinned only on an explicit yes. A changed
    key for an already pinned product is a hard failure, never a silent re-pin.

@@ -1,0 +1,29 @@
+Run the checks in a spec and write the reports
+
+Usage: rdy run [OPTIONS] <SPEC>
+
+Arguments:
+  <SPEC>  The spec file, for example acme-platform.yaml
+
+Options:
+      --color <WHEN>     Colors: auto, always, never [default: auto]
+      --progress <WHEN>  Live progress: auto, never [default: auto]
+  -q, --quiet            Print less
+  -v, --verbose          Print more
+  -h, --help             Print help (see more with '--help')
+
+Signature:
+      --sig <FILE>      Read the signature from this file
+      --key <KEY>       Trust this public key for this run only
+      --allow-unsigned  Run a spec that has no signature
+
+Output:
+      --json           Print the JSON report on stdout
+      --out-dir <DIR>  Folder to create the report folder in
+      --no-report      Write no report files
+
+Scope:
+      --kubeconfig <FILE>    Kubeconfig to use
+      --kube-context <NAME>  Kubernetes context to use
+      --no-network           Open no network connections
+      --jobs <N>             Checks to run at once [default: 8, max: 32]

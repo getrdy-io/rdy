@@ -1,0 +1,110 @@
+Run the checks in a spec and write the reports
+
+rdy checks this machine against the spec, prints the result, and writes an
+HTML report and a JSON report into a new folder. It runs what it can and says
+what it could not run. It never asks for sudo and never changes anything.
+
+The spec must be signed by a key you trust (see 'rdy trust add'). rdy refuses
+a spec with a signature that does not match, and a spec signed by a key you
+have not trusted. To run a spec that has no signature at all, such as an
+example file, see --allow-unsigned.
+
+Usage: rdy run [OPTIONS] <SPEC>
+
+Arguments:
+  <SPEC>
+          The spec file, for example acme-platform.yaml. Its signature is
+          read from <SPEC>.minisig unless you pass --sig.
+
+Options:
+      --color <WHEN>
+          Colors: auto, always, never [default: auto]
+
+      --progress <WHEN>
+          Live progress: auto, never [default: auto]
+
+  -q, --quiet
+          Print less
+
+  -v, --verbose
+          Print more
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Signature:
+      --sig <FILE>
+          Read the signature from this file
+
+      --key <KEY>
+          Trust this public key for this run only. A key file or
+          the key text. Nothing is saved, and the run prints a
+          KEY NOT PINNED warning. Use 'rdy trust add' to keep a
+          key.
+
+      --allow-unsigned
+          Run a spec that has no signature. rdy prints an
+          UNSIGNED SPEC warning and marks every report. A
+          signature that does not match is still refused.
+
+Output:
+      --json
+          Print the JSON report on stdout. The text report still
+          goes to stderr.
+
+      --out-dir <DIR>
+          Folder to create the report folder in
+          [default: . ; on Windows %USERPROFILE%\rdy-reports]
+
+      --no-report
+          Write no report files
+
+Scope:
+      --kubeconfig <FILE>
+          Kubeconfig to use. Use only one you trust: a
+          kubeconfig can run programs.
+
+      --kube-context <NAME>
+          Kubernetes context to use
+
+      --no-network
+          Open no network connections. Network and
+          Kubernetes checks are skipped. A Kubernetes flag
+          is ignored, and the header says so.
+
+      --jobs <N>
+          Checks to run at once [default: 8, max: 32]
+
+Verdict:
+  NOT READY if anything blocks or a required check could not run.
+  READY with warnings if only optional things are wrong.
+  READY if every check ran and passed.
+
+Examples:
+  Run a spec your vendor signed:
+    rdy run acme-platform.yaml
+
+  Run an example spec that has no signature (you wrote it, or you trust it):
+    rdy run acme-quickstart.yaml --allow-unsigned
+
+  Use the exit code in a script and keep the JSON result:
+    rdy run acme-platform.yaml --json > result.json
+    echo $?
+
+  Check a cluster with a kubeconfig and context you choose:
+    rdy run acme-platform.yaml --kubeconfig ~/.kube/acme --kube-context staging
+
+  Run with no network, for a host-only spec on an air-gapped machine:
+    rdy run acme-edge.yaml --no-network
+
+Files:
+  rdy creates a new folder, rdy-report-<product>-<time>/, with mode 0700. It
+  holds the HTML report, the JSON report, and a copy of the spec and its
+  signature. rdy never overwrites a folder.
+
+Exit codes:
+  0   READY
+  1   READY with warnings
+  2   NOT READY
+  64  Usage error, or a spec that must change
+  70  Internal error, the report could not be written, or the run was stopped

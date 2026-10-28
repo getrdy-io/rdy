@@ -1,0 +1,17 @@
+Sign a spec with your secret key
+
+Usage: rdy spec sign [OPTIONS] --secret-key <FILE> <SPEC>
+
+Arguments:
+  <SPEC>  The spec file, for example acme-platform.yaml
+
+Options:
+      --secret-key <FILE>     Your secret key, made with 'rdy spec keygen'
+      --sig <FILE>            Where to write the signature
+      --force                 Replace the signature file if it exists
+      --password-file <FILE>  Read the key password from a file
+      --color <WHEN>          Colors: auto, always, never [default: auto]
+      --progress <WHEN>       Live progress: auto, never [default: auto]
+  -q, --quiet                 Print less
+  -v, --verbose               Print more
+  -h, --help                  Print help (see more with '--help')

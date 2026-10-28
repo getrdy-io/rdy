@@ -1,0 +1,50 @@
+Trust a vendor key for one product
+
+Shows the key id and the fingerprint (SHA-256 of the public key) and asks
+you to compare the fingerprint with the one the vendor published. Answer y
+only if they match. rdy saves the key only after you say yes.
+
+Usage: rdy trust add [OPTIONS] --key <KEY> <PRODUCT>
+
+Arguments:
+  <PRODUCT>
+          The product the key may sign for, for example acme-platform
+
+Options:
+      --key <KEY>
+          The vendor's public key: a .pub file, or the key text
+
+      --yes
+          Do not ask. For scripts. Only use it after you have
+          checked the fingerprint.
+
+      --note <TEXT>
+          A note for yourself. It appears in every report you send.
+
+      --color <WHEN>
+          Colors: auto, always, never [default: auto]
+
+      --progress <WHEN>
+          Live progress: auto, never [default: auto]
+
+  -q, --quiet
+          Print less
+
+  -v, --verbose
+          Print more
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Examples:
+  Trust a key for yourself:
+    rdy trust add acme-platform --key acme-platform.pub
+
+  Trust a key for runs as root:
+    sudo rdy trust add acme-platform --key acme-platform.pub
+
+Exit codes:
+  0   Key saved
+  64  Not saved: you answered no, there is no terminal and no --yes, the file
+      is a secret key, or the product already has a key with this key id
+  70  Internal error
