@@ -25,10 +25,13 @@
 //! Every value from the spec (an id, a field name) is cut and has control characters replaced before it
 //! goes into a message, a key or a result id, so a spec cannot put escape codes on a terminal.
 //!
+//! The reserved-id list is `rdy_spec::reserved`.
+//!
 //! The words here follow 01 section 5.2. M1-057 reconciles them with `SkipWhy` in `rdy-cli`, which also
 //! adds the did-you-mean hint.
 
 use rdy_spec::check::{CheckParams, UnsupportedReason};
+use rdy_spec::reserved::{RESERVED_IDS, UnknownKind};
 use rdy_spec::result::{CheckResult, FixSource, Severity, SkipKind};
 use rdy_spec::spec::{CheckSpec, Lenient, OsFamily, Spec};
 
@@ -36,11 +39,8 @@ use crate::check::Os;
 use crate::family::{Built, HostSet, Registry};
 use crate::outcome::os_name;
 
-mod reserved;
 #[cfg(test)]
 mod tests;
-
-use reserved::Why;
 
 /// The longest part of a spec value that goes into a message, in characters.
 const MAX_ECHO_CHARS: usize = 64;
@@ -241,7 +241,7 @@ impl Registry {
         let params = entry.decode_params();
         // Rules 3 and 4.
         if let CheckParams::Unknown { id, .. } = &params {
-            return Err(unknown(self, id, &version));
+            return Err(unknown(self, &params, id, &version));
         }
         // Rule 5: rdy-spec reads the id, but no registered family builds it yet. This comes before the
         // fields are judged, because a field of a check this build lacks is not a typo.
@@ -303,33 +303,38 @@ fn not_applicable(list: &[OsFamily]) -> PlanSkip {
     }
 }
 
-fn unknown(registry: &Registry, id: &str, version: &str) -> PlanSkip {
-    match reserved::classify(id) {
-        Why::NotInBuild => not_in_build(registry, id),
-        Why::UnknownCheck {
-            family_reserved: true,
-        } => PlanSkip::new(
+fn unknown(registry: &Registry, params: &CheckParams, id: &str, version: &str) -> PlanSkip {
+    match params.unknown_kind() {
+        Some(UnknownKind::UnknownCheck) => {}
+        // `NotInBuild`, and any kind a later rdy-spec adds: say the id is not in this build, which
+        // points the customer at a newer rdy and is the safe wording.
+        _ => return not_in_build(registry, id),
+    }
+    let id = echo(id);
+    match id.split_once('.') {
+        Some((family, _)) if family_is_reserved(family) => PlanSkip::new(
             SkipKind::UnknownCheck,
-            format!(
-                "Not run. rdy {version} does not know the check '{}'.",
-                echo(id)
-            ),
+            format!("Not run. rdy {version} does not know the check '{id}'."),
             &format!(
                 "Tell the vendor. The spec may have a typo, or it may need a newer rdy than {version}."
             ),
         ),
-        Why::UnknownCheck {
-            family_reserved: false,
-        } => {
-            let id = echo(id);
-            let family = id.split_once('.').map_or(id.as_str(), |(family, _)| family);
-            PlanSkip::new(
-                SkipKind::UnknownCheck,
-                format!("Not run. No version of rdy has checks named {family}."),
-                "Tell the vendor. The spec may have a typo.",
-            )
-        }
+        other => PlanSkip::new(
+            SkipKind::UnknownCheck,
+            format!(
+                "Not run. No version of rdy has checks named {}.",
+                other.map_or(id.as_str(), |(family, _)| family)
+            ),
+            "Tell the vendor. The spec may have a typo.",
+        ),
     }
+}
+
+/// Whether some reserved id has this family prefix, so a newer rdy may know the check.
+fn family_is_reserved(family: &str) -> bool {
+    RESERVED_IDS
+        .iter()
+        .any(|reserved| reserved.split_once('.').is_some_and(|(f, _)| f == family))
 }
 
 fn not_in_build(registry: &Registry, id: &str) -> PlanSkip {

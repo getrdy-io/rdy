@@ -104,7 +104,7 @@ defaults, so they appear in the schema and the docs. The check copies effective 
 `Family` (three in M1, so a trait): `name`, `checks()` (static infos), `probe()` for needs only it can
 probe (k8s owns `kube_context`; cloud will own `cloud_credentials`), and `build(check, spec)`, which
 returns the check plus its own host set computed from its params, derived defaults included
-(`net.tls_intercept` defaults to the `net.egress` hosts). `Engine::plan` maps every spec entry to a
+(`net.tls_intercept` defaults to the `net.egress` hosts). `Registry::plan` (M1-035; `Engine::plan` will call it) maps every spec entry to a
 built check or a skip kind with no I/O:
 
 | Situation | `skip_kind` (01) |
@@ -660,9 +660,11 @@ pub trait Family: Send + Sync + 'static {
     fn name(&self) -> &'static str;
     fn checks(&self) -> &'static [&'static CheckInfo];
     fn probe<'a>(&'a self, wanted: &'a [Need], probe: &'a Probe) -> BoxFuture<'a, Vec<Capability>>;
-    fn build(&self, check: &CheckSpec, spec: &Spec) -> Result<Built, BuildError>;
+    fn build(&self, entry: &CheckSpec, params: CheckParams, spec: &Spec) -> Result<Built, BuildError>;
 }
-pub struct Built { pub check: Box<dyn Check>, pub hosts: HostSet }
+pub struct Built { pub check: Box<dyn Check>, pub hosts: HostSet }  // HostSet: deduplicated Vec<Target>
+// plan.rs (M1-035): Registry::plan is pure, and takes the Spec (a LoadedSpec derefs to it) and the binary's version
+impl Registry { pub fn plan(&self, spec: &Spec, os: Os, rdy_version: &str) -> RunPlan; }
 
 // privilege.rs, sched.rs
 pub struct Privilege { pub uid: [u32; 4], pub gid: [u32; 4], // real, effective, saved, filesystem
