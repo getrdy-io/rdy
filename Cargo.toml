@@ -28,6 +28,10 @@ homepage = "https://getrdy.io"
 # Default features are off. The crate that uses a dependency names its features.
 anyhow = { version = "1", default-features = false }
 clap = { version = "4.6", default-features = false }
+serde = { version = "1", default-features = false }
+serde_json = { version = "1", default-features = false }
+trybuild = "1"
+thiserror = { version = "2", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 tempfile = { version = "3", default-features = false }
 unicode-normalization = { version = "0.1", default-features = false }

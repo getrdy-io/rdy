@@ -9,5 +9,13 @@ repository.workspace = true
 homepage.workspace = true
 include = ["src/**", "Cargo.toml", "LICENSE"]
 
+[dependencies]
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+thiserror = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+trybuild = { workspace = true }
+
 [lints]
 workspace = true
