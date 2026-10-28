@@ -1,0 +1,10 @@
+Show the keys you trust
+
+Usage: rdy trust list [OPTIONS]
+
+Options:
+      --color <WHEN>     Colors: auto, always, never [default: auto]
+      --progress <WHEN>  Live progress: auto, never [default: auto]
+  -q, --quiet            Print less
+  -v, --verbose          Print more
+  -h, --help             Print help (see more with '--help')

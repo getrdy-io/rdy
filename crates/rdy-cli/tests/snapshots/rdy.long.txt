@@ -1,0 +1,64 @@
+Check an environment against a vendor's requirements before install day.
+
+rdy runs a signed spec of checks on this machine. It prints what is ready,
+what is not, and how to fix it. It writes an HTML report and a JSON report.
+It works offline. It never asks for sudo. Nothing leaves this machine unless
+you send it.
+
+Usage: rdy [OPTIONS] <COMMAND>
+
+Commands:
+  run      Run the checks in a spec and write the reports
+  verify   Check a spec's signature without running any checks
+  spec     Lint, sign and make keys for spec files
+  trust    Choose which vendor keys rdy trusts
+  version  Print the version
+  help     Print help for a command
+
+Options:
+      --color <WHEN>
+          Colors: auto, always, never [default: auto]
+
+      --progress <WHEN>
+          Live progress: auto, never [default: auto]
+
+  -q, --quiet
+          Print less
+
+  -v, --verbose
+          Print more
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print the version
+
+Examples:
+  Run a spec your vendor signed:
+    rdy run acme-platform.yaml
+
+  Use rdy as a gate in CI and keep the result:
+    rdy run acme-platform.yaml --json > result.json
+
+  Check a signature without running anything:
+    rdy verify acme-platform.yaml
+
+  Trust a vendor's key, once, after you check its fingerprint:
+    rdy trust add acme-platform --key acme-platform.pub
+
+Exit codes:
+  0   READY
+  1   READY with warnings
+  2   NOT READY
+  64  Usage error, or a spec that must change
+  70  Internal error, the report could not be written, or the run was stopped
+
+Environment:
+  NO_COLOR     Turn colors off (any non-empty value)
+  HTTPS_PROXY  Proxy for network checks (also HTTP_PROXY, NO_PROXY)
+  KUBECONFIG   Kubeconfig for Kubernetes checks
+  RUST_LOG     Log level for diagnostics, for example RUST_LOG=rdy=debug
+
+Learn more: https://docs.getrdy.io
+Report a bug: https://github.com/getrdy-io/rdy/issues

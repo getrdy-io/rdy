@@ -1,0 +1,48 @@
+Make a signing key pair
+
+Writes <NAME>.key (secret) and <NAME>.pub (public). The secret key is
+password protected and readable only by you. rdy never overwrites a key. Use
+a key only for specs. Back it up: anyone who has it can sign specs as you.
+
+Usage: rdy spec keygen [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Name for the key files, for example acme-signing
+
+Options:
+      --unencrypted
+          Do not protect the secret key with a password.
+          For CI only.
+
+      --password-file <FILE>
+          Read the new password from a file, or '-' for
+          standard input. The prompt is the default.
+
+      --color <WHEN>
+          Colors: auto, always, never [default: auto]
+
+      --progress <WHEN>
+          Live progress: auto, never [default: auto]
+
+  -q, --quiet
+          Print less
+
+  -v, --verbose
+          Print more
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Environment:
+  RDY_KEY_PASSWORD  The new key password, for CI. Never put it on the command
+                    line.
+
+Examples:
+  Make a key pair:
+    rdy spec keygen acme-signing
+
+Exit codes:
+  0   Key pair written
+  64  A key file already exists, or the passwords did not match
+  70  Internal error

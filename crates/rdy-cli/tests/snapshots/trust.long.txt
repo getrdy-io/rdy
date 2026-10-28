@@ -1,0 +1,34 @@
+Choose which vendor keys rdy trusts
+
+rdy runs a spec only if a key you trust for that product signed it. Trust is
+per product: a key trusted for acme-platform means nothing for another
+product. Ask the vendor for the key by another route than the spec, and check
+its fingerprint before you say yes.
+
+Usage: rdy trust [OPTIONS] <COMMAND>
+
+Commands:
+  add     Trust a vendor key for one product
+  list    Show the keys you trust
+  remove  Stop trusting a key
+
+Options:
+      --color <WHEN>
+          Colors: auto, always, never [default: auto]
+
+      --progress <WHEN>
+          Live progress: auto, never [default: auto]
+
+  -q, --quiet
+          Print less
+
+  -v, --verbose
+          Print more
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Where keys are kept:
+  As a normal user: ~/.config/rdy/trust.yaml, then /etc/rdy/trust.yaml.
+  As root: only /etc/rdy/trust.yaml. Run 'sudo rdy trust add' to trust a
+  key for root runs.

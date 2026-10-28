@@ -1,0 +1,43 @@
+Check a spec file for mistakes
+
+Reads the spec and reports every problem with its line and column. Run it
+before you sign. It never runs a check and never needs a signature.
+
+Usage: rdy spec lint [OPTIONS] <SPEC>
+
+Arguments:
+  <SPEC>
+          The spec file, for example acme-platform.yaml
+
+Options:
+      --json
+          Print a JSON result on stdout
+
+      --color <WHEN>
+          Colors: auto, always, never [default: auto]
+
+      --progress <WHEN>
+          Live progress: auto, never [default: auto]
+
+  -q, --quiet
+          Print less
+
+  -v, --verbose
+          Print more
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Examples:
+  Check a spec:
+    rdy spec lint acme-platform.yaml
+
+  Use it in CI:
+    rdy spec lint acme-platform.yaml --json
+
+Exit codes:
+  0   No problems
+  1   Warnings only
+  2   The spec has errors
+  64  Usage error, or the file cannot be read
+  70  Internal error
