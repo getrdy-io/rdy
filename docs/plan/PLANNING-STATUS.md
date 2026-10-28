@@ -26,7 +26,7 @@ Review files live in `docs/plan/reviews/`. Revisions after review are applied an
 
 ## Remaining steps, in order
 
-1. If `docs/plan/reviews/07-cli-ux-review-by-code-reviewer.md` does not exist, run code-reviewer on 07 (cold review:
+1. (Review done, 3 must-fix: watchdog must not write to stdout under --json, no fix line may name --key, cut --timeout from M1.) Next: cli-ux applies `docs/plan/reviews/07-cli-ux-review-by-code-reviewer.md` to 07 and cuts M1 to about 31 hours. Original step text (cold review:
    KICKOFF item 8 coverage, exit codes and samples against 01, ADR 0008 and 0013, JSON samples against the schema,
    Ctrl-C 70 versus 130, `--timeout` guard, HTML brief against ADR 0003, M1 tickets cut from 51 to about 30 hours).
    Then cli-ux applies it to 07.
