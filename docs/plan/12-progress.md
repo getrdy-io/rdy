@@ -19,7 +19,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-005 | [#14](https://github.com/getrdy-io/rdy/pull/14) | 2026-10-28 | zizmor ran with --offline locally only (online audits run in CI); the exit-test throwaway PRs are run by the coordinator
 
-- M1-006 | PR #TBD | | The five-leg run, the scratch container and the red-leg-blocks-ci-ok behaviour are for the coordinator to watch on the PR; cargo-nextest and zizmor were not run locally (binary downloads were denied here), so the nextest config and workflow lint are first proven in CI
+- M1-006 | [#21](https://github.com/getrdy-io/rdy/pull/21) | 2026-10-28 | The five-leg run, the scratch container and the red-leg-blocks-ci-ok behaviour are for the coordinator to watch on the PR; cargo-nextest and zizmor were not run locally (binary downloads were denied here), so the nextest config and workflow lint are first proven in CI
 
 - M1-007 | todo | | dist init for five targets with cargo-auditable and SBOM, proven in release-sandbox
 
