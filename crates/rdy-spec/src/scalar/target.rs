@@ -49,6 +49,9 @@ pub enum TargetProblem {
     /// A URL has a `#fragment`.
     #[error("the URL has a fragment")]
     Fragment,
+    /// The IPv6 address wraps an IPv4 address (`::ffff:a.b.c.d` or `::a.b.c.d`).
+    #[error("the IPv6 address wraps an IPv4 address")]
+    MappedIpv4,
     /// The URL scheme is not lowercase `http` or `https`.
     #[error("the URL scheme is not http or https")]
     BadScheme,
@@ -72,6 +75,9 @@ impl TargetProblem {
             Self::BadIpv6 => {
                 "put an IPv6 address in square brackets with a port, such as '[::1]:443'."
             }
+            Self::MappedIpv4 => {
+                "write the IPv4 address itself, such as '10.0.0.1:443', not an IPv6 form of it."
+            }
             Self::Credentials => {
                 "remove the user name and password. A spec never carries credentials."
             }
@@ -87,7 +93,7 @@ impl TargetProblem {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Host {
-    /// A DNS name, in lowercase. It never ends in a number, so it is never an IPv4 address in disguise.
+    /// A DNS name, in lowercase. It never ends in a number.
     Name(String),
     /// An IPv4 address written as four decimal parts, such as `10.0.0.1`.
     Ipv4(Ipv4Addr),
@@ -122,8 +128,11 @@ impl fmt::Display for Host {
 /// - The path and query of a URL are kept as written. Query strings never enter the action log, so a
 ///   caller that logs a target uses [`Target::host`] and [`Target::port`], not the whole text.
 ///
-/// This type checks the shape only. Link-local and metadata addresses parse. The egress policy refuses
-/// them at run time.
+/// This type checks the shape only. It does not classify addresses. `localhost`, wildcard DNS names such
+/// as `169.254.169.254.example`, `[::]`, `0.0.0.0`, NAT64 (`64:ff9b::/96`) and unique local (`fd00::/8`)
+/// literals, and link-local and metadata addresses all parse. Every host, whether a literal or the
+/// answer of a lookup, must pass the `is_forbidden` check of the network facade before a connect
+/// (INV-12). A caller must never treat a parsed `Target` as safe to connect to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Target {
     scheme: Option<Scheme>,
@@ -236,18 +245,32 @@ impl Target {
     }
 }
 
-/// Makes a refused target safe to echo: no user info, no query, no fragment.
+/// An IPv4-mapped (`::ffff:a.b.c.d`) or IPv4-compatible (`::a.b.c.d`) address. `::` and `::1` are not.
+///
+/// Such a literal is another spelling of an IPv4 address, and `Display` would print it in the dotted
+/// form that the parser refuses, so it is refused here and the author writes the IPv4 form.
+fn wraps_ipv4(addr: &Ipv6Addr) -> bool {
+    let s = addr.segments();
+    let compatible = s[..6] == [0; 6] && (s[6] != 0 || s[7] > 1);
+    addr.to_ipv4_mapped().is_some() || compatible
+}
+
+/// Makes a refused target safe to echo: only the scheme, the host and the port.
 ///
 /// Everything before the last `@` goes, so a password with a `/` or `?` in it cannot leak. Everything
-/// from the first `?` or `#` goes, because a query can carry tokens.
+/// from the first `/`, `?` or `#` after the scheme goes, because a path or query can carry tokens.
 fn redact_for_echo(text: &str) -> String {
-    let start = text.find("://").map_or(0, |i| i + 3);
+    // A scheme is letters and digits before the first "://". A "://" later on, in a query, is not one.
+    let start = text
+        .find("://")
+        .filter(|i| text[..*i].bytes().all(|b| b.is_ascii_alphanumeric()))
+        .map_or(0, |i| i + 3);
     let mut out = match text.rfind('@') {
         Some(at) if at >= start => format!("{}***@{}", &text[..start], &text[at + 1..]),
         _ => text.to_owned(),
     };
-    if let Some(cut) = out.find(['?', '#']) {
-        out.truncate(cut);
+    if let Some(cut) = out[start..].find(['/', '?', '#']) {
+        out.truncate(start + cut);
     }
     out
 }
@@ -263,6 +286,9 @@ fn parse_authority(
             return Err(TargetProblem::BadIpv6);
         }
         let addr: Ipv6Addr = addr.parse().map_err(|_| TargetProblem::BadIpv6)?;
+        if wraps_ipv4(&addr) {
+            return Err(TargetProblem::MappedIpv4);
+        }
         let port_text = match after {
             "" => None,
             _ => Some(after.strip_prefix(':').ok_or(TargetProblem::BadIpv6)?),
@@ -289,8 +315,8 @@ fn parse_authority(
 ///
 /// A host whose last label is all digits, or starts with `0x`, is a number to resolvers and to URL
 /// parsers (`2852039166`, `0xa9.0xfe.0xa9.0xfe`, `0251.0376.0251.0376` and `127.1` all mean an address).
-/// Such a host is accepted only as four plain decimal parts. Everything else of that kind is refused,
-/// so the address policy never sees a name that is an address in disguise.
+/// Such a host is accepted only as four plain decimal parts, and everything else of that kind is
+/// refused. That keeps one spelling per IPv4 address. It is not an address policy.
 fn parse_host(host: &str) -> Result<Host, TargetProblem> {
     let label_ok = |label: &str| {
         let b = label.as_bytes();
@@ -550,6 +576,49 @@ mod tests {
     }
 
     #[test]
+    fn refuses_ipv6_that_wraps_ipv4() {
+        for s in [
+            "[::ffff:a9fe:a9fe]:80",
+            "[::FFFF:A9FE:A9FE]:80",
+            "[0:0:0:0:0:ffff:a9fe:a9fe]:80",
+            "[::ffff:0:0]:80",
+            "[::a9fe:a9fe]:80",
+            "[::2]:80",
+            "[::ffff]:80",
+            "https://[::ffff:a9fe:a9fe]/",
+            "https://[::a00:1]:8443/x",
+        ] {
+            assert_eq!(problem(s), TargetProblem::MappedIpv4, "{s:?}");
+        }
+        for s in [
+            "[::]:80",
+            "[::1]:80",
+            "[64:ff9b::a9fe:a9fe]:80",
+            "[fd00::1]:80",
+            "[::1:0:0]:80",
+        ] {
+            let t = ok(s);
+            assert_eq!(ok(&t.to_string()), t, "{s}");
+        }
+    }
+
+    #[test]
+    fn parsing_does_not_classify_addresses() {
+        for s in [
+            "localhost:80",
+            "169.254.169.254.example:80",
+            "0.0.0.0:80",
+            "127.0.0.1:80",
+            "[::]:80",
+            "[64:ff9b::a9fe:a9fe]:80",
+            "[fd00:ec2::254]:80",
+            "[fe80::1]:80",
+        ] {
+            ok(s);
+        }
+    }
+
+    #[test]
     fn refuses_credentials_and_fragments() {
         for s in [
             "https://u:p@host/",
@@ -672,6 +741,8 @@ mod tests {
             "https://host:99999/x?token=abc123&u=a@b",
             "ftp://user:s3cret@host/",
             "user:s3cret@host:443",
+            "user:s3cret@host:1/?x=http://y",
+            "user:s3cret@host/p?x=https://z",
             "https://host:99999/?token=abc123",
             "https://host/\u{e9}?token=abc123",
         ];
@@ -687,12 +758,14 @@ mod tests {
         let e = Target::parse("https://u:p@host/").unwrap_err();
         assert_eq!(
             e.to_string(),
-            "'https://***@host/' is not a valid target: the URL carries a user name or password"
+            "'https://***@host' is not a valid target: the URL carries a user name or password"
         );
+        let e = Target::parse("user:pw@host:1/?x=http://y").unwrap_err();
+        assert!(e.to_string().starts_with("'***@host:1' is not"), "{e}");
         let e = Target::parse("https://host/x?token=abc123#frag").unwrap_err();
         assert_eq!(
             e.to_string(),
-            "'https://host/x' is not a valid target: the URL has a fragment"
+            "'https://host' is not a valid target: the URL has a fragment"
         );
         // The same rule holds through serde.
         let e = serde_json::from_str::<Target>("\"https://u:p@host/?t=1\"").unwrap_err();

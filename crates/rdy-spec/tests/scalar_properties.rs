@@ -147,7 +147,7 @@ fn target_round_trips() {
         let port = 1 + rng.below(65535);
         let text = match rng.below(5) {
             0 => format!("{host}:{port}"),
-            1 => format!("[::{:x}]:{port}", rng.below(65536)),
+            1 => format!("[2001:db8::{:x}]:{port}", rng.below(65536)),
             2 => format!("https://{host}{}", rng.pick(&tails)),
             3 => format!("http://{host}:{port}{}", rng.pick(&tails)),
             _ => format!(
@@ -157,6 +157,35 @@ fn target_round_trips() {
             ),
         };
         round_trips::<Target>(&text);
+    }
+}
+
+#[test]
+fn ipv6_forms_of_ipv4_addresses_are_refused() {
+    let mut rng = Rng(0x0F0F_1234_ABCD_9876);
+    for _ in 0..ROUNDS {
+        let (hi, lo) = (rng.below(65536), rng.below(65536));
+        let port = 1 + rng.below(65535);
+        let forms = [
+            format!("[::ffff:{hi:x}:{lo:x}]:{port}"),
+            format!("[::FFFF:{hi:X}:{lo:X}]:{port}"),
+            format!("[0:0:0:0:0:ffff:{hi:x}:{lo:x}]:{port}"),
+            format!("https://[::ffff:{hi:x}:{lo:x}]:{port}/p"),
+            format!("[::{hi:x}:{lo:x}]:{port}"),
+        ];
+        for form in forms {
+            // `::0:0` is `::`, and `::0:1` is `::1`. Those two are not IPv4 forms.
+            let bare = form.starts_with("[::") && !form.to_lowercase().contains("ffff");
+            if bare && hi == 0 && lo <= 1 {
+                continue;
+            }
+            let e = Target::parse(&form).unwrap_err();
+            assert!(
+                e.to_string().contains("wraps an IPv4 address"),
+                "{form}: {e}"
+            );
+            assert!(e.hint().contains("IPv4"), "{form}");
+        }
     }
 }
 
