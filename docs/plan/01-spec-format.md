@@ -79,7 +79,7 @@ plan's example.
 | `severity` | `block` or `warn` | `block` | `block` means required, `warn` means optional (2.6). |
 | `fix` | string, 1 to 2000 chars | none | Replaces rdy's advice as the headline fix (2.6). |
 | `timeout` | duration, 1s to 60s | the check's own default, else 10s | How long the check may run. The spec value wins over the check's default; the effective value is `min(spec or default, 60s, time left in the run)`. Outside 1s to 60s: lint and sign error `timeout must be between 1s and 60s`, and at run time that check is not run (`unsupported_spec`). |
-| `os` | list of `linux`, `macos`, `windows` | all | Run only there. Elsewhere the check is `skipped`, `not_applicable`, and never counts. `os: [rhel]` is an error with the lint note "os selects the operating system family. To match a distribution, use the host.os check." |
+| `os` | list of `linux`, `macos`, `windows` | all | Run only there. Elsewhere the check is `skipped`, `not_applicable`, and never counts. An empty list `os: []` is `unsupported_spec`, because it would hide the check on every OS. `os: [rhel]` is an error with the lint note "os selects the operating system family. To match a distribution, use the host.os check." |
 
 A cross-platform spec names the two entries:
 

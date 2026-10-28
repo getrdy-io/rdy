@@ -35,6 +35,8 @@ pub mod schema;
 pub mod sig;
 pub mod spec;
 
+#[doc(hidden)]
+pub use error::echo_capped;
 pub use error::{Location, SpecError};
 pub use loaded::{LoadedSpec, load};
 pub use parse::{MAX_DEPTH, MAX_SPEC_BYTES, parse_unverified};

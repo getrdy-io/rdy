@@ -105,9 +105,14 @@ before any `--`. Three more rules:
 
 - **No echo.** A usage error prints the flag name, never the text after `=` or the next argument, unless the
   flag is known and not secret (`--jobs abc` may print `abc`). A typo such as `--tokne=rdy_st_...` or
-  `--pasword hunter2` leaks nothing.
+  `--pasword hunter2` leaks nothing. A typed flag name can be a secret too (`--hunter2`, `--<api key>`), so rdy
+  prints an unknown name only when it is a typo of a flag rdy has (the same distance rule as below, over every
+  flag of every command, hidden ones included, plus `token`, `secret`, `yes` and `password`). Any other
+  unknown name gets `unknown option or argument`.
 - **rdy suggests, clap does not.** clap's suggester is off (it uses Jaro similarity). rdy offers a did-you-mean
-  at Levenshtein distance two or less (`strsim`) over the visible flags of that command.
+  at most two edits away (a swap of two neighbouring letters counts as one, and the limit is one third of the
+  typed length, at least one) over the visible flags of that command. rdy does its own count, so there is no
+  `strsim` dependency.
 - **Never `--key` or `--allow-unsigned`.** The suggester never proposes either, a hidden flag, or a flag of
   another command. For those near-misses the fix is `see 'rdy run --help'`. So `--yes` (an M2 flag) typed on
   `run` in M1 cannot teach `--key` (C.6).
