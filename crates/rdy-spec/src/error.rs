@@ -256,6 +256,15 @@ pub enum SpecError {
         /// The most distinct hosts a spec may name.
         limit: usize,
     },
+    /// The checks name more distinct host and port pairs than the limit (threat model INV-11).
+    #[error("{count} host and port pairs. The limit is {limit}")]
+    TooManyEndpoints {
+        /// How many distinct host and port pairs the spec names across `net.egress` and
+        /// `net.tls_intercept`.
+        count: usize,
+        /// The most distinct host and port pairs a spec may name.
+        limit: usize,
+    },
     /// `metadata.expires` is not a full UTC time.
     #[error("expires must be a full UTC time")]
     BadExpires,
@@ -387,6 +396,9 @@ impl SpecError {
             Self::TooManyHosts { .. } => {
                 "remove hosts, or split the spec in two. A host counts once, however many checks name it."
             }
+            Self::TooManyEndpoints { .. } => {
+                "remove endpoints, or split the spec in two. A host and port counts once, however many checks name it."
+            }
             Self::BadExpires => "write it like 'expires: 2027-01-31T00:00:00Z'.",
             Self::Expired { .. } => {
                 "ask the vendor for a current spec. If this machine's clock is wrong, set it and run again."
@@ -445,6 +457,7 @@ mod tests {
             | SpecError::TooManyChecks { .. }
             | SpecError::NoChecks
             | SpecError::TooManyHosts { .. }
+            | SpecError::TooManyEndpoints { .. }
             | SpecError::BadExpires
             | SpecError::Expired { .. }
             | SpecError::MissingField { .. }
@@ -508,6 +521,10 @@ mod tests {
             SpecError::TooManyHosts {
                 count: 65,
                 limit: 64,
+            },
+            SpecError::TooManyEndpoints {
+                count: 257,
+                limit: 256,
             },
             SpecError::BadExpires,
             SpecError::Expired {
@@ -609,6 +626,13 @@ mod tests {
                 limit: 64
             }),
             "65 endpoints. The limit is 64"
+        );
+        assert_eq!(
+            msg(SpecError::TooManyEndpoints {
+                count: 257,
+                limit: 256
+            }),
+            "257 host and port pairs. The limit is 256"
         );
         assert_eq!(
             msg(SpecError::BadExpires),

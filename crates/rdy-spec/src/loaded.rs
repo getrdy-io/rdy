@@ -78,7 +78,7 @@ impl LoadedSpec {
 /// 6. Last, `metadata.expires` is compared with this machine's clock. A spec that has expired is refused
 ///    with [`SpecError::Expired`], for a signed spec and an unsigned one alike. There is no override.
 ///
-/// Use [`load_at`] to give the clock.
+/// Tests that must pin the clock use [`load_at`].
 ///
 /// # Errors
 ///
@@ -90,15 +90,29 @@ pub fn load(
     trust: &TrustStore,
     policy: Policy,
 ) -> Result<LoadedSpec, SpecError> {
-    load_at(bytes, sig, trust, policy, SystemTime::now())
+    load_with_clock(bytes, sig, trust, policy, SystemTime::now())
 }
 
-/// [`load`] with the clock given, so a test or a caller with its own time source decides what "now" is.
+/// [`load`] with the clock given, so a test decides what "now" is.
+///
+/// Only tests should call this. A caller that chooses the clock can defeat `metadata.expires`, so
+/// `clippy.toml` bans it in the rest of the workspace (`disallowed-methods`). Test code allows it with
+/// `#[allow(clippy::disallowed_methods)]`.
 ///
 /// # Errors
 ///
 /// The same as [`load`].
 pub fn load_at(
+    bytes: &[u8],
+    sig: Option<&[u8]>,
+    trust: &TrustStore,
+    policy: Policy,
+    now: SystemTime,
+) -> Result<LoadedSpec, SpecError> {
+    load_with_clock(bytes, sig, trust, policy, now)
+}
+
+fn load_with_clock(
     bytes: &[u8],
     sig: Option<&[u8]>,
     trust: &TrustStore,

@@ -3,12 +3,16 @@
 //! Every refusal is an `Err(SpecError)` with the wording of 01 section 2.5. The CLI maps all of them to
 //! exit 64 (a spec content error). Helpers here avoid `unwrap` and `expect` because clippy only allows
 //! them inside `#[test]` functions.
+//!
+//! This file pins the clock with `load_at`, which the CLI may not call (clippy.toml).
+
+#![allow(clippy::disallowed_methods)]
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rdy_spec::sig::{Policy, TrustStore};
-use rdy_spec::{MAX_CHECKS, MAX_HOSTS, SpecError, load, load_at, parse_unverified};
+use rdy_spec::{MAX_CHECKS, MAX_ENDPOINTS, MAX_HOSTS, SpecError, load, load_at, parse_unverified};
 
 fn fixture(name: &str) -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -126,6 +130,27 @@ fn hosts_are_counted_across_egress_tls_and_dns_checks() {
 }
 
 #[test]
+fn host_and_port_pairs_are_counted_across_checks() {
+    // 4 hosts with 64 ports each is 256 pairs and passes. One more pair on a known host is refused, and
+    // the host count (4) is nowhere near its limit.
+    let e = refused("invalid/too-many-endpoint-pairs.yaml");
+    assert_eq!(
+        e,
+        SpecError::TooManyEndpoints {
+            count: 257,
+            limit: 256
+        }
+    );
+    assert_eq!(MAX_ENDPOINTS, 256);
+    assert_eq!(e.to_string(), "257 host and port pairs. The limit is 256");
+    assert_eq!(
+        e.fix(),
+        "remove endpoints, or split the spec in two. A host and port counts once, however many checks name it."
+    );
+    assert_printable(&e);
+}
+
+#[test]
 fn a_duplicate_key_is_refused_at_its_place() {
     let e = refused("malformed/duplicate-key-check.yaml");
     assert!(matches!(e.kind(), SpecError::DuplicateKey { .. }), "{e:?}");
@@ -211,6 +236,10 @@ fn collectors_follow_the_grammar_of_the_bundle_section() {
         "\"file:/etc/../shadow\"",
         "\"file:/etc/acme/..\"",
         "'file:C:\\acme\\x'",
+        "'file:/etc/acme\\x'",
+        "'file:/etc/acme/\\..\\x'",
+        "\"file:/etc/a\\u0085b\"",
+        "\"file:/etc/a\\tb\"",
         "\"exec:ls\"",
         "\"\"",
     ] {
@@ -242,6 +271,27 @@ fn bundle_lists_have_their_limits() {
         e.to_string(),
         "bundle.redact has 65 entries. The limit is 64"
     );
+    for bad in ["Aws_Keys", "1abc", "a-b", "", "a\"\\u0000\"", "aws keys"] {
+        let name = format!("  redact: [\"{bad}\"]");
+        assert!(run(name).is_err(), "redact group {bad:?}");
+        let name = format!("  redact_patterns: [{{name: \"{bad}\", regex: 'x'}}]");
+        assert!(run(name).is_err(), "pattern name {bad:?}");
+    }
+    assert!(run("  redact: [aws_keys, a1_b]".to_owned()).is_ok());
+    assert!(
+        run(format!(
+            "  redact_patterns: [{{name: {}, regex: 'x'}}]",
+            "a".repeat(32)
+        ))
+        .is_ok()
+    );
+    assert!(
+        run(format!(
+            "  redact_patterns: [{{name: {}, regex: 'x'}}]",
+            "a".repeat(33)
+        ))
+        .is_err()
+    );
     let patterns = |n: usize| {
         let one = "{name: p, regex: 'ACME-[A-Z]+'}";
         format!("  redact_patterns: {}", list(n, one))
@@ -271,6 +321,15 @@ fn metadata_lengths_and_annotations_have_their_limits() {
     assert_eq!(
         e.to_string(),
         "metadata.version is 65 characters. The limit is 64"
+    );
+    assert_eq!(place(&e), Some((5, 12)));
+    let e = match run("  version: \"\"\n".to_owned()) {
+        Err(e) => e,
+        Ok(_) => panic!("an empty version should be refused"),
+    };
+    assert!(
+        e.to_string().starts_with("metadata.version is empty"),
+        "{e}"
     );
     assert_eq!(place(&e), Some((5, 12)));
     assert!(run(format!("  contact: \"{}\"\n", "c".repeat(256))).is_ok());
@@ -312,8 +371,8 @@ fn an_expired_spec_is_refused_by_load_with_both_dates() {
     let bytes = fixture("invalid/expired.yaml");
     // The parser has no clock, so it reads the file.
     assert!(parse_unverified(&bytes).is_ok());
-    // 2027-02-03T00:00:00Z.
-    let now = at(1_801_353_600 + 3 * 86_400);
+    // 2020-02-03T00:00:00Z.
+    let now = at(1_580_428_800 + 3 * 86_400);
     let e = match load_at(&bytes, None, &TrustStore::new(), Policy::AllowUnsigned, now) {
         Err(e) => e,
         Ok(_) => panic!("an expired spec should be refused"),
@@ -321,13 +380,13 @@ fn an_expired_spec_is_refused_by_load_with_both_dates() {
     assert_eq!(
         e,
         SpecError::Expired {
-            expired_on: "2027-01-31".to_owned(),
-            today: "2027-02-03".to_owned()
+            expired_on: "2020-01-31".to_owned(),
+            today: "2020-02-03".to_owned()
         }
     );
     assert_eq!(
         e.to_string(),
-        "expired on 2027-01-31. This machine's clock says 2027-02-03"
+        "expired on 2020-01-31. This machine's clock says 2020-02-03"
     );
     assert_eq!(
         e.fix(),
@@ -340,15 +399,15 @@ fn a_spec_is_loaded_until_the_second_it_names() {
     let bytes = fixture("invalid/expired.yaml");
     let trust = TrustStore::new();
     let load_now = |now| load_at(&bytes, None, &trust, Policy::AllowUnsigned, now);
-    assert!(load_now(at(1_801_353_600)).is_ok());
-    assert!(load_now(at(1_801_353_601)).is_err());
+    assert!(load_now(at(1_580_428_800)).is_ok());
+    assert!(load_now(at(1_580_428_801)).is_err());
 }
 
 #[test]
 fn load_reads_the_real_clock() {
-    // The fixture expired in January 2027. This test runs after that on any machine with a sane clock,
-    // and before it on a machine that is wrong, so only the fail-closed half is pinned: an old date is
-    // refused, and a spec with no expiry is never refused for it.
+    // The fixture expired in January 2020, before any date this test can run on with a sane clock. Only
+    // the fail-closed half is pinned: an old date is refused, and a spec with no expiry is never refused
+    // for it.
     let old = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\n  expires: \"2001-01-01T00:00:00Z\"\nchecks:\n  - id: host.cpu\n    min: 2\n";
     match load(
         old.as_bytes(),

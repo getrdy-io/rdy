@@ -19,7 +19,11 @@ fn spec_of(checks: Vec<CheckSpec>) -> Spec {
 }
 
 fn hosts(checks: Vec<CheckSpec>) -> usize {
-    spec_hosts(&spec_of(checks)).len()
+    named_endpoints(&spec_of(checks)).hosts.len()
+}
+
+fn pairs(checks: Vec<CheckSpec>) -> usize {
+    named_endpoints(&spec_of(checks)).pairs.len()
 }
 
 #[test]
@@ -128,10 +132,100 @@ fn many_checks_with_different_hosts_hit_the_limit_the_old_per_check_rule_missed(
     assert_eq!(
         validate(&spec_of(checks), &Places::default()),
         Err(SpecError::TooManyHosts {
-            count: 128,
+            count: 65,
             limit: 64
         })
     );
+}
+
+/// `hosts` hosts with `ports` ports each, as `net.egress` endpoints, `per_check` endpoints to a check.
+fn grid(hosts: usize, ports: usize, per_check: usize) -> Vec<CheckSpec> {
+    let all: Vec<String> = (0..hosts)
+        .flat_map(|h| (0..ports).map(move |p| format!("h{h}.acme.example:{}", 1000 + p)))
+        .collect();
+    all.chunks(per_check)
+        .map(|chunk| check("net.egress", json!({"endpoints": chunk})))
+        .collect()
+}
+
+#[test]
+fn a_port_scan_shaped_spec_is_refused_by_the_pair_cap() {
+    // 64 checks of 64 endpoints on 4 hosts: 4096 entries, 4 hosts, 4096 distinct pairs.
+    let checks = grid(4, 1024, 64);
+    assert_eq!(checks.len(), 64);
+    assert_eq!(hosts(checks.clone()), 4);
+    assert_eq!(
+        validate(&spec_of(checks), &Places::default()),
+        Err(SpecError::TooManyEndpoints {
+            count: 257,
+            limit: 256
+        })
+    );
+}
+
+#[test]
+fn two_hundred_fifty_six_pairs_pass_and_two_hundred_fifty_seven_fail() {
+    assert_eq!(
+        validate(&spec_of(grid(4, 64, 64)), &Places::default()),
+        Ok(())
+    );
+    let mut over = grid(4, 64, 64);
+    over.push(check(
+        "net.egress",
+        json!({"endpoints": ["h0.acme.example:9999"]}),
+    ));
+    assert_eq!(pairs(over.clone()), 257);
+    assert_eq!(
+        validate(&spec_of(over), &Places::default()),
+        Err(SpecError::TooManyEndpoints {
+            count: 257,
+            limit: 256
+        })
+    );
+}
+
+#[test]
+fn a_pair_counts_once_however_it_is_written_and_dns_names_add_none() {
+    let egress = check(
+        "net.egress",
+        json!({"endpoints": [
+            "Registry.acme.example:443",
+            "registry.acme.example:443",
+            "https://registry.acme.example/v2/",
+            {"target": "registry.acme.example:8443"},
+        ]}),
+    );
+    let tls = check(
+        "net.tls_intercept",
+        json!({"hosts": ["registry.acme.example", "registry.acme.example:8443", "registry.acme.example:9443"]}),
+    );
+    let dns = check("net.dns", json!({"names": ["registry.acme.example"]}));
+    assert_eq!(pairs(vec![egress, tls, dns.clone()]), 3);
+    assert_eq!(pairs(vec![dns]), 0);
+}
+
+#[test]
+fn pairs_in_a_check_that_does_not_decode_are_still_counted() {
+    // 65 entries is over the 64 a check may have, so the check does not decode.
+    let list: Vec<String> = (0..65)
+        .map(|p| format!("a.acme.example:{}", 1000 + p))
+        .collect();
+    let skipped = check("net.egress", json!({"endpoints": list}));
+    assert_eq!(pairs(vec![skipped]), 65);
+}
+
+#[test]
+fn collection_stops_one_past_each_limit() {
+    let named = named_endpoints(&spec_of(vec![
+        many("net.egress", "endpoints", 0, 64, ":443"),
+        many("net.tls_intercept", "hosts", 64, 128, ""),
+        many("net.dns", "names", 128, 192, ""),
+    ]));
+    assert_eq!(named.hosts.len(), 65);
+    let named = named_endpoints(&spec_of(grid(4, 64, 64)));
+    assert_eq!(named.pairs.len(), 256);
+    let named = named_endpoints(&spec_of(grid(4, 1024, 64)));
+    assert_eq!(named.pairs.len(), 257);
 }
 
 #[test]

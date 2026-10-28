@@ -1333,6 +1333,9 @@
             "pattern": "^[a-z][a-z0-9_]{0,15}:.{1,1024}$",
             "allOf": [
               {
+                "pattern": "^(journal:|k8s:|file:)"
+              },
+              {
                 "if": {
                   "pattern": "^journal:"
                 },
@@ -1355,7 +1358,7 @@
                   "pattern": "^file:"
                 },
                 "then": {
-                  "pattern": "^file:/[^\\0]{0,1023}$",
+                  "pattern": "^file:/[^\\\\\\u0000-\\u001f\\u007f-\\u009f]{0,1023}$",
                   "not": {
                     "pattern": "(^file:|/)\\.\\.(/|$)"
                   }

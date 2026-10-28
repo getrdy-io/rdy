@@ -216,6 +216,13 @@ fn every_spec_error() -> Vec<(SpecError, ErrorCode)> {
             },
             SpecInvalid,
         ),
+        (
+            SpecError::TooManyEndpoints {
+                count: 257,
+                limit: 256,
+            },
+            SpecInvalid,
+        ),
         (SpecError::BadExpires, SpecInvalid),
         (
             SpecError::Expired {

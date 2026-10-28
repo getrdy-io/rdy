@@ -3,3 +3,10 @@
 # Helper functions in tests/ files are not covered, so they must not use unwrap or expect.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+
+# The CLI must read the real clock. `load_at` exists for tests that pin "now", and a caller of it could
+# defeat spec expiry. Tests allow it with `#[allow(clippy::disallowed_methods)]`.
+disallowed-methods = [
+    { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load" },
+    { path = "rdy_spec::loaded::load_at", reason = "only tests may pass a clock; use rdy_spec::load" },
+]
