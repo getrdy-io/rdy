@@ -537,6 +537,14 @@ way. The signing key is a path, never bytes. Proxy credentials come from `HTTPS_
 flag. Public keys may be on argv. Token and password files must not be symlinks or readable by group or
 others (Unix). rdy never prints its own argv or environment, and the action log records variable names only.
 
+**Reading a key password (M1-112).** `--password-file <file>` beats `RDY_KEY_PASSWORD`, and either beats the
+prompt. `-` is standard input. rdy removes one trailing line ending and nothing else, so spaces are part of the
+password. It refuses an empty value, a second line, text that is not UTF-8 and more than 1024 bytes. A password
+file must be a regular file. On Unix it must also not be a symlink and not readable by group or others, and the
+fix is `chmod 600 <file>`; Windows checks the symlink and file type only. The password is held in memory that
+is wiped on drop. `--password` is refused before clap parses anything, on `spec sign` and `spec keygen` only,
+so the refusal beats a missing-argument error and the value is never read. The code is `crates/rdy-cli/src/password.rs`.
+
 ## Appendix A: help text for rdy and every M1 command
 
 This is what the M1 build prints. The wording, the order of sections and the examples are fixed here. clap
