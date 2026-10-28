@@ -56,7 +56,7 @@ deny = [
     { crate = "aws-lc-sys", reason = "ADR 0009: ring is the crypto provider" },
     { crate = "aws-lc-rs", reason = "ADR 0009: ring is the crypto provider" },
     # YAML parsers that are archived or unsound (ADR 0001).
-    { crate = "serde_yaml", reason = "ADR 0001: archived, RUSTSEC-2025-0068" },
+    { crate = "serde_yaml", reason = "ADR 0001: deprecated and archived" },
     { crate = "serde_yml", reason = "ADR 0001: RUSTSEC-2025-0068" },
     { crate = "libyml", reason = "ADR 0001: RUSTSEC-2025-0067" },
     # Unmaintained RUSTSEC-2024-0375 and unsound RUSTSEC-2021-0145. Use std::io::IsTerminal.
