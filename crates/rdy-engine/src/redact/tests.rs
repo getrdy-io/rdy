@@ -164,14 +164,31 @@ fn an_exact_placeholder_value_is_left_as_it_is() {
 }
 
 #[test]
-fn quotes_and_delimiters_are_kept() {
-    let out = redactor().redact_str(r#"{"password": "hunter2", "user": "ada"}"#);
+fn the_quotes_around_a_one_line_value_are_kept() {
+    let out = redactor().redact_str("password = \"hunter2\"\nuser = \"ada\"");
     assert!(
-        out.starts_with(r#"{"password": "[REDACTED:secret_by_key:"#),
+        out.starts_with("password = \"[REDACTED:secret_by_key:"),
         "{}",
         *out
     );
-    assert!(out.ends_with(r#"]", "user": "ada"}"#), "{}", *out);
+    assert!(out.ends_with("]\"\nuser = \"ada\""), "{}", *out);
+    assert!(!out.contains("hunter2"));
+}
+
+#[test]
+fn over_redaction_stops_at_the_next_key() {
+    let out = redactor().redact_str("password: \"x y\"\nuser: bob\ntoken: abc\nhost: h");
+    assert!(out.contains("\nuser: bob\n"), "{}", *out);
+    assert!(out.ends_with("\nhost: h"), "{}", *out);
+    assert!(!out.contains("abc"), "{}", *out);
+    // A one-line JSON object after the key loses the rest of its line, on purpose.
+    let out = redactor().redact_str(r#"{"password": "hunter2", "user": "ada"}"#);
+    assert!(
+        out.starts_with(r#"{"password": [REDACTED:secret_by_key:"#),
+        "{}",
+        *out
+    );
+    assert!(!out.contains("hunter2") && !out.contains("ada"), "{}", *out);
 }
 
 #[test]
@@ -265,6 +282,18 @@ fn no_byte_of_a_matched_secret_survives() {
         format!("password: [a,\n{secret}\nnext: 1"),
         format!("password: \"a\nb\"{secret} x\nnext: 1"),
         format!("password: [a,\nb]\n  {secret}\nnext: 1"),
+        // Sixth review round: no parsing of quotes, escapes or brackets.
+        format!("password: 'a\\''\n{secret}'"),
+        format!("password: ['a\\'' ]\n{secret}']"),
+        format!("password: [a, # ]\n{secret}]"),
+        format!("password: !!str \"a\n{secret}\""),
+        format!("password: &p [a,\n{secret}]"),
+        format!("password = \"\"\"\n{secret}\n\"\"\""),
+        format!("{{\n\"password\":\n[\n\"{secret}\"\n]\n}}"),
+        format!("password: [a}}\n{secret}]"),
+        format!("TOKEN=\\\"a\n{secret}\\\""),
+        format!("password: correct horse\n  battery {secret}"),
+        format!("password: a\n  {secret}"),
     ];
     let r = redactor();
     for form in &forms {
