@@ -103,7 +103,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-047 | todo | | Fixture format README, .gitattributes and Windows canary
 
-- M1-048 | PR #TBD | | The M1 rules other than `secret_by_key` (M1-060), the report walk and `RedactedReport` (M1-062), the tracing writer and panic hook (M1-056), and the truncated-edge and known-secret handling (M1-061) are their own tickets. `TagKey::fixed` is behind the `testing` feature; the CI check that keeps that feature out of the release binary is not part of this ticket.
+- M1-048 | [#29](https://github.com/getrdy-io/rdy/pull/29) | 2026-10-28 | The M1 rules other than `secret_by_key` (M1-060), the report walk and `RedactedReport` (M1-062), the tracing writer and panic hook (M1-056), and the truncated-edge and known-secret handling (M1-061) are their own tickets. `TagKey::fixed` is behind the `testing` feature; the CI check that keeps that feature out of the release binary is not part of this ticket.
 
 - M1-049 | todo | | Replay backend and fixture loader in the 08 format
 
