@@ -47,10 +47,6 @@ jobs:
         with:
           shared-key: lint
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install zizmor
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
-        with:
-          tool: zizmor@1.31.1
       - name: cargo fmt
         run: cargo fmt --all --check
       - name: cargo clippy
@@ -59,6 +55,23 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --locked
+
+  # zizmor has its own job on purpose. It runs no cargo, so build scripts and proc macros from a PR
+  # never run beside its token or its binary. Do not add cargo steps here.
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install zizmor
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: zizmor@1.31.1
       - name: zizmor
         env:
           # Read-only token for zizmor's online audits (impostor commits, known-vulnerable actions).
@@ -77,7 +90,6 @@ jobs:
           persist-credentials: false
       - name: Install the pinned toolchain
         run: rustup toolchain install --no-self-update
-      # rust-cache runs first so the installed cargo-deny binary is cached with it.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: deny
@@ -101,6 +113,14 @@ jobs:
           # The check walks the PR's commits, so it needs full history.
           fetch-depth: 0
           persist-credentials: false
+      - name: Install shellcheck
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: shellcheck@0.11.0
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+      - name: DCO script tests
+        run: sh scripts/test-check-dco.sh
       # On push to main the job passes without checking. Squash and rebase merges
       # rewrite commits, and the PR already passed this check before it merged.
       - name: Every commit has a Signed-off-by line
@@ -114,7 +134,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, deny, dco]
+    needs: [lint, zizmor, deny, dco]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
