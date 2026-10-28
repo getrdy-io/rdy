@@ -3,6 +3,7 @@
 //! M1-048 ships the engine and one rule, `secret_by_key`. M1-060 adds the rest and tunes this one against
 //! the corpus. A spec can add rules but never remove or weaken one, so this table is a `static`.
 
+use std::cell::OnceCell;
 use std::ops::Range;
 use std::sync::LazyLock;
 
@@ -92,6 +93,9 @@ const PLAIN_VALUES: &[&str] = &["null", "true", "false", "none", "required"];
 /// Where a mounted secret lives. The path is not the secret.
 const SECRET_MOUNT: &str = "/run/secrets/";
 
+/// Characters that end a line: LF, CR, NEL, line separator and paragraph separator. CR LF is one end.
+const LINE_ENDS: [char; 5] = ['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'];
+
 fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
     let (Ok(assignment), Ok(placeholder)) = (ASSIGNMENT.as_ref(), PLACEHOLDER.as_ref()) else {
         out.push(0..text.len());
@@ -102,6 +106,7 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
     // Everything before this offset is part of a value already handled. A later key there is inside
     // that value, so it is skipped. This also keeps the scan linear on input such as `pass=pass=...`.
     let mut covered_until = 0;
+    let lines = OnceCell::new();
     for caps in assignment.captures_iter(text) {
         let (Some(whole), Some(key)) = (caps.get(0), caps.get(1)) else {
             continue;
@@ -112,47 +117,32 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
         if !is_secret_key(key.as_str()) {
             continue;
         }
-        let (value, bare) = value_range(text, whole.end());
-        if bare {
-            match classify_bare(&text[value.clone()]) {
-                Tail::Value => {}
-                Tail::Header => {
-                    // `token: |` is not the secret. The lines below it are.
-                    covered_until = value.end;
-                    if let Some(body) = body_lines(text, key.start(), value.end) {
-                        covered_until = body.end;
-                        out.push(body);
-                    }
-                    continue;
-                }
-                Tail::NextLines => {
-                    // Nothing but a comment, tags or anchors, or nothing at all: the value is on the
-                    // following lines. Whatever is on this line goes too, because `password=!hunter2`
-                    // and `password=#hunter2` look like a tag and a comment.
-                    covered_until = value.end;
-                    let body = body_lines(text, key.start(), value.end);
-                    match (value.is_empty(), body) {
-                        (_, Some(body)) => {
-                            covered_until = body.end;
-                            let from = if value.is_empty() {
-                                body.start
-                            } else {
-                                value.start
-                            };
-                            out.push(from..body.end);
-                        }
-                        (false, None) => out.push(value),
-                        (true, None) => {}
-                    }
-                    continue;
-                }
+        let value = value_range(text, whole.end());
+        // A comment line has no continuation, so a key inside one takes only its own line. That also keeps
+        // the scan below linear on a run of comment lines that all mention a key.
+        let lines = lines.get_or_init(|| Lines::new(text));
+        let body = if lines.is_comment(text, key.start()) {
+            None
+        } else {
+            // A quoted key with nothing after it, as in `{"password":` then `"x"}`, takes the next line.
+            let force_next = value.is_empty() && text[..key.start()].ends_with(['"', '\'']);
+            body_lines(text, lines, key.start(), value.end, force_next)
+        };
+        if let Some(body) = body {
+            covered_until = body.end;
+            let from = if value.is_empty() {
+                body.start
+            } else {
+                value.start
+            };
+            out.push(from..body.end);
+        } else if !value.is_empty() {
+            covered_until = value.end;
+            // References, plain words and placeholders are exempt only when the value is one line
+            // with nothing below it: `null` followed by a deeper line is not exempt.
+            if !is_exempt_value(&text[value.clone()]) {
+                out.push(value);
             }
-        } else if value.is_empty() {
-            continue;
-        }
-        covered_until = value.end;
-        if !is_exempt_value(&text[value.clone()]) {
-            out.push(value);
         }
     }
 }
@@ -213,7 +203,7 @@ fn normalize_key(key: &str) -> (String, Vec<bool>) {
     (norm, boundary)
 }
 
-/// The byte range of the value that starts at `start`, without its quotes, and whether it is bare.
+/// The byte range of the value that starts at `start`, without its quotes.
 ///
 /// - A quoted value (`"x"`, `'x'`, `\"x\"`, `\\\"x\\\"`) runs to the closing quote, or to the end of the
 ///   line if there is none. The closing quote of an escaped value is the same run of backslashes and the
@@ -224,7 +214,7 @@ fn normalize_key(key: &str) -> (String, Vec<bool>) {
 ///
 /// Scanning stops at the end of the value, never at the end of the text, so many assignments on one long
 /// line stay linear (the caller skips keys inside a value).
-fn value_range(text: &str, start: usize) -> (Range<usize>, bool) {
+fn value_range(text: &str, start: usize) -> Range<usize> {
     /// More backslashes than this are not treated as an escaped quote. The value is then bare, which
     /// takes the rest of the line. The cap keeps the scan linear.
     const MAX_ESCAPES: usize = 16;
@@ -243,9 +233,11 @@ fn value_range(text: &str, start: usize) -> (Range<usize>, bool) {
         let open = slashes + 1;
         let mut i = open;
         let closed = loop {
-            match bytes.get(i) {
-                None | Some(b'\n' | b'\r') => break false,
-                Some(b'\\') if escaped => {
+            if i >= bytes.len() || at_line_end(bytes, i) {
+                break false;
+            }
+            match bytes[i] {
+                b'\\' if escaped => {
                     // Close only on exactly the opener's run of backslashes and the same quote. A longer
                     // run is a deeper level of escaping and belongs to the value.
                     let run = bytes[i..].iter().take_while(|&&b| b == b'\\').count();
@@ -254,17 +246,13 @@ fn value_range(text: &str, start: usize) -> (Range<usize>, bool) {
                     }
                     i += run;
                 }
-                Some(b'\\') if !escaped => {
+                b'\\' => {
                     // A backslash escapes the next byte, except a line break. Only ASCII bytes are
                     // compared, so a multi-byte character is never split.
-                    i += if matches!(bytes.get(i + 1), None | Some(b'\n' | b'\r')) {
-                        1
-                    } else {
-                        2
-                    };
+                    i += if at_line_end(bytes, i + 1) { 1 } else { 2 };
                 }
-                Some(&b) if !escaped && b == quote => break true,
-                Some(_) => i += 1,
+                b if b == quote && !escaped => break true,
+                _ => i += 1,
             }
         };
         if closed {
@@ -274,74 +262,80 @@ fn value_range(text: &str, start: usize) -> (Range<usize>, bool) {
                 .next()
                 .is_none_or(|c| c.is_whitespace() || matches!(c, ',' | ';' | ')' | ']' | '}'));
             if tail_is_clean {
-                return (start + open..start + i, false);
+                return start + open..start + i;
             }
         }
         // Unterminated, or text glued to the closing quote: take the rest of the line.
-        let line_end = rest.find(['\n', '\r']).unwrap_or(rest.len());
+        let line_end = rest.find(LINE_ENDS).unwrap_or(rest.len());
         let end = rest[..line_end].trim_end().len().max(open);
-        return (start + open..start + end, false);
+        return start + open..start + end;
     }
-    let line_end = rest.find(['\n', '\r']).unwrap_or(rest.len());
+    let line_end = rest.find(LINE_ENDS).unwrap_or(rest.len());
     let line = &rest[..line_end];
     let trimmed = line.trim_start();
     let lead = line.len() - trimmed.len();
-    (start + lead..start + lead + trimmed.trim_end().len(), true)
+    start + lead..start + lead + trimmed.trim_end().len()
 }
 
-/// What a bare value turned out to be, after YAML decoration is peeled off.
-#[derive(Debug, PartialEq, Eq)]
-enum Tail {
-    /// A value that sits on this line.
-    Value,
-    /// Only a block scalar header (`|`, `>-`, `!!binary |`, `&a |2 # note`). The body is below.
-    Header,
-    /// Empty, or only a comment, tags or anchors. The value is below.
-    NextLines,
-}
-
-/// Peels, in this order, a comment (`#` at the start or after whitespace), leading `!tag` and `&anchor`
-/// tokens, and a block indicator. If something else is left, the value is on this line.
-fn classify_bare(value: &str) -> Tail {
-    let comment_at = value
-        .char_indices()
-        .find(|&(i, c)| c == '#' && (i == 0 || value[..i].ends_with([' ', '\t'])))
-        .map(|(i, _)| i);
-    let mut v = comment_at.map_or(value, |at| &value[..at]).trim();
-    while v.starts_with(['!', '&']) {
-        v = v
-            .split_once([' ', '\t'])
-            .map_or("", |(_, after)| after.trim_start());
-    }
-    if v.is_empty() {
-        Tail::NextLines
-    } else if is_block_indicator(v) {
-        Tail::Header
-    } else {
-        Tail::Value
-    }
-}
-
-/// True for a YAML block scalar header: `|`, `>`, `|-`, `>+`, `|2`, `|2-`.
-fn is_block_indicator(value: &str) -> bool {
-    let Some(rest) = value.strip_prefix(['|', '>']) else {
-        return false;
-    };
-    let digits = rest.chars().filter(|c| ('1'..='9').contains(c)).count();
-    let chomps = rest.chars().filter(|c| matches!(c, '+' | '-')).count();
-    digits <= 1 && chomps <= 1 && digits + chomps == rest.chars().count()
-}
-
-/// The end of the line that starts at `pos` and where the next line starts. A line ends at `\n`, `\r\n`
-/// or a lone `\r`. The second value is `None` after the last line.
-fn line_end(text: &str, pos: usize) -> (usize, Option<usize>) {
-    match text[pos..].find(['\n', '\r']) {
-        None => (text.len(), None),
-        Some(i) => {
-            let end = pos + i;
-            let crlf = text[end..].starts_with("\r\n");
-            (end, Some(end + if crlf { 2 } else { 1 }))
+/// True if a line end (see [`LINE_ENDS`]) starts at byte `i`.
+fn at_line_end(bytes: &[u8], i: usize) -> bool {
+    match bytes.get(i) {
+        Some(b'\n' | b'\r') => true,
+        Some(0xC2) => bytes.get(i + 1) == Some(&0x85),
+        Some(0xE2) => {
+            bytes.get(i + 1) == Some(&0x80) && matches!(bytes.get(i + 2), Some(0xA8 | 0xA9))
         }
+        _ => false,
+    }
+}
+
+/// Where every line ends, so the lines around a position are found without rescanning the text. A line
+/// end is one of [`LINE_ENDS`], and CR LF is a single end.
+struct Lines {
+    /// For each line end, the offset where it starts and the offset after it. Sorted.
+    breaks: Vec<(usize, usize)>,
+    len: usize,
+}
+
+impl Lines {
+    fn new(text: &str) -> Self {
+        let mut breaks: Vec<(usize, usize)> = Vec::new();
+        for (i, m) in text.match_indices(LINE_ENDS) {
+            if breaks.last().is_some_and(|&(_, after)| i < after) {
+                continue; // the LF of a CR LF
+            }
+            let width = if m == "\r" && text[i + 1..].starts_with('\n') {
+                2
+            } else {
+                m.len()
+            };
+            breaks.push((i, i + width));
+        }
+        Self {
+            breaks,
+            len: text.len(),
+        }
+    }
+
+    /// The end of the line that holds `pos`, and where the next line starts (`None` after the last line).
+    fn line_end(&self, pos: usize) -> (usize, Option<usize>) {
+        let i = self.breaks.partition_point(|&(start, _)| start < pos);
+        self.breaks
+            .get(i)
+            .map_or((self.len, None), |&(start, after)| (start, Some(after)))
+    }
+
+    /// The offset where the line that holds `pos` starts.
+    fn line_start(&self, pos: usize) -> usize {
+        let i = self.breaks.partition_point(|&(start, _)| start < pos);
+        i.checked_sub(1).map_or(0, |j| self.breaks[j].1)
+    }
+
+    /// True if the first non-blank character of the line that holds `pos` is `#`.
+    fn is_comment(&self, text: &str, pos: usize) -> bool {
+        text[self.line_start(pos)..]
+            .trim_start_matches([' ', '\t'])
+            .starts_with('#')
     }
 }
 
@@ -366,29 +360,53 @@ fn continues_value(key_ws: &str, line_ws: &str, rest: &str) -> bool {
     }
 }
 
-/// The lines below a key whose value is not on its own line: every line up to the first non-blank line
-/// that does not continue the value (see [`continues_value`]), from the start of the first to the end of
-/// the last non-blank one. Blank lines inside are taken. The indent of the key's line is measured from the
-/// start of that line, not from the key, so `db password:` and `- token:` count from column 0.
-/// `value_end` is the end of the key's value, on the key's line.
-fn body_lines(text: &str, key_start: usize, value_end: usize) -> Option<Range<usize>> {
-    let key_line_start = text[..key_start].rfind(['\n', '\r']).map_or(0, |i| i + 1);
-    let key_line = &text[key_line_start..];
+/// The lines below a key that belong to its value. This is the one rule for every YAML shape (block
+/// scalars, multi-line plain and quoted scalars, flow collections, values on the next line, tags, anchors
+/// and comments), and it fails closed:
+///
+/// after any key match, the value is the rest of the key's line **and** every following line up to the first
+/// line that does not continue it. Blank lines never end the value. A comment line (first non-blank
+/// character `#`) never ends it either, unless it is deeper than the key, in which case it is value text,
+/// as in a block scalar. Any other line continues the value if its indent is deeper than the indent of the
+/// key's line, or equal and starting with `- ` (kubectl-style lists). The indent is measured from the start
+/// of the key's line, not from the key, so `db password:` and `- token:` count from their line's first
+/// non-blank column. A tab and space mix in the two indents counts as deeper. If `force_next` is set, the
+/// first line that is not blank or a shallower comment is taken whatever its indent.
+///
+/// This over-redacts on purpose. It takes sibling list items after a `- token:` line, closing brackets,
+/// and the text of a value already on the key's line that was only a comment or tag. M1-060 narrows it
+/// against the corpus.
+///
+/// Returns the span from the start of the first taken line to the end of the last, or `None` if no line
+/// is taken. `value_end` is the end of the key's value, on the key's line.
+fn body_lines(
+    text: &str,
+    lines: &Lines,
+    key_start: usize,
+    value_end: usize,
+    mut force_next: bool,
+) -> Option<Range<usize>> {
+    let key_line = &text[lines.line_start(key_start)..];
     let key_ws = &key_line[..key_line.len() - key_line.trim_start_matches([' ', '\t']).len()];
-    let mut pos = line_end(text, value_end).1?;
+    let mut pos = lines.line_end(value_end).1?;
     let mut first = None;
     let mut last_end = 0;
     loop {
-        let (end, next) = line_end(text, pos);
+        let (end, next) = lines.line_end(pos);
         let line = text[pos..end].trim_end();
         if !line.is_empty() {
             let rest = line.trim_start_matches([' ', '\t']);
             let line_ws = &line[..line.len() - rest.len()];
-            if !continues_value(key_ws, line_ws, rest) {
-                break;
+            let continues = continues_value(key_ws, line_ws, rest);
+            let is_comment = rest.starts_with('#');
+            if !(is_comment && !continues) {
+                if !continues && !force_next {
+                    break;
+                }
+                force_next = false;
+                first.get_or_insert(pos);
+                last_end = pos + line.len();
             }
-            first.get_or_insert(pos);
-            last_end = pos + line.len();
         }
         match next {
             Some(n) => pos = n,
@@ -616,22 +634,27 @@ mod tests {
 
     #[test]
     fn yaml_block_values_are_redacted_to_the_end_of_the_block() {
+        // The header is part of the value: one rule for every shape, and it fails closed.
         let text = "a: 1\ntoken: |\n  line one hunter2\n\n  line two\nnext: ok\n";
-        assert_eq!(found(text), ["  line one hunter2\n\n  line two"]);
+        assert_eq!(found(text), ["|\n  line one hunter2\n\n  line two"]);
         let text = "key:\n  - token: >-\n      folded secret\n      more\n    other: 1\n";
         // `other: 1` is deeper than the key's line (the `-` is at column 2), so it is part of the value.
         assert_eq!(
             found(text),
-            ["      folded secret\n      more\n    other: 1"]
+            [">-\n      folded secret\n      more\n    other: 1"]
         );
         // CRLF, a block at the end of the text, and an empty block.
-        assert_eq!(found("token: |\r\n  abc\r\nx: 1\r\n"), ["  abc"]);
-        assert_eq!(found("token: |\n  abc"), ["  abc"]);
-        assert!(found("token: |\nnext: 1").is_empty());
-        assert!(found("token: |").is_empty());
-        // Not a block header.
-        assert_eq!(found("token: | foo\n  bar"), ["| foo"]);
-        assert_eq!(found("token: |22\n  bar"), ["|22"]);
+        assert_eq!(found("token: |\r\n  abc\r\nx: 1\r\n"), ["|\r\n  abc"]);
+        assert_eq!(found("token: |\n  abc"), ["|\n  abc"]);
+        assert_eq!(found("token: |\nnext: 1"), ["|"]);
+        assert_eq!(found("token: |"), ["|"]);
+        assert_eq!(found("token: | foo\n  bar"), ["| foo\n  bar"]);
+        assert_eq!(found("token: |22\n  bar"), ["|22\n  bar"]);
+        // A deeper comment line is text in a block scalar. A shallower one is not.
+        assert_eq!(found("token: |\n  # hunter2"), ["|\n  # hunter2"]);
+        assert_eq!(found("password:\n# old\n  hunter2"), ["  hunter2"]);
+        assert_eq!(found("password:\n  a\n# c\n  b"), ["  a\n# c\n  b"]);
+        assert_eq!(found("password:\n  a\n# c\nnext: 1"), ["  a"]);
     }
 
     #[test]
@@ -647,39 +670,55 @@ mod tests {
         );
         assert!(found("password:\nnext: 1").is_empty());
         assert!(found("password:").is_empty());
-        // A quoted empty value is a value, not a pointer to the next lines.
-        assert!(found("password: \"\"\n  hunter2").is_empty());
+        // A quoted empty value does not end the value either.
+        assert_eq!(found("password: \"\"\n  hunter2"), ["  hunter2"]);
     }
 
     #[test]
-    fn block_headers_may_carry_tags_anchors_and_comments() {
-        for text in [
-            "token: | # note\n  hunter2",
-            "token: |- #note\n  hunter2",
-            "token: !!binary |\n  hunter2",
-            "token: &a |\n  hunter2",
-            "token: !!str &a >-\n  hunter2",
-            "token: |2+ # x\n  hunter2",
+    fn a_value_may_continue_on_the_next_lines_in_every_yaml_shape() {
+        for (text, want) in [
+            (
+                "password: correct horse\n  battery staple",
+                "correct horse\n  battery staple",
+            ),
+            ("password: \"hunter\n  2\"", "hunter\n  2\""),
+            ("password: 'hunter\n  2'", "hunter\n  2'"),
+            ("password: {\n  a: hunter2\n}", "{\n  a: hunter2"),
+            ("password: [\n  hunter2\n]", "[\n  hunter2"),
+            ("password: null\n  hunter2", "null\n  hunter2"),
+            ("password: ${DB}\n  hunter2", "${DB}\n  hunter2"),
+            ("password: true\n  hunter2", "true\n  hunter2"),
+            (
+                "password: [REDACTED:x:00000000]\n  hunter2",
+                "[REDACTED:x:00000000]\n  hunter2",
+            ),
+            ("{\"password\":\n\"hunter2\"}", "\"hunter2\"}"),
+            ("{'password':\n  'hunter2'}", "  'hunter2'}"),
+            ("{\"password\":\n\n# c\n\"hunter2\"}", "\"hunter2\"}"),
+            ("k:\n  y: 1\u{85}password:\n hunter2", " hunter2"),
+            ("k:\n  y: 1\u{2028}password:\n hunter2", " hunter2"),
+            ("k:\n  y: 1\u{2029}password:\n hunter2", " hunter2"),
+            ("password:\u{85}  hunter2", "  hunter2"),
+            ("password:\u{2028}  hunter2\u{2029}next: 1", "  hunter2"),
+            ("password=\"a\\\u{85}b", "a\\"),
         ] {
-            assert_eq!(found(text), ["  hunter2"], "{text:?}");
+            assert_eq!(found(text), [want], "{text:?}");
         }
-        // A quoted pipe is a value, not a block.
-        assert_eq!(found("token: \"|\"\n  body"), ["|"]);
-        // A tag alone, with the value below: the tag goes too, since it could be a password.
-        assert_eq!(found("token: !!binary\n  body"), ["!!binary\n  body"]);
+        // A key inside a comment takes only its own line.
+        assert_eq!(found("# password: hunter2\n  x"), ["hunter2"]);
     }
 
     #[test]
-    fn block_indent_is_measured_from_a_quoted_key_and_counts_tabs() {
-        assert_eq!(found("\"token\": |\n hunter2\n"), [" hunter2"]);
-        assert_eq!(found("'token': |\n hunter2\n"), [" hunter2"]);
+    fn block_indent_is_measured_from_the_line_start_and_counts_tabs() {
+        assert_eq!(found("\"token\": |\n hunter2\n"), ["|\n hunter2"]);
+        assert_eq!(found("'token': |\n hunter2\n"), ["|\n hunter2"]);
         assert_eq!(
             found("token: |\n\thunter2\n\tmore\nnext: 1"),
-            ["\thunter2\n\tmore"]
+            ["|\n\thunter2\n\tmore"]
         );
         assert_eq!(
             found("- token: |\n    hunter2\n  next: 1"),
-            ["    hunter2\n  next: 1"]
+            ["|\n    hunter2\n  next: 1"]
         );
     }
 
@@ -689,14 +728,14 @@ mod tests {
             ("password: # note\n  hunter2", "# note\n  hunter2"),
             ("token: !!binary\n  aGk=", "!!binary\n  aGk="),
             ("password: &a\n  hunter2", "&a\n  hunter2"),
-            ("token: !!binary |\n  aGk=", "  aGk="),
+            ("token: !!binary |\n  aGk=", "!!binary |\n  aGk="),
             ("passwords:\n- hunter2", "- hunter2"),
             ("passwords:\n- a\n- b\nnext: 1", "- a\n- b"),
             ("db password:\n  hunter2", "  hunter2"),
-            ("x/token: |\n hunter2", " hunter2"),
+            ("x/token: |\n hunter2", "|\n hunter2"),
             ("password:\r  hunter2", "  hunter2"),
             ("password:\r\n  hunter2\r\nnext: 1", "  hunter2"),
-            ("token: |\r  hunter2\rnext: 1", "  hunter2"),
+            ("token: |\r  hunter2\rnext: 1", "|\r  hunter2"),
             ("    password:\n\thunter2", "\thunter2"),
             ("\tpassword:\n    hunter2", "    hunter2"),
             ("  password:\n \t hunter2\n  next: 1", " \t hunter2"),
@@ -787,6 +826,18 @@ mod tests {
         let started = std::time::Instant::now();
         let text = "pass=".repeat(100_000);
         assert_eq!(found(&text).len(), 1);
+        for (unit, spans) in [
+            ("password:\n", 0),
+            ("- token: |\n", 1),
+            ("password:\n\n", 0),
+            ("password:\n# password:\n", 0),
+            ("password:\n  a\n", 100_000),
+            ("# password: x\n", 100_000),
+            ("password: \"a\"\n", 100_000),
+        ] {
+            let text = unit.repeat(100_000);
+            assert_eq!(found(&text).len(), spans, "{unit:?}");
+        }
         let quoted = "password=\"a\" ".repeat(100_000);
         assert_eq!(found(&quoted).len(), 100_000);
         let placeholders = "[REDACTED:x:00000000] ".repeat(100_000) + "password=a";
@@ -794,7 +845,7 @@ mod tests {
         let nulls = "password=null ".repeat(100_000);
         assert_eq!(found(&nulls).len(), 1);
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(10),
+            started.elapsed() < std::time::Duration::from_secs(60),
             "took {:?}",
             started.elapsed()
         );

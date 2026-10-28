@@ -240,6 +240,18 @@ fn no_byte_of_a_matched_secret_survives() {
         format!("password=!{secret}"),
         format!("password=#{secret}"),
         format!(r#"password=\"pa\\\",{secret}\" x"#),
+        // Fourth review round: values that run over several lines.
+        format!("password: correct {secret}\n  battery staple"),
+        format!("password: \"hunter\n  {secret}\""),
+        format!("password: {{\n  a: {secret}\n}}"),
+        format!("password: [\n  {secret}\n]"),
+        format!("password: null\n  {secret}"),
+        format!("password:\n# old\n  {secret}"),
+        format!("{{\"password\":\n\"{secret}\"}}"),
+        format!("k:\n  y: 1\u{85}password:\n {secret}"),
+        format!("k:\n  y: 1\u{2028}password:\n {secret}"),
+        format!("k:\n  y: 1\u{2029}password:\n {secret}"),
+        format!("token: |\n  # {secret}"),
     ];
     let r = redactor();
     for form in &forms {
