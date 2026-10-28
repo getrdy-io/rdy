@@ -23,8 +23,12 @@
 //! because dropping a stricter threshold from a newer spec would turn a failing host into a passing one
 //! (ADR 0008).
 //!
-//! The parameter structs of the 17 M1 ids are placeholders here. They have no fields yet, so every
-//! parameter is refused as unknown until the tickets for the host, net and k8s parameters fill them in.
+//! The seven host ids have their parameter structs, from [`HostCpu`] to [`HostOs`]. The net and k8s structs are placeholders
+//! for now. They have no fields yet, so every parameter is refused as unknown until the tickets for the
+//! net and k8s parameters fill them in.
+//!
+//! A check that needs a threshold and has none is [`UnsupportedReason::NoThreshold`], not a pass. A bare
+//! `- id: host.memory` would otherwise measure nothing and report ready.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -38,6 +42,19 @@ use crate::error::{echo_reason, echo_safe};
 use crate::reserved::{UnknownKind, is_reserved_id};
 use crate::spec::{CheckSpec, Lenient, Spec};
 
+mod common;
+mod host;
+
+pub use common::{
+    AbsPath, Arch, BoundedList, Cores, CpuFlag, DistroId, FsType, ListText, OsVersion, Port,
+    StringList, TolerancePercent,
+};
+pub use host::{
+    ApparmorMode, ApparmorPolicy, Bind, FipsPolicy, HostCpu, HostDisk, HostLsm, HostMemory, HostOs,
+    HostPorts, HostSecurityAgents, MountOption, PortRule, SelinuxMode, SelinuxPolicy, SupportedOs,
+    SwapPolicy, ToleranceResult,
+};
+
 /// The most characters of a message from the value reader that a reason keeps.
 const MAX_REASON_CHARS: usize = 160;
 
@@ -45,6 +62,15 @@ const MAX_REASON_CHARS: usize = 160;
 pub(crate) trait ParamSet: DeserializeOwned {
     /// Every key the check accepts. A key outside this list is refused by name.
     const FIELDS: &'static [&'static str];
+
+    /// The keys of which an entry needs at least one, because without it the check measures nothing.
+    /// Empty when the check needs no threshold. An entry with none of them is
+    /// [`UnsupportedReason::NoThreshold`].
+    const THRESHOLD: &'static [&'static str] = &[];
+
+    /// Keys that are required besides the threshold. They are named in a
+    /// [`UnsupportedReason::NoThreshold`] when they are missing too, so one message asks for everything.
+    const ALSO_REQUIRED: &'static [&'static str] = &[];
 }
 
 /// Defines a parameter struct with no fields yet.
@@ -68,13 +94,6 @@ macro_rules! placeholder_params {
 }
 
 placeholder_params! {
-    "host.cpu" => HostCpu,
-    "host.memory" => HostMemory,
-    "host.disk" => HostDisk,
-    "host.ports" => HostPorts,
-    "host.lsm" => HostLsm,
-    "host.security_agents" => HostSecurityAgents,
-    "host.os" => HostOs,
     "net.egress" => NetEgress,
     "net.proxy" => NetProxy,
     "net.tls_intercept" => NetTlsIntercept,
@@ -214,6 +233,15 @@ pub enum UnsupportedReason {
         /// What the reader said, already cut and escaped so it is safe to print.
         message: String,
     },
+    /// The check needs a threshold and the entry has none, such as a bare `- id: host.memory`.
+    ///
+    /// A check without a threshold measures nothing, so it is skipped and not passed.
+    NoThreshold {
+        /// The keys that would fix it. One of them is enough.
+        one_of: &'static [&'static str],
+        /// Other required keys that the entry also lacks, such as `path` of `host.disk`.
+        and: Vec<&'static str>,
+    },
     /// A common field of the entry does not fit: `name`, `severity`, `fix`, `timeout` or `os`.
     ///
     /// An unreadable `severity` still counts as `block` when the verdict is worked out.
@@ -236,6 +264,23 @@ impl fmt::Display for UnsupportedReason {
                 field: None,
                 message,
             } => write!(f, "a value does not fit: {message}"),
+            Self::NoThreshold { one_of, and } => {
+                match one_of {
+                    [only] => write!(f, "has no threshold: add '{only}'")?,
+                    [init @ .., last] => {
+                        write!(f, "has no threshold: add at least one of ")?;
+                        for key in init {
+                            write!(f, "'{key}', ")?;
+                        }
+                        write!(f, "or '{last}'")?;
+                    }
+                    [] => f.write_str("has no threshold")?,
+                }
+                for key in and {
+                    write!(f, " and '{key}'")?;
+                }
+                Ok(())
+            }
             Self::BadCommonField { field } => write!(f, "the value of '{field}' does not fit"),
         }
     }
@@ -250,9 +295,28 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
             field: echo_safe(field),
         });
     }
+    // A key with no value, such as `min:` in YAML, is a mistake and not an absent key. Reading it as
+    // absent would drop a threshold silently.
+    // This holds at any depth: `selinux: {allow:}` would otherwise allow every mode.
+    if let Some(key) = fields.iter().find_map(|(k, v)| has_null(v).then_some(k)) {
+        return Err(UnsupportedReason::BadValue {
+            field: Some(echo_safe(key)),
+            message: "the key has no value: write one, or remove the key".to_owned(),
+        });
+    }
+    if !P::THRESHOLD.is_empty() && !P::THRESHOLD.iter().any(|key| fields.contains_key(*key)) {
+        return Err(UnsupportedReason::NoThreshold {
+            one_of: P::THRESHOLD,
+            and: P::ALSO_REQUIRED
+                .iter()
+                .copied()
+                .filter(|key| !fields.contains_key(*key))
+                .collect(),
+        });
+    }
     serde_json::from_value::<P>(Value::Object(fields.clone())).map_err(|e| {
         let message = e.to_string();
-        if let Some(field) = missing_field_name(&message) {
+        if let Some(field) = missing_field_name::<P>(&message, fields) {
             UnsupportedReason::MissingField {
                 field: echo_safe(field),
             }
@@ -265,10 +329,27 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
     })
 }
 
+/// Whether a value is null, or holds a null in a list or an object at any depth.
+fn has_null(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Array(items) => items.iter().any(has_null),
+        Value::Object(map) => map.values().any(has_null),
+        _ => false,
+    }
+}
+
 /// The field named by serde's `missing field` message. The name comes from the struct, not the file.
-fn missing_field_name(message: &str) -> Option<&str> {
+///
+/// Only a key of `P` itself that `fields` lacks counts. A nested struct that lacks a key, such as a port
+/// object without `port`, gives the same message, and that is a bad value of the outer key.
+fn missing_field_name<'m, P: ParamSet>(
+    message: &'m str,
+    fields: &Map<String, Value>,
+) -> Option<&'m str> {
     let rest = message.strip_prefix("missing field `")?;
-    rest.split_once('`').map(|(name, _)| name)
+    let (name, _) = rest.split_once('`')?;
+    (P::FIELDS.contains(&name) && !fields.contains_key(name)).then_some(name)
 }
 
 /// The key whose value alone makes `P` fail. A required key that is absent is not a culprit.
@@ -276,8 +357,10 @@ fn culprit<P: ParamSet>(fields: &Map<String, Value>) -> Option<String> {
     fields.iter().find_map(|(key, value)| {
         let mut one = Map::new();
         one.insert(key.clone(), value.clone());
-        match serde_json::from_value::<P>(Value::Object(one)) {
-            Err(e) if missing_field_name(&e.to_string()).is_none() => Some(echo_safe(key)),
+        match serde_json::from_value::<P>(Value::Object(one.clone())) {
+            Err(e) if missing_field_name::<P>(&e.to_string(), &one).is_none() => {
+                Some(echo_safe(key))
+            }
             _ => None,
         }
     })
