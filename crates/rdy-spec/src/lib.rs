@@ -19,5 +19,11 @@ pub mod spec;
 pub use error::SpecError;
 pub use loaded::{LoadedSpec, load};
 
+/// Throwaway for the M1-005 exit test. It trips `clippy::needless_return`.
+#[must_use]
+pub fn throwaway_clippy() -> u32 {
+    return 1;
+}
+
 /// The `apiVersion` every `rdy/v1` document carries.
 pub const API_VERSION: &str = "rdy/v1";
