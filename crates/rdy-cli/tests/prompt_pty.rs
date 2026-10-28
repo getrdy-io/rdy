@@ -6,10 +6,12 @@
 // Helper functions in tests/ are not covered by clippy.toml, and a failed spawn must fail the test.
 #![allow(clippy::expect_used)]
 
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, MutexGuard, Once, PoisonError};
 
+use rexpect::process::WaitStatus;
 use rexpect::session::PtySession;
 
 const TIMEOUT_MS: u64 = 20_000;
@@ -23,25 +25,40 @@ fn lock() -> MutexGuard<'static, ()> {
 }
 
 /// The probe binary. `cargo test -p rdy` builds examples next to the test binaries. A run of just
-/// this test file does not, so build it once if it is missing.
+/// this test file does not, and a stale one would test old code. So build it once per run, for the
+/// same profile and target. When it is fresh this takes a moment and changes nothing.
 fn probe_path() -> PathBuf {
     static BUILD: Once = Once::new();
     let mut dir = std::env::current_exe().expect("test exe path");
     dir.pop(); // deps
-    dir.pop(); // debug or release
-    let release = dir.file_name().is_some_and(|n| n == "release");
-    let path = dir.join("examples").join("prompt_probe");
-    BUILD.call_once(|| {
-        if !path.exists() {
-            let mut cargo = Command::new(env!("CARGO"));
-            cargo.args(["build", "--quiet", "-p", "rdy", "--example", "prompt_probe"]);
-            if release {
-                cargo.arg("--release");
-            }
-            assert!(cargo.status().expect("run cargo").success());
+    dir.pop(); // the profile folder: debug, release or a custom profile
+    BUILD.call_once(|| build_probe(&dir));
+    dir.join("examples").join("prompt_probe")
+}
+
+/// Run `cargo build --example prompt_probe` for the profile folder `dir`.
+fn build_probe(dir: &Path) {
+    let mut cargo = Command::new(env!("CARGO"));
+    cargo.args(["build", "--quiet", "-p", "rdy", "--example", "prompt_probe"]);
+    match dir.file_name().and_then(|n| n.to_str()) {
+        Some("debug") | None => {}
+        Some("release") => {
+            cargo.arg("--release");
         }
+        Some(profile) => {
+            cargo.args(["--profile", profile]);
+        }
+    }
+    // With `--target T` the folders are target/T/<profile>. A target triple has at least two
+    // dashes. `CARGO_BUILD_TARGET` wins when it is set.
+    let target = std::env::var("CARGO_BUILD_TARGET").ok().or_else(|| {
+        let name = dir.parent()?.file_name()?.to_str()?;
+        (name.matches('-').count() >= 2).then(|| name.to_string())
     });
-    path
+    if let Some(target) = target {
+        cargo.args(["--target", &target]);
+    }
+    assert!(cargo.status().expect("run cargo").success());
 }
 
 /// The probe with no terminal wiring, for the no-terminal cases.
@@ -65,16 +82,53 @@ fn on_pty(mode: &str) -> PtySession {
     rexpect::session::spawn_command(cmd, Some(TIMEOUT_MS)).expect("spawn probe on a pty")
 }
 
+/// Run the probe on a pty like `on_pty`, then print the terminal settings with `stty -a` and exit
+/// with the probe's exit code. This shows what state the probe left the terminal in.
+fn on_pty_then_stty(mode: &str) -> PtySession {
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c")
+        .arg(
+            "stty echo; \"$0\" \"$@\"; code=$?; \
+             echo STTY-BEGIN; stty -a; echo STTY-END; exit $code",
+        )
+        .arg(probe_path())
+        .arg(mode)
+        .env("RDY_PROBE_EXPECT", SECRET);
+    rexpect::session::spawn_command(cmd, Some(TIMEOUT_MS)).expect("spawn probe on a pty")
+}
+
 /// Wait for the child and return its exit code.
 fn exit_code(session: &PtySession) -> i32 {
-    // The nix status prints as `Exited(Pid(n), code)`.
-    let status = format!("{:?}", session.process().wait().expect("wait"));
-    let code = status
-        .rsplit(", ")
-        .next()
-        .and_then(|rest| rest.strip_suffix(')'))
-        .and_then(|n| n.parse().ok());
-    code.unwrap_or_else(|| panic!("child did not exit normally: {status}"))
+    match session.process().wait().expect("wait") {
+        WaitStatus::Exited(_, code) => code,
+        other => panic!("child did not exit normally: {other:?}"),
+    }
+}
+
+/// The terminal flags from the `stty -a` block in `output`, such as `echo` or `-icanon`.
+fn stty_flags(output: &str) -> HashSet<String> {
+    let block = output
+        .split("STTY-BEGIN")
+        .nth(1)
+        .and_then(|rest| rest.split("STTY-END").next())
+        .unwrap_or_else(|| panic!("no stty output in {output:?}"));
+    block
+        .split(|c: char| c.is_whitespace() || c == ';')
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The terminal is back to a normal shell state: echo, canonical mode and signal keys all on.
+fn assert_terminal_restored(output: &str) {
+    let flags = stty_flags(output);
+    for on in ["echo", "icanon", "isig"] {
+        assert!(flags.contains(on), "{on} is not on: {output:?}");
+        assert!(
+            !flags.contains(&format!("-{on}")),
+            "-{on} is set: {output:?}"
+        );
+    }
 }
 
 /// Answer the y/N question with `typed` and return (output after the prompt, exit code).
@@ -192,4 +246,85 @@ fn password_without_a_terminal_exits_64() {
         "error: cannot ask for a password because there is no terminal\n\
          fix: use --password-file or the RDY_KEY_PASSWORD variable\n"
     );
+}
+
+#[test]
+fn ctrl_c_at_the_password_prompt_restores_the_terminal_and_exits_70() {
+    let _guard = lock();
+    let mut session = on_pty_then_stty("password");
+    session
+        .exp_string("Password (input hidden): ")
+        .expect("prompt");
+    session.send("half-typed").expect("send");
+    session.send_control('c').expect("ctrl-c");
+    let rest = session.exp_eof().expect("eof");
+
+    assert!(
+        rest.contains("error: interrupted\r\nfix: run the command again"),
+        "{rest:?}"
+    );
+    assert!(!rest.contains("half-typed"), "{rest:?}");
+    assert_terminal_restored(&rest);
+    assert_eq!(exit_code(&session), 70);
+}
+
+#[test]
+fn ctrl_d_at_the_password_prompt_restores_the_terminal_and_exits_64() {
+    let _guard = lock();
+    let mut session = on_pty_then_stty("password");
+    session
+        .exp_string("Password (input hidden): ")
+        .expect("prompt");
+    session.send_control('d').expect("ctrl-d");
+    let rest = session.exp_eof().expect("eof");
+
+    assert!(rest.contains("error: no password was entered"), "{rest:?}");
+    assert_terminal_restored(&rest);
+    assert_eq!(exit_code(&session), 64);
+}
+
+#[test]
+fn after_a_good_password_the_terminal_is_restored() {
+    let _guard = lock();
+    let mut session = on_pty_then_stty("password");
+    session
+        .exp_string("Password (input hidden): ")
+        .expect("prompt");
+    session.send_line(SECRET).expect("send");
+    let rest = session.exp_eof().expect("eof");
+    assert!(rest.contains("match=true"), "{rest:?}");
+    assert!(!rest.contains(SECRET), "{rest:?}");
+    assert_terminal_restored(&rest);
+    assert_eq!(exit_code(&session), 0);
+}
+
+#[test]
+fn backspace_edits_the_hidden_password() {
+    let _guard = lock();
+    let mut session = on_pty("password");
+    session
+        .exp_string("Password (input hidden): ")
+        .expect("prompt");
+    session
+        .send(&format!("wrong\x7f\x7f\x7f\x7f\x7f{SECRET}\n"))
+        .expect("send");
+    let rest = session.exp_eof().expect("eof");
+    assert!(rest.contains("match=true"), "{rest:?}");
+}
+
+#[test]
+fn a_password_over_the_cap_is_refused_with_exit_64() {
+    let _guard = lock();
+    let mut session = on_pty_then_stty("password");
+    session
+        .exp_string("Password (input hidden): ")
+        .expect("prompt");
+    session.send_line(&"p".repeat(2000)).expect("send");
+    let rest = session.exp_eof().expect("eof");
+    assert!(
+        rest.contains("error: the password is longer than 1024 bytes"),
+        "{rest:?}"
+    );
+    assert_terminal_restored(&rest);
+    assert_eq!(exit_code(&session), 64);
 }

@@ -38,6 +38,8 @@ rexpect = { version = "0.7", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 tempfile = { version = "3", default-features = false }
 unicode-normalization = { version = "0.1", default-features = false }
+# Safe wrappers over open flags and geteuid, so the password file checks need no unsafe (M1-112).
+rustix = { version = "1", default-features = false }
 # Key passwords are wiped from memory on drop (M1-112). `alloc` gives the String impl.
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 

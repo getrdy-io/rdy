@@ -10,14 +10,23 @@
 //! - A password is read with echo off. Nothing the user types is written back, logged or put in an
 //!   error. [`Secret`] has no `Display` and its `Debug` shows no text.
 //! - A line of input is capped at 4096 bytes. The rest of an over-long line is read and dropped, so
-//!   it cannot become the answer to the next prompt.
+//!   it cannot become the answer to the next prompt. A hidden password is capped at 1024 bytes and
+//!   a longer one is refused, never cut.
+//! - Ctrl-C at the password prompt cancels the prompt (exit 70, 07 section 5.1) and Ctrl-D on an
+//!   empty line cancels it too (exit 64). Either way the terminal is put back as it was.
 //!
 //! The logic sits behind the [`Terminal`] trait. [`StdTerminal`] is the real keyboard and stderr.
 //! Unit tests use a scripted terminal, so they need no TTY. On Unix, `tests/prompt_pty.rs` also
 //! drives [`StdTerminal`] through a real pseudo-terminal (Linux and macOS CI legs): `y`, `yes`, `n`,
 //! an empty line, end of input, no terminal, and a password that is never echoed. Windows has no pty
 //! test. The scripted-terminal unit tests cover the logic there, and `rpassword` does the console
-//! work.
+//! work. There, Ctrl-C at the password prompt is not handled by this module.
+//!
+//! On Unix the hidden read is done here with `rustix` termios, not with `rpassword`. `rpassword`
+//! raises SIGINT on Ctrl-C while the terminal is still in raw mode, which leaves the user's shell
+//! with echo off. Here the signal key is switched off for the read, so Ctrl-C arrives as a byte,
+//! the guard restores the terminal, and the prompt returns [`Cancelled`](PromptError::Cancelled).
+//! A signal sent from outside (such as `kill -INT`) is not caught here. The Ctrl-C ticket owns that.
 //!
 //! A declined question is not an error here: [`Prompter::confirm`] returns `Ok(false)`. The caller
 //! decides what that means. `trust add` prints `Not trusted. Nothing was changed.` and exits 64
@@ -65,6 +74,28 @@ impl std::fmt::Debug for Secret {
     }
 }
 
+/// The most bytes of a hidden password. A longer one is refused.
+const MAX_SECRET: usize = 1024;
+
+/// Why a prompt was cancelled by the person at the keyboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cancel {
+    /// Ctrl-C.
+    Interrupted,
+    /// Ctrl-D on an empty line, or the input closed.
+    EndOfInput,
+}
+
+impl Cancel {
+    /// The text of the `error:` line.
+    fn message(self) -> &'static str {
+        match self {
+            Self::Interrupted => "interrupted",
+            Self::EndOfInput => "no password was entered",
+        }
+    }
+}
+
 /// Why a prompt could not be shown or read.
 #[derive(Debug, thiserror::Error)]
 pub enum PromptError {
@@ -80,6 +111,12 @@ pub enum PromptError {
         /// The fix line, such as "use --password-file or the RDY_KEY_PASSWORD variable".
         fix: String,
     },
+    /// The person cancelled the prompt with Ctrl-C or Ctrl-D.
+    #[error("{}", .0.message())]
+    Cancelled(Cancel),
+    /// The hidden password is longer than the cap of 1024 bytes.
+    #[error("the password is longer than {max} bytes", max = MAX_SECRET)]
+    TooLong,
     /// The terminal could not be read or written. The OS error is kept as the source, not printed.
     #[error("could not read your answer from the terminal")]
     Io(#[source] io::Error),
@@ -91,16 +128,25 @@ impl PromptError {
     pub fn fix(&self) -> &str {
         match self {
             Self::NoTerminalConfirm { fix } | Self::NoTerminalPassword { fix } => fix,
+            Self::Cancelled(Cancel::Interrupted) => "run the command again",
+            Self::Cancelled(Cancel::EndOfInput) => {
+                "run the command again and type the password, or give it another way as --help shows"
+            }
+            Self::TooLong => "use a shorter password",
             Self::Io(_) => "check that the terminal is still open, then run the command again",
         }
     }
 
-    /// The exit code for this error: 64 when there is no terminal (ADR 0008), 70 for an I/O failure.
+    /// The exit code for this error (ADR 0008, 07 section 5.1): 64 when there is no terminal, when
+    /// the input ended or when the password is too long, and 70 for Ctrl-C and for an I/O failure.
     #[must_use]
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::NoTerminalConfirm { .. } | Self::NoTerminalPassword { .. } => crate::EXIT_USAGE,
-            Self::Io(_) => crate::EXIT_INTERNAL,
+            Self::NoTerminalConfirm { .. }
+            | Self::NoTerminalPassword { .. }
+            | Self::Cancelled(Cancel::EndOfInput)
+            | Self::TooLong => crate::EXIT_USAGE,
+            Self::Cancelled(Cancel::Interrupted) | Self::Io(_) => crate::EXIT_INTERNAL,
         }
     }
 
@@ -137,11 +183,13 @@ pub trait Terminal {
     /// line, so the implementation ends the line itself (the Enter key is not echoed either).
     ///
     /// # Errors
-    /// Returns the I/O error if the terminal cannot be read or its mode cannot be changed.
-    fn read_hidden(&mut self) -> io::Result<Secret>;
+    /// [`PromptError::Cancelled`] on Ctrl-C or Ctrl-D, [`PromptError::TooLong`] past the cap, and
+    /// [`PromptError::Io`] if the terminal cannot be read or its mode cannot be changed. The
+    /// terminal mode is back as it was before this returns, whatever the outcome.
+    fn read_hidden(&mut self) -> Result<Secret, PromptError>;
 }
 
-/// The real terminal: stdin for answers, the controlling terminal for hidden input, stderr for prompts.
+/// The real terminal: stdin for answers and hidden input, stderr for prompts.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct StdTerminal;
 
@@ -160,10 +208,106 @@ impl Terminal for StdTerminal {
         read_bounded_line(&mut io::stdin().lock())
     }
 
-    fn read_hidden(&mut self) -> io::Result<Secret> {
-        // rpassword turns echo off on the controlling terminal and restores it when it is done,
-        // including on an error.
-        rpassword::read_password().map(Secret::new)
+    fn read_hidden(&mut self) -> Result<Secret, PromptError> {
+        read_hidden_tty()
+    }
+}
+
+/// Read a password from stdin with echo and the signal keys off (Unix).
+///
+/// The terminal is set to non-canonical mode with ECHO, ECHONL, ICANON and ISIG off, so each key
+/// arrives as a byte and Ctrl-C is the byte 0x03, not a SIGINT. A guard puts the saved settings
+/// back on every way out, including a panic. Line editing is Backspace and Ctrl-U. Other control
+/// bytes are ignored.
+#[cfg(unix)]
+fn read_hidden_tty() -> Result<Secret, PromptError> {
+    use rustix::termios::{LocalModes, OptionalActions, SpecialCodeIndex, tcgetattr, tcsetattr};
+
+    /// Puts the saved terminal settings back when dropped.
+    struct Restore<'a> {
+        fd: &'a io::Stdin,
+        saved: rustix::termios::Termios,
+    }
+    impl Drop for Restore<'_> {
+        fn drop(&mut self) {
+            // Nothing useful can be done if this fails while unwinding or returning.
+            let _ = tcsetattr(self.fd, OptionalActions::Now, &self.saved);
+        }
+    }
+
+    let stdin = io::stdin();
+    let saved = tcgetattr(&stdin).map_err(|e| PromptError::Io(e.into()))?;
+    let mut hidden = saved.clone();
+    hidden
+        .local_modes
+        .remove(LocalModes::ECHO | LocalModes::ECHONL | LocalModes::ICANON | LocalModes::ISIG);
+    hidden.special_codes[SpecialCodeIndex::VMIN] = 1;
+    hidden.special_codes[SpecialCodeIndex::VTIME] = 0;
+    // The guard goes first, so a failure half way through `tcsetattr` is also undone.
+    let restore = Restore { fd: &stdin, saved };
+    tcsetattr(&stdin, OptionalActions::Now, &hidden).map_err(|e| PromptError::Io(e.into()))?;
+
+    let result = read_hidden_bytes(&mut stdin.lock());
+    drop(restore);
+    // Echo of the Enter key is off, so end the line here. The terminal is back to normal first.
+    let _ = io::stderr().write_all(b"\n");
+    result
+}
+
+/// Read password bytes one key at a time. See [`read_hidden_tty`] for the key rules.
+#[cfg(unix)]
+fn read_hidden_bytes(input: &mut dyn io::Read) -> Result<Secret, PromptError> {
+    use zeroize::Zeroize;
+
+    // Room for the cap plus one byte, so the buffer never grows and leaves copies behind.
+    let mut typed: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(MAX_SECRET + 1));
+    let mut byte = [0_u8; 1];
+    loop {
+        match input.read(&mut byte) {
+            Ok(0) => return Err(PromptError::Cancelled(Cancel::EndOfInput)),
+            Ok(_) => {}
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(PromptError::Io(err)),
+        }
+        match byte[0] {
+            b'\n' | b'\r' => break,
+            0x03 => return Err(PromptError::Cancelled(Cancel::Interrupted)),
+            0x04 if typed.is_empty() => return Err(PromptError::Cancelled(Cancel::EndOfInput)),
+            // Backspace and DEL remove the last character, which may be several bytes.
+            0x08 | 0x7f => {
+                while let Some(last) = typed.pop() {
+                    if last & 0xC0 != 0x80 {
+                        break;
+                    }
+                }
+            }
+            0x15 => typed.zeroize(),
+            // Every other control byte (Tab, Esc, Ctrl-Z, Ctrl-\ and so on) is ignored.
+            0x00..=0x1f => {}
+            other => {
+                typed.push(other);
+                if typed.len() > MAX_SECRET {
+                    return Err(PromptError::TooLong);
+                }
+            }
+        }
+    }
+    let bytes = std::mem::take(&mut *typed);
+    String::from_utf8(bytes)
+        .map(Secret::new)
+        .map_err(|_| PromptError::Io(io::Error::new(io::ErrorKind::InvalidData, "not UTF-8")))
+}
+
+/// Read a password with echo off (not Unix). `rpassword` does the console work.
+#[cfg(not(unix))]
+fn read_hidden_tty() -> Result<Secret, PromptError> {
+    match rpassword::read_password() {
+        Ok(text) if text.len() > MAX_SECRET => Err(PromptError::TooLong),
+        Ok(text) => Ok(Secret::new(text)),
+        Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
+            Err(PromptError::Cancelled(Cancel::EndOfInput))
+        }
+        Err(err) => Err(PromptError::Io(err)),
     }
 }
 
@@ -240,7 +384,7 @@ impl<T: Terminal> Prompter<T> {
             });
         }
         self.term.write_prompt(prompt).map_err(PromptError::Io)?;
-        self.term.read_hidden().map_err(PromptError::Io)
+        self.term.read_hidden()
     }
 }
 
@@ -291,7 +435,7 @@ mod tests {
     struct Scripted {
         interactive: bool,
         input: Cursor<Vec<u8>>,
-        hidden: Option<io::Result<&'static str>>,
+        hidden: Option<Result<&'static str, PromptError>>,
         out: Vec<u8>,
         hidden_reads: usize,
     }
@@ -330,10 +474,10 @@ mod tests {
             read_bounded_line(&mut self.input)
         }
 
-        fn read_hidden(&mut self) -> io::Result<Secret> {
+        fn read_hidden(&mut self) -> Result<Secret, PromptError> {
             self.hidden_reads += 1;
             // Like the real terminal with echo off: the typed text is NOT written to `out`, but
-            // the line is ended (rpassword writes the line break itself).
+            // the line is ended (the real read writes the line break itself).
             self.out.extend_from_slice(b"\n");
             match self.hidden.take() {
                 Some(Ok(text)) => Ok(Secret::new(text.to_string())),
@@ -472,8 +616,8 @@ mod tests {
             fn read_line(&mut self) -> io::Result<Option<String>> {
                 Err(io::Error::other("boom"))
             }
-            fn read_hidden(&mut self) -> io::Result<Secret> {
-                Err(io::Error::other("boom"))
+            fn read_hidden(&mut self) -> Result<Secret, PromptError> {
+                Err(PromptError::Io(io::Error::other("boom")))
             }
         }
         let mut p = Prompter::new(Broken);
@@ -547,10 +691,112 @@ mod tests {
     #[test]
     fn a_failed_hidden_read_is_an_io_error_with_no_secret_text() {
         let mut term = Scripted::new(true, "");
-        term.hidden = Some(Err(io::Error::other("no tty")));
+        term.hidden = Some(Err(PromptError::Io(io::Error::other("no tty"))));
         let mut p = Prompter::new(term);
         let err = p.password("Password: ", "unused").unwrap_err();
         assert_eq!(err.exit_code(), 70);
         assert!(!err.to_string().contains("no tty"));
+    }
+
+    #[test]
+    fn cancelling_the_password_prompt_has_the_exit_codes_of_07() {
+        // Ctrl-C is exit 70 (07 section 5.1). Ctrl-D is an unanswered prompt, exit 64.
+        let cases = [
+            (
+                Cancel::Interrupted,
+                70,
+                "error: interrupted\nfix: run the command again\n",
+            ),
+            (
+                Cancel::EndOfInput,
+                64,
+                "error: no password was entered\n\
+                 fix: run the command again and type the password, or give it another way as --help shows\n",
+            ),
+        ];
+        for (cancel, code, text) in cases {
+            let mut term = Scripted::new(true, "");
+            term.hidden = Some(Err(PromptError::Cancelled(cancel)));
+            let mut p = Prompter::new(term);
+            let err = p.password("Password: ", "unused").unwrap_err();
+            let mut stderr = Vec::new();
+            assert_eq!(err.report(&mut stderr), code);
+            assert_eq!(String::from_utf8(stderr).unwrap(), text);
+        }
+    }
+
+    #[test]
+    fn too_long_has_exit_64_and_a_fix() {
+        let err = PromptError::TooLong;
+        assert_eq!(err.exit_code(), 64);
+        assert_eq!(err.to_string(), "the password is longer than 1024 bytes");
+        assert_eq!(err.fix(), "use a shorter password");
+    }
+
+    #[cfg(unix)]
+    mod keys {
+        use super::*;
+
+        fn read(keys: &[u8]) -> Result<Secret, PromptError> {
+            read_hidden_bytes(&mut Cursor::new(keys.to_vec()))
+        }
+
+        #[test]
+        fn enter_ends_the_password_with_lf_or_cr() {
+            assert_eq!(read(b"abc\n").unwrap().expose(), "abc");
+            assert_eq!(read(b"abc\r").unwrap().expose(), "abc");
+            assert_eq!(read(b"\n").unwrap().expose(), "");
+        }
+
+        #[test]
+        fn backspace_removes_a_whole_character() {
+            assert_eq!(read(b"abx\x7f\x08c\n").unwrap().expose(), "ac");
+            assert_eq!(read("a\u{e9}\x7fb\n".as_bytes()).unwrap().expose(), "ab");
+            assert_eq!(read(b"\x7f\x7fa\n").unwrap().expose(), "a");
+        }
+
+        #[test]
+        fn ctrl_u_clears_and_other_control_keys_are_ignored() {
+            assert_eq!(read(b"wrong\x15ok\n").unwrap().expose(), "ok");
+            assert_eq!(read(b"a\tb\x1a\x1b\x1cc\n").unwrap().expose(), "abc");
+        }
+
+        #[test]
+        fn ctrl_c_is_interrupted_even_after_typing() {
+            assert!(matches!(
+                read(b"abc\x03def\n"),
+                Err(PromptError::Cancelled(Cancel::Interrupted))
+            ));
+        }
+
+        #[test]
+        fn ctrl_d_on_an_empty_line_and_a_closed_input_are_end_of_input() {
+            assert!(matches!(
+                read(b"\x04"),
+                Err(PromptError::Cancelled(Cancel::EndOfInput))
+            ));
+            assert!(matches!(
+                read(b"abc"),
+                Err(PromptError::Cancelled(Cancel::EndOfInput))
+            ));
+            // Ctrl-D after some text is ignored.
+            assert_eq!(read(b"ab\x04c\n").unwrap().expose(), "abc");
+        }
+
+        #[test]
+        fn the_cap_is_exact_and_a_longer_password_is_refused() {
+            let mut at_cap = "p".repeat(MAX_SECRET).into_bytes();
+            at_cap.push(b'\n');
+            assert_eq!(read(&at_cap).unwrap().expose().len(), MAX_SECRET);
+
+            let mut over = "p".repeat(MAX_SECRET + 1).into_bytes();
+            over.push(b'\n');
+            assert!(matches!(read(&over), Err(PromptError::TooLong)));
+        }
+
+        #[test]
+        fn text_that_is_not_utf8_is_an_io_error() {
+            assert!(matches!(read(b"\xff\xfe\n"), Err(PromptError::Io(_))));
+        }
     }
 }

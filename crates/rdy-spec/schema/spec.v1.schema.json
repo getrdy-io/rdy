@@ -109,7 +109,8 @@
       "oneOf": [
         {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 999999999999999
         },
         {
           "type": "string",
