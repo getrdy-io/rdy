@@ -1,0 +1,6 @@
+# Exact stable. Bump it by hand about every six weeks (docs/plan/06-release-and-distribution.md).
+# The MSRV in Cargo.toml is stable minus two minors.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

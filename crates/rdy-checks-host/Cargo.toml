@@ -1,0 +1,13 @@
+[package]
+name = "rdy-checks-host"
+version = "0.1.0-alpha.0"
+description = "Host checks for rdy: CPU, memory, disk, ports and OS. Internal to rdy."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+include = ["src/**", "Cargo.toml", "LICENSE"]
+
+[lints]
+workspace = true

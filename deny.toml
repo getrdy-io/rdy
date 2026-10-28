@@ -1,0 +1,4 @@
+# Minimal cargo-deny policy from M1-003. M1-004 adds the crate bans and the full license policy.
+
+[licenses]
+allow = ["Apache-2.0", "MIT", "Unicode-3.0"]

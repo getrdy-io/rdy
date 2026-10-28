@@ -1,0 +1,13 @@
+[package]
+name = "rdy-checks-k8s"
+version = "0.1.0-alpha.0"
+description = "Kubernetes checks for rdy: version, storage classes, RBAC and nodes. Internal to rdy."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+include = ["src/**", "Cargo.toml", "LICENSE"]
+
+[lints]
+workspace = true
