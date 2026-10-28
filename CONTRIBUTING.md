@@ -12,7 +12,8 @@ Good contributions keep it small, safe and boring.
 - **New checks:** open a "check request" issue. We need the id, what it measures,
   where the data comes from on each OS, what privilege it needs, the
   pass/warn/block thresholds, and the fix text. `docs/plan/03-check-catalog.md`
-  shows the format.
+  shows the format. The id is `family.name`, in a family `docs/plan/01-spec-format.md`
+  reserves (`host`, `net`, `k8s`, `aws`, `gcp`, `azure`, `gpu`, `store`, `custom`).
 - **Security problems:** do not open a public issue. Follow `SECURITY.md`.
 
 ## Rules every check must follow
@@ -26,7 +27,15 @@ Good contributions keep it small, safe and boring.
    real hostnames, keys, tokens or customer data. Use `.example` domains and
    acme-style names.
 5. No OpenSSL. rustls only. No `unsafe` unless the crate documents each block.
-6. Every user-facing error says how to fix it.
+6. Every user-facing error says how to fix it. An error is two lines at column 0:
+   `error: <what happened>` and `fix: <one thing to do>`. Plain words, no Rust type
+   names, no `os error 13`.
+7. A check that cannot run says why and what to do, and does not fail the run. If
+   the spec marks that check `severity: block`, the run is NOT READY (exit 2). It is
+   never a quiet pass.
+8. No error, fix or hint ever names `--allow-unsigned` or `rdy run --key`. They are
+   documented in `--help` and at docs.getrdy.io, not suggested. A hint may name
+   `rdy trust add ... --key`, which pins a key. Secrets never go on argv.
 
 ## Build and test
 
@@ -38,18 +47,23 @@ cargo fmt --all --check
 cargo deny check
 ```
 
-All of these must pass before a PR is reviewed. CI also runs on Linux (x86_64
-and aarch64), macOS and Windows for every PR, so expect your change to be
-tested on all four. The Rust version is pinned in `rust-toolchain.toml`.
+All of these must pass before a PR is reviewed. CI also runs on five native
+runners for every PR (Linux x86_64 and aarch64 on musl, macOS arm64 and x86_64,
+Windows x86_64), so expect your change to be tested on all five. The Rust version
+is pinned in `rust-toolchain.toml`.
 
 To try your change by hand:
 
 ```sh
-cargo run -p rdy -- run examples/specs/acme-quickstart.yaml --allow-unsigned
+cargo run -p rdy -- run examples/specs/acme-quickstart.yaml --allow-unsigned --out-dir /tmp
 ```
 
-The exit code is not the point here. It is 2 on most machines, because the
-example's endpoints do not exist. That is expected.
+The example spec has no signature, so rdy prints a red `UNSIGNED SPEC` banner
+before the checks and again above the verdict. That is expected. The exit code is
+not the point here. It is 2 on most machines, because the example's endpoints do
+not exist. Exit codes are 0 ready, 1 ready with warnings, 2 not ready, 64 usage
+error and 70 internal error. Each run writes a new `rdy-report-...` folder, so
+use `--out-dir` or `--no-report` to keep your checkout clean.
 
 ## Where things go
 
@@ -57,6 +71,10 @@ example's endpoints do not exist. That is expected.
   per check, with its fixture and golden test.
 - Golden files live under `tests/fixtures/`. The testing docs say how to
   regenerate them. Read the diff before you commit it.
+- Anything a user reads (output, errors, help) follows `docs/plan/07-cli-ux.md`.
+  Its samples are golden files, so a wording change changes a golden file, and
+  the diff shows it. Human output goes to stderr. Only `--json` data goes to
+  stdout.
 
 ## Pull requests
 
@@ -74,7 +92,9 @@ example's endpoints do not exist. That is expected.
 
 `rdy-spec` and `rdy-engine` define the spec and the result format. Changes to
 either need a design note in `docs/plan/` or an ADR in `docs/adr/` first. Other
-programs read these formats, so we do not break them casually.
+programs read these formats, so we do not break them casually. Within `rdy/v1`
+the JSON only grows: no field is removed, renamed, retyped or given a new meaning.
+New optional fields are fine. Anything else needs `rdy/v2` and an ADR.
 
 ## Conduct
 
