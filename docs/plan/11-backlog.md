@@ -883,15 +883,14 @@ The reviews of this file cite the draft's ids. This table maps each draft M1 id 
   no longer require immutability, and a new hand step cuts a fresh immutable tag for the announcement.
   Registrar lock, DNSSEC and CAA are needed before the announcement, because it and security.txt rely
   on getrdy.io. M1-138 closes only the repo side of SEC-04, SEC-05 and SEC-32.
-- 2026-10-28 | M1-061, M1-043, M1-104, M1-001 | Security closure check of M1-001, CF-04 to CF-06
-  and CF-08. M1-061 gets back "a PEM key" (ADR 0015 line 63, 02 line 594). M1-043 gets back "a held
+- 2026-10-28 | M1-061, M1-043, M1-104, M1-001, Founder hand steps | Security closure check of M1-001,
+  CF-04 to CF-06 and CF-08, and review of correction 01. M1-061 gets back "a PEM key" (ADR 0015 line 63, 02 line 594). M1-043 gets back "a held
   snapshot lock" (02 lines 476 and 574, the test for the `try_lock` bound behind ADR 0016 decision 6).
   M1-104 gets back "an unlisted resource", "every ALLOWED entry is cited by a CheckInfo" and "a dropped
   request leaves a timeout entry with its check id" (02 line 586). CF-08: 05 revision 3 folds into
   M1-001, the only security-reviewer ticket that lands before M1-040; M1-101 and M1-132 land after it.
   Ids, owners, estimates, dependencies and core marks are unchanged, so the CF-06 re-estimate of M1-104
-  (1 h to 3.5 h) and the extra hour in M1-001 are not applied here.
-- 2026-10-28 | Founder hand steps | Review of correction 01. The fresh-tag step also runs
+  (1 h to 3.5 h) and the extra hour in M1-001 are not applied here. The fresh-tag hand step also runs
   `scripts/verify-release.sh v0.1.1` on that tag. HSTS stays needed before M2-019, although 05 T1 marks
   HSTS as an M1 control, because M1 installs use the pinned GitHub release URL, not getrdy.io. This is
   pending security-reviewer sign-off in this PR's review.
