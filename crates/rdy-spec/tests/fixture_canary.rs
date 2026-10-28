@@ -5,9 +5,12 @@
 //! leg of CI sets `core.autocrlf true` before checkout. These tests then prove, on every leg, that:
 //!
 //! - git reports the `text` attribute as `unset` for the fixtures, so it converts nothing;
-//! - the signed fixture files and one fixture that must carry CRLF match digests committed here.
+//! - the one fixture that must carry CRLF matches a digest committed here.
 //!
-//! The digests change only if a fixture is deliberately replaced. Do not update them to make a red leg
+//! The signed fixtures are not pinned here: they are regenerated with a fresh key whenever the example spec
+//! changes. `signed_fixture.rs` (no CR) and the M1-120 verification guard their bytes.
+//!
+//! The digest changes only if the canary is deliberately replaced. Do not update them to make a red leg
 //! green: a red Windows leg means `.gitattributes` or the checkout is wrong.
 //!
 //! Helpers in this file avoid `unwrap` and `expect` because clippy only allows them inside `#[test]`
@@ -19,20 +22,8 @@ use std::process::Command;
 
 use sha2::{Digest, Sha256};
 
-/// Files that git must never convert, with the SHA-256 of their exact bytes.
+/// Fixtures whose exact bytes are pinned, with their SHA-256.
 const PINNED: &[(&str, &str)] = &[
-    (
-        "tests/fixtures/signed/acme-platform.yaml",
-        "231d161afdf97fb9aa5a2ea3cfbd3f4645249d218e9aaefe3f4000dc598d0d4f",
-    ),
-    (
-        "tests/fixtures/signed/acme-platform.yaml.minisig",
-        "9f5b8e978db5b8b2606b745cd17403eb77f1c39ed15a11f38a733c8a3e9e25d4",
-    ),
-    (
-        "tests/fixtures/signed/acme-platform.pub",
-        "cdad852d19bea33f87893a0aef7ce2bb977eae3c155ffba6e433150cd93ddd78",
-    ),
     // The one fixture that carries CRLF on purpose (recorded Windows console output).
     (
         "tests/fixtures/canary/netstat-crlf.txt",
@@ -116,6 +107,9 @@ fn git_converts_nothing_under_tests_fixtures() {
     let mut paths: Vec<&str> = PINNED.iter().map(|(path, _)| *path).collect();
     // Other fixtures too, including ones that do not exist yet: check-attr only reads the rules.
     paths.extend([
+        "tests/fixtures/signed/acme-platform.yaml",
+        "tests/fixtures/signed/acme-platform.yaml.minisig",
+        "tests/fixtures/signed/acme-platform.pub",
         "tests/fixtures/wycheproof/ed25519_test.json",
         "tests/fixtures/specs/malformed/nan.yaml",
         "tests/fixtures/checks/host.memory/pass/root/proc/meminfo",

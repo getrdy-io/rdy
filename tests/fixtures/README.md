@@ -220,11 +220,12 @@ a byte. A fixture that must carry CRLF keeps it on every OS, and any other fixtu
   console output.
 - The `windows-x64` CI leg sets `core.autocrlf true` before checkout. The test
   `crates/rdy-spec/tests/fixture_canary.rs` then checks that `git check-attr text` says `unset` for the
-  fixtures, and that `signed/*` and `canary/netstat-crlf.txt` match digests committed in the test.
+  fixtures, and that `canary/netstat-crlf.txt` matches a digest committed in the test. The `signed/*` bytes
+  are not pinned, because they are regenerated with a fresh key when the example spec changes.
 - A red canary on Windows means `.gitattributes` or the checkout is wrong. Do not change the digests to
   make it green.
-- The lint (M1-050) rejects a `\r` outside `crlf` in `tests/fixtures` and `examples/specs`. It must skip
-  `canary/`.
+- The lint (M1-050) rejects a `\r` outside `crlf` in `tests/fixtures` and `examples/specs`. It must add an
+  allow entry for `canary/netstat-crlf.txt` with a reason.
 
 ## Names and sizes
 

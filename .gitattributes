@@ -7,8 +7,8 @@
 /examples/specs/** -text
 *.minisig -text
 # Templates and shipped data are compiled into the binary. CRLF there would change the HTML and break goldens.
-/crates/*/templates/** text eol=lf
-/crates/*/data/** text eol=lf
+/crates/*/templates/** text=auto eol=lf
+/crates/*/data/** text=auto eol=lf
 # Help snapshots must keep LF on Windows checkouts (M1-029).
 /crates/rdy-cli/tests/snapshots/*.txt text eol=lf
 # Signed fixtures are signed over exact bytes. Git must never touch their line endings (M1-120).
