@@ -7,5 +7,6 @@ description: The rdy/v1 spec fields. This page is generated.
 
 You can use this page to look up each `rdy/v1` spec field. The page is a placeholder for now.
 
-The schema generator and the field renderer fill it in. They ship in M1-022 and M1-076. Until then,
-read `docs/plan/01-spec-format.md` for the field list.
+The field renderer fills it in (M1-076). It reads the schema files that `cargo xtask schema` writes
+under `crates/rdy-spec/schema/`. Until then, read the schema files or `docs/plan/01-spec-format.md`
+for the field list.

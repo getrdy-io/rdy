@@ -1,6 +1,7 @@
 //! Repo tasks for rdy, run as `cargo xtask <command>` (alias in `.cargo/config.toml`).
 //!
-//! The commands write and check the generated files under `docs/`, and they lint the tracked text
+//! The commands write and check the generated files (the JSON schemas under `crates/rdy-spec/schema/`
+//! and the pages under `docs/`), and they lint the tracked text
 //! files for dashes and banned tokens. `dist` and `publish` are off until their tickets land.
 //! This crate is never published (docs/plan/09-docs-site.md, section 2).
 

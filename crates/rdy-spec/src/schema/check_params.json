@@ -1,0 +1,829 @@
+{
+  "ids": {
+    "host.cpu": "HostCpuParams",
+    "host.memory": "HostMemoryParams",
+    "host.disk": "HostDiskParams",
+    "host.ports": "HostPortsParams",
+    "host.lsm": "HostLsmParams",
+    "host.security_agents": "HostSecurityAgentsParams",
+    "host.os": "HostOsParams",
+    "net.egress": "NetEgressParams",
+    "net.proxy": "NetProxyParams",
+    "net.tls_intercept": "NetTlsInterceptParams",
+    "net.dns": "NetDnsParams",
+    "k8s.access": "K8sAccessParams",
+    "k8s.storageclass": "K8sStorageClassParams",
+    "k8s.rbac": "K8sRbacParams",
+    "k8s.admission": "K8sAdmissionParams",
+    "k8s.nodes": "K8sNodesParams",
+    "k8s.version": "K8sVersionParams"
+  },
+  "$defs": {
+    "Regex": {
+      "description": "A regular expression in Rust regex syntax (linear time, no backreferences).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "Port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "1 to 65535."
+    },
+    "Cidr": {
+      "type": "string",
+      "pattern": "^([0-9]{1,3}(\\.[0-9]{1,3}){3}|[0-9A-Fa-f:]+)/[0-9]{1,3}$"
+    },
+    "AbsPath": {
+      "description": "An absolute path: /... on Unix, C:\\... on Windows.",
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^(/|[A-Za-z]:\\\\)"
+    },
+    "K8sName": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$"
+    },
+    "StringList": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "HostCpuParams": {
+      "properties": {
+        "min": {
+          "description": "Minimum CPU cores rdy can use (container limits count).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "recommended": {
+          "description": "Below this many cores: warn.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "arch": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "x86_64",
+              "aarch64",
+              "amd64",
+              "arm64"
+            ]
+          }
+        },
+        "flags": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]{1,32}$"
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "min"
+          ]
+        },
+        {
+          "required": [
+            "arch"
+          ]
+        },
+        {
+          "required": [
+            "flags"
+          ]
+        }
+      ]
+    },
+    "HostMemoryParams": {
+      "properties": {
+        "min": {
+          "description": "Minimum total RAM.",
+          "$ref": "#/$defs/Quantity"
+        },
+        "min_available": {
+          "description": "Below this much free RAM: warn. Default half of min.",
+          "$ref": "#/$defs/Quantity"
+        },
+        "swap": {
+          "description": "forbid: swap must be off.",
+          "enum": [
+            "forbid",
+            "any"
+          ],
+          "default": "any"
+        },
+        "tolerance_percent": {
+          "description": "How far below min still passes, in percent, because a 32 GiB machine shows a little less. Default 5, at least 256 MiB. 0 turns it off.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "tolerance_result": {
+          "description": "What a value inside the tolerance counts as.",
+          "enum": [
+            "pass",
+            "warn"
+          ],
+          "default": "pass"
+        }
+      },
+      "required": [
+        "min"
+      ]
+    },
+    "HostDiskParams": {
+      "required": [
+        "path",
+        "min"
+      ],
+      "properties": {
+        "path": {
+          "description": "Install path. If it does not exist yet, the nearest existing parent is measured.",
+          "$ref": "#/$defs/AbsPath"
+        },
+        "min": {
+          "description": "Minimum free space.",
+          "$ref": "#/$defs/Quantity"
+        },
+        "recommended": {
+          "description": "Below this much free space: warn. Default min plus 20%.",
+          "$ref": "#/$defs/Quantity"
+        },
+        "min_inodes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "forbid_options": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "noexec",
+              "nosuid",
+              "nodev",
+              "ro"
+            ]
+          }
+        },
+        "forbid_fstypes": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9_.]{1,32}$"
+          }
+        }
+      }
+    },
+    "HostPortsParams": {
+      "properties": {
+        "free": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Port"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "port"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "port": {
+                    "$ref": "#/$defs/Port"
+                  },
+                  "bind": {
+                    "enum": [
+                      "public",
+                      "loopback"
+                    ],
+                    "default": "public"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "udp_free": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Port"
+          }
+        },
+        "allow_owner": {
+          "description": "Process names that may already hold a port, such as an earlier install of the product.",
+          "$ref": "#/$defs/StringList"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "free"
+          ]
+        },
+        {
+          "required": [
+            "udp_free"
+          ]
+        }
+      ]
+    },
+    "HostLsmParams": {
+      "properties": {
+        "selinux": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allow": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "enforcing",
+                  "permissive",
+                  "disabled"
+                ]
+              }
+            },
+            "denials_max": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "denials_window": {
+              "$ref": "#/$defs/Duration"
+            },
+            "watch": {
+              "$ref": "#/$defs/StringList"
+            }
+          }
+        },
+        "apparmor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allow": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ]
+              }
+            },
+            "require_profiles": {
+              "$ref": "#/$defs/StringList"
+            }
+          }
+        }
+      }
+    },
+    "HostSecurityAgentsParams": {
+      "properties": {
+        "forbid": {
+          "description": "Agent ids that block. Run rdy spec lint to see the known ids.",
+          "$ref": "#/$defs/StringList"
+        },
+        "allow": {
+          "description": "Agent ids that are fine. Run rdy spec lint to see the known ids.",
+          "$ref": "#/$defs/StringList"
+        }
+      }
+    },
+    "HostOsParams": {
+      "properties": {
+        "supported": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "description": "Distribution id from /etc/os-release, such as rhel or ubuntu.",
+                "type": "string",
+                "pattern": "^[a-z0-9._-]{1,32}$"
+              },
+              "versions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 32
+                }
+              }
+            }
+          }
+        },
+        "arch": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "x86_64",
+              "aarch64",
+              "amd64",
+              "arm64"
+            ]
+          }
+        },
+        "fips": {
+          "enum": [
+            "forbid",
+            "require",
+            "any"
+          ],
+          "default": "any"
+        },
+        "windows_min_build": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "NetEgressParams": {
+      "required": [
+        "endpoints"
+      ],
+      "properties": {
+        "endpoints": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Target"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "target"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "target": {
+                    "$ref": "#/$defs/Target"
+                  },
+                  "optional": {
+                    "description": "Unreachable gives warn instead of block.",
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "expect_status": {
+                    "description": "URL targets only.",
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 100,
+                      "maximum": 599
+                    }
+                  },
+                  "method": {
+                    "description": "URL targets only.",
+                    "enum": [
+                      "HEAD",
+                      "GET"
+                    ],
+                    "default": "HEAD"
+                  },
+                  "via_proxy": {
+                    "enum": [
+                      "auto",
+                      "direct",
+                      "proxy_only"
+                    ]
+                  },
+                  "tls": {
+                    "description": "false probes plain TCP only. Default true for port 443 and https URLs.",
+                    "type": "boolean"
+                  }
+                }
+              }
+            ]
+          },
+          "description": "At most 64 endpoints in the whole spec."
+        },
+        "via_proxy": {
+          "description": "auto: try what the product would do and say if the other path works. direct: no proxy. proxy_only: only through the proxy.",
+          "enum": [
+            "auto",
+            "direct",
+            "proxy_only"
+          ],
+          "default": "auto"
+        },
+        "trust": {
+          "enum": [
+            "system",
+            "bundled"
+          ],
+          "default": "system"
+        },
+        "max_latency": {
+          "description": "Connect slower than this: warn. Default 2s.",
+          "$ref": "#/$defs/Duration"
+        }
+      }
+    },
+    "NetProxyParams": {
+      "properties": {
+        "required_no_proxy": {
+          "description": "Entries NO_PROXY must cover, such as .svc or 10.0.0.0/8.",
+          "$ref": "#/$defs/StringList"
+        },
+        "daemons_need_proxy": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "NetTlsInterceptParams": {
+      "properties": {
+        "hosts": {
+          "description": "Default: the hosts of every net.egress endpoint in this spec.",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9.-]+(:[0-9]{1,5})?$"
+          }
+        },
+        "expected_issuer": {
+          "$ref": "#/$defs/Regex"
+        },
+        "pin_sha256": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "forbid_interception": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "NetDnsParams": {
+      "required": [
+        "names"
+      ],
+      "properties": {
+        "names": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9.-]{1,253}$"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9.-]{1,253}$"
+                  },
+                  "expect_in": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "$ref": "#/$defs/Cidr"
+                    }
+                  },
+                  "expect_public": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "max_latency": {
+          "description": "Lookup slower than this: warn. Default 500ms.",
+          "$ref": "#/$defs/Duration"
+        }
+      }
+    },
+    "K8sAccessParams": {
+      "properties": {
+        "context_pattern": {
+          "description": "The current kube context must match, a guard against the wrong cluster.",
+          "$ref": "#/$defs/Regex"
+        },
+        "max_latency": {
+          "$ref": "#/$defs/Duration"
+        },
+        "server_pattern": {
+          "description": "The API server URL must match.",
+          "$ref": "#/$defs/Regex"
+        }
+      }
+    },
+    "K8sStorageClassParams": {
+      "properties": {
+        "class": {
+          "description": "A storage class that must exist. Default: the cluster's default class.",
+          "$ref": "#/$defs/K8sName"
+        },
+        "access_modes": {
+          "$ref": "#/$defs/AccessModes"
+        },
+        "binding": {
+          "enum": [
+            "WaitForFirstConsumer",
+            "Immediate",
+            "any"
+          ],
+          "default": "any"
+        },
+        "expansion": {
+          "type": "boolean"
+        },
+        "reclaim_policy": {
+          "description": "Mismatch gives warn.",
+          "enum": [
+            "Retain",
+            "Delete"
+          ]
+        }
+      }
+    },
+    "AccessModes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "ReadWriteOnce",
+          "ReadOnlyMany",
+          "ReadWriteMany",
+          "ReadWriteOncePod"
+        ]
+      }
+    },
+    "K8sRbacParams": {
+      "required": [
+        "can"
+      ],
+      "properties": {
+        "can": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "oneOf": [
+              {
+                "description": "verb resource[.group][/subresource], as in kubectl auth can-i.",
+                "type": "string",
+                "pattern": "^[a-z*]+ [a-z0-9*-]+(\\.[a-z0-9.-]+)?(/[a-z]+)?$"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "verb",
+                  "resource"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "verb": {
+                    "type": "string",
+                    "pattern": "^[a-z*]+$"
+                  },
+                  "group": {
+                    "type": "string",
+                    "maxLength": 253
+                  },
+                  "resource": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9*-]+$"
+                  },
+                  "subresource": {
+                    "type": "string",
+                    "pattern": "^[a-z]+$"
+                  },
+                  "namespace": {
+                    "$ref": "#/$defs/K8sName"
+                  },
+                  "name": {
+                    "$ref": "#/$defs/K8sName"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "namespace": {
+          "description": "Namespace for string items. Default: cluster scope.",
+          "$ref": "#/$defs/K8sName"
+        }
+      }
+    },
+    "K8sAdmissionParams": {
+      "properties": {
+        "pod_security": {
+          "description": "The Pod Security level the product's pods need.",
+          "enum": [
+            "privileged",
+            "baseline",
+            "restricted"
+          ]
+        },
+        "namespace": {
+          "$ref": "#/$defs/K8sName"
+        },
+        "scc": {
+          "description": "The OpenShift security context constraint the product documents.",
+          "type": "string",
+          "maxLength": 253
+        },
+        "uses": {
+          "description": "Pod features the product needs; the check derives the minimum Pod Security level.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "hostPath",
+              "hostNetwork",
+              "hostPID",
+              "privileged",
+              "runAsRoot"
+            ]
+          }
+        }
+      },
+      "description": "Dry-run checks are not supported yet."
+    },
+    "K8sNodesParams": {
+      "properties": {
+        "min_ready": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "min_zones": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "per_node": {
+          "$ref": "#/$defs/K8sResources"
+        },
+        "free": {
+          "$ref": "#/$defs/K8sResources"
+        },
+        "arch": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "amd64",
+              "arm64",
+              "x86_64",
+              "aarch64"
+            ]
+          }
+        },
+        "selector": {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 63
+          }
+        },
+        "tolerations": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "min_ready"
+          ]
+        },
+        {
+          "required": [
+            "per_node"
+          ]
+        },
+        {
+          "required": [
+            "free"
+          ]
+        }
+      ]
+    },
+    "K8sResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "oneOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,9}m?$"
+            }
+          ]
+        },
+        "memory": {
+          "$ref": "#/$defs/Quantity"
+        },
+        "pods": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ephemeral": {
+          "$ref": "#/$defs/Quantity"
+        }
+      }
+    },
+    "K8sVersionParams": {
+      "properties": {
+        "min": {
+          "$ref": "#/$defs/Version"
+        },
+        "max": {
+          "$ref": "#/$defs/Version"
+        },
+        "apis": {
+          "description": "group/version Kind, for example networking.k8s.io/v1 Ingress.",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^([a-z0-9.-]+/)?v[0-9a-z]+ [A-Z][A-Za-z0-9]*$"
+          }
+        },
+        "openshift_min": {
+          "description": "Minimum OpenShift version, used when the cluster is OpenShift.",
+          "$ref": "#/$defs/Version"
+        },
+        "over_max": {
+          "description": "What a server newer than max counts as. Default warn.",
+          "enum": [
+            "warn",
+            "block"
+          ],
+          "default": "warn"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "min"
+          ]
+        },
+        {
+          "required": [
+            "max"
+          ]
+        },
+        {
+          "required": [
+            "apis"
+          ]
+        },
+        {
+          "required": [
+            "openshift_min"
+          ]
+        }
+      ]
+    }
+  }
+}

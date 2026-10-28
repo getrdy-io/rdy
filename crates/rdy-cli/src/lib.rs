@@ -30,7 +30,7 @@ pub mod prompt;
 
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
 use error::{CliError, InternalKind, emit};
-use rdy_spec::result::ExitCode;
+use rdy_spec::result::{ExitCode, VersionInfo};
 
 /// Exit code for success.
 pub const EXIT_OK: u8 = ExitCode::Ready.code();
@@ -101,8 +101,7 @@ fn dispatch(command: &Commands, json: bool, stdout: &mut dyn Write, stderr: &mut
     match command {
         Commands::Version(args) if !args.json => finish(writeln!(stdout, "rdy {VERSION}"), stderr),
         Commands::Help { command } => show_help(command, json, stdout, stderr),
-        // `version --json` waits for the Version schema (07 section 4.3).
-        Commands::Version(_) => not_implemented("version --json", json, stdout, stderr),
+        Commands::Version(_) => finish(write!(stdout, "{}", version_json()), stderr),
         Commands::Run(_) => not_implemented("run", json, stdout, stderr),
         Commands::Verify(_) => not_implemented("verify", json, stdout, stderr),
         Commands::Spec { command } => match command {
@@ -116,6 +115,27 @@ fn dispatch(command: &Commands, json: bool, stdout: &mut dyn Write, stderr: &mut
             TrustCommand::Remove(_) => not_implemented("trust remove", json, stdout, stderr),
         },
     }
+}
+
+/// The text of `rdy version --json`: one object with a final newline (07 sections 4.3 and C.11).
+///
+/// `commit` and `date` are `null` when the build had no trustworthy git information. The characters
+/// `<`, `>` and `&` are escaped, as in every other JSON object rdy prints, so the text is safe inside
+/// HTML.
+fn version_json() -> String {
+    let known = |text: &str| (!text.is_empty()).then(|| text.to_owned());
+    let mut info = VersionInfo::new(env!("CARGO_PKG_VERSION"), cli::TARGET, rdy_spec::VERSION);
+    info.commit = known(cli::COMMIT);
+    info.date = known(cli::COMMIT_DATE);
+    // The object holds short strings only, so serializing cannot fail. If it ever did, an empty
+    // object is still valid JSON for a reader that checks the exit code first.
+    let text = serde_json::to_string_pretty(&info).unwrap_or_else(|_| "{}".to_owned());
+    let mut out = text
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026");
+    out.push('\n');
+    out
 }
 
 /// `rdy help [COMMAND]...`: print the full help of a command, as `COMMAND --help` does.

@@ -4,6 +4,7 @@
 //! besides. A reader keeps an unknown value as `Unknown(text)` and applies the rule in the doc comment of
 //! that type. Only [`Verdict`] is closed, because a new verdict needs `rdy/v2`.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::open::open_enum;
@@ -11,7 +12,7 @@ use super::open::open_enum;
 open_enum! {
     /// How much a check matters, as the spec wrote it.
     ///
-    /// An unknown severity counts as [`Severity::Block`] everywhere (01 section 5.3).
+    /// An unknown severity counts as `block` everywhere.
     Severity {
         /// Required. A failure makes the run NOT READY.
         Block => "block",
@@ -32,7 +33,7 @@ impl From<crate::spec::Severity> for Severity {
 open_enum! {
     /// What happened to a check, after its severity was applied.
     ///
-    /// An unknown status counts as not run (01 section 5.3).
+    /// An unknown status counts as not run.
     Status {
         /// The requirement is met.
         Pass => "pass",
@@ -50,9 +51,9 @@ open_enum! {
 }
 
 open_enum! {
-    /// Why a check did not run (01 section 5.2). Present when the status is `skipped`.
+    /// Why a check did not run. Present when the status is `skipped`.
     ///
-    /// Every kind except [`SkipKind::NotApplicable`] counts as not run, and so does an unknown kind.
+    /// Every kind except `not_applicable` counts as not run, and so does an unknown kind.
     SkipKind {
         /// A need the check cannot do without was not met, such as root or a cluster.
         MissingNeed => "missing_need",
@@ -96,9 +97,10 @@ open_enum! {
 }
 
 open_enum! {
-    /// The display group of a check, from the same rule as the verdict (01 section 5.2).
+    /// The display group of a check, from the same rule as the verdict.
     ///
-    /// [`crate::result::classify`] computes it. Sort by [`Bucket::order_key`].
+    /// Sort by it in this order: blocker, required_not_run, warning, passed, not_applicable. Do not
+    /// recompute it.
     Bucket {
         /// `status: block`.
         Blocker => "blocker",
@@ -166,7 +168,7 @@ open_enum! {
 open_enum! {
     /// Where the trusted key came from.
     ///
-    /// An unknown source is treated like [`TrustSource::Flag`].
+    /// An unknown source is treated like `flag`.
     TrustSource {
         /// The system trust store.
         System => "system",
@@ -202,7 +204,7 @@ open_enum! {
 }
 
 open_enum! {
-    /// What a recorded side effect was (01 section 5.4).
+    /// What a recorded side effect was.
     ActionKind {
         /// A command was run.
         Exec => "exec",
@@ -258,7 +260,7 @@ open_enum! {
 }
 
 open_enum! {
-    /// Why the verdict is not explained by an observed block or warning (01 section 5.3).
+    /// Why the verdict is not explained by an observed block or warning.
     VerdictReason {
         /// NOT READY with no block: a required check did not run.
         RequiredCheckNotRun => "required_check_not_run",
@@ -268,7 +270,7 @@ open_enum! {
 }
 
 /// The overall answer of a run. Closed in v1: a new value needs `rdy/v2`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Verdict {

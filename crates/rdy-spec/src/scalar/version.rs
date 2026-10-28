@@ -1,8 +1,10 @@
 //! [`Version`]: a dotted numeric version.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
@@ -171,6 +173,22 @@ impl FromStr for Version {
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.source)
+    }
+}
+
+impl JsonSchema for Version {
+    fn schema_name() -> Cow<'static, str> {
+        "Version".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A dotted version such as 1.28 or 5.10, as a quoted string. A bare integer (14) is accepted. An unquoted decimal (1.30) is rejected because YAML reads it as the number 1.3.",
+            "oneOf": [
+                {"type": "string", "pattern": "^v?[0-9]{1,9}(\\.[0-9]{1,9}){0,3}$"},
+                {"type": "integer", "minimum": 0}
+            ]
+        })
     }
 }
 

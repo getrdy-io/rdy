@@ -55,6 +55,10 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --locked
+      # The JSON schemas are generated from the rdy-spec types. A type or doc comment that changed
+      # without `cargo xtask schema` fails here and names the file to regenerate.
+      - name: Generated schemas are current
+        run: cargo run --locked --quiet --package xtask -- schema --check
 
   # zizmor has its own job on purpose. It runs no cargo, so build scripts and proc macros from a PR
   # never run beside its token or its binary. Do not add cargo steps here.

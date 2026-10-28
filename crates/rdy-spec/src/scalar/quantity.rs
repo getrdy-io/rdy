@@ -1,8 +1,10 @@
 //! [`Quantity`]: a size in bytes.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
@@ -154,6 +156,22 @@ impl fmt::Display for Quantity {
             }
         }
         write!(f, "{}", self.0)
+    }
+}
+
+impl JsonSchema for Quantity {
+    fn schema_name() -> Cow<'static, str> {
+        "Quantity".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Bytes. A whole number with an optional binary suffix Ki, Mi, Gi, Ti, Pi. Decimal suffixes (G, GB) are rejected to avoid ambiguity.",
+            "oneOf": [
+                {"type": "integer", "minimum": 0, "maximum": 999_999_999_999_999_u64},
+                {"type": "string", "pattern": "^[0-9]{1,15}(Ki|Mi|Gi|Ti|Pi)?$"}
+            ]
+        })
     }
 }
 

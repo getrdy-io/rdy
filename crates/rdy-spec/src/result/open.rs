@@ -6,14 +6,17 @@
 /// exactly as read, so a value this version does not know survives a read and a write (01 section 3.2,
 /// "Open"). Reading never fails on the text. The `Unknown` variant is where a consumer applies its rule
 /// for values it cannot read.
+///
+/// The doc comment of the enum is the description in the JSON schema, which lists the known values and
+/// also accepts any snake_case code (the `OpenCode` definition).
 macro_rules! open_enum {
     (
-        $(#[$meta:meta])*
+        $(#[doc = $doc:literal])*
         $name:ident {
             $( $(#[$vmeta:meta])* $variant:ident => $text:literal ),+ $(,)?
         }
     ) => {
-        $(#[$meta])*
+        $(#[doc = $doc])*
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         #[non_exhaustive]
         pub enum $name {
@@ -57,6 +60,23 @@ macro_rules! open_enum {
             }
         }
 
+        impl ::schemars::JsonSchema for $name {
+            fn schema_name() -> ::std::borrow::Cow<'static, str> {
+                stringify!($name).into()
+            }
+
+            fn json_schema(generator: &mut ::schemars::SchemaGenerator) -> ::schemars::Schema {
+                let open = generator.subschema_for::<$crate::result::open::OpenCode>();
+                ::schemars::json_schema!({
+                    "description": concat!($($doc, "\n",)* "Open: a newer producer may send other snake_case values."),
+                    "anyOf": [
+                        { "enum": [ $($text),+ ] },
+                        open
+                    ]
+                })
+            }
+        }
+
         impl ::std::fmt::Display for $name {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 f.write_str(self.as_str())
@@ -78,3 +98,22 @@ macro_rules! open_enum {
 }
 
 pub(crate) use open_enum;
+
+/// Any snake_case code: the second alternative of every open enum in the schema.
+///
+/// It exists only to give the schema one shared definition. No value of this type is ever built.
+pub(crate) struct OpenCode;
+
+impl ::schemars::JsonSchema for OpenCode {
+    fn schema_name() -> ::std::borrow::Cow<'static, str> {
+        "OpenCode".into()
+    }
+
+    fn json_schema(_: &mut ::schemars::SchemaGenerator) -> ::schemars::Schema {
+        ::schemars::json_schema!({
+            "description": "A snake_case code. Newer producers may send values not listed.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        })
+    }
+}
