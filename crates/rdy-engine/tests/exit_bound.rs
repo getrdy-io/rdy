@@ -5,7 +5,7 @@
 //! times it. In the child role (`exit_bound_child`) it plays the part of `rdy`: it runs a check that
 //! forks `sleep 600`, waits for the scheduler's timeout, kills leftover groups and calls
 //! `std::process::exit`, the way the CLI will. Timing is an upper bound only.
-#![cfg(unix)]
+#![cfg(all(unix, feature = "runtime"))]
 
 use std::error::Error;
 use std::path::Path;
@@ -23,6 +23,7 @@ use rdy_engine::sched::{End, Planned, Scheduler};
 const CHILD_ENV: &str = "RDY_EXIT_BOUND_PID_FILE";
 const DEADLINE: Duration = Duration::from_secs(1);
 const EXIT_BOUND: Duration = Duration::from_secs(2);
+const HARD_LIMIT: Duration = Duration::from_secs(10);
 
 static SCRIPT_CHECK: CheckInfo = CheckInfo {
     id: "fake.script",
@@ -126,7 +127,7 @@ fn a_timed_out_script_leaves_no_process_and_the_process_exits_in_time() -> Resul
     let dir = tempfile::tempdir()?;
     let pid_file = dir.path().join("sleeper.pid");
     let started = Instant::now();
-    let status = Command::new(std::env::current_exe()?)
+    let mut child = Command::new(std::env::current_exe()?)
         .args([
             "exit_bound_child",
             "--exact",
@@ -134,7 +135,19 @@ fn a_timed_out_script_leaves_no_process_and_the_process_exits_in_time() -> Resul
             "--test-threads=1",
         ])
         .env(CHILD_ENV, &pid_file)
-        .status()?;
+        .spawn()?;
+    // The test must not hang if the child does: poll, and kill it after a hard limit.
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if started.elapsed() > HARD_LIMIT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("the child run was still going after {HARD_LIMIT:?}").into());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
     let took = started.elapsed();
     assert!(status.success(), "the child run ended with {status}");
     assert!(

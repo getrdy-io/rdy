@@ -1,9 +1,11 @@
 //! Process runner tests.
 //!
-//! The process tests run real `sh` and `sleep`, so they are Unix only. They use real time with short
-//! timeouts and check upper bounds only. The registry tests are portable.
+//! The process tests run real `sh` and `sleep`, so they are Unix only. They use real time with
+//! generous timeouts and check upper bounds only. The registry tests are portable.
 
 use super::*;
+
+static IDLE: Registry<REGISTRY_SLOTS> = Registry::new();
 
 #[test]
 fn registry_hands_out_each_slot_once_and_refuses_when_full() {
@@ -17,19 +19,24 @@ fn registry_hands_out_each_slot_once_and_refuses_when_full() {
 }
 
 #[test]
-fn registry_kill_all_skips_free_and_reserved_slots() {
+fn registry_kill_all_skips_free_and_reserved_slots_and_sets_the_flag_first() {
     use std::sync::Mutex;
     static SEEN: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+    static REGISTRY_UNDER_TEST: Registry<4> = Registry::new();
     fn record(pid: u32) {
+        // The flag is already set when the first kill happens.
+        assert!(REGISTRY_UNDER_TEST.shutting_down());
         SEEN.lock().expect("lock").push(pid);
     }
-    let registry: Registry<4> = Registry::new();
-    let first = registry.reserve().expect("slot");
-    registry.set(first, 4242);
-    let _reserved_only = registry.reserve().expect("slot");
-    assert_eq!(registry.live(), 2);
-    registry.kill_all(record);
+    let first = REGISTRY_UNDER_TEST.reserve().expect("slot");
+    REGISTRY_UNDER_TEST.set(first, 4242);
+    let _reserved_only = REGISTRY_UNDER_TEST.reserve().expect("slot");
+    // `live` counts reserved slots too.
+    assert_eq!(REGISTRY_UNDER_TEST.live(), 2);
+    assert!(!REGISTRY_UNDER_TEST.shutting_down());
+    REGISTRY_UNDER_TEST.kill_all(record);
     assert_eq!(*SEEN.lock().expect("lock"), vec![4242]);
+    assert!(REGISTRY_UNDER_TEST.shutting_down());
 }
 
 #[test]
@@ -40,10 +47,62 @@ fn the_defaults_match_the_design() {
     assert_eq!(KILLS_PROCESS_TREE, cfg!(unix));
 }
 
+#[test]
+fn debug_output_shows_env_names_and_never_values() {
+    let spec = ExecSpec::new("/bin/true", Duration::from_secs(1))
+        .env([("HTTPS_PROXY", "http://user:hunter2@proxy.example:3128")]);
+    let text = format!("{spec:?}");
+    assert!(text.contains("HTTPS_PROXY"), "{text}");
+    assert!(!text.contains("hunter2"), "{text}");
+    assert!(!text.contains("proxy.example"), "{text}");
+}
+
+#[tokio::test]
+async fn a_program_that_is_not_an_absolute_path_is_refused_before_any_lookup() {
+    for program in ["whoami", "./whoami", "bin/whoami"] {
+        let error = run_with(
+            ExecSpec::new(program, Duration::from_secs(1)),
+            &IDLE,
+            LIVE,
+            REAP_GRACE,
+        )
+        .await
+        .expect_err("refused");
+        let ExecError::Spawn(inner) = error else {
+            panic!("expected Spawn for {program}, got {error:?}");
+        };
+        assert_eq!(inner.kind(), io::ErrorKind::InvalidInput, "{program}");
+    }
+    assert_eq!(IDLE.live(), 0);
+}
+
+#[tokio::test]
+async fn nothing_starts_after_the_run_has_ended() {
+    static ENDED: Registry<REGISTRY_SLOTS> = Registry::new();
+    ENDED.kill_all(nothing);
+    let program = if cfg!(unix) {
+        "/bin/sh"
+    } else {
+        "C:\\Windows\\System32\\whoami.exe"
+    };
+    let error = run_with(
+        ExecSpec::new(program, Duration::from_secs(1)),
+        &ENDED,
+        LIVE,
+        REAP_GRACE,
+    )
+    .await
+    .expect_err("shutting down");
+    assert!(matches!(error, ExecError::ShuttingDown), "{error:?}");
+    assert_eq!(ENDED.live(), 0);
+}
+
 #[cfg(unix)]
 mod process {
+    use std::os::unix::process::ExitStatusExt;
     use std::path::Path;
-    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::{Arc, Mutex};
     use std::time::Instant;
 
     use super::*;
@@ -84,10 +143,7 @@ mod process {
 
     /// True when `pid` is gone. A zombie that nothing has reaped yet counts as gone.
     fn is_gone(pid: u32) -> bool {
-        let Some(pid) = i32::try_from(pid)
-            .ok()
-            .and_then(rustix::process::Pid::from_raw)
-        else {
+        let Some(pid) = to_pid(pid) else {
             return true;
         };
         if rustix::process::test_kill_process(pid).is_err() {
@@ -97,6 +153,11 @@ mod process {
             .ok()
             .and_then(|stat| stat.rsplit(')').next().map(str::to_owned))
             .is_some_and(|rest| rest.trim_start().starts_with('Z'))
+    }
+
+    /// True while the kernel still knows `pid`, zombie or not. Reaping makes this false.
+    fn exists(pid: u32) -> bool {
+        to_pid(pid).is_some_and(|pid| rustix::process::test_kill_process(pid).is_ok())
     }
 
     async fn wait_gone(pid: u32) {
@@ -142,12 +203,18 @@ mod process {
     }
 
     #[tokio::test]
+    async fn the_child_starts_in_the_root_directory() {
+        let out = run(sh("pwd", SECOND * 10)).await.expect("runs");
+        assert_eq!(out.stdout, b"/\n");
+    }
+
+    #[tokio::test]
     async fn a_missing_program_is_a_spawn_error_and_frees_the_slot() {
         static OWN: Registry<REGISTRY_SLOTS> = Registry::new();
         let error = run_with(
             ExecSpec::new("/nonexistent/rdy-test", SECOND),
             &OWN,
-            kill_group,
+            LIVE,
             REAP_GRACE,
         )
         .await
@@ -161,11 +228,11 @@ mod process {
         let dir = tempfile::tempdir().expect("temp dir");
         let pid_file = dir.path().join("sleeper.pid");
         let started = Instant::now();
-        let error = run(forks_sleeper(&pid_file, Duration::from_millis(400)))
+        let error = run(forks_sleeper(&pid_file, SECOND * 2))
             .await
             .expect_err("times out");
         assert!(matches!(error, ExecError::Timeout), "{error:?}");
-        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(started.elapsed() < Duration::from_secs(6));
         let sleeper = read_pid(&pid_file, SECOND).await;
         wait_gone(sleeper).await;
     }
@@ -186,7 +253,7 @@ mod process {
     async fn a_normal_exit_also_clears_what_the_leader_left_behind() {
         let dir = tempfile::tempdir().expect("temp dir");
         let pid_file = dir.path().join("sleeper.pid");
-        // The sleeper's output is detached, so the command ends as soon as the shell does.
+        // The sleeper's output is detached, so the pipes close as soon as the shell exits.
         let script = "sleep 600 >/dev/null 2>&1 & echo $! > \"$0\"";
         let spec = ExecSpec::new("/bin/sh", SECOND * 10).args([
             "-c",
@@ -200,57 +267,134 @@ mod process {
     }
 
     #[tokio::test]
+    async fn a_member_holding_the_pipe_does_not_hide_the_leaders_exit() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let pid_file = dir.path().join("sleeper.pid");
+        // The sleeper keeps stdout open. Before the group kill on exit, the run waited for it.
+        let script = "sleep 600 & echo $! > \"$0\"; echo done; exit 7";
+        let spec = ExecSpec::new("/bin/sh", SECOND * 20).args([
+            "-c",
+            script,
+            pid_file.to_str().expect("utf-8 temp path"),
+        ]);
+        let started = Instant::now();
+        let out = run(spec).await.expect("the leader's exit is reported");
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_eq!(out.status.code(), Some(7));
+        assert_eq!(out.stdout, b"done\n");
+        let sleeper = read_pid(&pid_file, SECOND).await;
+        wait_gone(sleeper).await;
+    }
+
+    #[tokio::test]
+    async fn the_slot_is_freed_after_the_kill_and_before_the_reap() {
+        static OWN: Registry<REGISTRY_SLOTS> = Registry::new();
+        static RELEASED_PID: AtomicU32 = AtomicU32::new(0);
+        static LIVE_AT_RELEASE: AtomicUsize = AtomicUsize::new(usize::MAX);
+        static KILLED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+        static EXISTED_AT_RELEASE: AtomicBool = AtomicBool::new(false);
+        fn killed(pid: u32) {
+            // The slot is still held while the group is signalled.
+            assert_eq!(OWN.live(), 1);
+            KILLED.lock().expect("lock").push(pid);
+            kill_group(pid);
+        }
+        fn released(pid: u32) {
+            RELEASED_PID.store(pid, Ordering::SeqCst);
+            LIVE_AT_RELEASE.store(OWN.live(), Ordering::SeqCst);
+            // The leader has not been reaped: it is a zombie, and its group id is still held.
+            EXISTED_AT_RELEASE.store(exists(pid), Ordering::SeqCst);
+        }
+        let hooks = Hooks {
+            kill: killed,
+            released,
+        };
+        let out = run_with(sh("exit 0", SECOND * 10), &OWN, hooks, REAP_GRACE)
+            .await
+            .expect("runs");
+        assert!(out.status.success());
+        let pid = RELEASED_PID.load(Ordering::SeqCst);
+        assert_ne!(pid, 0, "the release hook never ran");
+        assert_eq!(*KILLED.lock().expect("lock"), vec![pid]);
+        assert_eq!(LIVE_AT_RELEASE.load(Ordering::SeqCst), 0);
+        assert!(
+            EXISTED_AT_RELEASE.load(Ordering::SeqCst),
+            "the leader was already reaped when the slot was freed"
+        );
+        // After the run the leader is reaped.
+        assert!(!exists(pid));
+        assert_eq!(OWN.live(), 0);
+    }
+
+    #[tokio::test]
+    async fn polling_for_an_exit_leaves_the_zombie_in_place() {
+        let mut child = tokio::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("starts");
+        let pid = child.id().expect("pid");
+        wait_exited(pid).await.expect("sees the exit");
+        // WNOWAIT: still there to be reaped, so a group kill here would still be safe.
+        assert!(exists(pid));
+        assert!(child.wait().await.expect("reaps").success());
+        assert!(!exists(pid));
+    }
+
+    #[tokio::test]
     async fn killing_the_registered_groups_ends_a_running_command() {
-        use std::os::unix::process::ExitStatusExt;
         static OWN: Registry<REGISTRY_SLOTS> = Registry::new();
         let dir = tempfile::tempdir().expect("temp dir");
         let pid_file = dir.path().join("sleeper.pid");
         let spec = forks_sleeper(&pid_file, Duration::from_secs(600));
-        let task = tokio::spawn(run_with(spec, &OWN, kill_group, REAP_GRACE));
+        let task = tokio::spawn(run_with(spec, &OWN, LIVE, REAP_GRACE));
         let sleeper = read_pid(&pid_file, Duration::from_secs(5)).await;
         OWN.kill_all(kill_group);
         let out = task.await.expect("joins").expect("ends with a status");
         assert_eq!(out.status.signal(), Some(9));
         wait_gone(sleeper).await;
         assert_eq!(OWN.live(), 0);
+        assert!(OWN.shutting_down());
     }
 
     #[tokio::test]
     async fn a_child_that_survives_sigkill_returns_hung_within_the_grace() {
-        fn no_kill(_pid: u32) {}
-        // Its own registry, so other tests running in parallel do not change the counts.
         static OWN: Registry<REGISTRY_SLOTS> = Registry::new();
+        static KILLED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+        // The kill function only records the pid, so the child outlives the "SIGKILL" like a process
+        // stuck in the kernel would.
+        fn record_only(pid: u32) {
+            KILLED.lock().expect("lock").push(pid);
+        }
+        let hooks = Hooks {
+            kill: record_only,
+            released: nothing,
+        };
         let dir = tempfile::tempdir().expect("temp dir");
         let pid_file = dir.path().join("sleeper.pid");
-        let spec = forks_sleeper(&pid_file, Duration::from_millis(200));
+        let timeout = SECOND * 2;
+        let spec = forks_sleeper(&pid_file, timeout);
         let started = Instant::now();
-        // The kill function does nothing, so the child outlives the "SIGKILL" like a process stuck in
-        // the kernel would.
-        let error = run_with(spec, &OWN, no_kill, REAP_GRACE)
+        let error = run_with(spec, &OWN, hooks, REAP_GRACE)
             .await
             .expect_err("hung");
         let took = started.elapsed();
         let ExecError::Hung { pid } = error else {
             panic!("expected Hung, got {error:?}");
         };
-        // 200 ms of run, then at most the one second grace, plus slack for a slow machine.
-        assert!(took < Duration::from_millis(2500), "took {took:?}");
+        // The run, then at most the one second grace, plus slack for a slow machine.
+        assert!(took < timeout + REAP_GRACE + SECOND * 3, "took {took:?}");
         assert!(
-            took >= Duration::from_millis(1100),
-            "returned early: {took:?}"
+            took >= timeout + REAP_GRACE - Duration::from_millis(100),
+            "{took:?}"
         );
-        // The slot stays in the registry until the child is reaped.
-        assert_eq!(OWN.live(), 1);
+        assert_eq!(*KILLED.lock().expect("lock"), vec![pid]);
+        // The group was signalled and the slot freed before the reap was attempted.
+        assert_eq!(OWN.live(), 0);
 
-        // Clean up for real: kill the group, and the detached reaper then frees the slot.
+        // Clean up for real: the detached reaper then collects the child.
         kill_group(pid);
         let sleeper = read_pid(&pid_file, SECOND).await;
         wait_gone(sleeper).await;
-        let start = Instant::now();
-        while OWN.live() > 0 {
-            assert!(start.elapsed() < Duration::from_secs(5), "slot never freed");
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
     }
 
     // A check that runs a command the way the facade will: through `exec::run`, with a long command
@@ -303,10 +447,10 @@ mod process {
             pid_file: pid_file.clone(),
         });
         let scheduler = Scheduler::new(2, current_os(), std::iter::empty::<Need>());
-        let planned = Planned::new(check, "fake.exec").with_timeout(Duration::from_millis(500));
+        let planned = Planned::new(check, "fake.exec").with_timeout(SECOND * 4);
         let started = Instant::now();
         let ran = scheduler.run(vec![planned]).await;
-        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(started.elapsed() < Duration::from_secs(8));
         assert!(
             matches!(ran[0].end, End::TimedOut { .. }),
             "{:?}",
