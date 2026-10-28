@@ -1,0 +1,73 @@
+# dist release config (docs/plan/06-release-and-distribution.md, Appendix B). The workflow
+# .github/workflows/release.yml is generated from this file by `dist generate`. Never edit it by hand.
+# Change this file, then run `dist generate` with the pinned version below and commit both.
+
+[workspace]
+members = ["cargo:."]
+
+[dist]
+# Exact pin. Bump it by hand, run `dist generate`, and review the workflow diff.
+cargo-dist-version = "0.33.0"
+ci = "github"
+targets = [
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-musl",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+# No installers in M1. Our own install.sh carries the verification (M1-014).
+installers = []
+# .tar.gz and .zip, not dist's default .xz: minimal hosts may lack xz.
+unix-archive = ".tar.gz"
+windows-archive = ".zip"
+checksum = "sha256"
+# Embed the dependency list in every binary, so `cargo audit bin ./rdy` works on a shipped file.
+cargo-auditable = true
+# One CycloneDX SBOM for the `rdy` package.
+cargo-cyclonedx = true
+install-updater = false
+precise-builds = true
+fail-fast = false
+# dist 0.33.0 with "host" creates and publishes the release in the host job, before any publish job
+# could sign anything. "announce" creates it in the last job, after the checks and the publish jobs
+# (sign-release, M1-010), from the workflow's artifacts. Immutable releases need that order.
+github-release = "announce"
+# Link the C runtime statically on Windows. rdy.exe must not import VCRUNTIME140.dll.
+# Do not set RUSTFLAGS in any workflow: it would replace the flag that does this.
+msvc-crt-static = true
+# Steps run before each build: the pinned toolchain and the target (.github/build-setup.yml).
+github-build-setup = "../build-setup.yml"
+# Runs after the builds and before the release exists: scripts/check-release-artifacts.sh on the
+# artifacts. Includes scripts/check-static.sh on both Linux binaries (ADR 0006, decision 2).
+# It is a publish job on purpose: in dist 0.33.0 only publish jobs hold back the announce job when
+# they fail. A host job that fails does not stop the release.
+publish-jobs = ["./check-release-artifacts"]
+# Every alpha tag is a prerelease. Without this, dist skips publish jobs for prereleases, and a
+# skipped check counts as passed.
+publish-prereleases = true
+# On pull requests dist only plans. Its plan job fails if release.yml has drifted from this file.
+pr-run-mode = "plan"
+
+[dist.github-custom-runners]
+x86_64-unknown-linux-musl = "ubuntu-24.04"
+aarch64-unknown-linux-musl = "ubuntu-24.04-arm"
+# The org has no macOS arm64 runners (ADR 0006, decision 8). This target is cross-compiled on the
+# Intel runner and not run there. Move it to macos-15 when the org has arm64 runners.
+aarch64-apple-darwin = "macos-15-intel"
+x86_64-apple-darwin = "macos-15-intel"
+x86_64-pc-windows-msvc = "windows-2022"
+
+# SEC-03: every action is pinned to a full commit SHA, written into release.yml by dist.
+# Read with `git ls-remote --tags https://github.com/<owner>/<repo>`:
+#   actions/checkout v7.0.1, actions/upload-artifact v7.0.2, actions/download-artifact v8.0.2.
+# dist cannot write the version comment, so this file is the record. Bump all three together.
+[dist.github-action-commits]
+"actions/checkout" = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+"actions/upload-artifact" = "cf430e030ddbb5b0abf93d22962f4752f3646cd9"
+"actions/download-artifact" = "9000827ccba6bdab643e8b6fd33ac0654aef8333"
+
+# Custom jobs get id-token and packages write by default. The check reads files and needs neither.
+# Naming a job here replaces the defaults. M1-010 adds sign-release here with contents and id-token.
+[dist.github-custom-job-permissions]
+check-release-artifacts = { contents = "read" }

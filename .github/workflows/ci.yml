@@ -199,6 +199,8 @@ jobs:
         run: |
           sh scripts/test-musl-pie-linker.sh
           sh scripts/test-check-static.sh
+          # The release workflow runs this script on the real artifacts (M1-007).
+          sh scripts/test-check-release-artifacts.sh
           scripts/check-static.sh "target/$TARGET/debug/rdy"
       # `scratch` is not a pullable image, so import an empty one. It has no shell and no libc, so
       # the binary only runs if it is truly static. Non-root, no network, read-only root, no capabilities.
