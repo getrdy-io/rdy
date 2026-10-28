@@ -76,6 +76,11 @@ found in this pass.
    Sunday Jun 13, 2027** (week 29). At 10 hours a week M1 ends in the week of Aug 9, 2027; at 15 hours,
    in the week of May 17, 2027. The code-reviewer's bottom-up estimate of the core is 229 hours.
 
+2. **Starting M1 (2026-10-28).** The founder approved the planning pass as it stands and told the coordinator
+   to build M1 now, ahead of the Nov 20, 2026 go or no-go. This closes open decision 1 below ("Starting M1
+   before the M0 gates") in favour of starting now. The employment-agreement read and the validation gates
+   stay the founder's to finish in parallel.
+
 ### Background: how the M1 count grew
 
 The budget in `KICKOFF.md` is six weeks at 10 to 15 hours: 60 to 90 hours.

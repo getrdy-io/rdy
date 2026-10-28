@@ -5,13 +5,13 @@ One line per M1 ticket from `11-backlog.md`. The PR that completes a ticket upda
 that each touch one line do not conflict.
 
 Start: the founder approved the planning pass and started M1 on 2026-10-28, ahead of the Nov 20, 2026
-go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.md` in favour of starting now.
+go or no-go in the plan. This is recorded as decision 2 under "Decisions made" in `13-plan-corrections.md`.
 
 ## Tickets
 
 - M1-001 | todo | | Confirm the revised ADRs close security findings MF-01 to MF-07
 
-- M1-002 | todo | | Confirm the revised ADRs close cli-ux findings M1 to M3 and the final command na
+- M1-002 | todo | | Confirm the revised ADRs close cli-ux findings M1 to M3 and the final command names
 
 - M1-003 | todo | | Create workspace skeleton and package rdy in crates/rdy-cli with binary name rdy
 
@@ -19,9 +19,9 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-005 | todo | | CI lint and deny job: fmt, clippy, doc, cargo-deny, zizmor (SEC-01)
 
-- M1-006 | todo | | CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR
+- M1-006 | todo | | CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006)
 
-- M1-007 | todo | | dist init for five targets with cargo-auditable and SBOM, proven in release-sand
+- M1-007 | todo | | dist init for five targets with cargo-auditable and SBOM, proven in release-sandbox
 
 - M1-008 | todo | | SEC-05 Harden getrdy.io domain and hosting accounts
 
@@ -29,19 +29,19 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-010 | todo | | sign-release with cosign keyless, SHA256SUMS and self-verify (SEC-06, SEC-07)
 
-- M1-011 | todo | | SEC-04 Org 2FA, private reporting, immutable releases, CODEOWNERS and a settings
+- M1-011 | todo | | SEC-04 Org 2FA, private reporting, immutable releases, CODEOWNERS and a settings check script
 
 - M1-012 | todo | | First signed alpha, scripts/verify-release.sh and RELEASING.md
 
-- M1-013 | todo | | xtask skeleton with schema, docs, docs-lint and --check modes, dist and publish 
+- M1-013 | todo | | xtask skeleton with schema, docs, docs-lint and --check modes, dist and publish off
 
-- M1-014 | todo | | install.sh core with root refusal, truncation guard, sha256 and shell tests (SEC
+- M1-014 | todo | | install.sh core with root refusal, truncation guard, sha256 and shell tests (SEC-08)
 
 - M1-015 | todo | | install.sh signature check, fail closed, with tamper tests (SEC-09, SEC-10)
 
 - M1-016 | todo | | Define public spec types in rdy-spec
 
-- M1-017 | todo | | Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-k
+- M1-017 | todo | | Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits
 
 - M1-018 | todo | | Scalar types Quantity, Duration, Version and Target with strict grammars
 
@@ -51,7 +51,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-021 | todo | | Error types with fix hints and exit code mapping at the CLI edge
 
-- M1-022 | todo | | Generate JSON schemas with schemars behind cargo xtask schema and check drift in
+- M1-022 | todo | | Generate JSON schemas with schemars behind cargo xtask schema and check drift in CI
 
 - M1-023 | todo | | Reserved check ids and the not_in_build lint rule
 
@@ -67,7 +67,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-029 | todo | | clap command tree in rdy-cli exposed as library rdy_cli
 
-- M1-030 | todo | | No-echo rule for usage errors: canaries and near-miss flags (extends M1 error ty
+- M1-030 | todo | | No-echo rule for usage errors: canaries and near-miss flags (extends M1 error types)
 
 - M1-031 | todo | | rdy spec lint with errors, warnings and did-you-mean
 
@@ -85,7 +85,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-038 | todo | | Blocking helper and subprocess kill on timeout
 
-- M1-039 | todo | | SEC-18 Command policy: search path, declared directories, caps and Windows whoam
+- M1-039 | todo | | SEC-18 Command policy: search path, declared directories, caps and Windows whoami only
 
 - M1-040 | todo | | SEC-17 Mediated Context handles with action log and read denylist
 
@@ -127,7 +127,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-059 | todo | | --no-network and --jobs flags
 
-- M1-060 | todo | | M1 redaction rules for URLs, auth headers, AWS keys, PEM keys, JWTs, rdy tokens 
+- M1-060 | todo | | M1 redaction rules for URLs, auth headers, AWS keys, PEM keys, JWTs, rdy tokens and key names
 
 - M1-061 | todo | | Redact facade-truncated buffers and a run-scoped known-secret set
 
@@ -135,7 +135,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-063 | todo | | SEC-26 M1 redaction corpus, first 30 cases (0.1.0 gate)
 
-- M1-064 | todo | | Shared helpers: units, quantities, dotted version compare, nominal band, severit
+- M1-064 | todo | | Shared helpers: units, quantities, dotted version compare, nominal band, severity cap
 
 - M1-065 | todo | | cgroup helper for memory, cpu and controllers
 
@@ -143,7 +143,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-067 | todo | | OS support table and compile stubs for rdy-checks-host
 
-- M1-068 | todo | | host.disk (Linux: statvfs flags, mountinfo with escapes, whole-component match, 
+- M1-068 | todo | | host.disk (Linux: statvfs flags, mountinfo with escapes, whole-component match, hung-mount timeout)
 
 - M1-069 | todo | | host.memory (meminfo, swap, cgroup limit, nominal band)
 
@@ -169,17 +169,17 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-080 | todo | | HTML fix source label and action log table
 
-- M1-081 | todo | | HTML Found and Needed rendering and the footer link (extends HTML print override
+- M1-081 | todo | | HTML Found and Needed rendering and the footer link (extends HTML print override)
 
 - M1-082 | todo | | HTML structure test: headings, landmarks, tables and links
 
 - M1-083 | todo | | Golden tests for JSON and HTML reports
 
-- M1-084 | todo | | Spec renderer for enums, oneOf variants and YAML examples, with the missing-desc
+- M1-084 | todo | | Spec renderer for enums, oneOf variants and YAML examples, with the missing-description failure
 
 - M1-085 | todo | | Spec and result reference pages with hand-written intro
 
-- M1-086 | todo | | Human renderer for run: header, bucket-sorted checks with fix lines, summary, re
+- M1-086 | todo | | Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict
 
 - M1-087 | todo | | Exit-code golden suite for 0, 1, 2, 64 and 70
 
@@ -187,7 +187,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-089 | todo | | CheckMeta in the check registry, read by xtask
 
-- M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes
+- M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case)
 
 - M1-091 | todo | | Facade TCP attempts, proxy CONNECT and per-check host sets
 
@@ -201,9 +201,9 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-096 | todo | | net.egress HTTP stage and failure classes
 
-- M1-097 | todo | | net.egress via proxy (own CONNECT, absolute-form for http, 407) and redirect hos
+- M1-097 | todo | | net.egress via proxy (own CONNECT, absolute-form for http, 407) and redirect host evidence
 
-- M1-098 | todo | | net.proxy (process env, systemd drop-ins, NO_PROXY coverage, PAC detection, reac
+- M1-098 | todo | | net.proxy (process env, systemd drop-ins, NO_PROXY coverage, PAC detection, reachability)
 
 - M1-099 | todo | | net.tls_intercept recording verifier and classes
 
@@ -217,7 +217,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-104 | todo | | Kube guard path parser, resource allowlist and pending log entries
 
-- M1-105 | todo | | Kube mock harness (tower service replaying api/ JSON, paging and 410, selectors,
+- M1-105 | todo | | Kube mock harness (tower service replaying api/ JSON, paging and 410, selectors, legacy discovery, review table)
 
 - M1-106 | todo | | k8s.version (gitVersion parse, distribution, discovery API availability)
 
@@ -225,11 +225,11 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-108 | todo | | kind integration job with a restricted PSA namespace and review round trips
 
-- M1-109 | todo | | k8s.access (kubeconfig, version, SelfSubjectReview, anonymous warn, exec classes
+- M1-109 | todo | | k8s.access (kubeconfig, version, SelfSubjectReview, anonymous warn, exec classes, proxy resolution)
 
-- M1-110 | todo | | k8s.storageclass (normalised provisioners, CSINode evidence, default rules, prov
+- M1-110 | todo | | k8s.storageclass (normalised provisioners, CSINode evidence, default rules, provisioner table)
 
-- M1-111 | todo | | k8s.rbac (SelfSubjectReview, access reviews, non-resource items, escalate and bi
+- M1-111 | todo | | k8s.rbac (SelfSubjectReview, access reviews, non-resource items, escalate and bind as warn)
 
 - M1-112 | todo | | Refuse --password on argv and read key passwords from env or file
 
@@ -237,9 +237,9 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-114 | todo | | k8s.admission PSA labels, policy engine and SCC discovery
 
-- M1-115 | todo | | Review k8s checks and fixtures (semantics, API groups, RBAC degrade, per-distro 
+- M1-115 | todo | | Review k8s checks and fixtures (semantics, API groups, RBAC degrade, per-distro sets)
 
-- M1-116 | todo | | Check family renderer and the host, network and Kubernetes pages with hand-writt
+- M1-116 | todo | | Check family renderer and the host, network and Kubernetes pages with hand-written intros
 
 - M1-117 | todo | | Fixture env all-pass
 
@@ -247,7 +247,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-119 | todo | | Timeouts env and scheduler timeout and deadline tests under paused time
 
-- M1-120 | todo | | Verify minisign signatures in rdy-spec against a trust store with product bindin
+- M1-120 | todo | | Verify minisign signatures in rdy-spec against a trust store with product binding
 
 - M1-121 | todo | | Trust store load and save in user and system locations
 
@@ -277,7 +277,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-134 | todo | | Sign and verify page
 
-- M1-135 | todo | | Golden README transcripts from Replay envs (acme-quickstart refusal, NOT READY, 
+- M1-135 | todo | | Golden README transcripts from Replay envs (acme-quickstart refusal, NOT READY, READY; acme-platform skipped checks)
 
 - M1-136 | todo | | docs-test runner for README and docs tested blocks
 
@@ -295,7 +295,7 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-143 | todo | | Quiet and verbose output modes
 
-- M1-144 | todo | | Facade methods for UDP exchanges and unix sockets with a GET-only Docker API gua
+- M1-144 | todo | | Facade methods for UDP exchanges and unix sockets with a GET-only Docker API guard
 
 - M1-145 | todo | | host.lsm (SELinux, AppArmor, audit log denials) (M1-late)
 
@@ -307,19 +307,19 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-149 | todo | | host.sysctl (live and persisted values, precedence, systemd limits) (M1-late)
 
-- M1-150 | todo | | host.container_runtime (sockets, daemon.json, containerd v2 and v3, kubelet driv
+- M1-150 | todo | | host.container_runtime (sockets, daemon.json, containerd v2 and v3, kubelet driver, API over unix socket) (M1-late)
 
 - M1-151 | todo | | host.cgroups (v1, hybrid, v2, controllers) (M1-late)
 
 - M1-152 | todo | | host.kernel (version and modules) (M1-late)
 
-- M1-153 | todo | | net.dns system answer (getent path, name validation, fallback, timeout evidence)
+- M1-153 | todo | | net.dns system answer (getent path, name validation, fallback, timeout evidence) (M1-late)
 
 - M1-154 | todo | | musl resolver behaviour fixture for net.dns
 
-- M1-155 | todo | | net.dns direct nameserver lookups, resolv.conf and nsswitch analysis, scripted D
+- M1-155 | todo | | net.dns direct nameserver lookups, resolv.conf and nsswitch analysis, scripted DNS server (M1-late)
 
-- M1-156 | todo | | net.registry (v2 ping, token realm, manifest and config blob host, HEAD versus G
+- M1-156 | todo | | net.registry (v2 ping, token realm, manifest and config blob host, HEAD versus GET) (M1-late)
 
 - M1-157 | todo | | net.mtu (Linux sysfs, sysinfo elsewhere, overlay overhead tables) (M1-late)
 
@@ -327,17 +327,17 @@ go or no-go in the plan. That resolves open decision 1 in `13-plan-corrections.m
 
 - M1-159 | todo | | k8s.nodes free capacity from pod requests (cut 2)
 
-- M1-160 | todo | | k8s.admission webhooks, validating admission policies and the dry-run guard test
+- M1-160 | todo | | k8s.admission webhooks, validating admission policies and the dry-run guard test (M1-late)
 
-- M1-161 | todo | | k8s.namespace (existence, terminating, quota, limit range, project request) (M1-
+- M1-161 | todo | | k8s.namespace (existence, terminating, quota, limit range, project request) (M1-late)
 
 - M1-162 | todo | | k8s.dns (label-based selection, Corefile, restart evidence) (M1-late)
 
-- M1-163 | todo | | k8s.ingress (IngressClass by controller, Gateway API, route, pending LoadBalance
+- M1-163 | todo | | k8s.ingress (IngressClass by controller, Gateway API, route, pending LoadBalancer, retirement warning) (M1-late)
 
 - M1-164 | todo | | k8s.crds (CRDs, served versions, operator version) (M1-late)
 
-- M1-165 | todo | | k8s.cni (node-condition and CRD signals, DaemonSets, NetworkPolicy, CIDRs, cni.t
+- M1-165 | todo | | k8s.cni (node-condition and CRD signals, DaemonSets, NetworkPolicy, CIDRs, cni.toml) (M1-late)
 
 - M1-166 | todo | | Fixture env net-airgapped
 
