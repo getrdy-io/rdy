@@ -1,6 +1,6 @@
 # ADR 0002: Specs are signed with ed25519 in minisign format, verified before parsing, keys pinned per product
 
-- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review; decision 5 amended 2026-10-28 in M1-009: a declined `trust add` exits 64)
+- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review; decision 5 amended 2026-10-28 in M1-009: a declined `trust add` exits 64; decision 2 amended 2026-10-28 in M1-120: see ADR 0018)
 - Date: 2026-10-27
 
 ## Context
@@ -18,7 +18,8 @@ envelope is a classic way to get crypto wrong. Untrusted bytes should not reach 
    comment must be exactly `rdy-spec-v1 product=<slug> signed_at=<RFC 3339>`; anything else is refused.
    That prefix is our domain separation. Docs tell vendors to use a dedicated spec-signing key.
 2. **Crates.** `rdy-spec` verifies with `minisign-verify`, pinned to an exact version and reviewed on
-   every bump, called with legacy (non-prehashed) signatures off. Wycheproof EdDSA vectors and
+   every bump, called with legacy (non-prehashed) signatures off. (Amended by ADR 0018: `rdy-spec` reads
+   the envelope itself and verifies with `ed25519-dalek` `verify_strict` and `blake2`.) Wycheproof EdDSA vectors and
    malleability cases run against it in CI. `rdy` creates keys and signs with the `minisign` crate.
    Stock `minisign` interoperates.
 3. **Verify, then parse.** `rdy_spec::load` reads the key id and the trusted comment from the signature,

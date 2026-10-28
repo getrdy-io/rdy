@@ -73,6 +73,8 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-032 | todo | | Check trait, Need and Context in rdy-engine
 
+- M1-032 correction-04 | backlog corrected 2026-10-28: exit test narrowed to the outcome types; pass and missing_need through the scheduler moved to M1-034, HostFs reads under host_root moved to M1-045 as the `reads` prefix rule, setuid refusal (INV-10) already in M1-042
+
 - M1-033 | todo | | Map outcomes to CheckResult with fix source, partial and needs
 
 - M1-034 | todo | | Scheduler with concurrency limit, per-check timeout and panic isolation
@@ -231,7 +233,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-111 | todo | | k8s.rbac (SelfSubjectReview, access reviews, non-resource items, escalate and bind as warn)
 
-- M1-112 | [#19](https://github.com/getrdy-io/rdy/pull/19) | 2026-10-28 | The "sign a spec in CI" half of the exit test is proved at the helper level (`RDY_KEY_PASSWORD` and `--password-file -` through `rdy_cli::password`); `spec sign` itself is M1-125, which must call `read_key_password`. `--password` is refused by a raw argv check, not a hidden clap flag, so it wins over missing-argument errors; only `spec sign` and `spec keygen` get the reason. Windows checks the file type and refuses reparse points but not ACLs; its file tests run on the Windows CI leg only (compiled here, not run). `read_key_password` now takes stderr for the env-variable note (tty only); it adds the `rustix` dependency (Unix only) for O_NOFOLLOW and geteuid without unsafe.
+- M1-112 | [#19](https://github.com/getrdy-io/rdy/pull/19) | 2026-10-28 | The "sign a spec in CI" half of the exit test is proved at the helper level (`RDY_KEY_PASSWORD` and `--password-file -` through `rdy_cli::password`); `spec sign` itself is M1-125, which must call `read_key_password`. `--password` is refused by a raw argv check, not a hidden clap flag, so it wins over missing-argument errors; only `spec sign` and `spec keygen` get the reason. Windows checks the file type and refuses reparse points but not ACLs; its file tests run on the Windows CI leg only (compiled here, not run). `read_key_password` now takes stderr for the env-variable note (tty only); it adds the `rustix` dependency (Unix only) for O_NOFOLLOW and geteuid without unsafe. Follow-up fix PR for macOS test build.
 
 - M1-113 | todo | | k8s.nodes allocatable, node filters, conditions, zones and pod-count limit
 
@@ -247,7 +249,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-119 | todo | | Timeouts env and scheduler timeout and deadline tests under paused time
 
-- M1-120 | todo | | Verify minisign signatures in rdy-spec against a trust store with product binding
+- M1-120 | [#27](https://github.com/getrdy-io/rdy/pull/27) | 2026-10-28 | The verifier is ed25519-dalek verify_strict over our own minisign envelope reader, not minisign-verify (ADR 0018). The Windows autocrlf case is covered by tests (`-text` and `eol=lf` rules in .gitattributes and a CR-free fixture test); the Windows CI leg arrives with M1-006 (#21) and M1-047. Deferred: signed_at future-date warning and expiry check (need a clock, M1-026), trust.yaml I/O (M1-121), key text files for --key (M1-121), CLI wiring and error codes (M1-126), the CRLF note on every error kind (today only `Tampered` carries it, M1-126) and reading the .minisig exactly once (M1-126)
 
 - M1-121 | todo | | Trust store load and save in user and system locations
 
