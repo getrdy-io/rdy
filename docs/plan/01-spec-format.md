@@ -149,6 +149,11 @@ exits 64. Lint and sign are stricter, because the person running them is the ven
 | A check with no threshold (`- id: host.memory` alone) | skipped, `unsupported_spec` (the parameter is required) | error, `no_threshold` | refuses |
 | A `redact_patterns` regex that does not compile or matches the empty string | exit 64 | error | refuses |
 
+A key with no value (`min:` and nothing after it) is a bad value, not an absent key, so it cannot drop a
+threshold by accident. Where this table says "no threshold", the required key or keys are the bold ones
+and the "one of" groups in section 2.7. `host.lsm`, `host.security_agents` and `host.os` have no required
+key and read when bare.
+
 `spec lint` exits 0 with no findings, 1 with warnings only, 2 with errors, 64 for usage, like `run`.
 With `--json` it prints a `LintReport` (result schema `$defs`). This answers the open question of draft 1
 (both reviews: sign refuses typos in known checks). It amends ADR 0008 decision 2, which made unknown

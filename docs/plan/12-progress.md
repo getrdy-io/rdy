@@ -55,7 +55,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-023 | todo | | Reserved check ids and the not_in_build lint rule
 
-- M1-024 | todo | | Typed parameters for M1 host check ids
+- M1-024 | PR #TBD | | none. Net and k8s structs stay placeholders (M1-025). The rule is no_threshold only where 01 names a required key, so host.lsm, host.os and host.security_agents read bare. AbsPath keeps the text as written (the check resolves it)
 
 - M1-025 | todo | | Typed parameters for M1 net and k8s check ids
 

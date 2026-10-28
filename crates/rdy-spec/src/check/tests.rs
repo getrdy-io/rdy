@@ -48,9 +48,24 @@ fn an_unknown_field_in_a_known_check_is_unsupported_and_named() {
 }
 
 #[test]
-fn a_known_id_with_no_parameters_decodes_to_its_typed_variant() {
-    let c = entry(&json!({"id": "host.cpu"}));
-    assert_eq!(c.decode_params(), CheckParams::HostCpu(HostCpu::default()));
+fn a_known_id_with_its_parameters_decodes_to_its_typed_variant() {
+    let c = entry(&json!({"id": "host.cpu", "min": 4}));
+    let CheckParams::HostCpu(cpu) = c.decode_params() else {
+        panic!("host.cpu must decode to HostCpu");
+    };
+    assert_eq!(cpu.min.map(Cores::get), Some(4));
+}
+
+/// The smallest parameters that make the entry of `id` read. A new parameter struct with a required key
+/// adds its line here.
+fn minimal(id: &str) -> Value {
+    match id {
+        "host.cpu" => json!({"id": id, "min": 1}),
+        "host.memory" => json!({"id": id, "min": "1Gi"}),
+        "host.disk" => json!({"id": id, "path": "/", "min": "1Gi"}),
+        "host.ports" => json!({"id": id, "free": [80]}),
+        _ => json!({"id": id}),
+    }
 }
 
 #[test]
@@ -59,7 +74,7 @@ fn all_seventeen_m1_ids_are_known_and_decode_to_their_own_variant() {
     let mut seen = HashSet::new();
     for id in KNOWN_IDS {
         assert!(seen.insert(*id), "{id} is listed twice");
-        let params = entry(&json!({ "id": id })).decode_params();
+        let params = entry(&minimal(id)).decode_params();
         assert!(
             !matches!(
                 params,
@@ -160,9 +175,9 @@ fn an_unreadable_severity_still_counts_as_block() {
 fn good_common_fields_do_not_disturb_the_parameters() {
     let c = entry(&json!({
         "id": "host.cpu", "name": "main", "severity": "warn", "fix": "Add cores.",
-        "timeout": "20s", "os": ["linux"]
+        "timeout": "20s", "os": ["linux"], "min": 2
     }));
-    assert_eq!(c.decode_params(), CheckParams::HostCpu(HostCpu::default()));
+    assert!(matches!(c.decode_params(), CheckParams::HostCpu(_)));
 }
 
 #[test]
@@ -365,7 +380,7 @@ fn an_entry_with_an_unreadable_name_has_no_key_and_is_not_a_duplicate() {
     let spec = spec_of(&[
         json!({"id": "host.disk", "name": "Data"}),
         json!({"id": "host.disk", "name": "Data"}),
-        json!({"id": "host.disk"}),
+        minimal("host.disk"),
     ]);
     assert!(find_duplicate(&spec.checks).is_none());
     let decoded = spec.decode_checks().expect("no duplicate");
@@ -390,7 +405,7 @@ fn a_duplicate_id_is_escaped_in_the_error() {
 #[test]
 fn decode_checks_keeps_entry_order_and_reports_each_outcome() {
     let spec = spec_of(&[
-        json!({"id": "host.cpu"}),
+        minimal("host.cpu"),
         json!({"id": "gpu.cuda"}),
         json!({"id": "host.memory", "mn": "32Gi"}),
     ]);
