@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use super::{BUG_HINT, CliError, ErrorCode, InternalKind, IoReason, ReportStep, emit, wants_json};
 use crate::password::{Origin, PasswordError};
 use crate::prompt::{Cancel, PromptError};
+use crate::trust::{Insecurity, Scope, TrustStoreError};
 
 fn s(text: &str) -> String {
     text.to_owned()
@@ -57,6 +58,12 @@ fn every_cli_error() -> Vec<CliError> {
         },
         CliError::Password(PasswordError::Empty(Origin::Env)),
         CliError::Prompt(PromptError::TooLong),
+        CliError::TrustStore(TrustStoreError::Insecure {
+            path: "/etc/rdy/trust.yaml".into(),
+            scope: Scope::System,
+            why: Insecurity::Writable,
+        }),
+        CliError::TrustStore(TrustStoreError::NoUserStore),
         CliError::ReportWrite {
             step: ReportStep::CreateFolder,
             path: s("/usr/share/rdy-report-x"),
@@ -84,6 +91,7 @@ fn check_variant(e: &CliError) -> ErrorCode {
         | CliError::Scalar { .. }
         | CliError::Password(_)
         | CliError::Prompt(_)
+        | CliError::TrustStore(_)
         | CliError::ReportWrite { .. }
         | CliError::Interrupted
         | CliError::Internal(_) => {
@@ -694,4 +702,62 @@ fn wants_json_reads_the_exact_flag_before_the_double_dash() {
         let weird = OsString::from_vec(vec![b'-', b'-', 0xff]);
         assert!(!wants_json(&[OsString::from("rdy"), weird]));
     }
+}
+
+#[test]
+fn an_insecure_trust_store_is_trust_store_insecure_with_the_documented_text() {
+    let err = CliError::TrustStore(TrustStoreError::Insecure {
+        path: "/etc/rdy/trust.yaml".into(),
+        scope: Scope::System,
+        why: Insecurity::Writable,
+    });
+    assert_eq!(err.code(), ErrorCode::TrustStoreInsecure);
+    assert_eq!(err.exit_code().code(), 64);
+    let (mut out, mut errout) = (Vec::new(), Vec::new());
+    assert_eq!(emit(&err, true, &mut out, &mut errout), 64);
+    assert_eq!(
+        String::from_utf8(errout).expect("utf8"),
+        "error: /etc/rdy/trust.yaml is writable by other users\nfix: chmod 644 /etc/rdy/trust.yaml\n"
+    );
+    let json: Value = serde_json::from_slice(&out).expect("json");
+    assert_eq!(json["error"]["code"], "trust_store_insecure");
+    assert!(json["error"].get("file").is_none());
+}
+
+#[test]
+fn an_invalid_trust_file_points_at_the_line() {
+    let err = CliError::TrustStore(TrustStoreError::Invalid {
+        path: "/home/u/.config/rdy/trust.yaml".into(),
+        source: rdy_spec::sig::TrustFileError::UnknownField {
+            key: s("extra"),
+            at: Some(Location::new(3, 1)),
+        },
+    });
+    let r = err.render();
+    assert_eq!(r.code, ErrorCode::Usage);
+    assert_eq!(r.file.as_deref(), Some("/home/u/.config/rdy/trust.yaml"));
+    assert_eq!((r.line, r.column), (Some(3), Some(1)));
+    assert!(r.fix.contains("rdy trust list"), "{}", r.fix);
+}
+
+#[test]
+fn a_trust_store_error_survives_anyhow_context() {
+    let err = anyhow::Error::new(TrustStoreError::Unsupported).context("pinning a key");
+    let found = CliError::from_anyhow(err);
+    assert!(matches!(
+        found,
+        CliError::TrustStore(TrustStoreError::Unsupported)
+    ));
+}
+
+#[test]
+fn a_trust_path_with_control_characters_is_escaped_in_the_message_and_the_fix() {
+    let err = CliError::TrustStore(TrustStoreError::Insecure {
+        path: "/tmp/\u{1b}[2Jevil/trust.yaml".into(),
+        scope: Scope::User,
+        why: Insecurity::Writable,
+    });
+    let r = err.render();
+    assert!(!r.message.contains('\u{1b}') && !r.fix.contains('\u{1b}'));
+    assert!(!r.text().contains('\u{1b}'));
 }

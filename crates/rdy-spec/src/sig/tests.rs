@@ -122,6 +122,7 @@ fn a_good_signature_verifies_and_records_its_provenance() {
             product: slug(PRODUCT),
             signed_at: "2026-11-30T16:02:11Z".to_owned(),
             trust_source: TrustSource::User,
+            trust_note: None,
         }
     );
     assert_eq!(loaded.sha256(), hex(&Sha256::digest(SPEC.as_bytes())));

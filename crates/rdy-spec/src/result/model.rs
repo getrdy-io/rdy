@@ -373,6 +373,41 @@ impl Signature {
     }
 }
 
+impl From<&crate::sig::SignatureState> for Signature {
+    /// The provenance of a loaded spec as the result records it (threat model R1, SEC-61).
+    ///
+    /// A verified spec carries the key id, the fingerprint of the key that verified, the signed product
+    /// and time, the trust source and the user's own note. The fingerprint is the identity of the key:
+    /// the key id alone can be copied by anyone.
+    fn from(state: &crate::sig::SignatureState) -> Self {
+        use crate::sig::{SignatureState as Loaded, TrustSource as Source};
+        match state {
+            Loaded::Unsigned => Self::unsigned(),
+            Loaded::Verified {
+                key_id,
+                fingerprint,
+                product,
+                signed_at,
+                trust_source,
+                trust_note,
+            } => {
+                let mut out = Self::bare(SignatureState::Verified);
+                out.key_id = Some(key_id.to_string());
+                out.key_fingerprint = Some(fingerprint.clone());
+                out.product = Some(product.as_str().to_owned());
+                out.signed_at = Some(signed_at.clone());
+                out.trust_note.clone_from(trust_note);
+                out.trust_source = Some(match trust_source {
+                    Source::System => TrustSource::System,
+                    Source::User => TrustSource::User,
+                    Source::Flag => TrustSource::Flag,
+                });
+                out
+            }
+        }
+    }
+}
+
 /// The machine, coarsely. No MAC addresses, environment values, command line, working directory, home
 /// paths, kubeconfig contents, raw machine id or serial numbers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -28,6 +28,9 @@ pub mod password;
 #[doc(hidden)]
 pub mod prompt;
 
+#[doc(hidden)]
+pub mod trust;
+
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
 use error::{CliError, InternalKind, emit};
 use rdy_spec::result::ExitCode;

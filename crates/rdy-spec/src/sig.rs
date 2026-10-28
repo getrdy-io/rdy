@@ -17,13 +17,15 @@
 mod base64;
 mod error;
 mod key;
+mod store;
 
 use ed25519_dalek::{Signature, VerifyingKey};
 
 use crate::spec::ProductSlug;
 pub use error::SignatureError;
 pub(crate) use key::hex;
-pub use key::{KeyId, PublicKey};
+pub use key::{KeyId, MAX_KEY_FILE_BYTES, PublicKey};
+pub use store::{MAX_TRUST_BYTES, TrustFileError};
 
 /// The largest signature file rdy reads, 4 KiB (threat model INV-02).
 pub const MAX_SIGNATURE_BYTES: usize = 4096;
@@ -80,6 +82,9 @@ pub enum SignatureState {
         signed_at: String,
         /// Where the key that verified came from.
         trust_source: TrustSource,
+        /// The note the user wrote when they pinned the key, or `None` for a one-run key and for a pin with
+        /// no note. It is never text from the spec.
+        trust_note: Option<String>,
     },
     /// The spec had no signature and the policy allowed that. Nothing says who wrote it.
     Unsigned,
@@ -91,12 +96,17 @@ struct Pin {
     product: ProductSlug,
     key: PublicKey,
     source: TrustSource,
+    /// When the key was pinned, `YYYY-MM-DDTHH:MM:SSZ`. `None` for a one-run key, which is never written.
+    added_at: Option<String>,
+    /// The user's note about the key.
+    note: Option<String>,
 }
 
 /// Keys that are trusted, each for named products.
 ///
 /// A key is trusted for a product only if it was pinned for that product. This type is the in-memory
-/// pin list. Reading and writing `trust.yaml` is the trust store ticket (M1-121).
+/// pin list. [`TrustStore::from_yaml`] and [`TrustStore::to_yaml`] read and write the text of one
+/// `trust.yaml`. Finding the file, and checking who owns it, is the CLI's job.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TrustStore {
     pins: Vec<Pin>,
@@ -116,6 +126,8 @@ impl TrustStore {
             product,
             key,
             source,
+            added_at: None,
+            note: None,
         });
     }
 
@@ -352,6 +364,7 @@ pub(crate) fn verify_sidecar(
             product: parsed.product.clone(),
             signed_at: parsed.signed_at.clone(),
             trust_source: pin.source,
+            trust_note: pin.note.clone(),
         });
     }
     if comment_failed {

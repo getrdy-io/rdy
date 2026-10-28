@@ -254,7 +254,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-120 | [#27](https://github.com/getrdy-io/rdy/pull/27) | 2026-10-28 | The verifier is ed25519-dalek verify_strict over our own minisign envelope reader, not minisign-verify (ADR 0018). The Windows autocrlf case is covered by tests (`-text` and `eol=lf` rules in .gitattributes and a CR-free fixture test); the Windows CI leg arrives with M1-006 (#21) and M1-047. Deferred: signed_at future-date warning and expiry check (need a clock, M1-026), trust.yaml I/O (M1-121), key text files for --key (M1-121), CLI wiring and error codes (M1-126), the CRLF note on every error kind (today only `Tampered` carries it, M1-126) and reading the .minisig exactly once (M1-126)
 
-- M1-121 | todo | | Trust store load and save in user and system locations
+- M1-121 | PR #TBD | | Trust file I/O is split: format in rdy-spec (`TrustStore::from_yaml`, `to_yaml`, `PublicKey::from_key_file_text`), file rules in rdy-cli `trust` (ADR 0019). Stricter than 01 4.3 on purpose: user file symlink and foreign owner are refused, and on Windows any existing store is refused until M1-122. Invalid or unreadable stores use code `usage`, not a new code. Deferred: opening a `--key` file with its size cap (M1-126 and M1-131 own the commands), the root no-match hint (M1-126), the `sudo` CI leg and strace test (M1-122), `trust add/list/remove` (M1-131). INV-04 is covered by unit tests with a pretend euid 0 and by a `detect()` test that runs only when the tests run as root
 
 - M1-122 | todo | | SEC-60 Root trust lookup touches no user path, Windows store ACL rules
 
