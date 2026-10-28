@@ -37,18 +37,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@PIN_CHECKOUT # PIN_CHECKOUT_VERSION
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install the pinned toolchain
         run: rustup toolchain install --no-self-update
       # PRs read the cache that main saved. Only main writes it.
-      - uses: Swatinem/rust-cache@PIN_RUST_CACHE # PIN_RUST_CACHE_VERSION
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: lint
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install zizmor
-        uses: taiki-e/install-action@PIN_INSTALL_ACTION # PIN_INSTALL_ACTION_VERSION
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: zizmor@1.31.1
       - name: cargo fmt
@@ -72,18 +72,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@PIN_CHECKOUT # PIN_CHECKOUT_VERSION
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install the pinned toolchain
         run: rustup toolchain install --no-self-update
       # rust-cache runs first so the installed cargo-deny binary is cached with it.
-      - uses: Swatinem/rust-cache@PIN_RUST_CACHE # PIN_RUST_CACHE_VERSION
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: deny
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-deny
-        uses: taiki-e/install-action@PIN_INSTALL_ACTION # PIN_INSTALL_ACTION_VERSION
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-deny@0.20.2
       - name: cargo deny
@@ -96,7 +96,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@PIN_CHECKOUT # PIN_CHECKOUT_VERSION
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The check walks the PR's commits, so it needs full history.
           fetch-depth: 0
