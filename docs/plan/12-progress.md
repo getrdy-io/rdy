@@ -11,7 +11,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-001 | todo | | Confirm the revised ADRs close security findings MF-01 to MF-07
 
-- M1-002 | todo | | Confirm the revised ADRs close cli-ux findings M1 to M3 and the final command names
+- M1-002 | [#2](https://github.com/getrdy-io/rdy/pull/2) | 2026-10-28 | none. Three ADR gaps reported for the ADR owners (0008 error codes, 0003 vs 0016, 0003 banner order); 07 needed no edit
 
 - M1-003 | todo | | Create workspace skeleton and package rdy in crates/rdy-cli with binary name rdy
 
