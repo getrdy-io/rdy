@@ -47,7 +47,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-019 | todo | | Two-step check decoding with Unknown and Unsupported variants
 
-- M1-020 | PR #TBD | | The evidence_only and pass_by_absence snapshot of ADR 0013 decision 6 waits for the check registry (nothing to list yet). `ErrorOutput`, `Verification` and `LintReport` are not typed (M1-021, `rdy verify` and `spec lint` own them). The action log keeps kind-specific fields as a JSON map until M1-040 types them. The 7.x samples round-trip as canonical JSON (equal keys and values), not as raw text, because the samples are hand formatted; the writer's byte layout is M1-055. `FixSource::FromSpec` is not called `Spec` because a variant of that name breaks the M1-016 compile-fail goldens.
+- M1-020 | [#22](https://github.com/getrdy-io/rdy/pull/22) | 2026-10-28 | The evidence_only and pass_by_absence snapshot of ADR 0013 decision 6 waits for the check registry (nothing to list yet). `ErrorOutput`, `Verification` and `LintReport` are not typed (M1-021, `rdy verify` and `spec lint` own them). The action log keeps kind-specific fields as a JSON map until M1-040 types them. The 7.x samples round-trip as canonical JSON (equal keys and values), not as raw text, because the samples are hand formatted; the writer's byte layout is M1-055. `FixSource::FromSpec` is not called `Spec` because a variant of that name breaks the M1-016 compile-fail goldens.
 
 - M1-021 | todo | | Error types with fix hints and exit code mapping at the CLI edge
 
