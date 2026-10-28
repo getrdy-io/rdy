@@ -149,7 +149,13 @@ manifest, receipt or error. Unkeyed, a hash of a short password would be a looku
 says "these two values are equal", inside this process, and two bundles from one host differ. The input is the
 secret bytes only, so one password in a URL and in an env var gets one tag. 32 bits gives a 1% collision
 chance at about 9,000 distinct secrets; a collision merges two labels and reveals nothing. `TagKey::fixed(..)`
-exists only under feature `testing`, which CI keeps out of the release binary.
+exists only under feature `testing`, which CI keeps out of the release binary (M1-048 also refuses a release
+build with the feature on, with a `compile_error!` in `rdy_engine::redact`).
+
+**Equality oracle.** Two placeholders with the same tag mean two equal secrets (or a 1 in 4 billion collision).
+Whoever reads a report learns that equality and nothing else: the key never leaves the process, so a guessed
+value cannot be tested against a tag. A 4-byte tag is a deliberate trade against a longer one that would make
+the equality easier to see in a diff.
 
 ### 3.4 Where the guarantee lives, and review decisions
 
@@ -175,7 +181,9 @@ exists only under feature `testing`, which CI keeps out of the release binary.
   Report set has no email rule: the report shows the Kubernetes user on purpose (SEC-24).
 - **Entropy thresholds** start at 24 or more characters, 4.0 bits per character, three of four classes, never
   pure hex of length 32, 40 or 64, UUIDs, `sha256:` digests or data URIs. They are constants tuned in M2.
-- **Limits and crates.** Maximum match length of any rule 16 KiB; custom patterns at most 32 of 256 chars; M2
+- **Limits and crates.** Maximum match length of any rule 16 KiB, except the key-name rule: its value runs to
+  the end of the line (or the end of a YAML block), and a cap would leave the tail of a long secret in the
+  output, so M1-048 has no cap there; custom patterns at most 32 of 256 chars; M2
   speed 50 MiB/s per core (CI fails under 25). Rules compile once into a `LazyLock<Arc<CompiledRules>>`. M1
   uses `regex` alone (linear time). HMAC-SHA256, SHA-256 and the RNG come from `ring` (ADR 0009); `aho-corasick`
   is added in M2 only after a measurement. `rdy-bundle` adds a C compiler to the musl build, so 06's size

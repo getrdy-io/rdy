@@ -262,6 +262,10 @@ Each is a statement that CI tests. The ticket in the test column carries it.
 | INV-26 | (M2) The token never appears in argv, logs, the receipt, any file or an error. | A canary token at `RUST_LOG=trace` (M2-077, M2-080). |
 | INV-27 | (M2) No socket and no DNS query for the upload origin before the consent answer, or after a no. | Under `unshare -n` and strace. A bad server, a token on argv, a group-readable token file, a residual hit, a zstd bomb, a 20,000-entry tar and a non-TTY run without `--yes` each exit 64 before any request (M2-076, M2-080). |
 
+Notes on INV-15 from the M1-048 review. The 4-byte tag shows that two redacted values are equal, and nothing
+else, because the key never leaves the process (04 section 3.3). The key-name rule has no 16 KiB cap: its value
+runs to the end of the line or YAML block, because a cap would leave the tail of a long secret behind.
+
 ## Dependency policy
 
 `deny.toml` encodes the bans, licenses and sources below (M1-004). The check-crate wrappers land in M1-044. These are the rules:
