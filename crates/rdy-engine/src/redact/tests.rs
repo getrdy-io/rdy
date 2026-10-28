@@ -227,6 +227,19 @@ fn no_byte_of_a_matched_secret_survives() {
         format!("password={{{{{secret}}}}}"),
         format!("password={{{{ {secret} }}}}"),
         format!("password=/run/secrets/../{secret}"),
+        // Third review round.
+        format!("password: # note\n  {secret}"),
+        format!("token: !!binary\n  {secret}"),
+        format!("password: &a\n  {secret}"),
+        format!("token: !!binary |\n  {secret}"),
+        format!("passwords:\n- {secret}"),
+        format!("db password:\n  {secret}"),
+        format!("x/token: |\n {secret}"),
+        format!("password:\r  {secret}"),
+        format!("    password:\n\t{secret}"),
+        format!("password=!{secret}"),
+        format!("password=#{secret}"),
+        format!(r#"password=\"pa\\\",{secret}\" x"#),
     ];
     let r = redactor();
     for form in &forms {
