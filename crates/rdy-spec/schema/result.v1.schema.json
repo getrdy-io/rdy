@@ -688,6 +688,10 @@
             "object",
             "null"
           ],
+          "description": "null when no k8s check ran. When an object, user_verified is required.",
+          "required": [
+            "user_verified"
+          ],
           "properties": {
             "context": {
               "type": [

@@ -505,7 +505,7 @@ Top level (`$defs/Report`). ADR 0012 decision 3 fixes the provenance fields; thi
 | `spec` | `product`, `version`, `sha256` of the verified bytes, `file_name` (base name only), `size_bytes`, `serial`, `expires`, `contact`, `annotations` |
 | `signature` | `state` (`verified`, `unsigned`), `key_id`, `key_fingerprint`, `product` and `signed_at` from the signed comment, `trust_note`, `trust_source` (`system`, `user`, `flag`) |
 | `host` | 5.1 |
-| `identity` | `euid`, `user`, `elevated`, `kube` (`context`, `server`, `user`, `user_verified`, `exec_plugin`, `insecure_tls`). `kube.user` is the authenticated user from `SelfSubjectReview` (ADR 0010 decision 2), with `user_verified: true`. When that API is missing (1.27 and older) or the call fails, it is the user entry named in the kubeconfig context with `user_verified: false`, shown as "not verified by the API server". |
+| `identity` | `euid`, `user`, `elevated`, `kube` (`context`, `server`, `user`, `user_verified`, `exec_plugin`, `insecure_tls`). `kube.user` is the authenticated user from `SelfSubjectReview` (ADR 0010 decision 2), with `user_verified: true`. When that API is missing (1.27 and older) or the call fails, it is the user entry named in the kubeconfig context with `user_verified: false`, shown as "not verified by the API server". `user_verified` is required whenever `kube` is an object. |
 | `proxy` | proxy URLs in effect, user info stripped, and `no_proxy`; null when none |
 | `capabilities` | each probed need: `need`, `name`, `available`, `detail`, `hint` (02) |
 | `verdict`, `verdict_reason`, `exit_code` | 5.3 |

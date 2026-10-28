@@ -1,7 +1,7 @@
 # ADR 0015: The minimal redactor lives in rdy-engine and runs on whole strings before any cap or write
 
-- Status: Accepted, pending security-reviewer sign-off in the M1-009 PR. Accepted 2026-10-28 after the
-  security-reviewer review of ADRs 0013 to 0016; decision 10 added 2026-10-28 in M1-009 from 04 section 3.
+- Status: Accepted (security-reviewer sign-off in PR #13, 2026-10-28). First accepted 2026-10-28 after
+  the security-reviewer review of ADRs 0013 to 0016; decision 10 added in M1-009 from 04 section 3.
 - Date: 2026-10-28
 
 ## Context

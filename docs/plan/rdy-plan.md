@@ -317,7 +317,7 @@ The site has one job at each stage: collect a waitlist in M0, convert design par
 
 ## Risks, validation gates, and alternatives
 
-The biggest risk is not competition. It is spending six months on Rust before five vendors have said they will pay. The gates below come before M1.
+The biggest risk is not competition. It is spending six months on Rust before five vendors have said they will pay. The gates below were meant to come before M1. On 2026-10-28 the founder chose to start M1 now and finish the gates in parallel (`docs/plan/13-plan-corrections.md`, Decisions made 2), so the gates are now a checkpoint, not a precondition.
 
 **Risks**
 
@@ -331,7 +331,7 @@ The biggest risk is not competition. It is spending six months on Rust before fi
 | Enterprise sales cycles | $50k+ deals take 6 to 9 months | Team tier is self-serve and pays the bills. Enterprise is M5, not M1. |
 | Cloud breadth | GCP and Azure Rust SDKs lag AWS | AWS first. REST clients for the rest. Accept community-contributed check families. |
 
-**Validation gates (finish before M1)**
+**Validation gates (finish in parallel with M1, by the Nov 20, 2026 checkpoint)**
 
 - [ ] 15 interviews with SE and support leaders completed
 - [ ] At least 10 of 15 say environment readiness costs them real POC time, with a number
@@ -353,7 +353,7 @@ Kill rule: fewer than 3 design partners after 30 outreach attempts means the pai
 
 ## Next 30 days
 
-No Rust until the gates are met. The next month is interviews, a waitlist page, and a throwaway prototype to show in those interviews.
+M1 started on 2026-10-28, ahead of the gates (Decisions made 2 in `docs/plan/13-plan-corrections.md`). The next month still holds interviews and a waitlist page next to the M1 build.
 
 - [ ] Read your employment agreement for IP and moonlighting terms
 - [ ] Name picked (rdy) and getrdy.io bought. Still to do: USPTO export for RDY, READY and REDY; crates.io name; Wisconsin LLC name check
@@ -365,7 +365,7 @@ No Rust until the gates are met. The next month is interviews, a waitlist page, 
 - [ ] Draft the first spec with a design partner's real prerequisites list
 - [ ] Decide go or no-go against the validation gates
 
-Nov 20, 2026 is the go or no-go date.
+Nov 20, 2026 is the go or no-go checkpoint.
 
 ## Name, domain and repositories
 

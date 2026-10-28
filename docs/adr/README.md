@@ -22,7 +22,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0012](0012-wire-types-in-rdy-spec-schema-generated.md) | All `rdy/v1` wire types live in rdy-spec; JSON schemas are generated from them | Accepted |
 | [0013](0013-verdict-refinements-not-run.md) | Verdict refinements: what counts as not run, and the one thing that never counts | Accepted |
 | [0014](0014-probe-facade-owns-side-effects.md) | The probe facade owns every check side effect, including TCP, proxy CONNECT, TLS and HTTP | Accepted; decision 7 amended 2026-10-28 (MF-04: wall over std and kube plus the dependency allowlist) |
-| [0015](0015-redactor-in-rdy-engine.md) | The minimal redactor lives in rdy-engine and runs on whole strings before any cap or write | Accepted, pending security-reviewer sign-off in the M1-009 PR; decision 10 added 2026-10-28 (span union, keyed tags, `Redacted<T>`, `ring`) |
+| [0015](0015-redactor-in-rdy-engine.md) | The minimal redactor lives in rdy-engine and runs on whole strings before any cap or write | Accepted (security-reviewer sign-off in PR #13, 2026-10-28); decision 10 added (span union, keyed tags, `Redacted<T>`, `ring`) |
 | [0016](0016-output-dir-confinement-cap-std.md) | Output is confined to one new directory, opened early through a cap-std handle | Accepted |
 | [0017](0017-changelog-fragments.md) | Changelog fragments: each PR adds one file in changelog.d/, and the release step assembles CHANGELOG.md | Accepted |
 

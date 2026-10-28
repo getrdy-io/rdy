@@ -23,7 +23,7 @@ in M2, which writes per-crate changelogs for crates.io releases. 09 section 7 re
    runbook for weekly tags) moves every fragment under a new `## <version>` heading in `CHANGELOG.md`,
    in ticket id order, and deletes the fragments in the same commit. `## Unreleased` then says the
    fragments are waiting in `changelog.d/`.
-4. **This is the CLAUDE.md "CHANGELOG entry".** The CLAUDE.md PR checklist line becomes "changelog
+4. **This is the CLAUDE.md "CHANGELOG entry".** The CLAUDE.md PR checklist line says "changelog
    fragment in `changelog.d/`" (edit C-4 in `docs/plan/13-plan-corrections.md`).
 5. **With ADR 0007.** `release-plz` (M2) keeps writing per-crate changelogs for `rdy-spec` and
    `rdy-engine`. The root `CHANGELOG.md` stays the binary's user-facing history, and the release step
@@ -53,4 +53,5 @@ in M2, which writes per-crate changelogs for crates.io releases. 09 section 7 re
 
 None new. M1-003 creates `changelog.d/`. The release step of decision 3 assembles the fragments: M1-138
 for 0.1.0, and the `RELEASING.md` runbook for weekly tags. The CLAUDE.md checklist line is edit C-4 in
-`docs/plan/13-plan-corrections.md`, for the founder to apply.
+`docs/plan/13-plan-corrections.md`. The coordinator applied it in the M1-009 PR (#13) under the
+founder's standing instruction to build every M1 ticket; the founder may revert it.
