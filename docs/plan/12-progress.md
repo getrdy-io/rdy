@@ -43,7 +43,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-017 | todo | | Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits
 
-- M1-018 | todo | | Scalar types Quantity, Duration, Version and Target with strict grammars
+- M1-018 | [#20](https://github.com/getrdy-io/rdy/pull/20) | 2026-10-28 | version constraints such as ">=4.2" are not a type: metadata.version stays free text per 01 (not evaluated); Version has no ordering yet (first comparing check adds it); CheckParams wiring is M1-019, M1-024, M1-025; timeout range 1s to 60s is checked by the field that uses Duration
 
 - M1-019 | todo | | Two-step check decoding with Unknown and Unsupported variants
 
