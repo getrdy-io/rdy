@@ -139,7 +139,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-063 | todo | | SEC-26 M1 redaction corpus, first 30 cases (0.1.0 gate)
 
-- M1-064 | todo | | Shared helpers: units, quantities, dotted version compare, nominal band, severity cap
+- M1-064 | [#42](https://github.com/getrdy-io/rdy/pull/42) | 2026-10-28 | Exit test follows correction-06 (3.8 GiB against `4Gi`; 3.7 GiB blocks at the default band). Tolerant kernel-release parsing (5.14.0-362.el9) is left to M1-152. The cgroup helper is a separate ticket.
 - M1-064 correction-06 | backlog corrected 2026-10-28: exit test uses 3.8 GiB against `4Gi`, not 3.7 GiB; the band max(5%, 256 MiB) puts the lowest passing value at 4 GiB minus 256 MiB = 3.75 GiB
 
 - M1-065 | todo | | cgroup helper for memory, cpu and controllers
