@@ -5,7 +5,8 @@
 //! status and skip kind, so the rule can be tested over a table.
 //!
 //! ```text
-//! not_run(c)  = c.status in {skipped, timeout, error, <unknown>} and c.skip_kind != not_applicable
+//! not_run(c)  = (c.status == skipped and c.skip_kind != not_applicable)
+//!               or c.status in {timeout, error, <unknown>}
 //! required(c) = c.severity != warn          # unreadable or unknown severity counts as block
 //!
 //! not_ready            if any c.status == block, or any c is required and not_run
@@ -14,9 +15,8 @@
 //! ready                otherwise
 //! ```
 //!
-//! One deliberate tightening: `skip_kind: not_applicable` only takes a check out of the count when the
-//! status is `skipped`. A `timeout` or `error` that carries the field by mistake still counts as not run,
-//! because only the spec's `os` list may relax a requirement (ADR 0013 decision 2).
+//! A `timeout` or `error` that carries `skip_kind: not_applicable` by mistake still counts as not run,
+//! because only the spec's `os` list may relax a requirement (ADR 0013 decisions 1 and 2).
 
 use super::codes::{Bucket, Need, Severity, SkipKind, Status, Verdict, VerdictReason};
 use super::model::{CheckResult, Partial};
