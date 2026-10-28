@@ -21,6 +21,9 @@ use clap::{Arg, ArgAction, CommandFactory, FromArgMatches};
 #[doc(hidden)]
 pub mod cli;
 
+#[doc(hidden)]
+pub mod prompt;
+
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
 
 /// Exit code for success.

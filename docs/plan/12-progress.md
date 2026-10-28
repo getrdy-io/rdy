@@ -253,7 +253,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-122 | todo | | SEC-60 Root trust lookup touches no user path, Windows store ACL rules
 
-- M1-123 | todo | | Prompt helper: y/N, no-terminal refusal and hidden input
+- M1-123 | PR #TBD | | no automated pty test: unit tests inject a scripted Terminal, and the real StdTerminal (rpassword echo off, stdin and stderr TTY check, exit 64 with no TTY) was checked by hand on a Linux pty with a throwaway example; Windows and macOS paths rely on rpassword and are untested here; `trust add` and `spec sign` wire the helper in M1-131 and M1-125
 
 - M1-124 | todo | | Review CONTRIBUTING.md on a fresh clone
 
