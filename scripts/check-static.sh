@@ -15,6 +15,10 @@
 
 set -u
 
+# readelf output is parsed below. Pin the locale so its words do not change.
+LC_ALL=C
+export LC_ALL
+
 if [ "$#" -ne 1 ]; then
     echo "usage: scripts/check-static.sh <path-to-binary>" >&2
     exit 64
@@ -64,7 +68,7 @@ fi
 if printf '%s\n' "$header" | grep -Eq '^[[:space:]]*Type:[[:space:]]+DYN'; then
     pass "position independent (static-pie)"
 else
-    fail "position independent (static-pie)" "the binary is not PIE, so it has no ASLR. Check that the musl target is not built with -C relocation-model=static."
+    fail "position independent (static-pie)" "the binary is not PIE, so it has no ASLR. On aarch64 musl, rustc links non-PIE unless scripts/musl-pie-linker.sh is the linker (.cargo/config.toml)."
 fi
 
 if printf '%s\n' "$programs" | grep -Eq '^[[:space:]]*GNU_RELRO[[:space:]]' &&

@@ -17,7 +17,12 @@ our checks directly, so they belong in writing.
    Linux build is published.
 2. Hardening is kept: Linux binaries are `static-pie` (ASLR), with full RELRO and a non-executable stack.
    The CI proof accepts `static-pie linked`, fails on a non-PIE binary, and checks RELRO and the stack
-   flag with `readelf` on both arches. A target that cannot be static-pie is recorded here.
+   flag with `readelf` on both arches (`scripts/check-static.sh`). A target that cannot be static-pie is
+   recorded here. (Amended 2026-10-28 in M1-006: rustc 1.99.1 does not mark `aarch64-unknown-linux-musl`
+   as able to build static-pie, so it links `-static -no-pie` with `crt1.o`, giving no ASLR and no
+   RELRO flags. That target links through `scripts/musl-pie-linker.sh`, set in `.cargo/config.toml`. It
+   swaps `crt1.o` for musl's `rcrt1.o` and passes `-static-pie` to `cc`. The CI check stays strict, so
+   it fails if the wrapper stops working. Delete the wrapper when rustc supports the target itself.)
 3. aarch64 Linux builds and tests run natively on GitHub's `ubuntu-24.04-arm` runners with `musl-tools`.
    `cargo-zigbuild` is the fallback and the documented local cross path. `cross` is not used.
 4. Allocator: musl's default in M1. An M2 benchmark compares with a glibc build; above a 20% slowdown we

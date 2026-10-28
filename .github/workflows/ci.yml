@@ -188,7 +188,7 @@ jobs:
           sh scripts/test-check-static.sh
           scripts/check-static.sh "target/$TARGET/debug/rdy"
       # `scratch` is not a pullable image, so import an empty one. It has no shell and no libc, so
-      # the binary only runs if it is truly static. Non-root user, no network, read-only mount.
+      # the binary only runs if it is truly static. Non-root, no network, read-only root, no capabilities.
       - name: Run the binary in a scratch container
         if: runner.os == 'Linux'
         run: |
@@ -196,7 +196,7 @@ jobs:
           cp "target/$TARGET/debug/rdy" "$dir/rdy"
           chmod 755 "$dir"
           tar -cT /dev/null | docker import - rdy-scratch
-          out=$(docker run --rm --network none --user 65534:65534 -v "$dir:/rdy:ro" rdy-scratch /rdy/rdy version)
+          out=$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534:65534 -v "$dir:/rdy:ro" rdy-scratch /rdy/rdy version)
           echo "$out"
           echo "$out" | grep -q '^rdy '
       - name: Test (nextest, no retries)
