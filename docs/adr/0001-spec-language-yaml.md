@@ -34,7 +34,88 @@ The plan names `serde_yaml`. Its author deprecated and archived it in March 2024
 5. Signatures cover the raw file bytes (ADR 0002), so no YAML canonicalization is ever needed.
 6. "No unsafe" is a claim from the crate's docs, not something we have checked. Before the parser ticket
    merges, `cargo geiger` (or a grep of the sources) runs over `serde-saphyr` and its parser crate, and
-   the result is written into this ADR.
+   the result is written into this ADR. Done in M1-017: see "Geiger result" below.
+
+## Implementation notes (M1-017, 2026-10-28)
+
+`rdy_spec::parse_unverified(bytes) -> Result<Spec, SpecError>` is the only call site of `serde-saphyr`
+(2.0.0, `default-features = false, features = ["deserialize"]`). `rdy_spec::load` keeps failing closed until
+M1-120 verifies the signature first. `parse_unverified` never returns a `LoadedSpec`.
+
+The reader makes two passes over text that is already in memory:
+
+1. A **guard** reads the YAML event stream (and the token stream for directives) with `granit-parser`, the
+   parser crate `serde-saphyr` re-exports. It refuses, with line and column and in file order:
+   size over 1 MiB (checked first, before any parsing), invalid UTF-8, `%` directives, every explicit tag
+   (`!!binary`, `!custom`, `!!str`), anchors, aliases (including an alias to an unknown anchor), merge keys,
+   a second document, a duplicate key at any depth (including inside a check's parameters), nesting past
+   64 levels, non-finite numbers (`.nan`, `.inf`, `-.inf`, and a decimal that overflows `f64`, such as
+   `1e999`) and any unquoted decimal.
+2. A **typed read** by `serde-saphyr` into `Spec`, with the same limits set again as a second line of
+   defence (budget: depth 64, one document, zero anchors and aliases; errors on duplicate keys, merge keys,
+   unknown tags and non-finite numbers).
+
+The guard exists because the parameters of a check are read into `serde_json::Value`, which keeps the last of
+two equal keys and turns a non-finite number into `null`, and because `serde-saphyr` accepts some tags
+(`!!binary`) that a spec must not contain. Unit tests call the typed read alone to prove the second line
+holds on its own.
+
+Rules that go beyond the list above, all from decision 4 and `docs/plan/01-spec-format.md` section 2:
+
+- **Decimals.** Decision 4 says a plain scalar that resolved to a float is refused for version fields. The
+  parameters are a raw map at this point and carry no field types, so the rule applies to every plain scalar
+  in the file: `min: 12.10`, `1e3`, `.5` and `5.` are refused, `"12.10"` is text, `12`, `0x1F` and `12.10.1`
+  are not decimals. A future numeric parameter that is a real decimal needs a rule here first. The same
+  rule refuses a whole number that would not keep its text: a leading zero (`0755`, which YAML 1.1 reads as
+  octal) or a value outside `i64` and `u64` (the reader would turn it into a float and lose digits). The
+  message says "versions must be text" only under a version key (`min`, `max`, `openshift_min`, `version`,
+  `versions`), and "Quote it to keep it as typed" under any other key.
+- **Later versions.** Once the top-level `apiVersion` says `rdy/v2` or later, any refusal that sits below it
+  in the file (an unquoted decimal, a tag, a duplicate key, a syntax error) is reported as
+  `UnsupportedApiVersion` with "install the latest rdy", because a file for a later rdy may use anything. A
+  refusal above the `apiVersion` line is reported as it is.
+- **Value count.** The crate's own caps on nodes and events are raised to the size limit (1,048,576 nodes,
+  4,194,304 events), so any valid file of 1 MiB parses. A value takes at least one byte, so the size limit
+  is the real bound. The worst case is a 1 MiB list of one-digit numbers, about 500,000 values.
+- **Use.** `parse_unverified` is for `spec lint` and `verify` diagnostics. A run, including `--allow-unsigned`,
+  goes through `load()` with an unsigned policy (M1-120).
+- **Booleans.** `strict_booleans` is on, so `yes`, `no`, `on` and `off` are strings (decision 4). `true` and
+  `false` are booleans.
+- **Root.** The root must be a map. A list, a scalar or an empty `---` document is an error at its place.
+- **`apiVersion`.** The guard reads the top-level `apiVersion` first. `rdy/v2` and later give
+  `UnsupportedApiVersion` (install the latest rdy) and the rest of the file is not read. Anything else,
+  including a missing key, gives `BadApiVersion`.
+- **Errors.** Every refusal is a `SpecError::Located` with a line and column (1-based, columns count
+  characters). Any text from the file that an error echoes goes through `echo_safe`: cut to 64 characters and
+  escaped. Reasons from the YAML crate are cut to 160 and escaped.
+
+## Geiger result (2026-10-28)
+
+`cargo geiger` 0.14.0 over `rdy-spec` with `serde-saphyr` 2.0.0 and `granit-parser` 2.0.0, plus a grep of both
+crates' sources:
+
+| Crate | Unsafe in the crate | Declares `#![forbid(unsafe_code)]` |
+| --- | --- | --- |
+| `serde-saphyr` 2.0.0 | 0 functions, 0 expressions | yes (`lib.rs` and `[lints]`) |
+| `granit-parser` 2.0.0 | 0 functions, 0 expressions | yes (`lib.rs` and `[lints]`) |
+
+The claim in the docs holds for the two crates that parse. The unsafe code is in small leaf crates that most
+Rust programs already carry. New in the tree with the `deserialize` feature (the others were there already or
+are build-time): `smallvec` 1.16.4 (1 function, 611 expressions), `arraydeque` 0.5.1 (2 functions, 343
+expressions), `encoding_rs` 0.8.42 (713 expressions), `simdutf8` 0.1.5 (347 expressions), `core_detect` 1.0.0,
+`scopeguard` 1.2.0 and `anstyle` 1.0.14 (small counts), with `annotate-snippets`, `encoding_rs_io`,
+`num-traits` and `unicode-width` clean. `encoding_rs`, `encoding_rs_io`, `simdutf8` and `annotate-snippets`
+come with the `deserialize` feature for reader input and snippet rendering that rdy does not use, and the
+feature cannot be split. This is a larger dependency tail than the ADR expected. If it matters later, the
+documented fallback (`serde_yaml_ng`, one day to swap) applies, and `cargo deny` bans the archived crates either way.
+
+`rdy-spec` itself still has `#![forbid(unsafe_code)]`.
+
+**Accepted risk.** The `deserialize` feature pulls in `encoding_rs`, `encoding_rs_io`, `simdutf8` and
+`annotate-snippets` although rdy reads only UTF-8 text already in memory. We accept that larger tail for
+now, because the feature cannot be split. `serde-saphyr` is pinned as `~2.0` in the workspace, so a minor
+release cannot change parser behaviour without a reviewed `Cargo.toml` edit. The parser tests are the check
+on each bump.
 
 ## Consequences
 

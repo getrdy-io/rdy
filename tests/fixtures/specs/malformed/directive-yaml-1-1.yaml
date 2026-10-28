@@ -1,0 +1,10 @@
+%YAML 1.1
+---
+# Synthetic fixture. Not a real spec.
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+checks:
+  - id: host.cpu
+    min: 8
