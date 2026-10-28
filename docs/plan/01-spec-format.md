@@ -213,7 +213,7 @@ means is in 03-check-catalog.md. Bold parameters are required; "one of" means at
 | Id | Parameters |
 | --- | --- |
 | `host.cpu` | one of `min` (cores), `arch` (`x86_64`, `aarch64`, or `amd64`, `arm64`), `flags`; also `recommended` |
-| `host.memory` | **`min`**, `min_available`, `swap` (`forbid`, `any`), `tolerance_percent` (0 to 20, default 5, at least 256 MiB), `tolerance_result` (`pass`, `warn`) |
+| `host.memory` | **`min`**, `min_available`, `swap` (`forbid`, `any`), `tolerance_percent` (0 to 20, default 5, at least 256 MiB. The band is never wider than half of `min`, so a tiny value always blocks), `tolerance_result` (`pass`, `warn`) |
 | `host.disk` | **`path`**, **`min`**, `recommended`, `min_inodes`, `forbid_options` (`noexec`, `nosuid`, `nodev`, `ro`), `forbid_fstypes`. One path per entry; repeat the id with a `name` for more. |
 | `host.ports` | one of `free` (a port or `{port, bind}`, `bind` `public` or `loopback`), `udp_free`; also `allow_owner` |
 | `host.lsm` | `selinux: {allow, denials_max, denials_window, watch}`, `apparmor: {allow, require_profiles}` |

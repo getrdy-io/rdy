@@ -2,6 +2,13 @@
 [build]
 rustdocflags = ["-D", "warnings"]
 
+# rustc links aarch64-unknown-linux-musl as non-PIE static (it does not mark that target as able to
+# build static-pie). The wrapper makes it static-pie, as ADR 0006 requires. The path is relative to
+# the repo root. A cross build on another host sets RDY_REAL_LINKER to its cross gcc. Do not set
+# RUSTFLAGS in CI: it would replace flags from this file.
+[target.aarch64-unknown-linux-musl]
+linker = "scripts/musl-pie-linker.sh"
+
 # `cargo xtask <command>` runs the repo task runner in crates/xtask (docs/plan/09-docs-site.md).
 [alias]
 xtask = "run --quiet --package xtask --"

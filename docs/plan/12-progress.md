@@ -21,7 +21,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-005 | [#14](https://github.com/getrdy-io/rdy/pull/14) | 2026-10-28 | zizmor ran with --offline locally only (online audits run in CI); the exit-test throwaway PRs are run by the coordinator
 
-- M1-006 | todo | | CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006)
+- M1-006 | [#21](https://github.com/getrdy-io/rdy/pull/21) | 2026-10-28 | The macos-arm64 test runs in macos-arm64.yml outside ci-ok until the org has arm64 runners (a Founder hand step). The run, the scratch container and the red-leg-blocks-ci-ok behaviour are for the coordinator to watch on the PR; cargo-nextest and zizmor were not run locally (binary downloads were denied here), so the nextest config and workflow lint are first proven in CI | backlog corrected 2026-10-28 (correction-05, [#40](https://github.com/getrdy-io/rdy/pull/40)): the org has no macOS arm64 runners (probe run 40737208354), so ci-ok gates four native test legs plus an `aarch64-apple-darwin` compile leg on `macos-15-intel`; `macos-arm64.yml` runs the full test job on `macos-15` outside ci-ok; a Founder hand step ends the fallback
 
 - M1-007 | todo | | dist init for five targets with cargo-auditable and SBOM, proven in release-sandbox
 
@@ -140,6 +140,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-063 | todo | | SEC-26 M1 redaction corpus, first 30 cases (0.1.0 gate)
 
 - M1-064 | [#42](https://github.com/getrdy-io/rdy/pull/42) | 2026-10-28 | Exit test follows correction-06 (3.8 GiB against `4Gi`; 3.7 GiB blocks at the default band). Tolerant kernel-release parsing (5.14.0-362.el9) is left to M1-152. The cgroup helper is a separate ticket.
+- M1-064 correction-06 | backlog corrected 2026-10-28: exit test uses 3.8 GiB against `4Gi`, not 3.7 GiB; the band max(5%, 256 MiB) puts the lowest passing value at 4 GiB minus 256 MiB = 3.75 GiB
 
 - M1-065 | todo | | cgroup helper for memory, cpu and controllers
 
