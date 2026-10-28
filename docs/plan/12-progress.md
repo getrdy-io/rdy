@@ -39,7 +39,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-015 | todo | | install.sh signature check, fail closed, with tamper tests (SEC-09, SEC-10)
 
-- M1-016 | todo | | Define public spec types in rdy-spec
+- M1-016 | PR #TBD | | check params stay a raw map (M1-019), timeout, max_size and expires stay text (M1-018, M1-026), load() is a fail-closed stub (M1-017, M1-120)
 
 - M1-017 | todo | | Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits
 
