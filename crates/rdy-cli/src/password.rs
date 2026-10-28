@@ -171,7 +171,7 @@ impl PasswordError {
 ///
 /// A write failure on `stderr` is ignored: the exit code still says what happened.
 pub fn report_error(err: &PasswordError, stderr: &mut dyn Write) -> u8 {
-    let _ = writeln!(stderr, "error: {err}\nfix: {}", err.fix());
+    let _ = stderr.write_all(crate::error::render_password(err).text().as_bytes());
     EXIT_USAGE
 }
 
@@ -198,8 +198,13 @@ fn is_password_flag(arg: &OsStr) -> bool {
 ///
 /// What follows the flag is never read into the message. It is fixed text.
 pub fn refuse_argv_password(stderr: &mut dyn Write) -> u8 {
-    let _ = writeln!(stderr, "error: {ARGV_ERROR}\nfix: {ARGV_FIX}");
-    EXIT_USAGE
+    crate::error::emit(&argv_refusal(), false, &mut std::io::sink(), stderr)
+}
+
+/// The error for `--password` on argv: a usage error with fixed text.
+#[must_use]
+pub fn argv_refusal() -> crate::error::CliError {
+    crate::error::CliError::usage(ARGV_ERROR, ARGV_FIX)
 }
 
 /// Read the key password from the file or the variable, or `None` when neither is given.

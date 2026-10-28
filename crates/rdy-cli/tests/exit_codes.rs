@@ -165,7 +165,6 @@ fn commands_for_later_tickets_exit_70_with_a_fix_line() {
         &["trust", "add", "acme", "--key", "acme.pub"],
         &["trust", "list"],
         &["trust", "remove", "acme"],
-        &["version", "--json"],
     ] {
         let out = rdy(args);
         assert_eq!(code(&out), 70, "rdy {args:?}: {out:?}");
@@ -177,6 +176,20 @@ fn commands_for_later_tickets_exit_70_with_a_fix_line() {
         );
         assert!(err.contains("\nfix: "), "rdy {args:?} has no fix: {err:?}");
     }
+}
+
+/// With `--json` the same failure also puts an error object on stdout (M1-021, 07 section 4.1).
+#[test]
+fn a_later_ticket_command_with_json_prints_the_error_object_too() {
+    let out = rdy(&["version", "--json"]);
+    assert_eq!(code(&out), 70);
+    let err = text(&out.stderr);
+    assert!(
+        err.contains("is not yet implemented in this build"),
+        "{err:?}"
+    );
+    assert!(err.contains("\nfix: "), "{err:?}");
+    assert!(text(&out.stdout).contains("\"code\": \"internal\""));
 }
 
 #[test]
