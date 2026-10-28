@@ -201,16 +201,16 @@ findings to a fresh agent of the owner's role on that branch.
 
 | PR | Ticket | Branch | Head at pause | State and next step |
 | --- | --- | --- | --- | --- |
-| #47 | M1-007 | m1/007-dist-init | 0527512 | Security approves. Code review asked for two mediums. (1) Step 8 of check-release-artifacts must also require `^precise-builds = true$` in dist-workspace.toml, with a test. (2) Merge main for correction-07, and change the 11-backlog Done log entry "ADR 0019" to ADR 0020 for M1-007. Lows: curl timeouts and retries in install-release-tool.sh; ADR 0020 hash wording; a ruleset test tag the trigger does not match; `fallback: none` on install-action; no GH_TOKEN in build jobs. Fix round was sent. Then re-review, CI, merge. Its ADR is 0020. |
-| #48 | M1-022 | m1/022-json-schemas | c85b122 | Approved with two mediums, now being fixed. (1) A CI guard that fails if `cargo tree -p rdy -e features` shows preserve_order or the rdy-spec `schema` feature. (2) A CI step `cargo test -p rdy -p rdy-engine` without --workspace. It must also merge main and move #43's schema edits into its fragments. After that: CI, then merge. It keeps ADR 0019. |
-| #49 | M1-067 | m1/067-host-os-stubs | 54d13c5 | Approved with nits, fix round sent. Add `HostFamily::stub_ids()` and a test, and record the rule that HostFamily must not be registered in the CLI while stubs remain. Reword the changelog. Then CI, then merge. |
+| #47 | M1-007 | m1/007-dist-init | 1da6d0a | Security approved 0527512. The final fix round landed in 1da6d0a: the precise-builds guard, the correction-07 merge, the ADR 0020 Done-log fix, and all five lows. Next: a quick code re-review of 0527512..1da6d0a, then CI, then merge. The cargo test suite was not rerun locally this round, so let CI decide. |
+| #48 | M1-022 | m1/022-json-schemas | 6f27287 | Approved with two mediums, both landed in 6f27287: the cargo-tree feature guard and a `cargo test -p rdy -p rdy-engine` step. Main (#43) is merged, with its schema edits in the fragments. Next: confirm the diff since c85b122 is only those, then CI, then merge. It keeps ADR 0019. |
+| #49 | M1-067 | m1/067-host-os-stubs | 4d98195 | Approved with nits; nits landed in 4d98195: `stub_ids()` with a test, and the no-register rule naming M1-057. Next: CI, then merge. |
 
 Implementers running at the pause, none pushed yet. Each pushes its branch only when done, so check
 `git ls-remote` for the branch. If the branch is missing, relaunch the ticket from its row with the carried
 notes below.
 
 - M1-121 trust store, branch `m1/121-trust-store`.
-- M1-056 redacting tracing writer and panic hook, `m1/056-redacting-tracing`.
+- M1-056 redacting tracing writer and panic hook, `m1/056-redacting-tracing`. Pushed at 149da84, with no PR yet. Next: open its PR, then code and security review. Its reviewers should judge the default filter with RUST_LOG unset (`warn` plus caps, while 07 says no log output) and the process-global redactor. The proxy URL canary waits for M1-060.
 - M1-125 `spec keygen` and `spec sign`, `m1/125-spec-keygen-sign`. Needs a security review.
 - M1-031 `spec lint`, `m1/031-spec-lint`.
 - M1-039 command policy, `m1/039-command-policy`. Needs a security review.
