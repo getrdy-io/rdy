@@ -6,6 +6,8 @@ use std::io;
 use anyhow::Context as _;
 use rdy_spec::result::ExitCode;
 use rdy_spec::scalar::{DurationProblem, QuantityProblem, TargetProblem, VersionProblem};
+use rdy_spec::sig::{KeyId, SignatureError};
+use rdy_spec::spec::ProductSlug;
 use rdy_spec::{Location, ScalarError, SpecError};
 use serde_json::{Value, json};
 
@@ -163,7 +165,7 @@ fn exit_codes_are_64_for_input_and_70_for_rdy() {
 /// variant added there cannot fail this build. It reaches `spec_invalid` through the wildcard, and
 /// `rdy-spec`'s own test checks its hint.
 fn every_spec_error() -> Vec<(SpecError, ErrorCode)> {
-    use ErrorCode::{Internal, SpecInvalid, SpecParse};
+    use ErrorCode::{SpecInvalid, SpecKeyUnknown, SpecParse, SpecSignatureInvalid, SpecUnsigned};
     vec![
         (SpecError::TooLarge { size: 2, limit: 1 }, SpecParse),
         (SpecError::NotUtf8, SpecParse),
@@ -204,7 +206,18 @@ fn every_spec_error() -> Vec<(SpecError, ErrorCode)> {
         (SpecError::InvalidCheckId { value: s("A") }, SpecInvalid),
         (SpecError::InvalidCheckName { value: s("A") }, SpecInvalid),
         (SpecError::InvalidSerial { value: u64::MAX }, SpecInvalid),
-        (SpecError::LoadNotWired, Internal),
+        (SpecError::Signature(SignatureError::Missing), SpecUnsigned),
+        (
+            SpecError::Signature(SignatureError::Tampered { crlf: false }),
+            SpecSignatureInvalid,
+        ),
+        (
+            SpecError::Signature(SignatureError::UnknownKey {
+                key_id: KeyId::from_bytes([1; 8]),
+                product: ProductSlug::new("acme-platform").unwrap_or_else(|e| panic!("{e}")),
+            }),
+            SpecKeyUnknown,
+        ),
     ]
 }
 
@@ -217,17 +230,9 @@ fn every_spec_error_maps_to_a_code_with_a_hint_and_the_right_exit() {
             assert_eq!(cli.code(), want, "{error:?}");
             assert!(!cli.hint().is_empty(), "{error:?}");
             assert!(!cli.render().message.is_empty(), "{error:?}");
-            let exit = if want == ErrorCode::Internal { 70 } else { 64 };
-            assert_eq!(cli.exit_code().code(), exit, "{error:?}");
+            assert_eq!(cli.exit_code().code(), 64, "{error:?}");
         }
     }
-}
-
-#[test]
-fn a_bug_in_the_loader_says_so() {
-    let cli = CliError::spec("a.yaml", SpecError::LoadNotWired);
-    assert_eq!(cli.code(), ErrorCode::Internal);
-    assert_eq!(cli.hint(), BUG_HINT);
 }
 
 #[test]

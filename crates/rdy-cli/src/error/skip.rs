@@ -216,7 +216,7 @@ impl SkipWhy {
             ),
             Self::MissingRoot { spec_file } => some(
                 "Not run. This check needs root.".to_owned(),
-                format!("Rerun as root: sudo rdy run {}", shell_word(spec_file)),
+                root_fix(spec_file, cfg!(windows)),
             ),
             Self::MissingCluster => some(
                 "Not run. No Kubernetes cluster was reachable.".to_owned(),
@@ -242,6 +242,15 @@ impl SkipWhy {
                 "Run it again.".to_owned(),
             ),
         }
+    }
+}
+
+/// The fix for a check that needs root. Windows has no `sudo`, so it says to use an elevated prompt.
+fn root_fix(spec_file: &str, windows: bool) -> String {
+    if windows {
+        "Run rdy from an elevated prompt: open Terminal or PowerShell with Run as administrator, then run it again.".to_owned()
+    } else {
+        format!("Rerun as root: sudo rdy run {}", shell_word(spec_file))
     }
 }
 
@@ -411,7 +420,7 @@ mod tests {
             pair(&all[6]),
             (
                 s("Not run. This check needs root."),
-                s("Rerun as root: sudo rdy run acme-platform.yaml")
+                super::root_fix("acme-platform.yaml", cfg!(windows))
             )
         );
         assert_eq!(
@@ -479,12 +488,27 @@ mod tests {
         };
         assert_eq!(
             root.text().fix.as_deref(),
-            Some("Rerun as root: sudo rdy run 'a b.yaml; rm -rf ~'")
+            Some(super::root_fix("a b.yaml; rm -rf ~", cfg!(windows)).as_str())
         );
         let long = SkipWhy::NotInBuildCheck {
             id: "x".repeat(500),
         };
         assert!(long.text().message.len() < 200);
+    }
+
+    #[test]
+    fn the_root_fix_is_sudo_on_unix_and_an_elevated_prompt_on_windows() {
+        assert_eq!(
+            super::root_fix("acme-platform.yaml", false),
+            "Rerun as root: sudo rdy run acme-platform.yaml"
+        );
+        assert_eq!(
+            super::root_fix("a b.yaml; rm -rf ~", false),
+            "Rerun as root: sudo rdy run 'a b.yaml; rm -rf ~'"
+        );
+        let windows = super::root_fix("acme-platform.yaml", true);
+        assert!(windows.contains("elevated prompt"), "{windows}");
+        assert!(!windows.contains("sudo"), "{windows}");
     }
 
     #[test]

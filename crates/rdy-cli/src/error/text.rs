@@ -27,18 +27,31 @@ pub fn escape_untrusted(text: &str) -> String {
     out
 }
 
-/// True for the format characters that hide or reorder text without being control characters.
+/// True for the code points that print as nothing or reorder text without being control characters.
+///
+/// This is the Unicode Default_Ignorable_Code_Point set, plus the line and paragraph separators, the
+/// interlinear annotation marks and the bidirectional controls. `escape_untrusted` shows them as
+/// `\u{..}` so a reader sees that they are there.
 fn is_invisible(c: char) -> bool {
     matches!(
         u32::from(c),
-        0x061C
-            | 0x180E
-            | 0x200B..=0x200F
-            | 0x2028..=0x202E
-            | 0x2060..=0x2064
-            | 0x2066..=0x206F
-            | 0xFEFF
-            | 0xFFF9..=0xFFFB
+        0x00AD // soft hyphen
+            | 0x034F // combining grapheme joiner
+            | 0x061C // arabic letter mark
+            | 0x115F..=0x1160 // hangul fillers
+            | 0x17B4..=0x17B5 // khmer inherent vowels
+            | 0x180B..=0x180F // mongolian free variation selectors and vowel separator
+            | 0x200B..=0x200F // zero-width characters and direction marks
+            | 0x2028..=0x202E // line and paragraph separators, embeddings and overrides
+            | 0x2060..=0x206F // word joiner, invisible operators, isolates and deprecated controls
+            | 0x3164 // hangul filler
+            | 0xFE00..=0xFE0F // variation selectors
+            | 0xFEFF // byte order mark
+            | 0xFFA0 // halfwidth hangul filler
+            | 0xFFF0..=0xFFFB // reserved specials and annotation marks
+            | 0x1BCA0..=0x1BCA3 // shorthand format controls
+            | 0x1D173..=0x1D17A // musical symbol format controls
+            | 0xE0000..=0xE0FFF // tags and variation selectors supplement
     )
 }
 
@@ -136,6 +149,11 @@ mod tests {
         assert_eq!(
             escape_untrusted("\u{200b}\u{feff}\u{2028}"),
             "\\u{200b}\\u{feff}\\u{2028}"
+        );
+        // Default-ignorable code points: soft hyphen, joiner, variation selector, a tag character.
+        assert_eq!(
+            escape_untrusted("a\u{ad}\u{34f}\u{fe0f}\u{e0041}\u{e007f}\u{3164}b"),
+            "a\\u{ad}\\u{34f}\\u{fe0f}\\u{e0041}\\u{e007f}\\u{3164}b"
         );
     }
 

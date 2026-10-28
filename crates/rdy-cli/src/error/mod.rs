@@ -26,6 +26,7 @@ use std::fmt;
 use std::io::{self, Write};
 
 use rdy_spec::result::{ExitCode, Verdict};
+use rdy_spec::sig::SignatureError;
 use rdy_spec::{ScalarError, SpecError};
 use serde::Serialize;
 
@@ -380,7 +381,7 @@ impl CliError {
                 }
             }
             .to_owned(),
-            Self::Spec { source, .. } => source.hint().to_owned(),
+            Self::Spec { source, .. } => source.fix(),
             Self::Scalar { source, .. } => source.hint().to_owned(),
             Self::Password(err) => err.fix(),
             Self::Prompt(err) => err.fix().to_owned(),
@@ -451,7 +452,7 @@ pub(crate) fn render_prompt(err: &PromptError) -> Rendered {
 
 /// The code of a spec error. Parse problems in the YAML itself are `spec_parse`. A well-formed
 /// document that is not a valid spec is `spec_invalid`. A spec error that no code fits is `spec_invalid`
-/// too: the input has to change. A bug in the loader is `internal`.
+/// too: the input has to change.
 fn spec_error_code(err: &SpecError) -> ErrorCode {
     match err.kind() {
         SpecError::TooLarge { .. }
@@ -467,8 +468,28 @@ fn spec_error_code(err: &SpecError) -> ErrorCode {
         | SpecError::DuplicateKey { .. }
         | SpecError::NonFiniteNumber { .. }
         | SpecError::UnquotedDecimal { .. } => ErrorCode::SpecParse,
-        SpecError::LoadNotWired => ErrorCode::Internal,
+        SpecError::Signature(error) => signature_error_code(error),
         _ => ErrorCode::SpecInvalid,
+    }
+}
+
+/// The code of a signature error (01 section 4.8). All of them exit 64, and none can be waved through.
+///
+/// - `Missing` is `spec_unsigned`.
+/// - `UnknownKey` is `spec_key_unknown`.
+/// - A signature file that is too large, malformed, legacy or has a bad comment, a file or comment that
+///   does not match, and a product mismatch are `spec_signature_invalid`.
+/// - A public key that is not usable or is weak is `spec_signature_invalid` too: the key cannot vouch for
+///   anything, and the fix is to get the key again.
+/// - A variant this build does not know is `spec_signature_invalid`. It fails closed and never becomes
+///   `spec_invalid`.
+///
+/// `spec_expired` has no source yet: `rdy-spec` does not check `metadata.expires`.
+fn signature_error_code(err: &SignatureError) -> ErrorCode {
+    match err {
+        SignatureError::Missing => ErrorCode::SpecUnsigned,
+        SignatureError::UnknownKey { .. } => ErrorCode::SpecKeyUnknown,
+        _ => ErrorCode::SpecSignatureInvalid,
     }
 }
 
@@ -539,8 +560,8 @@ impl Rendered {
         }
     }
 
-    /// The JSON document and a final newline. `<`, `>` and `&` are written as `<`, `>` and
-    /// `&`, like every document rdy prints (01 section 5.5).
+    /// The JSON document and a final newline. `<`, `>` and `&` are written as the escapes
+    /// `\u003c`, `\u003e` and `\u0026`, like every document rdy prints (01 section 5.5).
     #[must_use]
     pub fn json(&self) -> String {
         // The object holds strings and numbers only, so serializing cannot fail. If it ever did, an

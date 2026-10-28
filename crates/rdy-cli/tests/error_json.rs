@@ -163,7 +163,6 @@ fn every_kind_of_error_object_validates_against_the_schema() {
             CliError::spec("a.yaml", SpecError::BadApiVersion { found: None }),
             64,
         ),
-        (CliError::spec("a.yaml", SpecError::LoadNotWired), 70),
         (
             CliError::ReportWrite {
                 step: ReportStep::CreateFolder,
