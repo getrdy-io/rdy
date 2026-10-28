@@ -74,8 +74,8 @@ impl VersionProblem {
 /// `1.05` equals `1.5` and `v1.29` equals `1.29`.
 ///
 /// Versions are compared part by part as numbers, never as semver, so `1.9 < 1.10`. This type holds
-/// the parts and does not order them yet. `1.28` and `1.28.0` are different values here, and a check
-/// that compares versions pads the shorter one with zeros.
+/// the parts and does not order them. `1.28` and `1.28.0` are different values here. To compare, use
+/// `rdy_engine::units::compare_versions`, which pads the shorter one with zeros.
 #[derive(Debug, Clone)]
 pub struct Version {
     parts: [u32; MAX_PARTS],

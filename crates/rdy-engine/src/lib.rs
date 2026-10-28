@@ -5,6 +5,7 @@
 //!
 //! - [`check`]: the `Check` trait, `CheckInfo`, needs, `Finding` and `CheckError`.
 //! - [`outcome`]: [`outcome::map_outcome`] turns a check's outcome into a `CheckResult`.
+//! - [`units`]: version compare, byte sizes, the nominal band and the severity cap that checks share.
 //! - [`family`]: the `Family` trait and the `Registry` of the checks in this build.
 //! - [`plan`]: [`family::Registry::plan`] decides, with no I/O, which spec entries run and which are
 //!   skipped, and why.
@@ -22,3 +23,4 @@ pub mod outcome;
 pub mod plan;
 #[cfg(feature = "runtime")]
 pub mod sched;
+pub mod units;

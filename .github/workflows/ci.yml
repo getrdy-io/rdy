@@ -162,6 +162,11 @@ jobs:
     env:
       TARGET: ${{ matrix.target }}
     steps:
+      # Windows checkouts convert line endings by default. Turn that on before checkout so the canary in
+      # crates/rdy-spec/tests/fixture_canary.rs proves .gitattributes protects the fixtures.
+      - name: Set core.autocrlf true (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
