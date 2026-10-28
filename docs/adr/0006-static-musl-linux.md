@@ -1,6 +1,6 @@
 # ADR 0006: Linux binaries are static musl for x86_64 and aarch64, built on native runners
 
-- Status: Accepted (revised 2026-10-28 after security-reviewer review)
+- Status: Accepted (revised 2026-10-28 after security-reviewer review; decision 5 amended 2026-10-28 in M1-009: `getent ahosts` first, hickory as fallback)
 - Date: 2026-10-27
 
 ## Context
@@ -25,8 +25,13 @@ our checks directly, so they belong in writing.
 5. DNS: `rdy` must report what the customer's software will see, which usually resolves through glibc.
    musl differs: no NSS (`/etc/nsswitch.conf` ignored, so no LDAP, sssd, mDNS or nss-resolve hosts), all
    nameservers queried in parallel, no `options rotate`, TCP fallback for truncated answers only from
-   musl 1.2.4. So `net.dns` resolves with `hickory-resolver` from `/etc/resolv.conf` and `/etc/hosts`,
-   says so in its evidence, and warns when `nsswitch.conf` lists sources beyond `files` and `dns`.
+   musl 1.2.4. So on Linux `net.dns` takes the system answer from `/usr/bin/getent ahosts <name>`
+   through the facade's command runner when that binary exists: it is glibc's own path, with
+   `nsswitch.conf`, mDNS and sssd. The name must match `^[A-Za-z0-9._-]+$`, must not start with `-`,
+   and follows `--`. `hickory-resolver`, reading `/etc/resolv.conf` and `/etc/hosts`, queries each
+   nameserver directly and is the fallback when `getent` is missing (scratch containers, Alpine). The
+   evidence says which path answered. On the fallback it warns when `nsswitch.conf` lists sources beyond
+   `files` and `dns`. (Amended 2026-10-28 in M1-009, from 03 `net.dns` and its rust-engineer review.)
 6. No `dlopen` in a static musl binary: `nvml-wrapper` (plan, GPU row) cannot work. GPU checks on Linux
    use `nvidia-smi` and `/proc/driver/nvidia`.
 7. User and group lookups skip NSS too. Host checks that need a user read `/etc/passwd` and say "local
@@ -49,6 +54,7 @@ our checks directly, so they belong in writing.
 | `cross` (Docker plus QEMU) | Docker in CI and slow emulated tests; native arm runners are better. |
 | Non-PIE static binaries | Lose ASLR on a binary that often runs as root. |
 | jemalloc by default | C dependency and build time for a gain we have not measured. |
+| `net.dns` on `hickory-resolver` only (decision 5 before M1-009) | Misses NSS sources (sssd, LDAP, mDNS) that the customer's glibc-linked software uses. |
 
 ## Tickets implied
 

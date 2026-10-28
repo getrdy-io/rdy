@@ -24,6 +24,24 @@ pub(crate) fn echo_capped(value: &str, max_chars: usize) -> String {
     out
 }
 
+/// Makes a reason from the YAML reader safe to print: at most `max_chars` characters, with control and
+/// invisible characters escaped. Unlike [`echo_capped`] it leaves backslashes and quotes alone, because
+/// the reader has already escaped the text it quotes and a second pass would double every backslash.
+pub(crate) fn echo_reason(value: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for c in value.chars().take(max_chars) {
+        if matches!(c, '\\' | '\'' | '"') {
+            out.push(c);
+        } else {
+            out.extend(c.escape_debug());
+        }
+    }
+    if value.chars().nth(max_chars).is_some() {
+        out.push_str("...");
+    }
+    out
+}
+
 /// Makes a refused value safe to print: at most 64 characters, then escaped. See [`echo_capped`].
 pub(crate) fn echo_safe(value: &str) -> String {
     echo_capped(value, MAX_ECHO_CHARS)
@@ -203,10 +221,17 @@ pub enum SpecError {
     },
 }
 
+/// Keys that hold versions in the `rdy/v1` spec. A number under one of these has a version meaning, so
+/// the message says versions must be text. Under any other key the message only asks for quotes.
+const VERSION_KEYS: [&str; 5] = ["min", "max", "openshift_min", "version", "versions"];
+
 fn unquoted_decimal_message(key: Option<&str>, text: &str) -> String {
     match key {
-        Some(key) => format!("{key} is written as the number {text}, but versions must be text"),
-        None => format!("{text} is written as a number, but versions must be text"),
+        Some(key) if VERSION_KEYS.contains(&key) => {
+            format!("{key} is written as the number {text}, but versions must be text")
+        }
+        Some(key) => format!("{key} is written as the number {text}. Quote it to keep it as typed"),
+        None => format!("{text} is written as a number. Quote it to keep it as typed"),
     }
 }
 
@@ -459,6 +484,20 @@ mod tests {
                 text: "1.30".into()
             }),
             "min is written as the number 1.30, but versions must be text"
+        );
+        assert_eq!(
+            msg(SpecError::UnquotedDecimal {
+                key: Some("port".into()),
+                text: "0080".into()
+            }),
+            "port is written as the number 0080. Quote it to keep it as typed"
+        );
+        assert_eq!(
+            msg(SpecError::UnquotedDecimal {
+                key: None,
+                text: "1e3".into()
+            }),
+            "1e3 is written as a number. Quote it to keep it as typed"
         );
         assert_eq!(
             SpecError::BadApiVersion { found: None }.hint(),

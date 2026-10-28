@@ -596,6 +596,62 @@ fn whole_numbers_and_dotted_versions_are_not_decimals() {
     assert_eq!(p["d"], Value::from(-3));
     assert_eq!(p["e"], Value::from("1.2.3-rc1"));
     assert_eq!(p["f"], Value::Null);
+    // The extremes of i64 and u64 keep every digit.
+    let spec = pass(&spec_with_entry(
+        "  - id: host.cpu\n    a: 18446744073709551615\n    b: -9223372036854775808\n    c: 0\n    d: -0\n    e: +5\n",
+    ));
+    let p = &spec.checks[0].params;
+    assert_eq!(p["a"], Value::from(u64::MAX));
+    assert_eq!(p["b"], Value::from(i64::MIN));
+    assert_eq!(p["c"], Value::from(0));
+}
+
+#[test]
+fn whole_numbers_that_would_not_keep_their_text_are_refused_with_a_quote_hint() {
+    let cases = [
+        ("0755", (7, 8)),
+        ("00", (7, 8)),
+        ("-007", (7, 8)),
+        ("+01", (7, 8)),
+        ("18446744073709551616", (7, 8)),
+        ("99999999999999999999999", (7, 8)),
+        ("-9223372036854775809", (7, 8)),
+    ];
+    for (text, at) in cases {
+        let e = fail(&spec_with_entry(&format!(
+            "  - id: host.cpu\n    a: {text}\n"
+        )));
+        assert!(
+            matches!(e.kind(), SpecError::UnquotedDecimal { key: Some(k), text: t } if k == "a" && t == text),
+            "{text}: {e:?}"
+        );
+        assert_eq!(place(&e), at, "{text}");
+        assert!(e.hint().contains("quotes"), "{}", e.hint());
+        assert!(e.to_string().contains("Quote it"), "{e}");
+    }
+    // Quoted, they keep their text.
+    let spec = pass(&spec_with_entry(
+        "  - id: host.cpu\n    a: \"0755\"\n    b: '99999999999999999999999'\n",
+    ));
+    assert_eq!(spec.checks[0].params["a"], Value::from("0755"));
+    assert_eq!(
+        spec.checks[0].params["b"],
+        Value::from("99999999999999999999999")
+    );
+}
+
+#[test]
+fn the_decimal_message_talks_about_versions_only_for_version_keys() {
+    let e = fail(&spec_with_entry("  - id: gpu.cuda\n    min: 12.10\n"));
+    assert_eq!(
+        e.to_string(),
+        "min is written as the number 12.10, but versions must be text"
+    );
+    let e = fail(&spec_with_entry("  - id: net.egress\n    port: 0443\n"));
+    assert_eq!(
+        e.to_string(),
+        "port is written as the number 0443. Quote it to keep it as typed"
+    );
 }
 
 // ---- YAML 1.2 core schema ----------------------------------------------------------------------------------------
@@ -679,6 +735,45 @@ fn a_later_api_version_asks_for_an_upgrade_and_ignores_the_rest_of_the_file() {
         assert!(e.to_string().contains(version), "{e}");
         assert_eq!(e.hint(), "install the latest rdy.");
     }
+}
+
+#[test]
+fn once_the_file_says_rdy_v2_every_later_refusal_becomes_an_upgrade_message() {
+    let later_problems = [
+        "x: 1.5\n",
+        "x: !foo 1\n",
+        "x: &a 1\n",
+        "x: *a\n",
+        "x: .nan\n",
+        "x: 0755\n",
+        "x: 1\nx: 2\n",
+        "<<: {a: 1}\n",
+        "x: [\n",
+        "metadata: 1\n---\nz: 1\n",
+    ];
+    for tail in later_problems {
+        let e = fail(&format!("apiVersion: rdy/v2\n{tail}"));
+        assert!(
+            matches!(e.kind(), SpecError::UnsupportedApiVersion { found } if found == "rdy/v2"),
+            "{tail:?}: {e:?}"
+        );
+        assert_eq!(place(&e), (1, 13), "{tail:?}");
+        assert_eq!(e.hint(), "install the latest rdy.");
+    }
+    // A problem above the apiVersion line is reported first.
+    let e = fail("x: 1.5\napiVersion: rdy/v2\n");
+    assert!(
+        matches!(e.kind(), SpecError::UnquotedDecimal { .. }),
+        "{e:?}"
+    );
+    let e = fail("%YAML 1.2\n---\napiVersion: rdy/v2\n");
+    assert!(matches!(e.kind(), SpecError::Directive), "{e:?}");
+    // For rdy/v1 nothing changes.
+    let e = fail("apiVersion: rdy/v1\nx: 1.5\n");
+    assert!(
+        matches!(e.kind(), SpecError::UnquotedDecimal { .. }),
+        "{e:?}"
+    );
 }
 
 #[test]
@@ -888,18 +983,42 @@ fn a_megabyte_of_open_brackets_is_an_error_not_a_crash() {
 }
 
 #[test]
-fn a_file_with_too_many_values_is_refused_with_a_plain_message() {
-    // 500,000 one-digit values fit in 1 MiB. rdy reads 250,000 at most.
+fn a_valid_file_of_the_size_limit_is_not_refused_for_its_number_of_values() {
+    // About 500,000 one-digit values fit in 1 MiB. The count caps are raised to cover that.
     let mut yaml = spec_with_entry("  - id: host.cpu\n    p: [");
-    while yaml.len() < 1_000_000 {
+    while yaml.len() < MAX_SPEC_BYTES - 8 {
         yaml.push_str("1,");
     }
     yaml.push_str("1]\n");
     assert!(yaml.len() <= MAX_SPEC_BYTES);
-    let e = fail(&yaml);
-    assert!(matches!(e.kind(), SpecError::InvalidValue { .. }), "{e:?}");
-    assert!(place(&e).0 >= 1);
-    assert_eq!(e.to_string(), "the file has more values than rdy reads");
+    let spec = pass(&yaml);
+    assert!(matches!(&spec.checks[0].params["p"], Value::Array(a) if a.len() > 400_000));
+    // The worst case for events: one empty value per two bytes.
+    let mut yaml = spec_with_entry("  - id: host.cpu\n    p:\n");
+    while yaml.len() < MAX_SPEC_BYTES - 8 {
+        yaml.push_str("      -\n");
+    }
+    pass(&yaml);
+}
+
+#[test]
+fn syntax_reasons_are_escaped_once() {
+    // The reader quotes the bad character already escaped. A second pass would turn `\u{0}` into `\\u{0}`.
+    let e = fail(&spec_with_entry("  - id: host.cpu\n    p: a\u{0}b\n"));
+    let text = e.to_string();
+    assert!(text.contains("\\u{0}"), "{text}");
+    assert!(!text.contains("\\\\"), "{text}");
+    assert_printable(&e);
+}
+
+#[test]
+fn a_tab_error_points_at_the_tab() {
+    let e = fail("apiVersion: rdy/v1\nmetadata:\n\tproduct: a\n");
+    assert_eq!(place(&e), (3, 1), "{e:?}");
+    // Tabs inside a line are fine.
+    pass(&spec_with_entry(
+        "  - id: host.cpu\n    a:\t1\n    b: [1,\t2]\n",
+    ));
 }
 
 #[test]

@@ -65,7 +65,20 @@ Rules that go beyond the list above, all from decision 4 and `docs/plan/01-spec-
 - **Decimals.** Decision 4 says a plain scalar that resolved to a float is refused for version fields. The
   parameters are a raw map at this point and carry no field types, so the rule applies to every plain scalar
   in the file: `min: 12.10`, `1e3`, `.5` and `5.` are refused, `"12.10"` is text, `12`, `0x1F` and `12.10.1`
-  are not decimals. A future numeric parameter that is a real decimal needs a rule here first.
+  are not decimals. A future numeric parameter that is a real decimal needs a rule here first. The same
+  rule refuses a whole number that would not keep its text: a leading zero (`0755`, which YAML 1.1 reads as
+  octal) or a value outside `i64` and `u64` (the reader would turn it into a float and lose digits). The
+  message says "versions must be text" only under a version key (`min`, `max`, `openshift_min`, `version`,
+  `versions`), and "Quote it to keep it as typed" under any other key.
+- **Later versions.** Once the top-level `apiVersion` says `rdy/v2` or later, any refusal that sits below it
+  in the file (an unquoted decimal, a tag, a duplicate key, a syntax error) is reported as
+  `UnsupportedApiVersion` with "install the latest rdy", because a file for a later rdy may use anything. A
+  refusal above the `apiVersion` line is reported as it is.
+- **Value count.** The crate's own caps on nodes and events are raised to the size limit (1,048,576 nodes,
+  4,194,304 events), so any valid file of 1 MiB parses. A value takes at least one byte, so the size limit
+  is the real bound. The worst case is a 1 MiB list of one-digit numbers, about 500,000 values.
+- **Use.** `parse_unverified` is for `spec lint` and `verify` diagnostics. A run, including `--allow-unsigned`,
+  goes through `load()` with an unsigned policy (M1-120).
 - **Booleans.** `strict_booleans` is on, so `yes`, `no`, `on` and `off` are strings (decision 4). `true` and
   `false` are booleans.
 - **Root.** The root must be a map. A list, a scalar or an empty `---` document is an error at its place.
@@ -97,6 +110,12 @@ feature cannot be split. This is a larger dependency tail than the ADR expected.
 documented fallback (`serde_yaml_ng`, one day to swap) applies, and `cargo deny` bans the archived crates either way.
 
 `rdy-spec` itself still has `#![forbid(unsafe_code)]`.
+
+**Accepted risk.** The `deserialize` feature pulls in `encoding_rs`, `encoding_rs_io`, `simdutf8` and
+`annotate-snippets` although rdy reads only UTF-8 text already in memory. We accept that larger tail for
+now, because the feature cannot be split. `serde-saphyr` is pinned as `~2.0` in the workspace, so a minor
+release cannot change parser behaviour without a reviewed `Cargo.toml` edit. The parser tests are the check
+on each bump.
 
 ## Consequences
 

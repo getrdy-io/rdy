@@ -1,0 +1,7 @@
+# zizmor policy (SEC-01, SEC-03). Run by the lint job in ci.yml.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # Every action, from any owner, must be pinned to a full commit SHA.
+        "*": hash-pin

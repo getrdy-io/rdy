@@ -28,7 +28,7 @@ use serde_saphyr::granit_parser::{
 use serde_saphyr::options::{DuplicateKeyPolicy, MergeKeyPolicy};
 use serde_saphyr::{Budget, NonFiniteFloatPolicy};
 
-use crate::error::echo_capped;
+use crate::error::echo_reason;
 use crate::error::echo_safe;
 use crate::spec::Spec;
 use crate::{API_VERSION, Location, SpecError};
@@ -44,9 +44,10 @@ const MAX_REASON_CHARS: usize = 160;
 
 /// Reads spec text into a [`Spec`] without checking who wrote it.
 ///
-/// This is for `rdy spec lint`, `--allow-unsigned` runs and portal authoring. It never returns a
-/// [`crate::LoadedSpec`], and no function turns the [`Spec`] it returns into one. A run must use
-/// [`crate::load`], which verifies the signature before it parses.
+/// This is for `rdy spec lint` and `rdy verify` diagnostics only. It never returns a
+/// [`crate::LoadedSpec`], and no function turns the [`Spec`] it returns into one. A run, including an
+/// `--allow-unsigned` run, goes through [`crate::load`] with an unsigned policy (M1-120), which checks the
+/// signature state before it parses.
 ///
 /// The limits (ADR 0001, `docs/plan/01-spec-format.md` section 2):
 ///
@@ -56,8 +57,10 @@ const MAX_REASON_CHARS: usize = 160;
 /// - no anchors, aliases, merge keys (`<<`), explicit tags (`!!binary`, `!custom`) or directives
 ///   (`%YAML`, `%TAG`);
 /// - no `.nan`, `.inf` or other number that is not finite;
-/// - no unquoted decimal such as `12.10`, which YAML would read as the number 12.1. Write `"12.10"`.
-/// - `apiVersion` is `rdy/v1`. A later version, such as `rdy/v2`, gets its own error.
+/// - no unquoted decimal such as `12.10`, which YAML would read as the number 12.1, and no whole number
+///   with a leading zero (`0755`) or outside the range of `i64` and `u64`. Write `"12.10"`;
+/// - `apiVersion` is `rdy/v1`. A later version, such as `rdy/v2`, gets its own error, and once the file
+///   has said `rdy/v2` that error replaces any refusal further down.
 ///
 /// Whatever the bytes hold, this returns a value or an error. It does not panic.
 ///
@@ -81,14 +84,17 @@ pub(crate) fn parse_bytes(bytes: &[u8]) -> Result<Spec, SpecError> {
     }
     let text = std::str::from_utf8(bytes)
         .map_err(|e| SpecError::NotUtf8.at(location_of_byte(bytes, e.valid_up_to())))?;
-    let lexical = find_lexical(text);
-    let facts = match (lexical, guard(text)) {
-        (None, Ok(facts)) => facts,
-        (Some(error), Ok(_)) => return Err(error),
-        (None, Err(error)) => return Err(error),
+    let GuardOutcome { facts, error } = guard(text);
+    let error = match (find_lexical(text), error) {
+        (None, error) => error,
+        (Some(lexical), None) => Some(lexical),
         // Both found something. The one nearer the top of the file is the one to fix first.
-        (Some(lexical), Err(guarded)) => return Err(earlier(lexical, guarded)),
+        (Some(lexical), Some(guarded)) => Some(earlier(lexical, guarded)),
     };
+    if let Some(error) = error {
+        // Once the file has said it is for a later rdy/v, nothing after that is worth reporting.
+        return Err(facts.later_version_before(&error).unwrap_or(error));
+    }
     facts.check_api_version()?;
     let spec = typed_read(text)?;
     if spec.api_version != API_VERSION {
@@ -128,12 +134,47 @@ fn location_of_byte(bytes: &[u8], offset: usize) -> Location {
     Location::new(line, column)
 }
 
+/// The reader's errors about a tab.
+fn is_tab_error(kind: &ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::TabNotAllowed
+            | ErrorKind::TabInBlockIndentation
+            | ErrorKind::TabInIndentation
+            | ErrorKind::TabAtBlockScalarStart
+            | ErrorKind::TabInPlainScalar
+    )
+}
+
+/// The reader reports a tab error one column past the tab, because it has already read the tab. Point at the
+/// tab itself, but only when the character just before `at` really is a tab.
+fn back_onto_tab(text: &str, at: Location) -> Location {
+    let line = usize::try_from(at.line)
+        .unwrap_or(usize::MAX)
+        .saturating_sub(1);
+    let before = usize::try_from(at.column)
+        .unwrap_or(usize::MAX)
+        .saturating_sub(2);
+    let is_tab = text
+        .split('\n')
+        .nth(line)
+        .and_then(|l| l.chars().nth(before))
+        == Some('\t');
+    if is_tab {
+        Location::new(at.line, at.column - 1)
+    } else {
+        at
+    }
+}
+
+/// A place as a value that sorts in file order.
+fn position_key(at: Location) -> (u32, u32) {
+    (at.line, at.column)
+}
+
 /// The error whose place is nearer the top of the file. A tie goes to `first`.
 fn earlier(first: SpecError, second: SpecError) -> SpecError {
-    let key = |e: &SpecError| {
-        e.location()
-            .map_or((u32::MAX, u32::MAX), |l| (l.line, l.column))
-    };
+    let key = |e: &SpecError| e.location().map_or((u32::MAX, u32::MAX), position_key);
     if key(&second) < key(&first) {
         second
     } else {
@@ -191,6 +232,23 @@ struct Facts {
 }
 
 impl Facts {
+    /// `UnsupportedApiVersion` when `apiVersion` named a later version at a place above `error`. A file for
+    /// a later rdy can hold keys and values this rdy refuses, so the advice is to upgrade (ADR 0001).
+    fn later_version_before(&self, error: &SpecError) -> Option<SpecError> {
+        let Some(ApiVersionFact::Text(text, at)) = &self.api_version else {
+            return None;
+        };
+        let nearer_top = error
+            .location()
+            .is_none_or(|e| position_key(*at) < position_key(e));
+        (is_later_version(text) && nearer_top).then(|| {
+            SpecError::UnsupportedApiVersion {
+                found: echo_safe(text),
+            }
+            .at(*at)
+        })
+    }
+
     /// Runs the `apiVersion` rule of 01 section 3.1 before the typed read, so a later version is told to
     /// upgrade instead of being told about every key it adds.
     fn check_api_version(&self) -> Result<(), SpecError> {
@@ -262,14 +320,16 @@ struct Guard {
     api_version: Option<ApiVersionFact>,
 }
 
+/// What the guard found: the facts it learned before it stopped, and the first thing it refused.
+struct GuardOutcome {
+    facts: Facts,
+    error: Option<SpecError>,
+}
+
 /// Reads the whole event stream and refuses what a spec must not contain.
-fn guard(text: &str) -> Result<Facts, SpecError> {
-    let mut options = ParserOptions::default();
-    options.set_emit_comments(false);
-    // Our own depth rule fires first. The reader's limits only keep its stack bounded.
-    options.block_nesting_limit = MAX_DEPTH * 2;
-    options.flow_nesting_limit = MAX_DEPTH * 2;
-    let parser = Parser::new_from_str_with_options(text, options);
+///
+/// It keeps the `apiVersion` fact even when it refuses something later in the file.
+fn guard(text: &str) -> GuardOutcome {
     let mut g = Guard {
         frames: Vec::new(),
         documents: 0,
@@ -278,16 +338,41 @@ fn guard(text: &str) -> Result<Facts, SpecError> {
         api_next: false,
         api_version: None,
     };
+    let error = read_events(&mut g, text).err();
+    if error.is_none() && g.root_is_map && g.api_version.is_none() {
+        g.api_version = Some(ApiVersionFact::Missing);
+    }
+    GuardOutcome {
+        facts: Facts {
+            api_version: g.api_version,
+        },
+        error,
+    }
+}
+
+fn read_events(g: &mut Guard, text: &str) -> Result<(), SpecError> {
+    let mut options = ParserOptions::default();
+    options.set_emit_comments(false);
+    // Our own depth rule fires first. The reader's limits only keep its stack bounded.
+    options.block_nesting_limit = MAX_DEPTH * 2;
+    options.flow_nesting_limit = MAX_DEPTH * 2;
+    let parser = Parser::new_from_str_with_options(text, options);
     for item in parser {
         let (event, span) = item.map_err(|e| {
             let error = match e.kind() {
                 ErrorKind::RecursionLimitExceeded => SpecError::TooDeep { limit: MAX_DEPTH },
                 ErrorKind::UnknownAnchor => SpecError::Alias,
                 _ => SpecError::Syntax {
-                    reason: echo_capped(&e.info(), MAX_REASON_CHARS),
+                    reason: echo_reason(&e.info(), MAX_REASON_CHARS),
                 },
             };
-            error.at(location_of(e.marker()))
+            let at = location_of(e.marker());
+            let at = if is_tab_error(e.kind()) {
+                back_onto_tab(text, at)
+            } else {
+                at
+            };
+            error.at(at)
         })?;
         let at = location_of(&span.start);
         match event {
@@ -326,12 +411,7 @@ fn guard(text: &str) -> Result<Facts, SpecError> {
             _ => {}
         }
     }
-    if g.root_is_map && g.api_version.is_none() {
-        g.api_version = Some(ApiVersionFact::Missing);
-    }
-    Ok(Facts {
-        api_version: g.api_version,
-    })
+    Ok(())
 }
 
 impl Guard {
@@ -484,7 +564,8 @@ impl Guard {
 enum NumberKind {
     /// `.nan`, `.inf`, `-.inf`, or a decimal too large for a 64-bit float.
     NonFinite,
-    /// A number with a fraction or an exponent, such as `12.10` or `1e3`.
+    /// A number that would not keep its text: one with a fraction or an exponent (`12.10`, `1e3`), a whole
+    /// number with a leading zero (`0755`), or a whole number too large for `i64` and `u64`.
     Decimal,
 }
 
@@ -497,6 +578,14 @@ fn number_kind(text: &str) -> Option<NumberKind> {
         ".inf" | ".Inf" | ".INF" | ".nan" | ".NaN" | ".NAN"
     ) {
         return Some(NumberKind::NonFinite);
+    }
+    if unsigned.bytes().all(|b| b.is_ascii_digit()) && !unsigned.is_empty() {
+        // A whole number. It must read back exactly: no leading zero (YAML 1.1 reads it as octal) and
+        // within i64 or u64, or the reader would turn it into a float and lose digits.
+        let leading_zero = unsigned.len() > 1 && unsigned.starts_with('0');
+        let fits = text.trim_start_matches('+').parse::<i64>().is_ok()
+            || text.trim_start_matches('+').parse::<u64>().is_ok();
+        return (leading_zero || !fits).then_some(NumberKind::Decimal);
     }
     if !is_core_float(unsigned) {
         return None;
@@ -549,6 +638,10 @@ fn typed_read(text: &str) -> Result<Spec, SpecError> {
     budget.max_anchors = 0;
     budget.max_aliases = 0;
     budget.max_merge_keys = 0;
+    // A value takes at least one byte, so a file of the size limit holds at most that many nodes. Raise
+    // the crate's own caps to match, so a valid file of the size limit is never refused for its count.
+    budget.max_nodes = MAX_SPEC_BYTES;
+    budget.max_events = MAX_SPEC_BYTES.saturating_mul(4);
     budget.flow_nesting_limit = MAX_DEPTH;
     let mut options = serde_saphyr::Options::default();
     options.budget = Some(budget);
@@ -598,7 +691,7 @@ fn map_read_error(error: serde_saphyr::Error) -> SpecError {
         },
         E::Message { msg, .. } => classify_custom(msg),
         other => SpecError::InvalidValue {
-            reason: echo_capped(&reason_of(other), MAX_REASON_CHARS),
+            reason: echo_reason(&reason_of(other), MAX_REASON_CHARS),
         },
     };
     match at {
@@ -641,7 +734,7 @@ fn classify_custom(msg: &str) -> SpecError {
         return SpecError::InvalidSerial { value };
     }
     SpecError::InvalidValue {
-        reason: echo_capped(msg, MAX_REASON_CHARS),
+        reason: echo_reason(msg, MAX_REASON_CHARS),
     }
 }
 

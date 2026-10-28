@@ -1,6 +1,6 @@
 # ADR 0003: Reports are one JSON file plus one self-contained HTML file, rendered with askama
 
-- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review)
+- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review; decisions 1, 2 and 6 amended 2026-10-28 in M1-009 to match ADR 0016 and 01)
 - Date: 2026-10-27
 
 ## Context
@@ -15,15 +15,18 @@ runs as root, and the output name would otherwise come from vendor-controlled `m
 
 1. **Names and place.** `metadata.product` must match `^[a-z0-9][a-z0-9-]{0,62}$` (`rdy_spec::validate`,
    and the same rule on the signed trusted comment). Timestamps use basic ISO 8601 with no colons,
-   `20261027T143005Z`. `rdy run` creates a new directory `rdy-report-<product>-<ts>/` under `--out-dir`
-   (default `.`) with `create_dir` (fails if it exists), mode 0700, and writes
+   `20261027T143005Z`. Right after spec verification and before the first check, `rdy run` creates a
+   new directory `rdy-report-<product>-<ts>/` under `--out-dir` (default `.` on Unix,
+   `%USERPROFILE%\rdy-reports` on Windows) with `create_dir`, mode 0700. If the name exists it retries
+   with `-2` to `-9`, then exits 70 before any check runs (ADR 0016). It writes
    `rdy-report-<product>-<ts>.json` and `.html` inside it with `create_new`, mode 0600, through a
    directory handle that does not follow symlinks (`cap-std`), temp file then rename. The report code
    re-checks the slug defensively. `--no-report` writes nothing.
 2. **Terminal and stdout.** A `Report written to <dir>` line prints above the verdict, so the verdict
    stays last. `--json` writes the same bytes to stdout as the JSON file. If the directory cannot be
-   written, the full terminal result still prints, then `error:` and `fix: use --out-dir <writable dir>`,
-   and the exit code is 70.
+   created, rdy prints `error:` and `fix: use --out-dir <writable dir>` and exits 70 before any check
+   runs (ADR 0016). If the files cannot be written at the end, the full terminal result still prints,
+   then `error:` and `fix:`, and the exit code is 70.
 3. **Self-contained HTML.** Inline CSS, no JavaScript in M1, no web fonts, no images except an inline SVG
    logo, nothing loads on open. CSP meta: `default-src 'none'; style-src 'unsafe-inline'; img-src data:;
    base-uri 'none'; form-action 'none'`. `<html lang="en">`, a `color-scheme` meta, headings in order.
@@ -34,8 +37,9 @@ runs as root, and the output name would otherwise come from vendor-controlled `m
    portal treats JSON pulled from an HTML file as untrusted input.
 5. **askama** templates in `crates/rdy-engine/templates/`, checked at compile time, HTML auto-escaping on.
    `|safe` is banned in templates (CI grep).
-6. **Order and words.** Top of the page: the verdict in the terminal's words (`READY`,
-   `READY with warnings`, `NOT READY`), the counts, an unsigned-spec banner when it applies, and the line
+6. **Order and words.** Top of the page: the unsigned-spec or unpinned-key banner when it applies
+   (first, as in the terminal, 01 sections 4.7 and 6), then the verdict in the terminal's words (`READY`,
+   `READY with warnings`, `NOT READY`), the counts, and the line
    "This file lists hostnames and addresses from this machine. Read it before you send it." Then blocks,
    then required checks not run, then warnings, then passes. Status labels, same as the terminal:
    `PASS`, `WARN`, `BLOCK`, `SKIP`, `TIMEOUT`, `ERROR`. Colour is never the only signal.
