@@ -70,6 +70,7 @@ Where this differs from 05 as written (listed again under Plan corrections):
 Rules:
 
 - Pin runner images by name, never `-latest`. Review the names each April and October.
+- Temporary (correction 05): the org has no macOS arm64 runners. `ci-ok` gates an `aarch64-apple-darwin` compile leg on `macos-15-intel` instead of the macos-arm64 test leg, and `macos-arm64.yml` runs the full test job on `macos-15` outside `ci-ok`. A founder hand step ends it (ADR 0006, decision 8).
 - `macos-13` is retired. `macos-15-intel` is the last Intel image. If it is slow or dies, build `x86_64-apple-darwin` on the arm64 runner and test it nightly.
 - Linux tests run against the musl targets, so CI tests what we ship.
 - No `pull_request_target`. Fork PRs get a read-only token.
