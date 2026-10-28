@@ -201,7 +201,8 @@ labelled with the product ("From acme-platform") only when `signature.state` is 
 `trust_source` is `system` or `user`, because only then is the product bound to a pinned key. Otherwise
 the label, in the terminal and the HTML, is "From the spec file (not verified)" (threat model Surface 2,
 S1). When a check did not run the vendor's fix is not shown, because it would tell the customer to fix
-something nobody measured; rdy's own fix for the non-run is shown, with `fix_source: rdy`.
+something nobody measured; rdy's own fix for the non-run is shown, with `fix_source: rdy`. The same holds for a pass that the partial rule turns into `warn` (02, Verdict): nothing was measured as
+failing, so rdy's own text is shown, with `fix_source: rdy`, and the vendor's `fix` is hidden.
 
 ### 2.7 Parameters of the M1 check ids
 
