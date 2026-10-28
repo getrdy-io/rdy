@@ -15,7 +15,7 @@ The founder decided on 2026-10-28: M1 is extended, not cut. It is planned at its
 hours a week and starts on Monday Nov 23, 2026, after a "go" on Nov 20 (open decision 1 in `13`). A tagged
 binary ships every week.
 
-**Two estimates of the M1 core.** This table says 306 hours of core and 365 hours in all.
+**Two estimates of the M1 core.** This table says 309.5 hours of core and 368.5 hours in all.
 The code-reviewer's own bottom-up estimate of the same core, from scratch and with the same security
 posture, is **229 hours**. Most of the gap is the fixed cost of about 140 separate PRs (CHANGELOG entry,
 CI wait, review). Plan on the table's figure. If the first eight weeks run at the bottom-up rate, re-plan
@@ -70,12 +70,12 @@ M1-139. In M2 to M5 every ticket is `core: yes`; the marker only matters for the
 
 | Milestone | Tickets | Hours | Core hours | Weeks at 13 h |
 | --- | --- | --- | --- | --- |
-| M1 | 167 | 365 | 306 | 29 (calendar below) |
+| M1 | 167 | 368.5 | 309.5 | 30 (calendar below) |
 | M2 | 103 | 408 | 408 | about 31 |
 | M3 | 64 | 271.5 | 271.5 | about 21 |
 | M4 | 24 | 121 | 121 | about 9 |
 | M5 | 12 | 121 | 121 | about 9 |
-| **All** | **370** | **1286.5** | **1227.5** | about 99 |
+| **All** | **370** | **1290** | **1231** | about 100 |
 
 M2 to M5 tickets are coarse. When a milestone starts, rust-architect splits every ticket over 4 hours into
 tickets of 1 to 4 hours, keeping the exit tests.
@@ -91,7 +91,14 @@ design partners for real POCs (PC-08). Until `rdy verify` lands they run specs o
 
 - **0.1.0, the design-partner build:** week 25, May 10 to May 16, 2027, with the alpha announcement
   (M1-139). That is the core-only end date.
-- **M1 ends:** week 29, Jun 7 to Jun 13, 2027. End date: Sunday Jun 13, 2027.
+- **M1 ends:** week 29, Jun 7 to Jun 13, 2027. End date: Sunday Jun 13, 2027. Correction 02 moves this
+  one week, to week 30, Jun 14 to Jun 20, 2027 (see the next bullet).
+- **Correction 02 (2026-10-28) adds 3.5 core hours.** The rows below are not re-cut. M1-001's extra hour
+  (05 revision 3) runs in week 7, which had 1 h of room and comes before M1-040. M1-104's extra 2.5 h has
+  no room in weeks 19 to 25, so week 19 shows 16 h and the overflow pushes later tickets back. 0.1.0
+  stays in week 25 only if the non-core tickets there (M1-140 to M1-144, 9 h) slide into the non-core
+  weeks. Those weeks then need one more week, so M1 ends in week 30. The 10 and 15 hour dates are not
+  recomputed.
 - At 10 hours a week (holiday weeks at half): 0.1.0 in the week of Jun 28, 2027 and M1 end in the week
   of Aug 9, 2027. At 15 hours a week: 0.1.0 in the week of Apr 19, 2027 and M1 end in the week of May 17,
   2027.
@@ -106,7 +113,7 @@ design partners for real POCs (PC-08). Until `rdy verify` lands they run specs o
 | 4 | Dec 14 to Dec 20, 2026 | 13 | 13 | 2 Spec parser, result model, engine core | M1-019 to M1-022 | `v0.1.0-alpha.3`: result model and generated JSON schemas; errors carry fix hints; `rdy version --json` |
 | 5 | Dec 21 to Dec 27, 2026 | 6.5 | 6 | 2 Spec parser, result model, engine core | M1-023 to M1-025 | `v0.1.0-alpha.4`: same CLI; typed parameters for the M1 host, net and k8s check ids |
 | 6 | Dec 28, 2026 to Jan 3, 2027 | 6.5 | 6.5 | 2 Spec parser, result model, engine core | M1-026 to M1-028 | `v0.1.0-alpha.5`: same CLI; semantic validation, parser property tests, root CI job |
-| 7 | Jan 4 to Jan 10, 2027 | 13 | 12.5 | 2 Spec parser, result model, engine core | M1-029 to M1-032 | `v0.1.0-alpha.6`: `rdy spec lint <file>` with did-you-mean; usage errors exit 64 |
+| 7 | Jan 4 to Jan 10, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-029 to M1-032 | `v0.1.0-alpha.6`: `rdy spec lint <file>` with did-you-mean; usage errors exit 64 |
 | 8 | Jan 11 to Jan 17, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-033 to M1-037 | `v0.1.0-alpha.7`: engine runs checks with timeouts and panic isolation; unknown ids SKIP |
 | 9 | Jan 18 to Jan 24, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-038 to M1-042 | `v0.1.0-alpha.8`: commands only through the mediated runner; action log; privilege snapshot |
 | 10 | Jan 25 to Jan 31, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-043 to M1-048 | `v0.1.0-alpha.9`: run deadline and watchdog; facade file policy; redactor core |
@@ -118,7 +125,7 @@ design partners for real POCs (PC-08). Until `rdy verify` lands they run specs o
 | 16 | Mar 8 to Mar 14, 2027 | 13 | 11.5 | 3 Host checks, HTML report; 4 Network checks | M1-086 to M1-090 | `v0.1.0-alpha.15`: the demo: bucket-sorted terminal output with fix lines and the verdict last |
 | 17 | Mar 15 to Mar 21, 2027 | 13 | 12.5 | 4 Network checks | M1-091 to M1-095 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy |
 | 18 | Mar 22 to Mar 28, 2027 | 13 | 11.5 | 4 Network checks | M1-096 to M1-101 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept |
-| 19 | Mar 29 to Apr 4, 2027 | 13 | 13.5 | 5 Kubernetes checks | M1-102 to M1-106 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard; k8s.version |
+| 19 | Mar 29 to Apr 4, 2027 | 13 | 16 | 5 Kubernetes checks | M1-102 to M1-106 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard; k8s.version |
 | 20 | Apr 5 to Apr 11, 2027 | 13 | 13.5 | 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-107 to M1-112 | `v0.1.0-alpha.19`: k8s.access, k8s.storageclass, k8s.rbac; kind job in CI |
 | 21 | Apr 12 to Apr 18, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-113 to M1-118 | `v0.1.0-alpha.20`: k8s.nodes, k8s.admission (PSA); family pages; fixture envs for every verdict |
 | 22 | Apr 19 to Apr 25, 2027 | 13 | 13.5 | 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-119 to M1-124 | `v0.1.0-alpha.21`: signatures verified before parsing; trust store; timeouts env |
@@ -134,7 +141,7 @@ design partners for real POCs (PC-08). Until `rdy verify` lands they run specs o
 
 | id | milestone | title | owner subagent | estimate (h) | core | depends on | exit test |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| M1-001 | M1 | Confirm the revised ADRs close security findings MF-01 to MF-07 | security-reviewer | 1 | yes | none | Each must-fix is marked closed or reopened in docs/plan/reviews/ before the first M1 code ticket; and MF-01 to MF-06 of the ADR 0013 to 0016 review are marked closed; and before M1-040 starts, 05 revision 3 carries the four edits in 02 (INV-12 `is_forbidden` ranges, Appendix A I3 with ADR 0016 and `%USERPROFILE%\rdy-reports`, Appendix F cap-boundary redaction cases in M1, INV-08 fixed PATH always) and names ADRs 0014 to 0016. |
+| M1-001 | M1 | Confirm the revised ADRs close security findings MF-01 to MF-07 | security-reviewer | 2 | yes | none | Each must-fix is marked closed or reopened in docs/plan/reviews/ before the first M1 code ticket; and MF-01 to MF-06 of the ADR 0013 to 0016 review are marked closed; and before M1-040 starts, 05 revision 3 carries the four edits in 02 (INV-12 `is_forbidden` ranges, Appendix A I3 with ADR 0016 and `%USERPROFILE%\rdy-reports`, Appendix F cap-boundary redaction cases in M1, INV-08 fixed PATH always) and names ADRs 0014 to 0016. |
 | M1-002 | M1 | Confirm the revised ADRs close cli-ux findings M1 to M3 and the final command names | cli-ux | 1 | yes | none | 07-cli-ux.md uses the verdict words, status words and commands from ADRs 0002, 0003 and 0008; and 07 confirms the headline, the M1 Ctrl-C exit 70 message, `--no-network`, `--out-dir` and the plan flag name. |
 | M1-003 | M1 | Create workspace skeleton and package rdy in crates/rdy-cli with binary name rdy | rust-engineer | 2.5 | yes | M1-001, M1-002 | `cargo build`, `clippy -D warnings`, `fmt --check` and `cargo doc` with warnings as errors pass on edition 2024 crates with `forbid(unsafe_code)`, a pinned toolchain and shared lints, and `CHANGELOG.md` exists; `cargo run -p rdy -- version` and `-- --version` print the documented line and `cargo package -p rdy --list` contains no stray files; and `.github/pull_request_template.md` carries the CLAUDE.md checklist and 08 Appendix E, with the 10 section 6 labels created. |
 | M1-004 | M1 | Add deny.toml with crate bans and license allowlist | release-engineer | 1 | yes | M1-003 | Adding serde_yaml, serde_yml, libyml, openssl-sys, native-tls, aws-lc-sys or atty fails `cargo deny check` in CI, and webpki-roots passes under its CDLA-Permissive-2.0 entry. |
@@ -237,7 +244,7 @@ design partners for real POCs (PC-08). Until `rdy verify` lands they run specs o
 | M1-101 | M1 | Security review of the TLS recording verifier and 03 Appendix A | security-reviewer | 1.5 | yes | M1-100, M1-066 | `docs/plan/reviews/tls-verifier-review.md` exists, lists zero open must-fix items, and Appendix A matches the command table in code. |
 | M1-102 | M1 | Kube client from kubeconfig or in-cluster with rustls and timeouts | rust-engineer | 4 | yes | M1-032 | On a kind cluster in CI k8s.version passes and the context, server and user print before the first request, with no kubeconfig every k8s check is SKIP with the hint, and exec plugin output never appears at RUST_LOG=trace. |
 | M1-103 | M1 | Read-only guard layer and test for rdy-checks-k8s | k8s-expert | 3.5 | yes | M1-102 | The runtime layer rejects any write, any POST other than the three reviews, a SelfSubjectReview with a different body or a query string, and any secrets path, and a mock API server behind guarded_service records only allowlisted requests across the full k8s fixture run (INV-14); and `examples/rbac/rdy-readonly.yaml` exists and the guard test passes on kind with only that role (SEC-24). |
-| M1-104 | M1 | Kube guard path parser, resource allowlist and pending log entries | rust-engineer | 1 | yes | M1-103 | `%73ecrets`, `secrets` in every segment position, `/api/v1/namespaces/x/finalize`, GET pods/exec with Upgrade, a dryRun POST, Impersonate-User on a GET and an unlisted resource are each refused and logged, `/api/v1/namespaces/secrets` is allowed, every ALLOWED entry is cited by a CheckInfo, and a dropped request leaves a timeout entry with its check id. |
+| M1-104 | M1 | Kube guard path parser, resource allowlist and pending log entries | rust-engineer | 3.5 | yes | M1-103 | `%73ecrets`, `secrets` in every segment position, `/api/v1/namespaces/x/finalize`, GET pods/exec with Upgrade, a dryRun POST, Impersonate-User on a GET and an unlisted resource are each refused and logged, `/api/v1/namespaces/secrets` is allowed, every ALLOWED entry is cited by a CheckInfo, and a dropped request leaves a timeout entry with its check id. |
 | M1-105 | M1 | Kube mock harness (tower service replaying api/ JSON, paging and 410, selectors, legacy discovery, review table) | rust-engineer | 3.5 | yes | M1-049, M1-103 | A `kube::Client` on the mock with the guard in front pages through a recorded `nodes.json`, restarts once on `410 Gone`, and answers a `SelfSubjectAccessReview` from a table. |
 | M1-106 | M1 | k8s.version (gitVersion parse, distribution, discovery API availability) | check-author | 1.5 | yes | M1-105 | EKS `v1.29.4-eks-abc123` parses to 1.29, plain `v1.29.4` with Azure labels is AKS, OpenShift reads `ClusterVersion`, and a missing `autoscaling/v2` blocks. |
 | M1-107 | M1 | Family probe hook and lazy KubeContext probe | rust-engineer | 2 | yes | M1-042, M1-102 | A spec with no k8s checks loads no kubeconfig and sends no request, `--no-network` builds no client, and a fake exec plugin that sleeps 600 s makes kube_context unavailable after 10 s with no worker blocked. |
@@ -884,13 +891,15 @@ The reviews of this file cite the draft's ids. This table maps each draft M1 id 
   Registrar lock, DNSSEC and CAA are needed before the announcement, because it and security.txt rely
   on getrdy.io. M1-138 closes only the repo side of SEC-04, SEC-05 and SEC-32.
 - 2026-10-28 | M1-061, M1-043, M1-104, M1-001, Founder hand steps | Security closure check of M1-001,
-  CF-04 to CF-06 and CF-08, and review of correction 01. M1-061 gets back "a PEM key" (ADR 0015 line 63, 02 line 594). M1-043 gets back "a held
-  snapshot lock" (02 lines 476 and 574, the test for the `try_lock` bound behind ADR 0016 decision 6).
-  M1-104 gets back "an unlisted resource", "every ALLOWED entry is cited by a CheckInfo" and "a dropped
-  request leaves a timeout entry with its check id" (02 line 586). CF-08: 05 revision 3 folds into
-  M1-001, the only security-reviewer ticket that lands before M1-040; M1-101 and M1-132 land after it.
-  Ids, owners, estimates, dependencies and core marks are unchanged, so the CF-06 re-estimate of M1-104
-  (1 h to 3.5 h) and the extra hour in M1-001 are not applied here. The fresh-tag hand step also runs
-  `scripts/verify-release.sh v0.1.1` on that tag. HSTS stays needed before M2-019, although 05 T1 marks
-  HSTS as an M1 control, because M1 installs use the pinned GitHub release URL, not getrdy.io. This is
-  pending security-reviewer sign-off in this PR's review.
+  CF-04 to CF-06 and CF-08, and review of correction 01. M1-061 gets back "a PEM key" (ADR 0015 line 63,
+  02 line 594). M1-043 gets back "a held snapshot lock" (02 lines 476 and 574, the test for the
+  `try_lock` bound in 02 line 192). M1-104 gets back "an unlisted resource", "every ALLOWED entry is
+  cited by a CheckInfo" and "a dropped request leaves a timeout entry with its check id" (02 line 586).
+  CF-08: 05 revision 3 folds into M1-001, the only security-reviewer ticket that lands before M1-040;
+  M1-101 and M1-132 land after it. Ids, owners, dependencies and core marks are unchanged. The CF-06
+  re-estimate of M1-104 (1 h to 3.5 h) and the extra hour in M1-001 were first left out. Code review of
+  PR #5 applied both: M1-104 is 3.5 h and M1-001 is 2 h, and the Totals and calendar intro say so. The
+  fresh-tag hand step also runs `scripts/verify-release.sh v0.1.1` on that tag. HSTS stays needed before
+  M2-019, although 05 T1 marks HSTS as an M1 control, because M1 installs use the pinned GitHub release
+  URL, not getrdy.io. security-reviewer signed off 2026-10-28 in review of PR #5:
+  `curl --proto '=https'` gains nothing from HSTS. 05 T1 is retagged in M1-001's threat model revision 3.
