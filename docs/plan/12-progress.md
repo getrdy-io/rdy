@@ -285,7 +285,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-138 | todo | | Tag and release 0.1.0
 
-- M1-139 | todo | | Alpha announcement to design partners | backlog corrected 2026-10-28: account steps moved to Founder hand steps
+- M1-139 | todo | | Alpha announcement to design partners | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
 - M1-140 | todo | | HTML next-step sentences and the nothing-verified wording
 
@@ -341,7 +341,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-166 | todo | | Fixture env net-airgapped
 
-- M1-167 | todo | | Time the quickstart with two design-partner SEs | backlog corrected 2026-10-28: account steps moved to Founder hand steps
+- M1-167 | todo | | Time the quickstart with two design-partner SEs | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
 ## Summary
 
