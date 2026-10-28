@@ -92,9 +92,11 @@ fn a_nominal_32_gib_machine_passes_with_a_note() {
     );
 }
 
+// A 4096 MiB VM shows about 3.8 GiB. 5% of 4Gi is 205 MiB, so the 256 MiB floor sets the band and
+// the lowest value that passes is 3.75 GiB: 3.8 GiB passes with a note and 3.7 GiB blocks
+// (correction 06).
 #[test]
 fn a_small_machine_gets_the_floor_not_the_percent() {
-    // 5% of 4Gi is 205 MiB, so the 256 MiB floor sets the band: 3.75 GiB and up.
     assert_eq!(Band::MEMORY.width(q("4Gi")), 256 * MIB);
     let fit = Band::MEMORY.assess(gib(38), q("4Gi"));
     assert_eq!(fit.level(Level::Pass), Level::Pass);
@@ -102,15 +104,6 @@ fn a_small_machine_gets_the_floor_not_the_percent() {
         fit.note().as_deref(),
         Some("3.8 GiB found, 4 GiB needed, inside the 256 MiB tolerance")
     );
-}
-
-// A 4096 MiB VM shows about 3.8 GiB. With the default band, max(5%, 256 MiB), the lowest value that
-// passes against 4Gi is 3.75 GiB, so 3.8 GiB passes with a note and 3.7 GiB blocks (correction 06).
-#[test]
-fn a_4096_mib_vm_passes_against_4gi_with_a_note_and_3_7_gib_blocks() {
-    let fit = Band::MEMORY.assess(gib(38), q("4Gi"));
-    assert_eq!(fit.level(Level::Pass), Level::Pass);
-    assert!(fit.note().is_some());
     assert!(matches!(
         Band::MEMORY.assess(gib(37), q("4Gi")),
         SizeFit::Below { .. }
@@ -201,8 +194,26 @@ fn vram_uses_eight_percent() {
 fn odd_percents_are_clamped_and_never_panic() {
     assert_eq!(Band::new(f64::NAN, q("1Gi")).width(q("32Gi")), 0);
     assert_eq!(Band::new(-3.0, q("1Gi")).width(q("32Gi")), 0);
-    assert_eq!(Band::new(500.0, q("0")).width(q("32Gi")), 32 * GIB);
+    assert_eq!(Band::new(500.0, q("0")).width(q("32Gi")), 16 * GIB);
     let max = Quantity::parse("999999999999999").expect("max");
-    assert_eq!(Band::new(100.0, q("0")).width(max), max.bytes());
+    assert_eq!(Band::new(100.0, q("0")).width(max), max.bytes() / 2);
     assert!(matches!(Band::MEMORY.assess(0, max), SizeFit::Below { .. }));
+}
+
+#[test]
+fn a_floor_wider_than_the_minimum_cannot_make_zero_pass() {
+    let min = q("128Mi");
+    assert_eq!(Band::MEMORY.width(min), 64 * MIB);
+    for have in [0, 1, 63 * MIB] {
+        assert!(
+            matches!(Band::MEMORY.assess(have, min), SizeFit::Below { .. }),
+            "{have}"
+        );
+    }
+    assert!(matches!(
+        Band::MEMORY.assess(64 * MIB, min),
+        SizeFit::InBand { .. }
+    ));
+    // A zero minimum is always met.
+    assert_eq!(Band::MEMORY.assess(0, q("0")), SizeFit::Meets);
 }

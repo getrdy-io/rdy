@@ -155,7 +155,7 @@ impl Band {
         }
     }
 
-    /// The band width in bytes for a requirement of `min`.
+    /// The band width in bytes for a requirement of `min`. It is never more than half of `min`.
     #[must_use]
     pub fn width(&self, min: Quantity) -> u64 {
         self.sized(min).0
@@ -168,10 +168,13 @@ impl Band {
         // Hundredths of a percent, so 6.25 percent is exact. u128 keeps the multiply exact.
         let hundredths = u128::from((self.percent * 100.0).round() as u64);
         let by_percent = u64::try_from(u128::from(min.bytes()) * hundredths / 10_000).unwrap_or(0);
+        // A band never reaches half of `min`, so a floor wider than a small `min` cannot make zero
+        // or a tiny value pass.
+        let cap = min.bytes() / 2;
         if self.floor > by_percent {
-            (self.floor, BandBasis::Floor(self.floor))
+            (self.floor.min(cap), BandBasis::Floor(self.floor.min(cap)))
         } else {
-            (by_percent, BandBasis::Percent(self.percent))
+            (by_percent.min(cap), BandBasis::Percent(self.percent))
         }
     }
 
