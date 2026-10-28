@@ -12,13 +12,15 @@
 //! - A requirement met by absence is a pass built through [`Finding::pass_by_absence`], so the call
 //!   sites can be listed and reviewed.
 //!
-//! The probe facade (ADR 0014) and the run deadline are not here yet. [`CheckContext`] gains
-//! `probe()` and `remaining()` with the tickets that build them.
+//! The probe facade (ADR 0014) is not here yet. [`CheckContext`] gains `probe()` with the ticket that
+//! builds it. [`CheckContext::remaining`] came with the scheduler.
 
 use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
+
+use tokio::time::Instant;
 
 use rdy_spec::result::SkipKind;
 
@@ -431,14 +433,11 @@ pub struct CheckContext {
     key: String,
     os: Os,
     available: HashSet<Need>,
+    deadline: Option<Instant>,
 }
 
 impl CheckContext {
     /// A context for the check with `key`, on `os`, where the `available` needs are met.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the scheduler (M1-034) is the first caller")
-    )]
     pub(crate) fn new(
         key: impl Into<String>,
         os: Os,
@@ -448,7 +447,14 @@ impl CheckContext {
             key: key.into(),
             os,
             available: available.into_iter().collect(),
+            deadline: None,
         }
+    }
+
+    /// Sets the instant this check's timeout fires. The scheduler calls it as it starts the check.
+    pub(crate) fn at_deadline(mut self, deadline: Instant) -> Self {
+        self.deadline = Some(deadline);
+        self
     }
 
     /// The result key: the check id, or `id/name` when the entry has a name.
@@ -467,5 +473,19 @@ impl CheckContext {
     #[must_use]
     pub fn has(&self, need: &Need) -> bool {
         self.available.contains(need)
+    }
+
+    /// How long this check has left before the scheduler gives up on it.
+    ///
+    /// It reaches zero at the timeout and stays there. A check uses it to size its own work, for
+    /// example to pick a connect timeout that fits. The scheduler still enforces the timeout, so a
+    /// check that ignores this value is stopped anyway. A context built outside the scheduler has no
+    /// deadline and reports [`MAX_TIMEOUT`](crate::sched::MAX_TIMEOUT).
+    #[must_use]
+    pub fn remaining(&self) -> Duration {
+        match self.deadline {
+            Some(deadline) => deadline.saturating_duration_since(Instant::now()),
+            None => crate::sched::MAX_TIMEOUT,
+        }
     }
 }

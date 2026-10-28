@@ -13,6 +13,10 @@ include = ["src/**", "Cargo.toml", "LICENSE"]
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 
 [lints]
 workspace = true

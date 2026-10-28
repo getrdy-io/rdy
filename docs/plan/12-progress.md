@@ -79,7 +79,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-033 | todo | | Map outcomes to CheckResult with fix source, partial and needs
 
-- M1-034 | todo | | Scheduler with concurrency limit, per-check timeout and panic isolation
+- M1-034 | PR #TBD | | The run deadline, the "time left in the run" cap and the watchdog are M1-043. `CheckContext::remaining()` is the time left on the check's own timeout until then. A check that hard-spins is never freed (abort needs a yield point): its permit is released at timeout and it keeps one worker until it returns. `probe()` and `CheckError::Probe` still wait for M1-040. The scheduler returns `Ran`/`End` and does not use M1-033's outcome mapping.
 
 - M1-035 | todo | | Family trait, registry and run plan
 
