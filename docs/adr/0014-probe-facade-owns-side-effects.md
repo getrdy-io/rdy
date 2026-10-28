@@ -46,16 +46,22 @@ wildcards clippy cannot match, and nothing stopping a check crate from adding a 
 6. **Commands.** Fixed search path always, not only as root. Windows runs only `whoami.exe` in M1, from
    a constant path, until job objects land.
 7. **Wall around the facade.**
-   - `clippy.toml` lists exact items in `disallowed-methods` and `disallowed-types`, with no wildcards,
-     covering every file, process, socket, thread and env API, plus `Box::leak`, `String::leak` and
+   - `clippy.toml` lists exact items in `disallowed-methods` and `disallowed-types`, with no wildcards
+     (02 Appendix A). They cover every std file, directory, link, permission, process, socket (TCP,
+     UDP, unix stream and datagram), thread spawn and env API, every kube client and config
+     constructor outside the `rdy-checks-k8s` client module, plus `Box::leak`, `String::leak` and
      `rdy_engine::live_backend`.
+   - Other crates' I/O APIs are not listed. The direct dependency allowlist below keeps those crates
+     out of check crates. The guarantee is the wall and the allowlist together: a check crate can
+     reach the OS or a cluster only through the facade or the guarded kube client.
    - A `tests/lint-wall` crate uses each item, and CI expects each one to fail.
-   - `allow(clippy::disallowed_` is legal only in allowlisted facade files.
+   - `allow(clippy::disallowed_` is legal only in allowlisted facade files and the k8s client module.
    - **Direct dependency allowlist.** `ci/check-crate-deps.toml` names the allowed direct
      dependencies of each check crate: `rdy-engine`, `rdy-spec`, `serde`, `serde_json`, `thiserror`
      and `futures-util`, plus `kube` and `k8s-openapi` for `rdy-checks-k8s` only, and `x509-parser` for
-     `rdy-checks-net` only. A CI script compares `cargo metadata` against the file and fails on any
-     difference. A change to the file needs the `security-review` label (CODEOWNERS).
+     `rdy-checks-net` only. No other `rdy-checks-*` crate may depend on `kube`, and inside
+     `rdy-checks-k8s` only the client module may name a kube client or config type. A CI script
+     compares `cargo metadata` against the file and fails on any difference. A change to the file needs the `security-review` label (CODEOWNERS).
    - `deny.toml` `[bans]` wrappers keep `rustix`, `socket2`, `hyper`, `tokio-rustls`, `hickory-*`,
      `sysinfo`, `walkdir`, `tempfile`, `which`, `nix`, `ureq` and `reqwest` from being direct or
      wrapped dependencies of check crates.

@@ -364,3 +364,59 @@ Folds (extra exit-test clauses on existing tickets, 5.5 h in total):
 | SEC-19 Confine writes to a new output dir with safe names | MF-05 Windows default and reparse-point check; SF-13; N-01 | 1 |
 | Closed NativeCall enum in the facade | SF-03 sealed Backend and private constructors; SF-04 snapshot | 0.5 |
 | In-process CLI entry point rdy_cli::run taking a Backend | SF-08 RunHooks, grep, feature tree and marker checks | 0.5 |
+
+## Closure check (M1-001, 2026-10-28)
+
+Reviewer: security-reviewer. Checked on `main` at `8f5705f` against ADR 0010 (as amended), ADRs 0014,
+0015 and 0016 (all Accepted), `docs/plan/02-engine-design.md` revision 3 and `docs/plan/11-backlog.md`.
+Quotes are exact. Line numbers are at that commit, except the MF-04 row, which was re-checked at
+`74e162a` and cites that commit. No ADR or plan file was edited by this check.
+
+Result: all six must-fix items are closed. MF-04 was reopened in the first pass and closed after
+rust-architect completed the lint wall in `74e162a`. With that, 02 revision 3 has security-reviewer
+sign-off. Its status line (02 line 6) can drop "waiting for security-reviewer sign-off"; that edit is
+rust-architect's.
+
+| id | verdict | evidence | smallest fix |
+| --- | --- | --- | --- |
+| MF-01 facade caps cut secrets | closed | `docs/adr/0015-redactor-in-rdy-engine.md:19` "`FileBytes` and `Output` carry `truncated_head` and `truncated_tail`." Line 22: "The PEM rule matches an unterminated `-----BEGIN ... PRIVATE KEY-----` through to the". Line 26: "The redactor removes exact matches and any 8-character or longer prefix or suffix". Line 41: "a canary at offsets cap minus 1 to cap minus 64." Line 63 extends the exit test to "the stdout, stderr, file and tail caps". `docs/plan/02-engine-design.md:225` "**As each result or action entry completes**, it is redacted, then capped (ADR 0015):". | none (see CF-04) |
+| MF-02 watchdog race and hang | closed | `docs/adr/0016-output-dir-confinement-cap-std.md:40` "whoever moves it from `Running` to `Writing` writes. The loser never writes." `docs/plan/02-engine-design.md:192` "`try_lock` loop bounded at 1 s". Line 195: "It runs the same sync redact-then-cap pass as the engine and never assumes the". Line 199: "The render and write run on a helper thread through the held output directory." Line 201: "It sends SIGKILL to every live process group in the facade's lock-free list,". Line 203: "It never takes std's stdout or stderr locks". Line 205: "Before the output directory exists, it exits 70 with no report." Tests: lines 474 to 476. | none (see CF-05) |
+| MF-03 kube allowlist gaps | closed | `docs/plan/02-engine-design.md:781` "`k8s.storageclass`: Pending claims older than 5 minutes". Line 782: "`fieldSelector` must include `involvedObject.kind=PersistentVolumeClaim`". Line 784: "`k8s.storageclass`: `spec.drivers[].name`". Line 786: "`k8s.nodes`: `cluster-autoscaler` presence by name". Lines 790 to 791 move the webhook and `validatingadmissionpolicies` entries into "**`M1_LATE`**". Line 773: "asserts every entry is cited by at least one check's `CheckInfo` and that `secrets` appears nowhere." Deployments are a LIST in `kube-system` only, narrower than my either-or, and projected to minimal structs (line 795). Accepted. | none (see CF-06) |
+| MF-04 unvetted crates and the lint wall | closed (re-checked at `74e162a`) | The first pass of this check, at `8f5705f`, reopened it: 02 Appendix A lacked std write and socket items and let a check crate build an unguarded kube client. `74e162a` closes it. `docs/plan/02-engine-design.md:739` lists "`std::fs::remove_dir_all`", and lines 735 to 767 now hold every std item I named (links, permissions, `chown`, `chroot`, `UnixDatagram`, `connect_addr`, `bind_addr`, `std::thread::scope`, type `std::fs::DirBuilder`) and more (`std::path::Path` metadata calls, `std::env::current_dir`, `std::process::exit`). Line 771: "`kube::client::ClientBuilder`, `kube::config::Kubeconfig`; `kube::Client::new`," as disallowed types and methods outside the client module. Line 779: "Trait routes: `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`". Line 787: "Verified on 2026-10-28 against kube 4.2.0 on docs.rs". Line 791: "Not listed: crates other than std, kube and the facade." `docs/adr/0014-probe-facade-owns-side-effects.md:55` "The guarantee is the wall and the allowlist together", and line 63: "`rdy-checks-k8s` only the client module may name a kube client or config type." Tests: `docs/plan/11-backlog.md:180` (M1-044) "each entry, used once in tests/lint-wall, fails clippy"; line 238 (M1-102) "each 02 Appendix A kube entry, re-checked against the pinned kube version and used once in tests/lint-wall, fails clippy". | none |
+| MF-05 Windows output dir | closed | `docs/adr/0016-output-dir-confinement-cap-std.md:18` "`%USERPROFILE%\rdy-reports` (created if missing; owner, SYSTEM and Administrators by default)." Line 27: "`FILE_ATTRIBUTE_REPARSE_POINT` is clear, and its final". Line 28: "Junctions and symlinks with the target name are both refused." Line 42 names the ACL residuals "in the report's notes until SEC-58". `docs/plan/02-engine-design.md:403` "`%USERPROFILE%\rdy-reports` on Windows (05 I3)". Test: `docs/plan/11-backlog.md:173` (M1-037) "a pre-planted junction and a symlink with the target name are both refused before the first check". | none |
+| MF-06 `selfsubjectreviews` in M1 | closed | `docs/adr/0010-kubernetes-client-kube-rs.md:22` "and to `selfsubjectreviews` (`authentication.k8s.io/v1`) with no query string and exactly the body". Line 24: "From its response only `username` and `groups` are kept". Line 26: "kubeconfig user marked "not verified by the API server"". `docs/plan/02-engine-design.md:803` "compared byte for byte". Test: `docs/plan/11-backlog.md:239` (M1-103) "a SelfSubjectReview with a different body or a query string". | none (see CF-07) |
+
+### Follow-ups found during the check
+
+Numbering continues from the closure check in `adr-and-00-review-by-security-reviewer.md` (CF-01 to
+CF-03).
+
+- **CF-04 (medium). M1-061 lost the PEM case.**
+  - Problem: `docs/plan/11-backlog.md:197` (M1-061) tests "An AWS key id and a URL with userinfo". ADR
+    0015 line 63 and 02 line 594 also test "a PEM key" across the facade caps. M1-062 covers only the
+    64 KiB report cap. So the unterminated PEM rule at a facade cap is untested in M1.
+  - Fix: M1-061 exit test starts "A PEM key, an AWS key id and a URL with userinfo". Owner:
+    rust-architect, before M1-061 starts.
+- **CF-05 (medium). M1-043 lost the held-lock case.**
+  - Problem: `docs/plan/11-backlog.md:179` (M1-043) has no "held snapshot lock" case. 02 lines 476 and
+    574 have it. It is the test for the `try_lock` bound.
+  - Fix: add "and a held snapshot lock" to the M1-043 Spin clause. Owner: rust-architect, before
+    M1-043 starts.
+- **CF-06 (medium). M1-104 lost the citation test.**
+  - Problem: `docs/plan/11-backlog.md:240` (M1-104) drops three clauses that 02 line 586 has: "an
+    unlisted resource" is refused, "every ALLOWED entry is cited by a CheckInfo", and "a dropped request
+    leaves a timeout entry with its check id". The citation test is the MF-03 control against a wide
+    entry added under deadline pressure. The estimate also fell from 3.5 h to 1 h.
+  - Fix: restore the three clauses and re-estimate. Owner: rust-architect, before M1-104 starts.
+- **CF-07 (low). 01 still takes the kube user from the kubeconfig.**
+  - Problem: `docs/plan/01-spec-format.md:506` says the authenticated user "waits for the ADR 0010
+    amendment that allows that POST", and line 876 says the same. The amendment has landed. 02 line 497
+    lists the fix, but 13 does not carry it, so M1-009 does not own it.
+  - Fix: both lines say `identity.kube.user` comes from `SelfSubjectReview`, and on 1.27 and older it is
+    the kubeconfig user marked "not verified by the API server". Owner: rust-architect, before M1-020
+    starts.
+- **CF-08 (low). 05 revision 3 has no ticket.** Done: 05 revision 3 is part of M1-001 and landed with it.
+  - Problem: the threat model edits that this review and 02 lines 521 to 525 ask for (INV-12 ranges,
+    Appendix A I3, Appendix F cap-boundary cases in M1, INV-08 fixed PATH) are not in 11-backlog.md.
+  - Fix: a 1 h M1 ticket for security-reviewer, before M1-040 starts. Exit test: 05 revision 3 carries
+    those four edits and names ADRs 0014 to 0016.
