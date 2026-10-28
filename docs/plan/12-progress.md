@@ -11,7 +11,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-001 | PR #TBD | | none; MF-04 was reopened and closed after 74e162a, 05 revision 3 applied, follow-ups CF-01 to CF-07 are filed in both review files for their owners
 
-- M1-002 | todo | | Confirm the revised ADRs close cli-ux findings M1 to M3 and the final command names
+- M1-002 | [#2](https://github.com/getrdy-io/rdy/pull/2) | 2026-10-28 | none. Three ADR gaps reported for the ADR owners (0008 error codes, 0003 vs 0016, 0003 banner order); 07 needed no edit
 
 - M1-003 | todo | | Create workspace skeleton and package rdy in crates/rdy-cli with binary name rdy
 
@@ -23,13 +23,13 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-007 | todo | | dist init for five targets with cargo-auditable and SBOM, proven in release-sandbox
 
-- M1-008 | todo | | SEC-05 Harden getrdy.io domain and hosting accounts
+- M1-008 | [#3](https://github.com/getrdy-io/rdy/pull/3) | 2026-10-28 | Founder-only, account side: hardware-key MFA on registrar and Cloudflare, recovery codes offline, registrar lock, DNSSEC (DS at registrar), CAA records, HSTS after the Pages site is live. The script cannot read MFA. First run 2026-10-28 shows 0 of 4 passing; rerun `scripts/check-domain.sh` after the founder acts and paste the PASS output into the PR. Also: install whois on the founder machine (.io has no RDAP), shellcheck not run (not installed here) | backlog corrected 2026-10-28: account steps moved to Founder hand steps
 
 - M1-009 | todo | | Close the planning pass: apply plan corrections and amend ADRs 0006 and 0015
 
 - M1-010 | todo | | sign-release with cosign keyless, SHA256SUMS and self-verify (SEC-06, SEC-07)
 
-- M1-011 | todo | | SEC-04 Org 2FA, private reporting, immutable releases, CODEOWNERS and a settings check script
+- M1-011 | todo | | SEC-04 Org 2FA, private reporting, immutable releases, CODEOWNERS and a settings check script | backlog corrected 2026-10-28: account steps moved to Founder hand steps
 
 - M1-012 | todo | | First signed alpha, scripts/verify-release.sh and RELEASING.md
 
@@ -285,7 +285,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-138 | todo | | Tag and release 0.1.0
 
-- M1-139 | todo | | Alpha announcement to design partners
+- M1-139 | todo | | Alpha announcement to design partners | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
 - M1-140 | todo | | HTML next-step sentences and the nothing-verified wording
 
@@ -341,7 +341,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-166 | todo | | Fixture env net-airgapped
 
-- M1-167 | todo | | Time the quickstart with two design-partner SEs
+- M1-167 | todo | | Time the quickstart with two design-partner SEs | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
 ## Summary
 

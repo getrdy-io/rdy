@@ -138,3 +138,42 @@ Global flags: `--color auto|always|never`, `-h/--help`, `-V/--version`. `NO_COLO
 ## Verdict
 
 **Request changes**, driven by ADR 0008 (M1, M2) and the file-name rule in ADR 0003 (M3). Three must-fix items. Every item is a short edit. After they land: approve 0003, 0005, 0008, 0011 with the nits above.
+
+## Closure check (M1-002, 2026-10-28)
+
+Reviewer: cli-ux. Read: this review, ADRs 0002, 0003, 0008, 0011, 0013 and 0016 as revised on 2026-10-28, and
+`docs/plan/07-cli-ux.md`. No ADR was edited. 07 needed no edit: every word below already matches.
+
+Result: M1, M2 and M3 are closed. The final command names stand. 07 uses the verdict words, status words and
+commands of the ADRs. Three small ADR gaps are listed after the table for the ADR owners.
+
+| id | verdict | evidence |
+| --- | --- | --- |
+| M1 skipped required check gives exit 1 | Closed | ADR 0008 decision 3, "Run verdict, one rule, no `--strict` flag": the row "No `Block`, but a `severity: block` check was Skipped, Timeout or Error" gives `NotReady`, `not_ready`, `reason: "required_check_not_run"`, exit 2, last line `NOT READY: 1 required check was not run`. The Rust variant is `NotReady`, as asked. The summary line counts them apart. The Alternatives table rejects "Skipped required checks give exit 1" and "A `--strict` flag". Consequences: "The week 2 alpha, where every check is `SKIP` "not built yet", exits 2." ADR 0013 decisions 1 and 3 extend it: an unknown severity counts as `block`. 07 section 2.4 and C.12 use the same table and the same last line. |
+| M2 `hint()` is optional | Closed | ADR 0008 decision 5: "`fn hint(&self) -> &str`, never optional." The bug line is the one asked for: "this is a bug in rdy. Please report it at https://github.com/getrdy-io/rdy/issues and include the output of rdy version." "A unit test matches every variant and asserts a non-empty hint." Decision 8 gives a caught panic the same hint. The Alternatives table rejects `hint() -> Option<&str>`. 07 section 9 rules 2 and 6 repeat it. |
+| M3 `<product>` in the file name | Closed, stricter than asked | ADR 0003 decision 1: "`metadata.product` must match `^[a-z0-9][a-z0-9-]{0,62}$` (`rdy_spec::validate`, and the same rule on the signed trusted comment). ... The report code re-checks the slug defensively." ADR 0016 decision 2 re-checks it again. 01 section 4 table (line 51) has the same regex. The pattern drops `.` and `_` and caps at 63, so it is tighter than my `[a-z0-9][a-z0-9._-]{0,63}`; `docs/adr/README.md` records why. The output is a fresh 0700 folder under `--out-dir`, so a bad name cannot reach another path. The ticket SEC-19 exit test has `../x` failing validation. Line and column on a validation error: 01 line 33 and 07 section 4.1 (`file`, `line`, `column`). |
+| Verdict words | Match | ADR 0008 decision 3 and 0003 decision 6: `READY`, `READY with warnings`, `NOT READY`, and `NOT READY: N required check(s) was/were not run`. JSON `ready`, `ready_with_warnings`, `not_ready`. 07 section 2.4 table, A.2, A.3 and C.12 to C.18 use exactly these. 07 adds `READY with warnings: nothing was checked`, which is ADR 0013 decision 5 (`nothing_verified`, exit 1) worded by 01 section 5.3. 07 has no `--strict` and no `Blocked` verdict. |
+| Status words | Match | ADR 0008 decision 1 table: `PASS WARN BLOCK SKIP TIMEOUT ERROR` on screen, `pass warn block skipped timeout error` in JSON. 07 section 2.2 lists the same six and pads to 7. Appendix B uses the JSON values. |
+| Command names | Match | ADR 0002 decision 5: `rdy trust add <product> --key`, `--yes`, `rdy trust list`, `rdy trust remove <product> [--key-id]`, `rdy run <spec> --key` for one run, no `--trust-key`, `rdy spec keygen`, `rdy spec sign`. ADR 0011 decision 6: `rdy version`, `rdy --version`, `rdy version --json`, line `rdy 0.1.0-alpha.3 (abc1234 2026-12-01)`. 07 section 1 and 4.3 match all of them. It also keeps `rdy verify` at top level, with "See also" in `rdy spec --help` (A.5), as I decided. `--sig <file>` and the missing-sidecar message `error: no signature found at <spec>.minisig` are in 07 (A.3, section 4). |
+| Headline (last line) | Confirmed | 07 decision 3: "Last line. `READY`, `READY with warnings`, `NOT READY`, `NOT READY: N required checks were not run` or `READY with warnings: nothing was checked`." Section 2.4: with a block and unrun required checks together the last line is plain `NOT READY`. 02's headline `NOT READY: 1 blocker, 2 required checks not run` is rejected (07 section 2.4 and "Plan corrections found"). |
+| M1 Ctrl-C | Confirmed | 07 section 5.1, M1 column: abort, remove the empty report folder, exit 70, and print `error: interrupted. No report was written.` then `fix: run rdy again and let it finish`. Plan corrections: "Confirmed. M1: Ctrl-C aborts ... and exits 70." From M2, the first Ctrl-C writes a partial report and the second exits 70. Ticket M1-058 points at this section. |
+| `--no-network` | Confirmed | 07 section 1 run flags (M1) and A.3 `Scope:`. Network and Kubernetes checks are skipped as `missing_need`. The `cluster` header line says a kube flag is ignored. 00-overview line 355 agrees. |
+| `--out-dir` | Confirmed | 07 section 1 and A.3 `Output:`: parent folder for `rdy-report-<product>-<ts>/`, default `.` on Unix and `%USERPROFILE%\rdy-reports` on Windows. This matches ADR 0003 decision 1 and ADR 0016 decision 1. `--no-report` is there too. |
+| Plan flag name | Confirmed: `--dry-run`, in M2 | 07 decision 5: "`--dry-run` (not `--plan`)". 07 moved it from M1 to M2: the run flag table marks it M2, and Appendix A says "`--timeout` (M2) and `--dry-run` (M2) are not in the M1 pages." 00-overview line 355, ADR 0005 (the consent list "reuses the `rdy run --dry-run` plan (M2)") and the backlog (M2-040, M2-041, and the note at line 55) use the same name and milestone. The `--plan` flag appears in 07 only in the list of old names to rename. |
+
+### Gaps found in the ADRs (not edited, for the ADR owners)
+
+1. **ADR 0008 decision 7 has a closed list of error codes** (`usage`, `spec_parse`, `spec_invalid`, `spec_unsigned`,
+   `spec_signature_invalid`, `spec_key_unknown`, `report_write`, `internal`). 07 section 4.1 adds `spec_unreadable`
+   (exit 64) and `interrupted` (exit 70). Neither is in 01 section 4.8 yet; 07 lists that as a plan correction.
+   Add both codes to ADR 0008 decision 7 before the error ticket starts. The codes are stable, so this is a
+   contract change.
+2. **ADR 0003 decisions 1 and 2 are older than ADR 0016.** Decision 1 says `create_dir` "fails if it exists"; ADR 0016
+   retries `-2` to `-9`, then exits 70. Decision 2 and ADR 0008 decision 4 say an unwritable directory still prints
+   the full terminal result; ADR 0016 moves the failure to before the first check, and only a write failure at the
+   end (full disk) prints the result first. 07 follows ADR 0016 and covers both cases (section 5 table). Add "see
+   ADR 0016" to ADR 0003 decisions 1 and 2.
+3. **ADR 0003 decision 6 lists the unsigned banner after the verdict and counts.** 07 section 8 and 01 section 4.7
+   put the banner first, at the top. Say "banner, then verdict" in the ADR so the HTML ticket has one order.
+
+None of the three blocks M1-003. Item 1 should land before the error-types ticket.
