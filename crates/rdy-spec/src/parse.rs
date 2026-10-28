@@ -31,6 +31,7 @@ use serde_saphyr::{Budget, NonFiniteFloatPolicy};
 use crate::check::find_duplicate;
 use crate::error::echo_reason;
 use crate::error::echo_safe;
+use crate::limits::{self, MAX_CHECKS, PLACED_COLLECT_ITEMS, PLACED_METADATA_KEYS, Places};
 use crate::spec::Spec;
 use crate::{API_VERSION, Location, SpecError};
 
@@ -99,6 +100,8 @@ pub(crate) fn parse_bytes(bytes: &[u8]) -> Result<Spec, SpecError> {
         return Err(facts.later_version_before(&error).unwrap_or(error));
     }
     facts.check_api_version()?;
+    // The guard counted the entries, so a huge list is refused before the typed read builds it.
+    facts.check_entry_count()?;
     let spec = typed_read(text).map_err(|e| facts.entry_without_id(&e).unwrap_or(e))?;
     // A duplicate entry key is a fact about the whole list, so it is told after the typed read. The
     // guard saw the entries in file order, which is the order of `spec.checks`.
@@ -115,6 +118,7 @@ pub(crate) fn parse_bytes(bytes: &[u8]) -> Result<Spec, SpecError> {
         }
         .at(Location::new(1, 1)));
     }
+    limits::validate(&spec, &facts.places)?;
     Ok(spec)
 }
 
@@ -246,11 +250,28 @@ struct EntryFact {
 /// What the guard learned while it read the whole file.
 struct Facts {
     api_version: Option<ApiVersionFact>,
-    /// The entries of the top-level `checks` list, in file order.
+    /// The entries of the top-level `checks` list, in file order. At most [`MAX_CHECKS`] plus one are
+    /// kept: a list over the limit is refused, and its tail is never read for anything else.
     entries: Vec<EntryFact>,
+    /// How many entries the top-level `checks` list has, counted without keeping them.
+    entry_count: usize,
+    /// Where a few values start, for the errors of [`limits::validate`].
+    places: Places,
 }
 
 impl Facts {
+    /// `TooManyChecks` when the `checks` list has more entries than the limit. The count is the real
+    /// one, even though only the first 257 entries are kept.
+    fn check_entry_count(&self) -> Result<(), SpecError> {
+        if self.entry_count > MAX_CHECKS {
+            return Err(SpecError::TooManyChecks {
+                count: self.entry_count,
+                limit: MAX_CHECKS,
+            });
+        }
+        Ok(())
+    }
+
     /// `MissingCheckId` at the first entry with no `id` key, when `error` is the typed read saying an
     /// `id` is missing. The typed read walks the file in order, so the first such entry is the one it
     /// stopped at. The typed read does not know the position of the entry in the list. The guard does.
@@ -353,8 +374,11 @@ struct Guard {
     /// The next value belongs to the top-level `apiVersion` key.
     api_next: bool,
     api_version: Option<ApiVersionFact>,
-    /// The entries of the top-level `checks` list so far.
+    /// The first entries of the top-level `checks` list. See [`Facts::entries`].
     entries: Vec<EntryFact>,
+    /// How many entries the top-level `checks` list has had so far.
+    entry_count: usize,
+    places: Places,
 }
 
 /// What the guard found: the facts it learned before it stopped, and the first thing it refused.
@@ -375,6 +399,8 @@ fn guard(text: &str) -> GuardOutcome {
         api_next: false,
         api_version: None,
         entries: Vec::new(),
+        entry_count: 0,
+        places: Places::default(),
     };
     let error = read_events(&mut g, text).err();
     if error.is_none() && g.root_is_map && g.api_version.is_none() {
@@ -384,6 +410,8 @@ fn guard(text: &str) -> GuardOutcome {
         facts: Facts {
             api_version: g.api_version,
             entries: g.entries,
+            entry_count: g.entry_count,
+            places: g.places,
         },
         error,
     }
@@ -499,6 +527,37 @@ impl Guard {
         )
     }
 
+    /// Remembers where a metadata value or a `bundle.collect` item starts. The reader sees a node before
+    /// it knows whether it is a key, so this runs first and looks at the frames.
+    fn note_place(&mut self, at: Location) {
+        match self.frames.as_slice() {
+            [
+                Frame::Map { key: Some(top), .. },
+                Frame::Map {
+                    expecting_key: false,
+                    key: Some(k),
+                    ..
+                },
+            ] if top == "metadata" => {
+                if let Some(name) = PLACED_METADATA_KEYS.iter().find(|n| **n == k) {
+                    self.places.metadata.entry(name).or_insert(at);
+                }
+            }
+            [
+                Frame::Map { key: Some(top), .. },
+                Frame::Map {
+                    key: Some(inner), ..
+                },
+                Frame::Seq,
+            ] if top == "bundle" && inner == "collect" => {
+                if self.places.collect.len() < PLACED_COLLECT_ITEMS {
+                    self.places.collect.push(at);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// The map being read is an entry of the top-level `checks` list.
     fn in_check_entry(&self) -> bool {
         matches!(
@@ -512,8 +571,13 @@ impl Guard {
             return Err(SpecError::TooDeep { limit: MAX_DEPTH }.at(at));
         }
         if matches!(node, Node::MapStart) && self.in_checks_list() {
-            self.entries.push(EntryFact { at, has_id: false });
+            self.entry_count = self.entry_count.saturating_add(1);
+            // Keep one entry past the limit, which is enough to point at it. Nothing later is stored.
+            if self.entries.len() <= MAX_CHECKS {
+                self.entries.push(EntryFact { at, has_id: false });
+            }
         }
+        self.note_place(at);
         let in_entry = self.in_check_entry();
         let is_root = !self.seen_root;
         self.seen_root = true;
@@ -729,9 +793,9 @@ fn map_read_error(error: serde_saphyr::Error) -> SpecError {
         .location()
         .map(|l| Location::new(clamp(l.line()), clamp(l.column())));
     let kind = match error {
-        E::SerdeUnknownField { field, .. } => SpecError::UnknownKey {
-            key: echo_safe(field),
-        },
+        E::SerdeUnknownField {
+            field, expected, ..
+        } => unknown_key(echo_safe(&field), &expected),
         E::SerdeMissingField { field, .. } if *field == "apiVersion" => {
             SpecError::BadApiVersion { found: None }
         }
@@ -762,6 +826,24 @@ fn map_read_error(error: serde_saphyr::Error) -> SpecError {
     match at {
         Some(at) => kind.at(at),
         None => kind,
+    }
+}
+
+/// An unknown key, with the block it is in when that is not the top level. The reader lists the keys it
+/// expected there, and each block has a key no other block has.
+fn unknown_key(key: String, expected: &[&str]) -> SpecError {
+    let section = if expected.contains(&"product") {
+        Some("metadata")
+    } else if expected.contains(&"collect") {
+        Some("bundle")
+    } else if expected.contains(&"regex") {
+        Some("a redact pattern")
+    } else {
+        None
+    };
+    match section {
+        Some(section) => SpecError::UnknownKeyIn { key, section },
+        None => SpecError::UnknownKey { key },
     }
 }
 

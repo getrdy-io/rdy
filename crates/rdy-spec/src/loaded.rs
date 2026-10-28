@@ -9,9 +9,12 @@
 //! The compile-fail tests in `tests/compile_fail/` pin each way of getting this wrong: a struct literal,
 //! the private constructor, `From<Spec>` and `Default`. The unit test below pins `Deserialize`.
 
+use std::time::SystemTime;
+
 use sha2::{Digest, Sha256};
 
 use crate::SpecError;
+use crate::expiry::check_not_expired;
 use crate::parse::{MAX_SPEC_BYTES, parse_bytes};
 use crate::sig::{Policy, SignatureError, SignatureState, TrustStore, verify_sidecar};
 use crate::spec::Spec;
@@ -72,17 +75,35 @@ impl LoadedSpec {
 /// 4. Only now are the bytes parsed. A spec that was refused above is never given to the YAML reader.
 /// 5. For a signed spec, `metadata.product` must equal the product in the signed comment.
 ///
-/// Expiry (`metadata.expires`) is not checked here.
+/// 6. Last, `metadata.expires` is compared with this machine's clock. A spec that has expired is refused
+///    with [`SpecError::Expired`], for a signed spec and an unsigned one alike. There is no override.
+///
+/// Use [`load_at`] to give the clock.
 ///
 /// # Errors
 ///
-/// [`SpecError::Signature`] for every signature problem, and the usual parse errors of
-/// [`crate::parse_unverified`] after that.
+/// [`SpecError::Signature`] for every signature problem, the usual parse errors of
+/// [`crate::parse_unverified`] after that, and [`SpecError::Expired`] for a spec past its `expires`.
 pub fn load(
     bytes: &[u8],
     sig: Option<&[u8]>,
     trust: &TrustStore,
     policy: Policy,
+) -> Result<LoadedSpec, SpecError> {
+    load_at(bytes, sig, trust, policy, SystemTime::now())
+}
+
+/// [`load`] with the clock given, so a test or a caller with its own time source decides what "now" is.
+///
+/// # Errors
+///
+/// The same as [`load`].
+pub fn load_at(
+    bytes: &[u8],
+    sig: Option<&[u8]>,
+    trust: &TrustStore,
+    policy: Policy,
+    now: SystemTime,
 ) -> Result<LoadedSpec, SpecError> {
     if bytes.len() > MAX_SPEC_BYTES {
         return Err(SpecError::TooLarge {
@@ -105,6 +126,7 @@ pub fn load(
         }
         .into());
     }
+    check_not_expired(spec.metadata.expires.as_deref(), now)?;
     let sha256 = crate::sig::hex(&Sha256::digest(bytes));
     Ok(LoadedSpec::new(spec, signature, sha256))
 }

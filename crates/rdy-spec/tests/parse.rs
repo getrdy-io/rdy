@@ -851,7 +851,10 @@ fn errors_of_the_typed_read_carry_a_place_and_a_fix() {
 
     let e = fail(&base("{prodcut: a}", ""));
     assert!(
-        matches!(e.kind(), SpecError::UnknownKey { key } if key == "prodcut"),
+        matches!(
+            e.kind(),
+            SpecError::UnknownKeyIn { key, section: "metadata" } if key == "prodcut"
+        ),
         "{e:?}"
     );
 
