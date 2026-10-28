@@ -26,9 +26,9 @@ serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "signal", "sync", "time"], optional = true }
 
-# Process group kill on Unix (M1-038). Safe wrappers, so the crate keeps `forbid(unsafe_code)`.
+# Process group kill (M1-038) and the umask (M1-039) on Unix. Safe wrappers, so the crate keeps `forbid(unsafe_code)`.
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["std", "process"], optional = true }
+rustix = { workspace = true, features = ["std", "process", "fs"], optional = true }
 
 [dev-dependencies]
 serde = { workspace = true, features = ["std"] }

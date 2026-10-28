@@ -106,7 +106,9 @@ ADR 0010 stays as a second line.
   allowlist has no such program, and on Windows only `whoami.exe` runs, which starts no children. The
   fixes are M2: a Linux cgroup kill (`cgroup.kill`) or a child subreaper that walks descendants, and
   Windows job objects (M2-006). Until then a stray process can outlive a run. Descriptors above 2 that
-  `rdy` inherited from its parent also reach children until the command policy closes them (M1-039).
+  `rdy` inherited from its parent also reach children. Closing them needs `unsafe`, so M1 lists them for
+  a start-up warning and the M2 FFI module closes them (ADR 0019). The programs are fixed system tools
+  with fixed argv, and shells are refused, so nothing can walk the descriptor table for a spec.
 - A signed spec can probe internal endpoints it lists. Results stay local unless the customer sends them.
 - Windows output files inherit folder ACLs, and macOS honours inheritable ACEs on the parent before mode
   bits. Both are named in the report's notes until SEC-58 (ADR 0016).

@@ -289,7 +289,13 @@ tests policy.
 - Refused outright: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`, `powershell`, `pwsh`) and `sudo`,
   `su`, `doas`, `pkexec`, `runas`.
 - Environment cleared, then `LC_ALL=C`, `PATH=<fixed>` and declared names only; no `LD_*`, `DYLD_*`.
-- stdin null; cwd `/`.
+- stdin null; cwd `/`; umask `0o077` (set process-wide before each start, since a child-only umask needs
+  `pre_exec`, which is `unsafe`). The refusal list also holds `ash`, `ksh`, `csh`, `tcsh` and `fish`, and
+  a program that resolves to a listed shell through a link is refused. The extra variable names that
+  change loading or name resolution (`LOCPATH`, `NLSPATH`, `HOSTALIASES`, `BASH_ENV`, `IFS` and similar)
+  are refused too. Code: `rdy_engine::exec::policy`.
+- Descriptors above 2 that `rdy` inherited reach children in M1. `exec::inherited_fds()` lists them
+  for a start-up warning; closing them needs `unsafe` (ADR 0019).
 - Each child gets its own process group, recorded in a lock-free list until reaped, and the group is
   killed on timeout. A child not reaped within 1 s of SIGKILL returns `Hung { pid }`; a detached task
   reaps it later.

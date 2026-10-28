@@ -209,6 +209,41 @@ mod process {
     }
 
     #[tokio::test]
+    async fn the_child_gets_a_tight_umask_even_when_the_parent_had_a_loose_one() {
+        let _ = rustix::process::umask(rustix::fs::Mode::from_bits_truncate(0o000));
+        let out = run(sh("umask", SECOND * 10)).await.expect("runs");
+        assert_eq!(out.stdout, b"0077\n");
+        assert_eq!(CHILD_UMASK, 0o077);
+    }
+
+    /// Descriptors the standard library opens do not reach a child. One whose close-on-exec flag was
+    /// cleared (as a descriptor inherited from a shell would be) does. That second half is the
+    /// documented residual of ADR 0019, and `inherited_fds` lists it.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn only_descriptors_without_close_on_exec_reach_a_child() {
+        use std::os::fd::AsRawFd;
+        let kept = std::fs::File::open("/dev/null").expect("open");
+        let leaked = std::fs::File::open("/dev/null").expect("open");
+        rustix::io::fcntl_setfd(&leaked, rustix::io::FdFlags::empty()).expect("clear CLOEXEC");
+        let (kept_fd, leaked_fd) = (kept.as_raw_fd(), leaked.as_raw_fd());
+
+        let listed = inherited_fds();
+        let fd = |raw: i32| u32::try_from(raw).expect("fd is not negative");
+        assert!(listed.contains(&fd(kept_fd)) && listed.contains(&fd(leaked_fd)));
+
+        let script =
+            format!("test ! -e /proc/self/fd/{kept_fd} && test -e /proc/self/fd/{leaked_fd}");
+        let out = run(sh(&script, SECOND * 10)).await.expect("runs");
+        assert!(out.status.success(), "{out:?}");
+    }
+
+    #[test]
+    fn the_standard_descriptors_are_never_listed() {
+        assert!(inherited_fds().iter().all(|fd| *fd > 2));
+    }
+
+    #[tokio::test]
     async fn a_missing_program_is_a_spawn_error_and_frees_the_slot() {
         static OWN: Registry<REGISTRY_SLOTS> = Registry::new();
         let error = run_with(

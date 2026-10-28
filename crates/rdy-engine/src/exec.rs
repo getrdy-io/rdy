@@ -1,8 +1,9 @@
 //! The process runner: starts one command, bounds it, and makes sure it dies with its check.
 //!
 //! This is the mechanism under the facade's `exec` (02, "Exec"). The command policy (search path,
-//! refused programs, environment names, output caps) is M1-039 and sits on top. This module only
-//! answers: how does a child start, how does it end, and what is left when it does not end by itself.
+//! refused programs, environment names, output caps) is [`policy`] and sits on top: facade code runs a
+//! [`policy::Cmd`] and never builds an [`ExecSpec`] itself. This module answers: how does a child start,
+//! how does it end, and what is left when it does not end by itself.
 //!
 //! - **Own process group.** On Unix each child leads a new process group, so `sh -c 'sleep 600 &'`
 //!   and everything it forks share one group id. Killing the group kills them all.
@@ -24,16 +25,23 @@
 //!   It also sets a shutdown flag first, so a command that is being started at that moment is killed
 //!   as soon as it is registered, and none start afterwards.
 //!
-//! The program must be an absolute path, so no `PATH` or working-directory lookup happens. The
+//! The program must be an absolute path, so no `PATH` or working-directory lookup happens here ([`policy`]
+//! resolves names from the fixed search path). The
 //! environment is cleared, stdin is null, the working directory is the root of the file system
 //! ([`child_cwd`]), and stdout and stderr are read up to a byte cap each. The rest is drained and
 //! dropped, so a chatty child never blocks on a full pipe.
 //!
+//! **Umask.** Before each start the runner sets the process umask to `0o077` ([`harden_umask`]), and the
+//! child inherits it. Safe code cannot set a umask in the child alone (that needs `pre_exec`, which is
+//! `unsafe`), so the change is process-wide. It only makes files that `rdy` itself creates tighter, and
+//! the report writer sets its modes explicitly (ADR 0016). The value is constant, so repeated calls are
+//! harmless.
+//!
 //! **Inherited descriptors.** The standard library opens its own descriptors with close-on-exec, but a
 //! descriptor above 2 that `rdy` inherited from its parent (a shell that left a file open) passes to
-//! every child. Setting close-on-exec on those needs a raw descriptor, which safe `rustix` does not
-//! give. M1-039 (command policy) and the CLI start-up own this; until then the runner does not close
-//! them.
+//! every child. Setting close-on-exec or closing it needs a raw descriptor number, which no safe API
+//! accepts. M1 does not close them. [`inherited_fds`] lists them so the CLI can warn at start-up, and
+//! ADR 0019 records why and what the M2 fix is.
 //!
 //! **Windows.** Job objects are M2-006. Until then a timeout or a drop kills the child process only
 //! ([`KILLS_PROCESS_TREE`] is `false`), which is enough for the one program M1 runs there
@@ -53,6 +61,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
+pub mod policy;
 #[cfg(test)]
 mod tests;
 
@@ -86,6 +95,57 @@ pub fn child_cwd() -> PathBuf {
             || PathBuf::from("\\"),
             |root| PathBuf::from(root).join("System32"),
         )
+    }
+}
+
+/// The umask every child gets: no access for group or others on anything it creates.
+pub const CHILD_UMASK: u32 = 0o077;
+
+/// Sets the process umask to [`CHILD_UMASK`]. Children inherit it.
+///
+/// [`run`] calls this before every start, so a caller never has to. It is public so the CLI can call it
+/// first thing at start-up, before `rdy` creates any file. Process-wide and idempotent. A no-op on
+/// Windows, which has no umask.
+pub fn harden_umask() {
+    #[cfg(unix)]
+    {
+        let _previous = rustix::process::umask(rustix::fs::Mode::from_bits_truncate(
+            CHILD_UMASK as rustix::fs::RawMode,
+        ));
+    }
+}
+
+/// Lists the descriptors above 2 that this process has open, as numbers.
+///
+/// At start-up, before `rdy` opens anything itself, these are the descriptors it inherited from its
+/// parent, and every child command would inherit them too (see the module docs). The CLI warns when
+/// the list is not empty. The numbers carry no secret; the targets are not read. Later in a run it also
+/// lists descriptors that the runtime opened without close-on-exec, so call it early. Empty on
+/// targets with no descriptor directory (Windows).
+#[must_use]
+pub fn inherited_fds() -> Vec<u32> {
+    #[cfg(unix)]
+    {
+        let dir = if cfg!(target_os = "linux") {
+            "/proc/self/fd"
+        } else {
+            "/dev/fd"
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut found: Vec<u32> = entries
+            .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
+            .filter(|fd| *fd > 2)
+            .collect();
+        // The directory handle itself was listed. It is closed now, so a second look drops it.
+        found.retain(|fd| std::fs::metadata(format!("{dir}/{fd}")).is_ok());
+        found.sort_unstable();
+        found
+    }
+    #[cfg(not(unix))]
+    {
+        Vec::new()
     }
 }
 
@@ -472,6 +532,7 @@ async fn run_with(
     }
     #[cfg(unix)]
     let _sigchld = ensure_sigchld_handled()?;
+    harden_umask();
     let index = registry.reserve().ok_or(ExecError::TooMany)?;
     let mut command = Command::new(&spec.program);
     command
