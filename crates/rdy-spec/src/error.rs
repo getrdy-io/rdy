@@ -293,6 +293,17 @@ impl SpecError {
         }
     }
 
+    /// The fix line with the real values filled in, where the error knows them. Otherwise the same text
+    /// as [`SpecError::hint`].
+    #[must_use]
+    pub fn fix(&self) -> String {
+        match self {
+            Self::Signature(error) => error.fix(),
+            Self::Located { error, .. } => error.fix(),
+            other => other.hint().to_owned(),
+        }
+    }
+
     /// The fix line for this error. Never empty.
     #[must_use]
     pub fn hint(&self) -> &'static str {

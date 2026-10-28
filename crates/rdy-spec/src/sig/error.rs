@@ -50,10 +50,10 @@ pub enum SignatureError {
         /// The product the signed comment names.
         product: ProductSlug,
     },
-    /// The file, or the signed comment, does not match the signature.
+    /// The file does not match the signature.
     #[error(
-        "the signature does not match the file. It may have been changed after signing.{}",
-        if *.crlf { " The file has Windows line endings. If it went through Git or email, ask for the original." } else { "" }
+        "the signature does not match the file. It may have been changed after signing{}",
+        if *.crlf { ". The file has Windows line endings. If it went through Git or email, ask for the original" } else { "" }
     )]
     Tampered {
         /// The file holds a CR LF pair. Line-ending conversion is the usual honest cause.
@@ -62,7 +62,7 @@ pub enum SignatureError {
     /// The signature over the file verifies, but the signature over the trusted comment does not. The
     /// signed comment (product or time) was edited. Same error code as [`SignatureError::Tampered`].
     #[error(
-        "the signed comment does not match the signature. It may have been changed after signing."
+        "the signed comment does not match the signature. It may have been changed after signing"
     )]
     CommentTampered,
     /// The product in the signed comment is not the product in the spec.
@@ -85,7 +85,20 @@ pub enum SignatureError {
 }
 
 impl SignatureError {
-    /// The fix line for this error. Never empty, and never names a flag that skips or weakens the check.
+    /// The fix line with the real values filled in. Like [`SignatureError::hint`], but an unknown key
+    /// names the product to pin it for.
+    #[must_use]
+    pub fn fix(&self) -> String {
+        match self {
+            Self::UnknownKey { product, .. } => format!(
+                "get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then pin it with: rdy trust add {product} --key <file>"
+            ),
+            other => other.hint().to_owned(),
+        }
+    }
+
+    /// The fix line for this error, with `<product>` as a placeholder where the product belongs. Never
+    /// empty, and never names a flag that skips or weakens the check. See [`SignatureError::fix`].
     #[must_use]
     pub fn hint(&self) -> &'static str {
         match self {
@@ -93,7 +106,7 @@ impl SignatureError {
                 "ask the vendor for the .minisig file and put it next to the spec. If you wrote this spec yourself, see https://docs.getrdy.io/unsigned"
             }
             Self::UnknownKey { .. } => {
-                "get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then pin it with rdy trust add."
+                "get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then pin it with: rdy trust add <product> --key <file>"
             }
             Self::BadKey { .. } | Self::WeakKey => {
                 "get the public key again from the vendor's docs. Do not use a key from anywhere else."

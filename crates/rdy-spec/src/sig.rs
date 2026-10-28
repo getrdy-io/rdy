@@ -48,8 +48,9 @@ pub enum Policy {
     AllowUnsigned,
 }
 
-/// Where a trusted key came from. Reports record it, and the CLI shows KEY NOT PINNED for [`Self::Flag`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Where a trusted key came from, strongest first (`System` is less than `User` is less than `Flag`).
+/// Reports record it, and the CLI shows KEY NOT PINNED for [`Self::Flag`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum TrustSource {
     /// Pinned in the system store (`/etc/rdy/trust.yaml` or its Windows twin).
@@ -331,20 +332,27 @@ pub(crate) fn verify_sidecar(
         });
     }
     let mut comment_failed = false;
+    // When one key is pinned from several places, report the strongest place, not the first one tried.
+    let mut best: Option<&Pin> = None;
     for pin in candidates {
         match verify_with(&pin.key, bytes, &parsed) {
             KeyCheck::Verified => {
-                return Ok(SignatureState::Verified {
-                    key_id: parsed.key_id,
-                    fingerprint: pin.key.fingerprint(),
-                    product: parsed.product.clone(),
-                    signed_at: parsed.signed_at.clone(),
-                    trust_source: pin.source,
-                });
+                if best.is_none_or(|b| pin.source < b.source) {
+                    best = Some(pin);
+                }
             }
             KeyCheck::CommentDoesNotMatch => comment_failed = true,
             KeyCheck::FileDoesNotMatch => {}
         }
+    }
+    if let Some(pin) = best {
+        return Ok(SignatureState::Verified {
+            key_id: parsed.key_id,
+            fingerprint: pin.key.fingerprint(),
+            product: parsed.product.clone(),
+            signed_at: parsed.signed_at.clone(),
+            trust_source: pin.source,
+        });
     }
     if comment_failed {
         // The file is what the key signed. The edit is in the signed comment.

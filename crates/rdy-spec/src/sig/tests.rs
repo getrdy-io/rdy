@@ -405,6 +405,77 @@ fn the_trust_source_of_the_key_that_verified_is_recorded() {
 }
 
 #[test]
+fn one_key_pinned_from_several_places_reports_the_strongest() {
+    let pair = Pair::new();
+    let sidecar = pair.sign(SPEC.as_bytes(), COMMENT);
+    use TrustSource::{Flag, System, User};
+    for order in [
+        [Flag, User, System],
+        [System, User, Flag],
+        [User, Flag, System],
+        [Flag, System, User],
+    ] {
+        let mut trust = TrustStore::new();
+        for source in order {
+            trust.pin(slug(PRODUCT), pair.key(), source);
+        }
+        let (result, _) = run(
+            SPEC.as_bytes(),
+            Some(sidecar.as_bytes()),
+            &trust,
+            Policy::RequireSigned,
+        );
+        let loaded = result.expect("loads");
+        let SignatureState::Verified { trust_source, .. } = loaded.signature() else {
+            panic!("expected a verified signature");
+        };
+        assert_eq!(*trust_source, System, "{order:?}");
+    }
+    let mut trust = TrustStore::new();
+    trust.pin(slug(PRODUCT), pair.key(), Flag);
+    trust.pin(slug(PRODUCT), pair.key(), User);
+    let (result, _) = run(
+        SPEC.as_bytes(),
+        Some(sidecar.as_bytes()),
+        &trust,
+        Policy::RequireSigned,
+    );
+    let loaded = result.expect("loads");
+    assert!(matches!(
+        loaded.signature(),
+        SignatureState::Verified {
+            trust_source: User,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn an_unknown_key_fix_names_the_product_to_pin() {
+    let error = SignatureError::UnknownKey {
+        key_id: KeyId::from_bytes([1; 8]),
+        product: slug(PRODUCT),
+    };
+    assert!(
+        error
+            .fix()
+            .ends_with("rdy trust add acme-platform --key <file>"),
+        "{}",
+        error.fix()
+    );
+    assert!(
+        error
+            .hint()
+            .contains("rdy trust add <product> --key <file>")
+    );
+    assert_eq!(SpecError::from(error.clone()).fix(), error.fix());
+    assert_eq!(
+        SignatureError::Missing.fix(),
+        SignatureError::Missing.hint()
+    );
+}
+
+#[test]
 fn the_right_key_among_several_pins_is_found() {
     let first = Pair::new();
     let second = Pair::new();
@@ -763,7 +834,8 @@ fn no_error_message_or_hint_names_the_flags_that_weaken_the_check() {
         for text in [error.to_string(), error.hint().to_owned()] {
             assert!(!text.is_empty());
             assert!(!text.contains("--allow-unsigned"), "{text}");
-            assert!(!text.contains("--key"), "{text}");
+            assert!(!text.contains("rdy run --key"), "{text}");
+            assert!(!text.contains("--trust-key"), "{text}");
             assert!(!text.contains("allow_unsigned"), "{text}");
         }
         let wrapped = SpecError::from(error.clone());

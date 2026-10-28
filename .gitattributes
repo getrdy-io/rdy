@@ -3,3 +3,5 @@
 # Signed fixtures are signed over exact bytes. Git must never touch their line endings (M1-120).
 /tests/fixtures/signed/* -text
 /tests/fixtures/wycheproof/* -text
+# The fixture test compares the signed copy with the example spec byte for byte (M1-120).
+/examples/specs/*.yaml text eol=lf

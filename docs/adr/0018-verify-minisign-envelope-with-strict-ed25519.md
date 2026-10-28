@@ -26,7 +26,7 @@ current release (0.3.0) for M1-120 found three problems.
    `crates/rdy-spec/src/sig.rs` and `sig/`. The code is small, with a strict base64 decoder (canonical,
    padded, no whitespace).
 2. It verifies with `ed25519-dalek` `verify_strict` over the BLAKE2b-512 hash of the raw bytes, then over
-   `signature || trusted comment`. Public keys with small order or off the curve are refused when they are
+   `signature || trusted comment`. Public keys with small order, off the curve or in a non-canonical encoding are refused when they are
    built (`PublicKey::from_base64`). Pinned exactly: `ed25519-dalek =2.2.0`, `blake2 =0.10.6`. Every bump
    is reviewed by hand. The 2.x line matches the `sha2` 0.10 and `digest` 0.10 the workspace already uses.
 3. Only the prehashed form (`ED`) is accepted. `Ed` is refused as its own error before any math.
