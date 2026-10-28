@@ -863,6 +863,11 @@ version = "0.1.0-alpha.0"
 [[package]]
 name = "rdy-engine"
 version = "0.1.0-alpha.0"
+dependencies = [
+ "rdy-spec",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "rdy-spec"
