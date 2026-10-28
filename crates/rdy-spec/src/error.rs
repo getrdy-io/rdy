@@ -4,6 +4,8 @@ use std::fmt;
 
 use thiserror::Error;
 
+use crate::sig::SignatureError;
+
 /// The most characters of a refused value that an error keeps.
 const MAX_ECHO_CHARS: usize = 64;
 
@@ -77,7 +79,7 @@ impl fmt::Display for Location {
 ///
 /// Every variant has a `fix:` line from [`SpecError::hint`], which is never empty. Errors that point at a
 /// place in the file come wrapped in [`SpecError::Located`]: use [`SpecError::location`] for the place and
-/// [`SpecError::kind`] for the error itself. Later tickets add the signature variants. The enum is
+/// [`SpecError::kind`] for the error itself. The enum is
 /// `#[non_exhaustive]` so that is not a breaking change.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
@@ -112,9 +114,10 @@ pub enum SpecError {
         /// The number that was refused.
         value: u64,
     },
-    /// [`crate::load`] cannot return a spec yet, because signature checking is not wired in.
-    #[error("loading a spec is not available in this build")]
-    LoadNotWired,
+    /// The signature is missing, in the wrong form, from a key nobody pinned for this product, for another
+    /// product, or does not match the file. Nothing was parsed.
+    #[error(transparent)]
+    Signature(#[from] SignatureError),
     /// An error that points at a place in the file. The parser wraps every error it can place this way.
     ///
     /// `Display` shows only the inner message, so a caller can print `file:line:column: message`.
@@ -318,9 +321,7 @@ impl SpecError {
                 "use lowercase letters, digits, hyphens and underscores, such as 'data'."
             }
             Self::InvalidSerial { .. } => "use a revision number up to 9007199254740991.",
-            Self::LoadNotWired => {
-                "this is a bug in rdy. Please report it at https://github.com/getrdy-io/rdy/issues and include the output of rdy version."
-            }
+            Self::Signature(error) => error.hint(),
         }
     }
 }
@@ -328,6 +329,7 @@ impl SpecError {
 #[cfg(test)]
 mod tests {
     use super::{Location, SpecError};
+    use crate::sig::SignatureError;
 
     /// The match has no wildcard, so a new variant fails to compile until it is listed here and in
     /// `samples`.
@@ -337,7 +339,7 @@ mod tests {
             | SpecError::InvalidCheckId { .. }
             | SpecError::InvalidCheckName { .. }
             | SpecError::InvalidSerial { .. }
-            | SpecError::LoadNotWired
+            | SpecError::Signature(_)
             | SpecError::Located { .. }
             | SpecError::TooLarge { .. }
             | SpecError::NotUtf8
@@ -370,7 +372,7 @@ mod tests {
             SpecError::InvalidCheckId { value: "A".into() },
             SpecError::InvalidCheckName { value: "A".into() },
             SpecError::InvalidSerial { value: u64::MAX },
-            SpecError::LoadNotWired,
+            SpecError::Signature(SignatureError::Missing),
             SpecError::Anchor.at(Location::new(3, 5)),
             SpecError::TooLarge { size: 2, limit: 1 },
             SpecError::NotUtf8,

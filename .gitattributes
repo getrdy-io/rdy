@@ -1,2 +1,5 @@
 # Help snapshots must keep LF on Windows checkouts (M1-029). The repo-wide rules are M1-047.
 /crates/rdy-cli/tests/snapshots/*.txt text eol=lf
+# Signed fixtures are signed over exact bytes. Git must never touch their line endings (M1-120).
+/tests/fixtures/signed/* -text
+/tests/fixtures/wycheproof/* -text

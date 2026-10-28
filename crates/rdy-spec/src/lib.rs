@@ -1,17 +1,21 @@
 //! The `rdy/v1` spec and result formats.
 //!
 //! This crate is the source of truth for the wire types. Today it holds the spec types in [`spec`], the
-//! typed scalars in [`scalar`], the YAML reader [`parse_unverified`] and the [`LoadedSpec`] guarantee.
-//! Signature checks, the result model and the JSON schemas arrive in later M1 tickets.
+//! typed scalars in [`scalar`], the YAML reader [`parse_unverified`], the signature checks in [`sig`] and
+//! the [`LoadedSpec`] guarantee. The result model and the JSON schemas arrive in later M1 tickets.
 //!
 //! Two kinds of spec value exist, on purpose:
 //!
 //! - [`spec::Spec`] is what a file says. It is untrusted. Nothing proves who wrote it.
 //! - [`LoadedSpec`] is a spec that [`load`] verified before parsing it. Only `load` can build one.
 //!
+//! [`load`] takes the raw bytes, the contents of the `.minisig` file if there is one, a [`sig::TrustStore`]
+//! and a [`sig::Policy`]. It checks the minisign signature on the raw bytes, then the signed product, and
+//! only then parses. The result records how the spec was authenticated ([`sig::SignatureState`]).
+//!
 //! [`parse_unverified`] reads a file into the first kind. It is for `rdy spec lint` and `rdy verify`
-//! diagnostics only. A run, including an `--allow-unsigned` run, goes through [`load`] with an unsigned
-//! policy (M1-120). Nothing turns the result of `parse_unverified` into a [`LoadedSpec`].
+//! diagnostics only. A run, including an `--allow-unsigned` run, goes through [`load`] with
+//! [`sig::Policy::AllowUnsigned`]. Nothing turns the result of `parse_unverified` into a [`LoadedSpec`].
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -20,6 +24,7 @@ mod error;
 mod loaded;
 mod parse;
 pub mod scalar;
+pub mod sig;
 pub mod spec;
 
 pub use error::{Location, SpecError};

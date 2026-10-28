@@ -9,7 +9,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | Number | Title | Status |
 | --- | --- | --- |
 | [0001](0001-spec-language-yaml.md) | Spec language is YAML, parsed with serde-saphyr | Accepted |
-| [0002](0002-spec-signatures-ed25519-minisign.md) | Specs are signed with ed25519 in minisign format, verified before parsing, keys pinned per product | Accepted; decision 5 amended 2026-10-28 (declined `trust add` exits 64) |
+| [0002](0002-spec-signatures-ed25519-minisign.md) | Specs are signed with ed25519 in minisign format, verified before parsing, keys pinned per product | Accepted; decision 5 amended 2026-10-28 (declined `trust add` exits 64); decision 2 amended by 0018 (verifier crate) |
 | [0003](0003-report-format-html-json.md) | Reports are one JSON file plus one self-contained HTML file, rendered with askama | Accepted; decisions 1, 2 and 6 amended 2026-10-28 (ADR 0016 timing, banner first) |
 | [0004](0004-async-runtime-tokio.md) | tokio multi-thread runtime, blocking work on spawn_blocking, every check under a timeout | Accepted; decision 5 tightened by 0014 |
 | [0005](0005-plugin-model-custom-checks.md) | No plugins in M1; a sandboxed `custom.exec` check in M4; no dynamic loading or WASM in v1 | Accepted; amended 2026-10-28 (`custom.exec` in M4, not M3) |
@@ -25,6 +25,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0015](0015-redactor-in-rdy-engine.md) | The minimal redactor lives in rdy-engine and runs on whole strings before any cap or write | Accepted (security-reviewer sign-off in PR #13, 2026-10-28); decision 10 added (span union, keyed tags, `Redacted<T>`, `ring`) |
 | [0016](0016-output-dir-confinement-cap-std.md) | Output is confined to one new directory, opened early through a cap-std handle | Accepted |
 | [0017](0017-changelog-fragments.md) | Changelog fragments: each PR adds one file in changelog.d/, and the release step assembles CHANGELOG.md | Accepted |
+| [0018](0018-verify-minisign-envelope-with-strict-ed25519.md) | rdy-spec checks the minisign envelope itself, over strict ed25519 and BLAKE2b | Accepted |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.

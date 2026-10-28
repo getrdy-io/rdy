@@ -10,12 +10,17 @@ homepage.workspace = true
 include = ["src/**", "Cargo.toml", "LICENSE"]
 
 [dependencies]
+blake2 = { workspace = true }
+ed25519-dalek = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde-saphyr = { workspace = true, features = ["deserialize"] }
 serde_json = { workspace = true, features = ["std"] }
+sha2 = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+minisign = { workspace = true }
+proptest = { workspace = true, features = ["std"] }
 trybuild = { workspace = true }
 
 [lints]

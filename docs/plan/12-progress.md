@@ -247,7 +247,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-119 | todo | | Timeouts env and scheduler timeout and deadline tests under paused time
 
-- M1-120 | todo | | Verify minisign signatures in rdy-spec against a trust store with product binding
+- M1-120 | PR #TBD | | verifier is ed25519-dalek verify_strict over our own minisign envelope reader, not minisign-verify (ADR 0018). Deferred: signed_at future-date warning and expiry check (need a clock, M1-026), trust.yaml I/O (M1-121), key text files for --key (M1-121), CLI wiring and error codes (M1-126), windows-x64 autocrlf leg is covered by `-text` in .gitattributes and a CR-free test but is confirmed only by CI
 
 - M1-121 | todo | | Trust store load and save in user and system locations
 
