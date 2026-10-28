@@ -193,6 +193,13 @@ pub enum InternalKind {
     Bug,
     /// stdout could not be written.
     OutputClosed,
+    /// A file could not be written, such as a key or a signature. The path is escaped when printed.
+    FileWrite {
+        /// The path as the user gave it.
+        path: String,
+        /// Why, in plain words.
+        reason: IoReason,
+    },
     /// The command exists in the tree but a later ticket builds it.
     NotImplemented {
         /// The command as typed in the tree, such as `spec lint`. Always a name from the command tree.
@@ -275,6 +282,7 @@ fn internal_message(kind: &InternalKind) -> String {
     match kind {
         InternalKind::Bug => "rdy hit an internal error".to_owned(),
         InternalKind::OutputClosed => "rdy could not write its output".to_owned(),
+        InternalKind::FileWrite { path, reason } => format!("cannot write {path} ({reason})"),
         InternalKind::NotImplemented { command } => {
             format!("rdy {command} is not yet implemented in this build")
         }
@@ -398,6 +406,10 @@ impl CliError {
             Self::Internal(InternalKind::Bug) => BUG_HINT.to_owned(),
             Self::Internal(InternalKind::OutputClosed) => {
                 "check that the output is not closed or full".to_owned()
+            }
+            Self::Internal(InternalKind::FileWrite { .. }) => {
+                "check that the folder exists, that you can write to it and that the disk has room, then run again"
+                    .to_owned()
             }
             Self::Internal(InternalKind::NotImplemented { .. }) => {
                 "use a later release of rdy, listed at https://github.com/getrdy-io/rdy/releases"

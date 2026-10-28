@@ -556,6 +556,17 @@ type only; it does not check ACLs. The password is held in memory that is wiped 
 refused before clap parses anything, on `spec sign` and `spec keygen` only, so the refusal beats a
 missing-argument error and the value is never read. The code is `crates/rdy-cli/src/password.rs`.
 
+**Secret key files (M1-125).** `spec keygen` writes `<name>.key` and `<name>.pub` with `create_new`, so it
+never replaces a file and never follows a link, and the secret key has mode 0600 from the first byte. It
+looks for both names before it asks for a password. The password comes from `--password-file`,
+`RDY_KEY_PASSWORD` or two prompts that must match, and an empty one is refused. With `--unencrypted` it asks
+for nothing and prints a warning, and `--password-file` is refused together with it. `spec sign` lints the
+spec first and asks for nothing if lint fails. It opens the key once without following a symlink and checks
+the open handle (regular file, yours, no group or other access, at most 1 KiB), then asks for the password
+only if the key is encrypted. A key file may ask for no more than scrypt N = 2^20 and 1 GiB (ADR 0019).
+Windows checks the file type only and a new file gets its folder's access list, and the success message
+says so. The code is `crates/rdy-cli/src/spec_cmds.rs` and `crates/rdy-cli/src/signing/`.
+
 **`RDY_KEY_PASSWORD` is the weakest source.** The same user's processes and root can read it from
 `/proc/<pid>/environ`, and every child process inherits it. In CI, store it as a masked secret and prefer a
 `--password-file -` pipe when the CI system allows it. When the password comes from the variable and stderr is

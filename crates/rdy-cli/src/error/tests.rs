@@ -70,6 +70,10 @@ fn every_cli_error() -> Vec<CliError> {
         CliError::Interrupted,
         CliError::Internal(InternalKind::Bug),
         CliError::Internal(InternalKind::OutputClosed),
+        CliError::Internal(InternalKind::FileWrite {
+            path: "acme-signing.key".into(),
+            reason: IoReason::DiskFull,
+        }),
         CliError::Internal(InternalKind::NotImplemented { command: "run" }),
     ]
 }

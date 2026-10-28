@@ -20,7 +20,7 @@ envelope is a classic way to get crypto wrong. Untrusted bytes should not reach 
 2. **Crates.** `rdy-spec` verifies with `minisign-verify`, pinned to an exact version and reviewed on
    every bump, called with legacy (non-prehashed) signatures off. (Amended by ADR 0018: `rdy-spec` reads
    the envelope itself and verifies with `ed25519-dalek` `verify_strict` and `blake2`.) Wycheproof EdDSA vectors and
-   malleability cases run against it in CI. `rdy` creates keys and signs with the `minisign` crate.
+   malleability cases run against it in CI. `rdy` creates keys and signs with the `minisign` crate (amended by ADR 0019: `rdy-cli` does this itself, and the crate is a test-only second implementation).
    Stock `minisign` interoperates.
 3. **Verify, then parse.** `rdy_spec::load` reads the key id and the trusted comment from the signature,
    looks up keys pinned for that product, verifies the raw bytes, and only then parses. After parsing,

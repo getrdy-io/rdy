@@ -262,7 +262,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-124 | todo | | Review CONTRIBUTING.md on a fresh clone
 
-- M1-125 | todo | | rdy spec keygen and rdy spec sign
+- M1-125 | PR #TBD | | ADR 0019: rdy writes the minisign key file itself (scrypt N=2^20, 1 GiB, the stock cost and the most a file may ask for) instead of the `minisign` crate, whose key cost is fixed at N=2^15; the crate stays as a dev-dependency interop check. Lint findings print as `file: level: message` with no line and column until `spec lint` (M1-031) maps checks to lines. Windows checks the file type only and a new key gets its folder's access list (named in the success message); the Windows tests compile here and run on the Windows leg. Ctrl-C during the 2 to 4 second key derivation is the M1 Ctrl-C ticket's
 
 - M1-126 | todo | | rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner
 

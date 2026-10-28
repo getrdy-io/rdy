@@ -38,7 +38,7 @@ current release (0.3.0) for M1-120 found three problems.
    point. Each pin records a source (system, user or flag), and a verified result carries it, so the CLI
    can show KEY NOT PINNED for a one-run key. A bad file signature and a bad comment signature are two
    errors with one error code.
-7. `rdy` still creates keys and signs with the `minisign` crate (ADR 0002), in M1-125.
+7. `rdy` still creates keys and signs with the `minisign` crate (ADR 0002), in M1-125. (Amended by ADR 0019: `rdy-cli` writes the secret key file and signs itself, because the crate's key cost is fixed and low.)
 
 ## Consequences
 
