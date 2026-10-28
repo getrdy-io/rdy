@@ -7,10 +7,12 @@ members = [
     "crates/rdy-checks-net",
     "crates/rdy-checks-k8s",
     "crates/rdy-cli",
+    "crates/xtask",
 ]
 
 # Crates enter the workspace when their milestone starts (docs/plan/00-overview.md).
 # rdy-bundle is M2, rdy-checks-cloud is M3, rdy-checks-gpu is M4.
+# xtask is the repo task runner (cargo xtask). It is never published.
 
 [workspace.package]
 edition = "2024"
@@ -24,11 +26,15 @@ homepage = "https://getrdy.io"
 [workspace.dependencies]
 # Each ticket adds the lines it needs. Nothing is listed ahead of use.
 # Default features are off. The crate that uses a dependency names its features.
+anyhow = { version = "1", default-features = false }
 clap = { version = "4.6", default-features = false }
 serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false }
 trybuild = "1"
 thiserror = { version = "2", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+tempfile = { version = "3", default-features = false }
+unicode-normalization = { version = "0.1", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
