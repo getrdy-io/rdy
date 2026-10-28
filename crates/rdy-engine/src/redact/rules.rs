@@ -164,8 +164,9 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
 ///    markers (a PEM key, whose `Proc-Type: 4,ENCRYPTED` header looks like a key). The counts ignore
 ///    quotes inside brackets, escapes and everything else, and they can only make a span longer. Without
 ///    them `password: {` then `v: hunter2}`, or `KEY="-----BEGIN` then a key-shaped line, would stop early.
-/// 6. A line only counts as a key when `name=` is not followed by another `=`, a quote or the end of the
-///    line, so the base64 tail `QUJD==` is not a key. This also keeps `NEXT="1"` inside the value.
+/// 6. A line only counts as a key when `name=` is not directly followed by another `=`, a quote or the end
+///    of the line, so the base64 tail `QUJD==` is not a key. This also keeps `NEXT="1"` inside the
+///    value, while `NEXT= "1"` still counts as a key.
 /// 7. A key inside a `#` comment line takes only its own value, never the lines below.
 ///
 /// This over-redacts on purpose: a one-line JSON object after a secret key loses the rest of its line,

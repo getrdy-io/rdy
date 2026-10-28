@@ -88,11 +88,11 @@ pub fn shell_word(word: &str) -> String {
 /// The candidate closest to `input`, when it is close enough to be a typo.
 ///
 /// The distance counts one edit for an insert, a delete, a change or a swap of two neighbours. The limit
-/// is one third of the length of `input`, at least 1 and at most 3. An exact match is not a suggestion.
+/// is one third of the length of `input`, at least 1 and at most 2 (07 section 1). An exact match is not a suggestion.
 /// On a tie the first candidate wins, so the result does not depend on hashing.
 #[must_use]
 pub fn did_you_mean<'a>(input: &str, candidates: &[&'a str]) -> Option<&'a str> {
-    let limit = (input.chars().count() / 3).clamp(1, 3);
+    let limit = (input.chars().count() / 3).clamp(1, 2);
     candidates
         .iter()
         .filter(|c| **c != input)

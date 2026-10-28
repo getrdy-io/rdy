@@ -67,6 +67,8 @@ fn main() -> ExitCode {
         Ok(cli) => cli,
         Err(err) => {
             // Help and version print to stdout and exit 0. Usage errors exit 64.
+            // xtask is a repo tool, not the `rdy` binary: it takes no secrets, so clap's own text is fine.
+            #[allow(clippy::disallowed_methods)]
             let _ = err.print();
             return ExitCode::from(if err.use_stderr() { EXIT_USAGE } else { 0 });
         }
