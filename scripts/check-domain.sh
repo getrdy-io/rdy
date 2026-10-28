@@ -30,6 +30,12 @@ RESOLVER="${RDY_RESOLVER:-1.1.1.1}"
 DOH_URL="${RDY_DOH_URL:-https://dns.google/resolve}"
 CAA_ALLOWED="${RDY_CAA_ALLOWED:-letsencrypt.org pki.goog ssl.com sectigo.com}"
 HSTS_MIN="${RDY_HSTS_MIN:-15552000}"
+case "$HSTS_MIN" in
+'' | *[!0-9]*)
+  echo "RDY_HSTS_MIN must be a whole number of seconds" >&2
+  exit 64
+  ;;
+esac
 CURL_OPTS="--silent --show-error --max-time 20"
 
 case "$DOMAIN" in
@@ -55,6 +61,15 @@ FAILS=0
 PASSES=0
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# with_timeout CMD ARGS...: run with a 20 second limit when timeout exists.
+with_timeout() {
+  if have timeout; then
+    timeout 20 "$@"
+  else
+    "$@"
+  fi
+}
 
 pass() {
   PASSES=$((PASSES + 1))
@@ -82,10 +97,10 @@ dig)
   }
   ;;
 doh)
-  have curl && have jq || {
+  if ! have curl || ! have jq; then
     echo "DNS-over-HTTPS mode needs curl and jq" >&2
     exit 64
-  }
+  fi
   ;;
 *)
   echo "RDY_DNS_TOOL must be dig or doh" >&2
@@ -94,16 +109,19 @@ doh)
 esac
 
 # dns_data TYPE NUMBER: print the record data, one record per line. Empty when none.
-# Returns 1 when the lookup itself failed.
+# Returns 2 when the lookup itself failed (network, timeout, bad JSON), 0 otherwise.
 dns_data() {
   if [ "$DNS_TOOL" = dig ]; then
-    dig +short +time=5 +tries=2 "@$RESOLVER" "$DOMAIN" "$1" 2>/dev/null
+    dd_out=$(dig +short +time=5 +tries=2 "@$RESOLVER" "$DOMAIN" "$1" 2>/dev/null) || return 2
   else
     # shellcheck disable=SC2086
-    curl $CURL_OPTS -H 'accept: application/dns-json' \
-      "$DOH_URL?name=$DOMAIN&type=$2&do=1" |
-      jq -r --argjson t "$2" '.Answer[]? | select(.type == $t) | .data'
+    dd_body=$(curl $CURL_OPTS -H 'accept: application/dns-json' \
+      "$DOH_URL?name=$DOMAIN&type=$2&do=1" 2>/dev/null) || return 2
+    dd_out=$(printf '%s' "$dd_body" |
+      jq -r --argjson t "$2" '.Answer[]? | select(.type == $t) | .data' 2>/dev/null) || return 2
   fi
+  if [ -n "$dd_out" ]; then printf '%s\n' "$dd_out"; fi
+  return 0
 }
 
 # dns_ad: print yes or no for the AD flag on an apex SOA answer. Prints nothing on failure.
@@ -154,7 +172,7 @@ check_lock() {
   fi
 
   if [ -z "$statuses" ] && have whois; then
-    out=$(whois "$DOMAIN" 2>/dev/null) || out=""
+    out=$(with_timeout whois "$DOMAIN" 2>/dev/null) || out=""
     statuses=$(printf '%s\n' "$out" | grep -iE '^[[:space:]]*(domain )?status:' | sed 's/^[^:]*:[[:space:]]*//')
     via="whois $DOMAIN"
   fi
@@ -170,12 +188,14 @@ check_lock() {
     return
   fi
 
-  norm=$(printf '%s\n' "$statuses" | tr 'A-Z' 'a-z' | tr -d ' _-')
+  norm=$(printf '%s\n' "$statuses" | tr '[:upper:]' '[:lower:]' | tr -d ' _-')
   if printf '%s\n' "$norm" | grep -q 'clienttransferprohibited'; then
     pass "$item" "clientTransferProhibited is set (via $via)"
+  elif printf '%s\n' "$norm" | grep -q 'servertransferprohibited'; then
+    pass "$item" "serverTransferProhibited is set, a registry lock (via $via)"
   else
     shown=$(printf '%s\n' "$statuses" | sed 's/ http.*//' | tr '\n' ',' | sed 's/,$//')
-    fail "$item" "clientTransferProhibited is not set. Status: $shown (via $via)" "$fixmsg"
+    fail "$item" "neither clientTransferProhibited nor serverTransferProhibited is set. Status: $shown (via $via)" "$fixmsg"
   fi
 }
 
@@ -185,7 +205,12 @@ check_dnssec() {
   label=$(dns_tool_label)
   fixmsg="Cloudflare: DNS > Settings > DNSSEC > Enable DNSSEC, then add the DS record at the registrar."
 
-  ds=$(dns_data DS 43) || ds=""
+  ds=$(dns_data DS 43)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "$item" "lookup failed for the DS record (via $label)" "Check the network and the resolver, then rerun."
+    return
+  fi
   if [ -z "$ds" ]; then
     fail "$item" "no DS record at the parent zone, so the zone is not signed in the chain (via $label)" "$fixmsg"
     return
@@ -193,7 +218,7 @@ check_dnssec() {
 
   ad=$(dns_ad) || ad=""
   if [ "$DNS_TOOL" = dig ] && have delv; then
-    if delv "@$RESOLVER" "$DOMAIN" SOA 2>&1 | grep -q 'fully validated'; then
+    if with_timeout delv "@$RESOLVER" "$DOMAIN" SOA 2>&1 | grep -q 'fully validated'; then
       pass "$item" "DS present and delv reports fully validated (via dig and delv @$RESOLVER)"
     else
       fail "$item" "DS present but delv did not report fully validated (via delv @$RESOLVER)" \
@@ -215,7 +240,12 @@ check_caa() {
   label=$(dns_tool_label)
   fixmsg="Cloudflare: DNS > Records > Add record > CAA, once per allowed CA. Cloudflare adds the other CAs it needs."
 
-  caa=$(dns_data CAA 257) || caa=""
+  caa=$(dns_data CAA 257)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "$item" "lookup failed for CAA records (via $label)" "Check the network and the resolver, then rerun."
+    return
+  fi
   if [ -z "$caa" ]; then
     fail "$item" "no CAA records on $DOMAIN (via $label)" "$fixmsg"
     return
@@ -226,28 +256,31 @@ check_caa() {
     return
   fi
 
-  issuers=$(printf '%s\n' "$caa" |
-    sed -n 's/^[0-9][0-9]*[[:space:]][[:space:]]*issue\(wild\)\{0,1\}[[:space:]][[:space:]]*"\{0,1\}\([^";]*\).*/\2/p' |
-    tr 'A-Z' 'a-z' | sort -u)
-  if [ -z "$issuers" ]; then
-    fail "$item" "CAA records exist but none has an issue or issuewild tag (via $label)" "$fixmsg"
+  caa=$(printf '%s\n' "$caa" | tr '[:upper:]' '[:lower:]')
+  plain=$(printf '%s\n' "$caa" | grep -cE '^[0-9]+[[:space:]]+issue[[:space:]]')
+  if [ "$plain" -eq 0 ]; then
+    fail "$item" "no plain issue tag. issuewild alone does not limit non-wildcard issuance, so any CA may still issue (via $label)" \
+      "Add an issue record for each CA we use, as well as any issuewild records. $fixmsg"
     return
   fi
+  issuers=$(printf '%s\n' "$caa" |
+    sed -n 's/^[0-9][0-9]*[[:space:]][[:space:]]*issue\(wild\)\{0,1\}[[:space:]][[:space:]]*"\{0,1\}\([^";]*\).*/\2/p' |
+    grep -v '^$' | sort -u)
 
   bad=""
   for ca in $issuers; do
     ok=no
     for allowed in $CAA_ALLOWED; do
-      [ "$ca" = "$allowed" ] && ok=yes
+      if [ "$ca" = "$allowed" ]; then ok=yes; fi
     done
-    [ "$ok" = no ] && bad="$bad $ca"
+    if [ "$ok" = no ]; then bad="$bad $ca"; fi
   done
   if [ -n "$bad" ]; then
     fail "$item" "CAs not on the allowed list:$bad. Allowed: $CAA_ALLOWED (via $label)" \
       "Delete the CAA records for CAs we do not use, or add the CA to RDY_CAA_ALLOWED and to the doc if it is really used."
     return
   fi
-  pass "$item" "issuers: $(printf '%s' "$issuers" | tr '\n' ' ' | sed 's/ $//') (via $label)"
+  pass "$item" "issuers: $(printf '%s\n' "$issuers" | tr '\n' ' ' | sed 's/ $//') (via $label)"
 }
 
 # ---- 4. HSTS -----------------------------------------------------------------------
@@ -269,7 +302,7 @@ check_hsts() {
     fail "$item" "no Strict-Transport-Security header on https://$DOMAIN (via curl --head)" "$fixmsg"
     return
   fi
-  lower=$(printf '%s' "$line" | tr 'A-Z' 'a-z')
+  lower=$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')
   age=$(printf '%s' "$lower" | sed -n 's/.*max-age=\([0-9][0-9]*\).*/\1/p')
   if [ -z "$age" ] || [ "$age" -lt "$HSTS_MIN" ]; then
     fail "$item" "max-age is ${age:-missing}, need at least $HSTS_MIN (via curl --head): $line" "$fixmsg"

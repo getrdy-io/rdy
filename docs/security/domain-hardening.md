@@ -19,10 +19,12 @@ scripts/check-domain.sh example.com
 
 | Item | Passes when | Tools |
 | --- | --- | --- |
-| Registrar lock | `clientTransferProhibited` is in the RDAP or whois status | RDAP (curl, jq) if the TLD publishes it, else `whois` |
+| Registrar lock | `clientTransferProhibited` or `serverTransferProhibited` is in the RDAP or whois status | RDAP (curl, jq) if the TLD publishes it, else `whois` |
 | DNSSEC | A DS record exists at the parent and a validating resolver sets the AD flag | `dig` (and `delv` if present), else DNS-over-HTTPS JSON via curl and jq |
-| CAA | At least one `issue` record, and every issuer is on the allowed list | `dig`, else DNS-over-HTTPS |
+| CAA | At least one plain `issue` record (`issuewild` alone is not enough), and every issuer is on the allowed list | `dig`, else DNS-over-HTTPS |
 | HSTS | `Strict-Transport-Security` on `https://getrdy.io` with max-age of 180 days or more and `includeSubDomains` | `curl --head` |
+
+Offline stub tests for the parsers are in `scripts/test-check-domain.sh`.
 
 Hardware-key MFA cannot be read from outside. The script prints it as MANUAL. You confirm it by hand
 (see below) and write the date in the PR.
