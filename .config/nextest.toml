@@ -1,0 +1,13 @@
+# cargo-nextest settings (docs/plan/08-testing.md, section 1).
+# CI runs `cargo nextest run --profile ci`. Locally the default profile applies.
+
+# Oldest nextest that reads these settings. CI pins an exact version in .github/workflows/ci.yml.
+nextest-version = "0.9.100"
+
+[profile.ci]
+# No retries. A test that fails once in three runs is a bug, and a retry would hide it.
+retries = 0
+# Run every test so one red test does not hide the others.
+fail-fast = false
+# A hung test is reported after 30 seconds and killed after two minutes, and it names itself.
+slow-timeout = { period = "30s", terminate-after = 4 }
