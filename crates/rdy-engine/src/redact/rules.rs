@@ -158,10 +158,15 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
 ///    **and** itself starts with a key (`name:`, `name=`, `"name":`). With no such line it runs to the
 ///    end of the text. If the value is one line wrapped in a matching pair of quotes, the two outer
 ///    quotes stay. A tab and space mix in the two indents counts as deeper.
-/// 5. The terminator test in rule 4 is switched off while the text taken so far has more `[` and `{` than
-///    `]` and `}`. This is a plain count that ignores quotes and escapes, and it is the only bracket
-///    logic. Without it `password: {` then `v: hunter2}` would stop at `v:`.
-/// 6. A key inside a `#` comment line takes only its own value, never the lines below.
+/// 5. The terminator test in rule 4 is switched off, so the value goes on, while any of these plain counts
+///    over the text taken so far says it is still open: more `[` and `{` than `]` and `}`; an odd number
+///    of the value's opening quote character (`"` or `'`); or more `-----BEGIN ` than `-----END `
+///    markers (a PEM key, whose `Proc-Type: 4,ENCRYPTED` header looks like a key). The counts ignore
+///    quotes inside brackets, escapes and everything else, and they can only make a span longer. Without
+///    them `password: {` then `v: hunter2}`, or `KEY="-----BEGIN` then a key-shaped line, would stop early.
+/// 6. A line only counts as a key when `name=` is not followed by another `=`, a quote or the end of the
+///    line, so the base64 tail `QUJD==` is not a key. This also keeps `NEXT="1"` inside the value.
+/// 7. A key inside a `#` comment line takes only its own value, never the lines below.
 ///
 /// This over-redacts on purpose: a one-line JSON object after a secret key loses the rest of its line,
 /// a `[INFO]` log line is not a key, so a quoted secret in a log can take every line below it, and a
@@ -210,7 +215,11 @@ fn value_span(
 
     let simple = is_simple || is_exempt;
     let key_indent = Indent::of(key_ws);
-    let mut depth = if simple { 0 } else { bracket_delta(value) };
+    let quote = value.bytes().next().filter(|b| matches!(b, b'"' | b'\''));
+    let mut open = Open::default();
+    if !simple {
+        open.add(value, quote);
+    }
     let mut first = None;
     let mut last_end = None;
     let mut pos = next_line;
@@ -222,13 +231,13 @@ fn value_span(
             let rest = line.trim_start_matches([' ', '\t']);
             let at_or_left =
                 key_indent.is_at_or_left_of(&Indent::of(&line[..line.len() - rest.len()]));
-            if at_or_left && (simple || (depth <= 0 && starts_with_key_token(rest))) {
+            if at_or_left && (simple || (!open.is_open() && starts_with_key_token(rest))) {
                 break;
             }
             first.get_or_insert(start);
             last_end = Some(start + line.len());
             if !simple {
-                depth += bracket_delta(line);
+                open.add(line, quote);
             }
         }
         pos = next;
@@ -327,17 +336,49 @@ fn starts_with_key_token(rest: &str) -> bool {
         i += 1;
     }
     visit(i + 1);
-    matches!(bytes.get(i), Some(b':' | b'='))
+    match bytes.get(i) {
+        Some(b':') => true,
+        // `AbCd==` and `KEY="v"` and `AbCd=` are not keys here.
+        Some(b'=') => !matches!(bytes.get(i + 1), None | Some(b'=' | b'"' | b'\'')),
+        _ => false,
+    }
 }
 
-/// Opening brackets minus closing brackets in `s`, counting `[` `{` `]` `}` and nothing else.
-fn bracket_delta(s: &str) -> i64 {
-    visit(s.len());
-    s.bytes().fold(0, |d, b| match b {
-        b'[' | b'{' => d + 1,
-        b']' | b'}' => d - 1,
-        _ => d,
-    })
+/// Plain counts over the text a value has taken so far. They decide whether the value is still open,
+/// and they are deliberately naive: no quotes inside brackets, no escapes, no nesting by kind.
+#[derive(Default)]
+struct Open {
+    /// `[` and `{` minus `]` and `}`.
+    brackets: i64,
+    /// How many times the value's opening quote character has appeared.
+    quotes: usize,
+    /// `-----BEGIN ` markers minus `-----END ` markers.
+    pem: i64,
+}
+
+impl Open {
+    fn add(&mut self, s: &str, quote: Option<u8>) {
+        visit(s.len());
+        for b in s.bytes() {
+            match b {
+                b'[' | b'{' => self.brackets += 1,
+                b']' | b'}' => self.brackets -= 1,
+                _ if Some(b) == quote => self.quotes += 1,
+                _ => {}
+            }
+        }
+        if s.contains("-----") {
+            visit(2 * s.len());
+            let begins = i64::try_from(s.matches("-----BEGIN ").count()).unwrap_or(i64::MAX);
+            let ends = i64::try_from(s.matches("-----END ").count()).unwrap_or(i64::MAX);
+            self.pem += begins - ends;
+        }
+    }
+
+    /// True while a bracket, a quote or a PEM block that the value opened has not been closed.
+    fn is_open(&self) -> bool {
+        self.brackets > 0 || self.quotes % 2 == 1 || self.pem > 0
+    }
 }
 
 /// True if `pos` is inside one of the sorted, disjoint ranges.
@@ -752,8 +793,77 @@ mod tests {
             ("{\n\"password\":\n[\n\"hunter2\"\n]\n}", "hunter2"),
             ("password: [a}\nhunter2]", "hunter2"),
             ("TOKEN=\\\"a\nhunter2\\\"", "hunter2"),
+            // Round 7: an open quote, a base64 tail and a PEM header that looks like a key.
+            ("password: \"a\nb: hunter2\"", "hunter2"),
+            ("password: 'a\nb: hunter2'", "hunter2"),
+            ("password: \"a\nb=hunter2\"", "hunter2"),
+            (
+                "PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\nMIIBVQIBADANBgkq\nQUJD==\n-----END PRIVATE KEY-----\"\nNEXT=1",
+                "MIIBVQIBADANBgkq",
+            ),
+            (
+                "PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\nMIIBVQIBADANBgkq\nQUJD==\n-----END PRIVATE KEY-----\"\nNEXT=1",
+                "QUJD==",
+            ),
+            (
+                "PRIVATE_KEY=\"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,ABCDEF\n\nMIIBVQIBADANBgkq\n-----END RSA PRIVATE KEY-----\"",
+                "MIIBVQIBADANBgkq",
+            ),
+            (
+                "PRIVATE_KEY=\"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,ABCDEF\n\nMIIBVQIBADANBgkq\n-----END RSA PRIVATE KEY-----\"",
+                "DEK-Info",
+            ),
+            (
+                "PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nMIIBVQIBADANBgkq\n-----END RSA PRIVATE KEY-----",
+                "MIIBVQIBADANBgkq",
+            ),
+            (
+                "password: |\n  -----BEGIN PRIVATE KEY-----\n  MIIBVQIBADANBgkq\n  -----END PRIVATE KEY-----",
+                "MIIBVQIBADANBgkq",
+            ),
+            (
+                "PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\nMIIBVQ=\nAbCd=\nQUJD==\n",
+                "AbCd=",
+            ),
         ] {
             assert_covered(text, secret);
+        }
+    }
+
+    #[test]
+    fn a_pem_key_in_a_dotenv_file_is_covered_and_the_next_key_is_not() {
+        let text = "A=1\nPRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\nMIIBVQIBADANBgkq\nQUJD==\n-----END PRIVATE KEY-----\"\nNEXT=1\nB=\"2\"";
+        let spans = spans(text);
+        assert_eq!(spans.len(), 1, "{spans:?}");
+        let taken = &text[spans[0].clone()];
+        assert!(taken.starts_with("\"-----BEGIN"), "{taken:?}");
+        assert!(taken.ends_with("-----END PRIVATE KEY-----\""), "{taken:?}");
+        // The key after it is a key again once the block is closed.
+        let text = "PRIVATE_KEY=-----BEGIN X-----\nProc-Type: 4,ENCRYPTED\n-----END X-----\nNEXT=1\npassword: \"q r\"";
+        assert_eq!(
+            found(text),
+            [
+                "-----BEGIN X-----\nProc-Type: 4,ENCRYPTED\n-----END X-----",
+                "q r"
+            ]
+        );
+    }
+
+    #[test]
+    fn base64_tails_and_quoted_assignments_are_not_keys() {
+        for line in ["QUJD==", "AbCd=", "x=\"v\"", "x='v'", "x=", "x ==y"] {
+            assert!(!starts_with_key_token(line), "{line:?}");
+        }
+        for line in [
+            "name: v",
+            "name=v",
+            "name = v",
+            "\"name\": v",
+            "'name': v",
+            "a.b-c:",
+            "x= v",
+        ] {
+            assert!(starts_with_key_token(line), "{line:?}");
         }
     }
 
@@ -891,6 +1001,10 @@ mod tests {
     /// Every input here made some earlier version of the rule quadratic. The rule must visit a bounded
     /// number of bytes per input byte, whatever the shape. `n` is large enough that a quadratic rule
     /// would visit thousands of times the input.
+    ///
+    /// The counter covers the rule's own scans only. The time spent inside the `regex` crate
+    /// (`captures_iter`) and in `is_secret_key` is not counted. The smoke test below times adversarial
+    /// inputs for those.
     #[test]
     fn the_work_is_linear_in_the_input() {
         let n = 20_000;
@@ -953,6 +1067,16 @@ mod tests {
                 "blank gaps",
                 "password: \"x y\"\n\n\n\n\nuser: 1\n".repeat(n),
             ),
+            ("open quote then keys", "password: \"a\nb: 1\n".repeat(n)),
+            (
+                "pem blocks",
+                "PRIVATE_KEY=\"-----BEGIN K-----\nAAAA\nBB==\n-----END K-----\"\n".repeat(n),
+            ),
+            (
+                "open pem",
+                "PRIVATE_KEY=-----BEGIN K-----\nProc-Type: 4\n".repeat(n),
+            ),
+            ("base64 tails", "password: \"a b\"\nQUJD==\n".repeat(n)),
         ];
         for (name, text) in &inputs {
             let counted = visits(text);
@@ -965,13 +1089,31 @@ mod tests {
         }
     }
 
-    /// One wall-clock check with a generous bound, as a smoke test for the parts the counter cannot see.
+    /// One wall-clock check with a generous bound, as a smoke test for the parts the counter cannot see:
+    /// the `regex` crate's `captures_iter` and `is_secret_key`.
     #[test]
     fn a_large_hostile_input_finishes_in_reasonable_time() {
         let n = 5_000;
-        let text = "password=\"a\" ".repeat(n) + &"\n".repeat(4 * n);
+        let inputs = [
+            "password=\"a\" ".repeat(n) + &"\n".repeat(4 * n),
+            // Regex worst cases: long runs that almost match, and matches that start far back.
+            "a".repeat(40 * n) + "=b ",
+            "a=".repeat(20 * n),
+            "=".repeat(40 * n),
+            "a".repeat(20 * n) + &"\\".repeat(20 * n) + "\"=",
+            "a\"=".repeat(20 * n),
+            "-a".repeat(20 * n) + ":x",
+            // A key with a stem and an excluded word at every position.
+            "password".repeat(8 * n) + "=x",
+            "author".repeat(8 * n) + "=x",
+            "authorization".repeat(4 * n) + "=x",
+            "passed_".repeat(8 * n) + "token=x",
+            " ".repeat(40 * n) + "password=x",
+        ];
         let started = std::time::Instant::now();
-        let _ = spans(&text);
+        for text in &inputs {
+            let _ = spans(text);
+        }
         assert!(
             started.elapsed() < std::time::Duration::from_secs(20),
             "took {:?}",

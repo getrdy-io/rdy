@@ -294,6 +294,19 @@ fn no_byte_of_a_matched_secret_survives() {
         format!("TOKEN=\\\"a\n{secret}\\\""),
         format!("password: correct horse\n  battery {secret}"),
         format!("password: a\n  {secret}"),
+        // Seventh review round: an open quote, a base64 tail and a PEM header that looks like a key.
+        format!("password: \"a\nb: {secret}\""),
+        format!("password: 'a\nb: {secret}'"),
+        format!(
+            "PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\n{secret}\nQUJD==\n-----END PRIVATE KEY-----\"\nNEXT=1"
+        ),
+        format!(
+            "PRIVATE_KEY=\"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,{secret}\n\nMIIBVQ\n-----END RSA PRIVATE KEY-----\""
+        ),
+        format!(
+            "PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n{secret}\n-----END RSA PRIVATE KEY-----"
+        ),
+        format!("PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\nMIIBVQ\n{secret}=\n"),
     ];
     let r = redactor();
     for form in &forms {
