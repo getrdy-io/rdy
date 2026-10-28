@@ -15,8 +15,9 @@
 //! | [`CheckParams::Unknown`] | rdy has no check with this id | `not_in_build` or `unknown_check` |
 //! | [`CheckParams::Unsupported`] | rdy knows the id and cannot read a field or a value | `unsupported_spec` |
 //!
-//! Telling `not_in_build` from `unknown_check` needs the list of reserved ids. That list arrives with the
-//! reserved-id lint rule. Until then `Unknown` stands for both.
+//! `Unknown` stands for two skips. [`CheckParams::unknown_kind`] tells them apart with the list of
+//! reserved ids in [`crate::reserved`]: [`UnknownKind::NotInBuild`] for a reserved id this build lacks,
+//! [`UnknownKind::UnknownCheck`] for any other.
 //!
 //! Nothing is ever ignored. A field the parameter struct does not have is [`UnsupportedReason::UnknownField`],
 //! because dropping a stricter threshold from a newer spec would turn a failing host into a passing one
@@ -38,6 +39,7 @@ use serde_json::{Map, Value};
 
 use crate::SpecError;
 use crate::error::{echo_reason, echo_safe};
+use crate::reserved::{UnknownKind, is_reserved_id};
 use crate::spec::{CheckSpec, Lenient, Spec};
 
 mod common;
@@ -173,6 +175,18 @@ known_checks! {
     "k8s.admission" => K8sAdmission(K8sAdmission),
     "k8s.nodes" => K8sNodes(K8sNodes),
     "k8s.version" => K8sVersion(K8sVersion),
+}
+
+impl CheckParams {
+    /// Why an [`CheckParams::Unknown`] entry is skipped, or `None` for any other variant.
+    #[must_use]
+    pub fn unknown_kind(&self) -> Option<UnknownKind> {
+        match self {
+            Self::Unknown { id, .. } if is_reserved_id(id) => Some(UnknownKind::NotInBuild),
+            Self::Unknown { .. } => Some(UnknownKind::UnknownCheck),
+            _ => None,
+        }
+    }
 }
 
 /// Why an entry for a known check id could not be read. Only the first problem is kept.
