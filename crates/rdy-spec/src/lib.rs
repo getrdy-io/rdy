@@ -3,7 +3,8 @@
 //! This crate is the source of truth for the wire types. Today it holds the spec types in [`spec`], the
 //! typed scalars in [`scalar`], the YAML reader [`parse_unverified`], the two-step check decoding in
 //! [`check`], the signature checks in [`sig`], the result types and the verdict rule in [`result`], and
-//! the [`LoadedSpec`] guarantee. The JSON schemas of the spec and the result are generated from these
+//! the [`LoadedSpec`] guarantee. [`reserved`] lists the check ids that are reserved and [`lint`] turns a
+//! decoded entry into a finding. The JSON schemas of the spec and the result are generated from these
 //! types by [`schema`].
 //!
 //! Two kinds of spec value exist, on purpose:
@@ -24,8 +25,10 @@
 
 pub mod check;
 mod error;
+pub mod lint;
 mod loaded;
 mod parse;
+pub mod reserved;
 pub mod result;
 pub mod scalar;
 pub mod schema;

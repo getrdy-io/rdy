@@ -48,9 +48,29 @@ fn an_unknown_field_in_a_known_check_is_unsupported_and_named() {
 }
 
 #[test]
-fn a_known_id_with_no_parameters_decodes_to_its_typed_variant() {
-    let c = entry(&json!({"id": "host.cpu"}));
-    assert_eq!(c.decode_params(), CheckParams::HostCpu(HostCpu::default()));
+fn a_known_id_with_its_parameters_decodes_to_its_typed_variant() {
+    let c = entry(&json!({"id": "host.cpu", "min": 4}));
+    let CheckParams::HostCpu(cpu) = c.decode_params() else {
+        panic!("host.cpu must decode to HostCpu");
+    };
+    assert_eq!(cpu.min.map(Cores::get), Some(4));
+}
+
+/// The smallest parameters that make the entry of `id` read. A new parameter struct with a required key
+/// adds its line here.
+fn minimal(id: &str) -> Value {
+    match id {
+        "host.cpu" => json!({"id": id, "min": 1}),
+        "host.memory" => json!({"id": id, "min": "1Gi"}),
+        "host.disk" => json!({"id": id, "path": "/", "min": "1Gi"}),
+        "host.ports" => json!({"id": id, "free": [80]}),
+        "net.egress" => json!({"id": id, "endpoints": ["a.example:443"]}),
+        "net.dns" => json!({"id": id, "names": ["a.example"]}),
+        "k8s.rbac" => json!({"id": id, "can": ["create namespaces"]}),
+        "k8s.nodes" => json!({"id": id, "min_ready": 1}),
+        "k8s.version" => json!({"id": id, "min": "1.27"}),
+        _ => json!({"id": id}),
+    }
 }
 
 #[test]
@@ -59,7 +79,7 @@ fn all_seventeen_m1_ids_are_known_and_decode_to_their_own_variant() {
     let mut seen = HashSet::new();
     for id in KNOWN_IDS {
         assert!(seen.insert(*id), "{id} is listed twice");
-        let params = entry(&json!({ "id": id })).decode_params();
+        let params = entry(&minimal(id)).decode_params();
         assert!(
             !matches!(
                 params,
@@ -160,9 +180,9 @@ fn an_unreadable_severity_still_counts_as_block() {
 fn good_common_fields_do_not_disturb_the_parameters() {
     let c = entry(&json!({
         "id": "host.cpu", "name": "main", "severity": "warn", "fix": "Add cores.",
-        "timeout": "20s", "os": ["linux"]
+        "timeout": "20s", "os": ["linux"], "min": 2
     }));
-    assert_eq!(c.decode_params(), CheckParams::HostCpu(HostCpu::default()));
+    assert!(matches!(c.decode_params(), CheckParams::HostCpu(_)));
 }
 
 #[test]
@@ -365,7 +385,7 @@ fn an_entry_with_an_unreadable_name_has_no_key_and_is_not_a_duplicate() {
     let spec = spec_of(&[
         json!({"id": "host.disk", "name": "Data"}),
         json!({"id": "host.disk", "name": "Data"}),
-        json!({"id": "host.disk"}),
+        minimal("host.disk"),
     ]);
     assert!(find_duplicate(&spec.checks).is_none());
     let decoded = spec.decode_checks().expect("no duplicate");
@@ -390,7 +410,7 @@ fn a_duplicate_id_is_escaped_in_the_error() {
 #[test]
 fn decode_checks_keeps_entry_order_and_reports_each_outcome() {
     let spec = spec_of(&[
-        json!({"id": "host.cpu"}),
+        minimal("host.cpu"),
         json!({"id": "gpu.cuda"}),
         json!({"id": "host.memory", "mn": "32Gi"}),
     ]);
@@ -398,4 +418,41 @@ fn decode_checks_keeps_entry_order_and_reports_each_outcome() {
     assert!(matches!(decoded[0], CheckParams::HostCpu(_)));
     assert!(matches!(decoded[1], CheckParams::Unknown { .. }));
     assert!(matches!(decoded[2], CheckParams::Unsupported { .. }));
+}
+
+// ---- messages carried from the review of M1-024 -----------------------------------------------
+
+/// With several keys in `one_of`, "and 'path'" would read as part of the list.
+#[test]
+fn a_no_threshold_with_several_keys_and_another_required_key_reads_as_two_clauses() {
+    let reason = UnsupportedReason::NoThreshold {
+        one_of: &["min", "arch", "flags"],
+        and: vec!["path", "name"],
+    };
+    assert_eq!(
+        reason.to_string(),
+        "has no threshold: add at least one of 'min', 'arch', or 'flags'; also add 'path' and 'name'"
+    );
+    let single = UnsupportedReason::NoThreshold {
+        one_of: &["min"],
+        and: vec!["path"],
+    };
+    assert_eq!(single.to_string(), "has no threshold: add 'min' and 'path'");
+}
+
+/// The message of a list below its minimum gives the count and the minimum, whatever the minimum is.
+#[test]
+fn a_list_below_its_minimum_says_how_many_items_it_has_and_how_many_it_needs() {
+    let one = serde_json::from_value::<BoundedList<u8, 5, false, 1>>(json!([]));
+    assert!(
+        one.expect_err("too short")
+            .to_string()
+            .contains("a list has 0 items, at least 1 needed")
+    );
+    let two = serde_json::from_value::<BoundedList<u8, 5, false, 2>>(json!([7]));
+    assert!(
+        two.expect_err("too short")
+            .to_string()
+            .contains("a list has 1 items, at least 2 needed")
+    );
 }

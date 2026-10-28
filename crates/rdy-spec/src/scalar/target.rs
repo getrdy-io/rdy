@@ -261,7 +261,7 @@ fn wraps_ipv4(addr: &Ipv6Addr) -> bool {
 ///
 /// Everything before the last `@` goes, so a password with a `/` or `?` in it cannot leak. Everything
 /// from the first `/`, `?` or `#` after the scheme goes, because a path or query can carry tokens.
-fn redact_for_echo(text: &str) -> String {
+pub(crate) fn redact_for_echo(text: &str) -> String {
     // A scheme is letters and digits before the first "://". A "://" later on, in a query, is not one.
     let start = text
         .find("://")
@@ -338,6 +338,13 @@ fn parse_host(host: &str) -> Result<Host, TargetProblem> {
             .ok_or(TargetProblem::BadHost);
     }
     Ok(Host::Name(host.to_ascii_lowercase()))
+}
+
+/// Whether `host` is a plain DNS name by the grammar of [`Target`]: labels of 1 to 63 letters, digits and
+/// hyphens that do not start or end with a hyphen, at most 253 characters, and a last label that is not
+/// a number to a resolver. So `-s`, `--x`, `2852039166` and `0xa9.0xfe.0xa9.0xfe` are not names.
+pub(crate) fn is_plain_host_name(host: &str) -> bool {
+    matches!(parse_host(host), Ok(Host::Name(_)))
 }
 
 /// All digits, or `0x` and hex digits.

@@ -168,7 +168,7 @@ fn a_name_makes_two_entries_with_one_id_fine() {
 #[test]
 fn one_bad_check_never_fails_the_whole_spec() {
     let spec = pass(&with_entries(
-        "  - id: host.cpu\n\
+        "  - id: host.cpu\n    min: 4\n\
          \x20 - id: gpu.cuda\n    min: \"12.4\"\n\
          \x20 - id: host.memory\n    mn: 32Gi\n\
          \x20 - id: host.disk\n    severity: blok\n\
@@ -190,16 +190,10 @@ fn one_bad_check_never_fails_the_whole_spec() {
         assert_eq!(*reason, UnsupportedReason::BadCommonField { field });
     }
     assert!(matches!(decoded[6], CheckParams::Unknown { .. }));
-    // `names` is a real net.dns parameter, but this build has not got its struct yet, so it is refused
-    // by name and not ignored.
-    let CheckParams::Unsupported { reason, .. } = &decoded[7] else {
-        panic!("net.dns: {:?}", decoded[7]);
-    };
-    assert_eq!(
-        *reason,
-        UnsupportedReason::UnknownField {
-            field: "names".into()
-        }
+    assert!(
+        matches!(decoded[7], CheckParams::NetDns(_)),
+        "{:?}",
+        decoded[7]
     );
 }
 
@@ -318,4 +312,70 @@ fn acme_platform_has_gpu_cuda_and_aws_iam_as_unknown() {
         .map(CheckParams::id)
         .collect();
     assert_eq!(unknown, ["gpu.cuda", "aws.iam"]);
+}
+
+/// The host checks of the example specs all read: a vendor who copies an example gets a check that runs.
+#[test]
+fn every_host_check_in_the_examples_that_this_build_has_reads_fully() {
+    let dir = repo_root().join("examples/specs");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        panic!("cannot read {}", dir.display());
+    };
+    let mut host_checks = 0;
+    for item in entries.flatten() {
+        let path = item.path();
+        if path.extension().is_none_or(|e| e != "yaml") {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            panic!("cannot read {}", path.display());
+        };
+        let spec = pass(&String::from_utf8_lossy(&bytes));
+        for params in decode(&spec) {
+            if params.id().starts_with("host.") && KNOWN_IDS.contains(&params.id()) {
+                host_checks += 1;
+                assert!(
+                    !matches!(params, CheckParams::Unsupported { .. }),
+                    "{}: {params:?}",
+                    path.display()
+                );
+            }
+        }
+    }
+    assert!(host_checks >= 10, "{host_checks}");
+}
+
+/// 01 section 2.5: `- id: host.memory` alone is skipped as `unsupported_spec`, with the reason
+/// `no_threshold` for lint.
+#[test]
+fn a_bare_host_memory_has_no_threshold() {
+    let spec = pass(&with_entries(
+        "  - id: host.memory\n    severity: block\n    fix: Add RAM.\n",
+    ));
+    let decoded = decode(&spec);
+    let CheckParams::Unsupported { id, reason, .. } = &decoded[0] else {
+        panic!("{:?}", decoded[0]);
+    };
+    assert_eq!(id, "host.memory");
+    assert_eq!(
+        *reason,
+        UnsupportedReason::NoThreshold {
+            one_of: &["min"],
+            and: vec![]
+        }
+    );
+}
+
+/// A YAML key with no value (`min:`) is a bad value. It must not read as an absent threshold.
+#[test]
+fn a_host_key_with_no_value_is_a_bad_value() {
+    let spec = pass(&with_entries("  - id: host.memory\n    min:\n"));
+    let decoded = decode(&spec);
+    let CheckParams::Unsupported { reason, .. } = &decoded[0] else {
+        panic!("{:?}", decoded[0]);
+    };
+    assert!(
+        matches!(reason, UnsupportedReason::BadValue { field: Some(f), .. } if f == "min"),
+        "{reason:?}"
+    );
 }

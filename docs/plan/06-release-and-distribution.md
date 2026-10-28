@@ -70,6 +70,7 @@ Where this differs from 05 as written (listed again under Plan corrections):
 Rules:
 
 - Pin runner images by name, never `-latest`. Review the names each April and October.
+- Temporary (correction 05): the org has no macOS arm64 runners. `ci-ok` gates an `aarch64-apple-darwin` compile leg on `macos-15-intel` instead of the macos-arm64 test leg, and `macos-arm64.yml` runs the full test job on `macos-15` outside `ci-ok`. A founder hand step ends it (ADR 0006, decision 8).
 - `macos-13` is retired. `macos-15-intel` is the last Intel image. If it is slow or dies, build `x86_64-apple-darwin` on the arm64 runner and test it nightly.
 - Linux tests run against the musl targets, so CI tests what we ship.
 - No `pull_request_target`. Fork PRs get a read-only token.
@@ -88,7 +89,7 @@ Rules:
 
 `ci-ok` lists only gating jobs. A job skipped on PRs must never sit in its `needs:`. A renamed matrix leg would otherwise block every PR.
 
-Static-link proof (ADR 0006). Since Rust 1.59 the musl targets build static-pie, so `file` says "static-pie linked" and `ldd` output varies. The check is: `readelf -lW rdy` shows no `INTERP` header, `readelf -d rdy` shows no `NEEDED` entry, then run `rdy version` in a `scratch` container. If `ring` needs a C compiler, set `CC_<target>` only. Never set the linker to `musl-gcc`; its wrappers do not handle static-pie.
+Static-link proof (ADR 0006). Since Rust 1.59 the musl targets build static-pie, so `file` says "static-pie linked" and `ldd` output varies. The check is: `readelf -lW rdy` shows no `INTERP` header, `readelf -d rdy` shows no `NEEDED` entry, then run `rdy version` in a `scratch` container. `scripts/check-static.sh` runs the `readelf` checks from ADR 0006 (static-pie, full RELRO, non-executable stack) and `ci.yml` runs it on both Linux legs. `scratch` cannot be pulled, so CI imports an empty tar as the image. If `ring` needs a C compiler, set `CC_<target>` only. Never set the linker to `musl-gcc`; its wrappers do not handle static-pie.
 
 Caching, in short: `Swatinem/rust-cache` per leg, saved only from `main`; `CARGO_INCREMENTAL=0`; prebuilt tools via `taiki-e/install-action`; no `cargo install`; `--locked` everywhere; no cache in release builds. Target: warm PR runs under ten minutes. Details and the time budget are in Appendix A.
 

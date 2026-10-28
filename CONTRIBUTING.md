@@ -48,10 +48,17 @@ cargo deny check
 cargo doc --workspace --no-deps
 ```
 
-`cargo doc` treats rustdoc warnings as errors (`.cargo/config.toml`). All of these must pass before a PR is reviewed. CI also runs on five native
-runners for every PR (Linux x86_64 and aarch64 on musl, macOS arm64 and x86_64,
-Windows x86_64), so expect your change to be tested on all five. The Rust version
-is pinned in `rust-toolchain.toml`.
+`cargo doc` treats rustdoc warnings as errors (`.cargo/config.toml`). All of these must pass before a PR is reviewed. CI also runs on native
+runners for every PR (Linux x86_64 and aarch64 on musl, macOS x86_64, Windows x86_64),
+and it compiles the macOS arm64 target without running its tests. The full macOS arm64
+tests run nightly and on `main` in a separate workflow, until the org has arm64 runners.
+The Rust version is pinned in `rust-toolchain.toml`.
+
+CI runs the tests with `cargo nextest` (profile `ci` in `.config/nextest.toml`, no retries) and runs
+doc tests on Linux x86_64 only. A test that fails once in three runs is a bug. Fix the test. To run
+the suite the way CI does, install `cargo-nextest` and run `cargo nextest run --workspace --profile ci`
+and `cargo test --doc --workspace`. On Linux, CI also builds the musl binary and checks it with
+`scripts/check-static.sh target/<triple>/debug/rdy`.
 
 Repo tasks run through `cargo xtask`, from `crates/xtask`. Run these when you change docs or generated files:
 
