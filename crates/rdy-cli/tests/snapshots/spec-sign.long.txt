@@ -43,6 +43,8 @@ Options:
 
 Environment:
   RDY_KEY_PASSWORD  The key password, for CI. Never put it on the command line.
+                    Other processes of your user and root can read it, and
+                    child processes inherit it. Use a masked secret in CI.
 
 Examples:
   Sign a spec:
