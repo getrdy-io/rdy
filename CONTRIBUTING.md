@@ -53,6 +53,17 @@ runners for every PR (Linux x86_64 and aarch64 on musl, macOS arm64 and x86_64,
 Windows x86_64), so expect your change to be tested on all five. The Rust version
 is pinned in `rust-toolchain.toml`.
 
+Repo tasks run through `cargo xtask`, from `crates/xtask`. Run these when you change docs or generated files:
+
+```sh
+cargo xtask docs
+cargo xtask docs --check
+cargo xtask schema --check
+cargo xtask docs-lint
+```
+
+`cargo xtask docs` writes the generated pages under `docs/`. Never edit those pages by hand. Change the generator, then run the command again. `docs-lint` reads only the files that git tracks. Run `git add` on a new file before you lint it. `dist` and `publish` are off in this build.
+
 To try your change by hand:
 
 ```sh

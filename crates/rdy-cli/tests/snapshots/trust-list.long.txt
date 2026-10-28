@@ -1,0 +1,28 @@
+Show the keys you trust
+
+Prints every trusted key with its product, key id, fingerprint, the date you
+added it, and your note. As a normal user it lists your file and the system
+file. As root it lists only the system file.
+
+Usage: rdy trust list [OPTIONS]
+
+Options:
+      --color <WHEN>
+          Colors: auto, always, never [default: auto]
+
+      --progress <WHEN>
+          Live progress: auto, never [default: auto]
+
+  -q, --quiet
+          Print less
+
+  -v, --verbose
+          Print more
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Exit codes:
+  0   Done, even when no key is trusted yet
+  64  The trust file is unsafe: other users can write to it
+  70  Internal error

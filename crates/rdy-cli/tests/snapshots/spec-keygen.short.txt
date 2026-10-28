@@ -1,0 +1,15 @@
+Make a signing key pair
+
+Usage: rdy spec keygen [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  Name for the key files, for example acme-signing
+
+Options:
+      --unencrypted           Do not protect the secret key with a password
+      --password-file <FILE>  Read the new password from a file
+      --color <WHEN>          Colors: auto, always, never [default: auto]
+      --progress <WHEN>       Live progress: auto, never [default: auto]
+  -q, --quiet                 Print less
+  -v, --verbose               Print more
+  -h, --help                  Print help (see more with '--help')

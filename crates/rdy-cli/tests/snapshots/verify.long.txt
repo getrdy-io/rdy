@@ -1,0 +1,51 @@
+Check a spec's signature without running any checks
+
+Reads the spec and its signature and checks the signature against the keys
+you trust. Prints who signed it and when. Exit 0 means 'rdy run' would accept
+this file with the same --sig and --key. It never asks a question.
+
+Usage: rdy verify [OPTIONS] <SPEC>
+
+Arguments:
+  <SPEC>
+          The spec file, for example acme-platform.yaml
+
+Options:
+      --sig <FILE>
+          Read the signature from this file
+          [default: <SPEC>.minisig]
+
+      --key <KEY>
+          Check against this public key only, for this command.
+          Prints a KEY NOT PINNED warning.
+
+      --json
+          Print a JSON result on stdout
+
+      --color <WHEN>
+          Colors: auto, always, never [default: auto]
+
+      --progress <WHEN>
+          Live progress: auto, never [default: auto]
+
+  -q, --quiet
+          Print less
+
+  -v, --verbose
+          Print more
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Examples:
+  Check a spec your vendor sent:
+    rdy verify acme-platform.yaml
+
+  Check it in a script:
+    rdy verify acme-platform.yaml --json
+
+Exit codes:
+  0   Verified
+  64  Not verified: no signature, a signature that does not match, or a key
+      you have not trusted
+  70  Internal error

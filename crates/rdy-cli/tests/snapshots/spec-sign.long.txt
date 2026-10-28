@@ -1,0 +1,55 @@
+Sign a spec with your secret key
+
+Runs 'rdy spec lint' first and refuses to sign a spec with errors. Then it
+signs the exact bytes of the file and writes <SPEC>.minisig next to it. It
+checks its own signature and prints the key fingerprint and the line to send
+your customers. Stock minisign can verify the signature.
+
+Usage: rdy spec sign [OPTIONS] --secret-key <FILE> <SPEC>
+
+Arguments:
+  <SPEC>
+          The spec file, for example acme-platform.yaml
+
+Options:
+      --secret-key <FILE>
+          Your secret key, made with 'rdy spec keygen'
+
+      --sig <FILE>
+          Where to write the signature
+          [default: <SPEC>.minisig]
+
+      --force
+          Replace the signature file if it exists
+
+      --password-file <FILE>
+          Read the key password from a file, or '-' for
+          standard input. The prompt is the default.
+
+      --color <WHEN>
+          Colors: auto, always, never [default: auto]
+
+      --progress <WHEN>
+          Live progress: auto, never [default: auto]
+
+  -q, --quiet
+          Print less
+
+  -v, --verbose
+          Print more
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Environment:
+  RDY_KEY_PASSWORD  The key password, for CI. Never put it on the command line.
+
+Examples:
+  Sign a spec:
+    rdy spec sign acme-platform.yaml --secret-key acme-signing.key
+
+Exit codes:
+  0   Signed and verified
+  64  Refused: the spec has errors, the key is readable by others, the
+      signature file exists, or the password is wrong
+  70  Internal error

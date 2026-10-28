@@ -1,0 +1,11 @@
+Print the version
+
+Usage: rdy version [OPTIONS]
+
+Options:
+      --json             Print the fields as JSON on stdout
+      --color <WHEN>     Colors: auto, always, never [default: auto]
+      --progress <WHEN>  Live progress: auto, never [default: auto]
+  -q, --quiet            Print less
+  -v, --verbose          Print more
+  -h, --help             Print help (see more with '--help')

@@ -33,13 +33,13 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-012 | todo | | First signed alpha, scripts/verify-release.sh and RELEASING.md
 
-- M1-013 | todo | | xtask skeleton with schema, docs, docs-lint and --check modes, dist and publish off
+- M1-013 | [#11](https://github.com/getrdy-io/rdy/pull/11) | 2026-10-28 | `schema` writes no file yet (M1-022 adds the schemars output). `docs` writes one placeholder page under `docs/src/content/docs/reference/spec/`, and M1-076 replaces it. The page is not published yet because the Starlight scaffold is not in the repo. `docs --check` and `docs-lint` are not in `ci.yml`. 09 section 10 puts the docs-gen job in M1, but the backlog has it only at M3-002, so the coordinator should file a correction. The banned-token list holds the coordinator's hash list, with the synthetic test hash. The lint applies NFKC normalization before it matches tokens, and it lints every tracked file with no NUL byte, replacing invalid UTF-8 bytes. A UTF-16 file has NUL bytes, so the lint skips it. A generator path that climbs out of its root or is absolute is refused. The check does not yet find stale generated files that no generator emits
 
 - M1-014 | todo | | install.sh core with root refusal, truncation guard, sha256 and shell tests (SEC-08)
 
 - M1-015 | todo | | install.sh signature check, fail closed, with tamper tests (SEC-09, SEC-10)
 
-- M1-016 | todo | | Define public spec types in rdy-spec
+- M1-016 | [#10](https://github.com/getrdy-io/rdy/pull/10) | 2026-10-28 | check params stay a raw map (M1-019), timeout, max_size and expires stay text (M1-018, M1-026), load() is a fail-closed stub (M1-017, M1-120)
 
 - M1-017 | todo | | Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits
 
@@ -65,7 +65,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-028 | todo | | linux-x64 root job: nextest archive under sudo, root_* filter, strace installed
 
-- M1-029 | todo | | clap command tree in rdy-cli exposed as library rdy_cli
+- M1-029 | [#12](https://github.com/getrdy-io/rdy/pull/12) | 2026-10-28 | `spec init` is M3 (07 section 1) so it is not in the tree; `version --json` waits for the Version schema and exits 70; usage errors print generic text with no flag names or did-you-mean until M1-030; `--help` puts each option text on the line below the flag (clap layout), see 07 Appendix A note
 
 - M1-030 | todo | | No-echo rule for usage errors: canaries and near-miss flags (extends M1 error types)
 

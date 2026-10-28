@@ -1,0 +1,15 @@
+Choose which vendor keys rdy trusts
+
+Usage: rdy trust [OPTIONS] <COMMAND>
+
+Commands:
+  add     Trust a vendor key for one product
+  list    Show the keys you trust
+  remove  Stop trusting a key
+
+Options:
+      --color <WHEN>     Colors: auto, always, never [default: auto]
+      --progress <WHEN>  Live progress: auto, never [default: auto]
+  -q, --quiet            Print less
+  -v, --verbose          Print more
+  -h, --help             Print help (see more with '--help')

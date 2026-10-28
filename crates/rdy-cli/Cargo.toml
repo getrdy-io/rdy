@@ -13,12 +13,16 @@ categories = ["command-line-utilities"]
 build = "build.rs"
 include = ["src/**", "/build.rs", "/build_version.rs", "Cargo.toml", "LICENSE"]
 
+[lib]
+name = "rdy_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rdy"
 path = "src/main.rs"
 
 [dependencies]
-clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "env"] }
 
 [lints]
 workspace = true

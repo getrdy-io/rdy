@@ -1,0 +1,17 @@
+Lint, sign and make keys for spec files
+
+Usage: rdy spec [OPTIONS] <COMMAND>
+
+Commands:
+  lint    Check a spec file for mistakes
+  sign    Sign a spec with your secret key
+  keygen  Make a signing key pair
+
+Options:
+      --color <WHEN>     Colors: auto, always, never [default: auto]
+      --progress <WHEN>  Live progress: auto, never [default: auto]
+  -q, --quiet            Print less
+  -v, --verbose          Print more
+  -h, --help             Print help
+
+See also: 'rdy verify <SPEC>' checks a signature.
