@@ -1,694 +1,657 @@
 # 02 Engine design
 
-Owner: rust-architect. Status: draft, waiting for review by security-reviewer (probe facade, verdict rule,
-output dir) and cli-ux (verdict wording, interrupt behaviour, output naming). Date: 2026-10-27.
+Owner: rust-architect. Revision 2, 2026-10-28: applies the security review
+(`docs/plan/reviews/02-engine-design-review-by-security-reviewer.md`, 10 must-fix) and aligns with
+01-spec-format.md and the revised ADRs. Status: waiting for security-reviewer re-review and cli-ux review.
 
-This note designs `rdy-engine`: the `Check` trait, the registry, needs and privilege negotiation,
-scheduling, the result flow, the action log, the probe facade, per-OS behaviour, the report renderers,
-the custom check seam and the test seams. It builds on ADRs 0003, 0004, 0005, 0007, 0008, 0010 and 0012
-and on the invariants in 05-threat-model.md (INV-nn). The wire types (`Report`, `CheckResult`, `Status`,
-`SkipReason`, `Verdict`, `Summary`, `Action`, `Need`) live in `rdy_spec::result` per ADR 0012.
-01-spec-format.md owns their names and JSON shape. Where this note lists fields, it lists what the engine
-must fill; if 01 names them differently, 01 wins and this note follows.
+This note designs `rdy-engine`: checks and families, privilege and needs, scheduling, the result flow,
+the action log, the probe facade, per-OS behaviour, output and reports, and the test seams. It builds on
+ADRs 0003, 0004, 0005, 0008, 0010 and 0012, and on ADRs 0013 to 0016, written with this revision.
+**01-spec-format.md owns every wire name** (`Report`, `CheckResult`, statuses, `skip_kind`, verdicts,
+the action log shape). This note uses its names and says what the engine fills. Invariant numbers
+(INV-nn) are those of 05-threat-model.md revision 2. Rust signatures are in Appendix A.
+
+## Review items and where they are closed
+
+| Item | Fix | Section |
+| --- | --- | --- |
+| MF-01 kube guard | Deny by default on parsed, normalised paths; no dry run; ADR 0010's two POSTs | Kubernetes, Appendix B |
+| MF-02 native closures | Closed `NativeCall` enum (ADR 0014) | Native calls |
+| MF-03 check-written CONNECT | The facade writes CONNECT, TLS and HTTP (ADR 0014) | Network |
+| MF-04 lint wall | Full disallowed lists, lint-wall test crate, allow grep, deny wrappers; no bind fallback | Lint wall |
+| MF-05 redaction order, logs | Redact, then cap; log layer; errors redacted (ADR 0015) | From finding to result |
+| MF-06 not-applicable escape | Only the spec `os` list gives `not_applicable` (ADR 0013) | Verdict |
+| MF-07 non-yielding check | Timer on the join handle, watchdog thread, `process::exit` | Scheduling |
+| MF-08 log completeness | Kube entries open in `call`; plugin entry `delegated`; truncation drops only ok reads; strace test | Action log |
+| MF-09 privilege-carrying binary | uid, gid and `CapEff` checked before the spec is read | Privilege |
+| MF-10 lost escapes | Spelled out; the JSON writer applies them (01 section 5.5) | Output and reports |
+
+Should-fix items SF-01 to SF-13 and nits N-01 to N-08 are applied in place; SF-12 renumbering and ticket
+titles are in the ticket list.
 
 ## Decisions in one screen
 
-1. Checks are async. One trait, `run(&self, &CheckContext) -> BoxFuture<CheckOutcome>`. Blocking work
-   goes through the probe facade or `rdy_engine::blocking`, both on `spawn_blocking` (ADR 0004).
-2. Every check carries a static `CheckInfo`: id, family, summary, needs, wants, default timeout, OS
-   support, and a side-effect manifest (paths, commands, env vars, peers). The facade enforces the
-   manifest. `--plan` (M2) prints it. The action log proves it.
-3. Needs are probed once, before any check starts, and only for needs the run plan contains. A spec with
-   no k8s checks never loads a kubeconfig.
-4. A block-severity check that did not run (Skipped for any reason except "not applicable", Timeout, or
-   Error) makes the verdict NOT READY, exit 2, counted as "required check not run". This adopts the
-   proposed rule and extends it from Skipped to Timeout and Error. It supersedes ADR 0008 decision 3 and
-   needs ADR 0013.
-5. All side effects go through `Probe`. Its backend is a trait with two implementations: `Live` and
-   `Replay` (fixtures). Policy and logging sit above the backend, so tests run the same policy code.
-6. Net checks speak TLS and HTTP over sockets the facade opens. They do not use reqwest. This amends
-   ADR 0009 decisions 1 and 2 and needs ADR 0014.
-7. The engine redacts and size-caps every string in the `Report` before returning it (INV-14). The
-   redactor is a module in `rdy-engine` that `rdy-bundle` reuses in M2 (ADR 0015 to write).
-8. All output goes into one new directory through `cap-std` handles, 0700 and 0600 on Unix, temp file
-   plus rename (INV-08, ADR 0016 to write). No other temp files in M1.
-9. JSON keeps spec order. HTML groups blockers first. Both come from the same `Report` (ADR 0003).
-10. In M1 the host family has data sources on Linux only. Net and k8s run on all four CI targets. Every
-    check compiles everywhere; missing OS sources report Skipped "no data source for this OS yet".
+1. Checks are async: `run(&self, &CheckContext) -> BoxFuture<CheckOutcome>`. Every check has a static
+   `CheckInfo`: id, family, summary, needs, wants, default timeout, OS support, and a manifest of the
+   paths, programs, env names and peer classes it may touch. The facade enforces the manifest, `--plan`
+   (M2) prints it, the action log proves it.
+2. One privilege snapshot at startup, before the spec is read. It feeds the trust store scope, the
+   setuid refusal and the `root` need. Other needs are probed once, after planning, only if the plan
+   contains them.
+3. Verdict per 01 section 5.3 and ADR 0013: a required check that did not run gives `not_ready`; only
+   the vendor's `os` list makes a check not count.
+4. All side effects go through `Probe`, including TCP, proxy CONNECT, TLS and HTTP (ADR 0014). Native
+   OS calls are a closed enum. The kube client sits behind a deny-by-default guard.
+5. Redact every full string, then cap. Writers accept only `RedactedReport` (ADR 0015).
+6. The output directory is created and opened right after verification and held (ADR 0016).
+7. The scheduler owns the timers; a watchdog thread guarantees a report and an exit even if a check
+   never yields.
+8. M1 host checks have data sources on Linux only; net and k8s run on all four CI targets.
 
 ## Crate shape
 
 ```text
 crates/rdy-engine/src/
-  lib.rs        pub use rdy_spec::result; re-exports below
-  check.rs      Check, CheckInfo, Finding, Level, Partial, CheckError, CheckOutcome, OsSupport
-  family.rs     Family trait, Registry
-  plan.rs       RunPlan, PlannedCheck (pure, no I/O)
-  needs.rs      Capabilities, Availability, core probes (root, commands, network)
-  sched.rs      Engine::run: phases, semaphores, timeouts, cancellation, progress events
-  probe/        Probe, Cmd, Output, ProbeStream, ProbeError, Backend trait, live.rs, log.rs, kube.rs
-  redact.rs     minimal redactor (M1 corpus categories from 05)
-  output.rs     OutputDir: create-new dir, atomic writes, modes
-  report/       json.rs, html.rs; templates/ (askama)
-  testing.rs    Replay backend, FakeCheck, run_fixture, normalize (feature "testing" only)
+  lib.rs       pub use rdy_spec::result
+  check.rs     Check, CheckInfo, Finding, Level, Partial, CheckError, OsSupport
+  family.rs    Family, Registry
+  plan.rs      RunPlan (pure)
+  privilege.rs Privilege snapshot, binary refusal
+  needs.rs     Capabilities, core probes
+  sched.rs     Engine::run, timers, deadline, watchdog snapshot
+  probe/       Probe, policy, action log, Backend, live/, kube.rs (guard), net.rs (tcp, connect, tls, http)
+  redact.rs    M1 rule set (no feature gate)
+  units.rs     dotted version compare, quantities, nominal band, severity cap (03 asks for one home)
+  output.rs    OutputDir
+  report/      json.rs, html.rs, templates/
+  testing.rs   Replay backend and helpers (feature "testing")
 ```
 
-Features: `default = ["runtime", "html"]`. `runtime` holds the scheduler, needs, probe, output and
-redact modules (tokio, tokio-util, cap-std, rustix, http, tower-layer, tower-service). `html` holds the
-askama renderer. `testing` adds the Replay backend and helpers and is never enabled in the release
-binary; CI asserts `cargo tree -p rdy -e features` does not contain `rdy-engine/testing`. `rdy-cloud`
-takes `default-features = false, features = ["html"]` (ADR 0012).
+Features: `default = ["runtime", "html"]`. `runtime`: scheduler, privilege, needs, probe, output
+(tokio, tokio-util, cap-std, rustix, http, tower-layer, tower-service, hyper, tokio-rustls, rustls with
+ring only, webpki-roots). `html`: askama. `redact` and `units` need no feature, so `rdy-cloud`
+(`default-features = false, features = ["html"]`) and `rdy report` can use them. `testing` is never in
+the release binary; CI asserts `cargo tree -p rdy -e features` lacks it.
 
-## The Check trait and the registry
+## Checks, families and the run plan
+
+A check is a struct built from its typed spec params, with one `static CheckInfo`. Async, one trait: the
+scheduler spawns `async move { check.run(&ctx).await }`, so the task owns its `Arc`s and a panic stays
+inside it. Checks do no blocking work themselves: file reads, commands and native calls are facade
+calls on `spawn_blocking`, and pure CPU work over big input uses `rdy_engine::blocking`.
+
+`CheckInfo` fields that matter for policy:
+
+| Field | Meaning |
+| --- | --- |
+| `needs` | Hard. Missing means `skipped`, `skip_kind: missing_need`. |
+| `wants` | Soft. Missing means a `partial` result. A want marked `evidence_only` cannot change the level. |
+| `default_timeout` | From 03. The engine falls back to 10 s and caps at 60 s. |
+| `os` | `Full`, `Partial(note)` or `NotYet` per OS. There is no "not applicable" here (ADR 0013). |
+| `reads`, `env` | Absolute path prefixes and env var names. |
+| `commands` | `CommandSpec`: program name, extra search directories (absolute constants), stdout cap, extra env names. |
+| `peers` | Peer classes: `SpecHosts`, `Proxy`, `SystemResolver`, `KubeApi`. |
+
+Default thresholds live on the typed params in `rdy-spec` as serde defaults plus methods for derived
+defaults, so they appear in the schema and the docs. The check copies effective thresholds into
+`Finding::expected`.
+
+`Family` (three in M1, so a trait): `name`, `checks()` (static infos), `probe()` for needs only it can
+probe (k8s owns `kube_context`; cloud will own `cloud_credentials`), and `build(check, spec)`, which
+returns the check plus its own host set computed from its params, derived defaults included
+(`net.tls_intercept` defaults to the `net.egress` hosts). `Engine::plan` maps every spec entry to a
+built check or a skip kind with no I/O:
+
+| Situation | `skip_kind` (01) |
+| --- | --- |
+| Spec `os` list leaves this OS out | `not_applicable` (never counts) |
+| Family reserved, not built into this rdy | `not_in_build` |
+| Family built, id unknown | `unknown_check` |
+| Known id, field or value this rdy cannot read | `unsupported_spec` |
+| `CheckInfo::os` is `NotYet` here | `not_yet_on_os` |
+| Hard need missing after probing | `missing_need` |
+| Run deadline passed before start | `run_deadline` |
+| Run interrupted (M2 graceful Ctrl-C) | `cancelled` |
+
+There are no inter-check dependencies. Every k8s check except `k8s.access` needs `kube_context`;
+`k8s.access` has no hard need and reports the probe outcome as a block with its fix.
+
+## Privilege and needs
+
+**Snapshot first.** Before the spec is read, `Privilege::snapshot()` records uid, euid, gid, egid and
+(Linux) `CapEff` from `/proc/self/status`, all through the run-level facade (`check: null`). If uid and
+euid differ, gid and egid differ, or `CapEff` is nonzero for a non-root uid, `rdy` exits 70 with a hint
+naming `chmod u-s,g-s` and `setcap -r` (INV-10). On Windows the snapshot runs `whoami.exe /groups /fo csv`
+through the facade: integrity SID `S-1-16-12288` (High) or `S-1-16-16384` (System) means elevated. If
+`whoami` fails, the run counts as elevated for the trust store and `root` as unknown for checks. The CLI
+maps the snapshot to the `rdy-spec` trust store scope (system store only when elevated, INV-04); the
+loader never reads ids itself. One privilege answer per run.
+
+| Need (01 name) | Met when | Probed by | Never does |
+| --- | --- | --- | --- |
+| `root` | snapshot says euid 0 or elevated | the snapshot | ask for sudo, re-exec, prompt; the hint never suggests `sudo -E` |
+| `kube_context` | the operator's kubeconfig or in-cluster config loads and `GET /version` answers | k8s family `probe` | read a kubeconfig from a spec or the working directory |
+| `network` | the run allows sockets (no `--no-network`) | run option | contact anything to test connectivity |
+| `command` (with `name`) | the program exists in its search path | engine, by stat | search the caller's `PATH` |
+| `cloud_credentials` (M3) | the provider chain resolves | cloud family | assume a role without consent |
+
+Rules: plan, then probe, then run; all probes run concurrently before the first check, each under its
+own timeout; probe results go into `capabilities` with a hint. With `--no-network`, `kube_context` is
+unavailable and no kube client is built. The kube probe sends its first request (which may run an exec
+credential plugin that waits for an SSO login) from a `spawn_blocking` thread through the runtime handle,
+under a 10 s timer held by the scheduler, so a stuck plugin costs one abandoned blocking thread, never a
+worker.
+
+## Verdict
+
+The rule is 01 section 5.3, recorded in ADR 0013 (refining ADR 0008 decision 3). What the engine adds:
+
+- It never produces `not_applicable` except from the spec `os` list. A requirement met by absence is a
+  `pass` with a note, reviewed per check.
+- A level Pass with `partial` set on a required check becomes `warn`, "not verified: <missing>", unless
+  every missing want is `evidence_only`.
+- Unknown severity counts as block and unknown status as not run, in `rdy_spec::result::verdict()`.
+- A run that verified nothing is `ready_with_warnings`, `verdict_reason: nothing_verified`.
+
+Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
+
+## Scheduling, timeouts and hangs
+
+- **Concurrency.** One global semaphore, default 8, `--jobs` capped at 32 (ADR 0004). Facade-wide: at
+  most 4 child processes and 16 sockets. `rdy` sets `max_blocking_threads(32)`. Per-family limits are M2.
+- **Order.** Spec order through the semaphore.
+- **Per-check timeout.** The spec's `timeout` replaces the check default; else `CheckInfo` default; else
+  10 s. Capped at 60 s and at the time left in the run. The scheduler awaits each check's `JoinHandle`
+  under `tokio::time::timeout`, so the timer lives in the scheduler task, not in the check. On expiry:
+  abort, close the in-flight action as `timeout`, cancel the check's probe scope, status `timeout`.
+- **Run deadline.** 5 minutes. Running checks become `timeout`, unstarted ones `skipped`,
+  `run_deadline`.
+- **Watchdog.** A plain OS thread, started before the runtime, fires at deadline plus 10 s. It builds a
+  report from the shared snapshot of finished results (already redacted), marks running checks
+  `timeout` and unstarted ones `run_deadline`, sets `complete: false`, writes through the held output
+  directory and calls `std::process::exit(70)`. On the normal path the CLI writes, flushes and calls
+  `std::process::exit(code)`; nothing waits on a runtime drop.
+- **Ctrl-C in M1.** The first Ctrl-C cancels the run token: checks abort, child process groups die, the
+  CLI exits 70 with "interrupted, no report written". Writing the partial report with
+  `interrupted: true` is M2 (01 names). cli-ux to confirm.
+- **Panics** become `error`, `error_kind: panic` (ADR 0008 decision 8).
+
+## From finding to result: redact, then cap
+
+1. `rdy-spec` parses thresholds into typed params with defaults; `Family::build` hands them to the check.
+2. The check returns `Finding { level, message, observed, expected, fix, partial }`.
+3. The engine maps level and severity to `status`, fills the 01 section 5.2 fields (`key`, `id`, `name`,
+   `family`, `severity`, `status`, `message`, `fix`, `fix_source`, `builtin_fix`, `observed`,
+   `expected`, `needs` with `met`, `partial`, `notes`, `started_ms`, `duration_ms`, and the
+   status-specific fields). The vendor's `fix` replaces rdy's text verbatim on `warn` and `block` and is
+   hidden when the check did not run (01 section 2.6).
+4. Redaction over every full string in the report: results, actions, capabilities, identity, host, proxy.
+5. Caps on char boundaries with a marker: message 1 KiB, fix 4 KiB, `observed` and `expected` 64 KiB,
+   lists 200 items, then the 2 MiB report cap (Action log rule below).
+6. The result is a `RedactedReport`. `write_json`, `render_html` and the watchdog accept nothing else.
+
+`rdy` installs the redacting `tracing` layer first in `main`. With `RUST_LOG` unset, hyper, h2, rustls,
+tower and kube are capped at `warn`. `EngineError`, `ReportError` and panic text are redacted before
+printing (ADR 0015).
+
+## The action log
+
+Shape and kinds are 01 section 5.4. Rules the engine keeps:
+
+- The facade writes every entry; checks cannot skip it. Run-level work (snapshot, machine id, hostname,
+  os-release, command stats, kubeconfig read) is logged with `check: null`.
+- `exec` entries record the resolved absolute path and `argv` as a JSON array of strings, redacted.
+- Kube entries open in the guard's `call` (no check id yet) and are completed by the response future,
+  which runs on the calling check's task and fills `check` from the engine's task-local. A dropped
+  request is closed as `timeout`.
+- The kube exec credential plugin gets an `exec` entry with the resolved plugin path and redacted args,
+  outcome `delegated`, note "run by the kube client, output not captured, may run again on token
+  refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01.)
+- Coalescing (past 200 per check, per directory) and the 2 MiB truncation remove only `read`,
+  `read_dir` and `stat` entries with outcome `ok`. `exec`, `connect`, `tls`, `http`, `dns`, `kube`,
+  `native` entries and every `denied` or `failed` entry are always kept; they are bounded (64 hosts, a
+  fixed command list).
+- Completeness is tested, not only conformance: Linux CI runs the live fixture suite under
+  `strace -f -e trace=execve,openat,connect,sendto` and asserts every target after spec load is in the
+  log (folded into SEC-22).
+
+## The probe facade
+
+Policy and the log live in `Probe`, above the `Backend` trait (`Live`, `Replay`), so every fixture run
+tests policy. Each check's `Probe` is bound to its `CheckInfo`, its host set and a cancellation token
+cancelled when the check ends; a later call returns `denied`, rule `check finished`.
+
+**Exec.**
+- argv only; `Cmd.program` is `&'static str`; spec values pass 01's grammars (no leading `-`) and go
+  after `--` where the program supports it.
+- The program resolves to an absolute path from the fixed search path (`/usr/sbin:/usr/bin:/sbin:/bin`)
+  always, then the check's declared extra directories (absolute constants, for operator-managed GPU
+  tools). Windows: `%SystemRoot%\System32` only, and in M1 only `whoami.exe`, until job objects land.
+- Refused outright: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`, `powershell`, `pwsh`) and `sudo`,
+  `su`, `doas`, `pkexec`, `runas`.
+- Environment cleared, then `LC_ALL=C`, `PATH=<fixed>` and declared names only; no `LD_*`, `DYLD_*`.
+- stdin null; cwd `/`.
+- Each child gets its own process group, and the group is killed on timeout. If the child is not reaped
+  within 1 s after SIGKILL (uninterruptible sleep), the call returns `Hung { pid }` and a detached task
+  reaps it later.
+- Output caps: stdout per `CommandSpec` (default 1 MiB, at most 4 MiB), stderr 64 KiB.
+
+**Files.**
+- Absolute paths only, and no `..` component; matched before any open.
+- On Linux the facade opens with `O_PATH` (no side effect, no device open), reads the real path from
+  `/proc/self/fd/<n>`, and `fstat`s it. Prefix and deny list are checked against that real path, then
+  the file is reopened through the descriptor with `O_RDONLY | O_NONBLOCK`. Only regular files pass,
+  except under `/proc` and `/sys`.
+- macOS: `realpath`, open with `O_NOFOLLOW | O_NONBLOCK`, recheck with `F_GETPATH`.
+- Windows: no M1 check reads files, so the facade refuses them.
+- Deny list: `/etc/shadow`, `/etc/gshadow`, `/etc/sudoers*`, `*/.ssh/*`, private key files, `~/.kube/*`
+  and `/root/.kube/*` (kube reads the kubeconfig itself), `/proc/*/environ`, `/proc/*/cmdline`,
+  `/proc/*/mem`, `/proc/*/fd/*`, `/proc/*/root/*`, `/proc/*/map_files/*`, `/proc/kcore`, `/dev/*`.
+- 1 MiB cap. Reads run on `spawn_blocking`.
+- Env names must be declared; values are redacted before any write.
+
+**Network** (ADR 0014; ADR 0009 decisions 4, 6 and 7 stay).
+- The calling check's host set is enforced, and the host must be in it. The spec may name at most 64
+  distinct hosts (rdy-spec validation, exit 64).
+- The facade resolves the name and refuses every address in ADR 0009's ranges (169.254.0.0/16,
+  fe80::/10, fd00:ec2::254, IPv4-mapped forms), literal or resolved.
+- `tcp` tries each address with a 250 ms stagger and a per-attempt timeout, and reports every attempt
+  (dual stack, catalog hook 2). Checks cannot pick addresses.
+- On the proxied path the facade writes CONNECT itself (8 KiB head cap, own timeout, Basic auth from
+  `ProxyUrl`, `Proxy-Authorization` never logged). A literal blocked IP target is refused before any
+  byte is sent; names resolve at the proxy (05 residual).
+- `NO_PROXY` matching lives here.
+- `tls_chain` runs the recording verifier, private to the facade, and returns the presented chain and
+  whether it validates against the system roots and the bundled roots. It never sends application data.
+- `http` sends HTTP/1.1 HEAD or GET over a verified stream. It returns status, a fixed header list,
+  stage timings and the `Location` host. It reads at most 64 KiB of body and discards it, never follows
+  a redirect, and returns typed failure classes (`dns`, `refused`, `blackhole`, `tls_unknown_issuer`,
+  `tls_alert`, `reset_after_hello`, `proxy_403`, `proxy_407`, `http_status`, `blocked_address`).
+- System roots: Linux PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the standard paths) are read
+  through the facade; macOS and Windows use `NativeCall::SystemRoots`. No revocation check, and the
+  report says so.
+- PAC is reported, never fetched, in M1 (SF-13).
+- UDP (`udp_exchange`, with DNS messages built by `hickory-proto`) and unix sockets (`unix_get`, with a
+  GET-only Docker API guard) are M2 facade methods. They must land before `host.time_sync`, direct
+  `net.dns` queries and `host.container_runtime`. `permit_nameserver` is gone.
+
+**Native calls.** A closed enum the Live backend executes; each variant is a reviewed change
+(security-reviewer is CODEOWNER of the file).
+- M1: `Statvfs { path }` (path passes the read rules; logged as `native`, `api: statvfs`, with
+  `path`), `Uname`, `Rlimit(resource)`, `Hostname`, `MachineId` (macOS `kern.uuid`, Windows
+  `MachineGuid`; Linux reads `/etc/machine-id` as a file), `SystemRoots`.
+- No `sysinfo` in M1. In M2 its variants use refresh kinds without environ, cmdline, cwd and root.
+- No `bind()` port probes: the `host.ports` bind fallback is dropped, and the result says "owner
+  unknown, not verified".
+
+**Kubernetes.** Appendix B has the guard rules: deny by default, on a parsed and normalised path, GET
+only on a const resource list in `rdy-checks-k8s`, POST only to `selfsubjectaccessreviews` and
+`selfsubjectrulesreviews` (ADR 0010 decision 2), no subresources, no dry run, no probe pod in M1.
+`k8s.access` needs a POST to `selfsubjectreviews` for the authenticated user (ADR 0010 decision 4 and
+the 01 example). That POST is allowed once the ADR 0010 amendment ticket lands; until then the identity
+comes from the kubeconfig context. Construction:
+- One constructor, `guarded_service(inner)`, is used by production and by the mock tests.
+- A `ReadOnlyClient` newtype with a private constructor is the only client type checks get.
+- The k8s family owns the client; the engine has no kube dependency.
+- kube opens its own sockets. At probe time the facade resolves the API server host, applies the
+  address rule and logs a `connect`. A kube connector built on the facade is an M2 ticket.
+
+**Lint wall** (INV-07).
+- `clippy.toml` `disallowed-methods` and `disallowed-types` in every check crate (list in Appendix A).
+- A `tests/lint-wall` crate uses each entry, and CI expects each one to fail.
+- `allow(clippy::disallowed_` is legal only in allowlisted files: the facade's `live/` module and the
+  k8s client module.
+- `deny.toml` `[bans]` wrappers keep `rustix`, `socket2`, `hyper`, `tokio-rustls`, `hickory-*`,
+  `sysinfo` and `kube` direct dependencies of their owning crates only.
+
+## Per-OS behaviour
+
+- **Compile stubs.** Every check compiles everywhere. OS-specific gather functions sit behind
+  `#[cfg(target_os = ..)]`, with a stub returning `CheckError::Unsupported`. `CheckInfo::os` is the
+  source of truth at plan time. Evaluation is pure over fact structs, so macOS and Windows logic can be
+  tested on Linux from recorded facts.
+- **M1 coverage.**
+
+| Family | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| host | `Full` for the M1 tier | `NotYet` | `NotYet` |
+| net | `Full` | `Full`; `net.proxy` `Partial` (env only) | `Full`; `net.proxy` `Partial` (env only) |
+| k8s | `Full` | `Full` | `Full` |
+
+  03 asks for a `sysinfo` subset and code-level "not applicable" on macOS and Windows in M1. Declined:
+  MF-02 keeps `sysinfo` out of M1 and ADR 0013 removes code-level not applicable. Vendors scope
+  Linux-only checks with `os: [linux]`.
+- **Process model.** One foreground process: no daemon, no service, no listener. Children only through
+  the facade, plus kube exec plugins.
+- **Startup order.** Redacting log layer; privilege snapshot and binary refusal; ring provider; spec
+  load (verify, then parse); output directory created and held; plan; probes; checks; redact and cap;
+  write; exit.
+- **Linux:** `/proc`, `/sys`, `O_PATH` reads, process groups.
+- **macOS:** same Unix paths; SIP and TCC denials become `partial`.
+- **Windows:** M1 exec is `whoami.exe` only; Ctrl-C through `tokio::signal::ctrl_c`.
+- **Temp files.** None in M1 besides `.tmp` files inside the output directory.
+- **Exit codes.** Verdict 0, 1, 2; input errors 64; binary refusal, unwritable output, watchdog,
+  interrupt and runtime failure 70 (ADR 0008). With `--json`, stdout carries the same bytes as the
+  file, or the error object.
+
+## Output and reports
+
+- **Directory** (ADR 0016, ADR 0003).
+  - `rdy-report-<product>-<YYYYMMDDTHHMMSSZ>/` goes under `--out-dir`. The slug is
+    `^[a-z0-9][a-z0-9-]{0,62}$` (01 section 2.2) and is re-checked before use.
+  - The directory is created right after verification, opened no-follow, and `fstat`-checked (owned by
+    euid, 0700). The handle is held for the run.
+  - Inside go `rdy-report-<product>-<ts>.json` and `.html`, plus the spec and its `.minisig` copied from
+    the verified in-memory bytes (`VerifiedSpecBytes`). Each file is created `create_new`, 0600 with
+    `fchmod`, written as `.tmp`, fsynced, then renamed; the directory is fsynced last.
+  - `--no-report` writes nothing.
+- **JSON.** `write_json(&RedactedReport)` follows 01 section 5.5. After serializing, every `<` becomes
+  the six characters `\u003c` (backslash, `u`, `0`, `0`, `3`, `c`), every `>` becomes `\u003e`, every `&`
+  becomes `\u0026`, and U+2028 and U+2029 become `\u2028` and `\u2029`. The writer applies this to every
+  copy, so the `.json` file, `--json` stdout and the HTML embed are the same bytes. The renderer does
+  not escape a second time.
+- **HTML.**
+  - `render_html(&RedactedReport)` follows 01 section 6: content in 01's order (blockers, required not
+    run, warnings, passed, not applicable, capabilities, details, action log as one plain table).
+  - No `<details>`; vendor fix text is labelled "From <product>".
+  - The JSON is embedded with `data-sha256`.
+  - The CSP is ADR 0003's.
+- `rdy report` (M2) redacts input it did not produce before rendering.
+
+## Catalog hooks (03, "Decisions needing an ADR")
+
+| Hook | Answer |
+| --- | --- |
+| 1 UDP | Accepted for M2: `udp_exchange(server, payload, max_reply)` with peer classes `ntp_servers` (spec) and system nameservers, logged as `dns` or `connect`. Gates `host.time_sync` and direct `net.dns`. |
+| 2 Connect targets | Dual stack accepted inside the facade's `tcp` (per-address attempts reported); `Target::Addr` from check code rejected, because address choice is policy. `unix_get` M2; named pipes M2. |
+| 3 Nonblocking record read | Accepted for M2: `read_records(path, max_records, max_bytes)` with `O_NONBLOCK` until `EAGAIN`, `/dev/kmsg` as the only allowed device. No M1-tier check needs it. |
+| 4 Exec | Accepted for M1: `Hung { pid }` without waiting, per-command stdout cap, declared extra search directories. |
+| 5 Family-scoped shared state | Accepted for M2: `Family::facts()` with a family-scoped `Probe` (union of the fact's own manifest), a detached task with its own timeout, cached, attributed with an additive `fact` field (01). A check that times out waiting does not abort the fact. M1-tier k8s checks do not share fetches. |
+| 6 Result fields | `partial.missing_grants: [string]` accepted (additive for 01; k8s 403 partials need it in M1). `caused_by` rejected: the missing need and its hint already name `k8s.access`. `evidence: Vec<ApiCall>` rejected: the action log is the evidence; an additive `request_id` on `http` and `kube` entries comes in M3. `identifier` evidence class deferred to 04 and M3. |
+| 7 SDK clients | Accepted for M3: `http_exchange` returning a capped body to the caller, never logged or stored, for the AWS SDK adapter; `Need::Consent` for `--allow-assume-role` and `--allow-exec`; SDK credential provider exemption named in the M3 cloud ADR. `CheckContext` already has private fields and accessors; a typed extension slot is rejected (state goes through `Family::build`). |
+| 8 Kube dry run | Rejected for M1 (05 INV-14, ADR 0010, 01 section 2.7). The catalog's constraints (core v1 Pod path only, `generateName: rdy-probe-`) go into the later ADR 0010 amendment. |
+| 9 Shared helpers | Accepted: `rdy_engine::units`, covered by 03's "Shared helpers" ticket. |
+| 10 ADR amendments | ADR 0009 by 0014; ADR 0010 by the amendment ticket below; ADR 0006 item 5 (`getent`) in M2 with `net.dns`. |
+
+## Custom checks later (ADR 0005)
+
+None in M1; unknown ids skip and count as not run. M3 `custom.exec` reuses `Probe::exec` with a second
+policy: commands from the spec, consent bound to the plan by `--allow-exec=<sha256 of the exec plan>` or
+an interactive yes (a bare flag is refused), cwd in a fresh 0700 temp directory, 64 KiB caps. Under
+euid 0 a custom command runs as an unprivileged user unless it declares `needs: [root]`. `Cmd` gets an
+origin enum then, not before. Preconditions that hold from M1: `&'static str` programs with `Box::leak`
+and `String::leak` banned, argv logged as an array, the root-only trust store, Windows job objects
+before Windows exec. The plan flag is `--dry-run` in ADR 0005 and `--plan` in 01 and 05; cli-ux picks
+one.
+
+## Testing seams
+
+- **Replay backend** (feature `testing`) reads 03's fixture layout. `root/` maps absolute paths;
+  `commands/*.json` holds argv, stdout, stderr, exit and `delay_ms`. `net.json` holds per host
+  `lookup` addresses (including link-local cases, so the address rule runs in every net fixture) and
+  per address `refused`, `blackhole`, `reset` or `serve: <name>`, which connects a duplex stream to an
+  in-process server from 03's loopback test support. `native/` holds JSON per `NativeCall`;
+  `env.json` and `caps.json` complete the case. Anything unrecorded fails with `NotRecorded`.
+- **Kube** fixtures are a `tower` mock behind `guarded_service`, so the real layer order is under test.
+  The kind job adds an API server audit policy and asserts rdy's user agent used only allowlisted verbs
+  and resources.
+- **Time.** `start_paused` tests. `FakeCheck` supports `Outcome`, `Sleep`, `Panic`, `Block` (a stuck
+  `spawn_blocking`) and `Spin` (a future that never returns from poll). Spin and a fake exec plugin that
+  sleeps 600 s must each end with a report within the deadline plus 12 s.
+- **Goldens.** `insta` snapshots per fixture case and for whole reports, with `Clock::Fixed` and a
+  fixed run id.
+- **Live integration** against loopback servers on all four CI targets; strace completeness on Linux.
+
+## Plan corrections found
+
+- docs/plan/01-spec-format.md, section 5.2 `not_applicable` row and section 5.3 amendment 2: "the
+  concept does not exist here" is a source of `not_applicable`. Fix: only the spec `os` list; concept
+  absence is `pass` with a note or `not_yet_on_os` (ADR 0013, review MF-06).
+- docs/plan/01-spec-format.md, section 2.3 `timeout`: `min(spec, check default, 60s, time left)` means a
+  spec can never raise a timeout. Fix: the spec value replaces the default, capped at 60 s and time left.
+- docs/plan/01-spec-format.md, section 5.4: add outcome `delegated`, state `argv` is an array of strings,
+  add `partial.missing_grants`; section 5.5: truncation removes only `ok` read, read_dir and stat
+  entries. Section 2.7 and the 7.2 example: validate `namespace` and `name` values as DNS-1123; the
+  `selfsubjectreviews` POST waits for the ADR 0010 amendment.
+- docs/adr/0010-kubernetes-client-kube-rs.md: decision 2 omits `selfsubjectreviews` that decision 4
+  needs; decision 3 says the client is "shared through the engine Context" and uses `--kube-context`.
+  Fix: amendment ticket below (POST list, family-owned client, flag name from cli-ux).
+- docs/adr/0004-async-runtime-tokio.md, decision 5: fixed PATH "when euid is 0", job objects on Windows.
+  Fix: fixed PATH always; M1 Windows exec only `whoami.exe` (ADR 0014; status line updated).
+- docs/adr/0009-http-client-and-tls.md: reqwest, platform verifier and the `net::client` builder for net
+  checks; 4 KiB body cap. Fix: ADR 0014 (facade TLS and HTTP, system roots with webpki, 64 KiB per
+  INV-13). Its M1 ticket "Shared HTTP client builder with rustls ring and platform verifier" leaves M1,
+  replaced by the facade network tickets; status line updated.
+- docs/plan/03-check-catalog.md, host coverage correction and the `sysinfo` subset: declined (see
+  Per-OS). `host.ports` bind fallback: dropped in M1. `net.proxy`: no PAC fetch in M1. `net.egress` and
+  `net.registry`: redirects recorded, never followed. "net.egress core (... injectable connector)":
+  TCP, CONNECT, TLS and HTTP now live in the facade; check-author re-estimates the ticket (likely 2 to
+  3 h less). "Command table and argument allow-lists from Appendix A" depends on "SEC-18 Enforce command
+  execution policy in the facade", which no longer exists; it depends on "Command policy: search path,
+  declared directories, caps and Windows whoami only".
+- docs/plan/08-testing.md, "Scheduler timeout, deadline and cancellation tests under paused time":
+  depends on "Family limits, run deadline and Ctrl-C cancellation", now M2. Fix: depend on "Run
+  deadline and watchdog with a report on hang".
+- docs/plan/00-overview.md, rdy-engine and rdy-checks-k8s API sketches: `Exec` trait, `Context`,
+  `host_root`, public `connect()`. Fix: as in Appendix A. M1 calendar: about 194 h becomes about 241 h
+  (below).
+
+## M1 hours and cut list
+
+The engine M1 tickets below total **78 h**, counting tickets owned elsewhere that this design
+re-scopes (SEC-17, SEC-19, SEC-25, SEC-21, Blocking helper, Check trait, Scheduler, the kube guard).
+Against 00's 194 h the net addition is about 47 h: the review's 43 h, plus about 4 h for moving TCP,
+CONNECT, TLS and HTTP into the facade, which the dropped ADR 0009 builder ticket (3 h) and a smaller
+`net.egress core` ticket partly offset. **M1 is about 241 h**, roughly 18 to 19 weeks at 13 hours a
+week. The founder decides in 00.
+
+Cut list, invariant-neutral, first cut first:
+1. Graceful Ctrl-C report and per-family limits (already M2).
+2. Merge "Engine test helpers" into "Replay backend and fixture loader": 1 h.
+3. Merge "Family probe hook and lazy KubeContext probe" into "Kube client from kubeconfig or
+   in-cluster": 1 h.
+4. One address per host in M1 instead of dual-stack attempts: 1 h.
+5. HTML action log table limited to exec, connect and kube rows (the JSON has all): 0.5 h.
+
+Never cut: the facade policies, the closed native enum, the lint wall, the kube guard, output
+confinement, the privilege snapshot and binary refusal, redaction of reports and logs, timers on the
+join handle with the deadline and watchdog, the verdict mapping, the lazy kube need.
+
+## Tickets implied
+
+Titles reuse 05 revision 2, 00, ADR and 03 titles where the work is the same. SEC-18, SEC-20 and SEC-23
+are retired as duplicates (review SF-12).
+
+- [M1] Check trait, Need and Context in rdy-engine | owner: rust-engineer | est: 3.5h | depends on: Define result model and verdict mapping in rdy-spec | exit test: a fixture family with one passing and one need-missing check produces pass and skipped missing_need through Engine::run, and no CheckError or Support variant can produce not_applicable.
+- [M1] Privilege snapshot, binary refusal and capability probes | owner: rust-engineer | est: 3.5h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: injected uid, gid and CapEff mismatches each exit 70 with the hint before the spec is read; recorded whoami output maps High and System to elevated and a whoami failure to system trust scope; needs absent from the plan are not probed.
+- [M1] Family trait, registry and run plan | owner: rust-engineer | est: 3h | depends on: Unknown check ids report Skipped with a "needs a newer rdy" reason | exit test: the plan for examples/specs/acme-platform.yaml gives not_in_build for gpu.cuda and aws.iam, unknown_check for a typo id, not_yet_on_os for host checks on Windows, not_applicable only for an `os: [linux]` entry on macOS, per-check host sets, and does no I/O.
+- [M1] Family probe hook and lazy KubeContext probe | owner: rust-engineer | est: 2.5h | depends on: Privilege snapshot, binary refusal and capability probes, Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: a spec with no k8s checks loads no kubeconfig and sends no request; `--no-network` builds no client; a fake exec plugin that sleeps 600 s makes kube_context unavailable after 10 s with no worker blocked.
+- [M1] Scheduler with concurrency limit, per-check timeout and panic isolation | owner: rust-engineer | est: 4h | depends on: Check trait, Need and Context in rdy-engine | exit test: with the timer on the join handle, FakeCheck Sleep reports timeout, Panic reports error panic, and Spin on a 2-worker runtime still lets the other checks finish.
+- [M1] Run deadline and watchdog with a report on hang | owner: rust-engineer | est: 2h | depends on: Scheduler with concurrency limit, per-check timeout and panic isolation, SEC-19 Confine writes to a new output dir with safe names | exit test: under paused time running checks become timeout and unstarted ones run_deadline; with two Spin checks the watchdog writes a complete false report and exits 70 within the deadline plus 12 s.
+- [M1] Map outcomes to CheckResult with fix source, partial and needs | owner: rust-engineer | est: 2h | depends on: Check trait, Need and Context in rdy-engine, Define result model and verdict mapping in rdy-spec | exit test: a spec fix replaces the built-in text on block with fix_source spec and is hidden on skipped, a partial pass on a block check becomes warn unless evidence_only, and needs carry met flags.
+- [M1] SEC-17 Mediated Context handles with action log and read denylist | owner: rust-engineer | est: 4h | depends on: Check trait, Need and Context in rdy-engine | exit test: the fixture run's action log lists every command, file, endpoint and kube request; a read of /proc/1/environ is refused; a Probe call after its check ends is denied and logged; truncation drops only ok read, read_dir and stat entries.
+- [M1] Blocking helper and subprocess kill on timeout | owner: rust-engineer | est: 4h | depends on: Scheduler with concurrency limit, per-check timeout and panic isolation | exit test: a check running `sleep 600` times out, its process group is gone, a child that ignores reaping returns Hung within 1 s of SIGKILL, and rdy exits within 2 s of the deadline.
+- [M1] Command policy: search path, declared directories, caps and Windows whoami only | owner: rust-engineer | est: 2h | depends on: Blocking helper and subprocess kill on timeout | exit test: shells and the sudo family are refused, PATH is fixed for non-root runs too, LD_PRELOAD in the parent never reaches the child, a declared extra directory resolves, and any Windows program other than whoami.exe is refused.
+- [M1] File and env read policy in the facade | owner: rust-engineer | est: 3.5h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: /etc/shadow, a symlink to it, a `..` path, a FIFO and /dev/zero under an allowed prefix are refused and logged; a 2 MiB file returns 1 MiB with truncated true; an undeclared env name is refused.
+- [M1] Facade TCP attempts, proxy CONNECT and per-check host sets | owner: rust-engineer | est: 4h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: a host listed only by another check is denied, a CONNECT to a literal 169.254.169.254 is refused before any byte is sent, proxy 403 and 407 return typed errors, and Proxy-Authorization never appears in the log.
+- [M1] Facade TLS with system roots and the recording chain probe | owner: rust-engineer | est: 3h | depends on: Facade TCP attempts, proxy CONNECT and per-check host sets | exit test: against loopback servers a test-CA chain validates only when the CA is in the fixture system bundle, tls_chain returns the chain without sending application data, and SNI always equals the permitted host.
+- [M1] Facade HTTP/1.1 probe with 64 KiB discard and no redirects | owner: rust-engineer | est: 3h | depends on: Facade TLS with system roots and the recording chain probe | exit test: a 302 returns its Location host without a second request, a body canary never reaches the report, and each failure class is produced by its loopback case.
+- [M1] SEC-21 Egress address policy, no redirects, no bodies | owner: rust-engineer | est: 3h | depends on: Facade HTTP/1.1 probe with 64 KiB discard and no redirects | exit test: link-local, metadata and IPv4-mapped targets are refused directly, by DNS and as CONNECT targets, and more than 64 distinct hosts fail spec validation with exit 64.
+- [M1] Closed NativeCall enum in the facade | owner: rust-engineer | est: 2h | depends on: File and env read policy in the facade | exit test: Statvfs on a path outside the check's prefixes is refused, every variant is logged as native with its api name, Replay returns recorded JSON, and the facade has no closure-taking native API.
+- [M1] Read-only guard layer and test for rdy-checks-k8s | owner: k8s-expert | est: 3h | depends on: Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: a mock API server behind guarded_service records every request from the k8s suite and only allowlisted GETs and the two review POSTs appear.
+- [M1] Kube guard path parser, resource allowlist and pending log entries | owner: rust-engineer | est: 2h | depends on: Read-only guard layer and test for rdy-checks-k8s | exit test: `%73ecrets`, `secrets` in every segment position, GET pods/exec with Upgrade, a dryRun POST and an unlisted resource are each refused and logged, and a dropped request leaves a timeout entry with its check id.
+- [M1] Amend ADR 0010 for selfsubjectreviews, client ownership and the context flag | owner: rust-architect | est: 1h | depends on: none | exit test: ADR 0010 lists the three review POSTs, says the k8s family owns the ReadOnlyClient, uses cli-ux's flag name, and security-reviewer signs it.
+- [M1] Replay backend and fixture loader | owner: rust-engineer | est: 3h | depends on: File and env read policy in the facade, Closed NativeCall enum in the facade | exit test: a host.memory fixture runs with no real file read, an unrecorded argv fails with NotRecorded, a recorded link-local lookup is refused by the address rule, and the release feature tree excludes `testing`.
+- [M1] Engine test helpers FakeCheck, run_fixture and normalize | owner: qa-engineer | est: 2h | depends on: Replay backend and fixture loader | exit test: scheduler tests use every Fake variant including Spin, and assert_within_manifest fails on a fixture check that reads an undeclared path.
+- [M1] Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | owner: rust-engineer | est: 2h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: every Appendix A entry used in tests/lint-wall fails clippy, an allow attribute outside the allowlisted files fails CI, and a check crate depending on socket2 fails cargo deny.
+- [M1] SEC-19 Confine writes to a new output dir with safe names | owner: rust-engineer | est: 4h | depends on: Define public spec types in rdy-spec | exit test: product `../x` fails validation, a pre-planted symlink is not followed, an existing directory is refused before the first check, modes are 0700 and 0600, the spec copy matches the verified bytes, and a killed run leaves no file under a final name.
+- [M1] SEC-25 Minimal redactor for evidence, errors and logs | owner: rust-engineer | est: 4h | depends on: Define result model and verdict mapping in rdy-spec | exit test: canaries in env, proxy URL, kubeconfig and command output never appear in JSON, HTML or stderr at `RUST_LOG=trace`.
+- [M1] Redact then cap every Report string and return RedactedReport | owner: rust-engineer | est: 2h | depends on: SEC-25 Minimal redactor for evidence, errors and logs, Map outcomes to CheckResult with fix source, partial and needs | exit test: a PEM key placed across a 64 KiB cap boundary is fully redacted, and write_json and render_html do not compile with a plain Report.
+- [M1] HTML fix source label and action log table | owner: rust-engineer | est: 1h | depends on: askama HTML report with inline CSS, dark mode and print | exit test: the golden blocked HTML labels vendor fix text with the product name and shows the action log as one table with no details element.
+- [M1] OS support table and compile stubs for rdy-checks-host | owner: check-author | est: 2h | depends on: Family trait, registry and run plan | exit test: all four CI targets build, every host check on macOS and Windows reports not_yet_on_os, and none does on Linux.
+- [M1] Security re-review of 02 revision 2 and ADRs 0013 to 0016 | owner: security-reviewer | est: 2h | depends on: none | exit test: every MF item is marked closed in the review file and ADRs 0013 to 0016 move to Accepted or carry the requested change.
+- [M1] cli-ux review of verdict wording, interrupt behaviour and output naming | owner: cli-ux | est: 1h | depends on: none | exit test: 07-cli-ux.md confirms the headline, the M1 Ctrl-C exit 70 message, `--no-network`, `--out-dir` and the plan flag name.
+- [M2] Family limits and graceful Ctrl-C with a partial report | owner: rust-engineer | est: 3h | depends on: Run deadline and watchdog with a report on hang | exit test: Ctrl-C writes a report with interrupted true and unstarted checks skipped cancelled, and k8s never has more than 3 checks in flight.
+- [M2] Facade methods for UDP exchanges and unix sockets with a GET-only Docker API guard | owner: rust-engineer | est: 4h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: an SNTP query to a server not in spec ntp_servers and a POST on the Docker socket are refused and logged, and host.time_sync and host.container_runtime depend on this ticket.
+- [M2] Nonblocking record reads for /dev/kmsg | owner: rust-engineer | est: 2h | depends on: File and env read policy in the facade | exit test: a fixture kmsg with 10,000 records returns within its cap and timeout and no other device path is allowed.
+- [M2] Family-scoped facts with detached fetch and fact attribution | owner: rust-engineer | est: 4h | depends on: Family trait, registry and run plan | exit test: two k8s checks share one nodes fetch, a check that times out does not abort it, and its log entries carry the fact name.
+- [M2] sysinfo NativeCall variants without process environ or cmdline | owner: rust-engineer | est: 3h | depends on: Closed NativeCall enum in the facade | exit test: host.memory and host.cpu run on macOS and Windows CI and strace or the equivalent shows no environ or cmdline reads.
+- [M2] Kube connector built on the facade | owner: rust-engineer | est: 4h | depends on: Facade TCP attempts, proxy CONNECT and per-check host sets | exit test: every kube socket appears as a facade connect entry and the address rule applies to the API server.
+- [M2] Windows job objects so a timeout kills the whole process tree | owner: rust-engineer | est: 3h | depends on: Blocking helper and subprocess kill on timeout | exit test: a Windows fixture command that spawns a grandchild leaves no process after its timeout, and the Windows exec allowlist then opens to Appendix A's Windows rows.
+- [M2] SEC-40 `rdy run --plan` preview | owner: rust-engineer | est: 6h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: plan output matches the action log of a real run on the same fixtures.
+- [M2] Amend ADR 0006 item 5 for getent as the Linux system answer | owner: rust-architect | est: 1h | depends on: none | exit test: ADR 0006 names getent ahosts with hickory as fallback, and net.dns cites it.
+- [M3] Spec-origin exec policy, hash-bound consent and temp workdir for custom.exec | owner: rust-engineer | est: 4h | depends on: SEC-53 Threat model for custom.exec | exit test: a bare --allow-exec is refused, the right hash runs commands as an unprivileged user under euid 0 in a fresh temp dir with 64 KiB caps, and a wrong hash runs nothing.
+- [M3] http_exchange and Need::Consent for SDK adapters | owner: rust-engineer | est: 4h | depends on: Facade HTTP/1.1 probe with 64 KiB discard and no redirects | exit test: the AWS SDK adapter fixture runs through the facade with every call in the action log and no body in the report, and assume-role without consent is skipped missing_need.
+- [M3] Decide the 1.0 stability scope of Check, Family and Probe | owner: rust-architect | est: 3h | depends on: none | exit test: an ADR says whether these modules are semver-covered at 1.0 or move under rdy_engine::unstable, before rdy-engine 1.0 ships.
+
+## Appendix A. Rust signatures
 
 ```rust
-use futures_util::future::BoxFuture;
-use rdy_spec::result::Need;
-use std::time::Duration;
-
-/// What a check is, known without running it. One `static` per check.
+// check.rs
 pub struct CheckInfo {
-    pub id: &'static str,                  // "host.memory"
-    pub family: &'static str,              // "host"
-    pub summary: &'static str,             // one line, used by `rdy checks list` and the docs
-    pub needs: &'static [Need],            // hard: missing means Skipped(MissingNeed)
-    pub wants: &'static [Need],            // soft: missing means the result is partial
-    pub default_timeout: Duration,         // from 03-check-catalog.md; engine cap is 60 s
-    pub os: OsSupport,
-    // Side-effect manifest. The facade refuses anything outside it.
-    pub reads: &'static [&'static str],    // path prefixes, for example "/proc/meminfo", "/sys/fs/cgroup/"
-    pub commands: &'static [&'static str], // program names, for example "getent"; resolved by the facade
-    pub env: &'static [&'static str],      // env var names the check may read
-    pub peers: Peers,                      // which network peers the check may contact
+    pub id: &'static str, pub family: &'static str, pub summary: &'static str,
+    pub needs: &'static [Need], pub wants: &'static [Want],
+    pub default_timeout: Option<Duration>, pub os: OsSupport,
+    pub reads: &'static [&'static str], pub env: &'static [&'static str],
+    pub commands: &'static [CommandSpec], pub peers: &'static [PeerClass],
 }
-
+pub struct Want { pub need: Need, pub evidence_only: bool }
+pub struct CommandSpec { pub program: &'static str, pub extra_dirs: &'static [&'static str],
+                         pub max_stdout: usize, pub env: &'static [&'static str] }
+pub enum PeerClass { SpecHosts, Proxy, SystemResolver, KubeApi }
 pub struct OsSupport { pub linux: Support, pub macos: Support, pub windows: Support }
+pub enum Support { Full, Partial(&'static str), NotYet }
 
-pub enum Support {
-    Full,
-    Partial(&'static str),   // runs, some evidence missing on this OS; the note goes in the result
-    NotYet,                  // Skipped(NotYetOnOs): counts as not run
-    NotApplicable,           // the concept does not exist here (SELinux on Windows): no verdict effect
-}
-
-pub enum Peers { None, SpecEndpoints, Nameservers, KubeApi }
-
-/// The raw result of a check, before the engine applies severity, timeout and redaction (ADR 0008).
 pub type CheckOutcome = Result<Finding, CheckError>;
-
-pub struct Finding {
-    pub level: Level,                      // from the check's thresholds
-    pub message: String,                   // one line with measured values: "31.3 GiB RAM, 32 GiB needed"
-    pub observed: serde_json::Value,       // measured values, capped at 200 list items by the check
-    pub expected: serde_json::Value,       // effective thresholds after defaults
-    pub fix: Option<String>,               // built-in remediation with values filled in
-    pub partial: Option<Partial>,
-}
-
+pub struct Finding { pub level: Level, pub message: String, pub observed: serde_json::Value,
+                     pub expected: serde_json::Value, pub fix: Option<String>,
+                     pub partial: Option<Partial>, pub notes: Vec<String> }
 pub enum Level { Pass, Warn, Fail }
-
-pub struct Partial { pub missing: Vec<Need>, pub note: String }
-
+pub struct Partial { pub missing: Vec<Need>, pub missing_grants: Vec<String>, pub note: String }
 #[non_exhaustive]
-pub enum CheckError {
-    MissingNeed(Need),                     // found at run time, for example EACCES on a root-only file
-    NotApplicable(&'static str),
-    Unsupported(&'static str),             // no data source on this OS yet
-    Probe(ProbeError),                     // the facade refused or failed; refusal is a bug in the check
-    Failed { message: String, hint: Option<String> },
-}
+pub enum CheckError { MissingNeed(Need), Unsupported(&'static str), Probe(ProbeError),
+                      Failed { message: String, hint: String } }
 
 pub trait Check: Send + Sync + 'static {
     fn info(&self) -> &'static CheckInfo;
     fn run<'a>(&'a self, ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome>;
 }
-
-pub struct CheckContext { /* id, os, caps, probe bound to this check, deadline */ }
+pub struct CheckContext { /* private: key, os, caps, probe, deadline */ }
 impl CheckContext {
-    pub fn id(&self) -> &str;
-    pub fn os(&self) -> Os;
-    pub fn has(&self, need: &Need) -> bool;
-    pub fn probe(&self) -> &Probe;
-    pub fn remaining(&self) -> Duration;
+    pub fn key(&self) -> &str; pub fn os(&self) -> Os; pub fn has(&self, need: &Need) -> bool;
+    pub fn probe(&self) -> &Probe; pub fn remaining(&self) -> Duration;
 }
 
-pub enum Os { Linux, Macos, Windows }
-impl Os { pub const fn current() -> Os; }
-```
-
-Sync or async: async, one trait. The engine spawns each check as
-`tokio::spawn(async move { check.run(&ctx).await })`. The task owns the `Arc`s, so the borrowed signature
-works and a panic stays inside the task (ADR 0004 point 6). Host checks are async too, but they do no
-blocking work themselves: file reads, commands and native calls are facade calls that run on
-`spawn_blocking` under the timeout. Pure CPU work over large input (parsing 5,000 `/proc/*/comm` entries)
-uses `rdy_engine::blocking(f)`. Clippy `disallowed-methods` in every check crate bans `std::fs`,
-`tokio::fs`, `std::process`, `tokio::process`, `std::net` and `tokio::net`, so a check cannot bypass the
-facade by accident (INV-06).
-
-Default thresholds live on the typed parameter structs in `rdy-spec` as serde defaults, plus methods for
-derived defaults (`HostDisk::recommended_free()` is `min_free` plus 20%). That puts them in the generated
-schema and the docs, and makes a default change a reviewed wire change. The check copies the effective
-values into `Finding::expected`, so every report shows the thresholds it actually used.
-
-```rust
+// family.rs
 pub trait Family: Send + Sync + 'static {
-    fn name(&self) -> &'static str;                         // "host", "net", "k8s"
-    fn checks(&self) -> &'static [&'static CheckInfo];      // every id this family knows
-    fn max_concurrent(&self) -> usize { 4 }
-    /// Probe needs only this family can probe. k8s owns KubeContext; cloud will own CloudCredentials.
-    fn probe<'a>(&'a self, wanted: &'a [Need], probe: &'a Probe) -> BoxFuture<'a, Vec<Capability>> {
-        Box::pin(async { Vec::new() })
-    }
-    fn build(&self, check: &rdy_spec::spec::CheckSpec, spec: &rdy_spec::spec::Spec)
-        -> Result<Box<dyn Check>, BuildError>;
+    fn name(&self) -> &'static str;
+    fn checks(&self) -> &'static [&'static CheckInfo];
+    fn probe<'a>(&'a self, wanted: &'a [Need], probe: &'a Probe) -> BoxFuture<'a, Vec<Capability>>;
+    fn build(&self, check: &CheckSpec, spec: &Spec) -> Result<Built, BuildError>;
 }
+pub struct Built { pub check: Box<dyn Check>, pub hosts: HostSet }
 
-pub struct Registry { families: Vec<Box<dyn Family>> }
-impl Registry {
-    pub fn new(families: Vec<Box<dyn Family>>) -> Self;
-    pub fn info(&self, id: &str) -> Option<&'static CheckInfo>;
-    pub fn all(&self) -> impl Iterator<Item = &'static CheckInfo>;   // `rdy checks list`, docs generation
-}
-```
-
-`build` receives the whole spec because some checks default from others (`net.tls_intercept` defaults
-to the hosts in `net.egress`). `rdy-cli` assembles the built-ins:
-`Registry::new(vec![Box::new(HostFamily), Box::new(NetFamily::new(proxy)), Box::new(K8sFamily::new(kube_opts))])`.
-`K8sFamily` connects in its `probe` hook and keeps the client in a `OnceLock`, so `rdy-engine` never
-depends on `kube`. A trait is justified: three families in M1.
-
-## Needs and privilege negotiation
-
-`Need` is a wire type (it appears in `SkipReason::MissingNeed` and in the capabilities section of the
-report), so it lives in `rdy_spec::result` and is `#[non_exhaustive]`.
-
-| Need | Met when | Probed by | Probe method | Never does |
-| --- | --- | --- | --- | --- |
-| `Root` | Unix: effective uid 0. Windows: elevated token. | engine | `rustix::process::geteuid()`. Windows: `%SystemRoot%\System32\whoami.exe /groups /fo csv` through the facade, looking for SID `S-1-16-12288` (high integrity), which avoids an `unsafe` token call. | ask for sudo, re-exec, prompt |
-| `KubeContext` | the operator's kubeconfig (or in-cluster config) loads and `GET /version` answers | k8s family | `kube::Config::infer()` or `--kubeconfig`, `--context`; records context, server URL and user for SEC-24 | read a kubeconfig named by a spec or found in cwd (E5) |
-| `Network` | the run allows sockets (no `--no-network` flag; cli-ux owns the name) | engine | none; it is a run option | contact anything to "test" connectivity (I5, INV-10) |
-| `Command(name)` | the program exists in the fixed search path | engine | stat of `/usr/sbin`, `/usr/bin`, `/sbin`, `/bin` (Unix) or `%SystemRoot%\System32` (Windows) | search the caller's `PATH` |
-| `CloudCredentials(provider)` (M3) | provider credential chain resolves | cloud family | SDK chain, `sts:GetCallerIdentity` | assume a role unless the spec says so |
-
-Rules:
-
-1. **Plan, then probe, then run.** `Engine::plan` maps every spec check to a `CheckInfo` or a skip
-   reason with no I/O. The union of `needs` and `wants` of runnable checks is the probe list. Nothing
-   else is probed. All probes run concurrently before the first check starts, each under its own
-   timeout (kube 10 s). Two phases cost at most one probe timeout and keep the code simple.
-2. **Probe results are recorded.** `Report` gets a capabilities list: need, available yes or no, detail
-   (for example "uid 1000", "context acme-staging at https://api.acme.example:6443 as user ci-reader"),
-   and a hint when missing ("Rerun as root to complete 3 checks: host.ports, host.lsm,
-   host.security_agents"). The CLI prints the hint once. It never escalates.
-3. **Hard need missing:** the check does not run. Status `Skipped { reason: MissingNeed { need, hint } }`.
-4. **Soft need missing:** the check runs. Whatever it could not read goes into `Finding::partial`.
-   Rule from 03: a partial check never blocks on data it could not read. Added rule for check authors:
-   if the unread data could have turned a pass into a block, the check must return `Level::Warn` with
-   "not verified: <what>", not `Level::Pass`. Code review enforces it; fixtures prove it.
-5. **Runtime discovery:** a check that hits a permission error on a source it cannot do without returns
-   `CheckError::MissingNeed(Need::Root)`, which maps to the same Skipped status as rule 3.
-6. **No inter-check dependencies in M1.** The catalog's "every k8s check depends on k8s.access" is
-   expressed as a need: every k8s check except `k8s.access` needs `KubeContext`. `k8s.access` has no hard
-   need and reports the probe outcome, so a missing kubeconfig shows up as one Block with a fix and the
-   rest as Skipped.
-7. **Setuid refusal** (INV-09): before planning, if real and effective uid differ, the engine returns
-   `EngineError::Setuid` and the CLI exits 70 with a hint.
-
-## The verdict rule for required checks that did not run
-
-Adopted: a block-severity check that did not run makes the run NOT READY, exit 2, and is counted as
-"required check not run". Amended in one way: Timeout and Error count as "did not run" too. A required
-check that hung or crashed verified nothing, and reporting "warnings only" for it is the false
-confidence ADR 0008 itself rules out. Only `Skipped(NotApplicable)` has no effect.
-
-| Status of the check | `severity: block` | `severity: warn` |
-| --- | --- | --- |
-| Pass | none | none |
-| Warn (level Warn, or level Fail under severity warn) | Warnings | Warnings |
-| Block (level Fail under severity block) | Blocked | not possible |
-| Skipped, reason NotApplicable | none | none |
-| Skipped, any other reason (MissingNeed, NotYetOnOs, NeedsNewerRdy, RunDeadline, Cancelled) | Blocked, `required_not_run += 1` | Warnings, `not_run += 1` |
-| Timeout | Blocked, `required_not_run += 1` | Warnings, `not_run += 1` |
-| Error | Blocked, `required_not_run += 1` | Warnings, `not_run += 1` |
-
-Verdict: Blocked if any cell says Blocked; else Warnings if any cell says Warnings; else Ready. One more
-rule: if no check reached Pass, Warn or Block (empty spec, or everything not applicable), the verdict is
-at least Warnings, because nothing was verified. `rdy_spec::result::verdict()` implements this and
-`Verdict::exit_code()` maps 2, 1, 0. Proposed headline for cli-ux: `NOT READY: 1 blocker, 2 required
-checks not run`. Consequence: an M1 binary on the canonical example spec (with `gpu.cuda` and `aws.iam`
-at block) is NOT READY, which `examples/specs/acme-platform.yaml` already documents. ADR 0008's
-`--strict` question becomes moot for block checks.
-
-## Scheduling, timeouts and cancellation
-
-```rust
-pub struct Engine { registry: Registry, backend: Arc<dyn Backend> }
-
-pub struct RunOptions {
-    pub jobs: usize,                    // global cap, default 8 (ADR 0004), `--jobs`
-    pub deadline: Duration,             // whole run, default 5 min
-    pub network: bool,                  // false makes Need::Network unavailable
-    pub cancel: tokio_util::sync::CancellationToken,
-    pub on_progress: Option<Box<dyn Fn(&Progress) + Send + Sync>>,
-    pub clock: Clock,                   // System, or Fixed(ts) for golden tests
-    pub run_id: Option<String>,         // fixed in tests, uuid v4 otherwise
-}
-
-pub enum Progress { Probing(Need), Started { id: String }, Finished { id: String, status: StatusKind } }
-pub enum Clock { System, Fixed(jiff::Timestamp) }
-
+// privilege.rs, sched.rs
+pub struct Privilege { pub uid: u32, pub euid: u32, pub gid: u32, pub egid: u32,
+                       pub cap_eff: u64, pub elevation: Elevation }
+pub enum Elevation { Root, High, System, NotElevated, Unknown }
+impl Privilege { pub fn snapshot(probe: &Probe) -> Result<Self, EngineError>; // refuses setuid, setgid, file caps
+                 pub fn trust_scope(&self) -> rdy_spec::sig::TrustScope; }
+pub struct RunOptions { pub jobs: usize /* <= 32 */, pub deadline: Duration, pub network: bool,
+                        pub cancel: CancellationToken, pub on_progress: Option<Box<dyn Fn(&Progress) + Send + Sync>>,
+                        pub clock: Clock, pub run_id: Option<String> }
 impl Engine {
     pub fn new(registry: Registry, backend: Arc<dyn Backend>) -> Self;
-    pub fn plan(&self, spec: &rdy_spec::LoadedSpec, os: Os) -> RunPlan;
-    pub async fn run(&self, spec: &rdy_spec::LoadedSpec, opts: RunOptions) -> Result<Report, EngineError>;
+    pub fn plan(&self, spec: &LoadedSpec, os: Os) -> RunPlan;
+    pub async fn run(&self, spec: &LoadedSpec, out: &OutputDir, opts: RunOptions)
+        -> Result<RedactedReport, EngineError>;
 }
 
-pub fn blocking<T, F>(f: F) -> BoxFuture<'static, Result<T, CheckError>>
-where F: FnOnce() -> Result<T, CheckError> + Send + 'static, T: Send + 'static;
-```
-
-- **Concurrency.** A global semaphore of `jobs` permits, plus one per family: host 4, net 4, k8s 3.
-  Inside the facade: at most 4 child processes and 16 open sockets at once, across all checks. `rdy-cli`
-  sets `max_blocking_threads(32)` on the runtime so hung NFS `statvfs` calls cannot pile up hundreds of
-  threads. Constants, not flags; only `--jobs` is user-facing.
-- **Start order.** Spec order, through the semaphores. Deterministic, and the spec author controls it.
-- **Per-check timeout.** `min(spec timeout, CheckInfo::default_timeout, 60 s, time left in the run)`.
-  rdy-spec validation rejects a spec timeout above 60 s (01 to confirm). The check future runs inside
-  `tokio::time::timeout`. On expiry the task is aborted, child processes die (kill on drop, process group
-  on Unix), and the status is `Timeout { after_ms }`. The in-flight action is closed in the log with
-  outcome Timeout, so the report says "timed out while running `getent ahostsv4 registry.acme.example`".
-  A stuck `spawn_blocking` thread is abandoned (ADR 0004 point 5).
-- **Facade call timeouts.** Each call has its own default (file read 5 s, command 10 s, connect 10 s),
-  clipped to the check's remaining time.
-- **Run deadline.** When it passes, running checks become Timeout and unstarted checks become
-  `Skipped(RunDeadline)`. Both count as not run.
-- **Cancellation.** The CLI cancels the token on the first Ctrl-C (and SIGTERM on Unix). The engine
-  stops starting checks, aborts running ones, marks them `Skipped(Cancelled)`, sets
-  `Report::interrupted = true` and returns. The CLI writes the report and exits by verdict (usually 2,
-  since required checks did not run). A second Ctrl-C exits 70 at once with no report. cli-ux to
-  confirm.
-- **Panics.** Caught at the join handle and turned into `Error { message: "internal error in <id>, please
-  report", hint }` (ADR 0008 point 6).
-- **Report order.** `Report::checks` keeps spec order, so JSON diffs and portal ingestion are stable.
-  The HTML groups by outcome (see renderers).
-
-## Result model: how values flow
-
-1. The vendor writes thresholds in the spec. `rdy-spec` parses them into the typed params with defaults.
-2. `Family::build` hands the params to the check struct.
-3. The check measures, compares, and returns `Finding { level, message, observed, expected, fix, partial }`.
-4. The engine maps level and severity to `Status` (table above), times it, and fills the
-   `CheckResult`: `id`, `name`, `family`, `severity`, `status`, `message`, `observed`, `expected`,
-   `fix`, `fix_source`, `partial`, `duration_ms`.
-5. `fix`: the spec's `fix` replaces the built-in text (03 convention), verbatim, no templating, so a
-   spec cannot inject values. `fix_source` is `spec` or `rdy`. The HTML labels spec text "From
-   <product>" so a reader knows the vendor wrote it, not Rdy.
-6. Size caps before redaction: `observed` and `expected` 64 KiB serialized each, `message` 1 KiB, `fix`
-   4 KiB. Over the cap the value is truncated and `truncated: true` is set.
-7. Redaction pass over every string in the report, action log included (INV-14).
-8. `verdict()` and `Summary` (pass, warn, block, required_not_run, not_run, not_applicable).
-
-Fields the engine needs that the overview's sketch of `CheckResult` and `Report` lacks, for 01 to name:
-`family`, `fix_source`, `partial { missing, note }`, `truncated`, `SkipReason` variants (MissingNeed,
-NotYetOnOs, NotApplicable, NeedsNewerRdy, RunDeadline, Cancelled), `Summary::required_not_run` and
-`not_run`, `Report::capabilities`, `Report::actions`, `Report::interrupted`, and run environment (os,
-arch, rdy version, uid or "elevated", hostname after redaction).
-
-## The action log
-
-Threat 05 R1 and INV-06: every command run, file read, endpoint contacted and kube request is recorded
-into the result. The facade writes it; checks cannot skip it.
-
-```rust
-// Wire type in rdy_spec::result; 01 owns the JSON. Shown here for what the engine records.
-pub struct Action {
-    pub seq: u32,
-    pub check: Option<String>,          // None for startup probes
-    pub at_ms: u64,                     // offset from run start
-    pub duration_ms: u64,
-    pub kind: ActionKind,
-    pub outcome: ActionOutcome,         // Ok, Denied { rule }, Failed { error }, Timeout
-}
-
-#[non_exhaustive]
-pub enum ActionKind {
-    Exec { program: String, argv: Vec<String>, exit: Option<i32>, stdout_bytes: u64, truncated: bool },
-    Read { path: String, bytes: u64, truncated: bool },
-    ReadDir { path: String, entries: u32 },
-    Stat { path: String },
-    Env { name: String },               // the name only, never the value
-    Lookup { host: String, answers: u32 },
-    Connect { host: String, port: u16, addr: Option<String>, via_proxy: Option<String> },
-    Tls { host: String, sni: String },
-    Http { method: String, url: String, status: Option<u16> },   // url without query string
-    Dns { server: String, name: String, rtype: String },
-    Kube { method: String, path: String, status: Option<u16> },
-    Native { api: String },             // for example "sysinfo::System::refresh_memory"
-    Coalesced { kind: String, under: String, count: u32 },
-}
-```
-
-- Exec, Connect, Tls, Http, Dns and Kube entries are never coalesced. They are few and they are what a
-  security reviewer reads.
-- Read, ReadDir and Stat entries beyond 200 per check are coalesced per parent directory ("4,812 reads
-  under /proc"), so `host.security_agents` does not produce a 5 MB log.
-- The log is in the JSON (`Report::actions`) and in the HTML as a collapsed `<details>` section per
-  check (no JavaScript needed).
-- Kube exec credential plugins run inside `kube`, outside the facade (ADR 0010 point 5). At connect time
-  the k8s probe records an `Exec` entry with outcome `Ok` and a note that the kube client may run the
-  named plugin, so the log does not hide it.
-- `rdy run --plan` (M2, SEC-40) prints the union of the manifests in the run plan. A test asserts that
-  every action in a fixture run is inside its check's manifest.
-
-## The probe facade
-
-One engine-owned interface for every side effect a check performs (TB2 in 05). Policy and logging live
-in `Probe`. The backend does the raw I/O.
-
-```rust
-#[derive(Clone)]
-pub struct Probe { /* Arc<Shared { backend, policy, log, semaphores }>, scope: this check's info and deadline */ }
-
+// probe
 impl Probe {
-    // Files: read-only. Paths must start with a prefix in CheckInfo::reads and pass the deny list.
-    pub async fn read(&self, path: &Path) -> Result<FileBytes, ProbeError>;          // first 1 MiB
-    pub async fn read_tail(&self, path: &Path, max: usize) -> Result<FileBytes, ProbeError>; // last max, cap 1 MiB
-    pub async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ProbeError>;  // cap 10,000 entries
+    pub async fn read(&self, path: &Path) -> Result<FileBytes, ProbeError>;
+    pub async fn read_tail(&self, path: &Path, max: usize) -> Result<FileBytes, ProbeError>;
+    pub async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ProbeError>;
     pub async fn read_link(&self, path: &Path) -> Result<PathBuf, ProbeError>;
     pub async fn stat(&self, path: &Path) -> Result<Option<FileMeta>, ProbeError>;
-    pub fn env(&self, name: &str) -> Result<Option<String>, ProbeError>;              // name must be in CheckInfo::env
-
-    // Commands: argv only, program must be in CheckInfo::commands.
+    pub fn env(&self, name: &str) -> Result<Option<String>, ProbeError>;
     pub async fn exec(&self, cmd: Cmd) -> Result<Output, ProbeError>;
-
-    // Network: targets must pass the peer policy.
-    pub async fn lookup(&self, host: &str) -> Result<Vec<IpAddr>, ProbeError>;        // system resolver
-    pub async fn connect(&self, target: &Target, timeout: Duration) -> Result<ProbeStream, ProbeError>;
-    pub fn permit_nameserver(&self, server: SocketAddr) -> Result<Permit, ProbeError>; // before a hickory query
-
-    // Native OS calls (sysinfo, statvfs, Windows registry). Live runs `f`; Replay loads recorded JSON.
-    pub async fn native<T, F>(&self, api: &'static str, f: F) -> Result<T, ProbeError>
-    where T: Serialize + DeserializeOwned + Send + 'static,
-          F: FnOnce() -> Result<T, String> + Send + 'static;
-
-    // Protocol detail recorded by a check crate on top of a ProbeStream (TLS, HTTP, DNS answers).
-    pub fn note(&self, kind: ActionKind, outcome: ActionOutcome);
-
-    // Kubernetes: a tower layer installed once on the run's kube client by rdy-checks-k8s.
-    pub fn kube_guard(&self) -> KubeGuardLayer;
+    pub async fn lookup(&self, host: &str) -> Result<Vec<IpAddr>, ProbeError>;
+    pub async fn tcp(&self, target: &Target) -> Result<TcpReport, ProbeError>;     // attempts per address
+    pub async fn tls_chain(&self, target: &Target) -> Result<TlsChain, ProbeError>;
+    pub async fn http(&self, req: HttpProbe) -> Result<HttpOutcome, ProbeError>;
+    pub async fn native(&self, call: NativeCall) -> Result<NativeValue, ProbeError>;
+    pub fn kube_guard(&self) -> KubeGuardLayer;        // used only by guarded_service
 }
-
 pub struct Cmd { pub program: &'static str, pub args: Vec<String>, pub timeout: Option<Duration> }
-pub struct Output { pub status: Option<i32>, pub stdout: Vec<u8>, pub stderr: Vec<u8>, pub truncated: bool }
-pub struct ProbeStream { /* AsyncRead + AsyncWrite; TcpStream live, DuplexStream in replay; byte counters */ }
-pub enum Target { Host { host: String, port: u16 }, Proxy { proxy: Url, host: String, port: u16 } }
-
+pub enum Target { Direct { host: String, port: u16 }, ViaProxy { host: String, port: u16 } }
+pub struct HttpProbe { pub url: String, pub method: Method /* Head | Get */, pub route: Route,
+                       pub roots: Roots /* System | Bundled */ }
 #[non_exhaustive]
-pub enum ProbeError {
-    Denied { rule: &'static str, what: String },   // policy refusal; logged; a bug in the check or a hostile spec
-    NotFound,
-    PermissionDenied,                              // checks map this to MissingNeed(Root) or partial
-    Timeout,
-    Io(String),
-    NotRecorded(String),                           // Replay only: the fixture lacks this call
-}
-
-/// Raw I/O. Two implementations: Live (release) and Replay (feature "testing").
-pub trait Backend: Send + Sync + 'static {
-    fn read<'a>(&'a self, path: &'a Path, range: ReadRange) -> BoxFuture<'a, io::Result<FileBytes>>;
+pub enum NativeCall { Statvfs { path: PathBuf }, Uname, Rlimit(Resource), Hostname, MachineId, SystemRoots }
+#[non_exhaustive]
+pub enum ProbeError { Denied { rule: &'static str, what: String }, NotFound, PermissionDenied,
+                      Timeout, Hung { pid: u32 }, Net(NetFailure), Io(String), NotRecorded(String) }
+pub trait Backend: Send + Sync + 'static {   // Live and Replay; raw I/O only, no policy
+    fn open_read<'a>(&'a self, path: &'a Path, range: ReadRange) -> BoxFuture<'a, io::Result<FileBytes>>;
     fn read_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>>;
     fn read_link<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<PathBuf>>;
     fn stat<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
     fn env(&self, name: &str) -> Option<String>;
-    fn exec<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, io::Result<Output>>;
-    fn lookup<'a>(&'a self, host: &'a str) -> BoxFuture<'a, io::Result<Vec<IpAddr>>>;
-    fn connect<'a>(&'a self, addr: SocketAddr, host: &'a str) -> BoxFuture<'a, io::Result<ProbeStream>>;
-    fn native<'a>(&'a self, api: &'static str, live: NativeFn) -> BoxFuture<'a, Result<serde_json::Value, String>>;
+    fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, io::Result<Output>>;
+    fn resolve<'a>(&'a self, host: &'a str) -> BoxFuture<'a, io::Result<Vec<IpAddr>>>;
+    fn connect<'a>(&'a self, addr: SocketAddr) -> BoxFuture<'a, io::Result<BoxedStream>>;
+    fn native<'a>(&'a self, call: &'a NativeCall) -> BoxFuture<'a, io::Result<NativeValue>>;
 }
+
+// output, report, redact
+impl OutputDir { pub fn create_new(parent: &Path, product: &str, ts: &str) -> Result<Self, ReportError>;
+                 pub fn write_report(&self, r: &RedactedReport) -> Result<(), ReportError>;
+                 pub fn write_spec(&self, s: &VerifiedSpecBytes) -> Result<(), ReportError>; }
+pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<(), ReportError>;
+pub fn render_html(r: &RedactedReport) -> Result<String, ReportError>;
+pub struct RedactedReport(/* private */ Report);
+pub fn blocking<T, F>(f: F) -> BoxFuture<'static, Result<T, CheckError>>
+where F: FnOnce() -> Result<T, CheckError> + Send + 'static, T: Send + 'static;
 ```
 
-`Probe` replaces the overview's `Exec` trait: same idea (two implementations from day one), wider scope.
+Lint wall entries for every check crate's `clippy.toml`:
+- Process: `std::process::Command::new`, `tokio::process::Command::new`.
+- Files: `std::fs::*` functions, `File::open`, `File::create`, `OpenOptions::new`, `tokio::fs::*`,
+  `rustix::fs::*`.
+- Sockets: `std::net::{TcpStream, UdpSocket, TcpListener}` constructors, `ToSocketAddrs`,
+  `tokio::net::*` constructors and `lookup_host`, `std::os::unix::net::*`, `rustix::net::*`, type
+  `socket2::Socket`.
+- Threads and tasks: `std::thread::spawn`, `std::thread::Builder::spawn`, `tokio::spawn`,
+  `tokio::task::spawn_blocking`.
+- Env: `std::env::{var, var_os, vars, vars_os}`.
+- Leaks: `Box::leak`, `String::leak`, `Vec::leak`.
+- kube constructors outside the client module: `kube::Client::new`, `kube::Client::try_default`,
+  `kube::Config::infer`.
+- `rustix::process` functions other than the id getters.
 
-Policies enforced in `Probe`, so Live and Replay share them:
+## Appendix B. Kube guard rules
 
-| Area | Policy | Invariant |
-| --- | --- | --- |
-| Exec | Program resolved to an absolute path from the fixed search path, always, not only as root. Refused outright: `sh`, `bash`, `zsh`, `dash`, `cmd`, `powershell`, `pwsh`, `sudo`, `su`, `doas`, `pkexec`, `runas`. Environment cleared, then `LC_ALL=C`, `PATH=<fixed>` (Windows: `SystemRoot` only). No `LD_*`, `DYLD_*`. stdin null. cwd `/` (Windows: `%SystemRoot%`). Own process group on Unix, group killed on timeout. stdout cap 1 MiB, stderr cap 64 KiB, then the pipe is drained and dropped. | INV-07, S2, D1 |
-| Files | Read-only opens. Path must match a `reads` prefix. Deny list checked on the path and on its canonical target: `/etc/shadow`, `/etc/gshadow`, `/etc/sudoers*`, `*/.ssh/*`, `*.key`, `*.pem` with a private key header, `/root/.kube/*`, `~/.kube/*`, `/proc/*/environ`, `/proc/*/mem`. 1 MiB cap. Runs on `spawn_blocking` under the timeout (hung NFS). | INV-06, I1 |
-| Env | Name must be in `env`. Logged by name. Values pass the redactor before any write. | I1 |
-| Network | Allowed peers are built once from the verified spec: hosts in net check params, the proxy in effect, system nameservers read at startup, and the kube API server (through the guard). After lookup, every resolved address is checked again: link-local `169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254` and other metadata addresses are refused even when listed (rebinding defense). Endpoint count capped at 64 per spec. Per-stream read cap 1 MiB, except `net.bandwidth`, which declares its own byte cap. Redirect targets are not in the allowlist unless the spec lists them. | INV-10, INV-11, I6, D1 |
-| Kube | `KubeGuardLayer` is a tower layer over `http::Request` inside the kube client. Allowed: GET (no `watch=true`); POST to `selfsubjectaccessreviews`, `selfsubjectrulesreviews`, `selfsubjectreviews`; POST with `dryRun=All` only for checks whose spec turned on dry run. Refused: any path containing `/secrets`, `pods/exec`, `pods/attach`, `pods/portforward`, `/proxy`, `pods/log`. ConfigMaps: list as metadata only; GET by name only for names in the check's manifest (`kube-system/kubeadm-config`). Response body cap 32 MiB. Each request logged with method, path without query values, status. | INV-13, E1, I4 |
+Global rules, because `call` runs on kube's buffer worker without a check id.
 
-Kube attribution: kube wraps its service in a tower `Buffer`, so the guard's `call` runs on the buffer
-worker. The guard enforces policy in `call` and writes the log entry from the response future, which is
-polled on the calling check's task, where the engine's task-local check id is readable. A test asserts
-attribution, so a kube or tower change cannot break it silently; the fallback is `check: None`.
-
-TLS and HTTP: net checks run `tokio-rustls` over a `ProbeStream` (with the CONNECT written by
-`rdy-checks-net` when a proxy is in effect) and HTTP/1.1 through `hyper::client::conn::http1` on top.
-The net crate's HTTP helper returns status and selected headers and drains bodies without storing them
-(INV-12). Direct nameserver queries use `hickory-resolver` after `permit_nameserver`; the contact-set
-test (SEC-22) catches any socket opened outside the facade.
-
-## How checks degrade on each OS
-
-- Each check struct and its evaluation logic compile on every target. OS-specific gathering sits in
-  `#[cfg(target_os = "linux")]`, `"macos"`, `"windows"` functions. Each family has one
-  `#[cfg(not(any(...)))]` stub per gather function returning `Err(CheckError::Unsupported(..))`.
-- `CheckInfo::os` is the source of truth. The engine reads it at plan time: `NotYet` gives
-  `Skipped(NotYetOnOs)`, `NotApplicable` gives `Skipped(NotApplicable)`, and the check is never called.
-  A unit test per family, run on each CI OS, asserts that every check marked `Full` or `Partial` on the
-  current OS does not return `Unsupported` on its fixture.
-- Evaluation is pure and takes plain fact structs (`MemoryFacts`), so macOS and Windows logic is tested
-  on Linux CI from recorded facts before real sources exist.
-- The spec's `os` filter (01 owns the field) gives `Skipped(NotApplicable)`. That is how a vendor says
-  "this check is Linux only" without making a macOS run NOT READY.
-
-M1 coverage:
-
-| Family | Linux | macOS | Windows |
-| --- | --- | --- | --- |
-| host | Full for the M1 tier | `NotYet` for all (03 marks them M1-late) | `NotYet` for all; `host.lsm`, `host.cgroups` `NotApplicable` |
-| net | Full | Full, except `net.proxy` `Partial` (env only until scutil parsing lands) | Full, except `net.proxy` `Partial` (env only until registry parsing lands) |
-| k8s | Full | Full | Full |
-
-So the host family is Linux-only in M1. A Linux spec run on a laptop reports the host checks as
-"required checks not run", which is true.
-
-## How the engine runs on each OS
-
-- **Process model.** One foreground process. No daemon, no service, no scheduled task, no background
-  thread outliving the run, no listener sockets. Children only through the facade, plus kube exec
-  credential plugins. The tokio runtime is built by `rdy-cli` (ADR 0004) and dropped with
-  `shutdown_timeout(1s)`.
-- **Startup order.** Setuid refusal, ring provider install, spec load and verify (rdy-spec), plan,
-  probes, checks, mapping and redaction, report write.
-- **Output.** `rdy-cli` creates `./rdy-report-<product>-<UTC timestamp>/` (or `--out <dir>`) and
-  fails if it exists (INV-08). Inside: `rdy-report-<product>-<UTC timestamp>.json` and `.html`
-  (ADR 0003 names, so a file mailed alone keeps its context), and a copy of the verified spec and its
-  `.minisig` (05, surface 2). `OutputDir` in `rdy-engine` uses `cap_std::fs::Dir`: create the directory
-  with mode 0700, open it as a handle, create each file with `create_new` and mode 0600 under a
-  `.name.tmp` name, write, fsync, rename inside the same handle. Handles never follow a symlink out of
-  the directory. Windows: the directory inherits the parent's ACL; the docs say so and M2 can tighten it.
-- **Human output** goes to stderr with progress from `Progress` events. Untrusted strings are stripped
-  of control characters by the CLI (INV-16). With `--json`, the same JSON goes to stdout as well.
-  `tracing` logs go to stderr only; M1 writes no log files.
-- **Temp files.** None in M1 besides the `.tmp` files inside the output directory. Commands run with cwd
-  `/`. `custom.exec` (M3) gets a fresh 0700 temp directory from `tempfile`, removed after the check.
-- **Exit codes.** Engine returns `Report` or `EngineError`. The CLI maps: verdict 0, 1, 2; spec, flag or
-  signature errors 64; setuid, unwritable output, runtime failure 70 (ADR 0008). If the report cannot be
-  written but `--json` is set, the JSON still goes to stdout before exit 70.
-- **Linux.** Full host sources through `/proc` and `/sys`. Static musl (ADR 0006). Process group kill on
-  timeout.
-- **macOS.** Same Unix code paths. System Integrity Protection and TCC can deny reads even as root;
-  those surface as `PermissionDenied` and become partial results, not errors.
-- **Windows.** Commands by absolute path under `%SystemRoot%\System32` only. Timeout kills the child
-  with `kill_on_drop`; grandchildren are not killed in M1 (job objects are an M2 ticket). Ctrl-C through
-  `tokio::signal::ctrl_c`.
-
-## Report renderers
-
-Both in `rdy-engine::report` (ADR 0003), both pure functions of `Report`, both deterministic.
-
-```rust
-pub mod report {
-    pub fn write_json(report: &Report, out: &mut dyn std::io::Write) -> Result<(), ReportError>; // pretty, struct field order, BTreeMap only
-    pub fn render_html(report: &Report) -> Result<String, ReportError>;                        // feature "html"
-}
-pub struct OutputDir { /* cap_std::fs::Dir */ }
-impl OutputDir {
-    pub fn create_new(parent: &Path, name: &str) -> Result<Self, ReportError>;
-    pub fn write_atomic(&self, name: &str, bytes: &[u8]) -> Result<(), ReportError>;
-}
-```
-
-- HTML sections in this order: verdict headline and summary; Blockers; Required checks not run (with the
-  missing need and its hint); Warnings, including warn checks not run; Passed; Not applicable;
-  Capabilities; Action log (collapsed per check). Inside each section, spec order. Every status carries a
-  text label (ADR 0003 point 5). Spec-written fix text is labelled with the product name.
-- The full JSON is embedded in `<script type="application/json" id="rdy-result">`. Escaping is JSON
-  level: `<`, `>` and `&` become `<`, `>` and `&`, so `JSON.parse` of the element text
-  returns the exact report and no `</script>` can appear. (ADR 0003 decision 3 lost these escapes in its
-  text; see corrections.)
-- The renderers do not redact; the `Report` is already redacted when the engine returns it. `rdy report`
-  (M2) re-renders a JSON file and must run the redactor again on input it did not produce.
-
-## Custom checks later (ADR 0005)
-
-None in M1. `custom.exec` arrives in M3. What the engine keeps open now:
-
-1. Unknown ids map to `Skipped(NeedsNewerRdy)`, so an M1 binary given a `custom.exec` check reports it
-   as a required check not run, never a pass and never a parse error.
-2. `Probe::exec` is the only command path. `custom.exec` will reuse it with a second policy: commands
-   from the spec instead of `CheckInfo::commands`, allowed only when the run has `--allow-exec` or an
-   interactive yes, cwd in a fresh temp directory, 64 KiB caps (ADR 0005). The `Cmd` origin becomes an
-   enum then (`Builtin` or `Spec`); not before.
-3. The run plan already lists every command a run will execute, so the M3 consent prompt is the plan,
-   filtered to spec commands.
-4. `Need::Root` on a custom check only makes it skip when not root. The engine has no escalation path to
-   reuse.
-5. No dynamic loading, no WASM, no scripting. `Check`, `Family` and `Probe` are public Rust API for the
-   workspace crates with no stability promise until the 1.0 decision in M3 (ADR 0007).
-
-## Testing seams
-
-What qa-engineer builds on:
-
-- **Replay backend** (feature `testing`). Reads the 03 fixture layout
-  `tests/fixtures/<check-id>/<case>/`: `root/` maps absolute paths (`/proc/meminfo` is
-  `root/proc/meminfo`); `commands/*.json` holds `{argv, stdout, stderr, exit, delay_ms}`; `net.json`
-  scripts each `host:port` as `refused`, `blackhole` (never completes), `reset`, or `serve: <name>` to
-  connect a duplex stream to an in-process test server (for example an `rcgen` TLS server); `native/`
-  holds recorded JSON per api name; `env.json`; `caps.json` sets which needs are available. Anything not
-  recorded fails with `NotRecorded`, so a fixture cannot silently fall through to the real machine.
-- **Same policy in tests.** Replay sits under `Probe`, so every fixture run also tests the manifest,
-  the deny lists and the caps.
-- **Kubernetes** fixtures are a `tower` mock service handed to `kube::Client::new`, with
-  `KubeGuardLayer` in front, so the guard is under test in every k8s fixture (ADR 0010 read-only test).
-- **Time.** Tests use `#[tokio::test(start_paused = true)]`. A `delay_ms` beyond the timeout gives
-  Timeout without waiting.
-- **Helpers.**
-
-```rust
-// rdy_engine::testing, feature "testing"
-pub fn replay(dir: &Path) -> Arc<dyn Backend>;
-pub async fn run_fixture(check: Box<dyn Check>, dir: &Path) -> FixtureRun;   // result + action log
-pub struct FixtureRun { pub result: CheckResult, pub actions: Vec<Action> }
-impl FixtureRun { pub fn assert_within_manifest(&self); }                    // INV-06 per fixture
-pub struct FakeCheck { pub info: &'static CheckInfo, pub behaviour: Fake }   // scheduler tests
-pub enum Fake { Outcome(CheckOutcome), Sleep(Duration), Panic, Block }       // Block: spawn_blocking that never returns
-pub fn normalize(report: &mut Report);                                       // zero durations and timestamps
-```
-
-- **Goldens.** `insta` snapshots of `CheckResult` per fixture case (`expect.json` in 03), and of the
-  whole `Report` and HTML for the ready, warning and blocked runs, with `Clock::Fixed` and a fixed
-  `run_id`.
-- **Live integration.** Loopback servers (TLS with a test CA, CONNECT proxy, closed port, black hole)
-  with the Live backend, run on all four CI targets. The kind cluster job for k8s (ADR 0010).
-- **Record mode** for capturing fixtures from a real box is M2, dev-only, and its output is scrubbed to
-  acme names before commit.
-
-## Plan corrections found
-
-- docs/adr/0008-errors-and-result-model.md, Decision 3: a skipped, timed-out or errored block-severity
-  check yields Warnings, exit 1. Fix: Blocked, exit 2, counted as required check not run, as in the
-  verdict table above; write ADR 0013 and mark 0008 decision 3 superseded. The `--strict` note in its
-  Consequences becomes moot for block checks.
-- docs/adr/0003-report-format-html-json.md, Decision 3: says `<`, `>` and `&` are "escaped as `<`, `>`,
-  `&`", which is no escaping at all (the entities were lost). Fix: "escaped as the JSON escapes
-  `<`, `>`, `&`". HTML entities would be wrong too: script element text is not
-  entity-decoded.
-- docs/adr/0009-http-client-and-tls.md, Decisions 1 and 2: `net.egress` uses reqwest and a shared
-  `net::client` builder. reqwest opens its own sockets, which bypasses the probe facade (INV-06, INV-10)
-  and cannot be replayed. 03 already moved to a tokio-rustls connector. Fix: ADR 0014, net checks use
-  tokio-rustls and hyper's client conn API over `ProbeStream`; reqwest stays only for the M2 upload
-  client, which is not a check.
-- docs/adr/0010-kubernetes-client-kube-rs.md, Decisions 2 and 4: the client is "shared through the
-  engine Context" and only two review kinds may be POSTed. Fix: the k8s family owns the client (the
-  engine has no kube dependency); the allowlist is the one in the facade table above, which also admits
-  `SelfSubjectRulesReview` and opt-in `dryRun=All`, matching 05 INV-13 and 03 `k8s.admission`.
-- docs/plan/00-overview.md, rdy-engine API sketch: `Exec` trait, `Context { host_root, exec }`,
-  `Check::{id, needs, supported_on}`, `run(self: Arc<Self>, Arc<Context>)`, `Need` in rdy-engine,
-  `Finding { Pass, Fail }`. Fix: `Backend` behind `Probe`, `CheckContext`, `Check::info()` returning
-  `CheckInfo`, `run(&self, &CheckContext)`, `Need` in `rdy_spec::result`, `Finding` with a Warn level
-  and `partial`, as specified here.
-- docs/plan/00-overview.md, rdy-checks-k8s sketch: public `connect()` and `K8sFamily::new(Option<Client>)`.
-  Fix: `K8sFamily::new(KubeOptions)` connecting in its `probe` hook, so the cluster is touched only when
-  the plan needs it.
-- docs/plan/00-overview.md, Workspace dependencies: lists `nix`; 03 uses `rustix`, and `cap-std` already
-  depends on `rustix`. Fix: `rustix` only; add `cap-std`, `tokio-util`, `http`, `tower-layer`,
-  `tower-service` and `hyper` (direct, for net checks).
-- docs/plan/00-overview.md, M1 calendar: does not count the engine's security tickets. 05's SEC-17, 18,
-  19, 20, 23 and 25 add 20 h, and this note adds about 44 h of new tickets (below), so M1 lands near
-  160 h against 60 to 90. Fix, in cut order: graceful Ctrl-C (keep plain abort), generic native calls
-  (keep only `statvfs`), the HTML action log section (JSON keeps it), per-family limits (global
-  semaphore only), Windows elevation probe (report Root as unknown on Windows). Even then M1 needs the
-  founder's call to extend toward Jan 2027 or move k8s checks after `0.1.0`.
-- docs/plan/05-threat-model.md, INV-05 and surface 2 E1: "unknown check ids ... are errors (exit 64)".
-  ADRs 0005, 0007 and 0008 make them `Skipped(NeedsNewerRdy)`. With the verdict rule here an unknown
-  block-severity id gives NOT READY, so there is no false pass. Fix: INV-05 keeps duplicate keys,
-  anchors and multi-document input as errors and says unknown ids are Skipped and count as required
-  checks not run. Unknown fields inside a check follow ADR 0007 point 6 unless 01 decides otherwise.
-- docs/plan/05-threat-model.md, S2: fixed PATH "if euid is 0". Fix: always, because a user-writable
-  PATH entry is just as wrong for a non-root run and one rule is simpler to test.
-- docs/plan/05-threat-model.md, SEC-53 and the corrections list put custom exec at M4; ADR 0005 and
-  00-overview say M3 and call it `custom.exec`; 03 says `custom.script` at M4. Fix: one name,
-  `custom.exec`, and one milestone. M3 per ADR 0005, with SEC-53 moved to M3 ahead of the build ticket.
-- docs/plan/03-check-catalog.md, `net.egress` and `net.registry`: follow redirects and probe the redirect
-  host. That contacts hosts the spec did not list (INV-10, I6). Fix: record the `Location` host, do not
-  connect unless the spec lists it, and say "redirects to cdn.acme.example; add it to endpoints to test
-  it".
-- docs/plan/03-check-catalog.md, Conventions, "Redaction in evidence": calls the `rdy-bundle` redactor
-  the second line. In M1 the redactor is `rdy_engine::redact` (ADR 0015), applied to the whole report.
-- docs/plan/03-check-catalog.md, Conventions: `severity: info`, `optional` and `partial` are assumed.
-  The engine handles `partial` as specified here. `info` and `optional` need 01 to decide; if added, both
-  sit in the "warn" column of the verdict table or below it, never in the block column.
-- docs/plan/03-check-catalog.md, k8s intro: "every other check depends on k8s.access". Fix: expressed
-  as the `KubeContext` need; there is no check dependency graph.
-- docs/adr/0004-async-runtime-tokio.md, Decision 3: default timeout 10 s, spec override. Not wrong, but
-  03 sets per-check defaults (5, 15, 30 s) and a 60 s cap. Fix: `CheckInfo::default_timeout` per check,
-  10 s only as the fallback, 60 s hard cap validated by rdy-spec.
-
-## Tickets implied
-
-Tickets reused from 00-overview.md, the ADRs and 05 keep their exact titles so 11-backlog.md can dedupe.
-Their scope is now as specified here.
-
-- [M1] Write ADR 0013 required checks that did not run make the verdict Blocked | owner: rust-architect | est: 1h | depends on: none | exit test: ADR 0013 is Accepted, ADR 0008 shows "Decision 3 superseded by 0013", and the ADR index lists it.
-- [M1] Write ADR 0014 the probe facade owns every check side effect | owner: rust-architect | est: 1h | depends on: none | exit test: the ADR records hyper over probe streams for net checks, amends ADR 0009 decisions 1 and 2, and carries a security-reviewer sign-off.
-- [M1] Write ADR 0015 minimal redactor lives in rdy-engine | owner: rust-architect | est: 1h | depends on: none | exit test: the ADR is Accepted and 05's "redaction placement ADR" dependency of SEC-25 points to it.
-- [M1] Write ADR 0016 output directory confinement with cap-std | owner: rust-architect | est: 1h | depends on: none | exit test: the ADR is Accepted with the Windows ACL limitation stated, and SEC-19 points to it.
-- [M1] Check trait, Need and Context in rdy-engine | owner: rust-engineer | est: 3h | depends on: Define result model and verdict mapping in rdy-spec | exit test: a fixture family with one passing and one need-missing check produces Pass and Skipped through Engine::run.
-- [M1] Family trait, registry and run plan | owner: rust-engineer | est: 3h | depends on: Unknown check ids report Skipped with a "needs a newer rdy" reason | exit test: the plan for examples/specs/acme-platform.yaml on Linux marks host, net and k8s checks runnable and gpu.cuda and aws.iam NeedsNewerRdy; on Windows host checks are NotYetOnOs; an `os: [linux]` check on macOS is NotApplicable; no I/O happens.
-- [M1] Amend verdict mapping for required checks not run | owner: rust-engineer | est: 2h | depends on: Write ADR 0013 required checks that did not run make the verdict Blocked, Define result model and verdict mapping in rdy-spec | exit test: a table test covers every severity and status pair from 02, including NotApplicable and the empty-run rule, and asserts summary counts and exit codes.
-- [M1] Capability probes for root, commands and network | owner: rust-engineer | est: 3h | depends on: Family trait, registry and run plan, SEC-17 Build the probe facade and action log | exit test: CI as non-root reports Root unavailable with a rerun hint, the sudo CI job reports it available, a recorded `whoami /groups` output maps high integrity to available, and needs absent from the plan are not probed.
-- [M1] Family probe hook and lazy KubeContext probe | owner: rust-engineer | est: 2h | depends on: Capability probes for root, commands and network, Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: a spec with no k8s checks makes zero kube requests and loads no kubeconfig; with no kubeconfig k8s.access blocks with the fix and every other k8s check is Skipped MissingNeed KubeContext.
-- [M1] Scheduler with concurrency limit, per-check timeout and panic isolation | owner: rust-engineer | est: 4h | depends on: Check trait, Need and Context in rdy-engine | exit test: a fixture check that sleeps forever reports Timeout and a check that panics reports Error while the other checks still pass.
-- [M1] Family limits, run deadline and Ctrl-C cancellation | owner: rust-engineer | est: 3h | depends on: Scheduler with concurrency limit, per-check timeout and panic isolation | exit test: with paused time a deadline marks running checks Timeout and unstarted ones Skipped RunDeadline, a cancelled token yields a report with interrupted true, and k8s never has more than 3 checks in flight.
-- [M1] Map outcomes to CheckResult with fix source, partial and size caps | owner: rust-engineer | est: 2h | depends on: Check trait, Need and Context in rdy-engine, Amend verdict mapping for required checks not run | exit test: a spec fix replaces the built-in text with fix_source spec, a 100 KiB observed value is truncated with truncated true, and a partial finding carries its missing needs.
-- [M1] SEC-17 Build the probe facade and action log | owner: rust-engineer | est: 4h | depends on: Write ADR 0014 the probe facade owns every check side effect, Check trait, Need and Context in rdy-engine | exit test: a fixture run's JSON action log lists every command, file, endpoint and kube request the checks used, reads past 200 per check are coalesced, and a lint fails on `std::process::Command` outside the facade.
-- [M1] SEC-18 Enforce command execution policy in the facade | owner: rust-engineer | est: 3h | depends on: SEC-17 Build the probe facade and action log | exit test: tests show no shell, fixed PATH always, scrubbed loader env, sudo-family refused, timeout and 1 MiB output cap enforced.
-- [M1] Blocking helper and subprocess kill on timeout | owner: rust-engineer | est: 3h | depends on: SEC-18 Enforce command execution policy in the facade | exit test: a check running `sleep 600` times out, the child and its process group are gone on Unix, and `rdy` exits within 2 s of the deadline.
-- [M1] File and env read policy in the facade | owner: rust-engineer | est: 3h | depends on: SEC-17 Build the probe facade and action log | exit test: /etc/shadow and a symlink pointing to it are Denied and logged, a path outside the check's prefixes is Denied, a 2 MiB file returns 1 MiB with truncated true, and an undeclared env name is Denied.
-- [M1] Network permits in the facade for connect, lookup and nameservers | owner: rust-engineer | est: 3h | depends on: SEC-17 Build the probe facade and action log | exit test: an unlisted host, 169.254.169.254 and a listed name that resolves to a link-local address are Denied, a listed loopback endpoint connects and is logged, and more than 64 endpoints fail validation.
-- [M1] Native call recording in the facade | owner: rust-engineer | est: 2h | depends on: SEC-17 Build the probe facade and action log | exit test: a statvfs native call is logged with its api name in Live and returns recorded JSON in Replay.
-- [M1] SEC-23 Enforce Kubernetes request allowlist | owner: rust-engineer | est: 4h | depends on: SEC-17 Build the probe facade and action log | exit test: a mock API server behind KubeGuardLayer records every request from the k8s suite, the test asserts read verbs, access reviews and opt-in dry-run only with no secrets access, and every entry carries its check id.
-- [M1] Replay backend and fixture loader | owner: rust-engineer | est: 4h | depends on: File and env read policy in the facade, Native call recording in the facade, Network permits in the facade for connect, lookup and nameservers | exit test: a host.memory fixture runs with no real file read, an unrecorded argv fails with NotRecorded, a scripted blackhole yields Timeout under paused time, and the release binary's feature tree excludes `testing`.
-- [M1] Engine test helpers FakeCheck, run_fixture and normalize | owner: qa-engineer | est: 2h | depends on: Replay backend and fixture loader | exit test: the scheduler tests use FakeCheck for every status and `assert_within_manifest` fails on a fixture check that reads an undeclared path.
-- [M1] Clippy disallowed-methods for check crates | owner: rust-engineer | est: 1h | depends on: SEC-17 Build the probe facade and action log | exit test: adding `std::fs::read` or `tokio::net::TcpStream::connect` to rdy-checks-host fails clippy in CI.
-- [M1] SEC-19 Confine all writes to a new output directory | owner: rust-engineer | est: 4h | depends on: Write ADR 0016 output directory confinement with cap-std | exit test: a pre-planted symlink is not followed, an existing dir is refused, modes are 0700 and 0600, the verified spec copy is present, and a killed run leaves no partial file.
-- [M1] SEC-20 Refuse setuid execution | owner: rust-engineer | est: 1h | depends on: none | exit test: unit test shows exit 70 with a fix hint when real and effective uid differ.
-- [M1] SEC-25 Build minimal redactor for reports and evidence | owner: rust-engineer | est: 4h | depends on: Write ADR 0015 minimal redactor lives in rdy-engine | exit test: every evidence string passes through it before write and the M1 corpus passes with zero misses.
-- [M1] Apply the redactor to every Report string before return | owner: rust-engineer | est: 2h | depends on: SEC-25 Build minimal redactor for reports and evidence, Map outcomes to CheckResult with fix source, partial and size caps | exit test: canary secrets placed in an observed value, a fix text, an env-derived message and an argv in the action log are redacted in both JSON and HTML.
-- [M1] HTML report grouping with blockers first and a collapsed action log | owner: rust-engineer | est: 3h | depends on: askama HTML report with inline CSS, dark mode and print, SEC-17 Build the probe facade and action log | exit test: the golden blocked HTML shows Blockers, then Required checks not run, then Warnings, spec-written fix text is labelled with the product name, and the JSON keeps spec order.
-- [M1] OS support table and compile stubs for rdy-checks-host | owner: check-author | est: 2h | depends on: Family trait, registry and run plan | exit test: all four CI targets build, on macOS and Windows every NotYet host check reports Skipped "no data source for this OS yet", and on Linux none do.
-- [M1] Security review of 02-engine-design.md | owner: security-reviewer | est: 2h | depends on: none | exit test: a review file in docs/plan/reviews/ covers the facade policies, the verdict rule and output confinement, and every blocker is resolved in this note.
-- [M1] cli-ux review of verdict wording, interrupt behaviour and output naming | owner: cli-ux | est: 1h | depends on: none | exit test: 07-cli-ux.md confirms or replaces the headline wording, the second Ctrl-C exit code, the `--no-network` and `--out` names.
-- [M2] SEC-40 Add `rdy run --plan` preview | owner: rust-engineer | est: 6h | depends on: Family trait, registry and run plan | exit test: plan output matches the action log of a real run on the same fixtures.
-- [M2] Windows job objects so a timeout kills the whole process tree | owner: rust-engineer | est: 3h | depends on: Blocking helper and subprocess kill on timeout | exit test: a Windows fixture command that spawns a grandchild leaves no process behind after its timeout.
-- [M2] Dev-only fixture record mode with a scrub step | owner: qa-engineer | est: 4h | depends on: Replay backend and fixture loader | exit test: recording host.memory on a CI runner produces a fixture that replays to the same result, and the scrub step replaces the hostname with an acme name.
-- [M2] rdy-bundle collectors read through the probe facade | owner: rust-engineer | est: 4h | depends on: File and env read policy in the facade | exit test: every collected file appears in the action log and deny-listed paths are refused.
-- [M2] Restrict output directory ACL on Windows | owner: rust-engineer | est: 3h | depends on: SEC-19 Confine all writes to a new output directory | exit test: on Windows CI another local user cannot read the report files.
-- [M3] Spec-origin exec policy, consent list and temp workdir for custom.exec | owner: rust-engineer | est: 4h | depends on: Threat model and design note for custom.exec | exit test: without `--allow-exec` no spec command runs and the refusal lists them; with it, commands run in a fresh temp dir with 64 KiB caps.
-- [M3] CloudCredentials need and cloud family probe hook | owner: rust-engineer | est: 3h | depends on: Family probe hook and lazy KubeContext probe | exit test: with no AWS credentials every aws check is Skipped MissingNeed with a hint and no AWS endpoint is contacted.
-- [M3] Decide the 1.0 stability scope of Check, Family and Probe | owner: rust-architect | est: 3h | depends on: none | exit test: an ADR states whether these modules are semver-covered at 1.0 or move under `rdy_engine::unstable`, before rdy-engine 1.0 ships.
+1. Before any rule, refuse a path containing `%`, `..`, `//`, `;`, an empty segment, a trailing `/` or
+   a non-ASCII byte. Refuse `Upgrade` and `Connection: upgrade` headers. Allowed query keys: `limit`,
+   `continue`, `labelSelector`, `fieldSelector`; anything else (including `watch`, `follow`, `dryRun`)
+   is refused.
+2. Parse into group, version, namespace, resource, name and subresource. Discovery GETs: `/version`,
+   `/api`, `/apis`, `/api/v1`, `/apis/<group>`, `/apis/<group>/<version>`. A subresource is refused in
+   M1.
+3. GET only for (group, resource) pairs in `rdy_checks_k8s::ALLOWED`, a const list reviewed by
+   security-reviewer. M1 list: core `namespaces`, `nodes`, `pods` (requests and node names only enter
+   `observed`); `storage.k8s.io` `storageclasses`, `csidrivers`; `admissionregistration.k8s.io`
+   `validatingadmissionpolicies`, `validatingadmissionpolicybindings`; `security.openshift.io`
+   `securitycontextconstraints`; `config.openshift.io` `clusterversions`. A unit test asserts `secrets`
+   never appears.
+4. ConfigMaps: LIST only with an `Accept` header for `PartialObjectMetadataList`; GET by name only from
+   a const list (`kube-system/kubeadm-config`, M1-late).
+5. POST only to `/apis/authorization.k8s.io/v1/selfsubjectaccessreviews` and
+   `/apis/authorization.k8s.io/v1/selfsubjectrulesreviews`, with no query string. After the ADR 0010
+   amendment, also `/apis/authentication.k8s.io/v1/selfsubjectreviews`. Every other method is refused.
+6. Response bodies are capped at 32 MiB. Spec `namespace` and `name` values are DNS-1123 (rdy-spec).
+7. Every refusal is a `kube` entry with outcome `denied` and the rule name, and the request never
+   leaves the process.

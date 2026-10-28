@@ -1,6 +1,6 @@
 # ADR 0009: HTTP with reqwest on rustls and ring, a strict egress policy, dual roots only for the interception probe
 
-- Status: Accepted (revised 2026-10-28 after security-reviewer review)
+- Status: Accepted (revised 2026-10-28 after security-reviewer review); decisions 1, 2, 3 and 5 superseded by ADR 0014 once it is accepted
 - Date: 2026-10-27
 
 ## Context
