@@ -24,7 +24,7 @@ must-fix items of `docs/plan/reviews/adr-0013-0016-review-by-security-reviewer.m
 | MF-01 facade caps cut secrets | Truncation flags, line drop at cut edges, unterminated PEM rule, run-scoped known secrets, cap-offset corpus | From finding to result; ADR 0015 |
 | MF-02 watchdog race and hang | One `AtomicU8` writer state, bounded helper-thread write, no std stdout lock, `try_lock` snapshot, own redaction pass, child groups killed | Scheduling; ADR 0016 |
 | MF-03 kube allowlist gaps | Every GET the M1 k8s checks make, exactly, each cited by a check; late entries in `M1_LATE` | Appendix B |
-| MF-04 unvetted crates | Direct dependency allowlist per check crate in CI, exact clippy items, wider deny wrappers | Lint wall; ADR 0014 |
+| MF-04 unvetted crates | Direct dependency allowlist per check crate in CI, exact clippy items for every std file, link, permission, process, socket, thread and env API and every kube client and config constructor, wider deny wrappers | Lint wall; Appendix A; ADR 0014 |
 | MF-05 Windows output dir | `%USERPROFILE%\rdy-reports` default, reparse point and final path check (05 I3) | Output and reports; ADR 0016 |
 | MF-06 `selfsubjectreviews` | Allowed in M1 with a fixed body, `v1` only, `uid` and `extra` dropped (ADR 0010 amended) | Kubernetes; Appendix B |
 
@@ -357,7 +357,8 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
 - `allow(clippy::disallowed_` is legal only in the facade's `live/` module and the k8s client module.
 - **Direct dependency allowlist.** `ci/check-crate-deps.toml`:
   - every check crate: `rdy-engine`, `rdy-spec`, `serde`, `serde_json`, `thiserror`, `futures-util`;
-  - `rdy-checks-k8s` adds `kube` and `k8s-openapi`;
+  - `rdy-checks-k8s` adds `kube` and `k8s-openapi`, and is the only check crate that may depend on
+    `kube`; inside it, only the client module may name a kube client or config type (Appendix A);
   - `rdy-checks-net` adds `x509-parser`.
 
   A CI script compares `cargo metadata` against the file. A change needs the `security-review` label.
@@ -586,7 +587,7 @@ revision.
 - [M1] Kube guard path parser, resource allowlist and pending log entries | owner: rust-engineer | est: 3.5h | depends on: Read-only guard layer and test for rdy-checks-k8s | exit test: `%73ecrets`, `secrets` in every segment position, `/api/v1/namespaces/x/finalize`, GET pods/exec with Upgrade, a dryRun POST, a SelfSubjectReview with another body, Impersonate-User on a GET and an unlisted resource are each refused and logged; `/api/v1/namespaces/secrets` is allowed; every ALLOWED entry is cited by a CheckInfo; a dropped request leaves a timeout entry with its check id.
 - [M1] Replay backend and fixture loader | owner: rust-engineer | est: 3h | depends on: File and env read policy in the facade, Closed NativeCall enum in the facade | exit test: a host.memory fixture runs with no real file read, an unrecorded argv fails with NotRecorded, a recorded link-local lookup is refused by the address rule, and the release feature tree excludes `testing`.
 - [M1] Engine test helpers FakeCheck, run_fixture and normalize | owner: qa-engineer | est: 2h | depends on: Replay backend and fixture loader | exit test: scheduler tests use every Fake variant including Spin, and assert_within_manifest fails on a fixture check that reads an undeclared path.
-- [M1] Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | owner: rust-engineer | est: 2h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: every Appendix A entry used in tests/lint-wall fails clippy, an allow attribute outside the allowlisted files fails CI, and a check crate depending on socket2 fails cargo deny.
+- [M1] Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | owner: rust-engineer | est: 2h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: every Appendix A entry except the kube ones (added with the kube client ticket) used in tests/lint-wall fails clippy, an allow attribute outside the allowlisted files fails CI, and a check crate depending on socket2 fails cargo deny.
 - [M1] Direct dependency allowlist for check crates | owner: rust-engineer | est: 1h | depends on: Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | exit test: adding `walkdir` to rdy-checks-host fails CI, and the lint-wall crate has one exact entry per item with no wildcard.
 - [M1] SEC-19 Confine writes to a new output dir with safe names | owner: rust-engineer | est: 4h | depends on: Define public spec types in rdy-spec | exit test: product `../x` fails validation, a pre-planted symlink is not followed, a taken name moves to `-2`, modes are 0700 and 0600 under a setgid parent, the spec copy matches the verified bytes under fixed names, and a killed run leaves no file under a final name.
 - [M1] Windows output directory default and reparse-point checks | owner: rust-engineer | est: 1h | depends on: SEC-19 Confine writes to a new output dir with safe names | exit test: on the Windows CI leg the default lands under %USERPROFILE%\rdy-reports, and a pre-planted junction and a symlink with the target name are both refused before the first check.
@@ -725,29 +726,72 @@ where F: FnOnce() -> Result<T, CheckError> + Send + 'static, T: Send + 'static;
 ```
 
 Lint wall entries for every check crate's `clippy.toml`. Exact items only, because clippy matches exact
-paths; each one is used once in `tests/lint-wall`.
-- Process: `std::process::Command::new`, `tokio::process::Command::new`.
-- Files: `std::fs::read`, `std::fs::read_to_string`, `std::fs::read_dir`, `std::fs::read_link`,
-  `std::fs::metadata`, `std::fs::symlink_metadata`, `std::fs::canonicalize`, `std::fs::write`,
-  `std::fs::copy`, `std::fs::rename`, `std::fs::remove_file`, `std::fs::create_dir`,
-  `std::fs::create_dir_all`, `std::fs::File::open`, `std::fs::File::create`,
-  `std::fs::OpenOptions::new`, `tokio::fs::read`, `tokio::fs::read_to_string`, `tokio::fs::read_dir`,
-  `tokio::fs::metadata`, `tokio::fs::write`, `tokio::fs::File::open`, `tokio::fs::File::create`,
-  `tokio::fs::OpenOptions::new`.
-- Sockets: `std::net::TcpStream::connect`, `std::net::TcpStream::connect_timeout`,
-  `std::net::UdpSocket::bind`, `std::net::TcpListener::bind`,
-  `std::net::ToSocketAddrs::to_socket_addrs`, `tokio::net::TcpStream::connect`,
-  `tokio::net::UdpSocket::bind`, `tokio::net::TcpListener::bind`, `tokio::net::lookup_host`,
-  `std::os::unix::net::UnixStream::connect`, `std::os::unix::net::UnixListener::bind`,
-  `tokio::net::UnixStream::connect`; types `socket2::Socket`, `std::fs::File`.
-- Threads and tasks: `std::thread::spawn`, `std::thread::Builder::spawn`, `tokio::spawn`,
+paths; each one is used once in `tests/lint-wall`, and CI expects each use to fail clippy. A type entry
+catches every constructor and method reached by naming the type, so `std::fs::File` covers `File::open`
+and `File::options`. Method entries that a type entry also covers stay, so the wall does not hinge on
+one clippy rule.
+- Process: type `std::process::Command`; `std::process::Command::new`, `std::process::exit`,
+  `std::process::abort`, `tokio::process::Command::new`.
+- Files and directories: types `std::fs::File`, `std::fs::OpenOptions`, `std::fs::DirBuilder`;
+  `std::fs::read`, `std::fs::read_to_string`, `std::fs::read_dir`, `std::fs::read_link`,
+  `std::fs::metadata`, `std::fs::symlink_metadata`, `std::fs::canonicalize`, `std::fs::exists`,
+  `std::fs::write`, `std::fs::copy`, `std::fs::rename`, `std::fs::remove_file`, `std::fs::remove_dir`,
+  `std::fs::remove_dir_all`, `std::fs::create_dir`, `std::fs::create_dir_all`,
+  `std::fs::File::open`, `std::fs::File::create`, `std::fs::File::create_new`,
+  `std::fs::OpenOptions::new`.
+- Paths that touch the file system: `std::path::Path::metadata`, `std::path::Path::symlink_metadata`,
+  `std::path::Path::canonicalize`, `std::path::Path::read_link`, `std::path::Path::read_dir`,
+  `std::path::Path::exists`, `std::path::Path::try_exists`, `std::path::Path::is_file`,
+  `std::path::Path::is_dir`, `std::path::Path::is_symlink` (`PathBuf` reaches these through `Deref`).
+- Links and permissions: `std::fs::hard_link`, `std::fs::soft_link`, `std::fs::set_permissions`,
+  `std::os::unix::fs::symlink`, `std::os::unix::fs::chown`, `std::os::unix::fs::fchown`,
+  `std::os::unix::fs::lchown`, `std::os::unix::fs::chroot`, `std::os::windows::fs::symlink_file`,
+  `std::os::windows::fs::symlink_dir`.
+- Sockets: types `std::net::TcpStream`, `std::net::TcpListener`, `std::net::UdpSocket`,
+  `std::os::unix::net::UnixStream`, `std::os::unix::net::UnixListener`,
+  `std::os::unix::net::UnixDatagram`, `socket2::Socket`; `std::net::TcpStream::connect`,
+  `std::net::TcpStream::connect_timeout`, `std::net::TcpListener::bind`, `std::net::UdpSocket::bind`,
+  `std::net::ToSocketAddrs::to_socket_addrs`, `std::os::unix::net::UnixStream::connect`,
+  `std::os::unix::net::UnixStream::connect_addr`, `std::os::unix::net::UnixStream::pair`,
+  `std::os::unix::net::UnixListener::bind`, `std::os::unix::net::UnixListener::bind_addr`,
+  `std::os::unix::net::UnixDatagram::bind`, `std::os::unix::net::UnixDatagram::bind_addr`,
+  `std::os::unix::net::UnixDatagram::unbound`, `std::os::unix::net::UnixDatagram::pair`,
+  `tokio::net::TcpStream::connect`, `tokio::net::UdpSocket::bind`, `tokio::net::TcpListener::bind`,
+  `tokio::net::lookup_host`, `tokio::net::UnixStream::connect`.
+- Threads and tasks: type `std::thread::Builder`; `std::thread::spawn`, `std::thread::scope`,
+  `std::thread::Builder::spawn`, `std::thread::Builder::spawn_scoped`, `tokio::spawn`,
   `tokio::task::spawn_blocking`.
-- Env: `std::env::var`, `std::env::var_os`, `std::env::vars`, `std::env::vars_os`.
+- Env, read and write: `std::env::var`, `std::env::var_os`, `std::env::vars`, `std::env::vars_os`,
+  `std::env::set_var`, `std::env::remove_var`, `std::env::current_dir`, `std::env::set_current_dir`,
+  `std::env::current_exe`, `std::env::home_dir`, `std::env::temp_dir`. (`set_var` and `remove_var`
+  are `unsafe` in edition 2024, so `forbid(unsafe_code)` also stops them.)
 - Leaks: `Box::leak`, `String::leak`, `Vec::leak`.
-- Engine and kube: `rdy_engine::live_backend`; outside the client module `kube::Client::new`,
-  `kube::Client::try_default`, `kube::Config::infer`.
-- Crates such as `rustix`, `nix`, `walkdir` and `sysinfo` are kept out by the direct dependency
-  allowlist, not by clippy entries.
+- Engine: `rdy_engine::live_backend`.
+- Kube, outside the `rdy-checks-k8s` client module: types `kube::Client`, `kube::Config`,
+  `kube::client::ClientBuilder`, `kube::config::Kubeconfig`; `kube::Client::new`,
+  `kube::Client::try_default`, `kube::client::ClientBuilder::new`, `kube::Config::new`,
+  `kube::Config::infer`, `kube::Config::incluster`, `kube::Config::incluster_env`,
+  `kube::Config::incluster_dns`, `kube::Config::from_kubeconfig`,
+  `kube::Config::from_custom_kubeconfig`, `kube::config::Kubeconfig::read`,
+  `kube::config::Kubeconfig::read_from`, `kube::config::Kubeconfig::from_env`,
+  `kube::config::Kubeconfig::from_yaml`. The paths `kube::client::Client` and `kube::config::Config`
+  are re-exports of the same items, and clippy matches the item, so one entry covers both.
+  - Trait routes: `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`, `TryFrom<Config>` for
+    `ClientBuilder`, and `Default` and `Deserialize` for `Kubeconfig`. Each needs a named `Config` or
+    `Kubeconfig` (type inference cannot pick one), so the type entries cover them. `tests/lint-wall`
+    uses each route once.
+  - `From<Api<K>>` for `Client` and `Api::into_client` return the client inside an `Api`. Checks only
+    get `kube::Api<K>` values from `ReadOnlyClient`, so that client is the guarded one.
+  - `ReadOnlyClient` hands out `kube::Api<K>` and never a `kube::Client`, so check code never names
+    the type.
+  - Verified on 2026-10-28 against kube 4.2.0 on docs.rs (`kube`, `kube::client` and `kube::config`
+    index pages, and the `Client`, `Config`, `ClientBuilder`, `Kubeconfig` and `Api` pages). M1-102
+    adds and pins kube, so the kube entries and their lint-wall uses land there, re-checked against
+    the pinned version.
+- Not listed: crates other than std, kube and the facade. `tokio`, `rustix`, `nix`, `socket2`,
+  `walkdir`, `sysinfo` and the rest are not direct dependencies of any check crate, so their APIs are
+  out of reach. The direct dependency allowlist enforces that, not clippy. The `tokio` and `socket2`
+  entries above are a second line.
 
 ## Appendix B. Kube guard rules
 
