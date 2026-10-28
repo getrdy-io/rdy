@@ -3,8 +3,9 @@
 # The org has no macOS arm64 runners, so a `macos-15` job may never get one. A job that waits for
 # a runner must not block merges, so this workflow is not a PR check and is not in ci-ok's needs.
 # ci.yml still compiles the aarch64-apple-darwin target on every PR (the macos-arm64-compile leg).
-# When the org has arm64 runners, move this job into the `test` matrix in ci.yml, add it to ci-ok,
-# and delete this file (Founder hand steps, docs/plan/11-backlog.md).
+# When the org has arm64 runners, add a macos-arm64 matrix leg on macos-15 back to the `test` job in
+# ci.yml, drop the macos-arm64-compile leg, delete this file, and retire ADR 0006 decision 8 and the
+# 06 note (Founder hand steps, docs/plan/11-backlog.md).
 #
 # Same rules as ci.yml: every `uses:` is pinned to a full commit SHA, the token is read-only, no
 # pull_request_target, and the Rust toolchain comes from rust-toolchain.toml.
