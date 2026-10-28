@@ -190,16 +190,10 @@ fn one_bad_check_never_fails_the_whole_spec() {
         assert_eq!(*reason, UnsupportedReason::BadCommonField { field });
     }
     assert!(matches!(decoded[6], CheckParams::Unknown { .. }));
-    // `names` is a real net.dns parameter, but this build has not got its struct yet, so it is refused
-    // by name and not ignored.
-    let CheckParams::Unsupported { reason, .. } = &decoded[7] else {
-        panic!("net.dns: {:?}", decoded[7]);
-    };
-    assert_eq!(
-        *reason,
-        UnsupportedReason::UnknownField {
-            field: "names".into()
-        }
+    assert!(
+        matches!(decoded[7], CheckParams::NetDns(_)),
+        "{:?}",
+        decoded[7]
     );
 }
 

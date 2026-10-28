@@ -800,6 +800,9 @@
                   "expect_status": {
                     "description": "URL targets only.",
                     "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "uniqueItems": true,
                     "items": {
                       "type": "integer",
                       "minimum": 100,
@@ -870,10 +873,12 @@
         "hosts": {
           "description": "Default: the hosts of every net.egress endpoint in this spec.",
           "type": "array",
+          "minItems": 1,
           "maxItems": 64,
           "items": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9.-]+(:[0-9]{1,5})?$"
+            "maxLength": 259,
+            "pattern": "^[A-Za-z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
           }
         },
         "expected_issuer": {
@@ -881,6 +886,7 @@
         },
         "pin_sha256": {
           "type": "array",
+          "minItems": 1,
           "maxItems": 16,
           "items": {
             "type": "string",
@@ -921,6 +927,7 @@
                   },
                   "expect_in": {
                     "type": "array",
+                    "minItems": 1,
                     "maxItems": 16,
                     "items": {
                       "$ref": "#/$defs/Cidr"
@@ -1011,7 +1018,7 @@
               {
                 "description": "verb resource[.group][/subresource], as in kubectl auth can-i.",
                 "type": "string",
-                "pattern": "^[a-z*]+ [a-z0-9*-]+(\\.[a-z0-9.-]+)?(/[a-z]+)?$"
+                "pattern": "^[a-z*]{1,63} [a-z0-9*-]{1,253}(\\.[a-z0-9.-]{1,253})?(/[a-z]{1,63})?$"
               },
               {
                 "type": "object",
@@ -1023,19 +1030,23 @@
                 "properties": {
                   "verb": {
                     "type": "string",
-                    "pattern": "^[a-z*]+$"
+                    "pattern": "^[a-z*]+$",
+                    "maxLength": 63
                   },
                   "group": {
                     "type": "string",
+                    "pattern": "^[a-z0-9.-]*$",
                     "maxLength": 253
                   },
                   "resource": {
                     "type": "string",
-                    "pattern": "^[a-z0-9*-]+$"
+                    "pattern": "^[a-z0-9*-]+$",
+                    "maxLength": 253
                   },
                   "subresource": {
                     "type": "string",
-                    "pattern": "^[a-z]+$"
+                    "pattern": "^[a-z]+$",
+                    "maxLength": 63
                   },
                   "namespace": {
                     "$ref": "#/$defs/K8sName"
@@ -1069,8 +1080,7 @@
         },
         "scc": {
           "description": "The OpenShift security context constraint the product documents.",
-          "type": "string",
-          "maxLength": 253
+          "$ref": "#/$defs/K8sName"
         },
         "uses": {
           "description": "Pod features the product needs; the check derives the minimum Pod Security level.",
@@ -1093,11 +1103,13 @@
       "properties": {
         "min_ready": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 4294967295
         },
         "min_zones": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 4294967295
         },
         "per_node": {
           "$ref": "#/$defs/K8sResources"
@@ -1107,6 +1119,7 @@
         },
         "arch": {
           "type": "array",
+          "minItems": 1,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -1120,6 +1133,10 @@
         "selector": {
           "type": "object",
           "maxProperties": 16,
+          "propertyNames": {
+            "minLength": 1,
+            "maxLength": 317
+          },
           "additionalProperties": {
             "type": "string",
             "maxLength": 63
@@ -1129,7 +1146,32 @@
           "type": "array",
           "maxItems": 16,
           "items": {
-            "type": "object"
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 317
+              },
+              "operator": {
+                "enum": [
+                  "Equal",
+                  "Exists"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 63
+              },
+              "effect": {
+                "enum": [
+                  "NoSchedule",
+                  "PreferNoSchedule",
+                  "NoExecute"
+                ]
+              }
+            }
           }
         }
       },
@@ -1156,14 +1198,16 @@
       "additionalProperties": false,
       "properties": {
         "cpu": {
+          "description": "Cores as a number from 0.001 to 1000000, or a string of whole cores (\"4\") or millicores (\"500m\").",
           "oneOf": [
             {
               "type": "number",
-              "exclusiveMinimum": 0
+              "minimum": 0.001,
+              "maximum": 1000000
             },
             {
               "type": "string",
-              "pattern": "^[0-9]{1,9}m?$"
+              "pattern": "^[1-9][0-9]{0,8}m?$"
             }
           ]
         },
@@ -1172,12 +1216,14 @@
         },
         "pods": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "maximum": 4294967295
         },
         "ephemeral": {
           "$ref": "#/$defs/Quantity"
         }
-      }
+      },
+      "minProperties": 1
     },
     "K8sVersionParams": {
       "properties": {
@@ -1190,9 +1236,11 @@
         "apis": {
           "description": "group/version Kind, for example networking.k8s.io/v1 Ingress.",
           "type": "array",
+          "minItems": 1,
           "maxItems": 64,
           "items": {
             "type": "string",
+            "maxLength": 320,
             "pattern": "^([a-z0-9.-]+/)?v[0-9a-z]+ [A-Z][A-Za-z0-9]*$"
           }
         },
