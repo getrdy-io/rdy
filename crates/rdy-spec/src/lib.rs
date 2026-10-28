@@ -1,8 +1,9 @@
 //! The `rdy/v1` spec and result formats.
 //!
 //! This crate is the source of truth for the wire types. Today it holds the spec types in [`spec`], the
-//! typed scalars in [`scalar`], the YAML reader [`parse_unverified`], the signature checks in [`sig`] and
-//! the [`LoadedSpec`] guarantee. The result model and the JSON schemas arrive in later M1 tickets.
+//! typed scalars in [`scalar`], the YAML reader [`parse_unverified`], the two-step check decoding in
+//! [`check`], the signature checks in [`sig`], the result types and the verdict rule in [`result`], and
+//! the [`LoadedSpec`] guarantee. The JSON schemas arrive in later M1 tickets.
 //!
 //! Two kinds of spec value exist, on purpose:
 //!
@@ -20,9 +21,11 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod check;
 mod error;
 mod loaded;
 mod parse;
+pub mod result;
 pub mod scalar;
 pub mod sig;
 pub mod spec;

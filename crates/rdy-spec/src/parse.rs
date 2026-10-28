@@ -28,6 +28,7 @@ use serde_saphyr::granit_parser::{
 use serde_saphyr::options::{DuplicateKeyPolicy, MergeKeyPolicy};
 use serde_saphyr::{Budget, NonFiniteFloatPolicy};
 
+use crate::check::find_duplicate;
 use crate::error::echo_reason;
 use crate::error::echo_safe;
 use crate::spec::Spec;
@@ -98,7 +99,15 @@ pub(crate) fn parse_bytes(bytes: &[u8]) -> Result<Spec, SpecError> {
         return Err(facts.later_version_before(&error).unwrap_or(error));
     }
     facts.check_api_version()?;
-    let spec = typed_read(text)?;
+    let spec = typed_read(text).map_err(|e| facts.entry_without_id(&e).unwrap_or(e))?;
+    // A duplicate entry key is a fact about the whole list, so it is told after the typed read. The
+    // guard saw the entries in file order, which is the order of `spec.checks`.
+    if let Some((index, error)) = find_duplicate(&spec.checks) {
+        return Err(match facts.entries.get(index) {
+            Some(entry) if facts.entries.len() == spec.checks.len() => error.at(entry.at),
+            _ => error,
+        });
+    }
     if spec.api_version != API_VERSION {
         // The guard checked this already. Keep the check here so the rule holds on its own.
         return Err(SpecError::BadApiVersion {
@@ -228,12 +237,36 @@ enum ApiVersionFact {
     NotText(Location),
 }
 
+/// Where a check entry starts and whether it has an `id` key.
+struct EntryFact {
+    at: Location,
+    has_id: bool,
+}
+
 /// What the guard learned while it read the whole file.
 struct Facts {
     api_version: Option<ApiVersionFact>,
+    /// The entries of the top-level `checks` list, in file order.
+    entries: Vec<EntryFact>,
 }
 
 impl Facts {
+    /// `MissingCheckId` at the first entry with no `id` key, when `error` is the typed read saying an
+    /// `id` is missing. The typed read walks the file in order, so the first such entry is the one it
+    /// stopped at. The typed read does not know the position of the entry in the list. The guard does.
+    fn entry_without_id(&self, error: &SpecError) -> Option<SpecError> {
+        if !matches!(error.kind(), SpecError::MissingField { field } if field == "id") {
+            return None;
+        }
+        let (index, entry) = self.entries.iter().enumerate().find(|(_, e)| !e.has_id)?;
+        Some(
+            SpecError::MissingCheckId {
+                number: index.saturating_add(1),
+            }
+            .at(entry.at),
+        )
+    }
+
     /// `UnsupportedApiVersion` when `apiVersion` named a later version at a place above `error`. A file for
     /// a later rdy can hold keys and values this rdy refuses, so the advice is to upgrade (ADR 0001).
     fn later_version_before(&self, error: &SpecError) -> Option<SpecError> {
@@ -320,6 +353,8 @@ struct Guard {
     /// The next value belongs to the top-level `apiVersion` key.
     api_next: bool,
     api_version: Option<ApiVersionFact>,
+    /// The entries of the top-level `checks` list so far.
+    entries: Vec<EntryFact>,
 }
 
 /// What the guard found: the facts it learned before it stopped, and the first thing it refused.
@@ -339,6 +374,7 @@ fn guard(text: &str) -> GuardOutcome {
         seen_root: false,
         api_next: false,
         api_version: None,
+        entries: Vec::new(),
     };
     let error = read_events(&mut g, text).err();
     if error.is_none() && g.root_is_map && g.api_version.is_none() {
@@ -347,6 +383,7 @@ fn guard(text: &str) -> GuardOutcome {
     GuardOutcome {
         facts: Facts {
             api_version: g.api_version,
+            entries: g.entries,
         },
         error,
     }
@@ -454,10 +491,30 @@ impl Guard {
         })
     }
 
+    /// The top-level `checks` list is open and nothing inside it is: the next map starts an entry.
+    fn in_checks_list(&self) -> bool {
+        matches!(
+            self.frames.as_slice(),
+            [Frame::Map { key: Some(k), .. }, Frame::Seq] if k == "checks"
+        )
+    }
+
+    /// The map being read is an entry of the top-level `checks` list.
+    fn in_check_entry(&self) -> bool {
+        matches!(
+            self.frames.as_slice(),
+            [Frame::Map { key: Some(k), .. }, Frame::Seq, Frame::Map { .. }] if k == "checks"
+        )
+    }
+
     fn node(&mut self, node: &Node<'_>, at: Location) -> Result<(), SpecError> {
         if matches!(node, Node::SeqStart | Node::MapStart) && self.frames.len() >= MAX_DEPTH {
             return Err(SpecError::TooDeep { limit: MAX_DEPTH }.at(at));
         }
+        if matches!(node, Node::MapStart) && self.in_checks_list() {
+            self.entries.push(EntryFact { at, has_id: false });
+        }
+        let in_entry = self.in_check_entry();
         let is_root = !self.seen_root;
         self.seen_root = true;
         let in_root_map = self.frames.len() == 1;
@@ -494,6 +551,12 @@ impl Guard {
                 *key = Some((*value).to_owned());
                 *expecting_key = false;
                 self.api_next = in_root_map && *value == "apiVersion";
+                if in_entry
+                    && *value == "id"
+                    && let Some(entry) = self.entries.last_mut()
+                {
+                    entry.has_id = true;
+                }
                 self.push_if_collection(node);
                 return Ok(());
             }

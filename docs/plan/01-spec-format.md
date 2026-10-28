@@ -630,7 +630,8 @@ Section 7.4 has a JSON sample of each harder case.
 ### 5.3 The verdict rule and the summary line
 
 ```text
-not_run(c)  = c.status in {skipped, timeout, error, <unknown>} and c.skip_kind != not_applicable
+not_run(c)  = (c.status == skipped and c.skip_kind != not_applicable)
+              or c.status in {timeout, error, <unknown>}
 required(c) = c.severity != warn          # unreadable or unknown severity counts as block
 
 not_ready            if any c.status == block, or any c is required and not_run

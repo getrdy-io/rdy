@@ -18,7 +18,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::{API_VERSION, Quantity, SpecError};
+use crate::{API_VERSION, Duration, Quantity, SpecError};
 
 /// Defines a string newtype whose constructor and `Deserialize` impl both check one grammar.
 macro_rules! checked_string {
@@ -270,6 +270,131 @@ pub enum OsFamily {
     Windows,
 }
 
+/// The longest `fix` text, in characters.
+const MAX_FIX_CHARS: usize = 2000;
+
+/// The vendor's advice for a check, 1 to 2000 characters.
+///
+/// Plain text. There is no templating and no markup. Control characters other than newlines are stripped
+/// before it is printed, so print it through the report code and not straight to a terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct FixText(String);
+
+impl FixText {
+    /// Checks the length and wraps the text.
+    ///
+    /// # Errors
+    ///
+    /// [`SpecError::InvalidValue`] when the text is empty or longer than 2000 characters.
+    pub fn new(value: impl Into<String>) -> Result<Self, SpecError> {
+        let value = value.into();
+        let chars = value.chars().take(MAX_FIX_CHARS + 1).count();
+        if (1..=MAX_FIX_CHARS).contains(&chars) {
+            Ok(Self(value))
+        } else {
+            Err(SpecError::InvalidValue {
+                reason: "fix must be 1 to 2000 characters".to_owned(),
+            })
+        }
+    }
+
+    /// The text, exactly as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for FixText {
+    type Error = SpecError;
+
+    fn try_from(value: String) -> Result<Self, SpecError> {
+        Self::new(value)
+    }
+}
+
+impl From<FixText> for String {
+    fn from(value: FixText) -> String {
+        value.0
+    }
+}
+
+impl AsRef<str> for FixText {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The `timeout` of a check: a [`Duration`] from `1s` to `60s`.
+///
+/// `60s` and `1m` are both fine, and so is `1000ms`. `500ms`, `90s` and `1h` are not. The text as
+/// written is kept and written back.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct CheckTimeout(Duration);
+
+impl CheckTimeout {
+    /// The shortest timeout, in milliseconds.
+    pub const MIN_MILLIS: u64 = 1_000;
+    /// The longest timeout, in milliseconds.
+    pub const MAX_MILLIS: u64 = 60_000;
+
+    /// Checks the range and wraps the duration.
+    ///
+    /// # Errors
+    ///
+    /// [`SpecError::InvalidValue`] when the duration is outside `1s` to `60s`.
+    pub fn new(value: Duration) -> Result<Self, SpecError> {
+        if (Self::MIN_MILLIS..=Self::MAX_MILLIS).contains(&value.as_millis()) {
+            Ok(Self(value))
+        } else {
+            Err(SpecError::InvalidValue {
+                reason: "timeout must be between 1s and 60s".to_owned(),
+            })
+        }
+    }
+
+    /// Reads text such as `10s` and checks the range.
+    ///
+    /// # Errors
+    ///
+    /// [`SpecError::InvalidValue`] when the text is not a duration, or is outside `1s` to `60s`.
+    pub fn parse(text: &str) -> Result<Self, SpecError> {
+        match Duration::parse(text) {
+            Ok(d) => Self::new(d),
+            Err(e) => Err(SpecError::InvalidValue {
+                reason: crate::error::echo_reason(&e.to_string(), 160),
+            }),
+        }
+    }
+
+    /// The duration.
+    #[must_use]
+    pub fn as_duration(&self) -> &Duration {
+        &self.0
+    }
+
+    /// The text as written, such as `20s`.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl<'de> Deserialize<'de> for CheckTimeout {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let duration = Duration::deserialize(deserializer)?;
+        Self::new(duration).map_err(serde::de::Error::custom)
+    }
+}
+
+impl fmt::Display for CheckTimeout {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0.as_str())
+    }
+}
+
 /// A common field of a check entry that is either well formed or kept as the raw value that was
 /// written.
 ///
@@ -322,8 +447,10 @@ impl<'de, T: serde::de::DeserializeOwned> Deserialize<'de> for Lenient<T> {
 /// An entry is a flat map in the YAML file. Decoding it is the first of two steps (01 section 2.4).
 /// Only a missing `id`, an `id` that is not text, or an entry that is not a map rejects the file. Every
 /// other common field is a [`Lenient`] slot, so a bad `severity`, `os`, `name`, `fix` or `timeout` leaves
-/// the entry in place for the planner to skip. The remaining keys wait in [`CheckSpec::params`] for a
-/// later ticket to decode into a typed value per id.
+/// the entry in place for the planner to skip. The remaining keys wait in [`CheckSpec::params`]. The
+/// second step, [`CheckSpec::decode_params`], turns them into a [`crate::check::CheckParams`] and treats a
+/// [`Lenient::Invalid`] common field as `unsupported_spec`. A [`Lenient::Valid`] value is always one that
+/// step two accepts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct CheckSpec {
@@ -339,13 +466,13 @@ pub struct CheckSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub severity: Option<Lenient<Severity>>,
     /// The vendor's advice, 1 to 2000 characters, shown instead of rdy's own as the headline fix. Plain
-    /// text with no templating.
+    /// text with no templating. See [`FixText`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fix: Option<Lenient<String>>,
-    /// How long the check may run, `1s` to `60s`, written like `10s`. Kept as text here. The grammar and
-    /// range are checked by the typed `Duration` of a later ticket.
+    pub fix: Option<Lenient<FixText>>,
+    /// How long the check may run, `1s` to `60s`, written like `10s`. A value outside that range, or one
+    /// that is not a duration, stays [`Lenient::Invalid`] and the check is skipped. See [`CheckTimeout`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<Lenient<String>>,
+    pub timeout: Option<Lenient<CheckTimeout>>,
     /// Run only on these operating systems. Elsewhere the check is skipped as not applicable and never
     /// counts. `None` means every system.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -579,8 +706,14 @@ mod tests {
         );
         assert_eq!(c.severity, Some(Lenient::Valid(Severity::Warn)));
         assert_eq!(c.effective_severity(), Severity::Warn);
-        assert_eq!(c.fix, Some(Lenient::Valid("Add RAM.".to_owned())));
-        assert_eq!(c.timeout, Some(Lenient::Valid("20s".to_owned())));
+        assert_eq!(
+            c.fix,
+            Some(Lenient::Valid(FixText::new("Add RAM.").expect("fix")))
+        );
+        assert_eq!(
+            c.timeout,
+            Some(Lenient::Valid(CheckTimeout::parse("20s").expect("timeout")))
+        );
         assert_eq!(
             c.os,
             Some(Lenient::Valid(vec![OsFamily::Linux, OsFamily::Macos]))
@@ -623,6 +756,47 @@ mod tests {
         assert_eq!(c.timeout, Some(Lenient::Invalid(Value::from(10))));
 
         let c = entry(r#"{"id":"host.cpu","fix":["a"]}"#);
+        assert!(matches!(c.fix, Some(Lenient::Invalid(_))));
+    }
+
+    #[test]
+    fn timeout_is_kept_only_from_one_to_sixty_seconds() {
+        for ok in ["1s", "1000ms", "60s", "1m", "10s"] {
+            assert!(CheckTimeout::parse(ok).is_ok(), "{ok}");
+            let c = entry(&format!(r#"{{"id":"host.cpu","timeout":"{ok}"}}"#));
+            assert!(
+                c.timeout.as_ref().and_then(Lenient::valid).is_some(),
+                "{ok}"
+            );
+        }
+        for bad in [
+            "500ms", "999ms", "61s", "90s", "2m", "1h", "10 s", "0s", "ten", "",
+        ] {
+            assert!(CheckTimeout::parse(bad).is_err(), "{bad}");
+            let c = entry(&format!(r#"{{"id":"host.cpu","timeout":"{bad}"}}"#));
+            assert_eq!(c.timeout, Some(Lenient::Invalid(Value::from(bad))), "{bad}");
+        }
+        let c = entry(r#"{"id":"host.cpu","timeout":60}"#);
+        assert!(matches!(c.timeout, Some(Lenient::Invalid(_))));
+        // The text as written comes back out.
+        let c = entry(r#"{"id":"host.cpu","timeout":"1m"}"#);
+        let back = serde_json::to_value(&c).expect("value");
+        assert_eq!(back["timeout"], "1m");
+        let err = CheckTimeout::parse("90s").unwrap_err();
+        assert_eq!(err.to_string(), "timeout must be between 1s and 60s");
+    }
+
+    #[test]
+    fn fix_is_kept_only_from_one_to_two_thousand_characters() {
+        assert!(FixText::new("a").is_ok());
+        assert!(FixText::new("a".repeat(2000)).is_ok());
+        assert!(FixText::new("\u{e9}".repeat(2000)).is_ok());
+        assert!(FixText::new("").is_err());
+        assert!(FixText::new("a".repeat(2001)).is_err());
+        let c = entry(r#"{"id":"host.cpu","fix":""}"#);
+        assert_eq!(c.fix, Some(Lenient::Invalid(Value::from(""))));
+        let long = "a".repeat(2001);
+        let c = entry(&format!(r#"{{"id":"host.cpu","fix":"{long}"}}"#));
         assert!(matches!(c.fix, Some(Lenient::Invalid(_))));
     }
 

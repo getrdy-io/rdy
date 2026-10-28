@@ -19,6 +19,7 @@ sha2 = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+jsonschema = { workspace = true }
 minisign = { workspace = true }
 proptest = { workspace = true, features = ["std"] }
 trybuild = { workspace = true }
