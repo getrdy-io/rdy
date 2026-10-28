@@ -12,7 +12,7 @@ KICKOFF.md, rdy-plan.md, 03-check-catalog.md, 06-release-and-distribution.md and
 - No em dashes or en dashes. Neither file has a single non-ASCII character.
 - The old working name does not appear.
 - No competitor company or product names in either file. I checked every name in the plan's
-  "where it stops", "what exists" and "why it lost" tables, plus troubleshoot.sh and kurl. Zero hits.
+  "where it stops", "what exists" and "why it lost" tables, plus the incumbent tool names. Zero hits.
   `tj-actions/changed-files` (TM line 224) is a compromised GitHub Action cited as an incident, not a
   competitor. FYI, outside this review's scope: `docs/plan/rdy-plan.md` itself still names many
   competitors (lines 9 to 30, 128, 213, 221, 240, 283, 310, 321, 344 to 347, 432 to 436, 484, and the
