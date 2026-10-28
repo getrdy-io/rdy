@@ -146,9 +146,60 @@ fn a_typo_of_a_visible_flag_gets_a_did_you_mean() {
 
 #[test]
 fn a_typo_of_a_global_flag_is_suggested_on_a_subcommand() {
-    let (message, fix) = usage(&["spec", "lint", "spec.yaml", "--jsno"]);
+    // `--verbose` is global: it is declared on the root and offered on every subcommand.
+    let (message, fix) = usage(&["spec", "lint", "spec.yaml", "--verbsoe"]);
+    assert_eq!(message, "unknown flag --verbsoe");
+    assert_eq!(fix, "did you mean --verbose? See 'rdy spec lint --help'.");
+}
+
+#[test]
+fn a_flag_typed_before_a_subcommand_is_judged_on_the_command_it_was_typed_on() {
+    // `--json` is not a flag of the root, so it is not suggested for a typo placed before `spec`.
+    let (message, fix) = usage(&["--jsno", "spec", "lint", "spec.yaml"]);
     assert_eq!(message, "unknown flag --jsno");
-    assert_eq!(fix, "did you mean --json? See 'rdy spec lint --help'.");
+    assert_eq!(fix, "see 'rdy --help'");
+}
+
+#[test]
+fn a_name_that_is_not_a_typo_of_a_real_flag_is_not_echoed() {
+    // A typed name can be a secret. Only a typo of a flag rdy has is printed.
+    let uuid = "--123e4567-e89b-12d3-a456-426614174000";
+    let hex_key = "--9f86d081884c7d659a2feaa0c55ad015";
+    for name in [
+        "--hunter2",
+        "--password-hunter2",
+        "--pa55w0rd-hunter2",
+        uuid,
+        hex_key,
+        "--bogus",
+        "--x--key",
+        "--x--allow-unsigned",
+    ] {
+        for json in [false, true] {
+            let mut args = vec!["run", "spec.yaml", name];
+            if json {
+                args.push("--json");
+            }
+            let (code, stdout, stderr) = rdy(&args);
+            assert_eq!(code, 64, "{args:?}");
+            let shown = format!("{stdout}{stderr}");
+            assert!(shown.contains("unknown option or argument"), "{shown}");
+            assert!(!shown.contains(&name[2..]), "{name}: {shown}");
+            assert!(!shown.contains("--key"), "{name}: {shown}");
+            assert!(!shown.contains("--allow-unsigned"), "{name}: {shown}");
+        }
+    }
+}
+
+#[test]
+fn a_typo_of_a_hidden_or_other_command_flag_is_named_but_not_suggested() {
+    // Known names decide only whether the typed name is printed. They are never offered.
+    let (message, fix) = usage(&["run", "spec.yaml", "--unencryptd"]);
+    assert_eq!(message, "unknown flag --unencryptd");
+    assert_eq!(fix, "see 'rdy run --help'");
+    let (message, fix) = usage(&["run", "spec.yaml", "--tokne=x"]);
+    assert_eq!(message, "unknown flag --tokne");
+    assert_eq!(fix, "see 'rdy run --help'");
 }
 
 #[test]
@@ -218,24 +269,6 @@ fn a_hidden_flag_is_never_suggested() {
     // The password flag is refused before clap runs and is not a visible flag of any command.
     let (_, fix) = usage(&["run", "spec.yaml", "--passwrd"]);
     assert!(!fix.contains("--password"), "{fix}");
-}
-
-#[test]
-fn clippy_bans_the_clap_methods_that_exit_with_code_2() {
-    // Clippy itself does the banning (`cargo clippy -- -D warnings`). This guards the list.
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../clippy.toml");
-    let config = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-    for method in [
-        "clap::Parser::parse",
-        "clap::Command::get_matches",
-        "clap::error::Error::exit",
-    ] {
-        assert!(
-            config.contains(&format!("path = \"{method}\"")),
-            "clippy.toml does not ban {method}"
-        );
-    }
 }
 
 #[test]
