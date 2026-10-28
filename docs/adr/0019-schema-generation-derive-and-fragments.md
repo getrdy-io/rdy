@@ -34,7 +34,13 @@ makes that true and removes the hand-written files. Three things were not ready 
    `maxLength` 4096. The last step makes the size cap of SEC-63 hold for fields added later.
 4. **`serde_json/preserve_order` is on for the whole workspace**, through `schemars`. Code that relied on a
    sorted map must sort. `check.rs` now names the first unknown key in sorted order, and the result
-   schema test compares sorted copies.
+   schema test compares sorted copies. **Runtime cost:** every `serde_json::Map` in the runtime crates is an
+   `IndexMap`, which is larger than the default map and keeps
+   insertion order. That made `CheckOutcome` big enough to trip `clippy::large_enum_variant` on
+   `rdy_engine::End`, so `End::Done` holds a `Box<CheckOutcome>`. Keeping the feature out of the runtime
+   crates is not possible: `schemars` has no other way to keep field order, Cargo unifies the feature across
+   a `--workspace` build, and sorting the properties by an explicit table would have to list every field of
+   every type and keep up with each new one.
 5. **Lint in `cargo xtask schema`.** A description that names an ADR, a milestone or ticket, a plan document
    or a plan section, a rustdoc link or a Rust path fails the command, written or checked.
 
