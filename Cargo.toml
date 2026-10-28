@@ -48,6 +48,12 @@ unicode-normalization = { version = "0.1", default-features = false }
 rustix = { version = "1", default-features = false }
 # Key passwords are wiped from memory on drop (M1-112). `alloc` gives the String impl.
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
+# Spec signature checks (M1-120, ADR 0018). Exact pins: every bump is reviewed by hand.
+ed25519-dalek = { version = "=2.2.0", default-features = false }
+blake2 = { version = "=0.10.6", default-features = false }
+# Test-only: signs synthetic specs the way stock minisign does, and generates property-test cases.
+minisign = { version = "=0.10.0", default-features = false }
+proptest = { version = "1", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

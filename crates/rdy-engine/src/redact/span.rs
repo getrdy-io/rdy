@@ -21,9 +21,8 @@ pub(crate) struct Span {
 ///
 /// The merged span is named after the highest priority rule in it. On a priority tie the span that starts
 /// first (then the one that ends last, then the smaller rule name) wins, so the result does not depend on
-/// the order the rules ran in. Empty spans are dropped. The caller rejects inverted ranges before this. The output is sorted and
-/// disjoint, with a gap of at
-/// least one byte between spans.
+/// the order the rules ran in. Empty spans are dropped. The caller rejects inverted ranges before this.
+/// The output is sorted and disjoint, with a gap of at least one byte between spans.
 pub(crate) fn merge(mut spans: Vec<Span>) -> Vec<Span> {
     spans.retain(|s| s.start < s.end);
     spans.sort_by(|a, b| {

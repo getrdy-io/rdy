@@ -39,13 +39,14 @@ pub(crate) static BUILT_IN: &[Rule] = &[Rule {
 static PLACEHOLDER: LazyLock<Result<Regex, regex::Error>> =
     LazyLock::new(|| Regex::new(r"\[REDACTED:[a-z0-9_.]+:[0-9a-f]{8}\]"));
 
-/// `key = value`, `key: value`, `"key": "value"`, `--flag=value`, `\"key\":\"value\"`.
+/// `key = value`, `key: value`, `"key": "value"`, `--flag=value`, `\"key\":\"value\"` and the same
+/// with more backslashes (JSON inside JSON).
 ///
 /// The regex finds the key and the separator. Code reads the value, because the value may be quoted,
 /// escaped-quoted or bare. `Err` means the pattern failed to compile, which is a bug a unit test catches;
 /// the rule then fails closed and removes the whole text.
 static ASSIGNMENT: LazyLock<Result<Regex, regex::Error>> =
-    LazyLock::new(|| Regex::new(r#"([A-Za-z0-9_\-][A-Za-z0-9_.\-]*)(?:\\?["'])?[ \t]*[=:][ \t]*"#));
+    LazyLock::new(|| Regex::new(r#"([A-Za-z0-9_\-][A-Za-z0-9_.\-]*)(?:\\*["'])?[ \t]*[=:][ \t]*"#));
 
 /// Key stems (04 Appendix B). Matched on the key with `-`, `_` and `.` removed and lowercased, so
 /// `api_key`, `api-key` and `apiKey` are all `apikey`.
@@ -111,13 +112,21 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
         if !is_secret_key(key.as_str()) {
             continue;
         }
-        let value = value_range(text, whole.end());
+        let (value, bare) = value_range(text, whole.end());
         if value.is_empty() {
+            if bare {
+                // `password:` with nothing after it may be a YAML key whose value is on the next
+                // lines. Redact the lines indented deeper than the key.
+                if let Some(block) = block_lines(text, key.start(), value.end) {
+                    covered_until = block.end;
+                    out.push(block);
+                }
+            }
             continue;
         }
         covered_until = value.end;
         let value_text = &text[value.clone()];
-        if is_block_indicator(value_text) {
+        if bare && is_block_header(value_text) {
             // `token: |` is not the secret. The indented lines after it are.
             if let Some(block) = block_lines(text, key.start(), value.end) {
                 covered_until = block.end;
@@ -185,32 +194,40 @@ fn normalize_key(key: &str) -> (String, Vec<bool>) {
     (norm, boundary)
 }
 
-/// The byte range of the value that starts at `start`, without its quotes.
+/// The byte range of the value that starts at `start`, without its quotes, and whether it is bare.
 ///
-/// - A quoted value (`"x"`, `'x'`, `\"x\"`) runs to the closing quote, or to the end of the line if there
-///   is none. If the closing quote is followed by anything but whitespace or a delimiter (`,;)]}`), as in
-///   `""hunter2`, the value runs to the end of the line instead.
+/// - A quoted value (`"x"`, `'x'`, `\"x\"`, `\\\"x\\\"`) runs to the closing quote, or to the end of the
+///   line if there is none. The closing quote of an escaped value is the same run of backslashes and the
+///   same quote. If the closing quote is followed by anything but whitespace or a delimiter (`,;)]}`), as
+///   in `""hunter2`, the value runs to the end of the line instead.
 /// - A bare value runs to the end of the line, trimmed. It may take in text that belongs to a command line
 ///   or a JSON object around it. Over-redacting is the safe side, and a bare password may hold spaces.
 ///
 /// Scanning stops at the end of the value, never at the end of the text, so many assignments on one long
 /// line stay linear (the caller skips keys inside a value).
-fn value_range(text: &str, start: usize) -> Range<usize> {
+fn value_range(text: &str, start: usize) -> (Range<usize>, bool) {
+    /// More backslashes than this are not treated as an escaped quote. The value is then bare, which
+    /// takes the rest of the line. The cap keeps the scan linear.
+    const MAX_ESCAPES: usize = 16;
+
     let rest = &text[start..];
     let bytes = rest.as_bytes();
-    for quote in *b"\"'" {
-        let (open, escaped) = if bytes.first() == Some(&b'\\') && bytes.get(1) == Some(&quote) {
-            (2, true)
-        } else if bytes.first() == Some(&quote) {
-            (1, false)
-        } else {
-            continue;
-        };
+    let slashes = bytes.iter().take_while(|&&b| b == b'\\').count();
+    let quote = bytes
+        .get(slashes)
+        .copied()
+        .filter(|b| matches!(b, b'"' | b'\''));
+    if let Some(quote) = quote
+        && slashes <= MAX_ESCAPES
+    {
+        let escaped = slashes > 0;
+        let open = slashes + 1;
+        let closer = &bytes[..open];
         let mut i = open;
         let closed = loop {
             match bytes.get(i) {
                 None | Some(b'\n' | b'\r') => break false,
-                Some(b'\\') if escaped && bytes.get(i + 1) == Some(&quote) => break true,
+                Some(_) if escaped && bytes[i..].starts_with(closer) => break true,
                 Some(b'\\') if !escaped => {
                     // A backslash escapes the next byte, except a line break. Only ASCII bytes are
                     // compared, so a multi-byte character is never split.
@@ -225,25 +242,46 @@ fn value_range(text: &str, start: usize) -> Range<usize> {
             }
         };
         if closed {
-            let after = i + if escaped { 2 } else { 1 };
+            let after = i + if escaped { open } else { 1 };
             let tail_is_clean = rest[after..]
                 .chars()
                 .next()
                 .is_none_or(|c| c.is_whitespace() || matches!(c, ',' | ';' | ')' | ']' | '}'));
             if tail_is_clean {
-                return start + open..start + i;
+                return (start + open..start + i, false);
             }
         }
         // Unterminated, or text glued to the closing quote: take the rest of the line.
         let line_end = rest.find(['\n', '\r']).unwrap_or(rest.len());
         let end = rest[..line_end].trim_end().len().max(open);
-        return start + open..start + end;
+        return (start + open..start + end, false);
     }
     let line_end = rest.find(['\n', '\r']).unwrap_or(rest.len());
     let line = &rest[..line_end];
     let trimmed = line.trim_start();
     let lead = line.len() - trimmed.len();
-    start + lead..start + lead + trimmed.trim_end().len()
+    (start + lead..start + lead + trimmed.trim_end().len(), true)
+}
+
+/// True if a bare value is a YAML block scalar header, such as `|`, `>-`, `| # note`, `!!binary |` or
+/// `&anchor |2`. A trailing comment, and leading tags and anchors, are ignored.
+fn is_block_header(value: &str) -> bool {
+    let without_comment = find_comment(value).map_or(value, |at| &value[..at]);
+    let mut v = without_comment.trim();
+    while v.starts_with(['!', '&']) {
+        match v.split_once([' ', '\t']) {
+            Some((_, after)) => v = after.trim_start(),
+            None => return false,
+        }
+    }
+    is_block_indicator(v)
+}
+
+/// The offset of a YAML comment: a `#` that follows whitespace.
+fn find_comment(v: &str) -> Option<usize> {
+    v.match_indices('#')
+        .map(|(i, _)| i)
+        .find(|&i| v[..i].ends_with([' ', '\t']))
 }
 
 /// True for a YAML block scalar header: `|`, `>`, `|-`, `>+`, `|2`, `|2-`.
@@ -256,12 +294,20 @@ fn is_block_indicator(value: &str) -> bool {
     digits <= 1 && chomps <= 1 && digits + chomps == rest.chars().count()
 }
 
-/// The body of a YAML block scalar: the lines after the key's line that are indented deeper than the
-/// key, from the start of the first to the end of the last non-blank one. `key_start` is the offset of
-/// the key and `line_end` the end of the key's value, on the same line.
+/// The body of a YAML block scalar, or of a key with an empty value: the lines after the key's line that
+/// are indented deeper than the key, from the start of the first to the end of the last non-blank one.
+/// `key_start` is the offset of the key and `line_end` the end of the key's value, on the same line.
+/// Tabs count as indentation, so a tab-indented body is not cut short (over-redacting is safe).
 fn block_lines(text: &str, key_start: usize, line_end: usize) -> Option<Range<usize>> {
     let line_start = text[..key_start].rfind('\n').map_or(0, |i| i + 1);
-    let key_column = key_start - line_start;
+    // A quoted key starts at its quote, which the key match leaves out.
+    let mut column_start = key_start;
+    while column_start > line_start
+        && matches!(text.as_bytes()[column_start - 1], b'"' | b'\'' | b'\\')
+    {
+        column_start -= 1;
+    }
+    let key_column = column_start - line_start;
     let mut pos = line_end + text[line_end..].find('\n')? + 1;
     let mut first = None;
     let mut last_end = 0;
@@ -269,7 +315,7 @@ fn block_lines(text: &str, key_start: usize, line_end: usize) -> Option<Range<us
         let eol = text[pos..].find('\n').map_or(text.len(), |i| pos + i);
         let line = text[pos..eol].trim_end();
         if !line.is_empty() {
-            let indent = line.len() - line.trim_start_matches(' ').len();
+            let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
             if indent <= key_column {
                 break;
             }
@@ -302,7 +348,7 @@ fn is_path_char(b: u8) -> bool {
 fn is_secret_mount_path(value: &str) -> bool {
     value
         .strip_prefix(SECRET_MOUNT)
-        .is_some_and(|p| !p.is_empty() && p.bytes().all(is_path_char))
+        .is_some_and(|p| !p.is_empty() && !p.contains("..") && p.bytes().all(is_path_char))
 }
 
 /// `${NAME}` with NAME `[A-Za-z_][A-Za-z0-9_]*`. No default (`:-`), no other expansion.
@@ -327,14 +373,16 @@ fn is_cat_reference(value: &str) -> bool {
         .is_some_and(|p| !p.is_empty() && p.bytes().all(is_path_char))
 }
 
-/// `{{ .Values.pw }}`: one dotted name between the braces, with no quote, space or pipe inside, so a
-/// literal default cannot ride along.
+/// `{{ .Values.pw }}`: one dotted name that starts with `.` between the braces, with no quote, space or
+/// pipe inside, so a literal default cannot ride along and `{{ hunter2 }}` is not a reference.
 fn is_template_reference(value: &str) -> bool {
     value
         .strip_prefix("{{")
         .and_then(|v| v.strip_suffix("}}"))
         .map(str::trim)
-        .is_some_and(|name| !name.is_empty() && name.bytes().all(is_path_char))
+        .is_some_and(|name| {
+            name.len() > 1 && name.starts_with('.') && name.bytes().all(is_path_char)
+        })
 }
 
 /// True if the value is exactly one well-formed placeholder, `[REDACTED:<rule>:<8 hex>]`.
@@ -509,6 +557,81 @@ mod tests {
         // Not a block header.
         assert_eq!(found("token: | foo\n  bar"), ["| foo"]);
         assert_eq!(found("token: |22\n  bar"), ["|22"]);
+    }
+
+    #[test]
+    fn an_empty_value_takes_the_deeper_lines_that_follow() {
+        assert_eq!(found("password:\n  hunter2\nnext: 1"), ["  hunter2"]);
+        assert_eq!(
+            found("password:   \r\n    a\r\n\r\n    b\r\nx: 1"),
+            ["    a\r\n\r\n    b"]
+        );
+        assert_eq!(
+            found("- secret:\n    key: hunter2\n  other: 1"),
+            ["    key: hunter2"]
+        );
+        assert!(found("password:\nnext: 1").is_empty());
+        assert!(found("password:").is_empty());
+        // A quoted empty value is a value, not a pointer to the next lines.
+        assert!(found("password: \"\"\n  hunter2").is_empty());
+    }
+
+    #[test]
+    fn block_headers_may_carry_tags_anchors_and_comments() {
+        for text in [
+            "token: | # note\n  hunter2",
+            "token: |- #note\n  hunter2",
+            "token: !!binary |\n  hunter2",
+            "token: &a |\n  hunter2",
+            "token: !!str &a >-\n  hunter2",
+            "token: |2+ # x\n  hunter2",
+        ] {
+            assert_eq!(found(text), ["  hunter2"], "{text:?}");
+        }
+        // A quoted pipe is a value, not a block.
+        assert_eq!(found("token: \"|\"\n  body"), ["|"]);
+        assert_eq!(found("token: !!binary\n  body"), ["!!binary"]);
+    }
+
+    #[test]
+    fn block_indent_is_measured_from_a_quoted_key_and_counts_tabs() {
+        assert_eq!(found("\"token\": |\n hunter2\n"), [" hunter2"]);
+        assert_eq!(found("'token': |\n hunter2\n"), [" hunter2"]);
+        assert_eq!(
+            found("token: |\n\thunter2\n\tmore\nnext: 1"),
+            ["\thunter2\n\tmore"]
+        );
+        assert_eq!(found("- token: |\n    hunter2\n  next: 1"), ["    hunter2"]);
+    }
+
+    #[test]
+    fn escaped_quotes_may_carry_more_backslashes() {
+        assert_eq!(found(r#"{\\\"password\\\":\\\"hunter2\\\"}"#), ["hunter2"]);
+        assert_eq!(
+            found(r#"{\\\\\\\"password\\\\\\\":\\\\\\\"hunter2\\\\\\\",\\\\\\\"x\\\\\\\":1}"#),
+            ["hunter2"]
+        );
+        // Too many backslashes: the rest of the line, never a leak.
+        let many = "\\".repeat(40);
+        let text = format!("password={many}\"hunter2{many}\" x");
+        assert_eq!(found(&text), [text.strip_prefix("password=").unwrap_or("")]);
+    }
+
+    #[test]
+    fn names_that_look_like_references_but_are_not() {
+        for (text, want) in [
+            ("password={{hunter2}}", "{{hunter2}}"),
+            ("password={{ hunter2 }}", "{{ hunter2 }}"),
+            ("password={{ . }}", "{{ . }}"),
+            (
+                "password=/run/secrets/../../etc/shadow",
+                "/run/secrets/../../etc/shadow",
+            ),
+        ] {
+            assert_eq!(found(text), [want], "{text}");
+        }
+        assert!(found("password={{.Values.pw}}").is_empty());
+        assert!(found("password: /run/secrets/db.pass").is_empty());
     }
 
     #[test]

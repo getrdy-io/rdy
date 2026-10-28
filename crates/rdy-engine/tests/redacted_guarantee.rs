@@ -6,9 +6,9 @@
 //!
 //! The `.stderr` text depends on the compiler, so the test runs only on the toolchain pinned in
 //! `rust-toolchain.toml`. On any other rustc it prints a skip message and passes, except when the `CI`
-//! environment variable is set: CI always runs the pinned toolchain, so a skip there is a failure. The unit tests in
-//! `src/redact` and the pinned CI toolchain still cover the guarantee. After a toolchain bump, refresh
-//! the `.stderr` files with `TRYBUILD=overwrite` and read the diff.
+//! environment variable is set: CI always runs the pinned toolchain, so a skip there is a failure. The
+//! unit tests in `src/redact` and the pinned CI toolchain still cover the guarantee. After a toolchain
+//! bump, refresh the `.stderr` files with `TRYBUILD=overwrite` and read the diff.
 
 use std::path::Path;
 use std::process::Command;

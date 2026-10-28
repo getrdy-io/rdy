@@ -24,6 +24,8 @@
 // feature is refused. A debug build is allowed so `cargo test` and `cargo clippy --features testing` work.
 // Cargo unifies features across a workspace build, so build the shipped binary with
 // `cargo build --release -p rdy`, and let CI also check `cargo tree -e features -p rdy` for `testing`.
+// Limits: a release profile with `debug-assertions = true` bypasses this guard, and
+// `cargo test --release --features testing` fails to compile, so run tests in the dev profile.
 #[cfg(all(feature = "testing", not(test), not(debug_assertions)))]
 compile_error!("the `testing` feature of rdy-engine must not be enabled in a release build");
 

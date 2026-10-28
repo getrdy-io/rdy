@@ -171,7 +171,7 @@ impl PasswordError {
 ///
 /// A write failure on `stderr` is ignored: the exit code still says what happened.
 pub fn report_error(err: &PasswordError, stderr: &mut dyn Write) -> u8 {
-    let _ = writeln!(stderr, "error: {err}\nfix: {}", err.fix());
+    let _ = stderr.write_all(crate::error::render_password(err).text().as_bytes());
     EXIT_USAGE
 }
 
@@ -198,8 +198,13 @@ fn is_password_flag(arg: &OsStr) -> bool {
 ///
 /// What follows the flag is never read into the message. It is fixed text.
 pub fn refuse_argv_password(stderr: &mut dyn Write) -> u8 {
-    let _ = writeln!(stderr, "error: {ARGV_ERROR}\nfix: {ARGV_FIX}");
-    EXIT_USAGE
+    crate::error::emit(&argv_refusal(), false, &mut std::io::sink(), stderr)
+}
+
+/// The error for `--password` on argv: a usage error with fixed text.
+#[must_use]
+pub fn argv_refusal() -> crate::error::CliError {
+    crate::error::CliError::usage(ARGV_ERROR, ARGV_FIX)
 }
 
 /// Read the key password from the file or the variable, or `None` when neither is given.
@@ -903,19 +908,37 @@ mod tests {
             assert_eq!(text(read(&p)), "from-file");
         }
 
+        /// Make a named pipe with the system `mkfifo`. `rustix` has no `mknodat` or `mkfifoat` on
+        /// Apple targets, and `mkfifo` is on every Unix CI image.
+        fn make_fifo(path: &Path) {
+            let status = std::process::Command::new("mkfifo")
+                .arg(path)
+                .status()
+                .unwrap_or_else(|e| panic!("mkfifo: {e}"));
+            assert!(status.success(), "mkfifo failed: {status}");
+        }
+
+        /// Run `f` on a thread and fail the test if it takes more than 20 seconds. A read on a
+        /// named pipe with no writer blocks forever, so a regression must fail fast, not hang CI.
+        fn within_timeout<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(f());
+            });
+            rx.recv_timeout(std::time::Duration::from_secs(20))
+                .unwrap_or_else(|e| panic!("blocked on a named pipe: {e}"))
+        }
+
         #[test]
         fn a_named_pipe_is_refused_and_does_not_block() {
             let d = dir();
             let p = d.path().join("fifo");
-            rustix::fs::mknodat(
-                rustix::fs::CWD,
-                &p,
-                rustix::fs::FileType::Fifo,
-                rustix::fs::Mode::from_raw_mode(0o600),
-                0,
-            )
-            .unwrap_or_else(|e| panic!("mkfifo: {e}"));
-            assert!(matches!(err(read(&p)), PasswordError::NotRegular(_)));
+            make_fifo(&p);
+            let got = within_timeout({
+                let p = p.clone();
+                move || read(&p).map(|_| ())
+            });
+            assert!(matches!(got, Err(PasswordError::NotRegular(_))), "{got:?}");
         }
 
         #[test]

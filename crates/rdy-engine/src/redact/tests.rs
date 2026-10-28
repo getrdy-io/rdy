@@ -215,6 +215,18 @@ fn no_byte_of_a_matched_secret_survives() {
         format!("authProfile: {secret}"),
         format!("token: |\n  {secret}\n  more {secret}\nnext: 1"),
         format!("- token: >-\n    {secret}\n"),
+        // Second review round.
+        format!("password:\n  {secret}\nnext: 1"),
+        format!("secret:   \r\n    {secret}\r\nnext: 1"),
+        format!("token: | # note\n  {secret}"),
+        format!("token: !!binary |\n  {secret}"),
+        format!("token: &anchor |-\n  {secret}"),
+        format!("\"token\": |\n {secret}\n"),
+        format!("token: |\n\t{secret}\nnext: 1"),
+        format!(r#"{{\\\"password\\\":\\\"{secret}\\\"}}"#),
+        format!("password={{{{{secret}}}}}"),
+        format!("password={{{{ {secret} }}}}"),
+        format!("password=/run/secrets/../{secret}"),
     ];
     let r = redactor();
     for form in &forms {

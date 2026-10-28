@@ -21,21 +21,25 @@ use clap::{Arg, ArgAction, CommandFactory, FromArgMatches};
 #[doc(hidden)]
 pub mod cli;
 #[doc(hidden)]
+pub mod error;
+#[doc(hidden)]
 pub mod password;
 
 #[doc(hidden)]
 pub mod prompt;
 
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
+use error::{CliError, InternalKind, emit};
+use rdy_spec::result::ExitCode;
 
 /// Exit code for success.
-pub const EXIT_OK: u8 = 0;
+pub const EXIT_OK: u8 = ExitCode::Ready.code();
 
 /// Exit code for a usage error (ADR 0008).
-pub const EXIT_USAGE: u8 = 64;
+pub const EXIT_USAGE: u8 = ExitCode::Usage.code();
 
 /// Exit code for an internal error (ADR 0008).
-pub const EXIT_INTERNAL: u8 = 70;
+pub const EXIT_INTERNAL: u8 = ExitCode::Internal.code();
 
 /// The clap command tree, for the docs CLI reference and for tests.
 ///
@@ -71,17 +75,19 @@ where
     T: Into<OsString> + Clone,
 {
     let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    // Read from the raw arguments, so that even a command line that does not parse can answer in JSON.
+    let json = error::wants_json(&args);
     // A password on argv is refused before clap sees it, so that the refusal wins over every other
     // usage error and the value is never parsed (07 section 10).
     if password::argv_has_password_flag(&args) && takes_key_password(&command_path(&args)) {
-        return password::refuse_argv_password(stderr);
+        return emit(&password::argv_refusal(), json, stdout, stderr);
     }
     let parsed = command()
         .try_get_matches_from(&args)
         .and_then(|matches| Cli::from_arg_matches(&matches));
     match parsed {
-        Ok(cli) => dispatch(&cli.command, stdout, stderr),
-        Err(err) => report_parse_error(&err, &args, stdout, stderr),
+        Ok(cli) => dispatch(&cli.command, json, stdout, stderr),
+        Err(err) => report_parse_error(&err, &args, json, stdout, stderr),
     }
 }
 
@@ -91,29 +97,29 @@ fn takes_key_password(path: &str) -> bool {
 }
 
 /// Run a parsed command.
-fn dispatch(command: &Commands, stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
+fn dispatch(command: &Commands, json: bool, stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
     match command {
         Commands::Version(args) if !args.json => finish(writeln!(stdout, "rdy {VERSION}"), stderr),
+        Commands::Help { command } => show_help(command, json, stdout, stderr),
         // `version --json` waits for the Version schema (07 section 4.3).
-        Commands::Version(_) => not_implemented("version --json", stderr),
-        Commands::Help { command } => show_help(command, stdout, stderr),
-        Commands::Run(_) => not_implemented("run", stderr),
-        Commands::Verify(_) => not_implemented("verify", stderr),
+        Commands::Version(_) => not_implemented("version --json", json, stdout, stderr),
+        Commands::Run(_) => not_implemented("run", json, stdout, stderr),
+        Commands::Verify(_) => not_implemented("verify", json, stdout, stderr),
         Commands::Spec { command } => match command {
-            SpecCommand::Lint(_) => not_implemented("spec lint", stderr),
-            SpecCommand::Sign(_) => not_implemented("spec sign", stderr),
-            SpecCommand::Keygen(_) => not_implemented("spec keygen", stderr),
+            SpecCommand::Lint(_) => not_implemented("spec lint", json, stdout, stderr),
+            SpecCommand::Sign(_) => not_implemented("spec sign", json, stdout, stderr),
+            SpecCommand::Keygen(_) => not_implemented("spec keygen", json, stdout, stderr),
         },
         Commands::Trust { command } => match command {
-            TrustCommand::Add(_) => not_implemented("trust add", stderr),
-            TrustCommand::List => not_implemented("trust list", stderr),
-            TrustCommand::Remove(_) => not_implemented("trust remove", stderr),
+            TrustCommand::Add(_) => not_implemented("trust add", json, stdout, stderr),
+            TrustCommand::List => not_implemented("trust list", json, stdout, stderr),
+            TrustCommand::Remove(_) => not_implemented("trust remove", json, stdout, stderr),
         },
     }
 }
 
 /// `rdy help [COMMAND]...`: print the full help of a command, as `COMMAND --help` does.
-fn show_help(path: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
+fn show_help(path: &[String], json: bool, stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
     let mut root = command();
     root.build();
     let mut current = &mut root;
@@ -122,8 +128,8 @@ fn show_help(path: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) ->
             Some(next) => current = next,
             None => {
                 // The name is not echoed: it is what the user typed.
-                let _ = writeln!(stderr, "error: unknown command\nfix: see 'rdy --help'");
-                return EXIT_USAGE;
+                let err = CliError::usage("unknown command", "see 'rdy --help'");
+                return emit(&err, json, stdout, stderr);
             }
         }
     }
@@ -136,24 +142,23 @@ fn finish(written: std::io::Result<()>, stderr: &mut dyn Write) -> u8 {
     match written {
         Ok(()) => EXIT_OK,
         Err(_) => {
-            // Best effort: stderr may be the broken stream too.
-            let _ = writeln!(
-                stderr,
-                "error: rdy could not write its output\nfix: check that the output is not closed or full"
-            );
-            EXIT_INTERNAL
+            // Best effort: stderr may be the broken stream too. Stdout is the broken one, so the
+            // error object has nowhere to go.
+            let err = CliError::Internal(InternalKind::OutputClosed);
+            emit(&err, false, &mut std::io::sink(), stderr)
         }
     }
 }
 
 /// The error for a command a later ticket implements. Exit 70, with a fix line.
-fn not_implemented(name: &str, stderr: &mut dyn Write) -> u8 {
-    let _ = writeln!(
-        stderr,
-        "error: rdy {name} is not yet implemented in this build\n\
-         fix: use a later release of rdy, listed at https://github.com/getrdy-io/rdy/releases"
-    );
-    EXIT_INTERNAL
+fn not_implemented(
+    command: &'static str,
+    json: bool,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> u8 {
+    let err = CliError::Internal(InternalKind::NotImplemented { command });
+    emit(&err, json, stdout, stderr)
 }
 
 /// Print a clap error the rdy way and return the exit code.
@@ -163,6 +168,7 @@ fn not_implemented(name: &str, stderr: &mut dyn Write) -> u8 {
 fn report_parse_error(
     err: &clap::Error,
     args: &[OsString],
+    json: bool,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> u8 {
@@ -175,8 +181,7 @@ fn report_parse_error(
         }
         kind => {
             let (message, fix) = usage_lines(kind, err, args);
-            let _ = writeln!(stderr, "error: {message}\nfix: {fix}");
-            EXIT_USAGE
+            emit(&CliError::usage(message, fix), json, stdout, stderr)
         }
     }
 }
