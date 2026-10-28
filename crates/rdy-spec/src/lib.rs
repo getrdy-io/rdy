@@ -2,8 +2,8 @@
 //!
 //! This crate is the source of truth for the wire types. Today it holds the spec types in [`spec`], the
 //! typed scalars in [`scalar`], the YAML reader [`parse_unverified`], the two-step check decoding in
-//! [`check`] and the [`LoadedSpec`] guarantee. Signature checks, the result model and the JSON schemas
-//! arrive in later M1 tickets.
+//! [`check`], the result types and the verdict rule in [`result`], and the [`LoadedSpec`] guarantee.
+//! Signature checks and the JSON schemas arrive in later M1 tickets.
 //!
 //! Two kinds of spec value exist, on purpose:
 //!
@@ -21,6 +21,7 @@ pub mod check;
 mod error;
 mod loaded;
 mod parse;
+pub mod result;
 pub mod scalar;
 pub mod spec;
 
