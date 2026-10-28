@@ -105,7 +105,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-046 | todo | | Closed NativeCall enum in the facade
 
-- M1-047 | todo | | Fixture format README, .gitattributes and Windows canary
+- M1-047 | [#45](https://github.com/getrdy-io/rdy/pull/45) | 2026-10-28 | The Windows leg is unproven until CI runs it. Not added: `.editorconfig` (08 mentions it, no ticket owns it). The fixture lint (M1-050) must add an allow entry for `tests/fixtures/canary/netstat-crlf.txt` with a reason
 
 - M1-048 | todo | | SEC-25 Minimal redactor for evidence, errors and logs
 
