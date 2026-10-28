@@ -111,6 +111,13 @@ impl ScalarError {
     }
 }
 
+/// A serde error that carries the fix line, so the hint survives a trip through a deserializer.
+///
+/// The text is `<message>. fix: <hint>`.
+pub(crate) fn de_error<E: serde::de::Error>(e: &ScalarError) -> E {
+    E::custom(format_args!("{e}. fix: {}", e.hint()))
+}
+
 /// The digits at the start of `s`, and what follows them.
 fn split_digits(s: &str) -> (&str, &str) {
     let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());

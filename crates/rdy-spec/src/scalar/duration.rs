@@ -7,7 +7,7 @@ use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use super::{ScalarError, split_digits};
+use super::{ScalarError, de_error, split_digits};
 
 /// Units in milliseconds, largest first.
 const UNITS: [(&str, u64); 5] = [
@@ -78,11 +78,39 @@ impl DurationProblem {
 /// are lowercase. Zero is refused, because a zero timeout or window is always a mistake. A field that
 /// needs a narrower range, such as a check `timeout` of 1s to 60s, checks that on top.
 ///
-/// The value is kept in milliseconds. `Display` writes the largest unit that divides it exactly, so
-/// `60s` prints as `1m`, and the printed form always parses back to an equal value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// The value is kept in milliseconds, and so is the comparison: `60s` equals `1m`. The text as written
+/// is kept too, and `Display` and the serde writer give it back exactly, so a report shows `60s` and not
+/// `1m`. The printed form always parses back to an equal value.
+#[derive(Debug, Clone)]
 pub struct Duration {
     millis: u64,
+    source: String,
+}
+
+impl PartialEq for Duration {
+    fn eq(&self, other: &Self) -> bool {
+        self.millis == other.millis
+    }
+}
+
+impl Eq for Duration {}
+
+impl PartialOrd for Duration {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Duration {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.millis.cmp(&other.millis)
+    }
+}
+
+impl std::hash::Hash for Duration {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.millis.hash(state);
+    }
 }
 
 impl Duration {
@@ -95,15 +123,21 @@ impl Duration {
         Self::check(text).map_err(|p| ScalarError::duration(text, p))
     }
 
+    /// The text as the author wrote it, such as `60s`.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.source
+    }
+
     /// The length in milliseconds.
     #[must_use]
-    pub fn as_millis(self) -> u64 {
+    pub fn as_millis(&self) -> u64 {
         self.millis
     }
 
     /// The length as a standard library duration.
     #[must_use]
-    pub fn to_std(self) -> std::time::Duration {
+    pub fn to_std(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.millis)
     }
 
@@ -143,6 +177,7 @@ impl Duration {
         // 999999999 days is 8.64e16 ms, far below u64::MAX, so this cannot overflow.
         Ok(Self {
             millis: number * unit,
+            source: text.to_owned(),
         })
     }
 }
@@ -157,13 +192,7 @@ impl FromStr for Duration {
 
 impl fmt::Display for Duration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (name, size) in UNITS {
-            if self.millis.is_multiple_of(size) {
-                return write!(f, "{}{name}", self.millis / size);
-            }
-        }
-        // Unreachable: the last unit is 1 ms, which divides every value.
-        write!(f, "{}ms", self.millis)
+        f.write_str(&self.source)
     }
 }
 
@@ -185,7 +214,7 @@ impl<'de> Deserialize<'de> for Duration {
             }
 
             fn visit_u64<E: de::Error>(self, v: u64) -> Result<Duration, E> {
-                Err(E::custom(ScalarError::duration(
+                Err(de_error(&ScalarError::duration(
                     &v.to_string(),
                     DurationProblem::MissingUnit,
                 )))
@@ -197,18 +226,18 @@ impl<'de> Deserialize<'de> for Duration {
                 } else {
                     DurationProblem::MissingUnit
                 };
-                Err(E::custom(ScalarError::duration(&v.to_string(), problem)))
+                Err(de_error(&ScalarError::duration(&v.to_string(), problem)))
             }
 
             fn visit_f64<E: de::Error>(self, v: f64) -> Result<Duration, E> {
-                Err(E::custom(ScalarError::duration(
+                Err(de_error(&ScalarError::duration(
                     &v.to_string(),
                     DurationProblem::NotWholeNumber,
                 )))
             }
 
             fn visit_str<E: de::Error>(self, v: &str) -> Result<Duration, E> {
-                Duration::parse(v).map_err(E::custom)
+                Duration::parse(v).map_err(|e| de_error(&e))
             }
         }
 
@@ -243,11 +272,17 @@ mod tests {
     }
 
     #[test]
-    fn display_uses_the_largest_exact_unit() {
-        assert_eq!(Duration::parse("60s").unwrap().to_string(), "1m");
-        assert_eq!(Duration::parse("1500ms").unwrap().to_string(), "1500ms");
-        assert_eq!(Duration::parse("48h").unwrap().to_string(), "2d");
-        assert_eq!(Duration::parse("90s").unwrap().to_string(), "90s");
+    fn display_keeps_the_text_and_equality_uses_the_value() {
+        for s in ["60s", "1m", "1500ms", "48h", "2d", "90s"] {
+            let d = Duration::parse(s).unwrap();
+            assert_eq!(d.to_string(), s);
+            assert_eq!(d.as_str(), s);
+        }
+        let a = Duration::parse("60s").unwrap();
+        let b = Duration::parse("1m").unwrap();
+        assert_eq!(a, b);
+        assert!(Duration::parse("59s").unwrap() < b);
+        assert_eq!(serde_json::to_string(&a).unwrap(), "\"60s\"");
     }
 
     #[test]
@@ -274,6 +309,12 @@ mod tests {
         for s in ["1000000000s", "99999999999999999999999d"] {
             assert_eq!(problem(s), DurationProblem::TooLarge, "{s:?}");
         }
+    }
+
+    #[test]
+    fn serde_errors_carry_the_fix_line() {
+        let e = serde_json::from_str::<Duration>("\"10 s\"").unwrap_err();
+        assert!(e.to_string().contains(". fix: "), "{e}");
     }
 
     #[test]

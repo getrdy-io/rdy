@@ -7,7 +7,7 @@ use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use super::{ScalarError, split_digits};
+use super::{ScalarError, de_error, split_digits};
 
 /// Binary units, largest first.
 const UNITS: [(&str, u64); 5] = [
@@ -175,13 +175,13 @@ impl<'de> Deserialize<'de> for Quantity {
             }
 
             fn visit_u64<E: de::Error>(self, v: u64) -> Result<Quantity, E> {
-                Quantity::from_integer(v).map_err(E::custom)
+                Quantity::from_integer(v).map_err(|e| de_error(&e))
             }
 
             fn visit_i64<E: de::Error>(self, v: i64) -> Result<Quantity, E> {
                 match u64::try_from(v) {
                     Ok(n) => self.visit_u64(n),
-                    Err(_) => Err(E::custom(ScalarError::quantity(
+                    Err(_) => Err(de_error(&ScalarError::quantity(
                         &v.to_string(),
                         QuantityProblem::NotWholeNumber,
                     ))),
@@ -189,14 +189,14 @@ impl<'de> Deserialize<'de> for Quantity {
             }
 
             fn visit_f64<E: de::Error>(self, v: f64) -> Result<Quantity, E> {
-                Err(E::custom(ScalarError::quantity(
+                Err(de_error(&ScalarError::quantity(
                     &v.to_string(),
                     QuantityProblem::NotWholeNumber,
                 )))
             }
 
             fn visit_str<E: de::Error>(self, v: &str) -> Result<Quantity, E> {
-                Quantity::parse(v).map_err(E::custom)
+                Quantity::parse(v).map_err(|e| de_error(&e))
             }
         }
 
@@ -275,6 +275,12 @@ mod tests {
         assert_eq!(bytes("999999999999999"), 999_999_999_999_999);
         assert_eq!(bytes("7Pi"), 7 << 50);
         assert_eq!(bytes("8191Ti"), 8191 << 40);
+    }
+
+    #[test]
+    fn serde_errors_carry_the_fix_line() {
+        let e = serde_json::from_str::<Quantity>("\"32G\"").unwrap_err();
+        assert!(e.to_string().contains(". fix: "), "{e}");
     }
 
     #[test]

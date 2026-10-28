@@ -7,7 +7,7 @@ use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use super::ScalarError;
+use super::{ScalarError, de_error};
 
 /// The most parts a version may have.
 const MAX_PARTS: usize = 4;
@@ -65,16 +65,34 @@ impl VersionProblem {
 ///
 /// Write it as a quoted string. A bare integer such as `14` is also accepted, because YAML keeps its
 /// text. An unquoted `1.30` is refused: YAML reads it as the number 1.3, so the real version is lost.
-/// A leading `v` is allowed (`v1.29.4`) and is dropped, so `Display` never prints it. Leading zeros in
-/// a part are allowed and dropped too.
+/// A leading `v` is allowed (`v1.29.4`). Leading zeros in a part are allowed too.
+///
+/// The text as written is kept, and `Display` and the serde writer give it back exactly, so a report
+/// shows `1.05` and `v1.29.4` as the author wrote them. Equality and hashing use the parsed parts, so
+/// `1.05` equals `1.5` and `v1.29` equals `1.29`.
 ///
 /// Versions are compared part by part as numbers, never as semver, so `1.9 < 1.10`. This type holds
 /// the parts and does not order them yet. `1.28` and `1.28.0` are different values here, and a check
 /// that compares versions pads the shorter one with zeros.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Version {
     parts: [u32; MAX_PARTS],
     len: u8,
+    source: String,
+}
+
+impl PartialEq for Version {
+    fn eq(&self, other: &Self) -> bool {
+        self.components() == other.components()
+    }
+}
+
+impl Eq for Version {}
+
+impl std::hash::Hash for Version {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.components().hash(state);
+    }
 }
 
 impl Version {
@@ -85,6 +103,12 @@ impl Version {
     /// Returns [`ScalarError::InvalidVersion`] when `text` does not fit the grammar.
     pub fn parse(text: &str) -> Result<Self, ScalarError> {
         Self::check(text).map_err(|p| ScalarError::version(text, p))
+    }
+
+    /// The text as the author wrote it, such as `1.05`.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.source
     }
 
     /// The numeric parts, from the most significant. One to four of them.
@@ -120,6 +144,7 @@ impl Version {
         Ok(Self {
             parts,
             len: u8::try_from(len).unwrap_or(0),
+            source: text.to_owned(),
         })
     }
 
@@ -145,13 +170,7 @@ impl FromStr for Version {
 
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, part) in self.components().iter().enumerate() {
-            if i > 0 {
-                f.write_str(".")?;
-            }
-            write!(f, "{part}")?;
-        }
-        Ok(())
+        f.write_str(&self.source)
     }
 }
 
@@ -173,13 +192,13 @@ impl<'de> Deserialize<'de> for Version {
             }
 
             fn visit_u64<E: de::Error>(self, v: u64) -> Result<Version, E> {
-                Version::from_integer(v).map_err(E::custom)
+                Version::from_integer(v).map_err(|e| de_error(&e))
             }
 
             fn visit_i64<E: de::Error>(self, v: i64) -> Result<Version, E> {
                 match u64::try_from(v) {
                     Ok(n) => self.visit_u64(n),
-                    Err(_) => Err(E::custom(ScalarError::version(
+                    Err(_) => Err(de_error(&ScalarError::version(
                         &v.to_string(),
                         VersionProblem::BadShape,
                     ))),
@@ -187,14 +206,14 @@ impl<'de> Deserialize<'de> for Version {
             }
 
             fn visit_f64<E: de::Error>(self, v: f64) -> Result<Version, E> {
-                Err(E::custom(ScalarError::version(
+                Err(de_error(&ScalarError::version(
                     &v.to_string(),
                     VersionProblem::UnquotedDecimal,
                 )))
             }
 
             fn visit_str<E: de::Error>(self, v: &str) -> Result<Version, E> {
-                Version::parse(v).map_err(E::custom)
+                Version::parse(v).map_err(|e| de_error(&e))
             }
         }
 
@@ -230,10 +249,21 @@ mod tests {
     }
 
     #[test]
-    fn display_keeps_trailing_zeros_and_drops_the_v() {
-        assert_eq!(Version::parse("1.30").unwrap().to_string(), "1.30");
-        assert_eq!(Version::parse("12.4").unwrap().to_string(), "12.4");
-        assert_eq!(Version::parse("v1.29.4").unwrap().to_string(), "1.29.4");
+    fn display_keeps_the_text_and_equality_uses_the_parts() {
+        for s in ["1.30", "12.4", "v1.29.4", "01.05", "1.05"] {
+            let v = Version::parse(s).unwrap();
+            assert_eq!(v.to_string(), s);
+            assert_eq!(v.as_str(), s);
+            assert_eq!(serde_json::to_string(&v).unwrap(), format!("\"{s}\""));
+        }
+        assert_eq!(
+            Version::parse("1.05").unwrap(),
+            Version::parse("1.5").unwrap()
+        );
+        assert_eq!(
+            Version::parse("v1.29").unwrap(),
+            Version::parse("1.29").unwrap()
+        );
         assert_eq!(
             Version::parse("1.28").unwrap(),
             Version::parse("1.28").unwrap()
@@ -259,6 +289,12 @@ mod tests {
         assert_eq!(problem("1.2.3.4.5"), VersionProblem::TooManyParts);
         assert_eq!(problem("1000000000"), VersionProblem::TooLarge);
         assert_eq!(problem("1.99999999999999999999"), VersionProblem::TooLarge);
+    }
+
+    #[test]
+    fn serde_errors_carry_the_fix_line() {
+        let e = serde_json::from_str::<Version>("1.30").unwrap_err();
+        assert!(e.to_string().contains(". fix: "), "{e}");
     }
 
     #[test]

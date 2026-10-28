@@ -1,13 +1,13 @@
 //! [`Target`]: a network endpoint a check talks to.
 
 use std::fmt;
-use std::net::Ipv6Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use super::ScalarError;
+use super::{ScalarError, de_error};
 
 /// The longest target, in bytes, as in the JSON schema.
 const MAX_LEN: usize = 512;
@@ -38,7 +38,7 @@ pub enum TargetProblem {
     #[error("the port is not a number from 1 to 65535")]
     BadPort,
     /// The host is not a valid host name.
-    #[error("the host is not a valid host name")]
+    #[error("the host is not a valid host name or IPv4 address")]
     BadHost,
     /// The IPv6 address is malformed, or it is not in square brackets.
     #[error("the IPv6 address is malformed or has no square brackets")]
@@ -67,7 +67,7 @@ impl TargetProblem {
             Self::MissingPort => "add the port, such as 'registry.acme.example:443'.",
             Self::BadPort => "use a port from 1 to 65535 with no leading zero, such as ':443'.",
             Self::BadHost => {
-                "use letters, digits, hyphens and dots, such as 'registry.acme.example'."
+                "use letters, digits, hyphens and dots, such as 'registry.acme.example', or an IPv4 address in four-part form, such as '10.0.0.1'. A host name cannot end in a number, and an address cannot use hex, octal or a single number."
             }
             Self::BadIpv6 => {
                 "put an IPv6 address in square brackets with a port, such as '[::1]:443'."
@@ -87,8 +87,10 @@ impl TargetProblem {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Host {
-    /// A DNS name or an IPv4 address, in lowercase.
+    /// A DNS name, in lowercase. It never ends in a number, so it is never an IPv4 address in disguise.
     Name(String),
+    /// An IPv4 address written as four decimal parts, such as `10.0.0.1`.
+    Ipv4(Ipv4Addr),
     /// An IPv6 address.
     Ipv6(Ipv6Addr),
 }
@@ -98,6 +100,7 @@ impl fmt::Display for Host {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Name(name) => f.write_str(name),
+            Self::Ipv4(addr) => write!(f, "{addr}"),
             Self::Ipv6(addr) => write!(f, "[{addr}]"),
         }
     }
@@ -108,6 +111,10 @@ impl fmt::Display for Host {
 /// - The port is 1 to 65535, with no leading zero. A `host:port` always has one.
 /// - A URL may leave the port out. [`Target::port`] then gives 80 or 443.
 /// - A host name has letters, digits, hyphens and dots, at most 253 bytes, and is kept in lowercase.
+///   It has no trailing dot. Its last label is not all digits and does not start with `0x`.
+/// - An IPv4 address is four decimal parts with no leading zeros. Short forms (`127.1`), single numbers
+///   (`2852039166`), hex (`0xa9.0xfe.0xa9.0xfe`) and octal (`0251.0376.0251.0376`) are refused, because
+///   resolvers and URL parsers read them as other addresses than they look like.
 /// - An IPv6 address is in square brackets. It is parsed, and `Display` prints it in its short form.
 /// - The text is ASCII only, with no spaces, and at most 512 bytes.
 /// - A URL with a user name or password is refused, and so is a URL with a `#fragment`. The scheme must
@@ -117,8 +124,7 @@ impl fmt::Display for Host {
 ///
 /// This type checks the shape only. Link-local and metadata addresses parse. The egress policy refuses
 /// them at run time.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Target {
     scheme: Option<Scheme>,
     host: Host,
@@ -141,7 +147,7 @@ impl Target {
     ///
     /// Returns [`ScalarError::InvalidTarget`] when `text` does not fit the grammar.
     pub fn parse(text: &str) -> Result<Self, ScalarError> {
-        Self::check(text).map_err(|p| ScalarError::target(text, p))
+        Self::check(text).map_err(|p| ScalarError::target(&redact_for_echo(text), p))
     }
 
     /// The host.
@@ -230,6 +236,22 @@ impl Target {
     }
 }
 
+/// Makes a refused target safe to echo: no user info, no query, no fragment.
+///
+/// Everything before the last `@` goes, so a password with a `/` or `?` in it cannot leak. Everything
+/// from the first `?` or `#` goes, because a query can carry tokens.
+fn redact_for_echo(text: &str) -> String {
+    let start = text.find("://").map_or(0, |i| i + 3);
+    let mut out = match text.rfind('@') {
+        Some(at) if at >= start => format!("{}***@{}", &text[..start], &text[at + 1..]),
+        _ => text.to_owned(),
+    };
+    if let Some(cut) = out.find(['?', '#']) {
+        out.truncate(cut);
+    }
+    out
+}
+
 /// Reads `host[:port]` or `[v6][:port]`. `port_required` is true for a bare `host:port` target.
 fn parse_authority(
     authority: &str,
@@ -254,7 +276,7 @@ fn parse_authority(
         if host.contains(':') {
             return Err(TargetProblem::BadIpv6);
         }
-        (Host::Name(parse_host(host)?), port_text)
+        (parse_host(host)?, port_text)
     };
     match port_text {
         Some(text) => Ok((host, Some(parse_port(text)?))),
@@ -263,8 +285,13 @@ fn parse_authority(
     }
 }
 
-/// A DNS name or IPv4 address: dot-separated labels of letters, digits and inner hyphens.
-fn parse_host(host: &str) -> Result<String, TargetProblem> {
+/// A DNS name or a dotted-quad IPv4 address.
+///
+/// A host whose last label is all digits, or starts with `0x`, is a number to resolvers and to URL
+/// parsers (`2852039166`, `0xa9.0xfe.0xa9.0xfe`, `0251.0376.0251.0376` and `127.1` all mean an address).
+/// Such a host is accepted only as four plain decimal parts. Everything else of that kind is refused,
+/// so the address policy never sees a name that is an address in disguise.
+fn parse_host(host: &str) -> Result<Host, TargetProblem> {
     let label_ok = |label: &str| {
         let b = label.as_bytes();
         !b.is_empty()
@@ -276,7 +303,38 @@ fn parse_host(host: &str) -> Result<String, TargetProblem> {
     if host.len() > MAX_HOST_LEN || !host.split('.').all(label_ok) {
         return Err(TargetProblem::BadHost);
     }
-    Ok(host.to_ascii_lowercase())
+    let last = host.rsplit('.').next().unwrap_or(host);
+    if is_numeric_label(last) {
+        return parse_dotted_quad(host)
+            .map(Host::Ipv4)
+            .ok_or(TargetProblem::BadHost);
+    }
+    Ok(Host::Name(host.to_ascii_lowercase()))
+}
+
+/// All digits, or `0x` and hex digits.
+fn is_numeric_label(label: &str) -> bool {
+    let hex = label.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("0x"))
+        && label[2..].bytes().all(|b| b.is_ascii_hexdigit());
+    hex || label.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Exactly four decimal parts of 0 to 255, with no leading zeros.
+fn parse_dotted_quad(host: &str) -> Option<Ipv4Addr> {
+    let mut octets = [0_u8; 4];
+    let mut parts = host.split('.');
+    for octet in &mut octets {
+        let part = parts.next()?;
+        if part.is_empty()
+            || part.len() > 3
+            || (part.len() > 1 && part.starts_with('0'))
+            || !part.bytes().all(|b| b.is_ascii_digit())
+        {
+            return None;
+        }
+        *octet = part.parse().ok()?;
+    }
+    parts.next().is_none().then(|| Ipv4Addr::from(octets))
 }
 
 /// A port from 1 to 65535 as plain digits with no leading zero.
@@ -316,6 +374,19 @@ impl fmt::Display for Target {
             write!(f, ":{port}")?;
         }
         f.write_str(&self.tail)
+    }
+}
+
+impl Serialize for Target {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for Target {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        Self::parse(&text).map_err(|e| de_error(&e))
     }
 }
 
@@ -533,6 +604,106 @@ mod tests {
         assert_eq!(problem(&long), TargetProblem::TooLong);
         let edge = format!("https://host/{}", "a".repeat(512 - "https://host/".len()));
         assert_eq!(ok(&edge).to_string().len(), 512);
+    }
+
+    #[test]
+    fn ipv4_is_four_plain_decimal_parts() {
+        let t = ok("169.254.169.254:80");
+        assert_eq!(t.host(), &Host::Ipv4(Ipv4Addr::new(169, 254, 169, 254)));
+        assert_eq!(t.to_string(), "169.254.169.254:80");
+        assert_eq!(ok("0.0.0.0:1").host(), &Host::Ipv4(Ipv4Addr::UNSPECIFIED));
+        assert_eq!(
+            ok("https://10.1.2.3:8443/x").host(),
+            &Host::Ipv4(Ipv4Addr::new(10, 1, 2, 3))
+        );
+    }
+
+    #[test]
+    fn refuses_hosts_that_are_addresses_in_disguise() {
+        for s in [
+            // A single number: 2852039166 is 169.254.169.254.
+            "2852039166:80",
+            "https://2852039166/",
+            "0:80",
+            "4294967295:80",
+            // Hex.
+            "0xa9.0xfe.0xa9.0xfe:80",
+            "0xA9FEA9FE:80",
+            "https://0xa9fea9fe/",
+            "0xa9.254.169.254:80",
+            "169.254.169.0xfe:80",
+            "a.0x1f:80",
+            "0x:80",
+            // Octal-looking.
+            "0251.0376.0251.0376:80",
+            "169.254.169.0376:80",
+            "010.0.0.1:80",
+            "1.2.3.04:80",
+            "https://0251.0376.0251.0376/",
+            // Short and long forms.
+            "127.1:80",
+            "1.2.3:80",
+            "1.2.3.4.5:80",
+            "256.1.1.1:80",
+            "1.2.3.1000:80",
+            "1.1.1.1.example.123:80",
+            // A trailing dot is refused on purpose.
+            "example.com.:443",
+            "1.2.3.4.:80",
+        ] {
+            assert_eq!(problem(s), TargetProblem::BadHost, "{s:?}");
+        }
+        // Digits in other labels are fine.
+        assert_eq!(ok("1.2.3.example:80").to_string(), "1.2.3.example:80");
+        assert_eq!(ok("0x1.example:80").to_string(), "0x1.example:80");
+        assert_eq!(ok("host1:80").to_string(), "host1:80");
+        assert_eq!(ok("1e3:80").to_string(), "1e3:80");
+    }
+
+    #[test]
+    fn errors_never_echo_credentials_queries_or_fragments() {
+        let cases = [
+            "https://u:p@host/",
+            "https://user:s3cret@host:99999/x",
+            "https://user:pa/ss@host/",
+            "https://user:pa?ss#x@host/",
+            "https://user:s3cret@host/x?token=abc123",
+            "https://host/x?token=abc123#frag",
+            "https://host:99999/x?token=abc123&u=a@b",
+            "ftp://user:s3cret@host/",
+            "user:s3cret@host:443",
+            "https://host:99999/?token=abc123",
+            "https://host/\u{e9}?token=abc123",
+        ];
+        for s in cases {
+            let e = Target::parse(s).unwrap_err();
+            let text = e.to_string();
+            for secret in [
+                "s3cret", "abc123", "u:p@", "pa/ss", "pa?ss", "#frag", "user:",
+            ] {
+                assert!(!text.contains(secret), "{s:?} leaked {secret:?}: {text}");
+            }
+        }
+        let e = Target::parse("https://u:p@host/").unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "'https://***@host/' is not a valid target: the URL carries a user name or password"
+        );
+        let e = Target::parse("https://host/x?token=abc123#frag").unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "'https://host/x' is not a valid target: the URL has a fragment"
+        );
+        // The same rule holds through serde.
+        let e = serde_json::from_str::<Target>("\"https://u:p@host/?t=1\"").unwrap_err();
+        assert!(!e.to_string().contains("u:p"), "{e}");
+        assert!(e.to_string().contains("fix: remove the user name"), "{e}");
+    }
+
+    #[test]
+    fn serde_errors_carry_the_fix_line() {
+        let e = serde_json::from_str::<Target>("\"host:99999\"").unwrap_err();
+        assert!(e.to_string().contains(". fix: use a port"), "{e}");
     }
 
     #[test]

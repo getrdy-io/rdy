@@ -174,10 +174,10 @@ The `did you mean` part appears only when the edit distance is small; otherwise 
 | --- | --- | --- |
 | Quantity (bytes) | integer, or integer plus `Ki`, `Mi`, `Gi`, `Ti`, `Pi` | `32G` and `32GB` are bad values: "write 32Gi, not 32G". Lint warns on a bare integer under 1 MiB ("32 bytes, did you mean 32Gi?"). At most 15 digits and 2^53 - 1 bytes. Units are case sensitive. |
 | Duration | integer plus `ms`, `s`, `m`, `h` or `d` | `10s`, `7d`. No compound forms. The number is 1 to 999999999, so `0s` is a bad value. |
-| Version | quoted dotted string, or bare integer | Compared per numeric component, not as semver. One to four parts of up to 9 digits; a leading `v` is dropped. An unquoted `1.30` is a bad value (ADR 0001 decision 4). |
+| Version | quoted dotted string, or bare integer | Compared per numeric component, not as semver. One to four parts of up to 9 digits; a leading `v` is allowed. The text is kept as written. An unquoted `1.30` is a bad value (ADR 0001 decision 4). |
 | Path | absolute (`/...`, `C:\...`), max 1024 | Normalized. Never reaches a shell; there is none. |
 | Regex | Rust `regex` syntax, max 256 chars | Linear time, size-limited when compiled. Lint and sign compile every pattern. |
-| Target | `host:port` (port 1 to 65535), `[v6]:port`, or `http(s)://` URL | At most 64 per spec (ADR 0009). Specs never carry credentials: user info in a URL is a bad value, and fragments are not allowed. Query strings never enter the action log. Link-local and metadata addresses parse; the egress policy refuses them at run time and the check reports `block` with the reason (ADR 0009). |
+| Target | `host:port` (port 1 to 65535), `[v6]:port`, or `http(s)://` URL | At most 64 per spec (ADR 0009). Specs never carry credentials: user info in a URL is a bad value, and fragments are not allowed. Query strings never enter the action log. A host name has no trailing dot (write `example.com`, not `example.com.`) and cannot end in a number. An IPv4 address is four plain decimal parts: `2852039166`, `0xa9.0xfe.0xa9.0xfe`, `0251.0376.0251.0376` and `127.1` are bad values, because resolvers read them as other addresses than they look like. Link-local and metadata addresses parse; the egress policy refuses them at run time and the check reports `block` with the reason (ADR 0009). |
 
 **Severity.** `severity: block` means required and `severity: warn` means optional. A check computes a
 level from its thresholds: pass, warn or fail. `block` (default) maps fail to `block`; `warn` maps fail
