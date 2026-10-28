@@ -9,5 +9,18 @@ repository.workspace = true
 homepage.workspace = true
 include = ["src/**", "Cargo.toml", "LICENSE"]
 
+[features]
+# Test-only helpers (`TagKey::fixed`). CI keeps this feature out of the release binary (04 section 3.3).
+testing = []
+
+[dependencies]
+regex = { workspace = true, features = ["std", "perf", "unicode"] }
+ring = { workspace = true, features = ["alloc"] }
+thiserror = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+serde = { workspace = true, features = ["std"] }
+trybuild = { workspace = true }
+
 [lints]
 workspace = true
