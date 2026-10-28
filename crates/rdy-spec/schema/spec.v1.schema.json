@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://getrdy.io/schema/rdy/v1/spec.v1.schema.json",
   "title": "rdy/v1 readiness spec",
-  "description": "A vendor's readiness requirements. Hand-written contract for rdy/v1, revision 0 (rdy-spec 0.1). See docs/plan/01-spec-format.md. Unknown check ids are allowed by this schema (rdy reports them as skipped); every other unknown key is an error here. At run time an unknown key inside a known check skips that check instead (ADR 0007).",
+  "description": "A vendor's readiness requirements (apiVersion rdy/v1, kind Readiness). Check ids this schema does not know are allowed and reported as not run. Every other unknown key is an error.",
   "type": "object",
   "required": [
     "apiVersion",
@@ -13,7 +13,7 @@
   "additionalProperties": false,
   "properties": {
     "apiVersion": {
-      "description": "Wire format version. Exactly rdy/v1. Minor revisions never appear here.",
+      "description": "Format version. Must be rdy/v1.",
       "const": "rdy/v1"
     },
     "kind": {
@@ -45,12 +45,12 @@
       "additionalProperties": false,
       "properties": {
         "product": {
-          "description": "Product slug. Binds the signature to a pinned key and names the report files.",
+          "description": "Product name: lowercase letters, digits and hyphens. Ties the signature to a trusted key and names the report files.",
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
         },
         "version": {
-          "description": "Product versions this spec applies to, as a semver requirement. Shown in the report, not evaluated.",
+          "description": "Product versions this spec is for, such as >=4.2. Shown in the report, not checked.",
           "type": "string",
           "minLength": 1,
           "maxLength": 64
@@ -67,12 +67,12 @@
           "maximum": 9007199254740991
         },
         "expires": {
-          "description": "RFC 3339 UTC time after which rdy refuses to run this spec.",
+          "description": "UTC time after which rdy refuses to run this spec, for example 2027-01-31T00:00:00Z.",
           "type": "string",
-          "format": "date-time"
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
         },
         "annotations": {
-          "description": "Free-form labels for vendor tooling. rdy ignores them and copies them into the result.",
+          "description": "Free-form labels for vendor tooling. rdy never changes behaviour because of them and copies them into the result.",
           "type": "object",
           "maxProperties": 32,
           "propertyNames": {
@@ -86,12 +86,12 @@
       }
     },
     "CheckId": {
-      "description": "family.name, lowercase. Families reserved in v1: host, net, k8s, aws, gcp, azure, gpu, store, custom.",
+      "description": "family.name, lowercase, for example host.memory.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9]{0,15}\\.[a-z][a-z0-9_]{0,47}$"
     },
     "Severity": {
-      "description": "The most a failing check can count for. block makes the run NOT READY; warn makes it READY with warnings.",
+      "description": "block means required: a failure makes the run NOT READY. warn means optional: a failure gives READY with warnings.",
       "type": "string",
       "enum": [
         "block",
@@ -139,17 +139,18 @@
     "Port": {
       "type": "integer",
       "minimum": 1,
-      "maximum": 65535
+      "maximum": 65535,
+      "description": "1 to 65535."
     },
     "Cidr": {
       "type": "string",
       "pattern": "^([0-9]{1,3}(\\.[0-9]{1,3}){3}|[0-9A-Fa-f:]+)/[0-9]{1,3}$"
     },
     "Target": {
-      "description": "host:port, [ipv6]:port, or an http or https URL.",
+      "description": "host:port, [ipv6]:port, or an http or https URL. Never user:password in a URL; specs carry no credentials.",
       "type": "string",
       "maxLength": 512,
-      "pattern": "^(https?://[^\\s]+|[A-Za-z0-9.-]+:[0-9]{1,5}|\\[[0-9A-Fa-f:]+\\]:[0-9]{1,5})$"
+      "pattern": "^(https?://[^/@\\s#]+(/[^\\s#]*)?|[A-Za-z0-9.-]+:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])|\\[[0-9A-Fa-f:]+\\]:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))$"
     },
     "AbsPath": {
       "description": "An absolute path: /... on Unix, C:\\... on Windows.",
@@ -180,7 +181,7 @@
           "$ref": "#/$defs/CheckId"
         },
         "name": {
-          "description": "Label that makes the key unique when one id appears more than once.",
+          "description": "Short label, shown next to the id. Needed when the same id appears twice.",
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
         },
@@ -188,17 +189,17 @@
           "$ref": "#/$defs/Severity"
         },
         "fix": {
-          "description": "Plain text that replaces the built-in remediation text. No templating, no markup.",
+          "description": "What the customer should do when this check fails. Plain text. Shown instead of rdy's own advice, which stays available below it.",
           "type": "string",
           "minLength": 1,
           "maxLength": 2000
         },
         "timeout": {
-          "description": "Engine timeout for this check, 1s to 60s. Default comes from the check, else 10s.",
+          "description": "How long this check may run, 1s to 60s. Replaces the check's own default. Outside that range the check is not run and lint reports an error.",
           "$ref": "#/$defs/Duration"
         },
         "os": {
-          "description": "Run only on these operating systems. On others the check is reported as excluded and does not count.",
+          "description": "Run only on these operating systems. On others the check is reported as not applicable and does not count.",
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
@@ -418,7 +419,7 @@
           }
         },
         {
-          "description": "Check ids this revision does not know. Parameters are not validated here; rdy reports the check as skipped (not_in_build or unknown_check).",
+          "description": "Check ids this schema does not know. Their parameters are not checked here; rdy reports the check as not run.",
           "if": {
             "properties": {
               "id": {
@@ -456,13 +457,13 @@
     "HostCpuParams": {
       "properties": {
         "min": {
-          "description": "Minimum logical cores available to rdy (honours cgroup quota).",
+          "description": "Minimum CPU cores rdy can use (container limits count).",
           "type": "integer",
           "minimum": 1,
           "maximum": 4096
         },
         "recommended": {
-          "description": "Below this: warn.",
+          "description": "Below this many cores: warn.",
           "type": "integer",
           "minimum": 1,
           "maximum": 4096
@@ -487,7 +488,24 @@
             "pattern": "^[a-z0-9_-]{1,32}$"
           }
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "min"
+          ]
+        },
+        {
+          "required": [
+            "arch"
+          ]
+        },
+        {
+          "required": [
+            "flags"
+          ]
+        }
+      ]
     },
     "HostMemoryParams": {
       "properties": {
@@ -496,39 +514,44 @@
           "$ref": "#/$defs/Quantity"
         },
         "min_available": {
-          "description": "Below this available RAM: warn. Default half of min.",
+          "description": "Below this much free RAM: warn. Default half of min.",
           "$ref": "#/$defs/Quantity"
         },
         "swap": {
+          "description": "forbid: swap must be off.",
           "enum": [
-            "off",
+            "forbid",
             "any"
           ],
           "default": "any"
         },
-        "band": {
-          "description": "Percent below min that still passes with a note. Default max(5%, 256 MiB). 0 turns it off.",
+        "tolerance_percent": {
+          "description": "How far below min still passes, in percent, because a 32 GiB machine shows a little less. Default 5, at least 256 MiB. 0 turns it off.",
           "type": "number",
           "minimum": 0,
           "maximum": 20
         },
-        "band_result": {
-          "description": "What a value inside the band counts as.",
+        "tolerance_result": {
+          "description": "What a value inside the tolerance counts as.",
           "enum": [
             "pass",
             "warn"
           ],
           "default": "pass"
         }
-      }
+      },
+      "required": [
+        "min"
+      ]
     },
     "HostDiskParams": {
       "required": [
-        "path"
+        "path",
+        "min"
       ],
       "properties": {
         "path": {
-          "description": "Install path. The nearest existing parent is measured.",
+          "description": "Install path. If it does not exist yet, the nearest existing parent is measured.",
           "$ref": "#/$defs/AbsPath"
         },
         "min": {
@@ -536,7 +559,7 @@
           "$ref": "#/$defs/Quantity"
         },
         "recommended": {
-          "description": "Below this free space: warn. Default min plus 20%.",
+          "description": "Below this much free space: warn. Default min plus 20%.",
           "$ref": "#/$defs/Quantity"
         },
         "min_inodes": {
@@ -606,10 +629,22 @@
           }
         },
         "allow_owner": {
-          "description": "Process names that may hold a port (an earlier install of the product).",
+          "description": "Process names that may already hold a port, such as an earlier install of the product.",
           "$ref": "#/$defs/StringList"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "free"
+          ]
+        },
+        {
+          "required": [
+            "udp_free"
+          ]
+        }
+      ]
     },
     "HostLsmParams": {
       "properties": {
@@ -664,11 +699,11 @@
     "HostSecurityAgentsParams": {
       "properties": {
         "forbid": {
-          "description": "Agent ids from the shipped catalog that block.",
+          "description": "Agent ids that block. Run rdy spec lint to see the known ids.",
           "$ref": "#/$defs/StringList"
         },
         "allow": {
-          "description": "Agent ids that are accepted without a warning.",
+          "description": "Agent ids that are fine. Run rdy spec lint to see the known ids.",
           "$ref": "#/$defs/StringList"
         }
       }
@@ -686,7 +721,7 @@
             "additionalProperties": false,
             "properties": {
               "id": {
-                "description": "os-release ID, matched against ID then ID_LIKE.",
+                "description": "Distribution id from /etc/os-release, such as rhel or ubuntu.",
                 "type": "string",
                 "pattern": "^[a-z0-9._-]{1,32}$"
               },
@@ -787,10 +822,10 @@
               }
             ]
           },
-          "description": "At most 64 endpoints across the whole spec (ADR 0009)."
+          "description": "At most 64 endpoints in the whole spec."
         },
         "via_proxy": {
-          "description": "auto tries what the product would do and reports if the other path works.",
+          "description": "auto: try what the product would do and say if the other path works. direct: no proxy. proxy_only: only through the proxy.",
           "enum": [
             "auto",
             "direct",
@@ -914,23 +949,12 @@
       }
     },
     "K8sStorageClassParams": {
-      "not": {
-        "required": [
-          "access_modes",
-          "needs"
-        ]
-      },
       "properties": {
         "class": {
-          "description": "A named class that must exist. Default: the default class.",
+          "description": "A storage class that must exist. Default: the cluster's default class.",
           "$ref": "#/$defs/K8sName"
         },
         "access_modes": {
-          "$ref": "#/$defs/AccessModes"
-        },
-        "needs": {
-          "description": "Deprecated alias of access_modes, kept because the plan's first example uses it.",
-          "deprecated": true,
           "$ref": "#/$defs/AccessModes"
         },
         "binding": {
@@ -1037,7 +1061,7 @@
           "$ref": "#/$defs/K8sName"
         },
         "scc": {
-          "description": "OpenShift SCC the product documents.",
+          "description": "The OpenShift security context constraint the product documents.",
           "type": "string",
           "maxLength": 253
         },
@@ -1056,7 +1080,7 @@
           }
         }
       },
-      "description": "Server-side dry-run (dry_run, probe_pod in the catalog) is not in v1 revision 0: the read-only guard of ADR 0010 does not allow it."
+      "description": "Dry-run checks are not supported yet."
     },
     "K8sNodesParams": {
       "properties": {
@@ -1101,7 +1125,24 @@
             "type": "object"
           }
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "min_ready"
+          ]
+        },
+        {
+          "required": [
+            "per_node"
+          ]
+        },
+        {
+          "required": [
+            "free"
+          ]
+        }
+      ]
     },
     "K8sResources": {
       "type": "object",
@@ -1139,14 +1180,6 @@
         "max": {
           "$ref": "#/$defs/Version"
         },
-        "max_severity": {
-          "description": "What a server above max counts as. Default warn.",
-          "enum": [
-            "warn",
-            "block"
-          ],
-          "default": "warn"
-        },
         "apis": {
           "description": "group/version Kind, for example networking.k8s.io/v1 Ingress.",
           "type": "array",
@@ -1157,27 +1190,88 @@
           }
         },
         "openshift_min": {
-          "description": "Minimum OpenShift version when the cluster is OpenShift.",
+          "description": "Minimum OpenShift version, used when the cluster is OpenShift.",
           "$ref": "#/$defs/Version"
+        },
+        "over_max": {
+          "description": "What a server newer than max counts as. Default warn.",
+          "enum": [
+            "warn",
+            "block"
+          ],
+          "default": "warn"
         }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "min"
+          ]
+        },
+        {
+          "required": [
+            "max"
+          ]
+        },
+        {
+          "required": [
+            "apis"
+          ]
+        },
+        {
+          "required": [
+            "openshift_min"
+          ]
+        }
+      ]
     },
     "Bundle": {
-      "description": "Diagnostics bundle request. Used by rdy bundle from M2. Parsed and shape-checked in v1 so specs written today keep working. Unknown keys exit 64 (ADR 0007).",
+      "description": "What rdy bundle collects and how it redacts. Unknown keys are an error. rdy run never collects anything.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "collect": {
-          "description": "Collectors as kind:argument. Known kinds: journal:<duration>, k8s:events, file:<absolute glob>.",
+          "description": "Collectors: journal:<duration>, k8s:events, file:<absolute path or glob>.",
           "type": "array",
           "maxItems": 64,
           "items": {
             "type": "string",
-            "pattern": "^[a-z][a-z0-9_]{0,15}:.{1,1024}$"
+            "pattern": "^[a-z][a-z0-9_]{0,15}:.{1,1024}$",
+            "allOf": [
+              {
+                "if": {
+                  "pattern": "^journal:"
+                },
+                "then": {
+                  "pattern": "^journal:[1-9][0-9]{0,8}(ms|s|m|h|d)$"
+                }
+              },
+              {
+                "if": {
+                  "pattern": "^k8s:"
+                },
+                "then": {
+                  "enum": [
+                    "k8s:events"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "pattern": "^file:"
+                },
+                "then": {
+                  "pattern": "^file:/[^\\0]{0,1023}$",
+                  "not": {
+                    "pattern": "(^file:|/)\\.\\.(/|$)"
+                  }
+                }
+              }
+            ]
           }
         },
         "redact": {
-          "description": "Redactor groups to add. Known: aws_keys, bearer_tokens, emails. Adds groups only; the built-in minimum always runs (04-bundle-and-redaction.md).",
+          "description": "Redactor groups to add: aws_keys, bearer_tokens, emails. rdy always applies its built-in rules as well.",
           "type": "array",
           "maxItems": 64,
           "items": {
@@ -1186,7 +1280,7 @@
           }
         },
         "redact_patterns": {
-          "description": "Vendor patterns, at most 32. Each match becomes a custom.<name> placeholder.",
+          "description": "Your own patterns, at most 32. A match is replaced with a custom.<name> placeholder. A pattern can only add redaction: where it overlaps a built-in match, the whole overlapping region is redacted. A pattern that matches the empty string is an error.",
           "type": "array",
           "maxItems": 32,
           "items": {
@@ -1208,7 +1302,7 @@
           }
         },
         "max_size": {
-          "description": "Bundle size cap. Lowers the built-in cap, never raises it.",
+          "description": "Bundle size cap. Lowers rdy's own cap, never raises it.",
           "$ref": "#/$defs/Quantity"
         }
       }

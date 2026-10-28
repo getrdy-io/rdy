@@ -1,10 +1,14 @@
-# Synthetic example. Four checks, no Kubernetes, nothing that needs root.
+# Synthetic example. Four checks (host.disk is listed once per OS family),
+# no Kubernetes, nothing that needs root.
 # This is the spec the README and the quickstart use, so a laptop can reach
 # a real result in a few seconds.
 #
 # Expect net.egress to BLOCK on the first run: registry.acme.example is a
 # made-up name that does not resolve. To see READY, copy this file and point
 # net.egress at a host you can reach, for example github.com:443.
+#
+# This file is unsigned. Run it with --allow-unsigned; rdy prints a warning.
+# host.disk appears twice, one entry per OS family, to show the name field.
 apiVersion: rdy/v1
 kind: Readiness
 metadata:
@@ -20,10 +24,19 @@ checks:
     severity: block
     fix: "Add RAM or choose a larger node class."
   - id: host.disk
+    name: root
+    os: [linux, macos]
     path: /
     min: 20Gi
     severity: warn
     fix: "Free space on / or mount a larger volume."
+  - id: host.disk
+    name: system
+    os: [windows]
+    path: 'C:\'
+    min: 20Gi
+    severity: warn
+    fix: "Free space on C: or use a larger disk."
   - id: net.egress
     endpoints: ["registry.acme.example:443", "license.acme.example:443"]
     via_proxy: auto

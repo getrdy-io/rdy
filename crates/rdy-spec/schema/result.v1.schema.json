@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://getrdy.io/schema/rdy/v1/result.v1.schema.json",
   "title": "rdy/v1 run result",
-  "description": "The JSON report rdy writes and Rdy Cloud ingests. Hand-written contract for rdy/v1, revision 0 (rdy-spec 0.1). See docs/plan/01-spec-format.md. Consumers must ignore unknown fields, must accept values not listed for open enums (descriptions say 'Open'), and must use verdict as written, never recompute it.",
+  "description": "The JSON report rdy writes and Rdy Cloud reads. Ignore fields you do not know. Accept values not listed where a description says Open. Use verdict as written. A whole document is at most 2 MiB; readers should check that before parsing.",
   "$ref": "#/$defs/Report",
   "$defs": {
     "OpenCode": {
@@ -39,7 +39,8 @@
         "actions_truncated",
         "redaction",
         "complete",
-        "interrupted"
+        "interrupted",
+        "actions_dropped"
       ],
       "properties": {
         "api_version": {
@@ -70,7 +71,7 @@
           "$ref": "#/$defs/Proxy"
         },
         "capabilities": {
-          "description": "Every need the run plan probed, and the result.",
+          "description": "Every need rdy probed before running checks, and the result.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/Capability"
@@ -113,7 +114,7 @@
           "$ref": "#/$defs/Summary"
         },
         "checks": {
-          "description": "One entry per spec check, in spec order.",
+          "description": "One entry per spec check, in spec order. Sort by bucket for display.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/CheckResult"
@@ -124,11 +125,20 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/Action"
-          }
+          },
+          "maxItems": 5000
         },
         "actions_truncated": {
-          "description": "True when the log hit 5000 entries and later actions were dropped.",
+          "description": "True when the log hit 5000 entries. exec, connect, tls, http, dns, lookup and kube entries are never dropped.",
           "type": "boolean"
+        },
+        "actions_dropped": {
+          "description": "How many entries of each kind were dropped when the log hit its cap. Only read, read_dir and stat entries are ever dropped.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         },
         "redaction": {
           "$ref": "#/$defs/Redaction"
@@ -190,6 +200,66 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "signature": {
+                "properties": {
+                  "state": {
+                    "const": "unsigned"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "run": {
+                "properties": {
+                  "options": {
+                    "properties": {
+                      "allow_unsigned": {
+                        "const": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "ready"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "verdict_reason": {
+                "type": "null"
+              },
+              "summary": {
+                "properties": {
+                  "block": {
+                    "const": 0
+                  },
+                  "warn": {
+                    "const": 0
+                  },
+                  "required_not_run": {
+                    "const": 0
+                  },
+                  "optional_not_run": {
+                    "const": 0
+                  }
+                }
+              }
+            }
+          }
         }
       ]
     },
@@ -207,22 +277,26 @@
         },
         "version": {
           "type": "string",
-          "description": "Version of the rdy binary."
+          "description": "Version of the rdy binary.",
+          "maxLength": 4096
         },
         "commit": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Short git commit of the build."
+          "description": "Short git commit of the build.",
+          "maxLength": 4096
         },
         "rdy_spec": {
           "type": "string",
-          "description": "Version of the rdy-spec crate that wrote this file."
+          "description": "Version of the rdy-spec crate that wrote this file.",
+          "maxLength": 4096
         },
         "target": {
           "type": "string",
-          "description": "Rust target triple."
+          "description": "Rust target triple.",
+          "maxLength": 4096
         }
       }
     },
@@ -242,9 +316,11 @@
           "format": "uuid"
         },
         "started_at": {
+          "description": "UTC, with milliseconds.",
           "$ref": "#/$defs/Timestamp"
         },
         "finished_at": {
+          "description": "UTC, with milliseconds.",
           "$ref": "#/$defs/Timestamp"
         },
         "duration_ms": {
@@ -281,7 +357,8 @@
                 "string",
                 "null"
               ],
-              "description": "Context given with --kube-context, if any."
+              "description": "Context given with --kube-context, if any.",
+              "maxLength": 4096
             }
           }
         }
@@ -297,13 +374,15 @@
       ],
       "properties": {
         "product": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 4096
         },
         "version": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 4096
         },
         "sha256": {
           "description": "SHA-256 of the exact bytes that were verified and parsed.",
@@ -311,7 +390,8 @@
         },
         "file_name": {
           "type": "string",
-          "description": "Base name only, never the full path."
+          "description": "Base name only, never the full path.",
+          "maxLength": 4096
         },
         "size_bytes": {
           "type": "integer",
@@ -334,12 +414,14 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 4096
         },
         "annotations": {
           "type": "object",
           "additionalProperties": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 4096
           }
         }
       }
@@ -363,7 +445,7 @@
               "$ref": "#/$defs/OpenCode"
             }
           ],
-          "description": "verified: signed by a key pinned for this product (or given with --key). unsigned: no signature, run with --allow-unsigned. invalid exists in the Rust type for rdy verify and never appears in a written report, because an invalid signature always exits 64. Open."
+          "description": "verified: signed by a trusted key. unsigned: no signature, run with --allow-unsigned. invalid: only in the rdy verify object, never in a report. Open: treat an unknown value as not verified."
         },
         "key_id": {
           "description": "minisign key id, 16 uppercase hex digits.",
@@ -373,12 +455,21 @@
           ],
           "pattern": "^[0-9A-F]{16}$"
         },
+        "key_fingerprint": {
+          "description": "SHA-256 of the 32-byte ed25519 public key, 64 hex digits. The key id alone is not an identity.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
         "product": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Product from the signed trusted comment."
+          "description": "Product from the signed trusted comment.",
+          "maxLength": 4096
         },
         "signed_at": {
           "description": "From the signed trusted comment.",
@@ -393,7 +484,8 @@
             "string",
             "null"
           ],
-          "description": "The local note from the trust store entry. Never text from the spec."
+          "description": "The local note from the trust store entry. Never text from the spec.",
+          "maxLength": 4096
         },
         "trust_source": {
           "anyOf": [
@@ -411,19 +503,62 @@
               "type": "null"
             }
           ],
-          "description": "Which trust store matched, or flag for run --key. Open."
+          "description": "Where the key came from: system or user trust store, or flag for a key given with --key for one run. Open: treat an unknown value like flag."
         },
         "reason": {
           "type": [
             "string",
             "null"
           ],
-          "description": "For invalid only."
+          "description": "For invalid only.",
+          "maxLength": 4096
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "verified"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "key_id",
+              "key_fingerprint",
+              "product",
+              "signed_at",
+              "trust_source"
+            ],
+            "properties": {
+              "key_id": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "key_fingerprint": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "product": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "signed_at": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "trust_source": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        }
+      ]
     },
     "Host": {
-      "description": "The machine, coarsely. Deliberately excluded: IP and MAC addresses, environment values, argv, working directory, home path, kubeconfig path, raw machine id, serial numbers.",
+      "description": "The machine, coarsely. IP addresses appear only in check observed data and in the connect.addr and dns.server fields of actions. Never included: MAC addresses, environment values except proxy settings, the command line, the working directory, home paths, kubeconfig contents, the raw machine id, serial numbers.",
       "type": "object",
       "required": [
         "hostname",
@@ -434,10 +569,11 @@
       "properties": {
         "hostname": {
           "type": "string",
-          "description": "After redaction."
+          "description": "As the OS reports it.",
+          "maxLength": 4096
         },
         "host_id": {
-          "description": "First 16 hex digits of SHA-256 over 'rdy-host-id-v1', NUL, product, NUL, OS machine id. Stable per host and product, not linkable across products.",
+          "description": "HMAC-SHA256 of the OS machine id with key 'rdy-host-id-v1' plus the product, first 16 hex digits. Same host and product give the same value; different products give unrelated values. null when there is no usable machine id (macOS for now).",
           "type": [
             "string",
             "null"
@@ -468,19 +604,22 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "maxLength": 4096
             },
             "version": {
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "maxLength": 4096
             },
             "pretty_name": {
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "maxLength": 4096
             }
           }
         },
@@ -488,10 +627,12 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 4096
         },
         "arch": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 4096
         },
         "virtualization": {
           "anyOf": [
@@ -514,7 +655,7 @@
       }
     },
     "Identity": {
-      "description": "Who ran it (ADR 0012).",
+      "description": "Who ran it.",
       "type": "object",
       "required": [
         "euid",
@@ -535,7 +676,8 @@
             "string",
             "null"
           ],
-          "description": "Local login name."
+          "description": "Local login name.",
+          "maxLength": 4096
         },
         "elevated": {
           "description": "euid 0 on Unix, a high-integrity token on Windows.",
@@ -551,20 +693,35 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "maxLength": 4096
             },
             "server": {
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "maxLength": 4096
             },
             "user": {
               "type": [
                 "string",
                 "null"
               ],
-              "description": "From SelfSubjectReview where served."
+              "description": "The user entry named in the kubeconfig context. The authenticated user from SelfSubjectReview replaces it once that call is allowed.",
+              "maxLength": 4096
+            },
+            "exec_plugin": {
+              "description": "Base name of the kubeconfig credential plugin that ran, if any.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 4096
+            },
+            "insecure_tls": {
+              "description": "The context skips TLS verification.",
+              "type": "boolean"
             }
           }
         }
@@ -581,18 +738,21 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 4096
         },
         "http": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 4096
         },
         "no_proxy": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 4096
           }
         }
       }
@@ -626,7 +786,8 @@
             "string",
             "null"
           ],
-          "description": "Program name for command, provider for cloud_credentials."
+          "description": "Program name for command, provider for cloud_credentials.",
+          "maxLength": 4096
         },
         "available": {
           "type": "boolean"
@@ -636,16 +797,19 @@
             "string",
             "null"
           ],
-          "description": "For example 'uid 1000' or 'context acme-staging'."
+          "description": "For example 'uid 1000' or 'context acme-staging'.",
+          "maxLength": 4096
         },
         "hint": {
           "type": [
             "string",
             "null"
           ],
-          "description": "What to do when not available."
+          "description": "What to do when not available.",
+          "maxLength": 4096
         }
-      }
+      },
+      "description": "One thing rdy probed before running checks, such as root or a reachable cluster."
     },
     "Summary": {
       "type": "object",
@@ -681,7 +845,7 @@
         "skipped": {
           "type": "integer",
           "minimum": 0,
-          "description": "Skipped for any reason except not_applicable."
+          "description": "Every check with status skipped, not applicable included."
         },
         "timeout": {
           "type": "integer",
@@ -694,7 +858,7 @@
         "not_applicable": {
           "type": "integer",
           "minimum": 0,
-          "description": "Skipped as not applicable. Never counts toward the verdict."
+          "description": "Skipped because the spec's os list leaves this OS out. Never counts toward the verdict."
         },
         "required_not_run": {
           "type": "integer",
@@ -706,7 +870,8 @@
           "minimum": 0,
           "description": "severity warn and skipped (not not_applicable), timeout or error."
         }
-      }
+      },
+      "description": "Counts. pass + warn + block + skipped + timeout + error = total. not_applicable, required_not_run and optional_not_run are views inside that sum. New keys may be added, so do not sum every key."
     },
     "CheckResult": {
       "type": "object",
@@ -717,6 +882,7 @@
         "family",
         "severity",
         "status",
+        "bucket",
         "message",
         "fix",
         "fix_source",
@@ -732,19 +898,24 @@
       "properties": {
         "key": {
           "type": "string",
-          "description": "id, or id/name when the spec gave a name. Unique in the report."
+          "description": "id, or id/name when the spec gave a name. Unique in the report.",
+          "maxLength": 4096
         },
         "id": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 4096
         },
         "name": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "The spec's name for this entry, shown next to the id.",
+          "maxLength": 4096
         },
         "family": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 4096
         },
         "severity": {
           "anyOf": [
@@ -778,6 +949,23 @@
           ],
           "description": "After severity is applied. An unknown status counts as not run. Open."
         },
+        "bucket": {
+          "description": "Display group, from the same rule as the verdict. Sort by it in this order: blocker, required_not_run, warning, passed, not_applicable. Do not recompute it. Open.",
+          "anyOf": [
+            {
+              "enum": [
+                "blocker",
+                "required_not_run",
+                "warning",
+                "passed",
+                "not_applicable"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ]
+        },
         "skip_kind": {
           "anyOf": [
             {
@@ -796,13 +984,14 @@
               "$ref": "#/$defs/OpenCode"
             }
           ],
-          "description": "Present when status is skipped. Open."
+          "description": "Present when status is skipped. not_applicable comes only from the spec's os list; a check that cannot work on this OS is not_yet_on_os. Open."
         },
         "unsupported_fields": {
           "description": "For unsupported_spec: the fields this rdy could not read.",
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 4096
           }
         },
         "timeout_after_ms": {
@@ -826,14 +1015,16 @@
         },
         "message": {
           "type": "string",
-          "description": "One line, at most 1 KiB, such as '15.4 GiB found, 32 GiB needed'."
+          "description": "One line, at most 1 KiB, such as '15.4 GiB found, 32 GiB needed'.",
+          "maxLength": 1024
         },
         "fix": {
           "type": [
             "string",
             "null"
           ],
-          "description": "What to do. null only when status is pass or the check is not applicable."
+          "description": "What to do. null only for pass and not applicable.",
+          "maxLength": 4096
         },
         "fix_source": {
           "anyOf": [
@@ -850,17 +1041,18 @@
               "type": "null"
             }
           ],
-          "description": "spec: the vendor's fix field; the HTML labels it with the product. rdy: rdy's own text. Open."
+          "description": "spec: the vendor's fix text. rdy: rdy's own text. null on pass. Open."
         },
         "builtin_fix": {
           "type": [
             "string",
             "null"
           ],
-          "description": "rdy's text when the spec's fix replaced it."
+          "description": "rdy's text when the spec's fix replaced it.",
+          "maxLength": 4096
         },
         "observed": {
-          "description": "Measured values, at most 64 KiB. Keys per check id, snake_case, units in the name. Additive only within v1.",
+          "description": "Measured values, at most 64 KiB. Keys per check id, snake_case, with the unit in the name (_bytes, _ms, _percent). Keys are only ever added.",
           "type": [
             "object",
             "null"
@@ -912,7 +1104,8 @@
               }
             },
             "note": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 4096
             }
           }
         },
@@ -924,7 +1117,8 @@
           "type": "array",
           "maxItems": 20,
           "items": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 1024
           }
         },
         "started_ms": {
@@ -996,7 +1190,50 @@
           "then": {
             "properties": {
               "fix": {
-                "type": "string"
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "skipped"
+              },
+              "skip_kind": {
+                "not": {
+                  "const": "not_applicable"
+                }
+              }
+            },
+            "required": [
+              "skip_kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fix": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "pass"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "fix_source": {
+                "type": "null"
               }
             }
           }
@@ -1032,7 +1269,8 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 4096
         },
         "hard": {
           "description": "true: the check does not run without it. false: it runs partial.",
@@ -1044,7 +1282,7 @@
       }
     },
     "Action": {
-      "description": "One side effect, recorded by the probe facade (02-engine-design.md). Fields beyond the required ones depend on kind.",
+      "description": "One side effect, recorded as it happened. Fields beyond the required ones depend on kind.",
       "type": "object",
       "required": [
         "seq",
@@ -1064,7 +1302,8 @@
             "string",
             "null"
           ],
-          "description": "Check key, or null for run-level probes."
+          "description": "Check key, or null for run-level probes.",
+          "maxLength": 4096
         },
         "at_ms": {
           "type": "integer",
@@ -1120,23 +1359,27 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 4096
         },
         "error": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "maxLength": 4096
         },
         "program": {
           "type": "string",
-          "description": "exec"
+          "description": "exec",
+          "maxLength": 4096
         },
         "argv": {
           "description": "exec, after redaction",
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 4096
           }
         },
         "exit": {
@@ -1153,7 +1396,8 @@
         },
         "path": {
           "type": "string",
-          "description": "read, read_dir, stat"
+          "description": "read, read_dir, stat, native, kube. Paths under a home directory start with ~.",
+          "maxLength": 4096
         },
         "bytes": {
           "type": "integer",
@@ -1167,11 +1411,13 @@
         },
         "name": {
           "type": "string",
-          "description": "env (the name only, never the value), dns"
+          "description": "env (the name only, never the value), dns",
+          "maxLength": 4096
         },
         "host": {
           "type": "string",
-          "description": "lookup, connect, tls"
+          "description": "lookup, connect, tls",
+          "maxLength": 4096
         },
         "answers": {
           "type": "integer",
@@ -1189,26 +1435,31 @@
             "string",
             "null"
           ],
-          "description": "connect"
+          "description": "connect: the IP address used.",
+          "maxLength": 4096
         },
         "via_proxy": {
           "type": [
             "string",
             "null"
           ],
-          "description": "connect, user info stripped"
+          "description": "connect, user info stripped",
+          "maxLength": 4096
         },
         "sni": {
           "type": "string",
-          "description": "tls"
+          "description": "tls",
+          "maxLength": 4096
         },
         "method": {
           "type": "string",
-          "description": "http, kube"
+          "description": "http, kube",
+          "maxLength": 4096
         },
         "url": {
           "type": "string",
-          "description": "http, without query string"
+          "description": "http, without query string",
+          "maxLength": 4096
         },
         "status": {
           "description": "http, kube",
@@ -1219,23 +1470,28 @@
         },
         "server": {
           "type": "string",
-          "description": "dns"
+          "description": "dns: the nameserver's IP address.",
+          "maxLength": 4096
         },
         "rtype": {
           "type": "string",
-          "description": "dns"
+          "description": "dns",
+          "maxLength": 4096
         },
         "api": {
           "type": "string",
-          "description": "native, for example statvfs"
+          "description": "native, for example statvfs",
+          "maxLength": 4096
         },
         "of": {
           "type": "string",
-          "description": "coalesced: the kind that was coalesced"
+          "description": "coalesced: the kind that was coalesced",
+          "maxLength": 4096
         },
         "under": {
           "type": "string",
-          "description": "coalesced"
+          "description": "coalesced",
+          "maxLength": 4096
         },
         "count": {
           "type": "integer",
@@ -1249,7 +1505,7 @@
       }
     },
     "Verification": {
-      "description": "Not a Report. What rdy verify prints with --json when the spec is accepted.",
+      "description": "Not a report. What rdy verify prints with --json when the spec is accepted.",
       "type": "object",
       "required": [
         "api_version",
@@ -1277,7 +1533,7 @@
       }
     },
     "ErrorOutput": {
-      "description": "Not a Report. What rdy prints on stdout with --json when it exits 64 or 70 without a verdict (ADR 0008 decision 7). api_version and kind are written but not required.",
+      "description": "Not a report. What rdy prints on stdout with --json when it exits 64 or 70 without a verdict. api_version and kind are written but not required.",
       "type": "object",
       "required": [
         "error",
@@ -1300,14 +1556,37 @@
           ],
           "properties": {
             "code": {
-              "description": "Stable code (ADR 0007, 0008): usage, spec_parse, spec_invalid, spec_unsigned, spec_signature_invalid, spec_key_unknown, spec_expired, trust_store_insecure, report_write, internal. Open.",
+              "description": "Stable code: usage, spec_parse, spec_invalid, spec_unsigned, spec_signature_invalid, spec_key_unknown, spec_expired, trust_store_insecure, report_write, internal. Open.",
               "$ref": "#/$defs/OpenCode"
             },
             "message": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 4096
             },
             "fix": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 4096
+            },
+            "file": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 4096
+            },
+            "line": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "column": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
             }
           }
         },
@@ -1320,7 +1599,7 @@
       }
     },
     "Redaction": {
-      "description": "What the redactor changed in this report (04-bundle-and-redaction.md). Counts only, never the matched text.",
+      "description": "What the redactor changed in this report. Counts only, never the matched text.",
       "type": "object",
       "required": [
         "ruleset",
@@ -1352,6 +1631,107 @@
             "type": "integer",
             "minimum": 0
           }
+        }
+      }
+    },
+    "LintReport": {
+      "description": "Not a report. What rdy spec lint prints with --json.",
+      "type": "object",
+      "required": [
+        "api_version",
+        "kind",
+        "file",
+        "findings",
+        "errors",
+        "warnings"
+      ],
+      "properties": {
+        "api_version": {
+          "const": "rdy/v1"
+        },
+        "kind": {
+          "const": "Lint"
+        },
+        "file": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "level",
+              "code",
+              "message",
+              "fix"
+            ],
+            "properties": {
+              "level": {
+                "enum": [
+                  "error",
+                  "warning"
+                ]
+              },
+              "code": {
+                "description": "Known: unknown_key, unknown_check, unsupported_field, bad_value, not_in_build, no_threshold, structure. Open.",
+                "anyOf": [
+                  {
+                    "enum": [
+                      "unknown_key",
+                      "unknown_check",
+                      "unsupported_field",
+                      "bad_value",
+                      "not_in_build",
+                      "no_threshold",
+                      "structure"
+                    ]
+                  },
+                  {
+                    "$ref": "#/$defs/OpenCode"
+                  }
+                ]
+              },
+              "line": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "column": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "key": {
+                "description": "Check key, or null for top-level findings.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 4096
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "fix": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warnings": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     }

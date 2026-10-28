@@ -31,4 +31,4 @@ file adds a line here.
 
 | v1 revision | rdy-spec | Change |
 | --- | --- | --- |
-| 0 | 0.1.0 | First contract: spec envelope, 17 M1 check ids, bundle shape with `redact_patterns` and `max_size`, result report with action log and redaction summary. |
+| 0 | 0.1.0 | First contract: spec envelope, 17 M1 check ids with required thresholds, bundle shape with `redact_patterns` and `max_size`; result report with `bucket`, key fingerprint, action log retention, redaction summary, size caps; `Verification`, `ErrorOutput` and `LintReport` objects. |

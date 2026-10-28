@@ -2,6 +2,9 @@
 # Kubernetes. The customer runs rdy, copies the report file out on a USB
 # stick, and sends it to the vendor by hand. Nothing here needs network
 # access to the public internet. The only endpoint is an internal mirror.
+#
+# host.kernel, host.cgroups and host.time_sync are not built yet, so a run
+# reports them as not run and the verdict is NOT READY until they ship.
 apiVersion: rdy/v1
 kind: Readiness
 metadata:
@@ -26,7 +29,7 @@ checks:
     severity: block
     fix: "Upgrade to a distribution kernel 5.10 or newer."
   - id: host.cgroups
-    require: v2
+    version: v2
     severity: warn
     fix: "Boot with systemd.unified_cgroup_hierarchy=1."
   - id: host.time_sync
@@ -37,13 +40,14 @@ checks:
     free: [8443, 9100]
     severity: block
     fix: "Stop whatever is listening on these ports, or ask the vendor for a different port."
-  - id: host.selinux
-    allow: [permissive, disabled]
+  - id: host.lsm
+    selinux:
+      allow: [permissive, disabled]
     severity: warn
     fix: "Install the acme-edge SELinux policy module, or set permissive mode."
   - id: net.egress
     endpoints: ["mirror.corp.acme.example:443"]
-    via_proxy: never
+    via_proxy: direct
     severity: block
     fix: "Make the internal artifact mirror reachable from this host."
 bundle:

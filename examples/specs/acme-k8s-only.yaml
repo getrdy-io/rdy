@@ -12,20 +12,22 @@ checks:
   - id: k8s.version
     min: "1.27"
     max: "1.31"
+    over_max: block      # without this, a server newer than max is only a warning
     severity: block
     fix: "Upgrade or pin the cluster to a supported Kubernetes minor version."
-  - id: k8s.node_resources
-    nodes: 3
-    cpu_per_node: 4
-    memory_per_node: 16Gi
+  - id: k8s.nodes
+    min_ready: 3
+    per_node:
+      cpu: 4
+      memory: 16Gi
     severity: block
     fix: "Add worker nodes or use a larger instance type."
   - id: k8s.storageclass
-    needs: ["ReadWriteOnce", "ReadWriteMany"]
+    access_modes: ["ReadWriteOnce", "ReadWriteMany"]
     severity: warn
     fix: "Install a storage class that supports ReadWriteMany, or turn off shared volumes in the chart."
   - id: k8s.rbac
-    can_i: ["create clusterroles.rbac.authorization.k8s.io", "create customresourcedefinitions.apiextensions.k8s.io", "create namespaces"]
+    can: ["create clusterroles.rbac.authorization.k8s.io", "create customresourcedefinitions.apiextensions.k8s.io", "create namespaces"]
     severity: block
     fix: "Run the install with an identity that can create cluster-scoped resources."
   - id: k8s.admission

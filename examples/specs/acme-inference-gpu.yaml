@@ -27,9 +27,10 @@ checks:
     resource: nvidia.com/gpu
     severity: block
     fix: "Install the NVIDIA device plugin and check that nodes advertise nvidia.com/gpu."
-  - id: k8s.node_resources
-    nodes: 2
-    memory_per_node: 128Gi
+  - id: k8s.nodes
+    min_ready: 2
+    per_node:
+      memory: 128Gi
     severity: warn
     fix: "Use nodes with 128 GiB of memory, or expect lower throughput."
   - id: net.egress

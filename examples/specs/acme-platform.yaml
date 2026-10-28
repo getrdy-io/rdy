@@ -38,7 +38,7 @@ checks:
     severity: block
     fix: "Upgrade the cluster to Kubernetes 1.28 or newer."
   - id: k8s.storageclass
-    needs: ["ReadWriteOnce"]
+    access_modes: ["ReadWriteOnce"]
     severity: warn
     fix: "Mark a storage class that supports ReadWriteOnce as the default."
   # (later) gpu family, M4
