@@ -200,11 +200,13 @@ of the owner's role on that branch.
 
 | PR | Ticket | Branch | Head at pause | State and next step |
 | --- | --- | --- | --- | --- |
-| #21 | M1-006 | m1/006-ci-matrix | a0d9e7b | Review fixes pushed (crtbeginS/crtendS swap, ADR 0006 linker-override note, check-static requires PIE and fails on TEXTREL). code-reviewer approved the previous head. Waiting on CI. The macos-arm64 leg (`macos-15`) sat queued for 15 minutes on the last run before the push cancelled it. If it stays queued, that is runner capacity, not the PR. Wait for it; never merge without ci-ok. Merge when green. |
+| #21 | M1-006 | m1/006-ci-matrix | a0d9e7b | Review fixes pushed (crtbeginS/crtendS swap, ADR 0006 linker-override note, check-static requires PIE and fails on TEXTREL). code-reviewer approved the previous head. Waiting on CI: every leg but macos-arm64 was green at the pause. The macos-arm64 leg (`macos-15`) sat queued for 15 minutes on the last run before the push cancelled it. If it stays queued, that is runner capacity, not the PR. Wait for it; never merge without ci-ok. Merge when green. |
 | #28 | M1-024 | m1/024-host-params | 6e93785 | code-reviewer running at pause. If the verdict is lost, re-run the cold review. Open question for the reviewer: the `$defs/Bundle` regex in spec.v1.schema.json is refused by the jsonschema crate; file it for the schema owner. |
-| #29 | M1-048 | m1/048-minimal-redactor | fa42619 | Both reviewers asked for changes. Fix round sent. Highs: bare values stop at the first whitespace (run to end of line); `password=""hunter2` leaks; the reference exemption leaks (`${X:-secret}`, `$(echo secret)`, `{{ ... "secret" }}`); a reference that does not end the word leaks its tail. Mediums: `author` exempts `Authorization`; YAML `|` and `>` blocks leak; O(N^2) rescans; nothing keeps the `testing` feature out of release. Lows: inverted span fails closed, `/run/secrets/` exemption too broad, doc fixes, trybuild skip under CI, note the 4-byte tag oracle and missing 16 KiB cap in 04 and 05. After the fix: re-review by both reviewers. |
+| #29 | M1-048 | m1/048-minimal-redactor | f3c3780 | Both reviewers asked for changes at fa42619 (four highs: bare values stopped at whitespace, `password=""hunter2`, loose reference exemptions, reference tail leak; mediums: `author` exempting `Authorization`, YAML block values, O(N^2) scan, `testing` feature in release). The author reports all 14 findings fixed in f3c3780 with a leak test per case. Next: re-review by security-reviewer and code-reviewer on the fa42619..f3c3780 diff, then CI, then merge. Ask them to judge the deliberate over-redaction (`password=x --verbose`, `--db-password=x --other`) and the strict `{{ }}` rule. |
 
 Next PR number: #34 (#33 is the PR that added this runbook).
+
+No agents are running at the pause. Every open item above is waiting on the next coordinator.
 
 Unlocked tickets not started at the pause (their dependencies are merged): M1-022, M1-023, M1-025,
 M1-026, plus everything that depends only on merged tickets. Recompute from the dependency table in
