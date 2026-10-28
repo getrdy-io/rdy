@@ -73,7 +73,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-032 | todo | | Check trait, Need and Context in rdy-engine
 
-- M1-032 correction-04 | backlog corrected 2026-10-28: exit test narrowed to the outcome types; Engine::run pass and missing_need moved to M1-034, HostFs reads under host_root moved to M1-045 as the `reads` prefix rule, setuid refusal (INV-10) already in M1-042
+- M1-032 correction-04 | backlog corrected 2026-10-28: exit test narrowed to the outcome types; pass and missing_need through the scheduler moved to M1-034, HostFs reads under host_root moved to M1-045 as the `reads` prefix rule, setuid refusal (INV-10) already in M1-042
 
 - M1-033 | todo | | Map outcomes to CheckResult with fix source, partial and needs
 
