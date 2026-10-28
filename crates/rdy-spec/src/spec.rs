@@ -352,10 +352,11 @@ pub struct CheckSpec {
     pub os: Option<Lenient<Vec<OsFamily>>>,
     /// Every other key of the entry: the parameters of the check id, such as `min` or `endpoints`.
     ///
-    /// These values went through `serde_json::Value`, which keeps the last of two equal keys, turns a
-    /// non-finite float into `null` and has no line numbers. So the YAML layer (M1-017) must reject
-    /// duplicate keys and `.nan` and `.inf` before this type sees them, and it must keep the spans for
-    /// its own errors.
+    /// These values go through `serde_json::Value`, which keeps the last of two equal keys, turns a
+    /// non-finite float into `null` and has no line numbers. So [`crate::parse_unverified`] checks the
+    /// YAML first and rejects duplicate keys, `.nan`, `.inf` and unquoted decimals such as `12.10`,
+    /// with a line and column, before this type sees them. A `Spec` built any other way has no such
+    /// guarantee.
     #[serde(flatten)]
     pub params: Map<String, Value>,
 }
@@ -725,8 +726,8 @@ mod tests {
         );
     }
 
-    /// The shape of `examples/specs/acme-platform.yaml`, written as JSON because the YAML parser is a
-    /// later ticket.
+    /// The shape of `examples/specs/acme-platform.yaml`, written as JSON. The YAML version is tested
+    /// in `tests/parse.rs`.
     #[test]
     fn a_whole_spec_round_trips() {
         let json = r#"{

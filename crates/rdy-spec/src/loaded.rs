@@ -28,7 +28,7 @@ impl LoadedSpec {
         not(test),
         expect(
             dead_code,
-            reason = "load() cannot verify or parse yet. M1-017 and M1-120 wire it and remove this attribute"
+            reason = "load() cannot verify yet. M1-120 wires it and removes this attribute"
         )
     )]
     fn new(spec: Spec) -> Self {
@@ -44,9 +44,10 @@ impl LoadedSpec {
 
 /// The only way to get a [`LoadedSpec`]: verify the raw bytes, then parse, then validate.
 ///
-/// This is a stub. Signature checking (M1-120) and the YAML parser (M1-017) are not wired in, and `load`
-/// must never hand back a spec that nothing verified. So for now it always fails closed with
-/// [`SpecError::LoadNotWired`]. The final signature also takes the trust store and the signature policy.
+/// This is a stub. Signature checking (M1-120) is not wired in, and `load` must never hand back a spec
+/// that nothing verified, even though [`crate::parse_unverified`] can already read the YAML. So for now
+/// it always fails closed with [`SpecError::LoadNotWired`]. The final signature also takes the trust
+/// store and the signature policy, and it will parse only after the signature verified.
 ///
 /// # Errors
 ///

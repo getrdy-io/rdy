@@ -29,6 +29,7 @@ homepage = "https://getrdy.io"
 anyhow = { version = "1", default-features = false }
 clap = { version = "4.6", default-features = false }
 serde = { version = "1", default-features = false }
+serde-saphyr = { version = "~2.0", default-features = false }
 serde_json = { version = "1", default-features = false }
 trybuild = "1"
 thiserror = { version = "2", default-features = false }

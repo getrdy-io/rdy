@@ -1,0 +1,8 @@
+# Synthetic fixture. Not a real spec.
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+checks:
+  - id: gpu.cuda
+    min: 12.10

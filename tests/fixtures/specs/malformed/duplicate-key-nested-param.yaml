@@ -1,0 +1,11 @@
+# Synthetic fixture. Not a real spec.
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+checks:
+  - id: net.egress
+    endpoints:
+      - target: registry.acme.example:443
+        optional: false
+        target: license.acme.example:443

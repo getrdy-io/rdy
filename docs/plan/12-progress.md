@@ -41,7 +41,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-016 | [#10](https://github.com/getrdy-io/rdy/pull/10) | 2026-10-28 | check params stay a raw map (M1-019), timeout, max_size and expires stay text (M1-018, M1-026), load() is a fail-closed stub (M1-017, M1-120)
 
-- M1-017 | todo | | Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits
+- M1-017 | [#24](https://github.com/getrdy-io/rdy/pull/24) | 2026-10-28 | none. load() still fails closed until M1-120
 
 - M1-018 | [#20](https://github.com/getrdy-io/rdy/pull/20) | 2026-10-28 | version constraints such as ">=4.2" are not a type: metadata.version stays free text per 01 (not evaluated); Version has no ordering yet (first comparing check adds it); CheckParams wiring is M1-019, M1-024, M1-025; timeout range 1s to 60s is checked by the field that uses Duration
 
