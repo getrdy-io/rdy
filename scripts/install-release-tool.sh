@@ -95,7 +95,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 
 echo "downloading $tool $version ($file)"
-if ! curl --proto '=https' --tlsv1.2 -fsSL -o "$work/$file" "$url"; then
+if ! curl --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 300 --retry 3 -fsSL -o "$work/$file" "$url"; then
     echo "error: could not download $url" >&2
     echo "fix: check the network, then re-run. Nothing was installed." >&2
     exit 1

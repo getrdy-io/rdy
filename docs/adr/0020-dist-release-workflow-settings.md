@@ -36,9 +36,10 @@ script tests, not from a sandbox run.
    `cargo-zigbuild` bypasses `scripts/musl-pie-linker.sh` (ADR 0006, decision 2), and it checks hashes,
    archive paths, each binary's format and CPU (PE machine 0x8664, Mach-O arm64 and x86-64), the
    Windows imports, `cargo audit bin`, the SBOM, and that `cargo tree -p rdy -e features` for each target
-   shows no `preserve_order` (the schema tooling's serde_json feature, used only by xtask). dist keeps
-   `precise-builds = true`, so it builds `--package=rdy` and the feature cannot unify in from xtask. The
-   check fails if that setting is ever turned off.
+   shows no `preserve_order` (the schema tooling's serde_json feature, used only by xtask). That command
+   resolves features for `rdy` alone, so it cannot see a workspace build. The setting that stops one is
+   `precise-builds = true`, which makes dist build `--package=rdy`. The check therefore also fails
+   unless `dist-workspace.toml` has the line `precise-builds = true`.
 4. `github-attestations` stays off. It adds `id-token: write` to the build jobs, and 06 says the signing
    job is the only job that has it. The cosign signature of `SHA256SUMS` (M1-010) is the trust path.
    Revisit in M2.
@@ -50,8 +51,8 @@ script tests, not from a sandbox run.
      `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$` before anything else uses it. Later jobs read the tag from
      `env:` and quote it. dist's `tag-flag` output, which put the tag into shell text, is removed.
    - `dist` and `cargo-cyclonedx` are installed by `scripts/install-release-tool.sh` from a pinned
-     release file, checked with `sha256sum -c` against `.github/release-tools.txt` before anything is
-     unpacked. `cargo-auditable` is installed by `taiki-e/install-action` (SHA-pinned) at the exact
+     release file. The script compares the file's sha256 (from `sha256sum`, or `shasum` on macOS) with the
+     pin in `.github/release-tools.txt` and unpacks nothing on a difference. `cargo-auditable` is installed by `taiki-e/install-action` (SHA-pinned) at the exact
      version 0.7.7, not from `latest`.
    - The musl packages are installed by a fixed step, not by text from the build matrix. Container builds
      and the `curl | sh` Rust installer that serves them are removed: we configure none.

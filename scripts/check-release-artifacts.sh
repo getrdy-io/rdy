@@ -26,7 +26,9 @@
 #   8. `cargo tree -p rdy -e features` for each target shows no `preserve_order`. That feature of
 #      serde_json belongs to the schema tooling (rdy-spec's optional `schema` feature, used only by
 #      xtask). It would reach the binary if dist built the whole workspace, so a build with
-#      `precise-builds = false` fails here. Run from a full checkout: it reads Cargo.lock.
+#      `precise-builds = false` fails here. `cargo tree -p rdy` cannot see a workspace build, so
+#      this step also requires the line `precise-builds = true` in dist-workspace.toml.
+#      Run from a full checkout: it reads Cargo.lock.
 # Exit: 0 all checks pass, 1 at least one fails, 64 usage error or a missing tool.
 #
 # Needs: tar, unzip, readelf, objdump, od, awk, jq, python3, cargo with cargo-audit, and sha256sum or
@@ -396,6 +398,14 @@ if [ "$sbom_seen" -eq 0 ]; then
 fi
 
 # ---- 8. No schema-tooling feature in the release build -------------------------------------
+# `cargo tree --package rdy` resolves features for rdy alone, so it passes even when dist builds the
+# whole workspace. The setting that prevents that is precise-builds, so require it too.
+dist_config=${RDY_DIST_CONFIG:-$here/../dist-workspace.toml}
+if grep -Eq '^precise-builds = true$' "$dist_config" 2> /dev/null; then
+    pass "dist builds one package at a time (precise-builds = true)"
+else
+    fail "dist builds one package at a time (precise-builds = true)" "$dist_config must have the line 'precise-builds = true'. Without it dist builds the whole workspace and feature unification can put xtask's features (preserve_order) into rdy."
+fi
 # The features that `cargo build --package rdy` would turn on, for each release target. cargo-dist
 # builds one package at a time (precise-builds), so this must match what was shipped.
 for t in $targets; do

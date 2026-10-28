@@ -176,3 +176,29 @@ fn parse_unverified_returns_a_plain_spec_and_load_still_wants_a_signature() {
         SpecError::Signature(crate::sig::SignatureError::Missing)
     );
 }
+
+/// M1-019 review: the guard counts every entry of `checks` but keeps only the first 257, one past the
+/// limit, so a hostile list cannot grow the facts without bound.
+#[test]
+fn the_guard_keeps_at_most_257_entries_but_counts_them_all() {
+    let mut text = String::from(HEAD);
+    for i in 0..5000 {
+        text.push_str(&format!("  - id: host.cpu\n    name: c{i}\n"));
+    }
+    let outcome = guard(&text);
+    assert!(outcome.error.is_none());
+    assert_eq!(outcome.facts.entry_count, 5000);
+    assert_eq!(outcome.facts.entries.len(), MAX_CHECKS + 1);
+}
+
+#[test]
+fn the_guard_places_collectors_up_to_one_past_the_limit_only() {
+    let mut text = String::from(
+        "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nbundle:\n  collect:\n",
+    );
+    for _ in 0..500 {
+        text.push_str("    - k8s:events\n");
+    }
+    let outcome = guard(&text);
+    assert_eq!(outcome.facts.places.collect.len(), PLACED_COLLECT_ITEMS);
+}

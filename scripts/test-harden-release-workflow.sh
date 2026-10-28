@@ -71,6 +71,20 @@ else
     printf '%s\n' "$unpinned"
 fi
 
+# The build jobs run dependency build scripts, so they get no GH_TOKEN variable.
+for j in build-local-artifacts build-global-artifacts; do
+    block=$(awk -v j="$j" '$0 == "  " j ":" { f = 1; next } f && /^  [a-z][a-z-]*:$/ { exit } f { print }' "$wf")
+    if printf '%s\n' "$block" | grep -q 'GH_TOKEN'; then
+        bad "$j has no GH_TOKEN variable"
+    else
+        ok "$j has no GH_TOKEN variable"
+    fi
+done
+# Both install-action steps refuse the cargo fallback.
+n=$(grep -c 'taiki-e/install-action' "$wf")
+f=$(grep -c 'fallback: none' "$wf")
+if [ "$n" -ge 1 ] && [ "$n" -eq "$f" ]; then ok "install-action steps set fallback: none"; else bad "install-action steps set fallback: none"; fi
+
 # Every job names its permissions, and only announce can write.
 jobs=$(awk '/^jobs:/ { j = 1; next } j && /^  [a-z][a-z-]*:$/ { sub(/:$/, "", $1); print $1 }' "$wf")
 missing=""

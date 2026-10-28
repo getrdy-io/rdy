@@ -10,8 +10,9 @@
 //!   and the result is [`End::TimedOut`]. A check that never yields cannot be aborted. It holds its
 //!   worker until it returns. The timer and the other checks keep running only while the runtime has a
 //!   free worker: it fails once as many checks spin as there are workers, or on a `current_thread`
-//!   runtime. Threads abandoned on `spawn_blocking` also outlive the timeout. The backstops are the
-//!   blocking helper (M1-038) and the run watchdog (M1-043).
+//!   runtime. Threads abandoned on `spawn_blocking` also outlive the timeout, but a command does not:
+//!   [`crate::exec`] kills its process group when the aborted task drops it. The backstop for the rest
+//!   is the run watchdog (M1-043).
 //! - **Panics.** A panic stays inside the check's task. The join handle returns it and the result is
 //!   [`End::Panicked`].
 //! - **Hard needs.** A check whose hard need is missing is not started. Its result is

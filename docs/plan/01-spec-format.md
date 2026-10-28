@@ -39,6 +39,14 @@ unquoted decimal (`12.10`, `1e3`), a whole number with a leading zero (`0755`) a
 applies to every plain scalar, not only to version fields, because the parameters are read before their
 types are known (ADR 0001, implementation notes). `rdy_spec::parse_unverified` enforces all of this.
 
+The limits that need no clock live in the `limits` module of `rdy-spec` and run at the end of `parse_unverified`: 1 to 256 checks;
+at most 64 distinct hosts across every `net.egress` endpoint, `net.tls_intercept` host and `net.dns` name in the
+whole spec (threat model INV-11), counted once per host whatever the port; at most 256 distinct host and port
+pairs across every `net.egress` endpoint and `net.tls_intercept` host, so 256 checks of 64 endpoints cannot turn a
+spec into a port scan; the lengths of `metadata`; and the
+sizes and collector grammar of `bundle` (2.8). `expires` is shape-checked there and compared with the clock by
+`rdy_spec::load`, as the last step of 4.4.
+
 ### 2.1 Top level
 
 | Field | Type | Required | Meaning |
@@ -142,7 +150,7 @@ exits 64. Lint and sign are stricter, because the person running them is the ven
 | Case | `rdy run`, `rdy verify` | `rdy spec lint` | `rdy spec sign` |
 | --- | --- | --- | --- |
 | Unknown key at the top level, in `metadata` or in `bundle` | exit 64 | error | refuses |
-| Structure: syntax, limits, tags, missing `id`, duplicate keys, wrong `apiVersion` or `kind`, over 256 checks or 64 endpoints, bad product, bad `expires`, expired | exit 64 | error | refuses |
+| Structure: syntax, limits, tags, missing `id`, duplicate keys, wrong `apiVersion` or `kind`, no checks, over 256 checks, over 64 distinct hosts or over 256 host and port pairs, bad product, bad `expires`, expired | exit 64 | error | refuses |
 | Reserved id not implemented here (`gpu.cuda`, `host.kernel` on M1) | skipped, `not_in_build` | warning | signs, with the warning |
 | Id not reserved (`host.memroy`, `upload.now`) | skipped, `unknown_check` | error | refuses |
 | Unknown field or bad value in a known check (`mn: 32Gi`, `min: 32G`, `severity: blok`, `timeout: 90s`) | skipped, `unsupported_spec`; an unreadable `severity` counts as `block` | error | refuses |
@@ -172,7 +180,10 @@ errors (exit 64, codes `spec_parse` and `spec_invalid`; the same text in lint as
 | Same id twice | `error: acme-platform.yaml:31:5: two checks are named host.disk` | `fix: give each one a name, for example 'name: data'. The name is only a label.` |
 | Bad product name | `error: acme-platform.yaml:15:12: 'Acme Platform' is not a valid product name` | `fix: use lowercase letters, digits and hyphens, such as 'acme-platform'.` |
 | Bad `expires` | `error: acme-platform.yaml:16:12: expires must be a full UTC time` | `fix: write it like 'expires: 2027-01-31T00:00:00Z'.` |
-| Too many checks or endpoints | `error: acme-platform.yaml: 257 checks. The limit is 256.` | `fix: split the spec in two, or remove checks.` |
+| Too many checks | `error: acme-platform.yaml: 257 checks. The limit is 256.` | `fix: split the spec in two, or remove checks.` |
+| Too many hosts | `error: acme-platform.yaml: 65 endpoints. The limit is 64.` | `fix: remove hosts, or split the spec in two. A host counts once, however many checks name it.` |
+| Too many host and port pairs | `error: acme-platform.yaml: 257 host and port pairs. The limit is 256.` | `fix: remove endpoints, or split the spec in two. A host and port counts once, however many checks name it.` |
+| `expires` has passed | `error: acme-platform.yaml expired on 2027-01-31. This machine's clock says 2027-02-03.` | `fix: ask the vendor for a current spec. If this machine's clock is wrong, set it and run again.` |
 | Tag, directive or `.nan` | `error: acme-platform.yaml:22:10: '.nan' is not allowed in a spec` | `fix: write a plain number, string or list.` |
 
 The `did you mean` part appears only when the edit distance is small; otherwise the sentence ends after
@@ -221,7 +232,7 @@ means is in 03-check-catalog.md. Bold parameters are required; "one of" means at
 | `host.os` | `supported: [{id, versions}]`, `arch`, `fips` (`forbid`, `require`, `any`), `windows_min_build` |
 | `net.egress` | **`endpoints`** (a target, or `{target, optional, expect_status, method, via_proxy, tls}`), `via_proxy` (`auto`, `direct`, `proxy_only`; default `auto`), `trust` (`system`, `bundled`), `max_latency` |
 | `net.proxy` | `required_no_proxy`, `daemons_need_proxy` |
-| `net.tls_intercept` | `hosts` (default: every `net.egress` host in the spec), `expected_issuer`, `pin_sha256`, `forbid_interception` |
+| `net.tls_intercept` | `hosts` (default: every `net.egress` host in the spec, so an empty `tls_intercept` tests each of them and adds at most 64 connections), `expected_issuer`, `pin_sha256`, `forbid_interception` |
 | `net.dns` | **`names`** (a name or `{name, expect_in, expect_public}`), `max_latency` |
 | `k8s.access` | `context_pattern`, `server_pattern`, `max_latency` |
 | `k8s.storageclass` | `class`, `access_modes`, `binding`, `expansion`, `reclaim_policy` |
@@ -252,7 +263,7 @@ bundle:
 ```
 
 - `collect` items are `journal:<duration>`, `k8s:events` or `file:<absolute path or glob>` (no `..`
-  segments). Other kinds are bad values until 04-bundle-and-redaction.md adds them.
+  segments, no backslash until the Windows path form lands in M2, no control characters). Other kinds are bad values until 04-bundle-and-redaction.md adds them.
 - `redact` names groups to add. The built-in rules always run: a spec can add redaction and can never
   remove it.
 - `redact_patterns` adds vendor patterns. **A pattern can only add redaction. Overlapping spans merge:
@@ -705,8 +716,8 @@ Threat model R1 and INV-07: every side effect goes through the probe facade, whi
 | `coalesced` | `of` (the kind), `under`, `count` (reads past 200 per check, per directory) |
 
 Every string passes the redactor. Bodies are never recorded. **Retention:** `exec`, `connect`, `tls`,
-`http`, `dns`, `lookup` and `kube` entries are never dropped; they are bounded already by 64 endpoints
-and the fixed command set. When the log reaches 5000 entries, or the document its size cap, `read`,
+`http`, `dns`, `lookup` and `kube` entries are never dropped; they are bounded already by the 256 host and
+port pairs a spec may name (2.1) and the fixed command set. When the log reaches 5000 entries, or the document its size cap, `read`,
 `read_dir` and `stat` entries are dropped first, `actions_truncated` is true, and `actions_dropped` gives
 a count per kind. `rdy run --plan` (M2) prints the same shape before running.
 

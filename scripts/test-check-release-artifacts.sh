@@ -312,6 +312,18 @@ check "a failing cargo tree fails" 1 "FAIL cargo tree runs for" "$tmp/good"
 unset STUB_TREE_CODE
 check "a clean feature tree passes" 0 "PASS no preserve_order in the aarch64-apple-darwin build" "$tmp/good"
 
+printf '[dist]\nprecise-builds = false\n' > "$tmp/dist-off.toml"
+RDY_DIST_CONFIG="$tmp/dist-off.toml"
+export RDY_DIST_CONFIG
+check "precise-builds = false fails" 1 "FAIL dist builds one package at a time" "$tmp/good"
+printf '[dist]\n' > "$tmp/dist-none.toml"
+RDY_DIST_CONFIG="$tmp/dist-none.toml"
+check "a missing precise-builds line fails" 1 "FAIL dist builds one package at a time" "$tmp/good"
+RDY_DIST_CONFIG="$tmp/does-not-exist.toml"
+check "a missing dist-workspace.toml fails" 1 "FAIL dist builds one package at a time" "$tmp/good"
+unset RDY_DIST_CONFIG
+check "the committed dist-workspace.toml passes" 0 "PASS dist builds one package at a time" "$tmp/good"
+
 # Usage.
 check "no argument is a usage error" 64 "usage:"
 check "a missing folder is a usage error" 64 "is not a directory" "$tmp/does-not-exist"

@@ -13,7 +13,8 @@ script rewrites those parts and nothing else:
   4. dist and cargo-cyclonedx come from pinned files checked against a committed sha256
      (scripts/install-release-tool.sh). cargo-auditable comes from a SHA-pinned install action
      at an exact version, not from `latest`.
-  5. The musl packages are installed by a fixed step, not by text from the build matrix. Container
+  5. The build jobs get no GH_TOKEN variable, so a dependency's build script cannot read one.
+     The musl packages are installed by a fixed step, not by text from the build matrix. Container
      builds are removed: we configure none, and dist's fallback installs Rust with `curl | sh`.
   6. The SBOM upload uses `outputs`, not the misspelt `output` that dist writes.
   7. `announce` checks the exact file list again just before it publishes.
@@ -167,7 +168,8 @@ def harden(text: str) -> str:
         "      - name: Install cargo-auditable\n"
         f"        uses: {INSTALL_ACTION}\n"
         "        with:\n"
-        f"          tool: {AUDITABLE}\n",
+        f"          tool: {AUDITABLE}\n"
+        "          fallback: none\n",
     )
     sub(
         "      - name: Install cargo-cyclonedx\n"
@@ -210,6 +212,16 @@ def harden(text: str) -> str:
 
     # 5c. The check workflow reads no secret, so it gets none.
     sub("      plan: ${{ needs.plan.outputs.val }}\n    secrets: inherit\n", "      plan: ${{ needs.plan.outputs.val }}\n")
+
+    # 5d. Dependency build scripts run in the build jobs, so those jobs get no GH_TOKEN variable.
+    sub(
+        "    env:\n      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n      BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}",
+        "    env:\n      BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}",
+    )
+    sub(
+        "    env:\n      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n      BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json",
+        "    env:\n      BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json",
+    )
 
     # 6. dist's typo: the step output is `outputs`, so the SBOM path was always empty.
     sub("steps.cargo-cyclonedx.output.paths", "steps.cargo-cyclonedx.outputs.paths")
