@@ -149,6 +149,11 @@ exits 64. Lint and sign are stricter, because the person running them is the ven
 | A check with no threshold (`- id: host.memory` alone) | skipped, `unsupported_spec` (the parameter is required) | error, `no_threshold` | refuses |
 | A `redact_patterns` regex that does not compile or matches the empty string | exit 64 | error | refuses |
 
+A key with no value (`min:` and nothing after it) is a bad value, not an absent key, so it cannot drop a
+threshold by accident. Where this table says "no threshold", the required key or keys are the bold ones
+and the "one of" groups in section 2.7. `host.lsm`, `host.security_agents` and `host.os` have no required
+key and read when bare.
+
 `spec lint` exits 0 with no findings, 1 with warnings only, 2 with errors, 64 for usage, like `run`.
 With `--json` it prints a `LintReport` (result schema `$defs`). This answers the open question of draft 1
 (both reviews: sign refuses typos in known checks). It amends ADR 0008 decision 2, which made unknown
@@ -180,7 +185,7 @@ The `did you mean` part appears only when the edit distance is small; otherwise 
 | Quantity (bytes) | integer, or integer plus `Ki`, `Mi`, `Gi`, `Ti`, `Pi` | `32G` and `32GB` are bad values: "write 32Gi, not 32G". Lint warns on a bare integer under 1 MiB ("32 bytes, did you mean 32Gi?"). At most 15 digits and 2^53 - 1 bytes. Units are case sensitive. |
 | Duration | integer plus `ms`, `s`, `m`, `h` or `d` | `10s`, `7d`. No compound forms. The number is 1 to 999999999, so `0s` is a bad value. |
 | Version | quoted dotted string, or bare integer | Compared per numeric component, not as semver. One to four parts of up to 9 digits; a leading `v` is allowed. The text is kept as written. An unquoted `1.30` is a bad value (ADR 0001 decision 4). |
-| Path | absolute (`/...`, `C:\...`), max 1024 | Normalized. Never reaches a shell; there is none. |
+| Path | absolute (`/...`, `C:\...`), max 1024 | Kept as written; the check resolves it. No control characters. Never reaches a shell; there is none. |
 | Regex | Rust `regex` syntax, max 256 chars | Linear time, size-limited when compiled. Lint and sign compile every pattern. |
 | Target | `host:port` (port 1 to 65535), `[v6]:port`, or `http(s)://` URL | At most 64 per spec (ADR 0009). Specs never carry credentials: user info in a URL is a bad value, and fragments are not allowed. Query strings never enter the action log. A host name has no trailing dot (write `example.com`, not `example.com.`) and cannot end in a number. An IPv4 address is four plain decimal parts: `2852039166`, `0xa9.0xfe.0xa9.0xfe`, `0251.0376.0251.0376` and `127.1` are bad values, because resolvers read them as other addresses than they look like. IPv6 forms of an IPv4 address (`::ffff:a9fe:a9fe`) are bad values: write the IPv4 form. Parsing does not classify addresses: `localhost`, `0.0.0.0`, `[::]`, NAT64 and unique local literals, wildcard DNS names, link-local and metadata addresses all parse; the egress policy refuses them at run time and the check reports `block` with the reason (ADR 0009). |
 
