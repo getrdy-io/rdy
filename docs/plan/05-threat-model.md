@@ -101,6 +101,12 @@ ADR 0010 stays as a second line.
 - Root is root. Read-only behaviour, a small dependency set and the action log shrink the trust needed.
   They do not remove it.
 - Exec plugins run whatever the operator's kubeconfig says.
+- Process escape (M1-038): `rdy` kills a timed-out command's whole process group, but a program that
+  calls `setsid` or `setpgid` for a child puts that child in a new group and it survives. The M1 command
+  allowlist has no such program, and on Windows only `whoami.exe` runs, which starts no children. The
+  fixes are M2: a Linux cgroup kill (`cgroup.kill`) or a child subreaper that walks descendants, and
+  Windows job objects (M2-006). Until then a stray process can outlive a run. Descriptors above 2 that
+  `rdy` inherited from its parent also reach children until the command policy closes them (M1-039).
 - A signed spec can probe internal endpoints it lists. Results stay local unless the customer sends them.
 - Windows output files inherit folder ACLs, and macOS honours inheritable ACEs on the parent before mode
   bits. Both are named in the report's notes until SEC-58 (ADR 0016).
