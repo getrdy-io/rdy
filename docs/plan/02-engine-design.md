@@ -109,8 +109,8 @@ built check or a skip kind with no I/O. The first row that fits wins, in this or
 
 | Situation | `skip_kind` (01) |
 | --- | --- |
-| Spec `os` list leaves this OS out | `not_applicable` (never counts) |
 | Spec `os` list is empty (it would hide the check everywhere) | `unsupported_spec` |
+| Spec `os` list leaves this OS out | `not_applicable` (never counts) |
 | Id reserved, not built into this rdy | `not_in_build` |
 | Id not reserved | `unknown_check` |
 | Known id that no registered family builds (checked before its fields) | `not_in_build` |
