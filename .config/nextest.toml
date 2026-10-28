@@ -4,6 +4,14 @@
 # Oldest nextest that reads these settings. CI pins an exact version in .github/workflows/ci.yml.
 nextest-version = "0.9.100"
 
+# trybuild compile-fail tests run a nested `cargo build` of their own. That takes minutes on a slow
+# runner (the Intel macOS runner needs about 90 seconds). Convention: the test binary of a trybuild
+# test is named `<thing>_guarantee`, for example `loaded_spec_guarantee`. Those binaries get ten
+# minutes instead of two, and run one at a time so they do not fight over the target directory.
+# Every other test keeps the default limit. Name a new trybuild test binary `*_guarantee`.
+[test-groups]
+trybuild = { max-threads = 1 }
+
 [profile.ci]
 # No retries. A test that fails once in three runs is a bug, and a retry would hide it.
 retries = 0
@@ -11,3 +19,8 @@ retries = 0
 fail-fast = false
 # A hung test is reported after 30 seconds and killed after two minutes, and it names itself.
 slow-timeout = { period = "30s", terminate-after = 4 }
+
+[[profile.ci.overrides]]
+filter = 'binary(/_guarantee$/)'
+test-group = 'trybuild'
+slow-timeout = { period = "60s", terminate-after = 10 }
