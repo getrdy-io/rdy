@@ -21,6 +21,7 @@ pub mod check;
 pub mod family;
 pub mod outcome;
 pub mod plan;
+pub mod redact;
 #[cfg(feature = "runtime")]
 pub mod sched;
 pub mod units;
