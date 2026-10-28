@@ -7,8 +7,11 @@
 //!   [`MAX_JOBS`]. Checks take a permit in the order they were given.
 //! - **Timeout.** Each check runs as its own tokio task. The scheduler awaits the task's `JoinHandle`
 //!   under `tokio::time::timeout`, so the timer lives outside the check. On expiry the task is aborted
-//!   and the result is [`End::TimedOut`]. A check that never yields cannot be aborted, but it cannot
-//!   stop the timer or the other checks either, as long as the runtime has another worker.
+//!   and the result is [`End::TimedOut`]. A check that never yields cannot be aborted. It holds its
+//!   worker until it returns. The timer and the other checks keep running only while the runtime has a
+//!   free worker: it fails once as many checks spin as there are workers, or on a `current_thread`
+//!   runtime. Threads abandoned on `spawn_blocking` also outlive the timeout. The backstops are the
+//!   blocking helper (M1-038) and the run watchdog (M1-043).
 //! - **Panics.** A panic stays inside the check's task. The join handle returns it and the result is
 //!   [`End::Panicked`].
 //! - **Hard needs.** A check whose hard need is missing is not started. Its result is
@@ -41,8 +44,7 @@ pub const MAX_JOBS: usize = 32;
 /// The timeout of a check with neither a spec value nor a check default.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The longest timeout a check can get, whatever the spec or the check default says.
-pub const MAX_TIMEOUT: Duration = Duration::from_secs(60);
+pub use crate::check::MAX_TIMEOUT;
 
 /// Holds a requested `--jobs` value to `1..=`[`MAX_JOBS`].
 ///
@@ -111,6 +113,10 @@ pub enum End {
         after: Duration,
     },
     /// The check panicked.
+    ///
+    /// The text is raw. Redact it before it is shown or written: this type's `Debug` output prints it
+    /// as is, and so does the default panic hook, which writes it to stderr before the scheduler
+    /// catches the panic. The CLI replaces that hook.
     Panicked {
         /// The panic message when it was text, else a fixed note. It is not redacted yet.
         message: String,

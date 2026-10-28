@@ -20,14 +20,17 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-use tokio::time::Instant;
-
 use rdy_spec::result::SkipKind;
+#[cfg(feature = "runtime")]
+use tokio::time::Instant;
 
 pub use rdy_spec::spec::OsFamily as Os;
 
 #[cfg(test)]
 mod tests;
+
+/// The longest timeout a check can get, whatever the spec or the check default says.
+pub const MAX_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A boxed, sendable future. It is what [`Check::run`] returns, so `dyn Check` stays object safe.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -35,9 +38,15 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// What a check returns: a [`Finding`] when it ran, or a [`CheckError`] when it could not.
 pub type CheckOutcome = Result<Finding, CheckError>;
 
+// rdy ships for Linux, macOS and Windows only. Without this, `current_os()` would call any other
+// target (a BSD, wasm) Linux and report checks that read /proc as if they had a data source.
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+compile_error!("rdy-engine supports Linux, macOS and Windows only; add the OS to `current_os()`");
+
 /// The OS rdy was built for.
 ///
-/// Unix targets other than macOS count as Linux. CI covers Linux, macOS and Windows only.
+/// Linux, macOS and Windows are the only supported targets. Building for any other target is a
+/// compile error, so this never reports Linux by mistake.
 #[must_use]
 pub fn current_os() -> Os {
     if cfg!(target_os = "macos") {
@@ -122,6 +131,7 @@ pub struct CommandSpec {
 
 /// A class of network peer a check may talk to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PeerClass {
     /// The hosts the check's own spec entry names.
     SpecHosts,
@@ -331,13 +341,11 @@ impl Finding {
     ///
     /// An example is a spec that allows SELinux to be `disabled`, run on a host with no SELinux. This is
     /// the only way to report such a case. It is a pass, never `not_applicable` (ADR 0013 decision 2),
-    /// and the call sites are listed in review. `note` says why absence is enough.
+    /// and the call sites are listed in review. `note` says why absence is enough. It is the message,
+    /// and it is not repeated in the notes.
     #[must_use]
     pub fn pass_by_absence(note: impl Into<String>) -> Self {
-        let note = note.into();
-        let mut finding = Self::pass(note.clone());
-        finding.notes.push(note);
-        finding
+        Self::pass(note)
     }
 
     /// Sets what the check measured.
@@ -433,11 +441,16 @@ pub struct CheckContext {
     key: String,
     os: Os,
     available: HashSet<Need>,
+    #[cfg(feature = "runtime")]
     deadline: Option<Instant>,
 }
 
 impl CheckContext {
     /// A context for the check with `key`, on `os`, where the `available` needs are met.
+    #[cfg_attr(
+        not(any(test, feature = "runtime")),
+        expect(dead_code, reason = "only the scheduler builds contexts")
+    )]
     pub(crate) fn new(
         key: impl Into<String>,
         os: Os,
@@ -447,11 +460,13 @@ impl CheckContext {
             key: key.into(),
             os,
             available: available.into_iter().collect(),
+            #[cfg(feature = "runtime")]
             deadline: None,
         }
     }
 
     /// Sets the instant this check's timeout fires. The scheduler calls it as it starts the check.
+    #[cfg(feature = "runtime")]
     pub(crate) fn at_deadline(mut self, deadline: Instant) -> Self {
         self.deadline = Some(deadline);
         self
@@ -480,12 +495,13 @@ impl CheckContext {
     /// It reaches zero at the timeout and stays there. A check uses it to size its own work, for
     /// example to pick a connect timeout that fits. The scheduler still enforces the timeout, so a
     /// check that ignores this value is stopped anyway. A context built outside the scheduler has no
-    /// deadline and reports [`MAX_TIMEOUT`](crate::sched::MAX_TIMEOUT).
+    /// deadline and reports [`MAX_TIMEOUT`].
     #[must_use]
     pub fn remaining(&self) -> Duration {
-        match self.deadline {
-            Some(deadline) => deadline.saturating_duration_since(Instant::now()),
-            None => crate::sched::MAX_TIMEOUT,
+        #[cfg(feature = "runtime")]
+        if let Some(deadline) = self.deadline {
+            return deadline.saturating_duration_since(Instant::now());
         }
+        MAX_TIMEOUT
     }
 }

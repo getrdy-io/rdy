@@ -406,3 +406,27 @@ async fn dropping_the_run_aborts_the_checks_still_running() {
 async fn an_empty_plan_returns_an_empty_result() {
     assert!(scheduler(8).run(Vec::new()).await.is_empty());
 }
+
+#[tokio::test(start_paused = true)]
+async fn the_permit_comes_back_after_a_timeout() {
+    let ran = scheduler(1)
+        .run(vec![
+            planned("fake.plain/stuck", Mode::Forever),
+            planned("fake.plain/after", Mode::Pass),
+        ])
+        .await;
+    assert!(matches!(ran[0].end, End::TimedOut { .. }));
+    assert!(passed(&ran[1]));
+}
+
+#[tokio::test]
+async fn the_permit_comes_back_after_a_panic() {
+    let ran = scheduler(1)
+        .run(vec![
+            planned("fake.plain/bad", Mode::Panic("boom")),
+            planned("fake.plain/after", Mode::Pass),
+        ])
+        .await;
+    assert!(matches!(ran[0].end, End::Panicked { .. }));
+    assert!(passed(&ran[1]));
+}
