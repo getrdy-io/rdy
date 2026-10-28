@@ -1,0 +1,10 @@
+ INFO log_redaction: login attempt password="[REDACTED:secret_by_key:~]"
+DEBUG log_redaction: env seen: HOME=/home/synthetic API_TOKEN=[REDACTED:secret_by_key:~]
+TRACE log_redaction: kubeconfig:
+  users:
+  - name: synthetic
+    user:
+      token: [REDACTED:secret_by_key:~]
+
+TRACE log_redaction: command output output="Authorization: [REDACTED:secret_by_key:~]
+TRACE hyper::proto::h1::io: write headers: authorization: [REDACTED:secret_by_key:~]

@@ -21,12 +21,20 @@ use clap::{Arg, ArgAction, CommandFactory, FromArgMatches};
 #[doc(hidden)]
 pub mod cli;
 #[doc(hidden)]
+pub mod entry;
+#[doc(hidden)]
 pub mod error;
+#[doc(hidden)]
+pub mod logging;
+#[doc(hidden)]
+pub mod panic_hook;
 #[doc(hidden)]
 pub mod password;
 
 #[doc(hidden)]
 pub mod prompt;
+#[doc(hidden)]
+pub mod redaction;
 
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
 use error::{CliError, InternalKind, emit};
@@ -86,7 +94,10 @@ where
         .try_get_matches_from(&args)
         .and_then(|matches| Cli::from_arg_matches(&matches));
     match parsed {
-        Ok(cli) => dispatch(&cli.command, json, stdout, stderr),
+        Ok(cli) => {
+            tracing::debug!(command = %command_path(&args), json, "command parsed");
+            dispatch(&cli.command, json, stdout, stderr)
+        }
         Err(err) => report_parse_error(&err, &args, json, stdout, stderr),
     }
 }

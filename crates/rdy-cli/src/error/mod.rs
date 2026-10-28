@@ -319,7 +319,10 @@ impl CliError {
     ///
     /// Looks through `.context(..)` layers for a [`CliError`], a [`PasswordError`], a [`PromptError`], a
     /// [`SpecError`] or a [`ScalarError`]. Anything else is a bug. The text of an unknown error is dropped
-    /// on purpose: it may hold a path, a URL or a secret, and it has not been through the redactor.
+    /// on purpose: it may hold a path, a URL or a secret, and the M1 redactor has only the key-name rule
+    /// until M1-060 adds URL userinfo, headers and token shapes. Every string that [`CliError::render`]
+    /// prints does go through the redactor (M1-056), so showing the redacted chain later is a change in
+    /// this one function.
     #[must_use]
     pub fn from_anyhow(err: anyhow::Error) -> Self {
         let err = match err.downcast::<Self>() {
@@ -421,13 +424,20 @@ impl CliError {
         };
         Rendered {
             code: self.code(),
-            message: escape_untrusted(&self.to_string()),
-            fix: escape_untrusted(&self.hint()),
-            file: file.map(escape_untrusted),
+            message: clean(&self.to_string()),
+            fix: clean(&self.hint()),
+            file: file.map(clean),
             line: location.map(|at| at.line),
             column: location.map(|at| at.column),
         }
     }
+}
+
+/// The text as it is printed: control characters escaped, then secrets removed (ADR 0015 decision 6).
+///
+/// Redaction runs on the escaped text, which is what reaches the terminal and the JSON document.
+fn clean(text: &str) -> String {
+    crate::redaction::redact_text(&escape_untrusted(text))
 }
 
 /// The code of a prompt error: Ctrl-C is `interrupted`, a terminal failure is `internal`, and the rest
@@ -515,8 +525,8 @@ impl Rendered {
     fn plain(code: ErrorCode, message: &str, fix: &str) -> Self {
         Self {
             code,
-            message: escape_untrusted(message),
-            fix: escape_untrusted(fix),
+            message: clean(message),
+            fix: clean(fix),
             file: None,
             line: None,
             column: None,

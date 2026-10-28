@@ -57,6 +57,11 @@ blake2 = { version = "=0.10.6", default-features = false }
 minisign = { version = "=0.10.0", default-features = false }
 proptest = { version = "1", default-features = false }
 
+# The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field
+# name and `=` would hide `password=hunter2` from the key-name rule (04 section 3.4).
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

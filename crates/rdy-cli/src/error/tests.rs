@@ -695,3 +695,32 @@ fn wants_json_reads_the_exact_flag_before_the_double_dash() {
         assert!(!wants_json(&[OsString::from("rdy"), weird]));
     }
 }
+
+// ---- redaction (M1-056) ----
+
+#[test]
+fn rendered_text_and_json_pass_through_the_redactor() {
+    // A path as typed can hold anything, including a secret by key name.
+    let path = "token=canary-path-1.yaml";
+    let cli = CliError::spec_unreadable(path, &io::Error::from(io::ErrorKind::NotFound));
+    let shown = cli.render();
+    for part in [shown.text(), shown.json()] {
+        assert!(!part.contains("canary-path-1"), "{part}");
+        assert!(part.contains("[REDACTED:secret_by_key:"), "{part}");
+    }
+    let usage = CliError::usage("bad value password=canary-usage-2", "token: canary-fix-3");
+    let all = format!("{}{}", usage.render().text(), usage.render().json());
+    assert!(!all.contains("canary-"), "{all}");
+    let spec = CliError::spec("secret=canary-file-4.yaml", SpecError::NotUtf8);
+    let all = format!("{}{}", spec.render().text(), spec.render().json());
+    assert!(!all.contains("canary-"), "{all}");
+}
+
+#[test]
+fn fixed_error_text_is_not_changed_by_the_redactor() {
+    for cli in [CliError::Interrupted, CliError::bug()] {
+        let shown = cli.render();
+        assert!(!shown.message.contains("REDACTED"), "{}", shown.message);
+        assert!(!shown.fix.contains("REDACTED"), "{}", shown.fix);
+    }
+}

@@ -123,7 +123,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-055 | todo | | HTML-safe deterministic JSON writer with size caps
 
-- M1-056 | todo | | Redacting tracing writer, panic hook and CLI error text
+- M1-056 | PR #TBD | | The exit test names a proxy URL canary, but only the `secret_by_key` rule exists until M1-060 (URL userinfo, headers, token shapes), so the proxy URL and bare-token canaries are not covered yet. M1-060 must add them to `tests/log_redaction.rs` and `tests/trace_binary.rs`. `CliError::from_anyhow` still drops unknown error text on purpose, for the same reason; every printed CLI error string is redacted now, so M1-060 can show the redacted chain in that one function. A panic outside a check now exits 70 (a `catch_unwind` in `rdy_cli::entry::main_code`); no real-binary panic test, because a test-only trigger flag or env var is banned (02), so the hook and the exit code are tested in process. `End::Panicked` now holds a `PanicText` that only `redacted(&Redactor)` can read. Unset `RUST_LOG` means `warn` for everything plus the five named caps; 07 says "no log output", 02 and 04 say "capped at warn", and nothing logs a warning yet. Log lines have no time stamp. A PEM block split over several events is the known M1 gap.
 
 - M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code
 

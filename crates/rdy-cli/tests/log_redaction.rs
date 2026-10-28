@@ -1,0 +1,224 @@
+//! The redacting log writer (M1-056, ADR 0015 decision 5, threat model I2, INV-15).
+//!
+//! The tests install the real subscriber of `rdy_cli::logging` over a capture buffer and emit events
+//! that carry synthetic canaries. At `RUST_LOG=trace` no canary may reach the buffer. The golden file
+//! holds the exact output, with every tag replaced by `~` because the key is random per run.
+
+use std::io::Write;
+use std::sync::{Arc, Mutex};
+
+use rdy_cli::logging::{self, DEFAULT_FILTER, RedactingMakeWriter};
+use rdy_cli::redaction;
+use tracing_subscriber::fmt::MakeWriter;
+
+/// A capture buffer that hands out writers onto the same bytes.
+#[derive(Clone, Default)]
+struct Sink(Arc<Mutex<Vec<u8>>>);
+
+impl Sink {
+    fn text(&self) -> String {
+        let bytes = self.0.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        String::from_utf8(bytes).unwrap_or_else(|e| panic!("log output is not UTF-8: {e}"))
+    }
+}
+
+impl Write for Sink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl MakeWriter<'_> for Sink {
+    type Writer = Sink;
+
+    fn make_writer(&self) -> Sink {
+        self.clone()
+    }
+}
+
+fn redactor() -> rdy_engine::redact::Redactor {
+    redaction::init()
+        .unwrap_or_else(|e| panic!("the test host has a random source: {e}"))
+        .clone()
+}
+
+/// Runs `emit` under the real subscriber and returns what reached the sink.
+fn captured(rust_log: Option<&str>, emit: impl FnOnce()) -> String {
+    let sink = Sink::default();
+    let subscriber = logging::subscriber(sink.clone(), redactor(), rust_log);
+    tracing::subscriber::with_default(subscriber, emit);
+    sink.text()
+}
+
+/// Replaces each 8-digit tag with `~`, so output from two runs compares equal.
+fn normalize_tags(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("[REDACTED:") {
+        let (before, tail) = rest.split_at(at);
+        out.push_str(before);
+        match tail.find(']') {
+            Some(end) => {
+                let placeholder = &tail[..end];
+                match placeholder.rfind(':') {
+                    Some(colon) => out.push_str(&placeholder[..=colon]),
+                    None => out.push_str(placeholder),
+                }
+                out.push_str("~]");
+                rest = &tail[end + 1..];
+            }
+            None => {
+                out.push_str(tail);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+const CANARIES: [&str; 5] = [
+    "canary-field-pw-1",
+    "canary-env-token-2",
+    "canary-kube-token-3",
+    "canary-output-hdr-4",
+    "canary-dep-hdr-5",
+];
+
+/// One event of each kind the ticket names: a tracing field, an env pair, a kubeconfig, command output
+/// and a dependency header.
+fn emit_canaries() {
+    tracing::info!(password = "canary-field-pw-1", "login attempt");
+    tracing::debug!("env seen: HOME=/home/synthetic API_TOKEN=canary-env-token-2");
+    tracing::trace!(
+        "kubeconfig:\n  users:\n  - name: synthetic\n    user:\n      token: canary-kube-token-3\n"
+    );
+    tracing::trace!(
+        output = "Authorization: Bearer canary-output-hdr-4\nok",
+        "command output"
+    );
+    tracing::trace!(
+        target: "hyper::proto::h1::io",
+        "write headers: authorization: Bearer canary-dep-hdr-5"
+    );
+}
+
+#[test]
+fn trace_level_output_matches_the_golden_file_and_holds_no_canary() {
+    let out = captured(Some("trace"), emit_canaries);
+    for canary in CANARIES {
+        assert!(!out.contains(canary), "{canary} leaked:\n{out}");
+    }
+    assert_eq!(out.matches("[REDACTED:secret_by_key:").count(), 5, "{out}");
+    let got = normalize_tags(&out);
+    let want = include_str!("snapshots/log-trace-redacted.txt");
+    assert_eq!(got, want, "golden mismatch. Got:\n{got}");
+}
+
+#[test]
+fn a_tag_is_the_same_for_the_same_secret_in_one_run() {
+    let out = captured(Some("trace"), || {
+        tracing::info!(password = "canary-same-1", "first");
+        tracing::info!(password = "canary-same-1", "second");
+    });
+    let tags: Vec<&str> = out
+        .match_indices("secret_by_key:")
+        .map(|(at, m)| &out[at + m.len()..at + m.len() + 8])
+        .collect();
+    assert_eq!(tags.len(), 2, "{out}");
+    assert_eq!(tags[0], tags[1]);
+}
+
+#[test]
+fn an_event_is_redacted_whole_not_line_by_line() {
+    // A multi-line value runs over several lines of one event. The block rule needs all of them.
+    let out = captured(Some("trace"), || {
+        tracing::trace!("secret: |\n  canary-block-1\n  canary-block-2\nnext: ok");
+    });
+    assert!(!out.contains("canary-block"), "{out}");
+    assert!(out.contains("next: ok"), "{out}");
+}
+
+#[test]
+fn unset_empty_and_invalid_rust_log_use_the_default_caps() {
+    for rust_log in [None, Some(""), Some("  "), Some("=[bad")] {
+        let out = captured(rust_log, || {
+            tracing::info!("info line");
+            tracing::debug!(target: "hyper::client", "hyper debug line");
+            tracing::info!(target: "rustls::client", "rustls info line");
+            tracing::warn!(target: "hyper::client", "hyper warn line");
+            tracing::warn!("rdy warn line");
+        });
+        assert!(!out.contains("info line"), "{rust_log:?}: {out}");
+        assert!(!out.contains("debug line"), "{rust_log:?}: {out}");
+        assert!(out.contains("hyper warn line"), "{rust_log:?}: {out}");
+        assert!(out.contains("rdy warn line"), "{rust_log:?}: {out}");
+    }
+    for name in ["hyper", "h2", "rustls", "tower", "kube"] {
+        assert!(
+            DEFAULT_FILTER.contains(&format!("{name}=warn")),
+            "{name} is not capped"
+        );
+    }
+}
+
+#[test]
+fn a_set_rust_log_lifts_the_caps_and_is_still_redacted() {
+    let out = captured(Some("trace"), || {
+        tracing::trace!(target: "h2::codec", "frame token=canary-lift-1");
+    });
+    assert!(out.contains("h2::codec"), "{out}");
+    assert!(!out.contains("canary-lift-1"), "{out}");
+}
+
+#[test]
+fn output_has_no_ansi_codes_and_no_time_stamp() {
+    let out = captured(Some("trace"), || tracing::info!(password = "x", "line"));
+    assert!(!out.contains('\u{1b}'), "{out:?}");
+    assert!(out.starts_with(" INFO "), "{out:?}");
+}
+
+#[test]
+fn a_secret_split_over_two_writes_is_still_redacted() {
+    let sink = Sink::default();
+    let make = RedactingMakeWriter::new(sink.clone(), redactor());
+    {
+        let mut w = make.make_writer();
+        w.write_all(b"pass").unwrap_or_else(|e| panic!("{e}"));
+        w.flush().unwrap_or_else(|e| panic!("{e}"));
+        w.write_all(b"word=canary-split-1\n")
+            .unwrap_or_else(|e| panic!("{e}"));
+        // Nothing is written until the event ends.
+        assert!(sink.text().is_empty());
+    }
+    let out = sink.text();
+    assert!(!out.contains("canary-split-1"), "{out}");
+    assert!(
+        out.starts_with("password=[REDACTED:secret_by_key:"),
+        "{out}"
+    );
+}
+
+#[test]
+fn bytes_that_are_not_utf8_do_not_panic_and_do_not_leak() {
+    let sink = Sink::default();
+    let make = RedactingMakeWriter::new(sink.clone(), redactor());
+    {
+        let mut w = make.make_writer();
+        w.write_all(b"token=canary-bytes-1\xff\xfe tail\n")
+            .unwrap_or_else(|e| panic!("{e}"));
+    }
+    let out = sink.text();
+    assert!(!out.contains("canary-bytes-1"), "{out}");
+    // The replacement character is not a plain value character, so the rest of the line goes too.
+    // That is the fail-closed choice of the key-name rule.
+    assert!(out.starts_with("token=[REDACTED:secret_by_key:"), "{out}");
+}
