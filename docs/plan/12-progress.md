@@ -105,7 +105,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-046 | todo | | Closed NativeCall enum in the facade
 
-- M1-047 | todo | | Fixture format README, .gitattributes and Windows canary
+- M1-047 | PR #TBD | | The Windows leg is unproven until CI runs it. Not added: `.editorconfig` (08 mentions it, no ticket owns it). The fixture lint (M1-050) must skip `tests/fixtures/canary/` for the CRLF rule
 
 - M1-048 | todo | | SEC-25 Minimal redactor for evidence, errors and logs
 

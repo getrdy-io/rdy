@@ -1,7 +1,19 @@
-# Help snapshots must keep LF on Windows checkouts (M1-029). The repo-wide rules are M1-047.
+# Line endings (docs/plan/08-testing.md, "Windows checkouts and .gitattributes"; M1-047).
+# Text is LF in the index and on disk, on every OS, whatever core.autocrlf says.
+* text=auto eol=lf
+# Fixtures are bytes. Git never converts them, so a CRLF fixture keeps its CRLF and no other fixture
+# can gain one. The windows-x64 leg checks this with core.autocrlf true (crates/rdy-spec/tests/fixture_canary.rs).
+/tests/fixtures/** -text
+/examples/specs/** -text
+*.minisig -text
+# Templates and shipped data are compiled into the binary. CRLF there would change the HTML and break goldens.
+/crates/*/templates/** text eol=lf
+/crates/*/data/** text eol=lf
+# Help snapshots must keep LF on Windows checkouts (M1-029).
 /crates/rdy-cli/tests/snapshots/*.txt text eol=lf
 # Signed fixtures are signed over exact bytes. Git must never touch their line endings (M1-120).
 /tests/fixtures/signed/* -text
 /tests/fixtures/wycheproof/* -text
-# The fixture test compares the signed copy with the example spec byte for byte (M1-120).
+# Later lines win. The fixture test compares the signed copy with the example spec byte for byte (M1-120),
+# so the example specs stay text with LF, and the -text line above keeps every other file there as is.
 /examples/specs/*.yaml text eol=lf
