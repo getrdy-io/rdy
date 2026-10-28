@@ -253,7 +253,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-122 | todo | | SEC-60 Root trust lookup touches no user path, Windows store ACL rules
 
-- M1-123 | PR #TBD | | Windows has no pty test (the scripted-terminal unit tests cover the logic there, and rpassword does the console work); Unix pty tests use rexpect via an examples/prompt_probe helper; `trust add` and `spec sign` wire the helper in M1-131 and M1-125
+- M1-123 | [#23](https://github.com/getrdy-io/rdy/pull/23) | 2026-10-28 | Windows has no pty test (the scripted-terminal unit tests cover the logic there, and rpassword does the console work); Unix pty tests use rexpect via an examples/prompt_probe helper; `trust add` and `spec sign` wire the helper in M1-131 and M1-125
 
 - M1-124 | todo | | Review CONTRIBUTING.md on a fresh clone
 
