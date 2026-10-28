@@ -146,7 +146,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-066 | todo | | Command table and argument allow-lists from 03 Appendix A
 
-- M1-067 | todo | | OS support table and compile stubs for rdy-checks-host
+- M1-067 | PR #TBD | | The seven host ids are stubs. On Linux a stub that is run returns a check error, not a finding, until M1-068 and later replace it. `HostFamily` is not registered in the CLI yet (the registry wiring ticket owns it). The facade backend does not exist yet, so the OS comes from the plan and from `CheckContext::os`, and no `probe.native` closure exists to gate.
 
 - M1-068 | todo | | host.disk (Linux: statvfs flags, mountinfo with escapes, whole-component match, hung-mount timeout)
 
