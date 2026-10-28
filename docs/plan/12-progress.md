@@ -249,7 +249,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-119 | todo | | Timeouts env and scheduler timeout and deadline tests under paused time
 
-- M1-120 | todo | | Verify minisign signatures in rdy-spec against a trust store with product binding
+- M1-120 | [#27](https://github.com/getrdy-io/rdy/pull/27) | 2026-10-28 | The verifier is ed25519-dalek verify_strict over our own minisign envelope reader, not minisign-verify (ADR 0018). The Windows autocrlf case is covered by tests (`-text` and `eol=lf` rules in .gitattributes and a CR-free fixture test); the Windows CI leg arrives with M1-006 (#21) and M1-047. Deferred: signed_at future-date warning and expiry check (need a clock, M1-026), trust.yaml I/O (M1-121), key text files for --key (M1-121), CLI wiring and error codes (M1-126), the CRLF note on every error kind (today only `Tampered` carries it, M1-126) and reading the .minisig exactly once (M1-126)
 
 - M1-121 | todo | | Trust store load and save in user and system locations
 

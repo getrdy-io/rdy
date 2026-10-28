@@ -77,6 +77,8 @@ pub fn parse_unverified(bytes: &[u8]) -> Result<Spec, SpecError> {
 
 /// The shared reader. [`crate::load`] will call it with bytes that were verified first.
 pub(crate) fn parse_bytes(bytes: &[u8]) -> Result<Spec, SpecError> {
+    #[cfg(test)]
+    spy::record_call();
     if bytes.len() > MAX_SPEC_BYTES {
         return Err(SpecError::TooLarge {
             size: bytes.len(),
@@ -803,3 +805,23 @@ fn classify_custom(msg: &str) -> SpecError {
 
 #[cfg(test)]
 mod tests;
+
+/// The parser spy (threat model INV-01). Tests count how many times the reader started on this thread, to
+/// prove that [`crate::load`] never gives it a spec that failed verification.
+#[cfg(test)]
+pub(crate) mod spy {
+    use std::cell::Cell;
+
+    thread_local! {
+        static CALLS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(super) fn record_call() {
+        CALLS.with(|calls| calls.set(calls.get() + 1));
+    }
+
+    /// How many times the reader started on this thread so far.
+    pub(crate) fn calls() -> usize {
+        CALLS.with(Cell::get)
+    }
+}
