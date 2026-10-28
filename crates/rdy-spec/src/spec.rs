@@ -2,8 +2,8 @@
 //!
 //! These are the wire types of docs/plan/01-spec-format.md section 2. They derive `serde` and carry no
 //! behaviour beyond the grammar of the few names that are cheap to check on the way in (product, check
-//! id, check name). Size and count limits, expiry and the typed scalars (`Quantity`, `Duration`,
-//! `Version`, `Target`) belong to later tickets.
+//! id, check name) and the typed [`crate::scalar`] values. Size and count limits and expiry belong to
+//! later tickets.
 //!
 //! A [`Spec`] is untrusted input. Nothing here proves a vendor signed it. Only [`crate::load`] returns a
 //! [`crate::LoadedSpec`], which is the value the engine runs.
@@ -18,7 +18,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::{API_VERSION, SpecError};
+use crate::{API_VERSION, Quantity, SpecError};
 
 /// Defines a string newtype whose constructor and `Deserialize` impl both check one grammar.
 macro_rules! checked_string {
@@ -417,7 +417,7 @@ pub struct BundleSpec {
     pub redact_patterns: Vec<RedactPattern>,
     /// A size cap, such as `200Mi`. It lowers rdy's own cap and never raises it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_size: Option<RawQuantity>,
+    pub max_size: Option<Quantity>,
 }
 
 impl BundleSpec {
@@ -448,19 +448,6 @@ impl RedactPattern {
             regex: regex.into(),
         }
     }
-}
-
-/// A byte size exactly as the file wrote it: a whole number, or text such as `200Mi`.
-///
-/// The typed `Quantity` of a later ticket replaces this and checks the grammar.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-#[non_exhaustive]
-pub enum RawQuantity {
-    /// A whole number of bytes.
-    Bytes(u64),
-    /// Text such as `200Mi`.
-    Text(String),
 }
 
 #[cfg(test)]
@@ -711,12 +698,20 @@ mod tests {
             b.redact_patterns,
             [RedactPattern::new("acme_license", "ACME-[A-Z0-9]{20}")]
         );
-        assert_eq!(b.max_size, Some(RawQuantity::Text("200Mi".into())));
+        assert_eq!(b.max_size, Some(Quantity::parse("200Mi").unwrap()));
         let again: BundleSpec =
             serde_json::from_str(&serde_json::to_string(&b).expect("serialize")).expect("again");
         assert_eq!(again, b);
         let n: BundleSpec = serde_json::from_str(r#"{"max_size":1048576}"#).expect("parse");
-        assert_eq!(n.max_size, Some(RawQuantity::Bytes(1_048_576)));
+        assert_eq!(n.max_size, Some(Quantity::parse("1048576").unwrap()));
+    }
+
+    #[test]
+    fn bundle_refuses_a_bad_max_size() {
+        for bad in [r#""200M""#, r#""200 Mi""#, "1.5", "-1", "1000000000000000"] {
+            let json = format!(r#"{{"max_size":{bad}}}"#);
+            assert!(serde_json::from_str::<BundleSpec>(&json).is_err(), "{bad}");
+        }
     }
 
     #[test]

@@ -155,6 +155,8 @@ your customers. Stock minisign can verify the signature.";
 const SIGN_AFTER_LONG_HELP: &str = "\
 Environment:
   RDY_KEY_PASSWORD  The key password, for CI. Never put it on the command line.
+                    Other processes of your user and root can read it, and
+                    child processes inherit it. Use a masked secret in CI.
 
 Examples:
   Sign a spec:
@@ -176,7 +178,8 @@ a key only for specs. Back it up: anyone who has it can sign specs as you.";
 const KEYGEN_AFTER_LONG_HELP: &str = "\
 Environment:
   RDY_KEY_PASSWORD  The new key password, for CI. Never put it on the command
-                    line.
+                    line. Other processes of your user and root can read it,
+                    and child processes inherit it. Use a masked secret in CI.
 
 Examples:
   Make a key pair:
