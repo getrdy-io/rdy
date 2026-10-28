@@ -3,3 +3,15 @@
 # Helper functions in tests/ files are not covered, so they must not use unwrap or expect.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+
+# clap exits the process with code 2 on a usage error, and in rdy 2 means NOT READY (ADR 0008,
+# 07 section 1). Every parse goes through `try_get_matches_from`, and `rdy_cli::run` maps the error
+# to 64. These methods print the error and exit on their own.
+disallowed-methods = [
+    { path = "clap::Parser::parse", reason = "exits 2 on a usage error; use try_parse_from and map the error (rdy_cli::run)" },
+    { path = "clap::Parser::parse_from", reason = "exits 2 on a usage error; use try_parse_from and map the error (rdy_cli::run)" },
+    { path = "clap::Command::get_matches", reason = "exits 2 on a usage error; use try_get_matches_from and map the error (rdy_cli::run)" },
+    { path = "clap::Command::get_matches_from", reason = "exits 2 on a usage error; use try_get_matches_from and map the error (rdy_cli::run)" },
+    { path = "clap::Command::get_matches_mut", reason = "exits 2 on a usage error; use try_get_matches_from and map the error (rdy_cli::run)" },
+    { path = "clap::error::Error::exit", reason = "exits 2; print the error with rdy_cli::error::emit and return exit code 64" },
+]

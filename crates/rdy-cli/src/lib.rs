@@ -191,9 +191,12 @@ fn report_parse_error(
 /// Nothing the user typed is echoed. The only text taken from clap is the name of an argument as
 /// the command tree defines it (such as `--color <WHEN>`). The command path in the fix line comes
 /// from walking the arguments through the command tree, so it holds only names from the tree.
-/// M1-030 adds the flag name and the did-you-mean under the no-echo rule of 07 section 1.
+///
+/// The one exception is the name of an unknown flag, which is echoed under the no-echo rule of 07
+/// section 1 (see [`unknown_flag`]).
 fn usage_lines(kind: ErrorKind, err: &clap::Error, args: &[OsString]) -> (String, String) {
-    let mut fix = format!("see '{} --help'", command_path(args));
+    let (path, current) = walk(args);
+    let mut fix = format!("see '{path} --help'");
     let arg = defined_arg(err);
     let message = match kind {
         ErrorKind::MissingRequiredArgument => match arg {
@@ -218,7 +221,15 @@ fn usage_lines(kind: ErrorKind, err: &clap::Error, args: &[OsString]) -> (String
                 }
             }
         }
-        ErrorKind::UnknownArgument => "unknown option or argument".to_string(),
+        ErrorKind::UnknownArgument => match unknown_flag(err, args) {
+            Some(flag) => {
+                if let Some(near) = suggest(&flag, &current) {
+                    fix = format!("did you mean {near}? See '{path} --help'.");
+                }
+                format!("unknown flag {flag}")
+            }
+            None => "unknown option or argument".to_string(),
+        },
         ErrorKind::InvalidSubcommand => "unknown command".to_string(),
         ErrorKind::ArgumentConflict => match (&arg, prior_arg(err)) {
             (Some(arg), Some(prior)) if *arg == prior => {
@@ -263,12 +274,92 @@ fn on_argv(args: &[OsString], name: &str) -> bool {
         .any(|a| a == name || a.strip_prefix(name).is_some_and(|r| r.starts_with('=')))
 }
 
+/// The name of the unknown flag on the command line, or `None` when it must not be echoed.
+///
+/// This is the flag name only: `--tokne` for `--tokne=rdy_st_example`, `-x` for `-xsecret`. The text
+/// after `=` and the word after the flag are never part of it (07 section 1, no echo). The name is
+/// echoed only when all of these hold, so a secret typed in the wrong place stays out of the output:
+///
+/// - it is a token of the command line before any `--` (not a value, not text after `--`),
+/// - a long name is 1 to 40 letters, digits and hyphens that start with a letter or digit, and a short
+///   name is one ASCII letter or digit,
+/// - it does not start with `--key` or `--allow-unsigned` (the text would name the flag).
+///
+/// Anything else (a stray value, an underscore, a long token, a control character) gets the plain
+/// "unknown option or argument".
+fn unknown_flag(err: &clap::Error, args: &[OsString]) -> Option<String> {
+    let Some(ContextValue::String(raw)) = err.get(ContextKind::InvalidArg) else {
+        return None;
+    };
+    let name = raw.split_once('=').map_or(raw.as_str(), |(name, _)| name);
+    let plain = match name.strip_prefix("--") {
+        Some(long) => {
+            (1..=MAX_FLAG_NAME).contains(&long.len())
+                && long.starts_with(|c: char| c.is_ascii_alphanumeric())
+                && long.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        }
+        None => {
+            let mut chars = name.strip_prefix('-')?.chars();
+            matches!((chars.next(), chars.next()), (Some(c), None) if c.is_ascii_alphanumeric())
+        }
+    };
+    // `--keyy` would print the text `--key`, and no output may name either flag (rule 7).
+    let names_a_protected_flag = NEVER_SUGGEST
+        .iter()
+        .any(|n| name.strip_prefix("--").is_some_and(|l| l.starts_with(n)));
+    let on_command_line = args
+        .iter()
+        .skip(1)
+        .take_while(|a| *a != "--")
+        .filter_map(|a| a.to_str())
+        .any(|a| {
+            if name.starts_with("--") {
+                a == name || a.strip_prefix(name).is_some_and(|r| r.starts_with('='))
+            } else {
+                a.starts_with(name) && !a.starts_with("--")
+            }
+        });
+    (plain && on_command_line && !names_a_protected_flag).then(|| name.to_string())
+}
+
+/// The longest flag name (without the dashes) that rdy repeats back.
+const MAX_FLAG_NAME: usize = 40;
+
+/// Flags the suggester never offers, whatever the command (07 section 9 rule 7, threat model T2).
+///
+/// A typo of either must not teach the real name: `--keey` could lead to `run --key`, which skips
+/// the pinned-key check, and `--allow-unsgned` to `--allow-unsigned`.
+const NEVER_SUGGEST: [&str; 2] = ["key", "allow-unsigned"];
+
+/// The visible long flag of `command` closest to the unknown flag `flag`, as `--name`.
+///
+/// clap's own suggester is off. This one looks only at the flags of the command the user was on
+/// (its own and the global ones), skips hidden flags and [`NEVER_SUGGEST`], and uses the distance
+/// of [`error::did_you_mean`]. A short flag gets no suggestion.
+fn suggest(flag: &str, command: &clap::Command) -> Option<String> {
+    let typed = flag.strip_prefix("--")?;
+    let names: Vec<&str> = command
+        .get_arguments()
+        .filter(|a| !a.is_hide_set())
+        .filter_map(|a| a.get_long())
+        .filter(|n| !NEVER_SUGGEST.contains(n))
+        .collect();
+    error::did_you_mean(typed, &names).map(|n| format!("--{n}"))
+}
+
 /// The command path, such as `rdy spec sign`, found by walking `args` through the command tree.
 ///
-/// A word that names a subcommand of the current command moves down one level. A long flag that
-/// takes a value skips the word after it. Only names from the tree reach the result, never what
-/// the user typed. The binary name is always `rdy`, whatever argv[0] was.
+/// Only names from the tree reach the result, never what the user typed. The binary name is always
+/// `rdy`, whatever argv[0] was.
 fn command_path(args: &[OsString]) -> String {
+    walk(args).0
+}
+
+/// Walk `args` through the command tree. Returns the command path and the command it ends on.
+///
+/// A word that names a subcommand of the current command moves down one level. A long flag that
+/// takes a value skips the word after it.
+fn walk(args: &[OsString]) -> (String, clap::Command) {
     let mut root = command();
     root.build();
     let mut current = &root;
@@ -294,5 +385,5 @@ fn command_path(args: &[OsString]) -> String {
             current = sub;
         }
     }
-    path.join(" ")
+    (path.join(" "), current.clone())
 }
