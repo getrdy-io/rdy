@@ -9,21 +9,22 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | Number | Title | Status |
 | --- | --- | --- |
 | [0001](0001-spec-language-yaml.md) | Spec language is YAML, parsed with serde-saphyr | Accepted |
-| [0002](0002-spec-signatures-ed25519-minisign.md) | Specs are signed with ed25519 in minisign format, verified before parsing, keys pinned per product | Accepted |
-| [0003](0003-report-format-html-json.md) | Reports are one JSON file plus one self-contained HTML file, rendered with askama | Accepted |
+| [0002](0002-spec-signatures-ed25519-minisign.md) | Specs are signed with ed25519 in minisign format, verified before parsing, keys pinned per product | Accepted; decision 5 amended 2026-10-28 (declined `trust add` exits 64) |
+| [0003](0003-report-format-html-json.md) | Reports are one JSON file plus one self-contained HTML file, rendered with askama | Accepted; decisions 1, 2 and 6 amended 2026-10-28 (ADR 0016 timing, banner first) |
 | [0004](0004-async-runtime-tokio.md) | tokio multi-thread runtime, blocking work on spawn_blocking, every check under a timeout | Accepted; decision 5 tightened by 0014 |
 | [0005](0005-plugin-model-custom-checks.md) | No plugins in M1; a sandboxed `custom.exec` check in M4; no dynamic loading or WASM in v1 | Accepted; amended 2026-10-28 (`custom.exec` in M4, not M3) |
-| [0006](0006-static-musl-linux.md) | Linux binaries are static musl for x86_64 and aarch64, built on native runners | Accepted |
+| [0006](0006-static-musl-linux.md) | Linux binaries are static musl for x86_64 and aarch64, built on native runners | Accepted; decision 5 amended 2026-10-28 (`getent ahosts`, hickory as fallback) |
 | [0007](0007-crate-publishing-and-versioning.md) | Crate publishing and versioning policy | Accepted |
-| [0008](0008-errors-and-result-model.md) | Error handling and the result model; Timeout and Skipped are outcomes, never crashes | Accepted; decision 3 refined by 0013 |
+| [0008](0008-errors-and-result-model.md) | Error handling and the result model; Timeout and Skipped are outcomes, never crashes | Accepted; decision 3 refined by 0013; decisions 4 and 7 amended 2026-10-28 (Ctrl-C, new codes, `report_write`) |
 | [0009](0009-http-client-and-tls.md) | HTTP with reqwest on rustls and ring, a strict egress policy, dual roots only for the interception probe | Accepted; decisions 1, 2, 3 and 5 superseded by 0014 |
 | [0010](0010-kubernetes-client-kube-rs.md) | Use kube-rs (client only) behind a runtime read-only guard, not raw REST or kubectl | Accepted; amended 2026-10-28 (selfsubjectreviews in M1, family-owned client) |
 | [0011](0011-binary-name-and-cli-package.md) | The package is `rdy`, it lives in `crates/rdy-cli`, the binary is `rdy` | Accepted; decision 4 amended 2026-10-28 (in-process test entry point) |
 | [0012](0012-wire-types-in-rdy-spec-schema-generated.md) | All `rdy/v1` wire types live in rdy-spec; JSON schemas are generated from them | Accepted |
 | [0013](0013-verdict-refinements-not-run.md) | Verdict refinements: what counts as not run, and the one thing that never counts | Accepted |
-| [0014](0014-probe-facade-owns-side-effects.md) | The probe facade owns every check side effect, including TCP, proxy CONNECT, TLS and HTTP | Accepted |
-| [0015](0015-redactor-in-rdy-engine.md) | The minimal redactor lives in rdy-engine and runs on whole strings before any cap or write | Accepted |
+| [0014](0014-probe-facade-owns-side-effects.md) | The probe facade owns every check side effect, including TCP, proxy CONNECT, TLS and HTTP | Accepted; decision 7 amended 2026-10-28 (MF-04: wall over std and kube plus the dependency allowlist) |
+| [0015](0015-redactor-in-rdy-engine.md) | The minimal redactor lives in rdy-engine and runs on whole strings before any cap or write | Accepted, pending security-reviewer sign-off in the M1-009 PR; decision 10 added 2026-10-28 (span union, keyed tags, `Redacted<T>`, `ring`) |
 | [0016](0016-output-dir-confinement-cap-std.md) | Output is confined to one new directory, opened early through a cap-std handle | Accepted |
+| [0017](0017-changelog-fragments.md) | Changelog fragments: each PR adds one file in changelog.d/, and the release step assembles CHANGELOG.md | Accepted |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.
@@ -62,6 +63,9 @@ What gets easier, what gets harder, what we now have to watch.
 ```
 
 ## Plan corrections found
+
+These were merged into `docs/plan/13-plan-corrections.md` and applied or closed there in M1-009 (2026-10-28).
+They are kept as the record of what was found.
 
 - docs/plan/rdy-plan.md, Rust build plan, crate table, `rdy-spec` row: names `serde_yaml`, deprecated and
   archived by its author in March 2024. Fix: replace with `serde-saphyr` (ADR 0001); ban `serde_yaml`

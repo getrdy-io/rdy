@@ -28,8 +28,9 @@ by at least one other subagent who did not write it. Report back only when every
 6. `docs/plan/05-threat-model.md` (security-reviewer): STRIDE over the CLI running as root inside a
    customer environment, the spec supply chain, the install script, and the upload path. Mitigations
    mapped to tickets.
-7. `docs/plan/06-release-and-distribution.md` (release-engineer): CI matrix, cargo-dist config, cosign
-   signing, SBOM, install.sh behaviour, Homebrew tap, winget, apt and yum later, self-update, version policy.
+7. `docs/plan/06-release-and-distribution.md` (release-engineer): CI matrix, dist config
+   (`dist-workspace.toml`), cosign signing, SBOM, install.sh behaviour, Homebrew tap, winget, apt and yum
+   later, self-update, version policy.
 8. `docs/plan/07-cli-ux.md` (cli-ux): every command and flag, help text, output samples for ready, warning
    and blocked runs, JSON output samples, exit codes, color and no-color behaviour, accessibility.
 9. `docs/plan/08-testing.md` (qa-engineer): fixture strategy for environments you cannot have in CI
@@ -44,9 +45,11 @@ by at least one other subagent who did not write it. Report back only when every
 13. `docs/adr/0001-*.md` onward: one ADR per decision that could be argued (spec language YAML vs
     others, signature scheme, report format, async runtime, plugin model, musl vs glibc).
 
-Constraints the plan must respect: one part-time founder, a usable binary every week, M1 is six weeks and
-contains only workspace plus CI, spec parser and result model, host checks plus HTML report, network
-checks, Kubernetes checks, and signing. Anything else is M2 or later. Flag every place where the plan doc
+Constraints the plan must respect: one part-time founder, a usable binary every week. M1 runs at its real
+size from `docs/plan/11-backlog.md`: the founder started it on 2026-10-28, tickets marked `core: yes` are
+the minimum and `core: no` is the trim list. M1 contains only workspace plus CI, spec parser and result
+model, host checks plus HTML report, network checks, Kubernetes checks, and spec signing and release
+signing, plus the minimum docs, security and release work those need; anything else is M2 or later. Flag every place where the plan doc
 is wrong or out of date and propose the fix instead of silently following it.
 
 ## After the plan

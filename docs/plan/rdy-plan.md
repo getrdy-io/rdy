@@ -44,15 +44,18 @@ Rdy answers one question for software vendors: is this customer's environment re
 
 **Check families at launch**
 
-- Host: CPU, RAM, disk, kernel version, cgroups, time sync, open ports, SELinux and AppArmor state, antivirus agents known to break containers.
-- Network: egress to required endpoints through the customer's proxy, DNS, TLS interception detection, MTU, bandwidth sample.
-- Kubernetes: version, storage classes, RBAC for the install identity, admission policies, node resources, device plugins.
-- Cloud account: IAM permissions dry-run, service quotas, region availability, VPC and subnet capacity (AWS first, then GCP and Azure).
-- GPU and AI: driver and CUDA versions, device plugin, VRAM per node, NCCL and fabric sanity, model-download egress.
-- Data stores: reachability and version for Postgres, Redis, Kafka, S3-compatible storage.
-- Custom: a shell or script check with a declared expected output, sandboxed.
+Each family names the milestone it ships in. Launch copy claims only what ships by the end of M3.
 
-**Example spec**
+- Host (M1): CPU, RAM, disk, kernel version, cgroups, time sync, open ports, SELinux and AppArmor state, antivirus agents known to break containers.
+- Network (M1): egress to required endpoints through the customer's proxy, DNS, TLS interception detection, MTU, bandwidth sample.
+- Kubernetes (M1): version, storage classes, RBAC for the install identity, admission policies, node resources. Device plugins and VRAM per node ship in M4 with the GPU family, as `k8s.device_plugins`.
+- Bundle (M2): the redacted diagnostics bundle.
+- Cloud account (M3): IAM simulation, with EC2 dry-run as an opt-in fallback, service quotas, region availability, VPC and subnet capacity (AWS first, then GCP and Azure). Check ids are `aws.*`; `gcp.*` and `azure.*` are reserved.
+- GPU and AI (M4): driver and CUDA versions, NCCL and fabric sanity, model-download egress.
+- Data stores (M4): reachability and version for Postgres, Redis, Kafka, S3-compatible storage, as a feature-gated module of `rdy-checks-net`.
+- Custom: `custom.file` (M2, in `rdy-checks-host`) and `custom.exec` (M4, in `rdy-engine`), a script check with a declared expected output, sandboxed (ADR 0005).
+
+**Example spec** (design sample, not runnable in M1: `bundle:` is M2, `aws.iam` M3 and `gpu.cuda` M4. The runnable M1 example is `examples/specs/acme-platform.yaml`.)
 
 ```yaml
 apiVersion: rdy/v1
@@ -62,21 +65,23 @@ metadata:
   version: ">=4.2"
 checks:
   - id: host.memory
-    min: 32Gi
+    min: 32Gi            # a nominal band applies by default: a "32 GB" VM that shows 31.3 GiB passes with a note
     severity: block
     fix: "Add RAM or choose a larger node class."
   - id: net.egress
-    endpoints: ["registry.acme.io:443", "license.acme.io:443"]
+    endpoints: ["registry.acme.example:443", "license.acme.example:443"]
     via_proxy: auto
     severity: block
   - id: k8s.storageclass
-    needs: ["ReadWriteOnce"]
+    access_modes: ["ReadWriteOnce"]
     severity: warn
   - id: gpu.cuda
-    min: "12.4"
+    built_with: "12.4"
+    source: driver       # driver | toolkit
+    compat: minor        # minor | strict | forward
     severity: block
   - id: aws.iam
-    simulate: ["eks:DescribeCluster", "ec2:CreateSecurityGroup"]
+    simulate: ["eks:DescribeCluster", "ec2:CreateSecurityGroup"]   # IAM simulation; needs iam:SimulatePrincipalPolicy
     severity: block
 bundle:
   collect: ["journal:7d", "k8s:events", "file:/etc/acme/*.yaml"]
@@ -85,7 +90,7 @@ bundle:
 
 **How a POC flows**
 
-1. The SE picks a spec and sends the prospect a link: `curl -sSf https://getrdy.io/install | sh && rdy run acme-platform --token abc123`.
+1. The SE picks a spec and sends it to the prospect. In M1 the prospect downloads the pinned release `install.sh`, then runs `"$HOME/.local/bin/rdy" run acme-platform.yaml`. From M2 the SE sends a link: `curl --proto '=https' --tlsv1.2 -sSf https://getrdy.io/install | sh && "$HOME/.local/bin/rdy" run acme-platform`, with the token from `RDY_TOKEN` or a prompt, never on the command line. Root shells use `sh -s -- --allow-root`.
 2. The prospect runs it in the target environment. Nothing leaves the box unless they approve the upload.
 3. The SE sees a readiness score and the exact blockers within minutes, before the kickoff call.
 4. The prospect fixes the blockers using the remediation text. Reruns show green.
@@ -125,7 +130,7 @@ Open-core: the CLI is free and Apache-2.0, the portal is paid per vendor, not pe
 **Why the numbers hold up**
 
 - Buyers already pay $76k to $796k a year (third-party pricing data) for the incumbent platform. A $6k to $24k line item for the readiness piece is an easy add, or a cheap partial replacement for vendors who only wanted the checks.
-- Investors are funding the category: a BYOC deployment platform's $16.5M round was led by M12 and Uncork, with angels from Sourcegraph, WarpStream and WorkOS. That is the same buyer set Rdy targets.
+- Investors are funding the category: a BYOC deployment platform raised $16.5M. That is the same buyer set Rdy targets.
 - Gross margin should exceed 85%. Results are small JSON documents. Bundles are the only real storage cost and can be capped per tier.
 - Every prospect who runs the CLI sees the Rdy name. The product markets itself to the next vendor through the customer's own engineers.
 
@@ -138,29 +143,27 @@ Open-core: the CLI is free and Apache-2.0, the portal is paid per vendor, not pe
 
 ## Rust build plan
 
-Ship a usable CLI in about 12 weeks of part-time work, then add the portal. Everything below assumes 10 to 15 hours a week with an AI coding agent doing most of the typing. Full-time would roughly halve the dates.
+Ship 0.1.0, the design-partner build, after 25 weeks and all of M1 after 30 weeks of part-time work (13 hours a week, `docs/plan/11-backlog.md`), then add the portal. Everything below assumes 10 to 15 hours a week with an AI coding agent doing most of the typing. Full-time would roughly halve the dates. Weekly builds are `0.1.0-alpha.N` pre-releases until 0.1.0; crates version independently; the docs keep one version per stable minor (ADR 0007, `docs/plan/06-release-and-distribution.md`).
 
 **Architecture**
 
-One Cargo workspace. The CLI and the portal share the spec and result types, so a result produced offline on an air-gapped box opens in the portal unchanged.
-
-&#91;embedded content: architecture · customer side and vendor side\]
+Two workspaces. `rdy-cloud` depends on `rdy-spec` and `rdy-engine` from crates.io, never by path (ADR 0007), so a result produced offline on an air-gapped box opens in the portal unchanged.
 
 Specs flow from the vendor to the customer. Results flow back only when the customer approves the upload; air-gapped sites carry the report file out by hand.
 
 | Crate | Purpose | Key dependencies |
 | --- | --- | --- |
-| `rdy-spec` | Spec schema, YAML parsing, validation, signature verification | serde, serde\_yaml, schemars, ed25519-dalek |
-| `rdy-engine` | Check scheduler, privilege negotiation, result model, HTML and JSON reports | tokio, tracing, askama |
-| `rdy-checks-host` | CPU, memory, disk, kernel, cgroups, ports, security agents | sysinfo, nix, windows-sys |
-| `rdy-checks-net` | Egress via proxy, DNS, TLS interception, MTU | reqwest with rustls, hickory-resolver |
-| `rdy-checks-k8s` | Version, storage classes, RBAC, admission, node resources | kube, k8s-openapi |
+| `rdy-spec` | Schema, wire types for specs, results and the bundle manifest, YAML parsing, validation, signature verification | serde, serde-saphyr, schemars, minisign-verify (verify), minisign (sign) |
+| `rdy-engine` | Check trait, scheduler, probe facade, privilege negotiation, redactor, HTML and JSON reports | tokio, tracing, askama |
+| `rdy-checks-host` | CPU, memory, disk, kernel, cgroups, ports, security agents | sysinfo (no default features), rustix, winreg, plist, toml |
+| `rdy-checks-net` | Egress via proxy, DNS, TLS interception, MTU | probe facade over tokio-rustls and hyper on ring, rustls-native-certs, webpki-roots, x509-parser, hickory-resolver (default features off) |
+| `rdy-checks-k8s` | Version, storage classes, RBAC, admission, node resources; `k8s.device_plugins` and VRAM per node in M4 | kube, k8s-openapi |
 | `rdy-checks-cloud` | IAM simulation, quotas, regions (AWS first) | aws-sdk-iam, aws-sdk-servicequotas, aws-sdk-ec2; REST for GCP and Azure |
-| `rdy-checks-gpu` | Driver, CUDA, VRAM, device plugin | nvml-wrapper (optional), nvidia-smi fallback |
-| `rdy-bundle` | Collect, redact, compress, manifest | tar, zstd, regex, aho-corasick |
-| `rdy-cli` | The `rdy` binary | clap, indicatif, self\_update |
-| `rdy-server` | Portal API, auth, storage, billing webhooks | axum, sqlx with Postgres, tower, jsonwebtoken, object\_store |
-| `rdy-ffi`, `rdy-wasm` | Embed SDK | cbindgen, wasm-bindgen |
+| `rdy-checks-gpu` | Driver, CUDA, VRAM | `nvidia-smi` and `/proc/driver/nvidia` (no `nvml-wrapper`: a static musl binary cannot `dlopen`, ADR 0006) |
+| `rdy-bundle` | Collectors, tar+zstd, manifest; reuses `rdy_engine::redact` | tar, zstd, regex, aho-corasick |
+| `rdy` (directory `crates/rdy-cli`) | The `rdy` binary | clap, indicatif; signed self-update in M3, trust model by ADR |
+| `rdy-server` (in `rdy-cloud`) | Portal API, auth, storage, billing webhooks | axum, sqlx with Postgres, tower, jsonwebtoken, object\_store |
+| `rdy-ffi`, `rdy-wasm` (public repo, M5) | Embed SDK | cbindgen, wasm-bindgen |
 
 Portal frontend: SvelteKit in TypeScript against the Rust API. It is the fastest path to a good UI. Leptos is the all-Rust option if you want the story to be pure Rust; it will cost you iteration speed early on.
 
@@ -168,34 +171,36 @@ Portal frontend: SvelteKit in TypeScript against the Rust API. It is the fastest
 
 - Least privilege. Each check declares what it needs (root, kube context, cloud credentials). The CLI runs what it can and reports what it could not, instead of failing or asking for `sudo` up front.
 - Nothing leaves the machine by default. Upload is an explicit flag or a prompt. Redaction runs before anything is written to disk.
-- Specs are signed by the vendor's key. The CLI refuses unsigned or tampered specs unless `--allow-unsigned` is set.
+- Specs are signed by the vendor's key. The CLI refuses unsigned specs unless `--allow-unsigned` is set, and says so loudly. It always refuses a spec whose signature fails, with or without the flag.
 - Offline first. Every command works without network; the portal is additive.
 - One binary, no runtime. Static musl builds on Linux, no OpenSSL dependency (rustls everywhere).
 
 **Release engineering**
 
-- `cargo-dist` for cross-platform releases, `cargo-zigbuild` for cross-compiling, musl targets for Linux.
-- Binaries and specs signed with Sigstore (cosign); the install script verifies checksums and signatures.
+- `dist` (configured in `dist-workspace.toml`) for cross-platform releases, built on native runners, musl targets for Linux. `cargo-zigbuild` is only the fallback for local cross builds (ADR 0006).
+- Binaries and checksums are signed with Sigstore cosign; the install script verifies checksums and signatures. Specs are signed by the vendor's ed25519 key in minisign format (ADR 0002).
 - SBOM on every release via `cargo-cyclonedx`; `cargo-audit` and `cargo-deny` in CI; `cargo-auditable` so the binary carries its own dependency list.
 - Distribution: install script, GitHub Releases, Homebrew tap, winget, then apt and yum repos for the Enterprise tier.
 - Independent security audit before the Enterprise tier goes on sale. Budget $15k to $25k.
 
 **Milestones**
 
-&#91;embedded content: build timeline · six milestones, two gates\]
-
 The private beta gates M2 and the public launch gates M4. Dates move if the validation gates in the Risks section are not met on time.
 
-| Milestone | Scope | Exit test |
-| --- | --- | --- |
-| M0 Validate | 15 interviews with SE and support leaders, 5 design partners signed, landing page waitlist live | 5 vendors agree to run the alpha on a real POC |
-| M1 CLI alpha | Spec format, host, network and Kubernetes checks, HTML and JSON report, signed specs | One design partner catches a real install blocker with it |
-| M2 Portal MVP | Share links, results dashboard, redacted bundles, bundle viewer, Slack alerts | Design partners run it on 20 prospect environments |
-| M3 Launch | AWS account checks, Stripe billing, docs, public open-source launch, Team tier on sale | First 10 paying vendors |
-| M4 Business tier | GPU and AI checks, CRM sync, analytics, custom-branded CLI, SSO | First Business-tier deal |
-| M5 Enterprise | Embed SDK, self-hosted portal, air-gapped licensing, security audit | First $50k+ contract |
+The exit test is the business outcome. The engineering done test is what CI and a ticket can check (`docs/plan/00-overview.md`).
 
-**Build order inside M1 (first six weeks)**
+| Milestone | Scope | Exit test | Engineering done |
+| --- | --- | --- | --- |
+| M0 Validate | 15 interviews with SE and support leaders, 5 design partners signed, landing page waitlist live | 5 vendors agree to run the alpha on a real POC | Not engineering. |
+| M1 CLI alpha | Spec format, host, network and Kubernetes checks, HTML and JSON report, signed specs, minimal Markdown docs (install, first run, exit codes, unsigned specs, sign and verify, generated reference) | One design partner catches a real install blocker with it | Fixture envs exit 0, 1 and 2 on all five targets and write both reports; unsigned and tampered specs exit 64; every 0.1.0 gate security ticket is closed. |
+| M2 Portal MVP | Share links, results dashboard, redacted bundles, bundle viewer, Slack alerts | Design partners run it on 20 prospect environments | `rdy run <product>` fetches a signed spec with the token never on argv; the redaction golden suite passes; nothing uploads without the flag or a yes. |
+| M3 Launch | AWS account checks, Stripe billing, hosted docs site, public open-source launch, Team tier on sale | First 10 paying vendors | AWS checks pass on recorded fixtures; the docs site builds its reference from the schema; `rdy-spec` and `rdy-engine` are 1.0. |
+| M4 Business tier | GPU and AI checks, CRM sync, analytics, custom-branded CLI, SSO | First Business-tier deal | GPU checks pass on fixtures and one real node; data store checks ship; `custom.exec` runs only with hash-bound consent. |
+| M5 Enterprise | Embed SDK, self-hosted portal, air-gapped licensing, security audit | First $50k+ contract | C-ABI and WASM builds pass the same golden tests; audit findings closed. |
+
+**Build order inside M1**
+
+Builds before signing lands are tagged `0.1.0-alpha.N`, run specs only with `--allow-unsigned`, and are not given to design partners for real POCs.
 
 1. Workspace, CI, release pipeline. Boring, do it first so every later week ships a binary.
 2. Spec parser and the result model. Write the JSON schema and generate docs from it.
@@ -266,7 +271,7 @@ The site has one job at each stage: collect a waitlist in M0, convert design par
 - App: `app.<domain>`, SvelteKit frontend talking to the Rust API from the build plan.
 - Billing: Stripe Checkout and Customer Portal. Yearly plans only at first.
 - Analytics: Plausible. CRM: HubSpot free tier. Email: Resend for transactional, a simple newsletter tool for the launch list.
-- Install endpoint: `get.<domain>` serves the install script and verifies checksums; GitHub Releases hosts the binaries.
+- Install endpoint: `https://getrdy.io/install`, served with a 200 by a Worker route (never a redirect), from M2. The script verifies checksums and signatures; GitHub Releases hosts the binaries.
 
 **Pages**
 
@@ -278,7 +283,7 @@ The site has one job at each stage: collect a waitlist in M0, convert design par
 | Solutions: Support | Speak to the secondary buyer | Bundle viewer screenshot, redaction demo |
 | Solutions: BYOC and AI vendors | Catch the trend searches | GPU and cloud-account check examples |
 | Pricing | Convert self-serve | Four tiers, yearly pricing, FAQ, "book a demo" for Enterprise |
-| Docs | Make the CLI usable without talking to you | Install, first run, spec reference, check catalog, portal API |
+| Docs | Make the CLI usable without talking to you | Install, first run, spec reference, check catalog |
 | Open source | Build trust with security reviewers | License, repo link, signing and SBOM details, security policy |
 | Compare | Win the comparison searches | Rdy vs the incumbent Kubernetes-only preflight tool, Rdy vs homegrown scripts |
 | Blog and changelog | SEO and proof of momentum | Monthly posts, every release noted |
@@ -289,9 +294,9 @@ The site has one job at each stage: collect a waitlist in M0, convert design par
 - Headline: Install day should be boring.
 - Subhead: Rdy checks a customer's environment against your requirements before install day. One signed binary. Any target. Results your SEs and support team can see.
 - Primary button: Run your first check. Secondary: Read the docs.
-- Terminal demo: `rdy run acme-platform` producing a report with two blocks, one warning and the fixes, ending in NOT READY, then a rerun ending in READY.
+- Terminal demo: `rdy run acme-platform.yaml` producing a report with two blocks, one warning and the fixes, ending in NOT READY, then a rerun ending in READY.
 - Three steps: Write the spec. Send the link. Fix blockers before kickoff.
-- Proof row: design partner logos, then the "7x faster installs with preflight checks" industry stat with its source.
+- Proof row: design partner logos, then the "7x faster installs with preflight checks" industry stat with its source (2022 study, vendor-reported).
 - Security strip: open source, Rust, signed releases, redaction before write, no upload by default.
 - Pricing teaser with a link to the full page.
 - Footer: docs, GitHub, changelog, security, contact.
@@ -301,7 +306,7 @@ The site has one job at each stage: collect a waitlist in M0, convert design par
 1. M0: home page with waitlist form only. Ask one question on signup: what do you ship into customer environments?
 2. M2: waitlist gets beta invites in batches of 10. Beta users land on a portal onboarding that creates their first spec from a template in under five minutes.
 3. M3: self-serve signup, free tier, Stripe for Team. Pricing page gets a "start free" and a "book a demo" path.
-4. Every report the CLI renders links back to the site with the vendor's name in the URL so you can see which prospects clicked through.
+4. Every report the CLI renders links back to the site. The link carries only the public product name. Clicks are counted by site analytics on getrdy.io, never by the CLI. The trust page says so.
 
 **SEO targets**
 
@@ -351,7 +356,7 @@ Kill rule: fewer than 3 design partners after 30 outreach attempts means the pai
 No Rust until the gates are met. The next month is interviews, a waitlist page, and a throwaway prototype to show in those interviews.
 
 - [ ] Read your employment agreement for IP and moonlighting terms
-- [ ] Name picked (rdy) and getrdy.io bought. Still to do: USPTO export for RDY, READY and REDY; GitHub org; crates.io name; Wisconsin LLC name check
+- [ ] Name picked (rdy) and getrdy.io bought. Still to do: USPTO export for RDY, READY and REDY; crates.io name; Wisconsin LLC name check
 - [ ] Write the 10-question interview script (current process, time lost per POC, tools tried, willingness to pay)
 - [ ] List 30 SE and support leaders you can reach warm; book 15 calls
 - [ ] Ship the waitlist landing page on Astro and Cloudflare Pages
@@ -371,7 +376,7 @@ The product is Rdy. The command is `rdy`. The site is getrdy.io, bought 2026-10-
 | Product and company name | Rdy (Rdy Labs LLC or similar for the Wisconsin entity) | LLC name check pending |
 | CLI command | `rdy` | Decided |
 | Primary domain | getrdy.io | Owned |
-| Install script | `curl -sSf https://getrdy.io/install \| sh` | To build |
+| Install script | M1: the pinned release `install.sh`. From M2: `curl --proto '=https' --tlsv1.2 -sSf https://getrdy.io/install \| sh` | To build |
 | Docs | docs.getrdy.io | To build |
 | Portal | app.getrdy.io | To build |
 | Defensive domains | getrdy.dev if it opens; skip .ai, .sg and $200 aftermarket names | Watch |
@@ -389,17 +394,17 @@ The product is Rdy. The command is `rdy`. The site is getrdy.io, bought 2026-10-
 rdy/
   Cargo.toml            workspace
   crates/
-    rdy-spec/           schema, YAML parsing, signature verification
-    rdy-engine/         scheduler, privilege negotiation, result model, HTML and JSON reports
+    rdy-spec/           schema, wire types for specs, results and the bundle manifest, YAML parsing, signature verification
+    rdy-engine/         check trait, scheduler, probe facade, privilege negotiation, redactor, HTML and JSON reports
     rdy-checks-host/
     rdy-checks-net/
     rdy-checks-k8s/
     rdy-checks-cloud/
     rdy-checks-gpu/
-    rdy-bundle/         collect, redact, compress
+    rdy-bundle/         collectors, tar+zstd, manifest; reuses rdy_engine::redact
     rdy-cli/            the rdy binary, including the opt-in upload client
   install.sh            served at getrdy.io/install
-  docs/                 Starlight site, deployed to docs.getrdy.io
+  docs/                 Starlight site (M3), deployed to docs.getrdy.io; only docs/src/content/docs/ is published, never docs/plan/ or docs/adr/
 ```
 
 **Private repo layout**

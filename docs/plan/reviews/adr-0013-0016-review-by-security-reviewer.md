@@ -370,7 +370,8 @@ Folds (extra exit-test clauses on existing tickets, 5.5 h in total):
 Reviewer: security-reviewer. Checked on `main` at `8f5705f` against ADR 0010 (as amended), ADRs 0014,
 0015 and 0016 (all Accepted), `docs/plan/02-engine-design.md` revision 3 and `docs/plan/11-backlog.md`.
 Quotes are exact. Line numbers are at that commit, except the MF-04 row, which was re-checked at
-`74e162a` and cites that commit. No ADR or plan file was edited by this check.
+`74e162a` and cites that commit. This check itself edited no ADR or plan file. The M1-001 PR (#6) did,
+in separate commits: `74e162a` (ADRs 0010 and 0014, 02, 11) and `f896576` (05 revision 3).
 
 Result: all six must-fix items are closed. MF-04 was reopened in the first pass and closed after
 rust-architect completed the lint wall in `74e162a`. With that, 02 revision 3 has security-reviewer
@@ -391,18 +392,19 @@ rust-architect's.
 Numbering continues from the closure check in `adr-and-00-review-by-security-reviewer.md` (CF-01 to
 CF-03).
 
-- **CF-04 (medium). M1-061 lost the PEM case.**
+- **CF-04 (medium). M1-061 lost the PEM case.** Done: backlog correction 02 (PR #5) restored it.
   - Problem: `docs/plan/11-backlog.md:197` (M1-061) tests "An AWS key id and a URL with userinfo". ADR
     0015 line 63 and 02 line 594 also test "a PEM key" across the facade caps. M1-062 covers only the
     64 KiB report cap. So the unterminated PEM rule at a facade cap is untested in M1.
   - Fix: M1-061 exit test starts "A PEM key, an AWS key id and a URL with userinfo". Owner:
     rust-architect, before M1-061 starts.
-- **CF-05 (medium). M1-043 lost the held-lock case.**
+- **CF-05 (medium). M1-043 lost the held-lock case.** Done: backlog correction 02 (PR #5) restored it.
   - Problem: `docs/plan/11-backlog.md:179` (M1-043) has no "held snapshot lock" case. 02 lines 476 and
     574 have it. It is the test for the `try_lock` bound.
   - Fix: add "and a held snapshot lock" to the M1-043 Spin clause. Owner: rust-architect, before
     M1-043 starts.
-- **CF-06 (medium). M1-104 lost the citation test.**
+- **CF-06 (medium). M1-104 lost the citation test.** Done: backlog correction 02 (PR #5) restored the
+  three clauses and re-estimated M1-104 at 3.5 h.
   - Problem: `docs/plan/11-backlog.md:240` (M1-104) drops three clauses that 02 line 586 has: "an
     unlisted resource" is refused, "every ALLOWED entry is cited by a CheckInfo", and "a dropped request
     leaves a timeout entry with its check id". The citation test is the MF-03 control against a wide

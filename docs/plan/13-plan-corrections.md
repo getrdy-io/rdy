@@ -18,63 +18,30 @@ ticket depends on it. "Raised by" uses document numbers (00 to 10), `ADR` for `d
 `rv<doc>-<reviewer>` for a review file (`rvADR` is the review of the ADRs and 00), and `13` for items first
 found in this pass.
 
+**Status after M1-009 (2026-10-28).** rust-architect worked through every row. Each blocks-M1 and
+should-fix row is applied, rejected or moved, and its row is deleted; "Closed during M1-009" at the end
+says what happened to each. Two cosmetic rows stay. Edits to `CLAUDE.md` are not made by an agent: they
+wait for the founder in "CLAUDE.md edits waiting for the founder" below.
+
 ## Corrections
 
 | id | where | what is wrong | proposed fix | severity | raised by |
 | --- | --- | --- | --- | --- | --- |
-| PC-01 | `KICKOFF.md`, "After the plan"; plan, "Risks, validation gates" ("The gates below come before M1") and "Next 30 days" ("No Rust until the gates are met", go or no-go on Nov 20, 2026) | KICKOFF starts M1 as soon as the backlog is approved, which can be before Nov 20. The plan forbids Rust before a "go". The plan also contradicts itself: the same 30-day list budgets two weekends for a throwaway Rust prototype. | KICKOFF: start M1 only after a recorded "go" against the gates, earliest Monday Nov 23, 2026. Plan: "No product Rust until the gates are met. A throwaway demo prototype in a scratch repo is allowed." Founder decides; see open decision 1. | blocks M1 | 00 |
-| PC-02 | `KICKOFF.md`, constraints ("M1 is six weeks"); plan, "Rust build plan" ("a usable CLI in about 12 weeks") and "Build order inside M1 (first six weeks)" | Six weeks at 10 to 15 hours is 60 to 90 hours. M1 as scoped counts about 194 hours (00), then about 248 hours (02), before the cli-ux, testing, docs and devrel tickets are added. The plan's "12 weeks" matches neither. `11-backlog.md` counts 365 hours (306 core). | Decision made: M1 is extended (see Decisions made). `KICKOFF.md` constraints: replace "M1 is six weeks" with "M1 runs at its real size from `11-backlog.md`, starting after a recorded go on Nov 20, 2026; tickets marked `core: yes` are the minimum and `core: no` is the trim list." Plan line 141: replace "about 12 weeks" with the backlog figure (0.1.0 after 25 weeks and all of M1 after 29 weeks, at 13 hours a week). Plan line 198: retitle "Build order inside M1 (first six weeks)" to "Build order inside M1". Leave the `KICKOFF.md` scope list to PC-25. | blocks M1 | 00, 02, 03, 07, rv02-security, rvADR-security |
-| PC-03 | `CLAUDE.md`, rule 3; plan, "Rust build plan", Design rules, third bullet | "refuses unsigned or tampered specs unless `--allow-unsigned` is set" lets the flag run a spec whose signature fails. ADR 0002 decision 7 and 01 section 4.7 refuse that always. | "The CLI refuses unsigned specs unless `--allow-unsigned` is set, and says so loudly. It always refuses a spec whose signature fails, with or without the flag." | blocks M1 | ADR, rvADR-security, rv01-security, 01, 05 |
-| PC-04 | `CLAUDE.md`, Commands (`cargo run -p rdy-cli -- run examples/specs/acme-platform.yaml --json`); plan, crate table row `rdy-cli` | The package is `rdy` in `crates/rdy-cli` (ADR 0011), so `-p rdy-cli` fails. The example spec ships unsigned, so the command exits 64 (`spec_unsigned`). | `cargo run -p rdy -- run examples/specs/acme-platform.yaml --allow-unsigned --json` until signed examples ship in M2. Crate table: "`rdy` (directory `crates/rdy-cli`)". | blocks M1 | ADR, 00, 01, 09, 10, rv01-cli-ux |
-| PC-05 | Plan, "Business model and revenue" (tiers, ARR scenarios), Risks row "Employment agreement", "Website plan" and "Name, domain and repositories" (trademark history), Option B pricing; `CLAUDE.md`, Repo layout (`docs/plan/` holds the plan) | The repo must be public before the first CI ticket (06: private CI runs out of free minutes in about a dozen runs; 10 also chose public from M1). The plan copy would then publish pricing, ARR scenarios, the employment-agreement row and the trademark history. | Founder decides before `getrdy-io/rdy` is created: keep, trim, or move the business sections to `rdy-cloud` and leave a short technical summary. See open decision 2. | blocks M1 | 06, 09, 10, rv09-release |
-| PC-06 | `KICKOFF.md`, constraints ("... and signing") | Reads as spec signing only. Release signing (cosign, checksums, install.sh verification) lands in weeks 1 to 3 of the `11-backlog.md` calendar (the first signed alpha in week 2, the install.sh signature check in week 3). | "spec signing and release signing". PC-25 edits the same sentence. | should fix before M1 | 06 |
-| PC-07 | Plan, "Milestones" table, Exit test column | Every exit test is a business outcome that CI cannot check, so no ticket can close a milestone. | Keep the business test and add an "engineering done" column, as in the 00-overview.md milestone table. | should fix before M1 | 00 |
-| PC-08 | Plan, "Build order inside M1" (signing is step 6) | Builds before step 6 cannot refuse unsigned specs, which breaks `CLAUDE.md` rule 3. | Add: "Builds before signing lands are tagged `0.1.0-alpha.N`, run specs only with `--allow-unsigned`, and are not given to design partners for real POCs." See PC-38. | should fix before M1 | 00 |
-| PC-09 | Plan, "Architecture" ("One Cargo workspace. The CLI and the portal share the spec and result types") | There are two repos and two workspaces. A shared workspace would let `rdy-cloud` use the types by path, which `CLAUDE.md` rule 6 forbids. | "Two workspaces. `rdy-cloud` depends on `rdy-spec` and `rdy-engine` from crates.io, never by path (ADR 0007)." | should fix before M1 | 00 |
-| PC-10 | Plan, "Release engineering" ("Binaries and specs signed with Sigstore (cosign)"); crate table row `rdy-spec` (`ed25519-dalek`) | Specs are signed by the vendor's ed25519 key (`CLAUDE.md` rule 3), not cosign. The format is minisign (ADR 0002), so the crates are not `ed25519-dalek`. | "Binaries and checksums are signed with Sigstore cosign. Specs are signed by the vendor's ed25519 key in minisign format." Crate row: `minisign-verify` (verify) and `minisign` (sign). | should fix before M1 | ADR, 05, rv06-code |
-| PC-11 | Plan, crate table row `rdy-spec` (`serde_yaml`) | `serde_yaml` was deprecated and archived by its author in March 2024. The fork `serde_yml` carries RUSTSEC-2025-0068. | Replace with `serde-saphyr` (ADR 0001). Ban `serde_yaml` and `serde_yml` in `deny.toml`. | should fix before M1 | ADR, 05 |
-| PC-12 | Plan, crate table row `rdy-checks-host` (`sysinfo, nix, windows-sys`) | Direct `windows-sys` calls need `unsafe`, against `#![forbid(unsafe_code)]` in `CLAUDE.md`. `nix` duplicates `rustix`. | `sysinfo` (no default features), `rustix`, `winreg`, `plist`, `toml`: safe-API crates that keep the unsafe inside them. | should fix before M1 | 03, rv03-rust-engineer, rv05-code |
-| PC-13 | Plan, crate table row `rdy-checks-net` (`reqwest with rustls, hickory-resolver`) | reqwest 0.13 defaults to `aws-lc-rs`, and since ADR 0014 the probe facade owns every TCP, CONNECT, TLS and HTTP side effect. reqwest hides the peer chain and per-stage failures. | "Probe facade over `tokio-rustls` and `hyper` on ring, `rustls-native-certs`, `webpki-roots`, `x509-parser`, `hickory-resolver` (default features off). `reqwest` (rustls on ring, no default features) only for the M2 upload client." | should fix before M1 | ADR, 02, 03, rv03-rust-engineer |
-| PC-14 | Plan, "How a POC flows" step 1 (`rdy run acme-platform --token abc123`) and Home page copy, terminal demo (`rdy run acme-platform`) | Running a spec by product name and a share token both need the M2 portal. A token on argv is readable in `ps`, `/proc/<pid>/cmdline` and shell history. M1 `run` takes a spec file. | M1 copy uses `rdy run <spec file>`. From M2, `rdy run <product>` takes the token from `RDY_TOKEN`, `--token-file` or a prompt, and a `--token` value on argv exits 64. The final text for plan line 88 is given once, in PC-16. | should fix before M1 | 00, 04, 05, 09, 10 |
-| PC-15 | Plan, "Website plan", Stack ("Install endpoint: `get.<domain>`") against `CLAUDE.md` Names and places and the plan's names table (`getrdy.io/install`) | Two install URLs. Also the apex is the marketing site's Pages custom domain, and a Pages project cannot serve one path of it. | `https://getrdy.io/install` everywhere; delete `get.<domain>`. Served with a 200 by a Worker route owned by 06, never by a redirect. | should fix before M1 | 00, 05, 09, 10 |
-| PC-16 | `CLAUDE.md`, Names and places (install line); plan, "How a POC flows" step 1 and names table | `curl -sSf` lacks `--proto '=https' --tlsv1.2` (06 uses them). Without `-L` a redirect makes `sh` run an empty script and exit 0. `&& rdy run` fails when `~/.local/bin` is not on `PATH` in that shell. Many customer shells are root, and install.sh refuses root without `--allow-root`. | Final text, used in the plan (line 88 and the names table) and `CLAUDE.md`. M1 docs: download the pinned release `install.sh` (06), then `"$HOME/.local/bin/rdy" run acme-platform.yaml`. From M2, when the Worker route ships (11-backlog.md M2-019): `curl --proto '=https' --tlsv1.2 -sSf https://getrdy.io/install \| sh && "$HOME/.local/bin/rdy" run acme-platform`, with the token from `RDY_TOKEN` or a prompt. Docs show `sh -s -- --allow-root` for root shells. `-L` is not added: the endpoint serves 200 and the 09 verify job asserts it (PC-15). PC-14 points here. | should fix before M1 | 05, 06, 09, rv09-release |
-| PC-17 | Plan, "Product definition", Example spec | It mixes milestones (`bundle:` is M2, `aws.iam` M3, `gpu.cuda` M4). `needs:` is now `access_modes`. `registry.acme.io` and `license.acme.io` are real domains that every run would query. `gpu.cuda min: "12.4"` is ambiguous and false-blocks under CUDA minor version compatibility. The sample does not say that a nominal band applies by default (03), so `min: 32Gi` passes a nominal 32 GiB VM that reports about 31.3 GiB. `aws.iam simulate` needs `iam:SimulatePrincipalPolicy`, and "IAM permissions dry-run" is really simulation. 00 tickets use "the plan's example spec" as a test input. | Label the sample "design sample, not runnable in M1". Use `.example` hosts (RFC 2606, as `examples/specs/` does). Rename to `access_modes`. Give `gpu.cuda` `built_with`, `source: driver\|toolkit` and `compat: minor\|strict\|forward`. Say that a nominal band applies by default. Say "IAM simulation, with EC2 dry-run as an opt-in fallback". The runnable M1 example is `examples/specs/acme-platform.yaml`: host, net and k8s checks plus one unknown id. The two 00 tickets that used this sample as M1 input now use `examples/specs/acme-platform.yaml` (11-backlog.md M1-016 and M1-035). | should fix before M1 | 00, 01, 03, 09, 10, rv01-cli-ux, rv03-gpu, rv03-cloud-iam |
-| PC-18 | Plan, "Check families at launch" (Data stores, Custom) and Milestones table; `CLAUDE.md`, Repo layout | Data stores and Custom have no milestone and no crate. The documents disagree on where they go (03: stores M3; 09: stores M4, custom M5; ADR 0005: custom.exec M3; 00: stores M4). Launch copy would claim families that do not ship. | Add a milestone column to the family list: host, network, Kubernetes M1; bundle M2; AWS account M3; GPU M4; data stores M4 as a feature-gated module of `rdy-checks-net` (M3 already carries AWS, billing and launch; 03 said M3, check-author to confirm); `custom.file` M2 in `rdy-checks-host`; `custom.exec` M4 in `rdy-engine`, as in `11-backlog.md` and ADR 0005 (amended 2026-10-28). Launch copy claims only what ships by the end of M3. | should fix before M1 | ADR, 00, 03, 09, 10 |
-| PC-19 | `CLAUDE.md`, Repo layout rows for `rdy-checks-host`, `rdy-checks-net`, `rdy-checks-k8s`; plan, "Check families at launch", Host, Network and Kubernetes bullets | 03 marks 24 tickets (72 hours) as M1-late: host 11, net 6, k8s 7. The first draft of this entry moved them to M2, which the founder's decision reverses. The 11 review then moved the macOS and Windows data sources to M2 and `k8s.device_plugins` to M4 with the GPU family. | Keep the rest of the M1-late tier in M1, marked `core: no` in `11-backlog.md` (done there). In the `CLAUDE.md` layout, mark device plugins as M4 and nothing else about tiers. See PC-27 for where `k8s.device_plugins` lives. | cosmetic | 00, 03, rv03-k8s |
-| PC-20 | `CLAUDE.md`, Engineering standards ("Cross-platform from day one ... CI runs all four") | macOS ships two arches, so there are five release targets and five CI legs (06). Host data sources for macOS and Windows cannot all land in M1. | "Five release targets: Linux x86_64 and aarch64 (musl), macOS aarch64 and x86_64, Windows x86_64. Five CI legs, each running the full test job. If the Intel macOS image is retired, `x86_64-apple-darwin` is built on the arm64 runner and tested nightly (06). Every check compiles and runs on every target from day one; where a data source is not built yet, the check reports Skipped, not yet on this OS." | should fix before M1 | 00, 03, 06, 08 |
-| PC-21 | `CLAUDE.md`, Engineering standards (exit codes) | clap exits 2 on a usage error by default, and 2 means NOT READY here. | Add: "clap usage errors are mapped to 64, and a test runs `rdy --bogus`." | should fix before M1 | 07, 08 |
-| PC-22 | `CLAUDE.md`, Repo layout (every crate listed from day one) | Reads as a workspace with nine crates in week 1. Cloud and GPU crates have no M1 work. | Add: "A crate enters the workspace when its milestone starts. crates.io placeholders hold the names." | should fix before M1 | 00 |
-| PC-23 | `CLAUDE.md`, Repo layout lines `rdy-engine` ("result model") and `rdy-bundle` ("redactors"); plan, crate table rows `rdy-engine` ("result model", line 154) and `rdy-bundle` ("Collect, redact", line 160); plan, public repo layout lines for `rdy-engine/` (line 393) and `rdy-bundle/` (line 399) | All `rdy/v1` wire types, results and the bundle manifest included, live in `rdy-spec` (ADR 0012). The minimal redactor lives in `rdy-engine` and runs before any write (ADR 0015). | `rdy-spec`: "schema, wire types for specs, results and the bundle manifest". `rdy-engine`: "check trait, scheduler, probe facade, privilege negotiation, redactor, HTML and JSON reports". `rdy-bundle`: "collectors, tar+zstd, manifest; reuses `rdy_engine::redact`". | should fix before M1 | ADR, 04 |
-| PC-24 | `CLAUDE.md`, Repo layout, `rdy-cli` command list | Missing `spec keygen`, `trust add\|list\|remove` and `redact`. No milestones. | M1: `run`, `verify`, `spec lint\|sign\|keygen`, `trust add\|list\|remove`, `version`. M2: `bundle`, `upload`, `report`, `redact`. M3: `spec init`, `self-update`, `completion`. | should fix before M1 | ADR, 07, rvADR-cli-ux |
-| PC-25 | Plan, Milestones table (docs only in M3); `KICKOFF.md`, constraints ("Anything else is M2 or later") | `CLAUDE.md` requires docs in every PR, and the M1 exit test needs a design partner who can follow install and first-run steps. `KICKOFF.md` shuts out the M1 docs pages, and the M1 security and devrel tickets. | Add minimal docs to M1 as Markdown pages under `docs/`: install, first run, exit codes, unsigned specs, sign and verify, plus the generated reference. The hosted site is M3 (11 review). In `KICKOFF.md`, change "Anything else is M2 or later" to "plus the minimum docs, security and release work those need; anything else is M2 or later" (the same sentence as PC-06). | should fix before M1 | 09 |
-| PC-26 | Plan, "Conversion flow" step 4 ("see which prospects clicked through") and "Metrics that matter" | Conflicts with "nothing leaves the machine". The M1 HTML report already carries the link. | "The report link carries only the public product name. Clicks are counted by site analytics on getrdy.io, never by the CLI." State it on the trust page. | should fix before M1 | 10 |
-| PC-27 | Plan, crate table row `rdy-checks-gpu` (`nvml-wrapper (optional)`); `CLAUDE.md`, Repo layout row `rdy-checks-gpu` ("VRAM per node", "device plugin") | `nvml-wrapper` needs `dlopen`, which a static musl binary cannot do (ADR 0006). The in-cluster half has no home in the GPU crate. | GPU checks use `nvidia-smi` and `/proc/driver/nvidia`. Move the device plugin and VRAM per node (from GPU Feature Discovery labels) to `rdy-checks-k8s` as `k8s.device_plugins`, shipped in M4 with the GPU family. See PC-19. | should fix before M1 | ADR, 03, rv03-gpu |
-| PC-28 | Plan, "Release engineering" (`cargo-zigbuild`, `cargo-dist`); `CLAUDE.md`, Supply chain and layout (`release.yml (cargo-dist)`); `KICKOFF.md` item 7 ("cargo-dist config") | Native arm64 runners remove the need for zigbuild (fallback only, ADR 0006). `cargo-dist` is now `dist`, configured in `dist-workspace.toml`. The week 1 release tickets use these names. | Drop zigbuild from the main path. Say `dist`. In `KICKOFF.md` item 7 say "dist config (`dist-workspace.toml`)". See PC-29, which edits the same layout line. | should fix before M1 | 05, 06 |
-| PC-29 | `CLAUDE.md`, Repo layout (`.github/workflows/` and root files) | Lists `ci.yml`, `release.yml`, `audit.yml` only. | Add `sign-release.yml`, `docs-deploy.yml` (M1), a docs preview workflow (M2), `dist-workspace.toml`, `.cargo/config.toml`, `RELEASING.md`, `CHANGELOG.md`, `scripts/verify-release.sh`. Note that dist generates `release.yml`. See PC-28. | should fix before M1 | 06, 09, rv09-release |
-| PC-30 | `CLAUDE.md` and plan, Repo layouts (`docs/`) | Neither says that Starlight publishes only `src/content/docs/`, so readers cannot tell whether `docs/plan/` and `docs/adr/` are published. | State the content root in both layouts. The published-content guard in 09 enforces it. | should fix before M1 | 09 |
-| PC-31 | Plan, crate table rows `rdy-server`, `rdy-ffi`, `rdy-wasm` | The table mixes repos. `rdy-server` is private, and the Embed SDK crates have no home. | Mark `rdy-server` as `rdy-cloud`. Put `rdy-ffi` and `rdy-wasm` in the public repo at M5. | cosmetic | 00 |
-| PC-32 | `CLAUDE.md`, Engineering standards, Docs bullet | `cargo doc` warnings are errors, but nothing publishes the API docs. | Say the docs.rs pages of `rdy-spec` and `rdy-engine` go live with their first crates.io release (M2), and the docs site links there. | cosmetic | 09 |
-| PC-33 | Plan, "Website plan", Pages table, Docs row ("portal API") | The portal is private, so the public docs cannot document its API yet. | Drop "portal API" from the public docs until M3, and decide then where portal docs live. | cosmetic | 09 |
-| PC-34 | Plan, Example spec and Check families ("Cloud account" family, `aws.` ids) | Unclear whether ids are `aws.*` or `cloud.aws.*`. | Keep `aws.*`, as 03 does, with `gcp.*` and `azure.*` reserved. Say so in the family list. | cosmetic | 09 |
-| PC-35 | Plan, lines 9, 28, 213 and 283 ("the incumbent Kubernetes-only preflight tool") and evidence point 3 (remote host collectors) | The incumbent tool also has host collectors and preflights. Its remote-node limit is no rdy advantage while rdy also runs only where it is started. | Say "Kubernetes-first". Keep any multi-node claim out of public copy until rdy can run against remote hosts. Changing the descriptor is a repo-wide sweep, and the common brief that prescribes it needs the same edit. | cosmetic | 10 |
-| PC-36 | Plan, "Home page copy outline", proof row (line 294, "7x faster installs") | The figure is a 2022 study by the incumbent vendor about its own product. Line 22 already says "(2022 study, vendor-reported)". Line 294 says "with its source" but gives no year. | Add the year at line 294. Leave the figure out of the HN post. | cosmetic | 10 |
+| PC-35 | Plan, lines 9, 28, 218 and 288 ("the incumbent Kubernetes-only preflight tool") and evidence point 3 (remote host collectors) | The incumbent tool also has host collectors and preflights. Its remote-node limit is no rdy advantage while rdy also runs only where it is started. | Say "Kubernetes-first". Keep any multi-node claim out of public copy until rdy can run against remote hosts. Changing the descriptor is a repo-wide sweep, and the common brief that prescribes it needs the same edit. | cosmetic | 10 |
 | PC-37 | Plan, Milestones table, M3 | The M3 exit test ("First 10 paying vendors") can only be measured after the launch that M3 contains. | Launch when M3 scope is done; measure the exit test over the next eight weeks. The 12-month star and install targets start on launch day. | cosmetic | 10 |
-| PC-38 | Plan, "Rust build plan" and "Release engineering" | Weekly binaries, but no version policy. | Point to ADR 0007 and 06: weekly builds are `0.1.0-alpha.N` pre-releases, crates version independently, one docs version per stable minor. See PC-08. | should fix before M1 | 09, rv06-code |
-| PC-39 | Plan, "Architecture" and "Milestones" (`[embedded content: architecture ...]`, `[embedded content: build timeline ...]`) | Two embeds from the source document did not survive the copy, and the text refers to diagrams the reader cannot see. | Replace each with a short text diagram or table, or delete the line. | cosmetic | 13 |
-| PC-40 | Plan, "Why the numbers hold up", second bullet | It lists the lead investors and angels of the BYOC deployment platform's round next to the round size. That does not break the no-competitor rule as written, but it identifies the company. | Drop the investor and angel names; keep "a BYOC deployment platform raised $16.5M". Do it before `getrdy-io/rdy` is created (PC-05). Consider "a BYOC deployment platform raised a large round" at plan lines 9, 30 and 128, since the exact figure also identifies the company. | should fix before M1 | 13 |
-| PC-41 | Plan, crate table row `rdy-cli` (`self_update`) | `self_update` cannot verify cosign, and self-update is M3. | Replace `self_update` with "signed self-update, M3, trust model by ADR". | cosmetic | 05, 06 |
-| PC-42 | Plan, "Next 30 days" (line 354, "Still to do: ... GitHub org") against the names table (line 378, "GitHub org \| getrdy-io \| Owned") | The plan says both that the GitHub org is still to do and that it is owned. | Drop "GitHub org" from line 354. | cosmetic | rv13-code |
 
 ## Decisions made
 
 1. **M1 length (2026-10-28).** M1 is extended, not cut. It is planned at its real size, at 10 to 15 founder
-   hours a week, and starts after the Nov 20, 2026 go or no-go. Every document's cut list stays as a
-   `core` marker so you can still trim. The M1-late tier stays in M1 and is marked `core: no`. A usable
+   hours a week, and was planned to start after the Nov 20, 2026 go or no-go. Every document's cut list
+   stays as a `core` marker so you can still trim. The M1-late tier stays in M1 and is marked `core: no`. A usable
    binary still ships every week. `11-backlog.md` sets the numbers, after the code-reviewer and
-   qa-engineer reviews of it: M1 is 167 tickets and 365 hours, 306 of them core. At 13 hours a week from
-   Nov 23, 2026, with core tickets first, 0.1.0 ships in week 25 (May 10 to 16, 2027) and **M1 ends on
-   Sunday Jun 13, 2027** (week 29). At 10 hours a week M1 ends in the week of Aug 9, 2027; at 15 hours,
-   in the week of May 17, 2027. The code-reviewer's bottom-up estimate of the core is 229 hours.
+   qa-engineer reviews of it and correction 02: M1 is 167 tickets and 368.5 hours, 309.5 of them core.
+   At 13 hours a week from Nov 23, 2026, with core tickets first, 0.1.0 ships in week 25 (May 10 to 16,
+   2027) and **M1 ends on Sunday Jun 20, 2027** (week 30, after the M1-009 re-cut). At 10 hours a week
+   M1 ends in the week of Aug 9, 2027; at 15 hours, in the week of May 17, 2027 (not recomputed after
+   correction 02). The code-reviewer's bottom-up estimate of the core is 229 hours. Decision 2 moved the
+   start to 2026-10-28; the calendar dates are unchanged.
 
 2. **Starting M1 (2026-10-28).** The founder approved the planning pass as it stands and told the coordinator
    to build M1 now, ahead of the Nov 20, 2026 go or no-go. This closes open decision 1 below ("Starting M1
@@ -92,6 +59,7 @@ The budget in `KICKOFF.md` is six weeks at 10 to 15 hours: 60 to 90 hours.
 | Check families only: M1 tier 79 plus 6 of reviews; M1-late tier 72, kept in M1 as `core: no` | 03-check-catalog.md, "Capacity and cut order" | 157 |
 | Merged backlog, first draft | 11-backlog.md before review | 571 (438 core) |
 | Merged backlog after the code-reviewer and qa-engineer reviews | 11-backlog.md | 365 (306 core) |
+| Merged backlog after correction 02 (PR #5) | 11-backlog.md | 368.5 (309.5 core) |
 | Bottom-up estimate of the core | 11 review by code-reviewer | 229 core |
 
 M1 tickets in each document's "Tickets implied" section:
@@ -123,7 +91,11 @@ and 99 hours of padding, moved 62.5 hours to M2 to M4, and added 5 hours of qa-e
 
 In each case the documents took the conservative option and left the choice to you.
 
-### 1. Starting M1 before the M0 gates
+### 1. Starting M1 before the M0 gates (resolved 2026-10-28)
+
+**Resolved** by Decisions made 2: the founder started M1 on 2026-10-28, ahead of the Nov 20 go or no-go.
+The gates and the employment-agreement read stay the founder's to finish in parallel. The text below is
+kept as the record.
 
 The plan says no Rust until the gates are met, with go or no-go on Nov 20, 2026, and says to read the
 employment agreement before writing code. `KICKOFF.md` starts M1 when the backlog is approved. Taken (00,
@@ -138,7 +110,14 @@ The repo must be public before the first CI ticket for free CI minutes (06), and
 able to read the code (10). The plan copy in it holds pricing, ARR scenarios, the employment-agreement risk
 row and the trademark history. Options: keep it as is, trim the business sections, or move them to
 `rdy-cloud` and keep only the technical plan public. Taken until you decide: agents add no business content
-to `docs/plan/` (09), and the repo is not created.
+to `docs/plan/` (09).
+
+Update 2026-10-28 (M1-009): `getrdy-io/rdy` now exists and is public, and `docs/plan/rdy-plan.md` is in it
+with the pricing tiers, ARR scenarios, the employment-agreement row and the trademark history. This
+decision is now urgent. Two related rows moved here: PC-05 (the whole question, including the `CLAUDE.md`
+layout line "docs/plan/ holds the plan") and the optional half of PC-40 (whether to replace "$16.5M" at
+plan lines 9, 30 and 133 with "a large round", since the exact figure also identifies the company). M1-009
+applied the other half of PC-40: the investor and angel names are gone.
 
 ### 3. Paid services and credentials
 
@@ -204,3 +183,164 @@ This file is the corrections list.
 ## Tickets implied
 
 - [M1] Apply blocks-M1 and should-fix plan corrections to CLAUDE.md, KICKOFF.md and rdy-plan.md | owner: rust-architect | est: 3h | depends on: none | exit test: every blocks-M1 and should-fix entry is applied or rejected, and its row is deleted from 13.
+
+## Open items for later milestones
+
+- **CF-03, the upload transport (blocks M2-026, not M1).** ADR 0014 sends the M2 upload client to the
+  M3 `http_exchange` primitive and bans reqwest in `deny.toml`. M2-026 builds the upload client on
+  reqwest with the platform verifier, which ADR 0014 rejects. Not resolved here. Before M2-026 starts,
+  rust-architect writes one ADR that picks the upload stack, its verifier and its `deny.toml` entry,
+  reviewed by security-reviewer (`reviews/adr-and-00-review-by-security-reviewer.md`, CF-03).
+
+## CLAUDE.md edits waiting for the founder
+
+An agent message cannot authorize a change to `CLAUDE.md`, so M1-009 does not edit it. These are the
+`CLAUDE.md` halves of the rows above, as exact text. Apply them in the M1-009 PR or after it, then delete
+this section. Until then, agents follow the plan documents where `CLAUDE.md` is stale, as they already do.
+
+- **C-1 (PC-03), rule 3.** Replace "The CLI refuses unsigned or tampered specs unless `--allow-unsigned`
+  is set, and says so loudly." with "The CLI refuses unsigned specs unless `--allow-unsigned` is set, and
+  says so loudly. It always refuses a spec whose signature fails, with or without the flag."
+- **C-2 (PC-04), Commands.** Replace the last line with
+  `cargo run -p rdy -- run examples/specs/acme-platform.yaml --allow-unsigned --json` (signed examples
+  ship in M2).
+- **C-3 (PC-16), Names and places.** Replace "Install: `curl -sSf https://getrdy.io/install | sh`." with
+  "Install: in M1, the pinned release `install.sh`, then `"$HOME/.local/bin/rdy" run <spec>`. From M2,
+  `curl --proto '=https' --tlsv1.2 -sSf https://getrdy.io/install | sh` (root shells: `sh -s --
+  --allow-root`)."
+- **C-4 (ADR 0017), How to work in this repo.** Replace "docs updated, CHANGELOG entry." with "docs
+  updated, changelog fragment in `changelog.d/` (ADR 0017)."
+- **C-5 (PC-18, PC-19, PC-22, PC-23, PC-24, PC-27, PC-28, PC-29, PC-30), Repo layout.** Replace the block
+  with:
+
+  ```text
+  rdy/
+    Cargo.toml              workspace; shared [workspace.dependencies] and lints
+    rust-toolchain.toml     pinned stable
+    deny.toml               cargo-deny policy (licenses, advisories, bans)
+    dist-workspace.toml     dist release config
+    .cargo/config.toml      per-target build settings
+    CHANGELOG.md            assembled from changelog.d/ at each release (ADR 0017)
+    RELEASING.md            release runbook
+    crates/                 a crate enters the workspace when its milestone starts; crates.io placeholders hold the names
+      rdy-spec/             schema (schemars), wire types for specs, results and the bundle manifest, YAML parsing, validation, ed25519 signatures, versioning
+      rdy-engine/           check trait, scheduler, probe facade, privilege negotiation, redactor, HTML and JSON reports; custom.exec (M4)
+      rdy-checks-host/      cpu, memory, disk, kernel, cgroups, time sync, ports, selinux/apparmor, AV agents; custom.file (M2)
+      rdy-checks-net/       egress via proxy, DNS, TLS interception, MTU, bandwidth sample; data stores (M4, feature-gated)
+      rdy-checks-k8s/       version, storage classes, RBAC for install identity, admission, node resources; device plugins and VRAM per node (M4)
+      rdy-checks-cloud/     (M3) AWS first: IAM simulate, service quotas, regions, VPC/subnet capacity; GCP/Azure via REST later
+      rdy-checks-gpu/       (M4) driver, CUDA, VRAM, model-download egress
+      rdy-bundle/           (M2) collectors, tar+zstd, manifest; reuses rdy_engine::redact
+      rdy-cli/              package and binary `rdy` (clap). M1: run, verify, spec (lint|sign|keygen), trust (add|list|remove), version. M2: bundle, upload, report, redact. M3: spec init, self-update, completion
+    install.sh              served at getrdy.io/install; verifies checksum and cosign signature
+    scripts/                verify-release.sh and other repo scripts
+    changelog.d/            one changelog fragment per PR (ADR 0017)
+    docs/                   M1: Markdown pages, reference pages generated from the JSON schema. M3: Astro Starlight site; only docs/src/content/docs/ is published
+    docs/plan/              rdy-plan.md plus the plans this kickoff produces; never published
+    docs/adr/               architecture decision records; never published
+    examples/specs/         synthetic example specs
+    tests/fixtures/         synthetic environments, recorded command output, golden reports
+    .github/workflows/      ci.yml, release.yml (generated by dist), sign-release.yml, audit.yml; docs preview (M2) and docs-deploy.yml (M3)
+  ```
+
+  PC-05 (whether `docs/plan/` keeps the business plan) is founder decision 2 and is not part of this edit.
+- **C-6 (PC-20), Engineering standards.** Replace "Cross-platform from day one: Linux x86_64 and aarch64
+  (musl), macOS, Windows. CI runs all four." with "Five release targets: Linux x86_64 and aarch64 (musl),
+  macOS aarch64 and x86_64, Windows x86_64. Five CI legs, each running the full test job. If the Intel
+  macOS image is retired, `x86_64-apple-darwin` is built on the arm64 runner and tested nightly (06).
+  Every check compiles and runs on every target from day one; where a data source is not built yet, the
+  check reports Skipped, not yet on this OS."
+- **C-7 (PC-21), Engineering standards, Output.** After the exit code list add: "clap usage errors are
+  mapped to 64; `Parser::parse`, `Command::get_matches` and `Error::exit` are banned by clippy
+  `disallowed-methods`, and a test runs `rdy --bogus`." (07 section 1 and its correction add the ban.)
+- **C-8 (PC-28), Engineering standards, Supply chain.** Replace "releases via `cargo-dist`" with "releases
+  via `dist` (`dist-workspace.toml`)".
+- **C-9 (PC-32), Engineering standards, Docs.** Add: "The docs.rs pages of `rdy-spec` and `rdy-engine` go
+  live with their first crates.io release (M2), and the docs site links there."
+
+## Closed during M1-009
+
+Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit waiting for the founder.
+
+- PC-01: deleted. Resolved by Decisions made 2; open decision 1 is marked resolved, and 00 and 11 say M1
+  started on 2026-10-28.
+- PC-02: applied to `KICKOFF.md` (constraints) and the plan (Rust build plan: 0.1.0 after 25 weeks, M1
+  after 30; "Build order inside M1"). The KICKOFF text names the 2026-10-28 start instead of "after a
+  go on Nov 20".
+- PC-03: applied to the plan (design rules). C-1.
+- PC-04: applied to the plan (crate table: `rdy` in `crates/rdy-cli`). C-2.
+- PC-05: moved to founder decisions (decision 2), with the fact that the repo is now public.
+- PC-06, PC-25: applied to `KICKOFF.md` (spec signing and release signing; minimum docs, security and
+  release work) and the plan (M1 scope gets minimal Markdown docs; M3 says hosted docs site).
+- PC-07: applied to the plan (Milestones table gets an Engineering done column from 00).
+- PC-08, PC-38: applied to the plan (alpha builds, `--allow-unsigned`, version policy).
+- PC-09: applied to the plan (two workspaces).
+- PC-10, PC-11, PC-12: applied to the plan (release engineering and crate table). The `serde_yaml` and
+  `serde_yml` bans are already in the M1-004 exit test.
+- PC-13: applied to the plan crate row, except the clause "`reqwest` only for the M2 upload client":
+  rejected, because ADR 0014 bans reqwest and the upload stack is open (CF-03 above).
+- PC-14, PC-16: applied to the plan (POC flow step 1, terminal demo, names table). C-3.
+- PC-15: applied to the plan (install endpoint).
+- PC-17: applied to the plan (design sample label, `.example` hosts, `access_modes`, `gpu.cuda`
+  `built_with`, `source` and `compat`, the nominal band note, IAM simulation wording).
+- PC-18, PC-34: applied to the plan family list (milestone per family, `aws.*` ids). C-5.
+- PC-19 (cosmetic), PC-27: applied to the plan (family list, crate table). C-5.
+- PC-20: C-6. PC-21: C-7. PC-22, PC-24, PC-29: C-5. PC-29 had `docs-deploy.yml` in M1; the 11 review
+  moved the hosted docs to M3, so C-5 says M3.
+- PC-23, PC-30: applied to the plan (crate table, public layout). C-5.
+- PC-26: applied to the plan (conversion flow step 4).
+- PC-28: applied to the plan and `KICKOFF.md` item 7. C-5, C-8.
+- PC-31, PC-33, PC-36, PC-39, PC-41, PC-42 (cosmetic): applied to the plan.
+- PC-32 (cosmetic): C-9.
+- PC-35 (cosmetic): left in the table. It is a repo-wide wording sweep plus a brief kept outside the
+  repo, and no M1 ticket depends on it.
+- PC-37 (cosmetic): left in the table. It changes how a business milestone is measured, which is the
+  founder's call when M3 is planned.
+- PC-40: applied to the plan (investor and angel names dropped). The optional "$16.5M" change moved to
+  founder decisions (decision 2).
+
+ADR amendments in the ticket title:
+
+- ADR 0006 decision 5: `net.dns` takes the Linux system answer from `getent ahosts`, with
+  `hickory-resolver` as the per-nameserver tool and the fallback (03 `net.dns`, rv03-rust-engineer item
+  6). 02's M2 ticket for this amendment is done early.
+- ADR 0015 decision 10: the 04 bullet (span union, keyed HMAC tags, `Redacted<T>`, `ring`, schema-aware
+  walk, rules compiled in, fail closed). Status: Accepted, pending security-reviewer sign-off in the
+  M1-009 PR.
+
+Review follow-ups collected during the build:
+
+- ADR 0008 decision 7 and 01 section 4.8: `spec_unreadable` (exit 64) and `interrupted` (exit 70)
+  added. ADR 0008 also gains `spec_expired` and `trust_store_insecure`, which 01 section 4.8 already said
+  were added. The result schema's ErrorOutput code list matches.
+- ADR 0003 decisions 1 and 2 and ADR 0008 decision 4: aligned with ADR 0016 (folder created before the
+  first check, `-2` to `-9`, exit 70 before any check; Windows default).
+- ADR 0003 decision 6: the banner comes first. 01 section 6 still listed the banner second, below the
+  header, against its own 4.7, 07 sections 2.1 and 8, and 07's correction; it is moved to item 1 too.
+- ADR 0008 decision 4: Ctrl-C added to the exit 70 list (07 "Decisions needing an ADR").
+- ADR 0008 decision 7: `report_write` is an error object only when no verdict exists, as in 07 section
+  4.1.
+- ADR 0002 decision 5: a declined `trust add` exits 64.
+- Totals: 00 and 13 say 368.5 hours and 309.5 core, as 11 does. The 11 calendar is re-cut from week 19
+  (11 h, 12 h, 12.5 h, 13.5 h, 11.5 h, 13.5 h, 13 h to week 25; no week over 13.5 h). Core still ends in
+  week 25; M1 ends in week 30, Sunday Jun 20, 2027. 00's calendar is copied from 11 (00 had also
+  drifted in weeks 7 and 19).
+- `reviews/adr-and-00-review-by-security-reviewer.md`: the MF-03 quotes have their `<` and
+  `>` escapes back. Both closure checks now say the check itself edited no file, and name the M1-001
+  commits that did. `reviews/adr-0013-0016-review-by-security-reviewer.md`: CF-04 to CF-06 marked done by
+  backlog correction 02 (PR #5).
+- ADR 0014: amendment note for MF-04 in the status line and decision 7.
+- 11: the stale SEC-21 correction is deleted; 05 revision 3 already says "no redirects".
+- Corpus count: M1-063, M1-138, the week 13 row and the reconciliation note say 28, as 04 does. The
+  M1-063 title copy in 12-progress.md still says 30; that line belongs to the coordinator.
+- CF-03: recorded above as an open M2 item, not resolved.
+- CF-07: 01 section 5 and the 7.2 sample take `identity.kube.user` from `SelfSubjectReview`. A
+  kubeconfig-only user (1.27 and older, or a failed call) is marked with `user_verified: false` and shown
+  as "not verified by the API server". `user_verified` is a new optional field in revision 0 of the
+  result schema, which has not shipped, so no `rdy-spec` bump.
+- CF-02 (assigned to M1-009 by the adr-and-00 closure check): 00's report writer sketch takes
+  `RedactedReport` and `OutputDir`, `rdy-checks-net` names the probe facade (ADR 0014), and the
+  reqwest and `rustls-platform-verifier` rows say they are not used in M1; a hyper row is added.
+- ADR 0017 (changelog fragments) added and indexed. C-4 carries the `CLAUDE.md` checklist line.
+- M1-003: the exit test says the 12 labels of 10 section 6, so "the 10 section 6 labels" cannot be read
+  as a count.
