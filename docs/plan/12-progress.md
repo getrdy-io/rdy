@@ -45,7 +45,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-018 | [#20](https://github.com/getrdy-io/rdy/pull/20) | 2026-10-28 | version constraints such as ">=4.2" are not a type: metadata.version stays free text per 01 (not evaluated); Version has no ordering yet (first comparing check adds it); CheckParams wiring is M1-019, M1-024, M1-025; timeout range 1s to 60s is checked by the field that uses Duration
 
-- M1-019 | todo | | Two-step check decoding with Unknown and Unsupported variants
+- M1-019 | PR #TBD | | parameter structs for the 17 M1 ids are empty placeholders, so every parameter reads as Unsupported until M1-024 and M1-025; Unknown stands for both not_in_build and unknown_check until M1-023 adds the reserved-id list; did-you-mean and the skip messages are M1-021 and M1-031
 
 - M1-020 | todo | | Define result model and verdict mapping in rdy-spec
 

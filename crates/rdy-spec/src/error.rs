@@ -219,6 +219,20 @@ pub enum SpecError {
         /// What is wrong, already cut and escaped so it is safe to print.
         reason: String,
     },
+    /// A check entry has no `id`.
+    #[error("check {number} has no id")]
+    MissingCheckId {
+        /// The place of the entry in `checks`, counting from 1.
+        number: usize,
+    },
+    /// Two check entries have the same key, which is `id`, or `id/name` when there is a name.
+    #[error("{}", duplicate_check_message(.id, .name.as_deref()))]
+    DuplicateCheck {
+        /// The id of both entries, already cut and escaped so it is safe to print.
+        id: String,
+        /// The name of both entries, if they have one.
+        name: Option<String>,
+    },
 }
 
 /// Keys that hold versions in the `rdy/v1` spec. A number under one of these has a version meaning, so
@@ -232,6 +246,13 @@ fn unquoted_decimal_message(key: Option<&str>, text: &str) -> String {
         }
         Some(key) => format!("{key} is written as the number {text}. Quote it to keep it as typed"),
         None => format!("{text} is written as a number. Quote it to keep it as typed"),
+    }
+}
+
+fn duplicate_check_message(id: &str, name: Option<&str>) -> String {
+    match name {
+        Some(name) => format!("two checks are named {id} ({name})"),
+        None => format!("two checks are named {id}"),
     }
 }
 
@@ -308,6 +329,10 @@ impl SpecError {
             Self::InvalidValue { .. } => {
                 "change the value to the form the spec reference shows for this key."
             }
+            Self::MissingCheckId { .. } => "add an id such as 'id: host.memory'.",
+            Self::DuplicateCheck { .. } => {
+                "give each one a name, for example 'name: data'. The name is only a label."
+            }
             Self::InvalidProduct { .. } => {
                 "use lowercase letters, digits and hyphens, such as 'acme-platform'."
             }
@@ -356,6 +381,8 @@ mod tests {
             | SpecError::UnsupportedApiVersion { .. }
             | SpecError::UnknownKey { .. }
             | SpecError::MissingField { .. }
+            | SpecError::MissingCheckId { .. }
+            | SpecError::DuplicateCheck { .. }
             | SpecError::InvalidValue { .. } => {
                 assert!(!e.hint().is_empty(), "{e:?} has no hint");
                 assert!(!e.to_string().is_empty(), "{e:?} has no message");
@@ -404,6 +431,15 @@ mod tests {
             SpecError::UnknownKey { key: "k".into() },
             SpecError::MissingField { field: "k".into() },
             SpecError::InvalidValue { reason: "r".into() },
+            SpecError::MissingCheckId { number: 3 },
+            SpecError::DuplicateCheck {
+                id: "host.disk".into(),
+                name: None,
+            },
+            SpecError::DuplicateCheck {
+                id: "host.disk".into(),
+                name: Some("data".into()),
+            },
         ];
         for e in &samples {
             assert_has_hint_and_message(e);
@@ -498,6 +534,24 @@ mod tests {
                 text: "1e3".into()
             }),
             "1e3 is written as a number. Quote it to keep it as typed"
+        );
+        assert_eq!(
+            msg(SpecError::MissingCheckId { number: 3 }),
+            "check 3 has no id"
+        );
+        assert_eq!(
+            msg(SpecError::DuplicateCheck {
+                id: "host.disk".into(),
+                name: None
+            }),
+            "two checks are named host.disk"
+        );
+        assert_eq!(
+            msg(SpecError::DuplicateCheck {
+                id: "host.disk".into(),
+                name: Some("data".into())
+            }),
+            "two checks are named host.disk (data)"
         );
         assert_eq!(
             SpecError::BadApiVersion { found: None }.hint(),
