@@ -1,4 +1,73 @@
-# Minimal cargo-deny policy from M1-003. M1-004 adds the crate bans and the full license policy.
+# cargo-deny policy. Source: docs/plan/05-threat-model.md, "Dependency policy".
+# ADRs: 0001 (YAML parser), 0009 (rustls on ring, no OpenSSL), 0014 (probe facade).
+# Run it with `cargo deny check`. Every PR must pass.
+
+[graph]
+# Check the targets we ship. Windows and macOS legs get the same policy.
+targets = [
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+# The PR gate looks at unmaintained crates in the workspace's own dependencies.
+# The daily audit (M2, SEC-02) uses "all" and opens an issue instead of blocking.
+unmaintained = "workspace"
+yanked = "deny"
+# An ignore must name a ticket and expire within 90 days. There are none.
+ignore = []
 
 [licenses]
-allow = ["Apache-2.0", "MIT", "Unicode-3.0"]
+# Never GPL, LGPL, AGPL, SSPL, BUSL or unknown. MPL-2.0 only as a reviewed per-crate
+# exception (add it under `exceptions` with the crate name and the review link).
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    # webpki-roots ships Mozilla's root list under this license.
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+# The allowlist is ahead of the dependency tree on purpose. Do not warn about unused entries.
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+deny = [
+    # TLS is rustls on ring everywhere (ADR 0009, rule 5). No OpenSSL, no platform TLS,
+    # no aws-lc. A new ADR lifts the aws-lc ban, not a quiet change (M2 AWS SDK spike).
+    { crate = "openssl", reason = "ADR 0009: rustls only" },
+    { crate = "openssl-sys", reason = "ADR 0009: rustls only" },
+    { crate = "native-tls", reason = "ADR 0009: rustls only" },
+    { crate = "hyper-tls", reason = "ADR 0009: rustls only" },
+    { crate = "tokio-native-tls", reason = "ADR 0009: rustls only" },
+    { crate = "aws-lc-sys", reason = "ADR 0009: ring is the crypto provider" },
+    { crate = "aws-lc-rs", reason = "ADR 0009: ring is the crypto provider" },
+    # YAML parsers that are archived or unsound (ADR 0001).
+    { crate = "serde_yaml", reason = "ADR 0001: archived, RUSTSEC-2025-0068" },
+    { crate = "serde_yml", reason = "ADR 0001: RUSTSEC-2025-0068" },
+    { crate = "libyml", reason = "ADR 0001: RUSTSEC-2025-0067" },
+    # Unmaintained RUSTSEC-2024-0375 and unsound RUSTSEC-2021-0145. Use std::io::IsTerminal.
+    { crate = "atty", reason = "RUSTSEC-2024-0375 and RUSTSEC-2021-0145; use std::io::IsTerminal" },
+    # The probe facade owns every socket in M1 (ADR 0014). The M2 upload client lifts
+    # this with a reviewed change that names the crate that may depend on it.
+    { crate = "reqwest", reason = "ADR 0014: the probe facade owns sockets in M1" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
