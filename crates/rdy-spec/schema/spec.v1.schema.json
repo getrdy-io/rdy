@@ -154,10 +154,10 @@
       "pattern": "^(https?://[^/@\\s#]+(/[^\\s#]*)?|[A-Za-z0-9.-]+:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])|\\[[0-9A-Fa-f:]+\\]:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))$"
     },
     "AbsPath": {
-      "description": "An absolute path: /... on Unix, C:\\... on Windows.",
+      "description": "An absolute path: /... on Unix, C:\\... on Windows. No control characters.",
       "type": "string",
       "maxLength": 1024,
-      "pattern": "^(/|[A-Za-z]:\\\\)"
+      "pattern": "^(/|[A-Za-z]:\\\\)[^\\u0000-\\u001f\\u007f-\\u009f]*$"
     },
     "K8sName": {
       "type": "string",
@@ -471,6 +471,7 @@
         },
         "arch": {
           "type": "array",
+          "minItems": 1,
           "uniqueItems": true,
           "items": {
             "enum": [
@@ -483,6 +484,7 @@
         },
         "flags": {
           "type": "array",
+          "minItems": 1,
           "maxItems": 64,
           "items": {
             "type": "string",
@@ -593,6 +595,7 @@
       "properties": {
         "free": {
           "type": "array",
+          "minItems": 1,
           "maxItems": 256,
           "items": {
             "oneOf": [
@@ -623,6 +626,7 @@
         },
         "udp_free": {
           "type": "array",
+          "minItems": 1,
           "maxItems": 256,
           "uniqueItems": true,
           "items": {
@@ -666,7 +670,8 @@
             },
             "denials_max": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 4294967295
             },
             "denials_window": {
               "$ref": "#/$defs/Duration"
@@ -758,7 +763,8 @@
         },
         "windows_min_build": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 4294967295
         }
       }
     },
