@@ -855,7 +855,7 @@
               }
             ]
           },
-          "description": "At most 64 endpoints in the whole spec."
+          "description": "At most 64 endpoints in one check. A spec names at most 64 distinct hosts and 256 distinct host and port pairs across all its checks."
         },
         "via_proxy": {
           "description": "auto: try what the product would do and say if the other path works. direct: no proxy. proxy_only: only through the proxy.",
@@ -1358,7 +1358,7 @@
                   "pattern": "^file:"
                 },
                 "then": {
-                  "pattern": "^file:/[^\\\\\\u0000-\\u001f\\u007f-\\u009f]{0,1023}$",
+                  "pattern": "^file:/[^\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]{0,1023}$",
                   "not": {
                     "pattern": "(^file:|/)\\.\\.(/|$)"
                   }

@@ -35,6 +35,8 @@ pub mod scalar;
 pub mod sig;
 pub mod spec;
 
+#[doc(hidden)]
+pub use error::echo_capped;
 pub use error::{Location, SpecError};
 pub use limits::{MAX_CHECKS, MAX_ENDPOINTS, MAX_HOSTS};
 pub use loaded::{LoadedSpec, load, load_at};

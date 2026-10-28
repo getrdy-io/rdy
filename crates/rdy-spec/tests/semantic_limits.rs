@@ -240,6 +240,8 @@ fn collectors_follow_the_grammar_of_the_bundle_section() {
         "'file:/etc/acme/\\..\\x'",
         "\"file:/etc/a\\u0085b\"",
         "\"file:/etc/a\\tb\"",
+        "\"file:/etc/a\\u2028b\"",
+        "\"file:/etc/a\\u2029b\"",
         "\"exec:ls\"",
         "\"\"",
     ] {

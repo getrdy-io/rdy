@@ -289,7 +289,11 @@ fn check_collector_path(path: &str) -> Result<(), &'static str> {
     if path.chars().count() > MAX_PATH_CHARS {
         return Err("the path is too long");
     }
-    if path.chars().any(char::is_control) {
+    // U+2028 and U+2029 are not control characters to Rust, but they break a line in a log or a page.
+    if path
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
+    {
         return Err("the path has a control character");
     }
     // A backslash is refused until the Windows path form lands (M2), so `\..\` never passes as a name.
