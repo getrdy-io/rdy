@@ -829,8 +829,12 @@ fn a_wrong_or_missing_api_version_is_refused_with_its_own_error() {
 
 #[test]
 fn a_quoted_api_version_is_the_same_as_a_plain_one() {
-    pass("apiVersion: \"rdy/v1\"\nkind: Readiness\nmetadata: {product: a}\nchecks: []\n");
-    pass("apiVersion: 'rdy/v1'\nkind: Readiness\nmetadata: {product: a}\nchecks: []\n");
+    pass(
+        "apiVersion: \"rdy/v1\"\nkind: Readiness\nmetadata: {product: a}\nchecks: [{id: host.cpu}]\n",
+    );
+    pass(
+        "apiVersion: 'rdy/v1'\nkind: Readiness\nmetadata: {product: a}\nchecks: [{id: host.cpu}]\n",
+    );
 }
 
 // ---- typed errors from the second pass -----------------------------------------------------------------------------------

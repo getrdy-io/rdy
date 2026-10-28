@@ -549,10 +549,11 @@ impl Guard {
                     key: Some(inner), ..
                 },
                 Frame::Seq,
-            ] if top == "bundle" && inner == "collect" => {
-                if self.places.collect.len() < PLACED_COLLECT_ITEMS {
-                    self.places.collect.push(at);
-                }
+            ] if top == "bundle"
+                && inner == "collect"
+                && self.places.collect.len() < PLACED_COLLECT_ITEMS =>
+            {
+                self.places.collect.push(at);
             }
             _ => {}
         }
@@ -795,7 +796,7 @@ fn map_read_error(error: serde_saphyr::Error) -> SpecError {
     let kind = match error {
         E::SerdeUnknownField {
             field, expected, ..
-        } => unknown_key(echo_safe(&field), &expected),
+        } => unknown_key(echo_safe(field), expected),
         E::SerdeMissingField { field, .. } if *field == "apiVersion" => {
             SpecError::BadApiVersion { found: None }
         }

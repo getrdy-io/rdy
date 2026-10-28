@@ -56,8 +56,14 @@ fn other_checks_and_other_keys_add_no_hosts() {
     let host = check("host.cpu", json!({"endpoints": ["a.example:1"]}));
     let wrong_key = check("net.egress", json!({"hosts": ["a.example:1"]}));
     let not_a_list = check("net.egress", json!({"endpoints": "a.example:443"}));
-    let odd_items = check("net.dns", json!({"names": [1, null, true, ["x"], {"other": "y"}]}));
-    assert_eq!(hosts(vec![proxy, host, wrong_key, not_a_list, odd_items]), 0);
+    let odd_items = check(
+        "net.dns",
+        json!({"names": [1, null, true, ["x"], {"other": "y"}]}),
+    );
+    assert_eq!(
+        hosts(vec![proxy, host, wrong_key, not_a_list, odd_items]),
+        0
+    );
 }
 
 #[test]
@@ -71,7 +77,9 @@ fn text_that_is_not_a_target_still_counts_as_a_host() {
 }
 
 fn many(id: &str, key: &str, from: usize, to: usize, suffix: &str) -> CheckSpec {
-    let list: Vec<String> = (from..to).map(|i| format!("h{i}.acme.example{suffix}")).collect();
+    let list: Vec<String> = (from..to)
+        .map(|i| format!("h{i}.acme.example{suffix}"))
+        .collect();
     check(id, json!({ key: list }))
 }
 

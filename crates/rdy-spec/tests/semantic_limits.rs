@@ -74,9 +74,8 @@ fn a_spec_of_256_checks_is_read() {
 
 #[test]
 fn the_reported_count_is_the_real_one_however_long_the_list_is() {
-    let mut yaml = String::from(
-        "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n",
-    );
+    let mut yaml =
+        String::from("apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n");
     for i in 0..3000 {
         yaml.push_str(&format!("  - id: host.cpu\n    name: c{i}\n    min: 2\n"));
     }
@@ -188,7 +187,7 @@ fn collectors_follow_the_grammar_of_the_bundle_section() {
             Err(e) => e,
         };
         assert!(matches!(e.kind(), SpecError::InvalidValue { .. }), "{e:?}");
-        assert_eq!(place(&e), Some((9, 12)), "{item}");
+        assert_eq!(place(&e), Some((9, 13)), "{item}");
         assert_printable(&e);
     };
     for item in [
@@ -196,7 +195,6 @@ fn collectors_follow_the_grammar_of_the_bundle_section() {
         "\"journal:90m\"",
         "\"k8s:events\"",
         "\"file:/etc/acme/*.yaml\"",
-        "'file:C:\\ProgramData\\acme\\*.log'",
         "\"file:/var/log/..acme/x\"",
     ] {
         ok(item);
@@ -212,7 +210,7 @@ fn collectors_follow_the_grammar_of_the_bundle_section() {
         "\"file:./x\"",
         "\"file:/etc/../shadow\"",
         "\"file:/etc/acme/..\"",
-        "'file:C:\\acme\\..\\x'",
+        "'file:C:\\acme\\x'",
         "\"exec:ls\"",
         "\"\"",
     ] {
@@ -222,8 +220,7 @@ fn collectors_follow_the_grammar_of_the_bundle_section() {
 
 #[test]
 fn bundle_lists_have_their_limits() {
-    let head =
-        "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: host.cpu\n    min: 2\nbundle:\n";
+    let head = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: host.cpu\n    min: 2\nbundle:\n";
     let list = |n: usize, item: &str| format!("[{}]", vec![item; n].join(", "));
     let run = |body: String| parse_unverified(format!("{head}{body}\n").as_bytes());
     assert!(run(format!("  collect: {}", list(64, "\"k8s:events\""))).is_ok());
@@ -241,14 +238,20 @@ fn bundle_lists_have_their_limits() {
         Err(e) => e,
         Ok(_) => panic!("65 redact groups should be refused"),
     };
-    assert_eq!(e.to_string(), "bundle.redact has 65 entries. The limit is 64");
+    assert_eq!(
+        e.to_string(),
+        "bundle.redact has 65 entries. The limit is 64"
+    );
     let patterns = |n: usize| {
         let one = "{name: p, regex: 'ACME-[A-Z]+'}";
         format!("  redact_patterns: {}", list(n, one))
     };
     assert!(run(patterns(32)).is_ok());
     assert!(run(patterns(33)).is_err());
-    let long = format!("  redact_patterns: [{{name: p, regex: '{}'}}]", "a".repeat(257));
+    let long = format!(
+        "  redact_patterns: [{{name: p, regex: '{}'}}]",
+        "a".repeat(257)
+    );
     assert!(run(long).is_err());
 }
 
@@ -288,7 +291,7 @@ fn metadata_lengths_and_annotations_have_their_limits() {
         e.to_string(),
         "metadata.annotations has 33 entries. The limit is 32"
     );
-    assert_eq!(place(&e), Some((5, 3)));
+    assert_eq!(place(&e), Some((6, 5)));
 }
 
 #[test]
@@ -297,10 +300,7 @@ fn expires_must_be_the_full_utc_form() {
     assert_eq!(e.kind(), &SpecError::BadExpires);
     assert_eq!(e.to_string(), "expires must be a full UTC time");
     assert_eq!(place(&e), Some((5, 12)));
-    assert_eq!(
-        e.fix(),
-        "write it like 'expires: 2027-01-31T00:00:00Z'."
-    );
+    assert_eq!(e.fix(), "write it like 'expires: 2027-01-31T00:00:00Z'.");
 }
 
 fn at(secs: u64) -> SystemTime {
@@ -350,11 +350,51 @@ fn load_reads_the_real_clock() {
     // and before it on a machine that is wrong, so only the fail-closed half is pinned: an old date is
     // refused, and a spec with no expiry is never refused for it.
     let old = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\n  expires: \"2001-01-01T00:00:00Z\"\nchecks:\n  - id: host.cpu\n    min: 2\n";
-    match load(old.as_bytes(), None, &TrustStore::new(), Policy::AllowUnsigned) {
+    match load(
+        old.as_bytes(),
+        None,
+        &TrustStore::new(),
+        Policy::AllowUnsigned,
+    ) {
         Err(SpecError::Expired { expired_on, .. }) => assert_eq!(expired_on, "2001-01-01"),
         other => panic!("{other:?}"),
     }
     let none = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: host.cpu\n    min: 2\n";
-    assert!(load(none.as_bytes(), None, &TrustStore::new(), Policy::AllowUnsigned).is_ok());
+    assert!(
+        load(
+            none.as_bytes(),
+            None,
+            &TrustStore::new(),
+            Policy::AllowUnsigned
+        )
+        .is_ok()
+    );
 }
 
+#[test]
+fn an_annotation_must_fit_the_schema() {
+    let spec = |annotation: &str| {
+        format!(
+            "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\n  annotations:\n    {annotation}\nchecks:\n  - id: host.cpu\n    min: 2\n"
+        )
+    };
+    for ok in ["portal.id: abc", "a/b-c_d.e: \"\"", "k: \"vvv\""] {
+        assert!(parse_unverified(spec(ok).as_bytes()).is_ok(), "{ok}");
+    }
+    for bad in [
+        "Portal: x".to_owned(),
+        "-a: x".to_owned(),
+        "a b: x".to_owned(),
+        format!("{}: x", "k".repeat(64)),
+        format!("k: \"{}\"", "v".repeat(257)),
+    ] {
+        match parse_unverified(spec(&bad).as_bytes()) {
+            Err(e) => {
+                assert!(matches!(e.kind(), SpecError::InvalidValue { .. }), "{e:?}");
+                assert_eq!(place(&e), Some((6, 5)));
+                assert_printable(&e);
+            }
+            Ok(_) => panic!("{bad} should be refused"),
+        }
+    }
+}

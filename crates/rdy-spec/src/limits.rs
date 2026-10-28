@@ -12,11 +12,12 @@
 //! - the `bundle` block within its list sizes, with collectors that fit the grammar of 01 section 2.8
 //!   (`journal:<duration>`, `k8s:events`, `file:<absolute path or glob>` with no `..` segment).
 //!
-//! The host count reads the raw parameters of the three net checks and not their typed form. A check
-//! that does not decode (a mistyped key, a list of 65) is skipped at run time, but a spec that names 65
-//! hosts is still refused as a whole, so a vendor sees the problem in lint and sign and the limit does
-//! not depend on how a neighbouring check happens to decode. When a host cannot be read as a
-//! [`Target`], its lowercase text counts as one host. That can only make the count larger.
+//! The host count reads the typed parameters of the three net checks. A check that does not decode (a
+//! mistyped key, a list of 65) is skipped at run time, but a spec that names 65 hosts is still refused as
+//! a whole, so a vendor sees the problem in lint and sign and the limit does not depend on how a
+//! neighbouring check happens to decode. Such a check is counted from its raw parameters. When a host
+//! cannot be read as a [`Target`], its lowercase text counts as one host. That can only make the count
+//! larger.
 //!
 //! Not here: compiling `redact_patterns` regexes (M1-031 and M2), expiry against a clock (see
 //! [`crate::expiry`]).
@@ -25,6 +26,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use serde_json::{Map, Value};
 
+use crate::check::CheckParams;
 use crate::error::echo_safe;
 use crate::expiry::parse_utc;
 use crate::spec::{BundleSpec, Metadata, Spec};
@@ -39,6 +41,7 @@ pub const MAX_HOSTS: usize = 64;
 const MAX_VERSION_CHARS: usize = 64;
 const MAX_CONTACT_CHARS: usize = 256;
 const MAX_ANNOTATIONS: usize = 32;
+const MAX_ANNOTATION_VALUE_CHARS: usize = 256;
 const MAX_COLLECT: usize = 64;
 const MAX_REDACT: usize = 64;
 const MAX_REDACT_PATTERNS: usize = 32;
@@ -138,6 +141,23 @@ fn check_metadata(metadata: &Metadata, places: &Places) -> Result<(), SpecError>
             places.of_metadata("annotations"),
         ));
     }
+    for (key, value) in &metadata.annotations {
+        let key_ok = key.chars().count() <= 63
+            && key.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+            && key.chars().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '/' | '-')
+            });
+        if !key_ok || value.chars().count() > MAX_ANNOTATION_VALUE_CHARS {
+            return Err(placed(
+                invalid(format!(
+                    "the annotation '{}' is not allowed: a key is 1 to 63 characters from a-z, 0-9, . _ / and -, \
+                     starting with a letter or digit, and a value is at most {MAX_ANNOTATION_VALUE_CHARS} characters",
+                    echo_safe(key)
+                )),
+                places.of_metadata("annotations"),
+            ));
+        }
+    }
     if let Some(expires) = &metadata.expires
         && parse_utc(expires).is_none()
     {
@@ -217,13 +237,9 @@ fn check_collector(item: &str) -> Result<(), String> {
 }
 
 fn check_collector_path(path: &str) -> Result<(), &'static str> {
-    let mut chars = path.chars();
-    let absolute = match (chars.next(), chars.next(), chars.next()) {
-        (Some('/'), _, _) => true,
-        (Some(drive), Some(':'), Some('\\')) => drive.is_ascii_alphabetic(),
-        _ => false,
-    };
-    if !absolute {
+    // The schema allows a path that starts with `/` only. A Windows path form arrives with the bundle
+    // collectors of M2, in the schema and here together.
+    if !path.starts_with('/') {
         return Err("the path is not absolute");
     }
     if path.chars().count() > MAX_PATH_CHARS {
@@ -232,7 +248,7 @@ fn check_collector_path(path: &str) -> Result<(), &'static str> {
     if path.chars().any(char::is_control) {
         return Err("the path has a control character");
     }
-    if path.split(['/', '\\']).any(|part| part == "..") {
+    if path.split('/').any(|part| part == "..") {
         return Err("the path has a '..' part");
     }
     Ok(())
@@ -252,17 +268,33 @@ fn check_hosts(spec: &Spec) -> Result<(), SpecError> {
 /// Every distinct host that `net.egress`, `net.tls_intercept` and `net.dns` entries name, anywhere in the
 /// spec. A host named by several checks, or by several endpoints on different ports, counts once.
 ///
-/// This reads the raw parameters. See the module documentation for why.
+/// A check that decodes is read through its typed parameters. A check of these three ids that does not
+/// decode (a list of 65, a mistyped key) is skipped at run time, but it is still counted from its raw
+/// parameters, so a spec cannot hide hosts in entries that fail to decode. See the module documentation.
 pub(crate) fn spec_hosts(spec: &Spec) -> HashSet<String> {
     let mut hosts = HashSet::new();
     for check in &spec.checks {
-        let (key, inner) = match check.id.as_str() {
-            "net.egress" => ("endpoints", Some("target")),
-            "net.tls_intercept" => ("hosts", None),
-            "net.dns" => ("names", Some("name")),
-            _ => continue,
-        };
-        hosts.extend(listed_texts(&check.params, key, inner).map(host_key));
+        match check.decode_params() {
+            CheckParams::NetEgress(p) => {
+                hosts.extend(p.endpoints.iter().map(|e| e.target.host().to_string()));
+            }
+            CheckParams::NetTlsIntercept(p) => {
+                hosts.extend(p.hosts.iter().flatten().map(|h| h.host().to_string()));
+            }
+            CheckParams::NetDns(p) => {
+                hosts.extend(p.names.iter().map(|rule| host_key(rule.name.as_str())));
+            }
+            CheckParams::Unsupported { id, fields, .. } => {
+                let (key, inner) = match id.as_str() {
+                    "net.egress" => ("endpoints", Some("target")),
+                    "net.tls_intercept" => ("hosts", None),
+                    "net.dns" => ("names", Some("name")),
+                    _ => continue,
+                };
+                hosts.extend(listed_texts(&fields, key, inner).map(host_key));
+            }
+            _ => {}
+        }
     }
     hosts
 }
