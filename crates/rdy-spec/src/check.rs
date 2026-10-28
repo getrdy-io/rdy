@@ -41,6 +41,7 @@ use crate::SpecError;
 use crate::error::{echo_reason, echo_safe};
 use crate::reserved::{UnknownKind, is_reserved_id};
 use crate::spec::{CheckSpec, Lenient, Spec};
+use crate::suggest::did_you_mean;
 
 mod common;
 mod host;
@@ -154,6 +155,15 @@ macro_rules! known_checks {
 
         /// Every check id that this build implements.
         pub const KNOWN_IDS: &[&str] = &[$($id),*];
+
+        /// The keys the parameter struct of `id` accepts, or `None` when no check in this build has
+        /// that id. Lint offers them as did-you-mean suggestions.
+        pub(crate) fn fields_of(id: &str) -> Option<&'static [&'static str]> {
+            match id {
+                $($id => Some(<$ty as ParamSet>::FIELDS),)*
+                _ => None,
+            }
+        }
     };
 }
 
@@ -203,6 +213,16 @@ pub enum UnsupportedReason {
         /// The key, already cut and escaped so it is safe to print.
         field: String,
     },
+    /// A block inside a value has a key the block does not have, such as `prot` in
+    /// `free: [{port: 80, prot: tcp}]` of `host.ports`.
+    ///
+    /// The path names the key from the top of the entry: `free[0].prot`.
+    UnknownNestedField {
+        /// The path of the key, already cut and escaped so it is safe to print.
+        path: String,
+        /// The key of that block nearest to the one written, when it is a close match (a typo).
+        near: Option<String>,
+    },
     /// A key the check requires is missing.
     MissingField {
         /// The key, already cut and escaped so it is safe to print.
@@ -237,6 +257,7 @@ impl fmt::Display for UnsupportedReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownField { field } => write!(f, "cannot read '{field}'"),
+            Self::UnknownNestedField { path, .. } => write!(f, "cannot read '{path}'"),
             Self::MissingField { field } => write!(f, "'{field}' is required and missing"),
             Self::BadValue {
                 field: Some(field),
@@ -306,7 +327,9 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
     }
     serde_json::from_value::<P>(Value::Object(fields.clone())).map_err(|e| {
         let message = e.to_string();
-        if let Some(field) = missing_field_name::<P>(&message, fields) {
+        if let Some(reason) = nested_unknown_field(&message, fields) {
+            reason
+        } else if let Some(field) = missing_field_name::<P>(&message, fields) {
             UnsupportedReason::MissingField {
                 field: echo_safe(field),
             }
@@ -317,6 +340,95 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
             }
         }
     })
+}
+
+/// How deep [`nested_unknown_field`] looks. A parsed spec nests 64 levels at most.
+const MAX_SEARCH_DEPTH: usize = 64;
+
+/// Turns serde's refusal of an unknown key inside a nested block into a reason with the path of the key.
+///
+/// serde says "unknown field `x`, expected one of `a`, `b`" (or "expected `a`", "expected `a` or `b`",
+/// "there are no fields"). The names after "expected" come from the struct. The name before it comes from
+/// the file, and may hold anything, so the split is at the last "`, expected ", which no struct name can
+/// contain. The path is found by searching `fields` for a block that has that key, preferring one whose
+/// other keys are all keys the struct expects.
+fn nested_unknown_field(message: &str, fields: &Map<String, Value>) -> Option<UnsupportedReason> {
+    const EXPECTED: &str = "`, expected ";
+    let rest = message.strip_prefix("unknown field `")?;
+    let (name, expected) = match rest.rfind(EXPECTED) {
+        Some(at) => (&rest[..at], &rest[at + EXPECTED.len()..]),
+        None => (rest.strip_suffix("`, there are no fields")?, ""),
+    };
+    let expected: Vec<&str> = expected.split('`').skip(1).step_by(2).collect();
+    let mut found = Search::default();
+    for (key, value) in fields {
+        walk_blocks(value, key, name, &expected, &mut found, 0);
+    }
+    let block = found.exact.or(found.any)?;
+    Some(UnsupportedReason::UnknownNestedField {
+        path: echo_safe(&format!("{block}.{name}")),
+        near: did_you_mean(name, &expected).map(echo_safe),
+    })
+}
+
+/// Where [`walk_blocks`] has found the block with the unknown key.
+#[derive(Debug, Default)]
+struct Search {
+    /// The path of the first block that has the key and no other key the struct does not expect.
+    exact: Option<String>,
+    /// The path of the first block that has the key.
+    any: Option<String>,
+}
+
+/// Looks through `value`, whose path is `at`, for blocks that have the key `name`.
+fn walk_blocks(
+    value: &Value,
+    at: &str,
+    name: &str,
+    expected: &[&str],
+    found: &mut Search,
+    depth: usize,
+) {
+    if depth > MAX_SEARCH_DEPTH || found.exact.is_some() {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            if map.contains_key(name) {
+                found.any.get_or_insert_with(|| at.to_owned());
+                if map
+                    .keys()
+                    .all(|k| k == name || expected.contains(&k.as_str()))
+                {
+                    found.exact = Some(at.to_owned());
+                    return;
+                }
+            }
+            for (key, inner) in map {
+                walk_blocks(
+                    inner,
+                    &format!("{at}.{key}"),
+                    name,
+                    expected,
+                    found,
+                    depth + 1,
+                );
+            }
+        }
+        Value::Array(items) => {
+            for (i, inner) in items.iter().enumerate() {
+                walk_blocks(
+                    inner,
+                    &format!("{at}[{i}]"),
+                    name,
+                    expected,
+                    found,
+                    depth + 1,
+                );
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Whether a value is null, or holds a null in a list or an object at any depth.

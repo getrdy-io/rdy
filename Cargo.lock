@@ -940,6 +940,7 @@ dependencies = [
  "jsonschema",
  "minisign",
  "proptest",
+ "regex",
  "serde",
  "serde-saphyr",
  "serde_json",

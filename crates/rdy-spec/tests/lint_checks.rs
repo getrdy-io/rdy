@@ -57,7 +57,14 @@ fn a_misspelled_id_is_an_unknown_check_error_with_a_fix() {
     let f = one("  - id: host.memroy\n    min: 32Gi\n");
     assert_error_with_fix(&f, LintCode::UnknownCheck);
     assert!(f.message.contains("host.memroy"));
-    assert!(f.fix.contains("host.memroy"));
+    assert!(f.fix.contains("did you mean 'host.memory'?"), "{}", f.fix);
+}
+
+#[test]
+fn an_unknown_id_far_from_every_reserved_id_names_the_id_in_the_fix() {
+    let f = one("  - id: upload.now\n");
+    assert!(f.fix.contains("upload.now"), "{}", f.fix);
+    assert!(!f.fix.contains("did you mean"), "{}", f.fix);
 }
 
 #[test]
@@ -77,7 +84,32 @@ fn a_misspelled_field_is_an_unsupported_spec_error_with_a_fix() {
     let f = one("  - id: host.memory\n    mn: 32Gi\n");
     assert_error_with_fix(&f, LintCode::UnsupportedSpec);
     assert!(f.message.contains("mn"), "{}", f.message);
-    assert!(f.fix.contains("mn"), "{}", f.fix);
+    assert!(f.fix.contains("did you mean 'min'?"), "{}", f.fix);
+}
+
+#[test]
+fn a_field_far_from_every_key_of_the_check_names_the_field_in_the_fix() {
+    let f = one("  - id: host.memory\n    min: 32Gi\n    colour: red\n");
+    assert_error_with_fix(&f, LintCode::UnsupportedSpec);
+    assert!(f.fix.contains("colour"), "{}", f.fix);
+    assert!(!f.fix.contains("did you mean"), "{}", f.fix);
+}
+
+#[test]
+fn a_misspelled_key_in_a_nested_block_names_its_path_and_the_near_key() {
+    let f = one("  - id: host.ports\n    free:\n      - port: 80\n        bnid: loopback\n");
+    assert_error_with_fix(&f, LintCode::UnsupportedSpec);
+    assert!(f.message.contains("free[0].bnid"), "{}", f.message);
+    assert!(f.fix.contains("did you mean 'bind'?"), "{}", f.fix);
+}
+
+#[test]
+fn a_regex_field_that_does_not_compile_is_an_error() {
+    let f = one("  - id: k8s.access\n    context_pattern: \"prod-(\"\n");
+    assert_error_with_fix(&f, LintCode::UnsupportedSpec);
+    assert!(f.message.contains("context_pattern"), "{}", f.message);
+    let ok = pass("  - id: k8s.access\n    context_pattern: \"^prod-.*$\"\n");
+    assert!(ok.lint_checks().is_empty());
 }
 
 #[test]

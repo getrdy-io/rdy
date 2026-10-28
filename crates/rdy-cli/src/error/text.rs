@@ -85,48 +85,10 @@ pub fn shell_word(word: &str) -> String {
     }
 }
 
-/// The candidate closest to `input`, when it is close enough to be a typo.
-///
-/// The distance counts one edit for an insert, a delete, a change or a swap of two neighbours. The limit
-/// is one third of the length of `input`, at least 1 and at most 2 (07 section 1). An exact match is not a suggestion.
-/// On a tie the first candidate wins, so the result does not depend on hashing.
-#[must_use]
-pub fn did_you_mean<'a>(input: &str, candidates: &[&'a str]) -> Option<&'a str> {
-    let limit = (input.chars().count() / 3).clamp(1, 2);
-    candidates
-        .iter()
-        .filter(|c| **c != input)
-        .map(|c| (distance(input, c), *c))
-        .filter(|(d, _)| *d <= limit)
-        .min_by_key(|(d, _)| *d)
-        .map(|(_, c)| c)
-}
-
-/// The optimal string alignment distance of two strings, counted in characters.
-fn distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut rows = vec![vec![0usize; b.len() + 1]; a.len() + 1];
-    for (i, row) in rows.iter_mut().enumerate() {
-        row[0] = i;
-    }
-    for (j, cell) in rows[0].iter_mut().enumerate() {
-        *cell = j;
-    }
-    for i in 1..=a.len() {
-        for j in 1..=b.len() {
-            let cost = usize::from(a[i - 1] != b[j - 1]);
-            let mut best = (rows[i - 1][j] + 1)
-                .min(rows[i][j - 1] + 1)
-                .min(rows[i - 1][j - 1] + cost);
-            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
-                best = best.min(rows[i - 2][j - 2] + 1);
-            }
-            rows[i][j] = best;
-        }
-    }
-    rows[a.len()][b.len()]
-}
+/// The candidate closest to `input`, when it is close enough to be a typo (distance 2 or less, one
+/// third of the length of `input` at most). The implementation lives in `rdy-spec`, so the spec lint
+/// and the command line give the same advice. See [`rdy_spec::did_you_mean`].
+pub use rdy_spec::did_you_mean;
 
 #[cfg(test)]
 mod tests {
