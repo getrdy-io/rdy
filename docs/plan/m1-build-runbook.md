@@ -189,8 +189,8 @@ echo "ci-ok timeout $sha"
 
 Merged tickets are listed with their PRs in `12-progress.md`. Work that was in flight:
 
-Merged in M1 so far: M1-001, 002, 003, 004, 005, 008, 009, 013, 016, 017, 018, 019, 020, 029, 112, 120,
-123, plus backlog corrections 01 to 04 (#4, #5, #8, #30) and the macOS test fix (#26).
+Merged in M1 so far: M1-001, 002, 003, 004, 005, 008, 009, 013, 016, 017, 018, 019, 020, 029, 032, 112,
+120, 123, plus backlog corrections 01 to 04 (#4, #5, #8, #30) and the macOS test fix (#26).
 
 Open PRs. First check each branch head: if it has a new commit after the head named here, the fix round
 landed and the PR needs a re-review, then CI, then merge. If not, send the listed findings to a fresh agent
@@ -202,7 +202,6 @@ of the owner's role on that branch.
 | #28 | M1-024 | m1/024-host-params | 6e93785 | code-reviewer running at pause. If the verdict is lost, re-run the cold review. Open question for the reviewer: the `$defs/Bundle` regex in spec.v1.schema.json is refused by the jsonschema crate; file it for the schema owner. |
 | #29 | M1-048 | m1/048-minimal-redactor | fa42619 | Both reviewers asked for changes. Fix round sent. Highs: bare values stop at the first whitespace (run to end of line); `password=""hunter2` leaks; the reference exemption leaks (`${X:-secret}`, `$(echo secret)`, `{{ ... "secret" }}`); a reference that does not end the word leaks its tail. Mediums: `author` exempts `Authorization`; YAML `|` and `>` blocks leak; O(N^2) rescans; nothing keeps the `testing` feature out of release. Lows: inverted span fails closed, `/run/secrets/` exemption too broad, doc fixes, trybuild skip under CI, note the 4-byte tag oracle and missing 16 KiB cap in 04 and 05. After the fix: re-review by both reviewers. |
 | #31 | M1-021 | m1/021-error-types | 40cab8e | code-reviewer approved with nits. Fix round sent: merge main (M1-120 is in), map the signature errors to their own codes instead of the `spec_invalid` wildcard, "stripped" to "escaped" in the M1-021 row and ADR 0008, escape default-ignorable code points, Windows fix line instead of sudo, 07 section 4.1 note. Then a quick re-review, CI, merge. |
-| #32 | M1-032 | m1/032-check-trait | dd89feb | Opened after correction-04. code-reviewer running at pause. |
 
 Next PR number: #34 (#33 is the PR that added this runbook).
 
@@ -220,6 +219,10 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
 - M1-024 and M1-025: a bare `- id: host.memory` with no threshold must decode to `unsupported_spec` with
   reason `no_threshold` (01 section 2.5). Add a per-struct test so the FIELDS lists cannot drift.
 - M1-026: stop recording parse entries after 257.
+- M1-033: `pass_by_absence` shows its note twice (as the message and in notes); add `#[non_exhaustive]`
+  to `PeerClass`; add a `compile_error!` for Unix targets other than linux and macos (PR #32 review).
+- M1-040: `CheckError` derives Clone, PartialEq and Eq, so `ProbeError` and `NetFailure` must too, or drop
+  the derives before the M2 publish. Give check crates a test constructor for `CheckContext` (PR #32 review).
 - M1-044: use `allow-invalid = true` for disallowed paths that do not resolve in every crate. Add
   `std::io::stdout`, `std::io::stderr`, the print macros, and the clippy lints `print_stdout`, `print_stderr`
   and `dbg_macro`.
