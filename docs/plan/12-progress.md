@@ -71,7 +71,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-031 | todo | | rdy spec lint with errors, warnings and did-you-mean
 
-- M1-032 | todo | | Check trait, Need and Context in rdy-engine
+- M1-032 | PR #TBD | | The row's exit test is split across later tickets: `Engine::run` is M1-034/M1-035, `HostFs` is superseded by the Probe facade (02, M1-040/M1-038), and the setuid refusal is the privilege snapshot ticket. Built here: Check, CheckInfo, Need, CheckContext, Finding, CheckOutcome, with fake-check tests for pass, missing_need skip and no not_applicable. `CheckContext::probe()` and `remaining()` and `CheckError::Probe` wait for M1-040 and M1-034. `rdy_spec::result` is not re-exported yet.
 
 - M1-033 | todo | | Map outcomes to CheckResult with fix source, partial and needs
 
