@@ -37,7 +37,8 @@ the founder should look at.
 ## How one ticket runs
 
 1. Pick tickets whose dependencies are merged (the `depends on` column in `11-backlog.md`, and the
-   dependency table at its end). Prefer core tickets on the critical path.
+   dependency table at its end). Take them in id order, as "How to work the backlog" says, and run the
+   ones that do not depend on each other in parallel, as the founder's rules allow.
 2. Launch the backlog owner as a background agent with `isolation: worktree` and the implementer brief
    below, adding the ticket id, branch name and any carried notes for that ticket.
 3. When it reports, open the PR from its branch. Title `M1-NNN: <summary>`. Body: what changed, exit test
@@ -72,8 +73,9 @@ the founder should look at.
 - The proxy rejects remote branch deletes. Leave merged branches for the founder.
 - Reviewer agents cannot commit. Record their verdict in the review-record comment, never commit on their
   behalf.
-- Agents refuse to edit `CLAUDE.md`. When a ticket needs a CLAUDE.md change, the architect writes the exact
-  text and the coordinator applies it in that ticket's PR, citing the founder's build instruction.
+- Agents refuse to edit `CLAUDE.md`. In M1-009 the coordinator applied the architect's exact text, and the
+  founder is asked to look at that. Do not do it again: if a ticket needs a CLAUDE.md change, the architect
+  writes the exact text, it goes into `12-progress.md` as a founder hand step, and the build keeps going.
 
 ## Implementer brief
 
@@ -161,7 +163,7 @@ git commit -q -s -m "$2: record PR #$3 in progress tracker
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_011oBtEfTsAHp3D8SPZaBQJq"
-git push -q 2>&1 | tail -1
+git push -q
 grep "^- $2 |" docs/plan/12-progress.md
 git rev-parse --short HEAD
 ```
@@ -173,7 +175,7 @@ background:
 #!/bin/sh
 sha=$1; n=0
 while [ $n -lt 120 ]; do
-  out=$(curl -s "https://api.github.com/repos/getrdy-io/rdy/commits/$sha/check-runs?check_name=ci-ok" || true)
+  out=$(curl -s --max-time 15 "https://api.github.com/repos/getrdy-io/rdy/commits/$sha/check-runs?check_name=ci-ok" || true)
   c=$(printf '%s' "$out" | python3 -I -c 'import sys,json
 try:
   d=json.load(sys.stdin); r=[x for x in d.get("check_runs",[]) if x["status"]=="completed"]
@@ -189,8 +191,8 @@ echo "ci-ok timeout $sha"
 
 Merged tickets are listed with their PRs in `12-progress.md`. Work that was in flight:
 
-Merged in M1 so far: M1-001, 002, 003, 004, 005, 008, 009, 013, 016, 017, 018, 019, 020, 029, 032, 112,
-120, 123, plus backlog corrections 01 to 04 (#4, #5, #8, #30) and the macOS test fix (#26).
+Merged in M1 so far: M1-001, 002, 003, 004, 005, 008, 009, 013, 016, 017, 018, 019, 020, 021, 029, 032,
+112, 120, 123, plus backlog corrections 01 to 04 (#4, #5, #8, #30) and the macOS test fix (#26).
 
 Open PRs. First check each branch head: if it has a new commit after the head named here, the fix round
 landed and the PR needs a re-review, then CI, then merge. If not, send the listed findings to a fresh agent
@@ -201,7 +203,6 @@ of the owner's role on that branch.
 | #21 | M1-006 | m1/006-ci-matrix | a0d9e7b | Review fixes pushed (crtbeginS/crtendS swap, ADR 0006 linker-override note, check-static requires PIE and fails on TEXTREL). code-reviewer approved the previous head. Waiting on CI. The macos-arm64 leg (`macos-15`) sat queued for 15 minutes on the last run before the push cancelled it. If it stays queued, that is runner capacity, not the PR. Wait for it; never merge without ci-ok. Merge when green. |
 | #28 | M1-024 | m1/024-host-params | 6e93785 | code-reviewer running at pause. If the verdict is lost, re-run the cold review. Open question for the reviewer: the `$defs/Bundle` regex in spec.v1.schema.json is refused by the jsonschema crate; file it for the schema owner. |
 | #29 | M1-048 | m1/048-minimal-redactor | fa42619 | Both reviewers asked for changes. Fix round sent. Highs: bare values stop at the first whitespace (run to end of line); `password=""hunter2` leaks; the reference exemption leaks (`${X:-secret}`, `$(echo secret)`, `{{ ... "secret" }}`); a reference that does not end the word leaks its tail. Mediums: `author` exempts `Authorization`; YAML `|` and `>` blocks leak; O(N^2) rescans; nothing keeps the `testing` feature out of release. Lows: inverted span fails closed, `/run/secrets/` exemption too broad, doc fixes, trybuild skip under CI, note the 4-byte tag oracle and missing 16 KiB cap in 04 and 05. After the fix: re-review by both reviewers. |
-| #31 | M1-021 | m1/021-error-types | 40cab8e | code-reviewer approved with nits. Fix round sent: merge main (M1-120 is in), map the signature errors to their own codes instead of the `spec_invalid` wildcard, "stripped" to "escaped" in the M1-021 row and ADR 0008, escape default-ignorable code points, Windows fix line instead of sudo, 07 section 4.1 note. Then a quick re-review, CI, merge. |
 
 Next PR number: #34 (#33 is the PR that added this runbook).
 
@@ -230,7 +231,8 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
 - M1-063: the redaction corpus is 28 cases, per 04.
 - M1-125: wire `spec sign` and `spec keygen` to `rdy_cli::password::read_key_password`. The exit test covers
   `RDY_KEY_PASSWORD` and `--password-file -` with no prompt.
-- M1-126: add the CRLF note to every signature error. Read the `.minisig` file once; an unreadable or
+- M1-126: print `SpecError::fix()` (it fills in the product). Mention the signature error codes in the
+  changelog (PR #31 nit). Add the CRLF note to every signature error. Read the `.minisig` file once; an unreadable or
   non-regular file passes `Some`, never `None`. Show the KEY NOT PINNED banner from `TrustSource::Flag`.
 - M1-137: the README leads with the pinned GitHub release URL in M1, not getrdy.io/install.
 - CF-03: the upload transport is an open M2 item.
