@@ -879,9 +879,10 @@ fn errors_of_the_typed_read_carry_a_place_and_a_fix() {
         "apiVersion: rdy/v1\nkind: Readiness\nmetadata: {product: a}\nchecks: [{severity: warn}]\n",
     );
     assert!(
-        matches!(e.kind(), SpecError::MissingField { field } if field == "id"),
+        matches!(e.kind(), SpecError::MissingCheckId { number: 1 }),
         "{e:?}"
     );
+    assert_eq!(place(&e), (4, 10));
 
     let e = fail("hello\n");
     assert!(matches!(e.kind(), SpecError::InvalidValue { .. }), "{e:?}");
