@@ -335,15 +335,16 @@ fn finding_builders_set_the_level_and_detail() {
 }
 
 #[test]
-fn pass_by_absence_is_a_pass_with_its_note() {
+fn pass_by_absence_is_a_pass_whose_message_is_its_note() {
     let finding =
         Finding::pass_by_absence("SELinux is not installed, and the spec allows disabled");
     assert_eq!(finding.level, Level::Pass);
     assert_eq!(finding.partial, None);
     assert_eq!(
-        finding.notes,
-        ["SELinux is not installed, and the spec allows disabled"]
+        finding.message,
+        "SELinux is not installed, and the spec allows disabled"
     );
+    assert!(finding.notes.is_empty(), "the note must not show twice");
 }
 
 #[test]
