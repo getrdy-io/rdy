@@ -187,33 +187,53 @@ done
 echo "ci-ok timeout $sha"
 ```
 
-## State at the pause (2026-10-28, about 14:10 UTC)
+## State at the pause (2026-10-28, about 20:00 UTC)
 
-Merged tickets are listed with their PRs in `12-progress.md`. Work that was in flight:
+Merged tickets are listed with their PRs in `12-progress.md`. Main's CI now runs the full test matrix
+(M1-006): linux-x64, linux-arm64, windows-x64, macos-x64 and an aarch64-apple-darwin compile leg.
 
-Merged in M1 so far: M1-001, 002, 003, 004, 005, 008, 009, 013, 016, 017, 018, 019, 020, 021, 029, 032,
-112, 120, 123, plus backlog corrections 01 to 04 (#4, #5, #8, #30) and the macOS test fix (#26).
+Merged in M1 so far (34 tickets): M1-001 to 006, 008, 009, 013, 016 to 026, 029, 030, 032 to 035, 038,
+047, 048, 064, 112, 120, 123. Backlog corrections 01 to 07 are merged (#4, #5, #8, #30, #40, #41, #46).
 
-Open PRs. First check each branch head: if it has a new commit after the head named here, the fix round
-landed and the PR needs a re-review, then CI, then merge. If not, send the listed findings to a fresh agent
-of the owner's role on that branch.
+Open PRs. Check each branch head first. A commit newer than the head named here means the fix round
+landed: re-review the new diff, wait for CI, then merge. If there is no newer commit, send the listed
+findings to a fresh agent of the owner's role on that branch.
 
 | PR | Ticket | Branch | Head at pause | State and next step |
 | --- | --- | --- | --- | --- |
-| #21 | M1-006 | m1/006-ci-matrix | a0d9e7b | Review fixes pushed (crtbeginS/crtendS swap, ADR 0006 linker-override note, check-static requires PIE and fails on TEXTREL). code-reviewer approved the previous head. Waiting on CI: every leg but macos-arm64 was green at the pause. The macos-arm64 leg (`macos-15`) sat queued for 15 minutes on the last run before the push cancelled it. If it stays queued, that is runner capacity, not the PR. Wait for it; never merge without ci-ok. Merge when green. |
-| #28 | M1-024 | m1/024-host-params | 6e93785 | code-reviewer running at pause. If the verdict is lost, re-run the cold review. Open question for the reviewer: the `$defs/Bundle` regex in spec.v1.schema.json is refused by the jsonschema crate; file it for the schema owner. |
-| #29 | M1-048 | m1/048-minimal-redactor | f3c3780 | Both reviewers asked for changes at fa42619 (four highs: bare values stopped at whitespace, `password=""hunter2`, loose reference exemptions, reference tail leak; mediums: `author` exempting `Authorization`, YAML block values, O(N^2) scan, `testing` feature in release). The author reports all 14 findings fixed in f3c3780 with a leak test per case. Next: re-review by security-reviewer and code-reviewer on the fa42619..f3c3780 diff, then CI, then merge. Ask them to judge the deliberate over-redaction (`password=x --verbose`, `--db-password=x --other`) and the strict `{{ }}` rule. |
+| #47 | M1-007 | m1/007-dist-init | 0527512 | Security approves. Code review asked for two mediums. (1) Step 8 of check-release-artifacts must also require `^precise-builds = true$` in dist-workspace.toml, with a test. (2) Merge main for correction-07, and change the 11-backlog Done log entry "ADR 0019" to ADR 0020 for M1-007. Lows: curl timeouts and retries in install-release-tool.sh; ADR 0020 hash wording; a ruleset test tag the trigger does not match; `fallback: none` on install-action; no GH_TOKEN in build jobs. Fix round was sent. Then re-review, CI, merge. Its ADR is 0020. |
+| #48 | M1-022 | m1/022-json-schemas | c85b122 | Approved with two mediums, now being fixed. (1) A CI guard that fails if `cargo tree -p rdy -e features` shows preserve_order or the rdy-spec `schema` feature. (2) A CI step `cargo test -p rdy -p rdy-engine` without --workspace. It must also merge main and move #43's schema edits into its fragments. After that: CI, then merge. It keeps ADR 0019. |
+| #49 | M1-067 | m1/067-host-os-stubs | 54d13c5 | Approved with nits, fix round sent. Add `HostFamily::stub_ids()` and a test, and record the rule that HostFamily must not be registered in the CLI while stubs remain. Reword the changelog. Then CI, then merge. |
 
-Next PR number: #34 (#33 is the PR that added this runbook).
+Implementers running at the pause, none pushed yet. Each pushes its branch only when done, so check
+`git ls-remote` for the branch. If the branch is missing, relaunch the ticket from its row with the carried
+notes below.
 
-No agents are running at the pause. Every open item above is waiting on the next coordinator.
+- M1-121 trust store, branch `m1/121-trust-store`.
+- M1-056 redacting tracing writer and panic hook, `m1/056-redacting-tracing`.
+- M1-125 `spec keygen` and `spec sign`, `m1/125-spec-keygen-sign`. Needs a security review.
+- M1-031 `spec lint`, `m1/031-spec-lint`.
+- M1-039 command policy, `m1/039-command-policy`. Needs a security review.
 
-Unlocked tickets not started at the pause (their dependencies are merged): M1-022, M1-023, M1-025,
-M1-026, plus everything that depends only on merged tickets. Recompute from the dependency table in
-`11-backlog.md` against the merged list above before launching.
+Unlocked and not started: M1-011 (mostly founder steps), M1-027, M1-028, M1-040, M1-062, M1-089,
+M1-102, M1-152. Recompute against the dependency table before launching.
 
-Disk: the session's writable allowance is about 40 GB and each worktree's `target/` grows to 2 to 4 GB.
-Run `cargo clean` in a worktree once its PR merges. Reviewers must not build in new target dirs.
+Next PR number: #51 (#50 is the PR that updated this runbook).
+
+Lessons from this stretch:
+
+- Merging main into a branch can break it even without conflicts: new variants and lint triggers show up.
+  Run clippy and the full tests after every merge of main.
+- A PR whose `mergeable_state` is `dirty` gets no CI. Re-check before every merge.
+- Feature unification hides release-only behavior. M1-022 gates preserve_order behind a `schema` feature.
+- The redactor (M1-048) took eight review rounds. Structural parsing kept leaking. The fix was a
+  fail-closed design. Prefer fail-closed rules over clever parsers for security code.
+- Reviewers must not build. The disk filled several times. Run `cargo clean` after each merge, and keep
+  the coordinator checkout's `target/` empty.
+- The stop hook flags work in progress in agent worktrees. Those changes are the running agents' and
+  need no action.
+- `git config user.email noreply@anthropic.com` and `user.name Claude` are set in the shared repo config,
+  as the stop hook asked.
 
 ## Notes carried to later tickets
 
@@ -236,6 +256,29 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
 - M1-126: print `SpecError::fix()` (it fills in the product). Mention the signature error codes in the
   changelog (PR #31 nit). Add the CRLF note to every signature error. Read the `.minisig` file once; an unreadable or
   non-regular file passes `Some`, never `None`. Show the KEY NOT PINNED banner from `TrustSource::Flag`.
+- M1-031: did-you-mean for unknown keys including nested key paths; regex compile; line numbers and
+  `LintReport`; `assert!(!ids.is_empty())` in the reserved drift test; mention `no_threshold` in the M1-023
+  changelog; rename `gpu.device_plugin` in acme-inference-gpu.yaml; distance 2 or less.
+- M1-039: CLOEXEC on inherited fds (or an ADR), the umask, the shell and sudo refusal, PATH and env policy.
+- M1-043: the narrow window where the watchdog can kill after a reap, and a check that the
+  SIGCHLD-ignored test really ignores SIGCHLD on macOS.
+- M1-044: also prove the clippy disallowed-methods list, including the M1-030 bans. Add
+  `cargo clippy -p rdy-engine --no-default-features --all-targets -- -D warnings` to CI. Delete the stale
+  `strsim` row in 07 (around line 2591). Add a test that pins near-miss echoes (`--allow-unsigne`).
+- M1-050: add an allow entry for `tests/fixtures/canary/netstat-crlf.txt` in the `\r` lint.
+- M1-056 and M1-062: the CLI panic hook never prints default panic text. `End::Panicked` text is raw.
+  `CliError::from_anyhow` text goes through the redactor.
+- M1-057: End to CheckResult glue (TimedOut becomes timeout, Panicked becomes error with a fixed message,
+  Cancelled becomes a cancelled skip). Reconcile plan skip text with `rdy_cli::error::SkipWhy`. Test that
+  the CLI fills in `<spec>`.
+- M1-060: commented-out blocks, including commented PEM lines; crafted escapes of the bracket and quote
+  counts; tuning of over-redaction (all-quoted .env files, stray apostrophes, sibling `- ` items);
+  `--password hunter2` as separate words.
+- M1-073: what an os `arch: []` means. M1-145: what `allow: []` and `supported: []` mean.
+- M1-110: owns the `partial.missing_grants` wire field (13-plan-corrections open item). Its row needs the
+  rdy-spec work and the hours.
+- M1-126: also exit 64 on an expired spec, and the file-prefix wording.
+- The HostFamily registering ticket must drop the stubs, or first add an engine `NotInBuild` skip.
 - M1-137: the README leads with the pinned GitHub release URL in M1, not getrdy.io/install.
 - CF-03: the upload transport is an open M2 item.
 
@@ -251,6 +294,15 @@ Hand steps an agent cannot do (also in the Founder hand steps list in `11-backlo
 - Delete the throwaway branches `tmp/m1-005-clippy`, `tmp/m1-005-openssl`, `tmp/m1-005-unsigned` and
   `tmp/m1-005-signed`, and any merged `m1/*` branches. The agent proxy refuses branch deletes.
 
+- Enable macOS arm64 runners for the org (none are assigned today; see #21 and correction-05). Then
+  move the macos-arm64 test leg back into ci-ok.
+- Update CLAUDE.md's "Five CI legs" wording for the temporary arm64 exception (correction-05).
+- Run the release-sandbox proof in 06 "Sandbox proof" before M1-010 (correction-07).
+- Add a ruleset that restricts tag creation (M1-007).
+- Delete `tmp/m1-006-macos-probe` as well.
+- Scratchpad reviewer build folders could not be removed. The `rm` was denied by permissions and was not
+  worked around. They disappear with the session.
+
 Decisions to look at:
 
 - `CLAUDE.md` was edited by the coordinator in M1-009 (edits C-1 to C-9, the architect's text), under the
@@ -258,6 +310,11 @@ Decisions to look at:
 - ADR 0018 replaces the planned minisign verification crate with an in-tree envelope parser on
   `ed25519-dalek` `verify_strict` and `blake2`.
 - M1 started before the M0 go or no-go gate (decision 2 in `13-plan-corrections.md`).
+
+- Correction-05: four native test legs plus an arm64 compile leg gate PRs until arm64 runners exist.
+- M1-022 boxes `End::Done(Box<CheckOutcome>)` and turns on serde_json preserve_order behind a `schema`
+  feature (ADR 0019).
+- M1-048's redactor fails closed and over-redacts on purpose. M1-060 tunes it with corpus evidence.
 
 Process events worth knowing:
 
