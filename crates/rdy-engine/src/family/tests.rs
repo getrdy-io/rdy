@@ -2,8 +2,6 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use serde_json::Value;
-
 use super::*;
 use crate::check::{BoxFuture, CheckContext, CheckOutcome, Finding, OsSupport, Support};
 
@@ -81,9 +79,9 @@ impl Family for FakeHost {
     }
 }
 
-/// A `net` family. `net.tls_intercept` defaults to the `endpoints` of every `net.egress` entry, which
-/// is how 02 describes the real one. `net.egress` here reaches no host of its own, because the
-/// parameters of the real check are not in `rdy-spec` yet.
+/// A `net` family. `net.egress` reaches its own endpoints. `net.tls_intercept` without `hosts` defaults
+/// to the endpoints of every `net.egress` entry, which is how 02 describes the real one. Both read
+/// the decoded parameters of `rdy-spec`.
 pub(crate) struct FakeNet;
 
 impl Family for FakeNet {
@@ -95,22 +93,32 @@ impl Family for FakeNet {
         &NET_CHECKS
     }
 
-    fn build(&self, entry: &CheckSpec, _: CheckParams, spec: &Spec) -> Result<Built, BuildError> {
-        match entry.id.as_str() {
-            "net.egress" => Ok(Built::new(Box::new(Fake(&NET_EGRESS)))),
-            "net.tls_intercept" => {
+    fn build(&self, _: &CheckSpec, params: CheckParams, spec: &Spec) -> Result<Built, BuildError> {
+        match params {
+            CheckParams::NetEgress(egress) => {
+                let hosts = egress.endpoints.iter().map(|e| e.target.clone());
+                Ok(Built::new(Box::new(Fake(&NET_EGRESS))).with_hosts(HostSet::new(hosts)))
+            }
+            CheckParams::NetTlsIntercept(tls) if tls.hosts.is_none() => {
                 let hosts = spec
                     .checks
                     .iter()
-                    .filter(|sibling| sibling.id == "net.egress")
-                    .filter_map(|sibling| sibling.params.get("endpoints"))
-                    .filter_map(Value::as_array)
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .filter_map(|text| Target::parse(text).ok());
+                    .filter_map(|sibling| match sibling.decode_params() {
+                        CheckParams::NetEgress(egress) => Some(egress),
+                        _ => None,
+                    })
+                    .flat_map(|egress| {
+                        egress
+                            .endpoints
+                            .iter()
+                            .map(|e| e.target.clone())
+                            .collect::<Vec<_>>()
+                    });
                 Ok(Built::new(Box::new(Fake(&NET_TLS))).with_hosts(HostSet::new(hosts)))
             }
-            _ => Err(BuildError::Unsupported("not a net check".to_owned())),
+            _ => Err(BuildError::Unsupported(
+                "this fake builds only the defaults".to_owned(),
+            )),
         }
     }
 }

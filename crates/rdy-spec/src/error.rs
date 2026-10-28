@@ -11,10 +11,13 @@ const MAX_ECHO_CHARS: usize = 64;
 
 /// Makes a refused value safe to print: at most `max_chars` characters, then escaped.
 ///
+/// `rdy-engine` uses it for the spec text in plan messages.
+///
 /// A spec is untrusted, and its text reaches the terminal inside error messages. `escape_debug` turns
 /// ANSI escapes, other control characters and invisible format characters into visible `\u{..}` text.
 /// A cut value ends in `...`.
-pub(crate) fn echo_capped(value: &str, max_chars: usize) -> String {
+#[must_use]
+pub fn echo_capped(value: &str, max_chars: usize) -> String {
     let mut out: String = value
         .chars()
         .take(max_chars)

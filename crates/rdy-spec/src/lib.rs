@@ -33,7 +33,7 @@ pub mod scalar;
 pub mod sig;
 pub mod spec;
 
-pub use error::{Location, SpecError};
+pub use error::{Location, SpecError, echo_capped};
 pub use loaded::{LoadedSpec, load};
 pub use parse::{MAX_DEPTH, MAX_SPEC_BYTES, parse_unverified};
 pub use scalar::{Duration, Quantity, ScalarError, Target, Version};

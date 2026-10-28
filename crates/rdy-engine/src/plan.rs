@@ -22,8 +22,10 @@
 //! Only rule 1 produces `not_applicable`, and only from the vendor's own `os` list. A check with no
 //! data source on this OS is rule 8 and counts as not run.
 //!
-//! Every value from the spec (an id, a field name) is cut and has control characters replaced before it
-//! goes into a message, a key or a result id, so a spec cannot put escape codes on a terminal.
+//! Every value from the spec that is not a well-formed id (an odd id, a field name) is cut and escaped
+//! before it goes into a message or a result id, so a spec cannot put escape codes or bidirectional
+//! overrides on a terminal. A key is `id`, `id/name`, or `id#index` for an entry whose id or name did
+//! not read, so keys never collide.
 //!
 //! The reserved-id list is `rdy_spec::reserved`.
 //!
@@ -191,15 +193,23 @@ impl Registry {
         os: Os,
         rdy_version: &str,
     ) -> PlanEntry {
-        let id = echo(&entry.id);
+        // An id that fits the grammar is short ASCII and is used as written. Any other id is cut and
+        // escaped, and its key gets the index, so it cannot collide with another entry's key.
+        let grammatical = entry.check_id().is_ok();
+        let id = if grammatical {
+            entry.id.clone()
+        } else {
+            echo(&entry.id)
+        };
         let family = id
             .split_once('.')
             .map_or_else(|| id.clone(), |(family, _)| family.to_owned());
         let key = match &entry.name {
-            None => id.clone(),
-            Some(Lenient::Valid(name)) => format!("{id}/{}", echo(name.as_str())),
-            // An unreadable name has no key of its own. The index keeps two such entries apart.
-            Some(_) => format!("{id}#{index}"),
+            None if grammatical => id.clone(),
+            Some(Lenient::Valid(name)) if grammatical => format!("{id}/{}", name.as_str()),
+            // An off-grammar id, or an unreadable name, has no key of its own. The index keeps two
+            // such entries apart from each other and from every grammatical key (none has a '#').
+            _ => format!("{id}#{index}"),
         };
         let action = match self.decide(spec, entry, os, rdy_version) {
             Ok(built) => PlanAction::Run(built),
@@ -263,13 +273,13 @@ impl Registry {
         })?;
         if built.check.info().id != id {
             // A family built another check than the one it was asked for. That is a bug in the
-            // family. Fail closed: the entry does not run, and it still counts as not run.
-            debug_assert!(
-                false,
-                "family '{}' built the wrong check for {id}",
-                info.family
-            );
-            return Err(not_in_build(self, &id));
+            // family, not in the spec. Fail closed: the entry does not run and still counts as not
+            // run. The message is fixed, so it names no spec text and no family internals.
+            return Err(PlanSkip::new(
+                SkipKind::NotInBuild,
+                format!("Not run. rdy could not set up the check {id}. This is a bug in rdy."),
+                "Tell the vendor which check it was, and report the bug to the rdy maintainers.",
+            ));
         }
         // Rule 8.
         if let Some(kind) = info.os.on(os).skip_kind() {
@@ -367,15 +377,8 @@ fn unsupported(id: &str, reason: &UnsupportedReason, version: &str) -> PlanSkip 
     }
 }
 
-/// Cuts `text` to [`MAX_ECHO_CHARS`] characters and replaces control characters, so it is safe to print.
+/// Cuts `text` to [`MAX_ECHO_CHARS`] characters and escapes control, bidirectional and invisible
+/// characters, so it is safe to print. This is the escaping `rdy-spec` uses for its own errors.
 fn echo(text: &str) -> String {
-    let mut out = String::new();
-    for (count, c) in text.chars().enumerate() {
-        if count == MAX_ECHO_CHARS {
-            out.push_str("...");
-            break;
-        }
-        out.push(if c.is_control() { '\u{fffd}' } else { c });
-    }
-    out
+    rdy_spec::echo_capped(text, MAX_ECHO_CHARS)
 }

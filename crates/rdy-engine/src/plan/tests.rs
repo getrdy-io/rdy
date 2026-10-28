@@ -161,7 +161,7 @@ fn host_checks_are_not_yet_on_os_on_windows_and_macos() {
     // A check with full support on every OS runs on all of them.
     let net = host_and_net();
     for os in [Os::Linux, Os::Macos, Os::Windows] {
-        let plan = plan(&net, vec![entry(json!({"id": "net.egress"}))], os);
+        let plan = plan(&net, vec![egress("a.example:443")], os);
         assert!(runs(&plan, "net.egress"), "{os:?}");
     }
 }
@@ -172,7 +172,9 @@ fn not_applicable_comes_only_from_the_specs_os_list() {
         vec![
             entry(json!({"id": "host.cpu", "min": 4, "os": ["linux"]})),
             entry(json!({"id": "host.memory", "min": "1Gi"})),
-            entry(json!({"id": "net.egress", "os": ["linux", "windows"]})),
+            entry(
+                json!({"id": "net.egress", "endpoints": ["a.example:443"], "os": ["linux", "windows"]}),
+            ),
         ]
     };
     let registry = host_and_net();
@@ -338,28 +340,39 @@ fn each_check_has_its_own_host_set_with_derived_defaults() {
             "name": "registry",
             "endpoints": ["registry.acme.example:443", "license.acme.example:443"]
         })),
-        entry(json!({"id": "net.egress", "name": "other"})),
+        entry(json!({
+            "id": "net.egress",
+            "name": "other",
+            "endpoints": ["other.example:443"]
+        })),
         entry(json!({"id": "net.tls_intercept"})),
         entry(json!({"id": "host.cpu", "min": 4})),
+        entry(json!({
+            "id": "net.egress",
+            "name": "mac_only",
+            "endpoints": ["other.example:443"],
+            "os": ["macos"]
+        })),
     ]);
     let plan = host_and_net().plan(&spec, Os::Linux, VERSION);
 
-    // The fake egress check cannot read `endpoints` yet (the parameters are a later ticket), so the
-    // entry that names them is unsupported. The default for tls_intercept still comes from the spec.
-    assert_eq!(
-        skip(&plan, "net.egress/registry").kind,
-        SkipKind::UnsupportedSpec
-    );
-    assert!(plan.entries()[1].hosts().expect("runs").is_empty());
+    // Each net.egress check reaches its own endpoints and no others.
+    let registry = plan.entries()[0].hosts().expect("runs");
+    assert_eq!(registry.len(), 2);
+    assert!(registry.contains(&Target::parse("registry.acme.example:443").expect("target")));
+    let other = plan.entries()[1].hosts().expect("runs");
+    assert_eq!(other.len(), 1);
+    assert!(other.contains(&Target::parse("other.example:443").expect("target")));
+    assert!(!other.contains(&Target::parse("registry.acme.example:443").expect("target")));
 
+    // tls_intercept without `hosts` defaults to every egress host in the spec, from the decoded params.
     let tls = plan.entries()[2].hosts().expect("runs");
-    assert_eq!(tls.len(), 2);
-    assert!(tls.contains(&Target::parse("registry.acme.example:443").expect("target")));
+    assert_eq!(tls.len(), 3);
     assert!(tls.contains(&Target::parse("license.acme.example:443").expect("target")));
 
     assert!(plan.entries()[3].hosts().expect("runs").is_empty());
     assert!(
-        plan.entries()[0].hosts().is_none(),
+        plan.entries()[4].hosts().is_none(),
         "a skipped entry reaches no host"
     );
 }
@@ -495,8 +508,10 @@ fn spec_text_is_cut_and_has_no_control_characters_in_keys_or_messages() {
         for text in [&result.key, &result.id, &result.message] {
             assert!(!text.chars().any(char::is_control), "{text:?}");
         }
-        assert!(result.id.chars().count() <= 67, "{}", result.id);
     }
+    let nasty = &plan.entries()[0];
+    assert!(nasty.id.starts_with("host.\\u{1b}[31m"), "{}", nasty.id);
+    assert!(nasty.id.ends_with("..."), "{}", nasty.id);
 }
 
 #[test]
@@ -504,4 +519,115 @@ fn the_os_list_names_match_the_spec_type() {
     // The planner compares the spec's OsFamily with the engine's Os. They are one type.
     let os: Os = OsFamily::Linux;
     assert_eq!(os, Os::Linux);
+}
+
+/// Bidirectional overrides, isolates and zero-width characters are not control characters, but they
+/// can reorder or hide text on a terminal.
+const INVISIBLE: [char; 6] = [
+    '\u{202e}', '\u{202a}', '\u{2066}', '\u{2069}', '\u{200b}', '\u{feff}',
+];
+
+#[test]
+fn bidi_and_zero_width_characters_are_escaped() {
+    let ids = [
+        "host.\u{202e}cpu",
+        "host.\u{2066}cpu\u{2069}",
+        "host.\u{200b}cpu",
+        "\u{feff}host.cpu",
+    ];
+    let checks = ids
+        .iter()
+        .map(|id| entry(json!({"id": id, "min": 4, "name": "n", "mn": "\u{202e}x"})))
+        .collect();
+    let planned = plan(&host_only(), checks, Os::Linux);
+    for entry in planned.entries() {
+        let result = entry.skip_result().expect("skipped");
+        let fix = result.fix.clone().unwrap_or_default();
+        for text in [&result.key, &result.id, &result.message, &fix] {
+            assert!(!text.chars().any(|c| INVISIBLE.contains(&c)), "{text:?}");
+        }
+    }
+    assert!(planned.entries()[0].id.contains("\\u{202e}"));
+
+    // A bad field name is escaped too.
+    let second = plan(
+        &host_only(),
+        vec![entry(json!({"id": "host.cpu", "min": 4, "\u{202e}x": 1}))],
+        Os::Linux,
+    );
+    let s = skip(&second, "host.cpu");
+    assert!(
+        !s.message.chars().any(|c| INVISIBLE.contains(&c)),
+        "{}",
+        s.message
+    );
+}
+
+#[test]
+fn result_keys_never_collide() {
+    let long = "x".repeat(100);
+    let checks = vec![
+        entry(json!({"id": format!("host.{long}a"), "min": 1})),
+        entry(json!({"id": format!("host.{long}b"), "min": 1})),
+        entry(json!({"id": "host.cpu/x", "min": 4})),
+        entry(json!({"id": "host.cpu", "name": "x", "min": 4})),
+        entry(json!({"id": "host.cpu", "min": 4})),
+    ];
+    let plan = plan(&host_only(), checks, Os::Linux);
+    let keys: Vec<&str> = plan.entries().iter().map(|e| e.key.as_str()).collect();
+    let unique: std::collections::HashSet<&&str> = keys.iter().collect();
+    assert_eq!(unique.len(), keys.len(), "{keys:?}");
+    // The two cut ids share their text but not their keys.
+    assert_eq!(plan.entries()[0].id, plan.entries()[1].id);
+    assert!(
+        keys[0].ends_with("#0") && keys[1].ends_with("#1"),
+        "{keys:?}"
+    );
+    assert_eq!(keys[2], "host.cpu/x#2");
+    assert_eq!(keys[3], "host.cpu/x");
+    assert_eq!(keys[4], "host.cpu");
+}
+
+#[test]
+fn a_family_that_builds_the_wrong_check_fails_closed_with_a_fixed_message() {
+    use crate::check::CheckInfo;
+    use crate::family::tests::{Fake, HOST_CPU, HOST_MEMORY};
+    static LIST: [&CheckInfo; 1] = [&HOST_CPU];
+    struct Wrong;
+    impl crate::family::Family for Wrong {
+        fn name(&self) -> &'static str {
+            "host"
+        }
+        fn checks(&self) -> &'static [&'static CheckInfo] {
+            &LIST
+        }
+        fn build(
+            &self,
+            _: &CheckSpec,
+            _: rdy_spec::check::CheckParams,
+            _: &Spec,
+        ) -> Result<crate::family::Built, crate::family::BuildError> {
+            Ok(crate::family::Built::new(Box::new(Fake(&HOST_MEMORY))))
+        }
+    }
+    let mut registry = Registry::new();
+    registry.register(Wrong).expect("registers");
+    let plan = plan(
+        &registry,
+        vec![entry(json!({"id": "host.cpu", "min": 4}))],
+        Os::Linux,
+    );
+    let s = skip(&plan, "host.cpu");
+    assert_eq!(s.kind, SkipKind::NotInBuild);
+    assert_eq!(
+        s.message,
+        "Not run. rdy could not set up the check host.cpu. This is a bug in rdy."
+    );
+    let fix = s.fix.expect("a fix");
+    assert!(!fix.contains("newer rdy"), "{fix}");
+    assert!(fix.contains("bug"), "{fix}");
+}
+
+fn egress(endpoint: &str) -> CheckSpec {
+    entry(json!({"id": "net.egress", "endpoints": [endpoint]}))
 }
