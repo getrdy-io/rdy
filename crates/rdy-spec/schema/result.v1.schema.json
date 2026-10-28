@@ -1,0 +1,1359 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://getrdy.io/schema/rdy/v1/result.v1.schema.json",
+  "title": "rdy/v1 run result",
+  "description": "The JSON report rdy writes and Rdy Cloud ingests. Hand-written contract for rdy/v1, revision 0 (rdy-spec 0.1). See docs/plan/01-spec-format.md. Consumers must ignore unknown fields, must accept values not listed for open enums (descriptions say 'Open'), and must use verdict as written, never recompute it.",
+  "$ref": "#/$defs/Report",
+  "$defs": {
+    "OpenCode": {
+      "description": "A snake_case code. Newer producers may send values not listed.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Report": {
+      "type": "object",
+      "required": [
+        "api_version",
+        "kind",
+        "producer",
+        "run",
+        "spec",
+        "signature",
+        "host",
+        "identity",
+        "capabilities",
+        "verdict",
+        "verdict_reason",
+        "exit_code",
+        "summary",
+        "checks",
+        "actions",
+        "actions_truncated",
+        "redaction",
+        "complete",
+        "interrupted"
+      ],
+      "properties": {
+        "api_version": {
+          "const": "rdy/v1"
+        },
+        "kind": {
+          "const": "Report"
+        },
+        "producer": {
+          "$ref": "#/$defs/Producer"
+        },
+        "run": {
+          "$ref": "#/$defs/Run"
+        },
+        "spec": {
+          "$ref": "#/$defs/SpecRef"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        },
+        "host": {
+          "$ref": "#/$defs/Host"
+        },
+        "identity": {
+          "$ref": "#/$defs/Identity"
+        },
+        "proxy": {
+          "$ref": "#/$defs/Proxy"
+        },
+        "capabilities": {
+          "description": "Every need the run plan probed, and the result.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          }
+        },
+        "verdict": {
+          "description": "Closed in v1. A new verdict value needs rdy/v2.",
+          "enum": [
+            "ready",
+            "ready_with_warnings",
+            "not_ready"
+          ]
+        },
+        "verdict_reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "required_check_not_run",
+                "nothing_verified"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when the verdict is not explained by an observed block or warn: required_check_not_run (not_ready with no block), nothing_verified (ready_with_warnings because no check reached pass, warn or block). Otherwise null. Open."
+        },
+        "exit_code": {
+          "description": "Exit code for this verdict: 0, 1, 2. When rdy could not write the report it exits 70 instead and complete is false.",
+          "enum": [
+            0,
+            1,
+            2
+          ]
+        },
+        "summary": {
+          "$ref": "#/$defs/Summary"
+        },
+        "checks": {
+          "description": "One entry per spec check, in spec order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CheckResult"
+          }
+        },
+        "actions": {
+          "description": "Every file read, command, lookup, connection and API request, in order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Action"
+          }
+        },
+        "actions_truncated": {
+          "description": "True when the log hit 5000 entries and later actions were dropped.",
+          "type": "boolean"
+        },
+        "redaction": {
+          "$ref": "#/$defs/Redaction"
+        },
+        "complete": {
+          "description": "False when rdy could not finish or write the report (exit 70).",
+          "type": "boolean"
+        },
+        "interrupted": {
+          "description": "True when the run was cancelled (Ctrl-C). Unstarted and running checks are then skipped with skip_kind cancelled.",
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "ready"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exit_code": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "ready_with_warnings"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exit_code": {
+                "const": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "not_ready"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "exit_code": {
+                "const": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Producer": {
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "rdy_spec",
+        "target"
+      ],
+      "properties": {
+        "name": {
+          "const": "rdy"
+        },
+        "version": {
+          "type": "string",
+          "description": "Version of the rdy binary."
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Short git commit of the build."
+        },
+        "rdy_spec": {
+          "type": "string",
+          "description": "Version of the rdy-spec crate that wrote this file."
+        },
+        "target": {
+          "type": "string",
+          "description": "Rust target triple."
+        }
+      }
+    },
+    "Run": {
+      "type": "object",
+      "required": [
+        "id",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "options"
+      ],
+      "properties": {
+        "id": {
+          "description": "Random UUID v4.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "finished_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "options": {
+          "type": "object",
+          "required": [
+            "jobs",
+            "deadline_ms",
+            "allow_unsigned",
+            "network"
+          ],
+          "properties": {
+            "jobs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "deadline_ms": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "allow_unsigned": {
+              "type": "boolean"
+            },
+            "network": {
+              "description": "false when sockets were turned off for this run.",
+              "type": "boolean"
+            },
+            "kube_context": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Context given with --kube-context, if any."
+            }
+          }
+        }
+      }
+    },
+    "SpecRef": {
+      "type": "object",
+      "required": [
+        "product",
+        "sha256",
+        "file_name",
+        "size_bytes"
+      ],
+      "properties": {
+        "product": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sha256": {
+          "description": "SHA-256 of the exact bytes that were verified and parsed.",
+          "$ref": "#/$defs/Sha256"
+        },
+        "file_name": {
+          "type": "string",
+          "description": "Base name only, never the full path."
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "serial": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "expires": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "contact": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Signature": {
+      "type": "object",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "anyOf": [
+            {
+              "enum": [
+                "verified",
+                "unsigned",
+                "invalid"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ],
+          "description": "verified: signed by a key pinned for this product (or given with --key). unsigned: no signature, run with --allow-unsigned. invalid exists in the Rust type for rdy verify and never appears in a written report, because an invalid signature always exits 64. Open."
+        },
+        "key_id": {
+          "description": "minisign key id, 16 uppercase hex digits.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9A-F]{16}$"
+        },
+        "product": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Product from the signed trusted comment."
+        },
+        "signed_at": {
+          "description": "From the signed trusted comment.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "trust_note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The local note from the trust store entry. Never text from the spec."
+        },
+        "trust_source": {
+          "anyOf": [
+            {
+              "enum": [
+                "system",
+                "user",
+                "flag"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which trust store matched, or flag for run --key. Open."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For invalid only."
+        }
+      }
+    },
+    "Host": {
+      "description": "The machine, coarsely. Deliberately excluded: IP and MAC addresses, environment values, argv, working directory, home path, kubeconfig path, raw machine id, serial numbers.",
+      "type": "object",
+      "required": [
+        "hostname",
+        "host_id",
+        "os",
+        "arch"
+      ],
+      "properties": {
+        "hostname": {
+          "type": "string",
+          "description": "After redaction."
+        },
+        "host_id": {
+          "description": "First 16 hex digits of SHA-256 over 'rdy-host-id-v1', NUL, product, NUL, OS machine id. Stable per host and product, not linkable across products.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "os": {
+          "type": "object",
+          "required": [
+            "family"
+          ],
+          "properties": {
+            "family": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "linux",
+                    "macos",
+                    "windows"
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/OpenCode"
+                }
+              ]
+            },
+            "id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pretty_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "kernel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "arch": {
+          "type": "string"
+        },
+        "virtualization": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "vm",
+                "unknown"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ]
+        },
+        "container": {
+          "description": "rdy ran inside a container or WSL.",
+          "type": "boolean"
+        }
+      }
+    },
+    "Identity": {
+      "description": "Who ran it (ADR 0012).",
+      "type": "object",
+      "required": [
+        "euid",
+        "user",
+        "elevated"
+      ],
+      "properties": {
+        "euid": {
+          "description": "Effective uid on Unix, null on Windows.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Local login name."
+        },
+        "elevated": {
+          "description": "euid 0 on Unix, a high-integrity token on Windows.",
+          "type": "boolean"
+        },
+        "kube": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "context": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "server": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "user": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "From SelfSubjectReview where served."
+            }
+          }
+        }
+      }
+    },
+    "Proxy": {
+      "description": "Proxy settings in effect, user info stripped from URLs. null when none.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "https": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "no_proxy": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Capability": {
+      "type": "object",
+      "required": [
+        "need",
+        "available"
+      ],
+      "properties": {
+        "need": {
+          "anyOf": [
+            {
+              "enum": [
+                "root",
+                "kube_context",
+                "network",
+                "command",
+                "cloud_credentials"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ],
+          "description": "Known: root, kube_context, network, command, cloud_credentials. Open."
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Program name for command, provider for cloud_credentials."
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For example 'uid 1000' or 'context acme-staging'."
+        },
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What to do when not available."
+        }
+      }
+    },
+    "Summary": {
+      "type": "object",
+      "required": [
+        "total",
+        "pass",
+        "warn",
+        "block",
+        "skipped",
+        "timeout",
+        "error",
+        "not_applicable",
+        "required_not_run",
+        "optional_not_run"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pass": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "block": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Skipped for any reason except not_applicable."
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_applicable": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Skipped as not applicable. Never counts toward the verdict."
+        },
+        "required_not_run": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "severity block and skipped (not not_applicable), timeout or error."
+        },
+        "optional_not_run": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "severity warn and skipped (not not_applicable), timeout or error."
+        }
+      }
+    },
+    "CheckResult": {
+      "type": "object",
+      "required": [
+        "key",
+        "id",
+        "name",
+        "family",
+        "severity",
+        "status",
+        "message",
+        "fix",
+        "fix_source",
+        "observed",
+        "expected",
+        "needs",
+        "partial",
+        "truncated",
+        "notes",
+        "started_ms",
+        "duration_ms"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "id, or id/name when the spec gave a name. Unique in the report."
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "family": {
+          "type": "string"
+        },
+        "severity": {
+          "anyOf": [
+            {
+              "enum": [
+                "block",
+                "warn"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ],
+          "description": "From the spec. A value a consumer does not know counts as block. Open."
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "pass",
+                "warn",
+                "block",
+                "skipped",
+                "timeout",
+                "error"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ],
+          "description": "After severity is applied. An unknown status counts as not run. Open."
+        },
+        "skip_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "missing_need",
+                "not_in_build",
+                "unknown_check",
+                "unsupported_spec",
+                "not_yet_on_os",
+                "not_applicable",
+                "run_deadline",
+                "cancelled"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ],
+          "description": "Present when status is skipped. Open."
+        },
+        "unsupported_fields": {
+          "description": "For unsupported_spec: the fields this rdy could not read.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "timeout_after_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Present when status is timeout."
+        },
+        "error_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "check_failed",
+                "panic"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ],
+          "description": "Present when status is error. Open."
+        },
+        "message": {
+          "type": "string",
+          "description": "One line, at most 1 KiB, such as '15.4 GiB found, 32 GiB needed'."
+        },
+        "fix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What to do. null only when status is pass or the check is not applicable."
+        },
+        "fix_source": {
+          "anyOf": [
+            {
+              "enum": [
+                "spec",
+                "rdy"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "spec: the vendor's fix field; the HTML labels it with the product. rdy: rdy's own text. Open."
+        },
+        "builtin_fix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "rdy's text when the spec's fix replaced it."
+        },
+        "observed": {
+          "description": "Measured values, at most 64 KiB. Keys per check id, snake_case, units in the name. Additive only within v1.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "expected": {
+          "description": "Thresholds that applied after defaults. Same rules as observed.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "needs": {
+          "description": "Hard and soft needs the check declared, and whether each was met.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NeedState"
+          }
+        },
+        "partial": {
+          "description": "Set when some sources could not be read. A partial check never blocks on data it could not read.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "missing",
+            "note"
+          ],
+          "properties": {
+            "missing": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "root",
+                      "kube_context",
+                      "network",
+                      "command",
+                      "cloud_credentials"
+                    ]
+                  },
+                  {
+                    "$ref": "#/$defs/OpenCode"
+                  }
+                ],
+                "description": "Known: root, kube_context, network, command, cloud_credentials. Open."
+              }
+            },
+            "note": {
+              "type": "string"
+            }
+          }
+        },
+        "truncated": {
+          "description": "A size cap cut message, fix, observed or expected.",
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string"
+          }
+        },
+        "started_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Milliseconds after run.started_at."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "skipped"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "skip_kind"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "timeout"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "timeout_after_ms"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "error"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "error_kind"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "warn",
+                  "block",
+                  "timeout",
+                  "error"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "fix": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "NeedState": {
+      "type": "object",
+      "required": [
+        "need",
+        "hard",
+        "met"
+      ],
+      "properties": {
+        "need": {
+          "anyOf": [
+            {
+              "enum": [
+                "root",
+                "kube_context",
+                "network",
+                "command",
+                "cloud_credentials"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ],
+          "description": "Known: root, kube_context, network, command, cloud_credentials. Open."
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hard": {
+          "description": "true: the check does not run without it. false: it runs partial.",
+          "type": "boolean"
+        },
+        "met": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Action": {
+      "description": "One side effect, recorded by the probe facade (02-engine-design.md). Fields beyond the required ones depend on kind.",
+      "type": "object",
+      "required": [
+        "seq",
+        "check",
+        "at_ms",
+        "duration_ms",
+        "kind",
+        "outcome"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "check": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Check key, or null for run-level probes."
+        },
+        "at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Milliseconds after run.started_at."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "exec",
+                "read",
+                "read_dir",
+                "stat",
+                "env",
+                "lookup",
+                "connect",
+                "tls",
+                "http",
+                "dns",
+                "kube",
+                "native",
+                "coalesced"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ],
+          "description": "Open."
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "ok",
+                "denied",
+                "failed",
+                "timeout"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ],
+          "description": "denied: rdy's own policy refused it (see rule). failed: the OS or peer said no (see error). Open."
+        },
+        "rule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "program": {
+          "type": "string",
+          "description": "exec"
+        },
+        "argv": {
+          "description": "exec, after redaction",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exit": {
+          "description": "exec",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stdout_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "exec"
+        },
+        "path": {
+          "type": "string",
+          "description": "read, read_dir, stat"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "read"
+        },
+        "entries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "read_dir"
+        },
+        "name": {
+          "type": "string",
+          "description": "env (the name only, never the value), dns"
+        },
+        "host": {
+          "type": "string",
+          "description": "lookup, connect, tls"
+        },
+        "answers": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "lookup"
+        },
+        "port": {
+          "description": "connect",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "addr": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "connect"
+        },
+        "via_proxy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "connect, user info stripped"
+        },
+        "sni": {
+          "type": "string",
+          "description": "tls"
+        },
+        "method": {
+          "type": "string",
+          "description": "http, kube"
+        },
+        "url": {
+          "type": "string",
+          "description": "http, without query string"
+        },
+        "status": {
+          "description": "http, kube",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "server": {
+          "type": "string",
+          "description": "dns"
+        },
+        "rtype": {
+          "type": "string",
+          "description": "dns"
+        },
+        "api": {
+          "type": "string",
+          "description": "native, for example statvfs"
+        },
+        "of": {
+          "type": "string",
+          "description": "coalesced: the kind that was coalesced"
+        },
+        "under": {
+          "type": "string",
+          "description": "coalesced"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "coalesced"
+        },
+        "truncated": {
+          "description": "exec, read",
+          "type": "boolean"
+        }
+      }
+    },
+    "Verification": {
+      "description": "Not a Report. What rdy verify prints with --json when the spec is accepted.",
+      "type": "object",
+      "required": [
+        "api_version",
+        "kind",
+        "producer",
+        "spec",
+        "signature"
+      ],
+      "properties": {
+        "api_version": {
+          "const": "rdy/v1"
+        },
+        "kind": {
+          "const": "Verification"
+        },
+        "producer": {
+          "$ref": "#/$defs/Producer"
+        },
+        "spec": {
+          "$ref": "#/$defs/SpecRef"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      }
+    },
+    "ErrorOutput": {
+      "description": "Not a Report. What rdy prints on stdout with --json when it exits 64 or 70 without a verdict (ADR 0008 decision 7). api_version and kind are written but not required.",
+      "type": "object",
+      "required": [
+        "error",
+        "verdict",
+        "complete"
+      ],
+      "properties": {
+        "api_version": {
+          "const": "rdy/v1"
+        },
+        "kind": {
+          "const": "Error"
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message",
+            "fix"
+          ],
+          "properties": {
+            "code": {
+              "description": "Stable code (ADR 0007, 0008): usage, spec_parse, spec_invalid, spec_unsigned, spec_signature_invalid, spec_key_unknown, spec_expired, trust_store_insecure, report_write, internal. Open.",
+              "$ref": "#/$defs/OpenCode"
+            },
+            "message": {
+              "type": "string"
+            },
+            "fix": {
+              "type": "string"
+            }
+          }
+        },
+        "verdict": {
+          "type": "null"
+        },
+        "complete": {
+          "const": false
+        }
+      }
+    },
+    "Redaction": {
+      "description": "What the redactor changed in this report (04-bundle-and-redaction.md). Counts only, never the matched text.",
+      "type": "object",
+      "required": [
+        "ruleset",
+        "total",
+        "by_rule"
+      ],
+      "properties": {
+        "ruleset": {
+          "anyOf": [
+            {
+              "enum": [
+                "report",
+                "bundle"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ],
+          "description": "Which compiled rule set ran. Open."
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "by_rule": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}
