@@ -148,6 +148,23 @@ fn lint_params(index: usize, params: &CheckParams) -> Option<CheckLint> {
                 UnsupportedReason::BadValue { field: None, .. } => {
                     format!("Change the value that does not fit in the {id} entry.")
                 }
+                UnsupportedReason::NoThreshold { one_of, and } => {
+                    let mut keys: Vec<String> = Vec::new();
+                    if !one_of.is_empty() {
+                        let list = one_of
+                            .iter()
+                            .map(|k| format!("'{k}'"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        keys.push(if one_of.len() == 1 {
+                            list
+                        } else {
+                            format!("at least one of {list}")
+                        });
+                    }
+                    keys.extend(and.iter().map(|k| format!("'{k}'")));
+                    format!("Add {} to the {id} entry.", keys.join(" and "))
+                }
                 UnsupportedReason::BadCommonField { field } => {
                     format!("Change the value of '{field}' in the {id} entry to one that fits.")
                 }

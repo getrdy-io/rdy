@@ -55,7 +55,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-022 | todo | | Generate JSON schemas with schemars behind cargo xtask schema and check drift in CI
 
-- M1-023 | PR #TBD | | per-line locations and did-you-mean are M1-031; `min: 32G` reads as an unknown field until M1-024 gives host.memory its parameters
+- M1-023 | PR #TBD | | per-line locations and did-you-mean are M1-031; the bare-threshold case (`no_threshold`) maps to unsupported_spec with a fix naming the missing keys
 
 - M1-024 | [#28](https://github.com/getrdy-io/rdy/pull/28) | 2026-10-28 | none. Net and k8s structs stay placeholders (M1-025). The rule is no_threshold only where 01 names a required key, so host.lsm, host.os and host.security_agents read bare. AbsPath keeps the text as written (the check resolves it). Deferred to M1-031: did-you-mean for a nested unknown key needs the nested key path (it reads as BadValue on the outer key). Deferred, schema fix: change `[^\0]` to `[^\x00]` in the Bundle pattern of spec.v1.schema.json, so the schema loads whole in jsonschema (host_params_schema.rs leaves Bundle out until then)
 

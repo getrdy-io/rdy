@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use rdy_spec::check::CheckParams;
+use rdy_spec::check::{CheckParams, UnsupportedReason};
 use rdy_spec::lint::{CheckLint, Level, LintCode};
 use rdy_spec::parse_unverified;
 use rdy_spec::reserved::UnknownKind;
@@ -87,21 +87,50 @@ fn a_bad_value_is_an_unsupported_spec_error_with_a_fix() {
 }
 
 #[test]
+fn a_bare_host_memory_is_an_unsupported_spec_error_naming_the_missing_keys() {
+    let f = one("  - id: host.memory\n");
+    assert_error_with_fix(&f, LintCode::UnsupportedSpec);
+    assert!(f.message.contains("no threshold"), "{}", f.message);
+    assert!(f.fix.contains("'min'"), "{}", f.fix);
+}
+
+#[test]
+fn min_32g_is_a_bad_value_not_an_unknown_field() {
+    let spec = pass("  - id: host.memory\n    min: 32G\n");
+    let decoded = match spec.decode_checks() {
+        Ok(d) => d,
+        Err(e) => panic!("{e}"),
+    };
+    assert!(matches!(
+        &decoded[0],
+        CheckParams::Unsupported {
+            reason: UnsupportedReason::BadValue { .. },
+            ..
+        }
+    ));
+}
+
+#[test]
 fn a_bad_common_field_is_an_unsupported_spec_error() {
-    let f = one("  - id: host.cpu\n    timeout: 90s\n");
+    let f = one("  - id: host.cpu\n    min: 4\n    timeout: 90s\n");
     assert_error_with_fix(&f, LintCode::UnsupportedSpec);
     assert!(f.fix.contains("timeout"));
 }
 
 #[test]
 fn a_clean_entry_has_no_finding() {
-    assert!(pass("  - id: host.cpu\n").lint_checks().is_empty());
+    assert!(
+        pass("  - id: host.cpu\n    min: 4\n")
+            .lint_checks()
+            .is_empty()
+    );
 }
 
 #[test]
 fn findings_carry_the_entry_index() {
-    let spec =
-        pass("  - id: host.cpu\n  - id: host.kernel\n  - id: host.cpu\n    name: b\n  - id: x.y\n");
+    let spec = pass(
+        "  - id: host.cpu\n    min: 4\n  - id: host.kernel\n  - id: host.cpu\n    min: 4\n    name: b\n  - id: x.y\n",
+    );
     let indexes: Vec<usize> = spec.lint_checks().iter().map(|f| f.index).collect();
     assert_eq!(indexes, [1, 3]);
 }
@@ -117,7 +146,7 @@ fn hostile_text_is_escaped_in_the_message_and_the_fix() {
 
 #[test]
 fn unknown_kind_follows_the_reserved_list() {
-    let spec = pass("  - id: host.kernel\n  - id: host.memroy\n  - id: host.cpu\n");
+    let spec = pass("  - id: host.kernel\n  - id: host.memroy\n  - id: host.cpu\n    min: 4\n");
     let decoded = match spec.decode_checks() {
         Ok(d) => d,
         Err(e) => panic!("{e}"),
