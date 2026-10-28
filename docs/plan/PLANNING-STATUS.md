@@ -18,6 +18,7 @@ Review files live in `docs/plan/reviews/`. Revisions after review are applied an
 | docs/plan/05-threat-model.md and SECURITY.md | security-reviewer | code-reviewer | final |
 | docs/plan/06-release-and-distribution.md | release-engineer | code-reviewer | final |
 | docs/plan/07-cli-ux.md | cli-ux | code-reviewer | review in progress when the session paused, see below |
+| docs/plan/13-plan-corrections.md | rust-architect | not yet reviewed | written, 40 entries; review it with code-reviewer in the backlog step |
 | docs/plan/08-testing.md | qa-engineer | code-reviewer | final |
 | docs/plan/09-docs-site.md | docs-writer | release-engineer | final |
 | docs/plan/10-devrel-and-launch.md, examples, CONTRIBUTING.md | devrel | cli-ux | final, but about ten README transcript lines must be re-synced to 07 (list is in 07's "Plan corrections found") |
@@ -31,7 +32,7 @@ Review files live in `docs/plan/reviews/`. Revisions after review are applied an
    Then cli-ux applies it to 07.
 2. devrel re-syncs the README transcripts and install lines in 10 to the final 07 and 01 (field renames:
    `over_max`, `tolerance_percent`, `forbid`; summary-line grammar; banners).
-3. If `docs/plan/13-plan-corrections.md` does not exist, rust-architect compiles it from every document's
+3. (Done.) `docs/plan/13-plan-corrections.md` exists with 40 entries. Originally: rust-architect compiles it from every document's
    "Plan corrections found" section and the review files, deduplicated, as a table (id, where, what is wrong,
    proposed fix, severity, raised by), plus "Decisions the founder must make" and "Process notes from the planning pass".
 4. rust-architect writes `docs/plan/11-backlog.md` from every document's "Tickets implied" section: one table
