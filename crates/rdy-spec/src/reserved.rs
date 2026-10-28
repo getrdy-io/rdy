@@ -126,6 +126,55 @@ mod tests {
         }
     }
 
+    /// The catalog is the source of the list. If one changes without the other, this fails.
+    #[test]
+    fn the_list_matches_the_ids_in_the_check_catalog() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/plan/03-check-catalog.md");
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            panic!("cannot read {}", path.display());
+        };
+        let mut ids = std::collections::BTreeSet::new();
+        // Headings such as `### host.disk (M1)`, and table rows such as ``| `net.pmtu` | ...`` in the
+        // reserved GCP and Azure table and in section 9.
+        let mut in_table_section = false;
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("### ") {
+                in_table_section = rest.starts_with("Reserved: GCP and Azure");
+                let word = rest.split_whitespace().next().unwrap_or("");
+                if is_id_shape(word) {
+                    ids.insert(word.to_owned());
+                }
+            } else if let Some(rest) = line.strip_prefix("## ") {
+                in_table_section = rest.starts_with("9. Reserved ids");
+            } else if in_table_section && let Some(rest) = line.strip_prefix("| `") {
+                let word = rest.split('`').next().unwrap_or("");
+                if is_id_shape(word) {
+                    ids.insert(word.to_owned());
+                }
+            }
+        }
+        let listed: std::collections::BTreeSet<String> =
+            RESERVED_IDS.iter().map(|id| (*id).to_owned()).collect();
+        assert_eq!(listed, ids, "RESERVED_IDS and 03-check-catalog.md differ");
+    }
+
+    fn is_id_shape(word: &str) -> bool {
+        match word.split_once('.') {
+            Some((family, name)) => {
+                !family.is_empty()
+                    && !name.is_empty()
+                    && family
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            }
+            None => false,
+        }
+    }
+
     #[test]
     fn typos_and_other_families_are_not_reserved() {
         for id in ["host.memroy", "upload.now", "host.Kernel", "", "host"] {

@@ -87,11 +87,50 @@ fn a_bad_value_is_an_unsupported_spec_error_with_a_fix() {
 }
 
 #[test]
-fn a_bare_host_memory_is_an_unsupported_spec_error_naming_the_missing_keys() {
+fn a_bare_host_memory_is_a_no_threshold_error_naming_the_missing_key() {
     let f = one("  - id: host.memory\n");
-    assert_error_with_fix(&f, LintCode::UnsupportedSpec);
-    assert!(f.message.contains("no threshold"), "{}", f.message);
-    assert!(f.fix.contains("'min'"), "{}", f.fix);
+    assert_eq!(f.code, LintCode::NoThreshold);
+    assert_eq!(f.code.as_str(), "no_threshold");
+    assert_eq!(f.level, Level::Error);
+    assert!(f.blocks_signing());
+    assert_eq!(
+        f.message,
+        "host.memory has no threshold, so it can only pass"
+    );
+    assert_eq!(f.fix, "add 'min'.");
+}
+
+#[test]
+fn a_no_threshold_fix_puts_or_before_the_last_key_and_names_the_other_required_keys() {
+    let f = one("  - id: host.cpu\n");
+    assert_eq!(f.fix, "add at least one of 'min', 'arch', or 'flags'.");
+    let f = one("  - id: host.disk\n");
+    assert_eq!(f.code, LintCode::NoThreshold);
+    assert_eq!(f.fix, "add 'min'; also add 'path'.");
+}
+
+#[test]
+fn not_in_build_follows_the_wording_of_the_cli_design() {
+    let f = one("  - id: gpu.cuda\n");
+    assert_eq!(
+        f.message,
+        "gpu.cuda: this version of rdy has no gpu checks yet"
+    );
+    assert_eq!(
+        f.fix,
+        "customers will see this check as not run, and NOT READY while it is required. Keep it if that is what you want."
+    );
+    let f = one("  - id: host.kernel\n");
+    assert_eq!(
+        f.message,
+        "host.kernel: this version of rdy does not have the check host.kernel yet"
+    );
+}
+
+#[test]
+fn unsupported_messages_do_not_repeat_the_reason() {
+    let f = one("  - id: host.memory\n    mn: 32Gi\n");
+    assert_eq!(f.message, "unknown field 'mn' in host.memory");
 }
 
 #[test]
