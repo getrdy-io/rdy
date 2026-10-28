@@ -13,7 +13,11 @@
 //!   it cannot become the answer to the next prompt.
 //!
 //! The logic sits behind the [`Terminal`] trait. [`StdTerminal`] is the real keyboard and stderr.
-//! Tests use a scripted terminal, so they need no TTY.
+//! Unit tests use a scripted terminal, so they need no TTY. On Unix, `tests/prompt_pty.rs` also
+//! drives [`StdTerminal`] through a real pseudo-terminal (Linux and macOS CI legs): `y`, `yes`, `n`,
+//! an empty line, end of input, no terminal, and a password that is never echoed. Windows has no pty
+//! test. The scripted-terminal unit tests cover the logic there, and `rpassword` does the console
+//! work.
 //!
 //! A declined question is not an error here: [`Prompter::confirm`] returns `Ok(false)`. The caller
 //! decides what that means. `trust add` prints `Not trusted. Nothing was changed.` and exits 64
@@ -24,15 +28,24 @@
 
 use std::io::{self, BufRead, IsTerminal, Write};
 
+use zeroize::Zeroizing;
+
 /// The most bytes read from one line of an answer. Longer lines are cut, and the rest is dropped.
 const MAX_LINE: usize = 4096;
 
 /// A secret read from the user, such as a key password.
 ///
 /// It has no `Display` and no `Clone`. `Debug` prints no text, so it cannot reach a log by accident.
-pub struct Secret(String);
+/// The text is wiped from memory when the value is dropped.
+pub struct Secret(Zeroizing<String>);
 
 impl Secret {
+    /// Wrap secret text. The text is wiped when the [`Secret`] is dropped.
+    #[must_use]
+    pub fn new(text: String) -> Self {
+        Self(Zeroizing::new(text))
+    }
+
     /// The secret text. Use it, then drop the [`Secret`]. Never log it.
     #[must_use]
     pub fn expose(&self) -> &str {
@@ -150,7 +163,7 @@ impl Terminal for StdTerminal {
     fn read_hidden(&mut self) -> io::Result<Secret> {
         // rpassword turns echo off on the controlling terminal and restores it when it is done,
         // including on an error.
-        rpassword::read_password().map(Secret)
+        rpassword::read_password().map(Secret::new)
     }
 }
 
@@ -323,9 +336,9 @@ mod tests {
             // the line is ended (rpassword writes the line break itself).
             self.out.extend_from_slice(b"\n");
             match self.hidden.take() {
-                Some(Ok(text)) => Ok(Secret(text.to_string())),
+                Some(Ok(text)) => Ok(Secret::new(text.to_string())),
                 Some(Err(err)) => Err(err),
-                None => Ok(Secret(String::new())),
+                None => Ok(Secret::new(String::new())),
             }
         }
     }
@@ -502,10 +515,10 @@ mod tests {
 
     #[test]
     fn secret_debug_shows_no_text() {
-        let secret = Secret("hunter2".to_string());
+        let secret = Secret::new("hunter2".to_string());
         assert_eq!(format!("{secret:?}"), "Secret(..)");
         assert!(!secret.is_empty());
-        assert!(Secret(String::new()).is_empty());
+        assert!(Secret::new(String::new()).is_empty());
     }
 
     #[test]
