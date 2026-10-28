@@ -53,6 +53,12 @@ pub enum SpecError {
         /// Already cut to 64 characters and escaped, so it is safe to print.
         value: String,
     },
+    /// `metadata.serial` is larger than 2^53 - 1.
+    #[error("serial {value} is too large")]
+    InvalidSerial {
+        /// The number that was refused.
+        value: u64,
+    },
     /// [`crate::load`] cannot return a spec yet, because signature checking and parsing are not wired in.
     #[error("loading a spec is not available in this build")]
     LoadNotWired,
@@ -72,6 +78,7 @@ impl SpecError {
             Self::InvalidCheckName { .. } => {
                 "use lowercase letters, digits, hyphens and underscores, such as 'data'."
             }
+            Self::InvalidSerial { .. } => "use a revision number up to 9007199254740991.",
             Self::LoadNotWired => {
                 "this is a bug in rdy. Please report it at https://github.com/getrdy-io/rdy/issues and include the output of rdy version."
             }
@@ -83,17 +90,32 @@ impl SpecError {
 mod tests {
     use super::SpecError;
 
+    /// The match has no wildcard, so a new variant fails to compile until it is listed here and in
+    /// `samples`.
+    fn assert_has_hint_and_message(e: &SpecError) {
+        match e {
+            SpecError::InvalidProduct { .. }
+            | SpecError::InvalidCheckId { .. }
+            | SpecError::InvalidCheckName { .. }
+            | SpecError::InvalidSerial { .. }
+            | SpecError::LoadNotWired => {
+                assert!(!e.hint().is_empty(), "{e:?} has no hint");
+                assert!(!e.to_string().is_empty(), "{e:?} has no message");
+            }
+        }
+    }
+
     #[test]
     fn every_variant_has_a_hint_and_a_message() {
-        let all = [
+        let samples = [
             SpecError::InvalidProduct { value: "A".into() },
             SpecError::InvalidCheckId { value: "A".into() },
             SpecError::InvalidCheckName { value: "A".into() },
+            SpecError::InvalidSerial { value: u64::MAX },
             SpecError::LoadNotWired,
         ];
-        for e in all {
-            assert!(!e.hint().is_empty(), "{e:?} has no hint");
-            assert!(!e.to_string().is_empty(), "{e:?} has no message");
+        for e in &samples {
+            assert_has_hint_and_message(e);
         }
     }
 

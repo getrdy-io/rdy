@@ -184,6 +184,19 @@ impl Spec {
     }
 }
 
+/// The largest `metadata.serial`, 2^53 - 1. Larger numbers lose precision in JSON consumers.
+pub const MAX_SERIAL: u64 = 9_007_199_254_740_991;
+
+fn deserialize_serial<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    let value = Option::<u64>::deserialize(d)?;
+    match value {
+        Some(v) if v > MAX_SERIAL => Err(serde::de::Error::custom(SpecError::InvalidSerial {
+            value: v,
+        })),
+        other => Ok(other),
+    }
+}
+
 /// The `metadata` block: who the spec is for, which revision it is and when it stops being valid.
 ///
 /// Unknown keys are refused.
@@ -200,8 +213,12 @@ pub struct Metadata {
     /// Where the customer asks questions, at most 256 characters. Shown as plain text, never as a link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contact: Option<String>,
-    /// Spec revision, rising on every signed release. Shown as "Spec revision 7".
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Spec revision, rising on every signed release, 0 to [`MAX_SERIAL`]. Shown as "Spec revision 7".
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_serial"
+    )]
     pub serial: Option<u64>,
     /// The UTC time after which rdy refuses the spec, in the full form `YYYY-MM-DDTHH:MM:SSZ`. Kept as
     /// text here. The shape and the comparison with the clock are checked when the spec is validated.
@@ -253,51 +270,129 @@ pub enum OsFamily {
     Windows,
 }
 
+/// A common field of a check entry that is either well formed or kept as the raw value that was
+/// written.
+///
+/// One bad common field must skip one check and not reject the whole file (01 sections 2.5 and 3.2). So
+/// decoding never fails on these fields. A value that does not fit stays as [`Lenient::Invalid`], and the
+/// code that plans the run turns it into an `unsupported_spec` skip. It serializes back to what was read.
+///
+/// The raw value is untrusted. Strip control characters before printing it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Lenient<T> {
+    /// The value fits the field.
+    Valid(T),
+    /// The value does not fit. This is what the file said.
+    Invalid(Value),
+}
+
+impl<T> Lenient<T> {
+    /// The value, or `None` when it did not fit.
+    #[must_use]
+    pub fn valid(&self) -> Option<&T> {
+        match self {
+            Self::Valid(v) => Some(v),
+            Self::Invalid(_) => None,
+        }
+    }
+}
+
+impl<T: Serialize> Serialize for Lenient<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Valid(v) => v.serialize(serializer),
+            Self::Invalid(raw) => raw.serialize(serializer),
+        }
+    }
+}
+
+impl<'de, T: serde::de::DeserializeOwned> Deserialize<'de> for Lenient<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = Value::deserialize(deserializer)?;
+        Ok(match T::deserialize(raw.clone()) {
+            Ok(v) => Self::Valid(v),
+            Err(_) => Self::Invalid(raw),
+        })
+    }
+}
+
 /// One entry of `checks`: the common fields and the raw parameters of its check id.
 ///
-/// An entry is a flat map in the YAML file. The common fields are typed here. Everything else is kept in
-/// [`CheckSpec::params`] for now. A later ticket decodes those into a typed value per id, so that an
-/// unknown id or a bad parameter skips the one check and not the whole file.
+/// An entry is a flat map in the YAML file. Decoding it is the first of two steps (01 section 2.4).
+/// Only a missing `id`, an `id` that is not text, or an entry that is not a map rejects the file. Every
+/// other common field is a [`Lenient`] slot, so a bad `severity`, `os`, `name`, `fix` or `timeout` leaves
+/// the entry in place for the planner to skip. The remaining keys wait in [`CheckSpec::params`] for a
+/// later ticket to decode into a typed value per id.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct CheckSpec {
-    /// Which check to run.
-    pub id: CheckId,
+    /// Which check to run, as written. It should read `family.name` in lowercase. Use
+    /// [`CheckSpec::check_id`] to test that. An id that does not fit, or that rdy does not know, skips
+    /// this one check as unknown and never rejects the file.
+    pub id: String,
     /// A short label. The entry's key is `id` or `id/name`, unique per spec.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<CheckName>,
-    /// Whether a failure blocks or only warns. Defaults to [`Severity::Block`].
-    #[serde(default)]
-    pub severity: Severity,
+    pub name: Option<Lenient<CheckName>>,
+    /// Whether a failure blocks or only warns. `None` means [`Severity::Block`]. A value that does not
+    /// read, such as `info` or a typo, counts as block too. See [`CheckSpec::effective_severity`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<Lenient<Severity>>,
     /// The vendor's advice, 1 to 2000 characters, shown instead of rdy's own as the headline fix. Plain
     /// text with no templating.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fix: Option<String>,
+    pub fix: Option<Lenient<String>>,
     /// How long the check may run, `1s` to `60s`, written like `10s`. Kept as text here. The grammar and
     /// range are checked by the typed `Duration` of a later ticket.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<String>,
+    pub timeout: Option<Lenient<String>>,
     /// Run only on these operating systems. Elsewhere the check is skipped as not applicable and never
     /// counts. `None` means every system.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub os: Option<Vec<OsFamily>>,
+    pub os: Option<Lenient<Vec<OsFamily>>>,
     /// Every other key of the entry: the parameters of the check id, such as `min` or `endpoints`.
+    ///
+    /// These values went through `serde_json::Value`, which keeps the last of two equal keys, turns a
+    /// non-finite float into `null` and has no line numbers. So the YAML layer (M1-017) must reject
+    /// duplicate keys and `.nan` and `.inf` before this type sees them, and it must keep the spans for
+    /// its own errors.
     #[serde(flatten)]
     pub params: Map<String, Value>,
 }
 
 impl CheckSpec {
-    /// An entry for `id` with severity `block` and no other fields.
+    /// An entry for `id` with every other field unset.
     #[must_use]
-    pub fn new(id: CheckId) -> Self {
+    pub fn new(id: impl Into<String>) -> Self {
         Self {
-            id,
+            id: id.into(),
             name: None,
-            severity: Severity::Block,
+            severity: None,
             fix: None,
             timeout: None,
             os: None,
             params: Map::new(),
+        }
+    }
+
+    /// The id as a checked [`CheckId`].
+    ///
+    /// # Errors
+    ///
+    /// [`SpecError::InvalidCheckId`] when the id is not `family.name` in lowercase. The planner reports
+    /// that as an unknown check.
+    pub fn check_id(&self) -> Result<CheckId, SpecError> {
+        CheckId::new(self.id.as_str())
+    }
+
+    /// The severity that applies: the written one, or [`Severity::Block`] when it is absent or does not
+    /// read. A check that cannot read its own severity is treated as required, so it can never make a
+    /// run look better than it is.
+    #[must_use]
+    pub fn effective_severity(&self) -> Severity {
+        match &self.severity {
+            Some(Lenient::Valid(s)) => *s,
+            _ => Severity::Block,
         }
     }
 }
@@ -479,17 +574,29 @@ mod tests {
         }
     }
 
+    fn entry(json: &str) -> CheckSpec {
+        serde_json::from_str(json).expect("one bad field must not reject the entry")
+    }
+
     #[test]
     fn check_entry_is_a_flat_map() {
         let json = r#"{"id":"host.memory","min":"32Gi","severity":"warn","fix":"Add RAM.",
             "timeout":"20s","name":"main","os":["linux","macos"],"swap":"forbid"}"#;
-        let c: CheckSpec = serde_json::from_str(json).expect("deserialize");
-        assert_eq!(c.id.as_str(), "host.memory");
-        assert_eq!(c.name.as_ref().map(CheckName::as_str), Some("main"));
-        assert_eq!(c.severity, Severity::Warn);
-        assert_eq!(c.fix.as_deref(), Some("Add RAM."));
-        assert_eq!(c.timeout.as_deref(), Some("20s"));
-        assert_eq!(c.os, Some(vec![OsFamily::Linux, OsFamily::Macos]));
+        let c = entry(json);
+        assert_eq!(c.id, "host.memory");
+        assert_eq!(c.check_id().expect("id").as_str(), "host.memory");
+        assert_eq!(
+            c.name,
+            Some(Lenient::Valid(CheckName::new("main").expect("name")))
+        );
+        assert_eq!(c.severity, Some(Lenient::Valid(Severity::Warn)));
+        assert_eq!(c.effective_severity(), Severity::Warn);
+        assert_eq!(c.fix, Some(Lenient::Valid("Add RAM.".to_owned())));
+        assert_eq!(c.timeout, Some(Lenient::Valid("20s".to_owned())));
+        assert_eq!(
+            c.os,
+            Some(Lenient::Valid(vec![OsFamily::Linux, OsFamily::Macos]))
+        );
         let mut keys: Vec<_> = c.params.keys().map(String::as_str).collect();
         keys.sort_unstable();
         assert_eq!(keys, ["min", "swap"]);
@@ -499,14 +606,88 @@ mod tests {
     }
 
     #[test]
-    fn severity_defaults_to_block_and_bad_values_fail() {
-        let c: CheckSpec = serde_json::from_str(r#"{"id":"host.cpu","min":4}"#).expect("parse");
-        assert_eq!(c.severity, Severity::Block);
+    fn severity_defaults_to_block() {
+        let c = entry(r#"{"id":"host.cpu","min":4}"#);
+        assert_eq!(c.severity, None);
+        assert_eq!(c.effective_severity(), Severity::Block);
         assert_eq!(Severity::default(), Severity::Block);
-        assert!(
-            serde_json::from_str::<CheckSpec>(r#"{"id":"host.cpu","severity":"blok"}"#).is_err()
-        );
+    }
+
+    /// 01 sections 2.5 and 3.2: a bad value in one entry skips that check and never rejects the file.
+    #[test]
+    fn a_bad_common_field_is_kept_not_rejected() {
+        let c = entry(r#"{"id":"host.cpu","severity":"blok"}"#);
+        assert_eq!(c.severity, Some(Lenient::Invalid(Value::from("blok"))));
+        assert_eq!(c.effective_severity(), Severity::Block);
+
+        let c = entry(r#"{"id":"host.cpu","severity":"info"}"#);
+        assert_eq!(c.severity, Some(Lenient::Invalid(Value::from("info"))));
+        assert_eq!(c.effective_severity(), Severity::Block);
+
+        let c = entry(r#"{"id":"host.cpu","os":["rhel"]}"#);
+        assert_eq!(c.os.as_ref().and_then(Lenient::valid), None);
+        assert!(matches!(c.os, Some(Lenient::Invalid(_))));
+
+        let c = entry(r#"{"id":"host.cpu","name":"Data"}"#);
+        assert_eq!(c.name, Some(Lenient::Invalid(Value::from("Data"))));
+
+        let c = entry(r#"{"id":"host.cpu","timeout":10}"#);
+        assert_eq!(c.timeout, Some(Lenient::Invalid(Value::from(10))));
+
+        let c = entry(r#"{"id":"host.cpu","fix":["a"]}"#);
+        assert!(matches!(c.fix, Some(Lenient::Invalid(_))));
+    }
+
+    #[test]
+    fn a_malformed_id_is_kept_and_reported_by_check_id() {
+        let c = entry(r#"{"id":"memroy","min":"1Gi"}"#);
+        assert_eq!(c.id, "memroy");
+        assert!(matches!(
+            c.check_id(),
+            Err(SpecError::InvalidCheckId { .. })
+        ));
+    }
+
+    #[test]
+    fn a_missing_or_non_text_id_rejects_the_entry() {
         assert!(serde_json::from_str::<CheckSpec>(r#"{"severity":"warn"}"#).is_err());
+        assert!(serde_json::from_str::<CheckSpec>(r#"{"id":7}"#).is_err());
+        assert!(serde_json::from_str::<CheckSpec>(r#"["host.cpu"]"#).is_err());
+    }
+
+    #[test]
+    fn bad_entries_do_not_reject_the_spec_and_round_trip_as_written() {
+        let json = r#"{
+            "apiVersion": "rdy/v1", "kind": "Readiness", "metadata": {"product": "a"},
+            "checks": [
+                {"id": "host.cpu", "min": 4},
+                {"id": "host.memory", "severity": "blok", "min": "1Gi"},
+                {"id": "host.disk", "os": ["rhel"], "path": "/", "min": "1Gi"},
+                {"id": "memroy", "name": "Data", "timeout": 10}
+            ]
+        }"#;
+        let spec: Spec = serde_json::from_str(json).expect("the file must still parse");
+        assert_eq!(spec.checks.len(), 4);
+        assert_eq!(spec.checks[0].effective_severity(), Severity::Block);
+        let again: Spec =
+            serde_json::from_str(&serde_json::to_string(&spec).expect("serialize")).expect("again");
+        assert_eq!(again, spec);
+        let out = serde_json::to_value(&spec).expect("value");
+        assert_eq!(out["checks"][1]["severity"], "blok");
+        assert_eq!(out["checks"][3]["timeout"], 10);
+    }
+
+    #[test]
+    fn serial_is_capped_at_two_to_the_53_minus_one() {
+        let ok = format!(r#"{{"product":"a","serial":{MAX_SERIAL}}}"#);
+        assert_eq!(
+            serde_json::from_str::<Metadata>(&ok).expect("max").serial,
+            Some(MAX_SERIAL)
+        );
+        let bad = format!(r#"{{"product":"a","serial":{}}}"#, MAX_SERIAL + 1);
+        let err = serde_json::from_str::<Metadata>(&bad).expect_err("too big");
+        assert!(err.to_string().contains("serial"), "{err}");
+        assert!(serde_json::from_str::<Metadata>(r#"{"product":"a","serial":-1}"#).is_err());
     }
 
     #[test]
