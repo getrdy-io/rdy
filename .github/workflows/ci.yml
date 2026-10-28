@@ -130,9 +130,12 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: scripts/check-dco.sh "$BASE_SHA" "$HEAD_SHA"
 
-  # Five native runners, nothing cross-compiled (docs/plan/06, ADR 0006). The Linux legs build and
-  # test the musl targets, so CI tests what ships. fail-fast is off so one red leg does not hide
-  # the others. There are no retries: a test that fails once in three runs is a bug to fix.
+  # Four native test legs and one compile leg (docs/plan/06, ADR 0006 decision 8). The Linux legs
+  # build and test the musl targets, so CI tests what ships. The org has no macOS arm64 runners
+  # (correction 05), so `macos-arm64-compile` builds the aarch64-apple-darwin target and compiles its
+  # tests on the Intel runner without running them. The full macos-arm64 test job is in
+  # macos-arm64.yml, outside ci-ok, until the org has those runners. fail-fast is off so one red leg
+  # does not hide the others. There are no retries: a test that fails once in three runs is a bug.
   test:
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -149,8 +152,8 @@ jobs:
         include:
           - { name: linux-x64, os: ubuntu-24.04, target: x86_64-unknown-linux-musl }
           - { name: linux-arm64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
-          - { name: macos-arm64, os: macos-15, target: aarch64-apple-darwin }
           - { name: macos-x64, os: macos-15-intel, target: x86_64-apple-darwin }
+          - { name: macos-arm64-compile, os: macos-15-intel, target: aarch64-apple-darwin, compile_only: true }
           - { name: windows-x64, os: windows-2022, target: x86_64-pc-windows-msvc }
     env:
       TARGET: ${{ matrix.target }}
@@ -176,11 +179,20 @@ jobs:
           shared-key: test-${{ matrix.name }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
+        if: ${{ !matrix.compile_only }}
         uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest@0.9.149
       - name: Build the rdy binary
+        if: ${{ !matrix.compile_only }}
         run: cargo build --locked --target "$TARGET" --package rdy
+      # The compile leg cannot run aarch64 code on an Intel host. It proves every crate, binary and
+      # test still compiles for aarch64-apple-darwin.
+      - name: Build the workspace and compile its tests (no run)
+        if: ${{ matrix.compile_only }}
+        run: |
+          cargo build --workspace --locked --target "$TARGET"
+          cargo test --workspace --no-run --locked --target "$TARGET"
       # ADR 0006, decision 2: static-pie, full RELRO, non-executable stack, checked with readelf.
       - name: Static-musl proof (readelf)
         if: runner.os == 'Linux'
@@ -201,6 +213,7 @@ jobs:
           echo "$out"
           echo "$out" | grep -q '^rdy '
       - name: Test (nextest, no retries)
+        if: ${{ !matrix.compile_only }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
       # nextest does not run doc tests. They build for the host, so they run on one leg only.
       - name: Doc tests
