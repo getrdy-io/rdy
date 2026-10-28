@@ -5,7 +5,8 @@
 //! so a typo in such a test would pass for the wrong reason.
 //!
 //! The `.stderr` text depends on the compiler, so the test runs only on the toolchain pinned in
-//! `rust-toolchain.toml`. On any other rustc it prints a skip message and passes. The unit tests in
+//! `rust-toolchain.toml`. On any other rustc it prints a skip message and passes, except when the `CI`
+//! environment variable is set: CI always runs the pinned toolchain, so a skip there is a failure. The unit tests in
 //! `src/redact` and the pinned CI toolchain still cover the guarantee. After a toolchain bump, refresh
 //! the `.stderr` files with `TRYBUILD=overwrite` and read the diff.
 
@@ -29,19 +30,28 @@ fn running_rustc() -> Option<String> {
     String::from_utf8(out.stdout).ok()
 }
 
+/// Reports a skipped run. On CI a skip fails the test, so a toolchain mismatch cannot hide the check.
+fn skip(reason: &str) {
+    assert!(
+        std::env::var_os("CI").is_none(),
+        "the compile-fail check must run on CI, but it was skipped: {reason}"
+    );
+    eprintln!("SKIPPED: {reason}");
+}
+
 #[test]
 fn redacted_cannot_be_built_outside_the_redactor() {
     let (Some(pinned), Some(running)) = (pinned_channel(), running_rustc()) else {
-        eprintln!(
-            "SKIPPED: cannot read rust-toolchain.toml or run rustc, so the compile-fail snapshots are not checked"
+        skip(
+            "cannot read rust-toolchain.toml or run rustc, so the compile-fail snapshots are not checked",
         );
         return;
     };
     if !running.starts_with(&format!("rustc {pinned} ")) {
-        eprintln!(
-            "SKIPPED: the compile-fail snapshots are for rustc {pinned}, but this is `{}`",
+        skip(&format!(
+            "the compile-fail snapshots are for rustc {pinned}, but this is `{}`",
             running.trim()
-        );
+        ));
         return;
     }
     let cases = trybuild::TestCases::new();

@@ -9,7 +9,7 @@ fn redactor() -> Redactor {
     Redactor::new(TagKey::fixed([7; 32]))
 }
 
-/// A tiny rule that removes every occurrence of `needle`, for engine tests that need exact spans.
+/// A rule with a fixed name and priority, for engine tests that need exact spans.
 fn rule_for(name: &'static str, priority: u8, find: fn(&str, &mut Vec<Range<usize>>)) -> Rule {
     Rule {
         name,
@@ -18,8 +18,8 @@ fn rule_for(name: &'static str, priority: u8, find: fn(&str, &mut Vec<Range<usiz
     }
 }
 
-fn ranges(text: &str, out: &mut Vec<Range<usize>>, ranges: &[(usize, usize)]) {
-    let _ = text;
+/// Pushes fixed byte ranges, whatever the text is.
+fn ranges(_text: &str, out: &mut Vec<Range<usize>>, ranges: &[(usize, usize)]) {
     out.extend(ranges.iter().map(|&(s, e)| s..e));
 }
 
@@ -78,11 +78,8 @@ fn every_pair_of_spans_in_a_short_text_leaves_no_byte_behind() {
                     let covered: Vec<bool> = (0..10)
                         .map(|i| (s1..e1).contains(&i) || (s2..e2).contains(&i))
                         .collect();
-                    let make = |a: usize, b: usize| {
-                        // Each rule finds one range. Two rules with different priorities.
-                        (a, b)
-                    };
-                    let (x, y) = (make(s1, e1), make(s2, e2));
+                    // Two rules with different priorities, one range each.
+                    let (x, y) = ((s1, e1), (s2, e2));
                     let spans = vec![
                         Span {
                             start: x.0,
@@ -127,7 +124,7 @@ fn every_pair_of_spans_in_a_short_text_leaves_no_byte_behind() {
 #[test]
 fn equal_secrets_share_a_tag_inside_one_redactor() {
     let r = redactor();
-    let out = r.redact_str("password=Zq9xK7mW2 and token: Zq9xK7mW2 and secret=Other1234");
+    let out = r.redact_str("password=Zq9xK7mW2\ntoken: Zq9xK7mW2\nsecret=Other1234");
     let tags: Vec<&str> = out
         .match_indices("[REDACTED:secret_by_key:")
         .map(|(i, m)| &out[i + m.len()..i + m.len() + 8])
@@ -204,6 +201,20 @@ fn no_byte_of_a_matched_secret_survives() {
         format!("password=\"{secret}"),
         format!("x password={secret}\nmore"),
         format!("PASSWORD={secret}\r\nmore"),
+        // Review round: values with spaces, glued quotes, references that carry a literal, block scalars.
+        format!("password: correct {secret} staple"),
+        format!("token: Bearer {secret}"),
+        format!("password=x\u{a0}{secret}"),
+        format!("password=\"\"{secret}"),
+        format!("password=\"a\"{secret} tail"),
+        format!("password=${{PG_PW:-{secret}}}"),
+        format!("password=$(echo {secret})"),
+        format!("password={{{{ .pw | default \"{secret}\" }}}}"),
+        format!("password=${{A}}{secret}"),
+        format!("Authorization: Basic {secret}"),
+        format!("authProfile: {secret}"),
+        format!("token: |\n  {secret}\n  more {secret}\nnext: 1"),
+        format!("- token: >-\n    {secret}\n"),
     ];
     let r = redactor();
     for form in &forms {
@@ -222,7 +233,9 @@ fn a_rule_that_reports_a_bad_range_makes_the_engine_drop_the_whole_string() {
     let past = rule_for("past", 1, |t, o| ranges(t, o, &[(2, 99)]));
     // Inside the two-byte character, which starts at byte 5.
     let mid = rule_for("mid", 1, |t, o| ranges(t, o, &[(5, 6)]));
-    for bad in [past, mid] {
+    // Start after end.
+    let inverted = rule_for("inverted", 1, |t, o| ranges(t, o, &[(7, 3)]));
+    for bad in [past, mid, inverted] {
         let mut counts = RuleCounts::default();
         let out = redactor().run(&[bad], text, &mut counts);
         assert!(out.starts_with("[REDACTED:redactor_error:"), "{}", *out);
@@ -235,7 +248,7 @@ fn a_rule_that_reports_a_bad_range_makes_the_engine_drop_the_whole_string() {
 fn counts_are_per_call() {
     let r = redactor();
     let mut a = RuleCounts::default();
-    let _ = r.redact_str_counted("password=one token=two", &mut a);
+    let _ = r.redact_str_counted("password=one\ntoken=two", &mut a);
     let _ = r.redact_str("password=three");
     let mut b = RuleCounts::default();
     let _ = r.redact_str_counted("password=four", &mut b);

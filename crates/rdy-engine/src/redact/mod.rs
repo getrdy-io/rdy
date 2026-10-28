@@ -20,6 +20,13 @@
 //! adds the other M1 rules. M1-056 wires the tracing writer, panic hook and CLI errors. M1-062 adds the
 //! report walk and `RedactedReport`.
 
+// `TagKey::fixed` makes tags predictable. It is for tests only, so a release build with the `testing`
+// feature is refused. A debug build is allowed so `cargo test` and `cargo clippy --features testing` work.
+// Cargo unifies features across a workspace build, so build the shipped binary with
+// `cargo build --release -p rdy`, and let CI also check `cargo tree -e features -p rdy` for `testing`.
+#[cfg(all(feature = "testing", not(test), not(debug_assertions)))]
+compile_error!("the `testing` feature of rdy-engine must not be enabled in a release build");
+
 mod key;
 mod rules;
 mod span;
@@ -142,9 +149,12 @@ impl Redactor {
     fn run(&self, rules: &[Rule], text: &str, counts: &mut RuleCounts) -> Redacted<String> {
         let mut spans = Vec::new();
         let mut found = Vec::new();
+        // An inverted range (start after end) is a rule bug. It must fail closed, not vanish.
+        let mut ranges_ok = true;
         for rule in rules {
             found.clear();
             (rule.find)(text, &mut found);
+            ranges_ok &= found.iter().all(|r| r.start <= r.end);
             spans.extend(found.drain(..).map(|r| Span {
                 start: r.start,
                 end: r.end,
@@ -153,7 +163,7 @@ impl Redactor {
             }));
         }
         let spans = merge(spans);
-        match self.write(text, &spans) {
+        match ranges_ok.then(|| self.write(text, &spans)).flatten() {
             Some(out) => {
                 for span in &spans {
                     counts.add(span.rule);
