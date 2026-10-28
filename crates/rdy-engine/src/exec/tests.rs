@@ -327,6 +327,37 @@ mod process {
     }
 
     #[tokio::test]
+    async fn the_group_of_a_reaped_leader_is_not_signalled() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let pid_file = dir.path().join("sleeper.pid");
+        // The leader leaves a sleeper in its group and exits at once.
+        let mut leader = tokio::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "sleep 600 >/dev/null 2>&1 & echo $! > \"$0\"",
+                pid_file.to_str().expect("utf-8 temp path"),
+            ])
+            .process_group(0)
+            .spawn()
+            .expect("starts");
+        let leader_pid = leader.id().expect("pid");
+        let sleeper = read_pid(&pid_file, Duration::from_secs(5)).await;
+        wait_exited(leader_pid).await.expect("exits");
+        // A live (zombie) leader: the group kill goes through.
+        assert!(leader_unreaped(to_pid(leader_pid).expect("pid")));
+        leader.wait().await.expect("reaps");
+        // Reaped: the group id could belong to someone else now, so nothing is signalled.
+        assert!(!leader_unreaped(to_pid(leader_pid).expect("pid")));
+        kill_group(leader_pid);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!is_gone(sleeper), "the group of a reaped leader was killed");
+        // Clean up the sleeper directly.
+        let sleeper_pid = to_pid(sleeper).expect("pid");
+        let _ = rustix::process::kill_process(sleeper_pid, rustix::process::Signal::KILL);
+        wait_gone(sleeper).await;
+    }
+
+    #[tokio::test]
     async fn polling_for_an_exit_leaves_the_zombie_in_place() {
         let mut child = tokio::process::Command::new("/bin/sh")
             .args(["-c", "exit 0"])

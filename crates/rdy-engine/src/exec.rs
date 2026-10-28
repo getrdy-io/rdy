@@ -9,8 +9,10 @@
 //! - **Kill before reap.** A process group id stays reserved while its leader is a zombie. So the
 //!   runner never reaps the leader before it has signalled the group: it waits for the exit without
 //!   reaping (it polls `waitid` with `WNOWAIT`), sends SIGKILL to the group, frees the registry slot,
-//!   and only then reaps. A kill after the reap could hit a new, unrelated
-//!   group that reused the number.
+//!   and only then reaps. A kill after the reap could hit a new, unrelated group that reused the
+//!   number. Two guards back this up. Every run first registers a `SIGCHLD` handler, because a process
+//!   started with `SIGCHLD` ignored has its children reaped by the kernel at exit. And the group kill
+//!   itself is skipped when the leader is already reaped (`ECHILD`).
 //! - **Kill on every way out.** The group gets SIGKILL when the leader exits (so a background child
 //!   never outlives its command), when the command times out, when the future is dropped (the
 //!   scheduler aborts a check at its timeout, which drops it) and when the run ends through
@@ -24,7 +26,7 @@
 //!
 //! The program must be an absolute path, so no `PATH` or working-directory lookup happens. The
 //! environment is cleared, stdin is null, the working directory is the root of the file system
-//! ([`CHILD_CWD`]), and stdout and stderr are read up to a byte cap each. The rest is drained and
+//! ([`child_cwd`]), and stdout and stderr are read up to a byte cap each. The rest is drained and
 //! dropped, so a chatty child never blocks on a full pipe.
 //!
 //! **Inherited descriptors.** The standard library opens its own descriptors with close-on-exec, but a
@@ -69,12 +71,23 @@ pub const DEFAULT_STDOUT_CAP: usize = 1024 * 1024;
 pub const DEFAULT_STDERR_CAP: usize = 64 * 1024;
 
 /// The working directory every child gets, so it never runs inside the operator's directory.
-#[cfg(unix)]
-pub const CHILD_CWD: &str = "/";
-
-/// The working directory every child gets, so it never runs inside the operator's directory.
-#[cfg(not(unix))]
-pub const CHILD_CWD: &str = "C:\\Windows\\System32";
+///
+/// Unix: `/`. Windows: `%SystemRoot%\System32`, or the root of the current drive when `SystemRoot`
+/// is not set.
+#[must_use]
+pub fn child_cwd() -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from("/")
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::var_os("SystemRoot").map_or_else(
+            || PathBuf::from("\\"),
+            |root| PathBuf::from(root).join("System32"),
+        )
+    }
+}
 
 /// How many live process groups the registry holds. The facade allows at most 4 at once.
 const REGISTRY_SLOTS: usize = 64;
@@ -242,9 +255,37 @@ pub fn live_groups() -> usize {
 #[cfg(unix)]
 fn kill_group(pid: u32) {
     use rustix::process::{Signal, kill_process_group};
-    if let Some(pid) = to_pid(pid) {
+    if let Some(pid) = to_pid(pid)
+        && leader_unreaped(pid)
+    {
         let _ = kill_process_group(pid, Signal::KILL);
     }
+}
+
+/// Whether the child `pid` still exists as our child, running or as a zombie.
+///
+/// `false` means it was reaped already, by us or by the kernel (when `SIGCHLD` is ignored the kernel
+/// reaps a child at its exit). Its group id is then free to be reused, so the group must not be
+/// signalled. This is a second line behind [`ensure_sigchld_handled`], which stops the kernel
+/// reaping; it also covers a reap by another part of the process.
+#[cfg(unix)]
+fn leader_unreaped(pid: rustix::process::Pid) -> bool {
+    use rustix::io::Errno;
+    use rustix::process::{WaitId, WaitIdOptions, waitid};
+    let options = WaitIdOptions::EXITED | WaitIdOptions::NOWAIT | WaitIdOptions::NOHANG;
+    !matches!(waitid(WaitId::Pid(pid), options), Err(Errno::CHILD))
+}
+
+/// Makes sure `SIGCHLD` has a handler before any child starts.
+///
+/// If `rdy` is started with `SIGCHLD` set to ignore (a shell can do that with `trap '' CHLD`), the
+/// kernel reaps each child the moment it exits, and the zombie that protects the group id is never
+/// there. Registering tokio's child-exit signal replaces the ignore with a handler. It is idempotent.
+/// The returned guard only needs to live while the command is started.
+#[cfg(unix)]
+fn ensure_sigchld_handled() -> Result<tokio::signal::unix::Signal, ExecError> {
+    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::child())
+        .map_err(|error| ExecError::Io(format!("cannot watch for child exits: {error}")))
 }
 
 /// Windows has no process group to signal. The child itself is killed through its handle.
@@ -429,13 +470,15 @@ async fn run_with(
     if registry.shutting_down() {
         return Err(ExecError::ShuttingDown);
     }
+    #[cfg(unix)]
+    let _sigchld = ensure_sigchld_handled()?;
     let index = registry.reserve().ok_or(ExecError::TooMany)?;
     let mut command = Command::new(&spec.program);
     command
         .args(&spec.args)
         .env_clear()
         .envs(spec.env.iter().map(|(key, value)| (key, value)))
-        .current_dir(CHILD_CWD)
+        .current_dir(child_cwd())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

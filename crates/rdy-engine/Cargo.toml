@@ -18,7 +18,7 @@ runtime = ["dep:tokio", "dep:rustix"]
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "sync", "time"], optional = true }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "signal", "sync", "time"], optional = true }
 
 # Process group kill on Unix (M1-038). Safe wrappers, so the crate keeps `forbid(unsafe_code)`.
 [target.'cfg(unix)'.dependencies]
