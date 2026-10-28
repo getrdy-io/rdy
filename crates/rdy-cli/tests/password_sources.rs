@@ -15,7 +15,12 @@ fn read(
     stdin: &[u8],
 ) -> Result<Option<KeyPassword>, PasswordError> {
     let env = env.map(OsString::from);
-    read_key_password_from(file, env, &mut Cursor::new(stdin.to_vec()))
+    read_key_password_from(
+        file,
+        env,
+        &mut Cursor::new(stdin.to_vec()),
+        &mut std::io::sink(),
+    )
 }
 
 fn password(result: Result<Option<KeyPassword>, PasswordError>) -> String {

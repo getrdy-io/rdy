@@ -26,6 +26,9 @@ clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-
 thiserror = { workspace = true, features = ["std"] }
 zeroize = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["std", "fs", "process"] }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 

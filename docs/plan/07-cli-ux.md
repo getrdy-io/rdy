@@ -92,8 +92,9 @@ in M1 needs it.
 
 **Flag rules.** Long flags are lowercase words with hyphens; short flags only `-h -V -q -v`. Flags that grant
 trust or consent (`--allow-unsigned`, `--key`, `--allow-exec`, `--yes`) are read from argv only (INV-05).
-`--json` never changes a verdict or exit code. Hidden `--password` (M1) and `--token` and `--secret` (M2) exist
-only to exit 64 with the reason (section 10).
+`--json` never changes a verdict or exit code. `--password` (M1) is not a clap flag. A scan of the raw command
+line, before clap parses anything, refuses it on `spec sign` and `spec keygen` with exit 64 and the reason
+(section 10). `--token` and `--secret` (M2) get the same treatment on the commands that read them.
 
 **Usage errors.** clap exits 2 on its own errors. rdy parses with `try_parse_from` and maps by kind:
 `DisplayHelp`, `DisplayVersion` and `DisplayHelpOnMissingArgumentOrSubcommand` (bare `rdy`, `rdy spec`,
@@ -538,12 +539,21 @@ flag. Public keys may be on argv. Token and password files must not be symlinks 
 others (Unix). rdy never prints its own argv or environment, and the action log records variable names only.
 
 **Reading a key password (M1-112).** `--password-file <file>` beats `RDY_KEY_PASSWORD`, and either beats the
-prompt. `-` is standard input. rdy removes one trailing line ending and nothing else, so spaces are part of the
+prompt. `-` is standard input, read from an unbuffered duplicate of the descriptor so no copy stays in the
+standard library's buffer. rdy removes one trailing line ending and nothing else, so spaces are part of the
 password. It refuses an empty value, a second line, text that is not UTF-8 and more than 1024 bytes. A password
-file must be a regular file. On Unix it must also not be a symlink and not readable by group or others, and the
-fix is `chmod 600 <file>`; Windows checks the symlink and file type only. The password is held in memory that
-is wiped on drop. `--password` is refused before clap parses anything, on `spec sign` and `spec keygen` only,
-so the refusal beats a missing-argument error and the value is never read. The code is `crates/rdy-cli/src/password.rs`.
+file is opened once, without following a symlink, and every check runs on the open handle: it must be a regular
+file. On Unix it must also be owned by the effective user and not readable or writable by group or others, and
+the fix is `chmod 600 <file>`. Windows opens the file without following a reparse point and checks the file
+type only; it does not check ACLs. The password is held in memory that is wiped on drop. `--password` is
+refused before clap parses anything, on `spec sign` and `spec keygen` only, so the refusal beats a
+missing-argument error and the value is never read. The code is `crates/rdy-cli/src/password.rs`.
+
+**`RDY_KEY_PASSWORD` is the weakest source.** The same user's processes and root can read it from
+`/proc/<pid>/environ`, and every child process inherits it. In CI, store it as a masked secret and prefer a
+`--password-file -` pipe when the CI system allows it. When the password comes from the variable and stderr is
+a terminal, rdy prints one line: `note: the key password comes from RDY_KEY_PASSWORD, which child processes
+inherit and root can read`. It prints nothing when stderr is not a terminal.
 
 ## Appendix A: help text for rdy and every M1 command
 
@@ -852,6 +862,8 @@ Options:
 
 Environment:
   RDY_KEY_PASSWORD  The key password, for CI. Never put it on the command line.
+                    Other processes of your user and root can read it, and
+                    child processes inherit it. Use a masked secret in CI.
 
 Examples:
   Sign a spec:
@@ -886,7 +898,8 @@ Options:
 
 Environment:
   RDY_KEY_PASSWORD  The new key password, for CI. Never put it on the command
-                    line.
+                    line. Other processes of your user and root can read it,
+                    and child processes inherit it. Use a masked secret in CI.
 
 Examples:
   Make a key pair:

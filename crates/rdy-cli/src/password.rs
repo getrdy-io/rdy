@@ -9,11 +9,18 @@
 //!    `RDY_KEY_PASSWORD` variable ([`read_key_password`]). The result is `None` when neither is
 //!    given, and the caller then asks at the prompt (M1-123).
 //!
-//! The flag beats the variable when both are set. A password file must be a regular file, not a
-//! symlink, and (on Unix) not readable by group or others. Windows has no mode bits, so only the
-//! symlink and file-type rules apply there; ACL checks are not done. One trailing line ending is
-//! removed. Any other newline is an error. The password may be at most [`MAX_PASSWORD_BYTES`]
-//! bytes.
+//! The flag beats the variable when both are set. A password file is opened once, with symlinks
+//! refused, and the checks run on the open handle: it must be a regular file. On Unix it must also
+//! be owned by the effective user and not readable or writable by group or others. Windows has no
+//! mode bits, so only the reparse-point and file-type rules apply there; ACLs are not checked.
+//! (There is no "changed while opening" check: the path is never opened twice.) `-` reads a
+//! duplicate of the standard input descriptor with no buffer. One trailing line ending is removed.
+//! Any other newline is an error. The password may be at most [`MAX_PASSWORD_BYTES`] bytes, and
+//! `finish` is the one place that applies the cap, after the line ending is removed.
+//!
+//! **The variable is the weakest source.** Any process of the same user, and root, can read it from
+//! `/proc/<pid>/environ`, and every child process inherits it. In CI, store it as a masked secret.
+//! When the password comes from the variable and stderr is a terminal, rdy prints [`ENV_NOTE`].
 //!
 //! The password is held in a [`KeyPassword`], which wipes its memory on drop and prints as
 //! `KeyPassword(..)`. The process environment itself is not wiped, and a pipe or a file the user
@@ -22,7 +29,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 use zeroize::Zeroizing;
@@ -34,6 +41,12 @@ pub const ENV_NAME: &str = "RDY_KEY_PASSWORD";
 
 /// The longest password rdy reads, in bytes, not counting the line ending.
 pub const MAX_PASSWORD_BYTES: usize = 1024;
+
+/// The note printed when the password comes from the variable and stderr is a terminal.
+///
+/// It is one line. The variable is visible to the same user and to root through
+/// `/proc/<pid>/environ` and is inherited by every child process.
+pub const ENV_NOTE: &str = "note: the key password comes from RDY_KEY_PASSWORD, which child processes inherit and root can read";
 
 /// The most bytes read from a file or from standard input: the password and a `\r\n`.
 const MAX_INPUT_BYTES: usize = MAX_PASSWORD_BYTES + 2;
@@ -119,11 +132,11 @@ pub enum PasswordError {
     /// The password file is not a regular file.
     #[error("{0:?} is not a regular file")]
     NotRegular(PathBuf),
-    /// The path was replaced between the check and the open.
-    #[error("{0:?} changed while rdy was opening it")]
-    Changed(PathBuf),
-    /// Group or others can read the password file (Unix).
-    #[error("{0:?} can be read by other users")]
+    /// Another user owns the password file (Unix).
+    #[error("{0:?} is owned by another user")]
+    NotOwned(PathBuf),
+    /// Group or others have access to the password file (Unix).
+    #[error("{0:?} can be read or written by other users")]
     TooOpen(PathBuf),
 }
 
@@ -148,9 +161,7 @@ impl PasswordError {
             }
             Self::Symlink(path) => format!("give the real file, not a link to it: {path:?}"),
             Self::NotRegular(_) => "use a plain file, or '-' for standard input".into(),
-            Self::Changed(_) => {
-                "run the command again, and do not change the file meanwhile".into()
-            }
+            Self::NotOwned(_) => "use a password file that you own".into(),
             Self::TooOpen(path) => format!("make it private with: chmod 600 {path:?}"),
         }
     }
@@ -194,19 +205,41 @@ pub fn refuse_argv_password(stderr: &mut dyn Write) -> u8 {
 /// Read the key password from the file or the variable, or `None` when neither is given.
 ///
 /// `file` is the value of `--password-file`; `-` means standard input. The file wins over the
-/// variable. Standard input is read only when `file` is `-`.
+/// variable. Standard input is read only when `file` is `-`, through a duplicate of the descriptor
+/// with no buffer, so no copy of the password stays inside the standard library.
+///
+/// When the password comes from the variable and `stderr` is a terminal, one `note:` line is
+/// written to `stderr` (see [`ENV_NOTE`]).
 ///
 /// # Errors
 ///
 /// A [`PasswordError`] when the source is empty, too large, has more than one line, is not UTF-8,
-/// cannot be read, or (a file) is a symlink, is not a regular file or is open to other users.
-pub fn read_key_password(file: Option<&Path>) -> Result<Option<KeyPassword>, PasswordError> {
+/// cannot be read, or (a file) is a symlink, is not a regular file, is not yours or can be read or
+/// written by other users.
+pub fn read_key_password(
+    file: Option<&Path>,
+    stderr: &mut dyn Write,
+) -> Result<Option<KeyPassword>, PasswordError> {
     let env = std::env::var_os(ENV_NAME);
-    read_key_password_from(file, env, &mut std::io::stdin().lock())
+    let mut sink = std::io::sink();
+    let notice: &mut dyn Write = if std::io::stderr().is_terminal() {
+        stderr
+    } else {
+        &mut sink
+    };
+    if file == Some(Path::new("-")) {
+        let mut stdin = stdin_file().map_err(|source| PasswordError::Unreadable {
+            origin: Origin::Stdin,
+            source,
+        })?;
+        read_key_password_from(file, env, &mut stdin, notice)
+    } else {
+        read_key_password_from(file, env, &mut std::io::empty(), notice)
+    }
 }
 
 /// The testable core of [`read_key_password`]: the variable's value and standard input are passed
-/// in.
+/// in, and the env note goes to `notice` whenever the variable is used.
 ///
 /// # Errors
 ///
@@ -215,6 +248,7 @@ pub fn read_key_password_from(
     file: Option<&Path>,
     env: Option<OsString>,
     stdin: &mut dyn Read,
+    notice: &mut dyn Write,
 ) -> Result<Option<KeyPassword>, PasswordError> {
     if let Some(path) = file {
         let (origin, raw) = if path == Path::new("-") {
@@ -228,14 +262,37 @@ pub fn read_key_password_from(
     }
     match env {
         Some(value) => {
-            let raw = Zeroizing::new(value.into_encoded_bytes());
-            if raw.len() > MAX_PASSWORD_BYTES {
-                return Err(PasswordError::TooLarge(Origin::Env));
-            }
-            finish(raw, &Origin::Env).map(Some)
+            let password = finish(Zeroizing::new(value.into_encoded_bytes()), &Origin::Env)?;
+            let _ = writeln!(notice, "{ENV_NOTE}");
+            Ok(Some(password))
         }
         None => Ok(None),
     }
+}
+
+/// Standard input as an unbuffered `File`. `std::io::Stdin` keeps a buffer that holds a copy of
+/// what it read and is never wiped.
+fn stdin_file() -> std::io::Result<File> {
+    unbuffered(&std::io::stdin())
+}
+
+/// A `File` on a duplicate of the descriptor (Unix) or handle (Windows) of `stream`, so that reads
+/// go straight to the kernel with no buffer between.
+#[cfg(unix)]
+fn unbuffered(stream: &impl std::os::fd::AsFd) -> std::io::Result<File> {
+    Ok(File::from(stream.as_fd().try_clone_to_owned()?))
+}
+
+/// See the Unix version.
+#[cfg(windows)]
+fn unbuffered(stream: &impl std::os::windows::io::AsHandle) -> std::io::Result<File> {
+    Ok(File::from(stream.as_handle().try_clone_to_owned()?))
+}
+
+/// Other platforms have no duplicate here. Use a password file or the variable.
+#[cfg(not(any(unix, windows)))]
+fn unbuffered(_stream: &std::io::Stdin) -> std::io::Result<File> {
+    Err(std::io::ErrorKind::Unsupported.into())
 }
 
 /// How a capped read failed, before the origin is known.
@@ -265,7 +322,11 @@ fn read_capped(reader: &mut dyn Read) -> Result<Zeroizing<Vec<u8>>, ReadFailure>
     Ok(buf)
 }
 
-/// Open a password file after the symlink, file type and mode checks, and read it.
+/// Open a password file once, check the open handle, and read from that same handle.
+///
+/// The path is never opened a second time, so nothing can be swapped in between the checks and the
+/// read. On Unix the open refuses a symlink (`O_NOFOLLOW`) and does not block on a named pipe
+/// (`O_NONBLOCK`). On Windows the open does not follow a reparse point.
 fn read_file(path: &Path) -> Result<Zeroizing<Vec<u8>>, PasswordError> {
     let origin = || Origin::File(path.to_path_buf());
     let unreadable = |source| PasswordError::Unreadable {
@@ -273,34 +334,67 @@ fn read_file(path: &Path) -> Result<Zeroizing<Vec<u8>>, PasswordError> {
         source,
     };
 
-    let before = std::fs::symlink_metadata(path).map_err(unreadable)?;
-    if before.file_type().is_symlink() {
-        return Err(PasswordError::Symlink(path.to_path_buf()));
-    }
-    // A named pipe would block the open, so the type is checked before opening.
-    if !before.is_file() {
-        return Err(PasswordError::NotRegular(path.to_path_buf()));
-    }
-    let mut file = File::open(path).map_err(unreadable)?;
+    let mut file = open_private(path).map_err(|source| {
+        // Only on the error path: was it refused because it is a symlink?
+        if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+            PasswordError::Symlink(path.to_path_buf())
+        } else {
+            unreadable(source)
+        }
+    })?;
     let opened = file.metadata().map_err(unreadable)?;
-    if !opened.is_file() {
-        return Err(PasswordError::NotRegular(path.to_path_buf()));
-    }
-    check_private(path, &before, &opened)?;
+    check_opened(path, &opened)?;
     read_capped(&mut file).map_err(|e| e.into_error(origin()))
 }
 
-/// Unix: the opened file is the one that was checked, and group and others have no access.
 #[cfg(unix)]
-fn check_private(
-    path: &Path,
-    before: &std::fs::Metadata,
-    opened: &std::fs::Metadata,
-) -> Result<(), PasswordError> {
+fn open_private(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    use rustix::fs::OFlags;
+
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((OFlags::NOFOLLOW | OFlags::NONBLOCK).bits().cast_signed())
+        .open(path)
+}
+
+/// `FILE_FLAG_OPEN_REPARSE_POINT`: open a symlink or junction itself, do not follow it.
+#[cfg(windows)]
+fn open_private(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_private(path: &Path) -> std::io::Result<File> {
+    File::open(path)
+}
+
+/// Checks on the open handle: a regular file, not a link, and on Unix owned by this user and
+/// closed to group and others.
+fn check_opened(path: &Path, opened: &std::fs::Metadata) -> Result<(), PasswordError> {
+    if opened.file_type().is_symlink() {
+        return Err(PasswordError::Symlink(path.to_path_buf()));
+    }
+    if !opened.is_file() {
+        return Err(PasswordError::NotRegular(path.to_path_buf()));
+    }
+    check_owner_and_mode(path, opened)
+}
+
+/// Unix: the effective user owns the file, and group and others have no access at all.
+#[cfg(unix)]
+fn check_owner_and_mode(path: &Path, opened: &std::fs::Metadata) -> Result<(), PasswordError> {
     use std::os::unix::fs::MetadataExt;
 
-    if before.dev() != opened.dev() || before.ino() != opened.ino() {
-        return Err(PasswordError::Changed(path.to_path_buf()));
+    if opened.uid() != rustix::process::geteuid().as_raw() {
+        return Err(PasswordError::NotOwned(path.to_path_buf()));
     }
     if opened.mode() & 0o077 != 0 {
         return Err(PasswordError::TooOpen(path.to_path_buf()));
@@ -308,13 +402,9 @@ fn check_private(
     Ok(())
 }
 
-/// Other platforms have no mode bits. The symlink and file-type rules above still apply.
+/// Other platforms have no mode bits or uid. Windows ACLs are not checked.
 #[cfg(not(unix))]
-fn check_private(
-    _path: &Path,
-    _before: &std::fs::Metadata,
-    _opened: &std::fs::Metadata,
-) -> Result<(), PasswordError> {
+fn check_owner_and_mode(_path: &Path, _opened: &std::fs::Metadata) -> Result<(), PasswordError> {
     Ok(())
 }
 
@@ -354,16 +444,25 @@ mod tests {
 
     const SECRET: &str = "CANARY-correct horse battery staple";
 
+    /// `read_key_password_from` with the env note thrown away.
+    fn rk(
+        file: Option<&Path>,
+        env: Option<OsString>,
+        stdin: &mut dyn Read,
+    ) -> Result<Option<KeyPassword>, PasswordError> {
+        read_key_password_from(file, env, stdin, &mut std::io::sink())
+    }
+
     fn os(args: &[&str]) -> Vec<OsString> {
         args.iter().map(OsString::from).collect()
     }
 
     fn from_stdin(input: &[u8]) -> Result<Option<KeyPassword>, PasswordError> {
-        read_key_password_from(Some(Path::new("-")), None, &mut Cursor::new(input.to_vec()))
+        rk(Some(Path::new("-")), None, &mut Cursor::new(input.to_vec()))
     }
 
     fn from_env(value: &str) -> Result<Option<KeyPassword>, PasswordError> {
-        read_key_password_from(None, Some(value.into()), &mut std::io::empty())
+        rk(None, Some(value.into()), &mut std::io::empty())
     }
 
     fn text(result: Result<Option<KeyPassword>, PasswordError>) -> String {
@@ -426,10 +525,7 @@ mod tests {
 
     #[test]
     fn nothing_is_read_when_no_source_is_given() {
-        assert!(matches!(
-            read_key_password_from(None, None, &mut std::io::empty()),
-            Ok(None)
-        ));
+        assert!(matches!(rk(None, None, &mut std::io::empty()), Ok(None)));
     }
 
     #[test]
@@ -445,6 +541,49 @@ mod tests {
         let e = err(from_env(""));
         assert!(matches!(e, PasswordError::Empty(Origin::Env)));
         assert!(e.fix().contains(ENV_NAME));
+    }
+
+    #[test]
+    fn the_variable_gets_a_note_and_the_other_sources_do_not() {
+        let mut note = Vec::new();
+        let got =
+            read_key_password_from(None, Some(SECRET.into()), &mut std::io::empty(), &mut note);
+        assert_eq!(text(got), SECRET);
+        let note = String::from_utf8(note).unwrap_or_default();
+        assert_eq!(note, format!("{ENV_NOTE}\n"));
+        assert_eq!(note.lines().count(), 1);
+        assert!(!note.contains("CANARY"));
+
+        let mut note = Vec::new();
+        let got = read_key_password_from(
+            Some(Path::new("-")),
+            Some("from-env".into()),
+            &mut Cursor::new(b"pw\n".to_vec()),
+            &mut note,
+        );
+        assert_eq!(text(got), "pw");
+        assert!(note.is_empty());
+
+        // A bad value gets its error, not the note.
+        let mut note = Vec::new();
+        let got = read_key_password_from(None, Some("".into()), &mut std::io::empty(), &mut note);
+        assert!(got.is_err());
+        assert!(note.is_empty());
+    }
+
+    #[test]
+    fn a_long_variable_is_refused_after_the_line_ending_is_removed() {
+        assert_eq!(
+            text(from_env(&format!("{}\n", "x".repeat(MAX_PASSWORD_BYTES)))).len(),
+            MAX_PASSWORD_BYTES
+        );
+        assert!(matches!(
+            err(from_env(&format!(
+                "{}\n",
+                "x".repeat(MAX_PASSWORD_BYTES + 1)
+            ))),
+            PasswordError::TooLarge(Origin::Env)
+        ));
     }
 
     #[test]
@@ -527,11 +666,7 @@ mod tests {
                 Ok(buf.len())
             }
         }
-        let e = err(read_key_password_from(
-            Some(Path::new("-")),
-            None,
-            &mut Endless,
-        ));
+        let e = err(rk(Some(Path::new("-")), None, &mut Endless));
         assert!(matches!(e, PasswordError::TooLarge(Origin::Stdin)));
     }
 
@@ -543,11 +678,7 @@ mod tests {
                 Err(std::io::Error::other("boom"))
             }
         }
-        let e = err(read_key_password_from(
-            Some(Path::new("-")),
-            None,
-            &mut Broken,
-        ));
+        let e = err(rk(Some(Path::new("-")), None, &mut Broken));
         assert!(matches!(
             e,
             PasswordError::Unreadable {
@@ -559,7 +690,7 @@ mod tests {
 
     #[test]
     fn the_file_beats_the_variable() {
-        let got = read_key_password_from(
+        let got = rk(
             Some(Path::new("-")),
             Some("from-env".into()),
             &mut Cursor::new(b"from-stdin\n".to_vec()),
@@ -575,7 +706,7 @@ mod tests {
                 panic!("standard input must not be read");
             }
         }
-        let got = read_key_password_from(None, Some("from-env".into()), &mut Panics);
+        let got = rk(None, Some("from-env".into()), &mut Panics);
         assert_eq!(text(got), "from-env");
     }
 
@@ -606,7 +737,7 @@ mod tests {
             },
             PasswordError::Symlink(path.clone()),
             PasswordError::NotRegular(path.clone()),
-            PasswordError::Changed(path.clone()),
+            PasswordError::NotOwned(path.clone()),
             PasswordError::TooOpen(path),
         ];
         for e in &all {
@@ -653,7 +784,7 @@ mod tests {
         }
 
         fn read(path: &Path) -> Result<Option<KeyPassword>, PasswordError> {
-            read_key_password_from(Some(path), None, &mut std::io::empty())
+            rk(Some(path), None, &mut std::io::empty())
         }
 
         #[test]
@@ -770,6 +901,124 @@ mod tests {
             let d = dir();
             let p = write(d.path(), "-", b"from-file\n", 0o600);
             assert_eq!(text(read(&p)), "from-file");
+        }
+
+        #[test]
+        fn a_named_pipe_is_refused_and_does_not_block() {
+            let d = dir();
+            let p = d.path().join("fifo");
+            rustix::fs::mknodat(
+                rustix::fs::CWD,
+                &p,
+                rustix::fs::FileType::Fifo,
+                rustix::fs::Mode::from_raw_mode(0o600),
+                0,
+            )
+            .unwrap_or_else(|e| panic!("mkfifo: {e}"));
+            assert!(matches!(err(read(&p)), PasswordError::NotRegular(_)));
+        }
+
+        #[test]
+        fn a_file_owned_by_another_user_is_refused() {
+            use rustix::fs::{Uid, chown};
+
+            // Only root can give a file away. Without root there is nothing to test.
+            if rustix::process::geteuid().as_raw() != 0 {
+                return;
+            }
+            let d = dir();
+            let p = write(d.path(), "pw", SECRET.as_bytes(), 0o600);
+            chown(&p, Some(Uid::from_raw(12345)), None).unwrap_or_else(|e| panic!("chown: {e}"));
+            let e = err(read(&p));
+            assert!(matches!(e, PasswordError::NotOwned(_)), "{e}");
+            assert!(!e.fix().is_empty());
+        }
+
+        #[test]
+        fn standard_input_is_read_through_an_unbuffered_duplicate() {
+            use std::process::{Command, Stdio};
+
+            let mut child = Command::new("sh")
+                .args(["-c", "printf 'ci-secret\\n'"])
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap_or_else(|e| panic!("sh: {e}"));
+            let pipe = child
+                .stdout
+                .take()
+                .unwrap_or_else(|| panic!("no stdout pipe"));
+            let mut file = unbuffered(&pipe).unwrap_or_else(|e| panic!("dup: {e}"));
+            let got = rk(Some(Path::new("-")), None, &mut file);
+            let _ = child.wait();
+            assert_eq!(text(got), "ci-secret");
+        }
+    }
+
+    /// The Windows rules. These run on the Windows CI leg only.
+    #[cfg(windows)]
+    mod windows_files {
+        use super::*;
+
+        fn dir() -> tempfile::TempDir {
+            tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"))
+        }
+
+        fn read(path: &Path) -> Result<Option<KeyPassword>, PasswordError> {
+            rk(Some(path), None, &mut std::io::empty())
+        }
+
+        #[test]
+        fn a_file_is_read_and_its_line_ending_dropped() {
+            let d = dir();
+            let p = d.path().join("pw");
+            std::fs::write(&p, format!("{SECRET}\r\n")).unwrap_or_else(|e| panic!("write: {e}"));
+            assert_eq!(text(read(&p)), SECRET);
+        }
+
+        #[test]
+        fn a_missing_file_is_unreadable() {
+            let d = dir();
+            let e = err(read(&d.path().join("missing")));
+            assert!(matches!(e, PasswordError::Unreadable { .. }), "{e}");
+            assert!(!e.fix().is_empty());
+        }
+
+        #[test]
+        fn a_directory_is_refused() {
+            let d = dir();
+            let e = err(read(d.path()));
+            assert!(
+                matches!(
+                    e,
+                    PasswordError::NotRegular(_) | PasswordError::Unreadable { .. }
+                ),
+                "{e}"
+            );
+        }
+
+        #[test]
+        fn a_file_over_the_cap_and_an_empty_file_are_refused() {
+            let d = dir();
+            let big = d.path().join("big");
+            std::fs::write(&big, vec![b'x'; MAX_PASSWORD_BYTES * 64])
+                .unwrap_or_else(|e| panic!("write: {e}"));
+            assert!(matches!(err(read(&big)), PasswordError::TooLarge(_)));
+            let empty = d.path().join("empty");
+            std::fs::write(&empty, b"").unwrap_or_else(|e| panic!("write: {e}"));
+            assert!(matches!(err(read(&empty)), PasswordError::Empty(_)));
+        }
+
+        #[test]
+        fn a_symlink_is_refused_when_the_account_may_make_one() {
+            let d = dir();
+            let real = d.path().join("real");
+            std::fs::write(&real, SECRET).unwrap_or_else(|e| panic!("write: {e}"));
+            let link = d.path().join("link");
+            // Making a symlink needs a privilege on Windows. Skip when it is missing.
+            if std::os::windows::fs::symlink_file(&real, &link).is_err() {
+                return;
+            }
+            assert!(matches!(err(read(&link)), PasswordError::Symlink(_)));
         }
     }
 }
