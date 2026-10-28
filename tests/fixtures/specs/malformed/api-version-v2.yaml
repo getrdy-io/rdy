@@ -1,0 +1,9 @@
+# Synthetic fixture. Not a real spec.
+apiVersion: rdy/v2
+kind: Readiness
+metadata:
+  product: acme-platform
+  new_in_v2: true
+checks:
+  - id: host.cpu
+    min: 8

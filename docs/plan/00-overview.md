@@ -397,7 +397,7 @@ The line shown is the major line this plan expects.
 | Crate | Line | Used by | Why | Flag |
 | --- | --- | --- | --- | --- |
 | serde, serde_json | 1 | all | (de)serialization, result JSON | |
-| serde-saphyr | 1 | rdy-spec | YAML parser, pure Rust, budgets (ADR 0001) | Young, mostly one maintainer. Unsafe count to be checked with cargo geiger. Fallback `serde_yaml_ng`. |
+| serde-saphyr | 2 | rdy-spec | YAML parser, pure Rust, budgets (ADR 0001) | Young, mostly one maintainer. Unsafe count checked with cargo geiger on 2026-10-28, result in ADR 0001. Fallback `serde_yaml_ng`. |
 | serde_yaml | | none | named in the plan | **Deprecated** (March 2024). Banned in deny.toml. |
 | serde_yml | | none | common successor | **Archived**, RUSTSEC-2025-0068. Banned. |
 | schemars | 1 | rdy-spec | JSON Schema from types (ADR 0012) | 1.x changed API from 0.8; start on 1.x. |

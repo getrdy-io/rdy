@@ -32,7 +32,12 @@ A result records all three: `api_version`, `producer.rdy_spec`, `producer.versio
 One YAML 1.2 document per file, at most 1 MiB, with the limits of ADR 0001: depth 64, no duplicate
 keys, no merge keys, no anchors or aliases, one document. Also exit 64 with line and column: any explicit
 tag (`!!binary`, `!custom`), any `%YAML` or `%TAG` directive, and any non-finite float (`.inf`, `.nan`)
-anywhere in the file, because a NaN threshold compares false both ways and could pass by accident.
+anywhere in the file, because a NaN threshold compares false both ways and could pass by accident. An
+unquoted decimal (`12.10`, `1e3`), a whole number with a leading zero (`0755`) and a whole number outside
+`i64` and `u64` are also errors with a line, a column and the hint to quote them. Once `apiVersion` names
+`rdy/v2` or later, any such error further down is reported as the upgrade message instead. It
+applies to every plain scalar, not only to version fields, because the parameters are read before their
+types are known (ADR 0001, implementation notes). `rdy_spec::parse_unverified` enforces all of this.
 
 ### 2.1 Top level
 
