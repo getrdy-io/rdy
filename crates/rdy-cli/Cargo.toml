@@ -22,7 +22,11 @@ name = "rdy"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = { workspace = true, features = ["std"] }
 clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "env"] }
+rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 zeroize = { workspace = true }
 
@@ -34,6 +38,7 @@ rpassword.workspace = true
 rustix = { workspace = true, features = ["std", "fs", "process", "termios"] }
 
 [dev-dependencies]
+jsonschema = { workspace = true }
 tempfile = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]

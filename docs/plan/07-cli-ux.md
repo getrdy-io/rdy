@@ -301,6 +301,8 @@ With `--json`, stdout holds one JSON document and a final newline: UTF-8, no BOM
 | exit 70, no verdict (`internal`, `interrupted`, `report_write` before any check, or from `report` or `bundle`) | An ErrorOutput |
 | `verify` accepts the spec / `spec lint` / `version` | Verification / LintReport (`kind: Lint`, exit 0, 1 or 2) / version object (4.3) |
 
+`--json` is read from the raw arguments (ADR 0008 decision 7), so a command line that does not parse, or a command that has no `--json` flag of its own, still answers an error in JSON when `--json` is on the line before any `--`. Help and version still print on stdout and exit 0.
+
 The error text is on stderr in every case as `error:` and `fix:` lines, and equals the JSON `message` and
 `fix`. For a spec error with a position, the terminal prefixes the message with `file:line:column:` built
 from the three JSON fields; the JSON `message` does not repeat them. The error codes are 01 section 4.8 and

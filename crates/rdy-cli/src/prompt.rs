@@ -155,7 +155,7 @@ impl PromptError {
     /// A write failure is ignored: stderr may be the broken stream, and the exit code still says
     /// what happened.
     pub fn report(&self, stderr: &mut dyn Write) -> u8 {
-        let _ = writeln!(stderr, "error: {self}\nfix: {}", self.fix());
+        let _ = stderr.write_all(crate::error::render_prompt(self).text().as_bytes());
         self.exit_code()
     }
 }
