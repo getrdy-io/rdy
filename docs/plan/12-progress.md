@@ -21,7 +21,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-005 | [#14](https://github.com/getrdy-io/rdy/pull/14) | 2026-10-28 | zizmor ran with --offline locally only (online audits run in CI); the exit-test throwaway PRs are run by the coordinator
 
-- M1-006 | [#21](https://github.com/getrdy-io/rdy/pull/21) | 2026-10-28 | Correction 05 (#40): the org has no macOS arm64 runners, so ci-ok gates four test legs plus an aarch64-apple-darwin compile leg and macos-arm64.yml runs the full job outside ci-ok; a founder hand step ends it. The run, the scratch container and the red-leg-blocks-ci-ok behaviour are for the coordinator to watch on the PR; cargo-nextest and zizmor were not run locally (binary downloads were denied here), so the nextest config and workflow lint are first proven in CI
+- M1-006 | [#21](https://github.com/getrdy-io/rdy/pull/21) | 2026-10-28 | The macos-arm64 test runs in macos-arm64.yml outside ci-ok until the org has arm64 runners (a Founder hand step). The run, the scratch container and the red-leg-blocks-ci-ok behaviour are for the coordinator to watch on the PR; cargo-nextest and zizmor were not run locally (binary downloads were denied here), so the nextest config and workflow lint are first proven in CI | backlog corrected 2026-10-28 (correction-05, [#40](https://github.com/getrdy-io/rdy/pull/40)): the org has no macOS arm64 runners (probe run 40737208354), so ci-ok gates four native test legs plus an `aarch64-apple-darwin` compile leg on `macos-15-intel`; `macos-arm64.yml` runs the full test job on `macos-15` outside ci-ok; a Founder hand step ends the fallback
 
 - M1-007 | todo | | dist init for five targets with cargo-auditable and SBOM, proven in release-sandbox
 
