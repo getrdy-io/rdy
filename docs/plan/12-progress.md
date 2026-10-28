@@ -9,7 +9,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 ## Tickets
 
-- M1-001 | todo | | Confirm the revised ADRs close security findings MF-01 to MF-07
+- M1-001 | PR #TBD | | MF-04 of the ADR 0013 to 0016 review is reopened (02 Appendix A lint wall misses std write and socket items and kube client constructors), so the exit test second clause waits for rust-architect to apply the listed fix before M1-044; follow-ups CF-01 to CF-08 are filed in both review files
 
 - M1-002 | todo | | Confirm the revised ADRs close cli-ux findings M1 to M3 and the final command names
 

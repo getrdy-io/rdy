@@ -360,3 +360,51 @@ signing, SBOM and cargo-auditable, install.sh root refusal and verification (06 
 - [M1] SEC-31 Docs security page and verify-first install | owner: docs-writer | est: 2h | depends on: sign-release workflow with cosign keyless and ordering decision | exit test: the page lists what rdy reads and contacts, the report fields and link parameters, and CI runs its verify commands against the latest release.
 - [M1] SEC-32 Security mailbox and security.txt | owner: security-reviewer | est: 1h | depends on: SEC-04 Org 2FA, private reporting, CODEOWNERS and a settings check script | exit test: private vulnerability reporting is on, security@getrdy.io receives mail and security.txt is served on getrdy.io.
 - [M1] Read-only guard layer and test for rdy-checks-k8s (replaces the 1h guard test ticket) | owner: k8s-expert | est: 3h | depends on: Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: a runtime layer rejects any write, any non-review POST and any secrets path, and the mock API server records only allowed requests.
+
+## Closure check (M1-001, 2026-10-28)
+
+Reviewer: security-reviewer. Checked on `main` at `8f5705f` against ADRs 0002, 0003, 0009, 0010, 0014,
+0015 and 0016 (all Accepted), `docs/plan/00-overview.md`, `docs/plan/02-engine-design.md` revision 3 and
+`docs/plan/11-backlog.md`. Quotes are exact. Line numbers are at that commit. No ADR or plan file was
+edited.
+
+Result: all seven must-fix items are closed. Three follow-ups (CF-01 to CF-03) are listed below. None of
+them reopens a must-fix.
+
+| id | verdict | evidence | smallest fix |
+| --- | --- | --- | --- |
+| MF-01 verify before parse | closed | `docs/adr/0002-spec-signatures-ed25519-minisign.md:25` "looks up keys pinned for that product, verifies the raw bytes, and only then parses". Line 26: "`metadata.product` must equal the trusted-comment product". `docs/plan/00-overview.md:180` "Never yields a LoadedSpec." Line 186: "private fields, private constructor". Test: `docs/plan/11-backlog.md:256` (M1-120) "before the YAML is parsed (a parser spy proves it)". | none |
+| MF-02 root reads only the system trust store | closed | `docs/adr/0002-spec-signatures-ed25519-minisign.md:30` "euid 0: only `/etc/rdy/trust.yaml`, never a user path, whatever HOME or XDG say." Line 32: "Written atomically, mode 0644. Not on any cut list." `docs/plan/00-overview.md:156` "the root-only system trust store" (in the never-cut list). Test: `docs/plan/11-backlog.md:257` (M1-121) "As root with HOME and XDG_CONFIG_HOME pointing at a user store only /etc/rdy/trust.yaml is read". Windows elevated runs: line 258 (M1-122, SEC-60). | none (see CF-01) |
+| MF-03 escapes in the embedded JSON | closed | `docs/adr/0003-report-format-html-json.md:31` "every `<` becomes the six characters `<`, every `>` becomes `>`,". Tests: `docs/plan/11-backlog.md:191` (M1-055) "A hostname with `</script>` is written as `</script>`". Line 214 (M1-078): "round-trips through the embedded JSON unchanged and renders as text". | none |
+| MF-04 report name and write location | closed | `docs/adr/0003-report-format-html-json.md:16` "`metadata.product` must match `^[a-z0-9][a-z0-9-]{0,62}$`". `docs/adr/0016-output-dir-confinement-cap-std.md:24` "It must be a directory owned by the effective user." Line 30: "Files are created inside the handle with `create_new`, mode 0600 and `fchmod`". `docs/adr/0003-report-format-html-json.md:26` "and the exit code is 70." Test: `docs/plan/11-backlog.md:172` (M1-036) "Product `../x` fails validation, a pre-planted symlink is not followed". | none |
+| MF-05 egress address policy, redirects, bodies | closed | `docs/adr/0014-probe-facade-owns-side-effects.md:22` "The facade resolves names and refuses, literal or resolved, every address". Line 25: "The host must be in the calling check's own host set (at most 64 distinct hosts". Line 36: "reads at most 64 KiB of body and discards it (INV-13)". Line 37: "never follows a redirect (the `Location` host is returned)". Lines 33 to 34: "The recording verifier for `net.tls_intercept` is private to the facade and" / "returns a chain, never a stream." Test: `docs/plan/11-backlog.md:230` (M1-094). My fix asked for hand-followed redirects capped at 5 hops. Following none is stricter. Accepted. | none (see CF-03) |
+| MF-06 runtime kube guard | closed | `docs/adr/0010-kubernetes-client-kube-rs.md:18` "A tower layer wraps the kube client and rejects, at runtime and failing closed,". Line 20: "any path naming `secrets`." Line 21: "POST only to `selfsubjectaccessreviews` and `selfsubjectrulesreviews`". Lines 26 to 27: "`connect()` returns only the guarded type" / "and `K8sFamily` accepts only that type. ConfigMaps are listed metadata-only." Ticket: `docs/plan/11-backlog.md:239` (M1-103, 3.5 h) "The runtime layer rejects any write, any POST other than the three reviews". A check crate can still build a second, unguarded kube client. That is a lint wall gap, tracked as MF-04 of the ADR 0013 to 0016 review and reopened there. | none here |
+| MF-07 M1 room for security work | closed | `docs/plan/11-backlog.md:14` "The founder decided on 2026-10-28: M1 is extended, not cut." `docs/plan/00-overview.md:156` "Never on the cut list: the "0.1.0 gate" security tickets". `docs/plan/11-backlog.md:274` (M1-138) "every 0.1.0-gate security ticket (SEC-04, SEC-05, SEC-17, SEC-19, SEC-21, SEC-22, SEC-24, SEC-25, SEC-26 first 30, SEC-32) is closed". Ticket map: SEC-04 and SEC-32 in M1-011, SEC-05 M1-008, SEC-17 M1-040, SEC-19 M1-036, SEC-21 M1-094, SEC-22 M1-128, SEC-24 in M1-103, SEC-25 M1-048, SEC-26 M1-063. SEC-31 moved to M3-008 with the hosted docs site. My budget said "by 0.1.1", but it was never a 0.1.0 gate. Accepted. Parser property tests are core now, so the fuzz clause of MF-07 no longer applies. | none |
+
+### Follow-ups found during the check
+
+- **CF-01 (low). M1-121 does not test the directory rule.**
+  - Problem: `docs/adr/0002-spec-signatures-ed25519-minisign.md:31` refuses a store "in a directory
+    writable" by anyone but root. `docs/plan/11-backlog.md:257` (M1-121) tests the symlink, owner and
+    group-writable cases only. A user-writable `/etc/rdy` lets a user swap the file by rename.
+  - Fix: add "and a store in a user-writable directory exits 64 with trust_store_insecure" to the M1-121
+    exit test. Owner: rust-architect, before M1-121 starts.
+- **CF-02 (medium). 00-overview still describes the network stack before ADR 0014 and a writer that takes
+  a plain `Report`.**
+  - Problem: `docs/plan/00-overview.md:325` says "One policy client (ADR 0009)". Line 411 lists reqwest
+    for "HTTP egress (ADR 0009)". Line 413 lists rustls-platform-verifier for "OS trust for egress and
+    upload". Line 304 has "pub fn write(report: &Report, out_dir: &Path)". ADR 0014 lines 31 to 32 and
+    39 reject the platform verifier and ban reqwest in M1. ADR 0015 decision 4 lets writers take only
+    `RedactedReport`. Line 384 of 00 says M1-003 pins workspace versions from this table, so M1-003
+    could add both crates. 02 lines 526 to 528 fix only the API sketches.
+  - Fix: the M1-003 brief takes TLS and HTTP dependencies from ADR 0014 and 02 Appendix A, not from 00.
+    M1-009 rewrites 00 lines 304, 325, 411 and 413 to match. Owner: coordinator (M1-003 brief) and
+    rust-architect (M1-009).
+- **CF-03 (low for M1, blocks M2-026). The upload client design conflicts.**
+  - Problem: `docs/adr/0014-probe-facade-owns-side-effects.md:38` sends the M2 upload client to "the M3
+    `http_exchange` primitive", and line 39 says "reqwest is banned in `deny.toml`". So an M2 client
+    depends on an M3 primitive. `docs/plan/11-backlog.md:329` (M2-026) instead builds the upload client
+    on reqwest with the platform verifier, which ADR 0014 lines 31 to 32 reject because it can fetch
+    revocation and AIA URLs outside the peer set.
+  - Fix: one ADR, before M2-026 starts, that picks the upload stack, its verifier and its `deny.toml`
+    entry. Owner: rust-architect, reviewed by security-reviewer.

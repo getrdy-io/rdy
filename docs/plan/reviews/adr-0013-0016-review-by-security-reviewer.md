@@ -364,3 +364,58 @@ Folds (extra exit-test clauses on existing tickets, 5.5 h in total):
 | SEC-19 Confine writes to a new output dir with safe names | MF-05 Windows default and reparse-point check; SF-13; N-01 | 1 |
 | Closed NativeCall enum in the facade | SF-03 sealed Backend and private constructors; SF-04 snapshot | 0.5 |
 | In-process CLI entry point rdy_cli::run taking a Backend | SF-08 RunHooks, grep, feature tree and marker checks | 0.5 |
+
+## Closure check (M1-001, 2026-10-28)
+
+Reviewer: security-reviewer. Checked on `main` at `8f5705f` against ADR 0010 (as amended), ADRs 0014,
+0015 and 0016 (all Accepted), `docs/plan/02-engine-design.md` revision 3 and `docs/plan/11-backlog.md`.
+Quotes are exact. Line numbers are at that commit. No ADR or plan file was edited.
+
+Result: MF-01, MF-02, MF-03, MF-05 and MF-06 are closed. MF-04 is reopened: the exact-item lint wall is
+incomplete. The fix is a list edit in 02 Appendix A plus one exit-test clause, about 0.5 h, and it must
+land before M1-044 (week 10). It does not block M1-003 to M1-043. Until it lands, the second clause of
+the M1-001 exit test is not met, and 02 line 6 stays "waiting for security-reviewer sign-off".
+
+| id | verdict | evidence | smallest fix |
+| --- | --- | --- | --- |
+| MF-01 facade caps cut secrets | closed | `docs/adr/0015-redactor-in-rdy-engine.md:19` "`FileBytes` and `Output` carry `truncated_head` and `truncated_tail`." Line 22: "The PEM rule matches an unterminated `-----BEGIN ... PRIVATE KEY-----` through to the". Line 26: "The redactor removes exact matches and any 8-character or longer prefix or suffix". Line 41: "a canary at offsets cap minus 1 to cap minus 64." Line 63 extends the exit test to "the stdout, stderr, file and tail caps". `docs/plan/02-engine-design.md:225` "**As each result or action entry completes**, it is redacted, then capped (ADR 0015):". | none (see CF-04) |
+| MF-02 watchdog race and hang | closed | `docs/adr/0016-output-dir-confinement-cap-std.md:40` "whoever moves it from `Running` to `Writing` writes. The loser never writes." `docs/plan/02-engine-design.md:192` "`try_lock` loop bounded at 1 s". Line 195: "It runs the same sync redact-then-cap pass as the engine and never assumes the". Line 199: "The render and write run on a helper thread through the held output directory." Line 201: "It sends SIGKILL to every live process group in the facade's lock-free list,". Line 203: "It never takes std's stdout or stderr locks". Line 205: "Before the output directory exists, it exits 70 with no report." Tests: lines 474 to 476. | none (see CF-05) |
+| MF-03 kube allowlist gaps | closed | `docs/plan/02-engine-design.md:781` "`k8s.storageclass`: Pending claims older than 5 minutes". Line 782: "`fieldSelector` must include `involvedObject.kind=PersistentVolumeClaim`". Line 784: "`k8s.storageclass`: `spec.drivers[].name`". Line 786: "`k8s.nodes`: `cluster-autoscaler` presence by name". Lines 790 to 791 move the webhook and `validatingadmissionpolicies` entries into "**`M1_LATE`**". Line 773: "asserts every entry is cited by at least one check's `CheckInfo` and that `secrets` appears nowhere." Deployments are a LIST in `kube-system` only, narrower than my either-or, and projected to minimal structs (line 795). Accepted. | none (see CF-06) |
+| MF-04 unvetted crates and the lint wall | reopened | Closed parts: `docs/adr/0014-probe-facade-owns-side-effects.md:54` "`ci/check-crate-deps.toml` names the allowed direct". Line 52: "A `tests/lint-wall` crate uses each item, and CI expects each one to fail." `docs/plan/02-engine-design.md:727` "Exact items only, because clippy matches exact" (no wildcard is left). Open part: ADR 0014 line 50 promises "covering every file, process, socket, thread and env API". 02 Appendix A (lines 729 to 750) has no entry for `std::fs::remove_dir_all`, `std::fs::hard_link`, `std::fs::set_permissions`, `std::os::unix::fs::symlink`, `std::os::unix::fs::chown` or `std::os::unix::net::UnixDatagram`. For kube, lines 747 to 748 ban only "outside the client module `kube::Client::new`," / "`kube::Client::try_default`, `kube::Config::infer`." In rdy-checks-k8s, `kube::Config::from_kubeconfig` plus `kube::client::ClientBuilder::try_from(..)` and `.build()` still give an unguarded client with the operator's rights, often cluster-admin. So a check can delete files as root, or write to the cluster, without touching rdy-engine. That is the MF-04 problem. Also, `docs/plan/11-backlog.md:180` (M1-044) drops "CI expects each one to fail" from its exit test. | Owner: rust-architect, about 0.5 h, before M1-044 starts. (1) Add to 02 Appendix A. Files: `std::fs::remove_dir`, `std::fs::remove_dir_all`, `std::fs::hard_link`, `std::fs::soft_link`, `std::fs::set_permissions`, `std::fs::exists`, `std::os::unix::fs::symlink`, `std::os::unix::fs::chown`, `std::os::unix::fs::lchown`, `std::os::unix::fs::chroot`, `std::os::windows::fs::symlink_file`, `std::os::windows::fs::symlink_dir`, and type `std::fs::DirBuilder`. Sockets: `std::os::unix::net::UnixStream::connect_addr`, `std::os::unix::net::UnixListener::bind_addr`, `std::os::unix::net::UnixDatagram::bind`, `std::os::unix::net::UnixDatagram::bind_addr`, `std::os::unix::net::UnixDatagram::unbound`. Threads: `std::thread::scope`. Kube: replace the three method entries with the disallowed types `kube::Client`, `kube::Config`, `kube::client::ClientBuilder` and `kube::config::Kubeconfig` outside the client module, and have `ReadOnlyClient` hand out `kube::Api<K>` so checks never name `kube::Client`. A `Config` cannot be built without naming one of these types, so the `TryFrom<Config>` paths are covered too. (2) M1-044 exit test: add "and each entry, used once in tests/lint-wall, fails clippy". (3) M1-003 re-checks the kube items against the kube version it pins (4.2.0 on docs.rs today). |
+| MF-05 Windows output dir | closed | `docs/adr/0016-output-dir-confinement-cap-std.md:18` "`%USERPROFILE%\rdy-reports` (created if missing; owner, SYSTEM and Administrators by default)." Line 27: "`FILE_ATTRIBUTE_REPARSE_POINT` is clear, and its final". Line 28: "Junctions and symlinks with the target name are both refused." Line 42 names the ACL residuals "in the report's notes until SEC-58". `docs/plan/02-engine-design.md:403` "`%USERPROFILE%\rdy-reports` on Windows (05 I3)". Test: `docs/plan/11-backlog.md:173` (M1-037) "a pre-planted junction and a symlink with the target name are both refused before the first check". | none |
+| MF-06 `selfsubjectreviews` in M1 | closed | `docs/adr/0010-kubernetes-client-kube-rs.md:22` "and to `selfsubjectreviews` (`authentication.k8s.io/v1`) with no query string and exactly the body". Line 24: "From its response only `username` and `groups` are kept". Line 26: "kubeconfig user marked "not verified by the API server"". `docs/plan/02-engine-design.md:803` "compared byte for byte". Test: `docs/plan/11-backlog.md:239` (M1-103) "a SelfSubjectReview with a different body or a query string". | none (see CF-07) |
+
+### Follow-ups found during the check
+
+Numbering continues from the closure check in `adr-and-00-review-by-security-reviewer.md` (CF-01 to
+CF-03).
+
+- **CF-04 (medium). M1-061 lost the PEM case.**
+  - Problem: `docs/plan/11-backlog.md:197` (M1-061) tests "An AWS key id and a URL with userinfo". ADR
+    0015 line 63 and 02 line 594 also test "a PEM key" across the facade caps. M1-062 covers only the
+    64 KiB report cap. So the unterminated PEM rule at a facade cap is untested in M1.
+  - Fix: M1-061 exit test starts "A PEM key, an AWS key id and a URL with userinfo". Owner:
+    rust-architect, before M1-061 starts.
+- **CF-05 (medium). M1-043 lost the held-lock case.**
+  - Problem: `docs/plan/11-backlog.md:179` (M1-043) has no "held snapshot lock" case. 02 lines 476 and
+    574 have it. It is the test for the `try_lock` bound.
+  - Fix: add "and a held snapshot lock" to the M1-043 Spin clause. Owner: rust-architect, before
+    M1-043 starts.
+- **CF-06 (medium). M1-104 lost the citation test.**
+  - Problem: `docs/plan/11-backlog.md:240` (M1-104) drops three clauses that 02 line 586 has: "an
+    unlisted resource" is refused, "every ALLOWED entry is cited by a CheckInfo", and "a dropped request
+    leaves a timeout entry with its check id". The citation test is the MF-03 control against a wide
+    entry added under deadline pressure. The estimate also fell from 3.5 h to 1 h.
+  - Fix: restore the three clauses and re-estimate. Owner: rust-architect, before M1-104 starts.
+- **CF-07 (low). 01 still takes the kube user from the kubeconfig.**
+  - Problem: `docs/plan/01-spec-format.md:506` says the authenticated user "waits for the ADR 0010
+    amendment that allows that POST", and line 876 says the same. The amendment has landed. 02 line 497
+    lists the fix, but 13 does not carry it, so M1-009 does not own it.
+  - Fix: both lines say `identity.kube.user` comes from `SelfSubjectReview`, and on 1.27 and older it is
+    the kubeconfig user marked "not verified by the API server". Owner: rust-architect, before M1-020
+    starts.
+- **CF-08 (low). 05 revision 3 has no ticket.**
+  - Problem: the threat model edits that this review and 02 lines 521 to 525 ask for (INV-12 ranges,
+    Appendix A I3, Appendix F cap-boundary cases in M1, INV-08 fixed PATH) are not in 11-backlog.md.
+  - Fix: a 1 h M1 ticket for security-reviewer, before M1-040 starts. Exit test: 05 revision 3 carries
+    those four edits and names ADRs 0014 to 0016.
