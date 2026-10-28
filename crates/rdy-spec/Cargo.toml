@@ -10,6 +10,7 @@ homepage.workspace = true
 include = ["src/**", "Cargo.toml", "LICENSE"]
 
 [dependencies]
+openssl = "0.10"
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
