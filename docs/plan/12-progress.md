@@ -79,7 +79,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-033 | [#34](https://github.com/getrdy-io/rdy/pull/34) | 2026-10-28 | Redaction and size caps stay with M1-062. Timeout, panic and plan-level skips are built by M1-034 and M1-035 on the same CheckResult constructors. M1-057 reconciles the skip text in `rdy_engine::outcome` with `rdy_cli::error::SkipWhy` (the root fix carries a `<spec>` placeholder). `partial.missing_grants` goes to notes until it has a wire field and an owner: see 13, proposed M1-110.
 
-- M1-034 | todo | | Scheduler with concurrency limit, per-check timeout and panic isolation
+- M1-034 | [#37](https://github.com/getrdy-io/rdy/pull/37) | 2026-10-28 | The run deadline, the "time left in the run" cap and the watchdog are M1-043. `CheckContext::remaining()` is the time left on the check's own timeout until then. A check that hard-spins is never freed (abort needs a yield point): its permit is released at timeout and it keeps one worker until it returns. `probe()` and `CheckError::Probe` still wait for M1-040. The scheduler returns `Ran`/`End` and does not use M1-033's outcome mapping. M1-057 or M1-062 exit test: the CLI panic hook does not print the default panic text. `sched` and tokio are behind the default `runtime` feature.
 
 - M1-035 | todo | | Family trait, registry and run plan
 
