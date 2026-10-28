@@ -1,0 +1,127 @@
+# CI for rdy. docs/plan/06-release-and-distribution.md describes the design.
+#
+# Rules for this file (SEC-01, SEC-03):
+# - Every `uses:` line is pinned to a full commit SHA with the version in a comment.
+# - The token is read-only. Each job names the permissions it needs.
+# - No pull_request_target. Fork PRs get a read-only token.
+# - `ci-ok` is the only required check. It lists every gating job in `needs:`.
+#   Add each new gating job there (M1-006 adds the test matrix and install-sh).
+# - No path filters. A path-filtered required check goes pending and blocks merges.
+# - The Rust toolchain comes from rust-toolchain.toml. Do not name a version here.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_NET_RETRY: "3"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@PIN_CHECKOUT # PIN_CHECKOUT_VERSION
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      # PRs read the cache that main saved. Only main writes it.
+      - uses: Swatinem/rust-cache@PIN_RUST_CACHE # PIN_RUST_CACHE_VERSION
+        with:
+          shared-key: lint
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install zizmor
+        uses: taiki-e/install-action@PIN_INSTALL_ACTION # PIN_INSTALL_ACTION_VERSION
+        with:
+          tool: zizmor@1.31.1
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: cargo doc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --locked
+      - name: zizmor
+        env:
+          # Read-only token for zizmor's online audits (impostor commits, known-vulnerable actions).
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --format=github .
+
+  deny:
+    name: deny
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@PIN_CHECKOUT # PIN_CHECKOUT_VERSION
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      # rust-cache runs first so the installed cargo-deny binary is cached with it.
+      - uses: Swatinem/rust-cache@PIN_RUST_CACHE # PIN_RUST_CACHE_VERSION
+        with:
+          shared-key: deny
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@PIN_INSTALL_ACTION # PIN_INSTALL_ACTION_VERSION
+        with:
+          tool: cargo-deny@0.20.2
+      - name: cargo deny
+        run: cargo deny --locked check
+
+  dco:
+    name: dco
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@PIN_CHECKOUT # PIN_CHECKOUT_VERSION
+        with:
+          # The check walks the PR's commits, so it needs full history.
+          fetch-depth: 0
+          persist-credentials: false
+      # On push to main the job passes without checking. Squash and rebase merges
+      # rewrite commits, and the PR already passed this check before it merged.
+      - name: Every commit has a Signed-off-by line
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/check-dco.sh "$BASE_SHA" "$HEAD_SHA"
+
+  # The only required check. Keep `needs:` equal to the list of gating jobs.
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [lint, deny, dco]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Every gating job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'all(.[]; .result == "success")' > /dev/null

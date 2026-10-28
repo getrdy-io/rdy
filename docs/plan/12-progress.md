@@ -17,7 +17,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-004 | todo | | Add deny.toml with crate bans and license allowlist
 
-- M1-005 | todo | | CI lint and deny job: fmt, clippy, doc, cargo-deny, zizmor (SEC-01)
+- M1-005 | PR #TBD | | zizmor ran with --offline locally only (online audits run in CI); the exit-test throwaway PRs are run by the coordinator
 
 - M1-006 | todo | | CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006)
 

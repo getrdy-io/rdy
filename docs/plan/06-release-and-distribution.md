@@ -80,6 +80,7 @@ Rules:
 | --- | --- | --- |
 | `lint` | yes | `cargo fmt --check`, `clippy -D warnings`, `cargo doc` with warnings as errors, `zizmor` on workflows |
 | `deny` | yes | `cargo deny check` (licenses, bans incl. `openssl` and `aws-lc-sys`, sources, advisories) |
+| `dco` | yes | `scripts/check-dco.sh`: every non-merge commit in the PR has a `Signed-off-by:` trailer. Passes without checking on push to `main`. No third-party app |
 | `test` (5 legs) | yes | build, `cargo nextest run --locked`. Linux legs also prove the binary is static (below) |
 | `install-sh` | yes | `shellcheck`, then the shell test suite with a stub `curl` and stub cosign |
 | `ci-ok` | the only required check | `needs:` exactly the gating jobs above; fails on any result other than `success` |
