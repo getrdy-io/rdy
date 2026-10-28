@@ -363,7 +363,13 @@ fn a_bare_host_memory_has_no_threshold() {
         panic!("{:?}", decoded[0]);
     };
     assert_eq!(id, "host.memory");
-    assert_eq!(*reason, UnsupportedReason::NoThreshold { one_of: &["min"] });
+    assert_eq!(
+        *reason,
+        UnsupportedReason::NoThreshold {
+            one_of: &["min"],
+            and: vec![]
+        }
+    );
 }
 
 /// A YAML key with no value (`min:`) is a bad value. It must not read as an absent threshold.

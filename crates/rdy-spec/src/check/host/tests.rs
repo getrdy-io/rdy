@@ -82,6 +82,8 @@ fn cases() -> Vec<Case> {
                 ("arch", json!("x86_64")),
                 ("flags", json!(["AVX2"])),
                 ("flags", json!([""])),
+                ("arch", json!([])),
+                ("flags", json!([])),
                 ("flags", sixty_five_flags),
             ],
             fields: HostCpu::FIELDS,
@@ -114,6 +116,8 @@ fn cases() -> Vec<Case> {
                 ("path", json!("")),
                 ("path", json!("C:/x")),
                 ("path", json!("/a\u{0}b")),
+                ("path", json!("/a\nb")),
+                ("path", json!("/a\u{85}b")),
                 ("path", json!(format!("/{}", "a".repeat(1024)))),
                 ("path", json!(7)),
                 ("min", json!("100G")),
@@ -141,6 +145,8 @@ fn cases() -> Vec<Case> {
                 ("free", json!([{"port": 80, "extra": 1}])),
                 ("free", json!(80)),
                 ("free", ports_257),
+                ("free", json!([])),
+                ("udp_free", json!([])),
                 ("udp_free", json!([0])),
                 ("udp_free", json!([53, 53])),
                 ("allow_owner", json!([""])),
@@ -161,6 +167,7 @@ fn cases() -> Vec<Case> {
                 ("selinux", json!({"denials_window": "24"})),
                 ("selinux", json!({"denials_window": "0s"})),
                 ("selinux", json!({"watch": [""]})),
+                ("selinux", json!({"denials_max": 4_294_967_296_u64})),
                 ("selinux", json!({"mode": "enforcing"})),
                 ("selinux", json!("enforcing")),
                 ("apparmor", json!({"allow": ["on"]})),
@@ -196,6 +203,7 @@ fn cases() -> Vec<Case> {
                 ("fips", json!("yes")),
                 ("windows_min_build", json!(-1)),
                 ("windows_min_build", json!("2022")),
+                ("windows_min_build", json!(4_294_967_296_u64)),
             ],
             fields: HostOs::FIELDS,
         },
@@ -356,7 +364,17 @@ fn a_bare_host_check_that_needs_a_threshold_is_no_threshold() {
     ];
     for (id, one_of) in cases {
         let reason = why(id, &json!({}));
-        assert_eq!(reason, UnsupportedReason::NoThreshold { one_of }, "{id}");
+        // Only host.disk has a second required key, and it is named too.
+        let and = if id == "host.disk" {
+            vec!["path"]
+        } else {
+            vec![]
+        };
+        assert_eq!(
+            reason,
+            UnsupportedReason::NoThreshold { one_of, and },
+            "{id}"
+        );
     }
 }
 
@@ -403,6 +421,15 @@ fn no_threshold_reads_as_a_fix() {
     assert_eq!(
         why("host.cpu", &json!({})).to_string(),
         "has no threshold: add at least one of 'min', 'arch', or 'flags'"
+    );
+    assert_eq!(
+        why("host.disk", &json!({})).to_string(),
+        "has no threshold: add 'min' and 'path'"
+    );
+    // With the path given, only the threshold is asked for.
+    assert_eq!(
+        why("host.disk", &json!({"path": "/"})).to_string(),
+        "has no threshold: add 'min'"
     );
 }
 
@@ -554,4 +581,55 @@ fn hostile_text_in_a_host_value_is_escaped_in_the_reason() {
     let reason = why("host.cpu", &json!({"flags": [evil]}));
     let text = reason.to_string();
     assert!(!text.chars().any(char::is_control), "{text:?}");
+}
+
+/// A key with no value is a bad value at any depth, because reading it as absent would widen a rule:
+/// `selinux: {allow:}` would allow every mode.
+#[test]
+fn a_null_at_any_depth_is_a_bad_value_of_the_outer_key() {
+    let cases = [
+        ("host.lsm", json!({"selinux": {"allow": null}}), "selinux"),
+        (
+            "host.lsm",
+            json!({"selinux": {"denials_max": null}}),
+            "selinux",
+        ),
+        (
+            "host.lsm",
+            json!({"apparmor": {"require_profiles": null}}),
+            "apparmor",
+        ),
+        (
+            "host.os",
+            json!({"supported": [{"id": "rhel", "versions": null}]}),
+            "supported",
+        ),
+        ("host.os", json!({"supported": [null]}), "supported"),
+        ("host.ports", json!({"free": [80, null]}), "free"),
+        ("host.cpu", json!({"min": 2, "flags": [null]}), "flags"),
+    ];
+    for (id, params, field) in cases {
+        let reason = why(id, &params);
+        assert!(
+            matches!(&reason, UnsupportedReason::BadValue { field: Some(f), .. } if f == field),
+            "{id} {params}: {reason:?}"
+        );
+    }
+}
+
+#[test]
+fn an_empty_list_is_refused_where_it_would_be_the_only_threshold() {
+    for (id, params) in [
+        ("host.cpu", json!({"flags": []})),
+        ("host.cpu", json!({"arch": []})),
+        ("host.ports", json!({"free": []})),
+        ("host.ports", json!({"udp_free": []})),
+    ] {
+        let reason = why(id, &params);
+        assert!(
+            matches!(&reason, UnsupportedReason::BadValue { .. }),
+            "{id} {params}: {reason:?}"
+        );
+        assert!(reason.to_string().contains("at least 1"), "{reason}");
+    }
 }

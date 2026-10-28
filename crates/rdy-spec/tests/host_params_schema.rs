@@ -73,6 +73,8 @@ fn entries_both_accept() -> TestResult {
             json!({"id": "host.security_agents"}),
             json!({"id": "host.security_agents", "forbid": ["a"], "allow": ["b"]}),
             json!({"id": "host.os"}),
+            json!({"id": "host.os", "windows_min_build": 4_294_967_295_u64}),
+            json!({"id": "host.disk", "path": "/srv/data \u{a0}ok", "min": "1Gi"}),
             json!({"id": "host.os", "supported": [{"id": "rhel", "versions": ["8", "9"]}, {"id": "ubuntu"}],
                 "arch": ["x86_64"], "fips": "forbid", "windows_min_build": 20348}),
         ],
@@ -99,6 +101,24 @@ fn entries_both_refuse() -> TestResult {
             json!({"id": "host.os", "like": "rhel"}),
             json!({"id": "host.lsm", "selinux": {"mode": "enforcing"}}),
             json!({"id": "host.ports", "free": [{"port": 80, "proto": "tcp"}]}),
+            // a key with no value, at any depth
+            json!({"id": "host.lsm", "selinux": {"allow": null}}),
+            json!({"id": "host.lsm", "apparmor": {"require_profiles": null}}),
+            json!({"id": "host.os", "supported": [{"id": "rhel", "versions": null}]}),
+            // an empty list is no threshold
+            json!({"id": "host.cpu", "flags": []}),
+            json!({"id": "host.cpu", "arch": []}),
+            json!({"id": "host.ports", "free": []}),
+            json!({"id": "host.ports", "udp_free": []}),
+            // control characters in a path, C0 and C1
+            json!({"id": "host.disk", "path": "/a\nb", "min": "1Gi"}),
+            json!({"id": "host.disk", "path": "/a\u{0}b", "min": "1Gi"}),
+            json!({"id": "host.disk", "path": "/a\u{7f}b", "min": "1Gi"}),
+            json!({"id": "host.disk", "path": "/a\u{85}b", "min": "1Gi"}),
+            json!({"id": "host.disk", "path": "C:\\a\u{9f}", "min": "1Gi"}),
+            // above u32
+            json!({"id": "host.lsm", "selinux": {"denials_max": 4_294_967_296_u64}}),
+            json!({"id": "host.os", "windows_min_build": 4_294_967_296_u64}),
             // bad values
             json!({"id": "host.cpu", "min": 0}),
             json!({"id": "host.cpu", "min": 4097}),

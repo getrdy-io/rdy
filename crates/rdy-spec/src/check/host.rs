@@ -24,7 +24,7 @@ use crate::scalar::{Duration, Quantity};
 
 /// Parameters of `host.cpu`: cores, architecture and CPU flags.
 ///
-/// At least one of `min`, `arch` and `flags` is required.
+/// At least one of `min`, `arch` and `flags` is required. A list of `arch` or `flags` is not empty.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -34,9 +34,9 @@ pub struct HostCpu {
     /// Fewer cores than this: the check warns.
     pub recommended: Option<Cores>,
     /// The host must have one of these architectures. `amd64` is `x86_64` and `arm64` is `aarch64`.
-    pub arch: Option<BoundedList<Arch, 4, true>>,
+    pub arch: Option<BoundedList<Arch, 4, true, 1>>,
     /// CPU flags the host must have, such as `avx2` or `x86-64-v3`. At most 64.
-    pub flags: Option<BoundedList<CpuFlag, 64>>,
+    pub flags: Option<BoundedList<CpuFlag, 64, false, 1>>,
 }
 
 impl ParamSet for HostCpu {
@@ -148,6 +148,7 @@ impl ParamSet for HostDisk {
         "forbid_fstypes",
     ];
     const THRESHOLD: &'static [&'static str] = &["min"];
+    const ALSO_REQUIRED: &'static [&'static str] = &["path"];
 }
 
 /// Which addresses a required port must be free on.
@@ -206,9 +207,9 @@ impl<'de> Deserialize<'de> for PortRule {
 #[non_exhaustive]
 pub struct HostPorts {
     /// TCP ports that must be free. At most 256.
-    pub free: Option<BoundedList<PortRule, 256>>,
+    pub free: Option<BoundedList<PortRule, 256, false, 1>>,
     /// UDP ports that must be free. At most 256, none twice.
-    pub udp_free: Option<BoundedList<Port, 256, true>>,
+    pub udp_free: Option<BoundedList<Port, 256, true, 1>>,
     /// Process names that may already hold a port, such as an earlier install of the product.
     pub allow_owner: Option<StringList>,
 }

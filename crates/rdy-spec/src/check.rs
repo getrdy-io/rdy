@@ -65,6 +65,10 @@ pub(crate) trait ParamSet: DeserializeOwned {
     /// Empty when the check needs no threshold. An entry with none of them is
     /// [`UnsupportedReason::NoThreshold`].
     const THRESHOLD: &'static [&'static str] = &[];
+
+    /// Keys that are required besides the threshold. They are named in a
+    /// [`UnsupportedReason::NoThreshold`] when they are missing too, so one message asks for everything.
+    const ALSO_REQUIRED: &'static [&'static str] = &[];
 }
 
 /// Defines a parameter struct with no fields yet.
@@ -221,6 +225,8 @@ pub enum UnsupportedReason {
     NoThreshold {
         /// The keys that would fix it. One of them is enough.
         one_of: &'static [&'static str],
+        /// Other required keys that the entry also lacks, such as `path` of `host.disk`.
+        and: Vec<&'static str>,
     },
     /// A common field of the entry does not fit: `name`, `severity`, `fix`, `timeout` or `os`.
     ///
@@ -244,17 +250,23 @@ impl fmt::Display for UnsupportedReason {
                 field: None,
                 message,
             } => write!(f, "a value does not fit: {message}"),
-            Self::NoThreshold { one_of } => match one_of {
-                [only] => write!(f, "has no threshold: add '{only}'"),
-                [init @ .., last] => {
-                    write!(f, "has no threshold: add at least one of ")?;
-                    for key in init {
-                        write!(f, "'{key}', ")?;
+            Self::NoThreshold { one_of, and } => {
+                match one_of {
+                    [only] => write!(f, "has no threshold: add '{only}'")?,
+                    [init @ .., last] => {
+                        write!(f, "has no threshold: add at least one of ")?;
+                        for key in init {
+                            write!(f, "'{key}', ")?;
+                        }
+                        write!(f, "or '{last}'")?;
                     }
-                    write!(f, "or '{last}'")
+                    [] => f.write_str("has no threshold")?,
                 }
-                [] => f.write_str("has no threshold"),
-            },
+                for key in and {
+                    write!(f, " and '{key}'")?;
+                }
+                Ok(())
+            }
             Self::BadCommonField { field } => write!(f, "the value of '{field}' does not fit"),
         }
     }
@@ -271,7 +283,8 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
     }
     // A key with no value, such as `min:` in YAML, is a mistake and not an absent key. Reading it as
     // absent would drop a threshold silently.
-    if let Some(key) = fields.iter().find_map(|(k, v)| v.is_null().then_some(k)) {
+    // This holds at any depth: `selinux: {allow:}` would otherwise allow every mode.
+    if let Some(key) = fields.iter().find_map(|(k, v)| has_null(v).then_some(k)) {
         return Err(UnsupportedReason::BadValue {
             field: Some(echo_safe(key)),
             message: "the key has no value: write one, or remove the key".to_owned(),
@@ -280,6 +293,11 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
     if !P::THRESHOLD.is_empty() && !P::THRESHOLD.iter().any(|key| fields.contains_key(*key)) {
         return Err(UnsupportedReason::NoThreshold {
             one_of: P::THRESHOLD,
+            and: P::ALSO_REQUIRED
+                .iter()
+                .copied()
+                .filter(|key| !fields.contains_key(*key))
+                .collect(),
         });
     }
     serde_json::from_value::<P>(Value::Object(fields.clone())).map_err(|e| {
@@ -295,6 +313,16 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
             }
         }
     })
+}
+
+/// Whether a value is null, or holds a null in a list or an object at any depth.
+fn has_null(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Array(items) => items.iter().any(has_null),
+        Value::Object(map) => map.values().any(has_null),
+        _ => false,
+    }
 }
 
 /// The field named by serde's `missing field` message. The name comes from the struct, not the file.

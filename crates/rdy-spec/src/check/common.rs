@@ -258,17 +258,22 @@ impl<'de> Deserialize<'de> for ListText {
     }
 }
 
-/// A list of at most `MAX` items. With `UNIQUE` set, a repeated item is refused.
+/// A list of `MIN` to `MAX` items. With `UNIQUE` set, a repeated item is refused. `MIN` is 0 unless set,
+/// and 1 where an empty list would be a threshold that measures nothing.
 ///
 /// It reads as a plain YAML list and derefs to a slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BoundedList<T, const MAX: usize, const UNIQUE: bool = false>(Vec<T>);
+pub struct BoundedList<T, const MAX: usize, const UNIQUE: bool = false, const MIN: usize = 0>(
+    Vec<T>,
+);
 
 /// A list of names with the limits of the schema's `StringList`: at most 256 items of 1 to 256
 /// characters.
 pub type StringList = BoundedList<ListText, 256>;
 
-impl<T, const MAX: usize, const UNIQUE: bool> Deref for BoundedList<T, MAX, UNIQUE> {
+impl<T, const MAX: usize, const UNIQUE: bool, const MIN: usize> Deref
+    for BoundedList<T, MAX, UNIQUE, MIN>
+{
     type Target = [T];
 
     fn deref(&self) -> &[T] {
@@ -276,7 +281,9 @@ impl<T, const MAX: usize, const UNIQUE: bool> Deref for BoundedList<T, MAX, UNIQ
     }
 }
 
-impl<'a, T, const MAX: usize, const UNIQUE: bool> IntoIterator for &'a BoundedList<T, MAX, UNIQUE> {
+impl<'a, T, const MAX: usize, const UNIQUE: bool, const MIN: usize> IntoIterator
+    for &'a BoundedList<T, MAX, UNIQUE, MIN>
+{
     type Item = &'a T;
     type IntoIter = std::slice::Iter<'a, T>;
 
@@ -285,12 +292,18 @@ impl<'a, T, const MAX: usize, const UNIQUE: bool> IntoIterator for &'a BoundedLi
     }
 }
 
-impl<'de, T, const MAX: usize, const UNIQUE: bool> Deserialize<'de> for BoundedList<T, MAX, UNIQUE>
+impl<'de, T, const MAX: usize, const UNIQUE: bool, const MIN: usize> Deserialize<'de>
+    for BoundedList<T, MAX, UNIQUE, MIN>
 where
     T: Deserialize<'de> + Eq + Hash,
 {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let items = Vec::<T>::deserialize(deserializer)?;
+        if items.len() < MIN {
+            return Err(bad(format!(
+                "a list has at least {MIN} item, this one is empty"
+            )));
+        }
         if items.len() > MAX {
             return Err(bad(format!(
                 "a list has at most {MAX} items, this one has {}",
