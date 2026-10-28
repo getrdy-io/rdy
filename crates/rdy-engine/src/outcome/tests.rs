@@ -759,3 +759,43 @@ fn the_mapped_results_feed_the_verdict() {
         Verdict::ReadyWithWarnings
     );
 }
+
+#[test]
+fn the_root_fix_is_the_01_text_with_a_spec_placeholder_and_an_elevated_prompt_on_windows() {
+    let unix = map(
+        &WITH_WANTS,
+        &entry("fake.wants"),
+        &ctx_on(Os::Linux, "fake.wants", &[]),
+        Err(CheckError::MissingNeed(Need::Root)),
+    );
+    assert_eq!(
+        unix.fix.as_deref(),
+        Some("Rerun as root: sudo rdy run <spec>")
+    );
+    assert!(unix.fix.expect("fix").contains(SPEC_PLACEHOLDER));
+
+    let mac = map(
+        &WITH_WANTS,
+        &entry("fake.wants"),
+        &ctx_on(Os::Macos, "fake.wants", &[]),
+        Err(CheckError::MissingNeed(Need::Root)),
+    );
+    assert_eq!(
+        mac.fix.as_deref(),
+        Some("Rerun as root: sudo rdy run <spec>")
+    );
+
+    let windows = map(
+        &WITH_WANTS,
+        &entry("fake.wants"),
+        &ctx_on(Os::Windows, "fake.wants", &[]),
+        Err(CheckError::MissingNeed(Need::Root)),
+    );
+    assert_eq!(
+        windows.fix.as_deref(),
+        Some(
+            "Run rdy from an elevated prompt: open Terminal or PowerShell with Run as administrator, then run it again."
+        )
+    );
+    assert_eq!(windows.fix_source, Some(FixSource::Rdy));
+}

@@ -34,13 +34,13 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub type CheckOutcome = Result<Finding, CheckError>;
 
 // rdy ships for Linux, macOS and Windows only. Without this, `current_os()` would call any other
-// Unix target (a BSD, say) Linux and report checks that read /proc as if they had a data source.
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+// target (a BSD, wasm) Linux and report checks that read /proc as if they had a data source.
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 compile_error!("rdy-engine supports Linux, macOS and Windows only; add the OS to `current_os()`");
 
 /// The OS rdy was built for.
 ///
-/// Linux, macOS and Windows are the only supported targets. Building for any other Unix target is a
+/// Linux, macOS and Windows are the only supported targets. Building for any other target is a
 /// compile error, so this never reports Linux by mistake.
 #[must_use]
 pub fn current_os() -> Os {

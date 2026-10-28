@@ -38,6 +38,11 @@ use crate::check::{
 #[cfg(test)]
 mod tests;
 
+/// Stands for the spec file name in the root fix. The text is 01 section 5.2 word for word, but the
+/// engine does not know the file name as typed. The CLI replaces this with its own shell-quoted
+/// spec argument, as `SkipWhy::MissingRoot` does. M1-057 reconciles the two sources of skip text.
+pub const SPEC_PLACEHOLDER: &str = "<spec>";
+
 /// Text for a result whose check gave no advice of its own and the spec gave none either.
 const NO_ADVICE_FIX: &str =
     "rdy has no advice for this result. Tell the vendor which check it was.";
@@ -224,11 +229,10 @@ fn missing_need_text(need: &Need, os: Os) -> (String, String) {
         Need::Root => (
             "Not run. This check needs root.".to_owned(),
             if os == Os::Windows {
-                "Run rdy from an elevated prompt: open Terminal or PowerShell with Run as administrator, then run it again."
+                "Run rdy from an elevated prompt: open Terminal or PowerShell with Run as administrator, then run it again.".to_owned()
             } else {
-                "Rerun rdy as root, for example with sudo."
-            }
-            .to_owned(),
+                format!("Rerun as root: sudo rdy run {SPEC_PLACEHOLDER}")
+            },
         ),
         Need::KubeContext => (
             "Not run. No Kubernetes cluster was reachable.".to_owned(),
