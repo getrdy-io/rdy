@@ -17,7 +17,7 @@ go or no-go in the plan. This is recorded as decision 2 under "Decisions made" i
 
 - M1-004 | [#9](https://github.com/getrdy-io/rdy/pull/9) | 2026-10-28 | Exit test proven locally in a scratch copy, not in CI (M1-005 adds CI). Wrappers that keep I/O crates out of check crates are not set; they need `ci/check-crate-deps.toml` from the lint-wall ticket. `reqwest` is banned per 05 and ADR 0014; the M2 upload ticket must lift it with a reviewed change
 
-- M1-005 | PR #TBD | | zizmor ran with --offline locally only (online audits run in CI); the exit-test throwaway PRs are run by the coordinator
+- M1-005 | [#14](https://github.com/getrdy-io/rdy/pull/14) | 2026-10-28 | zizmor ran with --offline locally only (online audits run in CI); the exit-test throwaway PRs are run by the coordinator
 
 - M1-006 | todo | | CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006)
 
