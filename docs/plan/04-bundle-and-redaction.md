@@ -1,25 +1,27 @@
 # 04 Bundle and redaction
 
-Owners: rust-engineer (drafted all of it) and security-reviewer (joint owner; confirms sections 3, 4 and 6).
-Status: draft 1, 2026-10-28, waiting for security-reviewer. Date: 2026-10-28.
+Owners: rust-engineer (drafted it) and security-reviewer (joint owner; wrote sections 3, 4 and 6 of draft 2).
+Status: draft 2, 2026-10-28. Sections 3, 4 and 6 are confirmed by security-reviewer. Date: 2026-10-28.
 
 This note designs the redactor, the collectors, the bundle archive and manifest, and the opt-in upload.
 It builds on ADRs 0002, 0003, 0004, 0007, 0008, 0009, 0010 and 0012, on 02-engine-design.md (probe facade,
 action log, output confinement) and on 05-threat-model.md (Surface 4, INV-15, INV-20, Appendix F). Field
-names follow `crates/rdy-spec/schema/*.json`. 01-spec-format.md is not written yet; where 01 differs, 01
+names follow `crates/rdy-spec/schema/*.json` and 01-spec-format.md (revision 0). Where 01 differs, 01
 wins and this note follows. Everything on the server side (storage, viewer, analyzers) belongs to
 `rdy-cloud` and is out of scope. Where I propose a server behaviour, it is a request to `rdy-cloud`.
 
 ## Decisions in one screen
 
-1. One redactor engine, `rdy_engine::redact` (02, ADR 0015). M1 ships the whole-string API and the report
-   rule set. M2 adds streaming and the rest. It is one compiled rule set, not a chain of trait objects.
-   Rules find spans, overlaps resolve by priority, replaced text is never re-scanned.
+1. One redactor engine, `rdy_engine::redact` (02, ADR 0015). M1 ships the whole-string minimum (section 1).
+   M2 adds streaming and the rest. It is one compiled rule set, not a chain of trait objects. Rules find
+   spans in the original text, overlapping spans merge into their union, and the output is written once.
 2. Rules are compiled into the binary. A spec can add redaction and can never remove a built-in rule. A
-   customer can add more on the command line.
+   customer can add more on the command line. The one subtraction is the customer's own `--keep-emails` on
+   `rdy bundle`, argv only, shown at consent and in the manifest.
 3. A placeholder is `[REDACTED:aws_access_key_id:3fa9c01b]`. The tag is a keyed hash with a random key made at
    process start and never stored. Same secret, same tag, inside one run only.
-4. The archive writer only accepts bytes that came out of the `Redactor`. No temp file ever holds raw bytes.
+4. Every writer (report, log, archive) accepts only a `Redacted` value, which only the redactor can build.
+   No temp file ever holds raw bytes.
 5. A bundle never records a hash of raw content. It records raw byte counts and the hash of what it stored.
 6. Collectors go through the probe facade with a declared manifest. Bundle scope needs streaming reads and
    larger caps than checks get (a correction to 02).
@@ -38,17 +40,30 @@ gate, not a bundle feature. The bundle pipeline is M2, with the portal MVP (plan
 
 | Item | M1 | M2 | Later |
 | --- | --- | --- | --- |
-| Redactor API | `redact_str` (whole string), counts, keyed tags | `redact_bytes`, streaming `RedactStream`, residual scan | none |
-| Rules | url userinfo, auth headers and cookies, AWS keys, PEM private keys, kubeconfig credentials, `rdy_st_` tokens, secrets by key name (env, YAML, JSON, INI) | emails, JWTs, SaaS token prefixes, GCP and Azure credentials, Kubernetes Secret manifests, generic high-entropy tokens, IPv4, IPv6 and MAC (opt-in), custom patterns | more prefixes as reports arrive |
+| Redactor API | `redact_str` and `redact_report` (whole string), counts, keyed tags, the `Redacted` gate | `redact_bytes`, streaming `RedactStream`, residual scan | none |
+| Rules | the ten M1 rules below | emails, JWTs, SaaS token prefixes, GCP and Azure credentials, Kubernetes Secret manifests, generic high-entropy tokens, AWS secrets by proximity, IPv4, IPv6 and MAC (opt-in), custom patterns | more prefixes as reports arrive |
 | Where it runs | every string in the `Report` including the action log, error output, `--json` stdout, the `tracing` layer and panic messages | every byte of every bundle entry, the result JSON it embeds, and the manifest | `rdy report` re-render input |
-| Tests | 60 or more corpus cases, property tests, CI gate | 300 cases, chunk-boundary cases, fuzzing, second-opinion scanner, throughput floor | none |
+| Tests | 20 golden cases in `cargo test` (section 4) | 60 cases, property tests, chunk offsets, fuzzing, second-opinion scanner, throughput floor, own CI job | grows with every miss report |
 | Collectors, archive, manifest | none | all of section 2 and 5 on Linux and Kubernetes; basic macOS and Windows | `k8s:logs`, OS log collectors on macOS and Windows |
 | `rdy bundle` | none | yes | none |
 | `rdy upload`, receipt | none | yes, single `PUT` | resumable upload if partners need it |
-| Result schema | `redaction` summary field | manifest schema in `rdy-spec` | none |
+| Result schema | `redaction { ruleset, total, by_rule }` (01, already in the schema) | manifest schema in `rdy-spec` | none |
 
-M1 does not contain collectors, an archive, a manifest, streaming, binary handling, emails, JWTs, entropy
-rules, IP rules, custom patterns or any upload code. 05 says the same ("M1 has no upload code").
+**The M1 minimum redactor.** `rdy_engine::redact` with the whole-string API only, the keyed tag, span union
+and the `Redacted` writer gate (section 3). It has ten rule names built from five matchers: token shapes
+(`aws_access_key_id`, `rdy_share_token`), header names (`auth_header`, `api_key_header`), URL userinfo
+(`url_userinfo`), PEM blocks (`pem_private_key`, to the END line or, if there is none, to the end of the
+string), and one key-name matcher with four stem lists (`secret_by_key`, `kubeconfig_credential`,
+`aws_secret_access_key`, `aws_session_token`) over `=`, `:`, JSON members and `--flag=` forms. That covers
+every M1 category in 05 Appendix F. `redact_report` runs once on the finished `Report`, over every string
+leaf and object key including the action log, before the JSON file, the HTML, `--json` stdout and the
+terminal summary exist. The 02 field caps run after it. The same `redact_str` wraps the `tracing` writer,
+the panic hook and CLI error text. Tests are a golden corpus of 20 synthetic cases (16 positive, 4
+negative) in the normal `cargo test` job, growing to 60 in M2. Cost: 12.5 hours (Tickets implied). There
+is no cut below this line: it is 05 INV-15.
+
+M1 does not contain collectors, an archive, a manifest or any upload code. 05 says the same ("M1 has no
+upload code").
 
 ## 2. Collectors
 
@@ -117,160 +132,164 @@ sockets"). rdy never asks for sudo (rule 1).
 
 ## 3. Redactor design
 
-> security-reviewer to confirm
+Confirmed by security-reviewer on 2026-10-28. Changes from draft 1 are in Plan corrections.
 
-### 3.1 Model
+### 3.1 The contract
+
+These hold in every milestone. ADR 0015 records them and CI tests each one.
+
+1. **Compiled in, add only.** Rules, thresholds and the placeholder format ship in the binary: no rule
+   files, no dictionaries, no downloads. A spec can switch on optional groups and add `redact_patterns`. It
+   cannot remove or weaken a built-in rule. An unknown group exits 64, because a missing rule is a leak.
+   The customer can add groups and patterns on argv. The only subtraction is the customer's
+   `--keep-emails` (3.6).
+2. **Spans, merged by union.** Every rule runs on the original text and reports `(start, end, rule,
+   priority)`. Spans that overlap or touch merge into one span covering their union, named after the
+   highest priority rule in it. The output is written once, so no rule sees a placeholder and no partly
+   overlapped span leaves bytes behind.
+3. **Keyed tag, no stored key** (3.3).
+4. **Typed writers.** Only a `Redacted<T>` reaches a writer (3.5).
+5. **Binary is skipped**, never shipped, because rdy cannot prove it is redacted (3.4).
+6. **No raw digests.** Nothing hashes raw content. The keyed tag is the only value derived from a secret.
+   The manifest holds the sha256 of the stored, redacted bytes.
+7. **Fail closed.** An error or panic inside redaction drops the string or entry and records why. There is
+   no raw fallback. If the OS RNG cannot make a key, rdy exits 70.
+
+### 3.2 Model
 
 ```rust
 // rdy_engine::redact (feature `redact`, independent of `runtime` so rdy-cloud can reuse it)
 pub struct Redactor { /* Arc<CompiledRules>, TagKey, per-rule AtomicU64 counts */ }
+pub struct Redacted<T>(T);   // built only in this module: no pub constructor, From, Default or Deserialize
+impl<T> std::ops::Deref for Redacted<T> { type Target = T; /* no DerefMut */ }
 impl Redactor {
     pub fn new(set: RuleSet, extra: &Extra, key: TagKey) -> Result<Self, RedactError>; // only custom regex can fail
-    pub fn redact_str<'a>(&self, s: &'a str) -> Cow<'a, str>;        // M1
-    pub fn redact_bytes<'a>(&self, b: &'a [u8]) -> Cow<'a, [u8]>;    // M2
-    pub fn stream(&self) -> RedactStream;                            // M2: push(chunk, out), finish(out)
-    pub fn summary(&self) -> RedactionSummary;                       // rule name -> count. Never values.
+    pub fn redact_str(&self, s: &str) -> Redacted<String>;             // M1
+    pub fn redact_report(&self, r: Report) -> Redacted<Report>;       // M1
+    pub fn redact_bytes(&self, b: &[u8]) -> Redacted<Vec<u8>>;        // M2
+    pub fn stream(&self) -> RedactStream;                              // M2: push(chunk, out), finish(out)
+    pub fn summary(&self) -> Redaction;                                // 01: ruleset, total, by_rule. Never values
 }
-pub enum RuleSet { Report, Bundle }                                   // Bundle is a superset of Report
+impl TagKey { pub fn random() -> Result<Self, RedactError>; }         // ring SystemRandom; Debug prints TagKey(..)
+pub enum RuleSet { Report, Bundle }                                    // Bundle is a superset of Report
 ```
 
-One `Redactor` serves a whole process. Its key and counts are shared by the report and the bundle in one run.
+- One `Redactor` per process, built in `main` before the spec is read. The report, the logs and (M2) the
+  bundle share its key and counts.
+- `redact_report` turns the `Report` into a `serde_json::Value` and redacts every string leaf and object
+  key. A member whose key matches a secret key stem, and the `value` of a `{name, value}` pair whose `name`
+  matches, is replaced whole. It then deserializes and applies the 02 field caps, which never cut inside a
+  placeholder. A field added to the result later is covered with no code change.
+- **Priority**, highest first: PEM and Kubernetes Secret blocks; token shapes (AWS key ids, `rdy_st_`,
+  JWTs, SaaS prefixes); auth headers and cookies; URL userinfo; key names and kubeconfig credentials;
+  custom patterns; emails; opt-in IPv4, IPv6 and MAC; generic entropy. Priority only names a merged span.
+  It never shrinks what is replaced.
+- **Groups.** Specs name groups (Appendix B); placeholders and the manifest use rule names. Every group
+  except `ipv4`, `ipv6` and `mac` is always on. Listing an always-on group changes nothing; listing an
+  optional one turns it on.
+- **Structure is kept.** A span excludes quotes and delimiters: `password="hunter2"` becomes
+  `password="[REDACTED:secret_by_key:1a2b3c4d]"`, so JSON and YAML stay parseable. A PEM block becomes one
+  placeholder line. The key-name rule skips a value only when it is exactly one well-formed placeholder
+  (`^\[REDACTED:[a-z0-9_.]+:[0-9a-f]{8}\]$`), so `password=[REDACTED:x:00000000]hunter2` is still redacted.
+- **Not decoded.** Rules tolerate `\"`, `@`, `%40` in userinfo and literal `\n` in JSON-escaped PEM.
+  rdy does not decode base64, double encoding or compressed values. An encoded secret not caught by key
+  name or entropy stays. The docs say so and point to `--redact-pattern`.
 
-**Spans, not rewrites.** For each record, every active rule reports `(start, end, rule, priority)` spans.
-The merger sorts them, keeps the highest priority (then the longest) where they overlap, and writes the
-output once. A later rule never sees an earlier placeholder. This also makes redaction idempotent by
-construction: a placeholder matches no rule, and the key-name rule skips values that start with `[REDACTED:`.
-
-**Order (priority, first wins).**
-
-1. Multi-line blocks: PEM private keys, Kubernetes Secret `data:` blocks.
-2. Known token shapes: AWS key ids, `rdy_st_`, JWTs, SaaS prefixes.
-3. Auth headers and cookies.
-4. URL userinfo.
-5. Secrets by key name, kubeconfig credentials.
-6. Custom patterns from the spec and the command line.
-7. Emails.
-8. Opt-in IPv4, IPv6, MAC.
-9. Generic high-entropy tokens, on whatever is still uncovered.
-
-Specific rules go first because they give a typed placeholder and keep the entropy rule quiet. The entropy
-rule is last because it is the weakest signal and the one most likely to hit something support needs.
-
-**Groups and names.** A spec names groups (`aws_keys`, `bearer_tokens`, `emails`, and the others in
-Appendix B). Placeholders and the manifest use rule names. The built-in minimum set runs whatever the spec
-says: every group except `ipv4`, `ipv6` and `mac`. A spec that lists an always-on group is accepted and the
-entry changes nothing. A spec that lists an optional group turns it on. An unknown group exits 64
-("needs a newer rdy"). A rule that is missing is a privacy failure, so this one fails closed.
-
-**Structure is kept.** A replaced span excludes quotes and delimiters. `password="hunter2"` becomes
-`password="[REDACTED:secret_by_key:1a2b3c4d]"`. JSON and YAML stay parseable by the vendor's tools. A PEM
-block becomes one placeholder line.
-
-**What the rules do not decode.** Rules tolerate the usual escapes around the secret: `\"`, `\u0040` for
-`@`, `%40` in userinfo, and literal `\n` in JSON-escaped PEM. rdy does not decode base64, double encoding or
-compressed values. An encoded secret that is not caught by key name or by entropy stays. The docs say so and
-the customer can add `--redact-pattern`.
-
-### 3.2 Placeholder and the stable tag
+### 3.3 Placeholder and the stable tag
 
 `[REDACTED:<rule>:<tag>]`. Rule names are `[a-z0-9_.]` (`custom.<name>` for custom patterns). The tag is the
 first 4 bytes of `HMAC-SHA256(key, secret_bytes)` as 8 lowercase hex digits.
 
-- `key` is 32 random bytes from the OS RNG, made once at process start, held in memory, never written, never
-  logged (its `Debug` is masked). It is not in the manifest or the receipt.
-- Why keyed: an unkeyed hash of a short password is a lookup table. With a random key the tag only says
-  "these two values are equal", and only inside this run. Two bundles from the same host differ.
-- The hash input is the captured secret bytes only, not the rule name. The same password in a URL and in an
-  env var gets the same tag, which is what support wants to see.
-- 32 bits means a collision at roughly 9,000 distinct secrets has a 1% chance. A collision only merges two
-  labels. It never reveals a value.
-- Tests use `TagKey::fixed(..)` under feature `testing`. The corpus normalizes tags to `~` (section 4).
+- `key` is 32 bytes from `ring::rand::SystemRandom`, made once per process, held in memory only. It is
+  never written or logged, and never in the manifest, the receipt or an error.
+- Keyed because an unkeyed hash of a short password is a lookup table. With a random key the tag only says
+  "these two values are equal", inside this process. Two bundles from the same host differ.
+- The input is the secret bytes only, not the rule name, so one password in a URL and in an env var gets
+  one tag.
+- 32 bits gives a 1% collision chance at about 9,000 distinct secrets. A collision merges two labels. It
+  never reveals a value.
+- `TagKey::fixed(..)` exists only under feature `testing`, which CI keeps out of the release binary (02).
+  The corpus normalizes tags to `~`.
 
-### 3.3 Streaming and whole strings
+### 3.4 Streaming, binary and encodings (M2)
 
-| Input | Mode | Why |
-| --- | --- | --- |
-| Report strings, errors, log lines (M1) | whole string | small, at most 64 KiB each after caps |
-| Bundle entries (M2) | line-oriented stream, entry buffered | a journal is far bigger than one string, and `tar` needs the entry size before the data |
+M1 redacts each report string, error and log line whole, before the field caps (02 review MF-05); each is
+bounded by the facade's 1 MiB output cap. M2 bundle entries are a line-oriented stream into a buffered
+entry, because a journal is far bigger than one string and `tar` needs the size first.
 
-- The stream reads 64 KiB chunks, splits at `\n` and redacts complete records. A record longer than 1 MiB is
-  force-split, and the last 16 KiB of each piece is carried into the next. Every rule has a declared maximum
-  match length of at most 16 KiB, checked when the rule set is built. So a secret cut by a chunk boundary or
-  a forced split still sits whole in the carry window.
-- PEM blocks use a small state machine. After `-----BEGIN ... PRIVATE KEY-----` the stream keeps redacting
-  while lines look like key material (header lines, 64-column base64) and stops at the END line or at the first
-  line that does not look like key material. A truncated key is redacted to the point it stops. It fails
-  closed without eating the rest of the log.
-- Custom patterns never match across lines. The docs say so.
-- Entry buffers hold the redacted bytes only. Peak memory is the largest entry (at most 32 MiB) plus one chunk
-  plus the zstd encoder. Target: under 128 MiB RSS for a full default bundle, tested in M2.
+- 64 KiB chunks, split at `\n`, complete records redacted. A record over 1 MiB is force-split with a 16
+  KiB carry. Every rule declares a maximum match length of at most 16 KiB, checked at build, so a secret
+  cut by a boundary sits whole in the carry window.
+- PEM uses a small state machine: after `-----BEGIN ... PRIVATE KEY-----` it redacts while lines look like
+  key material and stops at END or the first line that does not. Custom patterns never cross lines.
+- Entry buffers hold redacted bytes only. Target: under 128 MiB RSS for a full default bundle.
+- The first 8 KiB is sniffed. A NUL byte, a high share of control bytes, or a gzip, zstd, xz, bzip2, zip or
+  tar magic number means binary: entry `skipped`, reason `binary` or `compressed`, counted in the summary.
+- UTF-16 (BOM, or NULs at every second byte) is transcoded first and the manifest records
+  `transcoded_from`. Invalid UTF-8 is redacted as bytes (`regex::bytes`), so a stray byte never disables a
+  rule.
 
-### 3.4 Binary and odd encodings (M2)
+### 3.5 Where the guarantee lives
 
-- Sniff the first 8 KiB. A NUL byte, a high share of control bytes, or the magic number of gzip, zstd, xz,
-  bzip2, zip or tar means binary. Binary files are **skipped, not collected**: entry `skipped`, reason
-  `binary` or `compressed`. rdy cannot prove a binary is redacted, so it does not ship one. The summary
-  counts them.
-- A UTF-16 BOM, or NULs at every second byte, is transcoded to UTF-8 with `char::decode_utf16` first. The
-  manifest records `transcoded_from`.
-- Text that is not valid UTF-8 is redacted as bytes (`regex::bytes`). A stray byte never disables a rule.
+- **Writers.** `report::write_json`, `report::render_html`, `OutputDir::write_atomic` and (M2)
+  `BundleWriter::add` take `&Redacted<_>` only. The verified spec copy goes through
+  `OutputDir::write_spec_copy(&VerifiedSpecBytes)` because signed bytes must stay exact (02 review SF-03).
+  The terminal summary and `--json` stdout come from the same `Redacted<Report>`. Skipping redaction is a
+  compile error.
+- **Logs.** A redacting writer under the `tracing` fmt layer redacts each formatted event whole before
+  stderr. It is installed first in `main`. With `RUST_LOG` unset, hyper, h2, rustls, tower and kube are
+  capped at warn (05 I2). The panic hook and CLI error chains print only redacted text (ADR 0008 points 8
+  and 9).
+- **Raw bytes** live only in memory owned by the collector task and the redactor: no temp file, no raw
+  value in the action log (sizes only), in `tracing` or in an error (rule and offset, never text).
+- **M2.** A failed entry is dropped with reason `redactor_error`. A residual scan re-checks stored bytes
+  with the same rules, counts `residual_hits` and prints "this is a bug in rdy". Entry names are redacted
+  in a filename-safe form (`REDACTED-<rule>-<tag>`). During `rdy bundle` and `rdy upload` on Linux, rdy
+  calls `rustix::process::set_dumpable_behavior(NotDumpable)`, so a core dump or same-user `ptrace` cannot
+  read raw text or the token. macOS and Windows have no safe equivalent (documented residual).
+- **Versions.** Each rule has a version. Changing what it matches bumps it and needs security-reviewer
+  approval. The manifest lists the set id (`rdy-redact/1`) and every rule version. Rules change only with a
+  signed release.
 
-### 3.5 Limits and performance budget
+### 3.6 Answers to draft 1's open questions
+
+- **Hash of redacted bytes only: confirmed.** `bytes_in` is a count. `sha256` covers the stored redacted
+  bytes; the sidecar covers the archive. A hash of a known template with one secret is a guessing oracle.
+- **Emails in bundles: on by default, customer opt-out.** The Bundle set always redacts emails. Only the
+  customer can turn that off, with `--keep-emails` on `rdy bundle`: argv only, no spec field, env var or
+  config (cli-ux owns the name). The manifest lists it in `groups_off_by_flags`, and the summary and the
+  consent screen print `not redacted  emails (--keep-emails)`. The M1 Report set has no email rule: the
+  report shows the Kubernetes user on purpose (SEC-24) and ADR 0003's banner says to read it first.
+- **Entropy thresholds: tunable, with a ticket.** Start at 24 or more characters, 4.0 bits or more per
+  character, three of four classes, never pure hex of length 32, 40 or 64, UUIDs, `sha256:` digests or data
+  URIs. They are constants in the rule table, set by the M2 ticket "Tune entropy rule thresholds against
+  the corpus". Each change bumps the rule version.
+- **Residual scan on upload: yes.** Pre-flight scans with the current rules and refuses on a hit (6.2). It
+  cannot fix the file, because it sends exact bytes.
+- **`PR_SET_DUMPABLE`: yes**, M2, Linux (3.5).
+
+### 3.7 Limits and dependencies
 
 | Limit | Value |
 | --- | --- |
-| Record length before forced split | 1 MiB (carry 16 KiB) |
 | Maximum match length of any rule | 16 KiB (checked at build) |
 | Custom patterns | at most 32, each at most 256 chars (schema), compile size limit 256 KiB each |
-| Cold compile, M1 report set | 20 ms or less on a CI runner |
-| Throughput, bundle set, typical log text | 50 MiB/s or more per core. CI fails under 25 MiB/s on the reference corpus (M2) |
-| Report redaction, 1 MiB report | 50 ms or less |
-| Full 256 MiB bundle with residual scan | under 15 s |
+| Cold compile, M1 report set | 20 ms or less on a CI runner (measured, not gated, in M1) |
+| Throughput, bundle set (M2) | 50 MiB/s or more per core. CI fails under 25 MiB/s on the reference corpus |
+| Full 256 MiB bundle with residual scan (M2) | under 15 s |
 
-The regex set is compiled once into a `LazyLock<Arc<CompiledRules>>` per `RuleSet`. In M2, an `aho-corasick`
-automaton of trigger literals (`AKIA`, `://`, `eyJ`, `-----BEGIN`, key stems such as `pass`, `secret`,
-`token`, ASCII case-insensitive) gates which regexes run on a record. M1 uses `regex` alone: strings are
-small and the gate is an optimization to add after a measurement, not before. The `regex` crate is linear
-time, so a hostile custom pattern cannot cause catastrophic backtracking.
+Rules compile once into a `LazyLock<Arc<CompiledRules>>` per `RuleSet`. M1 uses `regex` alone. M2 may add
+an `aho-corasick` trigger-literal gate after a measurement. `regex` is linear time, so a hostile custom
+pattern cannot backtrack.
 
-Crates: `regex` 1 (`regex::bytes` in M2), `aho-corasick` 1 (M2), `hmac`, `sha2`, `getrandom`. All are new
-direct dependencies and need security-reviewer approval under 05's dependency policy. `sha2` is also used
-for manifest hashes.
-
-### 3.6 Where the guarantee lives
-
-- `Redacted<Vec<u8>>` can only be built inside `rdy_engine::redact`. `BundleWriter::add` and the report
-  writers accept nothing else. Skipping redaction is a compile error, not a review comment.
-- Raw bytes exist only in memory owned by the collector task and the redactor. No temp file, no raw value in
-  the action log (it records sizes), in `tracing` (no `Debug` of buffers) or in an error (errors name a rule
-  and an offset, never the text).
-- If anything fails inside an entry (panic, redactor error), the entry is dropped and the manifest records
-  `dropped` with reason `redactor_error`. rdy never falls back to raw bytes.
-- **Residual scan (M2).** The stored bytes are scanned again with the same rule set. Hits are redacted again
-  and counted in `residual_hits`, and the CLI prints "this is a bug in rdy" with the rule name. It costs a
-  second pass and catches span-merge and boundary bugs before they ship.
-- Entry names are redacted too, in a filename-safe form (`REDACTED-<rule>-<tag>`).
-- **What ships in the binary.** Rules, thresholds and the placeholder format. No rule files, no dictionaries,
-  no downloaded updates (rule changes arrive with a signed release). Each rule has a version. Changing what a
-  rule matches bumps it and needs security-reviewer approval. The manifest lists the set id
-  (`rdy-redact/1`) and every rule version applied. Release assets are the archive, SBOM and checksums (06,
-  Appendix C), so there is nothing else to keep in step. `rdy-bundle` adds `regex`, `tar`, `zstd` and a C
-  compiler to the musl build, so the M2 binary size budget ticket (06) must measure it.
-
-### 3.7 Open questions for security-reviewer
-
-- Is emails always-on right for bundles, given that support loses real addresses? The stable tag still shows
-  that two lines name the same person.
-- Thresholds for the entropy rule (24 or more characters, 4.0 bits or more per character, three of four
-  character classes, pure hex of length 32, 40 or 64 and UUIDs excluded). They are starting values to be
-  tuned against the corpus.
-- Should `rdy upload` run a residual scan over a result JSON the customer may have edited?
-- Do you want `prctl(PR_SET_DUMPABLE, 0)` during redaction, so a crash dump cannot hold raw text? It is a safe
-  call through `rustix`, but Linux only.
+Dependencies (05 policy). Approved: `regex` 1 (M1) and `aho-corasick` 1 (M2), rust-lang maintained, MIT or
+Apache-2.0. HMAC-SHA256, SHA-256 and the RNG come from `ring`, already shipped by ADR 0009, so `hmac`,
+`sha2` and `getrandom` are not added. `tar` and `zstd` are reviewed with their M2 ticket. `rdy-bundle`
+adds a C compiler to the musl build, so 06's M2 size budget ticket must measure it.
 
 ## 4. Redaction test strategy
 
-> security-reviewer to confirm
+Confirmed by security-reviewer on 2026-10-28.
 
 ### 4.1 The golden corpus
 
@@ -278,8 +297,8 @@ All values are synthetic. Layout follows 05, Appendix F:
 
 ```text
 tests/fixtures/redaction/
-  FLOOR                      # integer: minimum case count for the milestone (60 in M1, 300 in M2)
-  known-gaps.toml            # cases marked known_gap, each with a ticket id
+  FLOOR                      # minimum case count: 20 in M1, 60 in M2. It only goes up
+  known-gaps.toml            # (M2) known_gap cases, each with a ticket id
   synthetic.toml             # secret values stored in parts, for push-protection safety
   <category>/<case>.in       # input
   <category>/<case>.expected # exact output with tags normalized to ~
@@ -288,68 +307,70 @@ tests/fixtures/redaction/
 
 ```toml
 # aws/env-secret-key.toml
-polarity = "positive"                       # positive | negative | known_gap
+polarity = "positive"                       # positive | negative | known_gap (M2)
 rules = ["aws_secret_access_key"]           # rules that must fire (positive only)
 since = "m1"                                # m1 | m2
 rulesets = ["report", "bundle"]             # run against each set
 secrets = ["${SYN:aws_example_secret}"]     # strings that must not appear in the output
 ```
 
-- `${SYN:name}` in `.in` and `secrets` is expanded by the harness from `synthetic.toml`, where values are
-  stored as parts (`["xoxb-", "123456789012-", "..."]`). A scanner that blocks pushes never sees a whole token
-  in the repo. The vendor-documented example `AKIAIOSFODNN7EXAMPLE` is used as is.
-- The harness redacts `.in` with a fixed test key, replaces every tag with `~`, and compares with `.expected`
-  byte for byte.
-- `secrets` is the independent oracle. A human blesses `.expected`. The oracle catches a wrongly blessed
-  file: no listed secret may appear in the output, whatever `.expected` says.
-- Tag behaviour has its own cases: a `[[tag_equal]]` table lists pairs of inputs whose tags must match, and
-  `[[tag_differ]]` pairs that must not.
+- `${SYN:name}` is expanded from `synthetic.toml`, where values are stored as parts, so push protection
+  never sees a whole token. The vendor-documented `AKIAIOSFODNN7EXAMPLE` is used as is.
+- The harness redacts `.in` with a fixed test key, replaces every tag with `~`, and compares with
+  `.expected` byte for byte. Negatives have `.expected` equal to `.in`.
+- On every case the harness also checks three things on its own: no string in `secrets` appears in the
+  output (the oracle, which catches a wrongly blessed `.expected`), `redact(output) == output`
+  (idempotence), and the same rule set finds no span in the output outside placeholders (residual).
+- `.expected` files are written and blessed by hand. `UPDATE_GOLDENS=1` never touches this directory (08).
 - Every missed-secret report adds a case before the fix (05).
 
-**M1: 71 cases.** Appendix D has the table. Positives cover 05's M1 categories; negatives and hostile cases
-cover the "must not redact" list. M2 grows this to 300 (SEC-44) with emails, JWTs, SaaS prefixes, GCP and
-Azure credentials, IPs, entropy positives and negatives, Kubernetes Secret manifests, binary and UTF-16 cases,
-custom patterns and tag cases. Chunk-boundary cases are generated: each positive is run through the stream
-with every split offset and must give the same bytes as the whole-string call.
+### 4.2 Sixty cases by category
 
-**Negatives (must not change).** Things a support engineer needs: git SHAs, image digests, UUIDs, versions,
-data URIs, long Kubernetes names, public certificates, `secretName:` and `${VAR}` references, and prose that
-mentions "password". Appendix D lists them. A negative that changes is a counted false positive (not gated
-in M1, gated by a budget in M2).
+M1 has 20 cases: 16 positive across every M1 category in 05 Appendix F, and 4 negative. M2 adds 40 for the
+bundle rules and the hostile forms. The 60 include 11 negatives (they must come out unchanged) and 2 known
+gaps. Generated chunk-offset variants and property cases (M2) come on top and are not counted.
 
-**Known gaps.** Cases such as a fullwidth-letter key name or a base64-wrapped short password are written down
-with the expected (unredacted) output and `polarity = "known_gap"`. The case exists so the gap is visible
-and tracked.
+| Category | M1 | M2 adds | Total | Cases (M1 first) |
+| --- | --- | --- | --- | --- |
+| `url` | 3 | 1 | 4 | proxy URL `http://svc:pa55@proxy.acme.test:3128`, Postgres DSN, percent-encoded password; M2: token-only userinfo |
+| `auth` | 3 | 1 | 4 | Bearer, Basic, Proxy-Authorization; M2: Cookie and `X-Api-Key` in a quoted curl trace |
+| `aws` | 2 | 2 | 4 | vendor example key id in a log line, `AWS_SECRET_ACCESS_KEY=` env; M2: `ASIA` id with JSON `SessionToken`, INI credentials file |
+| `pem` | 2 | 2 | 4 | RSA plain, PKCS8 with JSON-escaped `\n`; M2: OpenSSH, unterminated |
+| `kubeconfig` | 2 | 1 | 3 | `token:`, `client-key-data:`; M2: exec-plugin env with `refresh-token` |
+| `rdy_token` | 1 | 1 | 2 | plain text; M2: inside an `Authorization` header (checks the span union) |
+| `key_name` | 3 | 3 | 6 | `DB_PASSWORD=`, YAML `password:`, fake placeholder prefix `password=[REDACTED:x:00000000]hunter2`; M2: `--password=x`, JSON `"client_secret":`, connection string `Password=...;` |
+| `hostile` | 0 | 3 | 3 | ANSI-wrapped, CRLF, YAML block scalar |
+| `email` | 0 | 3 | 3 | plain, `@`, `%40`; one case run with `--keep-emails` expects the address kept |
+| `jwt` | 0 | 2 | 2 | bare, inside a cookie |
+| `saas` | 0 | 2 | 2 | GitHub and Slack prefixes, built from parts |
+| `cloud` | 0 | 2 | 2 | GCP service-account JSON `private_key`, Azure connection string with `AccountKey` and SAS `sig` |
+| `k8s_secret` | 0 | 2 | 2 | `data:` and `stringData:` in a `kind: Secret` document |
+| `entropy` | 0 | 2 | 2 | one positive and one negative near the thresholds |
+| `network` | 0 | 2 | 2 | IPv4 with the group on; the same input with it off, unchanged (negative) |
+| `custom` | 0 | 2 | 2 | named group `secret`, whole match |
+| `binary` | 0 | 2 | 2 | gzip file skipped with its reason, UTF-16 log redacted as UTF-8 |
+| `negative` | 4 | 5 | 9 | M1: git SHA, UUID, `BEGIN CERTIFICATE` block, `${DB_PASSWORD}` with `secretName: acme-tls`; M2: Appendix D |
+| `known_gap` | 0 | 2 | 2 | fullwidth-letter key name, base64-wrapped short password: unredacted on purpose, each with a ticket |
+| Total | 20 | 40 | 60 | |
 
-### 4.2 Property tests (proptest)
+### 4.3 Property tests, fuzzing and a second opinion (M2)
 
-| Property | Statement |
-| --- | --- |
-| No survivors | For each rule, a generator builds secrets from the rule's grammar plus random context (quotes, escapes, prefixes, suffixes). After redaction the secret is absent. |
-| No residual matches | Scanning the output with the same rule set finds nothing. This is the literal form of "no input bytes that match a redactor survive", and it runs inside every corpus and property test too. |
-| Idempotence | `redact(redact(x)) == redact(x)`. |
-| Stable tags | Equal secrets give equal tags in one `Redactor`. Different keys give different tags. |
-| Total | Arbitrary bytes, including invalid UTF-8 and 1 MiB lines, never panic and finish within a time bound. |
-| Quiet on plain text | Text built from short ordinary words and numbers is returned unchanged. |
-| Chunk invariance (M2) | For any set of split points, stream output equals whole-input output. |
+08's ticket "Redactor property tests and the schema-walk canary test" covers: no generated secret
+survives, no residual match, idempotence, stable tags, no panic or hang on arbitrary bytes, and stream
+output equal to whole-input output at any split points. Generators come from the rules, so they cannot
+find a form the rules do not know: that is why the corpus exists, plus a cargo-fuzz target on
+`RedactStream` (SEC-45) and a pinned, independent secret scanner over every redacted bundle fixture
+(zero findings apart from an allowlist with a reason per entry).
 
-The generators come from the rules themselves, so they cannot find a pattern the rules do not know. That is
-why the corpus (written from real-world forms) and the second-opinion scanner exist.
+### 4.4 The CI gate
 
-M2 adds a cargo-fuzz target on `RedactStream` (SEC-45) and a CI step that runs a pinned, independent secret
-scanner over every redacted bundle fixture and expects zero findings (a short allowlist file for known false
-positives, each with a reason).
-
-### 4.3 The CI gate
-
-A required `redaction` job in `ci.yml`, part of `ci-ok`, on all five legs. It fails on:
-
-1. Any survivor, any rule that did not fire, any `.expected` mismatch.
-2. A case count below `FLOOR`.
-3. A `known_gap` case that now passes ("promote it"), or a gap case missing from `known-gaps.toml`.
-4. Property test failures (256 cases per PR, 100,000 nightly).
-5. M2 only: more than 2% of negatives changed, throughput under the floor, memory over the ceiling, any
-   second-opinion finding. In M1 false positives are printed, not gated.
+- **M1.** The harness is a `cargo test` in `rdy-engine`, so it runs in the existing test job on all five
+  legs and is part of `ci-ok`. It fails on a survivor, a rule that did not fire, an `.expected` mismatch
+  (negatives included), an idempotence or residual failure, or fewer cases than `FLOOR`.
+- **M2.** A separate required `redaction` job adds: property tests (256 cases per PR, 100,000 nightly), the
+  known-gaps ledger (a gap that starts to pass fails with "promote it", a gap missing from the ledger
+  fails), the second-opinion scanner, the throughput and memory floor, and a false-positive budget of 2%
+  on the reference log corpus used for throughput.
 
 CODEOWNERS (SEC-04) puts `redact/`, the rule tables and `tests/fixtures/redaction/` under security-reviewer.
 
@@ -398,7 +419,7 @@ Appendix C has a full sample. It holds:
   `run.id` when a result is included, the spec reference (`product`, `version`, `serial`, `sha256`, file name,
   signature state, key id, `signed_at`), and `host_id` and OS family (the same derivation as the result).
 - **Redactor:** set id and every rule version applied, groups switched on by the spec, by the customer's
-  flags, and always.
+  flags, and always, and groups the customer switched off (`--keep-emails`, section 3.6).
 - **Entries**, one per file in the archive and one per collector outcome that produced no file: `path`,
   `collector` (the exact `collect:` string), `status`, `reason`, `source` (redacted path), `bytes_in` (raw
   bytes read, a count), `bytes_out`, `sha256` (of the stored redacted bytes), `redactions` by rule,
@@ -411,8 +432,8 @@ content only, never of the raw)". I read that as: no hash of raw bytes exists an
 file with a known template and one unknown secret is a guessing oracle; a hash of a secret is derived from
 it; and nothing needs it, since integrity of what was sent is proved by the hash of the stored bytes. So an
 entry has `bytes_in` (a count) and `sha256` of the stored redacted bytes (before compression), and the
-sidecar has the sha256 of the compressed archive (after compression). If the intent was different, change it
-here before building.
+sidecar has the sha256 of the compressed archive (after compression). security-reviewer confirms this
+reading (3.6).
 
 ### 5.5 Size caps
 
@@ -449,94 +470,111 @@ Defaults, all lowered (never raised) by `--max-size` and the spec's proposed `bu
 
 ## 6. The opt-in upload flow
 
-> security-reviewer to confirm
-
-Endpoints, headers and responses below are a proposal for `rdy-cloud` to accept (SEC-42 owns the token
-format). The client rules are what the CLI will enforce whatever the server does.
+Confirmed by security-reviewer on 2026-10-28. Endpoints, headers and responses are a proposal to
+`rdy-cloud` (SEC-42 owns the token format). The client rules hold whatever the server does.
 
 ### 6.1 Invariant
 
-Nothing leaves the machine unless the user typed `rdy upload` (or `--upload` on `run` or `bundle`) and then
-either answered `y` at the prompt or passed `--yes`. `rdy run` and `rdy bundle` open no socket for
-uploading. `rdy bundle` contacts only the Kubernetes API through the guard (and only if a `k8s:` collector is
-listed). Tested under `unshare -n` and `strace` (SEC-22 extended). This is INV-20, plus the additions in
-"Plan corrections".
+Nothing leaves unless the user typed `rdy upload` (or `--upload` on `run` or `bundle`) and then answered
+yes or passed `--yes`. Before the answer no socket opens and no DNS query goes out; after a no, nothing
+ever does. `rdy bundle` talks only to the Kubernetes API through the guard, for `k8s:` collectors. Tested
+under `unshare -n` and `strace` (SEC-22 extended). This is 05 INV-20 plus INV-25 to INV-27.
 
 ### 6.2 Step by step
 
-**Step 0. Pre-flight, no network.**
+**Step 0. Pre-flight. No network.**
 
-1. The file must be a regular file, not a symlink, owned by the caller. At most 100 MiB for a bundle and 16 MiB
-   for a result.
-2. It must be one of two things. A result: `.json` that validates against `result.v1.schema.json`. HTML is
-   refused ("upload the .json file"). A bundle: `.tar.zst` whose frame decodes, whose `manifest.json` parses
-   and whose entry hashes match the manifest. Nothing else uploads, so `rdy upload /etc/shadow` fails here.
-3. Compute `sha256` and the size of the exact bytes to send.
+1. Open the file once (`O_NOFOLLOW` on Unix) and `fstat` the handle: a regular file, owned by the caller's
+   euid, at most 100 MiB for a bundle and 16 MiB for a result. Every later read uses this handle, never the
+   path again.
+2. Decide the kind. A result is `.json` that parses into `rdy_spec::result::Report` (typed parsing, ADR
+   0012 decision 7). HTML is refused (`fix: upload the .json file`). A bundle is `.tar.zst` whose frame
+   decodes, with one top directory and regular files only, whose `manifest.json` parses and whose entry
+   hashes match. Anything else exits 64, so `rdy upload /etc/shadow` stops here.
+3. Residual scan: the Report rule set over a result, the Bundle rule set over every bundle entry. Any hit
+   exits 64 with rule names and entry paths, never the text: `fix: create the file again with this rdy
+   version`. A file rdy just wrote never hits. An edited or older file can.
+4. Compute the size and sha256 of the exact bytes.
 
-**Step 1. Token.** Precedence: `--token-file`, then `RDY_TOKEN`, then a hidden prompt on a TTY.
+**Step 1. Token.** Precedence: `--token-file`, then `RDY_TOKEN`, then a hidden prompt. The consent screen
+names the source.
 
-- `--token-file <path>` (or `-` for stdin) is the one for scripts. On Unix the file must not be a symlink or
-  readable by group or others. It is read up to 256 bytes and trimmed.
-- `RDY_TOKEN` is for CI. It stays out of the process list but is readable by the same user and root through
-  `/proc/<pid>/environ`. rdy cannot clear it in a `forbid(unsafe_code)` build (`remove_var` is unsafe in
-  edition 2024), so it relies on the facade's cleared child environment: no child ever sees it.
-- The prompt is the default for a person: `Share-link token (input hidden):`, read with no echo.
+- `--token-file <path>`, for scripts. Unix: opened with `O_NOFOLLOW`, owned by the euid, no group or other
+  bits, else exit 64 with the `chmod 600` fix. Read through `take(257)`; over 256 bytes exits 64. `-`
+  reads stdin, so `--yes` is required. Windows ACLs are not checked (documented residual).
+- `RDY_TOKEN`, for CI. Not in the process list, but readable by the same user and root through
+  `/proc/<pid>/environ`. rdy cannot clear it without `unsafe` (`remove_var`, edition 2024). The upload
+  path starts no child; elsewhere the facade clears child environments.
+- The prompt, for a person: `Share-link token (input hidden):`, no echo, only when stdin and stderr are
+  both terminals.
 - There is no `--token <value>`. A hidden flag of that name exists only to exit 64 with: "tokens on the
   command line show up in shell history and in `ps` for other users. Use `--token-file`, `RDY_TOKEN` or the
   prompt." On Linux `/proc/<pid>/cmdline` is world-readable by default. `environ` is not.
 - With no TTY and no token: exit 64, `fix: set RDY_TOKEN or use --token-file`.
-- The token is checked locally against `^rdy_st_[A-Za-z0-9]{20,64}$` before any request. A mistyped value, or
-  a password pasted into the prompt by accident, never leaves the box.
-- The token goes only into the `Authorization` header of requests to the consented origin. It is never in a
-  URL, a log line, the receipt or an error. The `rdy_st_` rule redacts it everywhere else.
+- The token is checked locally against `^rdy_st_[A-Za-z0-9]{20,64}$` before any request. A mistyped value,
+  or a password pasted into the prompt by accident, never leaves the box.
+- It is held in a `ShareToken` whose `Debug` and `Display` show only `rdy_st_...` and the last 4
+  characters, and sent only as `Authorization: Bearer` (`HeaderValue::set_sensitive(true)`) to the
+  consented origin. Never in a URL, a log line, the receipt or an error.
 
-**Step 2. Consent.** On a TTY the client prints this and waits. Default is no.
+**Step 2. Consent.** The screen always prints to stderr, whether or not a question follows. Default is no.
 
 ```text
 About to upload to https://app.getrdy.io (Rdy Cloud):
 
   file      rdy-bundle-acme-platform-20261104T101500Z.tar.zst
   size      12.4 MiB (38 files, 61 MiB unpacked)
-  sha256    9f2c...e41a
+  sha256    9f2c4b0e7d1a3c5e8f60b2d4a6c8e0f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9e41a
   redacted  3 aws_keys, 2 bearer_tokens, 14 emails (by rdy, before writing)
   spec      acme-platform, signed, key 7A3F9C21B04D55E1
-  token     rdy_st_...Q7XA
+  token     rdy_st_...Q7XA (from RDY_TOKEN)
 
-rdy sends this file, its name, size and SHA-256, and the rdy version. Nothing else.
+rdy sends this file, its name, size and SHA-256, and the rdy version and platform.
+Nothing else. The server also sees your IP address, as with any connection.
 To read what is inside first:  tar --zstd -xOf <file> '*/manifest.json'
 Upload this file? [y/N]
 ```
 
-For a result JSON the `redacted` line shows the result's `redaction` summary. A server other than the default
-(set with `--server`, `https` only, no userinfo; `http` only for `localhost` in tests) adds a line in bold:
-`server    https://staging.example.test (NOT the default Rdy Cloud server)`. The same line goes into the receipt.
-With no TTY, `--yes` is required. Without it: exit 64, `fix: add --yes to confirm the upload, or run this in
-a terminal`. A non-TTY run never prompts. A command pasted from a vendor email must not carry `--yes`; the
-docs say so.
+- Only `y` or `yes`, in any case, is yes. Empty input, EOF, Ctrl-C and anything else is no: exit 64 and
+  `Nothing was sent.`
+- With no TTY, `--yes` is required. Without it: exit 64, `fix: add --yes to confirm the upload, or run this
+  in a terminal`. A non-TTY run never prompts. On a TTY, `--yes` skips the question and the screen still
+  prints.
+- `--yes`, `--upload` and `--server` come from argv only, never env or config (as `--allow-unsigned`,
+  INV-05). Docs say a command pasted from a vendor email should not carry `--yes`.
+- `--server` takes an `https` origin only: no userinfo, path, query or fragment, and no plain `http`, not
+  even for localhost (tests use 08's loopback TLS server). A non-default server adds a bold line,
+  `server    https://staging.example.test (NOT the default Rdy Cloud server)`, also in the receipt.
+- If the bundle was built with `--keep-emails`, the screen adds `not redacted  emails (--keep-emails)`.
+  For a result JSON, the `redacted` line uses its `redaction.by_rule` counts.
 
 **Step 3. Create the upload.** `POST /api/v1/uploads` with the token in `Authorization`, a JSON body of
-`kind` (`bundle` or `result`), `file_name`, `size`, `sha256` and `rdy_version`, and an `Idempotency-Key` made
-once per run. The server answers `201` with `upload_id`, `max_bytes` and `expires_at`. Only these three
-fields are read, and `upload_id` must match `^upl_[A-Za-z0-9]{16,64}$`. If `size` exceeds `max_bytes`, the
-client stops and prints the size fix. This request carries metadata only. A failure here means no file bytes
-left the machine, and the CLI says so. Appendix E has the exact bytes.
+`kind` (`bundle` or `result`), `file_name`, `size`, `sha256` and `rdy_version`, and an `Idempotency-Key` (a
+UUID made once per invocation, reused on retry). The server answers `201`. The client reads `upload_id`,
+which must match `^upl_[A-Za-z0-9]{16,64}$`, and `max_bytes`. It ignores every other field. The effective
+cap is the smaller of `max_bytes` and the local 100 MiB: the server can lower it, never raise it. Over the
+cap, the client stops with the size fix. This request carries metadata only. A failure here means no file
+bytes left the machine, and the CLI says so. Appendix E has the exact bytes.
 
-**Step 4. Send the bytes.** One `PUT /api/v1/uploads/<upload_id>/content`. The client builds the URL from the
-id. It does not take a URL from the server. Headers: `Authorization`, `Content-Type` (`application/zstd` or
-`application/json`), `Content-Length`, `Content-Digest: sha-256=:<base64>:`, `User-Agent`. The body is the
-exact bytes of the file, streamed, with no extra compression and no chunked encoding. The server answers
-`200` with `receipt_id`, `upload_id`, `received_bytes` and `sha256`. The client checks the last two against
-its own values. A mismatch is an error, even on a `200`.
+**Step 4. Send the bytes.** One `PUT /api/v1/uploads/<upload_id>/content`. The client builds the URL from
+the validated id and never takes a URL from the server. Headers: `Authorization`, `Content-Type`
+(`application/zstd` or `application/json`), `Content-Length`, `Content-Digest: sha-256=:<base64>:` (RFC
+9530), `User-Agent`. The body is streamed from the step 0 handle, with no extra compression and no chunked
+encoding, and hashed again on the way. The last chunk is held back until hash and count equal the consent
+values; otherwise the request is aborted and rdy exits 70 ("the file changed during upload"). The server
+answers `200` with `receipt_id` (`^rcp_[A-Za-z0-9]{16,64}$`), `upload_id`, `received_bytes` and `sha256`.
+The last three must equal the client's values, or it is an error even on a `200` (exit 70).
 
-**Step 5. Receipt and output.** The client writes `upload-receipt.json` next to the file (`create_new`, 0600):
-receipt version, time, server origin, file name, kind, size, sha256, upload id, receipt id, the server's
-echoed size and hash, rdy version. No token, no argv. If the directory is not writable, it prints the receipt
-instead.
+**Step 5. Receipt and output.** The client writes `upload-receipt-<ts>.json` (local timestamp, never a
+server value in a file name) through a `cap-std` handle on the file's directory, `create_new`, mode 0600. It
+holds the receipt version, time, server origin, file name, kind, size, sha256, upload id, receipt id, the
+server's echoed size and hash, and the rdy version. No token, no argv. This is the only write `rdy upload`
+makes. If the directory is not writable, the receipt prints to stdout instead.
 
 ```text
 uploaded    rdy-bundle-acme-platform-20261104T101500Z.tar.zst (12.4 MiB)
 sha256      9f2c...e41a  (the server reports the same)
-receipt     rcp_9Qx4...  saved to ./upload-receipt.json
+receipt     rcp_9Qx4...  saved to ./upload-receipt-20261104T102010Z.json
 ```
 
 Server text is never printed raw. Errors map error codes to fixed local messages (`token_expired`,
@@ -545,22 +583,25 @@ status and "unexpected answer from the server". Response bodies over 64 KiB are 
 
 ### 6.3 Transport rules
 
-- Client: the M2 upload client from ADR 0009 (reqwest, rustls with `ring`, platform verifier), no redirects
-  (so the token cannot follow one to another host), the address policy on the server address, no cookies.
-  `User-Agent` carries the rdy version and target only. No telemetry.
+- Client: the M2 upload client from ADR 0009 (reqwest, rustls with `ring`, platform verifier), no
+  redirects (so the token cannot follow one to another host), the address policy on the server address, no
+  cookies. `User-Agent` carries the rdy version and target only. No telemetry.
 - Timeouts: connect 15 s (TLS included), 60 s without body progress, 60 s for the response, 30 min in all.
-- Retries: connect errors, timeouts, `408`, `429`, `502`, `503`, `504`. At most 4 attempts, waits of 2 s, 8 s
-  and 30 s with 20% jitter, `Retry-After` honoured up to 60 s. A retry repeats the whole `PUT` to the same
-  `upload_id`, so the server must accept a repeat of the same digest and return the same receipt. Other `4xx`
-  do not retry. The prompt is never asked twice.
-- Proxy: `HTTPS_PROXY` and `NO_PROXY` as in ADR 0009, with the `ProxyUrl` mask. On `407` the CLI says the proxy
-  wants credentials and shows the variable form without the password. NTLM and Negotiate are not supported;
-  the hint points to the manual route. A TLS failure behind an interception proxy prints `SSL_CERT_FILE`
-  advice and points at the `net.tls_intercept` result.
+- Retries: connect errors, timeouts, `408`, `429`, `502`, `503`, `504`. At most 4 attempts, waits of 2 s,
+  8 s and 30 s with 20% jitter, `Retry-After` honoured up to 60 s. A retry repeats the whole `PUT` to the
+  same `upload_id`, so the server must accept a repeat of the same digest and return the same receipt. A
+  `409` (another digest for the same id) and other `4xx` do not retry. The prompt is never asked twice.
+- Proxy: `HTTPS_PROXY` and `NO_PROXY` as in ADR 0009, with the `ProxyUrl` mask. A plain proxy sees only
+  `CONNECT app.getrdy.io:443`. An intercepting proxy whose CA the OS trusts sees the token and the file:
+  that is the customer's own middlebox, and the docs security page says so. On `407` the CLI says the
+  proxy wants credentials and shows the variable form without the password. NTLM and Negotiate are not
+  supported; the hint points to the manual route. A TLS failure behind an interception proxy prints
+  `SSL_CERT_FILE` advice and points at the `net.tls_intercept` result.
 
 ### 6.4 Offline
 
-If step 3 cannot connect (DNS, refused, TLS, timeout), the CLI prints this and exits 70:
+There is no pre-check connection. If step 3 cannot connect (DNS, refused, TLS, timeout), the CLI prints
+this and exits 70:
 
 ```text
 error: could not reach app.getrdy.io. Nothing was sent.
@@ -575,13 +616,22 @@ The contact is spec text and passes the control-character filter. If the failure
 sent, the CLI says the server may hold a partial copy that it should discard. `rdy bundle` and `rdy run`
 never fail because upload is unavailable.
 
-### 6.5 Open questions for security-reviewer and rdy-cloud
+### 6.5 Tests the client must pass (SEC-41 and the fake-server ticket)
 
-- A single `PUT` restarts from zero on a bad link: about 7 minutes per try at 100 MiB and 2 Mbit/s. Resumable
-  upload is an M3 decision, once a design partner hits it.
-- Will `rdy-cloud` accept `Content-Digest`, an idempotent repeat of a `PUT`, and a web drop page on the share
-  link? The offline text depends on the last one.
-- Spec fetch with `--token` is a different request, owned by SEC-42 and the portal.
+No socket or DNS query before the answer, and none after a no (strace). A canary token never appears in
+argv, stderr at `RUST_LOG=trace`, the receipt or any file. The fake server's bytes hash to the consent
+value, and a file changed after consent aborts with 70. A `302` is not followed. `--server http://...`, a
+token on argv, a group-readable token file, a residual-scan hit and a non-TTY run without `--yes` exit 64
+before any request. `401`, `409`, `413`, `429` with `Retry-After`, `503` then success, a wrong echoed hash,
+a dead proxy and no network each give their fixed message.
+
+### 6.6 Open with rdy-cloud
+
+- A single `PUT` restarts from zero on a bad link: about 7 minutes per try at 100 MiB and 2 Mbit/s.
+  Resumable upload is an M3 decision, once a design partner hits it.
+- Will `rdy-cloud` accept `Content-Digest`, an idempotent repeat of a `PUT`, and a web drop page on the
+  share link? The offline text depends on the last one.
+- Spec fetch with a share token is a different request, owned by SEC-42 and the portal.
 
 ## 7. The `rdy bundle` command surface
 
@@ -591,7 +641,7 @@ cli-ux owns the final names. This is the proposal.
 rdy bundle <spec> [--result <report.json>] [--out-dir <dir>] [--namespace <ns>] [--context <name>]
                   [--kubeconfig <path>] [--skip <collector-id>]... [--redact <group>,...]
                   [--redact-pattern <regex>]... [--max-size <size>] [--plan] [--list-collectors]
-                  [--list-redactors] [--allow-unsigned] [--json] [--upload [--yes]]
+                  [--list-redactors] [--keep-emails] [--allow-unsigned] [--json] [--upload [--yes]]
 rdy upload <file> [--token-file <path|->] [--server <https-url>] [--yes] [--json]
 rdy redact [<file>|-]            # prints the redacted text. Lets a customer try the redactor. M2.
 ```
@@ -600,7 +650,8 @@ rdy redact [<file>|-]            # prints the redacted text. Lets a customer try
   `fix: ask the vendor for a spec with a bundle: section`. The spec decides what is collected.
 - `--result` embeds a result JSON. It is validated against the schema and redacted again, because rdy did not
   just produce it. `rdy run --bundle` (cli-ux to decide) would pass the in-memory report instead.
-- `--redact` adds groups. `--redact-pattern` adds a regex. Neither can remove anything.
+- `--redact` adds groups. `--redact-pattern` adds a regex. Neither can remove anything. `--keep-emails`
+  is the only subtraction (3.6).
 - `--plan` prints collectors, commands, resolved files and caps. It reads nothing and makes no request.
 - Exit codes: 0 bundle written, even if collectors degraded. 64 usage, spec or signature problem, unknown
   redactor group. 70 cannot write the output. A bundle has no readiness verdict. `rdy upload` exits 0 on
@@ -645,21 +696,21 @@ Patterns are sketches. The code is the source of truth and the corpus is its tes
 | `auth_header` | `bearer_tokens` | 1 | `Authorization:` and `Proxy-Authorization:` values (Bearer, Basic, Token, any scheme), `-H 'Authorization: ...'`, bare `Bearer <token>` | the credential |
 | `api_key_header` | `bearer_tokens` | 1 | `X-Api-Key`, `X-Auth-Token`, `Cookie` and `Set-Cookie` values | each value |
 | `aws_access_key_id` | `aws_keys` | 1 | `(AKIA\|ASIA\|ABIA\|ACCA)[A-Z2-7]{16}` | the id |
-| `aws_secret_access_key` | `aws_keys` | 1 | by key name (`aws_secret_access_key`, `SecretAccessKey`) and a 40-char base64 value within 80 chars of a key id | the value |
+| `aws_secret_access_key` | `aws_keys` | 1 | by key name (`aws_secret_access_key`, `SecretAccessKey`). M2 adds a 40-char base64 value within 80 chars of a key id | the value |
 | `aws_session_token` | `aws_keys` | 1 | by key name (`aws_session_token`, `SessionToken`, `x-amz-security-token`) | the value |
 | `pem_private_key` | `private_keys` | 1 | `-----BEGIN [A-Z0-9 ]*PRIVATE KEY...-----` to END, plain or with literal `\n`; unterminated blocks | the whole block |
 | `kubeconfig_credential` | `kubeconfig` | 1 | keys `token`, `client-key-data`, `password`, `access-token`, `refresh-token`, `id-token`, `client-secret` in YAML or JSON. `certificate-authority-data` and `client-certificate-data` are public and stay | the value |
 | `rdy_share_token` | `rdy_tokens` | 1 | `rdy_st_[A-Za-z0-9]{20,64}` | the token |
-| `secret_by_key` | `secrets_by_key` | 1 | a key containing `pass`, `secret`, `token`, `api_key`, `access_key`, `private_key`, `credential`, `auth`, `bearer`, `dsn` followed by `=` or `:`, in env, YAML, JSON, INI, flags (`--password=x`), systemd `Environment=`, connection strings (`Password=...;`, `AccountKey=...`) | the value, without quotes |
+| `secret_by_key` | `secrets_by_key` | 1 | a value that is exactly one placeholder is skipped. A key containing `pass`, `secret`, `token`, `api_key`, `access_key`, `private_key`, `credential`, `auth`, `bearer`, `dsn` followed by `=` or `:`, in env, YAML, JSON, INI, flags (`--password=x`), systemd `Environment=`, connection strings (`Password=...;`, `AccountKey=...`) | the value, without quotes |
 | `jwt` | `jwt` | 2 | `eyJ...` three base64url parts | the token |
 | `github_token`, `gitlab_token`, `slack_token`, `stripe_key`, `google_api_key`, `npm_token`, `pypi_token`, `docker_pat` | `saas_tokens` | 2 | documented prefixes (`gh[pousr]_`, `github_pat_`, `glpat-`, `xox[baprs]-`, `[sr]k_live_`, `AIza`, `npm_`, `pypi-`, `dckr_pat_`) | the token |
 | `gcp_service_account_key`, `azure_credential` | `cloud_credentials` | 2 | `"private_key"` in service-account JSON, `client_secret`, SAS `sig=`, `AccountKey=` | the value |
 | `k8s_secret_data` | `k8s_secrets` | 2 | `data:` and `stringData:` values inside a `kind: Secret` document | each value |
-| `email` | `emails` | 2 | `local@domain.tld`, also `\u0040` and `%40` forms | the address |
+| `email` | `emails` | 2 | `local@domain.tld`, also `\u0040` and `%40` forms. Always on in the Bundle set; only the customer's `--keep-emails` turns it off | the address |
 | `ipv4` | `ipv4` (opt-in) | 2 | dotted quads that parse as addresses. `127.0.0.0/8`, `0.0.0.0`, `255.255.255.255` stay | the address |
 | `ipv6` | `ipv6` (opt-in) | 2 | candidates that parse with `Ipv6Addr`. `::1` and `::` stay | the address |
 | `mac` | `mac` (opt-in) | 2 | six hex pairs | the address |
-| `entropy_token` | `entropy` | 2 | see 3.7: 24 or more chars, 4.0 bits per char or more, three character classes. Not pure hex of length 32, 40 or 64, UUIDs, `sha256:` digests, data URIs | the token |
+| `entropy_token` | `entropy` | 2 | see 3.6: 24 or more chars, 4.0 bits per char or more, three character classes. Not pure hex of length 32, 40 or 64, UUIDs, `sha256:` digests, data URIs | the token |
 | `custom.<name>` | spec or `--redact-pattern` | 2 | Rust regex, per record, never across lines | the whole match, or group `secret` if named |
 
 Key-name exclusions (corpus-tuned): values that are empty, `null`, `true`, `false`, `none`, `required`; shell
@@ -685,7 +736,8 @@ or template references (`${X}`, `$(...)`, `{{ ... }}`); `valueFrom` and `secretK
     "rules": [ { "name": "aws_access_key_id", "version": 1 }, { "name": "email", "version": 1 } ],
     "groups_always": ["aws_keys", "bearer_tokens", "private_keys", "emails"],
     "groups_from_spec": ["aws_keys", "bearer_tokens", "emails"],
-    "groups_from_flags": ["ipv4"]
+    "groups_from_flags": ["ipv4"],
+    "groups_off_by_flags": []
   },
   "entries": [
     {
@@ -712,28 +764,17 @@ or template references (`${X}`, `$(...)`, `{{ ... }}`); `valueFrom` and `secretK
 
 Never in the manifest: a raw value, a raw hash, the tag key, a token, environment values, argv, user names.
 
-## Appendix D: M1 corpus plan (71 cases)
+## Appendix D: negatives and known gaps in full
 
-| Category (directory) | Core positive | Hostile, negative or gap | Notes |
-| --- | --- | --- | --- |
-| `url` | 8 | 0 | http, https with port, proxy URL, Postgres DSN, Redis, AMQP, percent-encoded password, token-only userinfo |
-| `auth` | 8 | 0 | Bearer, lowercase bearer, Basic, `Token`, Proxy-Authorization, `X-Api-Key`, Cookie, quoted curl header |
-| `aws` | 8 | 0 | AKIA id, ASIA id, env secret, JSON `SecretAccessKey`, INI credentials file, session token, id and secret on one log line, vendor example key |
-| `pem` | 6 | 0 | RSA, EC, OpenSSH, PKCS8, encrypted, JSON-escaped `\n`, unterminated |
-| `kubeconfig` | 6 | 0 | `token`, `client-key-data`, `refresh-token`, `id-token`, exec-plugin env, auth-provider config |
-| `rdy_token` | 3 | 0 | plain text, JSON, Authorization header |
-| `key_name` | 12 | 0 | env, `export`, YAML, JSON, INI, `--password=`, quoted with spaces, systemd `Environment=`, compose list, camelCase key, URL query `access_token=`, connection string |
-| `hostile` | 0 | 10 | 8 secrets in hostile forms that must be redacted: JSON-escaped quote, percent-encoded, ANSI-wrapped, YAML block scalar, multi-line, tabs, CRLF, very long line, plus 2 `known_gap` (unredacted on purpose): fullwidth-letter key name, base64-wrapped short password |
-| `negative` | 0 | 10 (must not change) | git SHA, `sha256:` digest, UUID, semver, data URI, long pod name, image reference with digest, `BEGIN CERTIFICATE`, `secretName`, prose containing "password" |
-| Total | 51 | 20 | 71 files, above the floor of 60 |
+Negatives that must come out unchanged. M1: a 40-hex git SHA, a UUID, a `BEGIN CERTIFICATE` block (public),
+and `${DB_PASSWORD}` next to `secretName: acme-tls`. M2: a `sha256:` image reference with digest, semver
+and calendar versions (`4.2.1-rc.1`), a `data:image/png;base64,` URI, a long Kubernetes name
+(`acme-platform-worker-7f9c6d8b5-x2k4m`), and prose such as "password policy requires 12 characters". The
+`network` and `entropy` categories each add one negative. The key-name exclusions in Appendix B (empty
+values, `secretKeyRef` blocks, file paths) are unit tests in the rules ticket, not corpus cases.
 
-Negatives, in full: git SHAs (40 hex), `sha256:` image digests, UUIDs, semver and calendar versions
-(`4.2.1-rc.1`), `data:image/png;base64,` URIs, long Kubernetes names (`acme-platform-worker-7f9c6d8b5-x2k4m`), file
-paths, `BEGIN CERTIFICATE` blocks (public), `secretName: acme-tls`, `secretKeyRef` blocks, `${DB_PASSWORD}`
-references, empty values, and prose such as "password policy requires 12 characters".
-
-Cut order if M1 time runs out (the ADR review table agrees): keep 30 positives for `0.1.0` and add the rest by
-`0.1.1`, keep the property tests for `0.1.1`, keep the kubeconfig rule as key names inside `secret_by_key`.
+Known gaps (M2): a key name written with fullwidth letters, and a base64-wrapped short password. Each is
+written down with its unredacted expected output and `polarity = "known_gap"`, so the gap stays visible.
 
 ## Appendix E: upload wire sample
 
@@ -799,9 +840,10 @@ not uploaded. To send it: rdy upload <path>  (read manifest.json first)
   Fix: the vendor one-liner uses `RDY_TOKEN` (or `--token-file`, or the prompt), and a hidden `--token` exits 64
   with the reason.
 - docs/plan/05-threat-model.md, Surface 4 point 2: "Upload reads only files listed in the output dir manifest".
-  No such manifest exists in M1 (ADR 0003, 02). Fix: upload accepts only a schema-valid result JSON or a bundle
-  whose manifest and hashes verify (section 6.2). Point 5 ("a receipt id and a URL") becomes "an upload id, a
-  receipt id, a byte count and a hash"; the client builds URLs itself.
+  No such manifest exists in M1 (ADR 0003, 02). Fix: upload accepts only a result JSON that parses as a typed `Report`
+  or a bundle whose manifest and hashes verify (section 6.2). Point 5 ("a receipt id and a URL") becomes "an upload id, a
+  receipt id, a byte count and a hash"; the client builds URLs itself. Accepted by security-reviewer; 05
+  revision 3 applies it.
 - docs/plan/05-threat-model.md invariants vs docs/plan/02-engine-design.md: 02 cites an earlier numbering
   (INV-14 for redaction, INV-08 for output confinement, INV-06 for file reads and the action log, INV-10 for
   network peers). 05's table now has INV-15, INV-09, INV-07 and INV-11, and no invariant for the action log.
@@ -814,8 +856,12 @@ not uploaded. To send it: rdy upload <path>  (read manifest.json first)
   - INV-24: no collected path is on the deny list, and a spec cannot remove a built-in rule. Test: fixtures.
   - INV-25: the bytes sent hash to the value shown at consent. Test: fake server.
   - INV-26: the token is never in argv, logs, the receipt or errors. Test: canary at `RUST_LOG=trace`.
-- docs/plan/05-threat-model.md, Appendix F: replacements are `[REDACTED:aws_access_key_id]`. Fix: add the
-  keyed tag, `[REDACTED:<rule>:<tag>]`, and say the corpus normalizes it.
+  - INV-27: `rdy upload` opens no socket and sends no DNS query before the consent answer, and none after a
+    no. Test: strace on the fake-server suite.
+  - security-reviewer accepts INV-21 to INV-27 for 05 revision 3.
+- docs/plan/05-threat-model.md, Appendix F, and docs/plan/08-testing.md, section 4: replacements are
+  `[REDACTED:aws_access_key_id]`. Fix: add the keyed tag, `[REDACTED:<rule>:<tag>]`, and say the corpus
+  normalizes it.
 - docs/plan/02-engine-design.md, probe facade: reads and command output are capped at 1 MiB. A journal
   collector needs more. Fix: streaming `read_stream` and `exec_stream` with a cap declared in `CollectorInfo`,
   amending ADR 0014. The ticket "rdy-bundle collectors read through the probe facade" (4h) becomes 6h.
@@ -829,29 +875,52 @@ not uploaded. To send it: rdy upload <path>  (read manifest.json first)
 - docs/adr/0012-wire-types-in-rdy-spec-schema-generated.md: the manifest is a wire format `rdy-cloud` reads.
   Fix: put it in `rdy_spec::bundle` with `bundle-manifest.v1.schema.json`, so `rdy-cloud` does not depend on
   `tar` or `zstd`.
-- crates/rdy-spec/schema/result.v1.schema.json: no `redaction` field, although ADR 0012 decision 3 lists
-  `redactions`. Fix: add `redaction { ruleset, total, by_rule }` (M1 ticket below).
-- crates/rdy-spec/schema/spec.v1.schema.json, `Bundle`: it has no custom pattern list and no size cap, and its
-  `redact` text can read as "the vendor chooses". Fix: add optional `redact_patterns: [{name, regex}]` (at most
-  32) and `max_size`, both additive under ADR 0007, and reword `redact` to "adds groups; the built-in minimum
-  always runs".
 - docs/plan/10-devrel-and-launch.md, day 5 sample: `wrote ./rdy-bundle.tar.zst` and `redacted ... aws_keys`.
   Fix: the file sits in a new directory (ADR 0003 style) and the summary prints groups as in section 7.
-- docs/plan/05-threat-model.md, SEC-25 (4h) and SEC-26 (3h): they cover the redactor, the corpus, the log layer
-  and the property tests in 7 hours. The tickets below total 38.5 hours. M1 is already over budget (02). The
-  cut order is in Appendix D.
+- 05 Appendix F, SEC-26 and SEC-44, and 08 SEC-26: 60 corpus cases in M1, 300 in M2. Fix: 20 and 60 (4.2),
+  then growth by miss reports; generated cases carry the volume. 05 revision 3 applies it.
+- 05 Appendix F: "false positives counted, not gated, in M1". Fix: golden negatives match exactly from M1,
+  because a hand-picked negative that changes is a regression; the 2% budget is for the M2 log corpus.
+- 05 SEC-25 (4h), SEC-26 (3h) and 02 SEC-25 (4h): replaced by the six M1 tickets below, 12h plus a 0.5h
+  clause on SEC-31. Draft 1 had 38.5h, far over the M1 budget.
+- This note, 3.1 draft 1, "keeps the highest priority (then the longest)": a partly overlapped span leaked
+  its uncovered bytes (INV-15). Fix: union of overlapping and touching spans.
+- This note, 3.1 draft 1: the key-name rule skipped values starting with `[REDACTED:`, so
+  `password=[REDACTED:x:00000000]hunter2` leaked. Fix: skip only an exact placeholder.
+- This note, 3.5 draft 1: new crates `hmac`, `sha2`, `getrandom`. Fix: use `ring` (ADR 0009), which has all
+  three (05 dependency policy).
+- This note, 3.3 draft 1: report strings capped before redaction. Conflicts with 02 review MF-05. Fix:
+  redact the whole string, then cap.
+- 02, report renderers: `OutputDir::write_atomic(name, &[u8])` takes any bytes. Fix: `&Redacted<_>` only,
+  plus `write_spec_copy(&VerifiedSpecBytes)` (02 review SF-03).
+- This note, 6.2 draft 1: runtime validation against `result.v1.schema.json`. Conflicts with ADR 0012
+  decision 7. Fix: typed parse.
+- This note, 6.2 draft 1: `http` for localhost. Conflicts with CLAUDE.md rule 5 for a token path. Fix:
+  `https` only.
+- This note, 6.2 draft 1: `upload-receipt.json` with `create_new` fails on a second upload. Fix:
+  `upload-receipt-<local ts>.json`.
+- This note, 5.4, Appendix C and section 7: no place for the email opt-out (3.6). Fix: `--keep-emails` and
+  `groups_off_by_flags`.
+- This note, M1 ticket "Add the redaction summary to the result schema": 01 revision 0 already has
+  `redaction { ruleset, total, by_rule }`. Fix: dropped. Likewise 01 has the spec half of the M2 ticket
+  "Spec and CLI additions", which drops to 2h.
+- This note, intro: "01-spec-format.md is not written yet". 01 revision 0 now exists. Fix: field names
+  follow it.
 
 ## Decisions needing an ADR
 
 - **ADR 0015 content (rust-architect writes it in M1).** Inputs from here: the module has its own feature
   `redact` so `rdy-cloud` can reuse it; the span-merge model; keyed placeholder tags; rules compiled in with no
   rule files; a spec cannot remove built-in rules; no hash of raw content anywhere; a `Redacted` type gates
-  every writer. Conservative choice taken: all of these.
+  every writer. security-reviewer adds: overlapping spans merge into their union; HMAC, SHA-256 and the RNG
+  come from `ring`; `Redacted` has no public constructor and no `Deserialize`. Conservative choice taken:
+  all of these.
 - **Manifest wire types in `rdy-spec`** (extends ADR 0012) rather than in `rdy-bundle`. Alternative: keep them
   in `rdy-bundle` and let `rdy-cloud` depend on it. Conservative choice: `rdy-spec`.
 - **Compression crate.** `zstd` (C libzstd, mature, good ratio) or `ruzstd` (pure Rust, fewer features, weaker
   ratio). Conservative choice taken: `zstd` for correctness, flagged for security-reviewer because it adds C to
-  a root binary and to the musl build.
+  a root binary and to the musl build. security-reviewer: acceptable for M2 if `cargo deny` passes, libzstd
+  stays on the daily audit and the size budget holds. Revisit `ruzstd` once its encoder reaches level 3.
 - **Upload transport.** Single `PUT` to one origin, idempotent. Alternatives: presigned object-store URL (a second
   destination to allow and show), resumable upload (tus or ranges). Conservative choice: single `PUT`, same
   origin, no server-supplied URLs.
@@ -860,34 +929,40 @@ not uploaded. To send it: rdy upload <path>  (read manifest.json first)
 - **Where k8s collectors live.** In `rdy-bundle` behind a `k8s` feature, using the guarded client from
   `rdy-checks-k8s`. Alternatives: inside `rdy-checks-k8s` (makes it depend on `rdy-bundle`), or a new crate.
   Conservative choice: `rdy-bundle`, no new crate.
+- **Email opt-out flag.** cli-ux owns the name (`--keep-emails` proposed). The rule is fixed: customer only,
+  argv only, `rdy bundle` only, shown at consent and in the manifest. Alternative: no opt-out at all.
 
 ## Tickets implied
 
 Reused tickets keep their exact titles so 11-backlog.md can dedupe. Scope notes sit in the exit test.
 
-- [M1] Write ADR 0015 minimal redactor lives in rdy-engine | owner: rust-architect | est: 1h | depends on: none | exit test: the ADR records the `redact` feature, span merge, keyed placeholder tags, no rule files, no raw hashes and the `Redacted` writer gate, and carries a security-reviewer sign-off.
-- [M1] Redactor core: rule table, span merge and keyed placeholder tags | owner: rust-engineer | est: 4h | depends on: Write ADR 0015 minimal redactor lives in rdy-engine, Define result model and verdict mapping in rdy-spec | exit test: unit tests show overlapping rules resolve by priority then length, equal secrets share a tag inside one Redactor and differ in another, redact(redact(x)) equals redact(x), and the key's Debug output is masked.
-- [M1] Redaction rules for URL userinfo, auth headers, cookies and rdy share tokens | owner: rust-engineer | est: 3h | depends on: Redactor core: rule table, span merge and keyed placeholder tags | exit test: userinfo, Basic, Bearer, Proxy-Authorization, X-Api-Key, Cookie and rdy_st_ canaries are gone while scheme, host and header names stay.
-- [M1] Redaction rules for AWS keys and secrets by key name in env, YAML, JSON and INI | owner: rust-engineer | est: 4h | depends on: Redactor core: rule table, span merge and keyed placeholder tags | exit test: AWS id, secret and session canaries, PASSWORD=, "client_secret": and --password=x are replaced with quotes and delimiters kept, while secretName: acme-tls, ${DB_PASSWORD} and empty values are untouched.
-- [M1] Redaction rules for PEM private keys and kubeconfig credentials | owner: rust-engineer | est: 3h | depends on: Redactor core: rule table, span merge and keyed placeholder tags | exit test: RSA, EC, OpenSSH, PKCS8 and encrypted keys in plain, JSON-escaped and unterminated forms and client-key-data, token and refresh-token values are replaced, and a BEGIN CERTIFICATE block is not.
-- [M1] Apply the redactor to every Report string before return | owner: rust-engineer | est: 2h | depends on: Redactor core: rule table, span merge and keyed placeholder tags, Map outcomes to CheckResult with fix source, partial and size caps | exit test: canaries in an observed value, a fix text, an env-derived message and an action-log argv are redacted in JSON and HTML, and the report carries per-rule counts.
-- [M1] Redacting tracing layer, panic hook and error strings | owner: rust-engineer | est: 3h | depends on: Redactor core: rule table, span merge and keyed placeholder tags | exit test: at RUST_LOG=trace canaries in env, a proxy URL and command output never reach stderr, and a panic message and an anyhow chain pass through the redactor.
-- [M1] Add the redaction summary to the result schema | owner: rust-architect | est: 1h | depends on: Generate JSON schemas with schemars and check drift in CI | exit test: result.v1.schema.json has redaction with ruleset, total and by_rule, the drift check passes and 01-spec-format.md uses the same names.
-- [M1] Redaction corpus harness with synthetic value expansion | owner: qa-engineer | est: 3h | depends on: Redactor core: rule table, span merge and keyed placeholder tags | exit test: the harness loads tests/fixtures/redaction, expands ${SYN:name} from parts, normalizes tags and fails on a survivor, a missing rule, an expected-file mismatch and an unlisted known gap.
-- [M1] Redaction corpus: 51 positive cases | owner: qa-engineer | est: 3h | depends on: Redaction corpus harness with synthetic value expansion, Redaction rules for AWS keys and secrets by key name in env, YAML, JSON and INI | exit test: the url, auth, aws, pem, kubeconfig, rdy_token and key_name cases pass with zero survivors.
-- [M1] Redaction corpus: 20 negative, hostile and known-gap cases | owner: qa-engineer | est: 3h | depends on: Redaction corpus harness with synthetic value expansion | exit test: git SHAs, UUIDs, versions, data URIs, pod names, certificates and prose stay unchanged, hostile forms are redacted or listed as known gaps, and false positives are printed.
-- [M1] Property tests for the redactor | owner: qa-engineer | est: 3h | depends on: Redactor core: rule table, span merge and keyed placeholder tags, Redaction rules for PEM private keys and kubeconfig credentials | exit test: 10k cases per property show no generated secret survives, no residual matches, idempotence, no panic on arbitrary bytes and unchanged plain text.
-- [M1] CI redaction gate with case-count floor and known-gaps ledger | owner: release-engineer | est: 2h | depends on: Redaction corpus harness with synthetic value expansion | exit test: the redaction job is part of ci-ok on all five legs and fails below the floor of 60 and when a known gap starts to pass.
-- [M1] Document what rdy redacts and the placeholder format on the security page | owner: docs-writer | est: 1.5h | depends on: SEC-31 Docs security page and verify-first install, Redaction rules for AWS keys and secrets by key name in env, YAML, JSON and INI | exit test: the page lists the M1 rules, what stays (hostnames, addresses, encoded values) and the tag format, and the docs link check passes.
-- [M1] Security review of the M1 redactor and corpus | owner: security-reviewer | est: 2h | depends on: Redaction corpus: 51 positive cases, Redaction corpus: 20 negative, hostile and known-gap cases | exit test: a review file in docs/plan/reviews/ is filed, and every miss it finds is a corpus case before its fix.
+M1 redactor: six tickets, 12 hours, plus a 0.5-hour clause on SEC-31 (12.5 hours in all). Everything else
+from draft 1's M1 list moved to M2 below.
+
+- [M1] Write ADR 0015 minimal redactor lives in rdy-engine | owner: rust-architect | est: 1h | depends on: none | exit test: the ADR is Accepted with the `redact` feature, the whole-string M1 API, span union, keyed tags from ring, compiled-in rules a spec cannot remove, no raw hashes and the `Redacted` writer gate, and carries a security-reviewer sign-off.
+- [M1] SEC-25 Build minimal redactor for reports and evidence | owner: rust-engineer | est: 2.5h | depends on: Write ADR 0015 minimal redactor lives in rdy-engine, Define result model and verdict mapping in rdy-spec | exit test: unit tests show overlapping and touching spans become one placeholder named after the higher priority rule, equal secrets share a tag in one Redactor and differ across two, an exact placeholder is left alone while `password=[REDACTED:x:00000000]hunter2` is redacted, `Redacted` has no public constructor or Deserialize, and the TagKey Debug output is masked.
+- [M1] M1 redaction rules for URLs, auth headers, AWS key ids, PEM keys, rdy tokens and key names | owner: rust-engineer | est: 3h | depends on: SEC-25 Build minimal redactor for reports and evidence | exit test: the 16 positive corpus inputs come out with typed placeholders and their quotes and delimiters kept, and `secretName: acme-tls`, `${DB_PASSWORD}`, an empty value and a BEGIN CERTIFICATE block are unchanged.
+- [M1] Apply the redactor to every Report string before return | owner: rust-engineer | est: 2h | depends on: SEC-25 Build minimal redactor for reports and evidence, Map outcomes to CheckResult with fix source, partial and size caps | exit test: canary secrets placed in an observed value, a fix text, an env-derived message and an argv in the action log are redacted in both JSON and HTML, the field caps run after redaction, `redaction.by_rule` matches the canaries, and the report writers and `OutputDir` accept only `Redacted` values.
+- [M1] Redacting tracing writer, panic hook and CLI error text | owner: rust-engineer | est: 1.5h | depends on: SEC-25 Build minimal redactor for reports and evidence | exit test: canaries in env, proxy URL, kubeconfig and command output never appear in JSON, HTML or stderr at `RUST_LOG=trace`, and a panic message and an anyhow chain carrying a canary print redacted.
+- [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 2h | depends on: M1 redaction rules for URLs, auth headers, AWS key ids, PEM keys, rdy tokens and key names | exit test: a `cargo test` harness in the existing CI job runs the 20 synthetic M1 cases of section 4.2 on all five legs and fails on a survivor, a rule that did not fire, an `.expected` mismatch, a non-idempotent output, a residual match or fewer cases than `FLOOR`, and `UPDATE_GOLDENS=1` leaves the directory untouched.
+- Fold, +0.5h on "SEC-31 Docs security page and verify-first install": the page lists the M1 rules, what stays (hostnames, addresses, encoded values) and the placeholder format.
+
+Moved from draft 1's M1 list to M2: property tests (08 already has them in M2), the separate CI gate and
+known-gaps ledger, the security-page redaction details beyond the fold, the security review ticket
+(CODEOWNERS review of each redactor PR covers it), and the schema ticket (done in 01).
+
+- [M2] Redactor property tests and the schema-walk canary test | owner: qa-engineer | est: 3h | depends on: Apply the redactor to every Report string before return | exit test: idempotence and the planted-secret properties hold, and a new string field added to the result schema is covered with no test change.
+- [M2] CI redaction gate with case-count floor and known-gaps ledger | owner: release-engineer | est: 2h | depends on: SEC-26 M1 redaction corpus | exit test: a separate redaction job is part of ci-ok on all five legs and fails below the floor of 60, when a known gap starts to pass, and over the 2% false-positive budget on the reference log corpus.
+- [M2] Tune entropy rule thresholds against the corpus | owner: security-reviewer | est: 2h | depends on: Bundle rules: entropy tokens, Kubernetes Secret manifests, IPv4, IPv6 and MAC | exit test: the chosen thresholds are recorded in the rule table with their false-positive rate on the reference corpus, and the entropy rule version is bumped.
+- [M2] Non-dumpable process during rdy bundle and rdy upload on Linux | owner: rust-engineer | est: 1h | depends on: rdy bundle command, plan output and summary | exit test: `/proc/self/status` shows `Dumpable: 0` during a bundle run and an upload in CI, with no `unsafe` added.
 - [M2] Streaming redactor with line framing, overlap window and PEM state | owner: rust-engineer | est: 8h | depends on: Apply the redactor to every Report string before return | exit test: stream output equals whole-input output for every split offset of every positive case.
-- [M2] Bundle rules: emails, JWTs, SaaS tokens, GCP and Azure credentials | owner: rust-engineer | est: 6h | depends on: Streaming redactor with line framing, overlap window and PEM state | exit test: the new corpus categories pass with zero survivors and the negatives are unchanged.
-- [M2] Bundle rules: entropy tokens, Kubernetes Secret manifests, IPv4, IPv6 and MAC | owner: rust-engineer | est: 6h | depends on: Streaming redactor with line framing, overlap window and PEM state | exit test: opt-in groups stay off unless asked, loopback and unspecified addresses stay, and false positives on the negative corpus are under 2%.
-- [M2] Spec and CLI additions: bundle.redact_patterns, bundle.max_size and --redact-pattern | owner: rust-architect | est: 3h | depends on: Streaming redactor with line framing, overlap window and PEM state | exit test: a custom pattern redacts with a custom.<name> tag, 33 patterns or a regex over 256 chars exits 64, and an unknown group exits 64.
+- [M2] Bundle rules: emails, JWTs, SaaS tokens, GCP and Azure credentials | owner: rust-engineer | est: 6h | depends on: Streaming redactor with line framing, overlap window and PEM state | exit test: the new corpus categories pass with zero survivors, the negatives are unchanged, and `--keep-emails` keeps addresses and is listed in `groups_off_by_flags`.
+- [M2] Bundle rules: entropy tokens, Kubernetes Secret manifests, IPv4, IPv6 and MAC | owner: rust-engineer | est: 6h | depends on: Streaming redactor with line framing, overlap window and PEM state | exit test: opt-in groups stay off unless asked, loopback and unspecified addresses stay, the corpus negatives are unchanged, and false positives on the reference log corpus are under 2%.
+- [M2] Spec and CLI additions: bundle.redact_patterns, bundle.max_size and --redact-pattern | owner: rust-architect | est: 2h | depends on: Streaming redactor with line framing, overlap window and PEM state | exit test: a custom pattern redacts with a custom.<name> tag, 33 patterns or a regex over 256 chars exits 64, and an unknown group exits 64.
 - [M2] Binary, compressed and UTF-16 handling in the redaction pipeline | owner: rust-engineer | est: 4h | depends on: Streaming redactor with line framing, overlap window and PEM state | exit test: a gzip file and a NUL-heavy file are skipped with a reason, a UTF-16 log is redacted as UTF-8, and invalid UTF-8 around a secret does not stop the rule.
 - [M2] Residual scan and per-entry fail-closed handling | owner: rust-engineer | est: 3h | depends on: Streaming redactor with line framing, overlap window and PEM state | exit test: a rule injected with a deliberate gap shows residual_hits above zero and the stored entry still contains no secret, and a panicking redactor drops the entry instead of writing raw bytes.
 - [M2] Redaction throughput and memory floor in CI | owner: qa-engineer | est: 3h | depends on: Streaming redactor with line framing, overlap window and PEM state | exit test: CI fails under 25 MiB/s on the reference corpus and above 128 MiB RSS for a full default bundle.
-- [M2] SEC-44 Full redaction corpus with chunk-boundary cases | owner: qa-engineer | est: 10h | depends on: Bundle rules: emails, JWTs, SaaS tokens, GCP and Azure credentials | exit test: 300 cases including every chunk offset pass with zero misses.
+- [M2] SEC-44 Full redaction corpus with chunk-boundary cases | owner: qa-engineer | est: 6h | depends on: Bundle rules: emails, JWTs, SaaS tokens, GCP and Azure credentials | exit test: the 60 cases of section 4.2, each positive also split at every offset, pass with zero misses and `FLOOR` is 60.
 - [M2] SEC-45 Fuzz targets for spec parser and redactor | owner: qa-engineer | est: 6h | depends on: Streaming redactor with line framing, overlap window and PEM state | exit test: a weekly 30-minute fuzz run per target finds no crash.
 - [M2] Second-opinion secret scan over redacted fixtures in CI | owner: qa-engineer | est: 3h | depends on: SEC-44 Full redaction corpus with chunk-boundary cases | exit test: a pinned independent scanner finds nothing in the redacted bundle fixtures apart from allowlisted false positives, each with a reason.
 - [M2] Bundle manifest wire types and schema in rdy-spec | owner: rust-engineer | est: 5h | depends on: Generate JSON schemas with schemars and check drift in CI | exit test: bundle-manifest.v1.schema.json is generated, the Appendix C sample validates, and a test shows no field can hold a raw hash.
@@ -905,7 +980,7 @@ Reused tickets keep their exact titles so 11-backlog.md can dedupe. Scope notes 
 - [M2] No-socket and no-stray-file tests for rdy bundle | owner: qa-engineer | est: 3h | depends on: rdy bundle command, plan output and summary | exit test: under unshare -n with strace a bundle run opens no socket apart from the kube fixture, and canary secrets appear in no file in the output dir or a sandboxed temp dir.
 - [M2] SEC-42 Share-link token format and scope | owner: security-reviewer | est: 6h | depends on: none | exit test: the token spec is agreed with rdy-cloud, including the rdy_st_ prefix, the length range in section 6.2 and the corpus cases.
 - [M2] Token input: prompt, RDY_TOKEN, --token-file and the refused --token | owner: rust-engineer | est: 3h | depends on: SEC-42 Share-link token format and scope | exit test: precedence is file, then env, then prompt, a group-readable token file is refused, --token exits 64 with the reason, and a malformed token never causes a request.
-- [M2] SEC-41 Upload client with consent, receipt and exact bytes | owner: rust-engineer | est: 12h | depends on: Token input: prompt, RDY_TOKEN, --token-file and the refused --token, rdy bundle command, plan output and summary | exit test: fake-server tests prove steps 0 to 5 of section 6.2, no upload without a yes or --yes, the sent bytes hash to the consent value, retries repeat the same upload id, and the receipt holds no token.
+- [M2] SEC-41 Upload client with consent, receipt and exact bytes | owner: rust-engineer | est: 12h | depends on: Token input: prompt, RDY_TOKEN, --token-file and the refused --token, rdy bundle command, plan output and summary | exit test: fake-server tests prove steps 0 to 5 of section 6.2 and every test in 6.5, including no socket before the answer, the residual-scan refusal, the changed-file abort, retries to the same upload id and a receipt with no token.
 - [M2] Fake upload server and offline behaviour tests | owner: qa-engineer | est: 5h | depends on: SEC-41 Upload client with consent, receipt and exact bytes | exit test: tests cover 401, 413, 429 with Retry-After, 503 then success, a wrong echoed hash, a redirect, a dead proxy and no network, with the section 6.4 text.
 - [M2] Security review of the bundle pipeline and upload client | owner: security-reviewer | est: 4h | depends on: Fake upload server and offline behaviour tests, Second-opinion secret scan over redacted fixtures in CI | exit test: a review file is filed and every blocker is fixed before the first design partner receives an M2 build.
 - [M2] Bundle and upload docs, and README output | owner: docs-writer | est: 3h | depends on: rdy bundle command, plan output and summary | exit test: the Bundles page lists collectors and groups exactly as --list-collectors and --list-redactors print them.
