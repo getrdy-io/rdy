@@ -21,7 +21,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-005 | [#14](https://github.com/getrdy-io/rdy/pull/14) | 2026-10-28 | zizmor ran with --offline locally only (online audits run in CI); the exit-test throwaway PRs are run by the coordinator
 
-- M1-006 | todo | | CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006)
+- M1-006 | [#21](https://github.com/getrdy-io/rdy/pull/21) | 2026-10-28 | The macos-arm64 test runs in macos-arm64.yml outside ci-ok until the org has arm64 runners (a Founder hand step). The run, the scratch container and the red-leg-blocks-ci-ok behaviour are for the coordinator to watch on the PR; cargo-nextest and zizmor were not run locally (binary downloads were denied here), so the nextest config and workflow lint are first proven in CI | backlog corrected 2026-10-28 (correction-05, [#40](https://github.com/getrdy-io/rdy/pull/40)): the org has no macOS arm64 runners (probe run 40737208354), so ci-ok gates four native test legs plus an `aarch64-apple-darwin` compile leg on `macos-15-intel`; `macos-arm64.yml` runs the full test job on `macos-15` outside ci-ok; a Founder hand step ends the fallback
 
 - M1-007 | todo | | dist init for five targets with cargo-auditable and SBOM, proven in release-sandbox
 
@@ -81,7 +81,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-034 | [#37](https://github.com/getrdy-io/rdy/pull/37) | 2026-10-28 | The run deadline, the "time left in the run" cap and the watchdog are M1-043. `CheckContext::remaining()` is the time left on the check's own timeout until then. A check that hard-spins is never freed (abort needs a yield point): its permit is released at timeout and it keeps one worker until it returns. `probe()` and `CheckError::Probe` still wait for M1-040. The scheduler returns `Ran`/`End` and does not use M1-033's outcome mapping. M1-057 or M1-062 exit test: the CLI panic hook does not print the default panic text. `sched` and tokio are behind the default `runtime` feature.
 
-- M1-035 | todo | | Family trait, registry and run plan
+- M1-035 | [#39](https://github.com/getrdy-io/rdy/pull/39) | 2026-10-28 | `Family::probe` waits for M1-040 and the family probe ticket. `Registry::plan` takes `&Spec` and the rdy version, not `&LoadedSpec`; `Engine::plan` is a thin call to it once `Engine` exists (M1-057). No did-you-mean in plan text; M1-057 reconciles it with `SkipWhy`. Empty `os: []` is `unsupported_spec`, not `not_applicable`. No bridge from `PlanEntry` to the scheduler's `Planned`, and no `End` to `CheckResult` mapping yet: M1-057 must map `End::TimedOut` to timeout, `End::Panicked` to error with a fixed message (the raw panic text is never put in a result; redaction is M1-062), and `End::Cancelled` to cancelled. A family that builds the wrong check plans as a fixed "bug in rdy" not_in_build skip (no tracing dependency yet). `rdy_spec::echo_capped` is now public so plan text uses the same escaping; INV-01 is enforced at `Engine::run(&LoadedSpec)` (M1-057)
 
 - M1-036 | todo | | SEC-19 Confine writes to a new output dir with safe names
 
@@ -140,6 +140,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-063 | todo | | SEC-26 M1 redaction corpus, first 30 cases (0.1.0 gate)
 
 - M1-064 | todo | | Shared helpers: units, quantities, dotted version compare, nominal band, severity cap
+- M1-064 correction-06 | backlog corrected 2026-10-28: exit test uses 3.8 GiB against `4Gi`, not 3.7 GiB; the band max(5%, 256 MiB) puts the lowest passing value at 4 GiB minus 256 MiB = 3.75 GiB
 
 - M1-065 | todo | | cgroup helper for memory, cpu and controllers
 
