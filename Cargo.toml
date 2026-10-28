@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/rdy-spec",
+    "crates/rdy-engine",
+    "crates/rdy-checks-host",
+    "crates/rdy-checks-net",
+    "crates/rdy-checks-k8s",
+    "crates/rdy-cli",
+]
+
+# Crates enter the workspace when their milestone starts (docs/plan/00-overview.md).
+# rdy-bundle is M2, rdy-checks-cloud is M3, rdy-checks-gpu is M4.
+
+[workspace.package]
+edition = "2024"
+# Stable minus two minors (docs/plan/06-release-and-distribution.md). A CI job enforces it from M2.
+rust-version = "1.97"
+license = "Apache-2.0"
+repository = "https://github.com/getrdy-io/rdy"
+homepage = "https://getrdy.io"
+# There is no shared `version`. Versions are per crate (ADR 0007).
+
+[workspace.dependencies]
+# Each ticket adds the lines it needs. Nothing is listed ahead of use.
+# Default features are off. The crate that uses a dependency names its features.
+clap = { version = "4.6", default-features = false }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"

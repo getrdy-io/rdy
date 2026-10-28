@@ -45,9 +45,10 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo deny check
+cargo doc --workspace --no-deps
 ```
 
-All of these must pass before a PR is reviewed. CI also runs on five native
+`cargo doc` treats rustdoc warnings as errors (`.cargo/config.toml`). All of these must pass before a PR is reviewed. CI also runs on five native
 runners for every PR (Linux x86_64 and aarch64 on musl, macOS arm64 and x86_64,
 Windows x86_64), so expect your change to be tested on all five. The Rust version
 is pinned in `rust-toolchain.toml`.
@@ -79,7 +80,10 @@ use `--out-dir` or `--no-report` to keep your checkout clean.
 ## Pull requests
 
 - One change per PR. Small is good. Imperative commit summary, one line.
-- Add tests. Update docs in the same PR. Add a `CHANGELOG.md` entry.
+- Add tests. Update docs in the same PR.
+- Add a changelog fragment. Create `changelog.d/<ticket>.md` (for example `changelog.d/M1-003.md`) with
+  one or two bullet lines in plain, user-facing words. Do not edit `CHANGELOG.md` itself, so parallel PRs
+  never conflict. The release ticket collects the fragments into `CHANGELOG.md`. The PR template has the box.
 - Sign off your commits (`git commit -s`). This is the
   [Developer Certificate of Origin](https://developercertificate.org/): you wrote
   it, or you have the right to submit it, under Apache-2.0.
