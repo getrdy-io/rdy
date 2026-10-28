@@ -690,8 +690,10 @@ pub struct BundleSpec {
 
 /// The schema of `bundle.collect`: a list of `kind:argument` strings with a rule for each kind.
 ///
-/// `journal:` takes a duration, `k8s:` takes only `events`, and `file:` takes an absolute path with no
-/// NUL byte and no `..` part. The NUL is written `\x00`, which both ECMA 262 and Rust regex accept.
+/// The kind must be `journal`, `k8s` or `file`. `journal:` takes a duration, `k8s:` takes only `events`,
+/// and `file:` takes an absolute path with no backslash, no control character, no line or paragraph
+/// separator and no `..` part. The control characters are written as `\u` escapes, which both ECMA 262
+/// and Rust regex accept.
 #[cfg(feature = "schema")]
 fn collect_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
@@ -701,6 +703,7 @@ fn collect_schema(_: &mut SchemaGenerator) -> Schema {
             "type": "string",
             "pattern": "^[a-z][a-z0-9_]{0,15}:.{1,1024}$",
             "allOf": [
+                { "pattern": "^(journal:|k8s:|file:)" },
                 {
                     "if": { "pattern": "^journal:" },
                     "then": { "pattern": "^journal:[1-9][0-9]{0,8}(ms|s|m|h|d)$" }
@@ -712,7 +715,7 @@ fn collect_schema(_: &mut SchemaGenerator) -> Schema {
                 {
                     "if": { "pattern": "^file:" },
                     "then": {
-                        "pattern": "^file:/[^\\x00]{0,1023}$",
+                        "pattern": "^file:/[^\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]{0,1023}$",
                         "not": { "pattern": "(^file:|/)\\.\\.(/|$)" }
                     }
                 }

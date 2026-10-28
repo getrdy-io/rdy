@@ -1,0 +1,72 @@
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+checks:
+  - id: net.egress
+    endpoints:
+      - host01.acme.example:443
+      - host02.acme.example:443
+      - host03.acme.example:443
+      - host04.acme.example:443
+      - host05.acme.example:443
+      - host06.acme.example:443
+      - host07.acme.example:443
+      - host08.acme.example:443
+      - host09.acme.example:443
+      - host10.acme.example:443
+      - host11.acme.example:443
+      - host12.acme.example:443
+      - host13.acme.example:443
+      - host14.acme.example:443
+      - host15.acme.example:443
+      - host16.acme.example:443
+      - host17.acme.example:443
+      - host18.acme.example:443
+      - host19.acme.example:443
+      - host20.acme.example:443
+      - host21.acme.example:443
+      - host22.acme.example:443
+      - host23.acme.example:443
+      - host24.acme.example:443
+      - host25.acme.example:443
+      - host26.acme.example:443
+      - host27.acme.example:443
+      - host28.acme.example:443
+      - host29.acme.example:443
+      - host30.acme.example:443
+      - host31.acme.example:443
+      - host32.acme.example:443
+      - host33.acme.example:443
+      - host34.acme.example:443
+      - host35.acme.example:443
+      - host36.acme.example:443
+      - host37.acme.example:443
+      - host38.acme.example:443
+      - host39.acme.example:443
+      - host40.acme.example:443
+      - host41.acme.example:443
+      - host42.acme.example:443
+      - host43.acme.example:443
+      - host44.acme.example:443
+      - host45.acme.example:443
+      - host46.acme.example:443
+      - host47.acme.example:443
+      - host48.acme.example:443
+      - host49.acme.example:443
+      - host50.acme.example:443
+      - host51.acme.example:443
+      - host52.acme.example:443
+      - host53.acme.example:443
+      - host54.acme.example:443
+      - host55.acme.example:443
+      - host56.acme.example:443
+      - host57.acme.example:443
+      - host58.acme.example:443
+      - host59.acme.example:443
+      - host60.acme.example:443
+      - host61.acme.example:443
+      - host62.acme.example:443
+      - host63.acme.example:443
+      - host64.acme.example:443
+      - host65.acme.example:443

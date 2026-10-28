@@ -61,7 +61,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-025 | [#36](https://github.com/getrdy-io/rdy/pull/36) | 2026-10-28 | Regex fields (expected_issuer, context_pattern, server_pattern) are checked for length only (rdy-spec has no regex engine); compiling them is for lint and sign (M1-031). Schema entries for my ids were tightened to match the structs: minItems 1 on hosts, pin_sha256, apis, arch, expect_in, expect_status; maxItems 16 on expect_status; a host pattern with a port range; maxLength on RBAC parts; scc is a K8sName; typed tolerations; minProperties 1 on K8sResources; stricter cpu string. expect_status and method on a non-URL target are read but not refused (the check decides). Toleration has no tolerationSeconds (refused by name). For M1-026: count egress endpoints, tls_intercept hosts and DNS names against the 64-host spec-wide limit (INV-11). For the k8s.nodes check ticket: a toleration with no key and operator Exists matches every taint, so the check must report control-plane nodes as their own item
 
-- M1-026 | todo | | Semantic validation and structural limits for specs
+- M1-026 | [#43](https://github.com/getrdy-io/rdy/pull/43) | 2026-10-28 | regex compile of redact_patterns (M1-031), did-you-mean in the unknown-key fix line (M1-031), Windows paths in file: collectors (schema allows `/` only; M2); the CLI prints the `expired on` line with no `:` after the file name, and CLI exit 64 on an expired spec (M1-126)
 
 - M1-027 | todo | | Property tests for rdy_spec::parse
 
@@ -87,7 +87,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-037 | todo | | Windows output directory default and reparse-point checks
 
-- M1-038 | todo | | Blocking helper and subprocess kill on timeout
+- M1-038 | [#44](https://github.com/getrdy-io/rdy/pull/44) | 2026-10-28 | Built as `rdy_engine::blocking` and `rdy_engine::exec` (async `tokio::process`, so no command runs on an abandoned blocking thread). Windows kills only the child, not its tree, until job objects (M2-006): `KILLS_PROCESS_TREE` is false there and M1-039 limits Windows to `whoami.exe`. The exit wait polls `waitid(WNOWAIT)` on every Unix instead of using `pidfd_open`, because every safe `tokio::io::unix::AsyncFd` constructor is deprecated in tokio 1.54 and the supported one is `unsafe`. Descriptors above 2 inherited by `rdy` still reach children (safe rustix cannot set CLOEXEC on a raw descriptor): M1-039 or the CLI start-up closes them. Shell and sudo refusal, PATH and env-name policy are M1-039. Wiring into `Probe` and `ProbeError` is M1-040. The watchdog and Ctrl-C callers of `kill_all_groups` are M1-043 and M1-058. The Hung proof uses a no-op kill function because a test cannot make a process survive SIGKILL.
 
 - M1-039 | todo | | SEC-18 Command policy: search path, declared directories, caps and Windows whoami only
 

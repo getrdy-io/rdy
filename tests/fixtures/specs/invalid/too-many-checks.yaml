@@ -1,0 +1,776 @@
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+checks:
+  - id: host.cpu
+    name: c001
+    min: 2
+  - id: host.cpu
+    name: c002
+    min: 2
+  - id: host.cpu
+    name: c003
+    min: 2
+  - id: host.cpu
+    name: c004
+    min: 2
+  - id: host.cpu
+    name: c005
+    min: 2
+  - id: host.cpu
+    name: c006
+    min: 2
+  - id: host.cpu
+    name: c007
+    min: 2
+  - id: host.cpu
+    name: c008
+    min: 2
+  - id: host.cpu
+    name: c009
+    min: 2
+  - id: host.cpu
+    name: c010
+    min: 2
+  - id: host.cpu
+    name: c011
+    min: 2
+  - id: host.cpu
+    name: c012
+    min: 2
+  - id: host.cpu
+    name: c013
+    min: 2
+  - id: host.cpu
+    name: c014
+    min: 2
+  - id: host.cpu
+    name: c015
+    min: 2
+  - id: host.cpu
+    name: c016
+    min: 2
+  - id: host.cpu
+    name: c017
+    min: 2
+  - id: host.cpu
+    name: c018
+    min: 2
+  - id: host.cpu
+    name: c019
+    min: 2
+  - id: host.cpu
+    name: c020
+    min: 2
+  - id: host.cpu
+    name: c021
+    min: 2
+  - id: host.cpu
+    name: c022
+    min: 2
+  - id: host.cpu
+    name: c023
+    min: 2
+  - id: host.cpu
+    name: c024
+    min: 2
+  - id: host.cpu
+    name: c025
+    min: 2
+  - id: host.cpu
+    name: c026
+    min: 2
+  - id: host.cpu
+    name: c027
+    min: 2
+  - id: host.cpu
+    name: c028
+    min: 2
+  - id: host.cpu
+    name: c029
+    min: 2
+  - id: host.cpu
+    name: c030
+    min: 2
+  - id: host.cpu
+    name: c031
+    min: 2
+  - id: host.cpu
+    name: c032
+    min: 2
+  - id: host.cpu
+    name: c033
+    min: 2
+  - id: host.cpu
+    name: c034
+    min: 2
+  - id: host.cpu
+    name: c035
+    min: 2
+  - id: host.cpu
+    name: c036
+    min: 2
+  - id: host.cpu
+    name: c037
+    min: 2
+  - id: host.cpu
+    name: c038
+    min: 2
+  - id: host.cpu
+    name: c039
+    min: 2
+  - id: host.cpu
+    name: c040
+    min: 2
+  - id: host.cpu
+    name: c041
+    min: 2
+  - id: host.cpu
+    name: c042
+    min: 2
+  - id: host.cpu
+    name: c043
+    min: 2
+  - id: host.cpu
+    name: c044
+    min: 2
+  - id: host.cpu
+    name: c045
+    min: 2
+  - id: host.cpu
+    name: c046
+    min: 2
+  - id: host.cpu
+    name: c047
+    min: 2
+  - id: host.cpu
+    name: c048
+    min: 2
+  - id: host.cpu
+    name: c049
+    min: 2
+  - id: host.cpu
+    name: c050
+    min: 2
+  - id: host.cpu
+    name: c051
+    min: 2
+  - id: host.cpu
+    name: c052
+    min: 2
+  - id: host.cpu
+    name: c053
+    min: 2
+  - id: host.cpu
+    name: c054
+    min: 2
+  - id: host.cpu
+    name: c055
+    min: 2
+  - id: host.cpu
+    name: c056
+    min: 2
+  - id: host.cpu
+    name: c057
+    min: 2
+  - id: host.cpu
+    name: c058
+    min: 2
+  - id: host.cpu
+    name: c059
+    min: 2
+  - id: host.cpu
+    name: c060
+    min: 2
+  - id: host.cpu
+    name: c061
+    min: 2
+  - id: host.cpu
+    name: c062
+    min: 2
+  - id: host.cpu
+    name: c063
+    min: 2
+  - id: host.cpu
+    name: c064
+    min: 2
+  - id: host.cpu
+    name: c065
+    min: 2
+  - id: host.cpu
+    name: c066
+    min: 2
+  - id: host.cpu
+    name: c067
+    min: 2
+  - id: host.cpu
+    name: c068
+    min: 2
+  - id: host.cpu
+    name: c069
+    min: 2
+  - id: host.cpu
+    name: c070
+    min: 2
+  - id: host.cpu
+    name: c071
+    min: 2
+  - id: host.cpu
+    name: c072
+    min: 2
+  - id: host.cpu
+    name: c073
+    min: 2
+  - id: host.cpu
+    name: c074
+    min: 2
+  - id: host.cpu
+    name: c075
+    min: 2
+  - id: host.cpu
+    name: c076
+    min: 2
+  - id: host.cpu
+    name: c077
+    min: 2
+  - id: host.cpu
+    name: c078
+    min: 2
+  - id: host.cpu
+    name: c079
+    min: 2
+  - id: host.cpu
+    name: c080
+    min: 2
+  - id: host.cpu
+    name: c081
+    min: 2
+  - id: host.cpu
+    name: c082
+    min: 2
+  - id: host.cpu
+    name: c083
+    min: 2
+  - id: host.cpu
+    name: c084
+    min: 2
+  - id: host.cpu
+    name: c085
+    min: 2
+  - id: host.cpu
+    name: c086
+    min: 2
+  - id: host.cpu
+    name: c087
+    min: 2
+  - id: host.cpu
+    name: c088
+    min: 2
+  - id: host.cpu
+    name: c089
+    min: 2
+  - id: host.cpu
+    name: c090
+    min: 2
+  - id: host.cpu
+    name: c091
+    min: 2
+  - id: host.cpu
+    name: c092
+    min: 2
+  - id: host.cpu
+    name: c093
+    min: 2
+  - id: host.cpu
+    name: c094
+    min: 2
+  - id: host.cpu
+    name: c095
+    min: 2
+  - id: host.cpu
+    name: c096
+    min: 2
+  - id: host.cpu
+    name: c097
+    min: 2
+  - id: host.cpu
+    name: c098
+    min: 2
+  - id: host.cpu
+    name: c099
+    min: 2
+  - id: host.cpu
+    name: c100
+    min: 2
+  - id: host.cpu
+    name: c101
+    min: 2
+  - id: host.cpu
+    name: c102
+    min: 2
+  - id: host.cpu
+    name: c103
+    min: 2
+  - id: host.cpu
+    name: c104
+    min: 2
+  - id: host.cpu
+    name: c105
+    min: 2
+  - id: host.cpu
+    name: c106
+    min: 2
+  - id: host.cpu
+    name: c107
+    min: 2
+  - id: host.cpu
+    name: c108
+    min: 2
+  - id: host.cpu
+    name: c109
+    min: 2
+  - id: host.cpu
+    name: c110
+    min: 2
+  - id: host.cpu
+    name: c111
+    min: 2
+  - id: host.cpu
+    name: c112
+    min: 2
+  - id: host.cpu
+    name: c113
+    min: 2
+  - id: host.cpu
+    name: c114
+    min: 2
+  - id: host.cpu
+    name: c115
+    min: 2
+  - id: host.cpu
+    name: c116
+    min: 2
+  - id: host.cpu
+    name: c117
+    min: 2
+  - id: host.cpu
+    name: c118
+    min: 2
+  - id: host.cpu
+    name: c119
+    min: 2
+  - id: host.cpu
+    name: c120
+    min: 2
+  - id: host.cpu
+    name: c121
+    min: 2
+  - id: host.cpu
+    name: c122
+    min: 2
+  - id: host.cpu
+    name: c123
+    min: 2
+  - id: host.cpu
+    name: c124
+    min: 2
+  - id: host.cpu
+    name: c125
+    min: 2
+  - id: host.cpu
+    name: c126
+    min: 2
+  - id: host.cpu
+    name: c127
+    min: 2
+  - id: host.cpu
+    name: c128
+    min: 2
+  - id: host.cpu
+    name: c129
+    min: 2
+  - id: host.cpu
+    name: c130
+    min: 2
+  - id: host.cpu
+    name: c131
+    min: 2
+  - id: host.cpu
+    name: c132
+    min: 2
+  - id: host.cpu
+    name: c133
+    min: 2
+  - id: host.cpu
+    name: c134
+    min: 2
+  - id: host.cpu
+    name: c135
+    min: 2
+  - id: host.cpu
+    name: c136
+    min: 2
+  - id: host.cpu
+    name: c137
+    min: 2
+  - id: host.cpu
+    name: c138
+    min: 2
+  - id: host.cpu
+    name: c139
+    min: 2
+  - id: host.cpu
+    name: c140
+    min: 2
+  - id: host.cpu
+    name: c141
+    min: 2
+  - id: host.cpu
+    name: c142
+    min: 2
+  - id: host.cpu
+    name: c143
+    min: 2
+  - id: host.cpu
+    name: c144
+    min: 2
+  - id: host.cpu
+    name: c145
+    min: 2
+  - id: host.cpu
+    name: c146
+    min: 2
+  - id: host.cpu
+    name: c147
+    min: 2
+  - id: host.cpu
+    name: c148
+    min: 2
+  - id: host.cpu
+    name: c149
+    min: 2
+  - id: host.cpu
+    name: c150
+    min: 2
+  - id: host.cpu
+    name: c151
+    min: 2
+  - id: host.cpu
+    name: c152
+    min: 2
+  - id: host.cpu
+    name: c153
+    min: 2
+  - id: host.cpu
+    name: c154
+    min: 2
+  - id: host.cpu
+    name: c155
+    min: 2
+  - id: host.cpu
+    name: c156
+    min: 2
+  - id: host.cpu
+    name: c157
+    min: 2
+  - id: host.cpu
+    name: c158
+    min: 2
+  - id: host.cpu
+    name: c159
+    min: 2
+  - id: host.cpu
+    name: c160
+    min: 2
+  - id: host.cpu
+    name: c161
+    min: 2
+  - id: host.cpu
+    name: c162
+    min: 2
+  - id: host.cpu
+    name: c163
+    min: 2
+  - id: host.cpu
+    name: c164
+    min: 2
+  - id: host.cpu
+    name: c165
+    min: 2
+  - id: host.cpu
+    name: c166
+    min: 2
+  - id: host.cpu
+    name: c167
+    min: 2
+  - id: host.cpu
+    name: c168
+    min: 2
+  - id: host.cpu
+    name: c169
+    min: 2
+  - id: host.cpu
+    name: c170
+    min: 2
+  - id: host.cpu
+    name: c171
+    min: 2
+  - id: host.cpu
+    name: c172
+    min: 2
+  - id: host.cpu
+    name: c173
+    min: 2
+  - id: host.cpu
+    name: c174
+    min: 2
+  - id: host.cpu
+    name: c175
+    min: 2
+  - id: host.cpu
+    name: c176
+    min: 2
+  - id: host.cpu
+    name: c177
+    min: 2
+  - id: host.cpu
+    name: c178
+    min: 2
+  - id: host.cpu
+    name: c179
+    min: 2
+  - id: host.cpu
+    name: c180
+    min: 2
+  - id: host.cpu
+    name: c181
+    min: 2
+  - id: host.cpu
+    name: c182
+    min: 2
+  - id: host.cpu
+    name: c183
+    min: 2
+  - id: host.cpu
+    name: c184
+    min: 2
+  - id: host.cpu
+    name: c185
+    min: 2
+  - id: host.cpu
+    name: c186
+    min: 2
+  - id: host.cpu
+    name: c187
+    min: 2
+  - id: host.cpu
+    name: c188
+    min: 2
+  - id: host.cpu
+    name: c189
+    min: 2
+  - id: host.cpu
+    name: c190
+    min: 2
+  - id: host.cpu
+    name: c191
+    min: 2
+  - id: host.cpu
+    name: c192
+    min: 2
+  - id: host.cpu
+    name: c193
+    min: 2
+  - id: host.cpu
+    name: c194
+    min: 2
+  - id: host.cpu
+    name: c195
+    min: 2
+  - id: host.cpu
+    name: c196
+    min: 2
+  - id: host.cpu
+    name: c197
+    min: 2
+  - id: host.cpu
+    name: c198
+    min: 2
+  - id: host.cpu
+    name: c199
+    min: 2
+  - id: host.cpu
+    name: c200
+    min: 2
+  - id: host.cpu
+    name: c201
+    min: 2
+  - id: host.cpu
+    name: c202
+    min: 2
+  - id: host.cpu
+    name: c203
+    min: 2
+  - id: host.cpu
+    name: c204
+    min: 2
+  - id: host.cpu
+    name: c205
+    min: 2
+  - id: host.cpu
+    name: c206
+    min: 2
+  - id: host.cpu
+    name: c207
+    min: 2
+  - id: host.cpu
+    name: c208
+    min: 2
+  - id: host.cpu
+    name: c209
+    min: 2
+  - id: host.cpu
+    name: c210
+    min: 2
+  - id: host.cpu
+    name: c211
+    min: 2
+  - id: host.cpu
+    name: c212
+    min: 2
+  - id: host.cpu
+    name: c213
+    min: 2
+  - id: host.cpu
+    name: c214
+    min: 2
+  - id: host.cpu
+    name: c215
+    min: 2
+  - id: host.cpu
+    name: c216
+    min: 2
+  - id: host.cpu
+    name: c217
+    min: 2
+  - id: host.cpu
+    name: c218
+    min: 2
+  - id: host.cpu
+    name: c219
+    min: 2
+  - id: host.cpu
+    name: c220
+    min: 2
+  - id: host.cpu
+    name: c221
+    min: 2
+  - id: host.cpu
+    name: c222
+    min: 2
+  - id: host.cpu
+    name: c223
+    min: 2
+  - id: host.cpu
+    name: c224
+    min: 2
+  - id: host.cpu
+    name: c225
+    min: 2
+  - id: host.cpu
+    name: c226
+    min: 2
+  - id: host.cpu
+    name: c227
+    min: 2
+  - id: host.cpu
+    name: c228
+    min: 2
+  - id: host.cpu
+    name: c229
+    min: 2
+  - id: host.cpu
+    name: c230
+    min: 2
+  - id: host.cpu
+    name: c231
+    min: 2
+  - id: host.cpu
+    name: c232
+    min: 2
+  - id: host.cpu
+    name: c233
+    min: 2
+  - id: host.cpu
+    name: c234
+    min: 2
+  - id: host.cpu
+    name: c235
+    min: 2
+  - id: host.cpu
+    name: c236
+    min: 2
+  - id: host.cpu
+    name: c237
+    min: 2
+  - id: host.cpu
+    name: c238
+    min: 2
+  - id: host.cpu
+    name: c239
+    min: 2
+  - id: host.cpu
+    name: c240
+    min: 2
+  - id: host.cpu
+    name: c241
+    min: 2
+  - id: host.cpu
+    name: c242
+    min: 2
+  - id: host.cpu
+    name: c243
+    min: 2
+  - id: host.cpu
+    name: c244
+    min: 2
+  - id: host.cpu
+    name: c245
+    min: 2
+  - id: host.cpu
+    name: c246
+    min: 2
+  - id: host.cpu
+    name: c247
+    min: 2
+  - id: host.cpu
+    name: c248
+    min: 2
+  - id: host.cpu
+    name: c249
+    min: 2
+  - id: host.cpu
+    name: c250
+    min: 2
+  - id: host.cpu
+    name: c251
+    min: 2
+  - id: host.cpu
+    name: c252
+    min: 2
+  - id: host.cpu
+    name: c253
+    min: 2
+  - id: host.cpu
+    name: c254
+    min: 2
+  - id: host.cpu
+    name: c255
+    min: 2
+  - id: host.cpu
+    name: c256
+    min: 2
+  - id: host.cpu
+    name: c257
+    min: 2
