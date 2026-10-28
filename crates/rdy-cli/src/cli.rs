@@ -265,6 +265,7 @@ Example output:
 #[derive(Debug, Parser)]
 #[command(
     name = "rdy",
+    bin_name = "rdy",
     version = VERSION,
     disable_version_flag = true,
     disable_help_subcommand = true,

@@ -218,3 +218,30 @@ fn global_flags_work_before_and_after_the_subcommand() {
         assert!(out.starts_with("rdy "), "rdy {args:?}: {out:?}");
     }
 }
+
+#[test]
+fn the_binary_name_is_rdy_whatever_argv0_is() {
+    // On Windows argv[0] is `rdy.exe`. clap would print that in Usage lines.
+    for name in ["rdy.exe", "C:\\tools\\rdy.exe", "./target/debug/rdy"] {
+        for path in [&[][..], &["run"][..], &["spec", "lint"][..]] {
+            for flag in ["-h", "--help"] {
+                let mut out = Vec::new();
+                let mut err = Vec::new();
+                let argv = std::iter::once(name)
+                    .chain(path.iter().copied())
+                    .chain([flag]);
+                assert_eq!(rdy_cli::run(argv, &mut out, &mut err), 0);
+                let out = String::from_utf8(out).unwrap_or_default();
+                assert_eq!(out, help(path, flag), "argv[0] = {name}");
+                assert!(!out.contains(".exe"), "{name}: {out}");
+            }
+        }
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = rdy_cli::run([name, "run"], &mut out, &mut err);
+        let err = String::from_utf8(err).unwrap_or_default();
+        assert_eq!(code, 64);
+        assert!(err.contains("fix: see 'rdy run --help'"), "{name}: {err}");
+        assert!(!err.contains(".exe"), "{name}: {err}");
+    }
+}

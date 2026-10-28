@@ -128,6 +128,10 @@ fn a_usage_error_never_echoes_what_was_typed() {
         &["CANARY-7f3a"],
         &["--color", "CANARY-7f3a", "version"],
         &["--CANARY-7f3a=x"],
+        &["run", "spec.yaml", "--jobs=CANARY-7f3a"],
+        &["run", "spec.yaml", "-qCANARY-7f3a"],
+        &["help", "CANARY-7f3a"],
+        &["spec", "CANARY-7f3a"],
     ] {
         let err = assert_usage_error(args);
         assert!(!err.contains("CANARY"), "rdy {args:?} echoed: {err:?}");
@@ -181,4 +185,51 @@ fn version_still_works() {
     assert_eq!(code(&out), 0);
     assert!(text(&out.stdout).starts_with("rdy "));
     assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn a_bad_progress_variable_is_not_echoed_and_not_blamed_on_a_flag() {
+    let out = Command::new(env!("CARGO_BIN_EXE_rdy"))
+        .args(["version"])
+        .env("RDY_PROGRESS", "CANARY-7f3a")
+        .output()
+        .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"));
+    assert_eq!(code(&out), 64);
+    let err = text(&out.stderr);
+    assert!(!err.contains("CANARY"), "{err:?}");
+    assert!(err.contains("RDY_PROGRESS"), "{err:?}");
+    assert!(!err.contains("--progress"), "{err:?}");
+}
+
+#[test]
+fn fix_lines_name_the_subcommand() {
+    for (args, fix) in [
+        (&["run", "spec.yaml", "--color", "purple"][..], "rdy run"),
+        (&["run", "spec.yaml", "--jobs", "abc"], "rdy run"),
+        (&["run", "spec.yaml", "-q", "-v"], "rdy run"),
+        (
+            &["spec", "sign", "s.yaml", "--color=purple"],
+            "rdy spec sign",
+        ),
+        (&["trust", "remove"], "rdy trust remove"),
+        (&["--color", "run", "version"], "rdy version"),
+        (&["--bogus"], "rdy"),
+    ] {
+        let err = assert_usage_error(args);
+        let want = format!("fix: see '{fix} --help'");
+        assert!(
+            err.contains(&want),
+            "rdy {args:?}: want {want:?} in {err:?}"
+        );
+    }
+}
+
+#[test]
+fn repeated_and_valueless_flags_have_their_own_words() {
+    let err = assert_usage_error(&["run", "s.yaml", "--sig", "a", "--sig", "b"]);
+    assert!(err.contains("can be used only once"), "{err:?}");
+    let err = assert_usage_error(&["run", "s.yaml", "--sig"]);
+    assert!(err.contains("missing a value for --sig"), "{err:?}");
+    let err = assert_usage_error(&["run", "s.yaml", "-q", "-v"]);
+    assert!(err.contains("cannot be used together"), "{err:?}");
 }

@@ -18,6 +18,7 @@ use std::io::Write;
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::{Arg, ArgAction, CommandFactory, FromArgMatches};
 
+#[doc(hidden)]
 pub mod cli;
 
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
@@ -32,11 +33,14 @@ pub const EXIT_USAGE: u8 = 64;
 pub const EXIT_INTERNAL: u8 = 70;
 
 /// The clap command tree, for the docs CLI reference and for tests.
+///
+/// The binary name is fixed to `rdy`, so help reads the same when argv[0] is `rdy.exe`.
+#[doc(hidden)]
 #[must_use]
 pub fn command() -> clap::Command {
     // clap's own `-V` text is "Print version". 07 Appendix A says "Print the version", so the flag
     // is declared here. It sorts last, after `-h`.
-    Cli::command().arg(
+    Cli::command().bin_name("rdy").arg(
         Arg::new("version")
             .short('V')
             .long("version")
@@ -52,17 +56,22 @@ pub fn command() -> clap::Command {
 ///
 /// Output goes to `stdout` and `stderr`, never to the process streams directly. If a stream cannot
 /// be written, the exit code is 70.
+///
+/// This is the one entry point (ADR 0011 decision 4). It returns the exit code as a `u8` for now.
+/// M1-074 gives it the `Backend` and `RunHooks` parameters and an `ExitCode` result.
+#[doc(hidden)]
 pub fn run<I, T>(args: I, stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
+    let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
     let parsed = command()
-        .try_get_matches_from(args)
+        .try_get_matches_from(&args)
         .and_then(|matches| Cli::from_arg_matches(&matches));
     match parsed {
         Ok(cli) => dispatch(&cli.command, stdout, stderr),
-        Err(err) => report_parse_error(&err, stdout, stderr),
+        Err(err) => report_parse_error(&err, &args, stdout, stderr),
     }
 }
 
@@ -136,7 +145,12 @@ fn not_implemented(name: &str, stderr: &mut dyn Write) -> u8 {
 ///
 /// Help, version and "no subcommand given" print on stdout and exit 0. Everything else is a usage
 /// error: two lines on stderr and exit 64.
-fn report_parse_error(err: &clap::Error, stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
+fn report_parse_error(
+    err: &clap::Error,
+    args: &[OsString],
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> u8 {
     match err.kind() {
         ErrorKind::DisplayHelp
         | ErrorKind::DisplayVersion
@@ -145,7 +159,7 @@ fn report_parse_error(err: &clap::Error, stdout: &mut dyn Write, stderr: &mut dy
             finish(write!(stdout, "{text}"), stderr)
         }
         kind => {
-            let (message, fix) = usage_lines(kind, err);
+            let (message, fix) = usage_lines(kind, err, args);
             let _ = writeln!(stderr, "error: {message}\nfix: {fix}");
             EXIT_USAGE
         }
@@ -155,22 +169,43 @@ fn report_parse_error(err: &clap::Error, stdout: &mut dyn Write, stderr: &mut dy
 /// The two lines of a usage error.
 ///
 /// Nothing the user typed is echoed. The only text taken from clap is the name of an argument as
-/// the command tree defines it (such as `--color <WHEN>`) and the command path in the usage line.
+/// the command tree defines it (such as `--color <WHEN>`). The command path in the fix line comes
+/// from walking the arguments through the command tree, so it holds only names from the tree.
 /// M1-030 adds the flag name and the did-you-mean under the no-echo rule of 07 section 1.
-fn usage_lines(kind: ErrorKind, err: &clap::Error) -> (String, String) {
-    let fix = format!("see '{} --help'", command_path(err));
+fn usage_lines(kind: ErrorKind, err: &clap::Error, args: &[OsString]) -> (String, String) {
+    let mut fix = format!("see '{} --help'", command_path(args));
+    let arg = defined_arg(err);
     let message = match kind {
-        ErrorKind::MissingRequiredArgument => match defined_arg(err) {
+        ErrorKind::MissingRequiredArgument => match arg {
             Some(arg) => format!("missing required argument {arg}"),
             None => "missing a required argument".to_string(),
         },
-        ErrorKind::InvalidValue | ErrorKind::ValueValidation => match defined_arg(err) {
-            Some(arg) => format!("invalid value for {arg}"),
-            None => "invalid value for an option".to_string(),
-        },
+        ErrorKind::InvalidValue | ErrorKind::ValueValidation => {
+            let named = |a: &str| arg.as_deref().is_some_and(|x| x.starts_with(a));
+            if named("--progress") && !on_argv(args, "--progress") {
+                // The bad value came from the environment, not from a flag.
+                fix = "set RDY_PROGRESS to auto or never, or unset it".to_string();
+                "RDY_PROGRESS has an invalid value".to_string()
+            } else if value_is_missing(err) {
+                match arg {
+                    Some(arg) => format!("missing a value for {arg}"),
+                    None => "missing a value for an option".to_string(),
+                }
+            } else {
+                match arg {
+                    Some(arg) => format!("invalid value for {arg}"),
+                    None => "invalid value for an option".to_string(),
+                }
+            }
+        }
         ErrorKind::UnknownArgument => "unknown option or argument".to_string(),
         ErrorKind::InvalidSubcommand => "unknown command".to_string(),
-        ErrorKind::ArgumentConflict => "two options cannot be used together".to_string(),
+        ErrorKind::ArgumentConflict => match (&arg, prior_arg(err)) {
+            (Some(arg), Some(prior)) if *arg == prior => {
+                format!("{arg} can be used only once")
+            }
+            _ => "two options cannot be used together".to_string(),
+        },
         ErrorKind::MissingSubcommand => "missing a command".to_string(),
         _ => "the command line is not valid".to_string(),
     };
@@ -186,24 +221,58 @@ fn defined_arg(err: &clap::Error) -> Option<String> {
     }
 }
 
-/// The command path, such as `rdy spec sign`, read from the usage line clap builds from the tree.
-///
-/// The words of a usage line run from the program name up to the first `[`, `<` or `-` token.
-fn command_path(err: &clap::Error) -> String {
-    let usage = match err.get(ContextKind::Usage) {
-        Some(ContextValue::StyledStr(text)) => text.to_string(),
-        _ => return "rdy".to_string(),
-    };
-    let words: Vec<&str> = usage
-        .trim()
-        .strip_prefix("Usage:")
-        .unwrap_or("")
-        .split_whitespace()
-        .take_while(|w| !w.starts_with(['[', '<', '-']))
-        .collect();
-    if words.first() == Some(&"rdy") {
-        words.join(" ")
-    } else {
-        "rdy".to_string()
+/// The earlier argument a conflict names, as the command tree defines it.
+fn prior_arg(err: &clap::Error) -> Option<String> {
+    match err.get(ContextKind::PriorArg) {
+        Some(ContextValue::String(name)) => Some(name.clone()),
+        _ => None,
     }
+}
+
+/// True when clap found the flag but no value after it.
+fn value_is_missing(err: &clap::Error) -> bool {
+    matches!(err.get(ContextKind::InvalidValue), Some(ContextValue::String(v)) if v.is_empty())
+}
+
+/// True when the long flag `name` (such as `--progress`) is on the command line before any `--`.
+fn on_argv(args: &[OsString], name: &str) -> bool {
+    args.iter()
+        .skip(1)
+        .take_while(|a| *a != "--")
+        .filter_map(|a| a.to_str())
+        .any(|a| a == name || a.strip_prefix(name).is_some_and(|r| r.starts_with('=')))
+}
+
+/// The command path, such as `rdy spec sign`, found by walking `args` through the command tree.
+///
+/// A word that names a subcommand of the current command moves down one level. A long flag that
+/// takes a value skips the word after it. Only names from the tree reach the result, never what
+/// the user typed. The binary name is always `rdy`, whatever argv[0] was.
+fn command_path(args: &[OsString]) -> String {
+    let mut root = command();
+    root.build();
+    let mut current = &root;
+    let mut path = vec!["rdy".to_string()];
+    let mut words = args.iter().skip(1).filter_map(|a| a.to_str());
+    while let Some(word) = words.next() {
+        if word == "--" {
+            break;
+        }
+        if let Some(long) = word.strip_prefix("--") {
+            let takes_value = !long.contains('=')
+                && current
+                    .get_arguments()
+                    .find(|a| a.get_long() == Some(long))
+                    .is_some_and(|a| a.get_action().takes_values());
+            if takes_value {
+                words.next();
+            }
+        } else if !word.starts_with('-')
+            && let Some(sub) = current.find_subcommand(word)
+        {
+            path.push(sub.get_name().to_string());
+            current = sub;
+        }
+    }
+    path.join(" ")
 }
