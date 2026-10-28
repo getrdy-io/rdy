@@ -15,42 +15,59 @@
 //! | [`CheckParams::Unknown`] | rdy has no check with this id | `not_in_build` or `unknown_check` |
 //! | [`CheckParams::Unsupported`] | rdy knows the id and cannot read a field or a value | `unsupported_spec` |
 //!
-//! Telling `not_in_build` from `unknown_check` needs the list of reserved ids. That list arrives with the
-//! reserved-id lint rule. Until then `Unknown` stands for both.
+//! `Unknown` stands for two skips. [`CheckParams::unknown_kind`] tells them apart with the list of
+//! reserved ids in [`crate::reserved`]: [`UnknownKind::NotInBuild`] for a reserved id this build lacks,
+//! [`UnknownKind::UnknownCheck`] for any other.
 //!
 //! Nothing is ever ignored. A field the parameter struct does not have is [`UnsupportedReason::UnknownField`],
 //! because dropping a stricter threshold from a newer spec would turn a failing host into a passing one
 //! (ADR 0008).
 //!
-//! The seven host ids have their parameter structs, from [`HostCpu`] to [`HostOs`]. The net and k8s structs are placeholders
-//! for now. They have no fields yet, so every parameter is refused as unknown until the tickets for the
-//! net and k8s parameters fill them in.
+//! The 17 M1 ids have their parameter structs: the seven host ids from [`HostCpu`] to [`HostOs`], the
+//! four net ids from [`NetEgress`] to [`NetDns`], and the six k8s ids from [`K8sAccess`] to
+//! [`K8sVersion`].
 //!
 //! A check that needs a threshold and has none is [`UnsupportedReason::NoThreshold`], not a pass. A bare
-//! `- id: host.memory` would otherwise measure nothing and report ready.
+//! `- id: host.memory` would otherwise measure nothing and report ready. The same goes for a bare
+//! `net.egress` without `endpoints` and a `k8s.rbac` without `can`.
 
 use std::collections::HashSet;
 use std::fmt;
 
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
 use crate::SpecError;
 use crate::error::{echo_reason, echo_safe};
+use crate::reserved::{UnknownKind, is_reserved_id};
 use crate::spec::{CheckSpec, Lenient, Spec};
 
 mod common;
 mod host;
+mod k8s;
+mod net;
+#[cfg(test)]
+mod testkit;
 
 pub use common::{
     AbsPath, Arch, BoundedList, Cores, CpuFlag, DistroId, FsType, ListText, OsVersion, Port,
-    StringList, TolerancePercent,
+    RegexText, StringList, TolerancePercent,
 };
 pub use host::{
     ApparmorMode, ApparmorPolicy, Bind, FipsPolicy, HostCpu, HostDisk, HostLsm, HostMemory, HostOs,
     HostPorts, HostSecurityAgents, MountOption, PortRule, SelinuxMode, SelinuxPolicy, SupportedOs,
     SwapPolicy, ToleranceResult,
+};
+
+pub use k8s::{
+    AccessMode, ApiGroup, ApiRef, CpuAmount, K8sAccess, K8sAdmission, K8sName, K8sNodes, K8sRbac,
+    K8sResources, K8sStorageClass, K8sVersion, LabelKey, LabelSelector, LabelValue, OverMax,
+    PodFeature, PodSecurityLevel, RbacResource, RbacRule, RbacSubresource, RbacVerb, ReclaimPolicy,
+    TaintEffect, Toleration, TolerationOperator, VolumeBinding,
+};
+pub use net::{
+    Cidr, DnsName, DnsRule, Endpoint, HttpMethod, HttpStatus, NetDns, NetEgress, NetProxy,
+    NetTlsIntercept, Sha256Hex, TlsHost, Trust, ViaProxy,
 };
 
 /// The most characters of a message from the value reader that a reason keeps.
@@ -69,39 +86,6 @@ pub(crate) trait ParamSet: DeserializeOwned {
     /// Keys that are required besides the threshold. They are named in a
     /// [`UnsupportedReason::NoThreshold`] when they are missing too, so one message asks for everything.
     const ALSO_REQUIRED: &'static [&'static str] = &[];
-}
-
-/// Defines a parameter struct with no fields yet.
-macro_rules! placeholder_params {
-    ($($id:literal => $name:ident),* $(,)?) => {
-        $(
-            #[doc = concat!("Parameters of `", $id, "`.")]
-            ///
-            /// This struct has no fields yet. Any parameter is refused as unknown until the ticket for
-            /// this check family adds them.
-            #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-            #[serde(deny_unknown_fields)]
-            #[non_exhaustive]
-            pub struct $name {}
-
-            impl ParamSet for $name {
-                const FIELDS: &'static [&'static str] = &[];
-            }
-        )*
-    };
-}
-
-placeholder_params! {
-    "net.egress" => NetEgress,
-    "net.proxy" => NetProxy,
-    "net.tls_intercept" => NetTlsIntercept,
-    "net.dns" => NetDns,
-    "k8s.access" => K8sAccess,
-    "k8s.storageclass" => K8sStorageClass,
-    "k8s.rbac" => K8sRbac,
-    "k8s.admission" => K8sAdmission,
-    "k8s.nodes" => K8sNodes,
-    "k8s.version" => K8sVersion,
 }
 
 /// Defines [`CheckParams`] and the table from check id to parameter struct.
@@ -193,6 +177,18 @@ known_checks! {
     "k8s.version" => K8sVersion(K8sVersion),
 }
 
+impl CheckParams {
+    /// Why an [`CheckParams::Unknown`] entry is skipped, or `None` for any other variant.
+    #[must_use]
+    pub fn unknown_kind(&self) -> Option<UnknownKind> {
+        match self {
+            Self::Unknown { id, .. } if is_reserved_id(id) => Some(UnknownKind::NotInBuild),
+            Self::Unknown { .. } => Some(UnknownKind::UnknownCheck),
+            _ => None,
+        }
+    }
+}
+
 /// Why an entry for a known check id could not be read. Only the first problem is kept.
 ///
 /// `Display` gives a short phrase for a skip message. Every name and message in it is cut and escaped, so
@@ -251,6 +247,13 @@ impl fmt::Display for UnsupportedReason {
                 message,
             } => write!(f, "a value does not fit: {message}"),
             Self::NoThreshold { one_of, and } => {
+                // With one key, "add 'min' and 'path'" reads fine. With several, "and 'path'" would
+                // read as part of the list, so the second part is a separate clause.
+                let joiner = if one_of.len() > 1 {
+                    "; also add "
+                } else {
+                    " and "
+                };
                 match one_of {
                     [only] => write!(f, "has no threshold: add '{only}'")?,
                     [init @ .., last] => {
@@ -262,8 +265,9 @@ impl fmt::Display for UnsupportedReason {
                     }
                     [] => f.write_str("has no threshold")?,
                 }
-                for key in and {
-                    write!(f, " and '{key}'")?;
+                for (i, key) in and.iter().enumerate() {
+                    f.write_str(if i == 0 { joiner } else { " and " })?;
+                    write!(f, "'{key}'")?;
                 }
                 Ok(())
             }

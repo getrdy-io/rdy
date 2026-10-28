@@ -258,11 +258,44 @@ impl<'de> Deserialize<'de> for ListText {
     }
 }
 
+/// A regular expression as written, 1 to 256 characters.
+///
+/// This type checks the length only. rdy-spec has no regex engine, so a pattern that does not compile
+/// is found by the lint and sign steps and, as a last stop, by the check that uses it. The text is
+/// kept as written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RegexText(String);
+
+impl RegexText {
+    /// The longest pattern in characters.
+    pub const MAX_CHARS: usize = 256;
+
+    /// The pattern as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for RegexText {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        if (1..=Self::MAX_CHARS).contains(&text.chars().count()) {
+            Ok(Self(text))
+        } else {
+            Err(bad(format!(
+                "a pattern is 1 to {} characters",
+                Self::MAX_CHARS
+            )))
+        }
+    }
+}
+
 /// A list of `MIN` to `MAX` items. With `UNIQUE` set, a repeated item is refused. `MIN` is 0 unless set,
 /// and 1 where an empty list would be a threshold that measures nothing.
 ///
 /// It reads as a plain YAML list and derefs to a slice.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoundedList<T, const MAX: usize, const UNIQUE: bool = false, const MIN: usize = 0>(
     Vec<T>,
 );
@@ -301,7 +334,8 @@ where
         let items = Vec::<T>::deserialize(deserializer)?;
         if items.len() < MIN {
             return Err(bad(format!(
-                "a list has at least {MIN} item, this one is empty"
+                "a list has {} items, at least {MIN} needed",
+                items.len()
             )));
         }
         if items.len() > MAX {
