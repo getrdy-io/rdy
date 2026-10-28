@@ -600,7 +600,7 @@ None yet.
   `https://docs.getrdy.io/unsigned` is a single redirect to the Markdown page until the site exists.
   Fix: docs-writer re-syncs 09.
 - `02-engine-design.md` (line 444), `03-check-catalog.md` (lines 17, 626, 636 and 847) and
-  `10-devrel-and-launch.md` (lines 1245 and 1259) still say `custom.exec` is M3. ADR 0005 now says M4.
+  `10-devrel-and-launch.md` (lines 1245 and 1259) said `custom.exec` was M3; they now say M4 to match ADR 0005.
   Fix: one-line edits by their owners.
 - `08-testing.md`: the `host-min` env, the real-binary smoke and the root job are new M1 tickets here.
   Fix: qa-engineer adds them to 08.

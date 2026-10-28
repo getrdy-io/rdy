@@ -82,7 +82,7 @@ argument is a usage error: exit 64.
 | `--timeout <time>` | M2 | See below |
 | `--dry-run` | M2 | Print what each check would read, contact and need. Runs nothing. One ticket with SEC-40 |
 | `--token-file <file>`, `--server <url>`, `--upload`, `--yes` | M2 | Share-link token, portal origin, offer the upload after the run, answer yes to it |
-| `--allow-exec <hash>` | M3 | Allow the exact `custom.exec` commands that hash to this value |
+| `--allow-exec <hash>` | M4 | Allow the exact `custom.exec` commands that hash to this value |
 
 **`--timeout` (M2, with a guard).** The spec's `timeout` wins over a check's default (01 section 2.3), so the
 customer must not raise a limit the vendor wrote. `--timeout` may lower any limit and raise only limits the spec

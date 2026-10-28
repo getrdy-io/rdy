@@ -26,7 +26,7 @@ It cannot run commands the spec names, write anywhere else, change the cluster, 
 or send result data anywhere. It can make `rdy` reveal spec hostnames to the network through DNS, SNI and
 HTTP requests. That is the point of a network check.
 
-Everything that would break this sentence is M2 or later and gets its own review: `custom.exec` (M3,
+Everything that would break this sentence is M2 or later and gets its own review: `custom.exec` (M4,
 ADR 0005), file collection and upload (M2), self-update (06).
 
 ## Surface 1: the CLI as a privileged process
@@ -410,6 +410,6 @@ workspace skeleton (INV-18).
 - [M3] SEC-48 Read-only cloud API allowlist | owner: check-author | est: 6h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: every AWS operation the checks can call is read-only or simulate (cloud-iam-expert reviews).
 - [M3] SEC-50 Windows and macOS code signing | owner: release-engineer | est: 8h | depends on: none | exit test: Authenticode and notarization verify on clean VMs.
 - [M3] SEC-52 cargo-vet for direct dependencies | owner: security-reviewer | est: 6h | depends on: none | exit test: `cargo vet` passes in CI.
-- [M3] SEC-53 Threat model for custom.exec | owner: security-reviewer | est: 4h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: a section is added here and reviewed by rust-architect before ADR 0005's build ticket starts.
+- [M4] SEC-53 Threat model for custom.exec | owner: security-reviewer | est: 4h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: a section is added here and reviewed by rust-architect before ADR 0005's build ticket starts.
 - [M4] SEC-49 Review of verified self-update | owner: security-reviewer | est: 4h | depends on: none | exit test: 06's self-update build refuses tampered or wrong-identity assets and never runs unprompted.
 - [M5] SEC-54 Independent security audit | owner: security-reviewer | est: 8h | depends on: none | exit test: report received and every high finding has a fix ticket.

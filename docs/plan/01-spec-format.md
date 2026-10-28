@@ -440,7 +440,7 @@ was given and opening `<spec>.minisig` returned not-found. Permission denied, a 
 symlink, an empty file, or a `--sig` path that does not exist all exit 64 (`spec_signature_invalid`, or
 `usage` for `--sig`), even with the flag. Any signature that is present but does not verify against a key
 pinned for the product, or given with `--key`, exits 64 even with the flag (ADR 0002 decision 7),
-including a valid signature by an unpinned key. An unsigned spec containing `custom.exec` exits 64 from M3
+including a valid signature by an unpinned key. An unsigned spec containing `custom.exec` exits 64 from M4
 (ADR 0005). Expired specs are refused regardless. **No hint, fix line or error message ever names
 `--allow-unsigned` or `--key`** (threat model T2); the flags are documented on
 `https://docs.getrdy.io/unsigned`.
