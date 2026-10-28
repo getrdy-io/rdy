@@ -264,7 +264,7 @@ Each is a statement that CI tests. The ticket in the test column carries it.
 
 ## Dependency policy
 
-The real `deny.toml` lands with 06's "CI lint and deny job" ticket. Rules it must encode:
+`deny.toml` encodes the bans, licenses and sources below (M1-004). The check-crate wrappers land in M1-044. These are the rules:
 
 - crates.io only. No git sources. `Cargo.lock` committed, `--locked` everywhere.
 - Bans: `openssl`, `openssl-sys`, `native-tls`, `hyper-tls`, `tokio-native-tls`, `aws-lc-sys` and
