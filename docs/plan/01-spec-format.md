@@ -79,7 +79,7 @@ plan's example.
 | `severity` | `block` or `warn` | `block` | `block` means required, `warn` means optional (2.6). |
 | `fix` | string, 1 to 2000 chars | none | Replaces rdy's advice as the headline fix (2.6). |
 | `timeout` | duration, 1s to 60s | the check's own default, else 10s | How long the check may run. The spec value wins over the check's default; the effective value is `min(spec or default, 60s, time left in the run)`. Outside 1s to 60s: lint and sign error `timeout must be between 1s and 60s`, and at run time that check is not run (`unsupported_spec`). |
-| `os` | list of `linux`, `macos`, `windows` | all | Run only there. Elsewhere the check is `skipped`, `not_applicable`, and never counts. `os: [rhel]` is an error with the lint note "os selects the operating system family. To match a distribution, use the host.os check." |
+| `os` | list of `linux`, `macos`, `windows` | all | Run only there. Elsewhere the check is `skipped`, `not_applicable`, and never counts. An empty list `os: []` is `unsupported_spec`, because it would hide the check on every OS. `os: [rhel]` is an error with the lint note "os selects the operating system family. To match a distribution, use the host.os check." |
 
 A cross-platform spec names the two entries:
 
@@ -213,7 +213,7 @@ means is in 03-check-catalog.md. Bold parameters are required; "one of" means at
 | Id | Parameters |
 | --- | --- |
 | `host.cpu` | one of `min` (cores), `arch` (`x86_64`, `aarch64`, or `amd64`, `arm64`), `flags`; also `recommended` |
-| `host.memory` | **`min`**, `min_available`, `swap` (`forbid`, `any`), `tolerance_percent` (0 to 20, default 5, at least 256 MiB), `tolerance_result` (`pass`, `warn`) |
+| `host.memory` | **`min`**, `min_available`, `swap` (`forbid`, `any`), `tolerance_percent` (0 to 20, default 5, at least 256 MiB. The band is never wider than half of `min`, so a tiny value always blocks), `tolerance_result` (`pass`, `warn`) |
 | `host.disk` | **`path`**, **`min`**, `recommended`, `min_inodes`, `forbid_options` (`noexec`, `nosuid`, `nodev`, `ro`), `forbid_fstypes`. One path per entry; repeat the id with a `name` for more. |
 | `host.ports` | one of `free` (a port or `{port, bind}`, `bind` `public` or `loopback`), `udp_free`; also `allow_owner` |
 | `host.lsm` | `selinux: {allow, denials_max, denials_window, watch}`, `apparmor: {allow, require_profiles}` |
