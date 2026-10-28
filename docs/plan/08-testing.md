@@ -1,68 +1,68 @@
 # 08 Testing
 
-Owner: qa-engineer. Status: draft, waiting for review by rust-architect (the fixture backend switch, the
-`Probe` path type) and code-reviewer (golden review rule, definition of done). Date: 2026-10-28.
+Owner: qa-engineer. Status: revised 2026-10-28 after the code-reviewer review (8 must-fix items applied).
+Waiting for a second pass, and for security-reviewer on the in-process entry point (decision A).
 
 This note says how the suite catches regressions without a GPU node, an air-gapped site or a Windows host
 with a particular agent. It builds on 02-engine-design.md (the `Backend` trait with `Live` and `Replay`,
-and its testing seams), 03-check-catalog.md (one fixture list per check), 05-threat-model.md (the
-invariants and the redaction corpus), 06-release-and-distribution.md (the five CI legs) and ADRs 0001,
-0003, 0004, 0007, 0008 and 0012.
+the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixture lists), 05-threat-model.md
+(invariants, redaction corpus), 06-release-and-distribution.md (the five CI legs) and ADRs 0001, 0003, 0004,
+0007, 0008 and 0012. Long material is in the appendices.
 
 ## Rules in one screen
 
-1. Every side effect goes through `Probe`, so a fixture can answer every question a check asks. A check
-   never learns whether it runs on a real machine.
-2. Every fixture is synthetic. No real hostname, address, user, serial, account id or secret is ever
-   committed. A lint enforces it.
-3. Fixtures are data, not OS-specific code. A Linux environment replays on a Windows runner. Only the
-   thin native closures (`statvfs`, the Windows registry) are behind `cfg`.
-4. A golden is the exact bytes the product writes. Goldens are normalised, not hand-edited. They change
-   only with `UPDATE_GOLDENS=1`, and a golden diff is read before the code diff.
-5. Tests are deterministic. No sleeps for synchronisation, no wall-clock lower bounds, no real network
-   except loopback on ephemeral ports.
-6. A flaky test is a bug owned by qa-engineer. Quarantine is not allowed: fix it or delete it.
-7. The PR that changes a check also changes its fixtures, its goldens and the compatibility matrix.
+1. Every side effect goes through `Probe`, so a fixture can answer every question a check asks.
+2. Every fixture is synthetic. A lint enforces it.
+3. Fixtures are data. A Linux environment replays on a Windows runner. Only the thin native closures
+   (`statvfs`, the Windows registry) are behind `cfg`.
+4. The CLI is tested in process. Tests call `rdy_cli::run(args, backend, out, err)` with the Replay backend.
+   No shipped binary contains a way to read a fixture directory.
+5. A golden is the exact bytes the product writes. It changes only with `UPDATE_GOLDENS=1`, and a golden
+   diff is read before the code diff.
+6. Tests are deterministic. Engine and env tests run on paused time. No sleep for synchronisation, no
+   wall-clock lower bounds, no real network except loopback on ephemeral ports.
+7. A flaky test is a bug owned by qa-engineer. Quarantine is not allowed: fix it or delete it.
+8. The PR that changes a check also changes its fixtures, its goldens and the compatibility page.
 
 ## 1. The test pyramid
 
 | Layer | Where it lives | What it proves | Runs on |
 | --- | --- | --- | --- |
-| Unit | `#[cfg(test)]` in each crate | Pure functions: threshold helpers, quantity and version parsing, `/proc` and `os-release` parsers, verdict mapping, YAML limits | All five legs |
-| Property | `proptest` in `rdy-spec`, `rdy-engine` | Parser never panics and keeps its limits, round trips hold, redactor and verdict invariants (section 4) | All five legs, 256 cases; 10,000 on linux-x64 |
-| Check and engine | `rdy_engine::testing`: `run_fixture`, `FakeCheck`, the Replay backend | One check against one fixture case; scheduler, timeouts, panics, cancellation under paused time | All five legs |
-| Loopback network | `crates/rdy-testkit` servers with the Live backend | Real sockets against a TLS server with a test CA, a CONNECT proxy, a closed port, a black hole | All five legs |
-| Golden | plain files compared byte for byte | JSON and HTML reports, terminal text, plans per OS, redaction output | All five legs |
-| Binary integration | `crates/rdy-cli/tests`, `assert_cmd` | The real `rdy` against fixture environments: exit codes 0, 1, 2, 64, 70, report files, signed spec flow | All five legs |
-| Live CI jobs | `ci.yml` jobs | Kind cluster, `sudo` paths, no phone home under `unshare -n` and `strace` | linux-x64 only |
-| Doc tests | `cargo test --doc` | Every public example in `rdy-spec` and `rdy-engine` compiles and runs; every `examples/specs/*.yaml` lints | linux-x64 |
+| Unit | `#[cfg(test)]` in each crate | Pure functions: thresholds, quantity and version parsing, `/proc` and `os-release` parsers, verdict mapping, YAML limits | All five legs |
+| Property | `proptest` in `rdy-spec` and `rdy-engine` | Parser never panics and keeps its limits, round trips, forward compatibility (section 4) | All five legs |
+| Check and engine | `rdy_engine::testing`: `run_fixture`, `FakeCheck`, Replay | One check against one fixture case; scheduler, timeouts, panics, cancellation | All five legs |
+| Loopback network | Servers behind the `test-support` feature of `rdy-checks-net` | Real sockets against a TLS server with a test CA, a CONNECT proxy, a closed port, a reset after ClientHello | All five legs |
+| Golden | Plain files compared byte for byte | JSON and HTML reports, terminal text, redaction output | All five legs |
+| CLI, in process | `crates/rdy-cli/tests`, calling `rdy_cli::run` | Exit codes, report files and terminal text for each fixture environment | All five legs |
+| CLI, real binary | `assert_cmd`, Live backend only | `rdy --bogus` gives 64, an unwritable `--out-dir` gives 70, the signed spec flow, the real-OS smoke | All five legs |
+| Live CI jobs | `ci.yml` | Kind cluster, `sudo` paths, no phone home under `unshare -n` | linux-x64 |
+| Doc tests | `cargo test --doc` on the host target | Public examples in `rdy-spec` and `rdy-engine` run | linux-x64 |
 
-Tooling: `cargo nextest` runs everything except doc tests, which it does not run. So CI also runs
-`cargo test --doc --workspace --locked`. Nextest config lives in `.config/nextest.toml` with a `ci`
-profile: `retries = 0`, `fail-fast = false`, `slow-timeout = { period = "30s", terminate-after = 4 }`, so a
-hung test dies in two minutes and names itself. Tests find shared data through one helper,
+Tooling. `cargo nextest` does not run doc tests, so CI also runs `cargo test --doc --workspace --locked`.
+The nextest `ci` profile has `retries = 0`, `fail-fast = false` and `slow-timeout = { period = "30s",
+terminate-after = 4 }`, so a hung test dies in two minutes and names itself. Shared data comes from
 `testing::fixtures_dir()`, which resolves `tests/fixtures` from `CARGO_MANIFEST_DIR`. The fixtures sit at
-the repo root, outside every crate, so `cargo package` never ships them.
-
-Not in the pyramid: mutation testing, browser matrices, load tests. `cargo-fuzz` is M2 (SEC-45).
+the repo root, outside every crate, so `cargo package` never ships them and the tests do not run from a
+crates.io tarball (the fixtures README says so). `rdy_engine::testing` is `#[doc(hidden)]`, unstable and
+outside the semver promise (see corrections). `cargo-fuzz` is M2 (SEC-45).
 
 ## 2. Fixtures for environments CI cannot have
 
 ### The rule: every fixture is synthetic
 
-"Synthetic" means no byte came from a customer or from a person. Each fixture manifest names its
-`origin`, and only four are allowed:
+"Synthetic" means no byte came from a customer or a person. Each manifest names its `origin`, one of four:
 
 | Origin | Meaning |
 | --- | --- |
-| `hand` | Written by us from a vendor doc or an RFC example |
-| `generated` | Built at test time or by a script (`rcgen` certificate chains, SNTP packets, kubeconfigs) |
+| `hand` | Written by us from a vendor doc or an RFC. It is our guess at a system, not a recording |
+| `generated` | Built at test time or by a script (`rcgen` chains, SNTP packets, kubeconfigs) |
 | `ci-runner` | Recorded on a GitHub-hosted runner, then scrubbed |
 | `throwaway` | Recorded on a rented machine made for the purpose and destroyed after, then scrubbed |
 
 A developer laptop is not an origin. A design partner's environment is never an origin: nothing recorded
-there enters this public repo, scrubbed or not. If a partner hits a failure we cannot reproduce, we write a
-`hand` fixture with the same shape and acme names.
+there enters this public repo, scrubbed or not. If a partner hits a failure we cannot reproduce, we write
+a `hand` fixture with the same shape and acme names. Only `ci-runner` and `throwaway` fixtures may be
+described anywhere as "recorded from a real system".
 
 ### Layout
 
@@ -71,6 +71,7 @@ tests/fixtures/
   README.md                      format, naming rules, how to record
   allow.toml                     lint exceptions, each with a one-line reason
   checks/<check-id>/<case>/      one check, one situation (03 lists the minimum cases)
+  checks/_policy/<case>/         engine policy cases, for example symlink-to-shadow
   envs/<env>/                    one whole environment plus a spec to run against it
   redaction/<category>/<case>.{in,expected,toml}   (05, Appendix F)
   results/<rdy-version>/*.json   result files from released versions, append only (ADR 0007)
@@ -78,21 +79,20 @@ tests/fixtures/
   signed/                        one signed spec, its .minisig and public key, never edited
 ```
 
-A check case and an environment use the same format. A case is just a small environment. One loader reads
-both.
+A check case and an environment use the same format. A case is a small environment. One loader reads both.
 
 ```text
-envs/net-corp-proxy/
-  fixture.toml           the manifest
-  spec.yaml              the spec the env-level tests run
-  root/                  fake file tree; root/etc/os-release stands for /etc/os-release
-  root.manifest.json     what a file system cannot hold: symlinks, unreadable files, modes, empty dirs
-  commands/              recorded command output, one JSON file per argv
-  native/                recorded results of native calls: statvfs, uname, registry keys
-  api/                   recorded Kubernetes and cloud API responses, one JSON file per request
-  net.json               scripted DNS and TCP behaviour per host:port
-  env.json               environment variables the process sees
-  golden/                report.json, report.html, terminal.txt
+envs/all-pass/
+  fixture.toml       the manifest
+  spec.yaml          the spec the env test runs
+  root/              fake file tree; root/etc/os-release stands for /etc/os-release
+  root.manifest.json symlinks, unreadable files, modes, empty dirs (what git and Windows cannot store)
+  commands/          recorded command output, one JSON file per argv
+  native/            recorded results of native calls: statvfs, uname, registry keys
+  api/               recorded Kubernetes and cloud API responses
+  net.json           scripted DNS and TCP behaviour per host:port
+  env.json           environment variables the process sees
+  golden/            report.json, report.html, terminal.txt
 ```
 
 ### The manifest
@@ -106,6 +106,7 @@ os = "linux"                  # what Backend::os() reports: linux, macos, window
 arch = "x86_64"
 base = "all-pass"             # optional, one level only
 remove = ["root/etc/docker/daemon.json"]
+crlf = []                     # files allowed to contain \r
 answers = ["host.os", "net.egress", "net.proxy", "net.tls_intercept"]
 spec = "spec.yaml"
 
@@ -114,7 +115,7 @@ root = false
 network = true
 kube = false
 
-[run]                         # honoured only by the fixture backend
+[run]                         # honoured by the in-process harness
 clock = "2026-11-02T09:00:00Z"
 run_id = "00000000-0000-4000-8000-000000000001"
 jobs = 1
@@ -124,26 +125,295 @@ deadline_ms = 20000
 verdict = "not_ready"
 exit_code = 2
 
-[matrix]                      # feeds the compatibility matrix (section 7)
+[matrix]                      # optional; only when the env is evidence for a matrix row
 os_family = "ubuntu"
 os_version = "22.04"
 proxy = "connect-basic-tls-intercept"
 ```
 
-- `base` is the only reuse feature. Files in the child replace files in the base path by path, and
-  `remove` deletes some. It is one level deep and has no other options. Without it, ten environments would
-  carry ten copies of `/proc/meminfo`.
-- `answers` lists the check ids the environment can answer. The loader fails with "this fixture does not
-  answer host.memory" instead of a confusing `NotRecorded` halfway through a run.
-- Anything not recorded fails with `NotRecorded`, as in 02. A fixture never falls through to the real
-  machine.
+- `base` is the only reuse feature: child files replace base files by path, `remove` deletes some. One
+  level, no other options. Without it, every env would carry its own `/proc/meminfo`.
+- `answers` lists the check ids the env can answer. The loader fails with "this fixture does not answer
+  host.memory" instead of a confusing `NotRecorded`. Anything unrecorded fails, as in 02: a fixture never
+  falls through to the real machine.
+- Virtual paths are POSIX strings. `root/proc/meminfo` answers `/proc/meminfo` on every runner. A Windows
+  env keeps drive files under `root/c/Windows/...`, mapped to the key `c:/windows/...` (lowercased) only
+  when `os = "windows"`. Case is kept on Linux and macOS. Programs resolve through the Backend by the
+  fixture's `os`, never the runner's.
+- Replay follows `root.manifest.json` symlinks when it applies the deny list, so the symlink-to-`/etc/shadow`
+  case is exercised. The lint requires `checks/_policy/symlink-to-shadow` and expects `Denied`.
+- `commands/` and `api/` files are indexed by the `argv` or `request` field inside them. File names are
+  free slugs. The loader and lint fail on a duplicate key. Appendix A has samples.
+- Replay never uses a blocking thread. A `delay_ms` is a tokio timer, and `blackhole` is a future that
+  never completes. Under paused time the wait costs nothing.
+- Addresses are documentation ranges, RFC 1918, `100.64.0.0/10`, `fd00::/8` and loopback. Names end in
+  `.example` unless a public name is in the lint allow-list (section below). Tokens are the string
+  `REDACTED-TEST-TOKEN`, or built from parts at test time when a push-protection scanner would flag them.
 
-### File formats
+### Windows checkouts and `.gitattributes`
 
-- **Virtual paths are POSIX strings.** `root/proc/meminfo` answers a read of `/proc/meminfo` on every
-  runner. Replay turns the requested `Path` into a POSIX string key before lookup. A
-  Windows environment keys `C:\Windows\System32\NETSTAT.EXE` as `c:/windows/system32/netstat.exe`.
-- **`root.manifest.json`** replaces what git and Windows cannot store:
+A default Windows checkout rewrites line endings, skips symlinks and rejects some names. The first one also
+breaks a signed spec, because the signature covers the raw bytes.
+
+```gitattributes
+* text=auto eol=lf
+/tests/fixtures/** -text
+/examples/specs/** -text
+*.minisig -text
+/crates/*/templates/** text eol=lf
+/crates/*/data/** text eol=lf
+```
+
+- `-text` means git never converts a byte, so a fixture that must carry CRLF (recorded `NETSTAT.EXE`
+  output) keeps it everywhere, and one that must not carry CRLF cannot gain it.
+- Askama templates and shipped data files are `eol=lf`. Otherwise a Windows checkout compiles CRLF into
+  the HTML and every golden fails on that leg.
+- `.editorconfig` sets `end_of_line = lf`. The lint rejects a `\r` in any fixture or example file not
+  listed in the manifest's `crlf`.
+- The windows-x64 leg sets `core.autocrlf true` before checkout. A test hashes `tests/fixtures/signed/*`
+  and one CRLF fixture against committed digests, and `git check-attr text` must say `unset` for them on
+  every leg. The signed spec was signed once with a throwaway key. Only the public key and the `.minisig`
+  are committed. New cases get new files; nobody re-signs.
+
+### The fixture lint
+
+It is a nextest test in `rdy-engine` (`tests/fixture_lint.rs`), so it runs on every leg with no extra
+command. It fails on:
+
+- a bad manifest, a missing `origin`, an `origin` outside the four;
+- a file name unique only by case, a Windows reserved name (`con`, `nul`, `aux`, `com1`), a trailing dot or
+  space, one of `<>:"|?*[]`, a path over 150 characters, a symlink, a file over 256 KiB, an env over 1 MiB;
+- a `\r` not listed in `crlf`, in `tests/fixtures` or `examples/specs`;
+- a URL host or FQDN with a public suffix that is not `.example`, `.test`, `.invalid`, `.local`,
+  `cluster.local` or on the built-in allow-list of vendors Rdy checks (OS vendors, `k8s.io`,
+  `nvidia.com`); any publicly routable IP address. Other entries need `allow.toml` with a reason
+  (`169.254.169.254` for the metadata tests is the first);
+- a registered, implemented check (its `CheckInfo` says so) with no `checks/<id>/` directory, or without a
+  passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a
+  `Timeout` case where it runs a command or opens a socket; a missing `checks/_policy/symlink-to-shadow`.
+
+M2 adds the rule that nothing in a fixture changes under the redactor (it needs SEC-25), and the recorder.
+
+### Environments
+
+Five in M1, because the M1 exit test needs exit codes 0, 1 and 2 on every leg, and `all-pass` already has
+host, net and k8s facts in it. The rest are M2.
+
+| Env | Milestone | Story | Verdict, exit |
+| --- | --- | --- | --- |
+| `all-pass` | M1 | RHEL 9 VM, 32 GiB nominal showing 31.3 GiB, xfs, direct egress, vanilla three-node cluster | `ready`, 0 |
+| `warnings-only` | M1 | Swap on, port inside the ephemeral range, one `NO_PROXY` gap, no default StorageClass | `ready_with_warnings`, 1 |
+| `all-block` | M1 | 8 GiB RAM, disk full, 6443 held, egress refused, TLS interception, cluster too old, RBAC denied | `not_ready`, 2 |
+| `no-privileges` | M1 | Not root, audit log unreadable, no kubeconfig: partial results and `missing_need` skips | `not_ready`, 2 |
+| `timeouts` | M1 | Commands with `delay_ms` past the limit, a black-hole endpoint, a slow `/version`, a hung `statvfs` | `not_ready`, 2 |
+| `net-airgapped` | M2, first to add back | No default route, internal DNS only, public endpoints refused, mirror reachable; runs `acme-airgap-host.yaml` | per spec |
+| `host-ubuntu2204-container` | M2 | `memory.max` 8 GiB on a 64 GiB host, `cpu.max` quota, overlayfs, `noexec` tmpfs | per spec |
+| `net-corp-proxy` | M2 | 407 Basic proxy, CONNECT ok, `NO_PROXY` gap, private-CA interception | `not_ready`, 2 |
+| `k8s-openshift-restricted` | M2 | `+hash` version string, PSA `restricted`, SCCs, no default StorageClass | `ready_with_warnings`, 1 |
+| `macos-15-arm64-stub`, `windows-2022-stub` | M2 | Host checks skipped, net runs; real recordings replace them | per spec |
+
+The check-level cases for each of these shapes ship with the 03 check tickets in M1. The macOS and Windows
+stub behaviour in M1 is covered by the exit test of "Family trait, registry and run plan" (02): the plan for
+Windows marks host checks `not_yet_on_os`, a pure unit test with no I/O.
+
+### How each hard case is covered
+
+| Case CI cannot have | How it is covered | Matrix state |
+| --- | --- | --- |
+| Air-gapped site | `net-airgapped` (`refused` and `blackhole` entries, DNS limited to internal names) and SEC-22 (no connect leaves loopback). Both are M2 add-backs | `none` until they land, then `fixture` |
+| GPU node (M4) | `nvidia-smi -q -x --dtd` captures from a rented T4 or L4, one A100 with MIG, and an HGX capture, all scrubbed. Every failure string and exit code is a command fixture. A case asserts `nvidia-smi` is never called when the kernel module is absent | `none` until a capture exists, then `fixture` (origin `throwaway`); `field` for the first real node |
+| Windows host with a specific agent | Registry and service JSON under `native/`, a `SecurityCenter2` result, a Defender preference dump. `agents.toml` has a unit test per entry | `fixture`; `field` only when we run on a real Windows box |
+| Kubernetes distros | Per-distro sets as 03 describes, plus a live kind job for the real API server | kind `live`, others `fixture` |
+| Proxy with TLS interception | `rcgen` chains served by the loopback test server, a CONNECT proxy with modes `ok`, `403`, `407-basic`, `407-negotiate`. The probe test asserts zero application bytes are written | `fixture`: a simulated middlebox, not a real one |
+
+## 3. Golden tests
+
+**What is golden.** Per environment: `report.json` (the `--json` stdout), `report.html` and `terminal.txt`
+(stderr with colour off and width 100), captured from the in-process run. Per check case: `expect.json`.
+Redaction expectations are goldens too. HTML goldens exist for `all-pass`, `warnings-only` and `all-block`
+only. Goldens sit next to what they describe, so a reviewer sees input and output in one diff.
+
+**Compare.** One helper, `testing::golden::assert_golden(path, actual_bytes)`, about 60 lines. It compares
+bytes. A mismatch writes `<path>.actual` (git-ignored), prints the first 40 lines of a unified diff and the
+exact accept command. A missing golden fails, unless `UPDATE_GOLDENS=1`. Every path it touches is appended
+to `target/goldens-used/<pid>.txt`. No insta: the file is the product's own output, and `report.html` opens
+in a browser.
+
+**Normalisation.** Determinism first (fixed clock, run id, jobs, environment), scrubbing second. The field
+list is in Appendix C. The env test runs each env at `jobs = 1` and `jobs = 8` on paused time and asserts
+equal normalised reports.
+
+**Checks on every golden.** JSON validates against `result.v1.schema.json`. Tests use the typed enums from
+`rdy-spec` for `skip_kind`, `error_kind` and `verdict_reason`, never string literals, so a renamed value
+fails to compile. The HTML golden gets the static checks from ADR 0003: exact CSP meta, `lang` and
+`color-scheme`, no `src` or `href` off the file except the footer link with `rel="noopener noreferrer"`,
+no `<link>`, `@import` or `url(`, no `|safe` in a template, and a `</script><img onerror>` hostname round
+trip through the embedded JSON. A headless browser render is M2.
+
+**Updating on purpose.**
+
+```text
+UPDATE_GOLDENS=1 cargo nextest run --workspace    # rewrites goldens and lists each file
+git diff tests/ crates/                           # read it
+```
+
+- `UPDATE_GOLDENS=1` is refused when `CI` is set.
+- It never touches `tests/fixtures/redaction/**` or `tests/fixtures/results/**`. A golden you can
+  regenerate is not a security test. Redaction expectations are edited by hand, and result files from
+  released versions are append only (the lint compares them with `main`).
+- Staleness. The normal run fails on a mismatch and on a missing golden. After nextest on linux-x64,
+  `cargo xtask goldens check` compares `target/goldens-used` with the files on disk and fails on an orphan.
+  Goldens are OS independent by construction: there is no per-OS golden file.
+
+**Review rule.** A PR that changes a golden has a `## Golden changes` section in its body: one sentence per
+changed file saying why. code-reviewer reads the golden diff first, before the code. A golden-only PR, or a
+change the code does not explain, is rejected. The CI check for the section is M2; until then
+code-reviewer enforces it by hand.
+
+## 4. Property tests
+
+`proptest`. The case count is set per test with `ProptestConfig`, not with the global `PROPTEST_CASES`:
+10,000 for the parser "never panics" and limits properties, 256 for everything else. Strings are capped at
+4 KiB and collections at 64 items. `max_shrink_time` is 30,000 ms, so a failure finishes shrinking before
+nextest's kill. The whole property suite stays under 60 s on linux-x64. Failures are saved to
+`proptest-regressions/` and committed. PR runs use a fixed seed, so an unrelated PR never fails on a fresh
+draw; a nightly job (M2) uses a random seed, prints it and files an issue. (A fixed seed needs proptest 1.5
+or newer; the ticket confirms the pinned version.)
+
+**Spec parser** (`rdy_spec::parse_unverified` and `load`), M1:
+
+| Invariant | Generator |
+| --- | --- |
+| Never panics. Returns `Ok` or a `SpecError` with a non-empty `hint()` and, for YAML failures, a line and column | Arbitrary bytes; YAML-shaped soup (`[`, `{`, `- `, `&a`, `*a`, `!!`, `<<`, NUL, BOM, CRLF, tabs); mutations of every file in `examples/specs` |
+| Over 1 MiB is refused before parsing; depth 64 passes, 65 fails | Boundary cases and nested flow collections of generated depth |
+| Anchors, aliases, merge keys, duplicate keys and a second document are each rejected with their own error | A valid generated spec with one poison step |
+| Round trip: `Spec` to JSON (valid YAML 1.2) and back is equal; `parse(emit(parse(x))) == parse(x)` for the examples | Generated `Spec` values: slug `^[a-z0-9][a-z0-9-]{0,62}$`, known ids, quantities, severities |
+| **Forward compatibility:** a valid spec plus an unknown id, an unknown field or an unknown severity still parses, and the check is `skipped` with `not_in_build`, `unknown_check` or `unsupported_spec` (an unknown severity counts as block), never `pass` | A valid spec with one such insertion |
+| Version-like fields keep their text: `12.10` quoted stays `"12.10"`, unquoted is refused with a quote hint | `\d{1,3}\.\d{1,3}(\.\d{1,3})?` |
+| Verify before parse: changing any byte of the signed spec gives a `SignatureError` and the parser spy count stays 0 | The signed spec plus a random index and byte |
+
+The redactor properties (idempotence, planted secrets never survive, a schema-driven canary walk over the
+whole `Report`) and the verdict properties are M2. Appendix D has both tables.
+
+## 5. Timeout and cancellation tests
+
+| Level | How | Asserts |
+| --- | --- | --- |
+| Scheduler | `FakeCheck` with `Sleep(forever)` and `Panic`, `#[tokio::test(start_paused = true)]` | `Timeout` with `timeout_after_ms` equal to the effective limit; `Panic` gives `Error` and the others still pass; no real time passes |
+| Stuck blocking thread | `Fake::Block` waits on a `std::sync::mpsc::Receiver` that the test releases after its asserts. The test builds its own runtime and ends it with `shutdown_timeout(100 ms)`. **Real time**: 50 ms check timeout, upper bound 1 s | `Timeout`, and the run returns without waiting for the thread. It never uses paused time, because tokio can stop auto-advancing while a blocking task runs |
+| Run deadline | Deadline 10 s, one check running, three unstarted | Running becomes `Timeout`, unstarted ones are not run (`skipped`), all counted as required or optional not run |
+| Cancellation | Cancel the token while checks run | Report written with `interrupted: true`; unfinished checks `skipped` with `skip_kind: cancelled`; nothing left running (a drop guard counts live futures); verdict from the 01 rule. `complete` is not asserted until 01 says what it is after Ctrl-C (see corrections) |
+| Replay delays | `delay_ms` past the limit, or a `blackhole` entry | `Timeout`, and an action log entry that says what was in flight |
+| `timeouts` env | In process, paused time, at `jobs = 1` and `jobs = 8` | Every hung source gives `Timeout`; the run ends inside `deadline_ms` in virtual time; verdict `not_ready` with `required_check_not_run` |
+| Process level, Unix (M2) | Live backend, a test check running `/bin/sleep 600`, timeout 1 s | The run ends in under 4 s, and the process group is gone (checked with `rustix` on the group id right after the run), so no reused pid can fool it |
+| Real binary, Unix (M2) | `rdy run` with a spec that sets `timeout: 1s`, `SIGINT` after the first check starts | Exit within 3 s, report directory with `interrupted: true`, exit by the verdict rule; a second `SIGINT` exits 70 with no report; `SIGTERM` acts like the first `SIGINT` |
+
+Rules that keep these stable:
+
+- Only the `Block` test and the two M2 rows use real time. They assert upper bounds with at least three
+  times the expected duration, never a lower bound, and never the order of unrelated events.
+- Windows: the `SIGINT` row is `#[cfg(unix)]`, since sending a console event needs `unsafe`. On Windows the
+  cancel path is covered at the engine level, and Ctrl-C on a real console is `field` in the matrix.
+  Grandchild kill waits for job objects (an M2 ticket in 02).
+- The Ctrl-C wording follows 02: first Ctrl-C finishes with a partial report, second exits 70. cli-ux has
+  not confirmed it. The test changes with 07.
+
+## 6. Cross-platform
+
+| Leg | Runner | Runs |
+| --- | --- | --- |
+| linux-x64 | `ubuntu-24.04`, musl | Everything, plus the Linux-only jobs: `root` (the `root_*` tests as a prebuilt nextest archive run under `sudo`, so `target/` stays user-owned), `kind`, doc tests, 10,000-case parser properties, `cargo xtask goldens check` |
+| linux-arm64 | `ubuntu-24.04-arm`, musl | Unit, property, fixtures, goldens, in-process CLI, real-binary tests |
+| macos-arm64, macos-x64 | `macos-15`, `macos-15-intel` | Same, with the Unix process tests |
+| windows-x64 | `windows-2022` | Same, with `core.autocrlf true`, minus Unix-only tests, plus Windows-only ones |
+
+What is `cfg`-gated, and nothing else:
+
+| Gate | Tests |
+| --- | --- |
+| `target_os = "linux"` | Live `statvfs` on a temp dir, a live `/proc/self` smoke |
+| `unix` | Process-group kill, `SIGINT` and `SIGTERM`, output-dir modes 0700 and 0600, symlink-not-followed |
+| `windows` | The `ping`-based sleeper, absolute `System32` resolution, a live registry read compared in shape to the recorded JSON |
+| none | Every parser and evaluator, and every Replay-driven fixture, for any recorded OS, on any runner |
+
+The last row is the point. A `/proc/net/tcp` parser, a macOS `netstat` parser and a Windows `NETSTAT.EXE`
+parser run on all five legs, because their input comes through `Probe`. Only the closure passed to
+`probe.native(..)` is gated. The setuid-like id mismatch (INV-10) is a unit test on the pure refusal
+function with injected ids, not a backend feature.
+
+**The CLI in process (decision A).** `rdy_cli` is a library target (09 already needs it for the CLI
+reference). It exposes `#[doc(hidden)] pub fn run(args, backend: Arc<dyn Backend>, stdout, stderr) ->
+ExitCode`. `main.rs` calls it with the Live backend and nothing else. Env tests call it with Replay and
+capture buffers, so they get exit codes, `terminal.txt` and the report files with paused time. No release
+artifact has a switch, a feature or an environment variable that reads a fixture, so there is nothing to
+prove absent. ADR 0011 decision 4 ("no library") is amended in the same change. The real-binary tests stay
+small and Live-only. `rdy --bogus` must exit 64, not clap's default 2, which would read as "blockers"; that
+case lives in ADR 0008's "Error types with fix hints" ticket.
+
+**Real-OS smoke.** On each leg the shipped `rdy` runs a tiny spec against the live runner and asserts
+shape only: the report validates against the schema, no check has `error_kind: panic`, host checks are not
+skipped on Linux and are `not_yet_on_os` on macOS and Windows, and the exit code is 0, 1 or 2. It merges
+with release-engineer's M2 `release-smoke` job.
+
+## 7. The compatibility matrix
+
+`docs/compatibility.md` is the public page, linked from the docs site. In M1 it is a hand-written table
+owned by docs-writer, with one row per claim below. From M2 it is generated from `tests/compat/matrix.toml`
+by `cargo xtask matrix`, and `docs-gen` runs it with `--check`. Appendix B has the rules and the day-one
+rows.
+
+**Dimensions**, one small table per group, not a cross product: OS family and version, architecture,
+container runtime, Kubernetes distro and version, proxy type, network posture, GPU driver line.
+
+**States.** The page makes a claim, so the words are exact.
+
+| State | Meaning |
+| --- | --- |
+| `live` | A CI runner leg or the kind job exercised real code on a real system of that kind. The evidence column names the leg |
+| `fixture` | CI replays a fixture. The page shows its origin. A `hand` fixture is our model of the system, not a recording |
+| `field` | Verified by hand on a real environment. Needs a record file with rdy version, date, who, and redacted evidence |
+| `none` | Unverified. We make no claim. The default for every row |
+
+**Kept current.** Every fixture env's optional `[matrix]` table must be cited by a row, and a row that cites
+an env must match it. A PR that changes `crates/rdy-checks-*/src/**`, `tests/fixtures/**` or
+`CheckInfo::os` also changes the page, or its body says `Compat matrix: unchanged because <reason>`
+(the CI check is M2; code-reviewer enforces it by hand in M1). Moving a row down is always allowed and is
+right when a check changes and the evidence no longer applies. Staleness of `field` rows (over 180 days) is
+reported by a nightly job that opens an issue. It is never computed inside `--check`, so it cannot fail an
+unrelated PR.
+
+## 8. Coverage and flakes
+
+**Coverage.** `cargo-llvm-cov` in the nightly job on linux-x64, which is release-engineer's 06 ticket
+"Nightly coverage job, not gating". It uploads lcov and prints per-crate lines in the job summary. It is
+reported, not gated: no threshold, no PR comment. The job runs on the glibc host target, so it measures our
+code, not the shipped musl binary. The founder reads the per-crate table monthly. The number that does gate
+is the fixture-completeness rule in the lint.
+
+**Flake policy.** A flake is a test that passes and fails on the same commit.
+
+- The `ci` profile has `retries = 0`. A retry that turns red into green is how flakes hide.
+- Every flake is a bug owned by qa-engineer, filed with label `flake` and the run link, fixed within five
+  working days. If not fixed, the test is deleted and a ticket is filed to rewrite it. **Quarantine is
+  never allowed.** No `#[ignore]` as a parking place, no `continue-on-error`, no "known flaky" list.
+- The one legal `#[ignore]` is `#[ignore = "runs in job: <name>"]` for a test another job runs with
+  `--run-ignored only` (kind). Root tests use a `root_*` name filter instead. An ignore lint is M2.
+- Hygiene: loopback sockets bind port 0 and read the port back; files live under `tempfile`; no in-process
+  environment changes (edition 2024 makes `set_var` unsafe and `forbid(unsafe_code)` holds); `TZ`, `LC_ALL`
+  and `NO_COLOR` are set on child processes; nothing sleeps to wait for something; timing is upper bound only.
+- A nightly flake hunt (M2) runs the suite repeatedly on all five legs and files issues itself.
+
+## 9. Definition of done for a check ticket, test side
+
+The checklist is Appendix E and is copied into `.github/pull_request_template.md`. In one line: a check is
+done when it has a complete `CheckInfo`, boundary unit tests, the minimum fixture cases with reviewed
+`expect.json`, an in-manifest proof, a Timeout case where it can hang, a canary case where it records
+sensitive input, the right OS table, a use in at least one env spec, a matrix decision, green on five legs,
+and a golden diff that code-reviewer has read first.
+
+## Appendix A. Fixture file formats and recording
+
+**`root.manifest.json`**
 
 ```json
 {
@@ -154,21 +424,19 @@ proxy = "connect-basic-tls-intercept"
 }
 ```
 
-  The loader builds these in memory. The fixture tree itself holds no symlinks, no special modes and no
-  file name with `:`, `[` or `]`. `unreadable` is how a no-privilege run is simulated.
-- **`commands/<slug>-<hash8>.json`**, where `hash8` is the first eight hex digits of SHA-256 over the argv
-  joined by NUL bytes, and the slug is the argv in lowercase letters, digits and `-`, cut at 40 characters.
+Built in memory. The tree holds no symlinks, no special modes and no name with `:`, `[` or `]`.
+`unreadable` simulates a no-privilege run.
 
-```json
-{ "argv": ["/usr/bin/chronyc", "-n", "-c", "tracking"], "stdout": "...", "stderr": "", "exit": 0, "delay_ms": 0 }
-```
+**`commands/*.json`** (any slug): `{ "argv": ["/usr/bin/chronyc", "-n", "-c", "tracking"], "stdout": "...",
+"stderr": "", "exit": 0, "delay_ms": 0 }`. The key is the normalised resolved argv. Binary output uses
+`stdout_b64`.
 
-  Binary output uses `stdout_b64`. A `delay_ms` beyond the check timeout gives `Timeout` without waiting.
-- **`api/<slug>-<hash8>.json`**: `{ "request": {"method", "path", "query"}, "status", "body", "delay_ms" }`,
-  hash over method, path and sorted query. Paged lists have one file per `continue` token. Access reviews
-  are answered from `api/reviews.json`, a table of attributes to `allowed` and `reason`. The mock records
-  every request, and the k8s tests assert that only the allowed ones arrived (ADR 0010, INV-14).
-- **`net.json`**:
+**`api/*.json`** (any slug): `{ "request": {"method", "path", "query"}, "status", "body", "delay_ms" }`.
+Paged lists have one file per `continue` token. Access reviews are answered from `api/reviews.json`, a
+table of attributes to `allowed` and `reason`. The mock records every request, and the k8s tests assert
+only the allowed ones arrived (ADR 0010, INV-14). Cloud APIs (M3) replay at the facade (03).
+
+**`net.json`**
 
 ```json
 {
@@ -182,564 +450,250 @@ proxy = "connect-basic-tls-intercept"
 }
 ```
 
-  `serve` connects a duplex stream to an in-process server from `rdy-testkit`. Certificate chains are
-  built with `rcgen` at test time, so no key or certificate is committed. Their serials and digests are
-  replaced by placeholders (`<serial>`, `<sha256>`) before comparison.
-- Addresses are documentation ranges only: `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`,
-  `2001:db8::/32`, plus loopback. Names end in `.example`. Tokens are the fixed string
-  `REDACTED-TEST-TOKEN`, or built from parts at test time when a push-protection scanner would flag them.
+`serve` names a server factory the test registers with the Replay builder. The factories come from the
+`test-support` feature of `rdy-checks-net`, which `rdy-cli` tests use as a dev-dependency, so
+`rdy-engine` does not depend on a check crate. Certificate chains are built with `rcgen` at test time.
+Their serials and digests become placeholders (`<serial>`, `<sha256>`) before comparison. `blackhole` is
+scripted only: a real black hole cannot exist on loopback (03).
 
-### Windows checkouts and `.gitattributes`
-
-Three things break on a default Windows checkout: `core.autocrlf` rewrites line endings, symlinks are not
-created, and some names are illegal. The first one also breaks a signed spec, because the signature
-covers the raw bytes.
-
-```gitattributes
-* text=auto eol=lf
-/tests/fixtures/** -text
-/examples/specs/** -text
-*.minisig -text
-/crates/*/templates/** text eol=lf
-/crates/*/data/** text eol=lf
-*.actual -diff
-```
-
-- `-text` under `tests/fixtures` means git never converts a byte. A fixture that must carry CRLF (recorded
-  `NETSTAT.EXE` output) keeps it on every OS. A fixture that must not carry CRLF cannot gain it.
-- Askama templates and shipped data files are `eol=lf`. Otherwise a Windows checkout compiles CRLF into the
-  HTML and every golden fails on that leg only.
-- `.editorconfig` sets `end_of_line = lf`. The lint (below) rejects a `\r` in any fixture file the
-  manifest does not list under `crlf = [...]`, so an editor cannot add CRLF by accident.
-- The windows-x64 leg runs `git config --global core.autocrlf true` before checkout. It is a permanent
-  canary: a test hashes `tests/fixtures/signed/*` and one CRLF fixture against committed digests, and the
-  signed spec must verify. The signed spec was signed once with a throwaway key. Only the public key and
-  the `.minisig` are committed. The secret key was deleted. New cases get new files; nobody re-signs.
-- Names: unique when lowercased, no Windows reserved names (`con`, `nul`, `aux`, `com1`), no trailing dot or
-  space, none of `<>:"|?*[]`, and under 150 characters from the repo root.
-
-### Recording a fixture from a real machine
-
-Most M1 fixtures are written by hand. Recording exists so that macOS, Windows, k8s distro and GPU shapes
-are real, not guessed. It is M2 and dev-only (02 agrees). It is a command in `xtask`, not in `rdy`: it
-reads many files, and that code should not sit in a binary that runs as root on a customer box.
+**Recording (M2, dev-only).** It is a command in `xtask`, not in `rdy`, so the shipped binary carries no
+bulk file-reading code.
 
 ```text
 cargo xtask fixture record --spec spec.yaml --origin ci-runner --out tests/fixtures/envs/macos-15-arm64
 ```
 
-1. A `Recording` decorator (cargo feature `record` on `rdy-engine`, never in release) wraps the Live
-   backend and runs the spec once. Raw responses stay in memory. Raw output is never written to disk, not
-   even to a temp file.
-2. **Scrub in memory**, before anything is written. First the `rdy_engine::redact` secret rules. Then an
-   identity pass with one consistent mapping per recording: hostnames become `host-01.acme.example`, users
-   `user-01`, addresses move into documentation ranges, MACs become `02:00:00:00:00:NN`, and UUIDs, serials,
-   instance ids, account ids and ARNs become counters of the same shape. Public names not on
-   `scrub-allow.toml` become acme names.
-3. **Allow-lists for known formats.** Kubernetes JSON drops `managedFields`, `last-applied-configuration`
-   and node `status.images`. NVIDIA XML keeps a tag allow-list and replaces UUID, serial, board id, bus id
-   and process names. Process lists keep command names only. An unknown file type is refused unless
-   `--include-unknown` is set.
+1. A `Recording` decorator (feature `record` on `rdy-engine`, never in release) wraps the Live backend and
+   runs the spec once. Raw responses stay in memory and are never written to disk.
+2. Scrub in memory: first the redactor rules, then one consistent identity mapping per recording.
+   Hostnames become `host-01.acme.example`, users `user-01`, addresses move into documentation ranges,
+   MACs become `02:00:00:00:00:NN`, and UUIDs, serials, instance ids, account ids and ARNs become counters
+   of the same shape.
+3. Allow-lists for known formats. Kubernetes JSON drops `managedFields`, `last-applied-configuration` and
+   node `status.images`. NVIDIA XML keeps a tag allow-list and replaces UUID, serial, board id, bus id and
+   process names. Process lists keep command names only. An unknown file type is refused.
 4. The recorder writes to `<out>.tmp`, runs the fixture lint, and deletes the directory if the lint fails.
-5. The real-to-fake mapping is never written anywhere. The recorder prints counts and the file list. The
-   human reads `git diff` before commit, and code-reviewer reads it again.
+5. The real-to-fake mapping is never written. The recorder prints counts and the file list. A human reads
+   `git diff`, and code-reviewer reads it again.
 
-For a remote host, build `xtask` as one static binary, copy it over, run it there, and carry back only the
-scrubbed directory. For macOS and Windows, a manual workflow `record-fixtures.yml` runs the recorder on the
-GitHub-hosted runners and uploads the scrubbed directory (M2). That gives real macOS and Windows output
-without owning either machine. Kubernetes shapes can also come from `scripts/record-k8s-fixture.sh` (a
-`kubectl get -o json` with a `jq` allow-list), then `cargo xtask fixture scrub`.
+For a remote host, build `xtask` as one static binary, run it there, and carry back only the scrubbed
+directory. For macOS and Windows, a manual workflow `record-fixtures.yml` runs the recorder on the
+GitHub-hosted runners and uploads the scrubbed directory. That gives real macOS and Windows output without
+owning either machine. Kubernetes shapes can come from `scripts/record-k8s-fixture.sh`, then the scrub step.
 
-### The fixture lint
+## Appendix B. Matrix rules and day-one rows
 
-`cargo xtask fixture check` runs in `lint` and as a test on every leg. It fails on:
-
-- a manifest that does not parse, a missing `origin`, an `origin` outside the four allowed;
-- a file name that breaks the Windows rules, a symlink, a file over 256 KiB, an environment over 1 MiB,
-  a `\r` not listed in the manifest, a missing `.gitattributes` line;
-- any name not ending in `.example`, `.test`, `.invalid` or `localhost`, and any address outside the
-  documentation and loopback ranges, unless `allow.toml` lists it with a reason (`169.254.169.254` for the
-  metadata-address tests is the first entry);
-- anything the M1 redactor would change. A fixture that contains a secret-shaped string must be under
-  `tests/fixtures/redaction/`, where that is the point;
-- for every check id in the registry: no `checks/<id>/` directory, or a directory without a passing case, a
-  non-passing case and, where `CheckInfo` has a root-optional need, a no-privilege case with `partial`, and
-  where the check runs a command or opens a socket, a `Timeout` case (03 lists the rest).
-
-### M1 environments
-
-Eleven environments. The first five are the ones the M1 exit test needs (exit codes 0, 1 and 2 on every
-leg). The family ones cover one real-looking stack each. The last two prove the macOS and Windows stubs.
-
-| Env | Origin | Story | Verdict, exit |
-| --- | --- | --- | --- |
-| `all-pass` | hand, generated | RHEL 9 VM, 32 GiB nominal showing 31.3 GiB, xfs, direct egress, vanilla three-node cluster | `ready`, 0 |
-| `warnings-only` | based on `all-pass` | Swap on, port inside the ephemeral range, one proxy `NO_PROXY` gap, no default StorageClass | `ready_with_warnings`, 1 |
-| `all-block` | based on `all-pass` | 8 GiB RAM, disk full, 6443 held, egress refused, TLS interception, cluster too old, RBAC denied, nodes NotReady | `not_ready`, 2 |
-| `no-privileges` | based on `all-pass` | Not root, audit log and other users' fds unreadable, no kubeconfig: partial results and `MissingNeed` skips | `not_ready` (required checks not run), 2 |
-| `timeouts` | based on `all-pass` | Commands with `delay_ms` past the limit, a black-hole endpoint, a slow `/version`, a hung `statvfs` | `not_ready`, 2, run ends inside `deadline_ms` |
-| `host-ubuntu2204-container` | hand | Container with `memory.max` 8 GiB on a 64 GiB host, `cpu.max` quota, overlayfs, `noexec` tmpfs | per spec |
-| `net-corp-proxy` | hand, generated | `HTTPS_PROXY` with a 407 Basic proxy, CONNECT ok, internal registry missing from `NO_PROXY`, no Docker drop-in, private-CA interception | `not_ready`, 2 |
-| `net-airgapped` | hand | No default route, internal DNS only, public endpoints refused or black-holed, internal mirror reachable, runs `acme-airgap-host.yaml` | per spec |
-| `k8s-openshift-restricted` | hand | `v1.xx.x+hash` version string, PSA `restricted` namespace, SCCs, no default StorageClass, CSI driver present | `ready_with_warnings`, 1 |
-| `macos-15-arm64-stub` | hand (recorded in M2) | Host checks answer "no data source for this OS yet"; net and k8s run | per spec |
-| `windows-2022-stub` | hand (recorded in M2) | Same, with CRLF command output and registry JSON for the proxy | per spec |
-
-Cut order if hours run short: the two stubs (the per-OS plan golden in section 6 still covers them), then
-`net-airgapped`, then `host-ubuntu2204-container`. The first five never move.
-
-### How each hard case is covered
-
-| Case CI cannot have | How it is covered | State shown in the matrix |
-| --- | --- | --- |
-| Air-gapped site | `net-airgapped`: `refused` and `blackhole` entries, DNS limited to internal names, the offline-first test (SEC-22) proving no connect leaves loopback | `ci` |
-| GPU node (M4) | `nvidia-smi -q -x --dtd` captures from a rented T4 or L4, one A100 with MIG, and an HGX capture scrubbed by `xtask`. Every failure string and exit code is a command fixture. The runner asserts `nvidia-smi` is never called when the kernel module is absent (gpu-expert review) | `none` until a capture exists, then `ci` for the captured driver line, and `hand` for the first real node |
-| Windows host with a specific agent | Registry and service JSON under `native/`, a `SecurityCenter2` result, a Defender preference dump. The catalog (`agents.toml`) has a unit test per entry | `ci`; `hand` only when we run on a real Windows box |
-| Kubernetes distros | Per-distro directories under `checks/k8s.*/` and envs: `version.json`, `nodes.json`, `storageclasses.json`, `csidrivers.json`, `ingressclasses.json`, and a Namespace with the distro's PSA labels (k8s-expert S7). A live kind job covers the real API server | kind `ci` live, others `ci` by fixture |
-| Proxy with TLS interception | `rcgen` chains served by `rdy-testkit` (public, private CA in a fake system store, unknown CA), a CONNECT proxy with modes `ok`, `403`, `407-basic`, `407-negotiate`. The probe test asserts zero application bytes are written | `ci` |
-
-## 3. Golden tests
-
-**What is golden.** Per environment: `report.json` (stdout of `rdy run --json`), `report.html`, and
-`terminal.txt` (stderr with `NO_COLOR=1`, `TERM=dumb`, `COLUMNS=100`). Per check case: `expect.json`. Also
-one plan golden per OS (section 6), and the redaction corpus. Goldens sit next to what they describe, so a
-reviewer sees the input and the output in one diff. HTML goldens exist for `all-pass`, `warnings-only` and
-`all-block` only, to keep review short.
-
-**Compare.** One helper, `testing::golden::assert_golden(path, actual_bytes)`, about 60 lines. It compares
-bytes. On a mismatch it writes `<path>.actual` (git-ignored), prints the first 40 lines of a unified diff
-and the exact command to accept. No insta, no snapshot header: the file is the product's own output, and
-`report.html` opens in a browser. Every path it touches is appended to `target/goldens-used/<pid>.txt`.
-
-**Normalisation.** Determinism first, scrubbing second. The harness fixes the inputs, then `normalize`
-handles what is left.
-
-| Field | Treatment |
-| --- | --- |
-| `run.started_at`, `finished_at` | `Clock::Fixed` from the manifest, so no scrubbing |
-| `run.id` | Fixed from the manifest |
-| `run.duration_ms`, `started_ms`, `duration_ms`, action `at_ms` and `duration_ms` | Set to 0. `timeout_after_ms` stays: it is the configured limit |
-| `producer.version`, `commit`, `target` | `<version>`, `<commit>`, `<target>`, so a release or a leg never changes a golden |
-| `host.hostname`, `host_id` | Taken from the fixture. The lint proves they are synthetic. Not scrubbed |
-| Action log order | Sorted by spec index of the check, then per-check order, then renumbered. Parallel arrival order is not part of the contract |
-| Output directory in terminal text | `<out-dir>`, with `\` turned into `/` in the terminal golden only |
-| Generated certificate serials and digests | `<serial>`, `<sha256>` |
-| Environment | The harness sets `TZ=UTC`, `LC_ALL=C`, `NO_COLOR=1`, `HOME` to a temp dir, and clears the rest |
-
-A second test runs each env at `jobs = 1` and `jobs = 8` and asserts equal normalised reports. That catches
-order dependence the goldens would hide.
-
-**Extra assertions on every JSON golden.** It validates against `result.v1.schema.json`. The HTML golden
-gets the static checks from ADR 0003: the CSP meta is exactly as written, `lang` and `color-scheme` are
-set, no `src` or `href` points off the file except the footer link with `rel="noopener noreferrer"`, no
-`<link>`, no `@import`, no `url(`, and `|safe` appears in no template. A `</script><img onerror>` hostname
-round-trips through the embedded JSON. A headless-browser no-network render is an M2 job, a change to the
-ADR 0003 exit test (see corrections).
-
-**Updating on purpose.**
-
-```text
-UPDATE_GOLDENS=1 cargo nextest run -p rdy --features fixture-backend   # rewrites goldens, lists each file
-git diff tests/                                                        # read it
-```
-
-- `UPDATE_GOLDENS=1` is refused when `CI` is set, except in the `goldens-fresh` job below.
-- It never touches `tests/fixtures/redaction/**` or `tests/fixtures/results/**`. A golden you can regenerate
-  is not a security test. Redaction expectations are edited by hand, and result files from released
-  versions are append only.
-- Every update prints the changed files, so a typo in a path cannot bless a new file silently.
-
-**Staleness checks in CI.**
-
-1. The normal run on all five legs: a mismatch fails.
-2. The `goldens-fresh` job (linux-x64): runs the suite with `UPDATE_GOLDENS=1`, then `git diff --exit-code
-   tests/`. A diff means a golden was out of date or the output is not deterministic. Then `cargo xtask
-   goldens check` compares `target/goldens-used` with the files on disk and fails on an orphan.
-3. Goldens are OS independent by construction. There is no per-OS golden file, so no leg can hide a diff.
-4. `cargo xtask fixture check` verifies every file under `tests/fixtures/results/<old version>/` is unchanged
-   from `main`.
-
-**Review rule.** A PR that changes a golden has a `## Golden changes` section in its body: one sentence
-per changed file saying why, plus the output of `cargo xtask goldens summary` (changed files, counts of
-changed JSON paths). A CI job fails the PR if goldens changed and the section is missing. It reads the body
-through an environment variable, never through `${{ }}` inside `run:` (zizmor flags that). code-reviewer
-reads the golden diff first, before the code. A golden-only PR, or a golden change the code change does not
-explain, is rejected.
-
-## 4. Property tests
-
-`proptest`, with `PROPTEST_CASES` at 256 locally and on four legs, 10,000 on linux-x64 (the ADR 0001 exit
-test), and 100,000 in the nightly job. Failures are saved to `proptest-regressions/` and committed, so a
-shrunk case becomes a permanent unit test. PR runs use a fixed seed, so an unrelated PR never fails on a
-fresh random draw. The nightly job uses a random seed, prints it, and files an issue instead of failing a
-PR. (A fixed seed needs proptest 1.5 or newer; the ticket confirms the pinned version.)
-
-**Spec parser** (`rdy_spec::parse_unverified` and `load`)
-
-| Invariant | Generator |
-| --- | --- |
-| Never panics. Returns `Ok` or a `SpecError` with a non-empty `hint()`, and a line and column when the failure is in the YAML | Arbitrary bytes up to 4 KiB; YAML-shaped soup (`[`, `{`, `- `, `: `, `&a`, `*a`, `!!`, `<<`, NUL, BOM, CRLF, tabs, long unicode); mutations of every file in `examples/specs` (byte flip, truncate, duplicate a line) |
-| Size limit: over 1 MiB is refused before parsing | Boundary cases (1 MiB, 1 MiB + 1), not random |
-| Depth limit: depth 64 passes, 65 fails | Nested flow sequences and maps of generated depth |
-| Anchors, aliases, merge keys, duplicate keys, a second document are each rejected with their own error | A valid generated spec with one poison step chosen by the strategy |
-| Round trip: `Spec` to JSON (valid YAML 1.2) and back is equal; `parse(emit(parse(x))) == parse(x)` for the examples | Generated `Spec` values: slug `^[a-z0-9][a-z0-9-]{0,62}$`, known ids, quantities, severities |
-| Version-like fields keep their text: `12.10` quoted stays `"12.10"`, unquoted is refused with a quote hint | Generated `\d{1,3}\.\d{1,3}(\.\d{1,3})?` |
-| Verify before parse: any single-byte change to the signed spec fails with a `SignatureError` and the parser spy count stays 0 | The committed signed spec plus a random index and byte |
-| The result type round trips: `Report` to JSON to `Report` is equal and validates against the schema | Generated reports from the result types |
-
-**Redactor** (`rdy_engine::redact`)
-
-| Invariant | Generator |
-| --- | --- |
-| Never panics on arbitrary UTF-8, nor on lossy-decoded bytes | Any string |
-| Idempotent: `redact(redact(x)) == redact(x)` | Any string, and strings with planted secrets |
-| A planted secret never survives, in its plain, JSON-escaped and URL-encoded forms, and the typed placeholder (`[REDACTED:aws_access_key_id]`) appears | Per-category secret generators (AWS key id, `rdy_st_` token, bearer, URL userinfo, PEM body, `password=`) embedded in random surrounding text, JSON strings, YAML and INI lines |
-| Report level: after the engine's redaction pass, a canary planted in every free-text field is absent from the JSON and the HTML, and `redactions` equals the number planted | Walk the result schema and plant a canary in every string leaf that has no `enum` or `const`. A new field is covered the day it is added |
-
-Not in M1: a property that random benign strings (git SHAs, UUIDs) pass unchanged. False positives are
-counted, not gated, in M1 (05), and a known-failing asserted property would be a quarantined test by another
-name. The curated negative cases in the corpus carry it until the rule set is stable in M2. Time is never
-asserted in property tests: the `regex` crate has no backtracking, and a 1 MiB adversarial case runs under
-the nextest slow-timeout.
-
-**Verdict and exit code** (`rdy_spec::result::verdict`, the rule in 02)
-
-First an exhaustive table test over severity (`warn`, `block`) times status (`pass`, `warn`, `block`,
-`skipped` with each reason, `timeout`, `error`). Then properties over generated lists of results:
-
-1. Order independent: any permutation gives the same verdict, counts and exit code.
-2. Monotone: making one result worse, or adding a result, never improves the verdict.
-3. A `severity: block` check that is skipped (other than not-applicable), timed out or errored gives
-   `not_ready` and exit 2. This is the "a gate of 0 or 1 must never pass an unchecked environment" guard
-   from ADR 0008.
-4. Exit code is 0, 1 or 2, and 0 only when every result is `pass` or not-applicable and at least one passed.
-5. Summary counts add up to `total`, and `required_not_run` equals the number of block-severity checks that
-   did not run.
-6. `verdict_reasons` match the statuses: `block_found` if and only if some check blocked.
-
-The binary maps 64 and 70 as table tests, not properties (section 6, CLI exit codes).
-
-## 5. Timeout and cancellation tests
-
-| Level | How | Asserts |
-| --- | --- | --- |
-| Scheduler | `FakeCheck` with `Sleep(forever)`, `Block` (a `spawn_blocking` that never returns), `Panic`, under `#[tokio::test(start_paused = true)]` | `Timeout` with `timeout_after_ms` equal to the effective limit; the run returns without waiting for the stuck thread; `Panic` gives `Error` and the other checks still pass; no real time passes |
-| Run deadline | `deadline` of 10 s, one check running, three unstarted | Running becomes `Timeout`, unstarted ones are not run, all counted as required or optional not run |
-| Cancellation | Cancel the token while checks run | Report written with `run.complete = false`, unfinished checks are `error` with `error_kind = interrupted` (01, section 5.3), nothing left running (a drop guard counts live futures), verdict from the rule |
-| Replay delays | `delay_ms` past the limit in a command or `net.json` `blackhole` | `Timeout` and an action log entry that says what was in flight |
-| Process level, Unix | Live backend, a test check that runs the platform sleeper (`/usr/bin/sleep 600`), timeout 1 s | The run ends in under 4 s, the child and its process group are gone (checked by `kill -0` on a recorded pid), `rdy` exits within 2 s of the deadline |
-| Binary, Unix | `rdy run` on the `timeouts` env, `SIGINT` after the first check starts | Exit within 3 s, report directory exists with `run.complete = false`, exit code by the verdict rule. A second `SIGINT` gives exit 70 and no report. `SIGTERM` behaves like the first `SIGINT` |
-
-Rules that keep these stable:
-
-- Engine tests use paused time, so they take microseconds and never flake on a slow runner. One case needs
-  proof, not assumption: tokio must auto-advance the paused clock while a `spawn_blocking` thread is stuck.
-  The harness test for `Fake::Block` proves it once. If it does not hold on the pinned tokio, that single
-  test uses a real 50 ms timeout.
-- The three real-time tests assert only upper bounds, with at least three times the expected time as margin.
-  They never assert a lower bound or the order of unrelated events. Nextest's `slow-timeout` kills a test
-  that hangs, so a regression fails in two minutes, not at the 25-minute job limit.
-- Windows: the first-`SIGINT` binary test is `#[cfg(unix)]` because sending a console control event needs
-  `unsafe`. On Windows the cancel path is covered at the engine level, and Ctrl-C on a real console is
-  `hand` in the matrix. Grandchild kill on Windows waits for job objects (an M2 ticket in 02); until then
-  the Windows process test asserts the direct child dies and the run ends.
-- The Ctrl-C wording follows 02 (first Ctrl-C finishes with a partial report, second exits 70). cli-ux has
-  not confirmed it. The test changes with 07, not the other way round.
-
-## 6. Cross-platform
-
-| Leg | Runner | Runs |
-| --- | --- | --- |
-| linux-x64 | `ubuntu-24.04`, musl | Everything, plus the Linux-only jobs: `root` (`sudo`, the `root_` tests), `nophonehome` (`sudo unshare -n` and `strace`, INV-11), `kind` (a live cluster), `goldens-fresh`, doc tests, 10,000-case properties. Nightly: coverage, flake hunt, 100,000-case properties |
-| linux-arm64 | `ubuntu-24.04-arm`, musl | Unit, property (256), fixtures, goldens, binary integration |
-| macos-arm64 | `macos-15` | Same, with the Unix process tests |
-| macos-x64 | `macos-15-intel` | Same |
-| windows-x64 | `windows-2022` | Same, with `core.autocrlf true`, minus Unix-only tests, plus Windows-only ones |
-
-What is `cfg`-gated, and nothing else:
-
-| Gate | Tests |
-| --- | --- |
-| `target_os = "linux"` | Live `statvfs` on a temp dir, live `/proc/self` smoke, `CapEff` parsing against the real file (the parsing itself is pure and ungated) |
-| `unix` | Process-group kill, `SIGINT` and `SIGTERM` tests, output-dir modes 0700 and 0600, symlink-not-followed |
-| `windows` | The `ping`-based sleeper, absolute `System32` resolution, live registry read compared in shape to the recorded JSON |
-| none | Every parser and evaluator. Every Replay-driven fixture, for any recorded OS, on any runner |
-
-The fourth row is the point. A `/proc/net/tcp` parser, a macOS `netstat` parser and a Windows `NETSTAT.EXE`
-parser all run on all five legs, because their input comes through `Probe`. Only the closure passed to
-`probe.native(..)` is `cfg`-gated. This tightens 02, which gates the whole gather function (see
-corrections).
-
-**How the macOS and Windows stubs are tested.**
-
-1. **Plan goldens.** `Engine::plan(spec, os)` is pure. A test plans every example spec for each of
-   `Linux`, `MacOs` and `Windows` on every runner and compares with `tests/fixtures/plans/<os>.txt`. The
-   support table in `CheckInfo::os` is therefore checked on all legs, with no Mac or Windows machine
-   needed. It shows `NotYet`, `NotApplicable`, `Partial` and `Full` per check.
-2. **Stub environments.** `macos-15-arm64-stub` and `windows-2022-stub` run end to end on every leg. Host
-   checks must be `skipped` with `skip_kind: unsupported_os` and the "no data source for this OS yet"
-   text, counted as required checks not run when the spec says block, and net and k8s must run as normal.
-   A spec that limits a check with `os:` gives `excluded`, which never counts.
-3. **Per-family honesty test** (02): every check marked `Full` or `Partial` on an OS must not return
-   `Unsupported` on that OS's fixture. It starts as an empty set and grows as data sources land.
-4. **Real-OS smoke.** On each leg, the shipped build of `rdy` runs a tiny spec against the live runner and
-   asserts only shape: the report validates against the schema, no check has `error_kind = panic`, host
-   checks are non-skipped on Linux and skipped with the stub reason on macOS and Windows, and the exit code
-   is 0, 1 or 2. This is the real-binary-on-every-OS test. It merges with release-engineer's M2
-   `release-smoke` job.
-
-**The fixture backend inside the real binary.** The integration tests run the real `rdy` (argument
-parsing, exit codes, report writing) against an environment directory. That needs a Replay backend in the
-binary. It is compiled only with cargo feature `fixture-backend` (which enables `rdy-engine/testing`) and
-read only from `RDY_TEST_BACKEND_DIR`. Release builds never enable it. CI proves it three ways: `cargo
-tree -p rdy -e features` on the release profile has no `testing`; `strings rdy | grep -c
-RDY_TEST_BACKEND_DIR` is 0 on the release archive; the `fixture-backend` binary prints a banner on stderr.
-The alternative, a separate test binary, cannot share the CLI code because `rdy` publishes no library
-(ADR 0011). This needs an ADR because security-reviewer should see it.
-
-**CLI exit codes.** Table tests through the real binary: 0, 1 and 2 on the three verdict envs; 64 for an
-unknown flag, an unreadable spec, a parse error, an unsigned spec without `--allow-unsigned`, and a failing
-signature even with the flag; 70 for an unwritable `--out-dir` (full terminal result still printed) and for
-a setuid-like id mismatch injected through the fixture backend. `clap` exits 2 on a usage error by default,
-which would read as "blockers". A test for `rdy --bogus` expecting 64 is the guard. `--json` failures print
-the error object with the stable `code` from ADR 0008.
-
-## 7. The compatibility matrix
-
-`docs/compatibility.md` is the public page. It is generated, never edited. The source is
-`tests/compat/matrix.toml`, rendered by `cargo xtask matrix` (the `docs-gen` job runs it with `--check`).
-
-**Dimensions**, one table per group, not one giant cross product: OS family and version, architecture,
-container runtime, Kubernetes distro and version, proxy type, network posture (direct, proxied,
-air-gapped), GPU driver line.
-
-**Three states.**
-
-| State | Meaning | Evidence required |
-| --- | --- | --- |
-| `ci` | Verified in CI. By a fixture environment or case, or by a live runner leg (the evidence column says which) | The fixture env name, or the runner leg. The generator checks the env exists and its `[matrix]` values equal the row |
-| `hand` | Verified by hand on a real environment | A record file `docs/compat/hand/<date>-<slug>.md`: rdy version, date, who, what the environment was, the command, redacted evidence. Shown as stale after 180 days |
-| `none` | Unverified. We make no claim | Nothing. `none` is the default for every row |
-
-A row looks like this:
+`tests/compat/matrix.toml` (M2 onward):
 
 ```toml
 [[row]]
 group = "Kubernetes distro"
 item = "OpenShift 4"
 checks = ["k8s"]
-state = "ci"
+state = "fixture"
 evidence = ["env:k8s-openshift-restricted"]
 
 [[row]]
 group = "Kubernetes distro"
 item = "EKS"
-version = "latest 3 minors"
+version = "three newest minors"
 checks = ["k8s"]
-state = "hand"
+state = "field"
 rdy = "0.2.0"
 verified_at = "2027-02-10"
-record = "docs/compat/hand/2027-02-10-eks.md"
+record = "docs/compat/field/2027-02-10-eks.md"
 ```
 
-**Kept current.**
+A `field` row needs its record file. A `fixture` row needs its env to exist, and the generator shows the
+env's `origin`. A `live` row names the runner leg or job.
 
-1. Every fixture env manifest has a `[matrix]` table. The generator fails if an env claims a dimension no row
-   cites (an env nobody uses as evidence), or a row cites an env that does not exist or disagrees.
-2. A PR that changes `crates/rdy-checks-*/src/**`, `tests/fixtures/**` or `CheckInfo::os` must also change
-   `tests/compat/matrix.toml`, or its body must carry a line `Compat matrix: unchanged because <reason>`.
-   A CI job checks the diff and the body (read through an environment variable). code-reviewer checks the
-   reason is true.
-3. Moving a row to `ci` needs the fixture. Moving it to `hand` needs the record file. Moving it down is
-   always allowed and is the right call when a check changes and the evidence no longer applies.
-
-**Day-one rows, the target for `0.1.0`.** Everything else is `none`.
+Day-one rows, the target for `0.1.0`. Everything else is `none`.
 
 | Group | Item | Checks | State | Evidence |
 | --- | --- | --- | --- | --- |
-| OS | Linux x86_64, Ubuntu 24.04 | host, net, k8s | `ci` | live runner linux-x64 |
-| OS | Linux aarch64, Ubuntu 24.04 | host, net, k8s | `ci` | live runner linux-arm64 |
-| OS | RHEL, Rocky, Alma 9 | host | `ci` | env `all-pass` |
-| OS | Ubuntu 22.04 in a container | host | `ci` | env `host-ubuntu2204-container` |
-| OS | RHEL, Rocky 8; Debian 12; Amazon Linux 2023; Alpine | host.os only | `ci` | `checks/host.os/*` cases |
-| OS | macOS 15 arm64 and x86_64 | net, k8s (host is a stub) | `ci` | live runner legs, env `macos-15-arm64-stub` |
-| OS | Windows Server 2022 x86_64 | net, k8s (host is a stub) | `ci` | live runner leg, env `windows-2022-stub` |
-| OS | Windows 11, SLES 15, macOS 14 | all | `none` | |
+| OS | Linux x86_64, Ubuntu 24.04 | host, net, k8s | `live` | linux-x64 leg, kind job |
+| OS | Linux aarch64, Ubuntu 24.04 | host, net | `live` | linux-arm64 leg |
+| OS | RHEL, Rocky, Alma 9 | host | `fixture` | env `all-pass` (origin `hand`) |
+| OS | RHEL, Rocky 8; Debian 12; Amazon Linux 2023; Alpine | host.os only | `fixture` | `checks/host.os/*` cases (`hand`) |
+| OS | macOS 15 arm64 and x86_64 | net | `live` | macos-15 and macos-15-intel legs. Host checks are `not_yet_on_os` |
+| OS | Windows Server 2022 x86_64 | net | `live` | windows-2022 leg. Host checks are `not_yet_on_os` |
 | Container runtime | Docker, containerd, Podman, CRI-O | host.container_runtime (M1-late) | `none` | |
-| Kubernetes | kind, newest upstream minor | k8s | `ci` | live `kind` job |
-| Kubernetes | kubeadm vanilla, three newest minors | k8s | `ci` | env `all-pass` and per-version `version.json` cases |
-| Kubernetes | OpenShift 4 | k8s | `ci` | env `k8s-openshift-restricted` |
-| Kubernetes | EKS, GKE, AKS, RKE2, k3s | k8s | `none` | distro set is M2 |
-| Proxy | Direct, none | net | `ci` | env `all-pass` |
-| Proxy | CONNECT without auth; 407 Basic; 407 Negotiate (classified, not authenticated) | net | `ci` | loopback proxy modes, env `net-corp-proxy` |
-| Proxy | TLS-intercepting with a private CA | net | `ci` | env `net-corp-proxy` |
+| Kubernetes | kind, newest upstream minor | k8s | `live` | kind job |
+| Kubernetes | kubeadm vanilla, three newest minors | k8s | `fixture` | env `all-pass`, `version.json` cases (`hand`) |
+| Kubernetes | OpenShift 4, EKS, GKE, AKS, RKE2, k3s | k8s | `none` | Distro set is M2 |
+| Proxy | Direct | net | `fixture` | env `all-pass` |
+| Proxy | CONNECT; 407 Basic; 407 Negotiate (classified, not authenticated) | net | `fixture` | loopback proxy modes, a simulated proxy |
+| Proxy | TLS-intercepting with a private CA | net | `fixture` | generated chains, a simulated middlebox |
 | Proxy | PAC or WPAD | net | `none` | Not supported in v1. The check warns |
-| Network | Air-gapped host | host, net | `ci` | env `net-airgapped` |
-| GPU driver | 535, 550, 570 lines | gpu (M4) | `none` | Captures needed (see section 2) |
+| Network | Air-gapped host | host, net | `none` | `net-airgapped` is the first M2 add-back |
+| GPU driver | 535, 550, 570 lines | gpu (M4) | `none` | Captures needed |
 
-## 8. Coverage and flakes
+## Appendix C. Normalisation
 
-**Coverage.** `cargo-llvm-cov` in a nightly job on linux-x64 (release-engineer owns the job, M2). It
-uploads an lcov file and prints per-crate line coverage in the job summary. It is reported, not gated: no
-threshold, no PR comment, no badge in M1. The founder looks at the per-crate table once a month and asks
-for tests where a parser or a verdict path is uncovered. `xtask` and the `testing` modules are excluded.
-The job runs on the glibc host target, so it measures our code, not the shipped musl binary. The number
-that does gate is the fixture-completeness lint in section 2: every registered check has its cases.
+| Field | Treatment |
+| --- | --- |
+| `run.started_at`, `finished_at`, `run.id` | Fixed from the manifest `[run]` table. No scrubbing |
+| `duration_ms`, `started_ms`, action `at_ms` and `duration_ms` | Set to 0. `timeout_after_ms` stays: it is the configured limit |
+| `producer.version`, `commit`, `target` | `<version>`, `<commit>`, `<target>`, so a release or a leg never changes a golden |
+| `host.hostname`, `host_id` | Taken from the fixture. The lint proves they are synthetic |
+| Action log order | Sorted by spec index of the check, then per-check order, then renumbered |
+| Output directory in terminal text | `<out-dir>`, with `\` turned into `/` in the terminal golden only |
+| Generated certificate serials and digests | `<serial>`, `<sha256>` |
+| Process environment | The harness passes `TZ=UTC`, `LC_ALL=C`, `NO_COLOR=1`, `HOME` as a temp dir, and nothing else |
 
-**Flake policy.** A flake is a test that passes and fails on the same commit.
+## Appendix D. Property tables for M2
 
-- The `ci` profile has `retries = 0`. A retry that turns red into green is how flakes hide.
-- Every flake is a bug owned by qa-engineer, filed with label `flake` and the failing run link, fixed within
-  five working days. If it is not fixed in five days, the test is deleted and a ticket is filed to rewrite
-  it. **Quarantine is never allowed.** No `#[ignore]` as a parking place, no `continue-on-error`, no
-  "known flaky" list.
-- The one legal `#[ignore]` is `#[ignore = "runs in job: <name>"]` for a test another CI job runs with
-  `--run-ignored only` (kind, root). A lint greps every `#[ignore` and fails unless the reason has that
-  form and `<name>` is a job in `ci.yml`. Platform gating uses `cfg`, listed in section 6, never `ignore`.
-- Root-only tests are named `root_*` and excluded from the normal profile by a nextest filter. In the `root`
-  job they fail, not skip, if the process is not root.
-- Test hygiene that prevents most flakes: bind loopback sockets on port 0 and read the port back; create
-  every file under `tempfile`; no in-process environment changes (edition 2024 makes `set_var` unsafe, and
-  `forbid(unsafe_code)` holds); set `TZ`, `LC_ALL`, `NO_COLOR` on child processes; no sleep to wait for a
-  thing (wait on a channel, a port, or paused time); upper-bound timing only.
-- A nightly flake hunt runs the suite repeatedly on all five legs (nextest stress mode, or a shell loop
-  if the pinned nextest lacks it) and files issues itself.
+**Redactor** (`rdy_engine::redact`)
 
-## 9. Definition of done for a check ticket, test side
+| Invariant | Generator |
+| --- | --- |
+| Never panics on arbitrary UTF-8 or lossy-decoded bytes | Any string up to 4 KiB |
+| Idempotent: `redact(redact(x)) == redact(x)` | Any string, and strings with planted secrets |
+| A planted secret never survives, in plain, JSON-escaped and URL-encoded form, and the typed placeholder appears | Per-category generators (AWS key id, `rdy_st_` token, bearer, URL userinfo, PEM body, `password=`) in random text, JSON, YAML and INI |
+| After the engine's redaction pass, a canary planted in every free-text field is absent from the JSON and the HTML, and `redactions` equals the number planted | Walk the result schema and plant a canary in every string leaf with no `enum` or `const`. A new field is covered the day it is added |
 
-A check ticket is not done until the PR shows all of these. The PR template carries the list.
+Random benign strings (git SHAs, UUIDs) are not asserted unchanged until the rule set is stable: false
+positives are counted, not gated, in M1 (05), and a known-failing property would be a quarantined test.
+
+**Verdict and exit code** (`rdy_spec::result`, the rule in 01 section 5.3). First an exhaustive table test
+over severity (`warn`, `block`, unknown) times status (`pass`, `warn`, `block`, `skipped` with each
+`skip_kind`, `timeout`, `error`, unknown). Then, over generated lists:
+
+1. Order independent: any permutation gives the same verdict, counts and exit code.
+2. Monotone: making one result worse, or adding a non-pass result, never improves the verdict. Adding a
+   `pass` to a list where nothing was verified is the one allowed improvement, and has its own case: it
+   moves `ready_with_warnings` with `verdict_reason: nothing_verified` (exit 1) to `ready` (exit 0).
+3. A required check (severity `block` or unknown) that is skipped (other than `not_applicable`), timed out,
+   errored or has an unknown status gives `not_ready` and exit 2.
+4. Exit code is 0 only when every required check passed or is `not_applicable`, nothing warned, no
+   optional check failed to run, and at least one check passed.
+5. Summary buckets add up to `total`, and `required_not_run` equals the count in property 3.
+6. `verdict_reason` is `required_check_not_run`, `nothing_verified` or null, and matches the statuses.
+
+## Appendix E. Check ticket checklist (the PR template)
 
 ```text
 [ ] CheckInfo complete: id, family, needs, os table, default timeout, manifest of reads/commands/env/peers.
     The registry test passes (ids unique, id matches its row in 03).
 [ ] Evaluation is a pure function over plain fact structs. Unit tests hit each threshold boundary:
     exactly at min, one below, inside the nominal band, severity warn capping a block.
-[ ] Parsers of external text have a "never panics on arbitrary bytes" property test (shared helper).
+[ ] Parsers of external text have a "never panics on arbitrary bytes" property (shared helper).
 [ ] tests/fixtures/checks/<id>/ has the minimum cases: pass, each non-pass level, no-privilege (partial)
     if a root-optional need exists, Timeout if the source can hang, garbage input (empty, truncated,
     odd locale) giving Error or partial and never a panic. Each case has a reviewed expect.json.
-[ ] assert_within_manifest passes for every case: the check read only what it declared.
-[ ] Fix text: every placeholder is filled in expect.json (no stray braces), and the spec fix override case exists.
-[ ] If the check records env, URLs or command output: a case with a planted canary shows it absent from JSON and HTML.
-[ ] Every OS in CheckInfo::os is right. Plan goldens for all three OSes are updated. Stubs return the skip reason.
-[ ] The check is used by at least one env spec. The env goldens are updated and the diff is explained in "## Golden changes".
-[ ] Fixture lint passes (synthetic origin, addresses, names, sizes, Windows-safe names).
-[ ] tests/compat/matrix.toml changed, or "Compat matrix: unchanged because ..." is in the PR body.
-[ ] Green on all five legs, goldens-fresh green, no new #[ignore] outside the allowed form.
-[ ] Ran once on a real machine if one is at hand. The command and redacted evidence are in the PR.
-[ ] code-reviewer has read the golden diff first. security-reviewer has it if the check execs, opens sockets or reads sensitive paths.
+[ ] assert_within_manifest passes for every case.
+[ ] Fix text: every placeholder is filled in expect.json, and the spec fix override case exists.
+[ ] If the check records env, URLs or command output: a canary case shows it absent from JSON and HTML.
+[ ] Every OS in CheckInfo::os is right; the plan unit test for Windows and macOS passes.
+[ ] The check is used by at least one env spec; env goldens updated and explained in "## Golden changes".
+[ ] Fixture lint passes.
+[ ] Compatibility page changed, or "Compat matrix: unchanged because ..." is in the PR body.
+[ ] Green on all five legs; no new #[ignore] outside the allowed form.
+[ ] Ran once on a real machine if one is at hand; command and redacted evidence in the PR.
+[ ] code-reviewer read the golden diff first. security-reviewer has it if the check execs, opens sockets
+    or reads sensitive paths.
 ```
 
 ## Plan corrections found
 
-- docs/plan/03-check-catalog.md, Conventions, "Fixtures", and docs/plan/02-engine-design.md, "Testing seams":
-  the layout `tests/fixtures/<check-id>/<case>/` leaves no room for whole environments, and the format has
-  symlink trees, a mode-0600 file and `:[]` in names (the rust-engineer review, item 9). Fix:
-  `tests/fixtures/checks/<check-id>/<case>/` beside `tests/fixtures/envs/<env>/`; add `fixture.toml`,
-  `root.manifest.json`, `native/` and `net.json`; name command files by argv hash; keep Replay keys as POSIX
-  strings (section 2).
-- docs/plan/02-engine-design.md, "The probe facade": `Probe` takes `&Path`. On Windows that makes the
-  fixture key depend on the runner. Fix: Replay normalises every requested path to a POSIX
-  string before lookup, as the rust-engineer review asked.
-- docs/plan/02-engine-design.md, "How checks degrade on each OS": the gather functions sit in
-  `#[cfg(target_os)]` functions with stubs. Then a Linux fixture cannot exercise the Linux parser on a macOS
-  leg. Fix: gate only the closures passed to `probe.native`; everything that reads through `Probe` is
-  ungated and chooses its source from `Backend::os()` at run time (section 6).
+- docs/plan/03-check-catalog.md, Conventions "Fixtures", and docs/plan/02-engine-design.md, "Testing
+  seams": the path `tests/fixtures/<check-id>/<case>/` leaves no room for whole environments. Fix:
+  `tests/fixtures/checks/<check-id>/<case>/` beside `tests/fixtures/envs/<env>/`, and 03's
+  `tests/fixtures/k8s/distros/` becomes `checks/k8s.*/` cases. Add `fixture.toml`, `native/` and `net.json`.
+  Command and api files are indexed by the content inside them with free slug names, not argv hashes
+  (code-review item 12); 03's "slug plus hash of argv" convention and its ticket "Fixture manifest
+  (symlinks, unreadable, dirs), placeholders and Windows-safe command names" follow this note.
+- docs/plan/02-engine-design.md, "The probe facade": `Probe` takes `&Path`. On Windows the fixture key then
+  depends on the runner. Fix: Replay normalises to POSIX strings, maps `root/c/...` to `c:/...` only for
+  `os = "windows"`, and resolves programs by the fixture's `os`.
+- docs/plan/02-engine-design.md, "How checks degrade on each OS": whole gather functions sit under
+  `#[cfg(target_os)]`, so a Linux fixture cannot exercise the Linux parser on a macOS leg. Fix: gate only
+  the closures passed to `probe.native`.
 - docs/plan/02-engine-design.md, "Testing seams", and docs/plan/00-overview.md, ticket "Golden tests for
-  JSON and HTML reports": both say `insta`. This plan uses plain-file goldens and `UPDATE_GOLDENS=1`
-  (section 3). Fix: drop `insta` from the dev-dependency table; rewrite that ticket's exit test (done in
-  Tickets implied). See the ADR list.
-- docs/plan/00-overview.md, same ticket, and CLAUDE.md "Cross-platform from day one": "all four CI targets".
-  06 defines five legs (macOS has two). Fix: say "five CI legs".
-- docs/plan/06-release-and-distribution.md, Appendix A `test` job: `cargo nextest run` does not run doc
-  tests, and nothing sets `core.autocrlf` on the Windows leg. Fix: add `cargo test --doc --workspace
-  --locked` (linux-x64), the `ci` nextest profile with `retries = 0`, and `git config --global
-  core.autocrlf true` before checkout on windows-x64.
-- docs/adr/0003-report-format-html-json.md, ticket "askama HTML report with inline CSS, dark mode and
-  print" and 00-overview's same ticket: the exit test needs a headless browser in M1. Fix: M1 uses the static
-  checks in section 3 (no off-file `src` or `href`, no `url(`, CSP exact). The browser render is an M2 job
-  (ticket below).
-- docs/adr/0007-crate-publishing-and-versioning.md, Tickets implied, "Keep golden result files per
-  released version and parse them in CI" is `[M2]`; docs/plan/00-overview.md lists it as `[M1]`. Fix: M1.
-  The week-2 to week-5 alphas already write result files, and the M2 portal must read what they wrote.
-  Start the directory at `0.1.0-alpha.1`.
-- docs/plan/rdy-plan.md "Example spec" and examples/specs/acme-airgap-host.yaml,
-  examples/specs/acme-inference-gpu.yaml: they use `host.selinux` and `gpu.device_plugin`, but 03 names
-  `host.lsm` and `k8s.device_plugins`. The examples lint test will report them as unknown ids. Fix: one
-  name per check, decided in 01 and 03, then the examples follow.
-- docs/plan/02-engine-design.md, "Scheduling, timeouts and cancellation": an interrupted run marks checks
-  `Skipped(Cancelled)` and sets `Report::interrupted`. 01-spec-format.md, section 5.3, has no such flag:
-  unfinished checks are `error` with `error_kind: interrupted` and `run.complete` is false. The `SkipReason`
-  names in 02 also differ from the `skip_kind` codes in 01. Fix: 02 follows 01 (02 says 01 wins). The
-  cancellation tests in section 5 are written to 01.
-- docs/plan/08-testing.md depends on 01's ticket "Align example specs and check catalog with 01-spec-format
-  names": `examples/specs/*.yaml` use `host.selinux` and `gpu.device_plugin`, but 03 names `host.lsm` and
-  `k8s.device_plugins`. The examples lint test fails on them until that ticket lands.
+  JSON and HTML reports": both say `insta`. Plain-file goldens and `UPDATE_GOLDENS=1` replace it. Fix: drop
+  `insta` from the dev-dependency table; the ticket's exit test is rewritten below.
+- docs/plan/00-overview.md ticket "Property and fuzz tests for rdy_spec::parse" and docs/adr/0001: the title
+  says fuzz, but fuzzing is M2 (SEC-45). Fix: the ticket is "Property tests for rdy_spec::parse".
+- docs/plan/00-overview.md, same golden ticket, and CLAUDE.md "Cross-platform from day one": "all four CI
+  targets". 06 defines five legs. Fix: say "five CI legs".
+- docs/plan/06-release-and-distribution.md, Appendix A `test` job: `cargo nextest run` skips doc tests, and
+  nothing sets `core.autocrlf` on the Windows leg. Fix: add `cargo test --doc --workspace --locked`
+  (linux-x64), the nextest `ci` profile with `retries = 0`, and the autocrlf step before checkout.
+- docs/adr/0011-binary-name-and-cli-package.md, decision 4 ("publishes no library API"): 09 already adds a
+  `rdy_cli` library target. Fix: amend decision 4 to say the library holds the command tree and the
+  `#[doc(hidden)]` `run` entry point, with no stability promise. security-reviewer signs.
+- docs/adr/0007-crate-publishing-and-versioning.md: `rdy_engine::testing` and its feature are public
+  surface of a published crate. Fix: state that `testing` and `record` are `#[doc(hidden)]`, unstable,
+  outside the semver promise and excluded from `cargo-semver-checks`.
+- docs/adr/0003 ticket "askama HTML report with inline CSS, dark mode and print" and the same ticket in 00:
+  the exit test needs a headless browser in M1. Fix: M1 uses the static checks in section 3; the browser
+  render is M2.
+- docs/adr/0007, Tickets implied: "Keep golden result files per released version and parse them in CI" is
+  `[M2]`, while 00 lists `[M1]`. Fix: M1. The alphas already write result files and the M2 portal must read
+  them. Start the directory at `0.1.0-alpha.1`.
+- docs/plan/03-check-catalog.md, ticket "Loopback network test support": no home is named. Fix: the servers
+  live behind a non-default `test-support` feature of `rdy-checks-net`. No new crate (CLAUDE.md fixes the
+  list). The live loopback list drops "black hole" (scripted only, per 03). Revisit a shared crate through an
+  ADR only if a third crate needs the servers.
+- docs/plan/01-spec-format.md, section 5.3: `complete: false` is tied only to exit 70, so after a Ctrl-C
+  that still writes a report its value is not stated. Fix: 01 says it. The cancellation test asserts
+  `interrupted: true` and `skip_kind: cancelled` only, until then.
+- docs/plan/00-overview.md, ADR 0008 ticket "Error types with fix hints and exit code mapping at the CLI
+  edge": add to its exit test that `rdy --bogus` exits 64, not clap's 2, and an unwritable `--out-dir`
+  exits 70 with the full terminal result printed (this replaces a separate qa ticket).
+- docs/plan/03-check-catalog.md, ticket "net.dns": the musl resolver fixture (`sss` in `nsswitch.conf` gives
+  the warning) moves into it from the qa-engineer ticket of the same name in 00.
+- examples/specs/*.yaml use `host.selinux` and `gpu.device_plugin`, but 03 names `host.lsm` and
+  `k8s.device_plugins`. The examples lint test fails on them until 01's ticket "Align example specs and
+  check catalog with 01-spec-format names" lands.
 
 ## Decisions needing an ADR
 
 Conservative choice first in each item.
 
-- **A fixture backend inside the real binary.** Cargo feature `fixture-backend`, off in every release
-  artifact, proven absent by a feature-tree check and a `strings` check, read only from `RDY_TEST_BACKEND_DIR`.
-  Alternatives: no fixture-backed binary tests (only the live smoke, so no deterministic exit-code tests
-  through the real CLI); a separate test binary (cannot share CLI code, since `rdy` has no library).
-  security-reviewer should sign it.
-- **Golden storage.** Plain files with a 60-line helper and `UPDATE_GOLDENS=1`. Alternative: `insta`, already
-  in the dependency table, which gives `cargo insta review` but stores `.snap` files with a header and needs
-  a separate path for redaction expectations that must never be regenerated. Switching later changes only
-  the helper, about one hour.
-- **`crates/rdy-testkit`.** A dev-only crate (`publish = false`, `dist = false`) holding the loopback
-  servers (TLS with `rcgen`, CONNECT proxy, black hole), kept out of `rdy-engine` so its `testing` feature
-  does not pull a server stack. Alternative: everything under `rdy_engine::testing`.
-- **Where recording lives.** `cargo xtask fixture record`, not an `rdy` subcommand, so the shipped binary
-  carries no bulk file-copy code. Alternative: a hidden `rdy fixture record`, simpler to run on a remote box
-  (07 owns the command surface).
+- **A. How the CLI is tested.** Add `rdy_cli::run(args, backend, out, err)` as a `#[doc(hidden)]` library
+  entry point, and amend ADR 0011 decision 4. No shipped binary has a fixture switch. Alternatives: a cargo
+  feature `fixture-backend` plus `RDY_TEST_BACKEND_DIR` in the binary (needs a `compile_error!` in release,
+  a `cargo tree -i` check, a `grep -q` on each extracted dist archive inside `sign-release.yml` before
+  signing, and still cannot use paused time); only Live smoke tests (no deterministic exit-code tests).
+  security-reviewer signs before the ADR is written.
+- **B. Golden storage.** Plain files, a 60-line helper, `UPDATE_GOLDENS=1`. Alternative: `insta`, already in
+  the dependency table, with `cargo insta review`, but `.snap` headers, and a separate path for redaction
+  expectations that must never be regenerated. Switching later changes only the helper, about one hour.
+- **C. Where recording lives.** `cargo xtask fixture record`, not an `rdy` subcommand. Alternative: a hidden
+  `rdy fixture record`, simpler on a remote box (07 owns the command surface).
 
 ## Tickets implied
 
-Tickets with a title that already appears in 00-overview.md, 02-engine-design.md or 05-threat-model.md keep
-that title, so 11-backlog.md can dedupe. Where the scope here differs, the exit test is the new one. Total
-qa-engineer load in M1 is about 58 hours: 15 reused and 43 new. That is a large share of an M1 that is
-already over budget. Cut order, in this sequence: `Fixture envs macos-15-arm64-stub and windows-2022-stub`,
-the net-airgapped half of `Fixture envs host-ubuntu2204-container and net-airgapped`,
-`Property and fuzz tests for rdy_spec::parse` (keep five hand-written malformed specs), the matrix generator
-(keep the hand-written table). Never cut the five exit-test environments, the fixture lint, or the Windows
-canary.
+Titles that already appear in 00, 02, 03 or 05 are reused so 11-backlog.md can dedupe. M1 qa-engineer load
+is 32 hours (down from 58). The review's cut list was applied. Add-back order if hours free up:
+`net-airgapped` (2h, the KICKOFF air-gap case), SEC-22 (2h), `windows-2022-stub` (1h). The M2 to M4 tickets
+below are coarse and move to 11-backlog.md when it is merged.
 
-- [M1] Fixture format README, fixture.toml schema and .gitattributes | owner: qa-engineer | est: 2h | depends on: Create workspace skeleton | exit test: `tests/fixtures/README.md` documents every file in section 2, `.gitattributes` has the lines above, and a doctest-style example manifest parses with the loader.
-- [M1] Fixture lint: cargo xtask fixture check | owner: qa-engineer | est: 4h | depends on: Fixture format README, fixture.toml schema and .gitattributes; xtask skeleton with schema, docs, docs-lint and --check modes, dist and publish off | exit test: a planted `.com` hostname, a `\r` outside the manifest list, a file named `con.json`, a 2 MiB file, a public IP and an `origin = "laptop"` each fail with the file named, and a check id with no `checks/<id>/` directory fails.
-- [M1] Windows checkout canary for CRLF and the signed spec | owner: qa-engineer | est: 2h | depends on: Fixture format README, fixture.toml schema and .gitattributes; CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006) | exit test: the windows-x64 leg checks out with `core.autocrlf true`, hashes `tests/fixtures/signed/*` and one CRLF fixture against committed digests, and verifies the signed spec with `minisign-verify`.
-- [M1] Golden helper with UPDATE_GOLDENS and the goldens-fresh CI job | owner: qa-engineer | est: 3h | depends on: Engine test helpers FakeCheck, run_fixture and normalize; CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006) | exit test: a changed output fails with a diff and an `.actual` file, `UPDATE_GOLDENS=1` is refused when `CI` is set, an orphan golden fails `cargo xtask goldens check`, and `goldens-fresh` fails on a non-deterministic field.
-- [M1] Engine test helpers FakeCheck, run_fixture and normalize | owner: qa-engineer | est: 2h | depends on: Replay backend and fixture loader | exit test: the scheduler tests use FakeCheck for every status, `assert_within_manifest` fails on a fixture check that reads an undeclared path, and `normalize` re-sorts the action log so two runs at `jobs = 1` and `jobs = 8` give equal reports.
-- [M1] Golden tests for JSON and HTML reports | owner: qa-engineer | est: 2h | depends on: Embed result JSON in the HTML report safely; Golden helper with UPDATE_GOLDENS and the goldens-fresh CI job | exit test: `report.json` for ready, warning and not-ready envs validates against the result schema, `report.html` passes the static checks (CSP, no off-file src or href, `</script>` hostname round trip), and all pass on five legs.
-- [M1] Test-only fixture backend switch in the rdy binary behind a cargo feature | owner: rust-engineer | est: 2h | depends on: Package rdy in crates/rdy-cli with binary name rdy; Replay backend and fixture loader | exit test: `cargo tree -p rdy -e features` on the release profile has no `testing`, `strings` on the release binary finds no `RDY_TEST_BACKEND_DIR`, and the feature build reads an env dir and prints a banner.
-- [M1] Env-level harness: run the real rdy against a fixture env and compare goldens | owner: qa-engineer | est: 4h | depends on: Test-only fixture backend switch in the rdy binary behind a cargo feature; Golden helper with UPDATE_GOLDENS and the goldens-fresh CI job | exit test: one test per env checks exit code, `report.json`, `terminal.txt` and, where present, `report.html`, with `TZ`, `LC_ALL`, `NO_COLOR` and `HOME` pinned, and the `jobs = 1` and `jobs = 8` reports are equal.
-- [M1] Fixture env all-pass | owner: qa-engineer | est: 3h | depends on: Env-level harness: run the real rdy against a fixture env and compare goldens; host.memory (meminfo, swap, cgroup limit, nominal band); net.egress core (DNS, TCP, TLS, HTTP, failure classes, injectable connector); k8s.version (gitVersion parse, distro, discovery API availability) | exit test: `rdy run` on the env exits 0 on all five legs with a golden JSON, HTML and terminal text, and 31.3 GiB against `min: 32Gi` passes with its note.
-- [M1] Fixture envs warnings-only, all-block and no-privileges | owner: qa-engineer | est: 3h | depends on: Fixture env all-pass | exit test: exit codes 1, 2 and 2 with goldens, `no-privileges` shows `partial` results and `MissingNeed` skips, and the verdict reason is `required_check_not_run`.
-- [M1] Fixture env timeouts | owner: qa-engineer | est: 2h | depends on: Fixture env all-pass; Scheduler with concurrency limit, per-check timeout and panic isolation | exit test: each hung source gives `Timeout` with the configured limit, the run ends inside `deadline_ms` under paused time, and the verdict is not_ready with required checks not run.
-- [M1] Fixture envs host-ubuntu2204-container and net-airgapped | owner: qa-engineer | est: 3h | depends on: Fixture env all-pass; host.cpu (cores with cgroup quota, arch, flags, hypervisor); net.egress core (DNS, TCP, TLS, HTTP, failure classes, injectable connector) | exit test: the container env reports the 8 GiB cgroup limit against a 64 GiB host, and the air-gapped env runs `acme-airgap-host.yaml` with every public endpoint refused or black-holed and the mirror reachable.
-- [M1] Fixture envs net-corp-proxy and k8s-openshift-restricted | owner: qa-engineer | est: 4h | depends on: Fixture env all-pass; net.proxy (Linux env and config files, daemon drop-ins, NO_PROXY coverage, reachability); net.tls_intercept (probe verifier, chain classification, trust store report); k8s.storageclass (default class, CSI driver, binding mode, provisioner table) | exit test: the proxy env shows the 407 Basic classification, the `NO_PROXY` gap and private-CA interception with no userinfo in any output, and the OpenShift env gives exit 1 with the missing default StorageClass.
-- [M1] Fixture envs macos-15-arm64-stub and windows-2022-stub | owner: qa-engineer | est: 2h | depends on: Fixture env all-pass; OS support table and compile stubs for rdy-checks-host | exit test: on all five legs host checks are skipped with the "no data source for this OS yet" reason and net and k8s run, with CRLF command output intact on the Windows env.
-- [M1] Scheduler timeout, deadline and cancellation tests under paused time | owner: qa-engineer | est: 3h | depends on: Family limits, run deadline and Ctrl-C cancellation | exit test: the table in section 5 (engine rows) passes, including the proof that a stuck `spawn_blocking` does not stop the paused clock, and no test uses a real sleep above 50 ms.
-- [M1] Property and fuzz tests for rdy_spec::parse | owner: qa-engineer | est: 3h | depends on: Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits | exit test: the invariants in section 4 hold over 10,000 cases on linux-x64 with a fixed seed on PRs, regressions are committed, and no input panics.
-- [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: SEC-25 Build minimal redactor for reports and evidence | exit test: 60 synthetic cases across the M1 categories pass with zero misses, secrets built from parts, and `UPDATE_GOLDENS=1` leaves `tests/fixtures/redaction/**` untouched.
-- [M1] SEC-22 No-phone-home strace test on Linux CI | owner: qa-engineer | est: 2h | depends on: SEC-21 Egress address policy, no redirects, no bodies; Fixture env all-pass | exit test: under `sudo unshare -n` and `strace -f -e trace=connect,sendto,sendmsg`, every destination while running `all-pass` and `net-airgapped` is a loopback fixture address.
-- [M1] musl resolver behaviour fixture for net.dns | owner: qa-engineer | est: 2h | depends on: Shared HTTP client builder with rustls ring and platform verifier | exit test: a fixture resolv.conf and nsswitch.conf with `sss` produce the documented warning.
-- [M1] CLI exit-code tests through the real binary | owner: qa-engineer | est: 3h | depends on: Env-level harness: run the real rdy against a fixture env and compare goldens; Error types with fix hints and exit code mapping at the CLI edge | exit test: 0, 1, 2 from the verdict envs, 64 for an unknown flag (not clap's 2), an unreadable spec, an unsigned spec and a bad signature with `--allow-unsigned`, and 70 for an unwritable `--out-dir` with the full terminal result printed.
-- [M1] Keep golden result files per released version and parse them in CI | owner: qa-engineer | est: 1h | depends on: Golden tests for JSON and HTML reports | exit test: `tests/fixtures/results/0.1.0-alpha.1/` parses with the current rdy-engine on every leg, and a modified file under an older version directory fails `cargo xtask fixture check`.
-- [M1] Compatibility matrix source, generator and day-one rows | owner: qa-engineer | est: 3h | depends on: Fixture env all-pass; xtask skeleton with schema, docs, docs-lint and --check modes, dist and publish off | exit test: `cargo xtask matrix --check` fails on a row citing a missing env or a mismatched `[matrix]` value, and the generated `docs/compatibility.md` lists the day-one rows from section 7.
-- [M1] Nextest ci profile, ignore lint and PR template with the check definition of done | owner: qa-engineer | est: 2h | depends on: CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006) | exit test: a test that fails once in three runs is not retried, a bare `#[ignore]` fails the lint, `cargo test --doc` runs on linux-x64, and the PR template lists the section 9 items.
-- [M2] Compat-touched and golden-section PR checks | owner: qa-engineer | est: 2h | depends on: Compatibility matrix source, generator and day-one rows; Golden helper with UPDATE_GOLDENS and the goldens-fresh CI job | exit test: a PR that changes a check crate without touching `matrix.toml` or the body line fails, a golden change without `## Golden changes` fails, and both read the body through an environment variable.
-- [M2] Per-OS plan goldens and stub honesty test | owner: qa-engineer | est: 2h | depends on: Family trait, registry and run plan | exit test: `plans/linux.txt`, `macos.txt` and `windows.txt` match on all five legs and the Full-or-Partial-must-not-be-Unsupported test runs for each OS.
-- [M2] Verdict and exit-code property tests | owner: qa-engineer | est: 2h | depends on: Amend verdict mapping for required checks not run | exit test: the six properties in section 4 hold over 10,000 generated result lists.
-- [M2] Redactor property tests and the schema-walk canary test | owner: qa-engineer | est: 3h | depends on: Apply the redactor to every Report string before return | exit test: idempotence and the planted-secret properties hold, and a new string field added to the result schema is covered with no test change.
-- [M2] Process-level timeout and Ctrl-C tests on Unix | owner: qa-engineer | est: 3h | depends on: Blocking helper and subprocess kill on timeout; Env-level harness: run the real rdy against a fixture env and compare goldens | exit test: the two process rows of section 5 pass on linux and macos legs, with upper-bound timing only.
-- [M2] Dev-only fixture record mode with a scrub step | owner: qa-engineer | est: 4h | depends on: Replay backend and fixture loader; Fixture lint: cargo xtask fixture check | exit test: recording `host.memory` on a CI runner writes nothing raw to disk, replays to the same result, and a planted hostname, address, MAC and serial are replaced consistently.
-- [M2] record-fixtures workflow for macOS and Windows runners | owner: qa-engineer | est: 3h | depends on: Dev-only fixture record mode with a scrub step | exit test: a manual run uploads scrubbed directories for macos-15 and windows-2022, and the stub envs are replaced by recordings that replay without `Error`.
-- [M2] Nightly flake hunt and 100,000-case property job | owner: qa-engineer | est: 3h | depends on: Nextest ci profile, ignore lint and PR template with the check definition of done | exit test: a planted test that fails one run in ten is caught by the nightly and files an issue with the seed.
-- [M2] Headless browser render of the golden HTML with no network | owner: qa-engineer | est: 3h | depends on: Golden tests for JSON and HTML reports | exit test: the headless render of each HTML golden makes zero network requests and logs no console errors.
-- [M2] Repo-wide forbidden-name scan using a hashed word list | owner: qa-engineer | est: 2h | depends on: Fixture lint: cargo xtask fixture check | exit test: a file containing a listed word fails CI, and the repo holds only hashes, never the words.
-- [M2] Fixture drift job: record on today's runner image and replay | owner: qa-engineer | est: 3h | depends on: record-fixtures workflow for macOS and Windows runners | exit test: a nightly run records on each runner, replays the host and net checks, and fails if any check returns `Error` or a panic.
-- [M2] Kubernetes distro fixture set | owner: qa-engineer | est: 6h | depends on: Fixture envs net-corp-proxy and k8s-openshift-restricted | exit test: `eks`, `gke`, `aks`, `rke2`, `k3s` and `kind` directories hold the files named in the k8s-expert review, and the matrix rows move to `ci`.
-- [M4] GPU capture set from rented machines with the NVIDIA XML scrub | owner: qa-engineer | est: 8h | depends on: Dev-only fixture record mode with a scrub step | exit test: captures with `-q -x --dtd` for a T4 or L4, an A100 with MIG and an HGX scrub clean, every tag the code reads exists in each DTD, and the matrix rows for those driver lines move to `ci`.
+- [M1] Fixture format README, .gitattributes and Windows canary | owner: qa-engineer | est: 2h | depends on: CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006); Verify minisign signatures in rdy-spec against a trust store with product binding | exit test: `tests/fixtures/README.md` documents every file in section 2 and Appendix A, `.gitattributes` has the lines above, and the windows-x64 leg checks out with `core.autocrlf true`, shows `git check-attr text` as `unset` for the fixtures, matches committed digests for `tests/fixtures/signed/*` and one CRLF fixture, and verifies the signed spec.
+- [M1] Replay loader reads the 08 fixture format | owner: rust-engineer | est: 3h | depends on: Replay backend and fixture loader; Fixture manifest (symlinks, unreadable, dirs), placeholders and Windows-safe command names | exit test: a `fixture.toml` with `base`, `remove` and `answers` loads; command and api files are found by the argv or request inside them; `root/c/Windows/...` answers `c:/windows/...` only when `os = "windows"`; a manifest symlink to `/etc/shadow` is Denied through the canonical check; a `delay_ms` waits on the tokio clock and `blackhole` never completes, with no blocking thread.
+- [M1] In-process CLI entry point rdy_cli::run taking a Backend | owner: rust-engineer | est: 2h | depends on: Package rdy in crates/rdy-cli with binary name rdy; clap command tree in rdy-cli exposed as library rdy_cli | exit test: a test calls `run` with the Replay backend and capture buffers and gets the exit code, stdout and stderr; `main.rs` calls it with the Live backend only; ADR 0011 decision 4 is amended and signed by security-reviewer.
+- [M1] Fixture lint as a nextest test | owner: qa-engineer | est: 3h | depends on: Fixture format README, .gitattributes and Windows canary; Replay loader reads the 08 fixture format | exit test: a planted public hostname, a `\r` outside `crlf`, a file named `con.json`, a 2 MiB file, a public IP, an `origin = "laptop"` and a duplicate argv key each fail with the file named, and a missing `checks/_policy/symlink-to-shadow` fails.
+- [M1] Engine test helpers FakeCheck, run_fixture and normalize | owner: qa-engineer | est: 2h | depends on: Replay loader reads the 08 fixture format | exit test: the scheduler tests use FakeCheck for every status, `Fake::Block` waits on an mpsc receiver the test releases, `assert_within_manifest` fails on a fixture check that reads an undeclared path, and `normalize` gives equal reports for `jobs = 1` and `jobs = 8`.
+- [M1] Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | owner: qa-engineer | est: 2h | depends on: Engine test helpers FakeCheck, run_fixture and normalize | exit test: a changed output fails with a diff and an `.actual` file, a missing golden fails, `UPDATE_GOLDENS=1` is refused when `CI` is set and never touches `tests/fixtures/redaction/**`, and `cargo xtask goldens check` fails on an orphan.
+- [M1] Golden tests for JSON and HTML reports | owner: qa-engineer | est: 2h | depends on: Embed result JSON in the HTML report safely; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: `report.json` for the ready, warning and not-ready runs validates against the result schema, `report.html` passes the static checks (CSP, no off-file src or href, `</script>` hostname round trip), and all pass on five legs.
+- [M1] Env-level harness, in process | owner: qa-engineer | est: 3h | depends on: In-process CLI entry point rdy_cli::run taking a Backend; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: one test per env checks exit code, `report.json`, `terminal.txt` and, where present, `report.html`, with the clock, run id and environment pinned, and the `jobs = 1` and `jobs = 8` reports are equal.
+- [M1] Fixture env all-pass | owner: qa-engineer | est: 3h | depends on: Env-level harness, in process; host.memory (meminfo, swap, cgroup limit, nominal band); net.egress staged connector (lookup, dual-stack connect, TLS, ALPN); k8s.version (gitVersion parse, distro, discovery API availability) | exit test: the env exits 0 on all five legs with golden JSON, HTML and terminal text, and 31.3 GiB against `min: 32Gi` passes with its note.
+- [M1] Fixture envs warnings-only, all-block and no-privileges | owner: qa-engineer | est: 3h | depends on: Fixture env all-pass | exit test: exit codes 1, 2 and 2 with goldens, `no-privileges` shows `partial` results and `missing_need` skips, and its verdict reason is `required_check_not_run`.
+- [M1] Timeouts env and scheduler timeout, deadline and cancellation tests under paused time | owner: qa-engineer | est: 4h | depends on: Fixture env all-pass; Family limits, run deadline and Ctrl-C cancellation | exit test: the `timeouts` env runs in process under paused time at `jobs = 1` and `jobs = 8`, every hung source gives `Timeout`, the run ends inside `deadline_ms` in virtual time, cancellation gives `interrupted: true` with `skip_kind: cancelled`, and only the `Fake::Block` test uses real time with a 1 s upper bound.
+- [M1] Property tests for rdy_spec::parse | owner: qa-engineer | est: 3h | depends on: Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits | exit test: the section 4 table holds, 10,000 cases for never-panics and limits and 256 for the rest, with a fixed seed on PRs, committed regressions, `max_shrink_time` 30 s and the suite under 60 s on linux-x64.
+- [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: SEC-25 Build minimal redactor for reports and evidence; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: 60 synthetic cases across the M1 categories pass with zero misses, secrets built from parts, and `UPDATE_GOLDENS=1` leaves `tests/fixtures/redaction/**` untouched.
+- [M1] Keep golden result files per released version and parse them in CI | owner: qa-engineer | est: 1h | depends on: Golden tests for JSON and HTML reports | exit test: `tests/fixtures/results/0.1.0-alpha.1/` parses with the current rdy-engine on every leg, and a modified file under an older version directory fails the lint.
+- [M1] Nextest ci profile, cargo test --doc in CI and PR template | owner: qa-engineer | est: 1h | depends on: CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006) | exit test: a test that fails once in three runs is not retried, `cargo test --doc` runs on linux-x64, and `.github/pull_request_template.md` carries Appendix E.
+- [M1] Hand-written compatibility page with the day-one rows | owner: docs-writer | est: 1h | depends on: Fixture env all-pass | exit test: `docs/compatibility.md` lists the Appendix B rows with the four state words and each fixture row shows its origin.
+- [M2] Compatibility matrix source and generator, and the compat-touched PR check | owner: qa-engineer | est: 4h | depends on: Hand-written compatibility page with the day-one rows | exit test: `cargo xtask matrix --check` fails on a row citing a missing env or a mismatched `[matrix]` value, and a PR that changes a check crate without touching the page or the body line fails.
+- [M2] Fixture envs net-airgapped, host-ubuntu2204-container, net-corp-proxy and k8s-openshift-restricted | owner: qa-engineer | est: 8h | depends on: Fixture env all-pass | exit test: each env runs in process with goldens, the air-gapped env runs `acme-airgap-host.yaml` with every public endpoint refused or black-holed, and the proxy env shows the 407 Basic classification and private-CA interception with no userinfo in any output.
+- [M2] SEC-22 No-phone-home strace test on Linux CI | owner: qa-engineer | est: 2h | depends on: SEC-21 Egress address policy, no redirects, no bodies; Fixture env all-pass | exit test: under `sudo unshare -n` and `strace -f -e trace=connect,sendto,sendmsg`, every destination while running `all-pass` and `net-airgapped` is a loopback fixture address.
+- [M2] Fixture envs macos-15-arm64-stub and windows-2022-stub | owner: qa-engineer | est: 3h | depends on: Fixture env all-pass; OS support table and compile stubs for rdy-checks-host | exit test: host checks are `not_yet_on_os` on all five legs, net runs, and CRLF command output stays intact on the Windows env.
+- [M2] Verdict and exit-code property tests, and redactor property tests with the schema-walk canary | owner: qa-engineer | est: 5h | depends on: Amend verdict mapping for required checks not run; Apply the redactor to every Report string before return | exit test: the Appendix D properties hold, including the nothing-verified improvement case, and a new string field added to the result schema is covered with no test change.
+- [M2] Process-level timeout and Ctrl-C tests on Unix | owner: qa-engineer | est: 3h | depends on: Blocking helper and subprocess kill on timeout; Timeouts env and scheduler timeout, deadline and cancellation tests under paused time | exit test: the two M2 rows of section 5 pass on linux and macos legs with upper-bound timing only.
+- [M2] Dev-only fixture record mode with a scrub step, and the record-fixtures workflow | owner: qa-engineer | est: 7h | depends on: Replay loader reads the 08 fixture format; Fixture lint as a nextest test | exit test: recording `host.memory` on a CI runner writes nothing raw to disk and replays to the same result, a planted hostname, address, MAC and serial are replaced consistently, and a manual run uploads scrubbed macOS and Windows directories.
+- [M2] Fixture lint redactor rule, golden-section PR check, ignore lint, nightly flake hunt and fixture drift job | owner: qa-engineer | est: 6h | depends on: Fixture lint as a nextest test; Golden tests for JSON and HTML reports | exit test: a secret-shaped string in a fixture fails the lint, a golden change without `## Golden changes` fails, a bare `#[ignore]` fails, and a planted test failing one run in ten is caught nightly with its seed.
+- [M2] Headless browser render of the golden HTML with no network | owner: qa-engineer | est: 3h | depends on: Golden tests for JSON and HTML reports | exit test: each HTML golden renders with zero network requests and no console errors.
+- [M2] Kubernetes distro fixture set | owner: qa-engineer | est: 6h | depends on: Fixture envs net-airgapped, host-ubuntu2204-container, net-corp-proxy and k8s-openshift-restricted | exit test: `eks`, `gke`, `aks`, `rke2`, `k3s` and `kind` cases hold the files named in the k8s-expert review and the matrix rows move to `fixture`.
+- [M4] GPU capture set from rented machines with the NVIDIA XML scrub | owner: qa-engineer | est: 8h | depends on: Dev-only fixture record mode with a scrub step, and the record-fixtures workflow | exit test: captures with `-q -x --dtd` for a T4 or L4, an A100 with MIG and an HGX scrub clean, every tag the code reads exists in each DTD, and the matrix rows for those driver lines move to `fixture`.
