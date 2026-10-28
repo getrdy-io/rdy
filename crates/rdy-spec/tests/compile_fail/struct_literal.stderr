@@ -1,5 +1,11 @@
-error[E0451]: field `spec` of struct `LoadedSpec` is private
-  --> tests/compile_fail/struct_literal.rs:11:26
+error[E0451]: fields `spec`, `signature` and `sha256` of struct `LoadedSpec` are private
+  --> tests/compile_fail/struct_literal.rs:13:9
    |
-11 |     let _ = LoadedSpec { spec: sample() };
-   |                          ^^^^ private field
+12 |     let _ = LoadedSpec {
+   |             ---------- in this type
+13 |         spec: sample(),
+   |         ^^^^ private field
+14 |         signature: SignatureState::Unsigned,
+   |         ^^^^^^^^^ private field
+15 |         sha256: String::new(),
+   |         ^^^^^^ private field
