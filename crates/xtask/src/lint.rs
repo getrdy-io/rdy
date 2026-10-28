@@ -1,28 +1,41 @@
 //! `cargo xtask docs-lint`: fails on dashes and banned tokens in tracked text files.
 //!
-//! Scope: every text file that git tracks. Untracked files, binary files and files that are not
-//! UTF-8 are skipped. Rules (docs/plan/09-docs-site.md, sections 10 and 11):
+//! Scope: every text file that git tracks. Untracked files are skipped. A file that holds a NUL
+//! byte counts as binary and is skipped. Any other file is decoded as UTF-8, and each byte that is
+//! not valid UTF-8 becomes U+FFFD. So Latin-1 text still gets its dashes checked. Rules
+//! (docs/plan/09-docs-site.md, sections 10 and 11):
 //!
 //! - no em dash (U+2014) and no en dash (U+2013);
 //! - no token whose SHA-256 is listed in `data/banned-token-sha256.txt`.
 //!
-//! A token is a run of letters or digits. Every other character splits tokens. Each token is
-//! lowercased and then hashed. The list holds hashes only, so the lint never prints a banned word.
+//! Each line is NFKC-normalized before the checks, so compatibility forms match the same way their
+//! plain forms do. A token is a run of letters or digits. Every other character splits tokens. Each
+//! token is lowercased and then hashed. The list holds hashes only, so the lint never prints a
+//! banned word.
 
 use std::collections::HashSet;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, ExitStatus, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
+use unicode_normalization::UnicodeNormalization;
 
 /// The banned-token hashes. Compiled in, so the lint needs no file at run time.
 const BANNED_HASHES: &str = include_str!("../data/banned-token-sha256.txt");
 
 const EM_DASH: char = '\u{2014}';
 const EN_DASH: char = '\u{2013}';
+
+/// How long `git ls-files` may run. A hung git fails the lint instead of blocking the run.
+const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How often the timeout loop checks whether the command has exited.
+const POLL: Duration = Duration::from_millis(20);
 
 /// One line that breaks a rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,8 +94,9 @@ fn hex_sha256(bytes: &[u8]) -> String {
 /// Checks one file's text against both rules. Each finding carries its line number.
 pub fn lint_text(path: &str, text: &str, banned: &BannedHashes) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for (index, line) in text.lines().enumerate() {
+    for (index, raw) in text.lines().enumerate() {
         let number = index + 1;
+        let line: String = raw.nfkc().collect();
         for (dash, name) in [(EM_DASH, "em dash"), (EN_DASH, "en dash")] {
             if line.contains(dash) {
                 findings.push(Finding {
@@ -119,11 +133,11 @@ pub fn run(root: &Path) -> Result<bool> {
             Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
             Err(err) => return Err(err).with_context(|| format!("cannot read {path}")),
         };
-        let Some(text) = as_text(&bytes) else {
+        let Some(text) = decode(&bytes) else {
             continue;
         };
         scanned += 1;
-        findings.extend(lint_text(&path, text, &banned));
+        findings.extend(lint_text(&path, &text, &banned));
     }
     for finding in &findings {
         eprintln!("{}:{}: {}", finding.path, finding.line, finding.message);
@@ -142,19 +156,26 @@ pub fn run(root: &Path) -> Result<bool> {
 
 /// The tracked file paths under `root`, from `git ls-files`.
 fn tracked_files(root: &Path) -> Result<Vec<String>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["ls-files", "-z"])
-        .output()
-        .context("cannot run git. docs-lint reads the tracked files with git. Install git and run docs-lint in a git checkout.")?;
-    if !output.status.success() {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(root).args(["ls-files", "-z"]);
+    let captured = capture_with_timeout(command, GIT_TIMEOUT).context(
+        "cannot run git. docs-lint reads the tracked files with git. Install git and run docs-lint in a git checkout.",
+    )?;
+    let Some(captured) = captured else {
         bail!(
-            "git ls-files failed in {}. Run docs-lint in a git checkout of the repo.",
+            "git ls-files did not finish within {} seconds in {}. Check that git runs, then run docs-lint again.",
+            GIT_TIMEOUT.as_secs(),
             root.display()
         );
+    };
+    if !captured.success {
+        bail!(
+            "git ls-files failed in {}: {}. Run docs-lint in a git checkout of the repo.",
+            root.display(),
+            String::from_utf8_lossy(&captured.stderr).trim()
+        );
     }
-    Ok(output
+    Ok(captured
         .stdout
         .split(|byte| *byte == 0)
         .filter(|name| !name.is_empty())
@@ -162,12 +183,62 @@ fn tracked_files(root: &Path) -> Result<Vec<String>> {
         .collect())
 }
 
-/// The text of a file, or `None` for a binary file or a file that is not UTF-8.
-fn as_text(bytes: &[u8]) -> Option<&str> {
+/// What a finished command left behind.
+struct Captured {
+    success: bool,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+/// Runs `command` and collects its stdout and stderr. Returns `None` after it kills the command
+/// when the command runs longer than `timeout`.
+fn capture_with_timeout(mut command: Command, timeout: Duration) -> Result<Option<Captured>> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("cannot start the command")?;
+    let (Some(mut out), Some(mut err)) = (child.stdout.take(), child.stderr.take()) else {
+        bail!("cannot capture the output of the command");
+    };
+    // Each pipe drains on its own thread. A full pipe would otherwise block the child.
+    let out_reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = out.read_to_end(&mut buf);
+        buf
+    });
+    let err_reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = err.read_to_end(&mut buf);
+        buf
+    });
+    let deadline = Instant::now() + timeout;
+    let status: ExitStatus = loop {
+        if let Some(status) = child.try_wait().context("cannot check the command")? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        thread::sleep(POLL);
+    };
+    Ok(Some(Captured {
+        success: status.success(),
+        stdout: out_reader.join().unwrap_or_default(),
+        stderr: err_reader.join().unwrap_or_default(),
+    }))
+}
+
+/// The text of a file, or `None` for a binary file. A file with a NUL byte is binary. Any other
+/// file is decoded as UTF-8, and each invalid byte becomes U+FFFD.
+fn decode(bytes: &[u8]) -> Option<String> {
     if bytes.contains(&0) {
         return None;
     }
-    std::str::from_utf8(bytes).ok()
+    Some(String::from_utf8_lossy(bytes).into_owned())
 }
 
 #[cfg(test)]
@@ -283,9 +354,61 @@ mod tests {
     }
 
     #[test]
-    fn binary_and_non_utf8_files_are_not_text() {
-        assert!(as_text(b"a\0b").is_none());
-        assert!(as_text(&[0xff, 0xfe]).is_none());
-        assert_eq!(as_text(b"plain"), Some("plain"));
+    fn only_a_nul_byte_makes_a_file_binary() {
+        assert!(decode(b"a\0b").is_none());
+        assert_eq!(decode(b"plain").as_deref(), Some("plain"));
+        assert!(decode(&[0xff, 0xfe]).is_some());
+    }
+
+    #[test]
+    fn latin1_text_still_gets_its_dashes_checked() -> Result<()> {
+        // 0xE9 is Latin-1 e-acute, which is not valid UTF-8. The em dash after it is valid.
+        let bytes: &[u8] = b"Caf\xe9 \xe2\x80\x94 open\n";
+        let text = decode(bytes).context("no NUL byte, so the file is text")?;
+        let findings = lint_text("legacy.txt", &text, &banned_for_tests()?);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].line, 1);
+        assert!(findings[0].message.starts_with("em dash"));
+        Ok(())
+    }
+
+    #[test]
+    fn fullwidth_letters_match_the_banned_hash_after_nfkc() -> Result<()> {
+        // Fullwidth lowercase letters that spell the synthetic token. NFKC maps them to ASCII.
+        let fullwidth = "\u{ff42}\u{ff41}\u{ff4e}\u{ff4e}\u{ff45}\u{ff44}\u{ff54}\u{ff4f}\u{ff4b}\u{ff45}\u{ff4e}";
+        let text = format!("Use {fullwidth} here.\n");
+        assert_eq!(lint_text("a.md", &text, &banned_for_tests()?).len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn a_small_em_dash_is_reported_after_nfkc() -> Result<()> {
+        // U+FE58 SMALL EM DASH normalizes to U+2014.
+        let findings = lint_text("a.md", "Install \u{fe58} now.\n", &banned_for_tests()?);
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].message.starts_with("em dash"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_that_runs_too_long_is_stopped() -> Result<()> {
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        let started = Instant::now();
+        let captured = capture_with_timeout(command, Duration::from_millis(200))?;
+        assert!(captured.is_none());
+        assert!(started.elapsed() < Duration::from_secs(20));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_that_finishes_is_captured() -> Result<()> {
+        let mut command = Command::new("echo");
+        command.arg("hi");
+        let captured = capture_with_timeout(command, Duration::from_secs(20))?;
+        assert!(captured.is_some_and(|c| c.success && c.stdout == b"hi\n"));
+        Ok(())
     }
 }

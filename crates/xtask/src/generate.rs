@@ -6,9 +6,9 @@
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 /// One file that a generator owns.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,10 +32,33 @@ pub fn run(root: &Path, check: bool, command: &str, files: &[Generated]) -> Resu
     }
 }
 
+/// Joins a generated file's relative path onto `root`.
+///
+/// Refuses an absolute path, a path with a `..` or `.` part, a backslash and an empty path. A
+/// generator that asks for any of those has a bug, so the run fails before it touches the disk.
+pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf> {
+    // Each `/` segment must be a plain name. Empty, `.` and `..` segments are refused, and so are
+    // a leading `/` and a Windows prefix.
+    let well_formed = !rel.is_empty()
+        && !rel.contains('\\')
+        && rel
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+        && Path::new(rel)
+            .components()
+            .all(|part| matches!(part, Component::Normal(_)));
+    if !well_formed {
+        bail!(
+            "generated path {rel:?} must be relative, stay under the repo root, and use `/` separators. Fix the generator that names it."
+        );
+    }
+    Ok(root.join(rel))
+}
+
 /// Writes every file under `root`, creating parent directories as needed.
 pub fn write_all(root: &Path, files: &[Generated]) -> Result<()> {
     for file in files {
-        let target = root.join(file.path);
+        let target = safe_join(root, file.path)?;
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("cannot create {}", parent.display()))?;
@@ -54,7 +77,7 @@ pub fn write_all(root: &Path, files: &[Generated]) -> Result<()> {
 pub fn check_all(root: &Path, files: &[Generated], command: &str) -> Result<bool> {
     let mut clean = true;
     for file in files {
-        match read_normalized(&root.join(file.path))? {
+        match read_normalized(&safe_join(root, file.path)?)? {
             None => {
                 eprintln!(
                     "{}: missing. Run `cargo xtask {command}` and commit the result.",
@@ -131,6 +154,50 @@ mod tests {
         write_all(dir.path(), &files)?;
         fs::write(dir.path().join("docs/page.md"), "one\r\ntwo\r\n")?;
         assert!(check_all(dir.path(), &files, "docs")?);
+        Ok(())
+    }
+
+    #[test]
+    fn safe_join_refuses_escapes_and_accepts_plain_paths() -> Result<()> {
+        let root = Path::new("/repo");
+        assert!(safe_join(root, "docs/x.md").is_ok());
+        for bad in [
+            "docs/../x",
+            "../x",
+            "/etc/passwd",
+            "docs/./x",
+            "docs\\..\\x",
+            "",
+            "docs//x",
+        ] {
+            assert!(safe_join(root, bad).is_err(), "{bad:?} must be refused");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn write_refuses_a_parent_escape_before_touching_the_disk() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let root = dir.path().join("repo");
+        fs::create_dir_all(&root)?;
+        let files = vec![Generated {
+            path: "docs/../escaped.md",
+            contents: "x\n".to_owned(),
+        }];
+        assert!(write_all(&root, &files).is_err());
+        assert!(!dir.path().join("escaped.md").exists());
+        assert!(!root.join("escaped.md").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn check_refuses_an_escaping_path() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let files = vec![Generated {
+            path: "/etc/passwd",
+            contents: String::new(),
+        }];
+        assert!(check_all(dir.path(), &files, "docs").is_err());
         Ok(())
     }
 

@@ -45,11 +45,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_page_is_markdown_under_the_docs_tree() {
+    fn every_page_is_markdown_under_the_docs_tree_without_escapes() {
+        let root = Path::new("/repo");
         for page in pages() {
             assert!(page.path.starts_with("docs/"), "{}", page.path);
             assert!(page.path.ends_with(".md"), "{}", page.path);
+            assert!(
+                generate::safe_join(root, page.path).is_ok(),
+                "{}",
+                page.path
+            );
         }
+    }
+
+    #[test]
+    fn a_page_path_that_climbs_out_of_docs_is_refused() {
+        // The generator refuses `docs/../x` (generate::safe_join), so no page can escape docs/.
+        assert!(generate::safe_join(Path::new("/repo"), "docs/../x").is_err());
     }
 
     #[test]

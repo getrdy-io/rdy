@@ -203,6 +203,23 @@ fn docs_lint_fails_on_a_planted_banned_token_hash_match() -> Result<()> {
 }
 
 #[test]
+fn docs_lint_checks_a_latin1_file_for_an_em_dash() -> Result<()> {
+    let repo = Repo::new()?;
+    // 0xE9 is Latin-1 and not valid UTF-8. The em dash after it must still be found.
+    repo.write("docs/legacy.txt", b"Caf\xe9 \xe2\x80\x94 open\n")?;
+    repo.track_all()?;
+    let lint = xtask(repo.path(), &["docs-lint"])?;
+    assert_eq!(code(&lint), Some(1), "{}", stderr(&lint));
+    assert!(
+        stderr(&lint).contains("docs/legacy.txt:1"),
+        "{}",
+        stderr(&lint)
+    );
+    assert!(stderr(&lint).contains("em dash"), "{}", stderr(&lint));
+    Ok(())
+}
+
+#[test]
 fn docs_lint_ignores_untracked_files() -> Result<()> {
     let repo = Repo::new()?;
     repo.write("docs/notes.md", "Install \u{2014} then run.\n")?;
