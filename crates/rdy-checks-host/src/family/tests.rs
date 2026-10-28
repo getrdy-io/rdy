@@ -174,3 +174,25 @@ fn build_refuses_an_id_the_family_does_not_have() {
     let params = entry.decode_params();
     assert!(HostFamily.build(&entry, params, &spec).is_err());
 }
+
+#[test]
+fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
+    // Delete an id here in the ticket that writes its real check. When the list is empty, the
+    // registering ticket (M1-057) may wire the family into the CLI.
+    assert_eq!(
+        HostFamily::stub_ids(),
+        [
+            "host.disk",
+            "host.memory",
+            "host.ports",
+            "host.lsm",
+            "host.security_agents",
+            "host.cpu",
+            "host.os",
+        ]
+    );
+    let listed: Vec<&str> = HostFamily.checks().iter().map(|info| info.id).collect();
+    for id in HostFamily::stub_ids() {
+        assert!(listed.contains(id), "{id} is not a host check");
+    }
+}

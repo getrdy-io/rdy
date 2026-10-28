@@ -94,11 +94,36 @@ static CHECKS: [&CheckInfo; 7] = [
 /// The `host` family: `host.disk`, `host.memory`, `host.ports`, `host.lsm`, `host.security_agents`,
 /// `host.cpu` and `host.os`.
 ///
-/// Each check is a stub for now. Register it with
-/// [`Registry::register`](rdy_engine::family::Registry::register) and the planner skips every host
-/// check on macOS and Windows with `not_yet_on_os`.
+/// Each check is a stub for now ([`HostFamily::stub_ids`]).
+///
+/// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
+/// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
+/// registers it (M1-057, `rdy run` end to end) must first drop the stubs, or have the engine add a
+/// `not_in_build` skip for them. Tests may register it freely.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HostFamily;
+
+impl HostFamily {
+    /// The ids of the checks that are still stubs, in catalog order.
+    ///
+    /// Each ticket that writes a real check removes its id here. The family may be registered in the
+    /// CLI only when this is empty.
+    #[must_use]
+    pub fn stub_ids() -> &'static [&'static str] {
+        &STUBS
+    }
+}
+
+/// The checks that have no code yet. `build` returns a [`Stub`] for each.
+static STUBS: [&str; 7] = [
+    "host.disk",
+    "host.memory",
+    "host.ports",
+    "host.lsm",
+    "host.security_agents",
+    "host.cpu",
+    "host.os",
+];
 
 impl Family for HostFamily {
     fn name(&self) -> &'static str {
@@ -135,7 +160,7 @@ impl Check for Stub {
             Support::NotYet => Err(CheckError::Unsupported(NO_SOURCE)),
             Support::Full | Support::Partial(_) => Err(CheckError::Failed {
                 message: format!("{} {NOT_BUILT}", self.0.id),
-                hint: "Install a newer rdy. If there is none yet, ask the vendor how to go on."
+                hint: "Install a newer rdy. If there is none yet, ask the vendor what to do next."
                     .to_owned(),
             }),
         };
