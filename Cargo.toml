@@ -15,7 +15,7 @@ members = [
 [workspace.package]
 edition = "2024"
 # Stable minus two minors (docs/plan/06-release-and-distribution.md). A CI job enforces it from M2.
-rust-version = "1.95"
+rust-version = "1.97"
 license = "Apache-2.0"
 repository = "https://github.com/getrdy-io/rdy"
 homepage = "https://getrdy.io"

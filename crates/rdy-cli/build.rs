@@ -1,21 +1,38 @@
 //! Build script. It builds the version line `rdy --version` prints (ADR 0011).
 //!
-//! The line is `<version> (<commit> <date>)`. The commit is the short hash of `HEAD`. The date is the
-//! commit date in UTC, not the build date, so two builds of one commit print the same line. Without
-//! git (a crates.io source build) the line is just `<version>`. The script runs `git` and nothing
-//! else. It reads no network and writes only the `RDY_VERSION` compile-time variable.
+//! The line is `<version> (<commit> <date>)`. The commit is the first 7 characters of the hash of
+//! `HEAD`. The date is the commit date in UTC, not the build date, so two builds of one commit print
+//! the same line. The rules live in `build_version.rs` and are tested there:
+//!
+//! - In a `cargo package` tree (`.cargo_vcs_info.json` exists) git is never run. The line is
+//!   `<version> (<commit>)` with the commit cargo recorded, or just `<version>`.
+//! - Otherwise git is used only if its top-level directory is this workspace.
+//! - Otherwise the line is just `<version>`.
+//!
+//! The script runs `git` and nothing else. It uses no network and writes only `RDY_VERSION`.
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod build_version;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    watch_git_head();
+    println!("cargo:rerun-if-changed=build_version.rs");
 
+    let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default());
+    let vcs_info = std::fs::read_to_string(manifest_dir.join(".cargo_vcs_info.json")).ok();
+    if vcs_info.is_none() {
+        watch_git_head();
+    }
+
+    let source = build_version::source(
+        vcs_info.as_deref(),
+        || toplevel_is_workspace(&manifest_dir),
+        git_head,
+    );
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
-    let line = match (git(&["rev-parse", "--short=7", "HEAD"]), commit_date()) {
-        (Some(commit), Some(date)) => format!("{version} ({commit} {date})"),
-        _ => version,
-    };
+    let line = build_version::line(&version, &source);
     println!("cargo:rustc-env=RDY_VERSION={line}");
 }
 
@@ -30,35 +47,41 @@ fn git(args: &[&str]) -> Option<String> {
     (!text.is_empty()).then(|| text.to_string())
 }
 
-/// Rebuild when `HEAD` or the branch it points at moves.
+/// True when git's top-level directory is the workspace root (two levels above this package).
+fn toplevel_is_workspace(manifest_dir: &Path) -> bool {
+    let Some(top) = git(&["rev-parse", "--show-toplevel"]) else {
+        return false;
+    };
+    let workspace = manifest_dir.join("..").join("..");
+    match (Path::new(&top).canonicalize(), workspace.canonicalize()) {
+        (Ok(top), Ok(workspace)) => top == workspace,
+        _ => false,
+    }
+}
+
+/// The full hash and the commit time (Unix seconds) of `HEAD`.
+fn git_head() -> Option<(String, i64)> {
+    let out = git(&[
+        "log",
+        "-1",
+        "--no-show-signature",
+        "--format=%H%n%ct",
+        "HEAD",
+    ])?;
+    let (hash, secs) = out.split_once('\n')?;
+    Some((hash.trim().to_string(), secs.trim().parse().ok()?))
+}
+
+/// Rebuild when `HEAD`, the branch it points at, or the packed refs move.
 fn watch_git_head() {
-    if let Some(path) = git(&["rev-parse", "--git-path", "HEAD"]) {
-        println!("cargo:rerun-if-changed={path}");
+    for name in ["HEAD", "packed-refs"] {
+        if let Some(path) = git(&["rev-parse", "--git-path", name]) {
+            println!("cargo:rerun-if-changed={path}");
+        }
     }
     if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"])
         && let Some(path) = git(&["rev-parse", "--git-path", &reference])
     {
         println!("cargo:rerun-if-changed={path}");
     }
-}
-
-/// The commit date of `HEAD` as `YYYY-MM-DD` in UTC.
-fn commit_date() -> Option<String> {
-    let secs: i64 = git(&["show", "-s", "--format=%ct", "HEAD"])?.parse().ok()?;
-    let (year, month, day) = civil_from_days(secs.div_euclid(86_400));
-    Some(format!("{year:04}-{month:02}-{day:02}"))
-}
-
-/// Days since 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's `civil_from_days`).
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    (year, month, day)
 }

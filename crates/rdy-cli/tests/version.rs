@@ -1,5 +1,6 @@
 //! Runs the built `rdy` binary and checks the version line (ADR 0011, 07 section 4.3).
 
+use std::path::Path;
 use std::process::{Command, Output};
 
 fn rdy(args: &[&str]) -> Output {
@@ -9,14 +10,30 @@ fn rdy(args: &[&str]) -> Output {
         .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"))
 }
 
-/// True when this checkout is a git work tree, so the build had a commit to embed.
-fn built_from_git() -> bool {
-    Command::new("git")
-        .args(["rev-parse", "--short=7", "HEAD"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false)
+/// The 7-character commit of `HEAD` when this is a git checkout of the workspace, so the build had
+/// a commit to embed. `None` for a packaged tree or a checkout that is not this workspace.
+fn expected_commit() -> Option<String> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if dir.join(".cargo_vcs_info.json").exists() {
+        return None;
+    }
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .ok()?;
+        let text = String::from_utf8(out.stdout).ok()?;
+        out.status.success().then(|| text.trim().to_string())
+    };
+    let top = Path::new(&git(&["rev-parse", "--show-toplevel"])?)
+        .canonicalize()
+        .ok()?;
+    if top != dir.join("../..").canonicalize().ok()? {
+        return None;
+    }
+    let full = git(&["rev-parse", "HEAD"])?;
+    (full.len() >= 7).then(|| full[..7].to_string())
 }
 
 fn is_date(s: &str) -> bool {
@@ -40,9 +57,10 @@ fn assert_version_line(line: &str) {
     let rest = rest
         .strip_prefix(version)
         .unwrap_or_else(|| panic!("line does not carry {version}: {line:?}"));
+    let want = expected_commit();
     if rest.is_empty() {
         assert!(
-            !built_from_git(),
+            want.is_none(),
             "a git build must embed commit and date: {line:?}"
         );
         return;
@@ -51,14 +69,21 @@ fn assert_version_line(line: &str) {
         .strip_prefix(" (")
         .and_then(|r| r.strip_suffix(')'))
         .unwrap_or_else(|| panic!("bad suffix after the version: {line:?}"));
-    let (commit, date) = inner
-        .split_once(' ')
-        .unwrap_or_else(|| panic!("want `<commit> <date>`: {line:?}"));
+    let (commit, date) = match inner.split_once(' ') {
+        Some((commit, date)) => (commit, Some(date)),
+        None => (inner, None),
+    };
     assert!(
         commit.len() == 7 && commit.bytes().all(|c| c.is_ascii_hexdigit()),
         "commit is not 7 hex digits: {line:?}"
     );
-    assert!(is_date(date), "date is not YYYY-MM-DD: {line:?}");
+    if let Some(want) = want {
+        assert_eq!(commit, want, "commit is not HEAD: {line:?}");
+        assert!(date.is_some(), "a git build must embed the date: {line:?}");
+    }
+    if let Some(date) = date {
+        assert!(is_date(date), "date is not YYYY-MM-DD: {line:?}");
+    }
 }
 
 fn assert_prints_version_line(args: &[&str]) {

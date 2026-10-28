@@ -1,3 +1,5 @@
-# unwrap_used and expect_used are denied in [workspace.lints.clippy]. Tests may use them.
+# unwrap_used and expect_used are denied in [workspace.lints.clippy].
+# These two settings allow them inside `#[test]` functions and `#[cfg(test)]` modules only.
+# Helper functions in tests/ files are not covered, so they must not use unwrap or expect.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
