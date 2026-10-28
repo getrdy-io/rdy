@@ -12,7 +12,7 @@ use std::io::Cursor;
 use std::path::PathBuf;
 
 use rdy_spec::SpecError;
-use rdy_spec::sig::{Policy, PublicKey, SignatureError, SignatureState, TrustStore};
+use rdy_spec::sig::{Policy, PublicKey, SignatureError, SignatureState, TrustSource, TrustStore};
 use rdy_spec::spec::ProductSlug;
 
 const PRODUCT: &str = "acme-platform";
@@ -50,7 +50,7 @@ fn slug(text: &str) -> ProductSlug {
 
 fn store_for(product: &str) -> TrustStore {
     let mut store = TrustStore::new();
-    store.pin(slug(product), pinned_key());
+    store.pin(slug(product), pinned_key(), TrustSource::User);
     store
 }
 
@@ -74,6 +74,7 @@ fn the_committed_fixture_verifies_with_its_public_key() {
         fingerprint,
         product,
         signed_at,
+        trust_source,
         ..
     } = loaded.signature()
     else {
@@ -83,6 +84,7 @@ fn the_committed_fixture_verifies_with_its_public_key() {
     assert_eq!(fingerprint, &key.fingerprint());
     assert_eq!(product.as_str(), PRODUCT);
     assert_eq!(signed_at, "2026-10-28T12:00:00Z");
+    assert_eq!(*trust_source, TrustSource::User);
     assert_eq!(loaded.sha256().len(), 64);
 }
 

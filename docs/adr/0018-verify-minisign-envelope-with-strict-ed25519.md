@@ -34,7 +34,11 @@ current release (0.3.0) for M1-120 found three problems.
    runs through the production key parser and verifier. Valid must verify, invalid must not.
 5. Tests sign with the `minisign` crate (dev-dependency only), so every good signature in the tests is one
    that stock minisign tooling writes. This is the interop proof for `minisign -V`.
-6. `rdy` still creates keys and signs with the `minisign` crate (ADR 0002), in M1-125.
+6. Public keys must be the exact base64 with no surrounding whitespace, and the canonical encoding of the
+   point. Each pin records a source (system, user or flag), and a verified result carries it, so the CLI
+   can show KEY NOT PINNED for a one-run key. A bad file signature and a bad comment signature are two
+   errors with one error code.
+7. `rdy` still creates keys and signs with the `minisign` crate (ADR 0002), in M1-125.
 
 ## Consequences
 

@@ -401,7 +401,7 @@ The line shown is the major line this plan expects.
 | serde_yaml | | none | named in the plan | **Deprecated** (March 2024). Banned in deny.toml. |
 | serde_yml | | none | common successor | **Archived**, RUSTSEC-2025-0068. Banned. |
 | schemars | 1 | rdy-spec | JSON Schema from types (ADR 0012) | 1.x changed API from 0.8; start on 1.x. |
-| ed25519-dalek, blake2 | 2.2 and 0.10, exact pins | rdy-spec | `verify_strict` over the minisign envelope that rdy-spec reads itself (ADR 0018) | Wycheproof vectors in CI, every bump reviewed. `minisign-verify` was dropped: it hides the key id and is not strict. |
+| ed25519-dalek, blake2 | 2.2 and 0.10, exact pins | rdy-spec | `verify_strict` over the minisign envelope that rdy-spec reads itself (ADR 0018) | Wycheproof vectors in the test suite, every bump reviewed. `minisign-verify` was dropped: it hides the key id and is not strict. |
 | minisign | current | rdy; dev-dependency of rdy-spec | key generation and signing; tests sign with it | |
 | sha2 | current | rdy-spec | spec digest in results | |
 | thiserror | 2 | libraries | typed errors | |

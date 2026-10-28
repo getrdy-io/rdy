@@ -59,6 +59,12 @@ pub enum SignatureError {
         /// The file holds a CR LF pair. Line-ending conversion is the usual honest cause.
         crlf: bool,
     },
+    /// The signature over the file verifies, but the signature over the trusted comment does not. The
+    /// signed comment (product or time) was edited. Same error code as [`SignatureError::Tampered`].
+    #[error(
+        "the signed comment does not match the signature. It may have been changed after signing."
+    )]
+    CommentTampered,
     /// The product in the signed comment is not the product in the spec.
     #[error("the spec is signed for product '{signed}', but it says '{spec}'")]
     ProductMismatch {
@@ -97,6 +103,7 @@ impl SignatureError {
             | Self::LegacyAlgorithm
             | Self::BadComment { .. }
             | Self::Tampered { .. }
+            | Self::CommentTampered
             | Self::ProductMismatch { .. } => {
                 "get a fresh copy and its .minisig from the vendor. Do not run this file."
             }

@@ -63,14 +63,15 @@ pub struct PublicKey {
 impl PublicKey {
     /// Reads a key from the base64 line of a minisign `.pub` file, such as `RWQf6LRC...`.
     ///
-    /// Surrounding whitespace is ignored.
+    /// The text must be exactly the base64, with no whitespace around it. The key must be a canonical
+    /// encoding of a curve point.
     ///
     /// # Errors
     ///
     /// [`SignatureError::BadKey`] if the text is not a minisign ed25519 public key, and
     /// [`SignatureError::WeakKey`] if the key has small order.
     pub fn from_base64(text: &str) -> Result<Self, SignatureError> {
-        let bytes = base64::decode(text.trim())
+        let bytes = base64::decode(text)
             .filter(|bytes| bytes.len() == PUBLIC_KEY_BYTES)
             .ok_or(SignatureError::BadKey {
                 reason: "it is not a minisign public key",
@@ -116,6 +117,12 @@ pub(super) fn parse_verifying_key(raw: &[u8; 32]) -> Result<VerifyingKey, Signat
     let key = VerifyingKey::from_bytes(raw).map_err(|_| SignatureError::BadKey {
         reason: "it is not a point on the curve",
     })?;
+    // A second encoding of the same point would behave the same and have a different fingerprint.
+    if key.to_edwards().compress().to_bytes() != *raw {
+        return Err(SignatureError::BadKey {
+            reason: "it is not the canonical encoding of the key",
+        });
+    }
     if key.is_weak() {
         return Err(SignatureError::WeakKey);
     }
@@ -141,10 +148,54 @@ mod tests {
 
     #[test]
     fn the_fingerprint_is_sha256_of_the_32_key_bytes() {
-        let key = PublicKey::from_base64(&format!("  {STOCK_KEY}\n")).expect("stock key");
+        let key = PublicKey::from_base64(STOCK_KEY).expect("stock key");
         let raw = base64::decode(STOCK_KEY).expect("base64");
         assert_eq!(key.fingerprint(), hex(&Sha256::digest(&raw[10..])));
         assert_eq!(key.fingerprint().len(), 64);
+    }
+
+    #[test]
+    fn whitespace_around_a_key_is_refused() {
+        for text in [
+            format!(" {STOCK_KEY}"),
+            format!("{STOCK_KEY} "),
+            format!("{STOCK_KEY}\n"),
+            format!("\t{STOCK_KEY}\r\n"),
+        ] {
+            assert!(
+                matches!(
+                    PublicKey::from_base64(&text).unwrap_err(),
+                    SignatureError::BadKey { .. }
+                ),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_canonical_encoding_of_a_good_key_is_refused() {
+        // y and y + p are the same field element. For y below 19, y + p still fits in 255 bits, so the
+        // same point has a second encoding.
+        let mut found = 0;
+        for y in 2u8..19 {
+            let mut canonical = [0u8; 32];
+            canonical[0] = y;
+            if parse_verifying_key(&canonical).is_err() {
+                continue;
+            }
+            let mut second = [0xFFu8; 32];
+            second[0] = 0xED + y;
+            second[31] = 0x7F;
+            assert!(
+                matches!(
+                    parse_verifying_key(&second),
+                    Err(SignatureError::BadKey { .. })
+                ),
+                "y = {y}"
+            );
+            found += 1;
+        }
+        assert!(found > 0, "no small y is on the curve");
     }
 
     #[test]

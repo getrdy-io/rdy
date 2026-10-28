@@ -61,7 +61,7 @@ impl Pair {
 fn store(entries: &[(&str, &Pair)]) -> TrustStore {
     let mut store = TrustStore::new();
     for (product, pair) in entries {
-        store.pin(slug(product), pair.key());
+        store.pin(slug(product), pair.key(), TrustSource::User);
     }
     store
 }
@@ -121,6 +121,7 @@ fn a_good_signature_verifies_and_records_its_provenance() {
             fingerprint: pair.key().fingerprint(),
             product: slug(PRODUCT),
             signed_at: "2026-11-30T16:02:11Z".to_owned(),
+            trust_source: TrustSource::User,
         }
     );
     assert_eq!(loaded.sha256(), hex(&Sha256::digest(SPEC.as_bytes())));
@@ -185,7 +186,7 @@ fn windows_line_endings_are_tampered_and_the_error_says_so() {
 }
 
 #[test]
-fn a_changed_comment_is_tampered() {
+fn a_changed_comment_is_comment_tampered() {
     let pair = Pair::new();
     let sidecar = pair.sign(SPEC.as_bytes(), COMMENT);
     // Same form, different time. The signature over the comment no longer matches.
@@ -197,12 +198,12 @@ fn a_changed_comment_is_tampered() {
         &store(&[(PRODUCT, &pair)]),
         Policy::RequireSigned,
     );
-    assert_eq!(sig_error(result), SignatureError::Tampered { crlf: false });
+    assert_eq!(sig_error(result), SignatureError::CommentTampered);
     assert_eq!(parses, 0);
 }
 
 #[test]
-fn a_comment_moved_to_another_product_is_tampered_not_a_mismatch() {
+fn a_comment_moved_to_another_product_is_comment_tampered_not_a_mismatch() {
     // The attacker keeps the real signature and edits the product in the comment to one that the
     // victim pinned. The key is pinned for both. Only the signature over the comment catches it.
     let pair = Pair::new();
@@ -214,7 +215,7 @@ fn a_comment_moved_to_another_product_is_tampered_not_a_mismatch() {
         &store(&[(PRODUCT, &pair), ("acme-edge", &pair)]),
         Policy::RequireSigned,
     );
-    assert_eq!(sig_error(result), SignatureError::Tampered { crlf: false });
+    assert_eq!(sig_error(result), SignatureError::CommentTampered);
     assert_eq!(parses, 0);
 }
 
@@ -383,6 +384,27 @@ fn a_wrong_key_with_the_right_key_id_does_not_verify() {
 }
 
 #[test]
+fn the_trust_source_of_the_key_that_verified_is_recorded() {
+    let pair = Pair::new();
+    let sidecar = pair.sign(SPEC.as_bytes(), COMMENT);
+    for source in [TrustSource::System, TrustSource::User, TrustSource::Flag] {
+        let mut trust = TrustStore::new();
+        trust.pin(slug(PRODUCT), pair.key(), source);
+        let (result, _) = run(
+            SPEC.as_bytes(),
+            Some(sidecar.as_bytes()),
+            &trust,
+            Policy::RequireSigned,
+        );
+        let loaded = result.expect("loads");
+        let SignatureState::Verified { trust_source, .. } = loaded.signature() else {
+            panic!("expected a verified signature");
+        };
+        assert_eq!(*trust_source, source);
+    }
+}
+
+#[test]
 fn the_right_key_among_several_pins_is_found() {
     let first = Pair::new();
     let second = Pair::new();
@@ -518,6 +540,10 @@ fn malformed_signature_files_are_refused() {
             format!("{}\n{}\n{}\nx\n", lines[0], lines[1], lines[2]).into_bytes(),
         ),
         (
+            "signature line with a trailing space",
+            format!("{}\n{} \n{}\n{}\n", lines[0], lines[1], lines[2], lines[3]).into_bytes(),
+        ),
+        (
             "signature line with a stray byte",
             format!("{}\n{}!\n{}\n{}\n", lines[0], lines[1], lines[2], lines[3]).into_bytes(),
         ),
@@ -647,7 +673,10 @@ fn malleable_signatures_are_refused() {
     let good = pair.sign(SPEC.as_bytes(), COMMENT);
     let on_file = edit_sidecar(&good, |line, _| add_l(&mut line[42..74]));
     let on_comment = edit_sidecar(&good, |_, global| add_l(&mut global[32..64]));
-    for (name, sidecar) in [("file", on_file), ("comment", on_comment)] {
+    for (name, sidecar, expected) in [
+        ("file", on_file, SignatureError::Tampered { crlf: false }),
+        ("comment", on_comment, SignatureError::CommentTampered),
+    ] {
         assert_ne!(sidecar, good);
         let (result, parses) = run(
             SPEC.as_bytes(),
@@ -655,11 +684,7 @@ fn malleable_signatures_are_refused() {
             &store(&[(PRODUCT, &pair)]),
             Policy::RequireSigned,
         );
-        assert_eq!(
-            sig_error(result),
-            SignatureError::Tampered { crlf: false },
-            "{name}"
-        );
+        assert_eq!(sig_error(result), expected, "{name}");
         assert_eq!(parses, 0, "{name}");
     }
 }
@@ -726,6 +751,7 @@ fn no_error_message_or_hint_names_the_flags_that_weaken_the_check() {
         },
         SignatureError::Tampered { crlf: false },
         SignatureError::Tampered { crlf: true },
+        SignatureError::CommentTampered,
         SignatureError::ProductMismatch {
             signed: slug("a"),
             spec: slug("b"),
@@ -867,7 +893,7 @@ fn fixture_trust() -> TrustStore {
     let pub_file = String::from_utf8(fixture("acme-platform.pub")).expect("utf-8");
     let key = PublicKey::from_base64(pub_file.lines().nth(1).expect("key line")).expect("key");
     let mut trust = TrustStore::new();
-    trust.pin(slug(PRODUCT), key);
+    trust.pin(slug(PRODUCT), key, TrustSource::System);
     trust
 }
 

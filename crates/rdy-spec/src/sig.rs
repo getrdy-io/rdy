@@ -48,6 +48,18 @@ pub enum Policy {
     AllowUnsigned,
 }
 
+/// Where a trusted key came from. Reports record it, and the CLI shows KEY NOT PINNED for [`Self::Flag`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum TrustSource {
+    /// Pinned in the system store (`/etc/rdy/trust.yaml` or its Windows twin).
+    System,
+    /// Pinned in the user's store.
+    User,
+    /// Given for this one run only, with the `--key` flag. Nothing was pinned.
+    Flag,
+}
+
 /// How a loaded spec was authenticated.
 ///
 /// This is the provenance that reports record (threat model R1).
@@ -65,9 +77,19 @@ pub enum SignatureState {
         product: ProductSlug,
         /// The `signed_at` of the signed comment, `YYYY-MM-DDTHH:MM:SSZ`.
         signed_at: String,
+        /// Where the key that verified came from.
+        trust_source: TrustSource,
     },
     /// The spec had no signature and the policy allowed that. Nothing says who wrote it.
     Unsigned,
+}
+
+/// One pinned key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Pin {
+    product: ProductSlug,
+    key: PublicKey,
+    source: TrustSource,
 }
 
 /// Keys that are trusted, each for named products.
@@ -76,7 +98,7 @@ pub enum SignatureState {
 /// pin list. Reading and writing `trust.yaml` is the trust store ticket (M1-121).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TrustStore {
-    pins: Vec<(ProductSlug, PublicKey)>,
+    pins: Vec<Pin>,
 }
 
 impl TrustStore {
@@ -86,17 +108,19 @@ impl TrustStore {
         Self::default()
     }
 
-    /// Trusts `key` for `product`. The same key can be pinned for several products.
-    pub fn pin(&mut self, product: ProductSlug, key: PublicKey) {
-        self.pins.push((product, key));
+    /// Trusts `key` for `product`, and records where the key came from. The same key can be pinned for
+    /// several products.
+    pub fn pin(&mut self, product: ProductSlug, key: PublicKey, source: TrustSource) {
+        self.pins.push(Pin {
+            product,
+            key,
+            source,
+        });
     }
 
-    /// The keys pinned for `product`.
-    pub fn keys_for<'a>(&'a self, product: &'a ProductSlug) -> impl Iterator<Item = &'a PublicKey> {
-        self.pins
-            .iter()
-            .filter(move |(pinned, _)| pinned == product)
-            .map(|(_, key)| key)
+    /// The pins for `product`.
+    fn pins_for<'a>(&'a self, product: &'a ProductSlug) -> impl Iterator<Item = &'a Pin> {
+        self.pins.iter().filter(move |pin| pin.product == *product)
     }
 }
 
@@ -133,7 +157,7 @@ fn fixed_bytes<const N: usize>(
     line: &str,
     reason: &'static str,
 ) -> Result<[u8; N], SignatureError> {
-    base64::decode(line.trim())
+    base64::decode(line)
         .and_then(|bytes| <[u8; N]>::try_from(bytes).ok())
         .ok_or_else(|| malformed(reason))
 }
@@ -259,16 +283,31 @@ fn prehash(bytes: &[u8]) -> [u8; 64] {
     Blake2b512::digest(bytes).into()
 }
 
+/// What checking one pinned key against a signature found.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeyCheck {
+    /// The file and the comment both verify.
+    Verified,
+    /// The signature over the file verifies, and the signature over the trusted comment does not.
+    CommentDoesNotMatch,
+    /// The signature over the file does not verify.
+    FileDoesNotMatch,
+}
+
 /// Checks that a pinned key signed `bytes` with the signed comment in `sidecar`.
-fn verify_with(key: &PublicKey, bytes: &[u8], sidecar: &Sidecar<'_>) -> bool {
+fn verify_with(key: &PublicKey, bytes: &[u8], sidecar: &Sidecar<'_>) -> KeyCheck {
     if !ed25519_verify(key.verifying_key(), &prehash(bytes), &sidecar.signature) {
-        return false;
+        return KeyCheck::FileDoesNotMatch;
     }
     // The global signature covers the signature and the trusted comment, so the comment is signed.
     let mut global = Vec::with_capacity(64 + sidecar.comment.len());
     global.extend_from_slice(&sidecar.signature);
     global.extend_from_slice(sidecar.comment.as_bytes());
-    ed25519_verify(key.verifying_key(), &global, &sidecar.global_signature)
+    if ed25519_verify(key.verifying_key(), &global, &sidecar.global_signature) {
+        KeyCheck::Verified
+    } else {
+        KeyCheck::CommentDoesNotMatch
+    }
 }
 
 /// Verifies `bytes` against the signature file `sidecar` and returns the provenance.
@@ -281,9 +320,9 @@ pub(crate) fn verify_sidecar(
 ) -> Result<SignatureState, SignatureError> {
     let parsed = parse_sidecar(sidecar)?;
     // The comment is not trusted yet. It only picks which pinned keys to try.
-    let candidates: Vec<&PublicKey> = trust
-        .keys_for(&parsed.product)
-        .filter(|key| key.key_id() == parsed.key_id)
+    let candidates: Vec<&Pin> = trust
+        .pins_for(&parsed.product)
+        .filter(|pin| pin.key.key_id() == parsed.key_id)
         .collect();
     if candidates.is_empty() {
         return Err(SignatureError::UnknownKey {
@@ -291,19 +330,29 @@ pub(crate) fn verify_sidecar(
             product: parsed.product,
         });
     }
-    match candidates
-        .into_iter()
-        .find(|key| verify_with(key, bytes, &parsed))
-    {
-        Some(key) => Ok(SignatureState::Verified {
-            key_id: parsed.key_id,
-            fingerprint: key.fingerprint(),
-            product: parsed.product,
-            signed_at: parsed.signed_at,
-        }),
-        None => Err(SignatureError::Tampered {
+    let mut comment_failed = false;
+    for pin in candidates {
+        match verify_with(&pin.key, bytes, &parsed) {
+            KeyCheck::Verified => {
+                return Ok(SignatureState::Verified {
+                    key_id: parsed.key_id,
+                    fingerprint: pin.key.fingerprint(),
+                    product: parsed.product.clone(),
+                    signed_at: parsed.signed_at.clone(),
+                    trust_source: pin.source,
+                });
+            }
+            KeyCheck::CommentDoesNotMatch => comment_failed = true,
+            KeyCheck::FileDoesNotMatch => {}
+        }
+    }
+    if comment_failed {
+        // The file is what the key signed. The edit is in the signed comment.
+        Err(SignatureError::CommentTampered)
+    } else {
+        Err(SignatureError::Tampered {
             crlf: bytes.windows(2).any(|pair| pair == b"\r\n"),
-        }),
+        })
     }
 }
 
