@@ -7,6 +7,8 @@ that each touch one line do not conflict.
 Start: the founder approved the planning pass and started M1 on 2026-10-28, ahead of the Nov 20, 2026
 go or no-go in the plan. This is recorded as decision 2 under "Decisions made" in `13-plan-corrections.md`.
 
+The build process, the implementer brief and the state at each pause are in `m1-build-runbook.md`.
+
 ## Tickets
 
 - M1-001 | [#6](https://github.com/getrdy-io/rdy/pull/6) | 2026-10-28 | none; MF-04 was reopened and closed after 74e162a, 05 revision 3 applied, follow-ups CF-01 to CF-07 are filed in both review files for their owners
