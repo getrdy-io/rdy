@@ -33,6 +33,9 @@ serde-saphyr = { version = "~2.0", default-features = false }
 serde_json = { version = "1", default-features = false }
 trybuild = "1"
 thiserror = { version = "2", default-features = false }
+rpassword = { version = "7.5", default-features = false }
+# Pseudo-terminal driver for the prompt tests (M1-123). Test-only, Unix only.
+rexpect = { version = "0.7", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 tempfile = { version = "3", default-features = false }
 unicode-normalization = { version = "0.1", default-features = false }
