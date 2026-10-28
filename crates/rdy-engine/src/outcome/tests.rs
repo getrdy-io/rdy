@@ -10,7 +10,7 @@ use rdy_spec::spec::{CheckSpec, FixText, Lenient, Severity as SpecSeverity};
 use serde_json::json;
 
 use super::*;
-use crate::check::{OsSupport, Want};
+use crate::check::{Level, OsSupport, Want};
 
 const VENDOR_FIX: &str = "Add RAM or choose a larger node class.";
 const RDY_FIX: &str = "Add memory to the machine.";

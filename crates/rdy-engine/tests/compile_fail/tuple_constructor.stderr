@@ -1,0 +1,16 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/compile_fail/tuple_constructor.rs:4:13
+  |
+4 |     let _ = Redacted("raw text".to_string());
+  |             ^^^^^^^^
+  |
+  = note: a struct named `Redacted` exists in another namespace
+note: constructor is not visible here due to private fields
+ --> src/redact/mod.rs
+  |
+  | pub struct Redacted<T>(T);
+  |                        ^ private field
+help: you might have meant to use the `new` associated function
+  |
+4 |     let _ = Redacted::new("raw text".to_string());
+  |                     +++++

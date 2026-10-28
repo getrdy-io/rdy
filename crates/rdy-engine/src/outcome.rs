@@ -32,8 +32,9 @@ use rdy_spec::spec::{CheckSpec, Lenient};
 use serde_json::{Map, Value};
 
 use crate::check::{
-    CheckContext, CheckError, CheckInfo, CheckOutcome, Finding, Level, Need, Os, Partial, Support,
+    CheckContext, CheckError, CheckInfo, CheckOutcome, Finding, Need, Os, Partial, Support,
 };
+use crate::units::cap_level;
 
 #[cfg(test)]
 mod tests;
@@ -124,12 +125,7 @@ fn from_finding(
         ));
     }
 
-    let level_status = match (level, severity) {
-        (Level::Pass, _) => Status::Pass,
-        (Level::Warn, _) => Status::Warn,
-        (Level::Fail, Severity::Warn) => Status::Warn,
-        (Level::Fail, _) => Status::Block,
-    };
+    let level_status = cap_level(level, severity);
     let wire_partial = partial.as_ref().map(wire_partial);
     let os_partial = matches!(info.os.on(ctx.os()), Support::Partial(_));
     let evidence_only = evidence_only_missing(info, partial.as_ref(), os_partial);

@@ -1,0 +1,7 @@
+error[E0277]: the trait bound `Redacted<String>: From<String>` is not satisfied
+ --> tests/compile_fail/into_value.rs:4:54
+  |
+4 |     let _: Redacted<String> = "raw text".to_string().into();
+  |                                                      ^^^^ the trait `From<String>` is not implemented for `Redacted<String>`
+  |
+  = note: required for `String` to implement `Into<Redacted<String>>`
