@@ -64,6 +64,11 @@ fn minimal(id: &str) -> Value {
         "host.memory" => json!({"id": id, "min": "1Gi"}),
         "host.disk" => json!({"id": id, "path": "/", "min": "1Gi"}),
         "host.ports" => json!({"id": id, "free": [80]}),
+        "net.egress" => json!({"id": id, "endpoints": ["a.example:443"]}),
+        "net.dns" => json!({"id": id, "names": ["a.example"]}),
+        "k8s.rbac" => json!({"id": id, "can": ["create namespaces"]}),
+        "k8s.nodes" => json!({"id": id, "min_ready": 1}),
+        "k8s.version" => json!({"id": id, "min": "1.27"}),
         _ => json!({"id": id}),
     }
 }
@@ -413,4 +418,41 @@ fn decode_checks_keeps_entry_order_and_reports_each_outcome() {
     assert!(matches!(decoded[0], CheckParams::HostCpu(_)));
     assert!(matches!(decoded[1], CheckParams::Unknown { .. }));
     assert!(matches!(decoded[2], CheckParams::Unsupported { .. }));
+}
+
+// ---- messages carried from the review of M1-024 -----------------------------------------------
+
+/// With several keys in `one_of`, "and 'path'" would read as part of the list.
+#[test]
+fn a_no_threshold_with_several_keys_and_another_required_key_reads_as_two_clauses() {
+    let reason = UnsupportedReason::NoThreshold {
+        one_of: &["min", "arch", "flags"],
+        and: vec!["path", "name"],
+    };
+    assert_eq!(
+        reason.to_string(),
+        "has no threshold: add at least one of 'min', 'arch', or 'flags'; also add 'path' and 'name'"
+    );
+    let single = UnsupportedReason::NoThreshold {
+        one_of: &["min"],
+        and: vec!["path"],
+    };
+    assert_eq!(single.to_string(), "has no threshold: add 'min' and 'path'");
+}
+
+/// The message of a list below its minimum gives the count and the minimum, whatever the minimum is.
+#[test]
+fn a_list_below_its_minimum_says_how_many_items_it_has_and_how_many_it_needs() {
+    let one = serde_json::from_value::<BoundedList<u8, 5, false, 1>>(json!([]));
+    assert!(
+        one.expect_err("too short")
+            .to_string()
+            .contains("a list has 0 items, at least 1 needed")
+    );
+    let two = serde_json::from_value::<BoundedList<u8, 5, false, 2>>(json!([7]));
+    assert!(
+        two.expect_err("too short")
+            .to_string()
+            .contains("a list has 1 items, at least 2 needed")
+    );
 }
