@@ -5,6 +5,7 @@
 //!
 //! - [`check`]: the `Check` trait, `CheckInfo`, needs, `Finding` and `CheckError`.
 //! - [`outcome`]: [`outcome::map_outcome`] turns a check's outcome into a `CheckResult`.
+//! - [`units`]: version compare, byte sizes, the nominal band and the severity cap that checks share.
 //! - `sched` (feature `runtime`, on by default): runs checks with a concurrency limit, a timeout each
 //!   and panic isolation.
 //!
@@ -17,3 +18,4 @@ pub mod check;
 pub mod outcome;
 #[cfg(feature = "runtime")]
 pub mod sched;
+pub mod units;

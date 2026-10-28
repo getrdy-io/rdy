@@ -139,7 +139,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-063 | todo | | SEC-26 M1 redaction corpus, first 30 cases (0.1.0 gate)
 
-- M1-064 | todo | | Shared helpers: units, quantities, dotted version compare, nominal band, severity cap
+- M1-064 | PR #TBD | | NOT PUSHED: the exit test conflicts with the plan (3.7 GiB cannot pass against 4Gi with max(5%, 256 MiB); see the reply). Built to the documented defaults and the conflict is pinned in a test. Tolerant kernel-release parsing (5.14.0-362.el9) is left to M1-152. The cgroup helper is a separate ticket.
 
 - M1-065 | todo | | cgroup helper for memory, cpu and controllers
 
