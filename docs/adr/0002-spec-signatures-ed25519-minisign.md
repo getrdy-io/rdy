@@ -1,64 +1,75 @@
-# ADR 0002: Specs are signed with ed25519 in minisign format, keys pinned per product
+# ADR 0002: Specs are signed with ed25519 in minisign format, verified before parsing, keys pinned per product
 
-- Status: Accepted
+- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review)
 - Date: 2026-10-27
 
 ## Context
 
 CLAUDE.md rule 3: specs are signed by the vendor's ed25519 key and the CLI refuses unsigned or tampered
-specs unless `--allow-unsigned`. A spec decides what `rdy` reads on a customer box, and later (ADR 0005)
-what it may execute, so the spec is the main supply-chain input. Verification must work fully offline.
-The plan's release section says "binaries and specs signed with Sigstore", which conflicts with rule 3.
-Designing our own signature envelope is a classic way to get crypto wrong.
+specs unless `--allow-unsigned`. A spec decides what `rdy` reads on a customer box, and from M3
+(ADR 0005) what it may execute. Verification must work offline. The plan's release section says
+"binaries and specs signed with Sigstore", which conflicts with rule 3. Designing our own signature
+envelope is a classic way to get crypto wrong. Untrusted bytes should not reach the YAML parser as root.
 
 ## Decision
 
-1. **Format.** Detached signature in minisign format: ed25519 over a BLAKE2b-512 prehash of the exact
-   file bytes, with an 8-byte key id and a signed "trusted comment". The sidecar is `<spec>.minisig`
-   next to the spec. The trusted comment carries `product=<metadata.product> signed_at=<RFC 3339>`.
-2. **Crates.** `rdy-spec` verifies with `minisign-verify` (pure Rust, no dependencies), so `rdy-cloud`
-   can verify with the same code. `rdy-cli` creates keys and signs with the `minisign` crate, which also
-   gives password-encrypted secret keys. Vendors can use the stock `minisign` CLI instead; it interoperates.
-3. **Key pinning.** The CLI trusts a key only for named products. Trust lives in
-   `$XDG_CONFIG_HOME/rdy/trust.yaml` (user) and `/etc/rdy/trust.yaml` (system, used when running as root).
-   Each entry is `{ product, key, added_at, note }`. A spec verifies only if its signer key is pinned for
-   its `metadata.product`, and the trusted comment's product matches too.
-4. **Key distribution in M1** is out of band. The vendor publishes its public key on its own docs page
-   and in the SE's email. The customer passes it once with `--key <base64 or file>`; the CLI prints the
-   key id and fingerprint and asks to pin it (non-interactive runs need `--trust-key` explicitly).
-   From M2, a spec fetched through a portal share link arrives with the vendor key served by
-   app.getrdy.io over TLS; that makes Rdy part of the trust chain and the docs say so.
-5. **Unsigned or failing specs** exit with code 64 and a fix hint. `--allow-unsigned` runs them, prints a
-   red banner on stderr, and stamps `signature: unsigned` into the JSON and HTML reports.
-6. **Sigstore signs binaries and checksums, not specs.** The release pipeline signs with cosign keyless
-   (GitHub OIDC). That proves "this binary came from getrdy-io/rdy CI". A spec signature proves "this
-   vendor wrote these requirements". Different signers, different keys, different verifiers.
+1. **Format.** Detached minisign signature (ed25519 over a BLAKE2b-512 prehash of the exact file bytes,
+   8-byte key id, signed trusted comment) in `<spec>.minisig`, or the file named by `--sig`. The trusted
+   comment must be exactly `rdy-spec-v1 product=<slug> signed_at=<RFC 3339>`; anything else is refused.
+   That prefix is our domain separation. Docs tell vendors to use a dedicated spec-signing key.
+2. **Crates.** `rdy-spec` verifies with `minisign-verify`, pinned to an exact version and reviewed on
+   every bump, called with legacy (non-prehashed) signatures off. Wycheproof EdDSA vectors and
+   malleability cases run against it in CI. `rdy` creates keys and signs with the `minisign` crate.
+   Stock `minisign` interoperates.
+3. **Verify, then parse.** `rdy_spec::load` reads the key id and the trusted comment from the signature,
+   looks up keys pinned for that product, verifies the raw bytes, and only then parses. After parsing,
+   `metadata.product` must equal the trusted-comment product. `load` is the only way to get a
+   `LoadedSpec`. `parse_unverified` exists for `spec lint`, `--allow-unsigned` runs and portal authoring.
+4. **Trust store.** Entries `{ product, key, added_at, note }`. A key is trusted only for named products.
+   - Normal user: `$XDG_CONFIG_HOME/rdy/trust.yaml`.
+   - euid 0: only `/etc/rdy/trust.yaml`, never a user path, whatever HOME or XDG say. Refused, with the
+     reason, if it is a symlink, not owned by root, group or world writable, or in a directory writable
+     by anyone but root. Written atomically, mode 0644. Not on any cut list.
+5. **Pinning only in `rdy trust add <product> --key <file or base64>`.** It prints key id and
+   fingerprint and asks `Trust this key for <product>? [y/N]`; `--yes` skips the question; with no TTY
+   and no `--yes` it exits 64. `rdy run <spec> --key <pubkey>` verifies for that run only and writes
+   nothing. There is no `--trust-key`. `rdy trust list` and `rdy trust remove <product> [--key-id]`.
+6. **Key distribution in M1** is out of band: the vendor's docs page and the SE's email. From M2, a key
+   served with a share link is shown with its fingerprint and pinned only on an explicit yes. A changed
+   key for an already pinned product is a hard failure, never a silent re-pin.
+7. **Signature states:** `Verified`, `Unsigned`, `Invalid { reason }`. A missing signature exits 64
+   unless `--allow-unsigned` (argv only: no env var, config or alias), which prints a red banner and
+   stamps `unsigned` into both reports. A present but failing signature exits 64 always, even with the
+   flag. Its fix hint says "get a fresh copy and its .minisig from the vendor"; it never suggests the flag.
+8. **Secret keys.** `rdy spec keygen` writes with `create_new`, mode 0600, password-encrypted by
+   default; `--unencrypted` is explicit for CI. `spec sign` refuses a group or world readable key. Secret
+   bytes are never printed or logged.
+9. **Sigstore signs binaries and checksums, not specs.** Different signer, key and verifier.
 
 ## Consequences
 
-- Offline verification with no network and no transparency log.
-- Rotation: a vendor pins a new key per product and signs with it; old keys are removed by hand
-  (`rdy trust remove`). No revocation list in v1. Documented as a known limit.
-- Rollback: an old, validly signed spec with looser thresholds can be replayed. The report shows
-  `signed_at` so an SE can spot it; a portal-served spec (M2) fixes it by fetching the latest version.
-- `ed25519-dalek`, named in the plan, is not a direct dependency. Signing is still ed25519.
-- Command names (`trust add|list|remove`, `spec keygen`) are provisional until cli-ux signs off.
+- Offline verification, no transparency log. Partner runs never parse unverified bytes.
+- Rotation is pin-new, remove-old by hand. No revocation list in v1. Rollback of an old signed spec is
+  visible through `signed_at` in the report; portal-served specs (M2) fix it.
+- `ed25519-dalek` (plan) is not a direct dependency. Signing is still ed25519.
+- Tightens CLAUDE.md rule 3: a tampered spec is refused even with `--allow-unsigned` (plan correction).
 
 ## Alternatives considered
 
 | Option | Why it lost |
 | --- | --- |
-| Raw ed25519-dalek with our own envelope | We would design key ids, prehash and domain separation ourselves. minisign already did, and reviewers know it. |
-| Signature embedded in the YAML | Needs canonicalization of YAML, which is fragile and a known source of bypasses. |
-| Sigstore keyless for specs | Needs Fulcio and Rekor online or a shipped trust root plus bundle; vendors would need OIDC identities. Breaks offline-first. Possible add-on in M5. |
-| SSH signatures (`ssh-keygen -Y`) | Familiar keys, but a larger format to parse and RSA keys in the mix. |
-| DSSE or in-toto envelope | Built for attestations of artifacts, heavier than a spec needs. |
-| Trust on first use | Silent pinning of an attacker's key on first run. We pin only with an explicit user action. |
+| Raw ed25519-dalek with our own envelope | We would design key ids, prehash and domain separation ourselves. |
+| Signature embedded in the YAML | Needs YAML canonicalization, a known source of bypasses. |
+| Sigstore keyless for specs | Needs online Fulcio and Rekor or a shipped trust root; breaks offline-first. Revisit in M5. |
+| Key on the vendor's own domain (`/.well-known/rdy-keys.txt`) | A real second channel, but needs network and vendor setup. Candidate for M2 alongside the portal key. |
+| SSH signatures or DSSE | Larger formats than a spec needs. |
+| Trust on first use, or pinning from `run` | Silent or side-effect pinning of an attacker's key. Pinning is its own command. |
 
 ## Tickets implied
 
-- [M1] Verify minisign signatures in rdy-spec against a trust store with product binding | owner: rust-engineer | est: 3h | depends on: Define public spec types in rdy-spec | exit test: a tampered byte, a wrong product and an unpinned key each fail with a distinct SignatureError.
-- [M1] Trust store load and save in user and system locations | owner: rust-engineer | est: 2h | depends on: Verify minisign signatures in rdy-spec against a trust store with product binding | exit test: running as root reads /etc/rdy/trust.yaml, as a user reads XDG config, in a temp-dir integration test.
-- [M1] rdy spec keygen and rdy spec sign | owner: rust-engineer | est: 3h | depends on: Verify minisign signatures in rdy-spec against a trust store with product binding | exit test: a spec signed by rdy verifies with the stock minisign CLI and the reverse.
-- [M1] rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner | owner: rust-engineer | est: 3h | depends on: rdy spec keygen and rdy spec sign | exit test: unsigned spec exits 64 with a hint; with --allow-unsigned it runs and the JSON says signature: unsigned.
-- [M1] Security review of spec signing and trust store | owner: security-reviewer | est: 2h | depends on: rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner | exit test: review notes filed and every blocker fixed before the M1 tag.
+- [M1] Verify minisign signatures in rdy-spec against a trust store with product binding | owner: rust-engineer | est: 4h | depends on: Define public spec types in rdy-spec | exit test: a tampered byte, a wrong product, a bad trusted-comment prefix and an unpinned key each fail with a distinct SignatureError, Wycheproof vectors pass, and a parser spy shows a tampered spec is never parsed.
+- [M1] Trust store load and save in user and system locations | owner: rust-engineer | est: 3h | depends on: Verify minisign signatures in rdy-spec against a trust store with product binding | exit test: as root with HOME and XDG_CONFIG_HOME pointing at a user store, only /etc/rdy/trust.yaml is read, and a symlinked, non-root or group-writable file is refused with the reason.
+- [M1] rdy spec keygen and rdy spec sign | owner: rust-engineer | est: 4h | depends on: Verify minisign signatures in rdy-spec against a trust store with product binding | exit test: a spec signed by rdy verifies with stock minisign and the reverse; keys are 0600 and encrypted unless --unencrypted; a world-readable key is refused.
+- [M1] rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner | owner: rust-engineer | est: 3.5h | depends on: rdy spec keygen and rdy spec sign | exit test: unsigned exits 64; with --allow-unsigned it runs and both reports say unsigned; an invalid signature exits 64 even with the flag and its hint never names the flag.
+- [M1] Security review of spec signing and trust store | owner: security-reviewer | est: 2h | depends on: rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner | exit test: review notes filed and every blocker fixed before the 0.1.0 tag.
+- [M1] rdy trust add, list and remove | owner: rust-engineer | est: 2h | depends on: Trust store load and save in user and system locations | exit test: `trust add` without a TTY and without --yes exits 64 with a fix line; with --yes it pins and `trust list` shows key id and fingerprint; `run --key` leaves the store unchanged.

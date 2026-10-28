@@ -96,7 +96,8 @@ threat model and make my job easier.
   The ADR does not say that response bodies are never stored (INV-12). And the TLS interception check
   uses a verifier that accepts any chain so it can record it. Nothing confines that verifier.
 - Fix:
-  - Use `redirect::Policy::none()`. Record the `Location` header as evidence.
+  - Follow redirects by hand, at most 5 hops, and check each hop against the address policy. 03 needs the
+    redirect host list, because registry blob redirects are a real install blocker. Record each `Location`.
   - Add a custom `dns_resolver` on the shared client that drops resolved addresses in 169.254.0.0/16,
     fe80::/10 and fd00:ec2::254, and checks literal IPs the same way.
   - Only endpoints listed in the verified spec are reachable, with a cap on how many.
@@ -306,17 +307,17 @@ tickets. "0.1.0 gate" means the ticket must be done before any design partner ge
 
 | # | Standalone ticket (05 id) | Owner | Est | Week | 0.1.0 gate |
 |---|---|---|---|---|---|
-| 1 | Harden GitHub org and repo settings (SEC-04) | security-reviewer | 2h | 1 | yes |
+| 1 | Org 2FA, private reporting, CODEOWNERS and a settings check script (SEC-04) | security-reviewer | 2h | 1 | yes |
 | 2 | Harden getrdy.io domain and hosting accounts (SEC-05) | release-engineer | 2h | 1 | yes, before install.sh is served |
 | 3 | Confine writes to a new output dir with safe names (SEC-19, MF-04) | rust-engineer | 3h | 3 | yes |
 | 4 | Minimal redactor for evidence, errors and logs (SEC-25, SEC-29) | rust-engineer | 4h | 3 | yes |
-| 5 | Action log in the result via mediated Context handles (SEC-17, SF-13) | rust-engineer | 3h | 3 | yes |
-| 6 | Egress address policy, no redirects, no bodies (SEC-21, MF-05) | check-author | 3h | 4 | yes |
+| 5 | Mediated Context handles with action log and read denylist (SEC-17, SF-13) | rust-engineer | 3h | 3 | yes |
+| 6 | Egress address policy, capped redirects, no bodies (SEC-21, MF-05) | check-author | 3h | 4 | yes |
 | 7 | M1 redaction corpus, 60 cases (SEC-26) | qa-engineer | 3h | 4 | 30 cases yes, rest by 0.1.1 |
-| 8 | No-phone-home tests (SEC-22) | qa-engineer | 2h | 4 | no, by 0.1.1 |
+| 8 | No-phone-home strace test on Linux CI (SEC-22) | qa-engineer | 2h | 4 | no, by 0.1.1 |
 | 9 | Read-only ClusterRole example and kube identity display (SEC-24) | k8s-expert | 2h | 5 | no, by 0.1.1 |
 | 10 | Docs security page and verify-first install (SEC-31) | docs-writer | 2h | 6 | no, by 0.1.1 |
-| 11 | Enable vulnerability reporting channels (SEC-32) | security-reviewer | 1h | 6 | yes |
+| 11 | Security mailbox and security.txt (SEC-32) | security-reviewer | 1h | 6 | yes |
 
 Folds into existing tickets (about 8h in total):
 - Verify minisign signatures: verify before parse, trusted-comment prefix, legacy off, Wycheproof (MF-01, SF-01), +1h.
@@ -347,15 +348,15 @@ signing, SBOM and cargo-auditable, install.sh root refusal and verification (06 
 
 ## Tickets implied
 
-- [M1] SEC-04 Harden GitHub org and repo settings | owner: security-reviewer | est: 2h | depends on: none | exit test: a checklist in the PR shows 2FA required, rulesets on main and v* tags, immutable releases, private vulnerability reporting and CODEOWNERS on security paths.
+- [M1] SEC-04 Org 2FA, private reporting, CODEOWNERS and a settings check script | owner: security-reviewer | est: 2h | depends on: none | exit test: a checklist in the PR shows 2FA required, rulesets on main and v* tags, immutable releases, private vulnerability reporting and CODEOWNERS on security paths.
 - [M1] SEC-05 Harden getrdy.io domain and hosting accounts | owner: release-engineer | est: 2h | depends on: none | exit test: registrar lock, DNSSEC, CAA and HSTS verified with public tools and hardware-key MFA confirmed on registrar and Cloudflare.
 - [M1] SEC-19 Confine writes to a new output dir with safe names | owner: rust-engineer | est: 3h | depends on: Define public spec types in rdy-spec | exit test: a product of `../x` fails validation, a pre-planted symlink is not followed, an existing dir is refused, and modes are 0700 and 0600.
 - [M1] SEC-25 Minimal redactor for evidence, errors and logs | owner: rust-engineer | est: 4h | depends on: Define result model and verdict mapping in rdy-spec | exit test: canary secrets in env, proxy URL, kubeconfig and command output never appear in the JSON, HTML or stderr at RUST_LOG=trace.
-- [M1] SEC-17 Action log in the result via mediated Context handles | owner: rust-engineer | est: 3h | depends on: Check trait, Need and Context in rdy-engine | exit test: a fixture run's JSON lists every command, file read, endpoint and kube request the checks used.
-- [M1] SEC-21 Egress address policy, no redirects, no bodies | owner: check-author | est: 3h | depends on: Shared HTTP client builder with rustls ring, dual roots and proxy env | exit test: a redirect to 169.254.169.254, a hostname resolving to link-local and an unlisted endpoint are all refused, and a body canary never reaches the report.
+- [M1] SEC-17 Mediated Context handles with action log and read denylist | owner: rust-engineer | est: 3h | depends on: Check trait, Need and Context in rdy-engine | exit test: a fixture run's JSON lists every command, file read, endpoint and kube request the checks used.
+- [M1] SEC-21 Egress address policy, capped redirects, no bodies | owner: check-author | est: 3h | depends on: Shared HTTP client builder with rustls ring, dual roots and proxy env | exit test: a redirect to 169.254.169.254, a hostname resolving to link-local and an unlisted endpoint are all refused, and a body canary never reaches the report.
 - [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: SEC-25 Minimal redactor for evidence, errors and logs | exit test: 60 synthetic cases including chunk-boundary and negative cases pass with zero misses in CI.
-- [M1] SEC-22 No-phone-home tests | owner: qa-engineer | est: 2h | depends on: SEC-21 Egress address policy, no redirects, no bodies | exit test: a no-net spec passes under `unshare -rn` on Linux CI and a contact-set test sees only spec endpoints.
+- [M1] SEC-22 No-phone-home strace test on Linux CI | owner: qa-engineer | est: 2h | depends on: SEC-21 Egress address policy, capped redirects, no bodies | exit test: a no-net spec passes under `unshare -rn` on Linux CI and a contact-set test sees only spec endpoints.
 - [M1] SEC-24 Read-only ClusterRole example and kube identity display | owner: k8s-expert | est: 2h | depends on: Read-only guard layer and test for rdy-checks-k8s | exit test: M1 k8s checks pass on kind with only `examples/rbac/rdy-readonly.yaml`, and the report shows context, server and user.
 - [M1] SEC-31 Docs security page and verify-first install | owner: docs-writer | est: 2h | depends on: sign-release workflow with cosign keyless and ordering decision | exit test: the page lists what rdy reads and contacts, the report fields and link parameters, and CI runs its verify commands against the latest release.
-- [M1] SEC-32 Enable vulnerability reporting channels | owner: security-reviewer | est: 1h | depends on: SEC-04 Harden GitHub org and repo settings | exit test: private vulnerability reporting is on, security@getrdy.io receives mail and security.txt is served on getrdy.io.
+- [M1] SEC-32 Security mailbox and security.txt | owner: security-reviewer | est: 1h | depends on: SEC-04 Org 2FA, private reporting, CODEOWNERS and a settings check script | exit test: private vulnerability reporting is on, security@getrdy.io receives mail and security.txt is served on getrdy.io.
 - [M1] Read-only guard layer and test for rdy-checks-k8s (replaces the 1h guard test ticket) | owner: k8s-expert | est: 3h | depends on: Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: a runtime layer rejects any write, any non-review POST and any secrets path, and the mock API server records only allowed requests.

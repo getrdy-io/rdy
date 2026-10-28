@@ -1,6 +1,6 @@
 # ADR 0012: All `rdy/v1` wire types live in rdy-spec; JSON schemas are generated from them
 
-- Status: Accepted
+- Status: Accepted (revised 2026-10-28 after security-reviewer review)
 - Date: 2026-10-27
 
 ## Context
@@ -8,44 +8,51 @@
 There are two wire formats: the spec (vendor to customer) and the result (customer to vendor). CLAUDE.md
 puts the result model in `rdy-engine`, which also holds the tokio scheduler and the HTML renderer. The
 kickoff puts both JSON schema files under `crates/rdy-spec/schema/`. `rdy-cloud` must ingest results and
-validate specs authored in the portal. If the result types sit in `rdy-engine`, `rdy-cloud` pulls the
-scheduler and every result change bumps a crate full of unrelated code. There is also a choice between a
-hand-written schema and one generated from Rust types.
+validate specs authored in the portal. A security reviewer's first questions about a result are "what
+did it do" and "what spec ran, signed by whom", so the result must carry its own provenance.
 
 ## Decision
 
 1. `rdy-spec` owns every `rdy/v1` wire type: `rdy_spec::spec` (the spec, including the typed parameters
-   of every known check id) and `rdy_spec::result` (the report, check results, statuses, verdict).
-   `rdy-spec` has no async, no tokio, no I/O beyond reading bytes it is handed.
-2. `rdy-engine` produces `rdy_spec::result::Report` values and renders them (JSON, HTML). It re-exports
-   the result module so check authors only import one crate. Its scheduler sits behind the default
-   `runtime` feature; `rdy-cloud` can use `default-features = false, features = ["html"]`.
-3. Rust types are the source of truth. `schemars` (1.x, JSON Schema 2020-12) derives the schemas.
+   of every known check id) and `rdy_spec::result` (report, check results, statuses, verdict, error
+   object). No async, no tokio, no I/O beyond the bytes it is handed and the trust store file.
+2. **API shape follows ADR 0002.** `load()` (verify, then parse, then validate) is the only way to get a
+   `LoadedSpec`; its constructor is private. `parse_unverified()` returns a plain `Spec` for `spec lint`,
+   `--allow-unsigned` and portal authoring. No public function turns a `Spec` into a `LoadedSpec`.
+3. **Provenance in every `Report`:** `spec: SpecRef { product, version, sha256 }`; `signature:
+   SignatureState` (`Verified { key_id, product, signed_at }`, `Unsigned`, `Invalid { reason }`);
+   `identity { euid, user, kube: { context, server, user } }`; `actions: Vec<Action>` listing every
+   command, file read, endpoint and kube request with its outcome; `redactions: u32`; `complete: bool`.
+4. `rdy-engine` produces `Report` values and renders them (JSON, HTML). It re-exports the result module.
+   Its scheduler sits behind the default `runtime` feature; `rdy-cloud` can use
+   `default-features = false, features = ["html"]`.
+5. Rust types are the source of truth. `schemars` (1.x, JSON Schema 2020-12) derives the schemas.
    `cargo xtask schema` writes `crates/rdy-spec/schema/rdy-v1-spec.schema.json` and
-   `rdy-v1-result.schema.json`. The files are committed. CI regenerates them and fails on any diff.
-4. Doc comments on the types become schema descriptions, which feed the docs site reference pages.
-5. The binary does not validate against the JSON schema at runtime. serde types plus `rdy_spec::validate`
-   (semantic rules: ids unique, thresholds parse, quantities in range) do it, with better errors.
+   `rdy-v1-result.schema.json`, committed. CI regenerates them and fails on any diff.
+6. Doc comments become schema descriptions, which feed the docs site reference pages.
+7. The binary does not validate against the JSON schema at runtime. Typed parsing plus
+   `rdy_spec::validate` (ids unique, thresholds parse, `metadata.product` slug rule) do it, with better
+   errors.
 
 ## Consequences
 
 - One crate, one semver line, one schema directory for the whole contract (ADR 0007).
-- Adding a check id means adding its parameter type to `rdy-spec`. That is the right friction: it is a
-  wire format change and gets reviewed as one.
-- The JSON schema reads like serde's view of the types; we tune it with `#[schemars(..)]` attributes, and
-  golden schema files make every change visible in review.
+- Adding a check id means adding its parameter type to `rdy-spec`: a wire format change, reviewed as one.
+- `rdy-cloud` cannot accidentally treat an unverified spec as verified; the type system says which is which.
+- The result grows by the action log; a typical run adds a few KB.
 
 ## Alternatives considered
 
 | Option | Why it lost |
 | --- | --- |
 | Result types in `rdy-engine` (as CLAUDE.md says) | `rdy-cloud` would depend on the scheduler; schema files would come from two crates. |
-| A third crate `rdy-result` | More crates and versions to publish for one founder. Revisit only if `rdy-spec` gets heavy. |
-| Hand-written JSON schema, types generated from it (`typify`) | Generated Rust is awkward to document and extend; two sources to keep in sync. |
-| Hand-written schema and hand-written types | They drift. The docs promise they cannot. |
-| Validate with the `jsonschema` crate at runtime | Large dependency, worse error messages than typed parsing. |
+| A third crate `rdy-result` | More crates to publish for one founder. Revisit if `rdy-spec` gets heavy. |
+| Public `parse()` returning a usable `Spec` for runs | Any caller could skip verification. |
+| Hand-written schema, types generated from it (`typify`) | Awkward generated Rust; two sources to sync. |
+| Validate with the `jsonschema` crate at runtime | Large dependency, worse errors than typed parsing. |
 
 ## Tickets implied
 
-- [M1] Define public spec types in rdy-spec | owner: rust-engineer | est: 3h | depends on: Create workspace skeleton | exit test: the plan's example spec deserializes into typed values and round-trips through serde_json.
+- [M1] Define public spec types in rdy-spec | owner: rust-engineer | est: 3h | depends on: Create workspace skeleton | exit test: the plan's example spec deserializes through parse_unverified into typed values, round-trips through serde_json, and no public path builds a LoadedSpec without load().
 - [M1] Generate JSON schemas with schemars and check drift in CI | owner: rust-engineer | est: 3h | depends on: Define result model and verdict mapping in rdy-spec | exit test: changing a doc comment without rerunning cargo xtask schema fails CI.
+- [M1] SEC-17 Action log in the result via mediated Context handles | owner: rust-engineer | est: 3h | depends on: Check trait, Need and Context in rdy-engine | exit test: a fixture run's JSON lists every command, file read, endpoint and kube request the checks used, plus identity and the redaction count.

@@ -1,50 +1,56 @@
-# ADR 0010: Use kube-rs (client only) for Kubernetes checks in M1, not raw REST or kubectl
+# ADR 0010: Use kube-rs (client only) behind a runtime read-only guard, not raw REST or kubectl
 
-- Status: Accepted
+- Status: Accepted (revised 2026-10-28 after security-reviewer review)
 - Date: 2026-10-27
 
 ## Context
 
-M1 week 5 ships Kubernetes checks: server version, storage classes, RBAC for the install identity,
-admission policies, node resources, device plugins. The plan says no kubectl dependency. The hard part is
-not the REST calls; it is connecting the way `kubectl` does: kubeconfig merging, contexts, client certs,
-bearer tokens, exec credential plugins (`aws eks get-token`, `gke-gcloud-auth-plugin`, `kubelogin`),
-in-cluster service account config, and custom CAs.
+M1 ships Kubernetes checks: server version, storage classes, RBAC for the install identity, admission
+policies, node resources, device plugins. The plan says no kubectl dependency. The hard part is
+connecting the way `kubectl` does: kubeconfig merging, contexts, client certs, tokens, exec credential
+plugins, in-cluster config and custom CAs. The identity `rdy` uses is often cluster-admin, so a bug or a
+future check could write to a production cluster unless something stops it at runtime.
 
 ## Decision
 
-1. Depend on `kube` with default features off and only `client` and `rustls-tls`; no `runtime`, `derive`
-   or `ws`. Types from `k8s-openapi` with the newest `v1_*` feature, set once in the workspace.
-2. `rdy-checks-k8s` builds one client per run with `Config::infer()` (kubeconfig, then in-cluster), or the
-   `--kube-context` flag. Connect and read timeouts are set from the check timeout. The client is shared
-   by all k8s checks through the engine `Context`.
-3. The `KubeContext` need is met when `Config::infer()` succeeds and `GET /version` answers. Otherwise
-   every k8s check is `Skipped` with "no reachable cluster" and the fix hint.
-4. RBAC uses `SelfSubjectAccessReview` per required verb and resource, never by reading Roles.
-   Checks only read. The client never creates, patches or deletes any object; a unit test asserts the
-   check crate never builds a non-GET request except the two review kinds, which are create-only
-   subresources with no side effects.
-5. Exec credential plugins run with the user's environment, because that is what they need. This is the
-   one subprocess path that does not get the cleared environment of ADR 0004. Documented in the threat
-   model.
+1. `kube` with default features off and only `client` and `rustls-tls`; no `runtime`, `derive` or `ws`.
+   Types from `k8s-openapi` with the newest `v1_*` feature, set once in the workspace.
+2. **Read-only guard.** A tower layer wraps the kube client and rejects, at runtime and failing closed:
+   every method except GET; every POST except to `selfsubjectaccessreviews` and
+   `selfsubjectrulesreviews`; any path under `/secrets`. `connect()` returns only the guarded type
+   (`ReadOnlyClient`), and `K8sFamily::new` accepts only that type. ConfigMaps are listed metadata-only.
+   A mock API server test that records every request is the second line of defence.
+3. **Config sources.** Kubeconfig only from the default path, `KUBECONFIG` or `--kubeconfig`; in-cluster
+   config when running in a pod. `--kube-context` picks the context. Connect and read timeouts come
+   from the check timeout. One client per run, shared through the engine `Context`.
+4. **Identity is visible.** Before the first request, and in the report: context, server URL and the
+   authenticated user (from `SelfSubjectReview` where served). `insecure-skip-tls-verify: true` is
+   reported as a warning.
+5. The `KubeContext` need is met when config loads and `GET /version` answers. Otherwise every k8s check
+   is `Skipped` with "no reachable cluster" and the fix hint.
+6. RBAC uses `SelfSubjectAccessReview` per required verb and resource, never by reading Roles.
+7. Exec credential plugins run with the user's environment, because that is what they need: the one
+   exception to ADR 0004's cleared environment. Their output is never logged, at any level.
 
 ## Consequences
 
-- Same auth behaviour as kubectl for the cases customers hit. Less security-sensitive code of our own.
-- `kube` and `k8s-openapi` add compile time and about 2 to 4 MB to the binary. Accepted.
-- `k8s-openapi` releases often and bumps MSRV; we update it on a schedule, not on every release.
-- Using one API version's types against older servers is fine for stable APIs; for newer kinds
-  (`ValidatingAdmissionPolicy`) we use API discovery first and skip when the server lacks them.
+- Same auth behaviour as kubectl for the cases customers hit, with less security-sensitive code of ours.
+- A future check or dependency upgrade cannot write to the cluster or read Secrets: the request never
+  leaves the process.
+- `kube` and `k8s-openapi` add compile time and about 2 to 4 MB. `k8s-openapi` bumps MSRV often; we
+  update it on a schedule.
+- Newer kinds (`ValidatingAdmissionPolicy`) go through API discovery first and skip when absent.
 
 ## Alternatives considered
 
 | Option | Why it lost |
 | --- | --- |
 | Raw REST with reqwest | Reimplementing kubeconfig, exec plugins and in-cluster auth is weeks of security-sensitive work. |
-| Shell out to `kubectl` | Not present on many target boxes, and the plan sells "no kubectl". Version skew in output. |
-| `kube` with `runtime` | Watchers and controllers are not needed for one-shot reads. |
+| Shell out to `kubectl` | Missing on many target boxes; the plan sells "no kubectl". |
+| Read-only by test only | A test covers the paths it runs; a new check could still write with admin rights. |
+| Ask customers for a read-only identity | Recommended (an example ClusterRole ships), but cannot be relied on. |
 
 ## Tickets implied
 
-- [M1] Kube client from kubeconfig or in-cluster with rustls and timeouts | owner: rust-engineer | est: 3h | depends on: Check trait, Need and Context in rdy-engine | exit test: against a kind cluster in CI, k8s.version passes; with no kubeconfig every k8s check reports Skipped with the hint.
-- [M1] Read-only guard test for rdy-checks-k8s | owner: k8s-expert | est: 1h | depends on: Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: a mock API server records only GET and the two self-review POSTs across the full k8s fixture run.
+- [M1] Kube client from kubeconfig or in-cluster with rustls and timeouts | owner: rust-engineer | est: 4h | depends on: Check trait, Need and Context in rdy-engine | exit test: on a kind cluster in CI k8s.version passes and the context, server and user print before the first request; with no kubeconfig every k8s check is SKIP with the hint; exec plugin output never appears at RUST_LOG=trace.
+- [M1] Read-only guard layer and test for rdy-checks-k8s | owner: k8s-expert | est: 3h | depends on: Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: the runtime layer rejects any write, any non-review POST and any secrets path, and the mock API server records only allowed requests across the full k8s fixture run.

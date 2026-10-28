@@ -1,55 +1,70 @@
 # ADR 0003: Reports are one JSON file plus one self-contained HTML file, rendered with askama
 
-- Status: Accepted
+- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review)
 - Date: 2026-10-27
 
 ## Context
 
-The report is the demo (plan, M1 build order step 3). Air-gapped customers carry it out on a USB stick
-and email it to the SE. Customer security reviewers read the renderer's source (CLAUDE.md rule 7). The
-JSON result is the contract `rdy-cloud` ingests (ADR 0007). The HTML shows strings from two untrusted
-sources: vendor text in the spec (`fix`) and values observed on the customer box (hostnames, Kubernetes
-object names, proxy banners). Any of these could carry markup.
+The report is the demo (plan, M1 build order step 3). Air-gapped customers carry it out on a USB stick.
+Customer security reviewers read the renderer's source (CLAUDE.md rule 7). The JSON result is the
+contract `rdy-cloud` ingests (ADR 0007). The HTML shows untrusted strings from two sources: vendor text
+in the spec (`fix`) and values observed on the box (hostnames, object names, proxy banners). `rdy` often
+runs as root, and the output name would otherwise come from vendor-controlled `metadata.product`.
 
 ## Decision
 
-1. `rdy run` writes `rdy-report-<product>-<UTC timestamp>.json` and `.html` side by side. JSON is
-   primary; HTML is rendered from the same `Report` value, never from separate data.
-2. The HTML file is fully self-contained: inline CSS, no JavaScript in M1, no web fonts, no images except
-   an inline SVG logo, no external URLs that load on open. A strict CSP meta tag
-   (`default-src 'none'; style-src 'unsafe-inline'; img-src data:`) enforces it.
-3. The full result JSON is embedded in `<script type="application/json" id="rdy-result">`, with `<`, `>`
-   and `&` escaped as `<`, `>`, `&`. Uploading the HTML alone gives the portal everything.
-4. Templating with `askama`: templates are plain `.html` files in `crates/rdy-engine/templates/`, checked
-   at compile time, HTML auto-escaping on by default. `|safe` is banned in templates (CI grep).
-5. Dark mode with `prefers-color-scheme`, a print stylesheet (`@media print`: no backgrounds, every
-   section expanded, page breaks between families). Colour is never the only signal: every status has a
-   text label (PASS, WARN, BLOCK, SKIPPED, TIMEOUT, ERROR).
-6. The footer links to getrdy.io with the product name in the query string (plan, conversion flow 4).
-   It is a plain link: nothing is fetched unless the reader clicks it.
-7. Output is deterministic for a given `Report`, so golden-file tests are exact.
+1. **Names and place.** `metadata.product` must match `^[a-z0-9][a-z0-9-]{0,62}$` (`rdy_spec::validate`,
+   and the same rule on the signed trusted comment). Timestamps use basic ISO 8601 with no colons,
+   `20261027T143005Z`. `rdy run` creates a new directory `rdy-report-<product>-<ts>/` under `--out-dir`
+   (default `.`) with `create_dir` (fails if it exists), mode 0700, and writes
+   `rdy-report-<product>-<ts>.json` and `.html` inside it with `create_new`, mode 0600, through a
+   directory handle that does not follow symlinks (`cap-std`), temp file then rename. The report code
+   re-checks the slug defensively. `--no-report` writes nothing.
+2. **Terminal and stdout.** A `Report written to <dir>` line prints above the verdict, so the verdict
+   stays last. `--json` writes the same bytes to stdout as the JSON file. If the directory cannot be
+   written, the full terminal result still prints, then `error:` and `fix: use --out-dir <writable dir>`,
+   and the exit code is 70.
+3. **Self-contained HTML.** Inline CSS, no JavaScript in M1, no web fonts, no images except an inline SVG
+   logo, nothing loads on open. CSP meta: `default-src 'none'; style-src 'unsafe-inline'; img-src data:;
+   base-uri 'none'; form-action 'none'`. `<html lang="en">`, a `color-scheme` meta, headings in order.
+4. **Embedded JSON.** The full result is embedded in `<script type="application/json" id="rdy-result">`.
+   After serializing, every `<` becomes the six characters `\u003c`, every `>` becomes `\u003e`,
+   and every `&` becomes `\u0026` (JSON unicode escapes: backslash, `u`, four hex digits). Those characters only occur inside JSON strings, so the result is still valid
+   JSON and cannot close the script element. The JSON file, not the HTML, is the supported upload; the
+   portal treats JSON pulled from an HTML file as untrusted input.
+5. **askama** templates in `crates/rdy-engine/templates/`, checked at compile time, HTML auto-escaping on.
+   `|safe` is banned in templates (CI grep).
+6. **Order and words.** Top of the page: the verdict in the terminal's words (`READY`,
+   `READY with warnings`, `NOT READY`), the counts, an unsigned-spec banner when it applies, and the line
+   "This file lists hostnames and addresses from this machine. Read it before you send it." Then blocks,
+   then required checks not run, then warnings, then passes. Status labels, same as the terminal:
+   `PASS`, `WARN`, `BLOCK`, `SKIP`, `TIMEOUT`, `ERROR`. Colour is never the only signal.
+7. **Dark mode and print.** `prefers-color-scheme`; `@media print` expands every section and keeps the
+   order.
+8. The footer links to getrdy.io with the product name in the query string, `rel="noopener noreferrer"`.
+   Nothing is fetched unless the reader clicks. The docs security page lists the parameters it carries.
+9. Output is deterministic for a given `Report`, so golden tests are exact.
 
 ## Consequences
 
-- Opens anywhere, offline, in any browser, and prints for a change board.
-- No client-side filtering or sorting in M1. If it is added later, it is a hashed inline script and the
-  CSP is updated in the same PR.
-- Custom-branded reports (M4) are data (name, logo as data URI, accent colour) fed into the same
-  template, not vendor-supplied templates.
-- HTML size grows with check count; at a few hundred checks it stays well under 1 MB.
+- Opens offline in any browser and prints for a change board. Root runs cannot be steered into writing
+  outside a fresh directory.
+- No client-side filtering in M1. A later inline script must be hashed in the CSP in the same PR.
+- Custom-branded reports (M4) are data fed into the same template, never vendor templates.
 
 ## Alternatives considered
 
 | Option | Why it lost |
 | --- | --- |
-| `maud` (HTML in Rust macros) | Safe and fast, but a security reviewer or designer has to read Rust macros to see the markup. |
-| `minijinja` (runtime templates) | Errors surface at runtime; a missing variable can break a report on a customer box. Would make vendor-supplied templates easy, which we do not want. |
-| `tera` or `handlebars` | Runtime templates with the same drawback and more dependencies. |
-| HTML plus separate CSS and JS assets | Files get separated on the way out of an air-gapped site. |
-| PDF output | Needs a layout engine in the binary. Print-to-PDF from the HTML covers it. |
+| `maud` (HTML in Rust macros) | Safe and fast, but reviewers must read Rust macros to see the markup. |
+| `minijinja`, `tera`, `handlebars` (runtime templates) | Errors surface at runtime on a customer box; invite vendor-supplied templates. |
+| Files written straight into the cwd | A pre-planted symlink in a shared dir makes root overwrite any file. |
+| Separate CSS and JS assets | Files get separated on the way out of an air-gapped site. |
+| PDF output | Needs a layout engine; print-to-PDF covers it. |
 
 ## Tickets implied
 
-- [M1] askama HTML report with inline CSS, dark mode and print | owner: rust-engineer | est: 4h | depends on: Define result model and verdict mapping in rdy-spec | exit test: the golden HTML renders with no network requests in a headless browser test and passes an HTML validator.
-- [M1] Embed result JSON in the HTML report safely | owner: rust-engineer | est: 2h | depends on: askama HTML report with inline CSS, dark mode and print | exit test: a fixture with `</script><img onerror>` in a hostname round-trips through the embedded JSON unchanged and renders as text.
-- [M1] Golden tests for JSON and HTML reports | owner: qa-engineer | est: 2h | depends on: Embed result JSON in the HTML report safely | exit test: insta snapshots for ready, warning and blocked fixtures pass on all four CI targets.
+- [M1] askama HTML report with inline CSS, dark mode and print | owner: rust-engineer | est: 4h | depends on: Define result model and verdict mapping in rdy-spec | exit test: the golden HTML shows the verdict and blocks first, makes no network requests in a headless browser test, and passes an HTML validator with lang and color-scheme set.
+- [M1] Embed result JSON in the HTML report safely | owner: rust-engineer | est: 2.5h | depends on: askama HTML report with inline CSS, dark mode and print | exit test: a hostname of `</script><img onerror>` round-trips through the embedded JSON unchanged, renders as text, and the CSP and link attributes match this ADR.
+- [M1] Golden tests for JSON and HTML reports | owner: qa-engineer | est: 2h | depends on: Embed result JSON in the HTML report safely | exit test: insta snapshots for ready, warning and not-ready fixtures pass on all four CI targets.
+- [M1] SEC-19 Confine writes to a new output dir with safe names | owner: rust-engineer | est: 3h | depends on: Define public spec types in rdy-spec | exit test: a product of `../x` fails validation, a pre-planted symlink is not followed, an existing dir is refused, modes are 0700 and 0600, and `--out-dir` and `--no-report` behave as written.

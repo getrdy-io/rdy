@@ -1,59 +1,86 @@
 # ADR 0008: Error handling and the result model; Timeout and Skipped are outcomes, never crashes
 
-- Status: Accepted
+- Status: Accepted (revised 2026-10-28 after cli-ux and security-reviewer review)
 - Date: 2026-10-27
 
 ## Context
 
-`rdy` runs once, often as root, on a machine the vendor will never see. If it crashes, the SE gets
-nothing. CLAUDE.md fixes the rules: `thiserror` in libraries, `anyhow` only at the binary edge, a fix
-hint on every user-facing error, timeouts reported as results, and exit codes 0 ready, 1 warnings only,
-2 blockers, 64 usage, 70 internal. We need one model that separates "the environment failed a check"
-from "rdy could not check" from "rdy itself broke".
+`rdy` runs once, often as root, on a machine the vendor never sees. If it crashes, the SE gets nothing.
+CLAUDE.md fixes the rules: `thiserror` in libraries, `anyhow` only at the binary edge, a fix hint on every
+user-facing error, timeouts reported as results, exit codes 0 ready, 1 warnings only, 2 blockers, 64
+usage, 70 internal. We must separate "the environment failed a check" from "rdy could not check" from
+"rdy itself broke", and a CI gate written as "0 or 1 is fine" must never pass an unchecked environment.
 
 ## Decision
 
-1. **Per-check status** (in `rdy_spec::result`, re-exported by `rdy-engine`, `#[non_exhaustive]`; see ADR 0012):
-   `Pass`, `Warn`, `Block` (the check ran and failed; which of the two comes from the spec `severity`),
-   `Skipped { reason }` (a need was missing, the OS is unsupported, or the check id or a field is unknown),
-   `Timeout { after }`, `Error { message, hint }` (the check itself failed, including a caught panic).
-2. **Check code returns `Result<Finding, CheckError>`.** `Finding` is pass or fail plus observed and
-   expected values. `CheckError::MissingNeed`, `Unsupported` map to `Skipped`; anything else maps to
-   `Error`. The engine, not the check, applies severity and the timeout.
-3. **Run verdict:** `Blocked` if any `Block`; else `Warnings` if any `Warn`, `Skipped`, `Timeout` or
-   `Error`; else `Ready`. A check that could not run is never counted as passing. Exit codes 2, 1, 0.
-4. **Exit 64** when the input is wrong and the user must change it: bad flags, unreadable spec, spec
-   parse or validation error, signature failure without `--allow-unsigned`. **Exit 70** only when `rdy`
-   cannot produce a report at all (cannot write the output file, runtime failed to start, a panic
-   outside a check). Even then it prints the JSON it has to stdout if `--json` was given.
+1. **Per-check status** (`rdy_spec::result`, re-exported by `rdy-engine`, `#[non_exhaustive]`, ADR 0012).
+   JSON values and display words are one vocabulary:
+
+   | Rust | JSON | Terminal and HTML | Meaning |
+   | --- | --- | --- | --- |
+   | `Pass` | `pass` | `PASS` | ran, met the requirement |
+   | `Warn` | `warn` | `WARN` | ran, failed a `severity: warn` check |
+   | `Block` | `block` | `BLOCK` | ran, failed a `severity: block` check |
+   | `Skipped { reason }` | `skipped` | `SKIP` | need missing, OS unsupported, unknown id or field |
+   | `Timeout { after }` | `timeout` | `TIMEOUT` | did not finish in time |
+   | `Error { message, hint }` | `error` | `ERROR` | the check itself failed, including a caught panic |
+
+2. **Check code returns `Result<Finding, CheckError>`.** The engine, not the check, applies severity and
+   the timeout. `MissingNeed` and `Unsupported` map to `Skipped`; the rest to `Error`. A skip reason names
+   the thing: `unknown field 'min_memory' for host.memory (needs a newer rdy, or a typo)`. `spec lint`
+   reports the same as a warning with line, column and a did-you-mean.
+3. **Run verdict**, one rule, no `--strict` flag:
+
+   | Case | Verdict (Rust, JSON) | Exit | Last line |
+   | --- | --- | --- | --- |
+   | Any `Block` | `NotReady`, `not_ready` | 2 | `NOT READY` |
+   | No `Block`, but a `severity: block` check was Skipped, Timeout or Error | `NotReady`, `not_ready`, `reason: "required_check_not_run"` | 2 | `NOT READY: 1 required check was not run` |
+   | Only `Warn`, or a `severity: warn` check that did not run | `ReadyWithWarnings`, `ready_with_warnings` | 1 | `READY with warnings` |
+   | All ran and passed | `Ready`, `ready` | 0 | `READY` |
+
+   The summary counts them apart: `0 blocks, 1 warning, 3 passed, 1 required check not run`.
+4. **Exit 64** when the input must change: bad flags, unreadable spec, parse or validation error,
+   missing signature without `--allow-unsigned`, any invalid signature. **Exit 70** when `rdy` cannot
+   deliver its result: report directory not writable (the terminal result still prints in full, ADR
+   0003), runtime failed, a panic outside a check.
 5. **Errors.** Each library crate has one public `thiserror` enum (`SpecError`, `SignatureError`,
-   `EngineError`, `ReportError`), `#[non_exhaustive]`, each with `fn hint(&self) -> Option<&str>`.
-   `rdy-cli` uses `anyhow` with `.context(..)`, downcasts to these types to pick the exit code and print
-   `error: <what>` then `fix: <hint>`. No `unwrap` or `expect` outside tests (clippy `unwrap_used`,
-   `expect_used` denied in library crates).
-6. **Panics.** Release profile keeps `panic = "unwind"` so a panicking check is caught by its
-   `tokio::spawn` join handle and becomes `Error` with "internal error in <id>, please report". A panic
-   hook writes the message to the log, never the environment or arguments (they may hold tokens).
+   `EngineError`, `ReportError`), `#[non_exhaustive]`, with `fn hint(&self) -> &str`, never optional.
+   Where the honest fix is "this is a bug", the hint says `this is a bug in rdy. Please report it at
+   https://github.com/getrdy-io/rdy/issues and include the output of rdy version.` A unit test matches
+   every variant and asserts a non-empty hint. `rdy` uses `anyhow` with `.context(..)` and downcasts to
+   pick the exit code. Terminal output strips control characters from any untrusted string.
+6. **First lines differ by kind.** Usage: `error: unknown flag --keey`. Signature: `error: the signature
+   on acme-platform.yaml does not match the file. It may have been changed after signing.`
+7. **`--json` on any non-verdict exit** prints one object on stdout, and the same text on stderr:
+   `{"error": {"code": "spec_signature_invalid", "message": "...", "fix": "..."}, "verdict": null,
+   "complete": false}`. Codes are stable and part of `rdy/v1` (ADR 0007): `usage`, `spec_parse`,
+   `spec_invalid`, `spec_unsigned`, `spec_signature_invalid`, `spec_key_unknown`, `report_write`,
+   `internal`. A partial result after exit 70 carries `"complete": false`.
+8. **Panics.** Release profile keeps `panic = "unwind"` so a panicking check is caught by its join
+   handle and becomes `Error` with "internal error in <id>" and the bug hint. The panic hook logs the
+   message only, never environment or arguments.
+9. **No secrets in strings.** Every message, `Error.message` and evidence string goes through the M1
+   redactor before it is printed or written. reqwest errors use `without_url()`.
 
 ## Consequences
 
-- The report always lists every check in the spec with a status. Partial runs are still useful.
-- The portal can count "could not check" separately from failures, which is a sales signal on its own.
-- `panic = "unwind"` costs a little binary size versus `abort`. Accepted.
-- Skipped checks lower the verdict to at most `Warnings`, so a spec full of unknown ids can never be
-  `Ready`. cli-ux decides whether `--strict` should turn non-runs into blockers.
+- The report lists every check with a status. A partial run is still useful, and an unchecked required
+  check can never look like a pass or like "warnings only".
+- The week 2 alpha, where every check is `SKIP` "not built yet", exits 2. That is correct.
+- `panic = "unwind"` costs a little binary size. Accepted.
 
 ## Alternatives considered
 
 | Option | Why it lost |
 | --- | --- |
-| Status `Fail` plus a separate severity field only | Every consumer would recompute warn vs block; the portal and the HTML would drift. Severity is still in the JSON. |
-| `Skipped` counts as pass | Hides missing privileges; the customer reads READY when nothing was checked. |
-| `anyhow` everywhere | Libraries consumed by `rdy-cloud` need typed errors to match on. |
-| `miette` or `eyre` for rich diagnostics | Nicer output, more dependencies; line and column plus a hint is enough for v1. |
-| `panic = "abort"` | One bad check would kill the whole run and lose every other result. |
+| Skipped required checks give exit 1 | A "0 or 1 is fine" gate passes an environment nobody checked. |
+| A `--strict` flag | Two meanings of ready; the unsafe one would be the default. |
+| `hint() -> Option<&str>` | Makes "no fix" legal; new variants would ship without one. |
+| `Skipped` counts as pass | Hides missing privileges. |
+| `anyhow` everywhere | `rdy-cloud` needs typed errors. |
+| `panic = "abort"` | One bad check would lose every other result. |
 
 ## Tickets implied
 
-- [M1] Define result model and verdict mapping in rdy-spec | owner: rust-engineer | est: 3h | depends on: Define public spec types in rdy-spec | exit test: unit tests cover every status to verdict and verdict to exit code combination.
-- [M1] Error types with fix hints and exit code mapping at the CLI edge | owner: rust-engineer | est: 2h | depends on: Define result model and verdict mapping in rdy-spec | exit test: integration tests assert exit 64 for a bad spec, 70 for an unwritable output dir, and a `fix:` line in both.
+- [M1] Define result model and verdict mapping in rdy-spec | owner: rust-engineer | est: 3h | depends on: Define public spec types in rdy-spec | exit test: unit tests cover every row of the status and verdict tables, including a skipped block check giving not_ready with exit 2.
+- [M1] Error types with fix hints and exit code mapping at the CLI edge | owner: rust-engineer | est: 3.5h | depends on: Define result model and verdict mapping in rdy-spec | exit test: every error variant has a non-empty hint, exit 64 and 70 cases print `fix:`, `--json` failures print the error object with a stable code, and control characters in a spec string are stripped.
