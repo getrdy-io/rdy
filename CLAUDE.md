@@ -56,8 +56,8 @@ ship a usable binary every week, boring tooling, no speculative abstractions. Fu
 - Use the subagents in `.claude/agents/`. Each one is the top expert for its slice and runs on the cheapest
   model that does that job well. Delegate review to a subagent that did not write the code.
 - Every PR: tests pass, `cargo clippy -- -D warnings` clean, `cargo fmt` clean, `cargo deny check` clean,
-  docs
-  updated, changelog fragment in `changelog.d/` (ADR 0017). Commit messages in imperative mood with a one-line summary.
+  docs updated, changelog fragment in `changelog.d/` (ADR 0017). Commit messages in imperative mood with a
+  one-line summary.
 - Never commit secrets, real customer data, or real spec files from design partners. Fixtures are synthetic.
 - Short sentences in docs and UI copy. No corporate language. No em dashes.
 
