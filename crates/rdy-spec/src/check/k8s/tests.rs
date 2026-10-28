@@ -150,6 +150,9 @@ fn cases() -> Vec<Case> {
                 ("per_node", json!({"cpu": 0.0001})),
                 ("per_node", json!({"cpu": 0.0015})),
                 ("per_node", json!({"cpu": 1_000_001})),
+                ("per_node", json!({"cpu": "1000001"})),
+                ("per_node", json!({"cpu": "1000000001m"})),
+                ("per_node", json!({"cpu": "99999999999m"})),
                 ("per_node", json!({"cpu": true})),
                 ("per_node", json!({"memory": "28G"})),
                 ("per_node", json!({"ephemeral": "lots"})),
@@ -165,6 +168,15 @@ fn cases() -> Vec<Case> {
                 ("selector", labels_17),
                 ("selector", json!({"a": 1})),
                 ("selector", json!({"": "x"})),
+                ("selector", json!({"-a": "x"})),
+                ("selector", json!({"a b": "x"})),
+                ("selector", json!({"a\u{202e}b": "x"})),
+                ("selector", json!({"a\u{1b}": "x"})),
+                ("selector", json!({"A.Example/b": "x"})),
+                ("selector", json!({"a/b/c": "x"})),
+                ("selector", json!({"k": "-x"})),
+                ("selector", json!({"k": "x\u{202e}"})),
+                ("selector", json!({"k": "x\n"})),
                 ("selector", json!({"k": "x".repeat(64)})),
                 ("selector", json!(["a"])),
                 ("tolerations", Value::Array(tolerations_17)),
@@ -173,6 +185,14 @@ fn cases() -> Vec<Case> {
                 ("tolerations", json!([{"operator": "Maybe"}])),
                 ("tolerations", json!([{"effect": "Never"}])),
                 ("tolerations", json!([{"key": ""}])),
+                ("tolerations", json!([{"key": "a\u{202e}b"}])),
+                ("tolerations", json!([{"key": "a b"}])),
+                ("tolerations", json!([{"key": "gpu", "value": "\u{1b}[2J"}])),
+                ("tolerations", json!([{"operator": "Exists", "value": "x"}])),
+                ("tolerations", json!([{"operator": "Equal"}])),
+                ("tolerations", json!([{"effect": "NoSchedule"}])),
+                ("tolerations", json!([{"value": "x"}])),
+                ("tolerations", json!([{}])),
                 ("tolerations", json!([{"value": "x".repeat(64)}])),
                 ("tolerations", json!([{"tolerationSeconds": 60}])),
             ],
@@ -442,7 +462,9 @@ fn cpu_amounts_are_kept_in_millicores() {
         (json!(7.9), 7900),
         (json!(0.001), 1),
         (json!(1_000_000), 1_000_000_000),
-        (json!("999999999"), 999_999_999_000),
+        (json!("1000000"), 1_000_000_000),
+        (json!("1000000000m"), 1_000_000_000),
+        (json!("999999999m"), 999_999_999),
     ] {
         let CheckParams::K8sNodes(n) =
             typed("k8s.nodes", &json!({"per_node": {"cpu": written.clone()}}))
@@ -473,7 +495,8 @@ fn a_toleration_keeps_its_keys() {
     let CheckParams::K8sNodes(n) = typed(
         "k8s.nodes",
         &json!({"min_ready": 1, "tolerations": [
-            {"key": "gpu", "operator": "Exists", "effect": "NoSchedule"}, {}]}),
+            {"key": "gpu", "operator": "Exists", "effect": "NoSchedule"},
+            {"operator": "Exists"}, {"operator": "Exists", "value": ""}]}),
     ) else {
         panic!("not K8sNodes");
     };
@@ -481,10 +504,11 @@ fn a_toleration_keeps_its_keys() {
     assert_eq!(tolerations[0].operator, Some(TolerationOperator::Exists));
     assert_eq!(tolerations[0].effect, Some(TaintEffect::NoSchedule));
     assert_eq!(
-        tolerations[0].key.as_ref().map(TaintKey::as_str),
+        tolerations[0].key.as_ref().map(LabelKey::as_str),
         Some("gpu")
     );
     assert_eq!(tolerations[1].key, None);
+    assert_eq!(tolerations[2].key, None);
 }
 
 // ---- nested values and hostile text -------------------------------------------------------------

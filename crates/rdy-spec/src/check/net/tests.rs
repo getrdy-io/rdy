@@ -160,6 +160,19 @@ fn cases() -> Vec<Case> {
                 ("names", json!([""])),
                 ("names", json!(["a b"])),
                 ("names", json!(["a_b.example"])),
+                ("names", json!(["-s"])),
+                ("names", json!(["--x"])),
+                ("names", json!(["-a.example"])),
+                ("names", json!(["a-.example"])),
+                ("names", json!(["a..example"])),
+                ("names", json!(["a.example."])),
+                ("names", json!(["2852039166"])),
+                ("names", json!(["0xa9.0xfe.0xa9.0xfe"])),
+                ("names", json!(["10.0.0.1"])),
+                ("names", json!(["a.example.1"])),
+                ("names", json!([format!("{}.example", "a".repeat(64))])),
+                ("names", json!([{"name": "-s"}])),
+                ("names", json!(["a\u{202e}b.example"])),
                 ("names", json!(["x".repeat(254)])),
                 ("names", json!([7])),
                 ("names", json!([{"expect_public": true}])),
@@ -172,6 +185,10 @@ fn cases() -> Vec<Case> {
                 (
                     "names",
                     json!([{"name": "a.example", "expect_in": ["10.0.0.0/33"]}]),
+                ),
+                (
+                    "names",
+                    json!([{"name": "a.example", "expect_in": ["10.0.0.0/08"]}]),
                 ),
                 (
                     "names",
@@ -434,4 +451,35 @@ fn a_refused_target_does_not_echo_a_query_string() {
     let text = reason.to_string();
     assert!(!text.contains("hunter2"), "{text}");
     assert!(!text.contains("secret-token"), "{text}");
+}
+
+/// ADR 0006 decision 5: the name reaches `getent ahosts` as an argument, so it must not read as an option.
+#[test]
+fn a_dns_name_cannot_start_with_a_dash_or_be_a_number() {
+    for name in ["-s", "--x", "-", "2852039166", "0x7f000001", "127.1"] {
+        let reason = why("net.dns", &json!({"names": [name]}));
+        assert!(
+            matches!(&reason, UnsupportedReason::BadValue { field: Some(f), .. } if f == "names"),
+            "{name}: {reason:?}"
+        );
+    }
+    for name in [
+        "localhost",
+        "a-b.example",
+        "xn--bcher-kva.example",
+        "A.Example",
+        "a1.b2.example",
+    ] {
+        typed("net.dns", &json!({"names": [name]}));
+    }
+}
+
+#[test]
+fn a_host_with_credentials_does_not_echo_them() {
+    let reason = why(
+        "net.tls_intercept",
+        &json!({"hosts": ["user:secret-pw@a.example"]}),
+    );
+    let text = reason.to_string();
+    assert!(!text.contains("secret-pw"), "{text}");
 }

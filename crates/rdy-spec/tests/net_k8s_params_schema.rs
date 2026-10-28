@@ -4,9 +4,11 @@
 //! entry exactly when it decodes to a typed variant. So the schema, which writers of specs read, and
 //! the structs, which rdy runs, cannot drift apart without this test failing.
 //!
-//! The decoder is stricter than the schema in a few places that a pattern cannot say: a target or host
-//! with a trailing dot or a single-number IPv4 form, an address octet above 255, and a CPU amount with a
-//! fraction of a millicore. Those entries are tested against the decoder only, in the unit tests.
+//! The decoder is stricter than the schema in a few places that a pattern cannot say: a `Target` or TLS
+//! host with a trailing dot or a single-number IPv4 form, an IPv6 range that is not an address (`:::/8`),
+//! and a CPU amount with a fraction of a millicore (the schema description says at most three decimals).
+//! Those entries are tested against the decoder only, in the unit tests. Every other entry is in
+//! "both accept" or "both refuse".
 
 use std::error::Error;
 use std::path::Path;
@@ -74,6 +76,9 @@ fn net_entries_both_accept() -> TestResult {
                 "expected_issuer": "^Acme", "pin_sha256": [PIN], "forbid_interception": true}),
             json!({"id": "net.tls_intercept", "hosts": ["10.1.2.3:65535"]}),
             json!({"id": "net.dns", "names": ["a.example"]}),
+            json!({"id": "net.dns", "names": ["localhost", "a-b.example", "xn--bcher-kva.example", "A1.b2.example"]}),
+            json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in":
+                ["10.255.255.255/32", "255.255.255.255/32", "1.2.3.4/0", "::/0", "fd00::/128", "2001:db8::/32"]}]}),
             json!({"id": "net.dns", "names": ["a.example",
                 {"name": "db.example", "expect_in": ["10.0.0.0/8", "fd00::/8", "0.0.0.0/0"],
                  "expect_public": false}], "max_latency": "250ms"}),
@@ -144,6 +149,23 @@ fn net_entries_both_refuse() -> TestResult {
             json!({"id": "net.dns", "names": ["a_b.example"]}),
             json!({"id": "net.dns", "names": [{"expect_public": true}]}),
             json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["10.0.0.0"]}]}),
+            json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["10.0.0.300/8"]}]}),
+            json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["256.0.0.0/8"]}]}),
+            json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["10.0.0.0/33"]}]}),
+            json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["10.0.0.0/08"]}]}),
+            json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["10.0.0.0/8/8"]}]}),
+            json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["::1/129"]}]}),
+            json!({"id": "net.dns", "names": ["-s"]}),
+            json!({"id": "net.dns", "names": ["--x"]}),
+            json!({"id": "net.dns", "names": ["-a.example"]}),
+            json!({"id": "net.dns", "names": ["a-.example"]}),
+            json!({"id": "net.dns", "names": ["a..example"]}),
+            json!({"id": "net.dns", "names": ["a.example."]}),
+            json!({"id": "net.dns", "names": ["2852039166"]}),
+            json!({"id": "net.dns", "names": ["0xa9.0xfe.0xa9.0xfe"]}),
+            json!({"id": "net.dns", "names": ["10.0.0.1"]}),
+            json!({"id": "net.dns", "names": [{"name": "-s"}]}),
+            json!({"id": "net.dns", "names": [format!("{}.example", "a".repeat(64))]}),
             json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["a.example/8"]}]}),
             json!({"id": "net.dns", "names": [{"name": "a.example", "expect_public": "yes"}]}),
             json!({"id": "net.dns", "names": ["a.example"], "max_latency": "fast"}),
@@ -184,10 +206,18 @@ fn k8s_entries_both_accept() -> TestResult {
                 "free": {"cpu": "16", "memory": "64Gi"}, "arch": ["amd64", "arm64", "x86_64", "aarch64"],
                 "selector": {"node-role.kubernetes.io/worker": ""},
                 "tolerations": [{"key": "gpu", "operator": "Exists", "effect": "NoSchedule"},
-                    {"key": "dedicated", "operator": "Equal", "value": "acme", "effect": "NoExecute"}, {}]}),
+                    {"key": "dedicated", "operator": "Equal", "value": "acme", "effect": "NoExecute"},
+                    {"operator": "Exists"}]}),
             json!({"id": "k8s.nodes", "min_ready": 1, "per_node": {"cpu": 0.5}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "per_node": {"cpu": "500m"}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "per_node": {"cpu": 1000000}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "per_node": {"cpu": "1000000"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "per_node": {"cpu": "1000000000m"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "per_node": {"cpu": 1.234}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"a.example/b_c": "V-1.x", "k": ""}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"operator": "Exists"},
+                {"operator": "Exists", "value": ""}, {"key": "k"}, {"key": "k", "value": "v"},
+                {"key": "a.example/k", "operator": "Equal", "value": "v", "effect": "NoExecute"}]}),
             json!({"id": "k8s.nodes", "min_ready": 4_294_967_295_u64}),
             json!({"id": "k8s.version", "min": "1.27"}),
             json!({"id": "k8s.version", "max": 1}),
@@ -284,6 +314,21 @@ fn k8s_entries_both_refuse() -> TestResult {
             json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"": "x"}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"k": "x".repeat(64)}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"operator": "Maybe"}]}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{}]}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"operator": "Equal"}]}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"effect": "NoSchedule"}]}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"value": "x"}]}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"operator": "Exists", "value": "x"}]}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"key": "a\u{202e}b"}]}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"key": "k", "value": "-v"}]}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"-a": "x"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"a/b/c": "x"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"A.Example/b": "x"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"k": "-x"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"a\u{202e}b": "x"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"k": "x\u{202e}"}}),
+            json!({"id": "k8s.nodes", "per_node": {"cpu": "1000001"}}),
+            json!({"id": "k8s.nodes", "per_node": {"cpu": "1000000001m"}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"effect": "Never"}]}),
             json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"key": ""}]}),
             json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": ["gpu"]}),

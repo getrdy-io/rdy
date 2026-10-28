@@ -20,7 +20,7 @@ use serde_json::Value;
 use super::ParamSet;
 use super::common::{BoundedList, RegexText, StringList, from_value};
 use crate::error::echo_safe;
-use crate::scalar::{Duration, Host, Target};
+use crate::scalar::{Duration, Host, Target, is_plain_host_name, redact_for_echo};
 
 /// Builds a deserialize error from a message.
 fn bad<E: serde::de::Error>(message: impl std::fmt::Display) -> E {
@@ -233,7 +233,8 @@ impl<'de> Deserialize<'de> for TlsHost {
         if !shape_ok {
             return Err(bad(format!(
                 "'{}' is not a host: write a name or address, with an optional :port",
-                echo_safe(&text)
+                // A spec carries no credentials, but a mistake like user:secret@host must not be echoed.
+                echo_safe(&redact_for_echo(&text))
             )));
         }
         let full = format!("{host}:{}", port.unwrap_or("443"));
@@ -298,7 +299,11 @@ impl ParamSet for NetTlsIntercept {
     ];
 }
 
-/// A name to look up: 1 to 253 characters of letters, digits, `.` and `-`.
+/// A name to look up, by the host-name grammar of [`Target`] (01 section 2.6).
+///
+/// Labels are 1 to 63 letters, digits and hyphens, and do not start or end with a hyphen. The name is at
+/// most 253 characters, has no trailing dot and its last label is not a number. So it cannot start with
+/// `-`, and ADR 0006 decision 5 can pass it to `getent ahosts` without it reading as an option.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DnsName(String);
 
@@ -313,12 +318,12 @@ impl DnsName {
 impl<'de> Deserialize<'de> for DnsName {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        let fits = |c: char| c.is_ascii_alphanumeric() || c == '.' || c == '-';
-        if (1..=253).contains(&text.chars().count()) && text.chars().all(fits) {
+        if is_plain_host_name(&text) {
             Ok(Self(text))
         } else {
             Err(bad(format!(
-                "'{}' is not a name: use 1 to 253 characters from letters, digits, . and -",
+                "'{}' is not a name: use dot-separated labels of letters, digits and -, \
+                 none starting or ending with -, and a last label that is not a number",
                 echo_safe(&text)
             )))
         }
@@ -353,8 +358,10 @@ impl<'de> Deserialize<'de> for Cidr {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
         let parsed = text.split_once('/').and_then(|(addr, prefix)| {
-            let digits =
-                (1..=3).contains(&prefix.len()) && prefix.bytes().all(|b| b.is_ascii_digit());
+            // Plain digits with no leading zero, like the schema: `08` is not a prefix.
+            let digits = (1..=3).contains(&prefix.len())
+                && prefix.bytes().all(|b| b.is_ascii_digit())
+                && !(prefix.len() > 1 && prefix.starts_with('0'));
             let addr = addr.parse::<IpAddr>().ok().filter(|a| match a {
                 IpAddr::V4(_) => true,
                 IpAddr::V6(_) => !addr.contains('.'),

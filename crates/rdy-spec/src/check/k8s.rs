@@ -45,13 +45,7 @@ impl K8sName {
 impl<'de> Deserialize<'de> for K8sName {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        let inner = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.';
-        let edge = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
-        let ok = (1..=253).contains(&text.chars().count())
-            && text.chars().all(inner)
-            && text.chars().next().is_some_and(edge)
-            && text.chars().next_back().is_some_and(edge);
-        if ok {
+        if is_k8s_name(&text) {
             Ok(Self(text))
         } else {
             Err(bad(format!(
@@ -61,6 +55,46 @@ impl<'de> Deserialize<'de> for K8sName {
             )))
         }
     }
+}
+
+/// The rule of [`K8sName`]. It is also the rule for the prefix of a label key.
+fn is_k8s_name(text: &str) -> bool {
+    let inner = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.';
+    let edge = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+    (1..=253).contains(&text.chars().count())
+        && text.chars().all(inner)
+        && text.chars().next().is_some_and(edge)
+        && text.chars().next_back().is_some_and(edge)
+}
+
+/// The name part of a label key, or a non-empty label value: 1 to 63 characters of letters, digits, `-`,
+/// `_` and `.`, starting and ending with a letter or digit.
+fn is_label_part(text: &str) -> bool {
+    let inner = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.');
+    (1..=63).contains(&text.chars().count())
+        && text.chars().all(inner)
+        && text
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
+        && text
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric())
+}
+
+/// A Kubernetes qualified name: `name`, or `prefix/name` with a DNS-style prefix. It is the grammar of
+/// label keys and taint keys, so a control or bidirectional character cannot be in one.
+fn is_qualified_name(text: &str) -> bool {
+    match text.split_once('/') {
+        Some((prefix, name)) => is_k8s_name(prefix) && is_label_part(name),
+        None => is_label_part(text),
+    }
+}
+
+/// A Kubernetes label value: empty, or a label part.
+fn is_label_value(text: &str) -> bool {
+    text.is_empty() || is_label_part(text)
 }
 
 /// Parameters of `k8s.access`: can rdy reach the cluster with the current context.
@@ -399,8 +433,8 @@ impl ParamSet for K8sAdmission {
 
 /// An amount of CPU, kept in millicores: `4`, `0.5` or `"500m"`. At least 1m.
 ///
-/// A number is whole or fractional cores, 1m to 1000000 cores, with at most three decimals. A string is
-/// a whole number of cores, or millicores with an `m`.
+/// A number is whole or fractional cores with at most three decimals. A string is a whole number of
+/// cores, or millicores with an `m`. Either form is 1m to 1000000 cores.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CpuAmount(u64);
 
@@ -411,8 +445,10 @@ impl CpuAmount {
         self.0
     }
 
-    /// The most cores a number may hold.
+    /// The most cores, for the number form and the string form alike.
     const MAX_CORES: u64 = 1_000_000;
+    /// The same cap in millicores.
+    const MAX_MILLIS: u64 = Self::MAX_CORES * 1000;
 
     fn from_number(n: &serde_json::Number) -> Option<Self> {
         if let Some(cores) = n.as_u64() {
@@ -427,7 +463,7 @@ impl CpuAmount {
         if (millis - rounded).abs() > 1e-6 || rounded < 1.0 || rounded > 1e9 {
             return None;
         }
-        // `rounded` is a whole number from 1 to 1e9, so the cast is exact.
+        // `rounded` is a whole number from 1 to MAX_MILLIS (1e9), so the cast is exact.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         Some(Self(rounded as u64))
     }
@@ -437,13 +473,16 @@ impl CpuAmount {
             Some(digits) => (digits, 1),
             None => (text, 1000),
         };
-        let shape = (1..=9).contains(&digits.len())
+        let shape = (1..=10).contains(&digits.len())
             && digits.bytes().all(|b| b.is_ascii_digit())
             && !digits.starts_with('0');
         if !shape {
             return None;
         }
-        digits.parse::<u64>().ok().map(|n| Self(n * scale))
+        let millis = digits.parse::<u64>().ok()?.checked_mul(scale)?;
+        (1..=Self::MAX_MILLIS)
+            .contains(&millis)
+            .then_some(Self(millis))
     }
 }
 
@@ -511,7 +550,8 @@ impl<'de> Deserialize<'de> for K8sResources {
     }
 }
 
-/// Node labels that must match, at most 16. A key is 1 to 317 characters and a value 0 to 63.
+/// Node labels that must match, at most 16. A key is a Kubernetes qualified name and a value is a
+/// Kubernetes label value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LabelSelector(BTreeMap<String, String>);
 
@@ -537,9 +577,17 @@ impl<'de> Deserialize<'de> for LabelSelector {
             )));
         }
         for (key, value) in &map {
-            if !(1..=317).contains(&key.chars().count()) || value.chars().count() > 63 {
+            if !is_qualified_name(key) {
                 return Err(bad(format!(
-                    "the label '{}' does not fit: a key is 1 to 317 characters and a value up to 63",
+                    "the label key '{}' does not fit: use a name such as 'role' or \
+                     'node-role.kubernetes.io/worker'",
+                    echo_safe(key)
+                )));
+            }
+            if !is_label_value(value) {
+                return Err(bad(format!(
+                    "the value of the label '{}' does not fit: use up to 63 letters, digits, -, _ and ., \
+                     starting and ending with a letter or digit",
                     echo_safe(key)
                 )));
             }
@@ -571,26 +619,64 @@ pub enum TaintEffect {
 }
 
 /// A toleration, which lets the product's pods use tainted nodes. It has the keys of a pod's toleration,
-/// except `tolerationSeconds`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// except `tolerationSeconds`, and Kubernetes' own rules: without a `key` the operator must be `Exists`,
+/// and with `Exists` there is no `value`. A toleration with no key and `Exists` matches every taint, the
+/// control-plane taint too.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Toleration {
-    /// The taint key. Without it, with `operator: Exists`, every taint matches.
-    pub key: Option<TaintKey>,
+    /// The taint key. Without it the operator is `Exists` and every taint matches.
+    pub key: Option<LabelKey>,
     /// How the value is compared. Kubernetes treats a missing operator as `Equal`.
     pub operator: Option<TolerationOperator>,
-    /// The taint value.
+    /// The taint value. Not with `Exists`.
     pub value: Option<LabelValue>,
     /// The effect to tolerate. Without it every effect matches.
     pub effect: Option<TaintEffect>,
 }
 
-/// A taint key: 1 to 317 characters.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TaintKey(String);
+impl<'de> Deserialize<'de> for Toleration {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            key: Option<LabelKey>,
+            operator: Option<TolerationOperator>,
+            value: Option<LabelValue>,
+            effect: Option<TaintEffect>,
+        }
+        let Raw {
+            key,
+            operator,
+            value,
+            effect,
+        } = Raw::deserialize(deserializer)?;
+        let exists = operator == Some(TolerationOperator::Exists);
+        if key.is_none() && !exists {
+            return Err(bad(
+                "a toleration without a key must have operator Exists, which matches every taint",
+            ));
+        }
+        if exists && value.as_ref().is_some_and(|v| !v.as_str().is_empty()) {
+            return Err(bad(
+                "a toleration with operator Exists has no value: remove it, or use operator Equal",
+            ));
+        }
+        Ok(Self {
+            key,
+            operator,
+            value,
+            effect,
+        })
+    }
+}
 
-impl TaintKey {
+/// A label key or a taint key: a Kubernetes qualified name, up to 317 characters. It is `name`, or
+/// `prefix/name` with a lowercase DNS-style prefix.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LabelKey(String);
+
+impl LabelKey {
     /// The key as written.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -598,18 +684,22 @@ impl TaintKey {
     }
 }
 
-impl<'de> Deserialize<'de> for TaintKey {
+impl<'de> Deserialize<'de> for LabelKey {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        if (1..=317).contains(&text.chars().count()) {
+        if is_qualified_name(&text) {
             Ok(Self(text))
         } else {
-            Err(bad("a taint key is 1 to 317 characters"))
+            Err(bad(format!(
+                "'{}' is not a key: use a name such as 'gpu' or 'node-role.kubernetes.io/worker'",
+                echo_safe(&text)
+            )))
         }
     }
 }
 
-/// A taint value: up to 63 characters.
+/// A taint value: a Kubernetes label value, empty or up to 63 letters, digits, `-`, `_` and `.`,
+/// starting and ending with a letter or digit.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LabelValue(String);
 
@@ -624,10 +714,14 @@ impl LabelValue {
 impl<'de> Deserialize<'de> for LabelValue {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        if text.chars().count() <= 63 {
+        if is_label_value(&text) {
             Ok(Self(text))
         } else {
-            Err(bad("a taint value is up to 63 characters"))
+            Err(bad(format!(
+                "'{}' is not a value: use up to 63 letters, digits, -, _ and ., \
+                 starting and ending with a letter or digit",
+                echo_safe(&text)
+            )))
         }
     }
 }

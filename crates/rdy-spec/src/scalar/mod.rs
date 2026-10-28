@@ -17,6 +17,7 @@ use thiserror::Error;
 pub use duration::{Duration, DurationProblem};
 pub use quantity::{Quantity, QuantityProblem};
 pub use target::{Host, Target, TargetProblem};
+pub(crate) use target::{is_plain_host_name, redact_for_echo};
 pub use version::{Version, VersionProblem};
 
 use crate::error::echo_safe;

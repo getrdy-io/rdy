@@ -61,9 +61,9 @@ pub use host::{
 
 pub use k8s::{
     AccessMode, ApiGroup, ApiRef, CpuAmount, K8sAccess, K8sAdmission, K8sName, K8sNodes, K8sRbac,
-    K8sResources, K8sStorageClass, K8sVersion, LabelSelector, LabelValue, OverMax, PodFeature,
-    PodSecurityLevel, RbacResource, RbacRule, RbacSubresource, RbacVerb, ReclaimPolicy,
-    TaintEffect, TaintKey, Toleration, TolerationOperator, VolumeBinding,
+    K8sResources, K8sStorageClass, K8sVersion, LabelKey, LabelSelector, LabelValue, OverMax,
+    PodFeature, PodSecurityLevel, RbacResource, RbacRule, RbacSubresource, RbacVerb, ReclaimPolicy,
+    TaintEffect, Toleration, TolerationOperator, VolumeBinding,
 };
 pub use net::{
     Cidr, DnsName, DnsRule, Endpoint, HttpMethod, HttpStatus, NetDns, NetEgress, NetProxy,
