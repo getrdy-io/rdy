@@ -1,6 +1,6 @@
 # ADR 0013: Verdict refinements: what counts as not run, and the one thing that never counts
 
-- Status: Proposed (2026-10-28, applies the security-reviewer review of 02 and 01 section 5.3; security-reviewer re-review pending)
+- Status: Accepted (2026-10-28, after the security-reviewer review of ADRs 0013 to 0016)
 - Date: 2026-10-28
 
 ## Context
@@ -20,16 +20,22 @@ A false READY is the worst failure this tool has; a false NOT READY costs one re
 2. **Only the vendor can make a check not count.** `skip_kind: not_applicable` comes from one source:
    the spec's `os` list leaving this OS out. Engine and check code cannot produce it. A check with no
    data source on this OS is `not_yet_on_os` and counts. A requirement met by absence (a spec that
-   allows `disabled` SELinux, run on Windows) is a `pass` with a note, reviewed per check.
+   allows `disabled` SELinux, run on Windows) is a `pass` built only through
+   `Finding::pass_by_absence(note)`.
 3. **Required** means `severity` is not `warn`. An unreadable or unknown severity counts as `block`.
 4. **Partial passes.** A check at level Pass with a `partial` result on a required check becomes `warn`
    with "not verified: <what is missing>", unless every missing want is marked `evidence_only` in the
    check's `CheckInfo` (it can only add detail, never change the level). The engine applies this, not
-   code review.
+   code review. A check that runs on an OS its `CheckInfo` marks `Partial` always gets `partial` set,
+   with the OS note as what is missing, so this rule applies there too.
 5. **Nothing verified.** If no check reached `pass`, `warn` or `block`, the verdict is at least
-   `ready_with_warnings` with `verdict_reason: nothing_verified` (01 section 5.3).
+   `ready_with_warnings` with `verdict_reason: nothing_verified` (01 section 5.3). A spec with zero
+   checks is refused by rdy-spec (exit 64), so this can only come from the vendor's own `os` lists or
+   from warn-only checks that did not run.
 6. `rdy_spec::result::verdict()` is the one implementation. A table test covers every severity and
-   status pair, unknown values, the partial rule and the empty run.
+   status pair, unknown values, the partial rule and the empty run. A golden snapshot lists every
+   `evidence_only` want and every `pass_by_absence` call site across the registry, so any new way to
+   keep a level shows up in review.
 
 ## Consequences
 
@@ -50,4 +56,4 @@ A false READY is the worst failure this tool has; a false NOT READY costs one re
 
 ## Tickets implied
 
-- [M1] Define result model and verdict mapping in rdy-spec | owner: rust-engineer | est: 3.5h | depends on: Define public spec types in rdy-spec | exit test: a table test covers every severity and status pair, unknown severity and status values, the partial rule, the not_applicable source rule and the empty run, and asserts verdict_reason and exit codes.
+- [M1] Define result model and verdict mapping in rdy-spec | owner: rust-engineer | est: 3.5h | depends on: Define public spec types in rdy-spec | exit test: a table test covers every severity and status pair, unknown severity and status values, the partial rule including Partial OS support, the not_applicable source rule and the empty run, and asserts verdict_reason and exit codes; the evidence_only and pass_by_absence snapshot is committed.

@@ -1,6 +1,6 @@
 # ADR 0004: tokio multi-thread runtime, blocking work on spawn_blocking, every check under a timeout
 
-- Status: Accepted (revised 2026-10-28 after security-reviewer review); decision 5 tightened by ADR 0014 once it is accepted (fixed PATH always, Windows exec limited to whoami.exe in M1)
+- Status: Accepted (revised 2026-10-28 after security-reviewer review); decision 5 tightened by ADR 0014 (fixed PATH always, Windows exec limited to whoami.exe in M1)
 - Date: 2026-10-27
 
 ## Context

@@ -1,6 +1,6 @@
 # ADR 0008: Error handling and the result model; Timeout and Skipped are outcomes, never crashes
 
-- Status: Accepted (revised 2026-10-28 after cli-ux and security-reviewer review); decision 3 refined by ADR 0013 once it is accepted
+- Status: Accepted (revised 2026-10-28 after cli-ux and security-reviewer review); decision 3 refined by ADR 0013
 - Date: 2026-10-27
 
 ## Context

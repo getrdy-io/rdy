@@ -1,6 +1,6 @@
 # ADR 0010: Use kube-rs (client only) behind a runtime read-only guard, not raw REST or kubectl
 
-- Status: Accepted (revised 2026-10-28 after security-reviewer review)
+- Status: Accepted (revised 2026-10-28 after security-reviewer review; amended 2026-10-28: `selfsubjectreviews` POST in M1, family-owned client, per the review of ADRs 0013 to 0016)
 - Date: 2026-10-27
 
 ## Context
@@ -15,16 +15,24 @@ future check could write to a production cluster unless something stops it at ru
 
 1. `kube` with default features off and only `client` and `rustls-tls`; no `runtime`, `derive` or `ws`.
    Types from `k8s-openapi` with the newest `v1_*` feature, set once in the workspace.
-2. **Read-only guard.** A tower layer wraps the kube client and rejects, at runtime and failing closed:
-   every method except GET; every POST except to `selfsubjectaccessreviews` and
-   `selfsubjectrulesreviews`; any path under `/secrets`. `connect()` returns only the guarded type
-   (`ReadOnlyClient`), and `K8sFamily::new` accepts only that type. ConfigMaps are listed metadata-only.
-   A mock API server test that records every request is the second line of defence.
+2. **Read-only guard.** A tower layer wraps the kube client and rejects, at runtime and failing closed,
+   everything not on its allowlist (rules in 02-engine-design.md Appendix B): GET only on a const list
+   of resources the M1 checks cite; no subresources, no `watch`, no dry run; any path naming `secrets`.
+   POST only to `selfsubjectaccessreviews` and `selfsubjectrulesreviews` (`authorization.k8s.io/v1`),
+   and to `selfsubjectreviews` (`authentication.k8s.io/v1`) with no query string and exactly the body
+   `{"apiVersion":"authentication.k8s.io/v1","kind":"SelfSubjectReview"}`, compared byte for byte. No
+   `v1beta1` or `v1alpha1`. From its response only `username` and `groups` are kept; `uid` and `extra`
+   (which can carry cloud key ids and ARNs) are dropped. On clusters before 1.28 the report shows the
+   kubeconfig user marked "not verified by the API server". `connect()` returns only the guarded type
+   (`ReadOnlyClient`), and `K8sFamily` accepts only that type. ConfigMaps are listed metadata-only. A
+   mock API server test that records every request is the second line of defence.
 3. **Config sources.** Kubeconfig only from the default path, `KUBECONFIG` or `--kubeconfig`; in-cluster
-   config when running in a pod. `--kube-context` picks the context. Connect and read timeouts come
-   from the check timeout. One client per run, shared through the engine `Context`.
+   config when running in a pod. A context flag picks the context (name set by 07-cli-ux.md). Connect
+   and read timeouts come from the check timeout. One client per run, owned by the k8s family, which
+   builds it in its probe hook only when the run plan needs `kube_context`; `rdy-engine` has no kube
+   dependency.
 4. **Identity is visible.** Before the first request, and in the report: context, server URL and the
-   authenticated user (from `SelfSubjectReview` where served). `insecure-skip-tls-verify: true` is
+   authenticated user from `SelfSubjectReview` (decision 2). `insecure-skip-tls-verify: true` is
    reported as a warning.
 5. The `KubeContext` need is met when config loads and `GET /version` answers. Otherwise every k8s check
    is `Skipped` with "no reachable cluster" and the fix hint.
@@ -53,4 +61,4 @@ future check could write to a production cluster unless something stops it at ru
 ## Tickets implied
 
 - [M1] Kube client from kubeconfig or in-cluster with rustls and timeouts | owner: rust-engineer | est: 4h | depends on: Check trait, Need and Context in rdy-engine | exit test: on a kind cluster in CI k8s.version passes and the context, server and user print before the first request; with no kubeconfig every k8s check is SKIP with the hint; exec plugin output never appears at RUST_LOG=trace.
-- [M1] Read-only guard layer and test for rdy-checks-k8s | owner: k8s-expert | est: 3h | depends on: Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: the runtime layer rejects any write, any non-review POST and any secrets path, and the mock API server records only allowed requests across the full k8s fixture run.
+- [M1] Read-only guard layer and test for rdy-checks-k8s | owner: k8s-expert | est: 3h | depends on: Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: the runtime layer rejects any write, any POST other than the three reviews, a SelfSubjectReview with a different body or a query string, and any secrets path, and the mock API server records only allowed requests across the full k8s fixture run.

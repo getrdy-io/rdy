@@ -1,6 +1,6 @@
 # ADR 0011: The package is `rdy`, it lives in `crates/rdy-cli`, the binary is `rdy`
 
-- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review)
+- Status: Accepted (revised 2026-10-28 after security-reviewer and cli-ux review; decision 4 amended 2026-10-28 for the in-process test entry point, 08 decision A)
 - Date: 2026-10-27
 
 ## Context
@@ -15,7 +15,21 @@ The plan reserves `rdy` on crates.io. Package name, directory and binary name mu
 1. `crates/rdy-cli/Cargo.toml` declares `name = "rdy"` with `[[bin]] name = "rdy"`.
 2. The directory stays `crates/rdy-cli` so the binary crate is obvious in the tree.
 3. Commands become `cargo run -p rdy -- run examples/specs/acme-platform.yaml --json`.
-4. `rdy` publishes no library API: `src/main.rs` plus private modules.
+4. `rdy` has one library target, `rdy_cli`, for tests and the docs CLI reference, with one entry point:
+   `#[doc(hidden)] pub fn run(args, backend, hooks: RunHooks, stdout, stderr) -> ExitCode`. `main.rs`
+   calls it with `rdy_engine::live_backend()` and `RunHooks::default()`, nothing else. Conditions, each
+   checked in CI:
+   - Test hooks (clock, run id, deadline, watchdog action, privilege ids) are fields of `RunHooks`.
+     They are never argv flags or env vars, so the shipped binary cannot be steered into them.
+   - `crates/rdy-cli/src` outside `#[cfg(test)]` never names `Replay` or `testing` (CI grep). The
+     release build is `-p rdy` without `--all-targets`, and `cargo tree -p rdy -e normal,features
+     --target <t>` lacks `rdy-engine/testing` on every leg. A marker string compiled only into the Replay
+     module is absent from each dist binary before signing.
+   - Process-global effects stay in `main`: the redacting log layer, the panic hook, the ring provider
+     and `process::exit`. In process, the watchdog fires a hook instead of exiting. So the SEC-25
+     `RUST_LOG=trace` canary test and the watchdog exit-70 test run against the real binary
+     (`assert_cmd`).
+   - `Backend` is sealed (ADR 0014), so `run` cannot take a third-party backend.
 5. A no-code `rdy-cli` 0.0.1 placeholder is published whose description says "install `rdy`", so
    someone who reads the directory name and runs `cargo install rdy-cli` cannot get a squatter's code.
 6. `rdy version` and `rdy --version` both work and print `rdy 0.1.0-alpha.3 (abc1234 2026-12-01)` on
@@ -37,6 +51,8 @@ The plan reserves `rdy` on crates.io. Package name, directory and binary name mu
 | Leave `rdy-cli` unreserved | A squatter could publish code under the name people will guess. |
 
 ## Tickets implied
+
+- [M1] In-process CLI entry point rdy_cli::run taking a Backend | owner: rust-engineer | est: 2.5h | depends on: Package rdy in crates/rdy-cli with binary name rdy | exit test: a test calls `run` with the Replay backend, RunHooks and capture buffers and gets the exit code, stdout and stderr; the CI grep, feature-tree and marker-string checks of decision 4 pass on every leg.
 
 - [M1] Package rdy in crates/rdy-cli with binary name rdy | owner: rust-engineer | est: 1h | depends on: Create workspace skeleton | exit test: `cargo run -p rdy -- version` and `-- --version` print the documented line and `cargo package -p rdy --list` contains no stray files.
 - [M1] Update CLAUDE.md commands to cargo run -p rdy | owner: docs-writer | est: 1h | depends on: Package rdy in crates/rdy-cli with binary name rdy | exit test: every command in the CLAUDE.md Commands block runs green on a fresh clone.
