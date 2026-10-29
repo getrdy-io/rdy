@@ -955,8 +955,8 @@ mod windows {
 
     fn assert_ok(out: &std::process::Output) {
         assert!(
-            out.status.success(),
-            "child failed: {}{}",
+            out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+            "child failed or ran no test: {}{}",
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );

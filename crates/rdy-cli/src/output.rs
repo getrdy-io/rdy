@@ -9,7 +9,7 @@
 //! `metadata.product` and `SystemTime::now()`, hold the handle for the whole run, and write the report
 //! files through it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use rdy_engine::output::{
@@ -22,6 +22,16 @@ use crate::error::{CliError, IoReason, ReportReason, ReportStep};
 
 /// The default folder as 07 names it, for an error where the real path is not known.
 const DEFAULT_LABEL: &str = r"%USERPROFILE%\rdy-reports";
+
+/// How an error names the default folder when its real path is not known: `%USERPROFILE%\rdy-reports`
+/// on Windows, and the report folder in the working folder (`unix_folder`) elsewhere.
+fn default_label(windows: bool, unix_folder: PathBuf) -> PathBuf {
+    if windows {
+        PathBuf::from(DEFAULT_LABEL)
+    } else {
+        unix_folder
+    }
+}
 
 /// Makes the report folder for this run, or `None` when `--no-report` was given.
 ///
@@ -43,11 +53,12 @@ pub fn open_report_dir(
         Some(dir) => OutputDir::create_new(dir, product, &ts)
             .map_err(|err| report_error(ReportStep::CreateFolder, &shown(dir), err)),
         // Windows: opens `%USERPROFILE%\rdy-reports` without following a link and refuses a
-        // redirect there. On Unix it is `.` and cannot fail.
+        // redirect there. On Unix it opens `.`, which fails for a working folder that cannot be
+        // read, so both OSes name the folder in the error.
         None => {
-            let label = Path::new(DEFAULT_LABEL);
+            let label = default_label(cfg!(windows), shown(Path::new(".")));
             let parent = default_report_parent()
-                .map_err(|err| report_error(ReportStep::CreateFolder, label, err))?;
+                .map_err(|err| report_error(ReportStep::CreateFolder, &label, err))?;
             OutputDir::create_new_in(&parent, product, &ts)
                 .map_err(|err| report_error(ReportStep::CreateFolder, &shown(parent.path()), err))
         }

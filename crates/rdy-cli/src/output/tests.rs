@@ -224,8 +224,8 @@ fn the_default_lands_under_userprofile_rdy_reports() {
         .output()
         .expect("run child");
     assert!(
-        out.status.success(),
-        "child failed: {}{}",
+        out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"),
+        "child failed or ran no test: {}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
@@ -264,5 +264,17 @@ fn a_redirect_error_maps_to_a_report_write_error_with_a_fix() {
     assert_eq!(
         err.to_string(),
         r"cannot create the report folder %USERPROFILE%\rdy-reports (USERPROFILE is not set to a path on a local drive)"
+    );
+}
+
+#[test]
+fn the_default_folder_is_named_by_the_os_in_an_error() {
+    assert_eq!(
+        default_label(true, PathBuf::from("./rdy-report-acme-20270309T143005Z")),
+        Path::new(r"%USERPROFILE%\rdy-reports")
+    );
+    assert_eq!(
+        default_label(false, PathBuf::from("./rdy-report-acme-20270309T143005Z")),
+        Path::new("./rdy-report-acme-20270309T143005Z")
     );
 }
