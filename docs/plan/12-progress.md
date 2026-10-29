@@ -226,7 +226,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-106 | todo | | k8s.version (gitVersion parse, distribution, discovery API availability)
 
-- M1-107 | todo | | Family probe hook and lazy KubeContext probe | backlog corrected 2026-10-29 (correction-11): with no kubeconfig every k8s check is SKIP with the hint, the cluster line prints to stderr before the first request, and a timed-out exec plugin does not keep rdy from exiting (ADR 0031 residual), and each kube entry from M1-102's use file fails clippy in tests/lint-wall; depends on M1-044 too; 2.5 h | backlog corrected 2026-10-29 (correction-12): a Windows `.cmd` exec plugin test, PATH resolution of a bare plugin name for the exec action-log entry, and with no CA in the kubeconfig the client trusts the facade SystemRoots (ADR 0031 decision 9); depends on M1-092 too; 3 h (PR #76 reviews); backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers every kubeconfig user's credentials and the exec plugin's token, exit 70 if refused, kubeconfig canary at trace (PR #96 reviews)
+- M1-107 | todo | | Family probe hook and lazy KubeContext probe | backlog corrected 2026-10-29 (correction-11): with no kubeconfig every k8s check is SKIP with the hint, the cluster line prints to stderr before the first request, and a timed-out exec plugin does not keep rdy from exiting (ADR 0031 residual), and each kube entry from M1-102's use file fails clippy in tests/lint-wall; depends on M1-044 too; 2.5 h | backlog corrected 2026-10-29 (correction-12): a Windows `.cmd` exec plugin test, PATH resolution of a bare plugin name for the exec action-log entry, and with no CA in the kubeconfig the client trusts the facade SystemRoots (ADR 0031 decision 9); depends on M1-092 too; 3 h (PR #76 reviews); backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers every kubeconfig user's credentials and the exec plugin's token, exit 70 if refused, kubeconfig canary at trace (PR #96 reviews); backlog corrected 2026-10-29 (correction-17): the k8s family reads its check list from `registry::infos()` (PR #95 review)
 
 - M1-108 | todo | | kind integration job with a restricted PSA namespace and review round trips | backlog corrected 2026-10-29 (correction-11): depends on M1-106 and runs `tests/live_cluster.rs`, the ignored kind test from M1-102; backlog corrected 2026-10-29 (correction-15): depends on M1-103; applies `examples/rbac/rdy-readonly.yaml` and passes the read-only live test with that service account (SEC-24; PR #92 reviews)
 
@@ -298,7 +298,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-142 | todo | | Progress line with indicatif, TTY only
 
-- M1-143 | todo | | Quiet and verbose output modes
+- M1-143 | todo | | Quiet and verbose output modes | backlog corrected 2026-10-29 (correction-17): moved from week 26 to week 30
 
 - M1-144 | todo | | Facade methods for UDP exchanges and unix sockets with a GET-only Docker API guard
 
@@ -306,17 +306,17 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-146 | todo | | host.security_agents (process names, agents.toml format, seed list) (M1-late)
 
-- M1-147 | todo | | host.firewall (firewalld zone and service XML, ufw) (M1-late)
+- M1-147 | todo | | host.firewall (firewalld zone and service XML, ufw) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172, which registers the built check in `HostFamily` (PR #98 review)
 
-- M1-148 | todo | | host.time_sync (adjtimex, timedatectl, chronyc, SNTP client) (M1-late) | backlog corrected 2026-10-29 (correction-15): depends on M1-094; `ntp_servers` is the only UDP host source, counted toward INV-11; a server in a refused range falls back to `chronyc` (PR #91 reviews)
+- M1-148 | todo | | host.time_sync (adjtimex, timedatectl, chronyc, SNTP client) (M1-late) | backlog corrected 2026-10-29 (correction-15): depends on M1-094; `ntp_servers` is the only UDP host source, counted toward INV-11; a server in a refused range falls back to `chronyc` (PR #91 reviews); backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
-- M1-149 | todo | | host.sysctl (live and persisted values, precedence, systemd limits) (M1-late)
+- M1-149 | todo | | host.sysctl (live and persisted values, precedence, systemd limits) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
-- M1-150 | todo | | host.container_runtime (sockets, daemon.json, containerd v2 and v3, kubelet driver, API over unix socket) (M1-late) | backlog corrected 2026-10-29 (correction-15): redacts the Docker `/info` body it keeps (PR #91 review)
+- M1-150 | todo | | host.container_runtime (sockets, daemon.json, containerd v2 and v3, kubelet driver, API over unix socket) (M1-late) | backlog corrected 2026-10-29 (correction-15): redacts the Docker `/info` body it keeps (PR #91 review); backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
-- M1-151 | todo | | host.cgroups (v1, hybrid, v2, controllers) (M1-late)
+- M1-151 | todo | | host.cgroups (v1, hybrid, v2, controllers) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
-- M1-152 | todo | | host.kernel (version and modules) (M1-late)
+- M1-152 | todo | | host.kernel (version and modules) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
 - M1-153 | todo | | net.dns system answer (getent path, name validation, fallback, timeout evidence) (M1-late)
 
@@ -324,25 +324,25 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-155 | todo | | net.dns direct nameserver lookups, resolv.conf and nsswitch analysis, scripted DNS server (M1-late)
 
-- M1-156 | todo | | net.registry (v2 ping, token realm, manifest and config blob host, HEAD versus GET) (M1-late)
+- M1-156 | todo | | net.registry (v2 ping, token realm, manifest and config blob host, HEAD versus GET) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
-- M1-157 | todo | | net.mtu (Linux sysfs, sysinfo elsewhere, overlay overhead tables) (M1-late)
+- M1-157 | todo | | net.mtu (Linux sysfs, sysinfo elsewhere, overlay overhead tables) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
-- M1-158 | todo | | net.bandwidth (ranged sample, injected clock) (M1-late)
+- M1-158 | todo | | net.bandwidth (ranged sample, injected clock) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
 - M1-159 | todo | | k8s.nodes free capacity from pod requests (cut 2)
 
 - M1-160 | todo | | k8s.admission webhooks, validating admission policies and the dry-run guard test (M1-late)
 
-- M1-161 | todo | | k8s.namespace (existence, terminating, quota, limit range, project request) (M1-late)
+- M1-161 | todo | | k8s.namespace (existence, terminating, quota, limit range, project request) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
-- M1-162 | todo | | k8s.dns (label-based selection, Corefile, restart evidence) (M1-late)
+- M1-162 | todo | | k8s.dns (label-based selection, Corefile, restart evidence) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
-- M1-163 | todo | | k8s.ingress (IngressClass by controller, Gateway API, route, pending LoadBalancer, retirement warning) (M1-late)
+- M1-163 | todo | | k8s.ingress (IngressClass by controller, Gateway API, route, pending LoadBalancer, retirement warning) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
-- M1-164 | todo | | k8s.crds (CRDs, served versions, operator version) (M1-late)
+- M1-164 | todo | | k8s.crds (CRDs, served versions, operator version) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
-- M1-165 | todo | | k8s.cni (node-condition and CRD signals, DaemonSets, NetworkPolicy, CIDRs, cni.toml) (M1-late)
+- M1-165 | todo | | k8s.cni (node-condition and CRD signals, DaemonSets, NetworkPolicy, CIDRs, cni.toml) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
 - M1-166 | todo | | Fixture env net-airgapped
 
@@ -355,6 +355,8 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-170 | PR #TBD | | Machine identity files denied in the read policy | Built: `run/machine-id*` denied at any depth and admitted as a real path to the `MachineId` guard (third file tried); DMI `product_serial`, `product_uuid`, `board_serial`, `chassis_serial` under `dmi/id/` denied at any depth and read by nothing; inode refusal of a hard link or bind mount of any machine id file (separate list in `Secrets`, rule `RULE_MACHINE_ID_FILE`), skipped for the `MachineId` guard only. 02 and 05 (I5) updated. Residual: a copy at another inode; other firmware serial paths (`/sys/firmware/dmi/...`, `asset_tag` files) are not on the list; none deferred
 
 - M1-171 | todo | | `statfs` prefixes judge `NativeCall::Statvfs` | backlog corrected 2026-10-29 (correction-16): new ticket (PR #94 review)
+
+- M1-172 | todo | | Parameter types for the M1-late check ids | backlog corrected 2026-10-29 (correction-17): new ticket (PR #98 review)
 
 ## Summary
 
