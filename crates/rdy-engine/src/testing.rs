@@ -83,6 +83,12 @@ impl TestRun {
         self.hub.run_probe_for(os)
     }
 
+    /// Adds a secret to the run's known-secret set, as the facade does for a kubeconfig token (ADR 0015
+    /// decision 3). Returns `false` if the value was refused (see `Redactor::add_known_secret`).
+    pub fn add_known_secret(&self, secret: &str) -> bool {
+        self.hub.add_known_secret(secret)
+    }
+
     /// The action log so far.
     #[must_use]
     pub fn action_log(&self) -> ActionLogOutput {

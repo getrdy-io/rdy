@@ -50,7 +50,7 @@ use std::time::Instant;
 use rdy_spec::result::{Action, ActionKind, ActionOutcome, Report};
 use serde_json::{Map, Value};
 
-use crate::redact::{Redactor, RuleCounts};
+use crate::redact::{Cut, Redacted, Redactor, RuleCounts};
 
 /// The most entries a report carries. The result schema allows 5000 (01 section 5.4).
 pub const MAX_ENTRIES: usize = 5000;
@@ -266,6 +266,18 @@ impl ActionLog {
     /// The redactor this log uses.
     pub(crate) fn redactor(&self) -> &Redactor {
         &self.shared.redactor
+    }
+
+    /// Redacts a buffer the facade returned and adds what the redactor did to the log's counts, so
+    /// they reach the report's `redaction` summary with the log's own.
+    pub(crate) fn redact_buffer(&self, bytes: &[u8], cut: Cut) -> Redacted<String> {
+        let mut counts = RuleCounts::default();
+        let text = self
+            .shared
+            .redactor
+            .redact_buffer_counted(bytes, cut, &mut counts);
+        self.state().counts.merge(&counts);
+        text
     }
 
     fn state(&self) -> MutexGuard<'_, State> {

@@ -21,9 +21,13 @@
 //!   is redacted first and cut to its size cap second. The result is a [`RedactedReport`], the only type
 //!   the writers and renderers accept.
 //!
-//! This is the M1-048 core (the engine, the key, the gate and the first rule, `secret_by_key`) and the
-//! M1-062 report walk. M1-060 adds the other M1 rules. M1-056 wires the tracing writer, panic hook and
-//! CLI errors.
+//! - **Cut buffers and known secrets.** [`Redactor::redact_buffer`] drops the partial edge line of a buffer
+//!   the facade cut. [`Redactor::add_known_secret`] puts a secret in the run-scoped set that every clone of
+//!   the redactor removes, wherever it appears (M1-061).
+//!
+//! This is the M1-048 core (the engine, the key, the gate and the first rule, `secret_by_key`), the
+//! M1-062 report walk and the M1-061 cut buffers and known secrets. M1-060 adds the other M1 rules.
+//! M1-056 wires the tracing writer, panic hook and CLI errors.
 
 // `TagKey::fixed` makes tags predictable. It is for tests only, so a release build with the `testing`
 // feature is refused. A debug build is allowed so `cargo test` and `cargo clippy --features testing` work.
@@ -34,7 +38,9 @@
 #[cfg(all(feature = "testing", not(test), not(debug_assertions)))]
 compile_error!("the `testing` feature of rdy-engine must not be enabled in a release build");
 
+mod buffer;
 mod key;
+mod known;
 mod report;
 mod rules;
 mod span;
@@ -43,6 +49,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::Deref;
 
+pub use buffer::Cut;
 pub use key::TagKey;
 
 use rules::{BUILT_IN, Rule};
@@ -152,8 +159,7 @@ impl RuleCounts {
         self.by_rule.iter().map(|(rule, n)| (*rule, *n))
     }
 
-    /// Adds the counts of `other`. Only the run board (feature `runtime`) merges counts.
-    #[cfg(feature = "runtime")]
+    /// Adds the counts of `other`. The run board and the probe's action log merge counts.
     pub(crate) fn merge(&mut self, other: &RuleCounts) {
         for (rule, n) in other.iter() {
             *self.by_rule.entry(rule).or_insert(0) += n;
@@ -167,18 +173,36 @@ impl RuleCounts {
 
 /// Removes secrets from text.
 ///
-/// It holds the per-run [`TagKey`] and nothing else, so it is cheap to clone and safe to share. Build it
-/// first in `main`, before the spec is read.
+/// It holds the per-run [`TagKey`] and the run-scoped known-secret set, so it is cheap to clone and safe
+/// to share. Clones share the set: a secret added through one is removed by all. Build it first in
+/// `main`, before the spec is read.
 #[derive(Debug, Clone)]
 pub struct Redactor {
     key: TagKey,
+    known: known::KnownSecrets,
 }
 
 impl Redactor {
     /// A redactor with the built-in rules.
     #[must_use]
     pub fn new(key: TagKey) -> Self {
-        Self { key }
+        Self {
+            key,
+            known: known::KnownSecrets::default(),
+        }
+    }
+
+    /// Adds a secret to the run-scoped set. From now on every string this redactor and its clones handle
+    /// has the exact value removed, whatever the surrounding text looks like (ADR 0015 decision 3).
+    ///
+    /// The facade calls it for the kubeconfig token and client key data, the proxy password and the
+    /// value of a declared environment variable whose name [`is_secret_name`]. A value of several lines
+    /// is added whole and line by line. Surrounding blanks are ignored.
+    ///
+    /// Returns `false` if the value was refused: under 6 bytes (it would match common words), over
+    /// 64 KiB, or the set already holds 1,024 values. Never log the value.
+    pub fn add_known_secret(&self, secret: &str) -> bool {
+        self.known.add(secret)
     }
 
     /// Redacts one string. Never fails and never returns raw text for a string it could not handle.
@@ -195,6 +219,18 @@ impl Redactor {
 
     /// The engine. Runs every rule on the original text, merges the spans, writes the output once.
     fn run(&self, rules: &[Rule], text: &str, counts: &mut RuleCounts) -> Redacted<String> {
+        self.run_with(rules, text, &[], counts)
+    }
+
+    /// Like [`Redactor::run`], with spans the caller found as well (the cut-buffer guards). The known
+    /// secrets are added here, so every path through the engine removes them.
+    fn run_with(
+        &self,
+        rules: &[Rule],
+        text: &str,
+        extra: &[Span],
+        counts: &mut RuleCounts,
+    ) -> Redacted<String> {
         // The seam for callers that must prove they survive a redactor bug (M1-056).
         #[cfg(any(test, feature = "testing"))]
         assert!(
@@ -216,6 +252,10 @@ impl Redactor {
                 priority: rule.priority,
             }));
         }
+        spans.extend_from_slice(extra);
+        self.known.exact_spans(text, &mut spans);
+        // The extra spans come from code in this crate, but they get the same range check as a rule's.
+        ranges_ok &= spans.iter().all(|s| s.start <= s.end);
         let spans = merge(spans);
         match ranges_ok.then(|| self.write(text, &spans)).flatten() {
             Some(out) => {
