@@ -374,8 +374,9 @@ tests policy.
   macOS data volume): `etc/shadow*`, `etc/gshadow*`, `etc/sudoers*`, `etc/master.passwd`,
   `etc/security/opasswd`, `var/db/dslocal`; `.ssh`, `.kube`, `.aws`, `.azure`, `.config/gcloud`, `.gnupg`, `.docker/config.json`, `.netrc`,
   `.git-credentials`, `.pgpass`, `.vault-token`; private key files by name and extension (`*.key`,
-  `*.p12`, `*.keytab`, `*.keychain`, `*.keychain-db`, `id_*`, `ssh_host_*_key`), `etc/ssl/private`,
-  `etc/pki/tls/private`; cluster credentials (`etc/kubernetes/*.conf`, `etc/rancher/{k3s,rke2}/*.yaml`,
+  `*.p12`, `*.keytab`, `*.keychain`, `*.keychain-db`, `id_*`, `ssh_host_*_key`, and PEM keys `key.pem`, `*-key.pem`,
+  `*_key.pem`, `*.key.pem`, `*privkey*.pem` and `private*.pem`), `etc/ssl/private`, `etc/pki/tls/private`,
+  `etc/letsencrypt/{live,archive}`, `var/lib/kubelet/pki`, `run/secrets`; cluster credentials (`etc/kubernetes/*.conf`, `etc/rancher/{k3s,rke2}/*.yaml`,
   `var/lib/kubelet/kubeconfig`, `var/lib/etcd`, `var/lib/rancher/*/server/{token,node-token,cred}`,
   `secrets/kubernetes.io/*`). `/proc/<pid>/` is an allowlist (`status`, `stat`, `statm`, `comm`,
   `cgroup`, `mountinfo`, `mounts`, `limits`, `net`, and the same under `task/<tid>/`, plus `auxv` for

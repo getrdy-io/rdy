@@ -391,7 +391,8 @@ fn private_key_name(name: &str) -> bool {
         return true;
     }
     // A key in PEM form: `privkey.pem`, `tls-key.pem`, `server_key.pem`, `key.pem`. A certificate
-    // (`cert.pem`, `fullchain.pem`) stays readable.
+    // (`cert.pem`, `fullchain.pem`) stays readable. `private*` also refuses a certificate such as
+    // `private-ca.pem`; refusing too much fails closed, which is the side we want.
     if name.ends_with(".pem")
         && (name == "key.pem"
             || name.ends_with("-key.pem")
