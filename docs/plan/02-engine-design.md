@@ -239,7 +239,9 @@ Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
      declared env names that match the secret-name rule) is removed by exact match, and by any
      8-character or longer prefix or suffix at a truncated edge.
    - Then the caps, on char boundaries with a marker: message 1 KiB, fix 4 KiB, `observed` and
-     `expected` 64 KiB, lists 200 items.
+     `expected` 64 KiB, lists 200 items. The marker is ` [truncated]` and the cut never lands inside a
+     placeholder. `Redactor::redact_check` and `redact_action` do this step for one entry,
+     `Redactor::redact_report` and `redact_report_counted` for the whole report (M1-062).
 5. A final pass over the assembled report (identity, host, proxy, capabilities included), then the
    2 MiB report cap, measured after JSON escaping (Action log rule below).
 6. The result is a `RedactedReport`, with no `From<Report>`, no `Deserialize` and no `DerefMut`.

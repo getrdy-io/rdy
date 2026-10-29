@@ -1,0 +1,7 @@
+error[E0277]: the trait bound `Redacted<rdy_spec::result::Report>: From<rdy_spec::result::Report>` is not satisfied
+ --> tests/compile_fail/report_from_plain.rs:5:12
+  |
+5 |     report.into()
+  |            ^^^^ the trait `From<rdy_spec::result::Report>` is not implemented for `Redacted<rdy_spec::result::Report>`
+  |
+  = note: required for `rdy_spec::result::Report` to implement `Into<Redacted<rdy_spec::result::Report>>`

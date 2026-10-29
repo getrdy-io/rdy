@@ -110,7 +110,10 @@ impl Redactor {
     pub fn new(key: TagKey) -> Self;                                    // built-ins only; built first in `main`
     pub fn with_extra(&self, e: &Extra) -> Result<Redactor, RedactError>; // M2: after the spec is verified; same key
     pub fn redact_str(&self, s: &str) -> Redacted<String>;              // M1
-    pub fn redact_report(&self, r: Report) -> Result<Redacted<Report>, RedactError>; // M1
+    pub fn redact_report(&self, r: Report) -> Result<RedactedReport, RedactError>;  // M1: RedactedReport = Redacted<Report>
+    pub fn redact_report_counted(&self, r: Report, earlier: RuleCounts) -> Result<RedactedReport, RedactError>; // M1: keeps the counts of results redacted earlier
+    pub fn redact_check(&self, c: CheckResult, counts: &mut RuleCounts) -> Result<Redacted<CheckResult>, RedactError>; // M1: as each result completes
+    pub fn redact_action(&self, a: Action, counts: &mut RuleCounts) -> Result<Redacted<Action>, RedactError>;         // M1: as each entry is written
     pub fn redact_bytes(&self, b: &[u8]) -> Redacted<Vec<u8>>;         // M2
     pub fn stream(&self) -> RedactStream;                               // M2
 }
@@ -126,10 +129,15 @@ impl Redactor {
   fields keep their names and non-string values; only string leaves go through `redact_str`. The whole-member
   rule (replace the value of a member whose key matches a secret stem, and the `value` of a `{name, value}`
   pair whose `name` matches) runs only inside free-form subtrees: `checks[*].observed`, `checks[*].expected`,
-  env pairs and action `argv`. It never touches a schema-defined field, so `summary.pass`, `by_rule` keys and
-  check keys such as `passed` survive. The walk deserializes back into `Report` and applies the 02 caps, which
-  never cut inside a placeholder. On any error no report is written and rdy exits 70. The watchdog snapshot
-  uses the same function.
+  env pairs and action `argv` (a flag such as `--password` takes the next argument whole). It never touches a
+  schema-defined field, so `summary.pass`, `by_rule` keys and check keys such as `passed` survive. It replaces
+  string values only: numbers, booleans and `null` stay, so `token_ttl_ms: 3600` survives, and so do the forms
+  the key rule leaves alone (`${NAME}`, a `/run/secrets/` path, `null`, a placeholder). The walk deserializes
+  back into `Report` and applies the 02 caps, which never cut inside a placeholder. A cut string ends with
+  ` [truncated]` and sets the result's `truncated` flag. On any error no report is written and rdy exits 70.
+  The watchdog snapshot uses the same function. `redact_check` and `redact_action` run the same walk on one
+  entry as it completes. The final pass finds nothing new in them, so the caller keeps one `RuleCounts` across
+  the run and gives it to `redact_report_counted`.
 - **Structure is kept.** A span excludes quotes and delimiters: `password="hunter2"` becomes
   `password="[REDACTED:secret_by_key:1a2b3c4d]"`. The key-name rule skips a value only when it is exactly one
   well-formed placeholder, so `password=[REDACTED:x:00000000]hunter2` is still redacted.

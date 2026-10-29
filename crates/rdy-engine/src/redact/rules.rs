@@ -28,9 +28,12 @@ pub(crate) struct Rule {
     pub find: fn(&str, &mut Vec<Range<usize>>),
 }
 
+/// The name of the key-name rule, also used by the report walk when it replaces a whole member.
+pub(crate) const SECRET_BY_KEY: &str = "secret_by_key";
+
 /// The built-in rule set for the Report ruleset.
 pub(crate) static BUILT_IN: &[Rule] = &[Rule {
-    name: "secret_by_key",
+    name: SECRET_BY_KEY,
     priority: priority::KEY_NAMES,
     find: find_secret_by_key,
 }];
@@ -39,6 +42,15 @@ pub(crate) static BUILT_IN: &[Rule] = &[Rule {
 /// `key: value` and must not be redacted again.
 static PLACEHOLDER: LazyLock<Result<Regex, regex::Error>> =
     LazyLock::new(|| Regex::new(r"\[REDACTED:[a-z0-9_.]+:[0-9a-f]{8}\]"));
+
+/// Where the well-formed placeholders in `text` are, sorted and disjoint. The size caps use it so a cut
+/// never lands inside one.
+pub(crate) fn placeholder_spans(text: &str) -> Vec<Range<usize>> {
+    PLACEHOLDER
+        .as_ref()
+        .map(|re| re.find_iter(text).map(|m| m.range()).collect())
+        .unwrap_or_default()
+}
 
 /// `key = value`, `key: value`, `"key": "value"`, `--flag=value`, `\"key\":\"value\"` and the same
 /// with more backslashes (JSON inside JSON).
@@ -389,7 +401,7 @@ fn inside(ranges: &[Range<usize>], pos: usize) -> bool {
 }
 
 /// True if the key looks like it names a secret.
-fn is_secret_key(key: &str) -> bool {
+pub(crate) fn is_secret_key(key: &str) -> bool {
     let (norm, boundary) = normalize_key(key);
     // The suffix must be a whole last word: `secretName` is a name, `authProfile` is not a `file`.
     if NAME_SUFFIXES
@@ -486,7 +498,7 @@ impl Lines {
 ///
 /// Each form is exact, because anything extra could carry a secret: `${PG_PW:-hunter2}`,
 /// `$(echo hunter2)` and `{{ .pw | default "hunter2" }}` are not references.
-fn is_exempt_value(value: &str) -> bool {
+pub(crate) fn is_exempt_value(value: &str) -> bool {
     PLAIN_VALUES.iter().any(|p| value.eq_ignore_ascii_case(p))
         || is_secret_mount_path(value)
         || is_env_reference(value)

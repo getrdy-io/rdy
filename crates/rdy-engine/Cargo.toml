@@ -22,6 +22,7 @@ runtime = ["dep:tokio", "dep:rustix"]
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 regex = { workspace = true, features = ["std", "perf", "unicode"] }
 ring = { workspace = true, features = ["alloc"] }
+serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "signal", "sync", "time"], optional = true }
@@ -35,7 +36,6 @@ rustix = { workspace = true, features = ["std", "process", "fs"], optional = tru
 # is public only under `testing` (M1-039). A dev-dependency on the crate itself turns the feature on
 # for test builds only. A normal or release build never sees dev-dependencies.
 rdy-engine = { path = ".", features = ["testing"] }
-serde = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tempfile = { workspace = true }
 trybuild = { workspace = true }

@@ -559,7 +559,7 @@ test asserts both identities, and that bucket counts match the summary.
 
 **Size caps in the schema.** `message` 1 KiB; `fix` and `builtin_fix` 4 KiB; `notes` 20 items of 1 KiB;
 `actions` 5000 items; every other string 4 KiB; `observed` and `expected` 64 KiB each (prose, checked by
-the writer). The whole document is at most 2 MiB, which the portal checks before it parses.
+the writer). A string cut by a cap ends with ` [truncated]`, and the check's `truncated` flag is set. The whole document is at most 2 MiB, which the portal checks before it parses.
 
 ### 5.1 Host identity
 
