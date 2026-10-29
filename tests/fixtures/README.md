@@ -45,6 +45,7 @@ tests/fixtures/
   allow.toml                     lint exceptions, each with a one-line reason
   checks/<check-id>/<case>/      one check, one situation
   checks/_policy/<case>/         engine policy cases, for example symlink-to-shadow
+  checks/_loader/<case>/         loader cases, for example manifest-entries
   envs/<env>/                    one whole environment plus a spec to run against it
   redaction/<category>/<case>.{in,expected,toml}
   results/<rdy-version>/*.json   result files from released versions, append only
@@ -57,14 +58,15 @@ tests/fixtures/
 ```
 
 What exists today: `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/`, `reports/`, and under
-`checks/` the cases `host.memory/pass`, `_policy/symlink-to-shadow` and `_policy/manifest-entries`. The rest
+`checks/` the cases `host.memory/pass`, `_policy/symlink-to-shadow` and `_loader/manifest-entries`. The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
 | --- | --- | --- |
 | `allow.toml` | Lint exceptions. `169.254.169.254` for the metadata tests is the first | By hand, with a reason per entry |
 | `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command or opens a socket | By hand, with the check ticket |
-| `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied` | By hand |
+| `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied`. The expectation of a policy or loader case lives in its Rust test until the fixture lint has a format for it | By hand |
+| `checks/_loader/<case>/` | Cases that exercise the loader and the replay, such as every kind of manifest entry. Their expectation is in the Rust test too | By hand |
 | `envs/<env>/` | A whole environment and the spec the env test runs against it. Five in M1: `all-pass`, `warnings-only`, `all-block`, `no-privileges`, `timeouts` | By hand, goldens by `UPDATE_GOLDENS=1` |
 | `redaction/<category>/<case>.in`, `.expected`, `.toml` | Input, expected output and the rule setup for a redaction case | By hand only. `UPDATE_GOLDENS` never touches it |
 | `results/<rdy-version>/*.json` | Result files written by released versions. They must stay parseable | Append only. Never edited |
@@ -93,13 +95,13 @@ envs/all-pass/
   api/               recorded Kubernetes and cloud API responses
   net.json           scripted DNS and TCP behaviour per host:port
   env.json           environment variables the process sees
-  caps.json          which needs are available (see `[caps]` in the manifest)
   golden/            report.json, report.html, terminal.txt
   expect.json        (check cases) the reviewed expected result
 ```
 
-Anything a check asks for that is not recorded fails the test. A fixture never falls through to the real
-machine.
+The file tree is the machine: a path it does not hold is not found, as on a machine without that file, so a
+check that expects a missing file can be tested. A command, a native call, an API request or an address
+that is not recorded fails the test with `NotRecorded`. A fixture never falls through to the real machine.
 
 ### `fixture.toml`
 
@@ -142,6 +144,10 @@ proxy = "connect-basic-tls-intercept"
   and everything under it. A `remove` that names nothing in the base is an error. One level, no other
   options. The merged files are indexed after the merge, so a child command file with a new name but the
   same argv as a base file is a duplicate, not a replacement. Give it the base file's name to replace it.
+  The base must have the same `os` and `arch`. A child `root.manifest.json` replaces the base's whole
+  manifest (replace by path): the base's links, `dirs`, `unreadable` and `modes` are gone unless the child
+  repeats them. Removing a file that the base manifest still names fails, because the manifest then names
+  something that is not in the tree.
 - `answers` lists the check ids the env can answer. `Fixture::ensure_answers` says "this fixture does not
   answer host.memory" instead of a confusing `NotRecorded`.
 - `crlf` lists the files that may contain `\r`. Every other fixture file must be LF only.
@@ -163,7 +169,9 @@ git and Windows cannot store them. `root.manifest.json` adds them in memory:
 }
 ```
 
-`unreadable` simulates a no-privilege run: a read fails with permission denied and `stat` still works.
+`unreadable` simulates a no-privilege run: a read fails with permission denied and `stat` of the path
+still works. On a directory it hides everything below it: a read or `stat` of a path under it is denied,
+as on a machine where the user may not search the directory.
 Replay follows the symlinks when it applies the deny list, so a link to `/etc/shadow` is `Denied` (that is
 `checks/_policy/symlink-to-shadow`). A relative target is read from the directory of the link. A target that
 is not a path (`socket:[8841]`, what `/proc/<pid>/fd` shows) makes a special file that is neither a regular
@@ -179,10 +187,15 @@ Any slug for the file name. One command per file:
 { "argv": ["/usr/bin/chronyc", "-n", "-c", "tracking"], "stdout": "...", "stderr": "", "exit": 0, "delay_ms": 0 }
 ```
 
-The key is the normalised resolved `argv`. `argv[0]` is the absolute path the program lives at. Replay
-matches the program by its file name and the arguments by value, so the directory documents where the
-tool was and does not have to be one the live runner would search. A Windows fixture compares the program
-name without case. `exit` may be `null` for a command a signal ended. Binary output uses `stdout_b64`
+The key is the normalised resolved `argv`. `argv[0]` is the absolute path the program lives at, and it
+stays in the key. Replay finds a recording as the live runner finds a program: it tries `/usr/sbin`,
+`/usr/bin`, `/sbin` and `/bin`, then the directories the check declared, and uses the first one that
+holds the program. A recording in any other directory (`/opt/x/chronyc`) answers nothing. On a Windows
+fixture only `whoami.exe` in `C:\Windows\System32` runs, and names compare without case.
+
+A machine that lacks a tool is recorded as `{ "argv": ["chronyc"], "missing": true }`: the bare program
+name and nothing else in the file. A call to it fails with the error the live runner gives for a program
+that is not on the search path. The same program cannot also be recorded as installed in one fixture. `exit` may be `null` for a command a signal ended. Binary output uses `stdout_b64`
 (standard base64 with padding); `stdout` and `stdout_b64` are exclusive. Stdout and stderr are cut at the
 same caps as a live run, with the truncation flags set. A duplicate key fails the load and the lint.
 A `delay_ms` is a timer on the tokio clock. A delay that reaches the command's time limit gives a
@@ -257,8 +270,11 @@ The environment variables the process under test sees, as one JSON object of str
 `Fixture::load` fails, naming the file, on an unknown file or directory at the top of a fixture, an unknown
 key anywhere, a bad manifest, a symlink in the tree, a name in `root/` with `\`, `:`, `[` or `]`, a file over
 4 MiB, and a duplicate command, native call or API request. `golden/`, `expect.json`, the spec file,
-`README.md` and `caps.json` are left to the harness and the docs. The needs a fixture offers come from the
-`[caps]` table of the manifest, not from `caps.json`. A directory that is empty on disk is not read, because
+and `README.md` are left to the harness and the docs. The needs a fixture offers come from the `[caps]`
+table of the manifest; a `caps.json` is refused with that hint. A key that repeats, in JSON or once
+normalised (host names that differ in case, `[::1]` written two ways, two paths that are one on a Windows
+fixture), fails the load and names both. A manifest link at `proc/self` is refused for now: the pid of the
+test runner would decide what the read policy admits. A directory that is empty on disk is not read, because
 the repository cannot store it: list it in `dirs`. The size and name rules of the lint (M1-050) are
 stricter than the loader's on purpose.
 

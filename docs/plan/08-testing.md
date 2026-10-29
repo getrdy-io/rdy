@@ -448,8 +448,10 @@ Built in memory. The tree holds no symlinks, no special modes and no name with `
 
 **`commands/*.json`** (any slug): `{ "argv": ["/usr/bin/chronyc", "-n", "-c", "tracking"], "stdout": "...",
 "stderr": "", "exit": 0, "delay_ms": 0 }`. The key is the normalised resolved argv. Binary output uses
-`stdout_b64`. Replay matches the program by file name and the arguments by value; `exit` may be `null`
-for a signal. **`native/*.json`** (any slug): `{ "call": "statvfs", "path": "...", "value": {...} }` or
+`stdout_b64`. Replay finds a recording as the live runner finds a program: `argv[0]` must be in a
+fixed search directory or one the check declared (Windows: only `whoami.exe` in its constant directory),
+and the arguments match by value. `exit` may be `null` for a signal. `{ "argv": ["chronyc"], "missing":
+true }` records a program the machine does not have; a call fails with the live runner's not-found error. **`native/*.json`** (any slug): `{ "call": "statvfs", "path": "...", "value": {...} }` or
 `"error": "unsupported"`, one file per `NativeCall`, every field of a value required. The shapes are in
 `tests/fixtures/README.md`, which the loader tests keep true (M1-049).
 

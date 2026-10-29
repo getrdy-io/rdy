@@ -615,10 +615,14 @@ one.
   - `net.json` holds per host the `lookup` addresses (including forbidden ones, so `is_forbidden` runs
     in every net fixture), and per address `refused`, `blackhole`, `reset` or `serve: <name>`. `serve`
     connects a duplex stream to an in-process server from 03's loopback test support.
-  - `native/` holds JSON per `NativeCall`; `env.json` and `caps.json` complete the case.
+  - `native/` holds JSON per `NativeCall`; `env.json` completes the case. The needs a case offers are the
+    `[caps]` table of `fixture.toml`; a `caps.json` is refused.
   - Anything unrecorded fails with `NotRecorded`: a command, a native call or an address the fixture does
     not hold. The file tree is the machine, so a path it does not hold is `NotFound`, as on a machine
-    without that file.
+    without that file. A recorded command answers only where the live runner would find the program: its
+    argv[0] directory must be a fixed search directory or one the check declared. `{"argv":["chronyc"],
+    "missing":true}` records a program the machine lacks and fails like the live runner does for one that
+    is not on the search path. `process_ids` with none recorded is `NotRecorded`.
   - `Fixture::load(root, name)` reads the 08 format (`base`, `remove`, `answers`, `root.manifest.json`
     symlinks, `unreadable`, `modes` and `dirs`) into a `Replay`. File calls follow the manifest symlinks and
     give the real path to `ReadGuard::admit_real`, as the live backend does. A `delay_ms` is a tokio timer

@@ -22,8 +22,15 @@
 //! uses a thread, so under paused time a wait costs nothing. A command whose delay reaches its time
 //! limit gives `Timeout` after the limit.
 //!
-//! **Paths.** Keys are POSIX text whatever the runner is (see `paths`). Call [`Replay::with_os`] before
-//! adding files: the fixture's `os` decides how a key is written.
+//! **Paths.** Keys are POSIX text whatever the runner is (see `paths`). The fixture's `os` decides how a
+//! key is written, so it is an argument of the constructor ([`Replay::for_os`]).
+//!
+//! **Commands.** A recording is found as the live runner finds a program. The runner tries the
+//! fixed search directories, then the directories the check declared, and runs the first match. The
+//! replay does the same on the recorded `argv[0]`: a recording at `/opt/x/chronyc` answers nothing unless
+//! the check declared `/opt/x`. On Windows only `whoami.exe` in the constant directory runs. A program
+//! the fixture records as missing fails as the live runner fails for a program that is not on the
+//! search path.
 //!
 //! The loader that builds a [`Replay`] from the 08 directory format is [`Fixture`].
 
@@ -45,7 +52,7 @@ use super::{
 };
 use crate::check::{BoxFuture, Os};
 use crate::exec::DEFAULT_STDERR_CAP;
-use crate::exec::policy::Cmd;
+use crate::exec::policy::{Cmd, PolicyError, SEARCH_DIRS, WINDOWS_WHOAMI};
 use crate::privilege::ProcessIds;
 
 mod b64;
@@ -144,7 +151,10 @@ pub struct Replay {
     unreadable: HashSet<String>,
     modes: HashMap<String, u32>,
     env: HashMap<String, String>,
-    commands: HashMap<(String, Vec<String>), CommandAnswer>,
+    /// Program path key to arguments to answer.
+    commands: HashMap<String, HashMap<Vec<String>, CommandAnswer>>,
+    /// Programs the machine does not have, by name.
+    missing: HashSet<String>,
     ids: Option<ProcessIds>,
     native: HashMap<NativeCall, NativeAnswer>,
     /// The scripted names and connections of `net.json` (M1-049).
@@ -165,8 +175,15 @@ impl Replay {
     /// An empty Linux machine.
     #[must_use]
     pub fn new() -> Self {
+        Self::for_os(Os::Linux)
+    }
+
+    /// An empty machine that reports `os`. The OS decides how keys are written (a Windows machine has
+    /// drive paths in lower case), how a program name is compared and where a program is looked for.
+    #[must_use]
+    pub fn for_os(os: Os) -> Self {
         Self {
-            os: Os::Linux,
+            os,
             files: HashMap::new(),
             dirs: HashMap::new(),
             links: HashMap::new(),
@@ -174,6 +191,7 @@ impl Replay {
             modes: HashMap::new(),
             env: HashMap::new(),
             commands: HashMap::new(),
+            missing: HashSet::new(),
             ids: None,
             native: HashMap::new(),
             script: NetScript::default(),
@@ -183,22 +201,15 @@ impl Replay {
         }
     }
 
-    /// Sets the OS the machine reports. It decides how keys are written (a Windows machine has drive
-    /// paths in lower case) and how a program name is compared. Call it before adding anything.
-    #[must_use]
-    pub fn with_os(mut self, os: Os) -> Self {
-        self.os = os;
-        self
-    }
-
     /// The OS the machine reports.
     #[must_use]
     pub fn os(&self) -> Os {
         self.os
     }
 
+    /// The key of a path a check asks for or a test gives.
     fn key(&self, path: &Path) -> String {
-        paths::key(self.os, &path.to_string_lossy())
+        paths::asked_key(self.os, &path.to_string_lossy())
     }
 
     /// The name a command is stored under: the program name, lower case on Windows.
@@ -219,7 +230,9 @@ impl Replay {
     }
 
     /// Adds a symlink at `path` that leads to `target`. The target is text: a path (absolute, or
-    /// relative to the directory of the link) or a name such as `socket:[8841]`.
+    /// relative to the directory of the link) or a name such as `socket:[8841]`. Do not link
+    /// `/proc/self`: the pid of the test runner would decide what the read policy admits (the loader
+    /// refuses it).
     #[must_use]
     pub fn symlink(mut self, path: impl AsRef<Path>, target: &str) -> Self {
         let key = self.key(path.as_ref());
@@ -228,7 +241,8 @@ impl Replay {
     }
 
     /// Makes a file or directory unreadable: a read of it fails with permission denied, as it does for
-    /// a user without the right. `stat` still works.
+    /// a user without the right. `stat` of the path itself still works. On a directory it also hides
+    /// everything below it: a read or `stat` of a path under it fails with permission denied.
     #[must_use]
     pub fn unreadable(mut self, path: impl AsRef<Path>) -> Self {
         let key = self.key(path.as_ref());
@@ -252,17 +266,24 @@ impl Replay {
         self
     }
 
-    /// Adds the output of `program args...`. The command must still be one the table lists for the
-    /// check's OS, or the probe refuses it before the fixture is asked.
+    /// Adds the output of `program args...`, with the program installed in `/usr/bin` (in
+    /// `C:\Windows\System32` on a Windows machine). The command must still be one the table lists for
+    /// the check's OS, or the probe refuses it before the fixture is asked. The loader records the
+    /// program at the path `argv[0]` names.
     #[must_use]
     pub fn command(mut self, program: &str, args: &[&str], exit: i32, stdout: &str) -> Self {
         let output = Output::new(Some(exit), stdout.as_bytes().to_vec());
-        let key = (
-            self.program_key(program),
+        let name = self.program_key(program);
+        let dir = if self.os == Os::Windows {
+            WINDOWS_WHOAMI
+                .rsplit_once('\\')
+                .map_or(WINDOWS_WHOAMI, |(dir, _)| dir)
+        } else {
+            SEARCH_DIRS[1]
+        };
+        let path = paths::key(self.os, &format!("{dir}/{name}"));
+        self.commands.entry(path).or_default().insert(
             args.iter().map(|a| (*a).to_owned()).collect(),
-        );
-        self.commands.insert(
-            key,
             CommandAnswer {
                 output,
                 delay: Duration::ZERO,
@@ -287,7 +308,7 @@ impl Replay {
     }
 
     /// Sets the real, effective, saved and filesystem ids that `process_ids` answers with (the macOS
-    /// snapshot). A backend with none set answers "not found".
+    /// snapshot). A backend with none set answers "not recorded".
     #[must_use]
     pub fn ids(mut self, uid: [u32; 4], gid: [u32; 4]) -> Self {
         self.ids = Some(ProcessIds::new(uid, gid));
@@ -354,6 +375,41 @@ impl Replay {
             },
             other => other.clone(),
         }
+    }
+
+    /// Whether an ancestor directory of `real` is unreadable. A path under such a directory cannot be
+    /// reached by a user who may not search it.
+    fn hidden_by_parent(&self, real: &str) -> bool {
+        if self.unreadable.is_empty() {
+            return false;
+        }
+        let parts = paths::components(self.os, real);
+        (1..parts.len()).any(|n| self.unreadable.contains(&paths::join(self.os, &parts[..n])))
+    }
+
+    /// The recordings of the program the live runner would run for `cmd`: the first search directory
+    /// that holds it, then the directories the check declared. `Ok(None)` when there is none.
+    fn locate(
+        &self,
+        cmd: &Cmd,
+    ) -> Result<Option<&HashMap<Vec<String>, CommandAnswer>>, ProbeError> {
+        let name = self.program_key(cmd.program());
+        let candidates: Vec<String> = if self.os == Os::Windows {
+            // Until job objects land (M2-006) only `whoami` runs, from the constant path.
+            if name.strip_suffix(".exe").unwrap_or(&name) != "whoami" {
+                return Err(ProbeError::Policy(PolicyError::NotAllowedOnWindows {
+                    program: cmd.program(),
+                }));
+            }
+            vec![paths::key(self.os, WINDOWS_WHOAMI)]
+        } else {
+            SEARCH_DIRS
+                .iter()
+                .chain(cmd.declared_dirs())
+                .map(|dir| paths::key(self.os, &format!("{dir}/{name}")))
+                .collect()
+        };
+        Ok(candidates.iter().find_map(|path| self.commands.get(path)))
     }
 
     /// Follows links on the virtual tree, one component at a time, like `realpath`.
@@ -478,7 +534,7 @@ impl Backend for Replay {
                 Judged::Special => return Err(refusal(RULE_NOT_REGULAR)),
                 Judged::Real(real) => real,
             };
-            if self.unreadable.contains(&real) {
+            if self.unreadable.contains(&real) || self.hidden_by_parent(&real) {
                 return Err(io::ErrorKind::PermissionDenied.into());
             }
             if let Some(bytes) = self.files.get(&real) {
@@ -501,7 +557,7 @@ impl Backend for Replay {
                 Judged::Special => return Err(refusal(RULE_NOT_DIR)),
                 Judged::Real(real) => real,
             };
-            if self.unreadable.contains(&real) {
+            if self.unreadable.contains(&real) || self.hidden_by_parent(&real) {
                 return Err(io::ErrorKind::PermissionDenied.into());
             }
             if let Some(entries) = self.dirs.get(&real) {
@@ -530,6 +586,9 @@ impl Backend for Replay {
                 }
                 Judged::Real(real) => real,
             };
+            if self.hidden_by_parent(&real) {
+                return Err(io::ErrorKind::PermissionDenied.into());
+            }
             let meta = if let Some(bytes) = self.files.get(&real) {
                 Some(FileMeta::file(
                     u64::try_from(bytes.len()).unwrap_or(u64::MAX),
@@ -575,9 +634,14 @@ impl Backend for Replay {
                 .iter()
                 .map(|arg| arg.to_string_lossy().into_owned())
                 .collect();
-            let key = (self.program_key(cmd.program()), args);
-            let Some(answer) = self.commands.get(&key) else {
-                let (_, args) = key;
+            let recordings = self.locate(&cmd)?;
+            let Some(answer) = recordings.and_then(|by_args| by_args.get(&args)) else {
+                if recordings.is_none() && self.missing.contains(&self.program_key(cmd.program())) {
+                    // What the live runner returns for a program that is not on the search path.
+                    return Err(ProbeError::Policy(PolicyError::NotFound {
+                        program: cmd.program(),
+                    }));
+                }
                 return Err(ProbeError::NotRecorded(format!(
                     "the command `{} {}`",
                     cmd.program(),
@@ -637,6 +701,9 @@ impl Backend for Replay {
     }
 
     fn process_ids(&self) -> BoxFuture<'_, Result<ProcessIds, ProbeError>> {
-        Box::pin(async move { self.ids.ok_or(ProbeError::NotFound) })
+        Box::pin(async move {
+            self.ids
+                .ok_or_else(|| ProbeError::NotRecorded("the process ids".to_owned()))
+        })
     }
 }

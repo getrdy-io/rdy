@@ -27,6 +27,14 @@ use crate::family::HostSet;
 use crate::probe::{ActionLogOutput, Probe, ProbeHub};
 use crate::redact::{Redactor, TagKey};
 
+/// The shared fixtures directory, `tests/fixtures` at the repo root (08 section 1). It resolves from
+/// this crate's manifest directory, so it works from any crate of the workspace and not from a
+/// crates.io tarball, which does not ship the fixtures.
+#[must_use]
+pub fn fixtures_dir() -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
+}
+
 /// One fixture run: a replay backend, a probe hub and the action log they write.
 #[derive(Debug, Clone)]
 pub struct TestRun {

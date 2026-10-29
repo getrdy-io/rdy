@@ -13,17 +13,13 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::check::{CheckInfo, CheckMeta, Need, OsSupport, Support};
-use crate::exec::policy::Cmd;
+use crate::exec::policy::{Cmd, PolicyError};
 use crate::exec::table;
 use crate::probe::policy::{
     RULE_NOT_DIR, RULE_NOT_REGULAR, RULE_OUTSIDE_READS, RULE_SYSTEM_SECRET,
 };
 use crate::probe::{Resource, RlimitInfo, StatvfsInfo};
-use crate::testing::{TestRun, matches_placeholders};
-
-fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
-}
+use crate::testing::{TestRun, fixtures_dir, matches_placeholders};
 
 const META: CheckMeta = CheckMeta {
     title: "Fixture check",
@@ -142,7 +138,8 @@ fn rule_of(error: &ProbeError) -> &'static str {
 
 #[tokio::test]
 async fn a_host_memory_fixture_runs_with_no_real_file_read() {
-    let fixture = Fixture::load(&fixtures(), "checks/host.memory/pass").expect("the fixture loads");
+    let fixture =
+        Fixture::load(&fixtures_dir(), "checks/host.memory/pass").expect("the fixture loads");
     fixture.ensure_answers("host.memory").expect("answers it");
     assert!(matches!(
         fixture.ensure_answers("host.os"),
@@ -257,8 +254,8 @@ fn a_link_local_answer_loads_so_the_address_rule_can_run_in_every_net_fixture() 
 
 #[tokio::test]
 async fn a_manifest_symlink_to_etc_shadow_is_denied() {
-    let fixture =
-        Fixture::load(&fixtures(), "checks/_policy/symlink-to-shadow").expect("the fixture loads");
+    let fixture = Fixture::load(&fixtures_dir(), "checks/_policy/symlink-to-shadow")
+        .expect("the fixture loads");
     let run = TestRun::for_fixture(&fixture);
     let ctx = run.context_for(&ACME, "host.fixture", Os::Linux, []);
 
@@ -269,12 +266,12 @@ async fn a_manifest_symlink_to_etc_shadow_is_denied() {
         .await
         .expect_err("denied");
     assert_eq!(rule_of(&error), RULE_SYSTEM_SECRET, "{error:?}");
-    assert!(
-        ctx.probe()
-            .stat(Path::new("/etc/acme/license.link"))
-            .await
-            .is_err()
-    );
+    let error = ctx
+        .probe()
+        .stat(Path::new("/etc/acme/license.link"))
+        .await
+        .expect_err("denied");
+    assert_eq!(rule_of(&error), RULE_SYSTEM_SECRET, "{error:?}");
     let log = run.action_log();
     assert_eq!(log.actions[0].outcome, ActionOutcome::Denied);
     assert_eq!(
@@ -285,23 +282,14 @@ async fn a_manifest_symlink_to_etc_shadow_is_denied() {
     // The file next to it reads fine, so the refusal is the link's.
     let conf = ctx.probe().read(Path::new("/etc/acme/app.conf")).await;
     assert!(conf.is_ok(), "{conf:?}");
-
-    // With no manifest the denylist still applies to the real path.
-    let bare = run.context("host.fixture", Os::Linux, []);
-    let error = bare
-        .probe()
-        .read(Path::new("/etc/acme/license.link"))
-        .await
-        .expect_err("denied");
-    assert_eq!(rule_of(&error), RULE_SYSTEM_SECRET);
 }
 
 #[tokio::test]
 async fn a_link_out_of_the_declared_reads_is_denied_too() {
     // /etc/os-release is a link to /usr/lib/os-release: a check that declares only /etc is refused,
     // which is why check-author declares both.
-    let fixture =
-        Fixture::load(&fixtures(), "checks/_policy/manifest-entries").expect("the fixture loads");
+    let fixture = Fixture::load(&fixtures_dir(), "checks/_loader/manifest-entries")
+        .expect("the fixture loads");
     let run = TestRun::for_fixture(&fixture);
     static ETC_ONLY: CheckInfo = reader("host.fixture", &["/etc"]);
     let narrow = run.context_for(&ETC_ONLY, "host.fixture", Os::Linux, []);
@@ -323,8 +311,8 @@ async fn a_link_out_of_the_declared_reads_is_denied_too() {
 
 #[tokio::test]
 async fn the_manifest_entries_fixture_loads_and_replays_on_every_runner() {
-    let fixture =
-        Fixture::load(&fixtures(), "checks/_policy/manifest-entries").expect("the fixture loads");
+    let fixture = Fixture::load(&fixtures_dir(), "checks/_loader/manifest-entries")
+        .expect("the fixture loads");
     let replay = fixture.replay();
     let run = TestRun::for_fixture(&fixture);
     let ctx = run.context_for(&ENTRIES, "host.fixture", Os::Linux, []);
@@ -575,12 +563,15 @@ fn a_duplicate_argv_names_both_files_even_across_base_and_child() {
         }
     );
     assert!(error.to_string().contains("Fix:"));
-    // The same program in another directory is the same program to the replay.
-    let other = r#"{"argv":["/bin/chronyc","tracking"],"stdout":"b"}"#;
+    // The same path spelled another way is the same program.
+    let spelled = r#"{"argv":["/usr//bin/./chronyc","tracking"],"stdout":"b"}"#;
     assert!(matches!(
-        load(&[("commands/a.json", one), ("commands/b.json", other)]),
+        load(&[("commands/a.json", one), ("commands/b.json", spelled)]),
         Err(FixtureError::Duplicate { .. })
     ));
+    // Another directory is another program: the live runner finds the first on its search path.
+    let other = r#"{"argv":["/bin/chronyc","tracking"],"stdout":"b"}"#;
+    assert!(load(&[("commands/a.json", one), ("commands/b.json", other)]).is_ok());
     // A child file with another slug does not replace the base file: both are indexed.
     let error = load_pair(
         &[("commands/a.json", one)],
@@ -809,13 +800,13 @@ fn a_fixture_name_is_a_plain_relative_path() {
         "a b",
         "envs\\x",
     ] {
-        let error = Fixture::load(&fixtures(), name).expect_err(name);
+        let error = Fixture::load(&fixtures_dir(), name).expect_err(name);
         assert!(
             matches!(error, FixtureError::Invalid { .. }),
             "{name}: {error:?}"
         );
     }
-    let error = Fixture::load(&fixtures(), "checks/host.memory/nothing").expect_err("missing");
+    let error = Fixture::load(&fixtures_dir(), "checks/host.memory/nothing").expect_err("missing");
     assert!(matches!(error, FixtureError::Read { .. }), "{error:?}");
 }
 
@@ -863,9 +854,7 @@ async fn paths_are_posix_text_whatever_the_runner_is() {
         assert!(read(r"/proc\net\dev").await.is_ok());
     }
     // A Windows fixture is written with backslashes and compares without case.
-    let windows = Replay::new()
-        .with_os(Os::Windows)
-        .file(r"C:\Windows\System32\drivers\etc\HOSTS", "h");
+    let windows = Replay::for_os(Os::Windows).file(r"C:\Windows\System32\drivers\etc\HOSTS", "h");
     for text in [
         r"c:\windows\system32\drivers\etc\hosts",
         "C:/WINDOWS/System32/drivers/etc/hosts",
@@ -936,21 +925,35 @@ async fn drive_files_map_to_lower_case_keys_only_for_a_windows_fixture() {
 }
 
 #[tokio::test]
-async fn a_windows_program_name_compares_without_case() {
+async fn a_windows_program_name_compares_without_case_and_only_whoami_runs() {
     let fixture = load_os(
         "windows",
-        &[(
-            "commands/netstat.json",
-            r#"{"argv":["C:\\Windows\\System32\\NETSTAT.EXE","-ano"],"stdout":"  TCP    0.0.0.0:135\r\n","exit":0}"#,
-        )],
+        &[
+            (
+                "commands/whoami.json",
+                r#"{"argv":["C:\\Windows\\System32\\WHOAMI.EXE","/groups"],"stdout":"Everyone\r\n","exit":0}"#,
+            ),
+            (
+                "commands/netstat.json",
+                r#"{"argv":["C:\\Windows\\System32\\netstat.exe","-ano"],"stdout":"x"}"#,
+            ),
+        ],
     )
     .expect("loads");
     let done = fixture
         .replay()
-        .spawn(Cmd::new("netstat.exe", Duration::from_secs(5)).args(["-ano"]))
+        .spawn(Cmd::new("whoami.exe", Duration::from_secs(5)).args(["/groups"]))
         .await
         .expect("recorded");
-    assert_eq!(done.stdout, b"  TCP    0.0.0.0:135\r\n");
+    assert_eq!(done.stdout, b"Everyone\r\n");
+    // The live runner runs nothing else on Windows in M1, whatever the fixture holds.
+    assert!(matches!(
+        fixture
+            .replay()
+            .spawn(Cmd::new("netstat.exe", Duration::from_secs(5)).args(["-ano"]))
+            .await,
+        Err(ProbeError::Policy(PolicyError::NotAllowedOnWindows { .. }))
+    ));
     // A Linux fixture compares exactly.
     let linux = load(&[(
         "commands/chronyc.json",
@@ -1159,8 +1162,8 @@ async fn native_files_answer_each_call_and_unrecorded_calls_fail() {
 
 #[tokio::test]
 async fn a_statvfs_through_a_link_to_the_password_file_is_denied() {
-    let fixture =
-        Fixture::load(&fixtures(), "checks/_policy/symlink-to-shadow").expect("the fixture loads");
+    let fixture = Fixture::load(&fixtures_dir(), "checks/_policy/symlink-to-shadow")
+        .expect("the fixture loads");
     let replay = fixture.replay().clone().native(
         NativeCall::Statvfs {
             path: "/etc/acme/license.link".into(),
@@ -1262,6 +1265,467 @@ fn api_and_env_files_are_indexed_by_what_is_inside() {
     )])
     .expect_err("bad status");
     assert_eq!(invalid_path(&error), "api/a.json");
+}
+
+#[tokio::test]
+async fn a_recording_answers_only_where_the_live_runner_would_find_the_program() {
+    static DIRS: &[&str] = &["/opt/tools/bin"];
+    let tool = |args: &'static [&'static str]| {
+        Cmd::new("chronyc", Duration::from_secs(5))
+            .args(args.iter().copied())
+            .extra_dirs(DIRS)
+    };
+    let plain = |args: &'static [&'static str]| {
+        Cmd::new("chronyc", Duration::from_secs(5)).args(args.iter().copied())
+    };
+    let fixture = load(&[
+        (
+            "commands/outside.json",
+            r#"{"argv":["/opt/x/chronyc","tracking"],"stdout":"outside\n"}"#,
+        ),
+        (
+            "commands/declared.json",
+            r#"{"argv":["/opt/tools/bin/chronyc","sources"],"stdout":"declared\n"}"#,
+        ),
+        (
+            "commands/late.json",
+            r#"{"argv":["/bin/chronyc","tracking"],"stdout":"late\n"}"#,
+        ),
+        (
+            "commands/early.json",
+            r#"{"argv":["/usr/sbin/chronyc","sources"],"stdout":"early\n"}"#,
+        ),
+    ])
+    .expect("loads");
+    let replay = fixture.replay();
+
+    // The search stops at the first directory that holds the program, as the live runner does: with
+    // `chronyc` in /usr/sbin, the one in /bin is never run, so `tracking` is not recorded for it.
+    let early = replay.spawn(plain(&["sources"])).await.expect("early");
+    assert_eq!(early.stdout, b"early\n");
+    let got = replay.spawn(plain(&["tracking"])).await;
+    assert!(matches!(got, Err(ProbeError::NotRecorded(_))), "{got:?}");
+    // A declared directory is searched after the fixed ones, so the early one still wins.
+    let got = replay.spawn(tool(&["sources"])).await.expect("early wins");
+    assert_eq!(got.stdout, b"early\n");
+
+    // With nothing in the fixed directories, the declared one answers.
+    let only = load(&[
+        (
+            "commands/outside.json",
+            r#"{"argv":["/opt/x/chronyc","tracking"],"stdout":"outside\n"}"#,
+        ),
+        (
+            "commands/declared.json",
+            r#"{"argv":["/opt/tools/bin/chronyc","tracking"],"stdout":"declared\n"}"#,
+        ),
+    ])
+    .expect("loads");
+    assert_eq!(
+        only.replay()
+            .spawn(tool(&["tracking"]))
+            .await
+            .expect("declared")
+            .stdout,
+        b"declared\n"
+    );
+    // /opt/x is not a search directory and the check declared none, so it answers nothing.
+    let got = only.replay().spawn(plain(&["tracking"])).await;
+    assert!(matches!(got, Err(ProbeError::NotRecorded(_))), "{got:?}");
+    let error = got.expect_err("not recorded").to_string();
+    assert!(error.contains("no recorded answer"), "{error}");
+
+    // /bin is a search directory.
+    let bin = load(&[(
+        "commands/late.json",
+        r#"{"argv":["/bin/chronyc","tracking"],"stdout":"late\n"}"#,
+    )])
+    .expect("loads");
+    assert_eq!(
+        bin.replay()
+            .spawn(plain(&["tracking"]))
+            .await
+            .expect("bin")
+            .stdout,
+        b"late\n"
+    );
+}
+
+#[tokio::test]
+async fn a_missing_program_fails_as_the_live_runner_does() {
+    let fixture = load(&[
+        (
+            "commands/chronyc.json",
+            r#"{"argv":["chronyc"],"missing":true}"#,
+        ),
+        (
+            "commands/getent.json",
+            r#"{"argv":["/usr/bin/getent","ahosts","--","a.acme.example"],"stdout":"x"}"#,
+        ),
+    ])
+    .expect("loads");
+    let replay = fixture.replay();
+    let got = replay
+        .spawn(Cmd::new("chronyc", Duration::from_secs(5)).args(["tracking"]))
+        .await;
+    assert!(
+        matches!(&got, Err(ProbeError::Policy(PolicyError::NotFound { program })) if *program == "chronyc"),
+        "{got:?}"
+    );
+    // Only the named program is missing; others stay "not recorded".
+    assert!(matches!(
+        replay
+            .spawn(Cmd::new("getent", Duration::from_secs(5)).args(["hosts"]))
+            .await,
+        Err(ProbeError::NotRecorded(_))
+    ));
+
+    let cases: [(&[(&str, &str)], &str); 5] = [
+        (
+            &[(
+                "commands/a.json",
+                r#"{"argv":["/usr/bin/chronyc"],"missing":true}"#,
+            )],
+            "bare name",
+        ),
+        (
+            &[(
+                "commands/a.json",
+                r#"{"argv":["chronyc","tracking"],"missing":true}"#,
+            )],
+            "bare name",
+        ),
+        (
+            &[(
+                "commands/a.json",
+                r#"{"argv":["chronyc"],"missing":true,"stdout":"x"}"#,
+            )],
+            "`stdout` is not a key",
+        ),
+        (
+            &[("commands/a.json", r#"{"argv":["chronyc"],"missing":false}"#)],
+            "only ever true",
+        ),
+        (
+            &[
+                ("commands/a.json", r#"{"argv":["chronyc"],"missing":true}"#),
+                ("commands/b.json", r#"{"argv":["chronyc"],"missing":true}"#),
+            ],
+            "both record",
+        ),
+    ];
+    for (files, want) in cases {
+        let error = load(files).expect_err(want);
+        assert!(error.to_string().contains(want), "{want}: {error}");
+    }
+    // Missing and installed at once is a contradiction.
+    let error = load(&[
+        ("commands/a.json", r#"{"argv":["chronyc"],"missing":true}"#),
+        (
+            "commands/b.json",
+            r#"{"argv":["/usr/bin/chronyc","tracking"]}"#,
+        ),
+    ])
+    .expect_err("contradiction");
+    assert_eq!(invalid_path(&error), "commands/a.json");
+    assert!(error.to_string().contains("commands/b.json"), "{error}");
+    // A child can replace the base's recording with a missing one by using the same file name.
+    let child = load_pair(
+        &[("commands/chronyc.json", r#"{"argv":["/usr/bin/chronyc"]}"#)],
+        "base = \"base\"",
+        &[(
+            "commands/chronyc.json",
+            r#"{"argv":["chronyc"],"missing":true}"#,
+        )],
+    )
+    .expect("loads");
+    assert!(matches!(
+        child
+            .replay()
+            .spawn(Cmd::new("chronyc", Duration::from_secs(5)))
+            .await,
+        Err(ProbeError::Policy(PolicyError::NotFound { .. }))
+    ));
+}
+
+#[test]
+fn argv_zero_must_be_a_plain_absolute_path() {
+    for argv0 in ["/usr/bin/../bin/chronyc", "/"] {
+        let text = format!(r#"{{"argv":["{argv0}"]}}"#);
+        let error = load(&[("commands/a.json", &text)]).expect_err(argv0);
+        assert_eq!(invalid_path(&error), "commands/a.json", "{argv0}");
+    }
+}
+
+#[test]
+fn caps_json_is_refused_with_a_pointer_to_the_manifest() {
+    let error = load(&[("caps.json", r#"{"root":true}"#)]).expect_err("retired");
+    assert_eq!(invalid_path(&error), "caps.json");
+    assert!(
+        error.to_string().contains("use [caps] in fixture.toml"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn an_unreadable_directory_hides_what_is_under_it() {
+    let fixture = load(&[
+        ("root/var/log/audit/audit.log", "entry\n"),
+        ("root/var/log/syslog", "line\n"),
+        ("root.manifest.json", r#"{"unreadable":["var/log/audit"]}"#),
+    ])
+    .expect("loads");
+    let replay = fixture.replay();
+    for path in ["/var/log/audit/audit.log", "/var/log/audit/missing"] {
+        let error = replay
+            .open_read(Path::new(path), ReadRange::Head(8), &guard())
+            .await
+            .expect_err(path);
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied, "{path}");
+        let error = replay
+            .stat(Path::new(path), &guard())
+            .await
+            .expect_err(path);
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied, "{path}");
+    }
+    // The directory itself still stats, and its neighbour reads.
+    let meta = replay
+        .stat(Path::new("/var/log/audit"), &guard())
+        .await
+        .expect("stat")
+        .expect("there");
+    assert!(meta.is_dir);
+    assert!(
+        replay
+            .open_read(Path::new("/var/log/syslog"), ReadRange::Head(8), &guard())
+            .await
+            .is_ok()
+    );
+    let error = replay
+        .read_dir(Path::new("/var/log/audit"), &guard())
+        .await
+        .expect_err("unreadable");
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+}
+
+#[tokio::test]
+async fn process_ids_that_are_not_recorded_say_so() {
+    let error = Replay::new()
+        .process_ids()
+        .await
+        .expect_err("none recorded");
+    assert!(
+        matches!(&error, ProbeError::NotRecorded(what) if what == "the process ids"),
+        "{error:?}"
+    );
+    assert!(
+        Replay::new()
+            .ids([1; 4], [2; 4])
+            .process_ids()
+            .await
+            .is_ok()
+    );
+}
+
+#[test]
+fn a_proc_self_link_is_refused_so_the_runners_pid_never_decides() {
+    let error = load(&[
+        ("root/proc/1234/status", "x"),
+        ("root.manifest.json", r#"{"symlinks":{"proc/self":"1234"}}"#),
+    ])
+    .expect_err("proc/self");
+    assert_eq!(invalid_path(&error), "root.manifest.json");
+    assert!(error.to_string().contains("proc/self"), "{error}");
+    // Plain files under proc/self are fine: the read policy sees `self` as written.
+    assert!(load(&[("root/proc/self/status", "x")]).is_ok());
+}
+
+#[test]
+fn keys_that_are_one_entry_after_normalising_are_duplicates() {
+    let cases: [(&str, &str, &str, &str); 6] = [
+        (
+            "net.json",
+            r#"{"dns":{"Registry.acme.example":["192.0.2.1"],"registry.ACME.example":["192.0.2.2"]}}"#,
+            "net.json",
+            "Registry.acme.example",
+        ),
+        (
+            "net.json",
+            r#"{"tcp":{"[::1]:443":"refused","[0:0:0:0:0:0:0:1]:443":"reset"}}"#,
+            "net.json",
+            "[0:0:0:0:0:0:0:1]:443",
+        ),
+        (
+            "net.json",
+            r#"{"tcp":{"192.0.2.1:443":"refused","192.0.2.1:443":"reset"}}"#,
+            "net.json",
+            "appears twice",
+        ),
+        (
+            "env.json",
+            r#"{"HTTPS_PROXY":"a","HTTPS_PROXY":"b"}"#,
+            "env.json",
+            "`HTTPS_PROXY` appears twice",
+        ),
+        (
+            "commands/a.json",
+            r#"{"argv":["/usr/bin/chronyc"],"stdout":"a","stdout":"b"}"#,
+            "commands/a.json",
+            "`stdout` appears twice",
+        ),
+        (
+            "api/reviews.json",
+            r#"{"get nodes":{"allowed":true},"get nodes":{"allowed":false}}"#,
+            "api/reviews.json",
+            "`get nodes` appears twice",
+        ),
+    ];
+    for (file, text, path, want) in cases {
+        let error = load(&[(file, text)]).expect_err(file);
+        assert_eq!(invalid_path(&error), path, "{file}");
+        assert!(error.to_string().contains(want), "{file}: {error}");
+    }
+    // Inside a nested object too.
+    let error = load(&[("root.manifest.json", r#"{"symlinks":{"a":"/x","a":"/y"}}"#)])
+        .expect_err("repeated");
+    assert!(error.to_string().contains("appears twice"), "{error}");
+    // On a Windows fixture a path compares without case.
+    let error = load_os(
+        "windows",
+        &[
+            ("root/c/x", "x"),
+            (
+                "root.manifest.json",
+                r#"{"symlinks":{"c/Windows/A":"c:/x","c/windows/a":"c:/x"}}"#,
+            ),
+        ],
+    )
+    .expect_err("same path");
+    assert!(error.to_string().contains("same entry"), "{error}");
+    let error = load_os(
+        "windows",
+        &[
+            ("root/c/x", "x"),
+            (
+                "root.manifest.json",
+                r#"{"modes":{"c/X":"0640","c/x":"0600"}}"#,
+            ),
+        ],
+    )
+    .expect_err("same path");
+    assert!(error.to_string().contains("same entry"), "{error}");
+}
+
+#[test]
+fn a_base_on_another_arch_is_refused() {
+    let dir = TempDir::new().expect("temp dir");
+    put(dir.path(), "base", "linux", "", &[]);
+    let text = manifest_text("linux", "base = \"base\"").replace("x86_64", "aarch64");
+    put(
+        dir.path(),
+        "x",
+        "linux",
+        "",
+        &[("fixture.toml", text.as_str())],
+    );
+    let error = Fixture::load(dir.path(), "envs/x").expect_err("arch differs");
+    assert!(error.to_string().contains("`arch` differs"), "{error}");
+}
+
+#[test]
+fn a_child_manifest_replaces_the_whole_root_manifest_of_the_base() {
+    // 08's replace by path, kept as is: the child's root.manifest.json is the manifest.
+    let base = [
+        ("root/etc/a", "a"),
+        ("root/etc/b", "b"),
+        (
+            "root.manifest.json",
+            r#"{"unreadable":["etc/a"],"modes":{"etc/b":"0600"}}"#,
+        ),
+    ];
+    let kept = load_pair(&base, "base = \"base\"", &[]).expect("loads");
+    assert_eq!(kept.replay().mode("/etc/b"), Some(0o600));
+    let replaced = load_pair(
+        &base,
+        "base = \"base\"",
+        &[("root.manifest.json", r#"{"dirs":["var"]}"#)],
+    )
+    .expect("loads");
+    assert_eq!(
+        replaced.replay().mode("/etc/b"),
+        None,
+        "the base's modes are gone"
+    );
+    // Removing a file the base manifest names leaves the name dangling, and that fails.
+    let error =
+        load_pair(&base, "base = \"base\"\nremove = [\"root/etc/a\"]", &[]).expect_err("dangling");
+    assert_eq!(invalid_path(&error), "root.manifest.json");
+    assert!(error.to_string().contains("is not in the tree"), "{error}");
+}
+
+#[test]
+fn a_fixture_over_the_file_or_byte_budget_is_refused() {
+    // MAX_FILES small files.
+    let dir = TempDir::new().expect("temp dir");
+    put(dir.path(), "x", "linux", "", &[]);
+    let root = dir.path().join("envs/x/root/many");
+    fs::create_dir_all(&root).expect("dirs");
+    for n in 0..fixture::MAX_FILES {
+        fs::write(root.join(format!("f{n}")), "").expect("write");
+    }
+    let error = Fixture::load(dir.path(), "envs/x").expect_err("too many files");
+    assert!(error.to_string().contains("over"), "{error}");
+
+    // MAX_TOTAL_BYTES in files that are each under the file cap.
+    let dir = TempDir::new().expect("temp dir");
+    put(dir.path(), "x", "linux", "", &[]);
+    let root = dir.path().join("envs/x/root/big");
+    fs::create_dir_all(&root).expect("dirs");
+    let chunk = vec![0u8; usize::try_from(fixture::MAX_FILE_BYTES).expect("fits")];
+    let count = fixture::MAX_TOTAL_BYTES / fixture::MAX_FILE_BYTES + 1;
+    for n in 0..count {
+        fs::write(root.join(format!("b{n}")), &chunk).expect("write");
+    }
+    let error = Fixture::load(dir.path(), "envs/x").expect_err("too many bytes");
+    assert!(error.to_string().contains("over"), "{error}");
+}
+
+#[test]
+fn run_clock_can_be_a_toml_datetime() {
+    let top = "";
+    let tables = "\n[run]\nclock = 2026-11-02T09:00:00Z\n";
+    let manifest = format!("{}{tables}", manifest_text("linux", top));
+    let fixture = load(&[("fixture.toml", &manifest)]).expect("loads");
+    assert_eq!(
+        fixture.manifest().run.clock.as_deref(),
+        Some("2026-11-02T09:00:00Z")
+    );
+    let manifest = format!("{}\n[run]\nclock = 5\n", manifest_text("linux", top));
+    let error = load(&[("fixture.toml", &manifest)]).expect_err("not a time");
+    assert!(error.to_string().contains("`run.clock`"), "{error}");
+}
+
+#[tokio::test]
+async fn a_windows_runner_does_not_rewrite_a_linux_links_backslashes() {
+    // A Linux fixture holds a file whose name has a backslash, reached through a link. Only the path
+    // a check asks for is read by the runner; the stored target is read by the fixture's os.
+    let target = r"/data/odd\name";
+    assert_eq!(paths::components(Os::Linux, target), ["data", r"odd\name"]);
+    assert!(!paths::is_absolute(Os::Linux, r"\\server\share"));
+    assert_eq!(
+        paths::components(Os::Windows, r"C:\Data\X"),
+        ["c:", "data", "x"]
+    );
+    // The asked path is read by the runner as well.
+    let asked = paths::asked_key(Os::Linux, r"/proc\net");
+    assert_eq!(
+        asked,
+        if cfg!(windows) {
+            "/proc/net"
+        } else {
+            r"/proc\net"
+        }
+    );
 }
 
 // ---- time ----------------------------------------------------------------------------------------

@@ -12,17 +12,23 @@
 //!   env.json            environment variables
 //! ```
 //!
-//! The loader is strict. An unknown file, an unknown key, a duplicate argv, a symlink in the tree, a
-//! file over [`MAX_FILE_BYTES`] or a name with a character git or Windows cannot store is an error that
-//! names the file. A fixture that loads on one runner loads on all five.
+//! The loader is strict. An unknown file, an unknown key, a duplicate key (also two keys that are the
+//! same once normalised, such as host names that differ in case), a duplicate argv, a symlink in the
+//! tree, a file over [`MAX_FILE_BYTES`] or a name with a character git or Windows cannot store is an
+//! error that names the file. A fixture that loads on one runner loads on all five.
+//!
+//! **Commands.** `argv[0]` is the absolute path the program is installed at, and it stays in the key:
+//! the replay answers a command only if the live runner would find the program there (see the
+//! parent module). `{"argv":["chronyc"],"missing":true}` says the machine does not have the program.
 //!
 //! **`base` and `remove`.** `base = "all-pass"` names `envs/all-pass`, one level only. The files of the
 //! child replace the files of the base by path (`commands/chronyc.json` replaces
 //! `commands/chronyc.json`), and `remove` deletes paths from the base first. The merged set is then
 //! indexed, so two files that record the same argv are still a duplicate.
 //!
-//! **What is not read.** `golden/`, `expect.json`, the spec file, `caps.json` and `README.md` belong to
-//! the harness and the docs. The needs a fixture offers are the `[caps]` table of the manifest.
+//! **What is not read.** `golden/`, `expect.json`, the spec file and `README.md` belong to the harness
+//! and the docs. The needs a fixture offers are the `[caps]` table of the manifest; a `caps.json` is
+//! refused.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -253,6 +259,13 @@ impl Fixture {
                         format!("`os` differs from the base {base_name}"),
                     ));
                 }
+                if base_layer.manifest.arch != child.manifest.arch {
+                    return Err(invalid(
+                        name,
+                        "fixture.toml",
+                        format!("`arch` differs from the base {base_name}"),
+                    ));
+                }
                 merge(name, base_layer.files, &child.manifest.remove, child.files)?
             }
         };
@@ -436,7 +449,7 @@ fn classify(manifest: &Manifest, rel: &str) -> Entry {
     let top = rel.split('/').next().unwrap_or_default();
     let spec = manifest.spec.as_deref().unwrap_or("spec.yaml");
     match top {
-        "fixture.toml" | "golden" | "expect.json" | "caps.json" | "README.md" => Entry::Skip,
+        "fixture.toml" | "golden" | "expect.json" | "README.md" => Entry::Skip,
         _ if top == spec => Entry::Skip,
         "root" | "root.manifest.json" | "commands" | "native" | "api" | "net.json" | "env.json" => {
             Entry::Take
@@ -484,6 +497,13 @@ fn walk(
         }
         match classify(manifest, &path) {
             Entry::Skip => continue,
+            Entry::Unknown if path == "caps.json" => {
+                return Err(invalid(
+                    fixture,
+                    &path,
+                    "not part of the fixture format: use [caps] in fixture.toml",
+                ));
+            }
             Entry::Unknown => {
                 return Err(invalid(
                     fixture,
@@ -856,7 +876,7 @@ fn build(
     files: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Replay, FixtureError> {
     let os = manifest.os;
-    let mut replay = Replay::new().with_os(os);
+    let mut replay = Replay::for_os(os);
     let mut listing = Listing::new();
 
     for (path, bytes) in files {
@@ -889,17 +909,37 @@ fn build(
     check_tree(fixture, &replay)?;
 
     let mut commands: HashMap<CommandKey, String> = HashMap::new();
+    let mut present: BTreeMap<String, String> = BTreeMap::new();
+    let mut gone: HashMap<String, String> = HashMap::new();
     let mut natives: HashMap<NativeCall, String> = HashMap::new();
     let mut requests: HashMap<ApiKey, String> = HashMap::new();
     for (path, bytes) in files {
         let ctx = Ctx { fixture, path };
         if path.starts_with("commands/") {
-            let (key, shown, answer) = command(&ctx, os, bytes)?;
-            claim(&mut commands, &ctx, key.clone(), &shown)?;
-            replay.commands.insert(key, answer);
+            match command(&ctx, os, bytes)? {
+                Recorded::Run {
+                    program,
+                    args,
+                    shown,
+                    answer,
+                } => {
+                    claim(&mut commands, &ctx, (program.clone(), args.clone()), &shown)?;
+                    if let Some(name) = paths::components(os, &program).pop() {
+                        present.entry(name).or_insert_with(|| path.clone());
+                    }
+                    replay
+                        .commands
+                        .entry(program)
+                        .or_default()
+                        .insert(args, answer);
+                }
+                Recorded::Missing { name } => {
+                    claim(&mut gone, &ctx, name.clone(), &name)?;
+                    replay.missing.insert(name);
+                }
+            }
         } else if path.starts_with("native/") {
             let (call, answer) = native(&ctx, os, bytes)?;
-            let call = replay.normal_call(&call);
             claim(&mut natives, &ctx, call.clone(), &format!("{call:?}"))?;
             replay.native.insert(call, answer);
         } else if path.starts_with("api/") {
@@ -914,6 +954,17 @@ fn build(
             replay.script = net(&ctx, bytes)?;
         } else if path == "env.json" {
             replay.env = env(&ctx, bytes)?;
+        }
+    }
+    let mut gone: Vec<(String, String)> = gone.into_iter().collect();
+    gone.sort();
+    for (name, file) in &gone {
+        if let Some(other) = present.get(name) {
+            return Err(invalid(
+                fixture,
+                file,
+                format!("`{name}` is recorded as missing here and as installed in {other}"),
+            ));
         }
     }
     Ok(replay)
@@ -970,6 +1021,7 @@ fn apply_root_manifest(
     let os = replay.os;
     let mut obj = Obj::parse(ctx, bytes)?;
     if let Some(symlinks) = obj.optional_object("symlinks")? {
+        let mut seen: HashMap<String, String> = HashMap::new();
         for (path, target) in symlinks {
             check_rel(ctx, &path)?;
             let Value::String(target) = target else {
@@ -979,6 +1031,12 @@ fn apply_root_manifest(
                 return Err(ctx.err(format!("the link `{path}` has an empty or invalid target")));
             }
             let key = paths::tree_key(os, &path);
+            same_path(ctx, "symlinks", &mut seen, &key, &path)?;
+            if os != Os::Windows && key == "/proc/self" {
+                return Err(ctx.err(
+                    "`proc/self` cannot be a link yet: the pid of the test runner would decide what the read policy admits. Fix: put the files under root/proc/self",
+                ));
+            }
             note(listing, os, &paths::components(os, &key), false);
             replay.links.insert(key, target);
         }
@@ -988,8 +1046,10 @@ fn apply_root_manifest(
         replay.unreadable.insert(paths::tree_key(os, &path));
     }
     if let Some(modes) = obj.optional_object("modes")? {
+        let mut seen: HashMap<String, String> = HashMap::new();
         for (path, mode) in modes {
             check_rel(ctx, &path)?;
+            same_path(ctx, "modes", &mut seen, &paths::tree_key(os, &path), &path)?;
             let mode = mode
                 .as_str()
                 .and_then(|text| u32::from_str_radix(text, 8).ok())
@@ -1013,6 +1073,23 @@ fn apply_root_manifest(
     obj.finish()
 }
 
+/// Notes that `path` is the entry `key` of the map `what`, or fails when another key already is. Two
+/// keys can be one entry once case or form is normalised.
+fn same_path(
+    ctx: &Ctx<'_>,
+    what: &str,
+    seen: &mut HashMap<String, String>,
+    key: &str,
+    path: &str,
+) -> Result<(), FixtureError> {
+    match seen.insert(key.to_owned(), path.to_owned()) {
+        None => Ok(()),
+        Some(first) => Err(ctx.err(format!(
+            "`{what}` holds `{first}` and `{path}`, which are the same entry. Fix: keep one"
+        ))),
+    }
+}
+
 // ---- JSON files --------------------------------------------------------------------------------
 
 /// A JSON object whose keys are taken one by one, so `finish` can report a key nobody asked for.
@@ -1022,7 +1099,76 @@ struct Obj<'a> {
 }
 
 fn json_value(ctx: &Ctx<'_>, bytes: &[u8]) -> Result<Value, FixtureError> {
+    // `serde_json` keeps the last of two equal keys. A fixture must not say two things, so the
+    // first pass refuses a repeated key anywhere in the document.
+    serde_json::from_slice::<NoRepeats>(bytes)
+        .map_err(|e| ctx.err(format!("not valid JSON: {e}")))?;
     serde_json::from_slice(bytes).map_err(|e| ctx.err(format!("not valid JSON: {e}")))
+}
+
+/// A JSON document read only to prove that no object repeats a key.
+struct NoRepeats;
+
+impl<'de> serde::Deserialize<'de> for NoRepeats {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visit;
+        impl<'de> serde::de::Visitor<'de> for Visit {
+            type Value = NoRepeats;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("any JSON value")
+            }
+
+            fn visit_bool<E>(self, _: bool) -> Result<NoRepeats, E> {
+                Ok(NoRepeats)
+            }
+
+            fn visit_i64<E>(self, _: i64) -> Result<NoRepeats, E> {
+                Ok(NoRepeats)
+            }
+
+            fn visit_u64<E>(self, _: u64) -> Result<NoRepeats, E> {
+                Ok(NoRepeats)
+            }
+
+            fn visit_f64<E>(self, _: f64) -> Result<NoRepeats, E> {
+                Ok(NoRepeats)
+            }
+
+            fn visit_str<E>(self, _: &str) -> Result<NoRepeats, E> {
+                Ok(NoRepeats)
+            }
+
+            fn visit_unit<E>(self) -> Result<NoRepeats, E> {
+                Ok(NoRepeats)
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<NoRepeats, A::Error> {
+                while seq.next_element::<NoRepeats>()?.is_some() {}
+                Ok(NoRepeats)
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<NoRepeats, A::Error> {
+                let mut seen = std::collections::HashSet::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if !seen.insert(key.clone()) {
+                        return Err(serde::de::Error::custom(format!(
+                            "the key `{key}` appears twice"
+                        )));
+                    }
+                    map.next_value::<NoRepeats>()?;
+                }
+                Ok(NoRepeats)
+            }
+        }
+        deserializer.deserialize_any(Visit)
+    }
 }
 
 impl<'a> Obj<'a> {
@@ -1139,27 +1285,60 @@ type CommandKey = (String, Vec<String>);
 /// The method, path and query: how an API request is found.
 type ApiKey = (String, String, String);
 
-/// `commands/*.json`. Returns the key, the argv as shown in an error, and the answer.
-fn command(
-    ctx: &Ctx<'_>,
-    os: Os,
-    bytes: &[u8],
-) -> Result<(CommandKey, String, CommandAnswer), FixtureError> {
+/// What a `commands/*.json` file records.
+enum Recorded {
+    /// A program that runs: the key of its path, its arguments, the argv as an error shows it, and the
+    /// answer.
+    Run {
+        program: String,
+        args: Vec<String>,
+        shown: String,
+        answer: CommandAnswer,
+    },
+    /// A program the machine does not have, by name.
+    Missing { name: String },
+}
+
+/// `commands/*.json`.
+fn command(ctx: &Ctx<'_>, os: Os, bytes: &[u8]) -> Result<Recorded, FixtureError> {
     let mut obj = Obj::parse(ctx, bytes)?;
     let argv = obj.take("argv");
     let argv = obj.strings("argv", argv)?;
     let Some(program) = argv.first() else {
         return Err(ctx.err("`argv` must hold the resolved program and its arguments"));
     };
+    match obj.take("missing") {
+        None => {}
+        Some(Value::Bool(true)) => {
+            let bare = argv.len() == 1 && !program.contains(['/', '\\']);
+            if !bare {
+                return Err(
+                    ctx.err("`argv` of a missing program is its bare name, such as [\"chronyc\"]")
+                );
+            }
+            obj.finish()?;
+            let name = if os == Os::Windows {
+                program.to_lowercase()
+            } else {
+                program.clone()
+            };
+            return Ok(Recorded::Missing { name });
+        }
+        Some(_) => return Err(ctx.err("`missing` is only ever true: remove the key")),
+    }
     if !paths::is_absolute(os, program) {
         return Err(ctx.err(format!(
             "`argv[0]` is `{program}`; it must be the absolute path the program resolves to, such as /usr/bin/chronyc"
         )));
     }
-    let name = paths::components(os, program)
-        .pop()
-        .filter(|name| !paths::is_drive(name))
-        .ok_or_else(|| ctx.err("`argv[0]` names a directory, not a program"))?;
+    let parts = paths::components(os, program);
+    if parts.iter().any(|part| part == "..") {
+        return Err(ctx.err("`argv[0]` must not hold `..`"));
+    }
+    if parts.last().is_none_or(|name| paths::is_drive(name)) {
+        return Err(ctx.err("`argv[0]` names a directory, not a program"));
+    }
+    let program = paths::key(os, program);
     let args: Vec<String> = argv.iter().skip(1).cloned().collect();
 
     let stdout = obj.optional_string("stdout")?;
@@ -1193,11 +1372,12 @@ fn command(
         stderr: stderr.into_bytes(),
         ..Output::default()
     };
-    Ok((
-        (name, args),
-        argv.join(" "),
-        CommandAnswer { output, delay },
-    ))
+    Ok(Recorded::Run {
+        program,
+        args,
+        shown: argv.join(" "),
+        answer: CommandAnswer { output, delay },
+    })
 }
 
 /// `native/*.json`.
@@ -1210,7 +1390,9 @@ fn native(ctx: &Ctx<'_>, os: Os, bytes: &[u8]) -> Result<(NativeCall, NativeAnsw
             if !paths::is_absolute(os, &path) {
                 return Err(ctx.err("`path` must be absolute"));
             }
-            NativeCall::Statvfs { path: path.into() }
+            NativeCall::Statvfs {
+                path: paths::key(os, &path).into(),
+            }
         }
         "uname" => NativeCall::Uname,
         "rlimit" => {
@@ -1374,10 +1556,12 @@ fn api(ctx: &Ctx<'_>, bytes: &[u8]) -> Result<(ApiKey, String, ApiRecord), Fixtu
 fn net(ctx: &Ctx<'_>, bytes: &[u8]) -> Result<super::net::NetScript, FixtureError> {
     let mut obj = Obj::parse(ctx, bytes)?;
     let mut script = super::net::NetScript::default();
+    let mut hosts: HashMap<String, String> = HashMap::new();
     for (host, answer) in obj.optional_object("dns")?.unwrap_or_default() {
         if host.is_empty() {
             return Err(ctx.err("`dns` has an empty host name"));
         }
+        same_path(ctx, "dns", &mut hosts, &host.to_ascii_lowercase(), &host)?;
         let answer = match answer {
             Value::String(word) if word == "NXDOMAIN" => DnsAnswer::NxDomain,
             Value::Array(items) => {
@@ -1401,12 +1585,15 @@ fn net(ctx: &Ctx<'_>, bytes: &[u8]) -> Result<super::net::NetScript, FixtureErro
         };
         script.insert_dns(&host, answer);
     }
+    let mut addrs: HashMap<String, String> = HashMap::new();
     for (addr, how) in obj.optional_object("tcp")?.unwrap_or_default() {
-        let addr: SocketAddr = addr.parse().map_err(|_| {
+        let parsed: SocketAddr = addr.parse().map_err(|_| {
             ctx.err(format!(
                 "`tcp` key `{addr}` must be an address and port, such as 192.0.2.10:443"
             ))
         })?;
+        same_path(ctx, "tcp", &mut addrs, &parsed.to_string(), &addr)?;
+        let addr = parsed;
         let how = match &how {
             Value::String(word) => match word.as_str() {
                 "refused" => TcpScript::Refused,

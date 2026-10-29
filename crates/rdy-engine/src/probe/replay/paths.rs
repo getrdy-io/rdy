@@ -4,6 +4,11 @@
 //! Windows. The replay backend therefore works on strings. A key is POSIX text: `/proc/meminfo`. For a
 //! fixture whose `os` is `windows` it is lower case and starts with a drive, `c:/windows/system32`, and
 //! `root/c/Windows/...` in the tree maps to it. Case is kept on Linux and macOS.
+//!
+//! A backslash is a separator in two cases and only two. Stored text (a link target, a path in a
+//! fixture file) is read by the fixture's `os`: a Windows fixture. The path a check asks for
+//! ([`asked_key`]) is also read by the runner: a Windows runner joins with a backslash whatever the
+//! fixture is. So a Windows runner never rewrites a backslash inside a Linux fixture's link target.
 
 use crate::check::Os;
 
@@ -12,10 +17,10 @@ pub(super) fn is_drive(part: &str) -> bool {
     part.len() == 2 && part.ends_with(':') && part.starts_with(|c: char| c.is_ascii_alphabetic())
 }
 
-/// The components of path text, for a fixture of `os`. Empty parts and `.` are dropped; `..` stays.
+/// The components of stored path text, for a fixture of `os`. Empty parts and `.` are dropped; `..`
+/// stays.
 pub(super) fn components(os: Os, text: &str) -> Vec<String> {
-    // A Windows runner joins with a backslash whatever the fixture's os is.
-    let slashed = if os == Os::Windows || cfg!(windows) {
+    let slashed = if os == Os::Windows {
         text.replace('\\', "/")
     } else {
         text.to_owned()
@@ -51,9 +56,19 @@ pub(super) fn key(os: Os, text: &str) -> String {
     join(os, &components(os, text))
 }
 
-/// Whether link target text is an absolute path.
+/// The key for a path a check asks for. A Windows runner joins with a backslash whatever the
+/// fixture's `os` is, so that runner reads it as a separator.
+pub(super) fn asked_key(os: Os, text: &str) -> String {
+    if cfg!(windows) {
+        key(os, &text.replace('\\', "/"))
+    } else {
+        key(os, text)
+    }
+}
+
+/// Whether stored path text is absolute.
 pub(super) fn is_absolute(os: Os, target: &str) -> bool {
-    let slashed = if os == Os::Windows || cfg!(windows) {
+    let slashed = if os == Os::Windows {
         target.replace('\\', "/")
     } else {
         target.to_owned()
