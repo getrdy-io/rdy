@@ -21,8 +21,11 @@
 //! cannot be read as a [`Target`], its lowercase text counts as one host. That can only make the count
 //! larger.
 //!
-//! Not here: compiling `redact_patterns` regexes (M1-031 and M2), expiry against a clock (see
-//! [`crate::expiry`]).
+//! - every `bundle.redact_patterns` regex compiles, within the size limit of [`crate::pattern`], and does
+//!   not match the empty string (01 sections 2.5 and 2.8).
+//!
+//! Not here: the regexes of check parameters (`lint` compiles those, because a check that cannot read its
+//! pattern is skipped, not refused), and expiry against a clock (see [`crate::expiry`]).
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -31,6 +34,7 @@ use serde_json::{Map, Value};
 use crate::check::CheckParams;
 use crate::error::echo_safe;
 use crate::expiry::parse_utc;
+use crate::pattern;
 use crate::spec::{BundleSpec, Metadata, Spec};
 use crate::{Duration, Location, SpecError, Target};
 
@@ -64,6 +68,9 @@ pub(crate) const PLACED_METADATA_KEYS: [&str; 4] = ["version", "contact", "expir
 /// item over it.
 pub(crate) const PLACED_COLLECT_ITEMS: usize = MAX_COLLECT + 1;
 
+/// How many `redact_patterns` regex places the reader keeps. One more than the limit.
+pub(crate) const PLACED_REGEX_ITEMS: usize = MAX_REDACT_PATTERNS + 1;
+
 /// Where a few values start in the file, so an error about them can name a line and a column. The YAML
 /// reader fills it while it reads, and it is bounded: four keys and 65 collectors.
 #[derive(Debug, Default)]
@@ -72,6 +79,9 @@ pub(crate) struct Places {
     pub(crate) metadata: BTreeMap<&'static str, Location>,
     /// The first character of each `bundle.collect` item, in order, up to [`PLACED_COLLECT_ITEMS`].
     pub(crate) collect: Vec<Location>,
+    /// The first character of the `regex` value of each `bundle.redact_patterns` item, in order, up to
+    /// [`PLACED_REGEX_ITEMS`].
+    pub(crate) regex: Vec<Location>,
 }
 
 impl Places {
@@ -223,7 +233,7 @@ fn check_bundle(bundle: &BundleSpec, places: &Places) -> Result<(), SpecError> {
             )));
         }
     }
-    for pattern in &bundle.redact_patterns {
+    for (index, pattern) in bundle.redact_patterns.iter().enumerate() {
         if !is_redact_name(&pattern.name) {
             return Err(invalid(format!(
                 "the redact pattern name '{}' is not allowed. {REDACT_NAME_RULE}",
@@ -236,6 +246,15 @@ fn check_bundle(bundle: &BundleSpec, places: &Places) -> Result<(), SpecError> {
                 "the regex of redact pattern '{}' must have 1 to {MAX_REGEX_CHARS} characters",
                 echo_safe(&pattern.name)
             )));
+        }
+        if let Err(why) = pattern::check_redact_pattern(&pattern.regex) {
+            return Err(placed(
+                invalid(format!(
+                    "the regex of redact pattern '{}' is not allowed: {why}",
+                    echo_safe(&pattern.name)
+                )),
+                places.regex.get(index).copied(),
+            ));
         }
     }
     Ok(())

@@ -456,3 +456,93 @@ fn a_list_below_its_minimum_says_how_many_items_it_has_and_how_many_it_needs() {
             .contains("a list has 1 items, at least 2 needed")
     );
 }
+
+// ---- an unknown key inside a nested block ----------------------------------------------------
+
+#[test]
+fn a_nested_unknown_key_is_named_with_its_path_and_the_near_key() {
+    let c = entry(&json!({"id": "host.ports", "free": [80, {"port": 81, "bnid": "loopback"}]}));
+    let params = c.decode_params();
+    assert_eq!(
+        reason(&params),
+        &UnsupportedReason::UnknownNestedField {
+            path: "free[1].bnid".into(),
+            near: Some("bind".into()),
+        }
+    );
+    assert_eq!(reason(&params).to_string(), "cannot read 'free[1].bnid'");
+}
+
+#[test]
+fn a_nested_unknown_key_far_from_every_key_has_no_near() {
+    let c = entry(&json!({"id": "host.ports", "free": [{"port": 81, "colour": "red"}]}));
+    let params = c.decode_params();
+    assert_eq!(
+        reason(&params),
+        &UnsupportedReason::UnknownNestedField {
+            path: "free[0].colour".into(),
+            near: None,
+        }
+    );
+}
+
+/// The unknown name is text from the file. A name that imitates serde's own wording must not move the
+/// split, and anything it quotes in the path or the near key is escaped.
+#[test]
+fn a_hostile_nested_key_cannot_forge_the_expected_list() {
+    let name = "x`, expected `bind";
+    let c = entry(&json!({"id": "host.ports", "free": [{"port": 81, name: 1}]}));
+    let params = c.decode_params();
+    let UnsupportedReason::UnknownNestedField { path, near } = reason(&params) else {
+        panic!("expected a nested unknown field, got {:?}", reason(&params));
+    };
+    assert_eq!(path, &format!("free[0].{name}"));
+    assert_eq!(near, &None);
+
+    let c = entry(&json!({"id": "host.ports", "free": [{"port": 81, "\u{1b}[2J": 1}]}));
+    let params = c.decode_params();
+    let UnsupportedReason::UnknownNestedField { path, .. } = reason(&params) else {
+        panic!("expected a nested unknown field");
+    };
+    assert!(!path.chars().any(char::is_control), "{path:?}");
+    assert!(!reason(&params).to_string().chars().any(char::is_control));
+}
+
+#[test]
+fn the_search_for_the_block_is_bounded_in_depth() {
+    // A value nested far past the 64 levels a parsed spec can have is not searched, and the unknown key
+    // inside it falls back to a bad value instead of a stack overflow.
+    let mut deep = json!({"port": 1, "bnid": 2});
+    for _ in 0..200 {
+        deep = json!([deep]);
+    }
+    let c = entry(&json!({"id": "host.ports", "free": [deep]}));
+    let params = c.decode_params();
+    assert!(
+        matches!(reason(&params), UnsupportedReason::BadValue { .. }),
+        "{:?}",
+        reason(&params)
+    );
+}
+
+/// `RegexText` checks the length only, so lint compiles the keys named in `ParamSet::REGEX_FIELDS`. A
+/// struct that gains a `RegexText` key and leaves it out of the list would let a broken pattern be signed.
+#[test]
+fn every_regex_key_is_named_in_regex_fields() {
+    for id in KNOWN_IDS {
+        let found = probe_regex_fields(id).expect("a known id");
+        let declared = declared_regex_fields(id).expect("a known id");
+        assert_eq!(
+            found, declared,
+            "{id}: ParamSet::REGEX_FIELDS is out of date"
+        );
+        let all = fields_of(id).expect("a known id");
+        for field in declared {
+            assert!(all.contains(field), "{id}: {field} is not a field");
+        }
+    }
+    assert_eq!(
+        declared_regex_fields("net.tls_intercept"),
+        Some(&["expected_issuer"][..])
+    );
+}

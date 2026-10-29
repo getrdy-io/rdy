@@ -235,18 +235,24 @@ fn each_field_has_a_rejecting_case_and_it_is_refused_with_the_field_named() {
             let mut params = case.full.clone();
             params[*field] = bad.clone();
             let reason = why(case.id, &params);
-            let UnsupportedReason::BadValue {
-                field: culprit,
-                message,
-            } = &reason
-            else {
-                panic!(
-                    "{} {field}={bad}: expected BadValue, got {reason:?}",
+            match &reason {
+                UnsupportedReason::BadValue {
+                    field: culprit,
+                    message,
+                } => {
+                    assert_eq!(culprit.as_deref(), Some(*field), "{} {bad}", case.id);
+                    assert!(!message.is_empty());
+                }
+                // A block with a key it does not have is told by the path of that key, which starts
+                // with the field.
+                UnsupportedReason::UnknownNestedField { path, .. } => {
+                    assert!(path.starts_with(*field), "{} {bad}: {path}", case.id);
+                }
+                other => panic!(
+                    "{} {field}={bad}: expected BadValue, got {other:?}",
                     case.id
-                );
-            };
-            assert_eq!(culprit.as_deref(), Some(*field), "{} {bad}", case.id);
-            assert!(!message.is_empty());
+                ),
+            }
             let text = reason.to_string();
             assert!(!text.chars().any(char::is_control), "{text:?}");
             assert!(text.len() < 400, "{} chars", text.len());

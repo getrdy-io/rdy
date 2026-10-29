@@ -42,6 +42,7 @@ pub struct HostCpu {
 impl ParamSet for HostCpu {
     const FIELDS: &'static [&'static str] = &["min", "recommended", "arch", "flags"];
     const THRESHOLD: &'static [&'static str] = &["min", "arch", "flags"];
+    const THRESHOLD_EXAMPLE: &'static str = "min: 4";
 }
 
 /// What `host.memory` does about swap.
@@ -100,6 +101,7 @@ impl ParamSet for HostMemory {
         "tolerance_result",
     ];
     const THRESHOLD: &'static [&'static str] = &["min"];
+    const THRESHOLD_EXAMPLE: &'static str = "min: 8Gi";
 }
 
 /// A mount option that `host.disk` can forbid.
@@ -148,6 +150,7 @@ impl ParamSet for HostDisk {
         "forbid_fstypes",
     ];
     const THRESHOLD: &'static [&'static str] = &["min"];
+    const THRESHOLD_EXAMPLE: &'static str = "min: 20Gi";
     const ALSO_REQUIRED: &'static [&'static str] = &["path"];
 }
 
