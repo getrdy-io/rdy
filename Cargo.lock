@@ -953,6 +953,8 @@ dependencies = [
  "minisign",
  "proptest",
  "rdy-spec",
+ "regex",
+ "regex-syntax",
  "schemars",
  "serde",
  "serde-saphyr",
