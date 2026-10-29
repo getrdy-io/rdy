@@ -308,6 +308,37 @@ fn bundle_lists_have_their_limits() {
 }
 
 #[test]
+fn a_redact_regex_that_does_not_compile_or_matches_nothing_is_refused_with_its_place() {
+    let head = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: host.cpu\n    min: 2\nbundle:\n  redact_patterns:\n    - name: good\n      regex: 'ACME-[A-Z]+'\n";
+    let run = |pattern: &str| {
+        parse_unverified(format!("{head}    - name: p\n      regex: '{pattern}'\n").as_bytes())
+    };
+    assert!(run("ACME-[0-9]+").is_ok());
+    for (pattern, why) in [
+        ("(abc", "unclosed group"),
+        ("[z-a]", "invalid character class range"),
+        ("\\w{1000}", "too large"),
+        ("a*", "matches the empty string"),
+        ("^", "matches the empty string"),
+        ("\\b", "matches the empty string"),
+    ] {
+        let e = match run(pattern) {
+            Err(e) => e,
+            Ok(_) => panic!("{pattern:?} should be refused"),
+        };
+        assert!(
+            e.to_string()
+                .starts_with("the regex of redact pattern 'p' is not allowed: "),
+            "{e}"
+        );
+        assert!(e.to_string().contains(why), "{pattern:?}: {e}");
+        // The second pattern's regex value, on line 13 after `      regex: `.
+        assert_eq!(place(&e), Some((13, 14)), "{pattern:?}");
+        assert_printable(&e);
+    }
+}
+
+#[test]
 fn metadata_lengths_and_annotations_have_their_limits() {
     let spec = |meta: &str| {
         format!(

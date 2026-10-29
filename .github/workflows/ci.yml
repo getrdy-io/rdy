@@ -1,7 +1,9 @@
 # CI for rdy. docs/plan/06-release-and-distribution.md describes the design.
 #
 # Rules for this file (SEC-01, SEC-03):
-# - Every `uses:` line is pinned to a full commit SHA with the version in a comment.
+# - Every `uses:` line is pinned to a full commit SHA with the version in a comment. The zizmor job
+#   enforces it (.github/zizmor.yml, unpinned-uses with hash-pin for every owner), and Dependabot
+#   keeps the pins current (.github/dependabot.yml).
 # - The token is read-only. Each job names the permissions it needs.
 # - No pull_request_target. Fork PRs get a read-only token.
 # - `ci-ok` is the only required check. It lists every gating job in `needs:`.
@@ -64,10 +66,14 @@ jobs:
       - name: The binary does not build the schema generator
         run: |
           tree="$(cargo tree --locked -p rdy -e features --target x86_64-unknown-linux-gnu)"
-          if printf '%s\n' "$tree" | grep -E 'preserve_order|rdy-spec feature "schema"'; then
-            echo "::error::the rdy binary would build the schema generator or serde_json/preserve_order"
+          if printf '%s\n' "$tree" | grep -E 'preserve_order|rdy-spec feature "schema"|rdy-engine feature "testing"'; then
+            echo "::error::the rdy binary would build the schema generator, serde_json/preserve_order or the rdy-engine testing feature"
             exit 1
           fi
+      # exec::run and ExecSpec::new are pub(crate) without the `testing` feature. A normal build, with no
+      # dev-dependencies, must compile with that narrower surface.
+      - name: The binary builds without the testing feature
+        run: cargo check --locked -p rdy
       # A --workspace build turns the feature on through xtask. This runs the binary's own feature set.
       - name: Test the binary's feature set
         run: cargo test --locked -p rdy -p rdy-engine
@@ -137,6 +143,9 @@ jobs:
         run: shellcheck scripts/*.sh
       - name: DCO script tests
         run: sh scripts/test-check-dco.sh
+      # Offline: a fake curl answers from scripts/test-check-org-settings.json. No token, no network.
+      - name: Org settings check script tests
+        run: sh scripts/test-check-org-settings.sh
       # On push to main the job passes without checking. Squash and rebase merges
       # rewrite commits, and the PR already passed this check before it merged.
       - name: Every commit has a Signed-off-by line

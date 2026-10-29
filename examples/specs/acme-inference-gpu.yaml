@@ -1,9 +1,9 @@
 # Synthetic example. GPU inference on Kubernetes. For later: the gpu
-# family ships in M4. This file parses today. Until the gpu family
-# exists rdy reports the gpu.* checks as skipped, and runs the rest.
+# family and k8s.device_plugins ship in M4. This file parses today. Until
+# they exist rdy reports those checks as skipped, and runs the rest.
 #
 # Required checks that cannot run make the verdict NOT READY. This file will
-# not reach READY until the gpu family ships.
+# not reach READY until the gpu family and k8s.device_plugins ship.
 apiVersion: rdy/v1
 kind: Readiness
 metadata:
@@ -23,8 +23,10 @@ checks:
     min: 40Gi
     severity: block
     fix: "Use GPU instances with at least 40 GiB of memory each."
-  - id: gpu.device_plugin
-    resource: nvidia.com/gpu
+  - id: k8s.device_plugins
+    resources:
+      - name: nvidia.com/gpu
+        min_total: 2
     severity: block
     fix: "Install the NVIDIA device plugin and check that nodes advertise nvidia.com/gpu."
   - id: k8s.nodes
