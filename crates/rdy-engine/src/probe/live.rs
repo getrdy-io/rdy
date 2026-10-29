@@ -14,10 +14,13 @@
 //!    swap after step 1 cannot change which file is read, because the check and the read share one
 //!    inode.
 //!
-//! macOS and the other Unix targets have no `O_PATH`: the path is resolved with `realpath`, the real
-//! path is checked and its type read with `stat`, then it is opened with `O_NOFOLLOW | O_NONBLOCK`, and
-//! the descriptor must have the same device and inode. A path that resolves differently on the second
-//! look is refused. Windows has no file reads in M1: every file call fails with a typed error.
+//! macOS has no `O_PATH`: the path is resolved with `realpath` and the real path is checked. It is then
+//! opened with `O_NOFOLLOW_ANY` (no link anywhere along the path, so a directory swapped for a link
+//! after the check cannot redirect the open), the type is read from the descriptor with `fstat`, and
+//! the path of the descriptor (`F_GETPATH`) is judged again. The descriptor must have the same device
+//! and inode as the first look. A file with no names left (`st_nlink` of 0) is refused, and so is any
+//! file with the device and inode of a password or sudo file, whatever its name. Windows has no file
+//! reads in M1: every file call fails with a typed error.
 //!
 //! **Bounds.** A read returns at most `MAX_READ` bytes. A directory listing holds at most
 //! `MAX_DIR_ENTRIES` entries. The work runs on the blocking pool; a call that outlives its check's
@@ -41,11 +44,18 @@ mod files;
 /// `exec::table::run`.
 #[must_use]
 pub fn live_backend() -> Arc<dyn Backend> {
-    Arc::new(Live)
+    Arc::new(Live {
+        #[cfg(unix)]
+        secrets: files::Secrets::collect(),
+    })
 }
 
 #[derive(Debug)]
-struct Live;
+struct Live {
+    /// The password and sudo files by inode, so a hard link or a bind mount is refused too.
+    #[cfg(unix)]
+    secrets: files::Secrets,
+}
 
 impl Sealed for Live {}
 
@@ -80,10 +90,12 @@ impl Backend for Live {
     ) -> BoxFuture<'a, io::Result<FileBytes>> {
         let path = path.to_owned();
         let guard = *guard;
+        #[cfg(unix)]
+        let secrets = self.secrets.clone();
         Box::pin(async move {
             #[cfg(unix)]
             {
-                on_pool(move || files::read(&path, range, &guard)).await
+                on_pool(move || files::read(&path, range, &guard, &secrets)).await
             }
             #[cfg(not(unix))]
             {
@@ -100,10 +112,12 @@ impl Backend for Live {
     ) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
         let path = path.to_owned();
         let guard = *guard;
+        #[cfg(unix)]
+        let secrets = self.secrets.clone();
         Box::pin(async move {
             #[cfg(unix)]
             {
-                on_pool(move || files::read_dir(&path, &guard)).await
+                on_pool(move || files::read_dir(&path, &guard, &secrets)).await
             }
             #[cfg(not(unix))]
             {
@@ -120,10 +134,12 @@ impl Backend for Live {
     ) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
         let path = path.to_owned();
         let guard = *guard;
+        #[cfg(unix)]
+        let secrets = self.secrets.clone();
         Box::pin(async move {
             #[cfg(unix)]
             {
-                on_pool(move || files::stat(&path, &guard)).await
+                on_pool(move || files::stat(&path, &guard, &secrets)).await
             }
             #[cfg(not(unix))]
             {

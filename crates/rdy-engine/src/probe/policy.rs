@@ -12,6 +12,10 @@
 //!    location too: a check that reads `/etc/os-release` on a system where it is a link to
 //!    `/usr/lib/os-release` declares both.
 //!
+//! Before the prefix match, `/proc/<rdy's pid>/...` and `/proc/net/...` are put in the `/proc/self/...`
+//! form, on the path and on the declared prefixes alike. A check that declares `/proc/net` or
+//! `/proc/self/mountinfo` is not refused for where those links lead.
+//!
 //! The decision follows the check's `Os`, not the machine rdy runs on: a Linux check's path is read as
 //! a Unix path on any host, so a replay test of a Linux check runs on the Windows leg too. A Windows
 //! check reads no files in M1 and is refused (`RULE_WINDOWS`). A probe built with no `CheckInfo`
@@ -172,8 +176,14 @@ impl ReadGuard {
         let Some(reads) = self.reads else {
             return Ok(());
         };
+        // `/proc/net` is a link to `/proc/self/net`, and `/proc/self` is `/proc/<our pid>` once
+        // resolved. Both the path and the declared prefixes are put in the `self` form, so a check
+        // that declares `/proc/net` or `/proc/self/mountinfo` is not refused for where they lead.
+        let pid = std::process::id().to_string();
+        let names = proc_form(names, &pid);
         let covered = reads.iter().any(|prefix| {
-            split(Path::new(prefix), mac).is_ok_and(|prefix| names.starts_with(&prefix))
+            split(Path::new(prefix), mac)
+                .is_ok_and(|prefix| names.starts_with(&proc_form(prefix, &pid)))
         });
         if covered {
             Ok(())
@@ -181,6 +191,22 @@ impl ReadGuard {
             Err(RULE_OUTSIDE_READS)
         }
     }
+}
+
+/// Puts `proc/<our pid>/...` and `proc/net/...` in the `proc/self/...` form.
+fn proc_form(mut names: Vec<String>, pid: &str) -> Vec<String> {
+    if names.first().map(String::as_str) == Some("proc") {
+        match names.get(1).map(String::as_str) {
+            Some("net") => names.insert(1, "self".to_owned()),
+            Some(second) if second == pid => {
+                if let Some(slot) = names.get_mut(1) {
+                    "self".clone_into(slot);
+                }
+            }
+            _ => {}
+        }
+    }
+    names
 }
 
 /// The names of an absolute Unix path, read as text so that the result does not depend on the host.
@@ -228,7 +254,11 @@ fn deny(names: &[&str], self_pid: Option<&str>) -> Option<&'static str> {
             "secrets" if matches!(rest, ["kubernetes.io", _, ..]) => Some(RULE_KUBECONFIG),
             "etc" => etc_rule(rest),
             "var" => var_rule(rest),
-            "proc" => proc_rule(rest, self_pid),
+            "proc" => proc_rule(rest, self_pid, index == 0),
+            // Docker and Kubernetes secrets mounted into a container.
+            "run" if matches!(rest, ["secrets", name, ..] if *name != "kubernetes.io") => {
+                Some(RULE_CREDENTIALS)
+            }
             _ => None,
         };
         if rule.is_some() {
@@ -259,6 +289,8 @@ fn etc_rule(rest: &[&str]) -> Option<&'static str> {
         }
         ["security", "opasswd", ..] => Some(RULE_SYSTEM_SECRET),
         ["ssl", "private", ..] | ["pki", "tls", "private", ..] => Some(RULE_PRIVATE_KEY),
+        // Let's Encrypt keeps `privkey.pem` in `live` and every old copy in `archive`.
+        ["letsencrypt", "live" | "archive", ..] => Some(RULE_PRIVATE_KEY),
         // `admin.conf`, `kubelet.conf` and the other kubeconfigs of a control plane node.
         ["kubernetes", name, ..] if name.ends_with(".conf") => Some(RULE_KUBECONFIG),
         // `k3s.yaml`, `rke2.yaml` and `config.yaml`, which can hold the join token.
@@ -270,7 +302,7 @@ fn etc_rule(rest: &[&str]) -> Option<&'static str> {
 /// What follows a `var` component.
 fn var_rule(rest: &[&str]) -> Option<&'static str> {
     match rest {
-        ["lib", "kubelet", "kubeconfig", ..]
+        ["lib", "kubelet", "kubeconfig" | "pki", ..]
         | ["lib", "etcd", ..]
         | [
             "lib",
@@ -287,10 +319,10 @@ fn var_rule(rest: &[&str]) -> Option<&'static str> {
 }
 
 /// What follows a `proc` component: the process directories (an allowlist) and the kernel files.
-fn proc_rule(rest: &[&str], self_pid: Option<&str>) -> Option<&'static str> {
+fn proc_rule(rest: &[&str], self_pid: Option<&str>, root: bool) -> Option<&'static str> {
     match rest {
         [first, tail @ ..] if is_pid(first) => {
-            (!pid_entry_allowed(first, tail, self_pid)).then_some(RULE_PROC)
+            (!pid_entry_allowed(first, tail, self_pid, root)).then_some(RULE_PROC)
         }
         [name, ..]
             if matches!(
@@ -328,11 +360,13 @@ const PID_ALLOWED: &[&str] = &[
 /// of the process directory. `auxv` is allowed for `self` only: the privilege snapshot (M1-042) reads
 /// `AT_SECURE` from the running process's own `/proc/self/auxv`. Another process's auxv holds its
 /// load addresses and is not on the list. On a real path `/proc/self` has become `/proc/<pid>`, and
-/// `self_pid` is rdy's own process id: only that pid passes, never any pid.
-fn pid_entry_allowed(pid: &str, tail: &[&str], self_pid: Option<&str>) -> bool {
+/// `self_pid` is rdy's own process id: only that pid passes, never any pid. `root` is true when
+/// `proc` is the first component of the path: `/host/proc/self/auxv` belongs to another mount, and
+/// its `self` or its pid is not ours.
+fn pid_entry_allowed(pid: &str, tail: &[&str], self_pid: Option<&str>, root: bool) -> bool {
     match tail {
         [] | ["task"] => true,
-        ["auxv"] => pid == "self" || self_pid == Some(pid),
+        ["auxv"] => root && (pid == "self" || self_pid == Some(pid)),
         ["task", _tid, rest @ ..] => entry_allowed(rest),
         _ => entry_allowed(tail),
     }
@@ -352,6 +386,15 @@ fn private_key_name(name: &str) -> bool {
         return !key.ends_with(".pub");
     }
     if name.starts_with("ssh_host_") && name.ends_with("_key") {
+        return true;
+    }
+    // A key in PEM form: `privkey.pem`, `tls-key.pem`, `server_key.pem`, `key.pem`. A certificate
+    // (`cert.pem`, `fullchain.pem`) stays readable.
+    if name == "key.pem"
+        || name.ends_with("-key.pem")
+        || name.ends_with("_key.pem")
+        || (name.starts_with("privkey") && name.ends_with(".pem"))
+    {
         return true;
     }
     name.rsplit_once('.').is_some_and(|(_, extension)| {

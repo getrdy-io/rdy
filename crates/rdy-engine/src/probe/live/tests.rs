@@ -10,15 +10,16 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rdy_spec::result::{Action, ActionOutcome};
-use rustix::fs::{CWD, FileType, Mode};
 use serde_json::Value;
 use tempfile::TempDir;
 
 use super::*;
 use crate::check::{CheckInfo, CheckMeta, Os, OsSupport, Support};
+#[cfg(target_os = "linux")]
+use crate::probe::policy::RULE_PROC;
 use crate::probe::policy::{
     RULE_CHANGED, RULE_DEVICE, RULE_DOT_DOT, RULE_NOT_DIR, RULE_NOT_REGULAR, RULE_OUTSIDE_READS,
-    RULE_PROC, RULE_SSH, RULE_SYSTEM_SECRET,
+    RULE_SSH, RULE_SYSTEM_SECRET,
 };
 use crate::probe::{MAX_READ, Probe, ProbeError, ProbeHub};
 use crate::redact::{Redactor, TagKey};
@@ -95,6 +96,15 @@ impl Sandbox {
     fn actions(&self) -> Vec<Action> {
         self.hub.action_log().actions
     }
+}
+
+/// Makes a FIFO. `mknodat` is not in rustix on macOS, and `mkfifo` is on every Unix.
+fn mkfifo(path: &Path) {
+    let status = std::process::Command::new("/usr/bin/mkfifo")
+        .arg(path)
+        .status()
+        .expect("run mkfifo");
+    assert!(status.success(), "mkfifo failed");
 }
 
 fn rule_of(error: &ProbeError) -> &'static str {
@@ -184,7 +194,7 @@ async fn the_exit_test_refusals_are_logged() {
     symlink(&shadow, sandbox.path("looks-fine")).expect("symlink");
     // A FIFO under the allowed prefix.
     let fifo = sandbox.path("pipe");
-    rustix::fs::mknodat(CWD, &fifo, FileType::Fifo, Mode::from_raw_mode(0o600), 0).expect("mkfifo");
+    mkfifo(&fifo);
     // A link to a device, under the allowed prefix.
     symlink("/dev/zero", sandbox.path("zero")).expect("symlink");
     let outside = tempfile::tempdir().expect("tempdir");
@@ -291,7 +301,7 @@ async fn stat_describes_without_opening() {
     let sandbox = Sandbox::new();
     let file = sandbox.write("dir/file", b"12345");
     let fifo = sandbox.path("pipe");
-    rustix::fs::mknodat(CWD, &fifo, FileType::Fifo, Mode::from_raw_mode(0o600), 0).expect("mkfifo");
+    mkfifo(&fifo);
     let probe = sandbox.probe(&[], &[]);
 
     let meta = probe.stat(&file).await.expect("stat").expect("exists");
@@ -394,18 +404,80 @@ async fn proc_self_is_read_through_its_real_path() {
 
 #[cfg(target_os = "linux")]
 #[tokio::test]
-async fn a_link_to_another_pids_auxv_is_refused() {
+async fn a_link_to_another_pids_auxv_is_refused_and_one_to_ours_is_read() {
     let sandbox = Sandbox::new();
-    let other = std::process::id().wrapping_add(1);
-    // Not a real process, so the link dangles and the open fails with not found. A real one would be
-    // refused by the allowlist; the guard unit test covers the decision.
-    symlink(format!("/proc/{other}/auxv"), sandbox.path("auxv")).expect("symlink");
+    // Our parent is a real process that is not us, so the link resolves and the allowlist decides.
+    let parent = std::os::unix::process::parent_id();
+    assert_ne!(parent, std::process::id());
+    symlink(format!("/proc/{parent}/auxv"), sandbox.path("other")).expect("symlink");
+    symlink(
+        format!("/proc/{}/auxv", std::process::id()),
+        sandbox.path("own"),
+    )
+    .expect("symlink");
     let probe = sandbox.probe(&[Path::new("/proc")], &[]);
-    let error = probe.read(&sandbox.path("auxv")).await.expect_err("fails");
-    assert!(
-        matches!(error, ProbeError::NotFound | ProbeError::Denied { .. }),
-        "{error:?}"
-    );
+    let error = probe
+        .read(&sandbox.path("other"))
+        .await
+        .expect_err("another pid");
+    assert_eq!(rule_of(&error), RULE_PROC);
+    // The real path of the second link is `/proc/<our pid>/auxv`, and that pid passes.
+    let own = probe.read(&sandbox.path("own")).await.expect("our auxv");
+    assert!(!own.bytes.is_empty());
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn declared_proc_paths_that_resolve_elsewhere_are_still_read() {
+    let sandbox = Sandbox::new();
+    // `/proc/net` is a link to `/proc/self/net`, which resolves to `/proc/<pid>/net`.
+    let probe = sandbox.probe(&[Path::new("/proc/net")], &[]);
+    let dev = probe
+        .read(Path::new("/proc/net/dev"))
+        .await
+        .expect("/proc/net/dev");
+    assert!(dev.bytes.starts_with(b"Inter-|"));
+    assert!(probe.read_dir(Path::new("/proc/net")).await.is_ok());
+
+    let probe = sandbox.probe(&[Path::new("/proc/self/mountinfo")], &[]);
+    assert!(probe.read(Path::new("/proc/self/mountinfo")).await.is_ok());
+    // A pid in the declaration means the same thing as `self`.
+    let own = format!("/proc/{}/mountinfo", std::process::id());
+    let own: &'static str = Box::leak(own.into_boxed_str());
+    let probe = sandbox.probe(&[Path::new(own)], &[]);
+    assert!(probe.read(Path::new("/proc/self/mountinfo")).await.is_ok());
+
+    // `/etc/mtab` is usually a link to `/proc/self/mounts`; the link and its target are both declared.
+    if Path::new("/etc/mtab").exists() {
+        let probe = sandbox.probe(
+            &[Path::new("/etc/mtab"), Path::new("/proc/self/mounts")],
+            &[],
+        );
+        assert!(probe.read(Path::new("/etc/mtab")).await.is_ok());
+    }
+    // A prefix of another process is not ours.
+    let probe = sandbox.probe(&[Path::new("/proc/1/mountinfo")], &[]);
+    if std::process::id() != 1 {
+        let error = probe
+            .read(Path::new("/proc/self/mountinfo"))
+            .await
+            .expect_err("outside");
+        assert_eq!(rule_of(&error), RULE_OUTSIDE_READS);
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_tail_of_a_proc_file_is_the_end_of_the_file() {
+    let sandbox = Sandbox::new();
+    let probe = sandbox.probe(&[Path::new("/proc")], &[]);
+    // `limits` is the same text on every read of one process, and reports size 0.
+    let path = Path::new("/proc/self/limits");
+    let full = probe.read(path).await.expect("read");
+    assert!(full.bytes.len() > 64 && !full.truncated());
+    let tail = probe.read_tail(path, 64).await.expect("tail");
+    assert_eq!(tail.bytes, &full.bytes[full.bytes.len() - 64..]);
+    assert!(tail.truncated_head && !tail.truncated_tail);
 }
 
 #[tokio::test]
@@ -434,37 +506,134 @@ fn the_portable_path_gives_the_same_answers() {
     symlink(&shadow, sandbox.path("link")).expect("symlink");
     symlink(&plain, sandbox.path("plain-link")).expect("symlink");
     let guard = ReadGuard::new(Os::Linux, None);
+    let none = files::Secrets::default();
 
-    let error = files::locate_by_path(&sandbox.path("link"), &guard).expect_err("refused");
+    let error = files::locate_by_path(&sandbox.path("link"), &guard, &none).expect_err("refused");
     assert_eq!(
         crate::probe::Refused::from_io(&error).map(|r| r.rule),
         Some(RULE_SYSTEM_SECRET)
     );
-    let (real, stat) = files::locate_by_path(&sandbox.path("plain-link"), &guard).expect("ok");
+    let (real, stat) =
+        files::locate_by_path(&sandbox.path("plain-link"), &guard, &none).expect("ok");
     assert_eq!(real, plain);
-    let fd = files::reopen_by_path(
-        &sandbox.path("plain-link"),
-        &real,
-        &stat,
-        rustix::fs::OFlags::empty(),
-    )
-    .expect("open");
+    let requested = sandbox.path("plain-link");
+    let (fd, now) =
+        files::open_by_path(&requested, &real, &stat, &guard, files::Want::File).expect("open");
+    assert_eq!(now.st_ino, stat.st_ino);
     let file = files::read_part(std::fs::File::from(fd), 1, ReadRange::Head(10)).expect("read");
     assert_eq!(file.bytes, b"y");
+
+    // The type comes from the descriptor: a directory is not a file, and nothing is read.
+    let dir_real = sandbox.root.clone();
+    let dir_stat = rustix::fs::stat(&dir_real).expect("stat");
+    let error = files::open_by_path(&dir_real, &dir_real, &dir_stat, &guard, files::Want::File)
+        .expect_err("not a file");
+    assert_eq!(
+        crate::probe::Refused::from_io(&error).map(|r| r.rule),
+        Some(RULE_NOT_REGULAR)
+    );
 
     // The file is replaced between the check and the open: refused. The new file is made first, so it
     // cannot reuse the old inode number.
     let other = sandbox.write("other", b"z");
     std::fs::rename(&other, &plain).expect("rename");
-    let error = files::reopen_by_path(
-        &sandbox.path("plain-link"),
-        &real,
-        &stat,
-        rustix::fs::OFlags::empty(),
-    )
-    .expect_err("changed");
+    let error = files::open_by_path(&requested, &real, &stat, &guard, files::Want::File)
+        .expect_err("changed");
     assert_eq!(
         crate::probe::Refused::from_io(&error).map(|r| r.rule),
         Some(RULE_CHANGED)
     );
+}
+
+#[test]
+fn a_directory_swapped_for_a_link_is_not_followed() {
+    // The attack on the portable path: after the check, a directory on the path becomes a link to
+    // somewhere else. The open refuses to follow it.
+    let sandbox = Sandbox::new();
+    sandbox.write("d/file", b"inside");
+    sandbox.write("elsewhere/file", b"outside");
+    let guard = ReadGuard::new(Os::Linux, None);
+    let none = files::Secrets::default();
+    let requested = sandbox.path("d/file");
+    let (real, stat) = files::locate_by_path(&requested, &guard, &none).expect("ok");
+    std::fs::rename(sandbox.path("d"), sandbox.path("d-moved")).expect("rename");
+    symlink(sandbox.path("elsewhere"), sandbox.path("d")).expect("symlink");
+    let result = files::open_by_path(&requested, &real, &stat, &guard, files::Want::File);
+    assert!(result.is_err(), "the swapped path is not read");
+}
+
+#[tokio::test]
+async fn a_hard_link_to_a_secret_file_is_refused_by_inode() {
+    let sandbox = Sandbox::new();
+    let secret = sandbox.write("passwords", b"root:x");
+    std::fs::hard_link(&secret, sandbox.path("innocent")).expect("hard link");
+    // The backend learns the inode when it is made; here the secret is the file just written.
+    let secrets = files::Secrets::from_paths(&[secret.as_path()]);
+    let guard = ReadGuard::new(Os::Linux, None);
+    let error = files::read(
+        &sandbox.path("innocent"),
+        ReadRange::Head(MAX_READ),
+        &guard,
+        &secrets,
+    )
+    .expect_err("refused");
+    assert_eq!(
+        crate::probe::Refused::from_io(&error).map(|r| r.rule),
+        Some(RULE_SYSTEM_SECRET)
+    );
+    let ok = files::read(
+        &sandbox.write("other", b"fine"),
+        ReadRange::Head(MAX_READ),
+        &guard,
+        &secrets,
+    )
+    .expect("an unrelated file");
+    assert_eq!(ok.bytes, b"fine");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_with_no_names_left_is_refused() {
+    use std::os::fd::AsRawFd;
+    let sandbox = Sandbox::new();
+    let path = sandbox.write("gone.key", b"x");
+    let held = std::fs::File::open(&path).expect("open");
+    std::fs::remove_file(&path).expect("remove");
+    // Another name for the same inode, as `/proc/self/fd/N` shows it: the open file with no name.
+    let via = PathBuf::from(format!("/proc/self/fd/{}", held.as_raw_fd()));
+    let guard = ReadGuard::new(Os::Linux, None);
+    let error = files::read(
+        &via,
+        ReadRange::Head(MAX_READ),
+        &guard,
+        &files::Secrets::default(),
+    )
+    .expect_err("refused");
+    assert!(
+        crate::probe::Refused::from_io(&error).is_some(),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_tail_streams_to_the_end_and_says_when_it_could_not() {
+    let sandbox = Sandbox::new();
+    // The size is passed as 0, as `/proc` reports it.
+    let path = sandbox.write("log", b"0123456789abcdefghij");
+    let file = std::fs::File::open(&path).expect("open");
+    let tail = files::read_part(file, 0, ReadRange::Tail(5)).expect("tail");
+    assert_eq!(tail.bytes, b"fghij");
+    assert!(tail.truncated_head && !tail.truncated_tail);
+
+    let file = std::fs::File::open(&path).expect("open");
+    let whole = files::read_part(file, 0, ReadRange::Tail(100)).expect("tail");
+    assert_eq!(whole.bytes, b"0123456789abcdefghij");
+    assert!(!whole.truncated());
+
+    // A file past the scan budget: the end was not reached, and that is said.
+    let big = sandbox.write("big", &vec![b'x'; 17 << 20]);
+    let file = std::fs::File::open(&big).expect("open");
+    let tail = files::read_part(file, 0, ReadRange::Tail(10)).expect("tail");
+    assert_eq!(tail.bytes.len(), 10);
+    assert!(tail.truncated_head && tail.truncated_tail);
 }

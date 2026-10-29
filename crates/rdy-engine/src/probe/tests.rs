@@ -196,6 +196,28 @@ mod denylist {
             ("/dev", RULE_DEVICE),
             // Private keys by name.
             ("/etc/ssl/private/site.pem", RULE_PRIVATE_KEY),
+            // Key files in PEM form, by name and by directory.
+            ("/srv/app/tls/privkey.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/privkey1.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/server-key.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/server_key.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/key.pem", RULE_PRIVATE_KEY),
+            (
+                "/etc/letsencrypt/live/example.test/cert.pem",
+                RULE_PRIVATE_KEY,
+            ),
+            (
+                "/etc/letsencrypt/archive/example.test/chain1.pem",
+                RULE_PRIVATE_KEY,
+            ),
+            (
+                "/var/lib/kubelet/pki/kubelet-client-current.pem",
+                RULE_KUBECONFIG,
+            ),
+            ("/run/secrets/db_password", RULE_CREDENTIALS),
+            ("/var/run/secrets/db_password", RULE_CREDENTIALS),
+            // `auxv` is ours only under the real /proc, not under a mount of another one.
+            ("/host/proc/self/auxv", RULE_PROC),
             ("/etc/pki/tls/private/site.pem", RULE_PRIVATE_KEY),
             ("/srv/app/server.key", RULE_PRIVATE_KEY),
             ("/srv/app/SERVER.KEY", RULE_PRIVATE_KEY),
@@ -253,6 +275,10 @@ mod denylist {
             "/etc/kubernetes/pki/ca.crt",
             "/var/lib/kubelet/config.yaml",
             "/var/run/secrets/kubernetes.io",
+            "/etc/letsencrypt/renewal/example.test.conf",
+            "/srv/app/tls/fullchain.pem",
+            "/srv/app/tls/cert.pem",
+            "/run/secrets",
             "/home/ada/.docker",
             "/home/ada/.config/helm/repositories.yaml",
             "/home/ada/id_rsa.pub",
@@ -1229,7 +1255,7 @@ async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {
     );
 }
 
-#[cfg(all(unix, feature = "runtime"))]
+#[cfg(feature = "runtime")]
 #[tokio::test]
 async fn a_call_still_running_when_the_check_ends_is_cut_off_and_logged_denied() {
     let hub = ProbeHub::new(Arc::new(Hanging), redactor());

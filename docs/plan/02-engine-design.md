@@ -350,10 +350,18 @@ tests policy.
   through the descriptor with `O_RDONLY | O_NONBLOCK` and require the same device and inode. Only
   regular files are read (procfs and sysfs files are regular); a FIFO, socket, device or directory is
   refused before anything opens it. On the real path `/proc/<pid>/auxv` passes for rdy's own pid
-  only (`std::process::id()`), never for any pid.
-- macOS (and any other Unix without `O_PATH`): `realpath`, the checks, `stat` for the type, open with
-  `O_NOFOLLOW | O_NONBLOCK`, then the same device and inode, and the requested path must still resolve
-  to the same real path. (`F_GETPATH` is not used; the second `realpath` is the recheck.)
+  only (`std::process::id()`), never for any pid, and only when `proc` is the first component. A file
+  with `st_nlink` of 0 (unlinked after the open, whose path reads `... (deleted)`) is refused. Before the
+  prefix match `/proc/<our pid>` and `/proc/net` are put in the `/proc/self` form, on the path and on
+  the declared prefixes alike, so `reads: ["/proc/net"]` reads `/proc/net/tcp`. The device and inode of
+  each password and sudo file is recorded when the live backend is made, and a hard link or a bind
+  mount with that identity is refused whatever its name.
+- macOS: `realpath`, the checks, then open with `O_NOFOLLOW_ANY | O_NONBLOCK` (no link anywhere along
+  the path, so a directory swapped for a link after the check cannot redirect the open). The type comes
+  from `fstat` of the descriptor, the descriptor must have the same device and inode as the first
+  look, and `F_GETPATH` gives the path that is judged again. A tail streams to the end of the file
+  through a buffer of the last `max` bytes (a file in `/proc` reports size 0) and sets `truncated_tail`
+  when a 16 MiB scan budget ran out before the end.
 - Windows: no M1 check reads files, so the facade refuses them.
 - Deny list, matched on components at any depth (`/host/etc/shadow`, an overlay `diff/etc/shadow`, a
   macOS data volume): `etc/shadow*`, `etc/gshadow*`, `etc/sudoers*`, `etc/master.passwd`,
@@ -763,7 +771,8 @@ impl Probe {
     pub async fn read(&self, path: &Path) -> Result<FileBytes, ProbeError>;
     pub async fn read_tail(&self, path: &Path, max: usize) -> Result<FileBytes, ProbeError>;
     pub async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ProbeError>;
-    // read_link: deferred. No M1 check needs it and the action log has no kind for it.
+    // read_link: deferred to a follow-up ticket before M1-072 (plan correction 14). host.ports needs it for
+    // /proc/self/ns/net and /proc/<pid>/fd, and the action log needs a kind for it.
     pub async fn stat(&self, path: &Path) -> Result<Option<FileMeta>, ProbeError>;
     pub fn env(&self, name: &str) -> Result<Option<String>, ProbeError>;
     pub async fn exec(&self, cmd: Cmd) -> Result<Output, ProbeError>;

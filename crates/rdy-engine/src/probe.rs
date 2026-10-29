@@ -40,7 +40,8 @@
 //! - names, TCP, TLS, HTTP and native calls: the network and native tickets. They open their entries
 //!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp, http and kube
 //!   call writes exactly one entry (M1-091, M1-103);
-//! - `read_link`: no M1 check needs it, and the action log has no kind for it yet.
+//! - `read_link`: `host.ports` (M1-072) needs it for `/proc/self/ns/net` and `/proc/<pid>/fd`, and the
+//!   action log has no kind for it yet. A follow-up ticket before M1-072 adds both (plan correction 14).
 
 use std::fmt;
 use std::future::Future;
