@@ -145,6 +145,8 @@ Served as a release asset in M1 and at `https://getrdy.io/install` from M2. The 
 8. Extract, `chmod 0755`, run `rdy version`. Copy to `<dir>/.rdy.new.$$`, then `mv -f` for an atomic replace. If an old `rdy` exists, print old and new versions.
 9. Print a PATH hint and the full path on stderr. Stdout stays empty. Exit 0, 1 (failure) or 64 (usage).
 
+`install.sh` is built in two tickets. M1-014 has everything above except the cosign check: root refusal, the truncation guard, platform detection, the sha256 rule and the atomic install. Its seam is `verify_signature`, which M1-015 fills in. Until then a copy stops as if cosign were missing, unless `RDY_INSECURE_SKIP_SIGNATURE=1`. The details where the script is stricter than the list above (end marker on the last line, `--proto-redir`, wget only with `--https-only`, `mktemp` for the temp file, the version check on `rdy version`) and the stamp that `sign-release` writes are in ADR 0025. Tests: `sh scripts/test-install-sh.sh` (dash and busybox sh, stub `curl`).
+
 Every error follows one shape: what happened, likely cause, what to do, under five lines. Cosign is not preinstalled on most hosts, so the first-run hit is real. The docs show a two-line cosign install; the override is the escape for a host that cannot reach Sigstore.
 
 ### Air-gapped route and trust roots

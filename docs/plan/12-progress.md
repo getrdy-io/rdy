@@ -37,7 +37,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-013 | [#11](https://github.com/getrdy-io/rdy/pull/11) | 2026-10-28 | `schema` writes no file yet (M1-022 adds the schemars output). `docs` writes one placeholder page under `docs/src/content/docs/reference/spec/`, and M1-076 replaces it. The page is not published yet because the Starlight scaffold is not in the repo. `docs --check` and `docs-lint` are not in `ci.yml`. 09 section 10 puts the docs-gen job in M1, but the backlog has it only at M3-002, so the coordinator should file a correction. The banned-token list holds the coordinator's hash list, with the synthetic test hash. The lint applies NFKC normalization before it matches tokens, and it lints every tracked file with no NUL byte, replacing invalid UTF-8 bytes. A UTF-16 file has NUL bytes, so the lint skips it. A generator path that climbs out of its root or is absolute is refused. The check does not yet find stale generated files that no generator emits
 
-- M1-014 | todo | | install.sh core with root refusal, truncation guard, sha256 and shell tests (SEC-08)
+- M1-014 | PR #TBD | | busybox leg not run locally (the sandbox refused to run busybox), CI runs it; verify_signature is the seam and stops unless the override is set until M1-015; sign-release (M1-010) must stamp RDY_STAMPED_VERSION (ADR 0025); ADR 0025 needs security-reviewer sign-off with M1-015
 
 - M1-015 | todo | | install.sh signature check, fail closed, with tamper tests (SEC-09, SEC-10)
 

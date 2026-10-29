@@ -146,6 +146,31 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: scripts/check-dco.sh "$BASE_SHA" "$HEAD_SHA"
 
+  # install.sh (M1-014, SEC-08): shellcheck, then the shell tests under dash and busybox sh with stub
+  # curl, id and uname. The tests fail, not skip, when a shell is missing (CI is set).
+  install-sh:
+    name: install-sh
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install shellcheck
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: shellcheck@0.11.0
+      - name: Install busybox (the Alpine shell and tools)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends busybox-static
+      - name: shellcheck
+        run: shellcheck install.sh scripts/test-install-sh.sh
+      - name: Shell tests (dash and busybox sh)
+        run: sh scripts/test-install-sh.sh dash busybox
+
   # Four native test legs and one compile leg (docs/plan/06, ADR 0006 decision 8). The Linux legs
   # build and test the musl targets, so CI tests what ships. The org has no macOS arm64 runners
   # (correction 05), so `macos-arm64-compile` builds the aarch64-apple-darwin target and compiles its
@@ -271,7 +296,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, zizmor, deny, dco, test, release-workflow]
+    needs: [lint, zizmor, deny, dco, install-sh, test, release-workflow]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
