@@ -8,6 +8,7 @@ members = [
     "crates/rdy-checks-k8s",
     "crates/rdy-cli",
     "crates/xtask",
+    "tests/lint-wall",
 ]
 
 # Crates enter the workspace when their milestone starts (docs/plan/00-overview.md).
@@ -81,6 +82,10 @@ secrecy = { version = "0.10", default-features = false }
 # Test-only: a TLS server with a throwaway CA for the client tests (M1-102). Both on ring, never aws-lc.
 rcgen = { version = "0.14", default-features = false }
 tokio-rustls = { version = "0.26", default-features = false }
+
+# Test-only: the lint wall crate names `socket2::Socket` so the wall entry for it can fire (M1-044). The
+# version is the one tokio uses. cargo deny keeps it out of every check crate (deny.toml).
+socket2 = { version = "0.6", default-features = false }
 
 # The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field
 # name and `=` would hide `password=hunter2` from the key-name rule (04 section 3.4).

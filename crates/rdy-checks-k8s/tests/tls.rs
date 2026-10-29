@@ -7,6 +7,14 @@
 //! made in memory for each test. Nothing is written but the CA certificate.
 
 #![allow(clippy::expect_used)]
+// These are tests of the client module. They start mock servers, write kubeconfigs and run plugin
+// scripts, which the lint wall bans in the rest of this crate (INV-07). This file is on the allowlist of
+// tests/lint-wall/tests/allow_grep.rs. A test of a check does not belong here: use the probe.
+#![allow(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    clippy::disallowed_types
+)]
 
 mod common;
 

@@ -144,6 +144,13 @@ jobs:
           tool: cargo-deny@0.20.2
       - name: cargo deny
         run: cargo deny --locked check
+      # The wall around check crates (M1-044): a throwaway workspace with the names of the real crates runs
+      # the real deny.toml, and a check crate that depends on socket2 or walkdir must fail. The variable makes
+      # a missing cargo-deny fail the test, never skip it. The `test` legs have no cargo-deny and skip it.
+      - name: A check crate cannot depend on a walled crate
+        env:
+          RDY_REQUIRE_CARGO_DENY: "1"
+        run: cargo test --locked -p rdy-lint-wall --test deny_wrappers
 
   dco:
     name: dco

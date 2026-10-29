@@ -1,0 +1,35 @@
+[package]
+name = "rdy-lint-wall"
+version = "0.0.0"
+description = "Proof that the lint wall of the check crates bites. Not published."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+# Test crate. It never goes to crates.io and dist must not package it.
+publish = false
+
+[package.metadata.dist]
+dist = false
+
+[features]
+# `src/uses.rs` uses every item of the wall once. It is not part of a normal build, so `cargo clippy
+# --workspace` stays clean. `tests/clippy_wall.rs` runs clippy with this feature on, once for the root
+# clippy.toml and once for each check crate's, and expects every item to fail.
+# Do not build the workspace with `--all-features`: that turns this on, and then clippy fails by design.
+use-all = ["dep:clap", "dep:rdy-engine", "dep:rdy-spec", "dep:socket2", "dep:tokio", "rdy-engine/testing"]
+
+[dependencies]
+# These are the crates whose paths the wall names, so that every path resolves and every entry can fire.
+clap = { workspace = true, features = ["std", "derive", "error-context"], optional = true }
+rdy-engine = { path = "../../crates/rdy-engine", optional = true }
+rdy-spec = { path = "../../crates/rdy-spec", optional = true }
+socket2 = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["net", "process", "rt"], optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
