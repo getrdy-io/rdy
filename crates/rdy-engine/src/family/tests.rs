@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
-use crate::check::{BoxFuture, CheckContext, CheckOutcome, Finding, OsSupport, Support};
+use crate::check::{BoxFuture, CheckContext, CheckMeta, CheckOutcome, Finding, OsSupport, Support};
 
 /// Linux only: a data source on Linux, none yet elsewhere.
 pub(crate) static LINUX_ONLY: OsSupport = OsSupport {
@@ -24,6 +24,10 @@ const fn info(id: &'static str, family: &'static str, os: OsSupport) -> CheckInf
         id,
         family,
         summary: "A fake check.",
+        meta: CheckMeta {
+            title: "Fake check",
+            remediation: "Nothing to fix. This check is a test double.",
+        },
         needs: &[],
         wants: &[],
         default_timeout: None,
@@ -157,6 +161,21 @@ fn infos_are_ordered_by_id_whatever_the_registration_order() {
     assert_eq!(
         ids,
         ["host.cpu", "host.memory", "net.egress", "net.tls_intercept"]
+    );
+}
+
+#[test]
+fn families_keep_registration_order_and_their_checks_keep_catalog_order() {
+    let registry = registry();
+    let names: Vec<&str> = registry.families().map(Family::name).collect();
+    assert_eq!(names, ["net", "host"]);
+    let ids: Vec<&str> = registry
+        .families()
+        .flat_map(|family| family.checks().iter().map(|info| info.id))
+        .collect();
+    assert_eq!(
+        ids,
+        ["net.egress", "net.tls_intercept", "host.cpu", "host.memory"]
     );
 }
 

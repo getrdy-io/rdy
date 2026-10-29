@@ -155,6 +155,41 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: scripts/check-dco.sh "$BASE_SHA" "$HEAD_SHA"
 
+  # install.sh (M1-014, SEC-08): shellcheck, then the shell tests with stub curl, id and uname. dash runs
+  # on the runner. busybox sh runs in an Alpine container pinned by digest, because Alpine's busybox
+  # looks up applets on PATH and so runs the stubs. The Ubuntu busybox-static package runs its own
+  # built-in id, uname and sha256sum first, so the stubs would be ignored. The harness checks this
+  # before the suite and fails if the stubs are bypassed. macOS /bin/sh runs in the `test` job.
+  # The tests fail, not skip, when a shell is missing (CI is set).
+  install-sh:
+    name: install-sh
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # alpine:3.24 (3.24.3), index digest resolved 2026-10-29. Dependabot does not read this line.
+      # Bump the tag and the digest by hand when the Alpine release line moves.
+      ALPINE_IMAGE: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install shellcheck
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: shellcheck@0.11.0
+      - name: shellcheck
+        run: shellcheck install.sh scripts/test-install-sh.sh
+      - name: Shell tests (dash)
+        run: sh scripts/test-install-sh.sh dash
+      # The repo is mounted read-only. The tests write only under the container's /tmp. openssl and
+      # perl-utils (shasum) are there to test the other two hash tools.
+      - name: Shell tests (busybox sh, Alpine)
+        run: |
+          docker run --rm -e CI=true -v "$PWD:/src:ro" "$ALPINE_IMAGE" \
+            sh -c 'apk add --no-cache openssl perl-utils > /dev/null && sh /src/scripts/test-install-sh.sh busybox'
+
   # Four native test legs and one compile leg (docs/plan/06, ADR 0006 decision 8). The Linux legs
   # build and test the musl targets, so CI tests what ships. The org has no macOS arm64 runners
   # (correction 05), so `macos-arm64-compile` builds the aarch64-apple-darwin target and compiles its
@@ -191,6 +226,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # install.sh under macOS /bin/sh (bash in POSIX mode) with the BSD tools. The dash and busybox
+      # runs are in the install-sh job.
+      - name: install.sh tests (macOS /bin/sh)
+        if: matrix.name == 'macos-x64'
+        run: sh scripts/test-install-sh.sh sh
       - name: Install musl-tools
         if: runner.os == 'Linux'
         run: |
@@ -246,8 +286,15 @@ jobs:
           out=$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534:65534 -v "$dir:/rdy:ro" rdy-scratch /rdy/rdy version)
           echo "$out"
           echo "$out" | grep -q '^rdy '
+      # The C minisign program is the other end of the interop test (M1-125, ADR 0022). It is installed
+      # on this leg only, and the variable below makes a missing program fail the test, never skip it.
+      - name: Install C minisign
+        if: matrix.name == 'linux-x64'
+        run: sudo apt-get install -y --no-install-recommends minisign
       - name: Test (nextest, no retries)
         if: ${{ !matrix.compile_only }}
+        env:
+          RDY_REQUIRE_C_MINISIGN: ${{ matrix.name == 'linux-x64' && '1' || '' }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
       # nextest does not run doc tests. They build for the host, so they run on one leg only.
       - name: Doc tests
@@ -369,7 +416,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, zizmor, deny, dco, test, root, release-workflow, cosign-roundtrip]
+    needs: [lint, zizmor, deny, dco, install-sh, test, root, release-workflow, cosign-roundtrip]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

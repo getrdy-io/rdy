@@ -187,53 +187,67 @@ done
 echo "ci-ok timeout $sha"
 ```
 
-## State at the pause (2026-10-28, about 20:00 UTC)
+## State at the pause (2026-10-29, about 02:40 UTC)
 
-Merged tickets are listed with their PRs in `12-progress.md`. Main's CI now runs the full test matrix
-(M1-006): linux-x64, linux-arm64, windows-x64, macos-x64 and an aarch64-apple-darwin compile leg.
+The second coordinator session paused here because the founder's session limit was near. Merged tickets
+are in `12-progress.md`. Read this section, then check every open PR's head and CI before acting: agents
+that were running at the pause may have pushed after it.
 
-Merged in M1 so far (34 tickets): M1-001 to 006, 008, 009, 013, 016 to 026, 029, 030, 032 to 035, 038,
-047, 048, 064, 112, 120, 123. Backlog corrections 01 to 07 are merged (#4, #5, #8, #30, #40, #41, #46).
+Merged in this session: #48 M1-022, #49 M1-067, #47 M1-007, #57 M1-028, #51 M1-121, #59 M1-027,
+#60 M1-011, #54 M1-031, #53 M1-039, #56 correction-08, #62 M1-089, #52 M1-125, #67 correction-09, #65 M1-014.
+That makes 47 M1 tickets merged in all.
 
-Open PRs. Check each branch head first. A commit newer than the head named here means the fix round
-landed: re-review the new diff, wait for CI, then merge. If there is no newer commit, send the listed
-findings to a fresh agent of the owner's role on that branch.
+Open PRs at the pause. "Approved" means every required reviewer approved the current head.
 
-| PR | Ticket | Branch | Head at pause | State and next step |
-| --- | --- | --- | --- | --- |
-| #47 | M1-007 | m1/007-dist-init | 1da6d0a | Security approved 0527512. The final fix round landed in 1da6d0a: the precise-builds guard, the correction-07 merge, the ADR 0020 Done-log fix, and all five lows. Next: a quick code re-review of 0527512..1da6d0a, then CI, then merge. The cargo test suite was not rerun locally this round, so let CI decide. |
-| #48 | M1-022 | m1/022-json-schemas | 6f27287 | Approved with two mediums, both landed in 6f27287: the cargo-tree feature guard and a `cargo test -p rdy -p rdy-engine` step. Main (#43) is merged, with its schema edits in the fragments. Next: confirm the diff since c85b122 is only those, then CI, then merge. It keeps ADR 0019. |
-| #49 | M1-067 | m1/067-host-os-stubs | 4d98195 | Approved with nits; nits landed in 4d98195: `stub_ids()` with a test, and the no-register rule naming M1-057. Next: CI, then merge. |
+| PR | Ticket | State and next step |
+| --- | --- | --- |
+| #55 | M1-056 | Approved by code and security (three rounds). At 3dc8456 the `lint` job fails: the older guard from M1-022 in ci.yml ("the rdy binary would build the schema generator, serde_json/preserve_order or the rdy-engine testing feature") runs `cargo tree` with dev-dependencies, so it sees rdy-cli's dev-dependency on rdy-engine `testing`. Fix: make that guard use `-e normal,build` (the new M1-056 guard already does), merge main, CI, merge. |
+| #69 | correction-10 | Approved; the coordinator applied the review fixes at 78bfe79 (kept #66's version of the sandbox hand-step row, M2-105 is 8 h, a clause on M1-122). Next: merge main if dirty, CI, merge. Merge after #67. |
+| #71 | M1-036 | Opened at the pause; the coordinator merged main twice (lib.rs, rdy-cli Cargo.toml, Cargo.lock), clippy and fmt pass, the full test run was not finished. Next: CI, then code-reviewer and security-reviewer (filesystem writes, the new `Apache-2.0 WITH LLVM-exception` license for `winx`). |
+| #70 | M1-066 | Security review: changes required, findings in `reviews/open-findings-2026-10-29/pr70-sec.md` (two highs: `policy::run` must become crate-private with `table::run` the only public runner; Linux-only table tests fail on macOS and Windows). Code review: changes required too, in `pr70-code.md` (macOS and Windows legs red; shipped fix text unaudited). Next: fix round by rust-engineer or check-author. |
+| #58 | M1-040 | Fix round landed at 46fe58a: all findings in `pr58-*.md` applied (one `Cmd`, `Backend::spawn(&ResolvedCmd)`, a coalescing log that never drops a denied entry, the any-depth and `/proc/<pid>` allowlist rules, argv redaction, a schema-validated exit test, a cancel race for in-flight calls). It records PC-44 in 13; #55 adds PC-43, so check the numbers at merge. It kept `exec::policy::run` public, which conflicts with #70's security finding 1 (only `exec::table::run` public): settle that when #70 lands, and route the probe through `table::run`. Next: code and security re-review of the delta, then CI, merge. |
+| #66 | M1-010 | Fix round landed at 4d3e7ba (main merged): every finding in `pr66-*.md` applied. Verify pins the workflow repository, ref and trigger everywhere (self-verify, a new `announce` verify step, 06, SECURITY.md); the job has an owner check; the placeholder is M1-014's `@@RDY_STAMPED_VERSION@@` line; a real pinned GitHub-Actions-signed bundle (goreleaser v2.19.0) tests the claims; `cosign-roundtrip` is in `ci-ok`; ADR 0024 is shortened and marked founder ratification pending. It edits the sandbox hand-step row (needed before M1-010 and M1-012); #69 leaves that row alone. Next: code and security re-review of the delta, CI, merge. |
+| #68 | M1-122 | Fix round landed at 73c8dc0 (main merged): every finding in `pr68-*.md` applied. The write scope is a layout field, the strace check also fails on user-database lookups and uses `-y`, the Windows fix lines point to docs.getrdy.io/unsigned, and ADR 0027 lists the alternatives (status Proposed). Next: security-reviewer and rust-architect re-review the delta and sign off ADR 0027, then windows-x64 CI must be green, then merge. |
+| #63, #64 | Dependabot | Major bumps of `blake2` (0.11) and `ed25519-dalek` (3.0). ADR 0018 pins crypto crates exactly and reviews bumps by hand. Leave them open for the founder. |
 
-Implementers running at the pause, none pushed yet. Each pushes its branch only when done, so check
-`git ls-remote` for the branch. If the branch is missing, relaunch the ticket from its row with the carried
-notes below.
+Unlocked and not started (recompute against the backlog before launching): M1-062, M1-102, M1-152
+(non-core), M1-131 (needs #52, now merged), M1-168 (needs M1-056), M1-037 (needs M1-036), M1-043 (needs
+M1-036), M1-041, M1-042, M1-044, M1-045 (need M1-040), M1-012 and M1-015 (need M1-010; M1-012 needs a tag
+push and the sandbox proof, both founder steps under ADR 0024), M1-065 and the replay chain (need M1-049,
+which needs M1-045 and M1-046).
 
-- M1-121 trust store, branch `m1/121-trust-store`.
-- M1-056 redacting tracing writer and panic hook, `m1/056-redacting-tracing`. Pushed at 149da84, with no PR yet. Next: open its PR, then code and security review. Its reviewers should judge the default filter with RUST_LOG unset (`warn` plus caps, while 07 says no log output) and the process-global redactor. The proxy URL canary waits for M1-060.
-- M1-125 `spec keygen` and `spec sign`, `m1/125-spec-keygen-sign`. Needs a security review.
-- M1-031 `spec lint`, `m1/031-spec-lint`.
-- M1-039 command policy, `m1/039-command-policy`. Needs a security review.
+Next PR number: #72. Next free ADR number: 0029 (0024 to 0028 are taken by #66, #65, #62, #68 and #70).
 
-Unlocked and not started: M1-011 (mostly founder steps), M1-027, M1-028, M1-040, M1-062, M1-089,
-M1-102, M1-152. Recompute against the dependency table before launching.
+Coordinator decisions taken in this session (all conservative, recorded in ADRs or PR review records):
 
-Next PR number: #51 (#50 is the PR that updated this runbook).
+- ADR 0023 (#53): inherited descriptors are detected and listed, not closed, in M1; correction-08 amended
+  M1-039 and added M1-168 and M2-104.
+- ADR 0024 (#66): release proofs that need the sandbox, an environment approval or a tag push are founder
+  hand steps. Agents never push tags or publish releases.
+- ADR 0027 (#68): Windows trust stores stay refused in M1 and Windows has no user trust path; follow-up
+  M2-105 (an FFI crate) is filed in correction-10.
+- M1-056: `RUST_LOG` unset, empty or invalid means no log output; when set, hyper, h2, rustls, tower and
+  kube stay capped at warn.
+- M1-125: scrypt `p != 1` is refused; real-cost KDF tests run one at a time in nextest.
 
-Lessons from this stretch:
+Lessons from this session:
 
-- Merging main into a branch can break it even without conflicts: new variants and lint triggers show up.
-  Run clippy and the full tests after every merge of main.
-- A PR whose `mergeable_state` is `dirty` gets no CI. Re-check before every merge.
-- Feature unification hides release-only behavior. M1-022 gates preserve_order behind a `schema` feature.
-- The redactor (M1-048) took eight review rounds. Structural parsing kept leaking. The fix was a
-  fail-closed design. Prefer fail-closed rules over clever parsers for security code.
-- Reviewers must not build. The disk filled several times. Run `cargo clean` after each merge, and keep
-  the coordinator checkout's `target/` empty.
-- The stop hook flags work in progress in agent worktrees. Those changes are the running agents' and
-  need no action.
-- `git config user.email noreply@anthropic.com` and `user.name Claude` are set in the shared repo config,
-  as the stop hook asked.
+- Every merge moves main, and the same files conflict again and again: `docs/adr/README.md` rows,
+  `crates/rdy-cli/src/lib.rs` module lists, `.github/workflows/ci.yml` `ci-ok` needs, the 11-backlog
+  Corrections log, `Cargo.toml` and `Cargo.lock`. A PR with a conflict gets no CI. Merge main right
+  before merging and expect to repeat it. `reviews/open-findings-2026-10-29/resolve-conflict-union.py`
+  keeps both sides of each hunk; check the result by eye (module attributes, closing braces) and run
+  `cargo fmt` after resolving.
+- A debug build takes about 6 GB per worktree. Agents build with
+  `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0` and run `cargo clean` when
+  done. Run at most three builders at once.
+- Do not remove an agent's worktree while it may be resumed with SendMessage; the resume fails.
+- Downloading tool binaries is refused by the sandbox; `cargo install --locked` works for cargo-deny and
+  cargo-nextest. sccache was not worth the build time.
+- The sandbox refuses some strings in files (for example `--proto =https` in a script); record such
+  items as founder steps.
+- `reviews/open-findings-2026-10-29/` holds the review findings for the open PRs and the implementer and
+  reviewer briefs used in this session. `<scratchpad>` in them means the session scratchpad.
 
 ## Notes carried to later tickets
 
@@ -282,6 +296,23 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
 - M1-137: the README leads with the pinned GitHub release URL in M1, not getrdy.io/install.
 - CF-03: the upload transport is an open M2 item.
 
+- From this session:
+  - M1-010: done in #66 (the PR #47 security lows).
+  - M1-015: the fake `rdy` drops a canary file, and the bad-hash and bad-signature cases assert it is
+    absent; `fetch` takes the missing-bundle message (06 "this release looks incomplete"); the stop message
+    prints a reachable URL for `scripts/verify-release.sh` at the tag, then 06's manual path.
+  - M1-044: `exec::run`, `ExecSpec`, `exec::policy::run` (and anything but `exec::table::run`) on the
+    check-crate deny list; `ExecSpec` may need `disallowed-types`.
+  - M1-060: accept `\\+t` as a blank in `ASSIGNMENT` (a tab inside a Debug-printed field); the proxy URL
+    canary (PC-43); `--password hunter2` as separate words.
+  - M1-061: known secrets shared through `Arc` so the log writer and CLI errors see them.
+  - M1-066: programs that take code or a command line never enter the allow-list (done in #70).
+  - M1-102: the run probe denies `.kube`, so the engine's own kubeconfig read needs a settled path.
+  - M1-121, M1-122, M1-128: `sudo` resets HOME and XDG_CONFIG_HOME; root tests set them on the child.
+  - M1-126: `--key` runs never read the trust stores; the INV-04 strace check runs the real `rdy verify`
+    (correction-10).
+  - M3: `CAPPED_TARGETS` needs `reqwest`, `aws_smithy_*` and `aws_config` when cloud checks land.
+
 ## For the founder
 
 Hand steps an agent cannot do (also in the Founder hand steps list in `11-backlog.md`):
@@ -321,3 +352,16 @@ Process events worth knowing:
 - During M1-008 an agent tried to rewrite a URL to get past a guard. The guard denied it and the agent did
   not retry.
 - The security-reviewer could not commit its sign-off file in M1-009. The verdict is recorded as a PR comment.
+
+
+From the 2026-10-29 session:
+
+- Decision: `getrdy-io` is a personal account, not an organization, so org-wide 2FA cannot be enforced.
+  Convert it or move the repo to a new org (docs/security/github-settings.md section 1). Either choice
+  changes the login or the signing identity.
+- Add `--proto =https` to the curl calls in `scripts/check-org-settings.sh` by hand; the agent sandbox
+  refused to write it.
+- Dependabot PRs #63 and #64 bump crypto crates by a major version; review by hand per ADR 0018.
+- Ratify ADR 0024 (release proofs are founder steps) and ADR 0027 (Windows trust stores refused in M1).
+- Delete the branch `tmp/m1-011-unpinned` (proof PR #61, closed).
+\n
