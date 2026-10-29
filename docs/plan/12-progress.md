@@ -29,7 +29,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-009 | [#13](https://github.com/getrdy-io/rdy/pull/13) | 2026-10-28 | none for the repo: CLAUDE.md edits C-1 to C-9 (rust-architect's exact text) applied by the coordinator in this PR; ADR 0015 sign-off is security-reviewer's in this PR; PC-35 and PC-37 left as cosmetic
 
-- M1-010 | todo | | sign-release with cosign keyless, SHA256SUMS and self-verify (SEC-06, SEC-07)
+- M1-010 | todo | | sign-release with cosign keyless, SHA256SUMS and self-verify (SEC-06, SEC-07) | backlog corrected 2026-10-29 (correction-10): no release exists until signing ends, then it is published; the sandbox proof is a founder hand step needed before M1-012 (ADR 0024)
 
 - M1-011 | [#60](https://github.com/getrdy-io/rdy/pull/60) | 2026-10-29 | Founder hand steps (docs/security/github-settings.md sections 1 to 8): org 2FA, private reporting, immutable releases, `main` and `v*` rulesets, Dependabot alerts, security@ mailbox and serving security.txt. First run 2026-10-29 (no token): 1 pass, 4 fail, 1 unknown. Found: `getrdy-io` is a personal account, not an organization, so org-wide 2FA needs the account turned into an organization first (founder decision; the plan assumed an org). SEC-03 is zizmor `unpinned-uses` hash-pin from M1-005, not a new check; the red throwaway PR with an unpinned `uses:` is for the coordinator to run. CODEOWNERS uses `@getrdy-io`; code owner review is not required while there is one maintainer. zizmor not run locally (not installed); shellcheck 0.9.0 clean. The curl HTTPS-only protocol option (review nit 6) is not in the script: the agent sandbox refused to write it, so the founder adds it by hand
 
@@ -256,7 +256,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-121 | [#51](https://github.com/getrdy-io/rdy/pull/51) | 2026-10-28 | Trust file I/O is split: format in rdy-spec (`TrustStore::from_yaml`, `to_yaml`, `PublicKey::from_key_file_text`), file rules in rdy-cli `trust` (ADR 0021). Stricter than 01 4.3 on purpose: user file symlink and foreign owner are refused, and on Windows any existing store is refused until M1-122. Invalid or unreadable stores use code `usage`, not a new code. The user store folder gets the folder checks too. Deferred: opening a `--key` file with its size cap (M1-126 and M1-131 own the commands), the root no-match hint (M1-126), the `sudo` CI leg and strace test (M1-122), `trust add/list/remove` (M1-131). Carried to M1-122: an elevated Windows run would read `%APPDATA%`, so M1-122 detects elevation; macOS extended ACLs; a Windows ProgramData pre-created by a non-admin blocks verification until then (ADR 0021 consequences); the `root` CI job (M1-028) runs the root-only tests, which are named `root_*` (`root_real_process_has_no_user_path`, `root_user_store_owned_by_another_user_is_refused`) and fail when `RDY_REQUIRE_ROOT` is set and the process is not root. INV-04 is covered by unit tests with a pretend euid 0 and by the `root_real_process_has_no_user_path` test, which runs only when the tests run as root
 
-- M1-122 | todo | | SEC-60 Root trust lookup touches no user path, Windows store ACL rules
+- M1-122 | todo | | SEC-60 Root trust lookup touches no user path, Windows store ACL rules | backlog corrected 2026-10-29 (correction-10): the admin-only ProgramData store check and elevation detection are M2-105, a `rdy-winacl` FFI crate (ADR 0027)
 
 - M1-123 | [#23](https://github.com/getrdy-io/rdy/pull/23) | 2026-10-28 | Windows has no pty test and no Ctrl-C handling at the password prompt (the scripted-terminal unit tests cover the logic there, and rpassword does the console work); a signal sent from outside during the hidden read (kill -INT) is not caught, the M1 Ctrl-C ticket owns it; Unix pty tests use rexpect via an examples/prompt_probe helper; `trust add` and `spec sign` wire the helper in M1-131 and M1-125
 
@@ -264,7 +264,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-125 | [#52](https://github.com/getrdy-io/rdy/pull/52) | 2026-10-28 | ADR 0022: rdy writes the minisign key file itself (scrypt N=2^20, 1 GiB, the stock cost and the most a file may ask for, with p = 1 only) instead of the `minisign` crate, whose key cost is fixed at N=2^15; the crate stays as a dev-dependency interop check, and a key and signature made by C minisign 0.11 are committed in tests/fixtures/minisign-c/. Lint findings print as `file: level: message` with no line and column until `spec lint` (M1-031) maps checks to lines. Windows checks the file type only and a new key gets its folder's access list (named in the success message); owner-only ACLs on key files joined SEC-58 (M2-085); the Windows tests compile here and run on the Windows leg. Ctrl-C during the 2 to 4 second key derivation is the M1 Ctrl-C ticket's. CI: the linux-x64 leg installs C minisign and sets RDY_REQUIRE_C_MINISIGN, so the `minisign -V` and `minisign -S` test cannot skip there; the other legs skip it (the committed C-made fixtures run everywhere); the `real-kdf` nextest group holds the 1 GiB tests to one at a time.
 
-- M1-126 | todo | | rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner
+- M1-126 | todo | | rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner | backlog corrected 2026-10-29 (correction-10): on windows-x64 with a ProgramData trust store present, `rdy verify --key <pub>` exits 0 and `rdy verify` without `--key` exits 64 with `trust_store_insecure` (ADR 0027); the INV-04 strace check runs the real `rdy verify` on a signed fixture as root (carried from M1-122)
 
 - M1-127 | todo | | Real-binary smoke on five legs: live exit codes 0, 1, 2 and 64
 
@@ -278,7 +278,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-132 | todo | | Security review of spec signing and trust store
 
-- M1-133 | todo | | Install, exit codes and unsigned pages
+- M1-133 | todo | | Install, exit codes and unsigned pages | backlog corrected 2026-10-29 (correction-10): the unsigned page has a Windows section on verifying with the vendor key while Windows trust stores are refused (ADR 0027)
 
 - M1-134 | todo | | Sign and verify page
 
