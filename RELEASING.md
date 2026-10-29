@@ -70,23 +70,28 @@ Pick the next number `N`. The examples use `v0.1.0-alpha.1`.
    `gh api repos/getrdy-io/rdy/releases/tags/v0.1.0-alpha.1 --jq .immutable`.
 8. **Verify on a clean Linux machine.** A fresh VM or container with `git`, `curl`, `awk`, `grep`,
    `mktemp` and `sha256sum`, and no earlier checkout of rdy. It needs the network: cosign fetches the
-   Sigstore trust root, also for `--dir`. Run the script from a reviewed commit of `main`, never from
-   the tag you are checking. The script and the pinned cosign hash come from the checkout, so a checkout
-   of the tag would let the thing under test vouch for itself. The script checks the signature and the
-   hashes, so it trusts the commit you pick:
+   Sigstore trust root, also for `--dir`. The script and the pinned cosign hash come from the checkout,
+   so the checkout is what you trust. The tag points at the head of `main`, so a checkout of the tag is
+   the same code. What matters is that you read the script before the release. Check out a commit SHA
+   of `main` that you reviewed earlier (a merged PR), not a commit you picked after the tag. Record that
+   SHA in the Done log. The script is never taken from the release assets, which are the thing under
+   test:
 
    ```sh
    git clone https://github.com/getrdy-io/rdy.git
    cd rdy
-   git log -1 --oneline        # must be a main commit you have reviewed, not the release tag
+   git checkout --detach <sha>     # a main commit you reviewed before the tag
+   git log -1 --oneline            # record this SHA in the Done log
    sh scripts/install-release-tool.sh cosign     # the pinned cosign, sha256 checked
    PATH="$HOME/.cargo/bin:$PATH" scripts/verify-release.sh v0.1.0-alpha.1
    echo "exit $?"
    ```
 
    It must print `PASS signature`, one `PASS sha256` line per file, `verified v0.1.0-alpha.1`, and exit 0.
-   The script refuses cosign older than 3.1.3, a bundle that is not the v0.3 format, and a set
-   `SIGSTORE_ROOT_FILE`, `SIGSTORE_REKOR_PUBLIC_KEY` or `SIGSTORE_CT_LOG_PUBLIC_KEY_FILE`. It checks the
+   The script refuses cosign older than 3.1.3, a bundle that is not the v0.3 format, and any of these
+   variables when set: `SIGSTORE_ROOT_FILE`, `SIGSTORE_REKOR_PUBLIC_KEY`,
+   `SIGSTORE_CT_LOG_PUBLIC_KEY_FILE`, `SIGSTORE_TSA_CERTIFICATE_FILE`, `TUF_MIRROR`, `TUF_ROOT_JSON` and
+   `TUF_ROOT`. It checks the
    issuer, the exact identity, the repository `getrdy-io/rdy`, the ref `refs/tags/v0.1.0-alpha.1` and the
    trigger `push`, then the sha256 of every asset in `SHA256SUMS`.
 
@@ -96,7 +101,7 @@ Pick the next number `N`. The examples use `v0.1.0-alpha.1`.
    ```sh
    rel=$(mktemp -d)
    for f in SHA256SUMS SHA256SUMS.sigstore.json; do
-     curl --proto '=https' --tlsv1.2 -fsSL -o "$rel/$f" \
+     curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "$rel/$f" \
        "https://github.com/getrdy-io/rdy/releases/download/v0.1.0-alpha.1/$f"
    done
    printf 'X' | dd of="$rel/SHA256SUMS" bs=1 count=1 conv=notrunc

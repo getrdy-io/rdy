@@ -30,9 +30,11 @@
 #        --certificate-github-workflow-ref refs/tags/<tag>
 #        --certificate-github-workflow-trigger push
 #      The repository is fixed in this script. No flag or variable changes it, and none changes the
-#      download host. The script refuses to run when SIGSTORE_ROOT_FILE, SIGSTORE_REKOR_PUBLIC_KEY
-#      or SIGSTORE_CT_LOG_PUBLIC_KEY_FILE is set, because cosign would trust those instead of
-#      Sigstore's own roots.
+#      download host. The script refuses to run when any variable that moves cosign's trust is set:
+#      SIGSTORE_ROOT_FILE, SIGSTORE_REKOR_PUBLIC_KEY, SIGSTORE_CT_LOG_PUBLIC_KEY_FILE,
+#      SIGSTORE_TSA_CERTIFICATE_FILE, TUF_MIRROR, TUF_ROOT_JSON and TUF_ROOT. cosign would trust
+#      those instead of Sigstore's own roots, and a TUF_ROOT folder can name its own mirror.
+#      The script gives cosign its own empty TUF_ROOT in a temporary folder.
 #   3. Only after the signature passes, read SHA256SUMS. Every line must be "<sha256>  <name>" with a
 #      plain file name. The five release archives must be listed.
 #   4. Download every listed file (at most 1 GiB each) and compare its sha256 with its line.
@@ -40,15 +42,15 @@
 # It prints the sha256 of SHA256SUMS and the Rekor log index of the signature. The founder publishes
 # both out of band for each release (06, trust roots).
 #
-# Run this script from a reviewed commit of main, not from the tag being checked: the script and the
-# pinned cosign come from the same place as the thing you are checking otherwise (RELEASING.md).
+# Run this script from a commit of main that was reviewed before the tag, and record the SHA. The script and the
+# pinned cosign come from the checkout, not from the release assets (RELEASING.md).
 #
 # Needs: cosign 3.1.3 or newer (`sh scripts/install-release-tool.sh cosign` installs the pinned one),
 # curl (not with --dir), awk, grep, mktemp, cp, wc, and sha256sum or shasum. jq is optional (the Rekor
-# index). Environment: TUF_ROOT is honored. By default cosign's trust root cache goes to a temporary
-# folder, so nothing is left in ~/.sigstore.
+# index), head, tr. The trust root cache of cosign goes to a temporary folder, so nothing is left in
+# ~/.sigstore. Folder file names are printed with every non-printable byte shown as '?'.
 # Exit: 0 verified, 1 a check or a download failed, 64 usage error, a missing tool, a too old cosign
-# or a SIGSTORE_* trust variable that is set.
+# or a trust variable (above) that is set.
 
 set -u
 
@@ -126,7 +128,10 @@ if [ "$use_dir" = 1 ]; then
 fi
 
 # cosign reads these and would trust them instead of Sigstore's own roots. Refuse, even when empty.
-for var in SIGSTORE_ROOT_FILE SIGSTORE_REKOR_PUBLIC_KEY SIGSTORE_CT_LOG_PUBLIC_KEY_FILE; do
+# TUF_MIRROR and TUF_ROOT_JSON move the trust root. So does a TUF_ROOT folder, because its remote.json
+# can name a mirror. The script sets its own TUF_ROOT below.
+for var in SIGSTORE_ROOT_FILE SIGSTORE_REKOR_PUBLIC_KEY SIGSTORE_CT_LOG_PUBLIC_KEY_FILE \
+    SIGSTORE_TSA_CERTIFICATE_FILE TUF_MIRROR TUF_ROOT_JSON TUF_ROOT; do
     if eval "[ \"\${$var+set}\" = set ]"; then
         echo "error: $var is set. cosign would trust it instead of Sigstore's own roots" >&2
         echo "fix: run 'unset $var' and run this script again. This script never takes a trust root or a log key from the environment." >&2
@@ -134,7 +139,7 @@ for var in SIGSTORE_ROOT_FILE SIGSTORE_REKOR_PUBLIC_KEY SIGSTORE_CT_LOG_PUBLIC_K
     fi
 done
 
-for tool in cosign awk grep mktemp cp wc; do
+for tool in cosign awk grep mktemp cp wc head tr; do
     if ! command -v "$tool" > /dev/null 2>&1; then
         echo "error: $tool is not installed" >&2
         if [ "$tool" = cosign ]; then
@@ -216,7 +221,7 @@ trap 'exit 143' TERM
 # Absolute, even when TMPDIR is relative. Everything below uses absolute paths and never changes
 # directory, so CDPATH and the working directory cannot redirect a file.
 work=$(CDPATH='' cd -- "$work" && pwd -P) || exit 1
-TUF_ROOT=${TUF_ROOT:-$work/tuf}
+TUF_ROOT=$work/tuf
 export TUF_ROOT
 
 # $sig holds the only copies of SHA256SUMS and its bundle that are verified and read.
@@ -255,6 +260,21 @@ fetch_or_die() {
     die "could not download $base/$tag/$1 (HTTP status $fetch_code)" "check the network and the tag. Behind a proxy, set HTTPS_PROXY, and SSL_CERT_FILE or CURL_CA_BUNDLE for a private CA. Nothing was verified."
 }
 
+# check_small <file> <label>: refuse a signed-list file over the cap. Used on the source, on the copy
+# and on a download (an old curl ignores --max-filesize on a chunked answer).
+check_small() {
+    size=$(wc -c < "$1")
+    size=$((size + 0))
+    if [ "$size" -gt "$max_small" ]; then
+        die "$2 is $size bytes, which is too large for this file" "do not use this release. Tell security@getrdy.io."
+    fi
+}
+
+# printable <text>: the text with every non-printable byte shown as '?', for a terminal.
+printable() {
+    printf '%s' "$1" | tr -c '\040-\176' '?'
+}
+
 # copy_in <name>: copy one of the two signed-list files from the folder into $sig.
 copy_in() {
     if [ -L "$rel/$1" ]; then
@@ -266,12 +286,10 @@ copy_in() {
         fi
         die "$rel/$1 is missing, so this release looks incomplete" "download it from the release page of $tag. If the release has no such file, it was not signed: do not use it."
     fi
-    cp "$rel/$1" "$sig/$1" || die "could not copy $rel/$1" "check that you can read it"
-    size=$(wc -c < "$sig/$1")
-    size=$((size + 0))
-    if [ "$size" -gt "$max_small" ]; then
-        die "$rel/$1 is $size bytes, which is too large for this file" "do not use this release. Tell security@getrdy.io."
-    fi
+    check_small "$rel/$1" "$rel/$1"
+    # At most one byte more than the cap is copied, even if the file grows meanwhile. Then check the copy.
+    head -c "$((max_small + 1))" "$rel/$1" > "$sig/$1" || die "could not copy $rel/$1" "check that you can read it"
+    check_small "$sig/$1" "$rel/$1"
 }
 
 # 1. The signed list and its bundle.
@@ -283,6 +301,8 @@ else
     echo "downloading the signed list for $tag from github.com/$repo"
     fetch_or_die SHA256SUMS "$sig" "$max_small" "the tag has no published release. A tag with no release is normal while the signing approval is pending, and after a release that failed. Check the tag name, or wait."
     fetch_or_die SHA256SUMS.sigstore.json "$sig" "$max_small" "this release looks incomplete: it has SHA256SUMS but no signature. Do not use it. Tell security@getrdy.io."
+    check_small "$sig/SHA256SUMS" SHA256SUMS
+    check_small "$sig/SHA256SUMS.sigstore.json" SHA256SUMS.sigstore.json
 fi
 
 # 2. The bundle must be the v0.3 format. Older cosign accepted a legacy form that could skip the
@@ -290,6 +310,11 @@ fi
 if ! grep -Eq '"mediaType"[[:space:]]*:[[:space:]]*"application/vnd\.dev\.sigstore\.bundle\.v0\.3\+json"' "$sig/SHA256SUMS.sigstore.json" ||
     grep -Eq '"(base64Signature|rekorBundle)"' "$sig/SHA256SUMS.sigstore.json"; then
     die "SHA256SUMS.sigstore.json is not a Sigstore bundle of the v0.3 format (mediaType application/vnd.dev.sigstore.bundle.v0.3+json)" "do not use this release. Tell security@getrdy.io."
+fi
+
+# A JSON escape (\u) could hide a legacy key name from the check above. A real bundle has none.
+if grep -q '\\u' "$sig/SHA256SUMS.sigstore.json"; then
+    die "SHA256SUMS.sigstore.json has a JSON \\u escape, which a real bundle does not" "do not use this release. Tell security@getrdy.io."
 fi
 
 # The signature, with the full identity contract. Exact strings, no regular expression. Absolute
@@ -374,7 +399,7 @@ if [ "$use_dir" = 1 ]; then
         esac
         case " $listed " in
             *" $name "*) ;;
-            *) echo "NOTE: $name is in the folder but not in SHA256SUMS, so it is not verified" ;;
+            *) echo "NOTE: $(printable "$name") is in the folder but not in SHA256SUMS, so it is not verified" ;;
         esac
     done
 fi

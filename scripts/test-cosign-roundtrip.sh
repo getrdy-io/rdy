@@ -122,6 +122,13 @@ else
     bad "a real bundle has the v0.3 media type that verify-release.sh requires"
 fi
 
+# verify-release.sh refuses a bundle with a JSON \u escape, which could hide a legacy key name.
+if grep -q '\\u' "$tmp/gr/checksums.txt.sigstore.json"; then
+    bad "a real bundle has no JSON \\u escape, which verify-release.sh refuses"
+else
+    ok "a real bundle has no JSON \\u escape, which verify-release.sh refuses"
+fi
+
 # ---- part 1 ------------------------------------------------------------------------------------
 cd "$tmp/cosign" || exit 1
 

@@ -13,11 +13,44 @@
 # error is a failure only with -f), -w '%{http_code}' (the status is printed only when asked) and
 # --max-filesize, so dropping one of those flags from the script changes the result. Every call is
 # logged. Set SHELL_UNDER_TEST (for example "busybox sh") to run verify-release.sh under that shell.
+# FAKE_SLEEP makes the fake verify-blob sleep, then fail, and FAKE_STARTED is a file it creates first:
+# that is how the signal test sends TERM while cosign is running.
 # What the fakes cannot show is that Fulcio issues the claims. scripts/test-cosign-roundtrip.sh runs
 # the real verify-blob against a real keyless signature, and the release proof in 06 runs it on a
 # real release.
 
 set -u
+
+# Trust variables of cosign. The script under test refuses all of them, so none may leak in.
+unset SIGSTORE_ROOT_FILE SIGSTORE_REKOR_PUBLIC_KEY SIGSTORE_CT_LOG_PUBLIC_KEY_FILE \
+    SIGSTORE_TSA_CERTIFICATE_FILE TUF_MIRROR TUF_ROOT_JSON TUF_ROOT CDPATH
+
+# SHELL_UNDER_TEST, as an absolute path, so a PATH that is swapped later still finds it.
+shell_cmd=""
+if [ -n "${SHELL_UNDER_TEST:-}" ]; then
+    # shellcheck disable=SC2086
+    set -- $SHELL_UNDER_TEST
+    # Search PATH by hand: under busybox sh, `command -v` prints a bare applet name.
+    shell_first=""
+    old_ifs=$IFS
+    IFS=:
+    for d in $PATH; do
+        if [ -x "$d/$1" ] && [ -f "$d/$1" ]; then
+            shell_first=$d/$1
+            break
+        fi
+    done
+    IFS=$old_ifs
+    case $shell_first in
+        /*) ;;
+        *)
+            echo "FAIL SHELL_UNDER_TEST '$SHELL_UNDER_TEST' is not an installed program"
+            exit 1
+            ;;
+    esac
+    shift
+    shell_cmd="$shell_first${*:+ $*}"
+fi
 
 here=$(cd "$(dirname "$0")" && pwd)
 verify="$here/verify-release.sh"
@@ -98,6 +131,13 @@ case $cmd in
             "$media" "$digest" "$FAKE_SIGNER" "$FAKE_REPO" "$FAKE_REF" "$FAKE_TRIGGER" > "$bundle"
         ;;
     verify-blob)
+        printf '%s\n' "$TUF_ROOT" > "$FAKE_LOG.tuf"
+        if [ -n "${FAKE_SLEEP:-}" ]; then
+            : > "$FAKE_STARTED"
+            sleep "$FAKE_SLEEP"
+            echo "fake cosign: woke up" >&2
+            exit 1
+        fi
         [ "$(jq -r .digest "$bundle")" = "$digest" ] || { echo "fake cosign: invalid signature when validating ASN.1 encoded signature" >&2; exit 1; }
         [ "$(jq -r .identity "$bundle")" = "$identity" ] || { echo "fake cosign: none of the expected identities matched" >&2; exit 1; }
         [ "$issuer" = "https://token.actions.githubusercontent.com" ] || { echo "fake cosign: issuer mismatch" >&2; exit 1; }
@@ -164,7 +204,7 @@ if [ ! -f "$FAKE_SERVE/$name" ]; then
     echo "stub curl: The requested URL returned error: 404" >&2
     exit 22
 fi
-if [ -n "$max" ]; then
+if [ -n "$max" ] && [ -z "${FAKE_IGNORE_MAX:-}" ]; then
     size=$(wc -c < "$FAKE_SERVE/$name")
     if [ "$((size + 0))" -gt "$max" ]; then
         echo "stub curl: Maximum file size exceeded" >&2
@@ -226,8 +266,8 @@ run() {
     shift 3
     : > "$FAKE_LOG"
     : > "$CURL_LOG"
-    # shellcheck disable=SC2086 # SHELL_UNDER_TEST is a command and its arguments, split on purpose.
-    out=$(cd "${run_cwd:-.}" && PATH="$tmp/bin:$PATH" ${SHELL_UNDER_TEST:-} "$verify" "$@" 2>&1)
+    # shellcheck disable=SC2086 # shell_cmd is a command and its arguments, split on purpose.
+    out=$(cd "${run_cwd:-.}" && PATH="$tmp/bin:$PATH" $shell_cmd "$verify" "$@" 2>&1)
     code=$?
     if [ "$code" -ne "$want" ]; then
         bad "$name (exit $code, want $want)"
@@ -492,7 +532,7 @@ run "a folder with no SHA256SUMS says what to download" 1 "SHA256SUMS is missing
 # ---- cosign: missing, too old, different from the pin ------------------------------------------
 # A PATH with the tools the script needs and no cosign.
 mkdir "$tmp/nocosign"
-for tool in sh awk grep mktemp rm sed cat cp wc sha256sum curl jq dirname; do
+for tool in sh awk grep mktemp rm sed cat cp wc head tr sha256sum curl jq dirname; do
     p=$(command -v "$tool" 2> /dev/null) || continue
     # busybox sh prints a bare applet name for a built-in. Only an absolute path can be linked.
     case $p in
@@ -501,7 +541,7 @@ for tool in sh awk grep mktemp rm sed cat cp wc sha256sum curl jq dirname; do
     esac
 done
 # shellcheck disable=SC2086
-out=$(PATH="$tmp/nocosign" ${SHELL_UNDER_TEST:-} "$verify" --dir "$tmp/good" "$tag" 2>&1)
+out=$(PATH="$tmp/nocosign" $shell_cmd "$verify" --dir "$tmp/good" "$tag" 2>&1)
 code=$?
 if [ "$code" -eq 64 ] && printf '%s\n' "$out" | grep -q 'install-release-tool.sh cosign'; then
     ok "a missing cosign stops with exit 64 and the install line"
@@ -563,13 +603,28 @@ export FAKE_SERVE
 run "a bundle of the wrong media type is refused (download)" 1 "not a Sigstore bundle of the v0.3 format" "$tag"
 
 # ---- cosign must not take a trust root or a log key from the environment -----------------------
-for var in SIGSTORE_ROOT_FILE SIGSTORE_REKOR_PUBLIC_KEY SIGSTORE_CT_LOG_PUBLIC_KEY_FILE; do
+for var in SIGSTORE_ROOT_FILE SIGSTORE_REKOR_PUBLIC_KEY SIGSTORE_CT_LOG_PUBLIC_KEY_FILE \
+    SIGSTORE_TSA_CERTIFICATE_FILE TUF_MIRROR TUF_ROOT_JSON TUF_ROOT; do
     eval "$var=$tmp/good/SHA256SUMS; export $var"
     run "$var set is refused" 64 "$var is set" --dir "$tmp/good" "$tag"
     eval "unset $var"
     if no_verify; then ok "$var set is refused before cosign runs"; else bad "$var set is refused before cosign runs"; fi
 done
 run "with those variables unset the same release verifies" 0 "verified $tag" --dir "$tmp/good" "$tag"
+# The script gives cosign its own TUF_ROOT inside its temporary folder.
+case $(cat "$FAKE_LOG.tuf") in
+    */tuf) ok "cosign gets a private TUF_ROOT of the script's own" ;;
+    *) bad "cosign gets a private TUF_ROOT of the script's own (got: $(cat "$FAKE_LOG.tuf"))" ;;
+esac
+
+# ---- a JSON escape could hide a legacy key name ------------------------------------------------
+# The key below is base64Sig\u006eature, which a JSON reader reads as base64Signature. The plain grep
+# for the legacy keys does not see it, so only the check for a \u escape refuses this bundle.
+release escaped
+sed 's/^{/{"base64Sig\\u006eature":"AAAA",/' "$tmp/escaped/SHA256SUMS.sigstore.json" > "$tmp/escaped/S" && mv "$tmp/escaped/S" "$tmp/escaped/SHA256SUMS.sigstore.json"
+if grep -q 'base64Sig.u006eature' "$tmp/escaped/SHA256SUMS.sigstore.json"; then ok "the escaped bundle really holds the escape"; else bad "the escaped bundle really holds the escape"; fi
+run "a bundle with a JSON escape is refused" 1 "JSON .u escape" --dir "$tmp/escaped" "$tag"
+if no_verify; then ok "a bundle with a JSON escape is refused before cosign runs"; else bad "a bundle with a JSON escape is refused before cosign runs"; fi
 
 # ---- the tag ------------------------------------------------------------------------------------
 nl='
@@ -623,6 +678,41 @@ if no_verify; then ok "a SHA256SUMS over 1 MiB is refused before cosign runs"; e
 FAKE_SERVE=$tmp/big
 export FAKE_SERVE
 run "a SHA256SUMS over 1 MiB is refused (download)" 1 "Maximum file size exceeded" "$tag"
+# An old curl ignores --max-filesize on a chunked answer. The script checks the size itself.
+FAKE_IGNORE_MAX=1
+export FAKE_IGNORE_MAX
+run "a SHA256SUMS over 1 MiB is refused when curl ignores the cap (download)" 1 "which is too large for this file" "$tag"
+unset FAKE_IGNORE_MAX
+if no_verify; then ok "an oversize download is refused before cosign runs"; else bad "an oversize download is refused before cosign runs"; fi
+
+# ---- file names in the folder are shown safely --------------------------------------------------
+release escname
+esc=$(printf '\033')
+: > "$tmp/escname/evil${esc}[2Jname"
+run "an odd file name in the folder is noted" 0 "NOTE: evil.\[2Jname is in the folder" --dir "$tmp/escname" "$tag"
+if printf '%s\n' "$out" | grep -q "$esc"; then bad "no escape byte from a file name reaches the terminal"; else ok "no escape byte from a file name reaches the terminal"; fi
+
+# ---- a signal while cosign runs stops the script quietly ----------------------------------------
+# The fake sleeps, then fails. A script whose trap does not exit would go on to print the
+# "tell security@" message. This one exits 143 and removes its temporary folder. (INT is not tested:
+# a background job ignores it.)
+mkdir "$tmp/scratch"
+rm -f "$tmp/started"
+# shellcheck disable=SC2086
+PATH="$tmp/bin:$PATH" TMPDIR="$tmp/scratch" FAKE_SLEEP=2 FAKE_STARTED="$tmp/started" \
+    $shell_cmd "$verify" --dir "$tmp/good" "$tag" > "$tmp/term.out" 2>&1 &
+term_pid=$!
+n=0
+while [ ! -f "$tmp/started" ] && [ "$n" -lt 50 ]; do
+    sleep 0.2
+    n=$((n + 1))
+done
+kill -TERM "$term_pid"
+wait "$term_pid"
+code=$?
+if [ "$code" -eq 143 ]; then ok "TERM during cosign exits 143"; else bad "TERM during cosign exits 143 (exit $code)"; cat "$tmp/term.out"; fi
+if grep -q 'security@' "$tmp/term.out"; then bad "TERM prints no security incident message"; else ok "TERM prints no security incident message"; fi
+if [ -z "$(ls -A "$tmp/scratch")" ]; then ok "TERM removes the temporary folder"; else bad "TERM removes the temporary folder"; fi
 
 # ---- usage -------------------------------------------------------------------------------------
 run "no arguments is a usage error" 64 "usage:"
