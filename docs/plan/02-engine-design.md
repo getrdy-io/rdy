@@ -453,9 +453,13 @@ tests policy.
   the facade; macOS and Windows use `NativeCall::SystemRoots`. No revocation check, and the report says
   so.
 - PAC is reported, never fetched, in M1.
-- UDP (`udp_exchange`, DNS messages built by `hickory-proto`) and unix sockets (`unix_get`, GET-only
-  Docker API guard) are M2 facade methods. They must land before `host.time_sync`, direct `net.dns`
-  queries and `host.container_runtime`.
+- UDP (`udp_exchange`) and unix sockets (`unix_get`, GET-only Docker API guard) are facade methods built
+  in M1-144 (M1-late), before `host.time_sync` and `host.container_runtime`. A check declares
+  `PeerClass::NtpServers` or `PeerClass::UnixSocket(path)` in `CheckInfo::peers`. A datagram goes only to
+  one of the check's spec hosts, after the `is_forbidden` rule on every literal and resolved address,
+  and a unix request is `GET` of `/_ping`, `/version` or `/info` with no query string. The unix socket
+  entry is an `http` entry and the UDP entry is a `connect` entry with `proto: udp`. Direct `net.dns`
+  queries (`hickory-proto`, system nameservers) stay M2.
 
 **Native calls.** A closed enum the Live backend executes.
 - An exhaustive `match` maps each variant to its policy row. A snapshot test of the variant list fails
@@ -611,8 +615,8 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
 
 | Hook | Answer |
 | --- | --- |
-| 1 UDP | Accepted for M2: `udp_exchange(server, payload, max_reply)` with peer classes `ntp_servers` (spec) and system nameservers, logged as `dns` or `connect`. Gates `host.time_sync` and direct `net.dns`. |
-| 2 Connect targets | Dual stack accepted inside the facade's `tcp` (per-address attempts reported); `Target::Addr` from check code rejected, because address choice is policy. `unix_get` M2; named pipes M2. |
+| 1 UDP | Accepted: `udp_exchange(server, payload, max_reply)` with peer class `NtpServers` (the check's spec hosts) built in M1-144 and logged as `connect` with `proto: udp`; system nameservers (`dns` entries) stay M2. Gates `host.time_sync`; direct `net.dns` waits for the nameserver class. |
+| 2 Connect targets | Dual stack accepted inside the facade's `tcp` (per-address attempts reported); `Target::Addr` from check code rejected, because address choice is policy. `unix_get` built in M1-144 (declared as `PeerClass::UnixSocket`); named pipes M2. |
 | 3 Nonblocking record read | Accepted for M2: `read_records(path, max_records, max_bytes)` with `O_NONBLOCK` until `EAGAIN`, `/dev/kmsg` as the only allowed device. No M1-tier check needs it. |
 | 4 Exec | Accepted for M1: `Hung { pid }` without waiting, per-command stdout cap, declared extra search directories. |
 | 5 Family-scoped shared state | Accepted for M2: `Family::facts()` with a family-scoped `Probe` (union of the fact's own manifest), a detached task with its own timeout, cached, attributed with an additive `fact` field (01). A check that times out waiting does not abort the fact. M1-tier k8s checks do not share fetches. |

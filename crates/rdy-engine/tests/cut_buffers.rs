@@ -23,6 +23,7 @@ use std::path::{Path, PathBuf};
 
 use rdy_engine::check::Os;
 use rdy_engine::exec::{DEFAULT_STDERR_CAP, DEFAULT_STDOUT_CAP};
+use rdy_engine::probe::sock::{BODY_LIMIT, UnixResponse};
 use rdy_engine::probe::{MAX_READ, Output};
 use rdy_engine::redact::{Redactor, TagKey};
 use rdy_engine::testing::{Replay, TestRun};
@@ -534,6 +535,30 @@ async fn a_known_token_is_removed_from_a_file_the_cap_cut() -> TestResult {
         assert_no_token("file cap", &shown);
         assert!(shown.contains("whole [REDACTED:known_secret:"), "k {k}");
     }
+    Ok(())
+}
+
+/// A unix socket body (`/info` can carry proxy settings) goes through the same cut-buffer redaction.
+#[tokio::test(flavor = "current_thread")]
+async fn a_unix_socket_body_is_redacted_whole_and_cut() -> TestResult {
+    let run = run_knowing_the_token(Vec::new());
+    let ctx = run.context("k8s.synthetic", Os::Linux, []);
+    let whole = UnixResponse::new(
+        200,
+        format!("{{\"Name\":\"n1\",\"Note\":\"see {TOKEN} here\"}}").into_bytes(),
+    );
+    let shown = ctx.probe().unix_text(&whole)?;
+    assert_no_token("whole body", &shown);
+    assert!(shown.contains("[REDACTED:known_secret:"), "{}", *shown);
+
+    let pem = pem();
+    let mut body = filler(BODY_LIMIT - 40);
+    body.extend_from_slice(&pem.text.as_bytes()[..60]);
+    body.truncate(BODY_LIMIT);
+    let mut cut = UnixResponse::new(200, body);
+    cut.truncated = true;
+    let shown = ctx.probe().unix_text(&cut)?;
+    assert_clean("cut body", 40, &shown, &pem);
     Ok(())
 }
 

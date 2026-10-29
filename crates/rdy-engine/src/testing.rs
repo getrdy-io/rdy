@@ -20,6 +20,7 @@ use std::sync::Arc;
 pub use crate::probe::replay::Replay;
 
 use crate::check::{CheckContext, CheckInfo, Need, Os};
+use crate::family::HostSet;
 use crate::probe::{ActionLogOutput, Probe, ProbeHub};
 use crate::redact::{Redactor, TagKey};
 
@@ -74,6 +75,23 @@ impl TestRun {
         available: impl IntoIterator<Item = Need>,
     ) -> CheckContext {
         CheckContext::new(key, os, available).with_probe(self.hub.check_probe(key, os, Some(info)))
+    }
+
+    /// Like [`TestRun::context_for`], for a check whose spec entry names `hosts`. The probe may send
+    /// a datagram only to these (`Probe::udp_exchange`), as a real run does with `Built::hosts`. With
+    /// [`TestRun::context_for`] there are no hosts and every datagram is refused.
+    #[must_use]
+    pub fn context_for_hosts(
+        &self,
+        info: &'static CheckInfo,
+        key: &str,
+        os: Os,
+        available: impl IntoIterator<Item = Need>,
+        hosts: HostSet,
+    ) -> CheckContext {
+        let probe = self.hub.check_probe(key, os, Some(info));
+        probe.permit_hosts(hosts);
+        CheckContext::new(key, os, available).with_probe(probe)
     }
 
     /// The run-level probe (`check: null` in the log) for `os`, as the privilege snapshot and the
