@@ -13,6 +13,7 @@ mod docs;
 mod generate;
 mod lint;
 mod schema;
+mod spec_reference;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
