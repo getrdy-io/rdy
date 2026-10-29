@@ -1,0 +1,13 @@
+schema = 1
+name = "firewalld-closed"
+summary = "6443 is open only in the docker zone, not in the zone of the default-route interface"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-firewalld"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false

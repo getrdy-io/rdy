@@ -3,7 +3,8 @@
 //! Internal to rdy. No API stability promise.
 //!
 //! So far this crate holds the OS support table and a stub for each host check (M1-067). The real
-//! checks replace the stubs one ticket at a time (M1-068 and later). Every check compiles on every
+//! checks replace the stubs one ticket at a time (M1-068 and later). [`Firewall`] (`host.firewall`,
+//! M1-147) is real but not in the family yet, because `rdy-spec` has no parameter struct for it. Every check compiles on every
 //! target. Where a data source is not built, the check is `NotYet` on that OS, and the planner skips
 //! it with `skip_kind: not_yet_on_os` before it runs.
 //!
@@ -31,5 +32,7 @@
 #![warn(missing_docs)]
 
 mod family;
+mod firewall;
 
 pub use family::HostFamily;
+pub use firewall::Firewall;

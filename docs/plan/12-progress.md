@@ -306,7 +306,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-146 | todo | | host.security_agents (process names, agents.toml format, seed list) (M1-late)
 
-- M1-147 | todo | | host.firewall (firewalld zone and service XML, ufw) (M1-late)
+- M1-147 | PR #TBD | | Built as `rdy_checks_host::Firewall` (firewalld zone, service XML, ufw tuples) with synthetic cases in `tests/fixtures/checks/host.firewall/`. NOT registered in `HostFamily`: `rdy-spec` has no `host.firewall` parameter struct (`open_inbound`; the id is reserved but not in `KNOWN_IDS`), so a spec ticket must add the struct, the 01 section 2.7 row, the schema fragment and the family entry. Replay loader (M1-049) and `assert_within_manifest` (M1-051) are not built: cases are wired by hand with `include_str!` (two entries added to `INCLUDE_DATA_ALLOWED` in the lint wall, needs security-review), there is no `expect.json`, and Replay cannot simulate an unreadable file, so the permission-denied read of `user.rules` is tested only on a pure function. A root-less run on a host with no firewall becomes `warn` through the engine's want rule (`merge_partial`), not through this check.
 
 - M1-148 | todo | | host.time_sync (adjtimex, timedatectl, chronyc, SNTP client) (M1-late) | backlog corrected 2026-10-29 (correction-15): depends on M1-094; `ntp_servers` is the only UDP host source, counted toward INV-11; a server in a refused range falls back to `chronyc` (PR #91 reviews)
 
