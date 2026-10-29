@@ -17,7 +17,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0007](0007-crate-publishing-and-versioning.md) | Crate publishing and versioning policy | Accepted |
 | [0008](0008-errors-and-result-model.md) | Error handling and the result model; Timeout and Skipped are outcomes, never crashes | Accepted; decision 3 refined by 0013; decisions 4 and 7 amended 2026-10-28 (Ctrl-C, new codes, `report_write`) |
 | [0009](0009-http-client-and-tls.md) | HTTP with reqwest on rustls and ring, a strict egress policy, dual roots only for the interception probe | Accepted; decisions 1, 2, 3 and 5 superseded by 0014 |
-| [0010](0010-kubernetes-client-kube-rs.md) | Use kube-rs (client only) behind a runtime read-only guard, not raw REST or kubectl | Accepted; amended 2026-10-28 (selfsubjectreviews in M1, family-owned client) |
+| [0010](0010-kubernetes-client-kube-rs.md) | Use kube-rs (client only) behind a runtime read-only guard, not raw REST or kubectl | Accepted; amended 2026-10-28 (selfsubjectreviews in M1, family-owned client); decisions 1, 3 and 7 refined by 0031 |
 | [0011](0011-binary-name-and-cli-package.md) | The package is `rdy`, it lives in `crates/rdy-cli`, the binary is `rdy` | Accepted; decision 4 amended 2026-10-28 (in-process test entry point) |
 | [0012](0012-wire-types-in-rdy-spec-schema-generated.md) | All `rdy/v1` wire types live in rdy-spec; JSON schemas are generated from them | Accepted; decision 5 amended 2026-10-28 (file names, M1-022; see 0019) |
 | [0013](0013-verdict-refinements-not-run.md) | Verdict refinements: what counts as not run, and the one thing that never counts | Accepted |
@@ -36,6 +36,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0026](0026-checkmeta-in-checkinfo.md) | CheckMeta holds a check's title and remediation and lives in its static CheckInfo | Accepted |
 | [0027](0027-windows-trust-stores-stay-refused-in-m1.md) | Windows trust stores stay refused in M1: reading a DACL needs FFI or unmaintained crates, and Windows has no user store | Accepted, security-reviewed and architect-reviewed (PR #68) |
 | [0028](0028-command-table-and-fix-text-lists.md) | The command table is typed data in `rdy-engine`, and fix text is audited against two reviewed lists | Accepted, security-reviewed (PR #70) |
+| [0031](0031-kube-client-layer.md) | The kube client layer reads the kubeconfig itself, announces first, and keeps plugin output out of every error | Accepted, security-reviewed (PR #76) |
 | [0033](0033-trust-add-key-argument-and-store-api.md) | `trust add` takes a key as a file or as text, refuses secret keys by form, and edits the store through `rdy-spec` | Accepted, security-reviewed (PR #77) |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on

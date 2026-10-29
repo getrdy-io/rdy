@@ -6,6 +6,7 @@
 //! - [`check`]: the `Check` trait, `CheckInfo` with its `CheckMeta`, needs, `Finding` and `CheckError`.
 //! - [`outcome`]: [`outcome::map_outcome`] turns a check's outcome into a `CheckResult`.
 //! - [`units`]: version compare, byte sizes, the nominal band and the severity cap that checks share.
+//! - [`text`]: [`text::escape_untrusted`], the one escaper for text from a spec, a file or a server.
 //! - [`fixtext`]: the audit that keeps commands and sysctl names in fix text on two reviewed lists.
 //! - [`family`]: the `Family` trait and the `Registry` of the checks in this build.
 //! - [`plan`]: [`family::Registry::plan`] decides, with no I/O, which spec entries run and which are
@@ -40,4 +41,5 @@ pub mod plan;
 pub mod redact;
 #[cfg(feature = "runtime")]
 pub mod sched;
+pub mod text;
 pub mod units;
