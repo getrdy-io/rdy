@@ -30,7 +30,9 @@
 set -u
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 fail=0
 
 ok() { printf 'PASS %s\n' "$1"; }
@@ -55,7 +57,7 @@ refused() {
     fi
 }
 
-for tool in cosign curl sha256sum cmp tail; do
+for tool in cosign curl sha256sum cmp tail awk grep; do
     if ! command -v "$tool" > /dev/null 2>&1; then
         if [ -n "${CI:-}" ]; then
             echo "FAIL $tool is missing in CI"
@@ -104,6 +106,28 @@ gr_identity=https://github.com/goreleaser/goreleaser/.github/workflows/release.y
 gr_issuer=https://token.actions.githubusercontent.com
 fetch "$gr_base" checksums.txt "$gr_blob_sha" gr/checksums.txt
 fetch "$gr_base" checksums.txt.sigstore.json "$gr_bundle_sha" gr/checksums.txt.sigstore.json
+
+# ---- the two things scripts/verify-release.sh parses, against the real cosign and a real bundle ----
+# verify-release.sh reads the GitVersion line of `cosign version` and refuses cosign below 3.1.3. The
+# fake cosign in test-verify-release.sh prints that line in the shape we expect. This is the real one.
+real_version=$(cosign version 2> /dev/null | awk '/GitVersion:/ { print $2; exit }')
+case $real_version in
+    v[0-9]*.[0-9]*.[0-9]*) ok "the real cosign prints a GitVersion line that verify-release.sh can parse ($real_version)" ;;
+    *) bad "the real cosign prints a GitVersion line that verify-release.sh can parse (got '$real_version')" ;;
+esac
+# verify-release.sh requires this media type in the bundle. A real bundle must carry it.
+if grep -Eq '"mediaType"[[:space:]]*:[[:space:]]*"application/vnd\.dev\.sigstore\.bundle\.v0\.3\+json"' "$tmp/gr/checksums.txt.sigstore.json"; then
+    ok "a real bundle has the v0.3 media type that verify-release.sh requires"
+else
+    bad "a real bundle has the v0.3 media type that verify-release.sh requires"
+fi
+
+# verify-release.sh refuses a bundle with a JSON \u escape, which could hide a legacy key name.
+if grep -q '\\u' "$tmp/gr/checksums.txt.sigstore.json"; then
+    bad "a real bundle has no JSON \\u escape, which verify-release.sh refuses"
+else
+    ok "a real bundle has no JSON \\u escape, which verify-release.sh refuses"
+fi
 
 # ---- part 1 ------------------------------------------------------------------------------------
 cd "$tmp/cosign" || exit 1
