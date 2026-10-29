@@ -29,13 +29,10 @@ fn read(name: &str) -> Vec<u8> {
     }
 }
 
-/// The key of the committed `.pub` file: its second line.
+/// The key of the committed `.pub` file.
 fn pinned_key() -> PublicKey {
     let text = String::from_utf8(read("acme-platform.pub")).unwrap_or_default();
-    let Some(line) = text.lines().nth(1) else {
-        panic!("the .pub file has no key line");
-    };
-    match PublicKey::from_base64(line) {
+    match PublicKey::from_key_file_text(&text) {
         Ok(key) => key,
         Err(e) => panic!("bad key: {e}"),
     }
@@ -86,6 +83,50 @@ fn the_committed_fixture_verifies_with_its_public_key() {
     assert_eq!(signed_at, "2026-10-28T12:00:00Z");
     assert_eq!(*trust_source, TrustSource::User);
     assert_eq!(loaded.sha256().len(), 64);
+}
+
+/// SEC-61: the signature object a report carries names the fingerprint of the key that verified, and
+/// it passes the result schema.
+#[test]
+fn the_result_signature_carries_the_fingerprint_and_fits_the_schema() {
+    let spec = read("acme-platform.yaml");
+    let sig = read("acme-platform.yaml.minisig");
+    let key = pinned_key();
+    let loaded = match rdy_spec::load(
+        &spec,
+        Some(&sig),
+        &store_for(PRODUCT),
+        Policy::RequireSigned,
+    ) {
+        Ok(loaded) => loaded,
+        Err(e) => panic!("the fixture must verify: {e:?}"),
+    };
+    let signature = rdy_spec::result::Signature::from(loaded.signature());
+    assert_eq!(
+        signature.key_fingerprint.as_deref(),
+        Some(key.fingerprint().as_str())
+    );
+    let schema_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schema/result.v1.schema.json");
+    let text = std::fs::read_to_string(&schema_path).unwrap_or_default();
+    let mut schema: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(value) => value,
+        Err(e) => panic!("the schema is not JSON: {e}"),
+    };
+    schema["$ref"] = serde_json::Value::String("#/$defs/Signature".to_owned());
+    let validator = match jsonschema::draft202012::options().build(&schema) {
+        Ok(v) => v,
+        Err(e) => panic!("the schema does not build: {e}"),
+    };
+    let instance = match serde_json::to_value(&signature) {
+        Ok(v) => v,
+        Err(e) => panic!("the signature does not serialize: {e}"),
+    };
+    let errors: Vec<String> = validator
+        .iter_errors(&instance)
+        .map(|e| e.to_string())
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
 }
 
 #[test]

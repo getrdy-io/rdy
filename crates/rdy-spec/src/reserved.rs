@@ -154,6 +154,8 @@ mod tests {
                 }
             }
         }
+        // A heading format change must not turn this test into a comparison of two empty sets.
+        assert!(!ids.is_empty(), "no check id found in {}", path.display());
         let listed: std::collections::BTreeSet<String> =
             RESERVED_IDS.iter().map(|id| (*id).to_owned()).collect();
         assert_eq!(listed, ids, "RESERVED_IDS and 03-check-catalog.md differ");
