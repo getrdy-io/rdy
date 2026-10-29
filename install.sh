@@ -18,8 +18,11 @@
 #   plain http, also in a redirect. GNU wget cannot (see pick_downloader).
 # - Allowed variables: RDY_VERSION, RDY_INSTALL_DIR, RDY_INSECURE_SKIP_SIGNATURE. HOME, TMPDIR and
 #   the proxy variables are read by the tools themselves.
-# - Order: download, check the signature of SHA256SUMS (seam: verify_signature, M1-015), check the
-#   sha256 of the archive against SHA256SUMS, extract, run `rdy version`, install atomically.
+# - Order: find cosign (3.1.3 or newer), download, check the signature of SHA256SUMS with cosign
+#   (verify_signature), check the sha256 of the archive against SHA256SUMS, extract, run `rdy version`,
+#   install atomically. Nothing is made executable before both checks pass. No cosign, a bad
+#   signature, a missing bundle or a bad hash exits 1 and installs nothing. RDY_INSECURE_SKIP_SIGNATURE=1
+#   skips the signature check only, with a warning. It never skips the sha256 check.
 # - Everything is written to stderr. Stdout stays empty (except for --help).
 # - Exit: 0 installed, 1 failed, 64 bad usage.
 #
@@ -39,6 +42,16 @@ umask 022
 RDY_STAMPED_VERSION='@@RDY_STAMPED_VERSION@@'
 
 RELEASE_BASE='https://github.com/getrdy-io/rdy/releases/download'
+# The signing contract (docs/plan/06, "Install and signing contract"). Keep equal to
+# scripts/verify-release.sh and scripts/sign-release.sh. SIGNER_REPO is also in RELEASE_BASE, and a test
+# checks that the two agree. No variable changes any of them.
+SIGNER_REPO='getrdy-io/rdy'
+ISSUER='https://token.actions.githubusercontent.com'
+COSIGN_FLOOR='3.1.3'
+# Variables that move cosign's trust. check_cosign refuses to run while any of them is set.
+TRUST_VARS='SIGSTORE_ROOT_FILE SIGSTORE_REKOR_PUBLIC_KEY SIGSTORE_CT_LOG_PUBLIC_KEY_FILE SIGSTORE_TSA_CERTIFICATE_FILE TUF_MIRROR TUF_ROOT_JSON TUF_ROOT'
+# SHA256SUMS and its bundle are a few KB. Anything over this is not one.
+MAX_SMALL=1048576
 END_MARK='__rdy_end_of_script__'
 NL='
 '
@@ -57,6 +70,7 @@ HASHER=''
 BIN=''
 NEW_VERSION=''
 OLD_VERSION=''
+COSIGN=''
 
 say() {
     printf '%s\n' "$1" >&2
@@ -322,24 +336,135 @@ fetch() {
     esac
 }
 
-# SEAM FOR M1-015. Called after SHA256SUMS is downloaded and before anything is trusted.
-# Contract: return 0 only when the signature of the file $1 (SHA256SUMS) was verified for release
-# $2 with cosign, the exact signer identity and the three caller claims (contract table in
-# docs/plan/06). In every other case it exits 1 with the documented message. M1-015 downloads
-# SHA256SUMS.sigstore.json in main, replaces the body of this function with the cosign check, and
-# keeps RDY_INSECURE_SKIP_SIGNATURE=1 as the only override.
-# Until then this copy cannot check a signature, so it behaves as if cosign were missing: it stops,
-# unless the override is set. The override never skips the sha256 check.
+# True when the caller asked to skip the signature check. Exactly "1", nothing else counts.
+skip_signature() {
+    [ "${RDY_INSECURE_SKIP_SIGNATURE:-}" = 1 ]
+}
+
+bad_cosign_version() {
+    die "could not read the version of cosign (got '$1')." \
+        "$COSIGN did not print a GitVersion line like 'GitVersion: v3.1.4'." \
+        "install the current cosign (https://docs.sigstore.dev/cosign/system_config/installation/) and run this script again. Nothing was installed."
+}
+
+# Before any download: find a cosign that is safe to trust, or stop. With the override set, cosign is
+# not used at all, so nothing here runs. The rules are the ones in scripts/verify-release.sh, and a test
+# keeps the two lists equal.
+check_cosign() {
+    if skip_signature; then
+        return 0
+    fi
+    # cosign reads these and would trust them instead of Sigstore's own roots. Refuse, even when empty.
+    # TUF_ROOT too: its remote.json can name a mirror. verify_signature gives cosign a private one.
+    for var in $TRUST_VARS; do
+        if eval "[ \"\${$var+set}\" = set ]"; then
+            die "$var is set, and cosign would trust it instead of Sigstore's own roots." \
+                "this variable moves the trust root or a log key that the signature check relies on." \
+                "run 'unset $var' and run this script again. This script never takes a trust root from the environment. Nothing was installed."
+        fi
+    done
+    if ! command -v cosign > /dev/null 2>&1; then
+        die "cosign is not installed, so the release signature cannot be checked." \
+            "install.sh checks the signature of SHA256SUMS with cosign $COSIGN_FLOOR or newer, and this machine has none on PATH." \
+            "install cosign (https://docs.sigstore.dev/cosign/system_config/installation/) and run this script again, or check the release by hand with scripts/verify-release.sh v$VERSION (see the install docs). Nothing was installed."
+    fi
+    COSIGN=$(command -v cosign)
+    cv=$("$COSIGN" version < /dev/null 2> /dev/null | awk '/GitVersion:/ { print $2; exit }') || cv=''
+    cn=${cv#v}
+    case $cn in
+        '' | *[!0-9.]* | .* | *. | *..* | ???????????????????*) bad_cosign_version "$cv" ;;
+        *.*.*) ;;
+        *) bad_cosign_version "$cv" ;;
+    esac
+    c_major=${cn%%.*}
+    c_rest=${cn#*.}
+    c_minor=${c_rest%%.*}
+    c_patch=${c_rest#*.}
+    case $c_patch in
+        *.*) bad_cosign_version "$cv" ;;
+    esac
+    # 3.1.3 is the floor. Older ones have GHSA-fx35-mq7g-6g98: with a legacy bundle that holds a bare
+    # public key, the identity and issuer checks are skipped.
+    old=0
+    if [ "$c_major" -lt 3 ]; then
+        old=1
+    elif [ "$c_major" -eq 3 ]; then
+        if [ "$c_minor" -lt 1 ] || { [ "$c_minor" -eq 1 ] && [ "$c_patch" -lt 3 ]; }; then
+            old=1
+        fi
+    fi
+    if [ "$old" = 1 ]; then
+        die "cosign $cv is too old: it must be $COSIGN_FLOOR or newer." \
+            "older cosign releases can skip the identity checks (GHSA-fx35-mq7g-6g98)." \
+            "install a newer cosign (https://docs.sigstore.dev/cosign/system_config/installation/) and run this script again. Nothing was installed."
+    fi
+}
+
+# check_small <file> <name>: a signed-list file over 1 MiB is not a real one.
+check_small() {
+    if ! size=$(wc -c < "$1" 2> /dev/null); then
+        die "could not read the size of $2." \
+            "wc failed, or the file is missing." \
+            "check the temp folder and the disk, then run the script again."
+    fi
+    size=$((size + 0))
+    if [ "$size" -gt "$MAX_SMALL" ]; then
+        die "$2 is $size bytes, which is too large for this file." \
+            "the download was replaced or damaged." \
+            "do not use this download. Tell security@getrdy.io. Nothing was installed."
+    fi
+}
+
+# The seam from M1-014, filled in by M1-015. Called after SHA256SUMS and its bundle are downloaded and
+# before anything in SHA256SUMS is trusted. $1 is the file, $2 the release version.
+# Contract: return 0 only when the signature of the file $1 (SHA256SUMS) was verified for release $2 with
+# cosign, the exact signer identity and the three caller claims (contract table in docs/plan/06). In
+# every other case it exits 1 with the documented message. RDY_INSECURE_SKIP_SIGNATURE=1 is the only
+# override. It skips this check and never the sha256 check.
 verify_signature() {
-    if [ "${RDY_INSECURE_SKIP_SIGNATURE:-}" = 1 ]; then
+    if skip_signature; then
         say "WARNING: RDY_INSECURE_SKIP_SIGNATURE=1 is set. The signature of SHA256SUMS is NOT checked."
         say "  Only the sha256 of the archive is checked, against a list from the same place."
         say "  That does not prove who built the file. Use this only on a host you control."
         return 0
     fi
-    die "this copy of install.sh cannot check the release signature yet." \
-        "the cosign check is not built into this version of the script." \
-        "verify the release by hand with scripts/verify-release.sh (see the install docs), or use an install.sh from a later release. Nothing was installed."
+    sig_sums=$1
+    sig_bundle="$1.sigstore.json"
+    check_small "$sig_sums" SHA256SUMS
+    check_small "$sig_bundle" SHA256SUMS.sigstore.json
+    # The bundle must be the v0.3 format. Older cosign accepted a legacy form that could skip the
+    # identity checks (GHSA-fx35-mq7g-6g98). cosign 3.1.3 fixed that. This is a second guard.
+    if ! grep -Eq '"mediaType"[[:space:]]*:[[:space:]]*"application/vnd\.dev\.sigstore\.bundle\.v0\.3\+json"' "$sig_bundle" ||
+        grep -Eq '"(base64Signature|rekorBundle)"' "$sig_bundle"; then
+        die "SHA256SUMS.sigstore.json is not a Sigstore bundle of the v0.3 format." \
+            "the bundle is in an old format, or it was replaced." \
+            "do not run this file. Nothing was installed. Tell security@getrdy.io."
+    fi
+    # A JSON escape (\u) could hide a legacy key name from the check above. A real bundle has none.
+    if grep -q '\\u' "$sig_bundle"; then
+        die "SHA256SUMS.sigstore.json has a JSON \\u escape, which a real bundle does not." \
+            "the bundle was changed." \
+            "do not run this file. Nothing was installed. Tell security@getrdy.io."
+    fi
+    sig_tag="v$2"
+    sig_identity="https://github.com/$SIGNER_REPO/.github/workflows/sign-release.yml@refs/tags/$sig_tag"
+    # Exact strings, no regular expression. The subject names the called workflow file, not the
+    # repository that called it, so the last three flags are what stop a workflow in another repository
+    # that calls ours. cosign keeps its trust root cache in the work folder, so nothing is left in
+    # ~/.sigstore.
+    if ! TUF_ROOT="$WORK/tuf" "$COSIGN" verify-blob \
+        --bundle "$sig_bundle" \
+        --certificate-identity "$sig_identity" \
+        --certificate-oidc-issuer "$ISSUER" \
+        --certificate-github-workflow-repository "$SIGNER_REPO" \
+        --certificate-github-workflow-ref "refs/tags/$sig_tag" \
+        --certificate-github-workflow-trigger push \
+        "$sig_sums" < /dev/null > /dev/null; then
+        die "the signature on SHA256SUMS does not verify as $sig_identity." \
+            "the release files were changed, they were signed by something else, or cosign could not reach Sigstore (read the cosign lines above)." \
+            "do not run this file. Nothing was installed. Tell security@getrdy.io. If the lines above show a network error, fix the connection and run again."
+    fi
+    say "signature ok: SHA256SUMS is signed by $sig_identity"
 }
 
 sha256_of() {
@@ -498,6 +623,8 @@ main() {
     resolve_install_dir
     pick_hash_tool
     pick_downloader
+    # Before any download: no usable cosign means stop, unless the override is set.
+    check_cosign
 
     trap cleanup EXIT
     trap 'exit 129' HUP
@@ -514,6 +641,13 @@ main() {
         "this release looks incomplete: it has no SHA256SUMS." \
         "the release is still being published, or the version is wrong." \
         "check RDY_VERSION and the release page, and try again later. Nothing was installed."
+    # With the override the bundle is not needed, so a release without one still installs on hash only.
+    if ! skip_signature; then
+        fetch SHA256SUMS.sigstore.json \
+            "this release looks incomplete: it has SHA256SUMS but no SHA256SUMS.sigstore.json." \
+            "the release is still being published, or this version was never signed." \
+            "check RDY_VERSION and the release page, and try again later. If the file stays missing, do not use this release. Nothing was installed."
+    fi
     verify_signature "$WORK/SHA256SUMS" "$VERSION"
     verify_archive_hash
     extract_binary

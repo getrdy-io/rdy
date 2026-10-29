@@ -109,6 +109,25 @@ Pick the next number `N`. The examples use `v0.1.0-alpha.1`.
    echo "exit $?"        # must be 1, with an invalid signature error
    rm -rf "$rel"
    ```
+
+   Then run the installer from the release (M1-015). Use the same machine, the cosign from above on
+   `PATH`, and a throwaway install folder. Add `--allow-root` after `sh -s --` if the shell is root.
+   This is the pinned URL that design partners use in M1:
+
+   ```sh
+   dest=$(mktemp -d)
+   PATH="$HOME/.cargo/bin:$PATH" RDY_INSTALL_DIR="$dest" sh -c \
+     "curl --proto '=https' --tlsv1.2 -sSf https://github.com/getrdy-io/rdy/releases/download/v0.1.0-alpha.1/install.sh | sh"
+   echo "exit $?"        # must be 0
+   "$dest/rdy" version   # rdy 0.1.0-alpha.1
+   ```
+
+   The output must have `signature ok: SHA256SUMS is signed by` followed by the identity, then
+   `sha256 ok`, then `Installed rdy 0.1.0-alpha.1`. Then show that it fails closed: run the same
+   command with a `PATH` that has no cosign, into a new empty `$dest`. It must exit 1 with
+   `cosign is not installed` and leave `$dest` empty. The tamper cases (bad hash, bad signature, wrong
+   identity, wrong caller repository, ref or trigger, missing bundle, old cosign, trust variables)
+   cannot be staged on a real release. `scripts/test-install-sh.sh` proves them with a fake cosign.
 9. **Record.** In the Done log add `- M1-012 hand | <date> | <evidence>` (for the first tag) with: the run
    URL, the `gh release view` output, the `immutable` value, the verify output, the sha256 of `SHA256SUMS`
    and the Rekor log index. For every release, keep the sha256 and the Rekor index. They go on
@@ -127,6 +146,9 @@ Pick the next number `N`. The examples use `v0.1.0-alpha.1`.
 | `announce` fails on `gh release create` | The release may not exist, or a partial or draft one may | First run `gh release list --repo getrdy-io/rdy` and look for the tag. Then read ADR 0024, Consequences, before you retry. The number is burned. |
 | `verify-release.sh` fails on the signature | The release is not signed as the contract says, or the machine cannot reach Sigstore (read the cosign lines above the error) | Do not use it. Tell `security@getrdy.io` and `security-reviewer`. Cut a new number. |
 | `verify-release.sh` says cosign is missing or too old | The machine has no cosign, or one below 3.1.3 | `sh scripts/install-release-tool.sh cosign`, then put `$HOME/.cargo/bin` on `PATH`. |
+| `install.sh` says `cosign is not installed`, or `cosign ... is too old` | The machine has no cosign, or one below 3.1.3. The script stops before it downloads anything | Install cosign 3.1.3 or newer and run it again, or verify by hand with `scripts/verify-release.sh`. The override `RDY_INSECURE_SKIP_SIGNATURE=1` skips the signature only and prints a warning. Use it only on a host you control. |
+| `install.sh` says `this release looks incomplete: it has SHA256SUMS but no SHA256SUMS.sigstore.json` | The release is still being published, or it was never signed | Wait and try again. A published release without a bundle is a signing failure: do not use it, and cut a new number. |
+| `install.sh` says `does not verify as` | Wrong signer, wrong caller, changed files, or cosign could not reach Sigstore (read the cosign lines above the error) | Do not use it. Tell `security@getrdy.io`. |
 
 ## Version and support policy
 

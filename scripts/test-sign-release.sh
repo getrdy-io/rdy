@@ -79,8 +79,10 @@ digest=$(sha256sum "$blob" | awk '{ print $1 }')
 case $cmd in
     sign-blob)
         [ -z "${FAKE_SIGN_FAIL:-}" ] || { echo "fake cosign: no OIDC token" >&2; exit 1; }
-        printf '{"digest":"%s","identity":"%s","repo":"%s","ref":"%s","trigger":"%s","verificationMaterial":{"tlogEntries":[{"logIndex":"4242"}]}}\n' \
-            "$digest" "$FAKE_SIGNER" "$FAKE_REPO" "$FAKE_REF" "$FAKE_TRIGGER" > "$bundle"
+        media=""
+        [ -z "$FAKE_MEDIATYPE" ] || media="\"mediaType\":\"$FAKE_MEDIATYPE\","
+        printf '{%s"digest":"%s","identity":"%s","repo":"%s","ref":"%s","trigger":"%s"%s,"verificationMaterial":{"tlogEntries":[{"logIndex":"4242"}]}}\n' \
+            "$media" "$digest" "$FAKE_SIGNER" "$FAKE_REPO" "$FAKE_REF" "$FAKE_TRIGGER" "${FAKE_EXTRA:-}" > "$bundle"
         # FAKE_TOUCH: a file in the folder changes while the signature is made.
         [ -z "${FAKE_TOUCH:-}" ] || echo changed >> rdy-x86_64-apple-darwin.tar.gz
         echo "ZmFrZQ=="
@@ -104,7 +106,8 @@ FAKE_SIGNER=$want_identity
 FAKE_REPO=$repo
 FAKE_REF=refs/tags/$tag
 FAKE_TRIGGER=push
-export FAKE_SIGNER FAKE_REPO FAKE_REF FAKE_TRIGGER
+FAKE_MEDIATYPE=application/vnd.dev.sigstore.bundle.v0.3+json
+export FAKE_SIGNER FAKE_REPO FAKE_REF FAKE_TRIGGER FAKE_MEDIATYPE
 
 # ---- fixtures ----------------------------------------------------------------------------------
 targets="x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc"
@@ -362,6 +365,31 @@ export FAKE_TRIGGER
 run "a signature made by a manual run fails the self-verify" 1 "does not verify as" "$tmp/wrongtrigger" "$tag" "$repo" "$tmp/src-ok"
 FAKE_TRIGGER=push
 export FAKE_TRIGGER
+
+# The bundle format guard (M1-015). install.sh and verify-release.sh refuse a bundle that is not v0.3,
+# that has a legacy key, or that has a JSON escape. A release that fails here is never published.
+# Each spec is name:mediaType:extra JSON members. The escape spec has a backslash, u0053, in a key.
+bs='\'
+for spec in "legacy:application/vnd.dev.sigstore.bundle+json;version=0.1:" \
+    "none::" \
+    'legacykey:application/vnd.dev.sigstore.bundle.v0.3+json:,"base64Signature":"ZmFrZQ=="' \
+    "escape:application/vnd.dev.sigstore.bundle.v0.3+json:,\"base64${bs}u0053ignature\":\"x\""; do
+    bname=${spec%%:*}
+    rest=${spec#*:}
+    FAKE_MEDIATYPE=${rest%%:*}
+    FAKE_EXTRA=${rest#*:}
+    export FAKE_MEDIATYPE FAKE_EXTRA
+    release "bundle-$bname"
+    run "a bundle with $bname format fails the self-verify guard" 1 "not a plain Sigstore bundle" "$tmp/bundle-$bname" "$tag" "$repo" "$tmp/src-ok"
+    if [ -e "$tmp/bundle-$bname/SHA256SUMS" ] || [ -e "$tmp/bundle-$bname/SHA256SUMS.sigstore.json" ]; then
+        bad "a $bname bundle leaves no signature files"
+    else
+        ok "a $bname bundle leaves no signature files"
+    fi
+done
+FAKE_MEDIATYPE=application/vnd.dev.sigstore.bundle.v0.3+json
+FAKE_EXTRA=""
+export FAKE_MEDIATYPE FAKE_EXTRA
 
 # The files change while cosign signs.
 release touched
