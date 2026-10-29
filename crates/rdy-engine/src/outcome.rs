@@ -36,8 +36,11 @@ use crate::check::{
 };
 use crate::units::cap_level;
 
+mod not_run;
 #[cfg(test)]
 mod tests;
+
+pub use not_run::{run_deadline_result, timeout_result, unfinished_result};
 
 /// Stands for the spec file name in the root fix. The text is 01 section 5.2 word for word, but the
 /// engine does not know the file name as typed. The CLI replaces this with its own shell-quoted
