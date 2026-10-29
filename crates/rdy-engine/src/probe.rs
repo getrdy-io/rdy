@@ -39,7 +39,8 @@
 //!
 //! - names, TCP, TLS, HTTP and native calls: the network and native tickets. They open their entries
 //!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp, http and kube
-//!   call writes exactly one entry (M1-091, M1-103);
+//!   call writes exactly one entry (M1-091, M1-103). A kube request writes its entry through
+//!   [`Probe::kube_call`], which the read-only guard of `rdy-checks-k8s` calls;
 //! - `read_link`: `host.ports` (M1-072) needs it for `/proc/self/ns/net` and `/proc/<pid>/fd`, and the
 //!   action log has no kind for it yet. M1-169 adds both (plan correction 14).
 
@@ -653,6 +654,59 @@ impl Scope {
     }
 }
 
+/// One open `kube` entry of the action log. See [`Probe::kube_call`].
+///
+/// Close it with [`KubeCall::refused`], [`KubeCall::answered`] or [`KubeCall::failed`]. If it is dropped
+/// first, the log records the call as `timeout`.
+#[must_use = "an entry that is dropped is logged as a timeout"]
+pub struct KubeCall {
+    entry: Pending,
+}
+
+impl fmt::Debug for KubeCall {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KubeCall").finish_non_exhaustive()
+    }
+}
+
+impl KubeCall {
+    /// The guard refused the request. It never left the process. `rule` is a fixed sentence.
+    pub fn refused(mut self, rule: &'static str) {
+        self.entry.set("rule", rule);
+        self.entry.finish(ActionOutcome::Denied);
+    }
+
+    /// The guard refused the request because of one request header. As [`KubeCall::refused`], and the
+    /// entry also names the header. Pass the name, never the value (02 Appendix B, rule 8).
+    pub fn refused_header(mut self, rule: &'static str, header: &str) {
+        self.entry.set("header", header);
+        self.refused(rule);
+    }
+
+    /// The server answered with `status`. A status below 300 is `ok`. Any other is `failed` with a fixed
+    /// `error` (01 section 5.4): a redirect is not followed, so a 3xx is a failure too.
+    pub fn answered(mut self, status: u16) {
+        self.entry.set("status", status);
+        if status < 300 {
+            self.entry.finish(ActionOutcome::Ok);
+            return;
+        }
+        let error = if status < 400 {
+            "the server answered with a redirect, which rdy does not follow"
+        } else {
+            "the server answered with an error status"
+        };
+        self.entry.set("error", error);
+        self.entry.finish(ActionOutcome::Failed);
+    }
+
+    /// The request got no answer. `error` is a fixed phrase, never text from the client or the server.
+    pub fn failed(mut self, error: &'static str) {
+        self.entry.set("error", error);
+        self.entry.finish(ActionOutcome::Failed);
+    }
+}
+
 /// What a check uses to read the machine. See the [module docs](self).
 #[derive(Clone)]
 pub struct Probe {
@@ -746,6 +800,29 @@ impl Probe {
             let _ = what;
             work.await
         }
+    }
+
+    /// Opens the action-log entry for one Kubernetes API request (`kind` `kube`, with `method` and
+    /// `path`). The read-only guard in `rdy-checks-k8s` calls this once per request, before it decides.
+    /// Pass the path without the query string: a query can hold selector text, and 01 keeps it out of
+    /// the log.
+    ///
+    /// The entry carries this probe's check id, so a check that derives its client from its own probe
+    /// gets its requests logged under its own key. A probe with no check (run-level work) logs
+    /// `check: null`. Close the entry with one of the [`KubeCall`] methods. An entry that is dropped
+    /// first is recorded as `timeout`, so a request that is cancelled in flight still leaves one entry.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] after the check ended (the refusal is logged, rule
+    /// [`RULE_CHECK_FINISHED`]) or on a probe with no hub (rule [`RULE_NO_PROBE`]). The request must not
+    /// be sent.
+    pub fn kube_call(&self, method: &str, path: &str) -> Result<KubeCall, ProbeError> {
+        let mut fields = Map::new();
+        fields.insert("method".to_owned(), method.into());
+        fields.insert("path".to_owned(), path.into());
+        let (_, entry) = self.begin(ActionKind::Kube, fields, path)?;
+        Ok(KubeCall { entry })
     }
 
     /// The OS this probe's command table and privilege snapshot are read for.

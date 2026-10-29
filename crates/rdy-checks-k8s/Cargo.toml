@@ -20,9 +20,19 @@ kube = { workspace = true, features = ["client", "rustls-tls", "ring", "webpki-r
 # The newest `v1_*` minor, set once here (ADR 0010).
 k8s-openapi = { workspace = true, features = ["std", "v1_36"] }
 secrecy = { workspace = true, features = [] }
+# The read-only guard is a tower layer (M1-103). The request, body and service types it names.
+http = { workspace = true, features = ["std"] }
+http-body = { workspace = true, features = [] }
+tower-layer = { workspace = true, features = [] }
+tower-service = { workspace = true, features = [] }
 thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+# The test run (`TestRun`) writes the real action log, so the guard tests read the entries a run would.
+rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing"] }
+rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
+serde_json = { workspace = true, features = ["std"] }
+serde-saphyr = { workspace = true, features = ["deserialize"] }
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

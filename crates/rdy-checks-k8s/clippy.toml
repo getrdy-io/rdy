@@ -2,7 +2,7 @@
 #
 # Outside `src/client/`, check code must not name a kube client or config type or call a constructor of
 # one. Only the client module builds a client, so every request goes through the read-only guard that
-# M1-103 puts in `build_client`. `src/client/mod.rs` allows `clippy::disallowed_types` and
+# M1-103 wraps around it in `src/client/guard.rs`. `src/client/mod.rs` allows `clippy::disallowed_types` and
 # `clippy::disallowed_methods` for itself, and nowhere else may.
 #
 # Re-checked on 2026-10-29 against kube 4.2.0 (the pinned version, from the crate source): every item
@@ -25,7 +25,7 @@ allow-expect-in-tests = true
 disallowed-types = [
     { path = "kube::Client", reason = "only src/client/ builds a client; checks get the guarded ReadOnlyClient (ADR 0010)" },
     { path = "kube::Config", reason = "only src/client/ builds a kube config (ADR 0010)" },
-    { path = "kube::client::ClientBuilder", reason = "only src/client/ builds a client; the guard layer goes in build_client (ADR 0010)" },
+    { path = "kube::client::ClientBuilder", reason = "only src/client/ builds a client; the read-only guard wraps the built client from outside kube layers, in src/client/guard.rs (ADR 0010)" },
     { path = "kube::config::Kubeconfig", reason = "only src/client/ reads a kubeconfig; the probe facade denies .kube (ADR 0031)" },
 ]
 
@@ -59,4 +59,5 @@ disallowed-methods = [
     { path = "rdy_engine::exec::table::run", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration", allow-invalid = true },
     { path = "rdy_engine::exec::run", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
     { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
+    { path = "rdy_engine::probe::Probe::kube_call", reason = "writes the kube entry of the action log; only the read-only guard in rdy-checks-k8s src/client/ calls it, so a check cannot forge a kube entry (INV-14)", allow-invalid = true },
 ]

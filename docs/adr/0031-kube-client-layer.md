@@ -123,8 +123,12 @@ kubeconfig read needed a settled path.
 
 ## Consequences
 
-- M1-103 puts the guard in `build_client` and `connect` returns the guarded type. Until then the unguarded
-  client is private and only `GET /version` is sent.
+- M1-103 built the guard (`client/guard.rs`). The unguarded client stays private inside `Connected`.
+  `connect(probe, announce)` sends `GET /version` through the guard with the run probe, and
+  `Connected::read_only(check_probe)` wraps the raw client in `guarded_service` for one check and returns
+  a `ReadOnlyClient`, the only client a check gets. The guard sits outside kube's own layers, so it sees a
+  path with no host and no `Authorization` header, and `Impersonate-*` headers from the kubeconfig (added
+  below it) are not its to judge.
 - `cargo deny` allows `kube` only as a dependency of `rdy-checks-k8s`, and `kube-client` and `kube-core`
   only through kube (`deny.toml`, wrappers).
 - The kube lint-wall entries are in `crates/rdy-checks-k8s/clippy.toml`, together with the root entries (a

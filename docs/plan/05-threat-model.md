@@ -89,10 +89,14 @@ The allowlist (ADR 0010 as amended, 02 Appendix B):
 - Nothing else. 03's optional `dry_run: true` pod create for `k8s.admission` is rejected in M1. It
   conflicts with ADR 0010 and waits for an ADR 0010 amendment (Decisions needing an ADR).
 
-Enforcement is at runtime. A tower layer added through `kube::client::ClientBuilder` checks method and
-path on every request and fails closed: the request never leaves, and the check reports `Error`.
-`connect()` returns only the guarded client type and `K8sFamily::new` accepts only that type, so there is
-no unguarded client to pass. Inside `rdy-checks-k8s`, only the client module may name a kube client or
+Enforcement is at runtime. A tower layer wraps the built kube client from outside, as the service a
+check's `kube::Client` calls (it is not added through `ClientBuilder`). It sees the request as the check
+built it: method, path, query, headers and body. It cannot see what kube's own layers add below it, such
+as the `Authorization` header from the token or the exec plugin, the user agent, or a kubeconfig
+`Impersonate-*` (the operator's choice). It checks every request and fails closed: the request never
+leaves, and the check reports `Error`. A request header other than `accept`, `content-type` and
+`content-length` is refused. `connect()` keeps the raw client private and checks get only the guarded
+client type (`ReadOnlyClient`), so there is no unguarded client to pass. Inside `rdy-checks-k8s`, only the client module may name a kube client or
 config type (02 Appendix A), so a check cannot build a second client. The mock API server test from
 ADR 0010 stays as a second line.
 
