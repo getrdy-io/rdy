@@ -1,6 +1,6 @@
 # ADR 0031: The kube client layer reads the kubeconfig itself, announces first, and keeps plugin output out of every error
 
-- Status: Proposed (M1-102). Revised 2026-10-29 after the security-reviewer, k8s-expert and code-reviewer reviews of PR #76. It stays Proposed: security-reviewer re-reviews it, because it touches credentials, plugins and the network.
+- Status: Accepted, security-reviewed (PR #76). Revised 2026-10-29 after the security-reviewer, k8s-expert and code-reviewer reviews of PR #76; the security-reviewer signed it off on re-review, because it touches credentials, plugins and the network.
 - Date: 2026-10-29
 
 ## Context
@@ -45,8 +45,9 @@ kubeconfig read needed a settled path.
      them, in read order, so the probe hook (M1-107) logs one `read` entry each, with no check id (SEC-22).
      A check and the later read are two steps, so a file swapped in between is not caught. The operator
      owns these files. Two residuals: kube re-reads a token file about once a minute (`TokenFile::token`,
-     a synchronous read on a worker) and the pod's `ca.crt` about once a minute (`ReloadingVerifier`),
-     and neither re-read has rdy's type or size check. Both files sit in the pod's own projected volume.
+     a synchronous read on a worker; this covers the kubeconfig `tokenFile` too, `auth/mod.rs` line 339 of
+     kube-client 4.2.0, not only the pod's) and the pod's `ca.crt` about once a minute (`ReloadingVerifier`),
+     and neither re-read has rdy's type or size check. The pod's files sit in its own projected volume; a kubeconfig `tokenFile` is a path the operator chose.
 3. **No `infer`, no `try_default`.** The client module builds a `Config` from the `Kubeconfig` it read
    and never calls `apply_debug_overrides`.
 4. **Announce, then send.** `Loaded::connect(announce)` calls `announce` with the cluster line before it
@@ -108,7 +109,7 @@ kubeconfig read needed a settled path.
     kube's `drop_env`. Cloud credential variables are not removed: `aws eks get-token` and its kind need
     them, and the operator chose to run that plugin. Proved with a plugin that dumps its environment.
 11. **Hand-offs to the probe hook (M1-107).** `Loaded::known_secrets()` returns the inline token, password
-    and client key data, the contents of a token file or client key file, and the values of plugin `env` entries whose name looks like a secret (at least 8 characters), for the run-scoped known-secret
+    and client key data, the contents of a token file or client key file, and the values of plugin `env` entries whose name the redactor's key-name rule calls secret, or contains `KEY` (at least 8 characters), for the run-scoped known-secret
     set (02, ADR 0015 decision 3). A token that a plugin hands out exists only after `connect` and is not
     in it (the redactor's token rules cover its shape). `Loaded::plugin_exec()` returns the plugin command
     (an absolute path when the kubeconfig gave a path) and escaped arguments, for the `exec` action-log

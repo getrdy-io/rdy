@@ -896,8 +896,16 @@ fn a_secret_looking_exec_env_value_is_a_known_secret() {
 }
 
 #[test]
-fn rdy_variable_names_are_matched_the_way_the_os_matches_names() {
-    assert!(is_rdy_var("RDY_TOKEN"));
-    assert!(!is_rdy_var("RDX_TOKEN"));
-    assert_eq!(is_rdy_var("rdy_token"), cfg!(windows));
+fn rdy_variable_names_are_matched_by_case_where_the_os_does() {
+    for insensitive in [false, true] {
+        assert!(is_rdy_var("RDY_TOKEN", insensitive));
+        assert!(!is_rdy_var("RDX_TOKEN", insensitive));
+        assert!(!is_rdy_var("RDY", insensitive));
+        // A multi-byte character across byte 4 must not panic.
+        assert!(!is_rdy_var("abc\u{e9}", insensitive));
+        assert!(!is_rdy_var("\u{e9}\u{e9}\u{e9}", insensitive));
+    }
+    assert!(!is_rdy_var("rdy_token", false));
+    assert!(is_rdy_var("rdy_token", true));
+    assert!(is_rdy_var("Rdy_Token", true));
 }

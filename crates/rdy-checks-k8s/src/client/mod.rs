@@ -139,12 +139,14 @@ impl KubeOptions {
 }
 
 /// True for a `RDY_*` variable name. Windows variable names are case-insensitive, so `rdy_token` counts
-/// there.
-fn is_rdy_var(name: &str) -> bool {
-    if cfg!(windows) {
-        name.len() >= 4 && name[..4].eq_ignore_ascii_case("RDY_")
+/// there. `case_insensitive` is a parameter so every platform tests both rules. It compares bytes, so a
+/// name with a multi-byte character near the start cannot panic.
+fn is_rdy_var(name: &str, case_insensitive: bool) -> bool {
+    let prefix = name.as_bytes().get(..4);
+    if case_insensitive {
+        prefix.is_some_and(|p| p.eq_ignore_ascii_case(b"RDY_"))
     } else {
-        name.starts_with("RDY_")
+        prefix == Some(b"RDY_".as_slice())
     }
 }
 
@@ -189,7 +191,7 @@ impl Env {
             proxy_env_set: set("HTTPS_PROXY") || set("https_proxy"),
             rdy_vars: std::env::vars_os()
                 .filter_map(|(name, _)| name.into_string().ok())
-                .filter(|name| is_rdy_var(name))
+                .filter(|name| is_rdy_var(name, cfg!(windows)))
                 .collect(),
         }
     }
@@ -877,10 +879,9 @@ fn inline_secrets(auth: Option<&AuthInfo>) -> Vec<String> {
         .flatten()
     {
         if let (Some(name), Some(value)) = (entry.get("name"), entry.get("value")) {
-            let name = name.to_ascii_uppercase();
-            let secret_name = ["TOKEN", "SECRET", "KEY", "PASSWORD", "PASS"]
-                .iter()
-                .any(|word| name.contains(word));
+            // The redactor's own key-name rule, plus `KEY` (it treats `KEY` alone as a plain word).
+            let secret_name = rdy_engine::redact::is_secret_name(name)
+                || name.to_ascii_uppercase().contains("KEY");
             if secret_name && value.len() >= 8 {
                 secrets.push(value.clone());
             }
