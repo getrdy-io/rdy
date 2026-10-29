@@ -346,11 +346,10 @@ jobs:
       - name: release.yml matches dist and the hardening script
         run: sh scripts/gen-release-workflow.sh --check
 
-  # M1-010: the real cosign verify-blob form from 06 against a real keyless signature (cosign's own
-  # v3.1.4 release), and the same call after one byte changes. It needs the network (GitHub and
-  # Sigstore's TUF mirror) and cosign, which the pinned installer provides. It is NOT in ci-ok yet.
-  # It was written without a cosign binary to run it on (ADR 0024). Add it to `needs:` of ci-ok after
-  # the first green run.
+  # M1-010: the real cosign verify-blob forms from 06 against real keyless signatures: cosign's own
+  # v3.1.4 release (identity and issuer) and goreleaser v2.19.0 (a GitHub Actions run: identity, issuer,
+  # repository, ref and trigger), each also after a change that must fail. It needs the network (GitHub
+  # and Sigstore's TUF mirror) and cosign, which the pinned installer provides. It is in ci-ok (ADR 0024).
   cosign-roundtrip:
     name: cosign-roundtrip
     runs-on: ubuntu-24.04
@@ -363,14 +362,14 @@ jobs:
           persist-credentials: false
       - name: Install cosign (pinned file, sha256 checked)
         run: sh scripts/install-release-tool.sh cosign
-      - name: verify-blob passes with the exact identity and fails after one byte changes
+      - name: verify-blob passes with the exact identity and claims, and fails on every change
         run: sh scripts/test-cosign-roundtrip.sh
 
   # The only required check. Keep `needs:` equal to the list of gating jobs.
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, zizmor, deny, dco, test, root, release-workflow]
+    needs: [lint, zizmor, deny, dco, test, root, release-workflow, cosign-roundtrip]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

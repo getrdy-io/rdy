@@ -18,12 +18,18 @@
 #   3. The folder holds only expected release files (check-release-artifacts.sh --files-only).
 #   4. Every archive has a line in dist's sha256.sum and the hash matches.
 #   5. install.sh from the tagged source is stamped with the tag and copied in. It must hold the
-#      text @RDY_VERSION@ on exactly one line. That is the default version. The tag has no
-#      install.sh before M1-014, and then this step is skipped with a note.
+#      line RDY_STAMPED_VERSION='@@RDY_STAMPED_VERSION@@' exactly once. The whole line becomes
+#      RDY_STAMPED_VERSION='<tag>' (with the v), and exactly one such line must exist afterwards.
+#      The tag has no install.sh before M1-014, and then this step is skipped with a note.
 #   6. SHA256SUMS is written over every file in the folder (scripts/make-sha256sums.sh).
 #   7. `cosign sign-blob` signs SHA256SUMS and writes SHA256SUMS.sigstore.json.
 #   8. Self-verify: `cosign verify-blob` with the exact issuer and identity
 #        https://github.com/<owner/repo>/.github/workflows/sign-release.yml@refs/tags/<tag>
+#      and with the caller's claims, because the identity names the called workflow file, not the
+#      repository that called it (any repository can call a public reusable workflow):
+#        --certificate-github-workflow-repository <owner/repo>
+#        --certificate-github-workflow-ref refs/tags/<tag>
+#        --certificate-github-workflow-trigger push
 #      then SHA256SUMS is compared with the folder again. If anything fails, SHA256SUMS and the
 #      bundle are deleted and the script exits 1.
 # The Rekor log index and the sha256 of SHA256SUMS are printed, and written to
@@ -89,6 +95,10 @@ else
 fi
 
 identity="https://github.com/$repo/.github/workflows/sign-release.yml@refs/tags/$tag"
+# The Fulcio certificate also carries the claims of the run that called this reusable workflow.
+# Without these three, a workflow in any other repository that calls ours would pass.
+wf_ref="refs/tags/$tag"
+wf_trigger=push
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
@@ -148,16 +158,19 @@ fi
 # 5. install.sh from the tagged source, with the tag stamped in as the default version.
 src=$root/install.sh
 if [ -f "$src" ]; then
-    n=$(grep -c '@RDY_VERSION@' "$src")
+    placeholder="RDY_STAMPED_VERSION='@@RDY_STAMPED_VERSION@@'"
+    stamped="RDY_STAMPED_VERSION='$tag'"
+    n=$(grep -c -x -F "$placeholder" "$src")
     if [ "$n" -ne 1 ]; then
-        die "install.sh has @RDY_VERSION@ on $n lines, not one" "put the default version in one line as @RDY_VERSION@. This script replaces it with $tag."
+        die "install.sh has the line $placeholder on $n lines, not one" "keep that line in install.sh exactly once. This script replaces the whole line with $stamped."
     fi
     if [ -e "$dir/install.sh" ]; then
         die "$dir/install.sh already exists" "only this script adds install.sh. Find out what wrote it."
     fi
-    sed "s/@RDY_VERSION@/$tag/" "$src" > "$dir/install.sh"
-    if grep -q '@RDY_VERSION@' "$dir/install.sh"; then
-        die "the stamp did not replace @RDY_VERSION@" "check install.sh for a second copy of the text on the stamped line"
+    # The tag matched the release tag shape above, so it holds no character that sed treats as special.
+    sed "s/^RDY_STAMPED_VERSION='@@RDY_STAMPED_VERSION@@'\$/RDY_STAMPED_VERSION='$tag'/" "$src" > "$dir/install.sh"
+    if [ "$(grep -c -x -F "$stamped" "$dir/install.sh")" -ne 1 ] || [ "$(grep -c -x -F "$placeholder" "$dir/install.sh")" -ne 0 ]; then
+        die "the stamp did not leave exactly one $stamped line" "check install.sh for a second copy of the line, or for trailing spaces on it"
     fi
     echo "stamped install.sh with $tag"
 else
@@ -183,9 +196,12 @@ if ! (cd "$dir" && cosign verify-blob \
     --bundle SHA256SUMS.sigstore.json \
     --certificate-identity "$identity" \
     --certificate-oidc-issuer "$issuer" \
+    --certificate-github-workflow-repository "$repo" \
+    --certificate-github-workflow-ref "$wf_ref" \
+    --certificate-github-workflow-trigger "$wf_trigger" \
     SHA256SUMS); then
     cleanup_signature
-    die "the signature does not verify as $identity" "do not publish. The signing identity is not the one install.sh will check. Look for a renamed workflow file, a different tag or a different repository."
+    die "the signature does not verify as $identity" "do not publish. The signing identity is not the one install.sh will check. Look for a renamed workflow file, a different tag, a different repository or a trigger other than a tag push."
 fi
 if ! "$here/make-sha256sums.sh" "$dir" > "$work/SHA256SUMS.again" 2> /dev/null || ! cmp -s "$work/SHA256SUMS.again" "$dir/SHA256SUMS"; then
     cleanup_signature
@@ -197,6 +213,7 @@ rekor=$(jq -r '.verificationMaterial.tlogEntries[0].logIndex // "unknown"' "$dir
 echo "signed and verified SHA256SUMS"
 echo "  identity:  $identity"
 echo "  issuer:    $issuer"
+echo "  claims:    repository=$repo ref=$wf_ref trigger=$wf_trigger"
 echo "  sha256:    $digest"
 echo "  rekor log: $rekor"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -206,6 +223,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
         echo "- Tag: \`$tag\`"
         echo "- Identity: \`$identity\`"
         echo "- Issuer: \`$issuer\`"
+        echo "- Claims: repository \`$repo\`, ref \`$wf_ref\`, trigger \`$wf_trigger\`"
         echo "- sha256 of SHA256SUMS: \`$digest\`"
         echo "- Rekor log index: \`$rekor\`"
     } >> "$GITHUB_STEP_SUMMARY"

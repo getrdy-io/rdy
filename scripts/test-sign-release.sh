@@ -4,8 +4,10 @@
 #
 # A fake `cosign` on PATH stands in for Sigstore, so no test needs the network or an OIDC token.
 # The fake behaves like the parts of cosign that matter here. `sign-blob` writes a bundle that holds
-# the sha256 of the blob and the identity in $FAKE_SIGNER. `verify-blob` fails unless the blob's sha256,
-# the identity and the issuer all match. Every call is logged, so the tests read the exact arguments.
+# the sha256 of the blob, the identity in $FAKE_SIGNER and the caller claims in $FAKE_REPO, $FAKE_REF
+# and $FAKE_TRIGGER (what Fulcio puts in the certificate of a reusable workflow: the identity names the
+# called file, the claims name the caller). `verify-blob` fails unless the blob's sha256, the identity
+# and the issuer all match, and each --certificate-github-workflow-* flag that it gets matches the claim. Every call is logged, so the tests read the exact arguments.
 # What the fake cannot show is that Fulcio puts the identity we expect into the certificate. The
 # release-sandbox run (06, "Sandbox proof") shows that, and scripts/test-cosign-roundtrip.sh runs the
 # real verify-blob against a real keyless signature.
@@ -40,6 +42,9 @@ repo=getrdy-io/rdy
 tag=v0.1.0-alpha.1
 want_identity="https://github.com/$repo/.github/workflows/sign-release.yml@refs/tags/$tag"
 want_issuer=https://token.actions.githubusercontent.com
+# The caller's claims. The identity alone names the called workflow file, so any repository that
+# calls a public reusable workflow would match it.
+want_claims="--certificate-github-workflow-repository $repo --certificate-github-workflow-ref refs/tags/$tag --certificate-github-workflow-trigger push"
 
 # ---- the fake cosign ---------------------------------------------------------------------------
 mkdir "$tmp/bin"
@@ -52,12 +57,18 @@ shift
 bundle=""
 identity=""
 issuer=""
+wf_repo=""
+wf_ref=""
+wf_trigger=""
 blob=""
 while [ "$#" -gt 0 ]; do
     case $1 in
         --bundle) bundle=$2; shift ;;
         --certificate-identity) identity=$2; shift ;;
         --certificate-oidc-issuer) issuer=$2; shift ;;
+        --certificate-github-workflow-repository) wf_repo=$2; shift ;;
+        --certificate-github-workflow-ref) wf_ref=$2; shift ;;
+        --certificate-github-workflow-trigger) wf_trigger=$2; shift ;;
         --yes) ;;
         -*) echo "fake cosign: unexpected flag $1" >&2; exit 2 ;;
         *) blob=$1 ;;
@@ -68,14 +79,19 @@ digest=$(sha256sum "$blob" | awk '{ print $1 }')
 case $cmd in
     sign-blob)
         [ -z "${FAKE_SIGN_FAIL:-}" ] || { echo "fake cosign: no OIDC token" >&2; exit 1; }
-        printf '{"digest":"%s","identity":"%s","verificationMaterial":{"tlogEntries":[{"logIndex":"4242"}]}}\n' \
-            "$digest" "$FAKE_SIGNER" > "$bundle"
+        printf '{"digest":"%s","identity":"%s","repo":"%s","ref":"%s","trigger":"%s","verificationMaterial":{"tlogEntries":[{"logIndex":"4242"}]}}\n' \
+            "$digest" "$FAKE_SIGNER" "$FAKE_REPO" "$FAKE_REF" "$FAKE_TRIGGER" > "$bundle"
+        # FAKE_TOUCH: a file in the folder changes while the signature is made.
+        [ -z "${FAKE_TOUCH:-}" ] || echo changed >> rdy-x86_64-apple-darwin.tar.gz
         echo "ZmFrZQ=="
         ;;
     verify-blob)
         [ "$(jq -r .digest "$bundle")" = "$digest" ] || { echo "fake cosign: invalid signature when validating ASN.1 encoded signature" >&2; exit 1; }
         [ "$(jq -r .identity "$bundle")" = "$identity" ] || { echo "fake cosign: none of the expected identities matched" >&2; exit 1; }
         [ "$issuer" = "https://token.actions.githubusercontent.com" ] || { echo "fake cosign: issuer mismatch" >&2; exit 1; }
+        [ -z "$wf_repo" ] || [ "$(jq -r .repo "$bundle")" = "$wf_repo" ] || { echo "fake cosign: expected GitHub workflow repository value does not match" >&2; exit 1; }
+        [ -z "$wf_ref" ] || [ "$(jq -r .ref "$bundle")" = "$wf_ref" ] || { echo "fake cosign: expected GitHub workflow ref value does not match" >&2; exit 1; }
+        [ -z "$wf_trigger" ] || [ "$(jq -r .trigger "$bundle")" = "$wf_trigger" ] || { echo "fake cosign: expected GitHub workflow trigger value does not match" >&2; exit 1; }
         echo "Verified OK" >&2
         ;;
     *) echo "fake cosign: unexpected command $cmd" >&2; exit 2 ;;
@@ -85,7 +101,10 @@ chmod +x "$tmp/bin/cosign"
 FAKE_LOG="$tmp/cosign.log"
 export FAKE_LOG
 FAKE_SIGNER=$want_identity
-export FAKE_SIGNER
+FAKE_REPO=$repo
+FAKE_REF=refs/tags/$tag
+FAKE_TRIGGER=push
+export FAKE_SIGNER FAKE_REPO FAKE_REF FAKE_TRIGGER
 
 # ---- fixtures ----------------------------------------------------------------------------------
 targets="x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc"
@@ -123,12 +142,21 @@ source_tree() {
     fi
 }
 source_tree src-none -
-source_tree src-ok '#!/bin/sh
+# The placeholder line is the one in M1-014's install.sh.
+source_tree src-ok "#!/bin/sh
+RDY_STAMPED_VERSION='@@RDY_STAMPED_VERSION@@'
+case \$RDY_STAMPED_VERSION in '' | @@*) echo unstamped ;; esac
+echo hello"
+source_tree src-two "#!/bin/sh
+RDY_STAMPED_VERSION='@@RDY_STAMPED_VERSION@@'
+RDY_STAMPED_VERSION='@@RDY_STAMPED_VERSION@@'
+echo hello"
+source_tree src-indented "#!/bin/sh
+ RDY_STAMPED_VERSION='@@RDY_STAMPED_VERSION@@'
+echo hello"
+source_tree src-oldname '#!/bin/sh
 RDY_DEFAULT_VERSION="@RDY_VERSION@"
 echo hello'
-source_tree src-two '#!/bin/sh
-RDY_DEFAULT_VERSION="@RDY_VERSION@"
-# also @RDY_VERSION@ here'
 source_tree src-zero '#!/bin/sh
 echo hello'
 
@@ -191,7 +219,16 @@ if "$sums" > /dev/null 2>&1; then bad "make-sha256sums without an argument fails
 
 # ---- sign-release.sh: the good path ------------------------------------------------------------
 release good
-run "a good release is signed and verified" 0 "signed and verified SHA256SUMS" "$tmp/good" "$tag" "$repo" "$tmp/src-ok"
+GITHUB_STEP_SUMMARY="$tmp/summary.md"
+export GITHUB_STEP_SUMMARY
+run "a good release is signed and verified" 0 "rekor log: 4242" "$tmp/good" "$tag" "$repo" "$tmp/src-ok"
+unset GITHUB_STEP_SUMMARY
+# shellcheck disable=SC2016  # the backticks are literal Markdown
+if grep -q 'Rekor log index: `4242`' "$tmp/summary.md" && grep -q "Claims: repository \`$repo\`, ref \`refs/tags/$tag\`, trigger \`push\`" "$tmp/summary.md"; then
+    ok "the step summary holds the Rekor log index and the claims"
+else
+    bad "the step summary holds the Rekor log index and the claims"
+fi
 if [ -f "$tmp/good/SHA256SUMS" ] && [ -f "$tmp/good/SHA256SUMS.sigstore.json" ]; then
     ok "SHA256SUMS and its bundle are in the folder"
 else
@@ -217,10 +254,16 @@ if [ ! -e "$tmp/good/plan-dist-manifest.json" ] && [ -e "$tmp/good/dist-manifest
 else
     bad "the per-job manifests are removed and dist-manifest.json stays"
 fi
-if grep -q 'RDY_DEFAULT_VERSION="v0.1.0-alpha.1"' "$tmp/good/install.sh" && ! grep -q '@RDY_VERSION@' "$tmp/good/install.sh"; then
-    ok "install.sh carries this tag as its default version"
+stamped_lines=$(grep -c -x "RDY_STAMPED_VERSION='v0.1.0-alpha.1'" "$tmp/good/install.sh")
+if [ "$stamped_lines" = 1 ] && ! grep -q '^RDY_STAMPED_VERSION=.@@' "$tmp/good/install.sh"; then
+    ok "install.sh carries this tag, with the v, on exactly one RDY_STAMPED_VERSION line"
 else
-    bad "install.sh carries this tag as its default version"
+    bad "install.sh carries this tag, with the v, on exactly one RDY_STAMPED_VERSION line"
+fi
+if [ "$(sed -n 2p "$tmp/good/install.sh")" = "RDY_STAMPED_VERSION='v0.1.0-alpha.1'" ] && [ "$(sed -n 3p "$tmp/good/install.sh")" = "case \$RDY_STAMPED_VERSION in '' | @@*) echo unstamped ;; esac" ]; then
+    ok "only the placeholder line changes in install.sh"
+else
+    bad "only the placeholder line changes in install.sh"
 fi
 if (cd "$tmp/good" && sha256sum -c SHA256SUMS > /dev/null 2>&1); then
     ok "sha256sum -c SHA256SUMS passes on the signed folder"
@@ -242,10 +285,10 @@ if [ "$sign_line" = "sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUM
 else
     bad "cosign sign-blob gets --yes, the bundle path and SHA256SUMS (got: $sign_line)"
 fi
-if [ "$verify_line" = "verify-blob --bundle SHA256SUMS.sigstore.json --certificate-identity $want_identity --certificate-oidc-issuer $want_issuer SHA256SUMS" ]; then
-    ok "cosign verify-blob gets the exact identity and issuer, no regular expression"
+if [ "$verify_line" = "verify-blob --bundle SHA256SUMS.sigstore.json --certificate-identity $want_identity --certificate-oidc-issuer $want_issuer $want_claims SHA256SUMS" ]; then
+    ok "cosign verify-blob gets the exact identity, issuer, repository, ref and trigger, no regular expression"
 else
-    bad "cosign verify-blob gets the exact identity and issuer, no regular expression (got: $verify_line)"
+    bad "cosign verify-blob gets the exact identity, issuer, repository, ref and trigger, no regular expression (got: $verify_line)"
 fi
 case $verify_line in
     *regexp*) bad "no -regexp flag is used" ;;
@@ -257,14 +300,21 @@ else
     bad "cosign is called twice: sign, then verify"
 fi
 
+# verify_good: the verify-blob form from 06 against the signed folder, with the fake cosign.
+verify_good() {
+    # shellcheck disable=SC2086  # want_claims is a list of flags, one word each
+    PATH="$tmp/bin:$PATH" cosign verify-blob --bundle "$tmp/good/SHA256SUMS.sigstore.json" \
+        --certificate-identity "$want_identity" --certificate-oidc-issuer "$want_issuer" \
+        $want_claims "$tmp/good/SHA256SUMS" > /dev/null 2>&1
+}
 # The exit test, in the fake's terms: the bundle verifies, and fails after one byte changes.
-if PATH="$tmp/bin:$PATH" cosign verify-blob --bundle "$tmp/good/SHA256SUMS.sigstore.json" --certificate-identity "$want_identity" --certificate-oidc-issuer "$want_issuer" "$tmp/good/SHA256SUMS" > /dev/null 2>&1; then
+if verify_good; then
     ok "verify-blob passes on the signed SHA256SUMS"
 else
     bad "verify-blob passes on the signed SHA256SUMS"
 fi
 printf 'x' >> "$tmp/good/SHA256SUMS"
-if PATH="$tmp/bin:$PATH" cosign verify-blob --bundle "$tmp/good/SHA256SUMS.sigstore.json" --certificate-identity "$want_identity" --certificate-oidc-issuer "$want_issuer" "$tmp/good/SHA256SUMS" > /dev/null 2>&1; then
+if verify_good; then
     bad "verify-blob fails after one byte of SHA256SUMS changes"
 else
     ok "verify-blob fails after one byte of SHA256SUMS changes"
@@ -286,6 +336,44 @@ release wrongtag
 run "a signature for another tag fails the self-verify" 1 "does not verify as" "$tmp/wrongtag" "$tag" "$repo" "$tmp/src-ok"
 FAKE_SIGNER=$want_identity
 export FAKE_SIGNER
+
+# The reusable-workflow hole: the identity is right (it names our file) but the run that called it
+# belongs to another repository, another ref or another trigger.
+release wrongrepo
+FAKE_REPO=evil-org/rdy
+export FAKE_REPO
+run "a signature made by another repository's run fails the self-verify" 1 "does not verify as" "$tmp/wrongrepo" "$tag" "$repo" "$tmp/src-ok"
+if [ -e "$tmp/wrongrepo/SHA256SUMS" ] || [ -e "$tmp/wrongrepo/SHA256SUMS.sigstore.json" ]; then
+    bad "a wrong caller repository leaves no signature files"
+else
+    ok "a wrong caller repository leaves no signature files"
+fi
+FAKE_REPO=$repo
+export FAKE_REPO
+release wrongref
+FAKE_REF=refs/heads/main
+export FAKE_REF
+run "a signature made from a branch run fails the self-verify" 1 "does not verify as" "$tmp/wrongref" "$tag" "$repo" "$tmp/src-ok"
+FAKE_REF=refs/tags/$tag
+export FAKE_REF
+release wrongtrigger
+FAKE_TRIGGER=workflow_dispatch
+export FAKE_TRIGGER
+run "a signature made by a manual run fails the self-verify" 1 "does not verify as" "$tmp/wrongtrigger" "$tag" "$repo" "$tmp/src-ok"
+FAKE_TRIGGER=push
+export FAKE_TRIGGER
+
+# The files change while cosign signs.
+release touched
+FAKE_TOUCH=1
+export FAKE_TOUCH
+run "files that change while signing are not published" 1 "changed while signing" "$tmp/touched" "$tag" "$repo" "$tmp/src-ok"
+unset FAKE_TOUCH
+if [ -e "$tmp/touched/SHA256SUMS" ] || [ -e "$tmp/touched/SHA256SUMS.sigstore.json" ]; then
+    bad "files that changed while signing leave no signature files"
+else
+    ok "files that changed while signing leave no signature files"
+fi
 
 release signfail
 FAKE_SIGN_FAIL=1
@@ -329,6 +417,12 @@ release twostamps
 run "an install.sh with two stamp lines is refused" 1 "on 2 lines" "$tmp/twostamps" "$tag" "$repo" "$tmp/src-two"
 release nostamp
 run "an install.sh with no stamp line is refused" 1 "on 0 lines" "$tmp/nostamp" "$tag" "$repo" "$tmp/src-zero"
+release indented
+run "an install.sh whose stamp line is indented is refused" 1 "on 0 lines" "$tmp/indented" "$tag" "$repo" "$tmp/src-indented"
+release oldname
+run "an install.sh with the old @RDY_VERSION@ text is refused" 1 "on 0 lines" "$tmp/oldname" "$tag" "$repo" "$tmp/src-oldname"
+if [ -e "$tmp/oldname/install.sh" ]; then bad "a refused install.sh is not copied in"; else ok "a refused install.sh is not copied in"; fi
+if [ -s "$FAKE_LOG" ]; then bad "cosign is not called after a refused install.sh"; else ok "cosign is not called after a refused install.sh"; fi
 
 # ---- sign-release.sh: usage --------------------------------------------------------------------
 release usage

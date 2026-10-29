@@ -355,7 +355,7 @@ runs to the end of the line or YAML block, because a cap would leave the tail of
 | R1 | Unattributable release | "Who published this?" | L | M | `[M1]` Rekor entry, tag rulesets, audit log. | SEC-06 and SEC-07 (M1-010) |
 | I1 | Long-lived secrets leak | Token in a CI log | L | M | `[M1]` Keyless signing. `[M2+]` crates.io trusted publishing. | 06 |
 | E1 | Installer as root | `sudo sh` | M | M | `[M1]` Refuses uid 0 without `--allow-root`; never sudo (06). | SEC-08 (M1-014) |
-| E2 | Maintainer takeover | Attacker pushes a tag | L | H | `[M1]` MFA, tag ruleset, manual approval on `release`. | SEC-04 (M1-011), 06 rulesets |
+| E2 | Maintainer takeover | Attacker pushes a tag | L | H | `[M1]` MFA, tag ruleset, manual approval on `release`. With one founder and self-review off, the approval does not stop a stolen founder session or token: it stops a tag pushed by anything else. MFA and the tag ruleset carry that case. | SEC-04 (M1-011), 06 rulesets |
 
 ## Appendix D: Surface 4 STRIDE (M2)
 

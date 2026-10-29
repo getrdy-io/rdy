@@ -30,7 +30,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0020](0020-dist-release-workflow-settings.md) | Releases are built by a generated and hardened dist workflow, published last, and gated by an artifact check | Accepted |
 | [0021](0021-trust-store-file-rules.md) | Trust store file rules where the design is silent are the strict ones (user symlink and owner, Windows refuses until M1-122) | Accepted |
 | [0023](0023-inherited-descriptors-detect-not-close.md) | Descriptors inherited by `rdy` are listed and reported in M1, not closed | Accepted, security-reviewed (PR #53) |
-| [0024](0024-release-proofs-are-founder-hand-steps.md) | Release proofs that need the sandbox, an environment approval or a tag push are founder hand steps; agents build and test the repo side only | Accepted |
+| [0024](0024-release-proofs-are-founder-hand-steps.md) | Release proofs that need the sandbox, an environment approval or a tag push are founder hand steps; agents build and test the repo side only | Accepted by the coordinator, founder ratification pending |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.

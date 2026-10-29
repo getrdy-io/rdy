@@ -63,6 +63,16 @@ prop "the SBOM step output name is outputs" lacks 'cargo-cyclonedx\.output\.'
 prop "announce checks the files it publishes, and the signed list" has 'check-release-artifacts.sh --files-only --signed artifacts'
 prop "the signing job waits for the artifact check" has '^      - custom-check-release-artifacts$'
 prop "no workflow inherits secrets" lacks 'secrets: inherit'
+prop "announce needs the signing job to have succeeded, not skipped" has "&& needs\\.custom-sign-release\\.result == 'success' \\}\\}$"
+prop "announce does not accept a skipped signing job" lacks "custom-sign-release\\.result == 'skipped'"
+# shellcheck disable=SC2016  # $REPO and $TAG are literal text in the workflow
+prop "announce verifies the signature with the caller repository" has '^            --certificate-github-workflow-repository "\$REPO" \\$'
+# shellcheck disable=SC2016
+prop "announce verifies the signature with the tag ref" has '^            --certificate-github-workflow-ref "refs/tags/\$TAG" \\$'
+prop "announce verifies the signature with the push trigger" has '^            --certificate-github-workflow-trigger push \\$'
+# shellcheck disable=SC2016
+prop "announce verifies the exact signing identity" has 'certificate-identity "https://github.com/\$REPO/.github/workflows/sign-release.yml@refs/tags/\$TAG"'
+prop "announce verifies no identity by regular expression" lacks 'certificate-(identity|oidc-issuer)-regexp'
 
 # Every `uses:` is a full commit SHA, except the local reusable workflow.
 unpinned=$(grep -E '^[[:space:]]*-?[[:space:]]*uses:' "$wf" | grep -Ev 'uses: \./' | grep -Ev '@[0-9a-f]{40}( |$)' || true)
@@ -163,6 +173,11 @@ if grep -q '^    environment: release$' "$sw"; then
     ok "the signing job runs in the environment release"
 else
     bad "the signing job runs in the environment release"
+fi
+if grep -q "^    if: github.repository_owner == 'getrdy-io'\$" "$sw"; then
+    ok "the signing job runs only for the getrdy-io owner"
+else
+    bad "the signing job runs only for the getrdy-io owner"
 fi
 if grep -q 'contents: write' "$sw"; then
     bad "the signing workflow has no write token"

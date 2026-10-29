@@ -252,7 +252,32 @@ def harden(text: str) -> str:
         "      - name: Check the files to publish\n"
         "        # Only the expected names, regular files only, all listed in the signed SHA256SUMS (ADR 0020).\n"
         "        run: sh scripts/check-release-artifacts.sh --files-only --signed artifacts\n"
+        "      - name: Verify the release signature\n"
+        "        # The same exact identity and caller claims as sign-release.sh, install.sh and the docs\n"
+        "        # (06, trust roots). The hashes above prove the files match SHA256SUMS. This proves SHA256SUMS\n"
+        "        # was signed by sign-release.yml of this repository at this tag. The job token is not passed\n"
+        "        # to the downloaded tool.\n"
+        "        env:\n"
+        "          TAG: ${{ needs.plan.outputs.tag }}\n"
+        "          REPO: ${{ github.repository }}\n"
+        "        run: |\n"
+        "          env -u GH_TOKEN sh scripts/install-release-tool.sh cosign\n"
+        '          cd artifacts && env -u GH_TOKEN "$HOME/.cargo/bin/cosign" verify-blob \\\n'
+        "            --bundle SHA256SUMS.sigstore.json \\\n"
+        '            --certificate-identity "https://github.com/$REPO/.github/workflows/sign-release.yml@refs/tags/$TAG" \\\n'
+        "            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\\n"
+        '            --certificate-github-workflow-repository "$REPO" \\\n'
+        '            --certificate-github-workflow-ref "refs/tags/$TAG" \\\n'
+        "            --certificate-github-workflow-trigger push \\\n"
+        "            SHA256SUMS\n"
         "      - name: Create GitHub Release\n",
+    )
+
+    # 7b. Publish only after the signing job succeeded. A skipped signing job must not publish
+    # unsigned files. (publish-prereleases is on, so the job runs for alpha tags too.)
+    sub(
+        "(needs.custom-sign-release.result == 'skipped' || needs.custom-sign-release.result == 'success')",
+        "needs.custom-sign-release.result == 'success'",
     )
 
     return text

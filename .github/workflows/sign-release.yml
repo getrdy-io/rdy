@@ -9,6 +9,12 @@
 #        https://github.com/<repo>/.github/workflows/sign-release.yml@refs/tags/<tag>
 #      The certificate carries the path of this file, so renaming it changes the identity that
 #      install.sh and the docs check. Rename it only together with docs/plan/06 and install.sh.
+#      That identity names this file, not the repository that called it, and any repository can
+#      call a public reusable workflow. So every verify also pins the caller's claims:
+#        --certificate-github-workflow-repository <owner/repo>
+#        --certificate-github-workflow-ref refs/tags/<tag>
+#        --certificate-github-workflow-trigger push
+#      The job also refuses to run for any owner other than getrdy-io (see `if:` below).
 #   4. Uploads SHA256SUMS, SHA256SUMS.sigstore.json and the stamped install.sh as the workflow
 #      artifact `artifacts-sign-release`.
 # No release exists yet. The `announce` job creates it after this job, from every `artifacts-*`
@@ -37,6 +43,9 @@ permissions: {}
 jobs:
   sign:
     name: sign SHA256SUMS
+    # In a reusable workflow, `github` is the caller's context. A fork or another organization
+    # that calls this workflow never gets a certificate from us (SEC-06).
+    if: github.repository_owner == 'getrdy-io'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # The job waits here until a reviewer approves. The wait does not count toward the timeout.
