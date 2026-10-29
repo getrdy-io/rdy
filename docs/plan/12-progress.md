@@ -190,7 +190,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-088 | todo | | --json stdout hygiene on every exit path and the static TTY line
 
-- M1-089 | todo | | CheckMeta in the check registry, read by xtask
+- M1-089 | [#62](https://github.com/getrdy-io/rdy/pull/62) | 2026-10-29 | ADR 0026 (Accepted after the cli-ux review on PR #62). The family list lives in `xtask::checks::registry` until M1-057 moves it into `rdy_cli` (correction-09). `HostFamily` is not registered in the CLI (M1-067 rule stands). `xtask checks` lists the seven host stubs, so M1-116 must skip ids in `HostFamily::stub_ids()` (correction-09). The report does not fall back to `meta.remediation` yet: correction-09 adds it to M1-057. `docs-lint` runs the same validation, but neither command is in `ci.yml` yet; a unit test runs it in `cargo test`.
 
 - M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case)
 
@@ -262,7 +262,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-124 | todo | | Review CONTRIBUTING.md on a fresh clone
 
-- M1-125 | todo | | rdy spec keygen and rdy spec sign
+- M1-125 | [#52](https://github.com/getrdy-io/rdy/pull/52) | 2026-10-28 | ADR 0022: rdy writes the minisign key file itself (scrypt N=2^20, 1 GiB, the stock cost and the most a file may ask for, with p = 1 only) instead of the `minisign` crate, whose key cost is fixed at N=2^15; the crate stays as a dev-dependency interop check, and a key and signature made by C minisign 0.11 are committed in tests/fixtures/minisign-c/. Lint findings print as `file: level: message` with no line and column until `spec lint` (M1-031) maps checks to lines. Windows checks the file type only and a new key gets its folder's access list (named in the success message); owner-only ACLs on key files joined SEC-58 (M2-085); the Windows tests compile here and run on the Windows leg. Ctrl-C during the 2 to 4 second key derivation is the M1 Ctrl-C ticket's. CI: the linux-x64 leg installs C minisign and sets RDY_REQUIRE_C_MINISIGN, so the `minisign -V` and `minisign -S` test cannot skip there; the other legs skip it (the committed C-made fixtures run everywhere); the `real-kdf` nextest group holds the 1 GiB tests to one at a time.
 
 - M1-126 | todo | | rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner | backlog corrected 2026-10-29 (correction-10): on windows-x64 with a ProgramData trust store present, `rdy verify --key <pub>` exits 0 and `rdy verify` without `--key` exits 64 with `trust_store_insecure` (ADR 0027); the INV-04 strace check runs the real `rdy verify` on a signed fixture as root (carried from M1-122)
 

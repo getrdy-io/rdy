@@ -47,7 +47,9 @@ mod tests;
 /// The longest part of a spec value that goes into a message, in characters.
 const MAX_ECHO_CHARS: usize = 64;
 
-const NEWER_RDY: &str = "Install a newer rdy. If there is none yet, ask the vendor how to go on.";
+/// The fix for a check this rdy does not have, or has only as a stub: 01 section 5.2 word for word.
+pub const NEWER_RDY: &str =
+    "Install a newer rdy. If there is none yet, ask the vendor how to go on.";
 const FIX_ENTRY: &str = "Tell the vendor to correct the entry. rdy spec lint shows which one.";
 
 /// Why one entry will not run, with the words for the report.
