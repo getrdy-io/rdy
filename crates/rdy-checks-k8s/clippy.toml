@@ -1,0 +1,62 @@
+# The kube entries of the lint wall (docs/plan/02-engine-design.md, Appendix A, and ADR 0031).
+#
+# Outside `src/client/`, check code must not name a kube client or config type or call a constructor of
+# one. Only the client module builds a client, so every request goes through the read-only guard that
+# M1-103 puts in `build_client`. `src/client/mod.rs` allows `clippy::disallowed_types` and
+# `clippy::disallowed_methods` for itself, and nowhere else may.
+#
+# Re-checked on 2026-10-29 against kube 4.2.0 (the pinned version, from the crate source): every item
+# below exists. If a kube bump renames or removes one, clippy says so with a warning, and `-D warnings`
+# fails the build. `kube::client::Client` and `kube::config::Config` are re-exports of the same items as
+# `kube::Client` and `kube::Config`, and clippy matches the item, so one entry covers both paths.
+# A type entry covers every constructor and trait route reached by naming the type:
+# `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`, `TryFrom<Config>` for `ClientBuilder`,
+# `TryFrom<Kubeconfig>` for `Config`, and `Default` and `Deserialize` for `Kubeconfig`. The method entries stay as a second line.
+#
+# M1-044 merges the std and facade entries of Appendix A into this file. M1-107 carries the proof that the
+# kube entries bite, from `lint-wall/kube-use.rs.txt` (it uses all 18 entries, the trait routes and both
+# re-export paths; it is not compiled by default).
+#
+# A crate's own clippy.toml replaces the root file, so everything the root file says is repeated here.
+# Keep this file in step with ../../clippy.toml. The test settings:
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+disallowed-types = [
+    { path = "kube::Client", reason = "only src/client/ builds a client; checks get the guarded ReadOnlyClient (ADR 0010)" },
+    { path = "kube::Config", reason = "only src/client/ builds a kube config (ADR 0010)" },
+    { path = "kube::client::ClientBuilder", reason = "only src/client/ builds a client; the guard layer goes in build_client (ADR 0010)" },
+    { path = "kube::config::Kubeconfig", reason = "only src/client/ reads a kubeconfig; the probe facade denies .kube (ADR 0031)" },
+]
+
+disallowed-methods = [
+    { path = "kube::Client::new", reason = "builds a client with no guard; use the client module (ADR 0010)" },
+    { path = "kube::Client::try_default", reason = "infers a config and builds an unguarded client; use the client module (ADR 0010)" },
+    { path = "kube::client::ClientBuilder::new", reason = "builds a client with no guard; use the client module (ADR 0010)" },
+    { path = "kube::Config::new", reason = "builds a kube config by hand; use the client module (ADR 0010)" },
+    { path = "kube::Config::infer", reason = "applies KUBE_RS_DEBUG_* overrides that can swap the server; use the client module (ADR 0031)" },
+    { path = "kube::Config::incluster", reason = "use the client module (ADR 0010)" },
+    { path = "kube::Config::incluster_env", reason = "use the client module (ADR 0010)" },
+    { path = "kube::Config::incluster_dns", reason = "use the client module (ADR 0010)" },
+    { path = "kube::Config::from_kubeconfig", reason = "reads a kubeconfig outside the client module; use the client module (ADR 0031)" },
+    { path = "kube::Config::from_custom_kubeconfig", reason = "use the client module (ADR 0010)" },
+    { path = "kube::config::Kubeconfig::read", reason = "reads ~/.kube outside the client module; use the client module (ADR 0031)" },
+    { path = "kube::config::Kubeconfig::read_from", reason = "reads a kubeconfig outside the client module; use the client module (ADR 0031)" },
+    { path = "kube::config::Kubeconfig::from_env", reason = "reads KUBECONFIG outside the client module; use the client module (ADR 0031)" },
+    { path = "kube::config::Kubeconfig::from_yaml", reason = "parses a kubeconfig outside the client module; use the client module (ADR 0031)" },
+    # The entries of the root file. This crate does not depend on clap or rdy-spec, so a path that does not
+    # resolve here is allowed (`allow-invalid`) instead of warning.
+    { path = "clap::Parser::parse", reason = "exits 2 on a usage error; use try_parse_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::Parser::parse_from", reason = "exits 2 on a usage error; use try_parse_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::Command::get_matches", reason = "exits 2 on a usage error; use try_get_matches_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::Command::get_matches_from", reason = "exits 2 on a usage error; use try_get_matches_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::Command::get_matches_mut", reason = "exits 2 on a usage error; use try_get_matches_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::Parser::update_from", reason = "exits 2 on a usage error; use try_update_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::error::Error::print", reason = "prints clap's own text, which can echo what was typed; render the error with rdy_cli::error::emit", allow-invalid = true },
+    { path = "clap::error::Error::exit", reason = "exits 2; print the error with rdy_cli::error::emit and return exit code 64", allow-invalid = true },
+    { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
+    { path = "rdy_spec::loaded::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
+    { path = "rdy_engine::exec::table::run", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration", allow-invalid = true },
+    { path = "rdy_engine::exec::run", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
+    { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
+]

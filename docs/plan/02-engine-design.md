@@ -159,9 +159,12 @@ Rules:
 - The kube probe sends its first request (which may run an exec credential plugin that waits for an SSO
   login) from a `spawn_blocking` thread through the runtime handle, under a 10 s timer held by the
   scheduler. A stuck plugin costs one abandoned blocking thread, never a worker.
-- A token refresh later in the run runs the plugin inside kube and may block a worker. The per-check
-  timer and the watchdog are the backstop. The kube client ticket verifies this and records it as a
-  residual.
+- A token refresh later in the run runs the plugin inside kube. Checked against kube 4.2.0 (M1-102,
+  `auth/mod.rs`, `to_header`): the refresh runs `auth_exec` on `tokio::task::spawn_blocking`, so a stuck
+  refresh holds one blocking thread and the one request that waited for it, never a worker. The
+  per-check timer ends that request, and the plugin process is left running (ADR 0031 decision 7).
+  The refresh gets no new `exec` action-log entry of its own: the one `delegated` entry says it "may
+  run again on token refresh".
 
 ## Verdict
 
@@ -344,8 +347,7 @@ tests policy.
 - Windows: no M1 check reads files, so the facade refuses them.
 - Deny list, matched on components at any depth (`/host/etc/shadow`, an overlay `diff/etc/shadow`, a
   macOS data volume): `etc/shadow*`, `etc/gshadow*`, `etc/sudoers*`, `etc/master.passwd`,
-  `etc/security/opasswd`, `var/db/dslocal`; `.ssh`, `.kube` (the engine's own kubeconfig read needs a
-  settled path: M1-102), `.aws`, `.azure`, `.config/gcloud`, `.gnupg`, `.docker/config.json`, `.netrc`,
+  `etc/security/opasswd`, `var/db/dslocal`; `.ssh`, `.kube`, `.aws`, `.azure`, `.config/gcloud`, `.gnupg`, `.docker/config.json`, `.netrc`,
   `.git-credentials`, `.pgpass`, `.vault-token`; private key files by name and extension (`*.key`,
   `*.p12`, `*.keytab`, `*.keychain`, `*.keychain-db`, `id_*`, `ssh_host_*_key`), `etc/ssl/private`,
   `etc/pki/tls/private`; cluster credentials (`etc/kubernetes/*.conf`, `etc/rancher/{k3s,rke2}/*.yaml`,
@@ -357,6 +359,10 @@ tests policy.
   `kmsg`, `vmcore`, `kallsyms`, `kpage*`, `/sys/kernel/debug`, `/sys/kernel/tracing`, and `/dev/*` for
   `stat` and `read_dir` as well as `read` (M4 adds a closed stat-only list: `/dev/nvidia*`, `/dev/dri/*`,
   `/dev/kfd`).
+  The deny applies to the run-level probe too. The engine's own kubeconfig read is not a probe read: the
+  `rdy-checks-k8s` client module reads the file the operator chose (`--kubeconfig`, `KUBECONFIG` or
+  `~/.kube/config`), and the probe hook logs it as a `read` entry with no check id from
+  `Loaded::files()` (ADR 0031, M1-102).
 - 1 MiB cap; `read_tail` sets `truncated_head`. Reads run on `spawn_blocking`.
 - Env names must be declared; values matching the secret-name rule join the known-secret set.
 
@@ -848,7 +854,7 @@ one clippy rule.
   `kube::config::Kubeconfig::read_from`, `kube::config::Kubeconfig::from_env`,
   `kube::config::Kubeconfig::from_yaml`. The paths `kube::client::Client` and `kube::config::Config`
   are re-exports of the same items, and clippy matches the item, so one entry covers both.
-  - Trait routes: `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`, `TryFrom<Config>` for
+  - Trait routes: `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`, `TryFrom<Kubeconfig>` for `Config`, `TryFrom<Config>` for
     `ClientBuilder`, and `Default` and `Deserialize` for `Kubeconfig`. Each needs a named `Config` or
     `Kubeconfig` (type inference cannot pick one), so the type entries cover them. `tests/lint-wall`
     uses each route once.
@@ -857,9 +863,15 @@ one clippy rule.
   - `ReadOnlyClient` hands out `kube::Api<K>` and never a `kube::Client`, so check code never names
     the type.
   - Verified on 2026-10-28 against kube 4.2.0 on docs.rs (`kube`, `kube::client` and `kube::config`
-    index pages, and the `Client`, `Config`, `ClientBuilder`, `Kubeconfig` and `Api` pages). M1-102
-    adds and pins kube, so the kube entries land there, re-checked against the pinned version (kube
-    entries: clippy lists in M1-102, lint-wall proof in M1-107).
+    index pages, and the `Client`, `Config`, `ClientBuilder`, `Kubeconfig` and `Api` pages). Re-checked
+    on 2026-10-29 (M1-102) against the pinned `=4.2.0` crate source: all 4 type and 14 method entries
+    exist, and they are in `crates/rdy-checks-k8s/clippy.toml`, where a path that stops resolving
+    fails `clippy -D warnings`. A use file outside the client module that used each entry, each
+    trait route and both re-export paths drew a clippy hit for every use, and every method entry
+    fired on its own. The file is committed as `crates/rdy-checks-k8s/lint-wall/kube-use.rs.txt` (not
+    compiled by default). M1-107 carries the permanent proof from it (correction-11). The crate's
+    `clippy.toml` repeats the root entries (a crate file replaces the root file), with `allow-invalid`
+    for the paths of crates it does not depend on.
 - Not listed: crates other than std, kube and the facade. `tokio`, `rustix`, `nix`, `socket2`,
   `walkdir`, `sysinfo` and the rest are not direct dependencies of any check crate, so their APIs are
   out of reach. The direct dependency allowlist enforces that, not clippy. The `tokio` and `socket2`

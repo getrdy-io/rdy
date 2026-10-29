@@ -283,7 +283,7 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   rows in 11, 02 and ADR 0014 change in correction-12, PR #82). (4) The deny list in 02 and 05 I5 gains the any-depth `etc` rules, the credential files,
   the cluster credential paths, the `/proc/<pid>/` allowlist, the kernel files and `/dev` for `stat` and
   `read_dir`. Carried: M1-091 and M1-103 inherit "every tcp, http and kube call writes one entry"; M1-102
-  settles how the engine's own kubeconfig read gets past the `.kube` rule; M4 adds a closed stat-only
+  settled the engine's own kubeconfig read (not a probe read, ADR 0031); M4 adds a closed stat-only
   `/dev` list (`/dev/nvidia*`, `/dev/dri/*`, `/dev/kfd`).
   Fix round 2 (re-review of 2cd0026): (5) `/proc/self/auxv` is allowed for `self` only, because M1-042
   reads `AT_SECURE` from it (02 Files, 05 I5). (6) A `denied` call of any kind folds too, per
