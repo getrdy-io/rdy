@@ -84,6 +84,7 @@ Rules:
 | `deny` | yes | `cargo deny check` (licenses, bans incl. `openssl` and `aws-lc-sys`, sources, advisories) |
 | `dco` | yes | `scripts/check-dco.sh`: every non-merge commit in the PR has a `Signed-off-by:` trailer. Passes without checking on push to `main`. Also runs `shellcheck` and the DCO script tests on `scripts/*.sh`. No third-party app |
 | `test` (5 legs) | yes | build, `cargo nextest run --locked`. Linux legs also prove the binary is static (below) |
+| `root` | yes | linux-x64 only. Installs `strace`, builds a nextest archive as the runner user, runs the `root_*` tests from it under `sudo` with the nextest `root` profile (`docs/plan/08-testing.md`, section 6) |
 | `install-sh` | yes | `shellcheck`, then the shell test suite with a stub `curl` and stub cosign |
 | `ci-ok` | the only required check | `needs:` exactly the gating jobs above; fails on any result other than `success` |
 
