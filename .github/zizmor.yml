@@ -1,7 +1,17 @@
-# zizmor policy (SEC-01, SEC-03). Run by the lint job in ci.yml.
+# zizmor policy (SEC-01, SEC-03). Run by the zizmor job in ci.yml.
 rules:
   unpinned-uses:
     config:
       policies:
         # Every action, from any owner, must be pinned to a full commit SHA.
         "*": hash-pin
+
+  # release.yml is dist's generated workflow plus scripts/harden-release-workflow.py (ADR 0020), and
+  # is never edited by hand. The script removes everything else zizmor found: the workflow-wide write
+  # token, the shell text built from the tag and the build matrix, the unpinned container image
+  # and the inherited secrets. One note is left. dist calls the artifact check as `./.github/...`.
+  # zizmor prefers the `owner/repo/.github/...@ref` form, which would need a SHA of this same
+  # commit and cannot exist before the commit does. The local path is the right form here.
+  self-repository:
+    ignore:
+      - release.yml

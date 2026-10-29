@@ -122,6 +122,7 @@ fn a_good_signature_verifies_and_records_its_provenance() {
             product: slug(PRODUCT),
             signed_at: "2026-11-30T16:02:11Z".to_owned(),
             trust_source: TrustSource::User,
+            trust_note: None,
         }
     );
     assert_eq!(loaded.sha256(), hex(&Sha256::digest(SPEC.as_bytes())));
@@ -981,8 +982,22 @@ fn the_unmodified_fixture_verifies() {
     assert_eq!(parses, 1);
 }
 
+/// The settings of the property tests (08 section 4): 256 cases, a fixed seed so an unrelated PR never
+/// fails on a fresh draw (`PROPTEST_RNG_SEED` replaces it), and shrinking that ends before nextest's
+/// kill. A failure is saved under `proptest-regressions/` in this crate, and that file is committed.
+fn property_config() -> ProptestConfig {
+    use proptest::test_runner::RngSeed;
+    let mut config = ProptestConfig::with_cases(256);
+    config.max_shrink_time = 30_000;
+    if config.rng_seed == RngSeed::Random {
+        // The bytes of `rdy_spec`, the same seed as `tests/parse_properties.rs`.
+        config.rng_seed = RngSeed::Fixed(0x7264_795F_7370_6563);
+    }
+    config
+}
+
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(256))]
+    #![proptest_config(property_config())]
 
     /// Any change to the signed bytes, whether a changed byte, a cut or an addition, is a signature
     /// error, and the parser spy stays at zero.

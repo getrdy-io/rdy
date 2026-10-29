@@ -42,8 +42,8 @@ pub(super) fn decode(text: &str) -> Option<Vec<u8>> {
     (acc == 0).then_some(out)
 }
 
-/// Encodes `bytes` as canonical padded base64. Tests only: the verifier never writes base64.
-#[cfg(test)]
+/// Encodes `bytes` as canonical padded base64. Verification never writes base64. The trust file writer
+/// does, for the key of an entry.
 pub(super) fn encode(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();

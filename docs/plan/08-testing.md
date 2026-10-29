@@ -330,6 +330,22 @@ Rules that keep these stable:
 | macos-arm64, macos-x64 | `macos-15`, `macos-15-intel` | Same, with the Unix process tests |
 | windows-x64 | `windows-2022` | Same, with `core.autocrlf true`, minus Unix-only tests, plus Windows-only ones |
 
+**The `root_*` convention.** A test that needs uid 0 has a name whose last path segment starts with `root_`
+(`root_whoami_is_zero`, `trust::root_ignores_sudo_user_home`). Rules:
+
+- `.config/nextest.toml` skips those tests in the `default` and `ci` profiles. The `root` profile runs only
+  them. The filter is `test(/(^|::)root_[^:]*$/)`. A name that does not follow the convention runs in the
+  normal job and fails there.
+- The `root` job in `ci.yml` (linux-x64 only) installs `strace`, builds a nextest archive as the runner user,
+  then runs the archive under `sudo` with `--profile root --no-tests=fail`. `target/` stays user-owned and
+  root never runs cargo or rustup. It sets `RDY_REQUIRE_ROOT=1`.
+- Plain `cargo test` has no name filter. Each `root_*` test returns early when it is not root and
+  `RDY_REQUIRE_ROOT` is unset, so `cargo test --workspace` stays green for a normal user. With the variable
+  set, not being root is a failure. `crates/rdy-cli/tests/root_smoke.rs` (`root_whoami_is_zero`) is the
+  canary. It proves the job really runs as root, and `--no-tests=fail` proves the filter still matches.
+- The `test` job on linux-x64 lists the `ci` profile and fails if a `root_*` test appears.
+- Root tests never run on macOS or Windows. The Windows store ACL checks (M1-122) are `windows-only` tests.
+
 What is `cfg`-gated, and nothing else:
 
 | Gate | Tests |
@@ -400,7 +416,7 @@ is the fixture-completeness rule in the lint.
   working days. If not fixed, the test is deleted and a ticket is filed to rewrite it. **Quarantine is
   never allowed.** No `#[ignore]` as a parking place, no `continue-on-error`, no "known flaky" list.
 - The one legal `#[ignore]` is `#[ignore = "runs in job: <name>"]` for a test another job runs with
-  `--run-ignored only` (kind). Root tests use a `root_*` name filter instead. An ignore lint is M2.
+  `--run-ignored only` (kind). Root tests use the `root_*` name filter instead (section 6). An ignore lint is M2.
 - Hygiene: loopback sockets bind port 0 and read the port back; files live under `tempfile`; no in-process
   environment changes (edition 2024 makes `set_var` unsafe and `forbid(unsafe_code)` holds); `TZ`, `LC_ALL`
   and `NO_COLOR` are set on child processes; nothing sleeps to wait for something; timing is upper bound only.

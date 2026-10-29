@@ -12,6 +12,8 @@ include = ["src/**", "Cargo.toml", "LICENSE"]
 [dependencies]
 blake2 = { workspace = true }
 ed25519-dalek = { workspace = true }
+regex = { workspace = true, features = ["std", "perf", "unicode"] }
+regex-syntax = { workspace = true, features = ["std", "unicode"] }
 schemars = { workspace = true, optional = true, features = ["derive", "std", "preserve_order"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde-saphyr = { workspace = true, features = ["deserialize"] }

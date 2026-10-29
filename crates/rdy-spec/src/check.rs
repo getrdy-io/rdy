@@ -41,6 +41,7 @@ use crate::SpecError;
 use crate::error::{echo_reason, echo_safe};
 use crate::reserved::{UnknownKind, is_reserved_id};
 use crate::spec::{CheckSpec, Lenient, Spec};
+use crate::suggest::did_you_mean;
 
 mod common;
 mod host;
@@ -83,9 +84,18 @@ pub(crate) trait ParamSet: DeserializeOwned {
     /// [`UnsupportedReason::NoThreshold`].
     const THRESHOLD: &'static [&'static str] = &[];
 
+    /// A key and value to show a vendor whose entry has no threshold, such as `min: 4`. Empty when the
+    /// check has no one obvious example. Then the fix lists the threshold keys instead.
+    const THRESHOLD_EXAMPLE: &'static str = "";
+
     /// Keys that are required besides the threshold. They are named in a
     /// [`UnsupportedReason::NoThreshold`] when they are missing too, so one message asks for everything.
     const ALSO_REQUIRED: &'static [&'static str] = &[];
+
+    /// The keys whose value is a [`RegexText`]. Lint and sign compile each of them, because
+    /// `RegexText` checks the length only. A test finds the regex keys of every struct by trying them,
+    /// so a key left out of this list fails it.
+    const REGEX_FIELDS: &'static [&'static str] = &[];
 }
 
 /// Defines [`CheckParams`] and the table from check id to parameter struct.
@@ -152,17 +162,57 @@ macro_rules! known_checks {
             }
         }
 
-        /// The keys the parameter struct of `id` accepts, for the test that keeps the schema equal to them.
-        #[cfg(all(test, feature = "schema"))]
-        pub(crate) fn param_fields(id: &str) -> Option<&'static [&'static str]> {
+        /// The example threshold of `id` for a lint fix, or `""` when it has none.
+        pub(crate) fn threshold_example_of(id: &str) -> &'static str {
             match id {
-                $($id => Some(<$ty as ParamSet>::FIELDS),)*
+                $($id => <$ty as ParamSet>::THRESHOLD_EXAMPLE,)*
+                _ => "",
+            }
+        }
+
+        /// The keys of `id` whose value reads as a [`RegexText`], found by giving each key a text that is
+        /// too long for a pattern, for the test that keeps `ParamSet::REGEX_FIELDS` complete.
+        #[cfg(test)]
+        pub(crate) fn probe_regex_fields(id: &str) -> Option<Vec<&'static str>> {
+            fn probe<P: ParamSet>() -> Vec<&'static str> {
+                let too_long = "a".repeat(RegexText::MAX_CHARS + 1);
+                P::FIELDS
+                    .iter()
+                    .copied()
+                    .filter(|field| {
+                        let object = serde_json::json!({ *field: too_long });
+                        serde_json::from_value::<P>(object)
+                            .err()
+                            .is_some_and(|e| e.to_string().contains(RegexText::LENGTH_RULE))
+                    })
+                    .collect()
+            }
+            match id {
+                $($id => Some(probe::<$ty>()),)*
+                _ => None,
+            }
+        }
+
+        /// The keys of `id` that `rdy spec lint` compiles as patterns.
+        #[cfg(test)]
+        pub(crate) fn declared_regex_fields(id: &str) -> Option<&'static [&'static str]> {
+            match id {
+                $($id => Some(<$ty as ParamSet>::REGEX_FIELDS),)*
                 _ => None,
             }
         }
 
         /// Every check id that this build implements.
         pub const KNOWN_IDS: &[&str] = &[$($id),*];
+
+        /// The keys the parameter struct of `id` accepts, or `None` when no check in this build has
+        /// that id. Lint offers them as did-you-mean suggestions.
+        pub(crate) fn fields_of(id: &str) -> Option<&'static [&'static str]> {
+            match id {
+                $($id => Some(<$ty as ParamSet>::FIELDS),)*
+                _ => None,
+            }
+        }
     };
 }
 
@@ -212,6 +262,16 @@ pub enum UnsupportedReason {
         /// The key, already cut and escaped so it is safe to print.
         field: String,
     },
+    /// A block inside a value has a key the block does not have, such as `prot` in
+    /// `free: [{port: 80, prot: tcp}]` of `host.ports`.
+    ///
+    /// The path names the key from the top of the entry: `free[0].prot`.
+    UnknownNestedField {
+        /// The path of the key, already cut and escaped so it is safe to print.
+        path: String,
+        /// The key of that block nearest to the one written, when it is a close match (a typo).
+        near: Option<String>,
+    },
     /// A key the check requires is missing.
     MissingField {
         /// The key, already cut and escaped so it is safe to print.
@@ -246,6 +306,7 @@ impl fmt::Display for UnsupportedReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownField { field } => write!(f, "cannot read '{field}'"),
+            Self::UnknownNestedField { path, .. } => write!(f, "cannot read '{path}'"),
             Self::MissingField { field } => write!(f, "'{field}' is required and missing"),
             Self::BadValue {
                 field: Some(field),
@@ -287,9 +348,11 @@ impl fmt::Display for UnsupportedReason {
 
 /// Reads `fields` into the parameter struct `P`, naming the first problem.
 fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReason> {
-    // Naming the field needs a list, because a serde message cannot be taken apart safely when the
-    // key is attacker text. The list is checked first and `deny_unknown_fields` stays as a backstop.
-    // The first unknown key in sorted order is named, whatever order the map keeps its keys in.
+    // A top-level unknown key is named from the list of fields, not from serde's message, so the name
+    // is the key itself and not a guess at where the key ends. `deny_unknown_fields` stays as a
+    // backstop. The first unknown key in sorted order is named, whatever order the map keeps its keys in.
+    // An unknown key inside a nested block does come from serde's message: `nested_unknown_field`
+    // splits it at the last "`, expected ", which no struct field name contains, and escapes the name.
     if let Some(field) = fields
         .keys()
         .filter(|k| !P::FIELDS.contains(&k.as_str()))
@@ -320,7 +383,9 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
     }
     serde_json::from_value::<P>(Value::Object(fields.clone())).map_err(|e| {
         let message = e.to_string();
-        if let Some(field) = missing_field_name::<P>(&message, fields) {
+        if let Some(reason) = nested_unknown_field(&message, fields) {
+            reason
+        } else if let Some(field) = missing_field_name::<P>(&message, fields) {
             UnsupportedReason::MissingField {
                 field: echo_safe(field),
             }
@@ -331,6 +396,95 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
             }
         }
     })
+}
+
+/// How deep [`nested_unknown_field`] looks. A parsed spec nests 64 levels at most.
+const MAX_SEARCH_DEPTH: usize = 64;
+
+/// Turns serde's refusal of an unknown key inside a nested block into a reason with the path of the key.
+///
+/// serde says "unknown field `x`, expected one of `a`, `b`" (or "expected `a`", "expected `a` or `b`",
+/// "there are no fields"). The names after "expected" come from the struct. The name before it comes from
+/// the file, and may hold anything, so the split is at the last "`, expected ", which no struct name can
+/// contain. The path is found by searching `fields` for a block that has that key, preferring one whose
+/// other keys are all keys the struct expects.
+fn nested_unknown_field(message: &str, fields: &Map<String, Value>) -> Option<UnsupportedReason> {
+    const EXPECTED: &str = "`, expected ";
+    let rest = message.strip_prefix("unknown field `")?;
+    let (name, expected) = match rest.rfind(EXPECTED) {
+        Some(at) => (&rest[..at], &rest[at + EXPECTED.len()..]),
+        None => (rest.strip_suffix("`, there are no fields")?, ""),
+    };
+    let expected: Vec<&str> = expected.split('`').skip(1).step_by(2).collect();
+    let mut found = Search::default();
+    for (key, value) in fields {
+        walk_blocks(value, key, name, &expected, &mut found, 0);
+    }
+    let block = found.exact.or(found.any)?;
+    Some(UnsupportedReason::UnknownNestedField {
+        path: echo_safe(&format!("{block}.{name}")),
+        near: did_you_mean(name, &expected).map(echo_safe),
+    })
+}
+
+/// Where [`walk_blocks`] has found the block with the unknown key.
+#[derive(Debug, Default)]
+struct Search {
+    /// The path of the first block that has the key and no other key the struct does not expect.
+    exact: Option<String>,
+    /// The path of the first block that has the key.
+    any: Option<String>,
+}
+
+/// Looks through `value`, whose path is `at`, for blocks that have the key `name`.
+fn walk_blocks(
+    value: &Value,
+    at: &str,
+    name: &str,
+    expected: &[&str],
+    found: &mut Search,
+    depth: usize,
+) {
+    if depth > MAX_SEARCH_DEPTH || found.exact.is_some() {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            if map.contains_key(name) {
+                found.any.get_or_insert_with(|| at.to_owned());
+                if map
+                    .keys()
+                    .all(|k| k == name || expected.contains(&k.as_str()))
+                {
+                    found.exact = Some(at.to_owned());
+                    return;
+                }
+            }
+            for (key, inner) in map {
+                walk_blocks(
+                    inner,
+                    &format!("{at}.{key}"),
+                    name,
+                    expected,
+                    found,
+                    depth + 1,
+                );
+            }
+        }
+        Value::Array(items) => {
+            for (i, inner) in items.iter().enumerate() {
+                walk_blocks(
+                    inner,
+                    &format!("{at}[{i}]"),
+                    name,
+                    expected,
+                    found,
+                    depth + 1,
+                );
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Whether a value is null, or holds a null in a list or an object at any depth.
