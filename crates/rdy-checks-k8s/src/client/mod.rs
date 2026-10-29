@@ -33,8 +33,10 @@
 //!   the plugins need them.
 //! - It reads no namespace: `default_namespace` of the kubeconfig and of the service account is not used.
 //!   A check that needs a namespace gets it from its spec parameter.
-//! - It sends nothing but `GET /version`. The read-only guard layer (M1-103) goes in
-//!   `build_client`, and then `connect` returns the guarded type.
+//! - It sends nothing that the read-only guard (M1-103, [`guard`]) refuses. The raw kube client is private
+//!   to this module. `connect` sends `GET /version` through the guard, and [`Connected::read_only`] gives
+//!   a check a [`ReadOnlyClient`] bound to its own probe, so every request writes one `kube` entry to the
+//!   action log under that check's id.
 //!
 //! Timeouts: the connect, read and write timeouts of the client are the check timeout, at most
 //! [`MAX_TIMEOUT`]. kube's retries are off. A credential plugin that waits for a login is not bounded
@@ -54,9 +56,11 @@ use kube::Config;
 use kube::client::ClientBuilder;
 use kube::config::{AuthInfo, Cluster, ExecInteractiveMode, Kubeconfig};
 use rdy_engine::check::{CheckError, MAX_TIMEOUT};
+use rdy_engine::probe::Probe;
 use secrecy::ExposeSecret;
 
 mod error;
+pub mod guard;
 mod text;
 
 #[cfg(test)]
@@ -64,6 +68,7 @@ mod tests;
 
 pub use error::KubeError;
 use error::{from_kube_error, from_kubeconfig_error, io_reason, proxy_display};
+pub use guard::{GuardError, ReadOnlyClient, guarded_service};
 use text::escape;
 
 /// The largest kubeconfig rdy reads. A real one is a few kilobytes.
@@ -438,14 +443,17 @@ impl Loaded {
     ///
     /// `announce` runs first, before any plugin starts and before any socket opens. The caller prints
     /// the [`ClusterLine`] from it. Then the client is built on the blocking pool (the build can run a
-    /// credential plugin, which blocks), and `GET /version` is the first request. The need
-    /// `kube_context` is met when this returns `Ok` (ADR 0010 decision 5).
+    /// credential plugin, which blocks), and `GET /version` is the first request. It goes through the
+    /// read-only guard and writes a `kube` entry to the log of `probe`, which is the run-level probe
+    /// (`check: null`). The need `kube_context` is met when this returns `Ok` (ADR 0010 decision 5).
+    /// Needs a running tokio runtime.
     ///
     /// # Errors
     ///
     /// A [`KubeError`]. It never holds plugin output or credentials.
     pub async fn connect(
         self,
+        probe: &Probe,
         announce: impl FnOnce(&ClusterLine),
     ) -> Result<Connected, KubeError> {
         announce(&self.line);
@@ -475,9 +483,12 @@ impl Loaded {
             }
             Err(_) => return Err(KubeError::Cancelled),
         };
-        let info = client.apiserver_version().await.map_err(|error| {
-            from_kube_error(&error, &server, plugin.as_deref(), proxy_env_set, ca_set)
-        })?;
+        let info = ReadOnlyClient::new(&client, probe)
+            .version()
+            .await
+            .map_err(|error| {
+                from_kube_error(&error, &server, plugin.as_deref(), proxy_env_set, ca_set)
+            })?;
         Ok(Connected {
             source,
             files,
@@ -499,9 +510,8 @@ pub struct Connected {
     files: Vec<PathBuf>,
     line: ClusterLine,
     version: ServerVersion,
-    // M1-103 replaces this field with the guarded client (`ReadOnlyClient`) and the unguarded one stops
-    // being reachable. Until then nothing outside this module can send a request with it.
-    #[expect(dead_code, reason = "M1-103 wraps this client in the read-only guard")]
+    // The unguarded client. It is private, and the only way to send with it is through the guard
+    // (`Connected::read_only`), which wraps it in a service that refuses before it sends.
     client: kube::Client,
 }
 
@@ -538,6 +548,18 @@ impl Connected {
     #[must_use]
     pub fn server_version(&self) -> &ServerVersion {
         &self.version
+    }
+
+    /// The read-only client for one check. `probe` is the check's own probe
+    /// (`CheckContext::probe`): every request the client sends writes one `kube` entry to the action
+    /// log under that check's id, and a request made after the check ended is refused. The guard
+    /// refuses everything that is not an allowed read before it is sent (INV-14).
+    ///
+    /// Cheap: it shares the connection and the credentials with this value and starts one worker task,
+    /// so call it from a tokio runtime.
+    #[must_use]
+    pub fn read_only(&self, probe: &Probe) -> ReadOnlyClient {
+        ReadOnlyClient::new(&self.client, probe)
     }
 }
 
@@ -972,8 +994,10 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
 }
 
 /// Builds the kube client from a checked config. The one place a client is made.
+///
+/// The client is not guarded: the guard needs a probe, and a probe belongs to a check. It stays inside
+/// [`Connected`], and [`ReadOnlyClient`] is the only way to send with it.
 fn build_client(config: Config) -> Result<kube::Client, kube::Error> {
-    // M1-103 adds `.with_layer(&guard)` here, so the guard sits in front of every request.
     Ok(ClientBuilder::try_from(config)?.build())
 }
 
