@@ -5,17 +5,30 @@
 //! self review resources. Everything else is refused with a fixed rule sentence, and the request never
 //! leaves the process.
 //!
-//! What M1-103 builds here is the deny-by-default frame: the method rule, the POST rules (target, query
-//! string, exact body), the secrets rule, the path pre-filter, the query keys, `Upgrade` and
-//! `Impersonate-*`, and the resource table. M1-104 replaces the segment matching with the full
-//! request-info parser (so `/api/v1/namespaces/secrets` becomes allowed again), adds the citation test
-//! against the checks' `CheckInfo`, and relaxes `Impersonate-*` on the two access review POSTs.
+//! The frame is deny by default: the method rule, the POST rules (target, query string, exact body), the
+//! secrets rule, the path pre-filter, the query keys, `Upgrade`, `Impersonate-*` and the resource table.
+//! A GET path that passes the pre-filter is parsed the way the API server's request-info parser reads it
+//! ([`request_info`]): group, version, namespace, resource, name and subresource. The table then judges
+//! those parts, so a path the server reads one way is never judged another way. A subresource
+//! (`finalize`, `status`, `exec`, `log`, `proxy`, `scale`) is refused as [`RULE_SUBRESOURCE`], and the
+//! legacy `watch` and `proxy` path verbs are refused as [`RULE_NOT_ALLOWED`].
+//!
+//! `secrets` is refused in any path segment. The one exception is `GET /api/v1/namespaces/secrets`, a
+//! namespace that is called `secrets`. A namespace with that name cannot have its claims or events
+//! listed, because `/api/v1/namespaces/secrets/persistentvolumeclaims` is refused: rdy keeps the rule one
+//! sentence long rather than teach it which segment is a name.
+//!
+//! `Impersonate-User` is allowed only on the two access review POSTs, only when the guard was built with
+//! the spec's `as:` value ([`ImpersonateAs`]), and only with that exact value. Every other `Impersonate-*`
+//! header, and the header on any other request, is refused as [`RULE_IMPERSONATE`].
 //!
 //! For check authors: a list takes `limit`, `continue`, `labelSelector` and `fieldSelector` and nothing
 //! else. `resourceVersion` (so `ListParams::match_any()` too), `timeoutSeconds`, `watch` and the rest are
 //! refused as [`RULE_QUERY`]. A list of `pods` or `events` must also carry the field selector its
 //! [`ALLOWED`] entry names, or it is refused as [`RULE_SELECTOR`]. A request carries only the headers
 //! `accept`, `content-type` and `content-length`; any other is refused as [`RULE_HEADER`].
+
+use std::fmt;
 
 use http::header::{ACCEPT, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, UPGRADE};
 use http::{HeaderMap, Method, Uri};
@@ -34,6 +47,8 @@ pub const RULE_BODY: &str = "a review POST takes one buffered JSON body under 64
 pub const RULE_GET_BODY: &str = "a GET carries no body";
 /// The rule of any path that names `secrets`.
 pub const RULE_SECRETS: &str = "Secrets are never read";
+/// The rule of a GET of a subresource: `finalize`, `status`, `exec`, `log`, `proxy`, `scale` and the rest.
+pub const RULE_SUBRESOURCE: &str = "subresources are not allowed";
 /// The rule of a path that is malformed or not in the plain form kube builds.
 pub const RULE_PATH_SHAPE: &str = "the path is not in the plain form rdy builds";
 /// The rule of a GET of anything not in [`ALLOWED`] or the discovery paths.
@@ -153,7 +168,7 @@ pub struct Allowed {
     pub resource: &'static str,
     /// The GET shapes allowed for it.
     pub access: &'static [Access],
-    /// The ids of the checks that read it. M1-104 asserts each is cited by a `CheckInfo`.
+    /// The ids of the checks that read it. A test asserts each is cited by a `CheckInfo`.
     pub checks: &'static [&'static str],
     /// What the checks read from it.
     pub reads: &'static str,
@@ -264,6 +279,106 @@ pub const ALLOWED: &[Allowed] = &[
     },
 ];
 
+/// The longest `as:` value, in bytes.
+const MAX_AS: usize = 253;
+/// The prefix of a service account user name.
+const SERVICE_ACCOUNT_PREFIX: &str = "system:serviceaccount:";
+/// The two review resources an `Impersonate-User` header may ride on (02 Appendix B rule 8). Not
+/// `selfsubjectreviews`: that call shows who rdy really is.
+const ACCESS_REVIEW_PATHS: [&str; 2] = [
+    "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
+    "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews",
+];
+
+/// Why a spec `as:` value cannot be sent as `Impersonate-User`.
+///
+/// The text holds no part of the value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ImpersonateError {
+    /// The value is empty.
+    #[error(
+        "the `as` value is empty. Fix: give a user name such as system:serviceaccount:app:installer"
+    )]
+    Empty,
+    /// The value is longer than 253 bytes.
+    #[error("the `as` value is longer than 253 bytes. Fix: use a shorter user name")]
+    TooLong,
+    /// The value has a byte outside printable ASCII, or a space at either end.
+    #[error(
+        "the `as` value has a character that is not printable ASCII, or a space at its start or end. Fix: use only letters, digits and punctuation in the user name"
+    )]
+    BadCharacter,
+    /// A `system:serviceaccount:` value that is not `system:serviceaccount:<namespace>:<name>`.
+    #[error(
+        "the `as` value starts with system:serviceaccount: but is not system:serviceaccount:<namespace>:<name>. Fix: name the namespace and the service account, both in DNS-1123 form"
+    )]
+    BadServiceAccount,
+}
+
+/// The user the two access review POSTs may impersonate: the spec's `as:` value, checked once.
+///
+/// A value is 1 to 253 bytes, uses only the bytes 0x20 to 0x7E (printable ASCII, so no control character,
+/// no non-ASCII letter and no Unicode format character such as a right-to-left override, which could
+/// spoof the user shown in a report and which an HTTP header value cannot carry anyway), and has no space
+/// at either end. A value that starts with `system:serviceaccount:` must be exactly
+/// `system:serviceaccount:<namespace>:<name>`, a DNS-1123 label and a DNS-1123 subdomain.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ImpersonateAs(String);
+
+impl ImpersonateAs {
+    /// Checks `value` and keeps it.
+    ///
+    /// # Errors
+    ///
+    /// [`ImpersonateError`] naming the rule that the value breaks.
+    pub fn new(value: &str) -> Result<Self, ImpersonateError> {
+        if value.is_empty() {
+            return Err(ImpersonateError::Empty);
+        }
+        if value.len() > MAX_AS {
+            return Err(ImpersonateError::TooLong);
+        }
+        if !value.bytes().all(|b| (0x20..=0x7E).contains(&b))
+            || value.starts_with(' ')
+            || value.ends_with(' ')
+        {
+            return Err(ImpersonateError::BadCharacter);
+        }
+        if let Some(rest) = value.strip_prefix(SERVICE_ACCOUNT_PREFIX) {
+            let valid = rest
+                .split_once(':')
+                .is_some_and(|(namespace, name)| is_label(namespace) && is_group(name));
+            if !valid {
+                return Err(ImpersonateError::BadServiceAccount);
+            }
+        }
+        Ok(Self(value.to_owned()))
+    }
+
+    /// The checked value.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for ImpersonateAs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ImpersonateAs").finish_non_exhaustive()
+    }
+}
+
+/// The value an `Impersonate-User` header may carry on this request, or `None` when none may.
+pub(crate) fn impersonation_allowed<'a>(
+    method: &Method,
+    uri: &Uri,
+    configured: Option<&'a ImpersonateAs>,
+) -> Option<&'a str> {
+    let user = configured?;
+    (method == Method::POST && ACCESS_REVIEW_PATHS.contains(&uri.path())).then(|| user.as_str())
+}
+
 /// What the guard can see of a request body.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum BodyView<'a> {
@@ -278,20 +393,22 @@ pub(crate) enum BodyView<'a> {
 /// Decides one request. `Ok` means the request may go on; `Err` is the rule that refuses it.
 ///
 /// The order is fixed so the rule in the log is the first one broken: method, headers, path shape,
-/// secrets, then the rules of the method.
+/// secrets, then the rules of the method. `configured` is the guard's `as:` user, if it has one.
 pub(crate) fn judge(
     method: &Method,
     uri: &Uri,
     headers: &HeaderMap,
     body: BodyView<'_>,
+    configured: Option<&ImpersonateAs>,
 ) -> Result<(), &'static str> {
     let is_get = method == Method::GET;
     if !is_get && method != Method::POST {
         return Err(RULE_METHOD);
     }
-    check_headers(headers)?;
+    bad_header(headers, impersonation_allowed(method, uri, configured))
+        .map_or(Ok(()), |(rule, _)| Err(rule))?;
     let segments = path_segments(uri)?;
-    if segments.contains(&"secrets") {
+    if segments.contains(&"secrets") && !(is_get && segments == NAMESPACE_NAMED_SECRETS) {
         return Err(RULE_SECRETS);
     }
     if is_get {
@@ -305,13 +422,12 @@ pub(crate) fn judge(
     }
 }
 
+/// The one path with `secrets` in it that is allowed: a GET of the namespace called `secrets`.
+const NAMESPACE_NAMED_SECRETS: [&str; 4] = ["api", "v1", "namespaces", "secrets"];
+
 /// The path of `uri` for the action log: no query string, escaped, cut to 200 characters.
 pub(crate) fn log_path(uri: &Uri) -> String {
     super::super::text::escape_capped(uri.path(), 200)
-}
-
-fn check_headers(headers: &HeaderMap) -> Result<(), &'static str> {
-    bad_header(headers).map_or(Ok(()), |(rule, _)| Err(rule))
 }
 
 /// The rule and the name of the first request header the guard refuses, if any. Only the name is ever
@@ -322,8 +438,16 @@ fn check_headers(headers: &HeaderMap) -> Result<(), &'static str> {
 /// (`kube-core` 4.2.0, `request.rs`) and nothing else; hyper adds `content-length`, `host` and
 /// `user-agent` later. Anything else here was set by check code, so it is refused: an `Authorization`
 /// from a client-certificate kubeconfig, `X-Remote-User` and `X-Remote-Group` (front-proxy
-/// authentication), `X-HTTP-Method-Override`, `Host`, and every `Impersonate-*`.
-pub(crate) fn bad_header(headers: &HeaderMap) -> Option<(&'static str, &str)> {
+/// authentication), `X-HTTP-Method-Override`, `Host`, and every `Impersonate-*` except one.
+///
+/// The exception: `allowed_user` is the value an `Impersonate-User` header may carry on this request
+/// (see [`impersonation_allowed`]). The header passes when it appears once with exactly that value.
+/// `Impersonate-Group`, `-Uid` and `-Extra-*` never pass: a service account user has its groups from
+/// the server.
+pub(crate) fn bad_header<'h>(
+    headers: &'h HeaderMap,
+    allowed_user: Option<&str>,
+) -> Option<(&'static str, &'h str)> {
     if headers.contains_key(UPGRADE) {
         return Some((RULE_UPGRADE, UPGRADE.as_str()));
     }
@@ -338,15 +462,29 @@ pub(crate) fn bad_header(headers: &HeaderMap) -> Option<(&'static str, &str)> {
     }
     // Header names are lower case in `http`. This covers `Impersonate-User`, `-Group`, `-Uid` and
     // `-Extra-*`. Headers that the kubeconfig sets are added below the guard and are not seen here.
-    if let Some(name) = headers
-        .keys()
-        .find(|name| name.as_str().starts_with("impersonate-"))
-    {
-        return Some((RULE_IMPERSONATE, name.as_str()));
+    for name in headers.keys() {
+        if !name.as_str().starts_with("impersonate-") {
+            continue;
+        }
+        let mut values = headers.get_all(name).iter();
+        let exact = allowed_user.is_some_and(|user| {
+            name.as_str() == "impersonate-user"
+                && values
+                    .next()
+                    .is_some_and(|v| v.as_bytes() == user.as_bytes())
+                && values.next().is_none()
+        });
+        if !exact {
+            return Some((RULE_IMPERSONATE, name.as_str()));
+        }
     }
+    // Any `impersonate-user` still here passed the exact-value test above.
     headers
         .keys()
-        .find(|name| ![ACCEPT, CONTENT_TYPE, CONTENT_LENGTH].contains(name))
+        .find(|name| {
+            ![ACCEPT, CONTENT_TYPE, CONTENT_LENGTH].contains(name)
+                && name.as_str() != "impersonate-user"
+        })
         .map(|name| (RULE_HEADER, name.as_str()))
 }
 
@@ -378,9 +516,11 @@ fn path_segments(uri: &Uri) -> Result<Vec<&str>, &'static str> {
     Ok(segments)
 }
 
-/// Allows the keys `limit`, `continue`, `labelSelector` and `fieldSelector`, with plain values. Returns
-/// the `fieldSelector` value, decoded once, for the selector rule of the resource. M1-104 validates the
-/// other selector values after decoding.
+/// Allows the keys `limit`, `continue`, `labelSelector` and `fieldSelector`, once each, with plain
+/// values. Every value is decoded once, as the server does, and the decoded text is checked: a `continue`
+/// token, a label selector and a field selector each have a short character set, so a `%26`, `%00`, `%25`
+/// or `%5C` cannot carry anything the raw text hid. Returns the decoded `fieldSelector` for the selector
+/// rule of the resource.
 fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
     // kube writes a bare `?` when there are no parameters, and a `&` before the first one (`?&limit=5`).
     let Some(query) = query
@@ -398,8 +538,14 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
         return Err(RULE_QUERY);
     }
     let mut field_selector = None;
+    // A key twice is ambiguous: the server reads the first, a proxy may read the last.
+    let mut seen: Vec<&str> = Vec::new();
     for pair in query.split('&') {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if seen.contains(&key) {
+            return Err(RULE_QUERY);
+        }
+        seen.push(key);
         match key {
             "limit" => {
                 if value.is_empty() || value.len() > 6 || !value.bytes().all(|b| b.is_ascii_digit())
@@ -407,19 +553,72 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
                     return Err(RULE_QUERY);
                 }
             }
-            "continue" | "labelSelector" => check_query_value(value)?,
+            "continue" => {
+                check_query_value(value)?;
+                check_continue(&decode_query_value(value)?)?;
+            }
+            "labelSelector" => {
+                check_query_value(value)?;
+                check_label_selector(&decode_query_value(value)?)?;
+            }
             "fieldSelector" => {
                 check_query_value(value)?;
-                // A second `fieldSelector` is ambiguous: the server reads the first, a proxy may read
-                // the last.
-                if field_selector.replace(decode_query_value(value)?).is_some() {
-                    return Err(RULE_QUERY);
-                }
+                let decoded = decode_query_value(value)?;
+                check_field_selector(&decoded)?;
+                field_selector = Some(decoded);
             }
             _ => return Err(RULE_QUERY),
         }
     }
     Ok(field_selector)
+}
+
+/// The longest decoded `continue` token, label selector or field selector.
+const MAX_DECODED: usize = 4096;
+
+/// A `continue` token is base64 (the standard or the URL alphabet, with or without `=`).
+fn check_continue(token: &str) -> Result<(), &'static str> {
+    let plain = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'+' | b'/' | b'=');
+    if token.len() > MAX_DECODED || !token.bytes().all(plain) {
+        return Err(RULE_QUERY);
+    }
+    Ok(())
+}
+
+/// A label selector is names, values, `,`, `=`, `!`, `<`, `>`, `(`, `)`, `in` and `notin`, so: letters,
+/// digits, space and `. _ - / , = ! < > ( )`.
+fn check_label_selector(selector: &str) -> Result<(), &'static str> {
+    let plain = |b: u8| {
+        b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b' ' | b'.' | b'_' | b'-' | b'/' | b',' | b'=' | b'!' | b'<' | b'>' | b'(' | b')'
+            )
+    };
+    if selector.len() > MAX_DECODED || !selector.bytes().all(plain) {
+        return Err(RULE_QUERY);
+    }
+    Ok(())
+}
+
+/// A field selector is terms `key=value`, `key==value` or `key!=value` joined by `,`. The characters are
+/// letters, digits and `. _ - / : , = !`, and every term has a key and an operator. An empty selector
+/// has no terms.
+fn check_field_selector(selector: &str) -> Result<(), &'static str> {
+    let plain = |b: u8| {
+        b.is_ascii_alphanumeric()
+            || matches!(b, b'.' | b'_' | b'-' | b'/' | b':' | b',' | b'=' | b'!')
+    };
+    if selector.len() > MAX_DECODED || !selector.bytes().all(plain) {
+        return Err(RULE_QUERY);
+    }
+    if selector.is_empty() {
+        return Ok(());
+    }
+    let terms_ok = selector
+        .split(',')
+        .all(|term| split_term(term).is_some_and(|(key, _, _)| !key.is_empty()));
+    if terms_ok { Ok(()) } else { Err(RULE_QUERY) }
 }
 
 /// Decodes a query value once, as the API server does: `%XX` is a byte and `+` is a space. A backslash
@@ -473,34 +672,84 @@ fn check_query_value(value: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// A request path as the API server's request-info parser reads it (`k8s.io/apiserver`,
+/// `RequestInfoFactory.NewRequestInfo`).
+///
+/// `namespace` is set only for a namespaced resource: `/api/v1/namespaces/x/pods` has namespace `x` and
+/// resource `pods`, while `/api/v1/namespaces/x` has resource `namespaces` and name `x`, and
+/// `/api/v1/namespaces/x/finalize` has resource `namespaces`, name `x` and subresource `finalize`.
+///
+/// This differs from the server's `NewRequestInfo` in two places, on purpose. For `/api/v1/namespaces/x`
+/// the server also sets the namespace to `x`; this parser leaves it `None`, so the `Get(Only::Any)`
+/// entry of `namespaces` matches by name and a namespaced list does not. And the server keeps one
+/// subresource part; this parser joins the whole tail (`proxy/a/b`) into `subresource`. Neither changes
+/// a verdict, because every subresource is refused. Do not "fix" either to match the server.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct RequestInfo<'a> {
+    pub(super) group: &'a str,
+    pub(super) version: &'a str,
+    pub(super) namespace: Option<&'a str>,
+    pub(super) resource: &'a str,
+    pub(super) name: Option<&'a str>,
+    /// What follows the name, joined by `/`. `None` for no subresource.
+    pub(super) subresource: Option<String>,
+}
+
+/// Parses the segments of a resource path. `Err` is the rule for a path that is not a resource path or
+/// that uses a legacy path verb.
+pub(super) fn request_info<'a>(segments: &[&'a str]) -> Result<RequestInfo<'a>, &'static str> {
+    let (group, version, mut parts) = match segments {
+        ["api", version, rest @ ..] => ("", *version, rest),
+        ["apis", group, version, rest @ ..] => (*group, *version, rest),
+        _ => return Err(RULE_NOT_ALLOWED),
+    };
+    // `/api/v1/watch/nodes` and `/api/v1/proxy/nodes/x` are the legacy forms of a watch and a proxy.
+    if parts.len() > 1 && matches!(parts.first(), Some(&"watch" | &"proxy")) {
+        return Err(RULE_NOT_ALLOWED);
+    }
+    // `/namespaces/<ns>/<resource>/...` is a namespaced resource, unless the part after the name is a
+    // subresource of the namespace itself.
+    let mut namespace = None;
+    if let ["namespaces", name, third, ..] = parts
+        && !matches!(*third, "status" | "finalize")
+    {
+        namespace = Some(*name);
+        parts = parts.get(2..).unwrap_or_default();
+    }
+    let Some(resource) = parts.first() else {
+        return Err(RULE_NOT_ALLOWED);
+    };
+    let subresource = parts
+        .get(2..)
+        .filter(|rest| !rest.is_empty())
+        .map(|rest| rest.join("/"));
+    Ok(RequestInfo {
+        group,
+        version,
+        namespace,
+        resource,
+        name: parts.get(1).copied(),
+        subresource,
+    })
+}
+
 fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'static str> {
     if is_discovery(segments) {
         return Ok(());
     }
-    let (group, version, rest) = match segments {
-        ["api", "v1", rest @ ..] => ("", "v1", rest),
-        ["apis", group, version, rest @ ..] if is_group(group) && is_version(version) => {
-            (*group, *version, rest)
-        }
-        _ => return Err(RULE_NOT_ALLOWED),
-    };
-    let (namespace, resource, name) = match rest {
-        [resource] => (None, *resource, None),
-        ["namespaces", name] => (None, "namespaces", Some(*name)),
-        [resource, name] => (None, *resource, Some(*name)),
-        ["namespaces", namespace, resource] => (Some(*namespace), *resource, None),
-        _ => return Err(RULE_NOT_ALLOWED),
-    };
-    let Some(entry) = ALLOWED
-        .iter()
-        .find(|e| e.group == group && e.version == version && e.resource == resource)
-    else {
+    let info = request_info(segments)?;
+    if info.subresource.is_some() {
+        return Err(RULE_SUBRESOURCE);
+    }
+    let Some(entry) = ALLOWED.iter().find(|e| {
+        e.group == info.group && e.version == info.version && e.resource == info.resource
+    }) else {
         return Err(RULE_NOT_ALLOWED);
     };
     let allowed = entry
         .access
         .iter()
-        .any(|access| match (access, namespace, name) {
+        .any(|access| match (access, info.namespace, info.name) {
             (Access::List, None, None) => true,
             (Access::ListInNamespace(only), Some(namespace), None) => only.admits(namespace),
             (Access::Get(only), None, Some(name)) => only.admits(name),
@@ -510,7 +759,7 @@ fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'st
         return Err(RULE_NOT_ALLOWED);
     }
     // A list (no name) must carry the field selector its entry names. A get by name needs none.
-    if name.is_none() && !entry.field_selector.met_by(field_selector) {
+    if info.name.is_none() && !entry.field_selector.met_by(field_selector) {
         return Err(RULE_SELECTOR);
     }
     Ok(())
@@ -539,6 +788,12 @@ fn is_group(group: &str) -> bool {
                 && bytes.last().is_some_and(edge)
                 && bytes.iter().all(|b| edge(b) || *b == b'-')
         })
+}
+
+/// A DNS-1123 label: lower case letters, digits and `-`, starting and ending with a letter or digit, at
+/// most 63 characters.
+fn is_label(label: &str) -> bool {
+    !label.contains('.') && label.len() <= 63 && is_group(label)
 }
 
 /// `^v[0-9]+((alpha|beta)[0-9]+)?$`.

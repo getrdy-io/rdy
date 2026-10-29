@@ -96,7 +96,8 @@ as the `Authorization` header from the token or the exec plugin, the user agent,
 `Impersonate-*` (the operator's choice). It checks every request and fails closed: the request never
 leaves, and the check reports `Error`. A request header other than `accept`, `content-type` and
 `content-length` is refused. `connect()` keeps the raw client private and checks get only the guarded
-client type (`ReadOnlyClient`), so there is no unguarded client to pass. Inside `rdy-checks-k8s`, only the client module may name a kube client or
+client type (`ReadOnlyClient`), so there is no unguarded client to pass. The one header exception is
+`Impersonate-User` with the spec's `as:` value on the two access review POSTs (02 Appendix B rule 8). Inside `rdy-checks-k8s`, only the client module may name a kube client or
 config type (02 Appendix A), so a check cannot build a second client. The mock API server test from
 ADR 0010 stays as a second line.
 
