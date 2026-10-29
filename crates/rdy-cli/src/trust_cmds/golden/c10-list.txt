@@ -1,0 +1,7 @@
+acme-platform
+  key id       9F3A6C21D4E87B05
+  fingerprint  4d2a 7c0e 9b1f 3a5c 6e8d 0b2f 4a6c 8e0d
+               1b3f 5a7c 9e2d 4b6f 8a0c 2e4d 6b8f 0a1c
+  added        2026-11-30
+  note         Acme security page, fingerprint read back by phone
+  file         /etc/rdy/trust.yaml

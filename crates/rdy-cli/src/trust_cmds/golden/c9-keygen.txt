@@ -1,0 +1,11 @@
+Password for the new secret key (input hidden):
+Repeat the password:
+Wrote acme-signing.key (secret, readable only by you) and acme-signing.pub (public).
+
+key id       9F3A6C21D4E87B05
+fingerprint  4d2a 7c0e 9b1f 3a5c 6e8d 0b2f 4a6c 8e0d
+             1b3f 5a7c 9e2d 4b6f 8a0c 2e4d 6b8f 0a1c
+
+Publish the fingerprint on your docs page so customers can check it.
+Back up acme-signing.key. Anyone who has it can sign specs as you.
+Next: rdy spec sign <spec> --secret-key acme-signing.key

@@ -1,0 +1,2 @@
+error: cannot ask for confirmation because there is no terminal
+fix: check the key's fingerprint with the vendor, then run again with --yes
