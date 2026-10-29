@@ -348,7 +348,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-167 | todo | | Time the quickstart with two design-partner SEs | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
-- M1-168 | PR #TBD | | none; CLI start-up hardening: call `harden_umask()` and warn on inherited descriptors
+- M1-168 | [#74](https://github.com/getrdy-io/rdy/pull/74) | 2026-10-29 | none; CLI start-up hardening: call `harden_umask()` and warn on inherited descriptors
 
 ## Summary
 
