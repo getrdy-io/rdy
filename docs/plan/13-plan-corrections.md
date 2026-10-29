@@ -298,6 +298,19 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   `clippy.toml` `disallowed-methods` list now, so a check crate that calls the table runner without a
   `Probe` fails clippy. The one call in `probe.rs` carries `#[expect(clippy::disallowed_methods)]`.
 
+- PC-48 (found by the security review of PR #85, applied in M1-044): applied in 02 Appendix A, in the
+  `clippy.toml` of every check crate and in `tests/lint-wall/src/uses.rs`. The wall list gains the
+  first-party items a check must not call, because clippy bans only what is listed: the output folder
+  (`rdy_engine::output::{ReportParent::open, OutputDir::create_new, create_new_in, write_atomic,
+  write_spec, default_report_parent}`), the process-wide effects (`rdy_engine::exec::{kill_all_groups,
+  harden_umask, inherited_fds, live_groups}`), the watchdog (`watchdog::ProcessEffects`,
+  `watchdog::Effects::{exit, kill_groups, notice}`, `Watchdog::start`, `WriteState::{claim,
+  claim_or_park, finish}`), `probe::ProbeHub::{new, run_probe}`, `rdy_spec::load`, `std::env::args` and `args_os`, the terminal
+  (`std::io::{stdout, stderr, stdin}`, the print macros) and `TestRun::context`. `privilege_gate` and `gate_then`
+  (M1-042) are in `rdy-cli`, which no check crate may depend on. `rdy_engine::live_backend` (M1-045) is
+  on the list, in `uses.rs` and in the floor. The direct dependency
+  allowlist (`ci/check-crate-deps.toml`) is built in M1-044, because old M1-065 was merged into it.
+
 ADR amendments in the ticket title:
 
 - ADR 0006 decision 5: `net.dns` takes the Linux system answer from `getent ahosts`, with
