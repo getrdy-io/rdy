@@ -1,0 +1,10 @@
+error[E0624]: associated function `new` is private
+ --> tests/compile_fail/machine_id_new.rs:4:24
+  |
+4 |     let _ = MachineId::new("0f1e2d3c4b5a69788796a5b4c3d2e1f0");
+  |                        ^^^ private associated function
+  |
+ ::: src/probe/native.rs
+  |
+  |     pub(crate) fn new(raw: impl Into<String>) -> Self {
+  |     ------------------------------------------------- private associated function defined here

@@ -1,0 +1,16 @@
+# The closed list of native calls (ADR 0014 decision 5). One line per variant:
+# api | who may ask | path rules
+# A new variant fails the snapshot test until this file and the policy row in the module docs and the INV-07
+# row of docs/plan/05-threat-model.md change in the same PR.
+statvfs | any probe | read rules apply
+uname | any probe | none
+rlimit | any probe | none
+hostname | any probe | none
+machine_id | run-level probes only | none
+system_roots | any probe | none
+# Resources of Rlimit
+nofile
+nproc
+core
+memlock
+stack

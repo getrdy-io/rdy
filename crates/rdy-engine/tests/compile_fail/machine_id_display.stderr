@@ -1,0 +1,9 @@
+error[E0277]: `rdy_engine::probe::MachineId` doesn't implement `std::fmt::Display`
+ --> tests/compile_fail/machine_id_display.rs:4:14
+  |
+4 |     format!("{id}")
+  |              ^^^^ `rdy_engine::probe::MachineId` cannot be formatted with the default formatter
+  |
+  = help: the trait `std::fmt::Display` is not implemented for `rdy_engine::probe::MachineId`
+  = note: in format strings you may be able to use `{:?}` (or `{:#?}` for pretty-print) instead
+  = note: required for `&rdy_engine::probe::MachineId` to implement `std::fmt::Display`
