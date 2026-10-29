@@ -17,9 +17,10 @@ disallowed-methods = [
     { path = "clap::error::Error::print", reason = "prints clap's own text, which can echo what was typed; render the error with rdy_cli::error::emit" },
     { path = "clap::error::Error::exit", reason = "exits 2; print the error with rdy_cli::error::emit and return exit code 64" },
     # The CLI must read the real clock. `load_at` exists for tests that pin "now", and a caller of it could
-    # defeat spec expiry. Tests allow it with `#[allow(clippy::disallowed_methods)]`.
+    # defeat spec expiry. Tests allow it with `#[allow(clippy::disallowed_methods)]`. The path
+    # `rdy_spec::loaded::load_at` is the same item and clippy matches the item, so one entry covers both
+    # (M1-044 removed the second one: two entries for one item report under one name only).
     { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load" },
-    { path = "rdy_spec::loaded::load_at", reason = "only tests may pass a clock; use rdy_spec::load" },
     # A check reaches the machine only through its `Probe` (ADR 0014, SEC-17). `table::run` validates a
     # command against the command table but writes no action-log entry and checks no `CheckInfo`
     # declaration. Only the live probe backend may call it, with `#[expect(clippy::disallowed_methods)]`.
@@ -28,4 +29,5 @@ disallowed-methods = [
     { path = "rdy_engine::exec::table::run", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration", allow-invalid = true },
     { path = "rdy_engine::exec::run", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
     { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
+    { path = "rdy_engine::probe::Probe::kube_call", reason = "writes the kube entry of the action log; only the read-only guard in rdy-checks-k8s src/client/ calls it, so a check cannot forge a kube entry (INV-14)", allow-invalid = true },
 ]

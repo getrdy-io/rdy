@@ -3,6 +3,9 @@
 //!
 //! The fixture run at the bottom is the exit test of M1-040.
 
+// `Probe::kube_call` is on the lint wall for check crates. The engine tests exercise it directly.
+#![allow(clippy::disallowed_methods)]
+
 use std::path::Path;
 use std::sync::Arc;
 #[cfg(feature = "runtime")]
@@ -1216,6 +1219,157 @@ async fn a_call_after_the_check_ended_is_denied_and_logged() {
     assert_eq!(late.check.as_deref(), Some("host.cpu"));
     assert_eq!(field(late, "rule"), Some(&json!(RULE_CHECK_FINISHED)));
     assert_eq!(field(late, "path"), Some(&json!("/proc/cpuinfo")));
+}
+
+#[test]
+fn a_failed_kube_status_carries_a_fixed_error_and_a_redirect_is_not_ok() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("k8s.nodes", Os::Linux, None);
+    for status in [200_u16, 204, 302, 403, 503] {
+        probe
+            .kube_call("GET", "/api/v1/nodes")
+            .expect("open")
+            .answered(status);
+    }
+    probe
+        .kube_call("GET", "/api/v1/nodes")
+        .expect("open")
+        .refused_header("a header rule", "authorization");
+    let log = hub.action_log();
+    let outcomes: Vec<_> = log.actions.iter().map(|a| a.outcome.clone()).collect();
+    assert_eq!(
+        outcomes,
+        [
+            ActionOutcome::Ok,
+            ActionOutcome::Ok,
+            ActionOutcome::Failed,
+            ActionOutcome::Failed,
+            ActionOutcome::Failed,
+            ActionOutcome::Denied,
+        ]
+    );
+    assert_eq!(field(&log.actions[0], "error"), None);
+    assert_eq!(field(&log.actions[1], "error"), None);
+    for entry in &log.actions[2..5] {
+        let error = field(entry, "error")
+            .and_then(|v| v.as_str())
+            .expect("error");
+        assert!(error.starts_with("the server answered"), "{error}");
+    }
+    assert!(
+        field(&log.actions[2], "error")
+            .and_then(|v| v.as_str())
+            .is_some_and(|e| e.contains("redirect"))
+    );
+    // A refused header is named, with the rule, and has no value and no error.
+    assert_eq!(
+        field(&log.actions[5], "header"),
+        Some(&json!("authorization"))
+    );
+    assert_eq!(
+        field(&log.actions[5], "rule"),
+        Some(&json!("a header rule"))
+    );
+    assert_eq!(field(&log.actions[5], "error"), None);
+}
+
+#[test]
+fn a_kube_call_writes_one_entry_under_its_check() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("k8s.nodes", Os::Linux, None);
+    probe
+        .kube_call("GET", "/api/v1/nodes")
+        .expect("open")
+        .answered(200);
+    probe
+        .kube_call("GET", "/api/v1/pods")
+        .expect("open")
+        .answered(503);
+    probe
+        .kube_call("DELETE", "/api/v1/nodes/n1")
+        .expect("open")
+        .refused("a rule");
+    probe
+        .kube_call("GET", "/version")
+        .expect("open")
+        .failed("the request failed");
+    // Dropped before it is closed: a cancelled request still leaves its entry.
+    drop(probe.kube_call("GET", "/apis").expect("open"));
+
+    let log = hub.action_log();
+    let seen: Vec<_> = log
+        .actions
+        .iter()
+        .map(|a| (a.kind.clone(), a.outcome.clone(), a.check.clone()))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            (
+                ActionKind::Kube,
+                ActionOutcome::Ok,
+                Some("k8s.nodes".to_owned())
+            ),
+            (
+                ActionKind::Kube,
+                ActionOutcome::Failed,
+                Some("k8s.nodes".to_owned())
+            ),
+            (
+                ActionKind::Kube,
+                ActionOutcome::Denied,
+                Some("k8s.nodes".to_owned())
+            ),
+            (
+                ActionKind::Kube,
+                ActionOutcome::Failed,
+                Some("k8s.nodes".to_owned())
+            ),
+            (
+                ActionKind::Kube,
+                ActionOutcome::Timeout,
+                Some("k8s.nodes".to_owned())
+            ),
+        ]
+    );
+    assert_eq!(field(&log.actions[0], "status"), Some(&json!(200)));
+    assert_eq!(field(&log.actions[0], "method"), Some(&json!("GET")));
+    assert_eq!(field(&log.actions[2], "rule"), Some(&json!("a rule")));
+    assert_eq!(
+        field(&log.actions[2], "path"),
+        Some(&json!("/api/v1/nodes/n1"))
+    );
+
+    // A run-level probe logs `check: null`. An ended probe refuses, and the refusal is logged.
+    hub.run_probe()
+        .kube_call("GET", "/version")
+        .expect("open")
+        .answered(200);
+    probe.end();
+    let error = probe.kube_call("GET", "/api").expect_err("ended");
+    assert!(matches!(
+        error,
+        ProbeError::Denied {
+            rule: RULE_CHECK_FINISHED,
+            ..
+        }
+    ));
+    // A probe with no hub has nothing to log in, so it refuses and writes nothing.
+    assert!(matches!(
+        Probe::closed().kube_call("GET", "/version"),
+        Err(ProbeError::Denied {
+            rule: RULE_NO_PROBE,
+            ..
+        })
+    ));
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 7);
+    assert_eq!(log.actions[5].check, None);
+    assert_eq!(log.actions[6].outcome, ActionOutcome::Denied);
+    assert_eq!(
+        field(&log.actions[6], "rule"),
+        Some(&json!(RULE_CHECK_FINISHED))
+    );
 }
 
 /// A backend whose calls never finish, to stand in for a check that the scheduler aborts.

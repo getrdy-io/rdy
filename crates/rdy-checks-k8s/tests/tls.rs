@@ -7,6 +7,14 @@
 //! made in memory for each test. Nothing is written but the CA certificate.
 
 #![allow(clippy::expect_used)]
+// These are tests of the client module. They start mock servers, write kubeconfigs and run plugin
+// scripts, which the lint wall bans in the rest of this crate (INV-07). This file is on the allowlist of
+// tests/lint-wall/tests/allow_grep.rs. A test of a check does not belong here: use the probe.
+#![allow(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    clippy::disallowed_types
+)]
 
 mod common;
 
@@ -125,7 +133,7 @@ async fn a_server_certificate_from_the_kubeconfig_ca_is_trusted() {
 
     let connected = loaded(dir.path(), addr, &pki.ca_pem, "")
         .await
-        .connect(|_| {})
+        .connect(&common::run_probe(), |_| {})
         .await
         .expect("connect over TLS");
 
@@ -142,7 +150,7 @@ async fn a_certificate_from_another_ca_is_refused_with_the_reason() {
 
     let error = loaded(dir.path(), addr, &other.ca_pem, "")
         .await
-        .connect(|_| {})
+        .connect(&common::run_probe(), |_| {})
         .await
         .expect_err("unknown issuer");
 
@@ -168,7 +176,7 @@ async fn a_certificate_for_another_name_gets_its_own_phrase() {
 
     let error = loaded(dir.path(), addr, &pki.ca_pem, "")
         .await
-        .connect(|_| {})
+        .connect(&common::run_probe(), |_| {})
         .await
         .expect_err("the certificate is for localhost, the address is 127.0.0.1");
 
@@ -196,7 +204,9 @@ async fn insecure_skip_tls_verify_connects_and_the_line_says_so() {
     let seen = Arc::clone(&shown);
 
     loaded
-        .connect(move |line| *seen.lock().expect("shown") = line.to_string())
+        .connect(&common::run_probe(), move |line| {
+            *seen.lock().expect("shown") = line.to_string()
+        })
         .await
         .expect("connect with verification off");
 
@@ -246,7 +256,7 @@ async fn without_a_ca_in_the_kubeconfig_only_the_bundled_roots_are_trusted() {
     .expect("load");
 
     let error = loaded
-        .connect(|_| {})
+        .connect(&common::run_probe(), |_| {})
         .await
         .expect_err("the CA in SSL_CERT_FILE must not be trusted");
 

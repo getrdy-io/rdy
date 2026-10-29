@@ -1,6 +1,23 @@
 //! Helpers the integration tests share.
 
 #![allow(clippy::expect_used)]
+// These are tests of the client module. They start mock servers, write kubeconfigs and run plugin
+// scripts, which the lint wall bans in the rest of this crate (INV-07). This file is on the allowlist of
+// tests/lint-wall/tests/allow_grep.rs. A test of a check does not belong here: use the probe.
+#![allow(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    clippy::disallowed_types
+)]
+
+use rdy_engine::check::Os;
+use rdy_engine::probe::Probe;
+use rdy_engine::testing::{Replay, TestRun};
+
+/// A run-level probe over an empty replay. `connect` logs its `GET /version` to it.
+pub fn run_probe() -> Probe {
+    TestRun::new(Replay::new()).run_probe(Os::Linux)
+}
 
 // ---- child processes ---------------------------------------------------------------------------------
 //

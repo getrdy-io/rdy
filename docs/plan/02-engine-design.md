@@ -290,9 +290,12 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
 - The facade writes every entry; checks cannot skip it. Run-level work (snapshot, machine id, hostname,
   os-release, command stats, kubeconfig read) is logged with `check: null`.
 - `exec` entries record the resolved absolute path and `argv` as a JSON array of strings, redacted.
-- Kube entries open in the guard's `call` (no check id yet) and are completed by the response future,
-  which runs on the calling check's task and fills `check` from the engine's task-local. A dropped
-  request is closed as `timeout`.
+- Kube entries open in the guard's `call` through `Probe::kube_call(method, path)` (M1-103) and are
+  closed by the response future: `answered(status)`, `refused(rule)` or `failed(phrase)`. The path has no
+  query string and the entry holds no body. A dropped request is closed as `timeout`. Each check gets
+  its own client from its own probe (`Connected::read_only(probe)`), which shares the connection but has
+  its own guard, so `check` is set with no task-local. The run's `GET /version` uses the run probe
+  (`check: null`).
 - The kube exec credential plugin gets an `exec` entry with the resolved plugin path and redacted args,
   outcome `delegated`, note "run by the kube client, output not captured, may run again on token
   refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01.)
@@ -455,7 +458,7 @@ tests policy.
 on the exact list of resources the M1 checks read, no subresources, no dry run, no probe pod. POST only
 to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as amended).
 - Construction:
-  - One constructor, `guarded_service(inner)`, serves production and the mock tests.
+  - One constructor, `guarded_service(inner, &Probe)`, serves production and the mock tests.
   - A `ReadOnlyClient` newtype with a private constructor is the only client type checks get.
   - The k8s family owns the client; the engine has no kube dependency.
 - kube's own sockets, its proxy CONNECT and TLS, and its exec plugins are the named exceptions of ADR
@@ -465,17 +468,58 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
 **Lint wall** (INV-07, ADR 0014 decision 7).
 - `clippy.toml` `disallowed-methods` and `disallowed-types` list exact items, never wildcards
   (Appendix A).
-- A `tests/lint-wall` crate uses each item, and CI expects each one to fail.
-- `allow(clippy::disallowed_` is legal only in the facade's `live/` module and the k8s client module.
-- **Direct dependency allowlist.** `ci/check-crate-deps.toml`:
+- A `tests/lint-wall` crate uses each item, and CI expects each one to fail (M1-044). The wall lives in
+  each check crate's own `clippy.toml`, not in the root file: a crate file replaces the root file, and a
+  root entry would also ban the engine and the CLI, which use these APIs on purpose. The crate's
+  `src/uses.rs` (feature `use-all`, off by default) uses each item once. `tests/clippy_wall.rs` runs
+  `cargo clippy` over it under the root file and under each check crate's file, and fails unless every
+  entry is reported. It also fails on drift between the check crates' files.
+- `allow(clippy::disallowed_` is legal only in the facade's `live/` module and the k8s client module
+  (and the tests of that client). `tests/lint-wall/tests/allow_grep.rs` parses every `.rs` file of the
+  repository with `syn` (the walk starts at the root and skips only `target/`, `.git/` and the local agent
+  checkouts), walks every attribute (inside `cfg_attr` and in the tokens of a macro too), and fails on any
+  other file that relaxes a `disallowed_*` lint or a group that holds one. An attribute that a macro
+  builds from the caller's tokens (`#[allow($($t)*)]`, `#[$a(..)]`) counts, and `#[$meta]` does not when
+  the arm of the macro takes `#[$meta:meta]` as written (bound per arm). A check crate may use neither `#[path]` nor `include!`
+  (`include_str!` only for the data files listed in the test). Its list also holds the engine, spec and
+  xtask files that call a root entry on purpose.
+- The compiler is the first layer, the grep the second. A token grep cannot model `macro_rules!` (a macro
+  can take the `#` of an attribute as a `tt`, or rewrite a matcher), so every check crate has
+  `#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]` at the
+  root of `lib.rs` and of each `tests/`, `benches/` and `examples/` root. Any `allow`, `expect` or
+  `warn` of those lints, built by a macro or not, is then error E0453 under clippy. `rdy-checks-k8s` cannot
+  forbid at the root, because the `client` module allows the kube APIs it wraps (and so do its integration
+  tests, which are exempt). Its `lib.rs` holds only `mod` and `use` items, and every module but `client`
+  has `#[forbid(..)]` on it. `wall_intact.rs` requires all of this and rejects `[[bin]]`, `[[test]]`,
+  `[[bench]]`, `[[example]]` and `[lib] path` in a check crate manifest.
+- The wall cannot be turned down quietly (`tests/lint-wall/tests/wall_intact.rs`): a hardcoded floor of the
+  Appendix A entries, no `.clippy.toml` anywhere, no `CLIPPY_CONF_DIR`, `rustflags`, compiler wrapper or
+  `clippy` alias in a Cargo config, no `RUSTFLAGS` in a workflow, the clippy commands of CI are exactly the three pinned in the test, no workflow carries
+  `continue-on-error`, `--config`, `GITHUB_PATH` or a flags variable (any case), no workflow sets or reads a `CARGO_` name except `CARGO_TERM_COLOR`, `CARGO_INCREMENTAL`, `CARGO_NET_RETRY` and `CARGO_PROFILE_*`, a `- run:` clippy line counts as a command, any other clippy line is refused, no `[patch]`, `[replace]`, `paths` or `[source]`
+  anywhere, nothing under `.claude/worktrees/` is tracked, no `disallowed_*`, `all`, `style` or `warnings` set to `allow` in the root
+  `[workspace.lints]`, a check crate's `lints` is exactly `workspace = true` (manifests are read as TOML,
+  so the spelling of a key does not matter), and every check crate says
+  `#![deny(clippy::print_stdout, clippy::print_stderr)]` and the `forbid` above.
+- **Direct dependency allowlist** (M1-044, `ci/check-crate-deps.toml`):
   - every check crate: `rdy-engine`, `rdy-spec`, `serde`, `serde_json`, `thiserror`, `futures-util`;
-  - `rdy-checks-k8s` adds `kube` and `k8s-openapi`, and is the only check crate that may depend on
-    `kube`; inside it, only the client module may name a kube client or config type (Appendix A);
+  - `rdy-checks-k8s` adds `kube` and `k8s-openapi` (and `secrecy` for kubeconfig token values), and is the
+    only check crate that may depend on `kube`; inside it, only the client module may name a kube client
+    or config type (Appendix A);
   - `rdy-checks-net` adds `x509-parser`.
 
-  A CI script compares `cargo metadata` against the file. A change needs the `security-review` label.
+  `tests/lint-wall/tests/deps_allowlist.rs` compares `cargo metadata` against the file and fails on any
+  direct normal or build dependency of a `rdy-checks-*` crate that is not listed, and on a new check crate
+  with no section. It also refuses a list that names `tokio`, `cap-std`, `rustix`, `hyper-util` or any
+  other crate that reaches the machine, because clippy cannot ban another crate's API and the allowlist is
+  what keeps `tokio::fs`, `cap_std` and `TcpSocket` out. Every dependency of a check crate, dev ones
+  too, comes from crates.io or is `crates/rdy-engine` or `crates/rdy-spec` by path, because the file and
+  deny's wrappers see only names. A change needs the `security-review` label.
 - `deny.toml` wrappers keep `rustix`, `socket2`, `hyper`, `tokio-rustls`, `hickory-*`, `sysinfo`,
-  `walkdir`, `tempfile`, `which`, `nix`, `ureq` and `reqwest` out of check crates.
+  `walkdir`, `tempfile`, `which`, `nix`, `ureq` and `reqwest` out of check crates (M1-044). A crate that
+  nothing in the tree uses is a plain ban. A crate that the tree uses lists the crates that may depend on
+  it, and no check crate is among them, except two test-only dev-dependencies of `rdy-checks-k8s`
+  (`tempfile`, `tokio-rustls`) that `deny.toml` names and `deps_allowlist.rs` holds to dev-only.
+  `tests/lint-wall/tests/deny_wrappers.rs` proves the bans with a throwaway workspace.
 
 ## Per-OS behaviour
 
@@ -818,7 +862,7 @@ impl Probe {
     pub async fn tls_chain(&self, target: &Target) -> Result<TlsChain, ProbeError>;
     pub async fn http(&self, req: HttpProbe) -> Result<HttpOutcome, ProbeError>;
     pub async fn native(&self, call: NativeCall) -> Result<NativeValue, ProbeError>;
-    pub fn kube_guard(&self) -> KubeGuardLayer;        // used only by guarded_service
+    pub fn kube_call(&self, method: &str, path: &str) -> Result<KubeCall, ProbeError>;  // M1-103; the guard's door to the log
 }
 // One Cmd type: rdy_engine::exec::policy::Cmd { program: &'static str, args, extra_dirs, env names, timeout, stdout_cap }.
 // Build it with CommandEntry::cmd (the command table, ADR 0028). Probe::exec applies the check's
@@ -902,10 +946,25 @@ one clippy rule.
   `tokio::task::spawn_blocking`.
 - Env, read and write: `std::env::var`, `std::env::var_os`, `std::env::vars`, `std::env::vars_os`,
   `std::env::set_var`, `std::env::remove_var`, `std::env::current_dir`, `std::env::set_current_dir`,
-  `std::env::current_exe`, `std::env::home_dir`, `std::env::temp_dir`. (`set_var` and `remove_var`
+  `std::env::current_exe`, `std::env::home_dir`, `std::env::temp_dir`, `std::env::args`,
+  `std::env::args_os`. (`set_var` and `remove_var`
   are `unsafe` in edition 2024, so `forbid(unsafe_code)` also stops them.)
 - Leaks: `Box::leak`, `String::leak`, `Vec::leak`.
-- Engine: `rdy_engine::live_backend`.
+- Engine: `rdy_engine::live_backend` (feature `runtime`, so the entry is `allow-invalid` in a crate that
+  builds the engine without it), `rdy_engine::exec::table::run`, `rdy_engine::exec::run`,
+  `rdy_engine::exec::ExecSpec::new` and `rdy_engine::testing::TestRun::context` (check tests use
+  `context_for`, which applies the check's declaration).
+- First-party escapes (PC-48): the run owns the output folder, the process-wide effects and the spec, and
+  a check owns none of them. `rdy_engine::output::ReportParent::open`,
+  `rdy_engine::output::OutputDir::create_new`, `OutputDir::create_new_in`, `OutputDir::write_atomic`,
+  `OutputDir::write_spec`, `rdy_engine::output::default_report_parent`, `rdy_engine::exec::kill_all_groups`,
+  `rdy_engine::exec::harden_umask`, `rdy_engine::exec::inherited_fds`, `rdy_engine::exec::live_groups`,
+  the watchdog (type `rdy_engine::watchdog::ProcessEffects`, `watchdog::Effects::exit`, `kill_groups` and
+  `notice`, `Watchdog::start`, `WriteState::claim`, `claim_or_park` and `finish`), `rdy_engine::probe::ProbeHub::new` and
+  `ProbeHub::run_probe` (a check gets its `Probe` from the run and never makes a hub), `rdy_engine::probe::Probe::kube_call` (only the guard in the `rdy-checks-k8s` client module opens a kube entry; M1-103) and `rdy_spec::load`.
+  `privilege_gate` and `gate_then` (M1-042) are in `rdy-cli`, which no check crate may depend on, so they need no entry.
+- Terminal (macros in `disallowed-macros`): `std::io::stdout`, `std::io::stderr`, `std::io::stdin`,
+  `std::print`, `std::println`, `std::eprint`, `std::eprintln`.
 - Kube, outside the `rdy-checks-k8s` client module: types `kube::Client`, `kube::Config`,
   `kube::client::ClientBuilder`, `kube::config::Kubeconfig`; `kube::Client::new`,
   `kube::Client::try_default`, `kube::client::ClientBuilder::new`, `kube::Config::new`,
@@ -942,7 +1001,13 @@ one clippy rule.
 
 Global rules, because `call` runs on kube's buffer worker without a check id.
 
-1. **Path pre-filter.** Refuse a path containing `%`, `..`, `//`, `;`, an empty segment, a trailing `/`
+1. **Path pre-filter.** (M1-103 builds the frame: method, POST rules, the fixed body, a conservative
+   secrets rule, this pre-filter, the query keys, the field selectors that `pods` and `events` lists
+   must carry, the request header allow list of rule 8 and the table in section 4. M1-104 adds the full
+   request-info parser, the `namespaces/secrets` exception, the `Impersonate-*` value rule, the citation
+   test and validation of the other decoded selector values. kube writes `?&k=v`, with a `&` before the
+   first parameter and a bare `?` for none, so both are accepted. `resourceVersion`, so
+   `ListParams::match_any()`, is refused as a query key.) Refuse a path containing `%`, `..`, `//`, `;`, an empty segment, a trailing `/`
    or a non-ASCII byte. The `%` rule applies to the path only. Query values are decoded once, then
    validated (kube-rs percent-encodes `fieldSelector`). Refuse `Upgrade` and `Connection: upgrade`.
    Allowed query keys: `limit`, `continue`, `labelSelector`, `fieldSelector`. Anything else, including
@@ -998,6 +1063,12 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
    must equal the validated spec `as:` value: `system:serviceaccount:<dns1123>:<dns1123>`, or a user
    string with no control characters, at most 253 bytes. Otherwise only values the operator's kubeconfig
    sets are allowed. The header name is logged, never a token.
+
+   M1-103 builds the allow list under this rule. The guard sees the request as the caller built it, above
+   kube's layers, so it refuses every header except `accept`, `content-type` and `content-length`
+   (kube's request builders set the first two). A check-set `Authorization`, `X-Remote-User`,
+   `X-Remote-Group`, `X-HTTP-Method-Override` or `Host` is refused as a header, and the log entry names
+   the header and never its value. `Impersonate-*` is refused outright until M1-104 adds the value rule.
 9. **Data.** Response bodies are capped at 32 MiB. Spec `namespace` and `name` values are DNS-1123
    (rdy-spec).
 10. **Refusals.** Every refusal is a `kube` entry with outcome `denied` and the rule name. The request

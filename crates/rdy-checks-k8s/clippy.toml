@@ -2,7 +2,7 @@
 #
 # Outside `src/client/`, check code must not name a kube client or config type or call a constructor of
 # one. Only the client module builds a client, so every request goes through the read-only guard that
-# M1-103 puts in `build_client`. `src/client/mod.rs` allows `clippy::disallowed_types` and
+# M1-103 wraps around it in `src/client/guard.rs`. `src/client/mod.rs` allows `clippy::disallowed_types` and
 # `clippy::disallowed_methods` for itself, and nowhere else may.
 #
 # Re-checked on 2026-10-29 against kube 4.2.0 (the pinned version, from the crate source): every item
@@ -13,23 +13,53 @@
 # `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`, `TryFrom<Config>` for `ClientBuilder`,
 # `TryFrom<Kubeconfig>` for `Config`, and `Default` and `Deserialize` for `Kubeconfig`. The method entries stay as a second line.
 #
-# M1-044 merges the std and facade entries of Appendix A into this file. M1-107 carries the proof that the
+# M1-044 merged the std and facade entries of Appendix A into this file. M1-107 carries the proof that the
 # kube entries bite, from `lint-wall/kube-use.rs.txt` (it uses all 18 entries, the trait routes and both
 # re-export paths; it is not compiled by default).
 #
 # A crate's own clippy.toml replaces the root file, so everything the root file says is repeated here.
-# Keep this file in step with ../../clippy.toml. The test settings:
+# Keep this file in step with ../../clippy.toml (tests/lint-wall/tests/clippy_wall.rs checks it).
+#
+# The std and facade entries below are the check-crate wall (M1-044). It is the same list as in the other
+# check crates. tests/lint-wall/tests/clippy_wall.rs fails on drift against them, and on any non-kube entry
+# that no use in tests/lint-wall/src/uses.rs triggers. Paths that do not exist on every OS or in every
+# crate carry `allow-invalid = true`.
+# `allow(clippy::disallowed_` is legal only in `src/client/` and the client tests (tests/lint-wall/tests/allow_grep.rs).
+#
+# The test settings:
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 
 disallowed-types = [
+    # Kube, outside src/client/.
     { path = "kube::Client", reason = "only src/client/ builds a client; checks get the guarded ReadOnlyClient (ADR 0010)" },
     { path = "kube::Config", reason = "only src/client/ builds a kube config (ADR 0010)" },
-    { path = "kube::client::ClientBuilder", reason = "only src/client/ builds a client; the guard layer goes in build_client (ADR 0010)" },
+    { path = "kube::client::ClientBuilder", reason = "only src/client/ builds a client; the read-only guard wraps the built client from outside kube layers, in src/client/guard.rs (ADR 0010)" },
     { path = "kube::config::Kubeconfig", reason = "only src/client/ reads a kubeconfig; the probe facade denies .kube (ADR 0031)" },
+    # Process.
+    { path = "std::process::Command", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration (ADR 0014)" },
+    # Files and directories.
+    { path = "std::fs::File", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::OpenOptions", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::DirBuilder", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    # Sockets.
+    { path = "std::net::TcpStream", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)" },
+    { path = "std::net::TcpListener", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)" },
+    { path = "std::net::UdpSocket", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)" },
+    # Sockets (Unix only).
+    { path = "std::os::unix::net::UnixStream", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::net::UnixListener", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::net::UnixDatagram", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    # Sockets (`socket2` is not a dependency of a check crate: cargo deny is the first line, this is the second).
+    { path = "socket2::Socket", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    # Threads and tasks.
+    { path = "std::thread::Builder", reason = "a check never starts a thread or task of its own; use rdy_engine::blocking (ADR 0014)" },
+    # First-party escapes: the watchdog and the live process count (PC-48).
+    { path = "rdy_engine::watchdog::ProcessEffects", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
 ]
 
 disallowed-methods = [
+    # Kube, outside src/client/.
     { path = "kube::Client::new", reason = "builds a client with no guard; use the client module (ADR 0010)" },
     { path = "kube::Client::try_default", reason = "infers a config and builds an unguarded client; use the client module (ADR 0010)" },
     { path = "kube::client::ClientBuilder::new", reason = "builds a client with no guard; use the client module (ADR 0010)" },
@@ -44,8 +74,7 @@ disallowed-methods = [
     { path = "kube::config::Kubeconfig::read_from", reason = "reads a kubeconfig outside the client module; use the client module (ADR 0031)" },
     { path = "kube::config::Kubeconfig::from_env", reason = "reads KUBECONFIG outside the client module; use the client module (ADR 0031)" },
     { path = "kube::config::Kubeconfig::from_yaml", reason = "parses a kubeconfig outside the client module; use the client module (ADR 0031)" },
-    # The entries of the root file. This crate does not depend on clap or rdy-spec, so a path that does not
-    # resolve here is allowed (`allow-invalid`) instead of warning.
+    # The entries of the root file (clap exits, the clock). The raw runners are in the engine block below.
     { path = "clap::Parser::parse", reason = "exits 2 on a usage error; use try_parse_from and map the error (rdy_cli::run)", allow-invalid = true },
     { path = "clap::Parser::parse_from", reason = "exits 2 on a usage error; use try_parse_from and map the error (rdy_cli::run)", allow-invalid = true },
     { path = "clap::Command::get_matches", reason = "exits 2 on a usage error; use try_get_matches_from and map the error (rdy_cli::run)", allow-invalid = true },
@@ -55,8 +84,153 @@ disallowed-methods = [
     { path = "clap::error::Error::print", reason = "prints clap's own text, which can echo what was typed; render the error with rdy_cli::error::emit", allow-invalid = true },
     { path = "clap::error::Error::exit", reason = "exits 2; print the error with rdy_cli::error::emit and return exit code 64", allow-invalid = true },
     { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
-    { path = "rdy_spec::loaded::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
+    # Process.
+    { path = "std::process::Command::new", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration (ADR 0014)" },
+    { path = "std::process::exit", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration (ADR 0014)" },
+    { path = "std::process::abort", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration (ADR 0014)" },
+    # Process (`tokio` is not a direct dependency of a check crate, so this is the second line behind the dependency allowlist).
+    { path = "tokio::process::Command::new", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration (ADR 0014)", allow-invalid = true },
+    # Files and directories.
+    { path = "std::fs::read", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::read_to_string", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::read_dir", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::read_link", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::metadata", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::symlink_metadata", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::canonicalize", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::exists", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::write", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::copy", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::rename", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::remove_file", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::remove_dir", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::remove_dir_all", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::create_dir", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::create_dir_all", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::File::open", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::File::create", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::File::create_new", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::fs::OpenOptions::new", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    # Paths that touch the file system (`PathBuf` reaches these through `Deref`).
+    { path = "std::path::Path::metadata", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::path::Path::symlink_metadata", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::path::Path::canonicalize", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::path::Path::read_link", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::path::Path::read_dir", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::path::Path::exists", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::path::Path::try_exists", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::path::Path::is_file", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::path::Path::is_dir", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    { path = "std::path::Path::is_symlink", reason = "a check reads files only through Probe::read, read_dir and stat (ADR 0014)" },
+    # Links and permissions.
+    { path = "std::fs::hard_link", reason = "a check never changes links or permissions (ADR 0014)" },
+    { path = "std::fs::soft_link", reason = "a check never changes links or permissions (ADR 0014)" },
+    { path = "std::fs::set_permissions", reason = "a check never changes links or permissions (ADR 0014)" },
+    # Links and permissions (Unix only, so the path does not exist on Windows).
+    { path = "std::os::unix::fs::symlink", reason = "a check never changes links or permissions (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::fs::chown", reason = "a check never changes links or permissions (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::fs::fchown", reason = "a check never changes links or permissions (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::fs::lchown", reason = "a check never changes links or permissions (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::fs::chroot", reason = "a check never changes links or permissions (ADR 0014)", allow-invalid = true },
+    # Links and permissions (Windows only, so the path does not exist on Unix).
+    { path = "std::os::windows::fs::symlink_file", reason = "a check never changes links or permissions (ADR 0014)", allow-invalid = true },
+    { path = "std::os::windows::fs::symlink_dir", reason = "a check never changes links or permissions (ADR 0014)", allow-invalid = true },
+    # Sockets.
+    { path = "std::net::TcpStream::connect", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)" },
+    { path = "std::net::TcpStream::connect_timeout", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)" },
+    { path = "std::net::TcpListener::bind", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)" },
+    { path = "std::net::UdpSocket::bind", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)" },
+    { path = "std::net::ToSocketAddrs::to_socket_addrs", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)" },
+    # Sockets (Unix only).
+    { path = "std::os::unix::net::UnixStream::connect", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::net::UnixStream::connect_addr", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::net::UnixStream::pair", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::net::UnixListener::bind", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::net::UnixListener::bind_addr", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::net::UnixDatagram::bind", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::net::UnixDatagram::bind_addr", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::net::UnixDatagram::unbound", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "std::os::unix::net::UnixDatagram::pair", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    # Sockets (`tokio`: second line).
+    { path = "tokio::net::TcpStream::connect", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "tokio::net::UdpSocket::bind", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "tokio::net::TcpListener::bind", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "tokio::net::lookup_host", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    { path = "tokio::net::UnixStream::connect", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
+    # Threads and tasks.
+    { path = "std::thread::spawn", reason = "a check never starts a thread or task of its own; use rdy_engine::blocking (ADR 0014)" },
+    { path = "std::thread::scope", reason = "a check never starts a thread or task of its own; use rdy_engine::blocking (ADR 0014)" },
+    { path = "std::thread::Builder::spawn", reason = "a check never starts a thread or task of its own; use rdy_engine::blocking (ADR 0014)" },
+    { path = "std::thread::Builder::spawn_scoped", reason = "a check never starts a thread or task of its own; use rdy_engine::blocking (ADR 0014)" },
+    # Threads and tasks (`tokio`: second line).
+    { path = "tokio::spawn", reason = "a check never starts a thread or task of its own; use rdy_engine::blocking (ADR 0014)", allow-invalid = true },
+    { path = "tokio::task::spawn_blocking", reason = "a check never starts a thread or task of its own; use rdy_engine::blocking (ADR 0014)", allow-invalid = true },
+    # Environment, read.
+    { path = "std::env::var", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::var_os", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::vars", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::vars_os", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::current_dir", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::current_exe", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::home_dir", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::temp_dir", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::args", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::args_os", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    # Environment, write (`set_var` and `remove_var` are `unsafe` in edition 2024, so `forbid(unsafe_code)` also stops them).
+    { path = "std::env::set_var", reason = "a check never changes the process environment or directory (ADR 0014)" },
+    { path = "std::env::remove_var", reason = "a check never changes the process environment or directory (ADR 0014)" },
+    { path = "std::env::set_current_dir", reason = "a check never changes the process environment or directory (ADR 0014)" },
+    # Leaks.
+    { path = "std::boxed::Box::leak", reason = "a check never leaks memory on purpose" },
+    { path = "std::string::String::leak", reason = "a check never leaks memory on purpose" },
+    { path = "std::vec::Vec::leak", reason = "a check never leaks memory on purpose" },
+    # Terminal (the std I/O escapes carried from M1-039).
+    { path = "std::io::stdout", reason = "a check never writes to the terminal; its output is its Finding (ADR 0014)" },
+    { path = "std::io::stderr", reason = "a check never writes to the terminal; its output is its Finding (ADR 0014)" },
+    # Terminal.
+    { path = "std::io::stdin", reason = "a check never reads the terminal" },
+    # Engine: the live backend (M1-045 builds it, so the entry waits for the path to exist).
+    { path = "rdy_engine::live_backend", reason = "a check never builds a live backend; the run gives it a Probe (ADR 0014)", allow-invalid = true },
+    # Engine: the raw runners. `Probe::exec` is the only door (PR #53 and PR #58 reviews).
     { path = "rdy_engine::exec::table::run", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration", allow-invalid = true },
+    # Engine: the raw runners.
     { path = "rdy_engine::exec::run", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
     { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
+    # Engine: test helper.
+    { path = "rdy_engine::testing::TestRun::context", reason = "TestRun::context skips the declaration step; a check test uses TestRun::context_for", allow-invalid = true },
+    # First-party escapes: the run's own files (M1-044 fix round, PC-48).
+    { path = "rdy_engine::output::ReportParent::open", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::output::OutputDir::create_new", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::output::OutputDir::create_new_in", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::output::OutputDir::write_atomic", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::output::OutputDir::write_spec", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::output::default_report_parent", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    # First-party escapes: process-wide effects (PC-48).
+    { path = "rdy_engine::exec::kill_all_groups", reason = "a check never signals processes or changes the process umask; the run owns those (ADR 0016, ADR 0023)", allow-invalid = true },
+    { path = "rdy_engine::exec::harden_umask", reason = "a check never signals processes or changes the process umask; the run owns those (ADR 0016, ADR 0023)", allow-invalid = true },
+    { path = "rdy_engine::exec::inherited_fds", reason = "a check never signals processes or changes the process umask; the run owns those (ADR 0016, ADR 0023)", allow-invalid = true },
+    # First-party escapes: the watchdog and the live process count (PC-48).
+    { path = "rdy_engine::watchdog::Effects::exit", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::watchdog::Effects::kill_groups", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::watchdog::Effects::notice", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::watchdog::Watchdog::start", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::watchdog::WriteState::claim", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::watchdog::WriteState::claim_or_park", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::watchdog::WriteState::finish", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::exec::live_groups", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    # First-party escapes: the probe hub (PC-48).
+    { path = "rdy_engine::probe::ProbeHub::new", reason = "the run builds the probe hub and hands each check its Probe; a check never makes its own", allow-invalid = true },
+    { path = "rdy_engine::probe::ProbeHub::run_probe", reason = "the run builds the probe hub and hands each check its Probe; a check never makes its own", allow-invalid = true },
+    # First-party escapes: the spec (PC-48).
+    { path = "rdy_spec::load", reason = "a check never loads or verifies a spec; the run does", allow-invalid = true },
+    # First-party escapes: the kube action-log entry (INV-14).
+    { path = "rdy_engine::probe::Probe::kube_call", reason = "writes the kube entry of the action log; only the read-only guard in rdy-checks-k8s src/client/ calls it, so a check cannot forge a kube entry (INV-14)", allow-invalid = true },
+]
+
+disallowed-macros = [
+    # The print macros write to the terminal, which belongs to the CLI.
+    { path = "std::print", reason = "a check never writes to the terminal; its output is its Finding (ADR 0014)" },
+    { path = "std::println", reason = "a check never writes to the terminal; its output is its Finding (ADR 0014)" },
+    { path = "std::eprint", reason = "a check never writes to the terminal; its output is its Finding (ADR 0014)" },
+    { path = "std::eprintln", reason = "a check never writes to the terminal; its output is its Finding (ADR 0014)" },
 ]
