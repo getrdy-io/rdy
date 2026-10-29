@@ -211,7 +211,11 @@ pub struct MachineId(String);
 impl MachineId {
     /// Wraps a raw id. The live backend and the fixture loader call this.
     #[cfg_attr(
-        not(any(test, all(feature = "runtime", target_os = "linux"))),
+        not(any(
+            test,
+            feature = "testing",
+            all(feature = "runtime", target_os = "linux")
+        )),
         expect(dead_code, reason = "only a backend makes a machine id")
     )]
     pub(crate) fn new(raw: impl Into<String>) -> Self {

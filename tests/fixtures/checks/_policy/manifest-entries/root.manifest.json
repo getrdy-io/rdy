@@ -1,0 +1,9 @@
+{
+  "symlinks": {
+    "etc/os-release": "../usr/lib/os-release",
+    "proc/1234/fd/7": "socket:[8841]"
+  },
+  "unreadable": ["var/log/audit/audit.log"],
+  "modes": { "etc/acme/license.dat": "0640" },
+  "dirs": ["var/lib/acme"]
+}

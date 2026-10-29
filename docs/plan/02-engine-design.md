@@ -612,7 +612,16 @@ one.
     in every net fixture), and per address `refused`, `blackhole`, `reset` or `serve: <name>`. `serve`
     connects a duplex stream to an in-process server from 03's loopback test support.
   - `native/` holds JSON per `NativeCall`; `env.json` and `caps.json` complete the case.
-  - Anything unrecorded fails with `NotRecorded`.
+  - Anything unrecorded fails with `NotRecorded`: a command, a native call or an address the fixture does
+    not hold. The file tree is the machine, so a path it does not hold is `NotFound`, as on a machine
+    without that file.
+  - `Fixture::load(root, name)` reads the 08 format (`base`, `remove`, `answers`, `root.manifest.json`
+    symlinks, `unreadable`, `modes` and `dirs`) into a `Replay`. File calls follow the manifest symlinks and
+    give the real path to `ReadGuard::admit_real`, as the live backend does. A `delay_ms` is a tokio timer
+    and a `blackhole` is a future that never completes; neither uses a thread. The `Replay` holds
+    `net.json` and `api/` for the network and kube tickets, which read them (M1-091, M1-094 and the k8s
+    mock).
+    The refusal of a recorded link-local lookup is the facade's address rule (M1-094), not the backend's.
 - **CLI in process** (08 decision A, ADR 0011 decision 4 as amended). `#[doc(hidden)] rdy_cli::run(args,
   backend, hooks, out, err)`. Test hooks are `RunHooks` fields, never flags or env vars. CI checks that
   `Replay` is unnamed in `crates/rdy-cli/src` outside tests and that the `testing` feature and a

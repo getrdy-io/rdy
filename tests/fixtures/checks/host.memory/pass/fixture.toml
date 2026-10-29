@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-pass"
+summary = "RHEL 9 VM with 32 GiB nominal memory showing 31.3 GiB, swap off"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false

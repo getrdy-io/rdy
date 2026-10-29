@@ -56,8 +56,9 @@ tests/fixtures/
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/` and `reports/`. The rest arrives with the
-tickets that need it. The names above are fixed now so nobody invents another.
+What exists today: `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/`, `reports/`, and under
+`checks/` the cases `host.memory/pass`, `_policy/symlink-to-shadow` and `_policy/manifest-entries`. The rest
+arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
 | --- | --- | --- |
@@ -74,7 +75,10 @@ tickets that need it. The names above are fixed now so nobody invents another.
 | `wycheproof/` | Test vectors for ed25519. See `wycheproof/README.md` | Never |
 | `canary/` | Files that must reach every OS byte for byte. See "Line endings" below | Never |
 
-A check case and an environment use the same format. A case is a small environment. One loader reads both.
+A check case and an environment use the same format. A case is a small environment. One loader reads both:
+`rdy_engine::testing::Fixture::load(fixtures_root, "checks/host.memory/pass")`. A test then builds a run with
+`TestRun::for_fixture(&fixture)`. The loader is behind the `testing` feature of `rdy-engine`, which a release
+build never turns on.
 
 ## An environment or case
 
@@ -133,10 +137,13 @@ os_version = "22.04"
 proxy = "connect-basic-tls-intercept"
 ```
 
-- `base` is the only reuse feature. Child files replace base files by path. `remove` deletes some. One
-  level, no other options.
-- `answers` lists the check ids the env can answer. The loader says "this fixture does not answer
-  host.memory" instead of a confusing `NotRecorded`.
+- `base` is the only reuse feature. It names one environment under `envs/` (`base = "all-pass"` is
+  `envs/all-pass`). Child files replace base files by path. `remove` deletes some: a file, or a directory
+  and everything under it. A `remove` that names nothing in the base is an error. One level, no other
+  options. The merged files are indexed after the merge, so a child command file with a new name but the
+  same argv as a base file is a duplicate, not a replacement. Give it the base file's name to replace it.
+- `answers` lists the check ids the env can answer. `Fixture::ensure_answers` says "this fixture does not
+  answer host.memory" instead of a confusing `NotRecorded`.
 - `crlf` lists the files that may contain `\r`. Every other fixture file must be LF only.
 - Virtual paths are POSIX strings. `root/proc/meminfo` answers `/proc/meminfo` on every runner. A Windows
   env keeps drive files under `root/c/Windows/...`, mapped to the lowercase key `c:/windows/...`, only when
@@ -156,7 +163,13 @@ git and Windows cannot store them. `root.manifest.json` adds them in memory:
 }
 ```
 
-`unreadable` simulates a no-privilege run. Replay follows the symlinks when it applies the deny list.
+`unreadable` simulates a no-privilege run: a read fails with permission denied and `stat` still works.
+Replay follows the symlinks when it applies the deny list, so a link to `/etc/shadow` is `Denied` (that is
+`checks/_policy/symlink-to-shadow`). A relative target is read from the directory of the link. A target that
+is not a path (`socket:[8841]`, what `/proc/<pid>/fd` shows) makes a special file that is neither a regular
+file nor a directory. `modes` are kept for the check that needs them; no facade call reports a mode yet.
+Every path in `unreadable` and `modes` must be in the tree. The paths of `symlinks` and `dirs` create
+entries.
 
 ### `commands/*.json`
 
@@ -166,8 +179,15 @@ Any slug for the file name. One command per file:
 { "argv": ["/usr/bin/chronyc", "-n", "-c", "tracking"], "stdout": "...", "stderr": "", "exit": 0, "delay_ms": 0 }
 ```
 
-The key is the normalised resolved `argv`. Binary output uses `stdout_b64`. A duplicate key fails the
-lint. A `delay_ms` is a timer, so a delay past the check limit gives a `Timeout` without real waiting.
+The key is the normalised resolved `argv`. `argv[0]` is the absolute path the program lives at. Replay
+matches the program by its file name and the arguments by value, so the directory documents where the
+tool was and does not have to be one the live runner would search. A Windows fixture compares the program
+name without case. `exit` may be `null` for a command a signal ended. Binary output uses `stdout_b64`
+(standard base64 with padding); `stdout` and `stdout_b64` are exclusive. Stdout and stderr are cut at the
+same caps as a live run, with the truncation flags set. A duplicate key fails the load and the lint.
+A `delay_ms` is a timer on the tokio clock. A delay that reaches the command's time limit gives a
+`Timeout` after the limit, without real waiting. An argv the fixture does not hold fails with
+`NotRecorded`.
 
 ### `api/*.json`
 
@@ -177,14 +197,35 @@ Any slug for the file name. One request per file:
 { "request": { "method": "GET", "path": "/version", "query": "" }, "status": 200, "body": {}, "delay_ms": 0 }
 ```
 
-Paged lists have one file per `continue` token. Access reviews are answered from `api/reviews.json`, a
-table of attributes to `allowed` and `reason`. The mock records every request, and the k8s tests assert
-that only the allowed ones arrived.
+Paged lists have one file per `continue` token. The key is the upper-cased method, the path and the query
+text; `query` may be left out. A duplicate key fails the load. Access reviews are answered from
+`api/reviews.json`, a table of attributes to `allowed` and `reason`; the loader keeps it as it is. The mock
+records every request, and the k8s tests assert that only the allowed ones arrived. The loader holds the
+responses (`Replay::api`); the mock that serves them comes with the k8s tickets.
 
 ### `native/*.json`
 
 One JSON file per native call that has no portable text form: `statvfs`, `uname`, `adjtimex`, sysinfo
-results, Windows registry and service data. Keyed by the call's arguments, for example by path.
+results, Windows registry and service data. Keyed by the call's arguments, for example by path. The calls
+the facade has today are `statvfs`, `uname`, `rlimit`, `hostname`, `machine_id` and `system_roots`:
+
+```json
+{ "call": "statvfs", "path": "/var/lib/acme", "delay_ms": 0,
+  "value": { "fragment_size": 4096, "blocks": 1000, "blocks_free": 500, "blocks_available": 400,
+             "files": 0, "files_free": 0, "read_only": false, "no_exec": true, "no_suid": false } }
+{ "call": "uname", "value": { "sysname": "Linux", "release": "5.14.0-362.el9.x86_64", "version": "#1 SMP", "machine": "x86_64" } }
+{ "call": "rlimit", "resource": "nofile", "value": { "soft": 1024, "hard": null } }
+{ "call": "hostname", "value": "host-01.acme.example" }
+{ "call": "machine_id", "value": "0123456789abcdef0123456789abcdef" }
+{ "call": "system_roots", "error": "unsupported" }
+```
+
+Every field of a `statvfs`, `uname` or `rlimit` value is required, so a missing one cannot pass as zero.
+`no_exec` is `null` where the OS does not report it, and a `null` limit is unlimited. Use `error`
+(`unsupported`, `permission_denied`, `not_found` or `io`) instead of `value` for a call that fails.
+`system_roots` values are base64 DER certificates. `delay_ms` waits on the tokio clock, so a hung
+`statvfs` is a large delay that the check's timeout ends. A call the fixture does not hold fails with
+`NotRecorded`.
 
 ### `net.json`
 
@@ -200,12 +241,33 @@ results, Windows registry and service data. Keyed by the call's arguments, for e
 }
 ```
 
-`serve` names a server factory the test registers. `blackhole` is scripted: a future that never
-completes. Under paused time the wait costs nothing.
+`serve` names a server factory the test registers. `blackhole` is scripted: `Replay::dial` returns a
+future that never completes, with no timer and no thread. Under paused time the wait costs nothing. A
+lookup may answer with a link-local or metadata address, as recorded. The address rule that refuses it is
+the facade's (M1-094), and every net fixture can hold such an answer so the rule runs against it. Keys of
+`tcp` are an IP address and a port, with IPv6 in brackets. A host name compares without case. An address
+the file does not hold fails with `NotRecorded`.
 
 ### `env.json`
 
 The environment variables the process under test sees, as one JSON object of strings.
+
+### The loader is strict
+
+`Fixture::load` fails, naming the file, on an unknown file or directory at the top of a fixture, an unknown
+key anywhere, a bad manifest, a symlink in the tree, a name in `root/` with `\`, `:`, `[` or `]`, a file over
+4 MiB, and a duplicate command, native call or API request. `golden/`, `expect.json`, the spec file,
+`README.md` and `caps.json` are left to the harness and the docs. The needs a fixture offers come from the
+`[caps]` table of the manifest, not from `caps.json`. A directory that is empty on disk is not read, because
+the repository cannot store it: list it in `dirs`. The size and name rules of the lint (M1-050) are
+stricter than the loader's on purpose.
+
+### Golden files with placeholders
+
+A value that changes between runs (a generated certificate serial or digest) is written `<serial>` or
+`<sha256>` in the golden. `rdy_engine::testing::matches_placeholders(expected, actual)` compares them.
+`<sha256>` is 64 lower case hex digits. `<serial>` is 2 to 64 hex digits and takes the longest run, so
+the text after it must not start with a hex digit. Everything else must match byte for byte.
 
 ### `golden/`
 

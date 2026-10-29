@@ -17,7 +17,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub use crate::probe::replay::Replay;
+pub use crate::probe::replay::{
+    ApiRecord, Caps, DnsAnswer, Expect, Fixture, FixtureError, Manifest, NetScript, Origin, Replay,
+    RunPins, TcpScript,
+};
 
 use crate::check::{CheckContext, CheckInfo, Need, Os};
 use crate::probe::{ActionLogOutput, Probe, ProbeHub};
@@ -37,6 +40,12 @@ impl TestRun {
         Self {
             hub: ProbeHub::new(Arc::new(replay), redactor),
         }
+    }
+
+    /// A run over the machine of a loaded fixture (08 section 2).
+    #[must_use]
+    pub fn for_fixture(fixture: &Fixture) -> Self {
+        Self::new(fixture.replay().clone())
     }
 
     /// Shows paths under `home` as `~/...` in the log.
@@ -87,5 +96,59 @@ impl TestRun {
     #[must_use]
     pub fn action_log(&self) -> ActionLogOutput {
         self.hub.action_log()
+    }
+}
+
+/// Whether `actual` is the golden text `expected`, where a placeholder stands for a value that changes
+/// from run to run (08 Appendix C):
+///
+/// - `<sha256>` is 64 lower case hex digits, for the digest of a generated certificate;
+/// - `<serial>` is a run of 2 to 64 hex digits, for a generated serial number. It takes the longest
+///   run, so a literal that follows it must not begin with a hex digit.
+///
+/// Everything else must match byte for byte. A golden file with placeholders therefore compares equal
+/// across runs whose generated values differ, and still fails when anything else changes.
+///
+/// ```
+/// # use rdy_engine::testing::matches_placeholders;
+/// let digest = "ab".repeat(32);
+/// assert!(matches_placeholders(
+///     r#"{"root_sha256":"<sha256>"}"#,
+///     &format!(r#"{{"root_sha256":"{digest}"}}"#),
+/// ));
+/// assert!(!matches_placeholders("<sha256>", "not a digest"));
+/// ```
+#[must_use]
+pub fn matches_placeholders(expected: &str, actual: &str) -> bool {
+    const SHA256: &str = "<sha256>";
+    const SERIAL: &str = "<serial>";
+    let mut want = expected;
+    let mut have = actual;
+    loop {
+        let sha = want.find(SHA256).map(|at| (at, SHA256));
+        let serial = want.find(SERIAL).map(|at| (at, SERIAL));
+        let next = match (sha, serial) {
+            (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+            (a, b) => a.or(b),
+        };
+        let Some((at, token)) = next else {
+            return want == have;
+        };
+        let (literal, rest) = want.split_at(at);
+        let Some(after) = have.strip_prefix(literal) else {
+            return false;
+        };
+        let run = after.bytes().take_while(u8::is_ascii_hexdigit).count();
+        let lower = after.bytes().take(run).all(|b| !b.is_ascii_uppercase());
+        let fits = if token == SHA256 {
+            run == 64 && lower
+        } else {
+            (2..=64).contains(&run)
+        };
+        if !fits {
+            return false;
+        }
+        want = rest.get(token.len()..).unwrap_or_default();
+        have = after.get(run..).unwrap_or_default();
     }
 }

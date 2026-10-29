@@ -448,7 +448,10 @@ Built in memory. The tree holds no symlinks, no special modes and no name with `
 
 **`commands/*.json`** (any slug): `{ "argv": ["/usr/bin/chronyc", "-n", "-c", "tracking"], "stdout": "...",
 "stderr": "", "exit": 0, "delay_ms": 0 }`. The key is the normalised resolved argv. Binary output uses
-`stdout_b64`.
+`stdout_b64`. Replay matches the program by file name and the arguments by value; `exit` may be `null`
+for a signal. **`native/*.json`** (any slug): `{ "call": "statvfs", "path": "...", "value": {...} }` or
+`"error": "unsupported"`, one file per `NativeCall`, every field of a value required. The shapes are in
+`tests/fixtures/README.md`, which the loader tests keep true (M1-049).
 
 **`api/*.json`** (any slug): `{ "request": {"method", "path", "query"}, "status", "body", "delay_ms" }`.
 Paged lists have one file per `continue` token. Access reviews are answered from `api/reviews.json`, a
