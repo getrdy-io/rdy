@@ -164,7 +164,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-075 | todo | | Env-level harness, in process
 
-- M1-076 | [#80](https://github.com/getrdy-io/rdy/pull/80) | 2026-10-29 | Objects, scalars and arrays get rows. Array items that are objects get their own sections, so the `checks` entry fields and the `redact_patterns` entry fields are listed. `oneOf`, `anyOf` and `enum` fields show `choice` only, and their values, the Example column and the missing-description failure wait for M1-084. The committed page is the golden: `docs` tests run `check_all` on it, so CI catches a stale page.
+- M1-076 | [#80](https://github.com/getrdy-io/rdy/pull/80) | 2026-10-29 | Objects, scalars and arrays get rows. Array items that are objects get their own sections, so the `checks` entry fields and the `redact_patterns` entry fields are listed. `oneOf`, `anyOf` and `enum` fields show `choice` only, and their values, the Example column and the missing-description failure wait for M1-084. Per-id check parameters (`allOf` if/then) wait for M1-084 too. The committed page is the golden: `docs` tests run `check_all` on it, so CI catches a stale page.
 
 - M1-077 | todo | | askama HTML report with inline CSS, dark mode and print
 
