@@ -9,7 +9,10 @@
 # fails unless the blob, the identity and the issuer match, and each --certificate-github-workflow-*
 # flag that it gets matches the claim. A flag that is not passed is not checked, as in cosign, so a
 # test shows that the fake would accept the wrong caller when the flags are left off. The stub curl
-# serves files from a folder and refuses any URL outside the one release path. Every call is logged.
+# serves files from a folder and refuses any URL outside the one release path. It honors -f (an HTTP
+# error is a failure only with -f), -w '%{http_code}' (the status is printed only when asked) and
+# --max-filesize, so dropping one of those flags from the script changes the result. Every call is
+# logged. Set SHELL_UNDER_TEST (for example "busybox sh") to run verify-release.sh under that shell.
 # What the fakes cannot show is that Fulcio issues the claims. scripts/test-cosign-roundtrip.sh runs
 # the real verify-blob against a real keyless signature, and the release proof in 06 runs it on a
 # real release.
@@ -20,7 +23,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 verify="$here/verify-release.sh"
 sums="$here/make-sha256sums.sh"
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 fail=0
 
 ok() { printf 'PASS %s\n' "$1"; }
@@ -87,8 +92,10 @@ done
 digest=$(sha256sum "$blob" | awk '{ print $1 }')
 case $cmd in
     sign-blob)
-        printf '{"digest":"%s","identity":"%s","repo":"%s","ref":"%s","trigger":"%s","verificationMaterial":{"tlogEntries":[{"logIndex":"4242"}]}}\n' \
-            "$digest" "$FAKE_SIGNER" "$FAKE_REPO" "$FAKE_REF" "$FAKE_TRIGGER" > "$bundle"
+        media=""
+        [ -z "$FAKE_MEDIATYPE" ] || media="\"mediaType\":\"$FAKE_MEDIATYPE\","
+        printf '{%s"digest":"%s","identity":"%s","repo":"%s","ref":"%s","trigger":"%s","verificationMaterial":{"tlogEntries":[{"logIndex":"4242"}]}}\n' \
+            "$media" "$digest" "$FAKE_SIGNER" "$FAKE_REPO" "$FAKE_REF" "$FAKE_TRIGGER" > "$bundle"
         ;;
     verify-blob)
         [ "$(jq -r .digest "$bundle")" = "$digest" ] || { echo "fake cosign: invalid signature when validating ASN.1 encoded signature" >&2; exit 1; }
@@ -97,6 +104,9 @@ case $cmd in
         [ -z "$wf_repo" ] || [ "$(jq -r .repo "$bundle")" = "$wf_repo" ] || { echo "fake cosign: expected GitHub workflow repository value does not match" >&2; exit 1; }
         [ -z "$wf_ref" ] || [ "$(jq -r .ref "$bundle")" = "$wf_ref" ] || { echo "fake cosign: expected GitHub workflow ref value does not match" >&2; exit 1; }
         [ -z "$wf_trigger" ] || [ "$(jq -r .trigger "$bundle")" = "$wf_trigger" ] || { echo "fake cosign: expected GitHub workflow trigger value does not match" >&2; exit 1; }
+        # FAKE_MUTATE names a file to change after the check, as an attacker with write access to the
+        # folder would. A script that reads that file again, not its checked copy, sees the change.
+        [ -z "${FAKE_MUTATE:-}" ] || printf 'changed after the check\n' >> "$FAKE_MUTATE"
         echo "Verified OK" >&2
         ;;
     *) echo "fake cosign: unexpected command $cmd" >&2; exit 2 ;;
@@ -106,38 +116,64 @@ cat > "$tmp/bin/curl" << 'EOF'
 #!/bin/sh
 # Stub curl. Logs its arguments to $CURL_LOG. Serves $FAKE_SERVE/<name> for URLs under the release
 # path of $FAKE_TAG. A missing file is HTTP 404 and $FAKE_503 names a file that answers 503. Like
-# curl -f, a failure prints the status through -w and exits 22. Any other URL is refused.
+# curl, an HTTP error is a failure (exit 22) only with -f, and without -f the error page is saved and
+# the exit is 0. The status goes to stdout only with -w '%{http_code}'. A file over --max-filesize
+# fails with exit 63. Any other URL is refused.
 printf '%s\n' "$*" >> "$CURL_LOG"
 out=""
 url=""
+fflag=0
+wfmt=""
+max=""
 while [ "$#" -gt 0 ]; do
     case $1 in
         -o) out=$2; shift ;;
-        -w) shift ;;
+        -w) wfmt=$2; shift ;;
+        --max-filesize) max=$2; shift ;;
         --proto | --proto-redir | --connect-timeout | --max-time | --retry) shift ;;
+        --*) ;;
+        -*f*) fflag=1 ;;
         -*) ;;
         *) url=$1 ;;
     esac
     shift
 done
+status() {
+    case $wfmt in
+        *'%{http_code}'*) printf '%s' "$1" ;;
+        *) ;;
+    esac
+}
 prefix="https://github.com/getrdy-io/rdy/releases/download/$FAKE_TAG/"
 case $url in
     "$prefix"*) ;;
-    *) echo "stub curl: refused $url" >&2; printf '000'; exit 6 ;;
+    *) echo "stub curl: refused $url" >&2; status 000; exit 6 ;;
 esac
 name=${url#"$prefix"}
 if [ "$name" = "${FAKE_503:-}" ]; then
+    : > "$out"
+    status 503
+    [ "$fflag" = 1 ] || exit 0
     echo "stub curl: The requested URL returned error: 503" >&2
-    printf '503'
     exit 22
 fi
 if [ ! -f "$FAKE_SERVE/$name" ]; then
+    : > "$out"
+    status 404
+    [ "$fflag" = 1 ] || exit 0
     echo "stub curl: The requested URL returned error: 404" >&2
-    printf '404'
     exit 22
 fi
+if [ -n "$max" ]; then
+    size=$(wc -c < "$FAKE_SERVE/$name")
+    if [ "$((size + 0))" -gt "$max" ]; then
+        echo "stub curl: Maximum file size exceeded" >&2
+        status 200
+        exit 63
+    fi
+fi
 cp "$FAKE_SERVE/$name" "$out"
-printf '200'
+status 200
 EOF
 chmod +x "$tmp/bin/cosign" "$tmp/bin/curl"
 FAKE_LOG="$tmp/cosign.log"
@@ -148,7 +184,8 @@ FAKE_SIGNER=$want_identity
 FAKE_REPO=$repo
 FAKE_REF=refs/tags/$tag
 FAKE_TRIGGER=push
-export FAKE_LOG CURL_LOG FAKE_TAG FAKE_VERSION FAKE_SIGNER FAKE_REPO FAKE_REF FAKE_TRIGGER
+FAKE_MEDIATYPE=application/vnd.dev.sigstore.bundle.v0.3+json
+export FAKE_LOG CURL_LOG FAKE_TAG FAKE_VERSION FAKE_SIGNER FAKE_REPO FAKE_REF FAKE_TRIGGER FAKE_MEDIATYPE
 
 # ---- fixtures ----------------------------------------------------------------------------------
 targets="x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc"
@@ -189,7 +226,8 @@ run() {
     shift 3
     : > "$FAKE_LOG"
     : > "$CURL_LOG"
-    out=$(PATH="$tmp/bin:$PATH" "$verify" "$@" 2>&1)
+    # shellcheck disable=SC2086 # SHELL_UNDER_TEST is a command and its arguments, split on purpose.
+    out=$(cd "${run_cwd:-.}" && PATH="$tmp/bin:$PATH" ${SHELL_UNDER_TEST:-} "$verify" "$@" 2>&1)
     code=$?
     if [ "$code" -ne "$want" ]; then
         bad "$name (exit $code, want $want)"
@@ -201,6 +239,8 @@ run() {
         ok "$name"
     fi
 }
+# no_verify: cosign verify-blob was never called in the last run.
+no_verify() { ! grep -q '^verify-blob' "$FAKE_LOG"; }
 # last_out: the output of the last run.
 last_out() { printf '%s\n' "$out"; }
 
@@ -224,7 +264,28 @@ for t in $targets; do
     fi
 done
 verify_line=$(grep '^verify-blob' "$FAKE_LOG")
-if [ "$verify_line" = "verify-blob --bundle SHA256SUMS.sigstore.json --certificate-identity $want_identity --certificate-oidc-issuer $want_issuer $want_claims SHA256SUMS" ]; then
+# The two paths must be absolute and must be copies in a private folder, not the user's folder. The
+# words between them are the contract. (No argument has a space in it, so word splitting is safe.)
+# shellcheck disable=SC2086
+set -- $verify_line
+bundle_path=$3
+blob_path=""
+middle=""
+i=0
+for w in "$@"; do
+    i=$((i + 1))
+    blob_path=$w
+    if [ "$i" -ge 4 ] && [ "$i" -lt "$#" ]; then
+        middle="$middle $w"
+    fi
+done
+middle=${middle# }
+case $bundle_path:$blob_path in
+    "$tmp/good/"*) bad "cosign verifies copies, not the files in the user's folder (got: $verify_line)" ;;
+    /*/SHA256SUMS.sigstore.json:/*/SHA256SUMS) ok "cosign verifies absolute paths to copies, not the files in the user's folder" ;;
+    *) bad "cosign verifies absolute paths to copies, not the files in the user's folder (got: $verify_line)" ;;
+esac
+if [ "$1 $2" = "verify-blob --bundle" ] && [ "$middle" = "--certificate-identity $want_identity --certificate-oidc-issuer $want_issuer $want_claims" ]; then
     ok "cosign verify-blob gets the exact identity, issuer, repository, ref and trigger"
 else
     bad "cosign verify-blob gets the exact identity, issuer, repository, ref and trigger (got: $verify_line)"
@@ -270,7 +331,11 @@ if grep -v 'https://github.com/getrdy-io/rdy/releases/download/' "$CURL_LOG" | g
 else
     ok "every download is from the release path of getrdy-io/rdy"
 fi
-if grep -q -- '^-q ' "$CURL_LOG"; then ok "curl ignores the user's config file"; else bad "curl ignores the user's config file"; fi
+if grep -v -- '^-q ' "$CURL_LOG" | grep -q .; then bad "every curl call ignores the user's config file (-q first)"; else ok "every curl call ignores the user's config file (-q first)"; fi
+if grep -v -- ' -fsSL ' "$CURL_LOG" | grep -q .; then bad "every curl call fails on an HTTP error and follows redirects (-fsSL)"; else ok "every curl call fails on an HTTP error and follows redirects (-fsSL)"; fi
+if grep -v -- "-w %{http_code} " "$CURL_LOG" | grep -q .; then bad "every curl call asks for the HTTP status (-w)"; else ok "every curl call asks for the HTTP status (-w)"; fi
+if grep -v -- '--max-filesize [0-9]' "$CURL_LOG" | grep -q .; then bad "every curl call has a size cap (--max-filesize)"; else ok "every curl call has a size cap (--max-filesize)"; fi
+if sed -n '1,2p' "$CURL_LOG" | grep -v -- '--max-filesize 1048576 ' | grep -q .; then bad "the list and the bundle are capped at 1 MiB"; else ok "the list and the bundle are capped at 1 MiB"; fi
 
 # ---- the fake accepts a wrong caller when the flags are left off (so the tests below mean something)
 FAKE_REPO=evil-org/rdy
@@ -386,7 +451,7 @@ done
 h=$(sha256sum "$tmp/traversal/source.tar.gz" | awk '{ print $1 }')
 printf '%s  ../source.tar.gz\n' "$h" >> "$tmp/traversal/SHA256SUMS"
 printf '%s  source.tar.gz\n' "$h" >> "$tmp/dup/SHA256SUMS"
-sed 's/^\(..\)/\U\1/' "$tmp/upper/SHA256SUMS" > "$tmp/upper/S" && mv "$tmp/upper/S" "$tmp/upper/SHA256SUMS"
+awk '{ print toupper(substr($0, 1, 2)) substr($0, 3) }' "$tmp/upper/SHA256SUMS" > "$tmp/upper/S" && mv "$tmp/upper/S" "$tmp/upper/SHA256SUMS"
 printf 'abc  source.tar.gz\n' >> "$tmp/short/SHA256SUMS"
 : > "$tmp/empty/SHA256SUMS"
 sed 's/$/\r/' "$tmp/crlf/SHA256SUMS" > "$tmp/crlf/S" && mv "$tmp/crlf/S" "$tmp/crlf/SHA256SUMS"
@@ -427,10 +492,16 @@ run "a folder with no SHA256SUMS says what to download" 1 "SHA256SUMS is missing
 # ---- cosign: missing, too old, different from the pin ------------------------------------------
 # A PATH with the tools the script needs and no cosign.
 mkdir "$tmp/nocosign"
-for tool in sh awk grep mktemp rm sed cat sha256sum curl jq dirname; do
-    p=$(command -v "$tool" 2> /dev/null) && ln -s "$p" "$tmp/nocosign/$tool"
+for tool in sh awk grep mktemp rm sed cat cp wc sha256sum curl jq dirname; do
+    p=$(command -v "$tool" 2> /dev/null) || continue
+    # busybox sh prints a bare applet name for a built-in. Only an absolute path can be linked.
+    case $p in
+        /*) ln -s "$p" "$tmp/nocosign/$tool" ;;
+        *) ;;
+    esac
 done
-out=$(PATH="$tmp/nocosign" "$verify" --dir "$tmp/good" "$tag" 2>&1)
+# shellcheck disable=SC2086
+out=$(PATH="$tmp/nocosign" ${SHELL_UNDER_TEST:-} "$verify" --dir "$tmp/good" "$tag" 2>&1)
 code=$?
 if [ "$code" -eq 64 ] && printf '%s\n' "$out" | grep -q 'install-release-tool.sh cosign'; then
     ok "a missing cosign stops with exit 64 and the install line"
@@ -449,6 +520,109 @@ export FAKE_VERSION
 run "an unreadable cosign version is refused" 64 "cannot read the cosign version" --dir "$tmp/good" "$tag"
 FAKE_VERSION=v$pinned
 export FAKE_VERSION
+
+# cosign 3.0.0 to 3.1.2 have GHSA-fx35-mq7g-6g98, so the floor is 3.1.3. Each refusal stops before
+# cosign verifies anything.
+for v in v3.1.2 v3.0.3 v3.0.0 v2.4.1; do
+    FAKE_VERSION=$v
+    export FAKE_VERSION
+    run "cosign $v is refused" 64 "cosign $v is too old: it must be 3.1.3 or newer" --dir "$tmp/good" "$tag"
+    if no_verify; then ok "cosign $v is refused before it verifies anything"; else bad "cosign $v is refused before it verifies anything"; fi
+done
+for v in v3.1.3 v3.1.10 v3.2.0 v4.0.0; do
+    FAKE_VERSION=$v
+    export FAKE_VERSION
+    run "cosign $v is accepted" 0 "verified $tag" --dir "$tmp/good" "$tag"
+done
+for v in v3.1 v3.1.3-rc.1 v3.1.3.1 v3..3 3.x.4; do
+    FAKE_VERSION=$v
+    export FAKE_VERSION
+    run "the cosign version $v is unreadable and refused" 64 "cannot read the cosign version" --dir "$tmp/good" "$tag"
+done
+FAKE_VERSION=v$pinned
+export FAKE_VERSION
+
+# ---- the bundle must be the v0.3 format --------------------------------------------------------
+# The fake would accept all of these, so only the script's own check can refuse them.
+FAKE_MEDIATYPE="application/vnd.dev.sigstore.bundle+json;version=0.1"
+export FAKE_MEDIATYPE
+release media01
+FAKE_MEDIATYPE=""
+export FAKE_MEDIATYPE
+release medianone
+FAKE_MEDIATYPE=application/vnd.dev.sigstore.bundle.v0.3+json
+export FAKE_MEDIATYPE
+release medialegacy
+jq '. + {base64Signature: "AAAA"}' "$tmp/medialegacy/SHA256SUMS.sigstore.json" > "$tmp/medialegacy/S" && mv "$tmp/medialegacy/S" "$tmp/medialegacy/SHA256SUMS.sigstore.json"
+for m in media01 medianone medialegacy; do
+    run "a bundle of the wrong or no media type ($m) is refused" 1 "not a Sigstore bundle of the v0.3 format" --dir "$tmp/$m" "$tag"
+    if no_verify; then ok "a bundle of the wrong or no media type ($m) is refused before cosign runs"; else bad "a bundle of the wrong or no media type ($m) is refused before cosign runs"; fi
+done
+FAKE_SERVE=$tmp/media01
+export FAKE_SERVE
+run "a bundle of the wrong media type is refused (download)" 1 "not a Sigstore bundle of the v0.3 format" "$tag"
+
+# ---- cosign must not take a trust root or a log key from the environment -----------------------
+for var in SIGSTORE_ROOT_FILE SIGSTORE_REKOR_PUBLIC_KEY SIGSTORE_CT_LOG_PUBLIC_KEY_FILE; do
+    eval "$var=$tmp/good/SHA256SUMS; export $var"
+    run "$var set is refused" 64 "$var is set" --dir "$tmp/good" "$tag"
+    eval "unset $var"
+    if no_verify; then ok "$var set is refused before cosign runs"; else bad "$var set is refused before cosign runs"; fi
+done
+run "with those variables unset the same release verifies" 0 "verified $tag" --dir "$tmp/good" "$tag"
+
+# ---- the tag ------------------------------------------------------------------------------------
+nl='
+'
+run "a tag with a newline and a path on the second line is refused" 64 "newline" --dir "$tmp/good" "v0.1.0${nl}../../x"
+run "a tag with a newline after a good first line is refused" 64 "newline" --dir "$tmp/good" "$tag$nl"
+run "a tag with a space is refused" 64 "is not a release tag" --dir "$tmp/good" "$tag x"
+
+# ---- the folder is read once: the checked copy is what is parsed -------------------------------
+# After cosign verifies, the fake appends a line to SHA256SUMS in the user's folder. A script that
+# parsed that file again would stop on the line. This one parses the copy it checked.
+release toctou
+FAKE_MUTATE=$tmp/toctou/SHA256SUMS
+export FAKE_MUTATE
+run "SHA256SUMS changed in the folder after the check does not matter (the copy is read)" 0 "verified $tag: 9 files match" --dir "$tmp/toctou" "$tag"
+unset FAKE_MUTATE
+if grep -q 'changed after the check' "$tmp/toctou/SHA256SUMS"; then ok "the fake really changed the file in the folder"; else bad "the fake really changed the file in the folder"; fi
+
+# ---- a relative folder with CDPATH set ---------------------------------------------------------
+# cd through CDPATH would take the script to the decoy folder, which holds a changed SHA256SUMS.
+mkdir "$tmp/decoy"
+cp -R "$tmp/tampered" "$tmp/decoy/good"
+CDPATH=$tmp/decoy
+export CDPATH
+run_cwd=$tmp
+run "a relative --dir with CDPATH set reads the folder named, not the decoy" 0 "verified $tag: 9 files match" --dir good "$tag"
+run_cwd=""
+unset CDPATH
+if last_out | grep -q "$tmp/decoy"; then bad "the decoy folder is never entered"; else ok "the decoy folder is never entered"; fi
+
+# ---- symbolic links are refused -----------------------------------------------------------------
+release symsums
+mv "$tmp/symsums/SHA256SUMS" "$tmp/symsums/real-sums"
+ln -s real-sums "$tmp/symsums/SHA256SUMS"
+run "a SHA256SUMS that is a symbolic link is refused" 1 "SHA256SUMS is a symbolic link" --dir "$tmp/symsums" "$tag"
+if no_verify; then ok "a SHA256SUMS link is refused before cosign runs"; else bad "a SHA256SUMS link is refused before cosign runs"; fi
+release symbundle
+mv "$tmp/symbundle/SHA256SUMS.sigstore.json" "$tmp/symbundle/real-bundle"
+ln -s real-bundle "$tmp/symbundle/SHA256SUMS.sigstore.json"
+run "a bundle that is a symbolic link is refused" 1 "SHA256SUMS.sigstore.json is a symbolic link" --dir "$tmp/symbundle" "$tag"
+release symasset
+mv "$tmp/symasset/rdy-aarch64-apple-darwin.tar.gz" "$tmp/symasset/real-archive"
+ln -s real-archive "$tmp/symasset/rdy-aarch64-apple-darwin.tar.gz"
+run "an archive that is a symbolic link is refused" 1 "rdy-aarch64-apple-darwin.tar.gz is a symbolic link" --dir "$tmp/symasset" "$tag"
+
+# ---- size caps ----------------------------------------------------------------------------------
+release big
+dd if=/dev/zero bs=1048576 count=2 2> /dev/null >> "$tmp/big/SHA256SUMS"
+run "a SHA256SUMS over 1 MiB in the folder is refused" 1 "which is too large for this file" --dir "$tmp/big" "$tag"
+if no_verify; then ok "a SHA256SUMS over 1 MiB is refused before cosign runs"; else bad "a SHA256SUMS over 1 MiB is refused before cosign runs"; fi
+FAKE_SERVE=$tmp/big
+export FAKE_SERVE
+run "a SHA256SUMS over 1 MiB is refused (download)" 1 "Maximum file size exceeded" "$tag"
 
 # ---- usage -------------------------------------------------------------------------------------
 run "no arguments is a usage error" 64 "usage:"

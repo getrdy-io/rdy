@@ -68,24 +68,42 @@ Pick the next number `N`. The examples use `v0.1.0-alpha.1`.
    `isPrerelease` must be true and `isDraft` false. The assets must include `SHA256SUMS`,
    `SHA256SUMS.sigstore.json` and five archives. If the CLI has no `isImmutable`, use
    `gh api repos/getrdy-io/rdy/releases/tags/v0.1.0-alpha.1 --jq .immutable`.
-8. **Verify on a clean Linux machine.** A fresh VM or container with `git`, `curl`, `awk`, `grep` and
-   `sha256sum`, and no checkout of rdy. The script only trusts the signature, so a clone of the tag is
-   enough:
+8. **Verify on a clean Linux machine.** A fresh VM or container with `git`, `curl`, `awk`, `grep`,
+   `mktemp` and `sha256sum`, and no earlier checkout of rdy. It needs the network: cosign fetches the
+   Sigstore trust root, also for `--dir`. Run the script from a reviewed commit of `main`, never from
+   the tag you are checking. The script and the pinned cosign hash come from the checkout, so a checkout
+   of the tag would let the thing under test vouch for itself. The script checks the signature and the
+   hashes, so it trusts the commit you pick:
 
    ```sh
-   git clone --depth 1 --branch v0.1.0-alpha.1 https://github.com/getrdy-io/rdy.git
+   git clone https://github.com/getrdy-io/rdy.git
    cd rdy
+   git log -1 --oneline        # must be a main commit you have reviewed, not the release tag
    sh scripts/install-release-tool.sh cosign     # the pinned cosign, sha256 checked
    PATH="$HOME/.cargo/bin:$PATH" scripts/verify-release.sh v0.1.0-alpha.1
    echo "exit $?"
    ```
 
    It must print `PASS signature`, one `PASS sha256` line per file, `verified v0.1.0-alpha.1`, and exit 0.
-   The script checks the issuer, the exact identity, the repository `getrdy-io/rdy`, the ref
-   `refs/tags/v0.1.0-alpha.1` and the trigger `push`, then the sha256 of every asset in `SHA256SUMS`.
-   Then show that it can fail: `gh release download v0.1.0-alpha.1 --repo getrdy-io/rdy --dir /tmp/rel`,
-   change one byte of `/tmp/rel/SHA256SUMS`, and run
-   `scripts/verify-release.sh --dir /tmp/rel v0.1.0-alpha.1`. It must exit 1.
+   The script refuses cosign older than 3.1.3, a bundle that is not the v0.3 format, and a set
+   `SIGSTORE_ROOT_FILE`, `SIGSTORE_REKOR_PUBLIC_KEY` or `SIGSTORE_CT_LOG_PUBLIC_KEY_FILE`. It checks the
+   issuer, the exact identity, the repository `getrdy-io/rdy`, the ref `refs/tags/v0.1.0-alpha.1` and the
+   trigger `push`, then the sha256 of every asset in `SHA256SUMS`.
+
+   Then show that it can fail. Download the two signed-list files with `curl`, change one byte of
+   `SHA256SUMS`, and run the script on the folder. No `gh` is needed.
+
+   ```sh
+   rel=$(mktemp -d)
+   for f in SHA256SUMS SHA256SUMS.sigstore.json; do
+     curl --proto '=https' --tlsv1.2 -fsSL -o "$rel/$f" \
+       "https://github.com/getrdy-io/rdy/releases/download/v0.1.0-alpha.1/$f"
+   done
+   printf 'X' | dd of="$rel/SHA256SUMS" bs=1 count=1 conv=notrunc
+   PATH="$HOME/.cargo/bin:$PATH" scripts/verify-release.sh --dir "$rel" v0.1.0-alpha.1
+   echo "exit $?"        # must be 1, with an invalid signature error
+   rm -rf "$rel"
+   ```
 9. **Record.** In the Done log add `- M1-012 hand | <date> | <evidence>` (for the first tag) with: the run
    URL, the `gh release view` output, the `immutable` value, the verify output, the sha256 of `SHA256SUMS`
    and the Rekor log index. For every release, keep the sha256 and the Rekor index. They go on
@@ -101,9 +119,9 @@ Pick the next number `N`. The examples use `v0.1.0-alpha.1`.
 | `sign` fails in `cosign sign-blob` with an OIDC error | The caller job lacks `id-token: write` | Check `release.yml` against `scripts/harden-release-workflow.py`. |
 | `sign` fails on the self-verify | The identity or the caller claims are not what the contract expects (06) | Do not publish. Read the `error:` and `fix:` lines. Ask `security-reviewer`. |
 | You click Reject, or nobody approves | Signing did not run. No release exists | The number is burned. Start again with the next one. |
-| `announce` fails on `gh release create` | The release could not be created, so none exists | Read ADR 0024, Consequences, before you retry. The number is burned. |
-| `verify-release.sh` fails on the signature | The release is not signed as the contract says | Do not use it. Tell `security@getrdy.io` and `security-reviewer`. Cut a new number. |
-| `verify-release.sh` says cosign is missing or too old | The machine has no cosign 3 | `sh scripts/install-release-tool.sh cosign`, then put `$HOME/.cargo/bin` on `PATH`. |
+| `announce` fails on `gh release create` | The release may not exist, or a partial or draft one may | First run `gh release list --repo getrdy-io/rdy` and look for the tag. Then read ADR 0024, Consequences, before you retry. The number is burned. |
+| `verify-release.sh` fails on the signature | The release is not signed as the contract says, or the machine cannot reach Sigstore (read the cosign lines above the error) | Do not use it. Tell `security@getrdy.io` and `security-reviewer`. Cut a new number. |
+| `verify-release.sh` says cosign is missing or too old | The machine has no cosign, or one below 3.1.3 | `sh scripts/install-release-tool.sh cosign`, then put `$HOME/.cargo/bin` on `PATH`. |
 
 ## Version and support policy
 
