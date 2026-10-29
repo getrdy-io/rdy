@@ -36,8 +36,8 @@
 //!
 //! The methods block on file system calls. Call them from `spawn_blocking`, or from a plain thread.
 //!
-//! The watchdog's single-writer state (ADR 0016 decision 6) belongs to the run deadline ticket and is
-//! not here.
+//! The watchdog's single-writer state (ADR 0016 decision 6) is [`crate::watchdog::WriteState`], not
+//! here.
 
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
