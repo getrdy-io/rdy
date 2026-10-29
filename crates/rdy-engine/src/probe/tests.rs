@@ -88,6 +88,7 @@ fn a_declared_program_matches_the_way_the_table_does() {
 
 mod denylist {
     use super::*;
+    use crate::probe::policy::MACHINE_ID_FILES;
     use crate::probe::policy::{
         RULE_CREDENTIALS, RULE_DEVICE, RULE_DOT_DOT, RULE_KERNEL, RULE_KUBECONFIG,
         RULE_MACHINE_ID_FILE, RULE_PRIVATE_KEY, RULE_PROC, RULE_RELATIVE, RULE_SSH,
@@ -121,6 +122,36 @@ mod denylist {
             ("/host/var/lib/dbus/machine-id", RULE_MACHINE_ID_FILE),
             (
                 "/var/lib/docker/overlay2/ab12/diff/etc/machine-id",
+                RULE_MACHINE_ID_FILE,
+            ),
+            // The transient copy systemd keeps when `/etc` is read only, under both names of `/run`.
+            ("/run/machine-id", RULE_MACHINE_ID_FILE),
+            ("/var/run/machine-id", RULE_MACHINE_ID_FILE),
+            ("/host/run/machine-id", RULE_MACHINE_ID_FILE),
+            // The DMI serials and UUID, under both sysfs names and at any depth.
+            ("/sys/class/dmi/id/product_serial", RULE_MACHINE_ID_FILE),
+            ("/sys/class/dmi/id/product_uuid", RULE_MACHINE_ID_FILE),
+            ("/sys/class/dmi/id/board_serial", RULE_MACHINE_ID_FILE),
+            ("/sys/class/dmi/id/chassis_serial", RULE_MACHINE_ID_FILE),
+            (
+                "/sys/devices/virtual/dmi/id/product_serial",
+                RULE_MACHINE_ID_FILE,
+            ),
+            (
+                "/sys/devices/virtual/dmi/id/product_uuid",
+                RULE_MACHINE_ID_FILE,
+            ),
+            (
+                "/sys/devices/virtual/dmi/id/board_serial",
+                RULE_MACHINE_ID_FILE,
+            ),
+            (
+                "/sys/devices/virtual/dmi/id/chassis_serial",
+                RULE_MACHINE_ID_FILE,
+            ),
+            ("/host/sys/class/dmi/id/product_uuid", RULE_MACHINE_ID_FILE),
+            (
+                "/var/lib/docker/overlay2/ab12/diff/sys/devices/virtual/dmi/id/board_serial",
                 RULE_MACHINE_ID_FILE,
             ),
             // The same files under a mount, a container layer and a data volume.
@@ -301,15 +332,30 @@ mod denylist {
             "/home/ada/.config/helm/repositories.yaml",
             "/home/ada/id_rsa.pub",
             "/usr/share/ca-certificates/site.crt",
+            // The DMI files that name a model or a vendor are not serials.
+            "/sys/class/dmi/id/sys_vendor",
+            "/sys/class/dmi/id/product_name",
+            "/sys/class/dmi/id/board_vendor",
+            "/sys/class/dmi/id/bios_version",
+            "/sys/devices/virtual/dmi/id/chassis_type",
+            "/sys/class/dmi/product_serial",
+            "/run/systemd/resolve/stub-resolv.conf",
         ] {
             assert_eq!(verdict(path), Ok(()), "{path}");
         }
     }
 
     #[test]
-    fn the_machine_id_guard_admits_the_two_files_and_nothing_else() {
+    fn the_machine_id_guard_admits_the_three_files_and_nothing_else() {
         let guard = ReadGuard::machine_id_files();
-        for file in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+        for file in MACHINE_ID_FILES {
+            assert!(guard.admit_real(Path::new(file)).is_ok(), "{file}");
+        }
+        for file in [
+            "/etc/machine-id",
+            "/var/lib/dbus/machine-id",
+            "/run/machine-id",
+        ] {
             assert!(guard.admit_real(Path::new(file)).is_ok(), "{file}");
         }
         for other in [
@@ -317,6 +363,9 @@ mod denylist {
             "/etc/hostname",
             "/etc/machine-id.bak",
             "/host/etc/machine-id",
+            "/host/run/machine-id",
+            "/run/machine-id.bak",
+            "/sys/class/dmi/id/product_uuid",
             "/var/lib/dbus",
             "/",
             "etc/machine-id",
@@ -328,7 +377,11 @@ mod denylist {
             ReadGuard::new(Os::Linux, None),
             ReadGuard::new(Os::Linux, Some(&["/"])),
         ] {
-            for file in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+            for file in [
+                "/etc/machine-id",
+                "/var/lib/dbus/machine-id",
+                "/run/machine-id",
+            ] {
                 let refused = guard.admit_real(Path::new(file)).expect_err("refused");
                 assert_eq!(refused.rule, RULE_MACHINE_ID_FILE);
             }

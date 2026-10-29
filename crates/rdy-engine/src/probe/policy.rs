@@ -33,6 +33,11 @@
 //! credential paths and the process directories under `proc`. Only `/dev` and `/sys/kernel/...` are
 //! matched at the root, because those names mean something else elsewhere.
 //!
+//! **Machine identity.** `etc/machine-id*`, `var/lib/dbus/machine-id*` and `run/machine-id*` are refused
+//! to every reader but the `MachineId` guard, and so are the DMI `product_serial`, `product_uuid`,
+//! `board_serial` and `chassis_serial` under `dmi/id/` (nothing reads those). The live backend also
+//! knows the id files by inode, so a hard link or bind mount under another name is refused too.
+//!
 //! **`/proc/<pid>/`** is an allowlist, not a denylist: only `status`, `stat`, `statm`, `comm`, `cgroup`,
 //! `mountinfo`, `mounts`, `limits` and `net` (and the same under `task/<tid>/`) are readable. Everything
 //! else there is refused, including `cwd`, `exe`, `root`, `fd`, `environ`, `cmdline`, `mem`, `maps`
@@ -60,8 +65,9 @@ pub(crate) const RULE_DOT_DOT: &str = "path must not contain ..";
 pub(crate) const RULE_WINDOWS: &str = "file reads are not available on Windows";
 /// `/etc/shadow`, `/etc/gshadow`, `/etc/sudoers*`, `/etc/security/opasswd`, `/etc/master.passwd`.
 pub(crate) const RULE_SYSTEM_SECRET: &str = "password and sudo files are never read";
-/// `/etc/machine-id` and `/var/lib/dbus/machine-id`. The raw id never reaches a log or a report; only
-/// the engine's own `MachineId` call reads it (ADR 0014 decision 5).
+/// `/etc/machine-id`, `/var/lib/dbus/machine-id`, `/run/machine-id` and the DMI serial and UUID files.
+/// The raw id never reaches a log or a report; only the engine's own `MachineId` call reads the three
+/// id files (ADR 0014 decision 5), and nothing reads the DMI files.
 pub(crate) const RULE_MACHINE_ID_FILE: &str = "the machine id file is read by the engine only";
 /// Cloud, tool and keychain credential files in a home directory.
 pub(crate) const RULE_CREDENTIALS: &str = "credential files are never read";
@@ -105,13 +111,28 @@ pub(crate) const RULE_NOT_FILE_OR_DIR: &str = "only files and directories are me
 )]
 pub(crate) const RULE_CHANGED: &str = "the file changed while it was being opened";
 
-/// The places systemd and D-Bus keep the machine id, in order. Both are denied to every reader but the
-/// engine's `MachineId` call, which reads through [`ReadGuard::machine_id_files`].
+/// The places systemd and D-Bus keep the machine id, in the order `MachineId` tries them. All are denied
+/// to every reader but the engine's `MachineId` call, which reads through
+/// [`ReadGuard::machine_id_files`]. `/run/machine-id` is the transient copy systemd keeps when `/etc` is
+/// read only, and some images bind mount it over `/etc/machine-id`.
 #[cfg_attr(
-    not(any(test, all(feature = "runtime", target_os = "linux"))),
-    expect(dead_code, reason = "only the Linux live backend reads the files")
+    not(any(test, all(feature = "runtime", unix))),
+    expect(dead_code, reason = "only the Unix live backend reads the files")
 )]
-pub(crate) const MACHINE_ID_FILES: &[&str] = &["/etc/machine-id", "/var/lib/dbus/machine-id"];
+pub(crate) const MACHINE_ID_FILES: &[&str] = &[
+    "/etc/machine-id",
+    "/var/lib/dbus/machine-id",
+    "/run/machine-id",
+];
+
+/// The DMI files that hold a serial number or a UUID. Nothing reads them: a serial is as stable and as
+/// identifying as the machine id. They are matched under `dmi/id/` at any depth.
+const DMI_SECRET_FILES: &[&str] = &[
+    "product_serial",
+    "product_uuid",
+    "board_serial",
+    "chassis_serial",
+];
 
 /// Why the live backend refused a call. It travels inside an [`std::io::Error`] of kind
 /// `PermissionDenied`, and the probe turns it back into `ProbeError::Denied`.
@@ -169,7 +190,7 @@ impl ReadGuard {
     }
 
     /// The guard of the `MachineId` call: it admits [`MACHINE_ID_FILES`] and nothing else, on the real
-    /// path. Every other guard refuses those two files, so this is the only reader.
+    /// path. Every other guard refuses those files, so this is the only reader.
     #[cfg_attr(
         not(any(test, all(feature = "runtime", target_os = "linux"))),
         expect(dead_code, reason = "only the Linux live backend reads the files")
@@ -180,6 +201,16 @@ impl ReadGuard {
             reads: None,
             only: Some(MACHINE_ID_FILES),
         }
+    }
+
+    /// Whether this is the `MachineId` guard. The live backend skips its inode check of the machine id
+    /// files for this guard only, because the guard already admits them by real path.
+    #[cfg_attr(
+        not(all(feature = "runtime", unix)),
+        expect(dead_code, reason = "only the Unix live backend knows files by inode")
+    )]
+    pub(crate) fn reads_machine_id(&self) -> bool {
+        self.only.is_some()
     }
 
     /// Decides from the path text alone. Used before any I/O.
@@ -303,6 +334,15 @@ fn deny(names: &[&str], self_pid: Option<&str>) -> Option<&'static str> {
             "secrets" if matches!(rest, ["kubernetes.io", _, ..]) => Some(RULE_KUBECONFIG),
             "etc" => etc_rule(rest),
             "var" => var_rule(rest),
+            // `/var/run` is a link to `/run`, and the loop reaches `run` on the next component.
+            "run" if matches!(rest, [name, ..] if name.starts_with("machine-id")) => {
+                Some(RULE_MACHINE_ID_FILE)
+            }
+            // `/sys/class/dmi/id` and `/sys/devices/virtual/dmi/id`, and a copy of either under a host
+            // mount or a container layer.
+            "dmi" if matches!(rest, ["id", file, ..] if DMI_SECRET_FILES.contains(file)) => {
+                Some(RULE_MACHINE_ID_FILE)
+            }
             "proc" => proc_rule(rest, self_pid, index == 0),
             // Docker and Kubernetes secrets mounted into a container.
             "run" if matches!(rest, ["secrets", name, ..] if *name != "kubernetes.io") => {

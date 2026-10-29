@@ -249,17 +249,42 @@ async fn the_machine_id_files_are_refused_to_a_check_that_declares_the_root() {
     symlink(&etc, sandbox.path("looks-fine")).expect("symlink");
     symlink(&dbus, sandbox.path("also-fine")).expect("symlink");
     // The same two names on the real machine, where they exist.
+    let run = sandbox.write("run/machine-id", b"0f1e2d3c4b5a69788796a5b4c3d2e1f0\n");
+    symlink(&run, sandbox.path("run-looks-fine")).expect("symlink");
+    // The DMI files, under both sysfs names, and a copy of one under a host mount.
+    let dmi: Vec<PathBuf> = [
+        "sys/class/dmi/id/product_serial",
+        "sys/class/dmi/id/product_uuid",
+        "sys/devices/virtual/dmi/id/board_serial",
+        "sys/devices/virtual/dmi/id/chassis_serial",
+        "host/sys/class/dmi/id/board_serial",
+    ]
+    .map(|name| sandbox.write(name, b"SN-0001\n"))
+    .into();
+    symlink(&dmi[0], sandbox.path("dmi-looks-fine")).expect("symlink");
     let mut cases = vec![
         etc,
         dbus,
+        run,
         sandbox.path("looks-fine"),
         sandbox.path("also-fine"),
+        sandbox.path("run-looks-fine"),
+        sandbox.path("dmi-looks-fine"),
     ];
+    cases.extend(dmi);
     cases.extend(
-        ["/etc/machine-id", "/var/lib/dbus/machine-id"]
-            .map(PathBuf::from)
-            .into_iter()
-            .filter(|file| file.exists()),
+        [
+            "/etc/machine-id",
+            "/var/lib/dbus/machine-id",
+            "/run/machine-id",
+            "/sys/class/dmi/id/product_serial",
+            "/sys/class/dmi/id/product_uuid",
+            "/sys/class/dmi/id/board_serial",
+            "/sys/class/dmi/id/chassis_serial",
+        ]
+        .map(PathBuf::from)
+        .into_iter()
+        .filter(|file| file.exists()),
     );
     let probe = sandbox.probe(&[Path::new("/")], &[]);
     for path in &cases {
@@ -271,6 +296,73 @@ async fn the_machine_id_files_are_refused_to_a_check_that_declares_the_root() {
     // A sibling that is not a machine id file is still read.
     let other = sandbox.write("etc/hostname", b"node\n");
     assert_eq!(probe.read(&other).await.expect("read").bytes, b"node\n");
+    let model = sandbox.write("sys/class/dmi/id/product_name", b"Model 1\n");
+    assert_eq!(probe.read(&model).await.expect("read").bytes, b"Model 1\n");
+}
+
+/// A hard link (and so a bind mount, which has the same identity) of a machine id file has another
+/// name, so only its inode gives it away. The `MachineId` guard is the one reader that is let through.
+#[tokio::test]
+async fn a_hard_link_to_a_machine_id_file_is_refused_by_inode() {
+    let sandbox = Sandbox::new();
+    let id = sandbox.write("id", b"0f1e2d3c4b5a69788796a5b4c3d2e1f0\n");
+    std::fs::hard_link(&id, sandbox.path("innocent")).expect("hard link");
+    // The backend learns the inode when it is made; here the id file is the file just written.
+    let secrets = files::Secrets::from_paths(&[], &[id.as_path()]);
+    let guard = ReadGuard::new(Os::Linux, None);
+    let wide = ReadGuard::new(Os::Linux, Some(&["/"]));
+    for guard in [&guard, &wide] {
+        let name = sandbox.path("innocent");
+        let error =
+            files::read(&name, ReadRange::Head(MAX_READ), guard, &secrets).expect_err("refused");
+        assert_eq!(
+            crate::probe::Refused::from_io(&error).map(|r| r.rule),
+            Some(RULE_MACHINE_ID_FILE)
+        );
+        let error = files::stat(&name, guard, &secrets).expect_err("refused");
+        assert_eq!(
+            crate::probe::Refused::from_io(&error).map(|r| r.rule),
+            Some(RULE_MACHINE_ID_FILE)
+        );
+        let Err(error) = files::statvfs(&name, guard, &secrets) else {
+            panic!("statvfs of a machine id link was not refused");
+        };
+        assert_eq!(
+            crate::probe::Refused::from_io(&error).map(|r| r.rule),
+            Some(RULE_MACHINE_ID_FILE)
+        );
+    }
+    let other = sandbox.write("other", b"fine");
+    let ok = files::read(&other, ReadRange::Head(MAX_READ), &guard, &secrets)
+        .expect("an unrelated file");
+    assert_eq!(ok.bytes, b"fine");
+}
+
+/// The skip is for the `MachineId` guard and for the machine id files only.
+#[test]
+fn only_the_machine_id_guard_skips_the_machine_id_inodes() {
+    let sandbox = Sandbox::new();
+    let id = sandbox.write("id", b"0f1e2d3c4b5a69788796a5b4c3d2e1f0\n");
+    let password = sandbox.write("passwords", b"root:x");
+    let secrets = files::Secrets::from_paths(&[password.as_path()], &[id.as_path()]);
+    let id_stat = rustix::fs::stat(&id).expect("stat");
+    let password_stat = rustix::fs::stat(&password).expect("stat");
+    let other = ReadGuard::new(Os::Linux, None);
+    let engine = ReadGuard::machine_id_files();
+    assert_eq!(
+        secrets.refuses(&id_stat, &other),
+        Some(RULE_MACHINE_ID_FILE)
+    );
+    assert_eq!(secrets.refuses(&id_stat, &engine), None);
+    // A password file is refused to every guard, the engine's too.
+    assert_eq!(
+        secrets.refuses(&password_stat, &other),
+        Some(RULE_SYSTEM_SECRET)
+    );
+    assert_eq!(
+        secrets.refuses(&password_stat, &engine),
+        Some(RULE_SYSTEM_SECRET)
+    );
 }
 
 #[tokio::test]
@@ -676,7 +768,7 @@ async fn a_hard_link_to_a_secret_file_is_refused_by_inode() {
     let secret = sandbox.write("passwords", b"root:x");
     std::fs::hard_link(&secret, sandbox.path("innocent")).expect("hard link");
     // The backend learns the inode when it is made; here the secret is the file just written.
-    let secrets = files::Secrets::from_paths(&[secret.as_path()]);
+    let secrets = files::Secrets::from_paths(&[secret.as_path()], &[]);
     let guard = ReadGuard::new(Os::Linux, None);
     let error = files::read(
         &sandbox.path("innocent"),
