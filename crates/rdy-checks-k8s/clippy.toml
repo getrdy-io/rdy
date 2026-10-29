@@ -10,13 +10,15 @@
 # fails the build. `kube::client::Client` and `kube::config::Config` are re-exports of the same items as
 # `kube::Client` and `kube::Config`, and clippy matches the item, so one entry covers both paths.
 # A type entry covers every constructor and trait route reached by naming the type:
-# `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`, `TryFrom<Config>` for `ClientBuilder`, and
-# `Default` and `Deserialize` for `Kubeconfig`. The method entries stay as a second line.
+# `TryFrom<Config>` for `Client` and `ClientBuilder`, `TryFrom<Kubeconfig>` for `Config`, and `Default`
+# for `Kubeconfig`. The method entries stay as a second line.
 #
-# M1-044 merges the std and facade entries of Appendix A into this file and adds `tests/lint-wall`,
-# which uses each entry once and expects clippy to fail.
-
-# Same test settings as the workspace clippy.toml (a crate's own file replaces the root file).
+# M1-044 merges the std and facade entries of Appendix A into this file. M1-107 carries the proof that the
+# kube entries bite, from `lint-wall/kube-use.rs.txt` (it uses all 18 entries, the trait routes and both
+# re-export paths; it is not compiled by default).
+#
+# A crate's own clippy.toml replaces the root file, so everything the root file says is repeated here.
+# Keep this file in step with ../../clippy.toml. The test settings:
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 
@@ -42,4 +44,16 @@ disallowed-methods = [
     { path = "kube::config::Kubeconfig::read_from", reason = "reads a kubeconfig outside the client module; use the client module (ADR 0031)" },
     { path = "kube::config::Kubeconfig::from_env", reason = "reads KUBECONFIG outside the client module; use the client module (ADR 0031)" },
     { path = "kube::config::Kubeconfig::from_yaml", reason = "parses a kubeconfig outside the client module; use the client module (ADR 0031)" },
+    # The entries of the root file. This crate does not depend on clap or rdy-spec, so a path that does not
+    # resolve here is allowed (`allow-invalid`) instead of warning.
+    { path = "clap::Parser::parse", reason = "exits 2 on a usage error; use try_parse_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::Parser::parse_from", reason = "exits 2 on a usage error; use try_parse_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::Command::get_matches", reason = "exits 2 on a usage error; use try_get_matches_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::Command::get_matches_from", reason = "exits 2 on a usage error; use try_get_matches_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::Command::get_matches_mut", reason = "exits 2 on a usage error; use try_get_matches_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::Parser::update_from", reason = "exits 2 on a usage error; use try_update_from and map the error (rdy_cli::run)", allow-invalid = true },
+    { path = "clap::error::Error::print", reason = "prints clap's own text, which can echo what was typed; render the error with rdy_cli::error::emit", allow-invalid = true },
+    { path = "clap::error::Error::exit", reason = "exits 2; print the error with rdy_cli::error::emit and return exit code 64", allow-invalid = true },
+    { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
+    { path = "rdy_spec::loaded::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
 ]

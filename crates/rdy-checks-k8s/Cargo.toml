@@ -12,10 +12,14 @@ include = ["src/**", "Cargo.toml", "LICENSE", "clippy.toml"]
 [dependencies]
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
 # Only `client` and `rustls-tls`, plus `ring` so rustls has a crypto provider and `aws-lc-rs` stays out
-# (ADR 0009, ADR 0031). No `runtime`, `derive`, `ws`, `oauth`, `oidc`, `http-proxy` or `socks5`.
-kube = { workspace = true, features = ["client", "rustls-tls", "ring"] }
+# (ADR 0009, ADR 0031). `webpki-roots` makes the bundled roots the only system roots: without it kube
+# defers to rustls-platform-verifier when a kubeconfig has no CA, which ADR 0014 decision 3 bans. The
+# crate stays in the tree but nothing reaches it (ADR 0031 decision 9). No `runtime`, `derive`, `ws`,
+# `oauth`, `oidc`, `http-proxy` or `socks5`.
+kube = { workspace = true, features = ["client", "rustls-tls", "ring", "webpki-roots"] }
 # The newest `v1_*` minor, set once here (ADR 0010).
 k8s-openapi = { workspace = true, features = ["std", "v1_36"] }
+secrecy = { workspace = true, features = [] }
 thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
@@ -24,7 +28,8 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 tracing = { workspace = true, features = ["std"] }
-tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
+log = { workspace = true, features = ["std"] }
+tracing-subscriber = { workspace = true, features = ["fmt", "std", "tracing-log"] }
 
 [lints]
 workspace = true

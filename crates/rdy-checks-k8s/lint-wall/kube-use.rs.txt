@@ -1,0 +1,98 @@
+// The use file for the kube entries of the lint wall. It is NOT compiled here: the `.txt` name keeps
+// cargo away from it, and `Cargo.toml` leaves it out of the published package.
+//
+// It exists for M1-107 (backlog correction-11), which carries the proof that the kube entries of
+// `../clippy.toml` still bite. M1-044 builds the lint-wall test crate for the std and facade entries.
+//
+// How to use it:
+//
+//   1. Make a scratch crate OUTSIDE `src/client/` of this crate (a check module or the M1-044
+//      `tests/lint-wall` crate) that uses this crate's `clippy.toml`.
+//   2. The scratch crate depends on `kube = "=4.2.0"` (features `client`, `rustls-tls`, `ring`,
+//      `webpki-roots`), `k8s-openapi = "=0.28.0"` (features `std`, `v1_36`), `tower` 0.5 (feature
+//      `util`, for `service_fn`) and `http` 1.
+//   3. Copy this file in as a module and run `cargo clippy`.
+//   4. Every line that ends in `// EXPECT` must give one `clippy::disallowed_types` or
+//      `clippy::disallowed_methods` error. There are 18 entries: 4 types and 14 methods. Each is used
+//      once under "entries", then the trait routes and the two re-export paths are used.
+//   5. When a kube bump renames or removes an item, clippy warns that the path does not exist. Fix
+//      `../clippy.toml` and this file together.
+//
+// Last run: 2026-10-29 against kube 4.2.0, clippy 0.1.99. All `// EXPECT` lines fired.
+
+#![allow(unused, clippy::let_underscore_future)]
+
+use std::convert::Infallible;
+
+// ---- entries: the 4 types ---------------------------------------------------------------------------
+
+fn type_entries() {
+    let _: Option<kube::Client> = None; // EXPECT disallowed type kube::Client
+    let _: Option<kube::Config> = None; // EXPECT disallowed type kube::Config
+    let _: Option<kube::client::ClientBuilder<()>> = None; // EXPECT disallowed type ClientBuilder
+    let _: Option<kube::config::Kubeconfig> = None; // EXPECT disallowed type Kubeconfig
+}
+
+// ---- entries: the 14 methods ------------------------------------------------------------------------
+//
+// Every call also names its type, so clippy reports the type entry on the same line as the method
+// entry. Look for the `disallowed method` message of each line: there are 14.
+
+fn method_entries() {
+    let svc = tower::service_fn(|_: http::Request<kube::client::Body>| async {
+        Ok::<_, Infallible>(http::Response::new(kube::client::Body::empty()))
+    });
+    let _ = kube::Client::new(svc, "default"); // EXPECT Client::new
+    let _ = kube::Client::try_default(); // EXPECT Client::try_default
+    let svc = tower::service_fn(|_: http::Request<kube::client::Body>| async {
+        Ok::<_, Infallible>(http::Response::new(kube::client::Body::empty()))
+    });
+    let _ = kube::client::ClientBuilder::new(svc, "default"); // EXPECT ClientBuilder::new
+    let uri: http::Uri = "https://x".parse().unwrap();
+    let _ = kube::Config::new(uri); // EXPECT Config::new
+    let _ = kube::Config::infer(); // EXPECT Config::infer
+    let _ = kube::Config::incluster(); // EXPECT Config::incluster
+    let _ = kube::Config::incluster_env(); // EXPECT Config::incluster_env
+    let _ = kube::Config::incluster_dns(); // EXPECT Config::incluster_dns
+    let opts = kube::config::KubeConfigOptions::default();
+    let _ = kube::Config::from_kubeconfig(&opts); // EXPECT Config::from_kubeconfig
+    let _ = kube::Config::from_custom_kubeconfig(
+        // EXPECT Config::from_custom_kubeconfig
+        kube::config::Kubeconfig::default(), // EXPECT Kubeconfig (type entry, via Default)
+        &opts,
+    );
+    let _ = kube::config::Kubeconfig::read(); // EXPECT Kubeconfig::read
+    let _ = kube::config::Kubeconfig::read_from("/nonexistent"); // EXPECT Kubeconfig::read_from
+    let _ = kube::config::Kubeconfig::from_env(); // EXPECT Kubeconfig::from_env
+    let _ = kube::config::Kubeconfig::from_yaml("{}"); // EXPECT Kubeconfig::from_yaml
+}
+
+// ---- trait routes -----------------------------------------------------------------------------------
+//
+// Naming the type is what trips the type entries, so every trait route that starts from a named type
+// is covered by them. These are the routes a check author could reach for.
+
+fn trait_routes(config: kube::Config, kubeconfig: kube::config::Kubeconfig) {
+    // TryFrom<Config> for Client.
+    let _ = kube::Client::try_from(config.clone()); // EXPECT type Client
+    let _ = <kube::Client as TryFrom<kube::Config>>::try_from(config.clone()); // EXPECT type Client, Config
+    // TryFrom<Config> for ClientBuilder.
+    let _ = kube::client::ClientBuilder::try_from(config.clone()); // EXPECT type ClientBuilder
+    // TryFrom<Kubeconfig> for Config.
+    let _ = kube::Config::try_from(kubeconfig.clone()); // EXPECT type Config
+    // Default for Kubeconfig, by name and by annotation.
+    let _ = kube::config::Kubeconfig::default(); // EXPECT type Kubeconfig
+    let _: kube::config::Kubeconfig = Default::default(); // EXPECT type Kubeconfig
+}
+
+// ---- both re-export paths ---------------------------------------------------------------------------
+//
+// `kube::client::Client` and `kube::Client` are one item, as are `kube::config::Config` and
+// `kube::Config`. Clippy matches the item, so the entries cover both spellings.
+
+fn reexports() {
+    let _: Option<kube::client::Client> = None; // EXPECT type Client through the module path
+    let _: Option<kube::config::Config> = None; // EXPECT type Config through the module path
+    let _ = kube::client::Client::try_default(); // EXPECT Client::try_default through the module path
+    let _ = kube::config::Config::infer(); // EXPECT Config::infer through the module path
+}

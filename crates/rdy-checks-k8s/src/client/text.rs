@@ -2,36 +2,10 @@
 //!
 //! A kubeconfig can come from someone else, and a server answers with whatever it likes. A context
 //! name with `\x1b[2J` in it must not clear the screen, and a right-to-left override must not hide the
-//! end of a server address (07 section 9 rule 9). Control characters and invisible format characters
-//! become `\u{..}`.
+//! end of a server address (07 section 9 rule 9). The escaper is the shared one in
+//! [`rdy_engine::text`], so this crate and the command line show the same text.
 
-/// True for characters that must not reach a terminal as they are.
-fn is_unsafe(c: char) -> bool {
-    c.is_control()
-        || matches!(
-            c,
-            '\u{00AD}'
-                | '\u{061C}'
-                | '\u{180E}'
-                | '\u{200B}'..='\u{200F}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2060}'..='\u{206F}'
-                | '\u{FEFF}'
-        )
-}
-
-/// Replaces control and invisible characters with `\u{..}` escapes.
-pub(crate) fn escape(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for c in value.chars() {
-        if is_unsafe(c) {
-            out.push_str(&format!("\\u{{{:04x}}}", u32::from(c)));
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
+pub(crate) use rdy_engine::text::escape_untrusted as escape;
 
 /// [`escape`], cut to `max` characters of the input with `...` at the end when something was cut.
 pub(crate) fn escape_capped(value: &str, max: usize) -> String {
@@ -57,10 +31,15 @@ mod tests {
     }
 
     #[test]
-    fn escape_sequences_and_bidi_marks_are_made_visible() {
-        assert_eq!(escape("a\u{1b}[2Jb"), "a\\u{001b}[2Jb");
+    fn the_shared_escaper_covers_what_the_cli_covers() {
+        assert_eq!(escape("a\u{1b}[2Jb"), "a\\x1b[2Jb");
         assert_eq!(escape("x\u{202e}y"), "x\\u{202e}y");
-        assert_eq!(escape("t\u{0}"), "t\\u{0000}");
+        assert_eq!(escape("t\u{0}"), "t\\x00");
+        // Line and paragraph separators, variation selectors, tag characters and hangul fillers.
+        assert_eq!(
+            escape("a\u{2028}\u{2029}\u{fe0f}\u{e0041}\u{3164}\u{115f}b"),
+            "a\\u{2028}\\u{2029}\\u{fe0f}\\u{e0041}\\u{3164}\\u{115f}b"
+        );
     }
 
     #[test]

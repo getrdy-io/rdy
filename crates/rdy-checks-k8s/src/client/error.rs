@@ -28,8 +28,9 @@ pub enum KubeError {
     #[error("no kubeconfig found")]
     NoKubeconfig,
 
-    /// A kubeconfig file could not be read.
-    #[error("cannot read the kubeconfig {path}: {reason}")]
+    /// A kubeconfig file, or a file it names (a CA, a client certificate or key, a token file), could
+    /// not be read.
+    #[error("cannot read {path}: {reason}")]
     KubeconfigUnreadable {
         /// The path, escaped for a terminal.
         path: String,
@@ -77,8 +78,20 @@ pub enum KubeError {
     },
 
     /// The cluster entry has a `proxy-url`.
-    #[error("the kubeconfig sets a proxy-url for the cluster, which this rdy does not use yet")]
-    ProxyUnsupported,
+    #[error(
+        "the kubeconfig sets the proxy-url {proxy} for the cluster, which this rdy does not use yet"
+    )]
+    ProxyUnsupported {
+        /// The proxy as scheme, host and port. Never user info, path or query. Escaped.
+        proxy: String,
+    },
+
+    /// rdy runs in a pod, and the service account files or variables are not usable.
+    #[error("the pod's service account cannot be used: {what}")]
+    InClusterUnusable {
+        /// A fixed phrase.
+        what: &'static str,
+    },
 
     /// The TLS setup failed (a bad certificate, key or CA bundle).
     #[error("cannot set up TLS for the cluster: {what}")]
@@ -133,6 +146,13 @@ pub enum KubeError {
         server: String,
     },
 
+    /// The API server answered 200, but not with a Kubernetes version document.
+    #[error("the answer from {server} is not a Kubernetes version document")]
+    BadAnswer {
+        /// The server URL without user info, escaped.
+        server: String,
+    },
+
     /// The API server answered with another error status.
     #[error("the cluster at {server} answered with status {code}")]
     Api {
@@ -149,6 +169,9 @@ pub enum KubeError {
     Timeout {
         /// The server URL without user info, escaped.
         server: String,
+        /// `HTTPS_PROXY` or `https_proxy` is set in the environment. rdy does not use it for the
+        /// cluster, and the hint says so.
+        proxy_env_set: bool,
     },
 
     /// The connection or the TLS handshake failed.
@@ -156,13 +179,16 @@ pub enum KubeError {
     Unreachable {
         /// The server URL without user info, escaped.
         server: String,
-        /// The network error chain (io, hyper, rustls), escaped and cut. It never comes from a
-        /// credential plugin.
-        cause: String,
+        /// One of a fixed set of phrases for the kind of failure. It is chosen from the error kind and
+        /// never copies text from the error chain, so it cannot hold anything a plugin printed.
+        cause: &'static str,
+        /// `HTTPS_PROXY` or `https_proxy` is set in the environment. rdy does not use it for the
+        /// cluster, and the hint says so.
+        proxy_env_set: bool,
     },
 
-    /// The runtime shut down while the client was being built.
-    #[error("the run was cancelled while the cluster client was being built")]
+    /// The runtime shut down while the config was being read or the client was being built.
+    #[error("the run was cancelled while the cluster client was being set up")]
     Cancelled,
 
     /// Something else went wrong. The text is fixed.
@@ -182,10 +208,14 @@ impl KubeError {
     #[must_use]
     pub fn hint(&self) -> String {
         match self {
-            Self::NoKubeconfig => "Pass --kubeconfig <file> or set KUBECONFIG.".to_owned(),
-            Self::KubeconfigUnreadable { .. } => {
-                "Check that the file exists, is a regular file under 8 MiB, and that you can read it."
-                    .to_owned()
+            Self::NoKubeconfig => format!("Pass --kubeconfig <file> or set KUBECONFIG. {DISTRO_FILES}"),
+            Self::KubeconfigUnreadable { reason, .. } => {
+                let base = "Check that the file exists, is a regular file under 8 MiB (1 MiB for a certificate, key or token file), and that you can read it.";
+                if *reason == "permission denied" {
+                    format!("{base} {DISTRO_FILES}")
+                } else {
+                    base.to_owned()
+                }
             }
             Self::KubeconfigInvalid { .. } => {
                 "Fix the file, or point --kubeconfig or KUBECONFIG at a kubeconfig that kubectl accepts."
@@ -204,12 +234,13 @@ impl KubeError {
                 "Check the context, cluster and user entries in the kubeconfig with kubectl config view."
                     .to_owned()
             }
-            Self::AuthProviderUnsupported { .. } => {
-                "Switch the user to an exec credential plugin, as kubectl 1.26 and later require."
+            Self::AuthProviderUnsupported { name } => auth_provider_hint(name),
+            Self::ProxyUnsupported { .. } => {
+                "rdy does not use a proxy for the cluster yet. Do not edit your working kubeconfig. Run rdy from a host that reaches the API server directly, or pass a copy of the kubeconfig without proxy-url with --kubeconfig."
                     .to_owned()
             }
-            Self::ProxyUnsupported => {
-                "Remove proxy-url from the kubeconfig cluster entry for this run, or tell the vendor."
+            Self::InClusterUnusable { .. } => {
+                "Mount the service account token (automountServiceAccountToken: true) or pass --kubeconfig <file>."
                     .to_owned()
             }
             Self::Tls { .. } => {
@@ -231,15 +262,19 @@ impl KubeError {
                 "The credentials are expired or not accepted. Log in again, then run again.".to_owned()
             }
             Self::Forbidden { .. } => {
-                "The identity may not read the server version. Ask the cluster admin for a read-only role."
+                "Every logged-in identity may read /version, so a gateway or proxy in front of the API server probably refused the request, or a cluster admin removed the system:public-info-viewer binding. Ask the cluster admin."
                     .to_owned()
             }
-            Self::Api { .. } => {
+            Self::Api { .. } | Self::BadAnswer { .. } => {
                 "Check that the server address in the kubeconfig is the API server.".to_owned()
             }
-            Self::Timeout { .. } | Self::Unreachable { .. } => {
-                "Check the server address in your kubeconfig and that you are on the right network or VPN, then run rdy again."
-                    .to_owned()
+            Self::Timeout { proxy_env_set, .. } | Self::Unreachable { proxy_env_set, .. } => {
+                let base = "Check the server address in your kubeconfig and that you are on the right network or VPN, then run rdy again.";
+                if *proxy_env_set {
+                    format!("{base} {PROXY_ENV_NOTE}")
+                } else {
+                    base.to_owned()
+                }
             }
             Self::Cancelled => "Run the command again.".to_owned(),
             Self::Internal { .. } => "Run the command again, and tell the vendor if it repeats.".to_owned(),
@@ -252,6 +287,22 @@ impl KubeError {
     #[must_use]
     pub fn detail(&self) -> String {
         self.to_string()
+    }
+}
+
+/// Where the common distributions keep a kubeconfig that only root can read.
+const DISTRO_FILES: &str = "k3s keeps one at /etc/rancher/k3s/k3s.yaml, RKE2 at /etc/rancher/rke2/rke2.yaml and kubeadm at /etc/kubernetes/admin.conf. They are root-only: copy one to ~/.kube/config and chmod 600 it.";
+
+/// Said when the environment names a proxy that kubectl would use and rdy does not.
+const PROXY_ENV_NOTE: &str = "HTTPS_PROXY is set; rdy does not use it for the cluster yet.";
+
+/// The hint for a legacy `auth-provider`, by provider. The name is already escaped.
+fn auth_provider_hint(name: &str) -> String {
+    match name {
+        "gcp" => "Install gke-gcloud-auth-plugin and run gcloud container clusters get-credentials again. It writes an exec credential plugin entry that rdy can run.".to_owned(),
+        "azure" => "Run kubelogin convert-kubeconfig to switch the user to an exec credential plugin that rdy can run.".to_owned(),
+        "oidc" => "rdy does not run the oidc auth-provider yet. Switch the user to an exec credential plugin for your identity provider, or tell the vendor.".to_owned(),
+        _ => "rdy does not run auth-provider entries. Switch the user to an exec credential plugin, or tell the vendor.".to_owned(),
     }
 }
 
@@ -297,7 +348,7 @@ pub(crate) fn from_kubeconfig_error(error: &KubeconfigError, path: &str) -> Kube
             what: "the server URL is not valid",
         },
         KubeconfigError::ParseProxyUrl(_) => KubeError::IncompleteKubeconfig {
-            what: "a proxy URL (proxy-url in the kubeconfig, or HTTPS_PROXY) is not valid",
+            what: "a proxy URL is not valid",
         },
         KubeconfigError::LoadCertificateAuthority(_) | KubeconfigError::ParseCertificates(_) => {
             KubeError::IncompleteKubeconfig {
@@ -335,6 +386,7 @@ pub(crate) fn from_kube_error(
     error: &kube::Error,
     server: &str,
     plugin: Option<&str>,
+    proxy_env_set: bool,
 ) -> KubeError {
     // An auth error can sit anywhere in the chain (the request path boxes it). Look for it first, so
     // nothing from a plugin is ever read from a `Display` text.
@@ -355,8 +407,10 @@ pub(crate) fn from_kube_error(
                 reason: escape_capped(&status.reason, CAUSE_CAP),
             },
         },
-        kube::Error::ProxyProtocolDisabled { .. }
-        | kube::Error::ProxyProtocolUnsupported { .. } => KubeError::ProxyUnsupported,
+        kube::Error::ProxyProtocolDisabled { proxy_url, .. }
+        | kube::Error::ProxyProtocolUnsupported { proxy_url, .. } => KubeError::ProxyUnsupported {
+            proxy: proxy_display(&proxy_url.to_string()),
+        },
         kube::Error::RustlsTls(tls) => KubeError::Tls {
             what: match tls {
                 kube::client::RustlsTlsError::InvalidIdentityPem(_) => {
@@ -388,12 +442,10 @@ pub(crate) fn from_kube_error(
         },
         kube::Error::InferKubeconfig(inner) => from_kubeconfig_error(inner, ""),
         kube::Error::HyperError(_) | kube::Error::Service(_) | kube::Error::HttpError(_) => {
-            network_error(error, server)
+            network_error(error, server, proxy_env_set)
         }
-        kube::Error::SerdeError(_) | kube::Error::FromUtf8(_) => KubeError::Api {
+        kube::Error::SerdeError(_) | kube::Error::FromUtf8(_) => KubeError::BadAnswer {
             server: server.to_owned(),
-            code: 200,
-            reason: "the answer is not a Kubernetes version document".to_owned(),
         },
         _ => KubeError::Internal {
             what: "the request failed",
@@ -401,30 +453,83 @@ pub(crate) fn from_kube_error(
     }
 }
 
-fn network_error(error: &kube::Error, server: &str) -> KubeError {
-    let mut leaf = error.to_string();
+fn network_error(error: &kube::Error, server: &str, proxy_env_set: bool) -> KubeError {
+    // Everything read from the chain below is only looked at. None of it is copied into the result, so a
+    // plugin cannot get text into the error through a network failure.
     let mut timed_out = false;
+    let mut kind = None;
+    let mut seen = error.to_string().to_ascii_lowercase();
     let mut current: Option<&(dyn std::error::Error + 'static)> = error.source();
     while let Some(err) = current {
-        if let Some(io_error) = err.downcast_ref::<io::Error>()
-            && io_error.kind() == io::ErrorKind::TimedOut
-        {
-            timed_out = true;
+        if let Some(io_error) = err.downcast_ref::<io::Error>() {
+            if io_error.kind() == io::ErrorKind::TimedOut {
+                timed_out = true;
+            }
+            if kind.is_none() && io_error.kind() != io::ErrorKind::Other {
+                kind = Some(io_error.kind());
+            }
         }
-        // The outer layers repeat their source in their own text, so the last one is the shortest
-        // statement of the cause.
-        leaf = err.to_string();
+        seen.push(' ');
+        seen.push_str(&err.to_string().to_ascii_lowercase());
         current = err.source();
     }
     if timed_out {
         return KubeError::Timeout {
             server: server.to_owned(),
+            proxy_env_set,
         };
     }
     KubeError::Unreachable {
         server: server.to_owned(),
-        cause: escape_capped(&leaf, CAUSE_CAP),
+        cause: cause_words(&seen, kind),
+        proxy_env_set,
     }
+}
+
+/// A fixed phrase for a network failure, from what the error chain says (lowercase) and its io kind.
+fn cause_words(seen: &str, kind: Option<io::ErrorKind>) -> &'static str {
+    let has = |word: &str| seen.contains(word);
+    if has("unknownissuer") {
+        "the server certificate is signed by an authority that is not trusted (UnknownIssuer)"
+    } else if has("notvalidforname") {
+        "the server certificate is not valid for this address (NotValidForName)"
+    } else if has("notvalidyet") {
+        "the server certificate is not valid yet (NotValidYet)"
+    } else if has("expired") {
+        "the server certificate has expired (Expired)"
+    } else if has("revoked") {
+        "the server certificate was revoked (Revoked)"
+    } else if has("invalid peer certificate") || has("badsignature") {
+        "the server certificate was rejected"
+    } else if has("handshake") || has("alert") || has("corrupt message") || has("tls") {
+        "the TLS handshake failed"
+    } else if has("dns") || has("lookup") || has("resolve") {
+        "the server name did not resolve"
+    } else {
+        match kind {
+            Some(io::ErrorKind::ConnectionRefused) => "the connection was refused",
+            Some(
+                io::ErrorKind::ConnectionReset
+                | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::BrokenPipe
+                | io::ErrorKind::UnexpectedEof,
+            ) => "the connection was closed",
+            Some(io::ErrorKind::HostUnreachable) => "there is no route to the host",
+            Some(io::ErrorKind::NetworkUnreachable) => "the network is unreachable",
+            Some(io::ErrorKind::PermissionDenied) => "the connection was not permitted",
+            _ => "the connection failed",
+        }
+    }
+}
+
+/// A proxy URL as scheme, host and port: no user info, path or query. Escaped.
+pub(crate) fn proxy_display(raw: &str) -> String {
+    let Some((scheme, rest)) = raw.split_once("://") else {
+        return "(not a valid URL)".to_owned();
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host_port = authority.rsplit('@').next().unwrap_or("");
+    escape_capped(&format!("{scheme}://{host_port}"), CAUSE_CAP)
 }
 
 /// Looks for an auth error in `error` and its sources.

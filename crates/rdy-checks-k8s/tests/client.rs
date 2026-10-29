@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+mod common;
+
+use common::{is_child, run_child};
 use rdy_checks_k8s::client::{Env, KubeError, KubeOptions, Loaded, load};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -115,10 +118,12 @@ fn kubeconfig(server: &str, user: &str) -> String {
     )
 }
 
-fn load_text(dir: &Path, server: &str, user: &str, timeout: Duration) -> Loaded {
+async fn load_text(dir: &Path, server: &str, user: &str, timeout: Duration) -> Loaded {
     let path = dir.join("kubeconfig");
     std::fs::write(&path, kubeconfig(server, user)).expect("write kubeconfig");
-    load(&KubeOptions::new(timeout).kubeconfig(path), &Env::empty()).expect("load")
+    load(&KubeOptions::new(timeout).kubeconfig(path), &Env::empty())
+        .await
+        .expect("load")
 }
 
 fn token(value: &str) -> String {
@@ -143,7 +148,9 @@ impl std::io::Write for LogWriter {
 }
 
 /// Installs one global subscriber with every level on and no cap, so this is stricter than the rdy
-/// log layer (which caps kube at warn). Returns everything logged so far in the process.
+/// log layer (which caps kube at warn). It also takes the records of crates that log through the `log`
+/// crate (rustls does), by way of the `tracing-log` bridge. Returns everything logged so far in the
+/// process.
 fn logs() -> String {
     static LOGS: OnceLock<Arc<Mutex<Vec<u8>>>> = OnceLock::new();
     let shared = LOGS.get_or_init(|| {
@@ -154,7 +161,8 @@ fn logs() -> String {
             .with_ansi(false)
             .with_writer(move || LogWriter(Arc::clone(&writer)))
             .finish();
-        tracing::subscriber::set_global_default(subscriber).expect("one global subscriber");
+        tracing_subscriber::util::SubscriberInitExt::try_init(subscriber)
+            .expect("one global subscriber and one log bridge");
         buffer
     });
     String::from_utf8_lossy(&shared.lock().expect("logs")).into_owned()
@@ -163,11 +171,66 @@ fn logs() -> String {
 // ---- tests that need no plugin ---------------------------------------------------------------------
 
 #[tokio::test]
+async fn the_capture_sees_records_of_the_log_crate_too() {
+    let _ = logs();
+    log::error!("LOG-BRIDGE-CHECK");
+    assert!(logs().contains("LOG-BRIDGE-CHECK"));
+}
+
+#[tokio::test]
+async fn a_path_prefix_in_the_server_reaches_the_server() {
+    let api = MockApi::start(Mode::Version).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = format!("{}/k8s/clusters/c-m-1", api.url());
+    let loaded = load_text(dir.path(), &server, &token("t"), TIMEOUT).await;
+    assert!(loaded.line().server().ends_with("/k8s/clusters/c-m-1"));
+
+    loaded.connect(|_| {}).await.expect("connect");
+
+    let requests = api.requests();
+    assert!(
+        requests[0].starts_with("GET /k8s/clusters/c-m-1/version HTTP/1.1"),
+        "{}",
+        requests[0]
+    );
+}
+
+#[tokio::test]
+async fn https_proxy_in_the_environment_is_ignored_even_when_malformed() {
+    if !is_child() {
+        run_child(
+            "https_proxy_in_the_environment_is_ignored_even_when_malformed",
+            &[
+                ("HTTPS_PROXY", "::not a url::"),
+                ("https_proxy", "http://127.0.0.1:1"),
+            ],
+        );
+        return;
+    }
+    let env = Env::from_process();
+    assert!(env.proxy_env_set, "the child was started with a proxy set");
+    let api = MockApi::start(Mode::Version).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("kubeconfig");
+    std::fs::write(&path, kubeconfig(&api.url(), &token("t"))).expect("write");
+
+    let loaded = load(&KubeOptions::new(TIMEOUT).kubeconfig(path), &env)
+        .await
+        .expect("a malformed HTTPS_PROXY must not fail the load");
+    loaded
+        .connect(|_| {})
+        .await
+        .expect("the request must go to the cluster, not to the proxy");
+
+    assert_eq!(api.requests().len(), 1);
+}
+
+#[tokio::test]
 async fn connects_sends_a_bearer_token_and_reads_the_version() {
     let _ = logs();
     let api = MockApi::start(Mode::Version).await;
     let dir = tempfile::tempdir().expect("tempdir");
-    let loaded = load_text(dir.path(), &api.url(), &token("TOKEN-CANARY-1"), TIMEOUT);
+    let loaded = load_text(dir.path(), &api.url(), &token("TOKEN-CANARY-1"), TIMEOUT).await;
 
     let connected = loaded.connect(|_| {}).await.expect("connect");
 
@@ -202,7 +265,7 @@ async fn the_cluster_is_announced_before_the_first_connection() {
     let events: Shared<&'static str> = Arc::new(Mutex::new(Vec::new()));
     let api = MockApi::start_with(Mode::Version, Arc::clone(&events)).await;
     let dir = tempfile::tempdir().expect("tempdir");
-    let loaded = load_text(dir.path(), &api.url(), &token("t"), TIMEOUT);
+    let loaded = load_text(dir.path(), &api.url(), &token("t"), TIMEOUT).await;
     let announced = Arc::new(Mutex::new(String::new()));
 
     let (log, shown) = (Arc::clone(&events), Arc::clone(&announced));
@@ -225,7 +288,7 @@ async fn a_401_and_a_403_are_their_own_errors() {
     for (code, want_unauthorized) in [(401, true), (403, false)] {
         let api = MockApi::start(Mode::Status(code)).await;
         let dir = tempfile::tempdir().expect("tempdir");
-        let loaded = load_text(dir.path(), &api.url(), &token("t"), TIMEOUT);
+        let loaded = load_text(dir.path(), &api.url(), &token("t"), TIMEOUT).await;
         let error = loaded.connect(|_| {}).await.expect_err("refused");
         if want_unauthorized {
             assert!(matches!(error, KubeError::Unauthorized { .. }), "{error:?}");
@@ -241,7 +304,7 @@ async fn a_401_and_a_403_are_their_own_errors() {
 async fn another_status_keeps_the_code_and_reason() {
     let api = MockApi::start(Mode::Status(500)).await;
     let dir = tempfile::tempdir().expect("tempdir");
-    let loaded = load_text(dir.path(), &api.url(), &token("t"), TIMEOUT);
+    let loaded = load_text(dir.path(), &api.url(), &token("t"), TIMEOUT).await;
     let error = loaded.connect(|_| {}).await.expect_err("500");
     assert!(
         matches!(&error, KubeError::Api { code: 500, reason, .. } if reason == "Denied"),
@@ -259,7 +322,8 @@ async fn a_server_that_never_answers_times_out() {
         &api.url(),
         &token("t"),
         Duration::from_millis(300),
-    );
+    )
+    .await;
     let error = loaded.connect(|_| {}).await.expect_err("timeout");
     assert!(matches!(error, KubeError::Timeout { .. }), "{error:?}");
     assert!(error.hint().contains("VPN"), "{}", error.hint());
@@ -271,10 +335,10 @@ async fn a_closed_port_is_unreachable() {
     let addr = listener.local_addr().expect("addr");
     drop(listener);
     let dir = tempfile::tempdir().expect("tempdir");
-    let loaded = load_text(dir.path(), &format!("http://{addr}"), &token("t"), TIMEOUT);
+    let loaded = load_text(dir.path(), &format!("http://{addr}"), &token("t"), TIMEOUT).await;
     let error = loaded.connect(|_| {}).await.expect_err("refused");
     assert!(
-        matches!(&error, KubeError::Unreachable { cause, .. } if !cause.is_empty()),
+        matches!(&error, KubeError::Unreachable { cause, .. } if *cause == "the connection was refused"),
         "{error:?}"
     );
 }
@@ -296,7 +360,7 @@ mod plugin {
 
     fn exec_user(command: &Path) -> String {
         format!(
-            "    exec:\n      apiVersion: client.authentication.k8s.io/v1\n      command: {}\n      interactiveMode: Never\n",
+            "    exec:\n      apiVersion: client.authentication.k8s.io/v1\n      command: {}\n",
             command.display()
         )
     }
@@ -322,6 +386,69 @@ mod plugin {
     }
 
     #[tokio::test]
+    async fn without_a_terminal_a_plugin_cannot_reach_stderr_and_gets_no_rdy_secrets() {
+        const NAME: &str =
+            "plugin::without_a_terminal_a_plugin_cannot_reach_stderr_and_gets_no_rdy_secrets";
+        if !is_child() {
+            let output = run_child(
+                NAME,
+                &[
+                    ("RDY_TOKEN", "RDYTOKEN-CANARY"),
+                    ("RDY_KEY_PASSWORD", "KEYPASSWORD-CANARY"),
+                    ("RDY_EXTERNAL_ID_PROD", "EXTID-CANARY"),
+                    ("AWS_SECRET_ACCESS_KEY", "AWSKEY-STAYS"),
+                ],
+            );
+            // The kubeconfig sets no interactiveMode, so kube's default would hand the plugin this
+            // process's stderr. The child has no terminal, so the plugin's stderr must be captured.
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                !stderr.contains("STDERR-CHILD-CANARY"),
+                "plugin stderr reached rdy's stderr: {stderr}"
+            );
+            return;
+        }
+        let api = MockApi::start(Mode::Version).await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (dump, info) = (dir.path().join("env.dump"), dir.path().join("info.dump"));
+        let plugin = script(
+            dir.path(),
+            "get-token",
+            &format!(
+                "echo STDERR-CHILD-CANARY >&2\nenv > '{}'\nprintf '%s' \"$KUBERNETES_EXEC_INFO\" > '{}'\n{}\n",
+                dump.display(),
+                info.display(),
+                credential("t", None),
+            ),
+        );
+        let path = dir.path().join("kubeconfig");
+        std::fs::write(&path, kubeconfig(&api.url(), &exec_user(&plugin))).expect("write");
+        let env = Env::from_process();
+        assert!(!env.stdin_is_terminal && !env.stderr_is_terminal);
+
+        let loaded = load(&KubeOptions::new(TIMEOUT).kubeconfig(path), &env)
+            .await
+            .expect("load");
+        loaded.connect(|_| {}).await.expect("connect");
+
+        let seen = std::fs::read_to_string(&dump).expect("env dump");
+        for name in [
+            "RDY_TOKEN=",
+            "RDY_KEY_PASSWORD=",
+            "RDY_EXTERNAL_ID_PROD=",
+            "RDY_TEST_CHILD=",
+        ] {
+            assert!(!seen.contains(name), "the plugin saw {name}");
+        }
+        assert!(
+            seen.contains("AWS_SECRET_ACCESS_KEY=AWSKEY-STAYS"),
+            "cloud credentials must stay for the cloud plugins"
+        );
+        let exec_info = std::fs::read_to_string(&info).expect("exec info");
+        assert!(exec_info.contains(r#""interactive":false"#), "{exec_info}");
+    }
+
+    #[tokio::test]
     async fn a_plugin_token_is_used_and_nothing_of_the_plugin_is_logged() {
         let _ = logs();
         let api = MockApi::start(Mode::Version).await;
@@ -334,7 +461,7 @@ mod plugin {
                 credential("PLUGIN-TOKEN-CANARY", None)
             ),
         );
-        let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT);
+        let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT).await;
         assert_eq!(loaded.line().plugin(), Some("get-token"));
 
         loaded.connect(|_| {}).await.expect("connect");
@@ -368,7 +495,7 @@ mod plugin {
             "get-token",
             &format!("touch '{}'\n{}\n", marker.display(), credential("t", None)),
         );
-        let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT);
+        let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT).await;
         let seen = marker.clone();
 
         loaded
@@ -398,7 +525,7 @@ mod plugin {
             "get-token",
             "echo STDOUT-CANARY\necho STDERR-CANARY >&2\nexit 3\n",
         );
-        let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT);
+        let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT).await;
 
         let error = loaded.connect(|_| {}).await.expect_err("plugin fails");
 
@@ -424,7 +551,7 @@ mod plugin {
         let api = MockApi::start(Mode::Version).await;
         let dir = tempfile::tempdir().expect("tempdir");
         let plugin = script(dir.path(), "get-token", "echo 'STDOUT-CANARY: [not json'\n");
-        let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT);
+        let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT).await;
 
         let error = loaded.connect(|_| {}).await.expect_err("bad output");
 
@@ -448,7 +575,8 @@ mod plugin {
             &api.url(),
             &exec_user(&dir.path().join("does-not-exist")),
             TIMEOUT,
-        );
+        )
+        .await;
         let error = loaded.connect(|_| {}).await.expect_err("no plugin");
         assert!(
             matches!(&error, KubeError::PluginNotStarted { reason, .. } if *reason == "no such command"),
@@ -473,7 +601,7 @@ mod plugin {
                 first = credential("FIRST-TOKEN", Some("2000-01-01T00:00:00Z")),
             ),
         );
-        let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT);
+        let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT).await;
 
         let error = loaded.connect(|_| {}).await.expect_err("refresh fails");
 
@@ -520,7 +648,8 @@ mod plugin {
             &api.url(),
             &exec_user(&plugin),
             Duration::from_secs(30),
-        );
+        )
+        .await;
 
         let release = async {
             tokio::task::yield_now().await;

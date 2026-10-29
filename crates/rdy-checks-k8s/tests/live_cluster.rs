@@ -19,6 +19,7 @@ async fn the_default_kubeconfig_reaches_the_cluster() {
         &KubeOptions::new(Duration::from_secs(10)),
         &Env::from_process(),
     )
+    .await
     .expect("a kubeconfig that kubectl accepts");
 
     let connected = loaded

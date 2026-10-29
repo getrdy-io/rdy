@@ -2,16 +2,20 @@
 //!
 //! These prove the pieces `client.rs` cannot with plain HTTP: the CA in the kubeconfig is the trust
 //! anchor, a certificate from another CA is refused with the rustls reason in the error, and
-//! `insecure-skip-tls-verify` is honoured and shown on the cluster line. Keys are made in memory for
-//! each test. Nothing is written but the CA certificate.
+//! `insecure-skip-tls-verify` is honoured and shown on the cluster line. A kubeconfig with no CA trusts
+//! the bundled web roots and nothing the system or the environment adds (ADR 0031 decision 9). Keys are
+//! made in memory for each test. Nothing is written but the CA certificate.
 
 #![allow(clippy::expect_used)]
 
+mod common;
+
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use common::{is_child, run_child};
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
 use rdy_checks_k8s::client::{Env, KubeError, KubeOptions, Loaded, load};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -91,7 +95,7 @@ async fn serve(acceptor: TlsAcceptor) -> SocketAddr {
 }
 
 /// A kubeconfig that trusts `ca_pem`, with the extra cluster lines.
-fn loaded(dir: &Path, addr: SocketAddr, ca_pem: &str, cluster_extra: &str) -> Loaded {
+async fn loaded(dir: &Path, addr: SocketAddr, ca_pem: &str, cluster_extra: &str) -> Loaded {
     let ca_file = dir.join("ca.pem");
     std::fs::write(&ca_file, ca_pem).expect("write ca");
     let text = format!(
@@ -104,6 +108,7 @@ fn loaded(dir: &Path, addr: SocketAddr, ca_pem: &str, cluster_extra: &str) -> Lo
         &KubeOptions::new(Duration::from_secs(10)).kubeconfig(path),
         &Env::empty(),
     )
+    .await
     .expect("load")
 }
 
@@ -114,6 +119,7 @@ async fn a_server_certificate_from_the_kubeconfig_ca_is_trusted() {
     let dir = tempfile::tempdir().expect("tempdir");
 
     let connected = loaded(dir.path(), addr, &pki.ca_pem, "")
+        .await
         .connect(|_| {})
         .await
         .expect("connect over TLS");
@@ -130,6 +136,7 @@ async fn a_certificate_from_another_ca_is_refused_with_the_reason() {
     let dir = tempfile::tempdir().expect("tempdir");
 
     let error = loaded(dir.path(), addr, &other.ca_pem, "")
+        .await
         .connect(|_| {})
         .await
         .expect_err("unknown issuer");
@@ -151,7 +158,8 @@ async fn insecure_skip_tls_verify_connects_and_the_line_says_so() {
         addr,
         &other.ca_pem,
         "    insecure-skip-tls-verify: true\n",
-    );
+    )
+    .await;
     assert!(loaded.line().tls_verification_off());
     let shown = Arc::new(std::sync::Mutex::new(String::new()));
     let seen = Arc::clone(&shown);
@@ -166,5 +174,53 @@ async fn insecure_skip_tls_verify_connects_and_the_line_says_so() {
             .lock()
             .expect("shown")
             .ends_with(", TLS verification is OFF")
+    );
+}
+
+#[tokio::test]
+async fn without_a_ca_in_the_kubeconfig_only_the_bundled_roots_are_trusted() {
+    const NAME: &str = "without_a_ca_in_the_kubeconfig_only_the_bundled_roots_are_trusted";
+    if !is_child() {
+        // SSL_CERT_FILE is how the system trust store is steered on Linux. A verifier that reads the
+        // system roots would trust the CA the child writes there. The bundled roots ignore it.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ca = dir.path().join("system-ca.pem");
+        run_child(
+            NAME,
+            &[
+                ("SSL_CERT_FILE", ca.to_str().expect("utf8 path")),
+                (
+                    "SSL_CERT_DIR",
+                    dir.path().join("none").to_str().expect("utf8 path"),
+                ),
+                ("RDY_TEST_DIR", dir.path().to_str().expect("utf8 path")),
+            ],
+        );
+        return;
+    }
+    let dir = PathBuf::from(std::env::var_os("RDY_TEST_DIR").expect("RDY_TEST_DIR"));
+    let pki = pki("rdy system ca");
+    std::fs::write(dir.join("system-ca.pem"), &pki.ca_pem).expect("write the system CA");
+    let addr = serve(pki.server.clone()).await;
+    let text = format!(
+        "apiVersion: v1\nkind: Config\ncurrent-context: ctx\nclusters:\n- name: cl\n  cluster:\n    server: https://{addr}\ncontexts:\n- name: ctx\n  context:\n    cluster: cl\n    user: usr\nusers:\n- name: usr\n  user:\n    token: t\n"
+    );
+    let path = dir.join("kubeconfig");
+    std::fs::write(&path, text).expect("write kubeconfig");
+    let loaded = load(
+        &KubeOptions::new(Duration::from_secs(10)).kubeconfig(path),
+        &Env::empty(),
+    )
+    .await
+    .expect("load");
+
+    let error = loaded
+        .connect(|_| {})
+        .await
+        .expect_err("the CA in SSL_CERT_FILE must not be trusted");
+
+    assert!(
+        matches!(&error, KubeError::Unreachable { cause, .. } if cause.contains("UnknownIssuer")),
+        "{error:?}"
     );
 }

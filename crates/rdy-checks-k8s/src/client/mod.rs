@@ -9,7 +9,8 @@
 //!
 //! The steps are separate on purpose:
 //!
-//! 1. [`load`] reads files and builds a [`Loaded`]. It opens no socket and runs no plugin.
+//! 1. [`load`] reads files and builds a [`Loaded`]. It opens no socket and runs no plugin. It runs on the
+//!    blocking pool, so the scheduler's timer around the probe can bound it (M1-107).
 //! 2. [`Loaded::connect`] calls the `announce` closure with the [`ClusterLine`] (context, server and
 //!    user), and only then builds the client (which may run a credential plugin) and sends the first
 //!    request, `GET /version`. The order is in one function, so no caller can send before announcing.
@@ -22,8 +23,16 @@
 //! - It never reads a credential plugin's output into an error, a log line or a report ([`KubeError`]).
 //! - It refuses `auth-provider` entries (legacy `gcp`, `oidc` and `azure` providers can run a command
 //!   that the report would not name) and a cluster `proxy-url` (proxy support is M1-109).
-//! - It ignores `HTTPS_PROXY` for the cluster. kube would read it silently and, with no proxy feature,
-//!   fail with an error that hides the cause.
+//! - It never lets kube read `HTTPS_PROXY`. kube would read it inside `Config::try_from` and fail on a
+//!   malformed value, so a fixed placeholder takes the `proxy_url` slot of the chosen cluster before the
+//!   build and the slot is cleared after it. The cluster is contacted directly.
+//! - It never lets a credential plugin talk to the terminal unless stdin and stderr are both terminals
+//!   (client-go's `IfAvailable` rule). Without a terminal the plugin runs with `interactiveMode: Never`,
+//!   so its stderr is captured, not inherited (ADR 0031 decision 8).
+//! - It strips the rdy variables (`RDY_*`) from a plugin's environment. Cloud credentials stay, because
+//!   the plugins need them.
+//! - It reads no namespace: `default_namespace` of the kubeconfig and of the service account is not used.
+//!   A check that needs a namespace gets it from its spec parameter.
 //! - It sends nothing but `GET /version`. The read-only guard layer (M1-103) goes in
 //!   `build_client`, and then `connect` returns the guarded type.
 //!
@@ -37,13 +46,15 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use kube::Config;
 use kube::client::ClientBuilder;
-use kube::config::Kubeconfig;
+use kube::config::{AuthInfo, Cluster, ExecInteractiveMode, Kubeconfig};
 use rdy_engine::check::{CheckError, MAX_TIMEOUT};
+use secrecy::ExposeSecret;
 
 mod error;
 mod text;
@@ -52,11 +63,39 @@ mod text;
 mod tests;
 
 pub use error::KubeError;
-use error::{from_kube_error, from_kubeconfig_error, io_reason};
+use error::{from_kube_error, from_kubeconfig_error, io_reason, proxy_display};
 use text::escape;
 
 /// The largest kubeconfig rdy reads. A real one is a few kilobytes.
 const MAX_KUBECONFIG_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The largest CA bundle, certificate, key or token file rdy lets kube read.
+const MAX_FILE_BYTES: u64 = 1024 * 1024;
+
+/// A valid proxy URL that is never used. kube reads `HTTPS_PROXY` only when the cluster has no
+/// `proxy_url`, so this takes the slot, and the slot is cleared once kube has built the config.
+const PROXY_PLACEHOLDER: &str = "http://proxy.invalid:3128";
+
+/// Variables that are never handed to a credential plugin. The `RDY_*` variables that are set in the
+/// process are added at load time (an ExternalId variable, for example). Cloud credentials are not
+/// dropped: `aws eks get-token` and its kind need them.
+const PLUGIN_DROP_ENV: [&str; 2] = ["RDY_TOKEN", "RDY_KEY_PASSWORD"];
+
+/// The service account files of a pod, in the order kube reads them.
+const SERVICE_ACCOUNT_FILES: [(&str, &str); 3] = [
+    (
+        "/var/run/secrets/kubernetes.io/serviceaccount/token",
+        "the service account token is missing or not a regular file under 1 MiB",
+    ),
+    (
+        "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+        "the service account CA bundle is missing or not a regular file under 1 MiB",
+    ),
+    (
+        "/var/run/secrets/kubernetes.io/serviceaccount/namespace",
+        "the service account namespace file is missing or not a regular file under 1 MiB",
+    ),
+];
 
 /// The most context names listed in a hint.
 const MAX_LISTED_CONTEXTS: usize = 10;
@@ -110,17 +149,38 @@ pub struct Env {
     /// The home directory, for `~/.kube/config`.
     pub home: Option<PathBuf>,
     /// Whether to try the in-cluster config (a service account in a pod) when no kubeconfig is found.
+    /// [`Env::from_process`] sets it only when `KUBERNETES_SERVICE_HOST` is set.
     pub in_cluster: bool,
+    /// Whether stdin is a terminal. A credential plugin may be interactive only when this and
+    /// `stderr_is_terminal` are both true.
+    pub stdin_is_terminal: bool,
+    /// Whether stderr is a terminal.
+    pub stderr_is_terminal: bool,
+    /// Whether `HTTPS_PROXY` or `https_proxy` is set to something. rdy does not use it for the cluster,
+    /// and the hint of a network error says so.
+    pub proxy_env_set: bool,
+    /// The names of the `RDY_*` variables set in the process. They are removed from a plugin's
+    /// environment.
+    pub rdy_vars: Vec<String>,
 }
 
 impl Env {
-    /// Reads `KUBECONFIG` and the home directory from the process, and allows the in-cluster config.
+    /// Reads `KUBECONFIG`, the home directory, the terminal state, the proxy variables and the `RDY_*`
+    /// names from the process. The in-cluster config is allowed when `KUBERNETES_SERVICE_HOST` is set.
     #[must_use]
     pub fn from_process() -> Self {
+        let set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
         Self {
             kubeconfig: std::env::var_os("KUBECONFIG"),
             home: std::env::home_dir(),
-            in_cluster: true,
+            in_cluster: set("KUBERNETES_SERVICE_HOST"),
+            stdin_is_terminal: std::io::stdin().is_terminal(),
+            stderr_is_terminal: std::io::stderr().is_terminal(),
+            proxy_env_set: set("HTTPS_PROXY") || set("https_proxy"),
+            rdy_vars: std::env::vars_os()
+                .filter_map(|(name, _)| name.into_string().ok())
+                .filter(|name| name.starts_with("RDY_"))
+                .collect(),
         }
     }
 
@@ -148,6 +208,28 @@ impl Env {
     #[must_use]
     pub fn with_in_cluster(mut self) -> Self {
         self.in_cluster = true;
+        self
+    }
+
+    /// Says that stdin and stderr are both terminals, so an interactive plugin may prompt.
+    #[must_use]
+    pub fn with_terminal(mut self) -> Self {
+        self.stdin_is_terminal = true;
+        self.stderr_is_terminal = true;
+        self
+    }
+
+    /// Says that `HTTPS_PROXY` is set.
+    #[must_use]
+    pub fn with_proxy_env(mut self) -> Self {
+        self.proxy_env_set = true;
+        self
+    }
+
+    /// Adds the name of a `RDY_*` variable that a plugin must not see.
+    #[must_use]
+    pub fn with_rdy_var(mut self, name: impl Into<String>) -> Self {
+        self.rdy_vars.push(name.into());
         self
     }
 }
@@ -243,12 +325,49 @@ impl fmt::Display for ClusterLine {
     }
 }
 
+/// The credential plugin of the chosen user, as the action log needs it (02, "The action log").
+///
+/// The texts are escaped for a terminal. The arguments can hold a secret, so they must go through the
+/// redactor before they are written anywhere. `Debug` shows the command and the number of arguments only.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PluginExec {
+    command: String,
+    args: Vec<String>,
+}
+
+impl PluginExec {
+    /// The command as the kubeconfig names it. It is an absolute path when the kubeconfig gave a path.
+    /// A bare name is looked up on `PATH` by the operating system when the plugin starts.
+    #[must_use]
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
+    /// The arguments. Redact them before logging.
+    #[must_use]
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
+}
+
+impl fmt::Debug for PluginExec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PluginExec")
+            .field("command", &self.command)
+            .field("args", &format_args!("[{} hidden]", self.args.len()))
+            .finish()
+    }
+}
+
 /// A config that is read and checked, with no socket opened and no plugin run.
 pub struct Loaded {
     source: Source,
     files: Vec<PathBuf>,
     line: ClusterLine,
     config: Config,
+    plugin_exec: Option<PluginExec>,
+    secrets: Vec<String>,
+    proxy_env_set: bool,
 }
 
 impl fmt::Debug for Loaded {
@@ -268,8 +387,11 @@ impl Loaded {
         &self.source
     }
 
-    /// The kubeconfig files that were read, in order. Empty for the in-cluster config. The probe hook
-    /// logs each as a `read` entry with no check id.
+    /// Every file that was read to build this config, in order: the kubeconfig files, then the
+    /// certificate authority, client certificate, client key and token file the chosen cluster and user
+    /// name (only the ones kube reads: inline data wins over a path). For the in-cluster config it is the
+    /// service account token, CA bundle and namespace file. Each one was checked to be a regular file
+    /// within its size cap. The probe hook logs each as a `read` entry with no check id.
     #[must_use]
     pub fn files(&self) -> &[PathBuf] {
         &self.files
@@ -279,6 +401,24 @@ impl Loaded {
     #[must_use]
     pub fn line(&self) -> &ClusterLine {
         &self.line
+    }
+
+    /// The credential plugin kube will run, for the `exec` entry of the action log. `None` when the
+    /// user has no exec plugin.
+    #[must_use]
+    pub fn plugin_exec(&self) -> Option<&PluginExec> {
+        self.plugin_exec.as_ref()
+    }
+
+    /// The secret values of this config: the inline token, password and client key, and the contents of
+    /// a token file or client key file. The caller adds them to the run-scoped known-secret set
+    /// (02, "The action log"; ADR 0015 decision 3) before anything is printed or written. A token a
+    /// credential plugin hands out is not here: it exists only after `connect` runs the plugin.
+    ///
+    /// Never print or log the result.
+    #[must_use]
+    pub fn known_secrets(&self) -> Vec<String> {
+        self.secrets.clone()
     }
 
     /// Announces the cluster, builds the client and asks the server for its version.
@@ -301,6 +441,8 @@ impl Loaded {
             files,
             line,
             config,
+            proxy_env_set,
+            ..
         } = self;
         let server = line.server.clone();
         let plugin = line.plugin.clone();
@@ -308,13 +450,20 @@ impl Loaded {
             rdy_engine::blocking::blocking(move || Ok::<_, CheckError>(build_client(config))).await;
         let client = match built {
             Ok(Ok(client)) => client,
-            Ok(Err(error)) => return Err(from_kube_error(&error, &server, plugin.as_deref())),
+            Ok(Err(error)) => {
+                return Err(from_kube_error(
+                    &error,
+                    &server,
+                    plugin.as_deref(),
+                    proxy_env_set,
+                ));
+            }
             Err(_) => return Err(KubeError::Cancelled),
         };
         let info = client
             .apiserver_version()
             .await
-            .map_err(|error| from_kube_error(&error, &server, plugin.as_deref()))?;
+            .map_err(|error| from_kube_error(&error, &server, plugin.as_deref(), proxy_env_set))?;
         Ok(Connected {
             source,
             files,
@@ -392,32 +541,75 @@ pub struct ServerVersion {
     pub platform: String,
 }
 
-/// Builds the kube client from a checked config. The one place a client is made.
-fn build_client(config: Config) -> Result<kube::Client, kube::Error> {
-    // M1-103 adds `.with_layer(&guard)` here, so the guard sits in front of every request.
-    Ok(ClientBuilder::try_from(config)?.build())
-}
-
 /// Finds and reads the config. Reads files, opens no socket, runs no plugin.
+///
+/// The file reads run on the blocking pool, so a caller's timer can bound this call (a slow disk or a
+/// network mount cannot hold a worker).
 ///
 /// Order (03 section 4): `--kubeconfig`, then `KUBECONFIG`, then `~/.kube/config`, then the in-cluster
 /// config. A `--kubeconfig` file that is missing is an error and does not fall through. Files listed in
 /// `KUBECONFIG` that do not exist are skipped, as `kubectl` does, and the rest are merged with the first
-/// file winning.
+/// file winning. Every file kube will read (the kubeconfigs, and the CA, certificate, key and token files
+/// they name) must be a regular file within its size cap.
 ///
 /// # Errors
 ///
 /// [`KubeError::NoKubeconfig`] when no source exists, and other [`KubeError`] variants when a source
 /// exists and cannot be used. The text never quotes the kubeconfig.
-pub fn load(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
+pub async fn load(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
+    let (options, env) = (options.clone(), env.clone());
+    match rdy_engine::blocking::blocking(move || Ok::<_, CheckError>(load_sync(&options, &env)))
+        .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(KubeError::Cancelled),
+    }
+}
+
+/// [`load`] on the calling thread.
+fn load_sync(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
     match read_files(options, env)? {
-        Some((source, files, kubeconfig)) => from_kubeconfig(options, source, files, kubeconfig),
+        Some((source, files, kubeconfig)) => {
+            from_kubeconfig(options, env, source, files, kubeconfig)
+        }
         None => in_cluster(options, env),
     }
 }
 
 /// A kubeconfig and where it came from.
 type Found = (Source, Vec<PathBuf>, Kubeconfig);
+
+/// Checks that `path` is a regular file of at most `max` bytes. A FIFO or a device would block the read
+/// for ever, and a huge file is not a kubeconfig or a certificate. `too_big` is the phrase for the size.
+fn check_regular(
+    path: &Path,
+    max: u64,
+    too_big: &'static str,
+    metadata: &fs::Metadata,
+) -> Result<(), KubeError> {
+    if !metadata.is_file() {
+        return Err(KubeError::KubeconfigUnreadable {
+            path: escape(&path.display().to_string()),
+            reason: "it is not a regular file",
+        });
+    }
+    if metadata.len() > max {
+        return Err(KubeError::KubeconfigUnreadable {
+            path: escape(&path.display().to_string()),
+            reason: too_big,
+        });
+    }
+    Ok(())
+}
+
+/// [`check_regular`] for a file that kube reads on its own (a CA, a certificate, a key, a token).
+fn check_referenced(path: &Path) -> Result<(), KubeError> {
+    let metadata = fs::metadata(path).map_err(|error| KubeError::KubeconfigUnreadable {
+        path: escape(&path.display().to_string()),
+        reason: io_reason(error.kind()),
+    })?;
+    check_regular(path, MAX_FILE_BYTES, "it is larger than 1 MiB", &metadata)
+}
 
 fn read_files(options: &KubeOptions, env: &Env) -> Result<Option<Found>, KubeError> {
     let (source, paths, required) = if let Some(path) = &options.kubeconfig {
@@ -445,19 +637,12 @@ fn read_files(options: &KubeOptions, env: &Env) -> Result<Option<Found>, KubeErr
                 });
             }
         };
-        // A FIFO or a device would block the read for ever, and a huge file is not a kubeconfig.
-        if !metadata.is_file() {
-            return Err(KubeError::KubeconfigUnreadable {
-                path: shown,
-                reason: "it is not a regular file",
-            });
-        }
-        if metadata.len() > MAX_KUBECONFIG_BYTES {
-            return Err(KubeError::KubeconfigUnreadable {
-                path: shown,
-                reason: "it is larger than 8 MiB",
-            });
-        }
+        check_regular(
+            &path,
+            MAX_KUBECONFIG_BYTES,
+            "it is larger than 8 MiB",
+            &metadata,
+        )?;
         let one =
             Kubeconfig::read_from(&path).map_err(|error| from_kubeconfig_error(&error, &shown))?;
         merged = Some(match merged {
@@ -480,10 +665,40 @@ fn env_paths(env: &Env) -> Option<Vec<PathBuf>> {
     (!paths.is_empty()).then_some(paths)
 }
 
+/// The files kube will read for this cluster and user, as it reads them: inline data wins over a path,
+/// and an inline token or a username with a password wins over a token file. Paths are absolute (kube
+/// resolves them against the kubeconfig's directory when it reads the kubeconfig).
+fn referenced_files(cluster: &Cluster, auth: Option<&AuthInfo>) -> Vec<PathBuf> {
+    let path = |value: &Option<String>| {
+        value
+            .as_deref()
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+    };
+    let mut files = Vec::new();
+    if cluster.certificate_authority_data.is_none() {
+        files.extend(path(&cluster.certificate_authority));
+    }
+    if let Some(auth) = auth {
+        if auth.client_certificate_data.is_none() {
+            files.extend(path(&auth.client_certificate));
+        }
+        if auth.client_key_data.is_none() {
+            files.extend(path(&auth.client_key));
+        }
+        let basic = auth.username.is_some() && auth.password.is_some();
+        if auth.token.is_none() && !basic {
+            files.extend(path(&auth.token_file));
+        }
+    }
+    files
+}
+
 fn from_kubeconfig(
     options: &KubeOptions,
+    env: &Env,
     source: Source,
-    files: Vec<PathBuf>,
+    mut files: Vec<PathBuf>,
     mut kubeconfig: Kubeconfig,
 ) -> Result<Loaded, KubeError> {
     let available: Vec<String> = kubeconfig
@@ -523,16 +738,18 @@ fn from_kubeconfig(
         .ok_or(KubeError::IncompleteKubeconfig {
             what: "the context names a cluster that the kubeconfig does not define",
         })?;
-    if cluster
+    if let Some(proxy) = cluster
         .proxy_url
         .as_deref()
-        .is_some_and(|proxy| !proxy.is_empty())
+        .filter(|proxy| !proxy.is_empty())
     {
-        return Err(KubeError::ProxyUnsupported);
+        return Err(KubeError::ProxyUnsupported {
+            proxy: proxy_display(proxy),
+        });
     }
 
     let user_name = context.user.clone().filter(|user| !user.is_empty());
-    if let Some(provider) = user_name
+    let auth = user_name
         .as_deref()
         .and_then(|user| {
             kubeconfig
@@ -540,21 +757,43 @@ fn from_kubeconfig(
                 .iter()
                 .find(|named| named.name == user)
         })
-        .and_then(|named| named.auth_info.as_ref())
-        .and_then(|auth| auth.auth_provider.as_ref())
-    {
+        .and_then(|named| named.auth_info.as_ref());
+    if let Some(provider) = auth.and_then(|auth| auth.auth_provider.as_ref()) {
         return Err(KubeError::AuthProviderUnsupported {
             name: escape(&provider.name),
         });
     }
 
-    // `Config::try_from(Kubeconfig)` reads the current context, so the choice is written there.
+    // Everything kube reads on its own is checked first: a FIFO would hang the build and a device such
+    // as /dev/zero would fill memory. The files are listed for the action log.
+    let mut secrets = inline_secrets(auth);
+    for path in referenced_files(cluster, auth) {
+        check_referenced(&path)?;
+        if auth.is_some_and(|auth| {
+            auth.client_key.as_deref() == path.to_str()
+                || auth.token_file.as_deref() == path.to_str()
+        }) {
+            secrets.extend(read_secret_file(&path));
+        }
+        files.push(path);
+    }
+
+    // `Config::try_from(Kubeconfig)` reads the current context, so the choice is written there. It also
+    // reads HTTPS_PROXY unless the cluster has a `proxy_url`, and fails on a malformed value. A fixed
+    // placeholder takes the slot, and the slot is cleared below, so kube never looks at the environment.
     kubeconfig.current_context = Some(context_name.clone());
+    if let Some(chosen) = kubeconfig
+        .clusters
+        .iter_mut()
+        .find(|named| named.name == context.cluster)
+        .and_then(|named| named.cluster.as_mut())
+    {
+        chosen.proxy_url = Some(PROXY_PLACEHOLDER.to_owned());
+    }
     let mut config =
         Config::try_from(kubeconfig).map_err(|error| from_kubeconfig_error(&error, ""))?;
-    // kube also reads HTTPS_PROXY here. This build has no proxy feature, so an env proxy would only
-    // make the build fail with a hidden cause. The cluster is contacted directly (M1-109 owns proxies).
     config.proxy_url = None;
+    harden_plugin(&mut config, env);
 
     let line = ClusterLine {
         context: escape(&context_name),
@@ -563,13 +802,63 @@ fn from_kubeconfig(
         plugin: plugin_of(&config),
         tls_verification_off: config.accept_invalid_certs,
     };
+    let plugin_exec = plugin_exec_of(&config);
     limit(&mut config, options.timeout);
     Ok(Loaded {
         source,
         files,
         line,
         config,
+        plugin_exec,
+        secrets,
+        proxy_env_set: env.proxy_env_set,
     })
+}
+
+/// The plugin's terminal use and environment, set from the process state (ADR 0031 decisions 8 and 10).
+///
+/// kube treats `interactiveMode` unset or `IfAvailable` as interactive even with no terminal: it
+/// inherits stderr, which would bring plugin text past the redactor, and a login prompt would wait for
+/// nobody. client-go only prompts when a terminal is there. So unless stdin and stderr are both
+/// terminals the mode becomes `Never` (also for `Always`, which could not prompt anyway).
+fn harden_plugin(config: &mut Config, env: &Env) {
+    let Some(exec) = config.auth_info.exec.as_mut() else {
+        return;
+    };
+    if !(env.stdin_is_terminal && env.stderr_is_terminal) {
+        exec.interactive_mode = Some(ExecInteractiveMode::Never);
+    }
+    let mut drop = exec.drop_env.take().unwrap_or_default();
+    for name in PLUGIN_DROP_ENV
+        .iter()
+        .map(|name| (*name).to_owned())
+        .chain(env.rdy_vars.iter().cloned())
+    {
+        if !drop.contains(&name) {
+            drop.push(name);
+        }
+    }
+    exec.drop_env = Some(drop);
+}
+
+/// The inline secret values of a user entry.
+fn inline_secrets(auth: Option<&AuthInfo>) -> Vec<String> {
+    let Some(auth) = auth else {
+        return Vec::new();
+    };
+    [&auth.token, &auth.password, &auth.client_key_data]
+        .into_iter()
+        .flatten()
+        .map(|secret| secret.expose_secret().trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+/// The trimmed contents of a secret file that was already checked to be small and regular.
+fn read_secret_file(path: &Path) -> Option<String> {
+    let text = fs::read_to_string(path).ok()?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
 }
 
 fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
@@ -583,7 +872,42 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
             available: Vec::new(),
         });
     }
-    let mut config = Config::incluster_env().map_err(|_| KubeError::NoKubeconfig)?;
+    // kube reads these three files with no size or type check, so they are checked first.
+    let mut files = Vec::new();
+    for (path, problem) in SERVICE_ACCOUNT_FILES {
+        let path = PathBuf::from(path);
+        let usable = fs::metadata(&path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.len() <= MAX_FILE_BYTES);
+        if !usable {
+            return Err(KubeError::InClusterUnusable { what: problem });
+        }
+        files.push(path);
+    }
+    let mut config = match Config::incluster_env() {
+        Ok(config) => config,
+        // The variable is gone since the check of `Env`. Same as not being in a pod.
+        Err(kube::config::InClusterError::ReadEnvironmentVariable(_)) => {
+            return Err(KubeError::NoKubeconfig);
+        }
+        Err(
+            kube::config::InClusterError::ParseClusterPort(_)
+            | kube::config::InClusterError::ParseClusterUrl(_),
+        ) => {
+            return Err(KubeError::InClusterUnusable {
+                what: "KUBERNETES_SERVICE_HOST or KUBERNETES_SERVICE_PORT is not a valid address",
+            });
+        }
+        Err(kube::config::InClusterError::ParseCertificates(_)) => {
+            return Err(KubeError::InClusterUnusable {
+                what: "the service account CA bundle is not valid PEM",
+            });
+        }
+        Err(_) => {
+            return Err(KubeError::InClusterUnusable {
+                what: "a service account file cannot be read",
+            });
+        }
+    };
     config.proxy_url = None;
     let line = ClusterLine {
         context: "in-cluster".to_owned(),
@@ -592,13 +916,27 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
         plugin: None,
         tls_verification_off: config.accept_invalid_certs,
     };
+    let secrets = files
+        .first()
+        .and_then(|token| read_secret_file(token))
+        .into_iter()
+        .collect();
     limit(&mut config, options.timeout);
     Ok(Loaded {
         source: Source::InCluster,
-        files: Vec::new(),
+        files,
         line,
         config,
+        plugin_exec: None,
+        secrets,
+        proxy_env_set: env.proxy_env_set,
     })
+}
+
+/// Builds the kube client from a checked config. The one place a client is made.
+fn build_client(config: Config) -> Result<kube::Client, kube::Error> {
+    // M1-103 adds `.with_layer(&guard)` here, so the guard sits in front of every request.
+    Ok(ClientBuilder::try_from(config)?.build())
 }
 
 /// Sets the timeouts from the check timeout and turns kube's retries off.
@@ -632,4 +970,19 @@ fn plugin_of(config: &Config) -> Option<String> {
         |name| name.to_string_lossy().into_owned(),
     );
     Some(escape(&file))
+}
+
+/// The exec plugin's command and arguments for the action log.
+fn plugin_exec_of(config: &Config) -> Option<PluginExec> {
+    let exec = config.auth_info.exec.as_ref()?;
+    Some(PluginExec {
+        command: escape(exec.command.as_deref()?),
+        args: exec
+            .args
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|arg| escape(arg))
+            .collect(),
+    })
 }

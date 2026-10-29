@@ -15,6 +15,8 @@
 //! - `exec` (feature `runtime`): runs a command in its own process group and kills the group on
 //!   timeout, on drop and at exit.
 //!
+//! - [`text`]: [`text::escape_untrusted`], the one escaper for text from a spec, a file or a server.
+//!
 //! The probe facade and the renderers arrive in later M1 tickets.
 
 #![forbid(unsafe_code)]
@@ -31,4 +33,5 @@ pub mod plan;
 pub mod redact;
 #[cfg(feature = "runtime")]
 pub mod sched;
+pub mod text;
 pub mod units;
