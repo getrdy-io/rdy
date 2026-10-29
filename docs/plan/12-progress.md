@@ -31,7 +31,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-010 | todo | | sign-release with cosign keyless, SHA256SUMS and self-verify (SEC-06, SEC-07)
 
-- M1-011 | todo | | SEC-04 Org 2FA, private reporting, immutable releases, CODEOWNERS and a settings check script | backlog corrected 2026-10-28: account steps moved to Founder hand steps
+- M1-011 | [#60](https://github.com/getrdy-io/rdy/pull/60) | 2026-10-29 | Founder hand steps (docs/security/github-settings.md sections 1 to 8): org 2FA, private reporting, immutable releases, `main` and `v*` rulesets, Dependabot alerts, security@ mailbox and serving security.txt. First run 2026-10-29 (no token): 1 pass, 4 fail, 1 unknown. Found: `getrdy-io` is a personal account, not an organization, so org-wide 2FA needs the account turned into an organization first (founder decision; the plan assumed an org). SEC-03 is zizmor `unpinned-uses` hash-pin from M1-005, not a new check; the red throwaway PR with an unpinned `uses:` is for the coordinator to run. CODEOWNERS uses `@getrdy-io`; code owner review is not required while there is one maintainer. zizmor not run locally (not installed); shellcheck 0.9.0 clean. The curl HTTPS-only protocol option (review nit 6) is not in the script: the agent sandbox refused to write it, so the founder adds it by hand
 
 - M1-012 | todo | | First signed alpha, scripts/verify-release.sh and RELEASING.md
 
@@ -63,7 +63,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-026 | [#43](https://github.com/getrdy-io/rdy/pull/43) | 2026-10-28 | regex compile of redact_patterns (M1-031), did-you-mean in the unknown-key fix line (M1-031), Windows paths in file: collectors (schema allows `/` only; M2); the CLI prints the `expired on` line with no `:` after the file name, and CLI exit 64 on an expired spec (M1-126)
 
-- M1-027 | todo | | Property tests for rdy_spec::parse
+- M1-027 | [#59](https://github.com/getrdy-io/rdy/pull/59) | 2026-10-29 | The "verify before parse" row stays in src/sig/tests.rs (the parser spy is private to the crate), now on the fixed seed. Rules about the whole spec (no checks, too many hosts) carry no line, only YAML failures do. Nightly random-seed job is M2 (PROPTEST_RNG_SEED is the hook). Found and fixed: a tab ending the file was reported at column 0. nextest has a longer slow-timeout for the parse_properties binary; CI numbers: linux-x64 job 123200616321, longest test depth_64_passes_and_65_fails 15.3 s, nextest summary 39.4 s
 
 - M1-028 | [#57](https://github.com/getrdy-io/rdy/pull/57) | 2026-10-29 | none. CI run 40795966306 proved the exit test (root job: strace -V 6.8, uid under sudo 0, root_whoami_is_zero passed; the normal leg skipped it). Note for M1-121, M1-122 and M1-128: sudo resets HOME and XDG_CONFIG_HOME, so root tests set them on the child they spawn.
 
@@ -71,7 +71,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-030 | [#38](https://github.com/getrdy-io/rdy/pull/38) | 2026-10-28 | An unknown flag name is echoed only when it is a typo of a known flag (every long flag in the tree, hidden ones included, plus token, secret, yes, password), so `--hunter2`, UUIDs and hex keys get the generic line; typos that contain `--key` or `--allow-unsigned` are never echoed. Short flags get no did-you-mean. Also bans `parse_from`, `get_matches_from`, `get_matches_mut`, `update_from` and `Error::print`. The did-you-mean limit is capped at 2 and 07 now says swaps count as one. No test greps clippy.toml: M1-044 proves the lint wall. The M1-029 floor test now uses `--CANARY_7f3a=x`
 
-- M1-031 | todo | | rdy spec lint with errors, warnings and did-you-mean
+- M1-031 | [#54](https://github.com/getrdy-io/rdy/pull/54) | 2026-10-28 | `acme-quickstart.yaml` lints clean (exit 0), but "runs on Linux" waits for `rdy run` (M1-120 onward). Not built: the lint warning for a bare quantity under 1 MiB (01 section 2.6), the `os: [rhel]` note, and a position for the expired-spec finding. Lint writes its text to stderr and the LintReport to stdout with `--json` (07 section 1). Report codes follow the schema's list: a bad or missing value is `bad_value`, an unknown field is `unsupported_field`, a bad redact regex or other parse error is `structure`. A nested unknown key is a new reason, `UnknownNestedField`, with its path (`free[0].bnid`). `bundle.redact_patterns` regexes are now compiled in `rdy-spec` validation, so `rdy run` refuses them too (exit 64)
 
 - M1-032 | [#32](https://github.com/getrdy-io/rdy/pull/32) | 2026-10-28 | The row's exit test is split across later tickets: `Engine::run` is M1-034/M1-035, `HostFs` is superseded by the Probe facade (02, M1-040/M1-038), and the setuid refusal is the privilege snapshot ticket. Built here: Check, CheckInfo, Need, CheckContext, Finding, CheckOutcome, with fake-check tests for pass, missing_need skip and no not_applicable. `CheckContext::probe()` and `remaining()` and `CheckError::Probe` wait for M1-040 and M1-034. `rdy_spec::result` is not re-exported yet.
 
@@ -89,9 +89,9 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-038 | [#44](https://github.com/getrdy-io/rdy/pull/44) | 2026-10-28 | Built as `rdy_engine::blocking` and `rdy_engine::exec` (async `tokio::process`, so no command runs on an abandoned blocking thread). Windows kills only the child, not its tree, until job objects (M2-006): `KILLS_PROCESS_TREE` is false there and M1-039 limits Windows to `whoami.exe`. The exit wait polls `waitid(WNOWAIT)` on every Unix instead of using `pidfd_open`, because every safe `tokio::io::unix::AsyncFd` constructor is deprecated in tokio 1.54 and the supported one is `unsafe`. Descriptors above 2 inherited by `rdy` still reach children (safe rustix cannot set CLOEXEC on a raw descriptor): M1-039 or the CLI start-up closes them. Shell and sudo refusal, PATH and env-name policy are M1-039. Wiring into `Probe` and `ProbeError` is M1-040. The watchdog and Ctrl-C callers of `kill_all_groups` are M1-043 and M1-058. The Hung proof uses a no-op kill function because a test cannot make a process survive SIGKILL.
 
-- M1-039 | todo | | SEC-18 Command policy: search path, declared directories, caps and Windows whoami only
+- M1-039 | [#53](https://github.com/getrdy-io/rdy/pull/53) | 2026-10-28 | Built as `rdy_engine::exec::policy` (`Cmd`, `run`; `prepare` is crate-private). Inherited descriptors above 2 are listed by `inherited_fds()` but not closed, because no safe API accepts a raw descriptor (ADR 0023, security-accepted for M1); the exit-test clause is amended by backlog correction-08, and the follow-ups are M1-168 (CLI start-up warning, plus `harden_umask()` first in `main`, before the first public release) and M2-104 (FFI close). The umask is set process-wide (`0o077`) before each start, since a child-only umask needs `pre_exec`. `exec::run` and `ExecSpec::new` are public only under `cfg(any(test, feature = "testing"))`; the integration tests get the feature through a self dev-dependency, and correction-08 adds the same rule to M1-040 and M1-044. A resolved program must pass a trust walk (owner root or euid, no group or world write on the file or any parent directory) and starts from its real path with `argv[0]` set to the name. Windows policy is compile-checked and unit-tested for the constant `whoami.exe` rule, plus a `cfg(windows)` run test; no Windows run here. Carried to M1-066 (command allow-lists): programs that take code or a command line (`time`, `setarch`, `linux32`, `linux64`, `chpst`, `start-stop-daemon`, `run-parts`, and interpreters such as `python3 -c`, `perl -e`, `awk`) never enter the allow-list. The trust walk also follows every symlink and judges the directory that holds it.; backlog corrected 2026-10-29 (correction-08): inherited descriptors above 2 are detected and listed by `inherited_fds()`, not closed (ADR 0023); the CLI warning is M1-168 and closing them is M2-104
 
-- M1-040 | todo | | SEC-17 Mediated Context handles with action log and read denylist
+- M1-040 | todo | | SEC-17 Mediated Context handles with action log and read denylist | backlog corrected 2026-10-29 (correction-08): `rdy_engine::exec::run` and `ExecSpec` go on the check-crate deny list
 
 - M1-041 | todo | | SEC-63 Result schema caps, identity.kube exec plugin and action log retention
 
@@ -99,7 +99,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-043 | todo | | Run deadline and watchdog with a report on hang
 
-- M1-044 | todo | | Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers
+- M1-044 | todo | | Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | backlog corrected 2026-10-29 (correction-08): `rdy_engine::exec::run` and `ExecSpec` go on the check-crate deny list
 
 - M1-045 | todo | | File and env read policy in the facade
 
@@ -190,7 +190,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-088 | todo | | --json stdout hygiene on every exit path and the static TTY line
 
-- M1-089 | todo | | CheckMeta in the check registry, read by xtask
+- M1-089 | [#62](https://github.com/getrdy-io/rdy/pull/62) | 2026-10-29 | ADR 0026 (Accepted after the cli-ux review on PR #62). The family list lives in `xtask::checks::registry` until M1-057 moves it into `rdy_cli` (correction-09). `HostFamily` is not registered in the CLI (M1-067 rule stands). `xtask checks` lists the seven host stubs, so M1-116 must skip ids in `HostFamily::stub_ids()` (correction-09). The report does not fall back to `meta.remediation` yet: correction-09 adds it to M1-057. `docs-lint` runs the same validation, but neither command is in `ci.yml` yet; a unit test runs it in `cargo test`.
 
 - M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case)
 
@@ -347,6 +347,8 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-166 | todo | | Fixture env net-airgapped
 
 - M1-167 | todo | | Time the quickstart with two design-partner SEs | backlog corrected 2026-10-28: human steps moved to Founder hand steps
+
+- M1-168 | todo | | CLI start-up hardening: call `harden_umask()` and warn on inherited descriptors
 
 ## Summary
 

@@ -4,8 +4,9 @@
 //! typed scalars in [`scalar`], the YAML reader [`parse_unverified`], the two-step check decoding in
 //! [`check`], the signature checks in [`sig`], the result types and the verdict rule in [`result`], and
 //! the [`LoadedSpec`] guarantee. [`reserved`] lists the check ids that are reserved and [`lint`] turns a
-//! decoded entry into a finding. The JSON schemas of the spec and the result are generated from these
-//! types by the `schema` module, which the `schema` feature turns on.
+//! decoded entry into a finding and a spec file into a [`lint::LintReport`] with a line and column for
+//! each finding. The JSON schemas of the spec and the result are generated from these types by the
+//! `schema` module, which the `schema` feature turns on.
 //!
 //! Two kinds of spec value exist, on purpose:
 //!
@@ -30,6 +31,8 @@ mod limits;
 pub mod lint;
 mod loaded;
 mod parse;
+#[doc(hidden)]
+pub mod pattern;
 pub mod reserved;
 pub mod result;
 pub mod scalar;
@@ -37,6 +40,7 @@ pub mod scalar;
 pub mod schema;
 pub mod sig;
 pub mod spec;
+mod suggest;
 
 #[doc(hidden)]
 pub use error::echo_capped;
@@ -45,6 +49,8 @@ pub use limits::{MAX_CHECKS, MAX_ENDPOINTS, MAX_HOSTS};
 pub use loaded::{LoadedSpec, VerifiedSpecBytes, load, load_at};
 pub use parse::{MAX_DEPTH, MAX_SPEC_BYTES, parse_unverified};
 pub use scalar::{Duration, Quantity, ScalarError, Target, Version};
+#[doc(hidden)]
+pub use suggest::did_you_mean;
 
 /// The `apiVersion` every `rdy/v1` document carries.
 pub const API_VERSION: &str = "rdy/v1";

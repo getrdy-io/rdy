@@ -1015,6 +1015,7 @@ version = "0.1.0-alpha.0"
 dependencies = [
  "cap-primitives",
  "cap-std",
+ "rdy-engine",
  "rdy-spec",
  "regex",
  "ring",
@@ -1037,6 +1038,8 @@ dependencies = [
  "minisign",
  "proptest",
  "rdy-spec",
+ "regex",
+ "regex-syntax",
  "schemars",
  "serde",
  "serde-saphyr",
@@ -1829,6 +1832,8 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "rdy-checks-host",
+ "rdy-engine",
  "rdy-spec",
  "serde_json",
  "sha2",

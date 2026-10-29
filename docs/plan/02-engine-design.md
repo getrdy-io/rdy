@@ -286,10 +286,40 @@ tests policy.
 - The program resolves to an absolute path from the fixed search path (`/usr/sbin:/usr/bin:/sbin:/bin`)
   always, then the check's declared extra directories (absolute constants, for operator-managed GPU
   tools). Windows: in M1 only `C:\Windows\System32\whoami.exe`, until job objects land.
-- Refused outright: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`, `powershell`, `pwsh`) and `sudo`,
-  `su`, `doas`, `pkexec`, `runas`.
-- Environment cleared, then `LC_ALL=C`, `PATH=<fixed>` and declared names only; no `LD_*`, `DYLD_*`.
-- stdin null; cwd `/`.
+- Refused outright: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`, `powershell`, `pwsh`, and the busybox shell applets `hush`, `msh`, `mksh`, `yash`, `rbash`, `posh`, `oksh`, `loksh`), the privilege
+  family (`sudo`, `su`, `doas`, `pkexec`, `runas`, `run0`, `sudoedit`, `runuser`, `setpriv`, `sg`,
+  `newgrp`, `ksu`, `machinectl`, `systemd-run`) and the programs that run another program from their
+  arguments (`env`, `xargs`, `nice`, `nohup`, `timeout`, `setsid`, `chroot`, `nsenter`, `unshare`,
+  `stdbuf`, `taskset`, `ionice`, `chrt`, `numactl`, `prlimit`, `flock`, `watch`, `capsh`, `script`,
+  `strace`, `ltrace`, `gdb`, `cgexec`, `bwrap`, `firejail`, `systemd-nspawn`). A check that needs one
+  of these effects runs the tool itself. The multi-call binaries `busybox` and `toybox` are refused by
+  the name a check asks for, not by the file a name resolves to, because on a system built from one
+  every tool is a link to it.
+- Trust: the name resolves to a real path one component at a time. Every link on the way, the file and
+  every directory above them must be owned by root or the running user (root only, when run as root)
+  and not group- or world-writable. The directory that holds a link is judged like the one that holds
+  the file, because whoever can write there can re-point the link. A writable directory with the
+  sticky bit (like `/tmp`) is accepted above that directory, never as the one that holds the file or
+  a link, and never the file. More than 40 links, or a path that cannot be resolved or
+  read is refused. The program starts from the real path with `argv[0]` set to the name, so multi-call
+  binaries (`busybox`, `kmod`) still pick the right applet.
+- Environment cleared, then `LC_ALL=C`, `PATH=<fixed>` and declared names only (Windows: `SystemRoot`
+  and a System32 `PATH`, no Unix path). Declared names may not be `LD_*`, `DYLD_*`, `MALLOC_*`,
+  `PYTHON*`, `GIT_*`, `CORECLR_PROFILER*`, `GLIBC_TUNABLES`, `OPENSSL_CONF`, `OPENSSL_MODULES`, `OPENSSL_ENGINES`, `PERL5LIB`,
+  `PERL5OPT`, `RUBYLIB`, `RUBYOPT`, `NODE_OPTIONS`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `LESSOPEN`,
+  `PAGER`, `EDITOR`, `VISUAL`, `SYSTEMD_PAGER`, `ZDOTDIR`, `PROMPT_COMMAND`, `LUA_INIT`, `LUA_PATH`,
+  `LUA_CPATH`, `PERLLIB`, `PERL5DB`, `NODE_PATH`, `SSH_ASKPASS`, `SUDO_ASKPASS`, `BROWSER`, `TERMINFO`,
+  `TERMINFO_DIRS`, `KUBECONFIG`, `DOTNET_STARTUP_HOOKS`, `COR_PROFILER`, `COMSPEC`, `PATHEXT` or
+  `CUDA_INJECTION64_PATH`. The full list is in `policy.rs`.
+- stdin null; cwd `/`; umask `0o077` (set process-wide before each start, since a child-only umask needs
+  `pre_exec`, which is `unsafe`). The refusal list also holds `ash`, `ksh`, `csh`, `tcsh` and `fish`, and
+  a program that resolves to a listed shell through a link is refused. The extra variable names that
+  change loading or name resolution (`LOCPATH`, `NLSPATH`, `HOSTALIASES`, `BASH_ENV`, `IFS` and similar)
+  are refused too. Code: `rdy_engine::exec::policy`.
+- Descriptors above 2 that `rdy` inherited reach children in M1. `exec::inherited_fds()` lists them
+  for a start-up warning (M1-168); closing them needs `unsafe` (M2-104, ADR 0023).
+- `exec::run` and `ExecSpec::new` are public only under `cfg(any(test, feature = "testing"))`. Check
+  crates reach the runner through `exec::policy::run` only.
 - Each child gets its own process group, recorded in a lock-free list until reaped, and the group is
   killed on timeout. A child not reaped within 1 s of SIGKILL returns `Hung { pid }`; a detached task
   reaps it later.
@@ -626,11 +656,13 @@ revision.
 // check.rs
 pub struct CheckInfo {
     pub id: &'static str, pub family: &'static str, pub summary: &'static str,
+    pub meta: CheckMeta, // ADR 0026 (M1-089)
     pub needs: &'static [Need], pub wants: &'static [Want],
     pub default_timeout: Option<Duration>, pub os: OsSupport,
     pub reads: &'static [&'static str], pub env: &'static [&'static str],
     pub commands: &'static [CommandSpec], pub peers: &'static [PeerClass],
 }
+pub struct CheckMeta { pub title: &'static str, pub remediation: &'static str }
 pub struct Want { pub need: Need, pub evidence_only: bool }
 pub struct CommandSpec { pub program: &'static str, pub extra_dirs: &'static [&'static str],
                          pub max_stdout: usize, pub env: &'static [&'static str] }

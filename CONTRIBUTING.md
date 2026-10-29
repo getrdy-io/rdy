@@ -61,6 +61,12 @@ and `cargo test --doc --workspace`. A test named `root_*` needs uid 0. Nextest s
 `--profile root`, and CI runs it in the `root` job under `sudo`. On Linux, CI also builds the musl binary and checks it with
 `scripts/check-static.sh target/<triple>/debug/rdy`.
 
+Property tests use `proptest`. Each test sets its own case count (10,000 for "never panics" and
+limits, 256 for the rest), so do not set `PROPTEST_CASES`. Pull requests use a fixed seed, so a
+test never fails on an unrelated change. To try other draws, set `PROPTEST_RNG_SEED=<number>`. A
+failure is saved in `crates/rdy-spec/proptest-regressions/`. Commit that file with the fix, and add
+a plain test with the smallest input next to the fix.
+
 Repo tasks run through `cargo xtask`, from `crates/xtask`. Run these when you change docs or generated files:
 
 ```sh
@@ -68,9 +74,12 @@ cargo xtask docs
 cargo xtask docs --check
 cargo xtask schema --check
 cargo xtask docs-lint
+cargo xtask checks
 ```
 
 `cargo xtask docs` writes the generated pages under `docs/`. Never edit those pages by hand. Change the generator, then run the command again. `docs-lint` reads only the files that git tracks. Run `git add` on a new file before you lint it. `dist` and `publish` are off in this build.
+
+`cargo xtask checks` lists every registered check with its id, family, title and remediation, one tab-separated row each. It fails when a title or remediation is empty. A new check fills in the `meta` field of its `CheckInfo` (ADR 0026). `docs-lint` runs the same test.
 
 To try your change by hand:
 
