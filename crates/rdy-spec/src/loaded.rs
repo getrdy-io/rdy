@@ -19,6 +19,32 @@ use crate::parse::{MAX_SPEC_BYTES, parse_bytes};
 use crate::sig::{Policy, SignatureError, SignatureState, TrustStore, verify_sidecar};
 use crate::spec::Spec;
 
+/// The exact bytes [`load`] verified: the spec text and, for a signed spec, its `.minisig` sidecar.
+///
+/// The report folder holds a copy of these bytes (ADR 0016 decision 4), so the copy is what was
+/// verified and not what the file holds a moment later. Like [`LoadedSpec`] this type has a private
+/// field, no public constructor, no `Default`, no `From` and no `Deserialize`; [`load`] is the only
+/// code that builds one. Read it through [`LoadedSpec::verified_bytes`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedSpecBytes {
+    yaml: Vec<u8>,
+    signature: Option<Vec<u8>>,
+}
+
+impl VerifiedSpecBytes {
+    /// The spec text, byte for byte as it was verified and parsed.
+    #[must_use]
+    pub fn yaml(&self) -> &[u8] {
+        &self.yaml
+    }
+
+    /// The `.minisig` sidecar that verified, byte for byte, or `None` for an unsigned spec.
+    #[must_use]
+    pub fn signature(&self) -> Option<&[u8]> {
+        self.signature.as_deref()
+    }
+}
+
 /// A spec that [`load`] verified and parsed. This is the only kind of spec the engine runs.
 ///
 /// There is no public way to build one except [`load`]. See the module docs for the compile-fail tests
@@ -29,15 +55,22 @@ pub struct LoadedSpec {
     spec: Spec,
     signature: SignatureState,
     sha256: String,
+    bytes: VerifiedSpecBytes,
 }
 
 impl LoadedSpec {
     /// The only constructor. It is private to this module, and so only [`load`] can call it.
-    fn new(spec: Spec, signature: SignatureState, sha256: String) -> Self {
+    fn new(
+        spec: Spec,
+        signature: SignatureState,
+        sha256: String,
+        bytes: VerifiedSpecBytes,
+    ) -> Self {
         Self {
             spec,
             signature,
             sha256,
+            bytes,
         }
     }
 
@@ -57,6 +90,12 @@ impl LoadedSpec {
     #[must_use]
     pub fn sha256(&self) -> &str {
         &self.sha256
+    }
+
+    /// The exact bytes that were verified, for the copy in the report folder.
+    #[must_use]
+    pub fn verified_bytes(&self) -> &VerifiedSpecBytes {
+        &self.bytes
     }
 }
 
@@ -142,7 +181,11 @@ fn load_with_clock(
     }
     check_not_expired(spec.metadata.expires.as_deref(), now)?;
     let sha256 = crate::sig::hex(&Sha256::digest(bytes));
-    Ok(LoadedSpec::new(spec, signature, sha256))
+    let bytes = VerifiedSpecBytes {
+        yaml: bytes.to_vec(),
+        signature: sig.map(<[u8]>::to_vec),
+    };
+    Ok(LoadedSpec::new(spec, signature, sha256, bytes))
 }
 
 #[cfg(test)]
@@ -190,9 +233,19 @@ mod tests {
 
     #[test]
     fn the_accessor_returns_what_the_constructor_was_given() {
-        let loaded = LoadedSpec::new(sample(), SignatureState::Unsigned, "ab".to_owned());
+        let loaded = LoadedSpec::new(
+            sample(),
+            SignatureState::Unsigned,
+            "ab".to_owned(),
+            VerifiedSpecBytes {
+                yaml: b"x".to_vec(),
+                signature: None,
+            },
+        );
         assert_eq!(loaded.spec(), &sample());
         assert_eq!(loaded.signature(), &SignatureState::Unsigned);
         assert_eq!(loaded.sha256(), "ab");
+        assert_eq!(loaded.verified_bytes().yaml(), b"x");
+        assert_eq!(loaded.verified_bytes().signature(), None);
     }
 }
