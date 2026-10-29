@@ -1,5 +1,8 @@
 //! Proves that code outside the crate cannot build a `Redacted` value or get one from raw text.
 //!
+//! `compile_fail/policy_run.rs` holds the same kind of proof for commands (M1-066): `exec::policy::run`
+//! is crate-private, so `exec::table::run` is the only public runner.
+//!
 //! Each file in `compile_fail/` must fail to compile, and its `.stderr` file records the exact error. A
 //! rustdoc `compile_fail` test would not do alone, because stable rustdoc does not check the error code,
 //! so a typo in such a test would pass for the wrong reason.
