@@ -4,34 +4,45 @@
 //! the run from ever finishing. The watchdog is the backstop: a plain OS thread, started before the
 //! async runtime, that guarantees a report and an exit.
 //!
-//! It fires at the run deadline plus [`Timing::grace`] (10 s). Then:
+//! **One origin.** The watchdog and the scheduler count from the same `std::time::Instant`
+//! ([`WatchdogConfig::new`], [`crate::sched::Scheduler::with_origin`]). The watchdog fires at the run
+//! deadline plus [`Timing::grace`] (10 s) after that origin, so it always fires exactly the grace after
+//! the scheduler's deadline, whatever ran before the checks.
+//!
+//! When it fires:
 //!
 //! 1. **One writer.** [`WriteState`] holds `Running`, `Writing` or `Done`. Whoever moves it from
 //!    `Running` to `Writing` writes the report. If the run finished first (state `Done`), the watchdog
-//!    does nothing. If the normal path is `Writing` and does not reach `Done` within
-//!    [`Timing::loser_wait`] (5 s), the watchdog kills the process groups and exits 70 without writing.
-//! 2. **Snapshot.** [`Board::snapshot`] reads the results so far with a `try_lock` loop bounded by
-//!    [`Timing::snapshot_bound`] (1 s). Checks still running become `timeout`, checks not started
-//!    become `run_deadline`, and with no lock every check is an `error`.
-//! 3. **Its own pass.** It redacts the whole report with `redact_report_counted`, whatever the
-//!    snapshot held, and keeps the counts of the results redacted earlier.
-//! 4. **Bounded write.** The sink runs on a helper thread. The watchdog waits at most
-//!    [`Timing::write_bound`] (10 s).
-//! 5. **Kill, then exit.** It kills every live process group, writes one fixed line to stderr and
-//!    exits 70, whatever happened above, even a panic in the redactor.
+//!    does not write. It is still a backstop: a process that has not exited [`Timing::loser_wait`] (5 s)
+//!    later, say because a print to a blocked stdout never returns, is killed and exits with the code
+//!    stored by [`WriteState::finish`]. If the normal path is `Writing` and does not reach `Done`
+//!    within `loser_wait`, the watchdog kills the process groups and exits 70 without writing.
+//! 2. **One helper thread, one bound.** Snapshot, redaction and write all run on a helper thread, and
+//!    the watchdog waits for it at most [`Timing::snapshot_bound`] plus [`Timing::write_bound`] (11 s).
+//!    A redactor that is slow, or a panic hook that blocks, cannot hold up the exit.
+//! 3. **Snapshot.** [`Board::snapshot`] reads the results so far with a `try_lock` loop bounded by
+//!    `snapshot_bound` (1 s). Checks still running become `timeout`, checks not started become
+//!    `run_deadline`, and with no lock every check is an `error`.
+//! 4. **Its own pass.** It redacts the whole report with `redact_report_counted`, whatever the
+//!    snapshot held (the base report and the templates were never redacted), and keeps the counts of
+//!    the results redacted earlier.
+//! 5. **Kill, then exit.** It kills every live process group, writes the fixed two-line text to stderr
+//!    and exits 70, whatever happened above.
 //!
 //! It never takes std's stdout or stderr lock, because the thread that holds one may be the stuck one.
-//! The worst case from the start of the run is the deadline plus about 22 s.
+//! The worst case from the origin is the deadline plus about 22 s (10 s grace, 11 s bound, the stderr
+//! wait).
 //!
 //! Before [`Watchdog::arm`] has been called (no output folder yet) there is nothing to write, so the
-//! watchdog only kills and exits. On the normal path the CLI calls [`WriteState::claim_or_park`],
-//! writes, calls [`WriteState::finish`], kills leftover groups and exits.
+//! watchdog only kills and exits. On the normal path the CLI prints what it prints, calls
+//! [`WriteState::claim_or_park`], writes, calls [`WriteState::finish`] with the exit code, kills
+//! leftover groups and exits. It never calls [`Watchdog::stop`] on that path: the backstop must stay.
 //!
 //! Time and effects are traits ([`Clock`], [`Effects`]) so the tests can move time by hand and see
 //! the exit without ending the test process. The real ones are [`SystemClock`] and [`ProcessEffects`].
 
-use std::io;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::fs::File;
+use std::io::{self, Write as _};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
@@ -51,12 +62,13 @@ pub use board::{Board, MapRan, Snapshot};
 /// The exit code of a run that hung.
 pub const EXIT_HUNG: i32 = 70;
 
-/// The one line written to stderr when the watchdog ends a run. Fixed text: it holds no input.
-const NOTICE: &str = "error: the run did not finish and rdy stopped it. Fix: run it again. \
-If it happens again, tell the vendor which check hung. A report may be in the report folder.\n";
+/// What the watchdog writes to stderr when it ends a run: the two lines of 07 section 5.2, in one
+/// write. Fixed text: it holds no input.
+const NOTICE: &str = "error: the run did not finish, so rdy stopped itself. A partial report may be in the newest rdy-report folder.\nfix: run it again and tell the vendor which check was running.\n";
 
 /// The watchdog's time limits (02, "Watchdog").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Timing {
     /// Time after the run deadline at which the watchdog fires.
     pub grace: Duration,
@@ -69,7 +81,7 @@ pub struct Timing {
 }
 
 impl Timing {
-    /// 10 s, 1 s, 5 s and 10 s. With the kill and the notice, the exit is within the deadline plus 22 s.
+    /// 10 s, 1 s, 5 s and 10 s. Snapshot, redaction and write share one bound of 11 s. With the kill and the notice, the exit is within the deadline plus 22 s.
     pub const DEFAULT: Self = Self {
         grace: Duration::from_secs(10),
         snapshot_bound: Duration::from_secs(1),
@@ -86,7 +98,10 @@ impl Default for Timing {
 
 /// Who may write the report: the CLI at the end of the run or the watchdog (ADR 0016 decision 6).
 #[derive(Debug, Default)]
-pub struct WriteState(AtomicU8);
+pub struct WriteState {
+    phase: AtomicU8,
+    code: AtomicU8,
+}
 
 /// The phases of [`WriteState`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,13 +122,16 @@ impl WriteState {
     /// A state in `Running`.
     #[must_use]
     pub const fn new() -> Self {
-        Self(AtomicU8::new(RUNNING))
+        Self {
+            phase: AtomicU8::new(RUNNING),
+            code: AtomicU8::new(0),
+        }
     }
 
     /// Moves `Running` to `Writing`. True means the caller writes. False means the other side does
     /// and the caller must not write.
     pub fn claim(&self) -> bool {
-        self.0
+        self.phase
             .compare_exchange(RUNNING, WRITING, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
     }
@@ -128,15 +146,24 @@ impl WriteState {
         }
     }
 
-    /// Marks the report as written.
-    pub fn finish(&self) {
-        self.0.store(DONE, Ordering::Release);
+    /// Marks the report as written and stores the exit code the process is about to use. If the
+    /// process has not exited [`Timing::loser_wait`] after the watchdog fires, the watchdog exits
+    /// with this code.
+    pub fn finish(&self, exit_code: u8) {
+        self.code.store(exit_code, Ordering::Release);
+        self.phase.store(DONE, Ordering::Release);
+    }
+
+    /// The exit code given to [`WriteState::finish`], or 0 before that.
+    #[must_use]
+    pub fn exit_code(&self) -> u8 {
+        self.code.load(Ordering::Acquire)
     }
 
     /// Where the state is now.
     #[must_use]
     pub fn phase(&self) -> Phase {
-        match self.0.load(Ordering::Acquire) {
+        match self.phase.load(Ordering::Acquire) {
             RUNNING => Phase::Running,
             WRITING => Phase::Writing,
             _ => Phase::Done,
@@ -198,36 +225,28 @@ impl Stop {
 
 /// Time for the watchdog's single long wait. Tests move it by hand.
 pub trait Clock: Send + Sync {
-    /// Blocks until `at` has passed since the watchdog started (true) or `stop` is stopped (false).
+    /// Blocks until `at` has passed since the run's origin (true) or `stop` is stopped (false).
     fn wait_until(&self, at: Duration, stop: &Stop) -> bool;
 }
 
-/// The real clock, counted from when it was made.
+/// The real clock, counted from the run's origin.
 #[derive(Debug)]
 pub struct SystemClock {
-    start: Instant,
+    origin: Instant,
 }
 
 impl SystemClock {
-    /// A clock that starts now.
+    /// A clock that counts from `origin`.
     #[must_use]
-    pub fn new() -> Self {
-        Self {
-            start: Instant::now(),
-        }
-    }
-}
-
-impl Default for SystemClock {
-    fn default() -> Self {
-        Self::new()
+    pub fn new(origin: Instant) -> Self {
+        Self { origin }
     }
 }
 
 impl Clock for SystemClock {
     fn wait_until(&self, at: Duration, stop: &Stop) -> bool {
         loop {
-            let left = at.saturating_sub(self.start.elapsed());
+            let left = at.saturating_sub(self.origin.elapsed());
             if left.is_zero() {
                 return true;
             }
@@ -267,21 +286,24 @@ impl Effects for ProcessEffects {
 }
 
 /// How long the watchdog waits for the stderr line before it exits anyway.
-#[cfg(unix)]
 const NOTICE_WAIT: Duration = Duration::from_millis(200);
 
-/// Writes [`NOTICE`] on a helper thread with a raw write, so neither a full pipe nor a held std lock
+/// Writes [`NOTICE`] on a helper thread with one raw write, so neither a full pipe nor a held std lock
 /// can stop the exit.
-#[cfg(unix)]
+///
+/// The handle is a clone of descriptor 2 (the stderr handle on Windows) made with `as_fd` or
+/// `as_handle`, which do not take std's stderr lock, and the write goes to a `File`, which has no lock
+/// either. It is safe code.
 fn write_notice() {
-    use std::os::fd::AsFd as _;
-
+    let Some(mut stderr) = clone_stderr() else {
+        return;
+    };
     let (done, wait) = mpsc::channel();
     let spawned = thread::Builder::new()
         .name("rdy-watchdog-notice".into())
         .spawn(move || {
-            // `as_fd` on the handle does not take the lock. `write` may block on a full pipe.
-            let _ = rustix::io::write(io::stderr().as_fd(), NOTICE.as_bytes());
+            // One `write`, not `write_all`: a partial write is not retried.
+            let _ = stderr.write(NOTICE.as_bytes());
             let _ = done.send(());
         });
     if spawned.is_ok() {
@@ -289,9 +311,30 @@ fn write_notice() {
     }
 }
 
-/// No stderr line outside Unix: every safe way to write takes std's lock.
-#[cfg(not(unix))]
-fn write_notice() {}
+#[cfg(unix)]
+fn clone_stderr() -> Option<File> {
+    use std::os::fd::AsFd as _;
+    io::stderr()
+        .as_fd()
+        .try_clone_to_owned()
+        .ok()
+        .map(File::from)
+}
+
+#[cfg(windows)]
+fn clone_stderr() -> Option<File> {
+    use std::os::windows::io::AsHandle as _;
+    io::stderr()
+        .as_handle()
+        .try_clone_to_owned()
+        .ok()
+        .map(File::from)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn clone_stderr() -> Option<File> {
+    None
+}
 
 /// Everything [`Watchdog::start`] needs.
 pub struct WatchdogConfig {
@@ -304,16 +347,24 @@ pub struct WatchdogConfig {
 }
 
 impl WatchdogConfig {
-    /// A config for a run with this `deadline` (give it the one the scheduler has), the shared write
-    /// `state` and the process redactor, with the real clock, the real effects and [`Timing::DEFAULT`].
+    /// A config for a run that started at `origin` with this `deadline`, the shared write `state` and
+    /// the process redactor, with the real clock, the real effects and [`Timing::DEFAULT`].
+    ///
+    /// Give the scheduler the same origin and deadline
+    /// ([`crate::sched::Scheduler::with_origin`], [`crate::sched::Scheduler::with_deadline`]).
     #[must_use]
-    pub fn new(deadline: Duration, state: Arc<WriteState>, redactor: Redactor) -> Self {
+    pub fn new(
+        origin: Instant,
+        deadline: Duration,
+        state: Arc<WriteState>,
+        redactor: Redactor,
+    ) -> Self {
         Self {
             deadline,
             timing: Timing::DEFAULT,
             state,
             redactor,
-            clock: Arc::new(SystemClock::new()),
+            clock: Arc::new(SystemClock::new(origin)),
             effects: Arc::new(ProcessEffects),
         }
     }
@@ -326,6 +377,7 @@ impl WatchdogConfig {
     }
 
     /// Replaces the clock.
+    #[doc(hidden)]
     #[must_use]
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
@@ -333,6 +385,7 @@ impl WatchdogConfig {
     }
 
     /// Replaces the effects.
+    #[doc(hidden)]
     #[must_use]
     pub fn with_effects(mut self, effects: Arc<dyn Effects>) -> Self {
         self.effects = effects;
@@ -357,8 +410,8 @@ struct Shared {
 
 /// The watchdog thread. Start it first thing in `main`, before the runtime.
 ///
-/// Its clock counts from the start of the run, so start it when the scheduler's deadline starts. The
-/// 10 s of grace covers the little that happens in between.
+/// Its clock counts from the origin in its config, the same origin the scheduler counts from, so it
+/// does not matter how long set-up takes between the two starting.
 pub struct Watchdog {
     shared: Arc<Shared>,
     thread: JoinHandle<()>,
@@ -412,13 +465,15 @@ impl Watchdog {
         self.shared.armed.set(Armed { board, sink }).is_ok()
     }
 
-    /// Ends the watchdog without it acting, and waits for the thread.
+    /// Ends the watchdog without it acting, and waits for the thread. Never call it on the exit path
+    /// of a real run: the backstop after [`WriteState::finish`] must stay.
     pub fn stop(self) {
         self.shared.stop.stop();
         let _ = self.thread.join();
     }
 
     /// Waits for the thread to end on its own. For tests: in a real run the thread ends the process.
+    #[doc(hidden)]
     pub fn join(self) {
         let _ = self.thread.join();
     }
@@ -428,18 +483,33 @@ impl Shared {
     /// The deadline plus the grace has passed.
     fn fire(&self) {
         if self.state.phase() == Phase::Done {
-            // The run finished and the process is on its way out.
-            return;
-        }
-        if self.state.claim() {
-            // A panic anywhere in the write (the redactor, the sink) must not stop the exit.
-            let _ = catch_unwind(AssertUnwindSafe(|| self.write_partial_report()));
+            self.backstop();
+        } else if self.state.claim() {
+            self.write_partial_report();
+            self.end_hung_run();
         } else if self.wait_for_done() {
-            return;
+            self.backstop();
+        } else {
+            self.end_hung_run();
         }
+    }
+
+    /// Kills the process groups, writes the notice and exits 70.
+    fn end_hung_run(&self) {
         self.effects.kill_groups();
         self.effects.notice();
         self.effects.exit(EXIT_HUNG);
+    }
+
+    /// The report is written, so the process should be on its way out. If it is still here after
+    /// `loser_wait`, something after the write is stuck (a print to a blocked stdout, a flush at exit).
+    /// Kill the groups and exit with the code the normal path stored.
+    fn backstop(&self) {
+        if self.stop.wait(self.timing.loser_wait) {
+            return;
+        }
+        self.effects.kill_groups();
+        self.effects.exit(i32::from(self.state.exit_code()));
     }
 
     /// The normal path is writing. Waits for it, at most `loser_wait`. True if it finished.
@@ -454,26 +524,30 @@ impl Shared {
         true
     }
 
-    /// Snapshot, redact, write on a helper thread and wait for it, each step bounded. Writes nothing
-    /// when the watchdog was never armed.
+    /// Snapshot, redaction and write, all on one helper thread under one bound, so a stuck lock, a
+    /// slow redactor or a sink that never returns cannot hold up the exit. Writes nothing when the
+    /// watchdog was never armed.
     fn write_partial_report(&self) {
         let Some(armed) = self.armed.get() else {
             return;
         };
-        let (report, counts) = armed.board.partial_report(self.timing.snapshot_bound);
-        let Ok(redacted) = self.redactor.redact_report_counted(report, counts) else {
-            return;
-        };
+        let board = Arc::clone(&armed.board);
         let sink = Arc::clone(&armed.sink);
+        let redactor = self.redactor.clone();
+        let snapshot_bound = self.timing.snapshot_bound;
         let (done, wait) = mpsc::channel();
         let spawned = thread::Builder::new()
             .name("rdy-watchdog-write".into())
             .spawn(move || {
-                let _ = sink.write(&redacted);
+                let (report, counts) = board.partial_report(snapshot_bound);
+                if let Ok(redacted) = redactor.redact_report_counted(report, counts) {
+                    let _ = sink.write(&redacted);
+                }
                 let _ = done.send(());
             });
         if spawned.is_ok() {
-            let _ = wait.recv_timeout(self.timing.write_bound);
+            // A panic in the helper drops `done`, and the wait ends at once.
+            let _ = wait.recv_timeout(self.timing.snapshot_bound + self.timing.write_bound);
         }
     }
 }

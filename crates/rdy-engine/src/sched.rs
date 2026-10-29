@@ -17,7 +17,8 @@
 //!   timeouts and hangs"). A check's timeout is held to the time left in the run, so a check that is
 //!   still running at the deadline ends as [`End::TimedOut`]. A check that has not started by then
 //!   ends as [`End::RunDeadline`] and is never started. The deadline is read from the tokio clock, so
-//!   tests under paused time cover it.
+//!   tests under paused time cover it. It is counted from the start of `run`, or from the origin given
+//!   to [`Scheduler::with_origin`], which is the origin of the watchdog's clock too.
 //! - **Panics.** A panic stays inside the check's task. The join handle returns it and the result is
 //!   [`End::Panicked`].
 //! - **Hard needs.** A check whose hard need is missing is not started. Its result is
@@ -210,6 +211,7 @@ pub struct Scheduler {
     os: Os,
     available: Arc<HashSet<Need>>,
     deadline: Duration,
+    origin: Option<std::time::Instant>,
 }
 
 impl Scheduler {
@@ -223,6 +225,7 @@ impl Scheduler {
             os,
             available: Arc::new(available.into_iter().collect()),
             deadline: DEFAULT_DEADLINE,
+            origin: None,
         }
     }
 
@@ -231,6 +234,17 @@ impl Scheduler {
     #[must_use]
     pub fn with_deadline(mut self, deadline: Duration) -> Self {
         self.deadline = deadline;
+        self
+    }
+
+    /// Counts the deadline from `origin` instead of from the start of [`Scheduler::run`].
+    ///
+    /// Give the watchdog the same `origin` ([`crate::watchdog::WatchdogConfig::new`]). It fires at the
+    /// deadline plus its grace, counted from that origin, so the two clocks agree even when a probe
+    /// or other set-up ran before the checks. Time spent before `run` comes out of the run's budget.
+    #[must_use]
+    pub fn with_origin(mut self, origin: std::time::Instant) -> Self {
+        self.origin = Some(origin);
         self
     }
 
@@ -262,7 +276,7 @@ impl Scheduler {
         planned: Vec<Planned>,
         observer: Arc<dyn Observer>,
     ) -> Vec<Ran> {
-        let origin = Instant::now();
+        let origin = self.origin.map_or_else(Instant::now, Instant::from_std);
         let deadline_at = origin + self.deadline;
         let semaphore = Arc::new(Semaphore::new(self.jobs));
         let mut slots: Vec<Option<Ran>> = vec![None; planned.len()];

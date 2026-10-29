@@ -4,18 +4,20 @@
 //! and never reads the copy's stdout. In the child role (`watchdog_hang_child`) it plays the part of
 //! `rdy`:
 //!
-//! - one check forks `sleep 600`, so there is a live process group to kill;
 //! - two checks spin on a two-worker runtime, so the scheduler's own timers can never fire;
 //! - a thread writes to stdout until the pipe is full and then blocks, holding std's stdout lock;
-//! - a thread holds the run board's lock for good.
+//! - a thread holds the run board's lock for good;
+//! - on Unix, a third check forks `sleep 600`, so there is a live process group to kill.
 //!
 //! Only the watchdog is left to end the run. The parent asserts exit 70, a report with `complete:
-//! false`, the time bound of 02 (deadline plus 22 s) and that nothing of the process group is left.
-//! The time bound is an upper bound only, so a slow machine cannot make it flaky.
-#![cfg(all(unix, feature = "runtime"))]
+//! false` that holds none of the canaries planted in the base report and a template, and the time bound
+//! of 02 (deadline plus 22 s). On Unix it also asserts the fixed stderr text and that nothing of the
+//! process group is left. The rest runs on every target. The time bound is an upper bound only, so a
+//! slow machine cannot make it flaky.
+#![cfg(feature = "runtime")]
 
 use std::error::Error;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -23,10 +25,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use rdy_engine::check::{
-    BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Need,
-    OsSupport, Support, current_os,
+    BoxFuture, Check, CheckContext, CheckInfo, CheckMeta, CheckOutcome, Need, OsSupport, Support,
+    current_os,
 };
-use rdy_engine::exec::{self, ExecSpec};
 use rdy_engine::outcome::timeout_result;
 use rdy_engine::output::{OutputDir, ReportError};
 use rdy_engine::redact::{RedactedReport, Redactor, TagKey};
@@ -43,6 +44,11 @@ const DEADLINE: Duration = Duration::from_secs(1);
 const EXIT_BOUND: Duration = Duration::from_secs(22);
 const HARD_LIMIT: Duration = Duration::from_secs(60);
 const TS: &str = "20270101T000000Z";
+
+/// Secrets in the parts of the report that nothing redacted before the watchdog did.
+const HOST_CANARY: &str = "canary-host-pw-1";
+const USER_CANARY: &str = "canary-user-tok-2";
+const NAME_CANARY: &str = "canary-name-pw-3";
 
 static FAKE: CheckInfo = CheckInfo {
     id: "fake.hang",
@@ -66,33 +72,8 @@ static FAKE: CheckInfo = CheckInfo {
     peers: &[],
 };
 
-/// Forks `sleep 600` and waits for it.
-struct ExecCheck {
-    pid_file: PathBuf,
-}
-
-impl Check for ExecCheck {
-    fn info(&self) -> &'static CheckInfo {
-        &FAKE
-    }
-
-    fn run<'a>(&'a self, _ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome> {
-        Box::pin(async move {
-            let spec = ExecSpec::new("/bin/sh", Duration::from_secs(600)).args([
-                "-c",
-                "sleep 600 & echo $! > \"$0\"; wait",
-                &self.pid_file.to_string_lossy(),
-            ]);
-            exec::run(spec).await.map_err(|error| CheckError::Failed {
-                message: error.to_string(),
-                hint: String::new(),
-            })?;
-            Ok(Finding::pass("done"))
-        })
-    }
-}
-
-/// Holds its worker for good, once the sleeper's pid file exists.
+/// Holds its worker for good. On Unix it first waits, by sleeping so the exec check can run, for the
+/// sleeper's pid file.
 struct SpinCheck {
     pid_file: PathBuf,
 }
@@ -104,13 +85,110 @@ impl Check for SpinCheck {
 
     fn run<'a>(&'a self, _ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome> {
         Box::pin(async move {
-            while !self.pid_file.exists() {
-                std::hint::spin_loop();
+            while cfg!(unix) && !self.pid_file.exists() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
             }
             loop {
                 std::hint::spin_loop();
             }
         })
+    }
+}
+
+#[cfg(unix)]
+mod unix_only {
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    use rdy_engine::check::{
+        BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckOutcome, Finding,
+    };
+    use rdy_engine::exec::{self, ExecSpec};
+
+    /// Forks `sleep 600` and waits for it. The shell writes its own pid (the group id) first and
+    /// the sleeper's pid second, which is what the spinning checks wait for.
+    pub struct ExecCheck {
+        pub pid_file: PathBuf,
+    }
+
+    impl Check for ExecCheck {
+        fn info(&self) -> &'static CheckInfo {
+            &super::FAKE
+        }
+
+        fn run<'a>(&'a self, _ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome> {
+            Box::pin(async move {
+                let spec = ExecSpec::new("/bin/sh", Duration::from_secs(600)).args([
+                    "-c",
+                    "echo $$ > \"$0.pgid\"; sleep 600 & echo $! > \"$0\"; wait",
+                    &self.pid_file.to_string_lossy(),
+                ]);
+                exec::run(spec).await.map_err(|error| CheckError::Failed {
+                    message: error.to_string(),
+                    hint: String::new(),
+                })?;
+                Ok(Finding::pass("done"))
+            })
+        }
+    }
+
+    /// The state letter of a process and its group, from `/proc/<pid>/stat`. Linux only.
+    fn proc_state(pid: &str) -> Option<(char, u32)> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let rest = stat.rsplit(')').next()?;
+        let mut fields = rest.split_whitespace();
+        let state = fields.next()?.chars().next()?;
+        let _ppid = fields.next()?;
+        Some((state, fields.next()?.parse().ok()?))
+    }
+
+    fn is_gone(pid: u32) -> bool {
+        let Some(raw) = i32::try_from(pid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        else {
+            return true;
+        };
+        if rustix::process::test_kill_process(raw).is_err() {
+            return true;
+        }
+        // A zombie that nothing has reaped yet is gone for our purposes.
+        proc_state(&pid.to_string()).is_some_and(|(state, _)| state == 'Z')
+    }
+
+    /// No live process in the group. On Linux, zombies do not count. Elsewhere, a signal to the
+    /// group that finds nobody.
+    fn group_gone(pgid: u32) -> bool {
+        if Path::new("/proc/self/stat").exists() {
+            let Ok(entries) = std::fs::read_dir("/proc") else {
+                return false;
+            };
+            return !entries
+                .filter_map(Result::ok)
+                .filter_map(|entry| entry.file_name().into_string().ok())
+                .filter(|name| name.bytes().all(|b| b.is_ascii_digit()))
+                .filter_map(|name| proc_state(&name))
+                .any(|(state, group)| group == pgid && state != 'Z');
+        }
+        i32::try_from(pgid)
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+            .is_none_or(|pid| rustix::process::test_kill_process_group(pid).is_err())
+    }
+
+    pub fn wait_gone(pid_file: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let pid: u32 = std::fs::read_to_string(pid_file)?.trim().parse()?;
+        let pgid: u32 = std::fs::read_to_string(format!("{}.pgid", pid_file.display()))?
+            .trim()
+            .parse()?;
+        let start = Instant::now();
+        while !(is_gone(pid) && group_gone(pgid)) {
+            if start.elapsed() > Duration::from_secs(5) {
+                return Err(format!("process {pid} or its group {pgid} is still alive").into());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Ok(())
     }
 }
 
@@ -126,8 +204,12 @@ fn base_report() -> Report {
         ),
         SpecRef::new("acme", "0".repeat(64), "spec.yaml", 10),
         Signature::unsigned(),
-        Host::new("host.example", HostOs::new(HostOsFamily::Linux), "x86_64"),
-        Identity::new(Some(1000), Some("ada".to_owned()), false),
+        Host::new(
+            format!("build-01 password={HOST_CANARY}"),
+            HostOs::new(HostOsFamily::Linux),
+            "x86_64",
+        ),
+        Identity::new(Some(1000), Some(format!("ada token={USER_CANARY}")), false),
         Vec::new(),
     )
 }
@@ -157,15 +239,25 @@ fn watchdog_hang_child() {
     let Ok(dir) = std::env::var(CHILD_ENV) else {
         return;
     };
+    // The one origin of the run, for the watchdog and the scheduler alike.
+    let origin = Instant::now();
     let dir = PathBuf::from(dir);
     let pid_file = dir.join("sleeper.pid");
     let out_parent = dir.join("out");
     let redactor = Redactor::new(TagKey::fixed([3; 32]));
     let out = Arc::new(OutputDir::create_new(&out_parent, "acme", TS).expect("output dir"));
 
-    let templates: Vec<CheckResult> = ["host.exec", "host.spin_a", "host.spin_b"]
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut ids = vec!["host.spin_a", "host.spin_b"];
+    #[cfg(unix)]
+    ids.insert(0, "host.exec");
+    let templates: Vec<CheckResult> = ids
         .iter()
-        .map(|id| CheckResult::new(*id, "host", Severity::Block, Status::Pass))
+        .map(|id| {
+            let mut template = CheckResult::new(*id, "host", Severity::Block, Status::Pass);
+            template.name = Some(format!("primary password={NAME_CANARY}"));
+            template
+        })
         .collect();
     let for_map = templates.clone();
     let board = Arc::new(Board::new(
@@ -180,8 +272,13 @@ fn watchdog_hang_child() {
     ));
 
     let state = Arc::new(WriteState::new());
-    let watchdog = Watchdog::start(WatchdogConfig::new(DEADLINE, state, redactor.clone()))
-        .expect("watchdog thread");
+    let watchdog = Watchdog::start(WatchdogConfig::new(
+        origin,
+        DEADLINE,
+        state,
+        redactor.clone(),
+    ))
+    .expect("watchdog thread");
     watchdog.arm(Arc::clone(&board), Arc::new(JsonSink { out }));
 
     // A blocked stdout: the parent never reads the pipe, so this thread stops in `write` while it
@@ -200,7 +297,7 @@ fn watchdog_hang_child() {
     let holder = Arc::clone(&board);
     let held = pid_file.clone();
     std::thread::spawn(move || {
-        while !held.exists() {
+        while cfg!(unix) && !held.exists() {
             std::thread::sleep(Duration::from_millis(5));
         }
         let _hold = holder.hold_lock_for_test();
@@ -214,15 +311,11 @@ fn watchdog_hang_child() {
         .enable_all()
         .build()
         .expect("runtime");
-    let scheduler =
-        Scheduler::new(3, current_os(), std::iter::empty::<Need>()).with_deadline(DEADLINE);
-    let planned = vec![
-        Planned::new(
-            Arc::new(ExecCheck {
-                pid_file: pid_file.clone(),
-            }),
-            "host.exec",
-        ),
+    let scheduler = Scheduler::new(3, current_os(), std::iter::empty::<Need>())
+        .with_deadline(DEADLINE)
+        .with_origin(origin);
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut planned = vec![
         Planned::new(
             Arc::new(SpinCheck {
                 pid_file: pid_file.clone(),
@@ -231,6 +324,16 @@ fn watchdog_hang_child() {
         ),
         Planned::new(Arc::new(SpinCheck { pid_file }), "host.spin_b"),
     ];
+    #[cfg(unix)]
+    planned.insert(
+        0,
+        Planned::new(
+            Arc::new(unix_only::ExecCheck {
+                pid_file: dir.join("sleeper.pid"),
+            }),
+            "host.exec",
+        ),
+    );
     let observer: Arc<dyn Observer> = board;
     let _run = runtime.spawn(async move { scheduler.run_observed(planned, observer).await });
 
@@ -239,34 +342,6 @@ fn watchdog_hang_child() {
     while !never.load(Ordering::Relaxed) {
         std::thread::park();
     }
-}
-
-fn is_gone(pid: u32) -> bool {
-    let Some(pid) = i32::try_from(pid)
-        .ok()
-        .and_then(rustix::process::Pid::from_raw)
-    else {
-        return true;
-    };
-    if rustix::process::test_kill_process(pid).is_err() {
-        return true;
-    }
-    // A zombie that nothing has reaped yet is gone for our purposes.
-    std::fs::read_to_string(format!("/proc/{}/stat", pid.as_raw_nonzero()))
-        .ok()
-        .and_then(|stat| stat.rsplit(')').next().map(str::to_owned))
-        .is_some_and(|rest| rest.trim_start().starts_with('Z'))
-}
-
-fn wait_gone(pid: u32) -> Result<(), Box<dyn Error>> {
-    let start = Instant::now();
-    while !is_gone(pid) {
-        if start.elapsed() > Duration::from_secs(5) {
-            return Err(format!("process {pid} is still alive").into());
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    Ok(())
 }
 
 fn find_report(parent: &Path) -> Result<PathBuf, Box<dyn Error>> {
@@ -324,24 +399,40 @@ fn a_hung_run_ends_with_an_incomplete_report_and_exit_70_inside_the_bound()
         "the watchdog fires at the deadline plus 10 s, not at {took:?}"
     );
 
-    let mut stderr = String::new();
-    if let Some(mut pipe) = child.stderr.take() {
-        pipe.read_to_string(&mut stderr)?;
+    let raw = std::fs::read_to_string(find_report(&dir.path().join("out"))?)?;
+    for canary in [HOST_CANARY, USER_CANARY, NAME_CANARY] {
+        assert!(!raw.contains(canary), "{canary} is in the report");
     }
-    assert!(stderr.contains("rdy stopped it"), "stderr: {stderr}");
-
-    let report: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(find_report(&dir.path().join("out"))?)?)?;
+    let report: serde_json::Value = serde_json::from_str(&raw)?;
     assert_eq!(report["complete"], false);
     assert_eq!(report["kind"], "Report");
+    let expected_checks = if cfg!(unix) { 3 } else { 2 };
     let checks = report["checks"].as_array().ok_or("no checks")?;
-    assert_eq!(checks.len(), 3);
+    assert_eq!(checks.len(), expected_checks);
     // The board's lock was held, so the watchdog had no results to read: every check is unfinished.
     assert!(checks.iter().all(|check| check["status"] == "error"));
     assert_eq!(report["verdict"], "not_ready");
+    // The watchdog's own pass hid the planted secrets: host, user and one name per check.
+    let hidden = report["redaction"]["total"].as_u64().unwrap_or(0);
+    assert!(hidden >= 2 + expected_checks as u64, "{hidden}");
 
-    let pid: u32 = std::fs::read_to_string(dir.path().join("sleeper.pid"))?
-        .trim()
-        .parse()?;
-    wait_gone(pid)
+    #[cfg(unix)]
+    {
+        use std::io::Read;
+
+        let mut stderr = String::new();
+        if let Some(mut pipe) = child.stderr.take() {
+            pipe.read_to_string(&mut stderr)?;
+        }
+        assert!(
+            stderr.starts_with("error: the run did not finish, so rdy stopped itself."),
+            "stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains("\nfix: run it again and tell the vendor which check was running.\n"),
+            "stderr: {stderr}"
+        );
+        unix_only::wait_gone(&dir.path().join("sleeper.pid"))?;
+    }
+    Ok(())
 }

@@ -29,6 +29,7 @@ below.
 | --- | --- | --- | --- | --- | --- |
 | PC-35 | Plan, lines 9, 28, 218 and 288 ("the incumbent Kubernetes-only preflight tool") and evidence point 3 (remote host collectors) | The incumbent tool also has host collectors and preflights. Its remote-node limit is no rdy advantage while rdy also runs only where it is started. | Say "Kubernetes-first". Keep any multi-node claim out of public copy until rdy can run against remote hosts. Changing the descriptor is a repo-wide sweep, and the common brief that prescribes it needs the same edit. | cosmetic | 10 |
 | PC-37 | Plan, Milestones table, M3 | The M3 exit test ("First 10 paying vendors") can only be measured after the launch that M3 contains. | Launch when M3 scope is done; measure the exit test over the next eight weeks. The 12-month star and install targets start on launch day. | cosmetic | 10 |
+| PC-45 | 02 "Scheduling, timeouts and hangs", Watchdog, Snapshot bullet | It says that with no snapshot the watchdog reports every check as `error`, `interrupted`. `error_kind` has only `check_failed` and `panic` (01 section 5.2), and `interrupted` is a field of the report that means Ctrl-C. | Say "as `error` with `error_kind: check_failed`". M1-043 builds it that way (`unfinished_result`). | cosmetic | M1-043 review |
 
 ## Decisions made
 

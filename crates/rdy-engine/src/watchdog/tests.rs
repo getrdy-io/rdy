@@ -17,7 +17,12 @@ use crate::redact::TagKey;
 use crate::sched::{End, Observer, Ran};
 
 const DEADLINE: Duration = Duration::from_secs(300);
+/// In the message of a result the board redacted as it completed.
 const CANARY: &str = "canary-hunter2-value";
+/// In the base report and the templates, which nothing redacted before the watchdog did.
+const HOST_CANARY: &str = "canary-host-pw-1";
+const USER_CANARY: &str = "canary-user-tok-2";
+const NAME_CANARY: &str = "canary-name-pw-3";
 
 fn redactor() -> Redactor {
     Redactor::new(TagKey::fixed([5; 32]))
@@ -35,14 +40,20 @@ fn base_report() -> Report {
         ),
         SpecRef::new("acme", "0".repeat(64), "spec.yaml", 10),
         Signature::unsigned(),
-        Host::new("host.example", HostOs::new(HostOsFamily::Linux), "x86_64"),
-        Identity::new(Some(1000), Some("ada".to_owned()), false),
+        Host::new(
+            format!("build-01 password={HOST_CANARY}"),
+            HostOs::new(HostOsFamily::Linux),
+            "x86_64",
+        ),
+        Identity::new(Some(1000), Some(format!("ada token={USER_CANARY}")), false),
         Vec::new(),
     )
 }
 
 fn template(id: &str) -> CheckResult {
-    CheckResult::new(id, "host", Severity::Block, Status::Pass)
+    let mut result = CheckResult::new(id, "host", Severity::Block, Status::Pass);
+    result.name = Some(format!("primary password={NAME_CANARY}"));
+    result
 }
 
 /// Passing results that the map hands out by index. The first carries a secret in its message.
@@ -160,10 +171,14 @@ fn fast() -> Timing {
 }
 
 fn rig(timing: Timing) -> Rig {
+    rig_at(Instant::now(), DEADLINE, timing)
+}
+
+fn rig_at(origin: Instant, deadline: Duration, timing: Timing) -> Rig {
     let clock = Arc::new(ManualClock::default());
     let effects = Arc::new(Recorder::default());
     let state = Arc::new(WriteState::new());
-    let config = WatchdogConfig::new(DEADLINE, Arc::clone(&state), redactor())
+    let config = WatchdogConfig::new(origin, deadline, Arc::clone(&state), redactor())
         .with_timing(timing)
         .with_clock(clock.clone())
         .with_effects(effects.clone());
@@ -204,20 +219,32 @@ fn at_the_fire_time_it_writes_an_incomplete_report_and_exits_70() {
 }
 
 #[test]
-fn the_watchdog_report_is_redacted_and_keeps_the_counts_of_earlier_results() {
+fn the_watchdog_redacts_the_whole_report_itself_and_keeps_the_counts_of_earlier_results() {
     let rig = rig(fast());
     let sink = Arc::new(Collect::default());
-    rig.watchdog.arm(board_with_three(), sink.clone());
+    let board = board_with_three();
+    // The control: before the watchdog's pass the canaries are there, so a no-op redaction would fail.
+    let (plain, _) = board.partial_report(Duration::from_millis(30));
+    let plain = serde_json::to_string(&plain).unwrap();
+    for canary in [HOST_CANARY, USER_CANARY, NAME_CANARY] {
+        assert!(
+            plain.contains(canary),
+            "{canary} must be in the raw snapshot"
+        );
+    }
+    rig.watchdog.arm(board, sink.clone());
 
     rig.clock.set(DEADLINE + Duration::from_secs(10));
     rig.watchdog.join();
 
     let reports = sink.reports.lock().unwrap();
     let text = serde_json::to_string(&reports[0]).unwrap();
-    assert!(!text.contains(CANARY), "{text}");
-    // Result 0 was redacted when it completed. The report must still count that replacement.
+    for canary in [CANARY, HOST_CANARY, USER_CANARY, NAME_CANARY] {
+        assert!(!text.contains(canary), "{canary} survived: {text}");
+    }
+    // Host, user, three names (one in each kind of result) and the message of result 0.
     assert!(
-        reports[0].redaction.total >= 1,
+        reports[0].redaction.total >= 5,
         "{:?}",
         reports[0].redaction
     );
@@ -233,15 +260,126 @@ fn a_finish_at_nine_point_nine_seconds_after_the_deadline_keeps_the_complete_rep
     rig.clock.set(DEADLINE + Duration::from_millis(9_900));
     thread::sleep(Duration::from_millis(30));
     assert!(rig.state.claim(), "the CLI must win the race");
-    rig.state.finish();
+    rig.state.finish(1);
 
-    // Then the fire time passes. The watchdog sees `Done` and leaves everything alone.
+    // Then the fire time passes. The watchdog does not write. The process is leaving on its own in
+    // the real thing, so only the backstop remains: after `loser_wait` it exits with the stored code.
     rig.clock.set(DEADLINE + Duration::from_secs(10));
     rig.watchdog.join();
 
     assert!(sink.reports.lock().unwrap().is_empty());
+    assert_eq!(rig.effects.exits(), [1]);
+    assert_eq!(rig.effects.notices.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_stuck_exit_after_done_is_ended_with_the_stored_code_after_loser_wait() {
+    let rig = rig(fast());
+    let sink = Arc::new(Collect::default());
+    rig.watchdog.arm(board_with_three(), sink.clone());
+    assert!(rig.state.claim());
+    rig.state.finish(2);
+
+    let started = Instant::now();
+    rig.clock.set(DEADLINE + Duration::from_secs(10));
+    rig.watchdog.join();
+
+    assert!(started.elapsed() >= fast().loser_wait);
+    assert_eq!(rig.effects.exits(), [2]);
+    assert_eq!(rig.effects.kills.load(Ordering::SeqCst), 1);
+    assert!(sink.reports.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_process_that_leaves_by_itself_after_done_is_not_exited_by_the_watchdog() {
+    // In a real run `process::exit` ends the thread. Here `stop` stands in for that.
+    let rig = rig(Timing {
+        loser_wait: Duration::from_secs(30),
+        ..fast()
+    });
+    assert!(rig.state.claim());
+    rig.state.finish(0);
+    rig.clock.set(DEADLINE + Duration::from_secs(10));
+    thread::sleep(Duration::from_millis(30));
+    rig.watchdog.stop();
     assert!(rig.effects.exits().is_empty());
-    assert_eq!(rig.effects.kills.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn the_scheduler_and_the_watchdog_share_one_origin() {
+    use crate::check::{BoxFuture, Check, CheckContext, CheckInfo, CheckMeta, CheckOutcome, Os};
+    use crate::check::{OsSupport, Support};
+    use crate::sched::{Planned, Scheduler};
+
+    static INFO: CheckInfo = CheckInfo {
+        id: "fake.forever",
+        family: "fake",
+        summary: "A fake check that never ends.",
+        meta: CheckMeta {
+            title: "Fake check",
+            remediation: "Nothing to fix. This check is a test double.",
+        },
+        needs: &[],
+        wants: &[],
+        default_timeout: None,
+        os: OsSupport {
+            linux: Support::Full,
+            macos: Support::Full,
+            windows: Support::Full,
+        },
+        reads: &[],
+        env: &[],
+        commands: &[],
+        peers: &[],
+    };
+    struct Forever;
+    impl Check for Forever {
+        fn info(&self) -> &'static CheckInfo {
+            &INFO
+        }
+        fn run<'a>(&'a self, _ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome> {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    // The runtime is built paused by hand, so the scheduler's clock is virtual while the origin is a
+    // real instant that is already 12 s old, as when set-up (a cluster probe) took 12 s.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .unwrap();
+    let deadline = Duration::from_secs(30);
+    let origin = Instant::now()
+        .checked_sub(Duration::from_secs(12))
+        .expect("an instant 12 s back");
+    let ran = runtime.block_on(async {
+        Scheduler::new(1, Os::Linux, [])
+            .with_deadline(deadline)
+            .with_origin(origin)
+            .run(vec![
+                Planned::new(Arc::new(Forever), "fake.forever")
+                    .with_timeout(Duration::from_secs(60)),
+            ])
+            .await
+    });
+    // The check was cut at origin plus 30 s, which is 18 s into the run, not 30 s.
+    let End::TimedOut { after } = ran[0].end else {
+        panic!("want a timeout, got {:?}", ran[0].end);
+    };
+    // The paused clock and the real origin differ by the real time the test took, so allow a little.
+    let slack = Duration::from_millis(500);
+    assert!(after.abs_diff(Duration::from_secs(18)) < slack, "{after:?}");
+
+    // The watchdog counts from the same origin: it fires 10 s after the same deadline, not before.
+    let rig = rig_at(origin, deadline, fast());
+    rig.clock
+        .set(deadline + Timing::DEFAULT.grace - Duration::from_millis(1));
+    thread::sleep(Duration::from_millis(30));
+    assert!(rig.effects.exits().is_empty());
+    rig.clock.set(deadline + Timing::DEFAULT.grace);
+    rig.watchdog.join();
+    assert_eq!(rig.effects.exits(), [70]);
 }
 
 #[test]
@@ -281,9 +419,9 @@ fn a_normal_path_that_is_writing_and_never_finishes_ends_in_exit_70_with_no_repo
 }
 
 #[test]
-fn a_normal_path_that_finishes_while_the_watchdog_waits_is_left_alone() {
+fn a_normal_path_that_finishes_while_the_watchdog_waits_is_not_overwritten() {
     let rig = rig(Timing {
-        loser_wait: Duration::from_secs(30),
+        loser_wait: Duration::from_millis(300),
         ..fast()
     });
     let sink = Arc::new(Collect::default());
@@ -292,7 +430,7 @@ fn a_normal_path_that_finishes_while_the_watchdog_waits_is_left_alone() {
     let state = Arc::clone(&rig.state);
     let finisher = thread::spawn(move || {
         thread::sleep(Duration::from_millis(40));
-        state.finish();
+        state.finish(0);
     });
 
     rig.clock.set(DEADLINE + Duration::from_secs(10));
@@ -300,7 +438,8 @@ fn a_normal_path_that_finishes_while_the_watchdog_waits_is_left_alone() {
     finisher.join().unwrap();
 
     assert!(sink.reports.lock().unwrap().is_empty());
-    assert!(rig.effects.exits().is_empty());
+    // Only the backstop acts, with the stored code. No report is written over the CLI's.
+    assert_eq!(rig.effects.exits(), [0]);
 }
 
 #[test]
@@ -412,7 +551,7 @@ fn only_one_side_can_claim_the_write() {
     }
     assert_eq!(wins.load(Ordering::SeqCst), 1);
     assert_eq!(state.phase(), Phase::Writing);
-    state.finish();
+    state.finish(0);
     assert_eq!(state.phase(), Phase::Done);
     assert!(!state.claim());
 }

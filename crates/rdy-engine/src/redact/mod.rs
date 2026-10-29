@@ -142,6 +142,13 @@ impl RuleCounts {
         self.by_rule.iter().map(|(rule, n)| (*rule, *n))
     }
 
+    /// Adds the counts of `other`.
+    pub(crate) fn merge(&mut self, other: &RuleCounts) {
+        for (rule, n) in other.iter() {
+            *self.by_rule.entry(rule).or_insert(0) += n;
+        }
+    }
+
     fn add(&mut self, rule: &'static str) {
         *self.by_rule.entry(rule).or_insert(0) += 1;
     }

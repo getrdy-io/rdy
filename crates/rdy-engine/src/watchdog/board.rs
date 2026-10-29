@@ -41,6 +41,7 @@ struct Inner {
 }
 
 /// The results so far, read by the watchdog.
+#[non_exhaustive]
 pub struct Snapshot {
     /// One result per check, in spec order. A check still running is a timeout, a check not started
     /// is `run_deadline`, and with no lock every check is unfinished.
@@ -188,13 +189,16 @@ impl Observer for Board {
             return;
         };
         let result = (self.map)(index, ran);
-        let mut inner = self.lock();
-        // Redacted under the lock so the counts and the result go in together.
-        let kept = match self.redactor.redact_check(result, &mut inner.counts) {
+        // Redacted before the lock is taken: a slow redaction must not make the watchdog's `try_lock`
+        // fail. Only the counts and the result go in under the lock.
+        let mut counts = RuleCounts::default();
+        let kept = match self.redactor.redact_check(result, &mut counts) {
             Ok(redacted) => (*redacted).clone(),
             // The result no longer read as a result. Keep none of its text.
             Err(_) => unfinished_result(template),
         };
+        let mut inner = self.lock();
+        inner.counts.merge(&counts);
         if let Some(slot) = inner.slots.get_mut(index) {
             *slot = Slot::Done(Box::new(kept));
         }
