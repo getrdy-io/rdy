@@ -1,0 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+#
+# rdy: this file is committed on purpose. A test that fails here writes its `cc` line below. Commit
+# the line with the fix, and add a plain test with the minimal input next to the fix as well.
+# `tests/parse_properties.rs` checks that this file exists.
+# M1-027: a tab that ends the file was reported at column 0. Fixed in `back_onto_tab`.
+cc cc57faa4d2d9b40553953f80841b860b4427d103d9fdb6ff789387de0dbe4a20 # shrinks to bytes = [97, 112, 105, 86, 101, 114, 115, 105, 111, 110, 58, 32, 114, 100, 121, 47, 118, 49, 10, 58, 32, 32, 39, 97, 112, 105, 86, 101, 114, 115, 105, 111, 110, 58, 32, 114, 100, 121, 47, 118, 49, 10, 9]
