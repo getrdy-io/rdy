@@ -180,7 +180,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-083 | todo | | Golden tests for JSON and HTML reports
 
-- M1-084 | PR #TBD | | Enum values, a table per oneOf option and per check id (allOf if/then), the Example column (YAML, read back to the same value) and the missing-description failure. Every check parameter row now has a description, and each of the 17 check ids has an example. Deferred: the render does not validate examples, the test suite does, because a normal `jsonschema` dependency fails the license policy (ADR 0034; 09 section 5 says otherwise). No example on the top-level spec yet. The result reference waits for M1-085
+- M1-084 | [#89](https://github.com/getrdy-io/rdy/pull/89) | 2026-10-29 | Enum values, a table per oneOf option and per check id (allOf if/then), the Example column (YAML, read back to the same value) and the missing-description failure. Every check parameter row now has a description, and each of the 17 check ids has an example. Deferred: the render does not validate examples, the test suite does, because a normal `jsonschema` dependency fails the license policy (ADR 0034; 09 section 5 says otherwise). No example on the top-level spec yet. The result reference waits for M1-085
 
 - M1-085 | todo | | Spec and result reference pages with hand-written intro
 
