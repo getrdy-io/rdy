@@ -91,9 +91,9 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 171 | 374.5 |
+| M1, all | 172 | 376.5 |
 | M1, core | 143 | 315.5 |
-| M1, `core: no` (the cut list) | 28 | 59 |
+| M1, `core: no` (the cut list) | 29 | 61 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
 that. The earlier counts here (about 194 hours, then 248 in 02, then 571 in the first draft of 11) were
@@ -131,7 +131,7 @@ and Dec 28 run at half capacity.
 | 23 | Apr 26 to May 2, 2027 | 13 | 11.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-121 to M1-125 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign` |
 | 24 | May 3 to May 9, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-126 to M1-131 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove` |
 | 25 | May 10 to May 16, 2027 | 13 | 13 | 6 Signing, `rdy verify`, 0.1.0 | M1-132 to M1-139 | **`v0.1.0`**: signing review closed; install and sign pages; README ready, core done, announcement sent to design partners |
-| 26 | May 17 to May 23, 2027 | 13 | 11.5 | Non-core, steps 2 and 3 | M1-140 to M1-145 | `v0.1.1`: progress line, quiet and verbose modes, HTML wording; UDP and unix socket facade; host.lsm |
+| 26 | May 17 to May 23, 2027 | 13 | 13.5 | Non-core, steps 2 and 3 | M1-140 to M1-145, M1-172 | `v0.1.1`: progress line, quiet and verbose modes, HTML wording; UDP and unix socket facade; host.lsm; parameters for the M1-late check ids |
 | 27 | May 24 to May 30, 2027 | 13 | 13.5 | Non-core, step 3 | M1-146 to M1-150 | `v0.1.2`: host.security_agents, host.firewall, host.time_sync, host.sysctl, host.container_runtime |
 | 28 | May 31 to Jun 6, 2027 | 13 | 13 | Non-core, steps 3 and 4 | M1-151 to M1-156 | `v0.1.3`: host.cgroups, host.kernel; net.dns; net.registry |
 | 29 | Jun 7 to Jun 13, 2027 | 13 | 12.5 | Non-core, steps 4 and 5 | M1-157 to M1-163 | `v0.1.4`: net.mtu, net.bandwidth; k8s.nodes free capacity, webhooks, namespace, dns, ingress |
