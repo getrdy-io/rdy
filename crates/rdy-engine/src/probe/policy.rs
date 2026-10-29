@@ -164,7 +164,9 @@ fn var_rule(rest: &[&str]) -> Option<&'static str> {
 /// What follows a `proc` component: the process directories (an allowlist) and the kernel files.
 fn proc_rule(rest: &[&str]) -> Option<&'static str> {
     match rest {
-        [first, tail @ ..] if is_pid(first) => (!pid_entry_allowed(tail)).then_some(RULE_PROC),
+        [first, tail @ ..] if is_pid(first) => {
+            (!pid_entry_allowed(first, tail)).then_some(RULE_PROC)
+        }
         [name, ..]
             if matches!(
                 *name,
@@ -197,10 +199,14 @@ const PID_ALLOWED: &[&str] = &[
     "net",
 ];
 
-/// Whether `tail`, the part of the path after `/proc/<pid>`, is on the allowlist.
-fn pid_entry_allowed(tail: &[&str]) -> bool {
+/// Whether `tail`, the part of the path after `/proc/<pid>`, is on the allowlist. `pid` is the name
+/// of the process directory. `auxv` is allowed for `self` only: the privilege snapshot (M1-042) reads
+/// `AT_SECURE` from the running process's own `/proc/self/auxv`. Another process's auxv holds its
+/// load addresses and is not on the list.
+fn pid_entry_allowed(pid: &str, tail: &[&str]) -> bool {
     match tail {
         [] | ["task"] => true,
+        ["auxv"] => pid == "self",
         ["task", _tid, rest @ ..] => entry_allowed(rest),
         _ => entry_allowed(tail),
     }

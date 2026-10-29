@@ -541,7 +541,7 @@ Top level (`$defs/Report`). ADR 0012 decision 3 fixes the provenance fields; thi
 | `summary` | `total`, `pass`, `warn`, `block`, `skipped`, `timeout`, `error`, `not_applicable`, `required_not_run`, `optional_not_run` |
 | `checks` | one result per spec entry, in spec order (5.2) |
 | `actions`, `actions_truncated`, `actions_dropped` | the action log (5.4) |
-| `redaction` | `ruleset` (`report`), `total`, `by_rule`: counts only, never matched text (04) |
+| `redaction` | `ruleset` (`report`), `total`, `by_rule`: counts only, never matched text (04). They count every replacement the walk made, including in text a later cap dropped, so they are never lower than what was hidden |
 | `complete`, `interrupted` | `complete: false` when rdy could not finish or write the report (exit 70); `interrupted: true` after Ctrl-C |
 
 `signature.trust_note` is the local note from the trust store, never text from the spec (threat model
@@ -560,7 +560,7 @@ test asserts both identities, and that bucket counts match the summary.
 
 **Size caps in the schema.** `message` 1 KiB; `fix` and `builtin_fix` 4 KiB; `notes` 20 items of 1 KiB;
 `actions` 5000 items; every other string 4 KiB; `observed` and `expected` 64 KiB each (prose, checked by
-the writer). The whole document is at most 2 MiB, which the portal checks before it parses.
+the writer). A string cut by a cap ends with ` [truncated]`, and the check's `truncated` flag is set. The whole document is at most 2 MiB, which the portal checks before it parses.
 
 ### 5.1 Host identity
 
@@ -720,19 +720,20 @@ Threat model R1 and INV-07: every side effect goes through the probe facade, whi
 | `connect`, `tls` | `host`, `port`, `addr`, `via_proxy`; or `host`, `sni` |
 | `http`, `kube` | `method`, `url` (no query string) or `path`, `status` |
 | `native` | `api`, `path` |
-| `coalesced` | `of` (the kind), `under` (the directory), `count`; with `rule` or `error` when the calls were `denied` or `failed` |
+| `coalesced` | `of` (the kind), `under` (the directory of a file call, or the program, host or path of another denied call), `count`; with `rule` or `error` when the calls were `denied` or `failed` |
 
 Every string passes the redactor. Bodies are never recorded. **Retention:** `exec`, `connect`, `tls`,
 `http`, `dns`, `lookup` and `kube` entries are kept except in the last resort below; they are bounded already by the 256 host and
-port pairs a spec may name (2.1) and the fixed command set. A `denied` entry is never dropped. A `denied` or
-`failed` `read`, `read_dir` or `stat` is written as it happens up to 20 times per check, kind, rule or error and
-parent directory; the calls after that fold into one `coalesced` entry that carries a `count` and the `rule` or
+port pairs a spec may name (2.1) and the fixed command set. A `denied` entry is never dropped for another kind
+of entry. A `denied` or `failed` `read`, `read_dir` or `stat` is written as it happens up to 20 times per check,
+kind, rule or error and parent directory, and a `denied` call of any other kind up to 20 times per check, kind,
+rule and target (program, host or path); the calls after that fold into one `coalesced` entry that carries a `count` and the `rule` or
 `error` (the entry takes the `seq` of the first call it folds, so `seq` has a gap). A check holds at most 1000
 entries. When a check reaches that quota, the log reaches 5000 entries, or the document its size cap,
 retention drops, in order: a new `ok` `read`, `read_dir` or `stat`, then the `ok` ones already held, then
 `failed` `read`, `read_dir`, `stat` and `coalesced` entries; `actions_truncated` is true, and `actions_dropped`
 gives a count per kind. Only when nothing above can go does the log drop another kept entry (never a `denied`
-one if any other can go), with a `tracing` warning; that is a bug in a check or a spec far outside the limits.
+one if any other can go; only a check with more than 1000 distinct denied targets can lose one), with a `tracing` warning; that is a bug in a check or a spec far outside the limits.
 (M1-041 adds the folding of `ok` reads past 200 per directory.) `rdy run --plan` (M2) prints the same shape before running.
 
 ### 5.5 Writer rules

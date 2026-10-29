@@ -242,7 +242,9 @@ Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
      declared env names that match the secret-name rule) is removed by exact match, and by any
      8-character or longer prefix or suffix at a truncated edge.
    - Then the caps, on char boundaries with a marker: message 1 KiB, fix 4 KiB, `observed` and
-     `expected` 64 KiB, lists 200 items.
+     `expected` 64 KiB, lists 200 items. The marker is ` [truncated]` and the cut never lands inside a
+     placeholder. `Redactor::redact_check` and `redact_action` do this step for one entry,
+     `Redactor::redact_report` and `redact_report_counted` for the whole report (M1-062).
 5. A final pass over the assembled report (identity, host, proxy, capabilities included), then the
    2 MiB report cap, measured after JSON escaping (Action log rule below).
 6. The result is a `RedactedReport`, with no `From<Report>`, no `Deserialize` and no `DerefMut`.
@@ -349,7 +351,8 @@ tests policy.
   `etc/pki/tls/private`; cluster credentials (`etc/kubernetes/*.conf`, `etc/rancher/{k3s,rke2}/*.yaml`,
   `var/lib/kubelet/kubeconfig`, `var/lib/etcd`, `var/lib/rancher/*/server/{token,node-token,cred}`,
   `secrets/kubernetes.io/*`). `/proc/<pid>/` is an allowlist (`status`, `stat`, `statm`, `comm`,
-  `cgroup`, `mountinfo`, `mounts`, `limits`, `net`, and the same under `task/<tid>/`), so `cwd`,
+  `cgroup`, `mountinfo`, `mounts`, `limits`, `net`, and the same under `task/<tid>/`, plus `auxv` for
+  `self` only, which M1-042 reads for `AT_SECURE`), so `cwd`,
   `exe`, `root`, `fd`, `environ`, `cmdline`, `mem`, `maps` and `ns` are refused. At the root: `/proc/kcore`,
   `kmsg`, `vmcore`, `kallsyms`, `kpage*`, `/sys/kernel/debug`, `/sys/kernel/tracing`, and `/dev/*` for
   `stat` and `read_dir` as well as `read` (M4 adds a closed stat-only list: `/dev/nvidia*`, `/dev/dri/*`,
@@ -764,8 +767,9 @@ pub struct HttpProbe { pub url: String, pub method: Method /* Head | Get */, pub
 pub enum NativeCall { Statvfs { path: PathBuf }, Uname, Rlimit(Resource), Hostname,
                       MachineId /* raw value never logged or reported */, SystemRoots }
 #[non_exhaustive]
-pub enum ProbeError { Denied { rule: &'static str, what: String }, NotFound, PermissionDenied,
-                      Timeout, Hung { pid: u32 }, Net(NetFailure), Io(String), NotRecorded(String) }
+pub enum ProbeError { Denied { rule: &'static str, what: String }, Policy(PolicyError), Table(TableError),
+                      NotFound, PermissionDenied, Timeout, Hung { pid: u32 }, Net(NetFailure), Io(String),
+                      NotRecorded(String) }   // Clone + PartialEq + Eq; every message ends with a Fix: hint
 pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay only; raw I/O, no policy
     fn open_read<'a>(&'a self, path: &'a Path, range: ReadRange) -> BoxFuture<'a, io::Result<FileBytes>>;
     fn read_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>>;

@@ -117,7 +117,7 @@ pub struct Report {
     #[cfg_attr(feature = "schema", schemars(length(max = 5000)))]
     pub actions: Vec<Action>,
     /// `true` when the log dropped an entry: at the 5000 entry cap or a check's 1000 entry quota. `ok`
-    /// then `failed` `read`, `read_dir` and `stat` entries go first. A `denied` entry is never dropped.
+    /// then `failed` `read`, `read_dir` and `stat` entries go first. A `denied` entry is never dropped for another kind of entry, and repeated denials fold into one `coalesced` entry per target.
     pub actions_truncated: bool,
     /// How many entries of each kind were dropped. `read`, `read_dir`, `stat` and `coalesced` entries
     /// are dropped first; any other kind only as a last resort.

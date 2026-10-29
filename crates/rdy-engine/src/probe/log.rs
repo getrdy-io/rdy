@@ -14,19 +14,23 @@
 //! **Retention.** Three limits keep the log bounded and the entries that matter in it.
 //!
 //! - *Coalescing.* A `denied` or `failed` `read`, `read_dir` or `stat` is written as it happens, up to
-//!   [`COALESCE_AFTER`] times for one (check, kind, rule or error, parent directory). The calls after
-//!   that fold into one `coalesced` entry that carries a `count`. It takes the `seq` of the first call
-//!   it folded, and the folded calls leave a gap in `seq`. The limit is per key, so a flood of failures
-//!   under one directory costs 21 entries, and a denied call is still in the log.
+//!   [`COALESCE_AFTER`] times for one (check, kind, rule or error, parent directory). A `denied` call of
+//!   any other kind (`exec`, `connect`, `tls`, `http`, `kube`, a late call) folds the same way per
+//!   (check, kind, rule, program or host or path). The calls after that fold into one `coalesced` entry
+//!   that carries a `count`. It takes the `seq` of the first call it folded, and the folded calls leave
+//!   a gap in `seq`. The limit is per key, so a flood of calls at one target costs 21 entries, and the
+//!   first denied calls are in the log.
 //! - *Quota.* A check may hold [`CHECK_QUOTA`] entries, and the log [`MAX_ENTRIES`]. At either limit
 //!   the log drops, in this order: a new `ok` `read`, `read_dir` or `stat` (the oldest are kept), then
 //!   `ok` ones already held, then `failed` ones (`read`, `read_dir`, `stat` and `coalesced`).
 //!   `actions_dropped` counts them by kind.
-//! - *Last resort.* A `denied` entry is never dropped to make room for anything else. When the limit is
-//!   reached and nothing above can go, the log drops the newest other kept entry (`exec`, `connect`,
-//!   `tls`, `http`, `kube`, a timed out read), and only if there is none the new entry. Each of these is
-//!   counted in [`ActionLogOutput::last_resort_drops`] and warned about with `tracing`. The volume of
-//!   those kinds is bounded by the spec (hosts, ports) and by the fixed command set, so it should not
+//! - *Last resort.* A `denied` entry is never dropped to make room for another kind of entry, and
+//!   repeated denials fold, so the log holds one per distinct (check, kind, rule, target). Only a check
+//!   with more than [`CHECK_QUOTA`] such distinct denials, or a log past [`MAX_ENTRIES`] of them, can
+//!   lose one; the log then drops the newest other kept entry (`exec`, `connect`, `tls`, `http`, `kube`,
+//!   a timed out read) first, and only if there is none the new entry. Each of these is counted in
+//!   [`ActionLogOutput::last_resort_drops`] and warned about with `tracing`. The kinds other than
+//!   `denied` are bounded by the spec (hosts, ports) and by the fixed command set, so this should not
 //!   happen.
 //!
 //! Size-based truncation of the whole document (2 MiB) and the coalescing of `ok` reads past 200 per
@@ -401,17 +405,17 @@ fn tier(action: &Action) -> Tier {
     }
 }
 
-/// The key a `denied` or `failed` file call folds under, or `None` for any other entry.
+/// The key a repeated call folds under, or `None` for an entry that never folds. A `denied` or `failed`
+/// file call folds per parent directory. A `denied` call of any other kind (`exec`, `connect`, `tls`,
+/// `http`, `kube`, a late call) folds per target: the program, host, URL, API or path it named.
 fn fold_key(action: &Action) -> Option<FoldKey> {
-    if !matches!(
+    let files = matches!(
         action.kind,
         ActionKind::Read | ActionKind::ReadDir | ActionKind::Stat
-    ) {
-        return None;
-    }
+    );
     let (denied, reason_field) = match action.outcome {
-        ActionOutcome::Denied => (true, "rule"),
-        ActionOutcome::Failed => (false, "error"),
+        ActionOutcome::Denied if action.kind != ActionKind::Coalesced => (true, "rule"),
+        ActionOutcome::Failed if files => (false, "error"),
         _ => return None,
     };
     let text = |name: &str| {
@@ -419,18 +423,23 @@ fn fold_key(action: &Action) -> Option<FoldKey> {
             .fields
             .get(name)
             .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned()
+            .map(str::to_owned)
     };
-    let path = text("path");
-    let dir = path
-        .rsplit_once('/')
-        .map_or(String::new(), |(dir, _)| dir.to_owned());
+    let dir = if files {
+        let path = text("path").unwrap_or_default();
+        path.rsplit_once('/')
+            .map_or(String::new(), |(dir, _)| dir.to_owned())
+    } else {
+        ["program", "host", "url", "api", "path"]
+            .iter()
+            .find_map(|name| text(name))
+            .unwrap_or_default()
+    };
     Some(FoldKey {
         check: action.check.clone(),
         kind: action.kind.as_str().to_owned(),
         denied,
-        reason: text(reason_field),
+        reason: text(reason_field).unwrap_or_default(),
         dir,
     })
 }

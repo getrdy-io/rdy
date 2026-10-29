@@ -252,6 +252,15 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
 - PC-28: applied to the plan and `KICKOFF.md` item 7. C-5, C-8.
 - PC-31, PC-33, PC-36, PC-39, PC-41, PC-42 (cosmetic): applied to the plan.
 - PC-32 (cosmetic): C-9.
+- PC-35 (cosmetic): left in the table. It is a repo-wide wording sweep plus a brief kept outside the
+  repo, and no M1 ticket depends on it.
+- PC-37 (cosmetic): left in the table. It changes how a business milestone is measured, which is the
+  founder's call when M3 is planned.
+- PC-40: applied to the plan (investor and angel names dropped). The optional "$16.5M" change moved to
+  founder decisions (decision 2).
+- PC-43: applied in 02, 04, 05, 11. Unset, empty or invalid `RUST_LOG` means no log output (07 D.6),
+  and the five dependency caps hold whatever a valid `RUST_LOG` says. The proxy URL canary moved to
+  M1-060 and the JSON and HTML parts of the M1-056 exit test to M1-062.
 - PC-44 (found by the M1-040 review, PR #58): applied in 01 section 5.4, 02 (the Files deny list and the
   `Backend` sketch), 05 I5, 11 and ADR 0014. Four changes. (1) One `Cmd` type, the one in
   `exec::policy`, built with `CommandEntry::cmd` (ADR 0028). `Probe::exec` applies the check's
@@ -275,15 +284,15 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   `read_dir`. Carried: M1-091 and M1-103 inherit "every tcp, http and kube call writes one entry"; M1-102
   settles how the engine's own kubeconfig read gets past the `.kube` rule; M4 adds a closed stat-only
   `/dev` list (`/dev/nvidia*`, `/dev/dri/*`, `/dev/kfd`).
-- PC-35 (cosmetic): left in the table. It is a repo-wide wording sweep plus a brief kept outside the
-  repo, and no M1 ticket depends on it.
-- PC-37 (cosmetic): left in the table. It changes how a business milestone is measured, which is the
-  founder's call when M3 is planned.
-- PC-40: applied to the plan (investor and angel names dropped). The optional "$16.5M" change moved to
-  founder decisions (decision 2).
-- PC-43: applied in 02, 04, 05, 11. Unset, empty or invalid `RUST_LOG` means no log output (07 D.6),
-  and the five dependency caps hold whatever a valid `RUST_LOG` says. The proxy URL canary moved to
-  M1-060 and the JSON and HTML parts of the M1-056 exit test to M1-062.
+  Fix round 2 (re-review of 2cd0026): (5) `/proc/self/auxv` is allowed for `self` only, because M1-042
+  reads `AT_SECURE` from it (02 Files, 05 I5). (6) A `denied` call of any kind folds too, per
+  (check, kind, rule, program or host or path), so 1001 denied execs hold 21 entries and none is
+  dropped; "never a denied entry" means never dropped for another kind of entry, and only a check with
+  more than 1000 distinct denied targets can lose one (01 section 5.4, the schema, ADR 0014 unchanged).
+  (7) The `exec::run` and `ExecSpec` deny clause lives only in M1-044, and since M1-066 the cfg gate
+  enforces it at compile time. `exec::table::run`, `exec::run` and `ExecSpec::new` are also on the root
+  `clippy.toml` `disallowed-methods` list now, so a check crate that calls the table runner without a
+  `Probe` fails clippy. The one call in `probe.rs` carries `#[expect(clippy::disallowed_methods)]`.
 
 ADR amendments in the ticket title:
 

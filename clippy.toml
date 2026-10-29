@@ -20,4 +20,12 @@ disallowed-methods = [
     # defeat spec expiry. Tests allow it with `#[allow(clippy::disallowed_methods)]`.
     { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load" },
     { path = "rdy_spec::loaded::load_at", reason = "only tests may pass a clock; use rdy_spec::load" },
+    # A check reaches the machine only through its `Probe` (ADR 0014, SEC-17). `table::run` validates a
+    # command against the command table but writes no action-log entry and checks no `CheckInfo`
+    # declaration. Only the live probe backend may call it, with `#[expect(clippy::disallowed_methods)]`.
+    # `exec::run` and `ExecSpec::new` skip the table and the policy as well; only the policy and tests
+    # may use them.
+    { path = "rdy_engine::exec::table::run", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration", allow-invalid = true },
+    { path = "rdy_engine::exec::run", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
+    { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
 ]

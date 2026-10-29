@@ -1042,6 +1042,7 @@ dependencies = [
  "cap-primitives",
  "cap-std",
  "jsonschema",
+ "proptest",
  "rdy-engine",
  "rdy-spec",
  "regex",

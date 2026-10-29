@@ -20,7 +20,8 @@
 //!    failing, so it also gets rdy's text.
 //! 4. **Needs.** Every hard need and want in the `CheckInfo` is listed with whether the run met it.
 //!
-//! Redaction and the size caps are not applied here. They come with M1-062.
+//! Redaction and the size caps are not applied here. [`crate::redact::Redactor::redact_check`] does that
+//! as each result completes (M1-062).
 
 use std::collections::HashSet;
 

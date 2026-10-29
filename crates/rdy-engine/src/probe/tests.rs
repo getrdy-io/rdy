@@ -54,6 +54,33 @@ fn probe_errors_are_clone_eq_like_check_errors() {
     assert_eq!(error.skip_kind(), None);
 }
 
+#[test]
+fn every_probe_error_tells_the_user_what_to_do() {
+    use crate::exec::policy::PolicyError;
+    let errors = [
+        ProbeError::denied("some rule", "~/x"),
+        ProbeError::Policy(PolicyError::Refused { program: "sh" }),
+        ProbeError::Table(TableError::UnknownProgram { program: "sh" }),
+        ProbeError::NotFound,
+        ProbeError::PermissionDenied,
+        ProbeError::Timeout,
+        ProbeError::Hung { pid: 7 },
+        ProbeError::Io("broken pipe".to_owned()),
+    ];
+    for error in errors {
+        assert!(error.to_string().contains("Fix:"), "{error}");
+    }
+}
+
+#[test]
+fn a_declared_program_matches_the_way_the_table_does() {
+    // A Windows entry ignores case, as the table's lookup does. A Unix name must match exactly.
+    assert!(same_program("NETSTAT.EXE", "netstat.exe"));
+    assert!(same_program("getent", "getent"));
+    assert!(!same_program("getent", "GETENT"));
+    assert!(!same_program("getent", "chronyc"));
+}
+
 // ---- the read denylist -------------------------------------------------------------------------
 
 #[cfg(unix)]
@@ -143,6 +170,11 @@ mod denylist {
             ("/proc/1/cwd", RULE_PROC),
             ("/proc/1/cwd/etc/shadow", RULE_PROC),
             ("/proc/self/exe", RULE_PROC),
+            // auxv is for `self` only: another process's auxv shows its load addresses.
+            ("/proc/1/auxv", RULE_PROC),
+            ("/proc/1234/auxv", RULE_PROC),
+            ("/proc/self/task/1/auxv", RULE_PROC),
+            ("/proc/thread-self/auxv", RULE_PROC),
             ("/proc/1/map_files/7f00-7f01", RULE_PROC),
             ("/proc/1/maps", RULE_PROC),
             ("/proc/1/ns/mnt", RULE_PROC),
@@ -206,6 +238,7 @@ mod denylist {
             "/proc/1/task",
             "/proc/1/task/1/status",
             "/proc/self/mountinfo",
+            "/proc/self/auxv",
             "/proc/self/cgroup",
             "/proc/self/net/dev",
             "/proc/sys/kernel/osrelease",
@@ -1160,6 +1193,46 @@ fn six_thousand_failed_reads_then_a_denied_read_keeps_the_denied_entry() {
         "failed reads gave way, not the last resort"
     );
     assert_eq!(log.dropped.get("read"), Some(&(6001 - CHECK_QUOTA as u64)));
+}
+
+#[test]
+fn a_thousand_and_one_denied_execs_fold_and_none_is_dropped() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.flood", Os::Linux, None);
+    let deny = |kind: ActionKind, field: &str, target: &str| {
+        let (_, mut entry) = probe
+            .begin(kind, Map::new(), "fixture")
+            .expect("probe is live");
+        entry.set(field, target);
+        entry.set("rule", "command not declared by the check");
+        entry.finish(ActionOutcome::Denied);
+    };
+    for _ in 0..=CHECK_QUOTA {
+        deny(ActionKind::Exec, "program", "timedatectl");
+    }
+    // A different target is its own key, and so is a different kind.
+    deny(ActionKind::Exec, "program", "chronyc");
+    deny(ActionKind::Connect, "host", "registry.acme.example");
+
+    let log = hub.action_log();
+    assert_eq!(log.last_resort_drops, 0);
+    assert!(!log.truncated, "nothing was dropped: {:?}", log.dropped);
+    // 20 written, one coalesced entry, and the two other targets.
+    assert_eq!(log.actions.len(), COALESCE_AFTER + 1 + 2);
+    let folded: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .collect();
+    assert_eq!(folded.len(), 1);
+    assert_eq!(field(folded[0], "of"), Some(&json!("exec")));
+    assert_eq!(field(folded[0], "under"), Some(&json!("timedatectl")));
+    assert_eq!(
+        field(folded[0], "count"),
+        Some(&json!(CHECK_QUOTA + 1 - COALESCE_AFTER))
+    );
+    assert_eq!(folded[0].outcome, ActionOutcome::Denied);
+    assert_eq!(count_of(&log, "connect", ActionOutcome::Denied), 1);
 }
 
 #[test]

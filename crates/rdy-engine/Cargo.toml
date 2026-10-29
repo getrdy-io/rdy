@@ -23,6 +23,7 @@ rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 cap-std = { workspace = true, optional = true }
 regex = { workspace = true, features = ["std", "perf", "unicode"] }
 ring = { workspace = true, features = ["alloc"] }
+serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true, features = ["std"] }
@@ -42,9 +43,9 @@ rustix = { workspace = true, features = ["std", "process", "fs"], optional = tru
 # for test builds only. A normal or release build never sees dev-dependencies.
 rdy-engine = { path = ".", features = ["testing"] }
 jsonschema = { workspace = true }
-serde = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tempfile = { workspace = true }
+proptest = { workspace = true, features = ["std"] }
 trybuild = { workspace = true }
 
 [lints]

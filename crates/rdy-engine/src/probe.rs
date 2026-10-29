@@ -86,7 +86,9 @@ pub const RULE_ENV_UNDECLARED: &str = "environment name not declared by the chec
 pub enum ProbeError {
     /// rdy's own policy refused the call. `rule` is a fixed sentence, `what` names the target. For a
     /// path, `what` is the path as the log shows it (`~/...` under the home directory).
-    #[error("refused by rdy policy ({rule}): {what}")]
+    #[error(
+        "refused by rdy policy ({rule}): {what}. Fix: rdy blocks this on purpose. Ask the spec author to drop the requirement, or file a bug if the check should not need it"
+    )]
     Denied {
         /// The rule that refused it.
         rule: &'static str,
@@ -101,22 +103,28 @@ pub enum ProbeError {
     #[error("refused by rdy policy: {0}")]
     Table(#[from] TableError),
     /// The file, directory or program does not exist.
-    #[error("not found")]
+    #[error("not found. Fix: check that the file, directory or program exists on this machine")]
     NotFound,
     /// The OS refused: this user may not do that.
-    #[error("permission denied")]
+    #[error(
+        "permission denied. Fix: run rdy as a user who may read it, or accept the limited result"
+    )]
     PermissionDenied,
     /// The call ran out of time.
-    #[error("timed out")]
+    #[error(
+        "timed out. Fix: run again, and if it repeats check that the machine is not overloaded"
+    )]
     Timeout,
     /// A killed command was not reaped. It may be stuck in the kernel.
-    #[error("the command did not exit after it was killed (pid {pid})")]
+    #[error(
+        "the command did not exit after it was killed (pid {pid}). Fix: look at that process; it may be stuck in the kernel, for example on a hung network mount"
+    )]
     Hung {
         /// The child's process id.
         pid: u32,
     },
     /// Any other I/O failure. The text is the OS message.
-    #[error("{0}")]
+    #[error("{0}. Fix: check the message above and the state of the machine, then run again")]
     Io(String),
 }
 
@@ -294,7 +302,9 @@ mod sealed {
     pub trait Sealed {}
 }
 
-/// The raw I/O under the facade. It enforces no policy and writes no log.
+/// The raw I/O under the facade. The file calls enforce no policy and write no log: the probe has
+/// already done both. The provided `spawn` is the exception: it runs `exec::table::run`, which applies
+/// the command table and the command policy again before anything starts.
 ///
 /// Sealed: the live backend and the replay backend are the only implementations. A check cannot
 /// supply its own, so it cannot route around the facade's policy.
@@ -316,8 +326,14 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
     fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
         #[cfg(feature = "runtime")]
         {
+            // The one sanctioned call of the table runner outside `exec` (root clippy.toml).
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the probe is the only caller of table::run; it has logged the entry and applied the declaration"
+            )]
+            let running = table::run(cmd);
             Box::pin(async move {
-                table::run(cmd)
+                running
                     .await
                     .map(Output::from)
                     .map_err(ProbeError::from_command)
@@ -328,7 +344,7 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
             let _ = cmd;
             Box::pin(async {
                 Err(ProbeError::Io(
-                    "this build of rdy-engine cannot run commands. Fix: build with feature `runtime`"
+                    "this build of rdy-engine cannot run commands (feature `runtime` is off)"
                         .to_owned(),
                 ))
             })
@@ -655,7 +671,7 @@ impl Probe {
                 let spec = info
                     .commands
                     .iter()
-                    .find(|spec| spec.program == program)
+                    .find(|spec| same_program(spec.program, program))
                     .ok_or_else(|| ProbeError::denied(RULE_COMMAND_UNDECLARED, program))?;
                 if let Some(name) = cmd
                     .declared_env_names()
@@ -689,6 +705,16 @@ impl Probe {
             Ok(()) => Ok(Gate { hub, entry, what }),
             Err(rule) => Err(refuse(entry, rule, &what)),
         }
+    }
+}
+
+/// Whether two program names are the same program. It follows the command table, where a Windows
+/// entry matches without regard to case (`NETSTAT.EXE` and `netstat.exe`) and any other must match
+/// exactly.
+fn same_program(declared: &str, asked: &str) -> bool {
+    match (table::entry(declared), table::entry(asked)) {
+        (Some(a), Some(b)) => std::ptr::eq(a, b),
+        _ => declared == asked,
     }
 }
 

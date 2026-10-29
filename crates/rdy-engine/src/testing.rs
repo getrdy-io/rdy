@@ -49,8 +49,9 @@ impl TestRun {
     /// A context for the check with result `key`, on `os`, where the `available` needs are met. Its
     /// probe is bound to `key` and never ends, so a test can call it after the check returns. The
     /// probe has no manifest, so a command skips the declaration step and still has to be in the command
-    /// table for `os`. Use [`TestRun::context_for`] to
-    /// test a check against what it declared.
+    /// table for `os`. A check's own test must use [`TestRun::context_for`], which applies what the
+    /// check declared in its `CheckInfo`, as a real run does. This one is for tests of the probe and
+    /// the harness (M1-044 may lint its use in check crates).
     #[must_use]
     pub fn context(
         &self,

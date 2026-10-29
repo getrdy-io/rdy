@@ -557,7 +557,12 @@ pub(crate) fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
             .iter()
             .map(|(name, value)| (OsString::from(*name), value.clone())),
     );
-    Ok(ExecSpec::new(path, cmd.timeout)
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the policy is the one place that builds the raw spec, after its checks"
+    )]
+    let spec = ExecSpec::new(path, cmd.timeout);
+    Ok(spec
         .arg0(cmd.program)
         .args(cmd.args.iter().cloned())
         .env(env)
@@ -596,7 +601,12 @@ fn base_env() -> Vec<(OsString, OsString)> {
 /// read failures.
 pub(crate) async fn run(cmd: Cmd) -> Result<ExecOutput, CommandError> {
     let spec = prepare(&cmd)?;
-    Ok(super::runner::run(spec).await?)
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the policy runner is the one caller of the raw runner, after the policy checks"
+    )]
+    let running = super::runner::run(spec);
+    Ok(running.await?)
 }
 
 /// The shape and refusal checks on a program name.
