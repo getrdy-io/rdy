@@ -1,0 +1,11 @@
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+checks:
+  - id: host.cpu
+    min: 2
+bundle:
+  collect:
+    - "journal:7d"
+    - "file:etc/acme/app.yaml"

@@ -13,6 +13,15 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 /// `<version> (<commit> <date>)`, built by `build.rs`.
 pub(crate) const VERSION: &str = env!("RDY_VERSION");
 
+/// The 7-character commit of the build, or empty when `build.rs` did not know it.
+pub(crate) const COMMIT: &str = env!("RDY_COMMIT");
+
+/// The UTC commit date as `YYYY-MM-DD`, or empty when `build.rs` did not know it.
+pub(crate) const COMMIT_DATE: &str = env!("RDY_DATE");
+
+/// The Rust target triple of the build.
+pub(crate) const TARGET: &str = env!("RDY_TARGET");
+
 const ABOUT: &str = "Check an environment against a vendor's requirements before install day";
 
 const ROOT_LONG_ABOUT: &str = "\

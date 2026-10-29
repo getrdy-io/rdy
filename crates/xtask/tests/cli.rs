@@ -128,12 +128,50 @@ fn docs_check_passes_on_a_crlf_checkout() -> Result<()> {
     Ok(())
 }
 
+const SPEC_SCHEMA: &str = "crates/rdy-spec/schema/spec.v1.schema.json";
+const RESULT_SCHEMA: &str = "crates/rdy-spec/schema/result.v1.schema.json";
+
 #[test]
-fn schema_check_passes_while_no_schema_is_generated() -> Result<()> {
+fn schema_writes_both_files_and_check_passes_on_them() -> Result<()> {
     let repo = Repo::new()?;
+    assert_eq!(code(&xtask(repo.path(), &["schema"])?), Some(0));
+    for file in [SPEC_SCHEMA, RESULT_SCHEMA] {
+        let text = fs::read_to_string(repo.path().join(file))?;
+        assert!(text.starts_with("{\n  \"$schema\""), "{file}");
+        assert!(text.ends_with("}\n"), "{file}");
+    }
     let check = xtask(repo.path(), &["schema", "--check"])?;
     assert_eq!(code(&check), Some(0), "{}", stderr(&check));
-    assert!(stderr(&check).contains("M1-022"), "{}", stderr(&check));
+    Ok(())
+}
+
+#[test]
+fn schema_check_fails_on_a_missing_file_and_names_the_fix() -> Result<()> {
+    let repo = Repo::new()?;
+    let check = xtask(repo.path(), &["schema", "--check"])?;
+    assert_eq!(code(&check), Some(1), "{}", stderr(&check));
+    assert!(stderr(&check).contains(SPEC_SCHEMA), "{}", stderr(&check));
+    assert!(
+        stderr(&check).contains("cargo xtask schema"),
+        "{}",
+        stderr(&check)
+    );
+    Ok(())
+}
+
+#[test]
+fn schema_check_fails_on_a_stale_file_and_a_rewrite_fixes_it() -> Result<()> {
+    let repo = Repo::new()?;
+    assert_eq!(code(&xtask(repo.path(), &["schema"])?), Some(0));
+    // A hand edit stands in for a type or doc comment change that was not regenerated.
+    let target = repo.path().join(RESULT_SCHEMA);
+    let text = fs::read_to_string(&target)?;
+    fs::write(&target, text.replacen("One side effect", "One effect", 1))?;
+    let check = xtask(repo.path(), &["schema", "--check"])?;
+    assert_eq!(code(&check), Some(1), "{}", stderr(&check));
+    assert!(stderr(&check).contains(RESULT_SCHEMA), "{}", stderr(&check));
+    assert_eq!(code(&xtask(repo.path(), &["schema"])?), Some(0));
+    assert_eq!(code(&xtask(repo.path(), &["schema", "--check"])?), Some(0));
     Ok(())
 }
 

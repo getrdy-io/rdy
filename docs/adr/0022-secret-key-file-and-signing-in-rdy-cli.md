@@ -1,6 +1,6 @@
-# ADR 0019: rdy writes minisign secret keys with scrypt at the stock cost, and signs in rdy-cli
+# ADR 0022: rdy writes minisign secret keys with scrypt at the stock cost, and signs in rdy-cli
 
-- Status: Accepted (2026-10-28, M1-125). Amends ADR 0018 decision 7 and the last sentence of ADR 0002 decision 2 (the signing crate).
+- Status: Accepted, security-reviewed (PR #52). Amends ADR 0018 decision 7 and the last sentence of ADR 0002 decision 2 (the signing crate).
 - Date: 2026-10-28
 
 ## Context
@@ -30,14 +30,19 @@ M1-125 found three problems.
 2. **The cost of a new key is the stock cost, and it is also the most a key file may ask for.** Opslimit
    33,554,432 and memlimit 1,073,741,824, which libsodium's parameter rule turns into N = 2^20, r = 8, p = 1.
    It needs 1 GiB and about two to four seconds. A file that asks for more (a larger limit, or N above 2^20)
-   is refused before any work starts, so a key file from someone else cannot exhaust memory or time. A file
-   that asks for less (the `minisign` crate's own keys) opens. There is no flag to lower the cost.
+   is refused before any work starts, so a key file from someone else cannot exhaust memory or time. So is
+   a file whose limits turn into a parallelism p other than 1 (a large opslimit with a tiny memlimit gives
+   N = 2 and a huge p, which would run for hours at little memory). Stock minisign and the `minisign` crate
+   always write p = 1. A file that asks for less (the `minisign` crate's own keys) opens. There is no flag
+   to lower the cost.
 3. **Key files are opened and created without trusting the path.** Read: one open with `O_NOFOLLOW` and
    `O_NONBLOCK`, then every check on the handle: regular file, owned by the effective user, no group or
    other bits, at most 1 KiB. Write: `create_new` (`O_EXCL`) with mode 0600 passed to `open`, so the file is
-   never wider than 0600, not even for a moment. A key or signature is never replaced. Windows opens without
-   following a reparse point and checks the type only. A new file there gets the folder's access list. That
-   is a named residual and the success message says it.
+   never wider than 0600, not even for a moment. A key is never replaced. A signature is not replaced
+   unless `--force` is given, and then it is written to a new file next to it and renamed over it, so a
+   link at the path is replaced and never written through. Windows opens without following a reparse
+   point and checks the type only. A new file there gets the folder's access list. That is a named
+   residual and the success message says it. Owner-only ACLs on key files are part of SEC-58 (M2-085).
 4. **Signing is ed25519 over the BLAKE2b-512 hash of the spec, then over the signature and the trusted
    comment** (01 section 4.1). `ed25519-dalek` signs, with its `zeroize` feature, so the seed is wiped on
    drop. It is deterministic (RFC 8032), so a test can compare bytes. Passwords, seeds and decrypted bytes
@@ -45,9 +50,13 @@ M1-125 found three problems.
 5. **`rdy spec sign` verifies its own signature with `rdy_spec::load` before it writes.** The same code a
    customer's rdy runs, with the key pinned for the product. A signature that does not check is a bug
    (exit 70) and nothing is written.
-6. **The `minisign` crate stays as a dev-dependency.** It is the second implementation: tests open rdy's
-   keys with it, rdy opens its keys, and it verifies rdy's signatures. That is the interop proof for stock
-   `minisign -V`.
+6. **Two other implementations prove interop.** The `minisign` crate is a dev-dependency: tests open rdy's
+   keys with it, rdy opens its keys, and it verifies rdy's signatures. The C `minisign` 0.11 is the
+   program the ticket's exit test names (`minisign -V`). `tests/fixtures/minisign-c/` holds a key (scrypt
+   N = 2^20, a published test password) and a signature with the 01 section 4.2 trusted comment, both made
+   once by C minisign, and a test checks that rdy opens the key and verifies the signature. A second test
+   runs C `minisign -V` on rdy's signature and C `minisign -S` with rdy's key when a `minisign` is on the
+   PATH. It is skipped with a message when there is none, unless `RDY_REQUIRE_C_MINISIGN` is set.
 7. **New runtime dependencies of `rdy`:** `scrypt` 0.11 (and RustCrypto crates it uses), `ct-codecs` (constant
    time base64 for secret bytes), `getrandom` 0.4, and `blake2` and `ed25519-dalek`, which `rdy-spec` already
    pins. All were already in the tree through the dev-dependency. `scrypt` and its hash crates are built with
@@ -60,7 +69,14 @@ M1-125 found three problems.
   that. A vendor who cannot spare it can run `keygen` on a laptop. Signing in CI then needs the same 1 GiB
   to open the key. The alternative, a lower cost, makes the stolen-key case worse, and the ticket's rule is
   the conservative option.
-- Tests run the real cost once per command, one at a time (a mutex), and use a cheap cost elsewhere.
+- Tests run the real cost once per command, one at a time, and use a cheap cost elsewhere. A mutex
+  inside a test binary only works for `cargo test`, because nextest gives every test its own process.
+  The `real-kdf` test group in `.config/nextest.toml` (max-threads 1) is what holds under nextest, and
+  it lists the test binaries and the one unit test that derive a key at the real cost.
+- `scrypt`, `ct-codecs` and `getrandom` are exact pins (`=`) like the other crates that touch secret
+  bytes (ADR 0018). Every bump is read by hand.
+- `ed25519-dalek` is a direct dependency of `rdy` for signing, with its `zeroize` feature (this amends the
+  "not a direct dependency" line of ADR 0002 Consequences).
 - We own about 200 lines of the container format. Round trips against the `minisign` crate in both
   directions, and a table of malformed files, keep them honest.
 

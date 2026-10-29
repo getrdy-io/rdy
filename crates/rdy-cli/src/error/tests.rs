@@ -70,6 +70,7 @@ fn every_cli_error() -> Vec<CliError> {
         CliError::Interrupted,
         CliError::Internal(InternalKind::Bug),
         CliError::Internal(InternalKind::OutputClosed),
+        CliError::Internal(InternalKind::NoRandomness),
         CliError::Internal(InternalKind::FileWrite {
             path: "acme-signing.key".into(),
             reason: IoReason::DiskFull,
@@ -169,7 +170,9 @@ fn exit_codes_are_64_for_input_and_70_for_rdy() {
 /// variant added there cannot fail this build. It reaches `spec_invalid` through the wildcard, and
 /// `rdy-spec`'s own test checks its hint.
 fn every_spec_error() -> Vec<(SpecError, ErrorCode)> {
-    use ErrorCode::{SpecInvalid, SpecKeyUnknown, SpecParse, SpecSignatureInvalid, SpecUnsigned};
+    use ErrorCode::{
+        SpecExpired, SpecInvalid, SpecKeyUnknown, SpecParse, SpecSignatureInvalid, SpecUnsigned,
+    };
     vec![
         (SpecError::TooLarge { size: 2, limit: 1 }, SpecParse),
         (SpecError::NotUtf8, SpecParse),
@@ -196,6 +199,43 @@ fn every_spec_error() -> Vec<(SpecError, ErrorCode)> {
             SpecInvalid,
         ),
         (SpecError::UnknownKey { key: s("metdata") }, SpecInvalid),
+        (
+            SpecError::UnknownKeyIn {
+                key: s("prodcut"),
+                section: "metadata",
+            },
+            SpecInvalid,
+        ),
+        (
+            SpecError::TooManyChecks {
+                count: 257,
+                limit: 256,
+            },
+            SpecInvalid,
+        ),
+        (SpecError::NoChecks, SpecInvalid),
+        (
+            SpecError::TooManyHosts {
+                count: 65,
+                limit: 64,
+            },
+            SpecInvalid,
+        ),
+        (
+            SpecError::TooManyEndpoints {
+                count: 257,
+                limit: 256,
+            },
+            SpecInvalid,
+        ),
+        (SpecError::BadExpires, SpecInvalid),
+        (
+            SpecError::Expired {
+                expired_on: s("2027-01-31"),
+                today: s("2027-02-03"),
+            },
+            SpecExpired,
+        ),
         (SpecError::MissingField { field: s("k") }, SpecInvalid),
         (SpecError::InvalidValue { reason: s("r") }, SpecInvalid),
         (SpecError::MissingCheckId { number: 3 }, SpecInvalid),

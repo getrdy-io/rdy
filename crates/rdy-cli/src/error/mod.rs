@@ -200,6 +200,8 @@ pub enum InternalKind {
         /// Why, in plain words.
         reason: IoReason,
     },
+    /// The system could not give random bytes, so no key or file name could be made.
+    NoRandomness,
     /// The command exists in the tree but a later ticket builds it.
     NotImplemented {
         /// The command as typed in the tree, such as `spec lint`. Always a name from the command tree.
@@ -282,6 +284,7 @@ fn internal_message(kind: &InternalKind) -> String {
     match kind {
         InternalKind::Bug => "rdy hit an internal error".to_owned(),
         InternalKind::OutputClosed => "rdy could not write its output".to_owned(),
+        InternalKind::NoRandomness => "the system could not give random bytes".to_owned(),
         InternalKind::FileWrite { path, reason } => format!("cannot write {path} ({reason})"),
         InternalKind::NotImplemented { command } => {
             format!("rdy {command} is not yet implemented in this build")
@@ -407,6 +410,10 @@ impl CliError {
             Self::Internal(InternalKind::OutputClosed) => {
                 "check that the output is not closed or full".to_owned()
             }
+            Self::Internal(InternalKind::NoRandomness) => {
+                "check that the system random source works (on Linux, /dev/urandom and the getrandom call), then run again"
+                    .to_owned()
+            }
             Self::Internal(InternalKind::FileWrite { .. }) => {
                 "check that the folder exists, that you can write to it and that the disk has room, then run again"
                     .to_owned()
@@ -481,6 +488,7 @@ fn spec_error_code(err: &SpecError) -> ErrorCode {
         | SpecError::NonFiniteNumber { .. }
         | SpecError::UnquotedDecimal { .. } => ErrorCode::SpecParse,
         SpecError::Signature(error) => signature_error_code(error),
+        SpecError::Expired { .. } => ErrorCode::SpecExpired,
         _ => ErrorCode::SpecInvalid,
     }
 }
@@ -495,8 +503,6 @@ fn spec_error_code(err: &SpecError) -> ErrorCode {
 ///   anything, and the fix is to get the key again.
 /// - A variant this build does not know is `spec_signature_invalid`. It fails closed and never becomes
 ///   `spec_invalid`.
-///
-/// `spec_expired` has no source yet: `rdy-spec` does not check `metadata.expires`.
 fn signature_error_code(err: &SignatureError) -> ErrorCode {
     match err {
         SignatureError::Missing => ErrorCode::SpecUnsigned,

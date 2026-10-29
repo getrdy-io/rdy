@@ -95,7 +95,8 @@ fn the_standard_cost_is_what_stock_minisign_writes() {
 
 #[test]
 fn a_key_made_at_the_standard_cost_opens_and_signs() {
-    // The one test at the real cost: scrypt N = 2^20 needs 1 GiB.
+    // The one unit test at the real cost: scrypt N = 2^20 needs 1 GiB. Its name is in the `real-kdf`
+    // test group in .config/nextest.toml, so it never runs beside another 1 GiB test.
     let key = SecretKey::generate().expect("key");
     let text = key
         .key_file(Some(PASSWORD), KdfCost::STANDARD)
@@ -178,6 +179,10 @@ fn a_key_file_may_not_ask_for_more_than_the_standard_cost() {
         (u64::MAX, MAX_MEMLIMIT),
         (MAX_OPSLIMIT, u64::MAX),
         (u64::MAX, u64::MAX),
+        // Within both limits, but libsodium's rule turns these into N = 2 and p far above 1.
+        (MAX_OPSLIMIT, 0),
+        (MAX_OPSLIMIT, 1 << 20),
+        (0, 0),
     ] {
         assert_eq!(
             StoredKey::parse(&with(ops, mem)).unwrap_err(),
@@ -191,9 +196,10 @@ fn a_key_file_may_not_ask_for_more_than_the_standard_cost() {
             .unwrap_err(),
         KeyError::TooCostly
     );
-    // The limits themselves are fine, and so is nothing at all.
+    // The limits themselves are fine, and so is the cost of the `minisign` crate's own keys
+    // (32 MiB, N = 2^15, p = 1).
     assert!(StoredKey::parse(&with(MAX_OPSLIMIT, MAX_MEMLIMIT)).is_ok());
-    assert!(StoredKey::parse(&with(0, 0)).is_ok());
+    assert!(StoredKey::parse(&with(524_288, 33_554_432)).is_ok());
 }
 
 #[test]

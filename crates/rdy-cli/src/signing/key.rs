@@ -1,4 +1,4 @@
-//! The secret key file, in the minisign format (ADR 0019).
+//! The secret key file, in the minisign format (ADR 0022).
 //!
 //! A key file is two lines. The first is `untrusted comment: <text>`. The second is base64 of 158
 //! bytes:
@@ -18,8 +18,8 @@
 //!
 //! A new key is encrypted at [`KdfCost::STANDARD`], the cost stock minisign uses: scrypt with
 //! N = 2^20, r = 8, p = 1, which needs 1 GiB of memory. That is deliberately the highest cost a
-//! key file may ask for. [`StoredKey::parse`] refuses a file that asks for more, so a key file from
-//! someone else cannot make `rdy spec sign` run out of memory or time.
+//! key file may ask for, and p must be 1. [`StoredKey::parse`] refuses a file that asks for more,
+//! so a key file from someone else cannot make `rdy spec sign` run out of memory or time.
 //!
 //! The password is checked by the checksum. A wrong password and a damaged file are told apart
 //! only by whether the key is encrypted.
@@ -146,7 +146,7 @@ impl StoredKey {
     ///
     /// [`KeyError::Malformed`] if it is not a two-line minisign secret key,
     /// [`KeyError::Unsupported`] for another algorithm, and [`KeyError::TooCostly`] if the key
-    /// derivation it asks for is above [`KdfCost::STANDARD`].
+    /// derivation it asks for is above [`KdfCost::STANDARD`] or has a parallelism other than 1.
     pub fn parse(text: &str) -> Result<Self, KeyError> {
         let mut lines = text.lines();
         let comment = lines.next().ok_or(KeyError::Malformed("it is empty"))?;
@@ -423,7 +423,7 @@ fn derive_stream(
 }
 
 /// Turns minisign's two limits into scrypt parameters, the way libsodium's `pickparams` does, and
-/// refuses anything above [`KdfCost::STANDARD`].
+/// refuses anything above [`KdfCost::STANDARD`] or with a parallelism other than 1.
 fn scrypt_params(opslimit: u64, memlimit: u64) -> Result<scrypt::Params, KeyError> {
     if opslimit > MAX_OPSLIMIT || memlimit > MAX_MEMLIMIT {
         return Err(KeyError::TooCostly);
@@ -447,8 +447,13 @@ fn scrypt_params(opslimit: u64, memlimit: u64) -> Result<scrypt::Params, KeyErro
     if log_n > MAX_LOG_N {
         return Err(KeyError::TooCostly);
     }
-    let p = u32::try_from(p).map_err(|_| KeyError::TooCostly)?;
-    scrypt::Params::new(log_n, SCRYPT_R, p, scrypt::Params::RECOMMENDED_LEN)
+    // Stock minisign and the `minisign` crate always write p = 1. A file with a larger p (a big
+    // opslimit with a tiny memlimit gives one) would make the key derivation run for hours at
+    // little memory, so it is refused like any other file that asks for too much.
+    if p != 1 {
+        return Err(KeyError::TooCostly);
+    }
+    scrypt::Params::new(log_n, SCRYPT_R, 1, scrypt::Params::RECOMMENDED_LEN)
         .map_err(|_| KeyError::Malformed("the key derivation settings are not valid"))
 }
 

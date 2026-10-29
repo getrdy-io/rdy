@@ -50,11 +50,12 @@ tests/fixtures/
   results/<rdy-version>/*.json   result files from released versions, append only
   specs/{valid,malformed}/       parser corpus
   signed/                        one signed spec, its .minisig and public key, never edited
+  minisign-c/                    a key and a signature made by the C minisign tool, never edited
   wycheproof/                    ed25519 test vectors for the signature verifier
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `signed/`, `specs/malformed/`, `wycheproof/` and `canary/`. The rest arrives with the
+What exists today: `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/` and `canary/`. The rest arrives with the
 tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -67,6 +68,7 @@ tickets that need it. The names above are fixed now so nobody invents another.
 | `results/<rdy-version>/*.json` | Result files written by released versions. They must stay parseable | Append only. Never edited |
 | `specs/valid/`, `specs/malformed/` | Parser corpus. Each malformed file is one way a spec can be wrong | By hand |
 | `signed/` | One signed spec. See `signed/README.md` | Never. New cases get new files |
+| `minisign-c/` | A key with a published test password and a signature, both made by C minisign 0.11. See `minisign-c/README.md` | Never |
 | `wycheproof/` | Test vectors for ed25519. See `wycheproof/README.md` | Never |
 | `canary/` | Files that must reach every OS byte for byte. See "Line endings" below | Never |
 

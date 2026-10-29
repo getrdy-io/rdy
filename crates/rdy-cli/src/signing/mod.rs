@@ -1,4 +1,4 @@
-//! Making keys and signatures for `rdy spec keygen` and `rdy spec sign` (M1-125, ADR 0019).
+//! Making keys and signatures for `rdy spec keygen` and `rdy spec sign` (M1-125, ADR 0022).
 //!
 //! Four small pieces, all in the minisign formats so stock tooling can read what rdy writes:
 //!

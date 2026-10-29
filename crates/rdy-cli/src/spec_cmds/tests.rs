@@ -262,19 +262,22 @@ fn keygen_prints_the_key_id_and_the_fingerprint_in_groups_of_four() {
 
 #[cfg(unix)]
 #[test]
-fn keygen_makes_the_secret_key_0600_and_the_public_key_0644() {
+fn keygen_makes_the_secret_key_0600_and_the_public_key_at_most_0644() {
     let d = dir();
     let (result, _) = make_key(d.path(), "k", Some(PASSWORD));
     result.expect("keygen");
     assert_eq!(mode_of(&d.path().join("k.key")), 0o600);
-    assert_eq!(mode_of(&d.path().join("k.pub")), 0o644);
+    // The umask of whoever runs the tests can only remove bits from 0644.
+    let public = mode_of(&d.path().join("k.pub"));
+    assert_eq!(public & !0o644, 0, "{public:o}");
+    assert_ne!(public & 0o400, 0, "{public:o}");
 }
 
 #[cfg(unix)]
 #[test]
-fn keygen_0600_holds_under_a_permissive_umask_because_the_mode_is_set_at_creation() {
+fn the_private_file_helper_creates_with_no_group_or_other_bits() {
     // The mode is passed to open(2), so there is no moment when the file is wider than 0600. A umask can
-    // only remove bits. This pins the creation helper itself.
+    // only remove bits, so this holds under any umask. This pins the creation helper itself.
     let d = dir();
     let path = d.path().join("secret");
     let _file = files::create_new_private(&path).expect("create");
@@ -421,7 +424,7 @@ fn keygen_does_not_write_through_a_symlink() {
 }
 
 #[test]
-fn keygen_in_a_missing_folder_is_an_internal_error_with_a_fix() {
+fn keygen_in_a_missing_folder_is_a_usage_error_with_a_fix_and_makes_no_file() {
     let d = dir();
     let args = KeygenArgs {
         name: d
@@ -441,9 +444,10 @@ fn keygen_in_a_missing_folder_is_an_internal_error_with_a_fix() {
         &mut Vec::new(),
     );
     let (code, shown) = rendered(result);
-    assert_eq!(code, 70);
-    assert!(shown.contains("cannot write"), "{shown}");
-    assert!(shown.contains("\nfix: "), "{shown}");
+    assert_eq!(code, 64, "{shown}");
+    assert!(shown.contains("cannot create"), "{shown}");
+    assert!(shown.contains("\nfix: make the folder"), "{shown}");
+    assert!(!d.path().join("no-such-folder").exists());
 }
 
 #[test]
@@ -571,13 +575,37 @@ fn sign_with_an_unencrypted_key_never_asks_for_a_password() {
     make_key(d.path(), "ci", None).0.expect("keygen");
     let spec = write_spec(d.path(), GOOD_SPEC);
     let args = sign_args(&spec, &d.path().join("ci.key"));
-    let (result, _) = run_sign(
+    let (result, shown) = run_sign(
         &args,
         &mut must_not_be_called,
         &mut Scripted::no_terminal().0,
     );
     result.expect("sign");
     assert!(d.path().join("acme-platform.yaml.minisig").exists());
+    // One warning line, and it names the key.
+    let warnings: Vec<&str> = shown
+        .lines()
+        .filter(|l| l.starts_with("warning:") && l.contains("is not protected by a password"))
+        .collect();
+    assert_eq!(warnings.len(), 1, "{shown}");
+    assert!(warnings[0].contains("ci.key"), "{shown}");
+}
+
+#[test]
+fn sign_with_an_encrypted_key_does_not_warn_about_a_missing_password() {
+    let d = dir();
+    let args = setup(d.path(), GOOD_SPEC);
+    let (result, shown) = run_sign(&args, &mut from_file_or_env, &mut Scripted::no_terminal().0);
+    result.expect("sign");
+    assert!(!shown.contains("is not protected"), "{shown}");
+}
+
+#[test]
+fn a_missing_random_source_has_its_own_message_not_the_bug_text() {
+    let (code, shown) = rendered(Err(key_error_without_file(KeyError::Random)));
+    assert_eq!(code, 70);
+    assert!(shown.contains("could not give random bytes"), "{shown}");
+    assert!(!shown.contains("internal error"), "{shown}");
 }
 
 #[test]

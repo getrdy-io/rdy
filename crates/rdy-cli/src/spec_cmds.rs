@@ -39,6 +39,9 @@ use crate::signing::{sidecar, time};
 pub type PasswordSource<'a> =
     &'a mut dyn FnMut(&mut dyn Write) -> Result<Option<KeyPassword>, PasswordError>;
 
+/// Said when `--unencrypted` is given and `RDY_KEY_PASSWORD` is set: the variable is not used.
+const UNENCRYPTED_ENV_NOTE: &str = "note: RDY_KEY_PASSWORD is set and was not used (--unencrypted)";
+
 /// Runs `rdy spec keygen` on the real terminal and environment.
 pub fn run_keygen(
     args: &KeygenArgs,
@@ -49,6 +52,9 @@ pub fn run_keygen(
     let file = args.password_file.clone();
     let mut source = move |err: &mut dyn Write| read_key_password(file.as_deref(), err);
     let mut prompter = Prompter::stdio();
+    if args.unencrypted && std::env::var_os(crate::password::ENV_NAME).is_some() {
+        let _ = writeln!(stderr, "{UNENCRYPTED_ENV_NOTE}");
+    }
     let result = keygen(args, &mut source, &mut prompter, KdfCost::STANDARD, stderr);
     finish(result, json, stdout, stderr)
 }
@@ -205,7 +211,24 @@ fn create_error(path: &Path, err: &io::Error) -> CliError {
     if err.kind() == io::ErrorKind::AlreadyExists {
         already_exists(path)
     } else {
-        write_error(path, err)
+        folder_error(path, err)
+    }
+}
+
+/// A file that cannot be created because its folder is missing, is not a folder, or is not
+/// writable is something the user can fix (exit 64). Any other failure is rdy's (exit 70).
+fn folder_error(path: &Path, err: &io::Error) -> CliError {
+    match err.kind() {
+        io::ErrorKind::NotFound
+        | io::ErrorKind::PermissionDenied
+        | io::ErrorKind::NotADirectory => CliError::usage(
+            format!(
+                "cannot create {}: the folder does not exist or you cannot write to it",
+                display(path)
+            ),
+            "make the folder, or give a name in a folder you can write to",
+        ),
+        _ => write_error(path, err),
     }
 }
 
@@ -445,6 +468,13 @@ fn open_key<T: Terminal>(
     let text = std::str::from_utf8(&raw)
         .map_err(|_| key_error(key_name, KeyError::Malformed("it is not text")))?;
     let stored = StoredKey::parse(text).map_err(|e| key_error(key_name, e))?;
+    if !stored.is_encrypted() {
+        let _ = writeln!(
+            notices,
+            "warning: {} is not protected by a password. Anyone who can read it can sign specs as you.",
+            escape_untrusted(key_name)
+        );
+    }
     let typed = if stored.is_encrypted() {
         match password(notices)? {
             Some(password) => Some(password),
@@ -501,19 +531,23 @@ fn key_error(key_name: &str, err: KeyError) -> CliError {
             format!("{name} is damaged"),
             "restore the key from your backup",
         ),
-        KeyError::Random => CliError::bug(),
+        KeyError::Random => no_randomness(),
         other => CliError::usage(format!("cannot use {name}: {other}"), new_key),
     }
 }
 
 fn key_error_without_file(err: KeyError) -> CliError {
     match err {
-        KeyError::Random => CliError::bug(),
+        KeyError::Random => no_randomness(),
         other => CliError::usage(
             format!("cannot make the key: {other}"),
             "run the command again",
         ),
     }
+}
+
+fn no_randomness() -> CliError {
+    CliError::Internal(InternalKind::NoRandomness)
 }
 
 /// `<spec>.minisig`.
@@ -545,11 +579,11 @@ fn write_sig(path: &Path, bytes: &[u8], force: bool) -> Result<(), CliError> {
         });
     }
     let mut suffix = [0u8; 6];
-    getrandom::fill(&mut suffix).map_err(|_| CliError::bug())?;
+    getrandom::fill(&mut suffix).map_err(|_| no_randomness())?;
     let mut tmp_name = OsString::from(path.as_os_str());
     tmp_name.push(format!(".tmp{}", hex(&suffix)));
     let tmp = PathBuf::from(tmp_name);
-    let mut file = files::create_new_public(&tmp).map_err(|e| write_error(path, &e))?;
+    let mut file = files::create_new_public(&tmp).map_err(|e| folder_error(path, &e))?;
     let written = files::write_and_sync(&mut file, bytes);
     drop(file);
     let result = written.and_then(|()| std::fs::rename(&tmp, path));

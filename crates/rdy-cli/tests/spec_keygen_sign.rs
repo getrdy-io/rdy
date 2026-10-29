@@ -21,7 +21,9 @@ use rdy_spec::spec::ProductSlug;
 const PASSWORD: &str = "CANARY-ci password with spaces";
 const SPEC: &str = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme-platform\nchecks:\n  - id: host.cpu\n    min: 8\n    severity: block\n    fix: Use a node with at least 8 vCPUs.\n";
 
-/// One run at a time. Each key derivation needs 1 GiB, and a CI runner has a few GiB.
+/// One run at a time within this binary. Each key derivation needs 1 GiB, and a CI runner has a few
+/// GiB. Under nextest every test is its own process, so this lock does nothing there: the `real-kdf`
+/// test group in .config/nextest.toml does that job, and lists this binary.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 /// Runs `rdy` in `dir` with stdin from `stdin` (never a terminal) and the given extra variable.
@@ -173,7 +175,10 @@ fn the_key_is_encrypted_and_private_and_the_public_key_is_not_a_secret() {
                 & 0o7777
         };
         assert_eq!(mode("k.key"), 0o600);
-        assert_eq!(mode("k.pub"), 0o644);
+        // 0644 is the most a public file gets. The umask of whoever runs the tests can only remove bits.
+        let public = mode("k.pub");
+        assert_eq!(public & !0o644, 0, "{public:o}");
+        assert_ne!(public & 0o400, 0, "{public:o}");
     }
     let shown = stderr(&out);
     assert!(shown.contains("Wrote k.key"), "{shown}");
@@ -193,6 +198,12 @@ fn unencrypted_keygen_is_explicit_and_signs_without_any_password() {
     );
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     assert!(stderr(&out).contains("is not protected by a password"));
+    assert!(
+        stderr(&out).contains("note: RDY_KEY_PASSWORD is set and was not used (--unencrypted)"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!stderr(&out).contains("CANARY"));
     let key = std::fs::read_to_string(d.path().join("ci.key")).expect("key");
     let record = {
         use ct_codecs::Decoder;
@@ -212,7 +223,27 @@ fn unencrypted_keygen_is_explicit_and_signs_without_any_password() {
         "",
     );
     assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("warning: ci.key is not protected by a password"),
+        "{}",
+        stderr(&out)
+    );
     assert_verifies(d.path(), "ci");
+}
+
+#[test]
+fn keygen_into_a_folder_that_does_not_exist_exits_64_with_a_fix() {
+    let d = tempfile::tempdir().expect("tempdir");
+    let out = rdy(
+        d.path(),
+        &["spec", "keygen", "no-such-folder/k", "--unencrypted"],
+        None,
+        "",
+    );
+    let shown = stderr(&out);
+    assert_eq!(code(&out), 64, "{shown}");
+    assert!(shown.contains("fix: make the folder"), "{shown}");
+    assert!(!d.path().join("no-such-folder").exists());
 }
 
 #[test]

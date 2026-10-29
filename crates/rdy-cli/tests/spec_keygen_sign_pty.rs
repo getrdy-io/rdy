@@ -17,7 +17,8 @@ const TIMEOUT_MS: u64 = 60_000;
 const PASSWORD: &str = "pty-pass-phrase-7f3a-CANARY";
 const SPEC: &str = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme-platform\nchecks:\n  - id: host.cpu\n    min: 8\n    fix: Use a bigger node.\n";
 
-/// One test at a time. rexpect forks, and the key derivation needs 1 GiB.
+/// One test at a time within this binary (`cargo test`). rexpect forks, and the key derivation needs
+/// 1 GiB. Under nextest the `real-kdf` test group in .config/nextest.toml does this job.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 /// Runs `rdy args` in `dir` on a pty with echo switched on, as a login shell has it. Without this

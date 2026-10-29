@@ -1,0 +1,8 @@
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+  expires: "2027-01-31"
+checks:
+  - id: host.cpu
+    min: 2
