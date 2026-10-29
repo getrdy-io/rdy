@@ -1,0 +1,12 @@
+product      acme-platform
+key id       9F3A6C21D4E87B05
+fingerprint  4d2a 7c0e 9b1f 3a5c 6e8d 0b2f 4a6c 8e0d
+             1b3f 5a7c 9e2d 4b6f 8a0c 2e4d 6b8f 0a1c
+file         acme-platform.pub
+
+Compare this fingerprint with the one the vendor published on their site or
+told you by phone. If it differs, answer n.
+
+Trust this key for acme-platform? [y/N] y
+Trusted key 9F3A6C21D4E87B05 for acme-platform.
+Saved to /home/jdoe/.config/rdy/trust.yaml

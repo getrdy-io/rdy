@@ -3,9 +3,9 @@
 //! The binary in `src/main.rs` is a thin wrapper around [`run`]. Tests and the docs CLI reference
 //! use the same code (ADR 0011).
 //!
-//! This is the M1 command tree (M1-029). `rdy version`, `rdy spec lint`, `rdy spec keygen` and
-//! `rdy spec sign` do their jobs. Every other command prints "not yet implemented in this build" and
-//! exits 70 until its own ticket lands.
+//! This is the M1 command tree (M1-029). `rdy version`, `rdy spec lint`, `rdy spec keygen`,
+//! `rdy spec sign` and `rdy trust add`, `list` and `remove` do their jobs. Every other command prints
+//! "not yet implemented in this build" and exits 70 until its own ticket lands.
 //!
 //! Exit codes (CLAUDE.md, Output): clap's own exit code is 2, but in rdy 2 means NOT READY. So rdy
 //! parses with [`clap::Parser::try_parse_from`] and maps the outcome itself. Help and version go to
@@ -50,6 +50,8 @@ mod spec_cmds;
 
 #[doc(hidden)]
 pub mod trust;
+
+mod trust_cmds;
 
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
 use error::{CliError, InternalKind, emit};
@@ -143,9 +145,9 @@ fn dispatch(command: &Commands, json: bool, stdout: &mut dyn Write, stderr: &mut
             SpecCommand::Keygen(args) => spec_cmds::run_keygen(args, json, stdout, stderr),
         },
         Commands::Trust { command } => match command {
-            TrustCommand::Add(_) => not_implemented("trust add", json, stdout, stderr),
-            TrustCommand::List => not_implemented("trust list", json, stdout, stderr),
-            TrustCommand::Remove(_) => not_implemented("trust remove", json, stdout, stderr),
+            TrustCommand::Add(args) => trust_cmds::run_add(args, json, stdout, stderr),
+            TrustCommand::List => trust_cmds::run_list(json, stdout, stderr),
+            TrustCommand::Remove(args) => trust_cmds::run_remove(args, json, stdout, stderr),
         },
     }
 }

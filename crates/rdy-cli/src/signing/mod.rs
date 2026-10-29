@@ -7,6 +7,7 @@
 //! - [`sidecar`]: the signature file. Prehashed `ED` over BLAKE2b-512, and a signed trusted comment
 //!   in the form `rdy-spec-v1 product=<slug> signed_at=<time>` (01 section 4.2).
 //! - [`files`]: opening and creating key files without following links, with owner-only modes.
+//! - [`pubkey`]: a public key given as a file name or as text (`rdy trust add --key`).
 //! - [`time`]: the `signed_at` stamp.
 //!
 //! Verification is not here. It is `rdy_spec::load`, and `rdy spec sign` runs it on its own output
@@ -17,5 +18,6 @@
 
 pub mod files;
 pub mod key;
+pub mod pubkey;
 pub mod sidecar;
 pub mod time;
