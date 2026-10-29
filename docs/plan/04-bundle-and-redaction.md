@@ -110,7 +110,10 @@ impl Redactor {
     pub fn new(key: TagKey) -> Self;                                    // built-ins only; built first in `main`
     pub fn with_extra(&self, e: &Extra) -> Result<Redactor, RedactError>; // M2: after the spec is verified; same key
     pub fn redact_str(&self, s: &str) -> Redacted<String>;              // M1
-    pub fn redact_report(&self, r: Report) -> Result<Redacted<Report>, RedactError>; // M1
+    pub fn redact_report(&self, r: Report) -> Result<RedactedReport, RedactError>;  // M1: RedactedReport = Redacted<Report>
+    pub fn redact_report_counted(&self, r: Report, earlier: RuleCounts) -> Result<RedactedReport, RedactError>; // M1: keeps the counts of results redacted earlier
+    pub fn redact_check(&self, c: CheckResult, counts: &mut RuleCounts) -> Result<Redacted<CheckResult>, RedactError>; // M1: as each result completes
+    pub fn redact_action(&self, a: Action, counts: &mut RuleCounts) -> Result<Redacted<Action>, RedactError>;         // M1: as each entry is written
     pub fn redact_bytes(&self, b: &[u8]) -> Redacted<Vec<u8>>;         // M2
     pub fn stream(&self) -> RedactStream;                               // M2
 }
@@ -121,15 +124,33 @@ impl Redactor {
 - **Counts are per call.** A `Redactor` shares only its key between the report, the logs and bundle entries.
   `redact_report` keeps its own tally and writes `redaction { ruleset, total, by_rule }` after the walk; a
   bundle entry counts for itself. Log lines count nowhere in the report, so `by_rule` is the same with
-  `RUST_LOG` unset and at `trace`.
+  `RUST_LOG` unset and at `trace`. `redaction.total` and `by_rule` count every replacement the walk made,
+  including in text that a later cap dropped (a list past 200 items, notes past 20, keys dropped to fit
+  64 KiB), so they are never lower than what was hidden. The final pass of `redact_report_counted` finds
+  nothing new in results redacted earlier. A trailing ` [truncated]` is set aside while a string is redacted
+  and put back after. A cut never ends inside a placeholder or a reference the key rule leaves alone
+  (`${NAME}`, a `/run/secrets/` path, `null`), right behind a placeholder, or between a key and the quote
+  that opens either; it backs up to where the token starts (tokens up to 512 bytes), and a quoted single placeholder (`password="[REDACTED:..]"`) is exempt
+  like a bare one, so `password=" [truncated]` is never produced and a second pass changes nothing.
 - **`redact_report` is schema-aware.** It serializes the report to a `serde_json::Value` and walks it. Typed
   fields keep their names and non-string values; only string leaves go through `redact_str`. The whole-member
   rule (replace the value of a member whose key matches a secret stem, and the `value` of a `{name, value}`
   pair whose `name` matches) runs only inside free-form subtrees: `checks[*].observed`, `checks[*].expected`,
-  env pairs and action `argv`. It never touches a schema-defined field, so `summary.pass`, `by_rule` keys and
-  check keys such as `passed` survive. The walk deserializes back into `Report` and applies the 02 caps, which
-  never cut inside a placeholder. On any error no report is written and rdy exits 70. The watchdog snapshot
-  uses the same function.
+  env pairs and action `argv` (a flag such as `--password` takes the next argument whole). It never touches a
+  schema-defined field, so `summary.pass`, `by_rule` keys and check keys such as `passed` survive. Numbers under a secret key are
+  replaced too (`db_password: 12345678`), unless the key's last word is a unit or a count (`ms`, `seconds`,
+  `ttl`, `count`, `size`, `len`) and the number sits directly under the key, so `token_ttl_ms: 3600`
+  survives. A list or object under the key is replaced whole, so `private_key_bytes: [48, 130]` does not
+  stay (`bytes` is not a unit word for the same reason). Booleans and `null` stay, and so do the forms the
+  key rule leaves alone (`${NAME}`, a `/run/secrets/` path, `null`, a placeholder). Every list in a
+  free-form subtree is read as a command line, numbers and objects included, so
+  `["--password", "hunter2", 5432]` loses its second item. `{key, value}` and `Name`/`Value` pairs match
+  like `{name, value}`. The walk deserializes
+  back into `Report` and applies the 02 caps, which never cut inside a placeholder or a reference. A cut string ends with
+  ` [truncated]` and sets the result's `truncated` flag. On any error no report is written and rdy exits 70.
+  The watchdog snapshot uses the same function. `redact_check` and `redact_action` run the same walk on one
+  entry as it completes. The final pass finds nothing new in them, so the caller keeps one `RuleCounts` across
+  the run and gives it to `redact_report_counted`.
 - **Structure is kept.** A span excludes quotes and delimiters: `password="hunter2"` becomes
   `password="[REDACTED:secret_by_key:1a2b3c4d]"`. The key-name rule skips a value only when it is exactly one
   well-formed placeholder, so `password=[REDACTED:x:00000000]hunter2` is still redacted.
