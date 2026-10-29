@@ -783,6 +783,8 @@ fn fixed_error_text_is_not_changed_by_the_redactor() {
         assert!(!shown.message.contains("REDACTED"), "{}", shown.message);
         assert!(!shown.fix.contains("REDACTED"), "{}", shown.fix);
     }
+}
+
 #[test]
 fn an_insecure_trust_store_is_trust_store_insecure_with_the_documented_text() {
     let err = CliError::TrustStore(TrustStoreError::Insecure {
