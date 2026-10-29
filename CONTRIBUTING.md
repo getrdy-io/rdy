@@ -57,7 +57,8 @@ The Rust version is pinned in `rust-toolchain.toml`.
 CI runs the tests with `cargo nextest` (profile `ci` in `.config/nextest.toml`, no retries) and runs
 doc tests on Linux x86_64 only. A test that fails once in three runs is a bug. Fix the test. To run
 the suite the way CI does, install `cargo-nextest` and run `cargo nextest run --workspace --profile ci`
-and `cargo test --doc --workspace`. On Linux, CI also builds the musl binary and checks it with
+and `cargo test --doc --workspace`. A test named `root_*` needs uid 0. Nextest skips it unless you pass
+`--profile root`, and CI runs it in the `root` job under `sudo`. On Linux, CI also builds the musl binary and checks it with
 `scripts/check-static.sh target/<triple>/debug/rdy`.
 
 Property tests use `proptest`. Each test sets its own case count (10,000 for "never panics" and

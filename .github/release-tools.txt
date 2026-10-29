@@ -1,0 +1,17 @@
+# Release tools that CI downloads as pinned release files and checks against a hash before it
+# runs them (ADR 0020, decision 5). scripts/install-release-tool.sh reads this file.
+#
+# Columns: tool, version, file name, sha256, download URL. Separated by spaces.
+# To bump a tool: download the new files over HTTPS, compare each hash with the .sha256 file the
+# project publishes next to it, put the hashes here, and run scripts/test-install-release-tool.sh.
+# The hashes were taken from the project's own release page, so the first trust is in that page.
+# After that, a changed file fails the check.
+#
+# cargo-auditable is not here. The release workflow installs it with a SHA-pinned
+# taiki-e/install-action at an exact version, which checks its own hashes.
+dist 0.33.0 cargo-dist-x86_64-unknown-linux-musl.tar.xz b8e95bc76c63375958173ef5ae2dbd8e9211cc1ed03cdee0899702766b4c2a2e https://github.com/axodotdev/cargo-dist/releases/download/v0.33.0/cargo-dist-x86_64-unknown-linux-musl.tar.xz
+dist 0.33.0 cargo-dist-aarch64-unknown-linux-musl.tar.xz 4761cff5fc547ad66d1449abbf321380b0e6bd8093b1fe6593852a3314fd0c19 https://github.com/axodotdev/cargo-dist/releases/download/v0.33.0/cargo-dist-aarch64-unknown-linux-musl.tar.xz
+dist 0.33.0 cargo-dist-x86_64-apple-darwin.tar.xz 6a49bfb61bd86770d79c27f3d2b40c6b2e71cde940d3d31a6ccaaffc124d7a29 https://github.com/axodotdev/cargo-dist/releases/download/v0.33.0/cargo-dist-x86_64-apple-darwin.tar.xz
+dist 0.33.0 cargo-dist-aarch64-apple-darwin.tar.xz 7b3cbe25511de01d74c0f5fcb7909edabd379bea9cfa284d93af5a3cdfa3247c https://github.com/axodotdev/cargo-dist/releases/download/v0.33.0/cargo-dist-aarch64-apple-darwin.tar.xz
+dist 0.33.0 cargo-dist-x86_64-pc-windows-msvc.zip 9a36d70795e14326a5ec4bf17aee085df00ab85a322739291ea5d4b1b5f693cd https://github.com/axodotdev/cargo-dist/releases/download/v0.33.0/cargo-dist-x86_64-pc-windows-msvc.zip
+cargo-cyclonedx 0.5.5 cargo-cyclonedx-x86_64-unknown-linux-musl.tar.xz e0a872a5a8e32b9621334636e9da444d70527fb138aa75380e0dc20db8b0714b https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.5/cargo-cyclonedx-x86_64-unknown-linux-musl.tar.xz

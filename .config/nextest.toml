@@ -2,7 +2,7 @@
 # CI runs `cargo nextest run --profile ci`. Locally the default profile applies.
 
 # Oldest nextest that reads these settings. CI pins an exact version in .github/workflows/ci.yml.
-nextest-version = "0.9.100"
+nextest-version = "0.9.145"
 
 # trybuild compile-fail tests run a nested `cargo build` of their own. That takes minutes on a slow
 # runner (the Intel macOS runner needs about 90 seconds). Convention: the test binary of a trybuild
@@ -11,6 +11,13 @@ nextest-version = "0.9.100"
 # Every other test keeps the default limit. Name a new trybuild test binary `*_guarantee`.
 [test-groups]
 trybuild = { max-threads = 1 }
+
+# Root tests. Convention (docs/plan/08-testing.md, section 6): a test that needs uid 0 has a name whose
+# last path segment starts with `root_`, for example `root_whoami_is_zero`. The default and `ci` profiles
+# skip those tests, so a normal run (local or CI) never sees them. The `root` profile runs only them.
+# CI builds a nextest archive as the runner user and runs it under `sudo` (the `root` job in ci.yml).
+[profile.default]
+default-filter = 'not test(/(^|::)root_[^:]*$/)'
 
 [profile.ci]
 # No retries. A test that fails once in three runs is a bug, and a retry would hide it.
@@ -33,3 +40,9 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 [[profile.ci.overrides]]
 filter = 'binary(parse_properties)'
 slow-timeout = { period = "30s", terminate-after = 6 }
+
+# Only the root tests, with the `ci` settings (no retries, no fail-fast, the same timeouts). The job
+# passes `--no-tests=fail`, so a filter that matches nothing is red, not green.
+[profile.root]
+inherits = "ci"
+default-filter = 'test(/(^|::)root_[^:]*$/)'
