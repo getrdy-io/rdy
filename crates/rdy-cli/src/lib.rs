@@ -30,6 +30,8 @@ pub mod lint;
 #[doc(hidden)]
 pub mod logging;
 #[doc(hidden)]
+pub mod output;
+#[doc(hidden)]
 pub mod panic_hook;
 #[doc(hidden)]
 pub mod password;

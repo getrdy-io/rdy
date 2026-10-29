@@ -2016,6 +2016,17 @@ error: cannot create the report folder /usr/share/rdy-report-acme-quickstart-202
 fix: use --out-dir <a folder you can write to>, or --no-report to skip the files
 ```
 
+The reason in the brackets is plain words, never an OS error number. Four reasons beyond the OS ones
+(permission denied, no such folder, disk full) are specific to the report folder. Each has its own text
+and fix. Exact-text tests in `crates/rdy-cli/src/error/tests.rs` hold them.
+
+| Reason | Message | Fix |
+| --- | --- | --- |
+| The new folder is owned by another user | `error: cannot create the report folder <path> (the folder is owned by another user)` | `use --out-dir <a folder on a local disk>, or --no-report to skip the files. On NFS with root_squash, root cannot own new folders` |
+| The new folder cannot be made private | `error: cannot create the report folder <path> (the folder cannot be made private)` | `use --out-dir <a folder on a disk that keeps Unix permissions>, or --no-report to skip the files` |
+| The folder name and the next eight are taken | `error: cannot create the report folder in <parent> (all the folder names are taken)` | `wait a second and run again, or use --out-dir <another folder>` |
+| A report file with the final name exists (a bug, rdy never replaces it) | `error: cannot write the report files to <path> (the file already exists)` | The standard bug hint |
+
 ### C.8 `rdy spec lint`
 
 Exit 1 (two warnings, no errors). `--json` prints the LintReport in C.11.

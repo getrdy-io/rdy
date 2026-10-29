@@ -171,7 +171,7 @@ fn every_kind_of_error_object_validates_against_the_schema() {
             CliError::ReportWrite {
                 step: ReportStep::CreateFolder,
                 path: "/usr/share/rdy-report-x".into(),
-                reason: IoReason::PermissionDenied,
+                reason: IoReason::PermissionDenied.into(),
             },
             70,
         ),
