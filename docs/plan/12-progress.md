@@ -125,7 +125,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-056 | todo | | Redacting tracing writer, panic hook and CLI error text
 
-- M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code
+- M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code | backlog corrected 2026-10-29 (correction-09): a result with no fix of its own shows the check's `CheckMeta.remediation`, and `cargo xtask checks` reads the same family list as `rdy run`
 
 - M1-058 | todo | | Ctrl-C in M1: abort, remove the empty report folder, exit 70
 
@@ -244,7 +244,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-115 | todo | | Review k8s checks and fixtures (semantics, API groups, RBAC degrade, per-distro sets)
 
-- M1-116 | todo | | Check family renderer and the host, network and Kubernetes pages with hand-written intros
+- M1-116 | todo | | Check family renderer and the host, network and Kubernetes pages with hand-written intros | backlog corrected 2026-10-29 (correction-09): ids still in `HostFamily::stub_ids()` get no section, and reads are listed without an OS split until the manifest is keyed by OS
 
 - M1-117 | todo | | Fixture env all-pass
 
