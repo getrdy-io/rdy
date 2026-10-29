@@ -1,0 +1,44 @@
+# Commands that fix text may tell a customer to run (crates/rdy-engine/src/fixtext.rs).
+# One name per line, sorted by byte, no duplicates. `sudo` is not listed: it is skipped, and the
+# command after it is judged. A name here is reviewed text for a customer, not something `rdy` runs
+# (that is the command table, src/exec/table.rs). Never list a shell, `sudo`, `su` or a program that
+# runs another program.
+Set-VMProcessor
+ausearch
+aws
+az
+chcon
+chmod
+chronyc
+df
+dkms
+dnf
+dracut
+echo
+eksctl
+firewall-cmd
+gcloud
+grubby
+helm
+keytool
+kubectl
+kubelogin
+lvextend
+modprobe
+mount
+nvidia-ctk
+nvidia-smi
+oc
+rdy
+rmmod
+setenforce
+swapoff
+sysctl
+systemctl
+tee
+timedatectl
+ufw
+update-ca-certificates
+update-ca-trust
+update-grub
+update-initramfs

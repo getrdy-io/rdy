@@ -11,9 +11,10 @@
 //! - **Refusals.** Three groups never run, by name: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`,
 //!   `powershell`, `pwsh` and a few more), the privilege tools (`sudo`, `su`, `doas`, `pkexec`, `runas`,
 //!   `run0`, `sudoedit`, `runuser`, `setpriv`, `sg`, `newgrp`, `ksu`, `machinectl`, `systemd-run`) and
-//!   the programs that run another program (`env`, `xargs`, `nice`, `nohup`, `timeout`, `setsid`,
-//!   `chroot`, `nsenter`, `unshare`, `stdbuf`, `taskset`, `flock`, `strace`, `gdb`, `bwrap` and more).
-//!   See [`REFUSED_PROGRAMS`]. The check is on the name and on the file the name resolves to, so a
+//!   the programs that run another program or take code in their arguments (`env`, `xargs`, `nice`,
+//!   `nohup`, `timeout`, `time`, `setsid`, `setarch`, `chroot`, `nsenter`, `unshare`, `stdbuf`,
+//!   `taskset`, `flock`, `strace`, `gdb`, `bwrap`, `awk`, `python3`, `perl` and more).
+//!   See [`REFUSED_PROGRAMS`] and [`REFUSED_PROGRAM_PREFIXES`]. The check is on the name and on the file the name resolves to, so a
 //!   link named `tool` that points at `bash` is refused too. The multi-call binaries `busybox` and
 //!   `toybox` are refused by the name a check asks for and not by the file it resolves to: on a
 //!   system built from one, every tool is a link to it, and the applet is picked by `argv[0]`, which
@@ -32,6 +33,10 @@
 //!   code, resolves names or starts helpers are refused as declared names (see [`PolicyError::RefusedEnv`]).
 //!   The parent's `LD_PRELOAD` never reaches a child because the parent's environment is never copied.
 //! - **Caps.** Stdout defaults to 1 MiB and is at most 4 MiB. Stderr is 64 KiB.
+//! - **The command table.** This module says what can never run. [`super::table`] says what may: the
+//!   typed entries of 03 Appendix A, each with its argument forms, limits and exit-code meanings.
+//!   [`Cmd`] does not require a table entry, so the policy tests can run `true`. The probe runs
+//!   commands through [`super::table::run`], which checks the table first.
 //! - **Windows.** In M1 only `C:\Windows\System32\whoami.exe` runs, until job objects land (M2-006).
 //!
 //! Resolution and start are two steps. The trust rule above makes the gap small, because no one but
@@ -127,7 +132,31 @@ pub const REFUSED_PROGRAMS: &[&str] = &[
     "bwrap",
     "firejail",
     "systemd-nspawn",
+    // Programs that take code or a whole command line in their arguments (M1-066). `time`,
+    // `setarch`, `linux32`, `linux64`, `chpst`, `start-stop-daemon` and `run-parts` run another
+    // program. The interpreters run text that a spec-controlled argument could carry (`python3 -c`,
+    // `perl -e`, `awk 'BEGIN{system(..)}'`). Versioned names such as `python3.12` are caught by
+    // [`REFUSED_PROGRAM_PREFIXES`].
+    "time",
+    "setarch",
+    "linux32",
+    "linux64",
+    "chpst",
+    "start-stop-daemon",
+    "run-parts",
+    "awk",
+    "gawk",
+    "mawk",
+    "nawk",
+    "node",
+    "expect",
+    "osascript",
 ];
+
+/// Prefixes of refused program names, in lower case: the interpreters, whatever version suffix the
+/// distribution gives them (`python3.12`, `perl5.36.0`, `ruby3.2`, `lua5.4`, `php8.2`).
+pub const REFUSED_PROGRAM_PREFIXES: &[&str] =
+    &["python", "perl", "ruby", "lua", "php", "tclsh", "nodejs"];
 
 /// Multi-call binaries. Refused by the name a check asks for, never by the file a name resolves to:
 /// on a system built from one, `ls` and `cat` are links to it, and refusing the target would refuse
@@ -306,6 +335,9 @@ pub enum CommandError {
     /// The command was refused before anything started.
     #[error(transparent)]
     Policy(#[from] PolicyError),
+    /// The command is not in the command table (03 Appendix A), or does not fit its entry.
+    #[error(transparent)]
+    Table(#[from] super::table::TableError),
     /// The command was allowed and failed to run to the end.
     #[error(transparent)]
     Exec(#[from] ExecError),
@@ -391,6 +423,41 @@ impl Cmd {
     pub fn stdout_cap(mut self, bytes: usize) -> Self {
         self.stdout_cap = bytes;
         self
+    }
+
+    /// The program name this command asks for.
+    #[must_use]
+    pub fn program(&self) -> &'static str {
+        self.program
+    }
+
+    /// The arguments, as set.
+    #[must_use]
+    pub fn arguments(&self) -> &[OsString] {
+        &self.args
+    }
+
+    /// The wall-clock limit.
+    #[must_use]
+    pub fn time_limit(&self) -> Duration {
+        self.timeout
+    }
+
+    /// The stdout cap in bytes.
+    #[must_use]
+    pub fn output_cap(&self) -> usize {
+        self.stdout_cap
+    }
+
+    /// The declared extra search directories.
+    #[must_use]
+    pub fn declared_dirs(&self) -> &'static [&'static str] {
+        self.extra_dirs
+    }
+
+    /// The declared environment variable names. Never the values.
+    pub fn declared_env_names(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.env.iter().map(|(name, _)| *name)
     }
 }
 
@@ -481,6 +548,18 @@ fn stem(name: &str) -> String {
 
 fn is_refused(stem: &str) -> bool {
     REFUSED_PROGRAMS.contains(&stem)
+        || REFUSED_PROGRAM_PREFIXES
+            .iter()
+            .any(|prefix| stem.starts_with(prefix))
+}
+
+/// Whether a program name is refused by name: a shell, a privilege tool, a program that runs another
+/// program or takes code in its arguments, or a multi-call binary. Case and a `.exe` suffix do not
+/// matter. The command table uses it to keep such names out of the list.
+#[must_use]
+pub fn is_refused_name(program: &str) -> bool {
+    let stem = stem(program);
+    is_refused(&stem) || REFUSED_BY_REQUESTED_NAME.contains(&stem.as_str())
 }
 
 fn check_env(vars: &[(&'static str, OsString)]) -> Result<(), PolicyError> {

@@ -65,6 +65,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
 pub mod policy;
+pub mod table;
 #[cfg(test)]
 mod tests;
 
