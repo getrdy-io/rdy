@@ -270,6 +270,10 @@ impl RegexText {
     /// The longest pattern in characters.
     pub const MAX_CHARS: usize = 256;
 
+    /// The start of the message for a pattern of the wrong length.
+    #[cfg(test)]
+    pub(crate) const LENGTH_RULE: &'static str = "a pattern is 1 to";
+
     /// The pattern as written.
     #[must_use]
     pub fn as_str(&self) -> &str {

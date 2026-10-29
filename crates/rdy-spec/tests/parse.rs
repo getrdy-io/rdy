@@ -1023,6 +1023,9 @@ fn syntax_reasons_are_escaped_once() {
 fn a_tab_error_points_at_the_tab() {
     let e = fail("apiVersion: rdy/v1\nmetadata:\n\tproduct: a\n");
     assert_eq!(place(&e), (3, 1), "{e:?}");
+    // A tab that ends the file is reported where it is, never at column 0 (found by the property tests).
+    let e = fail("apiVersion: rdy/v1\n:  'apiVersion: rdy/v1\n\t");
+    assert_eq!(place(&e), (3, 1), "{e:?}");
     // Tabs inside a line are fine.
     pass(&spec_with_entry(
         "  - id: host.cpu\n    a:\t1\n    b: [1,\t2]\n",
