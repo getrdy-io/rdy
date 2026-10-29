@@ -111,7 +111,8 @@ pub struct Report {
     pub exit_code: u8,
     /// Counts of the results.
     pub summary: Summary,
-    /// One entry per spec check, in spec order. Sort by bucket for display.
+    /// One entry per spec check, in spec order, at most 256. Sort by bucket for display.
+    #[cfg_attr(feature = "schema", schemars(length(max = 256)))]
     pub checks: Vec<CheckResult>,
     /// Every file read, command, lookup, connection and API request, in order. At most 5000 entries.
     #[cfg_attr(feature = "schema", schemars(length(max = 5000)))]
@@ -121,6 +122,7 @@ pub struct Report {
     pub actions_truncated: bool,
     /// How many entries of each kind were dropped. `read`, `read_dir`, `stat` and `coalesced` entries
     /// are dropped first; any other kind only as a last resort.
+    #[cfg_attr(feature = "schema", schemars(extend("maxProperties" = 32)))]
     pub actions_dropped: BTreeMap<String, u64>,
     /// What the redactor changed in this report.
     pub redaction: Redaction,
@@ -320,8 +322,9 @@ pub struct SpecRef {
     /// `metadata.contact`.
     #[serde(default)]
     pub contact: Option<String>,
-    /// `metadata.annotations`.
+    /// `metadata.annotations`, at most 32.
     #[serde(default)]
+    #[cfg_attr(feature = "schema", schemars(extend("maxProperties" = 32)))]
     pub annotations: BTreeMap<String, String>,
 }
 
@@ -569,8 +572,13 @@ pub struct KubeIdentity {
     /// `true` when `user` came from `SelfSubjectReview`. `false` when it is the kubeconfig user, which
     /// the API server did not verify.
     pub user_verified: bool,
-    /// Base name of the kubeconfig credential plugin that ran, if any.
+    /// Base name of the kubeconfig credential plugin that ran, if any. One to 255 letters, digits, `.`,
+    /// `_`, `+` or `-`: it never carries a path or arguments.
     #[serde(default)]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(regex(pattern = r"^[A-Za-z0-9._+-]{1,255}$"))
+    )]
     pub exec_plugin: Option<String>,
     /// The context skips TLS verification.
     #[serde(default)]
@@ -744,14 +752,16 @@ pub struct CheckResult {
     /// rdy's text when the spec's fix replaced it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub builtin_fix: Option<String>,
-    /// Measured values, at most 64 KiB. Keys are per check id, in snake_case, with the unit in the name
-    /// (`_bytes`, `_ms`, `_percent`). Keys are only ever added.
+    /// Measured values, at most 64 KiB and 64 keys. Keys are per check id, in snake_case, with the unit
+    /// in the name (`_bytes`, `_ms`, `_percent`). Keys are only ever added. A value is a scalar, or a
+    /// list or object of at most three levels, with every text at most 4 KiB.
     #[serde(default)]
     pub observed: Option<Map<String, Value>>,
     /// Thresholds that applied after defaults. Same rules as `observed`.
     #[serde(default)]
     pub expected: Option<Map<String, Value>>,
-    /// Hard and soft needs the check declared, and whether each was met.
+    /// Hard and soft needs the check declared, and whether each was met. At most 32.
+    #[cfg_attr(feature = "schema", schemars(length(max = 32)))]
     pub needs: Vec<NeedState>,
     /// Set when some sources could not be read. A partial check never blocks on data it could not read.
     #[serde(default)]
@@ -945,7 +955,8 @@ pub struct Redaction {
     pub ruleset: RedactionRuleset,
     /// Total replacements.
     pub total: u64,
-    /// Replacements per rule name.
+    /// Replacements per rule name, at most 64 rules.
+    #[cfg_attr(feature = "schema", schemars(extend("maxProperties" = 64)))]
     pub by_rule: BTreeMap<String, u64>,
 }
 
