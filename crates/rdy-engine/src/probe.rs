@@ -33,11 +33,16 @@
 //! says when it cut. `env` reads a variable the check declared in `CheckInfo::env`, and the log records
 //! the name and never the value.
 //!
+//! **Native calls.** `Probe::native` takes a [`NativeCall`], a closed enum, never a closure. Each
+//! variant has one policy row and writes one `native` entry that holds the call and never the answer.
+//! A `Statvfs` path passes the read rules. The machine id is opaque and run-level only (see the
+//! `native` module, ADR 0014).
+//!
 //! **What is here, and what is not.** The handle, the log, the read policy, `read`, `read_tail`,
-//! `read_dir`, `stat`, `env` and `exec`, and the live file backend (`live_backend`, feature
+//! `read_dir`, `stat`, `env`, `exec` and `native`, and the live backend (`live_backend`, feature
 //! `runtime`). Still to come, each in its own ticket:
 //!
-//! - names, TCP, TLS, HTTP and native calls: the network and native tickets. They open their entries
+//! - names, TCP, TLS and HTTP: the network tickets. They open their entries
 //!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp, http and kube
 //!   call writes exactly one entry (M1-091, M1-103). A kube request writes its entry through
 //!   [`Probe::kube_call`], which the read-only guard of `rdy-checks-k8s` calls;
@@ -69,6 +74,10 @@ pub use live::live_backend;
 pub use log::{
     ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, COALESCE_OK_AFTER, DENIED_TARGETS, MAX_ENTRIES,
 };
+pub use native::{
+    MachineId, NativeCall, NativeValue, RULE_MACHINE_ID, Resource, RlimitInfo, StatvfsInfo,
+    UnameInfo,
+};
 pub use policy::{ReadGuard, Refused};
 
 use log::{ActionLog, Limits, Pending};
@@ -76,6 +85,7 @@ use log::{ActionLog, Limits, Pending};
 #[cfg(feature = "runtime")]
 mod live;
 mod log;
+mod native;
 mod policy;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) mod replay;
@@ -152,6 +162,12 @@ pub enum ProbeError {
         /// The child's process id.
         pid: u32,
     },
+    /// The OS has no source for this call yet. A check maps it to `CheckError::Unsupported`, so the
+    /// result is `skipped`, not yet on this OS.
+    #[error(
+        "{0} is not available on this OS in this version of rdy. Fix: none needed, the result is skipped here; a later version adds it"
+    )]
+    Unsupported(String),
     /// Any other I/O failure. The text is the OS message.
     #[error("{0}. Fix: check the message above and the state of the machine, then run again")]
     Io(String),
@@ -177,6 +193,16 @@ impl ProbeError {
         }
     }
 
+    /// The error for a failed native call. A refusal from the live backend (a `Statvfs` path that is a
+    /// link to a denied place) becomes `Denied`, and `Unsupported` becomes [`ProbeError::Unsupported`].
+    /// `what` is the path as the log shows it and `api` the call's name.
+    fn from_native_io(error: &io::Error, what: &str, api: &str) -> Self {
+        if error.kind() == io::ErrorKind::Unsupported {
+            return Self::Unsupported(format!("the native call {api}"));
+        }
+        Self::from_file_io(error, what)
+    }
+
     /// Maps what `table::run` returns.
     #[cfg(feature = "runtime")]
     fn from_command(error: CommandError) -> Self {
@@ -197,7 +223,9 @@ impl ProbeError {
             Self::Denied { .. } => ActionOutcome::Denied,
             Self::Policy(_) | Self::Table(_) => ActionOutcome::Denied,
             Self::Timeout | Self::Hung { .. } => ActionOutcome::Timeout,
-            Self::NotFound | Self::PermissionDenied | Self::Io(_) => ActionOutcome::Failed,
+            Self::NotFound | Self::PermissionDenied | Self::Unsupported(_) | Self::Io(_) => {
+                ActionOutcome::Failed
+            }
         }
     }
 
@@ -433,6 +461,16 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
     /// the run-level probe reads the few the engine needs (`Probe::run_env`). The live backend reads the
     /// process environment and a fixture backend answers from its record.
     fn env(&self, name: &str) -> Option<String>;
+    /// Runs one OS call from the closed list. The probe has applied the policy row of the variant. A
+    /// `Statvfs` call also gets the check's [`ReadGuard`], and a backend that resolves links applies
+    /// [`ReadGuard::admit_real`] to the real path before it asks the file system. An OS with no source
+    /// for the call returns an `io::Error` of kind `Unsupported`, which the probe reports as
+    /// [`ProbeError::Unsupported`]. The answer must be the value kind of the call: the probe checks.
+    fn native<'a>(
+        &'a self,
+        call: &'a NativeCall,
+        guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<NativeValue>>;
     /// Runs a command that the probe already checked against the command table. Unlike the file
     /// calls this returns a [`ProbeError`], because a start failure, a timeout and a command that would
     /// not die are not `io::Error` kinds.

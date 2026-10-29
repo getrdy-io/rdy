@@ -396,6 +396,10 @@ tests policy.
   the declared prefixes alike, so `reads: ["/proc/net"]` reads `/proc/net/tcp`. The device and inode of
   each password and sudo file is recorded when the live backend is made, and a hard link or a bind
   mount with that identity is refused whatever its name.
+- The machine id files (`etc/machine-id*`, `var/lib/dbus/machine-id*`) are on the deny list at any depth,
+  for every reader. A check that declares `/` still cannot read them, so the raw id cannot reach
+  `observed` or the report. The `MachineId` call reads them through a guard that admits those two real
+  paths and nothing else (M1-046).
 - macOS: `realpath`, the checks, then open with `O_NOFOLLOW_ANY | O_NONBLOCK` (no link anywhere along
   the path, so a directory swapped for a link after the check cannot redirect the open). The type comes
   from `fstat` of the descriptor, the descriptor must have the same device and inode as the first
@@ -462,7 +466,16 @@ tests policy.
   - `Uname`, `Rlimit(resource)`, `Hostname`, `SystemRoots`.
   - `MachineId`: Windows `MachineGuid`; Linux reads `/etc/machine-id` as a file; macOS has none in M1,
     so its `host_id` is null. The raw value never enters the log or the report; only 01's salted
-    `host_id` does.
+    `host_id` does. The probe refuses it from a check's probe (run-level only), and its type,
+    `MachineId`, has no `Display`, `Serialize` or public getter and a `Debug` that shows nothing (M1-046).
+  - As built in M1-046: Linux has all of them except `SystemRoots`, which M1-092 builds with the TLS
+    facade. macOS has all of them except `SystemRoots` and `MachineId` (it has no machine id in M1).
+    Windows has none yet, so each reports `Unsupported`, which a check maps to skipped, not yet
+    on this OS; the Windows `MachineGuid` read goes with `host_id` in M2-002. The log entry holds
+    `api` and `path` or `resource`, never the answer.
+  - `StatvfsInfo::no_exec` is an `Option<bool>`. Linux and Android set it from `ST_NOEXEC`. macOS has no
+    such flag in `statvfs`, so it is `None`: unknown. A check that forbids `noexec` reports "not
+    verified" for `None`, never a pass. Reading `MNT_NOEXEC` from `statfs` is a later ticket.
 - No `sysinfo` in M1. In M2 its variants use refresh kinds without environ, cmdline, cwd and root.
 - No `bind()` port probes. `host.ports` reports "owner unknown, not verified".
 
@@ -890,7 +903,7 @@ pub enum NativeCall { Statvfs { path: PathBuf }, Uname, Rlimit(Resource), Hostna
 #[non_exhaustive]
 pub enum ProbeError { Denied { rule: &'static str, what: String }, Policy(PolicyError), Table(TableError),
                       NotFound, PermissionDenied, Timeout, Hung { pid: u32 }, Net(NetFailure), Io(String),
-                      NotRecorded(String) }   // Clone + PartialEq + Eq; every message ends with a Fix: hint
+                      NotRecorded(String), Unsupported(String) }   // Clone + PartialEq + Eq; every message ends with a Fix: hint
 pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay only; raw I/O, no policy
     // The ReadGuard is the check's os and `reads`. A backend that resolves links applies
     // `guard.admit_real(real)` to the real path before it opens anything and reports a refusal as
@@ -903,7 +916,10 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
     fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> { /* table::run */ }
     fn resolve<'a>(&'a self, host: &'a str) -> BoxFuture<'a, io::Result<Vec<IpAddr>>>;
     fn connect<'a>(&'a self, addr: SocketAddr) -> BoxFuture<'a, io::Result<BoxedStream>>;
-    fn native<'a>(&'a self, call: &'a NativeCall) -> BoxFuture<'a, io::Result<NativeValue>>;
+    // The ReadGuard matters to `Statvfs` only: a backend that resolves links judges the real path with
+    // `guard.admit_real` before it asks the file system. An OS with no source returns an `io::Error` of
+    // kind Unsupported, which the probe reports as `ProbeError::Unsupported` (M1-046).
+    fn native<'a>(&'a self, call: &'a NativeCall, guard: &'a ReadGuard) -> BoxFuture<'a, io::Result<NativeValue>>;
 }
 
 // output, report, redact
@@ -1013,23 +1029,32 @@ one clippy rule.
 
 Global rules, because `call` runs on kube's buffer worker without a check id.
 
-1. **Path pre-filter.** (M1-103 builds the frame: method, POST rules, the fixed body, a conservative
-   secrets rule, this pre-filter, the query keys, the field selectors that `pods` and `events` lists
-   must carry, the request header allow list of rule 8 and the table in section 4. M1-104 adds the full
-   request-info parser, the `namespaces/secrets` exception, the `Impersonate-*` value rule, the citation
-   test and validation of the other decoded selector values. kube writes `?&k=v`, with a `&` before the
-   first parameter and a bare `?` for none, so both are accepted. `resourceVersion`, so
-   `ListParams::match_any()`, is refused as a query key.) Refuse a path containing `%`, `..`, `//`, `;`, an empty segment, a trailing `/`
+1. **Path pre-filter.** (M1-103 built the frame: method, POST rules, the fixed body, this pre-filter,
+   the query keys, the field selectors that `pods` and `events` lists must carry, the request header
+   allow list of rule 8 and the table in section 4. M1-104 added the request-info parser of rule 2, the
+   `namespaces/secrets` exception, the `Impersonate-*` value rule, the citation test and the checks on
+   decoded values. kube writes `?&k=v`, with a `&` before the first parameter and a bare `?` for none,
+   so both are accepted. `resourceVersion`, so `ListParams::match_any()`, is refused as a query key.
+   A key may appear once.) Refuse a path containing `%`, `..`, `//`, `;`, an empty segment, a trailing `/`
    or a non-ASCII byte. The `%` rule applies to the path only. Query values are decoded once, then
    validated (kube-rs percent-encodes `fieldSelector`). Refuse `Upgrade` and `Connection: upgrade`.
    Allowed query keys: `limit`, `continue`, `labelSelector`, `fieldSelector`. Anything else, including
-   `watch`, `follow` and `dryRun`, is refused.
+   `watch`, `follow` and `dryRun`, is refused. After the one decoding, each value has a short character
+   set: a `continue` token is base64 (`A-Z a-z 0-9 - _ + / =`); a label selector is letters, digits,
+   space and `. _ - / , = ! < > ( )`; a field selector is letters, digits and `. _ - / : , = !`, and
+   each of its terms has a key and an operator. Each is at most 4096 bytes. A decoded `&`, `;`, quote,
+   brace, control character, `%` or backslash is refused, so no value can carry text the raw form hid.
 2. **Parse** into group, version, namespace, resource, name and subresource, following the API server's
    request-info rules:
    - `/api/v1/namespaces/secrets` is a GET of a namespace named `secrets`, so it is allowed.
    - `/api/v1/namespaces/x/secrets/y` is refused.
    - `/api/v1/namespaces/x/finalize` is a subresource, so it is refused.
    - Any subresource is refused in M1.
+   - The legacy path verbs `watch` and `proxy` (`/api/v1/watch/nodes`) are refused.
+   - The guard still refuses `secrets` in any other segment, so `/api/v1/namespaces/secrets/pods` and
+     `/api/v1/namespaces/secrets/persistentvolumeclaims` are refused as Secrets: a namespace called
+     `secrets` cannot have its claims or events listed. That is deliberate. The one exception is the
+     namespace GET above.
 3. **Discovery GETs:** `/version`, `/api`, `/apis`, `/api/v1`, `/apis/<group>` and
    `/apis/<group>/<version>`. The group must be a DNS-1123 subdomain and the version must match
    `^v[0-9]+((alpha|beta)[0-9]+)?$`. These serve `k8s.access`, `k8s.version` `apis`, the `k8s.admission`
@@ -1037,7 +1062,11 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
    `templates.gatekeeper.sh`, `constraints.gatekeeper.sh`) and Karpenter detection in `k8s.nodes`.
 4. **`rdy_checks_k8s::ALLOWED`**, M1. Each entry names the check and field it serves, and a unit test
    asserts every entry is cited by at least one check's `CheckInfo` and that `secrets` appears nowhere.
-   k8s-expert confirms the list against 03 before the guard ticket starts.
+   k8s-expert confirms the list against 03 before the guard ticket starts. A check is cited by its id:
+   every id in `ALLOWED[].checks` is the `id` of a `CheckInfo`. No k8s check exists until M1-106, so the
+   test holds a short list of ids that are still to be built, proves each is a heading of 03, and fails
+   when an id is both built and on the list. Each check ticket moves its id from the list to the
+   `CheckInfo` set that the test reads.
 
 | Group, resource | Verbs and scope | Check: what it reads |
 | --- | --- | --- |
@@ -1073,14 +1102,21 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
    Every other method is refused.
 8. **Headers.** `Impersonate-*` headers are allowed only on the access and rules review POSTs. The value
    must equal the validated spec `as:` value: `system:serviceaccount:<dns1123>:<dns1123>`, or a user
-   string with no control characters, at most 253 bytes. Otherwise only values the operator's kubeconfig
-   sets are allowed. The header name is logged, never a token.
+   string of printable ASCII (bytes 0x20 to 0x7E) with no space at either end, at most 253 bytes. Otherwise only
+   values the operator's kubeconfig sets are allowed. The header name is logged, never a token.
+
+   The guard takes the `as:` value through `ImpersonateAs::new` and `guarded_service_as`. With it, one
+   `Impersonate-User` header with exactly that value passes on `selfsubjectaccessreviews` and
+   `selfsubjectrulesreviews`. `Impersonate-Group`, `-Uid` and `-Extra-*` never pass, a second value never
+   passes, and the identity review (`selfsubjectreviews`) never carries the header, because it shows who
+   rdy really is. Without an `as:` value every `Impersonate-*` header is refused. Nothing builds the
+   guard with a value yet: the check that sends the header (`k8s.rbac`) does, when it lands.
 
    M1-103 builds the allow list under this rule. The guard sees the request as the caller built it, above
    kube's layers, so it refuses every header except `accept`, `content-type` and `content-length`
    (kube's request builders set the first two). A check-set `Authorization`, `X-Remote-User`,
    `X-Remote-Group`, `X-HTTP-Method-Override` or `Host` is refused as a header, and the log entry names
-   the header and never its value. `Impersonate-*` is refused outright until M1-104 adds the value rule.
+   the header and never its value. M1-104 added the value rule above.
 9. **Data.** Response bodies are capped at 32 MiB. Spec `namespace` and `name` values are DNS-1123
    (rdy-spec).
 10. **Refusals.** Every refusal is a `kube` entry with outcome `denied` and the rule name. The request
