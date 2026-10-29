@@ -300,10 +300,17 @@ pick_downloader() {
 fetch() {
     url="$RELEASE_BASE/v$VERSION/$1"
     rc=0
+    # The two signed-list files are a few KB. curl stops a bigger one while it downloads. wget has no
+    # such flag, so check_small checks the size after the download for both tools.
+    max=''
+    case $1 in
+        SHA256SUMS | SHA256SUMS.sigstore.json) max=$MAX_SMALL ;;
+    esac
     case $DL in
         curl)
             curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL \
                 --connect-timeout 20 --speed-limit 1024 --speed-time 60 --retry 2 \
+                ${max:+--max-filesize $max} \
                 -o "$WORK/$1" "$url" < /dev/null || rc=$?
             ;;
         wget)
@@ -319,6 +326,11 @@ fetch() {
             die "could not make a secure connection to download $1." \
                 "a proxy that re-signs TLS, or a CA bundle that does not trust it (exit $rc)." \
                 "point SSL_CERT_FILE or CURL_CA_BUNDLE at your CA bundle, or download the files by hand and check them (see the docs)."
+            ;;
+        curl:63)
+            die "$1 is too large for this file." \
+                "the download was replaced or damaged." \
+                "do not use this download. Tell security@getrdy.io. Nothing was installed."
             ;;
         curl:22 | wget:8)
             if [ -n "${2:-}" ]; then
@@ -366,7 +378,7 @@ check_cosign() {
     if ! command -v cosign > /dev/null 2>&1; then
         die "cosign is not installed, so the release signature cannot be checked." \
             "install.sh checks the signature of SHA256SUMS with cosign $COSIGN_FLOOR or newer, and this machine has none on PATH." \
-            "install cosign (https://docs.sigstore.dev/cosign/system_config/installation/) and run this script again, or check the release by hand with scripts/verify-release.sh v$VERSION (see the install docs). Nothing was installed."
+            "install cosign (https://docs.sigstore.dev/cosign/system_config/installation/) and run this script again, or check the release by hand with verify-release.sh from https://github.com/$SIGNER_REPO/blob/v$VERSION/scripts/verify-release.sh (it needs cosign too; read it first). Nothing was installed."
     fi
     COSIGN=$(command -v cosign)
     cv=$("$COSIGN" version < /dev/null 2> /dev/null | awk '/GitVersion:/ { print $2; exit }') || cv=''
@@ -430,7 +442,6 @@ verify_signature() {
     fi
     sig_sums=$1
     sig_bundle="$1.sigstore.json"
-    check_small "$sig_sums" SHA256SUMS
     check_small "$sig_bundle" SHA256SUMS.sigstore.json
     # The bundle must be the v0.3 format. Older cosign accepted a legacy form that could skip the
     # identity checks (GHSA-fx35-mq7g-6g98). cosign 3.1.3 fixed that. This is a second guard.
@@ -641,6 +652,8 @@ main() {
         "this release looks incomplete: it has no SHA256SUMS." \
         "the release is still being published, or the version is wrong." \
         "check RDY_VERSION and the release page, and try again later. Nothing was installed."
+    # The size cap holds on the override path too.
+    check_small "$WORK/SHA256SUMS" SHA256SUMS
     # With the override the bundle is not needed, so a release without one still installs on hash only.
     if ! skip_signature; then
         fetch SHA256SUMS.sigstore.json \

@@ -369,7 +369,7 @@ export FAKE_TRIGGER
 # The bundle format guard (M1-015). install.sh and verify-release.sh refuse a bundle that is not v0.3,
 # that has a legacy key, or that has a JSON escape. A release that fails here is never published.
 # Each spec is name:mediaType:extra JSON members. The escape spec has a backslash, u0053, in a key.
-bs='\'
+bs=$(printf '\134')
 for spec in "legacy:application/vnd.dev.sigstore.bundle+json;version=0.1:" \
     "none::" \
     'legacykey:application/vnd.dev.sigstore.bundle.v0.3+json:,"base64Signature":"ZmFrZQ=="' \

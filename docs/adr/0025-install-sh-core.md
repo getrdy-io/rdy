@@ -94,10 +94,15 @@ choices M1-015 made:
   of the two scripts equal.
 - A set trust variable exits 1 here (the script's only failure code), where `verify-release.sh` uses 64.
   `install.sh` has no "tool missing" code, and 64 stays for bad usage.
-- The bundle and `SHA256SUMS` are each capped at 1 MiB.
-- Open note for the security review: variables with the `COSIGN_` prefix are not refused, here or in
-  `scripts/verify-release.sh`. M1-015 did not establish whether any of them can weaken a check. If one
-  can, add it to the trust variable list in both scripts and the test that keeps them equal.
+- The bundle and `SHA256SUMS` are each capped at 1 MiB. curl gets `--max-filesize` for both, and
+  `check_small` checks the size after the download for both tools. The cap on `SHA256SUMS` also holds
+  on the override path.
+- `COSIGN_`-prefixed variables are not refused, here or in `scripts/verify-release.sh`. The security
+  review read cosign v3.1.4 (`cmd/cosign/cli/commands.go` and `cmd/cosign/main.go`) and found no binding
+  from environment variables to flags. Only the seven trust variables change trust, and both scripts
+  refuse them. Re-check at every cosign pin bump (`.github/release-tools.txt`, `RELEASING.md`). If a
+  `COSIGN_` variable can weaken a check in a later version, add it to the list in both scripts and the
+  test that keeps them equal.
 - The real-cosign install of the first signed alpha is a founder hand step (`RELEASING.md`).
 
 ## Alternatives considered

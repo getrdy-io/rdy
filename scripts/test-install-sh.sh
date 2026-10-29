@@ -64,9 +64,11 @@ cat > /dev/null
 if [ -n "${STUB_CURL_RC:-}" ]; then exit "$STUB_CURL_RC"; fi
 out=''
 url=''
+max=''
 while [ "$#" -gt 0 ]; do
     case $1 in
         -o) out=$2; shift 2 ;;
+        --max-filesize) max=$2; shift 2 ;;
         --proto | --proto-redir | --connect-timeout | --retry | --speed-limit | --speed-time) shift 2 ;;
         -*) shift ;;
         *) url=$1; shift ;;
@@ -78,6 +80,8 @@ case $url in
     *) echo "stub curl: unexpected url $url" >&2; exit 7 ;;
 esac
 [ -f "$STUB_REL/$name" ] || exit 22
+# Like curl, a file over --max-filesize is refused with exit 63.
+if [ -n "$max" ] && [ "$(wc -c < "$STUB_REL/$name")" -gt "$max" ]; then exit 63; fi
 cp "$STUB_REL/$name" "$out"
 EOF
 
@@ -1235,6 +1239,7 @@ sig_suite() {
     mksig
     run
     want_sig_refused
+    want_err 'none of the expected identities matched'
     endcase
 
     begin "wrong identity: our workflow from a branch"
@@ -1243,6 +1248,7 @@ sig_suite() {
     mksig
     run
     want_sig_refused
+    want_err 'none of the expected identities matched'
     endcase
 
     # --- wrong caller (the reusable workflow hole) -------------------------------------------
@@ -1274,7 +1280,7 @@ sig_suite() {
     run
     want_code 1
     want_err 'cosign is not installed'
-    want_err "scripts/verify-release.sh v$VER"
+    want_err "https://github.com/getrdy-io/rdy/blob/v$VER/scripts/verify-release.sh"
     want_err 'fix:'
     # ADR 0025: the stop message does not name the override. The docs do.
     want_no_err 'RDY_INSECURE_SKIP_SIGNATURE'
@@ -1435,7 +1441,7 @@ sig_suite() {
     bad_bundle "a legacy base64Signature key" "$V3" ',"base64Signature":"ZmFrZQ=="' 'v0.3 format'
     bad_bundle "a legacy rekorBundle key" "$V3" ',"rekorBundle":{}' 'v0.3 format'
     # base64 + backslash + u0053 + ignature spells base64Signature once the escape is decoded.
-    BS='\'
+    BS=$(printf '\134')
     bad_bundle "a JSON \\u escape" "$V3" ",\"base64${BS}u0053ignature\":\"x\"" 'JSON \u escape'
 
     begin "a bundle over 1 MiB is refused"
@@ -1458,6 +1464,24 @@ sig_suite() {
     want_code 1
     want_err 'too large'
     want_no_verify
+    want_nothing_installed
+    want_no_canary
+    endcase
+
+    begin "a SHA256SUMS over 1 MiB is refused on the override path too, with curl and with wget"
+    defrel
+    skipsig
+    head -c 1100000 /dev/zero | tr '\0' ' ' >> "$REL/SHA256SUMS"
+    run
+    want_code 1
+    want_err 'too large'
+    want_nothing_installed
+    want_no_canary
+    want_log '--max-filesize 1048576'
+    DL=wget
+    run
+    want_code 1
+    want_err 'too large'
     want_nothing_installed
     want_no_canary
     endcase

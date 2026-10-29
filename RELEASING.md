@@ -130,8 +130,18 @@ Pick the next number `N`. The examples use `v0.1.0-alpha.1`.
    cannot be staged on a real release. `scripts/test-install-sh.sh` proves them with a fake cosign.
 9. **Record.** In the Done log add `- M1-012 hand | <date> | <evidence>` (for the first tag) with: the run
    URL, the `gh release view` output, the `immutable` value, the verify output, the sha256 of `SHA256SUMS`
-   and the Rekor log index. For every release, keep the sha256 and the Rekor index. They go on
+   and the Rekor log index. For the first tag also add `- M1-015 hand | <date> | <evidence>` with the
+   `install.sh` output from step 8 (the `signature ok` and `Installed` lines, exit 0) and the output of
+   the run without cosign (`cosign is not installed`, exit 1, empty folder). For every release, keep the sha256 and the Rekor index. They go on
    `getrdy.io/security` and in `SECURITY.md` when M2 publishes the trust anchors.
+
+## Bumping the pinned cosign
+
+`.github/release-tools.txt` holds the pin. A bump changes what `verify-release.sh`, `sign-release.sh` and
+`install.sh` trust, so before you merge it, re-check that cosign still has no environment-to-flag binding
+(ADR 0025, update for M1-015). Only the seven trust variables that `install.sh` and `verify-release.sh`
+refuse may change trust. Read `cmd/cosign/cli/commands.go` and `cmd/cosign/main.go` of the new version.
+If a `COSIGN_` variable can weaken a check, add it to the refused list in both scripts.
 
 ## If something fails
 
