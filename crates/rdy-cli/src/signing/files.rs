@@ -88,8 +88,13 @@ pub fn read_private(path: &Path, cap: usize) -> Result<Zeroizing<Vec<u8>>, FileE
 ///
 /// Nothing in a public key is secret, so there is no owner or mode rule, and a symlink is followed:
 /// the person who runs the command names the file and then compares the fingerprint it holds with the
-/// one the vendor published, which is what makes the key trusted. The file must be a regular file. On
-/// Unix it is opened without blocking, so a named pipe cannot hang the command.
+/// one the vendor published, which is what makes the key trusted. The file must be a regular file.
+///
+/// Opening some devices has side effects (a watchdog arms, a tape rewinds), and a person may run this
+/// under `sudo`. So the path is checked with `stat` first, which follows a symlink, and a target that is
+/// not a regular file is refused before it is opened. On Unix the open handle is then compared with what
+/// `stat` saw (device and inode), so a path swapped in between is refused too. The open does not block,
+/// so a named pipe that appears in that window cannot hang the command.
 ///
 /// # Errors
 ///
@@ -98,9 +103,13 @@ pub fn read_public(path: &Path, cap: usize) -> Result<Vec<u8>, FileError> {
     let unreadable = |err: &io::Error| FileError::Unreadable {
         reason: crate::error::IoReason::from_io(err),
     };
+    let seen = std::fs::metadata(path).map_err(|err| unreadable(&err))?;
+    if !seen.is_file() {
+        return Err(FileError::NotRegular);
+    }
     let mut file = open_public(path).map_err(|err| unreadable(&err))?;
     let opened = file.metadata().map_err(|err| unreadable(&err))?;
-    if !opened.is_file() {
+    if !opened.is_file() || !same_file(&seen, &opened) {
         return Err(FileError::NotRegular);
     }
     let mut buf = Vec::new();
@@ -112,6 +121,20 @@ pub fn read_public(path: &Path, cap: usize) -> Result<Vec<u8>, FileError> {
         return Err(FileError::TooLarge);
     }
     Ok(buf)
+}
+
+/// Unix: the handle is the file that `stat` looked at.
+#[cfg(unix)]
+fn same_file(seen: &std::fs::Metadata, opened: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    seen.dev() == opened.dev() && seen.ino() == opened.ino()
+}
+
+/// Other platforms have no inode to compare.
+#[cfg(not(unix))]
+fn same_file(_seen: &std::fs::Metadata, _opened: &std::fs::Metadata) -> bool {
+    true
 }
 
 #[cfg(unix)]

@@ -54,6 +54,8 @@ struct Transcript {
     lines: VecDeque<&'static str>,
     hidden: VecDeque<&'static str>,
     screen: Screen,
+    /// Runs when the person starts to type an answer: something else changes while the question is open.
+    while_asking: Option<Box<dyn FnOnce()>>,
 }
 
 impl Transcript {
@@ -68,6 +70,20 @@ impl Transcript {
             lines: lines.iter().copied().collect(),
             hidden: hidden.iter().copied().collect(),
             screen: Rc::clone(&screen),
+            while_asking: None,
+        };
+        (Prompter::new(term), Out(screen))
+    }
+
+    /// A terminal where `change` happens while the question is open, and then the person types `y`.
+    fn answering_after(change: impl FnOnce() + 'static) -> (Prompter<Self>, Out) {
+        let screen = Screen::default();
+        let term = Self {
+            interactive: true,
+            lines: VecDeque::from(["y"]),
+            hidden: VecDeque::new(),
+            screen: Rc::clone(&screen),
+            while_asking: Some(Box::new(change)),
         };
         (Prompter::new(term), Out(screen))
     }
@@ -94,6 +110,9 @@ impl Terminal for Transcript {
     }
 
     fn read_line(&mut self) -> io::Result<Option<String>> {
+        if let Some(change) = self.while_asking.take() {
+            change();
+        }
         Ok(self.lines.pop_front().map(|line| {
             self.screen.borrow_mut().push_str(&format!("{line}\n"));
             line.to_owned()
@@ -302,6 +321,33 @@ macro_rules! golden {
     ($name:literal) => {
         tidy(include_str!(concat!("golden/", $name)))
     };
+}
+
+/// Every golden file is a run of lines that 07 appendix C.9 or C.10 shows, so the goldens cannot drift
+/// from the document that is the source of truth for the wording.
+#[test]
+fn every_golden_is_text_that_07_shows() {
+    let doc_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/plan/07-cli-ux.md");
+    let doc = std::fs::read_to_string(&doc_path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", doc_path.display()))
+        .replace("\r\n", "\n");
+    let doc_lines: Vec<&str> = doc.lines().map(str::trim_end).collect();
+    let prose = doc.split_whitespace().collect::<Vec<_>>().join(" ");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/trust_cmds/golden");
+    let mut seen = 0;
+    for entry in std::fs::read_dir(&dir).expect("golden dir") {
+        let path = entry.expect("entry").path();
+        let text = std::fs::read_to_string(&path).expect("golden");
+        let golden = tidy(&text);
+        let lines: Vec<&str> = golden.lines().collect();
+        // Most goldens are a run of lines of a console block. A few are shown inline in the prose, which
+        // wraps, so each of their lines only has to be somewhere in the text with line ends as spaces.
+        let shown = doc_lines.windows(lines.len()).any(|window| window == lines)
+            || lines.iter().all(|line| prose.contains(line));
+        assert!(shown, "{} is not text that 07 shows", path.display());
+        seen += 1;
+    }
+    assert_eq!(seen, 10, "a golden was added or removed: update this count");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -540,6 +586,10 @@ fn secret_key_text_is_refused_with_the_shell_history_sentence_and_is_not_echoed(
         secret.clone(),
         line.clone(),
         "untrusted comment: rdy secret key ...".to_owned(),
+        // A paste often carries a space or a line end. It must not turn into a file name that is echoed.
+        format!(" {line}"),
+        format!("{line} "),
+        format!("{line}\r"),
     ] {
         let (mut prompter, mut out) = Transcript::answering("y");
         let err = add(
@@ -762,7 +812,7 @@ fn a_user_with_no_home_gets_a_fix_and_nothing_is_asked() {
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn root_add_writes_the_system_store_and_makes_nothing_under_home() {
+fn system_scope_add_writes_the_system_store_and_makes_nothing_under_home() {
     let env = Env::new();
     let key = new_key();
     let file = env.pub_file("acme-platform.pub", &key);
@@ -787,7 +837,7 @@ fn root_add_writes_the_system_store_and_makes_nothing_under_home() {
 }
 
 #[test]
-fn root_list_and_remove_see_only_the_system_store() {
+fn system_scope_list_and_remove_see_only_the_system_store() {
     let env = Env::new();
     let (user_key, system_key) = (new_key(), new_key());
     env.put_store(&env.user_store(), &[("acme-user", &user_key, None)]);
@@ -1065,6 +1115,96 @@ fn a_user_who_tries_to_remove_a_system_key_is_told_to_use_sudo() {
             .expect("lists")
             .contains("acme-platform")
     );
+}
+
+#[test]
+fn a_key_removed_while_the_question_is_open_does_not_come_back() {
+    let env = Env::new();
+    let (old, new) = (new_key(), new_key());
+    env.put_store(&env.user_store(), &[("acme-platform", &old, None)]);
+    set_mode(&env.user_store(), 0o600);
+    set_mode(env.user_store().parent().expect("dir"), 0o700);
+    let file = env.pub_file("new.pub", &new);
+    // The old key is found to be compromised and removed from another shell while the question is open.
+    let store = env.user_store();
+    let (mut prompter, mut out) = Transcript::answering_after(move || {
+        std::fs::write(&store, "apiVersion: rdy/v1\nkind: TrustStore\nkeys: []\n")
+            .expect("rewrite");
+    });
+    add(
+        &add_args("acme-platform", &file, false, None),
+        &env.user(),
+        ADDED,
+        &mut prompter,
+        &mut out,
+    )
+    .expect("adds");
+    let text = std::fs::read_to_string(env.user_store()).expect("store");
+    assert!(text.contains(&new.public_key_base64()), "{text}");
+    assert!(!text.contains(&old.public_key_base64()), "{text}");
+}
+
+#[test]
+fn a_key_added_while_the_question_is_open_is_found_as_a_duplicate_after_the_yes() {
+    let env = Env::new();
+    let key = new_key();
+    let file = env.pub_file("acme.pub", &key);
+    let store = env.user_store();
+    let entry = format!(
+        "apiVersion: rdy/v1\nkind: TrustStore\nkeys:\n  - product: acme-platform\n    key: {}\n    added_at: {ADDED}\n",
+        key.public_key_base64()
+    );
+    let (mut prompter, mut out) = Transcript::answering_after({
+        let store = store.clone();
+        move || {
+            std::fs::create_dir_all(store.parent().expect("dir")).expect("dir");
+            std::fs::write(&store, entry).expect("write");
+            set_mode(&store, 0o600);
+            set_mode(store.parent().expect("dir"), 0o700);
+        }
+    });
+    let err = add(
+        &add_args("acme-platform", &file, false, None),
+        &env.user(),
+        ADDED,
+        &mut prompter,
+        &mut out,
+    )
+    .expect_err("now a duplicate");
+    assert_eq!(err.exit_code().code(), 64);
+    assert!(err.to_string().contains("already trusted"), "{err}");
+    let text = std::fs::read_to_string(&store).expect("store");
+    assert_eq!(text.matches(&key.public_key_base64()).count(), 1, "{text}");
+}
+
+#[test]
+fn a_user_who_tries_to_remove_a_system_key_by_id_is_told_the_id_in_the_sudo_line() {
+    let env = Env::new();
+    let key = new_key();
+    env.put_store(&env.system_store(), &[("acme-platform", &key, None)]);
+    let id = public(&key).key_id().to_string();
+    let mut out = Vec::new();
+    let err = remove(
+        &remove_args("acme-platform", Some(&id.to_ascii_lowercase())),
+        &env.user(),
+        &mut out,
+    )
+    .expect_err("not theirs");
+    assert!(
+        err.hint().contains(&format!(
+            "sudo rdy trust remove acme-platform --key-id {id}"
+        )),
+        "{}",
+        err.hint()
+    );
+    // An id the system store does not have gets no sudo advice.
+    let err = remove(
+        &remove_args("acme-platform", Some("0000000000000000")),
+        &env.user(),
+        &mut out,
+    )
+    .expect_err("no such id anywhere");
+    assert!(!err.hint().contains("sudo"), "{}", err.hint());
 }
 
 #[test]

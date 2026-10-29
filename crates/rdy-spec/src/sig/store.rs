@@ -279,9 +279,11 @@ impl TrustStore {
     ///
     /// # Errors
     ///
-    /// [`TrustAddError`] if `product` already has a key with this key id (a second key with one id would
-    /// make the id useless for picking the key), if `added_at` is not a time of that form, or if the note
-    /// is longer than 512 characters or has a control character. The store is unchanged on an error.
+    /// [`TrustAddError`] if `source` is not [`TrustSource::System`] or [`TrustSource::User`] (a one-run
+    /// key from the `--key` flag is never kept, so it is never added), if `product` already has a key
+    /// with this key id (a second key with one id would make the id useless for picking the key), if
+    /// `added_at` is not a time of that form, or if the note is longer than 512 characters or has a
+    /// control character. The store is unchanged on an error.
     pub fn add(
         &mut self,
         product: ProductSlug,
@@ -290,6 +292,11 @@ impl TrustStore {
         added_at: &str,
         note: Option<&str>,
     ) -> Result<(), TrustAddError> {
+        // Only a file can hold a kept entry. Anything but the two stores is refused, so a source added
+        // to the enum later is not written to a file by accident.
+        if !matches!(source, TrustSource::System | TrustSource::User) {
+            return Err(TrustAddError::NotAStore);
+        }
         if !valid_timestamp(added_at) {
             return Err(TrustAddError::BadTime);
         }
@@ -320,7 +327,9 @@ impl TrustStore {
 
     /// Removes the kept entry for `product` with this key id. Returns true if there was one.
     ///
-    /// A key id is unique within a product in a store, so at most one entry goes.
+    /// A store read from one file has one entry per product and key id, so one entry goes. A store that
+    /// was joined with [`TrustStore::extend`] can hold the same key id from both files, and then both
+    /// entries go.
     pub fn remove(&mut self, product: &ProductSlug, key_id: KeyId) -> bool {
         let before = self.pins.len();
         self.pins.retain(|pin| {
@@ -383,6 +392,9 @@ pub enum TrustAddError {
         /// arrange, so the fingerprints must be compared.
         same_key: bool,
     },
+    /// The source is not a trust file. A key given with `--key` is for one run and is never kept.
+    #[error("only a key pinned in the system or user store can be kept in a trust file")]
+    NotAStore,
     /// `added_at` is not a time like `2026-11-30T16:20:00Z`.
     #[error("the time of the entry is not a time like 2026-11-30T16:20:00Z")]
     BadTime,

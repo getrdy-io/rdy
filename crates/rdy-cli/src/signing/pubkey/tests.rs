@@ -73,6 +73,45 @@ fn secret_key_text_on_the_command_line_is_refused_without_echo() {
 }
 
 #[test]
+fn secret_key_text_with_stray_white_space_is_still_text_and_never_echoed() {
+    let (_, _, secret) = pair();
+    let line = secret.lines().nth(1).expect("key line").to_owned();
+    for (what, arg) in [
+        ("leading space", format!(" {line}")),
+        ("trailing space", format!("{line} ")),
+        ("trailing carriage return", format!("{line}\r")),
+    ] {
+        let err = resolve(&arg).expect_err(what);
+        assert!(
+            matches!(
+                err,
+                GivenKeyError::SecretKey {
+                    origin: Origin::Text
+                }
+            ),
+            "{what}: {err:?}"
+        );
+        let shown = format!("{err} {err:?}");
+        assert!(!shown.contains(&line), "{what}: {shown}");
+    }
+}
+
+#[test]
+fn a_public_key_with_stray_white_space_is_text() {
+    let (key, _, _) = pair();
+    let line = key.public_key_base64();
+    for arg in [
+        format!(" {line}"),
+        format!("{line} "),
+        format!("{line}\r\n"),
+    ] {
+        let given = resolve(&arg).expect("public key text");
+        assert_eq!(given.origin, Origin::Text);
+        assert_eq!(given.key.key_id(), key.key_id());
+    }
+}
+
+#[test]
 fn a_public_key_comment_that_mentions_a_secret_key_is_still_a_public_key() {
     let (key, _, _) = pair();
     let text = format!(

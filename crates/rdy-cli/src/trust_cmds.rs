@@ -20,7 +20,8 @@
 //!   A root run never builds a path under a user's home (INV-04), so `sudo rdy trust add` does not
 //!   touch `~/.config/rdy`.
 //! - **A store that would be refused on read is not changed.** `trust add` and `trust remove` load the
-//!   store they write first, so an unsafe store stops them with `trust_store_insecure`.
+//!   store they write first, so an unsafe store stops them with `trust_store_insecure`. `trust add` loads
+//!   it again after the yes and saves that copy, so a change made while the question was open is kept.
 //! - **A key given with `--key` on `run` or `verify` is never saved** (01 section 4.3, one-run keys). Only
 //!   `trust add` calls [`trust::save`].
 //! - **Windows refuses.** A Windows store cannot be checked or written in M1 (ADR 0027), so `trust add`
@@ -136,7 +137,8 @@ fn finish(
 /// The order matters. Everything that can fail without asking comes first (the platform, the product
 /// name, the key, the note, the store and a duplicate), so nobody is asked about a key that cannot be
 /// saved. Then, with no terminal and no `--yes`, the command refuses before it prints the key. Only
-/// then does it show the key and ask. The store is written after a yes and not before.
+/// then does it show the key and ask. The store is read again after a yes, the key is added to that
+/// copy and it is written. Nothing is written before the yes.
 ///
 /// `now` is the `added_at` stamp (`YYYY-MM-DDTHH:MM:SSZ`). Progress and results go to `out`. The
 /// question goes to the prompt stream of `prompter`.
@@ -160,10 +162,11 @@ pub fn add<T: Terminal>(
     let scope = layout.write_scope();
     let path = layout.path(scope).ok_or(TrustStoreError::NoUserStore)?;
 
-    // The store is read, and refused if unsafe, before anyone is asked. The new entry goes in here, in
-    // memory, so a duplicate id or a bad note stops the command before the question.
-    let mut store = trust::load_scope(layout, scope)?;
-    store
+    // The store is read, and refused if unsafe, before anyone is asked. The new entry goes into this
+    // copy, so a duplicate id or a bad note stops the command before the question. The copy is not
+    // saved: the person may take minutes to answer, and the file can change in that time.
+    let mut checked = trust::load_scope(layout, scope)?;
+    checked
         .add(
             product.clone(),
             given.key.clone(),
@@ -195,6 +198,19 @@ pub fn add<T: Terminal>(
         return Ok(AddOutcome::Declined);
     }
 
+    // After the answer, the store is read again and the key is added to what is on disk now. A key that
+    // was removed while the question was open (after a compromise, say) is not brought back by a save
+    // of the copy from before. The duplicate check runs again too.
+    let mut store = trust::load_scope(layout, scope)?;
+    store
+        .add(
+            product.clone(),
+            given.key.clone(),
+            scope.source(),
+            now,
+            args.note.as_deref(),
+        )
+        .map_err(|e| add_error(&e, path))?;
     let saved = trust::save(layout, &store)?;
     if args.yes {
         let _ = writeln!(out);
@@ -415,7 +431,11 @@ pub fn remove(
         .map(|entry| entry.key().key_id())
         .collect();
     let id = match (&args.key_id, ids.as_slice()) {
-        (_, []) => return Err(no_such_key(&product, path, layout, scope, None)),
+        (wanted, []) => {
+            // No key for the product here. The id is passed on so the fix can name it for `sudo`.
+            let asked = wanted.as_deref().map(|id| (id, &[][..]));
+            return Err(no_such_key(&product, path, layout, scope, asked));
+        }
         (None, [only]) => *only,
         (None, many) => {
             return Err(CliError::usage(
@@ -479,12 +499,21 @@ fn no_such_key(
         Some((_, ids)) if !ids.is_empty() => {
             format!("pick one of these key ids: {}", id_list(ids))
         }
-        _ if in_other_store(layout, scope, product) => format!(
-            "the key is in the system store, {}. To remove it, run as root: sudo rdy trust remove {product}",
-            layout
-                .path(Scope::System)
-                .map_or_else(String::new, |path| shell_word(&path.to_string_lossy()))
-        ),
+        _ if in_other_store(layout, scope, product, asked.map(|(wanted, _)| wanted)) => {
+            // `--key-id` is repeated only when it is 16 hex digits. Other text is never echoed.
+            let key_id = asked
+                .map(|(wanted, _)| wanted)
+                .filter(|wanted| is_key_id_text(wanted))
+                .map_or_else(String::new, |wanted| {
+                    format!(" --key-id {}", wanted.to_ascii_uppercase())
+                });
+            format!(
+                "the key is in the system store, {}. To remove it, run as root: sudo rdy trust remove {product}{key_id}",
+                layout
+                    .path(Scope::System)
+                    .map_or_else(String::new, |path| shell_word(&path.to_string_lossy()))
+            )
+        }
         _ => "run rdy trust list to see which keys are trusted".to_owned(),
     };
     CliError::usage(message, fix)
@@ -495,14 +524,30 @@ fn is_key_id_text(text: &str) -> bool {
     text.len() == 16 && text.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// True when a normal user has no key for the product in the user store but the system store has one. It
-/// is read only for a user run, and only to word the fix line. A store that cannot be read is no.
-fn in_other_store(layout: &Layout, scope: Scope, product: &ProductSlug) -> bool {
+/// True when a normal user has no such key in the user store but the system store has it: a key for the
+/// product, and with `key_id` given, one with that id. It is read only for a user run, and only to word
+/// the fix line. A store that cannot be read is no.
+fn in_other_store(
+    layout: &Layout,
+    scope: Scope,
+    product: &ProductSlug,
+    key_id: Option<&str>,
+) -> bool {
     if scope != Scope::User {
         return false;
     }
-    trust::load_scope(layout, Scope::System)
-        .is_ok_and(|system| system.entries().any(|entry| entry.product() == product))
+    trust::load_scope(layout, Scope::System).is_ok_and(|system| {
+        system.entries().any(|entry| {
+            entry.product() == product
+                && key_id.is_none_or(|wanted| {
+                    entry
+                        .key()
+                        .key_id()
+                        .to_string()
+                        .eq_ignore_ascii_case(wanted)
+                })
+        })
+    })
 }
 
 /// A path as the user will read it, safe to print.

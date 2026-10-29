@@ -3,16 +3,19 @@
 //! `rdy trust add --key <key>` takes either. M1-126 gives `run --key` and `verify --key` the same
 //! argument, so the rule for telling them apart lives here once.
 //!
-//! The argument is key text when it has a line break, starts with `untrusted comment:` or looks like
-//! the one-line base64 of a minisign key (it starts with `RW`, which is how the algorithm bytes `Ed`
-//! encode, and holds only base64 characters). Anything else is a file name. A real file name does not
-//! look like that, so the two never get mixed up.
+//! The argument is judged after its leading and trailing white space is cut off, because a key pasted
+//! into a shell often carries a space or a line end. It is key text when it has a line break, starts
+//! with `untrusted comment:` or looks like the one-line base64 of a minisign key (it starts with `RW`,
+//! which is how the algorithm bytes `Ed` encode, and holds only base64 characters). Anything else is a
+//! file name. A real file name does not look like that, so the two never get mixed up.
 //!
 //! A secret key is never accepted, from a file or as text. Someone who gives `trust add` the wrong
 //! file has a key that is now in their shell history or in an email. [`GivenKeyError::SecretKey`]
 //! says so, and the caller words the refusal.
 //!
-//! Nothing here echoes key text. An error names the file the user gave, or says "the key you typed".
+//! Nothing here echoes key text. An error names the file the user gave, or says "that" for key text.
+//! The secret key test runs first, on the trimmed argument, so a secret key with a stray space or
+//! carriage return is still key text and never becomes a file name that an error would print.
 
 use std::path::{Path, PathBuf};
 
@@ -74,9 +77,10 @@ pub enum GivenKeyError {
     },
 }
 
-/// True when `arg` is key text and not a file name.
+/// True when `arg` is key text and not a file name. White space around it does not count.
 #[must_use]
 pub fn is_key_text(arg: &str) -> bool {
+    let arg = arg.trim();
     let one_line_key = arg.starts_with("RW")
         && arg.len() >= 40
         && arg
@@ -92,8 +96,15 @@ pub fn is_key_text(arg: &str) -> bool {
 /// A [`GivenKeyError`]: the file cannot be read, the text is a secret key, or it is not a public key
 /// that rdy may trust (not a minisign ed25519 key, not a canonical point, or of small order).
 pub fn resolve(arg: &str) -> Result<GivenKey, GivenKeyError> {
-    if is_key_text(arg) {
-        return parse(arg, Origin::Text);
+    let trimmed = arg.trim();
+    // A secret key is found first, so that no later step can take it for a file name and print it.
+    if looks_like_secret_key(trimmed) {
+        return Err(GivenKeyError::SecretKey {
+            origin: Origin::Text,
+        });
+    }
+    if is_key_text(trimmed) {
+        return parse(trimmed, Origin::Text);
     }
     let path = Path::new(arg);
     let origin = Origin::File(path.to_path_buf());

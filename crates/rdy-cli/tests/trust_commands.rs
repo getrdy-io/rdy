@@ -10,7 +10,8 @@
 //! because a root run uses `/etc/rdy` and never reads `HOME` (INV-04). The `root_*` tests do the
 //! opposite: they return early unless `RDY_REQUIRE_ROOT` is set, and then run the real binary as root
 //! against the real `/etc/rdy`, which they leave as they found it. A run that finds a system store
-//! already there fails and touches nothing.
+//! already there fails and touches nothing. They share that one path, so they never run together: a
+//! lock in this file for threads, and the nextest test group `etc-rdy` for processes.
 //!
 //! Windows has its own file, `trust_commands_windows.rs`: there `add` and `remove` are not supported.
 #![cfg(unix)]
@@ -248,8 +249,11 @@ fn add_with_yes_pins_and_list_shows_the_key_id_and_the_fingerprint_in_groups_of_
 #[test]
 fn other_commands_with_key_leave_the_store_unchanged() {
     // `--key` trusts a key for one run and saves nothing (01 section 4.3). `run` and `verify` are not
-    // built yet (M1-126), so today they exit 70. The assertion is the one that must hold when they are:
-    // the store is byte for byte what it was, and no file appears next to it.
+    // built yet (M1-126), so today they exit 70 before they look at the key. The spec and signature are
+    // the real ones that key `b` signed, so when M1-126 makes the commands real, the run goes through the
+    // key path. The exit code is pinned to 70 on purpose: this test turns red when M1-126 lands, and
+    // M1-126 must change it to assert the real run result and an unchanged store (12-progress carry
+    // note). Until then it checks that the store and its folder are what they were.
     if skip_as_root() {
         return;
     }
@@ -271,13 +275,26 @@ fn other_commands_with_key_leave_the_store_unchanged() {
         std::fs::read(home.store()).expect("store"),
         listing(&folder),
     );
-    let spec = home.file("acme-platform.yaml", "apiVersion: rdy/v1\n");
+    let spec = home.file(
+        "acme-platform.yaml",
+        &fixture("minisign-c/acme-platform.yaml"),
+    );
+    home.file(
+        "acme-platform.yaml.minisig",
+        &fixture("minisign-c/acme-platform.yaml.minisig"),
+    );
     for args in [
         vec!["run", &spec, "--key", &b],
         vec!["run", &spec, "--key", &b, "--allow-unsigned"],
         vec!["verify", &spec, "--key", &b],
     ] {
-        let _ = home.run(&args);
+        let out = home.run(&args);
+        assert_eq!(
+            code(&out),
+            70,
+            "run and verify are stubs until M1-126, which must change this assertion: {args:?}: {}",
+            stderr(&out)
+        );
         let after = (
             std::fs::read(home.store()).expect("store"),
             listing(&folder),
@@ -310,7 +327,10 @@ fn a_secret_key_is_refused_with_the_c10_fix_and_nothing_is_written() {
     // As text on the command line: the key line is not echoed, and the shell history is named.
     let whole = secret_key_text();
     let line = whole.lines().nth(1).expect("key line");
-    for text in [whole.as_str(), line] {
+    // A paste with a stray space or line end is still key text, and is never taken for a file name.
+    let (leading, trailing, carriage) =
+        (format!(" {line}"), format!("{line} "), format!("{line}\r"));
+    for text in [whole.as_str(), line, &leading, &trailing, &carriage] {
         let out = home.run(&["trust", "add", "acme-platform", "--key", text, "--yes"]);
         assert_eq!(code(&out), 64, "{}", stderr(&out));
         assert_eq!(golden(&stderr(&out)), golden(GOLDEN_SECRET_TEXT));
@@ -413,7 +433,9 @@ mod pty {
 
     const TIMEOUT_MS: u64 = 20_000;
 
-    /// One test at a time. rexpect forks, and a fork in a busy multi-threaded process is not safe.
+    /// One test at a time inside this test binary, so `cargo test` (threads in one process) is safe.
+    /// rexpect forks, and a fork in a busy multi-threaded process is not safe. nextest runs every test in
+    /// its own process, so there the lock does nothing and is not needed.
     static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
     fn lock() -> MutexGuard<'static, ()> {
@@ -518,6 +540,18 @@ mod pty {
 #[cfg(target_os = "linux")]
 mod root {
     use super::*;
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
+    /// Both tests below read or write the one real `/etc/rdy/trust.yaml`, and one asserts it is absent
+    /// while the other makes it. Under `cargo test` they are threads of one process and this lock
+    /// serializes them. Under nextest each test is its own process, so the test group `etc-rdy` in
+    /// `.config/nextest.toml` (max-threads = 1) does it. Keep the two in step: a new test that touches
+    /// `/etc/rdy` goes in the group's filter and takes this lock.
+    static ETC_RDY: Mutex<()> = Mutex::new(());
+
+    fn lock_etc_rdy() -> MutexGuard<'static, ()> {
+        ETC_RDY.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 
     const SYSTEM_DIR: &str = "/etc/rdy";
     const SYSTEM_STORE: &str = "/etc/rdy/trust.yaml";
@@ -552,6 +586,7 @@ mod root {
         if !wanted() {
             return;
         }
+        let _etc = lock_etc_rdy();
         assert!(
             !Path::new(SYSTEM_STORE).exists(),
             "{SYSTEM_STORE} already exists. This test will not touch it."
@@ -606,6 +641,7 @@ mod root {
         if !wanted() {
             return;
         }
+        let _etc = lock_etc_rdy();
         assert!(
             !Path::new(SYSTEM_STORE).exists(),
             "{SYSTEM_STORE} already exists. This test will not touch it."

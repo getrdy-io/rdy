@@ -625,6 +625,24 @@ fn add_applies_the_rules_the_reader_applies() {
 }
 
 #[test]
+fn add_refuses_a_one_run_source_and_leaves_the_store_unchanged() {
+    let pair = Pair::new();
+    let mut store = TrustStore::new();
+    let err = store
+        .add(
+            slug("acme-platform"),
+            pair.key(),
+            TrustSource::Flag,
+            ADDED,
+            None,
+        )
+        .expect_err("a flag key is never kept");
+    assert_eq!(err, TrustAddError::NotAStore);
+    assert_eq!(store.entries().count(), 0);
+    assert!(!store.to_yaml().contains("acme-platform"));
+}
+
+#[test]
 fn remove_takes_out_one_entry_by_product_and_key_id() {
     let (a, b) = (Pair::new(), Pair::new());
     let mut store = TrustStore::new();

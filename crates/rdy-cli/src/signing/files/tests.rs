@@ -229,3 +229,34 @@ fn a_named_pipe_is_refused_and_does_not_hang() {
         FileError::NotRegular
     ));
 }
+
+#[cfg(unix)]
+#[test]
+fn a_device_is_refused_by_stat_and_a_link_to_one_too() {
+    // /dev/null is a character device on every Unix. The refusal comes from `stat`, before any open.
+    assert!(matches!(
+        read_public(Path::new("/dev/null"), 64).unwrap_err(),
+        FileError::NotRegular
+    ));
+    let d = dir();
+    let link = d.path().join("null.pub");
+    std::os::unix::fs::symlink("/dev/null", &link).expect("symlink");
+    assert!(matches!(
+        read_public(&link, 64).unwrap_err(),
+        FileError::NotRegular
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_handle_that_is_not_the_file_stat_saw_is_refused() {
+    let d = dir();
+    let (a, b) = (d.path().join("a"), d.path().join("b"));
+    std::fs::write(&a, "one").expect("write");
+    std::fs::write(&b, "two").expect("write");
+    let seen = std::fs::metadata(&a).expect("stat");
+    let other = File::open(&b).expect("open").metadata().expect("fstat");
+    let same = File::open(&a).expect("open").metadata().expect("fstat");
+    assert!(!same_file(&seen, &other));
+    assert!(same_file(&seen, &same));
+}
