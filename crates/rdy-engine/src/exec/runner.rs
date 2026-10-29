@@ -50,8 +50,8 @@ pub const CHILD_UMASK: u32 = 0o077;
 ///
 /// The runner calls this before every start, so a caller never has to. It is public so the CLI can call
 /// it first thing in `main`, before `rdy` creates any file or thread. That call belongs to the CLI
-/// start-up work (M1-168); until it lands, files `rdy` creates before the first command keep the
-/// operator's umask. Process-wide and idempotent. A no-op on Windows, which has no umask.
+/// start-up work (M1-168, built: `rdy_cli::entry::main_code` calls it before anything else).
+/// Process-wide and idempotent. A no-op on Windows, which has no umask.
 pub fn harden_umask() {
     #[cfg(unix)]
     {
@@ -69,8 +69,8 @@ pub fn harden_umask() {
 /// lists descriptors that the runtime opened without close-on-exec, so call it early. Empty on
 /// targets with no descriptor directory (Windows).
 ///
-/// Calling it first in `main`, before anything is opened, and logging the warning is the CLI start-up
-/// work (M1-168). Closing the descriptors is M2-104 (ADR 0023).
+/// `rdy_cli::entry::main_code` calls it first, before anything is opened, and prints the warning
+/// (M1-168). Closing the descriptors is M2-104 (ADR 0023).
 #[must_use]
 pub fn inherited_fds() -> Vec<u32> {
     #[cfg(unix)]
@@ -88,7 +88,17 @@ pub fn inherited_fds() -> Vec<u32> {
             .filter(|fd| *fd > 2)
             .collect();
         // The directory handle itself was listed. It is closed now, so a second look drops it.
-        found.retain(|fd| std::fs::metadata(format!("{dir}/{fd}")).is_ok());
+        // On Linux the entry is a link to the target. `symlink_metadata` looks at the link itself, so a
+        // hung network or FUSE mount behind the descriptor cannot block start-up, and a failed stat of
+        // the target cannot drop a real descriptor.
+        found.retain(|fd| {
+            let entry = format!("{dir}/{fd}");
+            if cfg!(target_os = "linux") {
+                std::fs::symlink_metadata(entry).is_ok()
+            } else {
+                std::fs::metadata(entry).is_ok()
+            }
+        });
         found.sort_unstable();
         found
     }

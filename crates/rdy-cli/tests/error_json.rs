@@ -11,12 +11,16 @@ use rdy_cli::error::{CliError, ErrorCode, IoReason, ReportStep};
 use rdy_spec::{Location, SpecError};
 use serde_json::Value;
 
+mod common;
+
 fn rdy(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rdy"))
-        .args(args)
-        .env_remove("RDY_PROGRESS")
-        .output()
-        .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"))
+    common::quiet(
+        Command::new(env!("CARGO_BIN_EXE_rdy"))
+            .args(args)
+            .env_remove("RDY_PROGRESS")
+            .output()
+            .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
+    )
 }
 
 fn text(bytes: &[u8]) -> &str {

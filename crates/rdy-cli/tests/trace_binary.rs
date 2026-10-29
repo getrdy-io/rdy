@@ -9,6 +9,8 @@
 
 use std::process::{Command, Output};
 
+mod common;
+
 const ENV_CANARY: &str = "canary-binary-env-1";
 const ARG_CANARY: &str = "canary-binary-arg-2";
 const PATH_CANARY: &str = "canary-binary-path-3";
@@ -22,8 +24,10 @@ fn rdy(args: &[&str], rust_log: Option<&str>) -> Output {
     if let Some(level) = rust_log {
         cmd.env("RUST_LOG", level);
     }
-    cmd.output()
-        .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"))
+    common::quiet(
+        cmd.output()
+            .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
+    )
 }
 
 fn all_text(out: &Output) -> String {
