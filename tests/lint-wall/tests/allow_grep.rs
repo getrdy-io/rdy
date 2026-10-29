@@ -106,10 +106,16 @@ const ALLOWED: &[(&str, &str)] = &[
 
 /// Check-crate files that embed a data file with `include_str!` or `include_bytes!`. Data only: the file
 /// is text, never Rust. `include!` and `#[path]` are never allowed in a check crate.
-const INCLUDE_DATA_ALLOWED: &[(&str, &str)] = &[(
-    "crates/rdy-checks-host/src/family/tests.rs",
-    "embeds examples/specs/acme-platform.yaml for a test",
-)];
+const INCLUDE_DATA_ALLOWED: &[(&str, &str)] = &[
+    (
+        "crates/rdy-checks-host/src/family/tests.rs",
+        "embeds examples/specs/acme-platform.yaml for a test",
+    ),
+    (
+        "crates/rdy-checks-k8s/src/client/guard/tests/parser.rs",
+        "embeds docs/plan/03-check-catalog.md so a test can check the check ids that ALLOWED cites",
+    ),
+];
 
 /// Lints that cover `disallowed_*`: the three lints, and the groups that include them. Compared with
 /// whitespace removed, so `clippy :: disallowed_methods` matches.

@@ -21,3 +21,9 @@
 // `mod` and `use` items at this root.
 
 pub mod client;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod registry;
