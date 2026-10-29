@@ -1,6 +1,6 @@
 # ADR 0021: Trust store file rules where the design is silent are the strict ones
 
-- Status: Accepted (2026-10-28, M1-121). Fills gaps in ADR 0002 decision 4 and 01 section 4.3.
+- Status: Accepted (2026-10-28, M1-121). Fills gaps in ADR 0002 decision 4 and 01 section 4.3. Decision 5 and the last consequence are settled by ADR 0027: Windows stays refused in M1.
 - Date: 2026-10-28
 
 ## Context
@@ -49,12 +49,12 @@ is unreadable or not valid gets. M1-121 has to pick. Each choice below is the on
   accepted, and root writes only the system store.
 - On Windows, until M1-122, any account that can create `C:\ProgramData\rdy\trust.yaml` can make every
   run that reads the system store exit 64. This blocks verification and does not make a planted store
-  trusted. M1-122 replaces it with the ACL checks.
+  trusted. M2-105 replaces it with the ACL checks (ADR 0027).
 - Extended ACLs on macOS are not in the mode bits, so a file with a write ACL for another account passes
   the mode check. This is a residual risk (threat model 05, Surface 2). M1-122 decided not to read them:
   it needs FFI, and `#![forbid(unsafe_code)]` holds in `rdy-cli`. The system store folder `/etc/rdy` is
   made by root, which limits who can plant an ACL there.
-- M1-122 replaces decision 5 for Windows with the ACL checks of 01 section 4.3.
+- ADR 0027 keeps decision 5 for M1 and removes the Windows user store. The ACL checks of 01 section 4.3 wait for M2-105.
 
 ## Alternatives considered
 

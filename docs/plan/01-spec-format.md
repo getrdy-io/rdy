@@ -372,8 +372,8 @@ id for the same product, and refuses malformed and small-order keys, as does `--
 | Running as | Reads | `rdy trust add` writes |
 | --- | --- | --- |
 | euid 0 on Unix | only `/etc/rdy/trust.yaml`, whatever `HOME`, `SUDO_USER` or `XDG_CONFIG_HOME` say | `/etc/rdy/trust.yaml` |
-| elevated on Windows | only `%ProgramData%\rdy\trust.yaml` | that file |
-| a normal user | `$XDG_CONFIG_HOME/rdy/trust.yaml` (default `~/.config/rdy/trust.yaml`; Windows `%APPDATA%\rdy\trust.yaml`), then the system file (threat model Surface 2, requirement 3) | the user file |
+| Windows | only `%ProgramData%\rdy\trust.yaml`, never `%APPDATA%`, elevated or not (ADR 0027) | nothing in M1 (M2-105) |
+| a normal user on Unix | `$XDG_CONFIG_HOME/rdy/trust.yaml` (default `~/.config/rdy/trust.yaml`), then the system file (threat model Surface 2, requirement 3) | the user file |
 
 **A root run never stats, opens or parses any path under a user's home**, not even to word a hint
 (threat model INV-04). Whenever a root run finds no matching key it prints the same hint: `as root, rdy
@@ -385,9 +385,9 @@ trust add acme-platform --key <file>`.
 - Unix system file: a symlink, not owned by root, group or world writable, or in a directory writable by
   anyone but root (ADR 0002 decision 4). User file: group or world writable, and, by ADR 0021, a symlink or a
   file that another user owns, or a user folder (`~/.config/rdy`) that is a symlink, is owned by another
-  user, or is group or world writable. Until the Windows rules below are built (M1-122), a Windows trust file that
-  exists is refused as unverifiable (ADR 0021).
-- Windows, elevated runs: refused unless the file and `%ProgramData%\rdy` are owned by `Administrators`
+  user, or is group or world writable. Until the Windows rules below are built (M2-105), a Windows trust file that
+  exists is refused as unverifiable (ADR 0021, ADR 0027).
+- Windows (M2-105; in M1 every existing store is refused, ADR 0027), elevated runs: refused unless the file and `%ProgramData%\rdy` are owned by `Administrators`
   or `SYSTEM`, their DACLs grant write, delete or `WRITE_DAC` to no other principal (CREATOR OWNER
   included), and neither is a reparse point. By default `BUILTIN\Users` may create folders under
   `C:\ProgramData`, so a store a non-admin user pre-created must fail. `rdy trust add`, run elevated,
@@ -511,7 +511,7 @@ known (ADR 0008 decision 7). Spec content errors are in 2.5.
 | `spec_signature_invalid`, product | comment or metadata product differs | `error: acme-platform.yaml is signed for product 'acme-edge', but the spec says 'acme-platform'.` | same fix |
 | any of the above, file has CRLF | | adds `The file has Windows line endings. If it went through Git or email, ask for the original.` | |
 | `spec_expired` | `metadata.expires` has passed | `error: acme-platform.yaml expired on 2027-01-31. This machine's clock says 2027-02-03.` | `fix: ask the vendor for a current spec. If this machine's clock is wrong, set it and run again.` |
-| `trust_store_insecure` | 4.3 | `error: /etc/rdy/trust.yaml is writable by other users` | `fix: chmod 644 /etc/rdy/trust.yaml` (Windows: `fix: run rdy trust add from an elevated prompt to recreate the store`) |
+| `trust_store_insecure` | 4.3 | `error: /etc/rdy/trust.yaml is writable by other users` | `fix: chmod 644 /etc/rdy/trust.yaml` (Windows in M1: `fix: move the file away. rdy cannot check who can change a trust store on Windows yet, so it reads none there. Windows support comes in a later release.`, ADR 0027; from M2-105: `fix: run rdy trust add from an elevated prompt to recreate the store`) |
 
 `spec_unreadable`, `spec_expired` and `trust_store_insecure` are new codes, added to ADR 0008's list
 under ADR 0007's additive rule. One more ErrorOutput code is not about spec loading: `interrupted`

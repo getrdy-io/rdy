@@ -25,10 +25,12 @@
 //!   owns can be changed by that user.)
 //! - Reads stop one byte past 256 KiB (INV-02). A FIFO or a device is refused without being read.
 //!
-//! **Windows and other systems.** rdy cannot yet check who may change a file there (the ACL rules are
-//! M1-122). So any trust file that exists is refused as unverifiable, a missing file is an empty store,
-//! and saving says it is not supported. This is the conservative reading of "refuse what you cannot
-//! verify". `--key` runs are not affected, because they read no store. Extended ACLs on macOS are not in
+//! **Windows and other systems.** rdy cannot check who may change a file there. Reading a DACL needs FFI
+//! (`windows-sys` and `unsafe`) or unmaintained crates, and neither goes into the trust path in M1
+//! (ADR 0027, follow-up M2-105). So any trust file that exists is refused as unverifiable, a missing file
+//! is an empty store, and saving says it is not supported. This is the conservative reading of "refuse
+//! what you cannot verify". Windows has no user store at all, so `%APPDATA%` is never read, and an
+//! elevated run needs no detection. `--key` runs are not affected, because they read no store. Extended ACLs on macOS are not in
 //! the mode bits and are not checked. Reading them needs FFI, so this is a documented residual risk
 //! (threat model 05, Surface 2, and ADR 0021), not a gap to close in this crate.
 //!
@@ -81,17 +83,16 @@ impl Scope {
     }
 }
 
-/// The four environment values that place a trust store. Nothing else is read.
+/// The three environment values that place a trust store. Nothing else is read.
 ///
-/// `SUDO_USER` is not among them, on purpose.
+/// `SUDO_USER` is not among them, on purpose. Neither is `APPDATA`: Windows has no user store in M1
+/// (ADR 0027), so an elevated run has no user path to read.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Vars {
     /// `HOME`.
     pub home: Option<OsString>,
     /// `XDG_CONFIG_HOME`.
     pub xdg_config_home: Option<OsString>,
-    /// `APPDATA` (Windows).
-    pub appdata: Option<OsString>,
     /// `ProgramData` (Windows).
     pub program_data: Option<OsString>,
 }
@@ -103,7 +104,6 @@ impl Vars {
         Self {
             home: std::env::var_os("HOME"),
             xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
-            appdata: std::env::var_os("APPDATA"),
             program_data: std::env::var_os("ProgramData"),
         }
     }
@@ -166,11 +166,12 @@ impl Layout {
     }
 
     fn windows(vars: &Vars) -> Self {
-        let under =
-            |base: Option<&OsString>| absolute(base).map(|dir| dir.join(DIR_NAME).join(FILE_NAME));
+        // No user store: `%APPDATA%` is never read (ADR 0027). An elevated run cannot be told from a
+        // normal one without FFI, so no Windows run has a user path.
         Self {
-            system_file: under(vars.program_data.as_ref()),
-            user_file: under(vars.appdata.as_ref()),
+            system_file: absolute(vars.program_data.as_ref())
+                .map(|dir| dir.join(DIR_NAME).join(FILE_NAME)),
+            user_file: None,
             system_dir_owner: 0,
             system_file_owner: 0,
             euid: u32::MAX,
@@ -186,11 +187,11 @@ impl Layout {
         }
     }
 
-    /// The store that `rdy trust add` writes: the system store for euid 0 on Unix, the user store
-    /// otherwise.
+    /// The store that `rdy trust add` writes: the system store for euid 0 on Unix and for Windows (which
+    /// has no user store), the user store otherwise.
     #[must_use]
     pub fn write_scope(&self) -> Scope {
-        if self.euid == 0 {
+        if self.euid == 0 || cfg!(windows) {
             Scope::System
         } else {
             Scope::User
@@ -460,7 +461,7 @@ impl TrustStoreError {
                         Scope::User => format!("chmod 700 {dir}"),
                     },
                     Insecurity::Unverifiable => {
-                        "move the file away for now. rdy checks who can change a trust store on Linux and macOS, and Windows support comes in a later release.".to_owned()
+                        "move the file away. rdy cannot check who can change a trust store on Windows yet, so it reads none there. Windows support comes in a later release.".to_owned()
                     }
                 }
             }

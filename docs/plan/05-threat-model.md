@@ -167,7 +167,7 @@ STRIDE table: Appendix B.
   accepted, not scheduled: reading them needs FFI, and `#![forbid(unsafe_code)]` holds in `rdy-cli`
   (M1-122, ADR 0021). The mitigation is that a store is trusted only if its owner is right and its mode
   bits are tight, and on macOS the system store is in `/etc/rdy`, which only root can create. Windows
-  refuses any store until the ACL rules land (ADR 0021).
+  refuses any store and has no user store, until the ACL rules land (M2-105, ADR 0027).
 
 ## Surface 3: install script and release pipeline
 

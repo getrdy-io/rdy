@@ -1,4 +1,4 @@
-//! Trust stores on systems where rdy cannot check who may change a file (Windows until M1-122).
+//! Trust stores on systems where rdy cannot check who may change a file (Windows, ADR 0027).
 //!
 //! The rule is to refuse what cannot be verified. A store that exists is refused. A store that does not
 //! exist is empty. Writing is not supported.
