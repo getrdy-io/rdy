@@ -249,9 +249,18 @@ fn nothing_that_takes_code_or_a_command_line_is_listed() {
         "rundll32",
         "forfiles",
         "wsl",
+        "socat",
+        "nc",
+        "ncat",
+        "scp",
+        "sftp",
+        "emacs",
         "pypy3",
         "ld-linux-x86-64.so.2",
         "ld-musl-x86_64.so.1",
+        "ld.so.1",
+        "ld64.so.1",
+        "ld-2.31.so",
     ] {
         assert!(is_refused_name(name), "{name} should be refused by name");
         assert!(entry(name).is_none(), "{name} must not have an entry");
@@ -525,6 +534,20 @@ fn lookup_is_exact_except_for_windows_programs() {
     assert!(entry("Whoami.exe").is_some());
     assert!(entry("netstat.exe").is_some_and(|e| e.runs_on(Os::Windows)));
     assert!(entry("nope").is_none());
+}
+
+#[test]
+fn an_entry_that_runs_on_windows_runs_only_on_windows() {
+    // `entry` ignores case for Windows entries. An entry shared with a Unix OS would match
+    // `GETENT` for `getent` there, so a Windows entry must not list another OS.
+    for entry in entries().iter().filter(|entry| entry.runs_on(Os::Windows)) {
+        assert_eq!(
+            entry.os,
+            [Os::Windows],
+            "{} is not Windows-only",
+            entry.program
+        );
+    }
 }
 
 #[test]

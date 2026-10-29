@@ -1,6 +1,6 @@
 # ADR 0028: The command table is typed data in `rdy-engine`, and fix text is audited against two reviewed lists
 
-- Status: Proposed (security-reviewer sign-off in PR #70)
+- Status: Accepted, security-reviewed (PR #70)
 - Date: 2026-10-29
 
 ## Context
@@ -45,8 +45,9 @@ distribution. And the check crates that need the list (host, net, gpu) must not 
    language runtimes (`java`, `jshell`, `irb`, `jruby`, `deno`, `bun`), the container clients
    (`docker`, `podman`, `nerdctl`, `ctr`, `crictl`), the macOS tools `arch`, `caffeinate`,
    `launchctl`, `sandbox-exec` and `xcrun`, the Windows tools `cscript`, `wscript`, `mshta`,
-   `rundll32`, `forfiles` and `wsl`, and any name starting with `python`, `pypy`, `perl`, `ruby`,
-   `lua`, `php`, `tclsh`, `nodejs`, `ld-linux` or `ld-musl`. Program lookup in the table is exact,
+   `rundll32`, `forfiles` and `wsl`, the relays and copiers `socat`, `nc`, `ncat`, `scp` and `sftp`,
+   `emacs`, and any name starting with `python`, `pypy`, `perl`, `ruby`, `lua`, `php`, `tclsh`,
+   `nodejs`, `ld-linux`, `ld-musl`, `ld.so`, `ld64.so` or `ld-2`. Program lookup in the table is exact,
    except for Windows entries, where case does not matter. A table test walks
    every entry against `is_refused_name`.
 6. Fix text is audited by `rdy_engine::fixtext` against `commands.txt`, `sysctls.txt` and

@@ -1,6 +1,6 @@
 //! The command policy (SEC-18, INV-08): what may run, from where, with what environment.
 //!
-//! The facade runs a [`Cmd`] through [`super::table::run`], which checks the command table first. Nothing here trusts the caller's environment.
+//! The facade runs a [`Cmd`] through `table::run`, which checks the command table first. Nothing here trusts the caller's environment.
 //!
 //! - **Program names are constants.** [`Cmd::new`] takes a `&'static str`, so spec text cannot name a
 //!   program. The name must be a plain file name, with no separator.
@@ -36,7 +36,7 @@
 //! - **The command table.** This module says what can never run. [`super::table`] says what may: the
 //!   typed entries of 03 Appendix A, each with its argument forms, limits and exit-code meanings.
 //!   [`Cmd`] does not require a table entry, so the policy tests can run `true`. The probe runs
-//!   commands through [`super::table::run`], which checks the table first.
+//!   commands through `table::run`, which checks the table first.
 //! - **Windows.** In M1 only `C:\Windows\System32\whoami.exe` runs, until job objects land (M2-006).
 //!
 //! Resolution and start are two steps. The trust rule above makes the gap small, because no one but
@@ -210,14 +210,24 @@ pub const REFUSED_PROGRAMS: &[&str] = &[
     "rundll32",
     "forfiles",
     "wsl",
+    // Network relays and file copiers that open a connection or run a command (`socat EXEC:`,
+    // `nc -e`, `scp -S`, `sftp -S`), and `emacs`, which runs code (`--eval`) (M1-066 final review).
+    "socat",
+    "nc",
+    "ncat",
+    "scp",
+    "sftp",
+    "emacs",
 ];
 
 /// Prefixes of refused program names, in lower case: the interpreters, whatever version suffix the
 /// distribution gives them (`python3.12`, `perl5.36.0`, `ruby3.2`, `lua5.4`, `php8.2`, `pypy3`), and
-/// the dynamic loaders (`ld-linux-x86-64.so.2`, `ld-musl-x86_64.so.1`), which run any file given as
+/// the dynamic loaders (`ld-linux-x86-64.so.2`, `ld-musl-x86_64.so.1`, `ld.so.1`, `ld64.so.1`,
+/// `ld-2.31.so`), which run any file given as
 /// the first argument.
 pub const REFUSED_PROGRAM_PREFIXES: &[&str] = &[
     "python", "pypy", "perl", "ruby", "lua", "php", "tclsh", "nodejs", "ld-linux", "ld-musl",
+    "ld.so", "ld64.so", "ld-2",
 ];
 
 /// Multi-call binaries. Refused by the name a check asks for, never by the file a name resolves to:
@@ -407,7 +417,7 @@ pub enum CommandError {
 }
 
 /// One command, as a check asks for it. Build it with [`super::table::CommandEntry::cmd`], then run it
-/// with [`super::table::run`].
+/// with `table::run`.
 #[derive(Clone)]
 pub struct Cmd {
     program: &'static str,

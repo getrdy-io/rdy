@@ -189,6 +189,11 @@ The script does not read these. Check them by hand once.
   permissions". Leave "Allow GitHub Actions to create and approve pull requests" off.
 - [ ] Settings, Actions, General, Fork pull request workflows: require approval for first-time
   contributors.
+- [ ] Settings, Environments: create `release` (M1-010). Add yourself as a required reviewer, leave
+  "Prevent self-review" off while there is one maintainer, and allow deployments only from the tag
+  pattern `v*`. The signing job in `.github/workflows/sign-release.yml` waits for this approval on every
+  release. Do the same in `getrdy-io/release-sandbox` for the signing proof in 06. The name must be
+  exactly `release`.
 
 ## Exit test for M1-011
 

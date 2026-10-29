@@ -25,8 +25,8 @@
 //! - **Never listed.** A program that is refused by name ([`super::policy::is_refused_name`]) can not
 //!   have an entry. A test walks the table to prove it.
 //!
-//! The probe builds commands with [`CommandEntry::cmd`] and runs them with [`run`], which calls
-//! [`validate`] first. [`run`] is the only public command runner: the policy runner under it is
+//! The probe builds commands with [`CommandEntry::cmd`] and runs them with `run`, which calls
+//! [`validate`] first. `run` is the only public command runner: the policy runner under it is
 //! crate-private, so a command that is not in the table cannot start. A check crate that built its own
 //! [`Cmd`] gets the same answer from [`validate`]. The entries and [`validate_for`] do not need the
 //! `runtime` feature, so a probe gate without a runtime (replay) can refuse an unlisted command too.

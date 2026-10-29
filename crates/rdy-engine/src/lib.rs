@@ -15,7 +15,7 @@
 //! - `blocking` (feature `runtime`): runs blocking work off the async workers.
 //! - `exec`: the command table and the command policy, which need no runtime, and (feature `runtime`)
 //!   the runner that starts a command in its own process group and kills the group on timeout, on
-//!   drop and at exit. [`exec::table::run`] is the only public way to run a command.
+//!   drop and at exit. `exec::table::run` is the only public way to run a command.
 //!
 //! The probe facade and the renderers arrive in later M1 tickets.
 
