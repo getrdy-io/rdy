@@ -21,6 +21,8 @@
 # the identity is right and the caller is wrong is shown by the fake cosign in test-sign-release.sh and
 # by the release-sandbox run (06, "Sandbox proof, signing"), not here. No stable public bundle of that
 # shape is known; add one here when it is.
+# Each failing case must also show cosign's mismatch text (the claim or value it rejected), so a
+# network or TUF error cannot pass as a rejection. The texts are those of cosign v3.1.4.
 # It needs cosign 3 on PATH (scripts/install-release-tool.sh cosign), curl and sha256sum, and
 # reaches Sigstore's TUF root over the network. Without cosign it skips on a developer machine and
 # fails in CI ($CI set), so a missing install cannot become a silent pass.
@@ -35,6 +37,22 @@ ok() { printf 'PASS %s\n' "$1"; }
 bad() {
     printf 'FAIL %s\n' "$1"
     fail=1
+}
+
+# refused <label> <needle> <command...>: the command must fail, and cosign's output must hold the
+# mismatch text <needle>. A bare non-zero exit would also pass on a network error or a TUF failure.
+refused() {
+    label=$1
+    needle=$2
+    shift 2
+    if "$@"; then
+        bad "$label"
+    elif grep -qF -- "$needle" "$tmp/verify.out"; then
+        ok "$label"
+    else
+        bad "$label (it failed, but not with: $needle)"
+        cat "$tmp/verify.out"
+    fi
 }
 
 for tool in cosign curl sha256sum cmp tail; do
@@ -113,22 +131,13 @@ if cmp -s cosign_checksums.txt changed.txt; then
 else
     ok "the changed copy differs from the original"
 fi
-if verify changed.txt "$identity" "$issuer"; then
-    bad "verify-blob fails after one byte changes"
-else
-    ok "verify-blob fails after one byte changes"
-fi
+refused "verify-blob fails after one byte changes" "invalid signature" \
+    verify changed.txt "$identity" "$issuer"
 
-if verify cosign_checksums.txt "someone-else@example.com" "$issuer"; then
-    bad "verify-blob fails with a wrong identity"
-else
-    ok "verify-blob fails with a wrong identity"
-fi
-if verify cosign_checksums.txt "$identity" "https://token.actions.githubusercontent.com"; then
-    bad "verify-blob fails with a wrong issuer"
-else
-    ok "verify-blob fails with a wrong issuer"
-fi
+refused "verify-blob fails with a wrong identity" 'expected SAN value "someone-else@example.com"' \
+    verify cosign_checksums.txt "someone-else@example.com" "$issuer"
+refused "verify-blob fails with a wrong issuer" "expected issuer value" \
+    verify cosign_checksums.txt "$identity" "https://token.actions.githubusercontent.com"
 
 # ---- part 2: the GitHub Actions form of 06 -----------------------------------------------------
 cd "$tmp/gr" || exit 1
@@ -151,31 +160,16 @@ else
     bad "verify-blob passes with identity, issuer, repository, ref and trigger"
     cat "$tmp/verify.out"
 fi
-if gr_verify checksums.txt evil-org/goreleaser refs/tags/v2.19.0 push; then
-    bad "verify-blob fails with a wrong repository"
-else
-    ok "verify-blob fails with a wrong repository"
-fi
-if gr_verify checksums.txt goreleaser/goreleaser refs/tags/v2.19.1 push; then
-    bad "verify-blob fails with a wrong ref"
-else
-    ok "verify-blob fails with a wrong ref"
-fi
-if gr_verify checksums.txt goreleaser/goreleaser refs/heads/main push; then
-    bad "verify-blob fails with a branch ref"
-else
-    ok "verify-blob fails with a branch ref"
-fi
-if gr_verify checksums.txt goreleaser/goreleaser refs/tags/v2.19.0 workflow_dispatch; then
-    bad "verify-blob fails with a wrong trigger"
-else
-    ok "verify-blob fails with a wrong trigger"
-fi
+refused "verify-blob fails with a wrong repository" "expected GithubWorkflowRepository to be" \
+    gr_verify checksums.txt evil-org/goreleaser refs/tags/v2.19.0 push
+refused "verify-blob fails with a wrong ref" "expected GithubWorkflowRef to be" \
+    gr_verify checksums.txt goreleaser/goreleaser refs/tags/v2.19.1 push
+refused "verify-blob fails with a branch ref" "expected GithubWorkflowRef to be" \
+    gr_verify checksums.txt goreleaser/goreleaser refs/heads/main push
+refused "verify-blob fails with a wrong trigger" "expected GithubWorkflowTrigger to be" \
+    gr_verify checksums.txt goreleaser/goreleaser refs/tags/v2.19.0 workflow_dispatch
 { printf 'X'; tail -c +2 checksums.txt; } > changed.txt
-if gr_verify changed.txt goreleaser/goreleaser refs/tags/v2.19.0 push; then
-    bad "verify-blob fails after one byte changes, with all claims right"
-else
-    ok "verify-blob fails after one byte changes, with all claims right"
-fi
+refused "verify-blob fails after one byte changes, with all claims right" "invalid signature" \
+    gr_verify changed.txt goreleaser/goreleaser refs/tags/v2.19.0 push
 
 exit "$fail"

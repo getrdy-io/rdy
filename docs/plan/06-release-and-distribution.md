@@ -52,7 +52,7 @@ cosign verify-blob \
 sha256sum --ignore-missing -c SHA256SUMS      # macOS: shasum -a 256 -c on the matching line
 ```
 
-The last three flags are required, not optional. Without them a workflow in any other repository that calls `getrdy-io/rdy/.github/workflows/sign-release.yml@v0.1.0-alpha.3` would get a certificate with the same subject and pass. Fulcio puts the called file in the subject and the caller's run in the repository, ref and trigger claims. The flags exist in cosign v3.1.4 (the pinned version). Who must follow this contract: `sign-release.sh` (self-verify), the `announce` job (verifies before it publishes), M1-012's `scripts/verify-release.sh` and M1-015's `install.sh` (the docs and `SECURITY.md` already show it). Defence in depth: `sign-release.yml` has the job condition `github.repository_owner == 'getrdy-io'`, so a fork or another organization that calls it gets no certificate from us at all.
+The last three flags are required, not optional. Without them a workflow in any other repository that calls `getrdy-io/rdy/.github/workflows/sign-release.yml@v0.1.0-alpha.3` would get a certificate with the same subject and pass. Fulcio puts the called file in the subject and the caller's run in the repository, ref and trigger claims. The flags exist in cosign v3.1.4 (the pinned version). They read the Fulcio certificate extensions with the OIDs `1.3.6.1.4.1.57264.1.2` (trigger), `.1.5` (repository) and `.1.6` (ref). If Fulcio stops issuing one of them, or cosign stops reading it, verification fails closed: every verify, including the `announce` job and `install.sh`, refuses the release. That is a known way a release can break. The fix is a new pinned cosign or a contract change reviewed by security-reviewer, never dropping a flag. Who must follow this contract: `sign-release.sh` (self-verify), the `announce` job (verifies before it publishes), M1-012's `scripts/verify-release.sh` and M1-015's `install.sh` (the docs and `SECURITY.md` already show it). Defence in depth: `sign-release.yml` has the job condition `github.repository_owner == 'getrdy-io'`, so a fork or another organization that calls it gets no certificate from us at all.
 
 For a human who accepts any release, an anchored regexp is fine: `^https://github\.com/getrdy-io/rdy/\.github/workflows/sign-release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)*$`. Keep `--certificate-github-workflow-repository getrdy-io/rdy` and `--certificate-github-workflow-trigger push` with it. Never use a loose pattern such as `.*`.
 
@@ -164,7 +164,7 @@ Served as a release asset in M1 and at `https://getrdy.io/install` from M2. The 
 4. Version: `RDY_VERSION`, else the version stamped into this copy of the script.
 5. Download the archive, `SHA256SUMS` and `SHA256SUMS.sigstore.json` into a temp dir. Set `TUF_ROOT` inside the temp dir so cosign leaves nothing in `~/.sigstore`.
 6. Find `cosign` (version 3 or newer). If absent, apply the contract row: stop, or continue on hash only with the override.
-7. Run `cosign verify-blob` with the exact identity. Compare the archive's sha256 with its line in `SHA256SUMS` (`sha256sum`, else `shasum -a 256`).
+7. Run `cosign verify-blob` with the exact identity and the three caller claims (contract table). Compare the archive's sha256 with its line in `SHA256SUMS` (`sha256sum`, else `shasum -a 256`).
 8. Extract, `chmod 0755`, run `rdy version`. Copy to `<dir>/.rdy.new.$$`, then `mv -f` for an atomic replace. If an old `rdy` exists, print old and new versions.
 9. Print a PATH hint and the full path on stderr. Stdout stays empty. Exit 0, 1 (failure) or 64 (usage).
 
@@ -291,11 +291,11 @@ windows-archive = ".zip"
 checksum = "sha256"
 cargo-auditable = true
 cargo-cyclonedx = true
-github-attestations = true      # SLSA provenance; cosign stays the primary path
+github-attestations = false     # conflicts with the one-job id-token rule (ADR 0020); cosign is the signature
 install-updater = false
 precise-builds = true
 fail-fast = false
-github-release = "host"         # draft until announce; the sandbox ticket proves it
+github-release = "announce"     # no release exists until announce publishes, not even a draft (ADR 0020, 0024)
 publish-jobs = ["./sign-release"]
 pr-run-mode = "plan"
 
@@ -367,7 +367,7 @@ File names carry the target, not the version. The version is in the download URL
 ## Decisions needing an ADR
 
 - install.sh when cosign is missing. Taken for M1, per 05: fail closed with the named override. Release-engineer's view: this makes the first run harder than needed. Alternative (d): download a cosign whose version and sha256 are written in the script, adding about 30 MB and one more pinned artifact. 05's options (b) hash only and (c) pinned ECDSA key remain open. Revisit after design partners try it; M2 ticket if chosen.
-- Immutable releases against dist ordering. 05 requires immutable releases in M1. dist drafting the release until announce is unproven. If the sandbox shows dist publishes first, alternatives: a final job in `sign-release` that creates and publishes the release itself, or run without immutable releases and rely on the signature check (it still catches any asset swap). I recommend the first.
+- Immutable releases against dist ordering. 05 requires immutable releases in M1. Settled by ADR 0020 and 0024: `github-release = "announce"`, so no release exists, not even a draft, until `announce` publishes. Still unproven until the sandbox run: that one `gh release create` with all assets makes the release immutable. If it does not, `announce` creates a draft, uploads, then publishes (ADR 0024, Consequences).
 - Where the Worker token lives and who deploys it. Taken: founder deploys by hand, no Cloudflare secret in Actions. Alternative: a deploy workflow in a restricted GitHub environment, with a token in a separate Cloudflare account.
 - Self-update trust model (M3). Options: shell out to `cosign`, the `sigstore` crate if its tree is rustls-only, or an offline ed25519 release key. Lean: the crate if a spike is clean.
 - macOS notarization and Windows signing (M3). Paid. Options: neither, both, or Homebrew and winget only.

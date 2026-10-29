@@ -424,6 +424,35 @@ run "an install.sh with the old @RDY_VERSION@ text is refused" 1 "on 0 lines" "$
 if [ -e "$tmp/oldname/install.sh" ]; then bad "a refused install.sh is not copied in"; else ok "a refused install.sh is not copied in"; fi
 if [ -s "$FAKE_LOG" ]; then bad "cosign is not called after a refused install.sh"; else ok "cosign is not called after a refused install.sh"; fi
 
+# The repo's real install.sh, not a stand-in: it must survive the stamp. The stamp must leave a script
+# that parses, keeps its end marker on the last line (M1-014's truncation guard), and holds exactly
+# one stamped line. Only that one line may differ from the source.
+real=$here/../install.sh
+mkdir "$tmp/src-real"
+cp "$real" "$tmp/src-real/install.sh"
+release realinstall
+run "the real install.sh is stamped" 0 "stamped install.sh" "$tmp/realinstall" "$tag" "$repo" "$tmp/src-real"
+if sh -n "$tmp/realinstall/install.sh" 2> /dev/null; then
+    ok "the stamped real install.sh passes sh -n"
+else
+    bad "the stamped real install.sh passes sh -n"
+fi
+if [ "$(tail -n 1 "$real")" = "$(tail -n 1 "$tmp/realinstall/install.sh")" ] && tail -n 1 "$tmp/realinstall/install.sh" | grep -q 'END_MARK'; then
+    ok "the stamped real install.sh keeps its end marker on the last line"
+else
+    bad "the stamped real install.sh keeps its end marker on the last line"
+fi
+if [ "$(grep -c -x "RDY_STAMPED_VERSION='$tag'" "$tmp/realinstall/install.sh")" = 1 ] && ! grep -q '@@RDY_STAMPED_VERSION@@' "$tmp/realinstall/install.sh"; then
+    ok "the stamped real install.sh has exactly one stamped line and no placeholder"
+else
+    bad "the stamped real install.sh has exactly one stamped line and no placeholder"
+fi
+if [ "$(diff "$real" "$tmp/realinstall/install.sh" | grep -c '^[<>]')" = 2 ]; then
+    ok "only the stamp line differs from the real install.sh"
+else
+    bad "only the stamp line differs from the real install.sh"
+fi
+
 # ---- sign-release.sh: usage --------------------------------------------------------------------
 release usage
 run "a tag that is not a release tag is a usage error" 64 "is not a release tag" "$tmp/usage" "v1.0" "$repo" "$tmp/src-ok"
