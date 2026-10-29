@@ -11,7 +11,10 @@ use std::sync::Barrier;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
+use rdy_engine::check::{CheckInfo, CheckMeta, Need, Os, OsSupport, Support};
+use rdy_engine::probe::{NativeCall, ProbeError};
 use rdy_engine::redact::{RedactedReport, Redactor, RuleCounts, TagKey};
+use rdy_engine::testing::{Replay, TestRun};
 use rdy_spec::result::{CheckResult, Report};
 use serde_json::{Value, json};
 
@@ -321,5 +324,76 @@ fn a_kubeconfig_client_key_never_reaches_the_report() -> TestResult {
     });
     let text = serde_json::to_string(&*redact(&planted)?)?;
     assert!(!text.contains("canary-kube-key-7"), "a client key leaked");
+    Ok(())
+}
+
+/// A made-up machine id, in the form systemd writes it.
+const MACHINE_ID: &str = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+
+/// A check that declared the whole tree for reading, as a disk check must to measure any spec path.
+static BROAD_READS: CheckInfo = CheckInfo {
+    id: "host.fixture",
+    family: "host",
+    summary: "Reads anywhere.",
+    meta: CheckMeta {
+        title: "Fixture check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
+    needs: &[],
+    wants: &[],
+    default_timeout: None,
+    os: OsSupport {
+        linux: Support::Full,
+        macos: Support::Full,
+        windows: Support::NotYet,
+    },
+    reads: &["/"],
+    env: &[],
+    commands: &[],
+    peers: &[],
+};
+
+/// SEC-94-4: the raw machine id is in the replay fixture, and a check with broad reads tries every way
+/// to put it in its result. It reaches neither `observed` nor the action log nor the redacted report.
+/// The JSON half of the writers is checked here; `render_html` does not exist before M1-077, and its
+/// golden test (M1-083) takes the same fixture.
+#[tokio::test]
+async fn the_machine_id_never_reaches_the_report_even_for_a_check_with_broad_reads() -> TestResult {
+    let files = ["/etc/machine-id", "/var/lib/dbus/machine-id"];
+    let mut replay = Replay::new();
+    for file in files {
+        replay = replay.file(file, format!("{MACHINE_ID}\n"));
+    }
+    let run = TestRun::new(replay);
+    let ctx = run.context_for(&BROAD_READS, "host.fixture", Os::Linux, [Need::Root]);
+    let probe = ctx.probe();
+
+    // What a careless check would copy into `observed`: file text, or the error text.
+    let mut observed = serde_json::Map::new();
+    for file in files {
+        let text = match probe.read(Path::new(file)).await {
+            Ok(bytes) => String::from_utf8_lossy(&bytes.bytes).into_owned(),
+            Err(error @ ProbeError::Denied { .. }) => error.to_string(),
+            Err(other) => return Err(format!("{file}: {other:?}").into()),
+        };
+        observed.insert(file.to_owned(), json!(text));
+    }
+    // The native call is for the engine only, so a check's probe is refused.
+    let call = probe.native(NativeCall::MachineId).await;
+    assert!(matches!(call, Err(ProbeError::Denied { .. })), "{call:?}");
+    observed.insert("machine_id_call".to_owned(), json!(format!("{call:?}")));
+
+    let mut doc = sample("7.2 ")?;
+    doc["checks"][0]["observed"] = Value::Object(observed);
+    doc["actions"] = serde_json::to_value(run.action_log().actions)?;
+    assert!(
+        !doc.to_string().contains(MACHINE_ID),
+        "the id reached the result before redaction"
+    );
+
+    let out = redact(&doc)?;
+    let written = serde_json::to_string(&*out)?;
+    assert!(!written.contains(MACHINE_ID), "the id is in the report");
+    assert!(!format!("{out:?}").contains(MACHINE_ID));
     Ok(())
 }

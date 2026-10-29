@@ -60,6 +60,9 @@ pub(crate) const RULE_DOT_DOT: &str = "path must not contain ..";
 pub(crate) const RULE_WINDOWS: &str = "file reads are not available on Windows";
 /// `/etc/shadow`, `/etc/gshadow`, `/etc/sudoers*`, `/etc/security/opasswd`, `/etc/master.passwd`.
 pub(crate) const RULE_SYSTEM_SECRET: &str = "password and sudo files are never read";
+/// `/etc/machine-id` and `/var/lib/dbus/machine-id`. The raw id never reaches a log or a report; only
+/// the engine's own `MachineId` call reads it (ADR 0014 decision 5).
+pub(crate) const RULE_MACHINE_ID_FILE: &str = "the machine id file is read by the engine only";
 /// Cloud, tool and keychain credential files in a home directory.
 pub(crate) const RULE_CREDENTIALS: &str = "credential files are never read";
 /// Kernel memory, log and debug files.
@@ -89,12 +92,26 @@ pub(crate) const RULE_NOT_REGULAR: &str = "only regular files are read";
     expect(dead_code, reason = "only the Unix live backend refuses a target")
 )]
 pub(crate) const RULE_NOT_DIR: &str = "only directories are listed";
+/// The target is neither a regular file nor a directory.
+#[cfg_attr(
+    not(all(feature = "runtime", unix)),
+    expect(dead_code, reason = "only the Unix live backend refuses a target")
+)]
+pub(crate) const RULE_NOT_FILE_OR_DIR: &str = "only files and directories are measured";
 /// The file changed between the check and the open.
 #[cfg_attr(
     not(all(feature = "runtime", unix)),
     expect(dead_code, reason = "only the Unix live backend refuses a target")
 )]
 pub(crate) const RULE_CHANGED: &str = "the file changed while it was being opened";
+
+/// The places systemd and D-Bus keep the machine id, in order. Both are denied to every reader but the
+/// engine's `MachineId` call, which reads through [`ReadGuard::machine_id_files`].
+#[cfg_attr(
+    not(any(test, all(feature = "runtime", target_os = "linux"))),
+    expect(dead_code, reason = "only the Linux live backend reads the files")
+)]
+pub(crate) const MACHINE_ID_FILES: &[&str] = &["/etc/machine-id", "/var/lib/dbus/machine-id"];
 
 /// Why the live backend refused a call. It travels inside an [`std::io::Error`] of kind
 /// `PermissionDenied`, and the probe turns it back into `ProbeError::Denied`.
@@ -138,11 +155,31 @@ pub struct ReadGuard {
     os: Os,
     /// `None` for a probe with no manifest: the denylist applies and no prefix is enforced.
     reads: Option<&'static [&'static str]>,
+    /// The `MachineId` call's guard: only these paths pass, and the denylist is not asked.
+    only: Option<&'static [&'static str]>,
 }
 
 impl ReadGuard {
     pub(crate) fn new(os: Os, reads: Option<&'static [&'static str]>) -> Self {
-        Self { os, reads }
+        Self {
+            os,
+            reads,
+            only: None,
+        }
+    }
+
+    /// The guard of the `MachineId` call: it admits [`MACHINE_ID_FILES`] and nothing else, on the real
+    /// path. Every other guard refuses those two files, so this is the only reader.
+    #[cfg_attr(
+        not(any(test, all(feature = "runtime", target_os = "linux"))),
+        expect(dead_code, reason = "only the Linux live backend reads the files")
+    )]
+    pub(crate) fn machine_id_files() -> Self {
+        Self {
+            os: Os::Linux,
+            reads: None,
+            only: Some(MACHINE_ID_FILES),
+        }
     }
 
     /// Decides from the path text alone. Used before any I/O.
@@ -168,6 +205,16 @@ impl ReadGuard {
         }
         let mac = self.os == Os::Macos;
         let names = split(path, mac)?;
+        if let Some(only) = self.only {
+            let listed = only
+                .iter()
+                .any(|file| split(Path::new(file), mac).is_ok_and(|file| file == names));
+            return if listed {
+                Ok(())
+            } else {
+                Err(RULE_OUTSIDE_READS)
+            };
+        }
         deny(
             &names.iter().map(String::as_str).collect::<Vec<_>>(),
             self_pid,
@@ -290,6 +337,9 @@ fn etc_rule(rest: &[&str]) -> Option<&'static str> {
             Some(RULE_SYSTEM_SECRET)
         }
         ["security", "opasswd", ..] => Some(RULE_SYSTEM_SECRET),
+        // The id is stable per host. Only the salted `host_id` may leave the engine (M2-002).
+        // The prefix also catches a backup such as `machine-id.bak`.
+        [name, ..] if name.starts_with("machine-id") => Some(RULE_MACHINE_ID_FILE),
         ["ssl", "private", ..] | ["pki", "tls", "private", ..] => Some(RULE_PRIVATE_KEY),
         // Let's Encrypt keeps `privkey.pem` in `live` and every old copy in `archive`.
         ["letsencrypt", "live" | "archive", ..] => Some(RULE_PRIVATE_KEY),
@@ -314,6 +364,7 @@ fn var_rule(rest: &[&str]) -> Option<&'static str> {
             "token" | "node-token" | "cred",
             ..,
         ] => Some(RULE_KUBECONFIG),
+        ["lib", "dbus", name, ..] if name.starts_with("machine-id") => Some(RULE_MACHINE_ID_FILE),
         // The macOS directory service: account records with password hashes.
         ["db", "dslocal", ..] => Some(RULE_SYSTEM_SECRET),
         _ => None,
