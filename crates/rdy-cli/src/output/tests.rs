@@ -65,13 +65,16 @@ fn a_missing_out_dir_is_reported_as_the_folder_that_could_not_be_made() {
     let parent = tempfile::tempdir().expect("temp dir");
     let missing = parent.path().join("missing");
     let given = missing.to_str().expect("utf8");
+    // The folder is joined with the OS separator, so the expectation is built the same way.
+    let folder = missing.join("rdy-report-acme-20270309T143005Z");
     let err = open_report_dir(&args(&["--out-dir", given]), "acme", now()).expect_err("fails");
     assert_eq!(err.code(), ErrorCode::ReportWrite);
     assert_eq!(err.exit_code().code(), 70);
     assert_eq!(
         err.to_string(),
         format!(
-            "cannot create the report folder {given}/rdy-report-acme-20270309T143005Z (no such file)"
+            "cannot create the report folder {} (no such file)",
+            folder.display()
         )
     );
     assert_eq!(

@@ -593,7 +593,8 @@ mod unix {
             return;
         };
         let value = std::env::var(UMASK_VALUE_ENV).expect("umask value");
-        let bits = u32::from_str_radix(&value, 8).expect("octal umask");
+        // `RawMode` is u16 on macOS and u32 on Linux.
+        let bits = rustix::fs::RawMode::from_str_radix(&value, 8).expect("octal umask");
         rustix::process::umask(rustix::fs::Mode::from_bits_truncate(bits));
         let out = OutputDir::create_new(Path::new(&parent), "acme", TS).expect("create");
         out.write_atomic("report.json", &redacted("x"))
