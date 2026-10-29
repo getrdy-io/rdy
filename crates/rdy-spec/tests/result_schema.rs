@@ -387,6 +387,33 @@ fn a_newer_producer_still_reads() -> TestResult {
     Ok(())
 }
 
+/// A datagram exchange as `Probe::udp_exchange` logs it (M1-144) satisfies the action schema, and a
+/// `proto` other than `udp` does not.
+#[test]
+fn a_udp_connect_entry_validates_against_the_action_schema() -> TestResult {
+    let action = validator(Some("Action"))?;
+    let mut entry = serde_json::json!({
+        "seq": 1,
+        "check": "host.time_sync",
+        "at_ms": 12,
+        "duration_ms": 3,
+        "kind": "connect",
+        "outcome": "ok",
+        "host": "pool.example",
+        "port": 123,
+        "proto": "udp",
+        "addr": "192.0.2.10",
+        "bytes": 48,
+        "truncated": false
+    });
+    assert_valid(&action, &entry, "a udp connect entry");
+    entry["proto"] = Value::String("tcp".into());
+    assert!(!is_valid(&action, &entry), "only udp is a proto value");
+    entry["proto"] = Value::String("x".repeat(16));
+    assert!(!is_valid(&action, &entry), "no free text in proto");
+    Ok(())
+}
+
 #[test]
 fn closed_and_constant_fields_are_enforced() -> TestResult {
     let base = sample("7.3 ")?;

@@ -71,6 +71,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "the tests of the probe call Probe::kube_call, which only the k8s guard may call in a check crate (M1-103)",
     ),
     (
+        "crates/rdy-engine/src/probe/sock/tests.rs",
+        "the live socket tests build the live backend to run the real UDP and unix socket bodies (M1-144)",
+    ),
+    (
         "crates/rdy-engine/src/exec/policy.rs",
         "the tests of the policy call the raw runner",
     ),
