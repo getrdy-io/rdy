@@ -1,6 +1,9 @@
 //! The process entry point, in the order 02 ("Startup order") gives.
 //!
-//! 1. The redactor, so nothing printed after this can leak.
+//! 0. `harden_umask()` and the list of inherited descriptors, before anything is created or opened
+//!    (M1-168, ADR 0023).
+//! 1. The redactor, so nothing printed after this can leak. The descriptor warning, if any, follows
+//!    it ([`crate::startup`]).
 //! 2. The redacting log writer.
 //! 3. The panic hook, which prints nothing ([`crate::panic_hook`]).
 //! 4. [`crate::run`] inside [`guarded`], so that a panic outside a check exits 70, not 101 (07
@@ -10,12 +13,18 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::panic::{self, AssertUnwindSafe};
 
+use rdy_engine::exec;
+
 use crate::error::{CliError, emit, wants_json};
-use crate::{EXIT_INTERNAL, logging, panic_hook, redaction, run};
+use crate::{EXIT_INTERNAL, logging, panic_hook, redaction, run, startup};
 
 /// Runs rdy as the binary does and returns the exit code.
 #[must_use]
 pub fn main_code() -> u8 {
+    // First, before any file is created or descriptor opened: a private umask, and the descriptors
+    // the parent left open (they would reach every child command).
+    exec::harden_umask();
+    let inherited = exec::inherited_fds();
     let redactor = match redaction::init() {
         Ok(redactor) => redactor.clone(),
         Err(_) => {
@@ -32,6 +41,7 @@ pub fn main_code() -> u8 {
             return EXIT_INTERNAL;
         }
     };
+    startup::warn_inherited(&inherited, &mut io::stderr());
     logging::init_stderr(redactor);
     panic_hook::install();
     let args: Vec<OsString> = std::env::args_os().collect();
