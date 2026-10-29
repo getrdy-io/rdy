@@ -41,7 +41,6 @@ fn vars(home: Option<&str>, xdg: Option<&str>) -> Vars {
     Vars {
         home: home.and_then(os),
         xdg_config_home: xdg.and_then(os),
-        appdata: None,
         program_data: None,
     }
 }
@@ -111,23 +110,49 @@ fn a_relative_or_empty_home_gives_no_user_store() {
 }
 
 #[test]
-fn the_windows_layout_uses_appdata_and_programdata() {
+fn the_windows_layout_has_programdata_and_no_user_path() {
+    // HOME and XDG_CONFIG_HOME are set too: a Windows layout ignores them as well (ADR 0027).
     let v = Vars {
-        appdata: os(&abs("/appdata")),
         program_data: os(&abs("/programdata")),
-        ..Vars::default()
+        ..vars(Some(&abs("/home/alice")), Some(&abs("/home/alice/.config")))
     };
     let layout = Layout::windows(&v);
-    assert_eq!(
-        layout.path(Scope::User),
-        Some(under("/appdata", &["rdy", "trust.yaml"]).as_path())
-    );
+    assert_eq!(layout.path(Scope::User), None);
     assert_eq!(
         layout.path(Scope::System),
         Some(under("/programdata", &["rdy", "trust.yaml"]).as_path())
     );
-    // Elevation cannot be told here, so a Windows run writes the user store.
-    assert_eq!(layout.write_scope(), Scope::User);
+    // Elevation is never detected, and there is no user store, so the only store to write is the system one.
+    assert_eq!(layout.write_scope(), Scope::System);
+    // The Unix layout keeps its own answer on every host, Windows included.
+    let unix = Layout::unix(&v, 1000);
+    assert_eq!(unix.write_scope(), Scope::User);
+    assert_eq!(Layout::unix(&v, 0).write_scope(), Scope::System);
+}
+
+#[test]
+fn the_windows_layout_without_programdata_has_no_store_at_all() {
+    let layout = Layout::windows(&Vars::default());
+    assert_eq!(layout.path(Scope::User), None);
+    assert_eq!(layout.path(Scope::System), None);
+}
+
+#[test]
+fn the_unverifiable_fix_points_at_an_administrator_and_the_docs() {
+    let path = PathBuf::from("/etc/rdy/trust.yaml");
+    let error = TrustStoreError::Insecure {
+        path,
+        scope: Scope::System,
+        why: Insecurity::Unverifiable,
+    };
+    let fix = error.fix();
+    assert!(fix.starts_with("ask an administrator to remove "), "{fix}");
+    assert!(fix.contains("https://docs.getrdy.io/unsigned"), "{fix}");
+    // 07 rule 8: no fix line suggests the flags that weaken the check.
+    assert!(
+        !fix.contains("--key") && !fix.contains("--allow-unsigned"),
+        "{fix}"
+    );
 }
 
 #[test]
@@ -746,31 +771,118 @@ mod unix {
     }
 }
 
-/// Without Unix modes and owners, a store that exists is refused and a missing one is empty.
+/// Without Unix modes and owners, a store that exists is refused and a missing one is empty. A temp
+/// folder stands in for `C:\ProgramData` through `Vars::program_data`. These are the exit test of M1-122
+/// on Windows: a store that exists exits 64 with `trust_store_insecure`, whoever made it. A hosted CI
+/// runner user is an administrator, so these tests cannot make a non-admin store. They show that no
+/// store passes, which covers the non-admin case, and that a Users write ACE changes nothing.
 #[cfg(not(unix))]
 mod other {
     use super::*;
 
-    #[test]
-    fn an_existing_store_is_unverifiable_and_saving_is_unsupported() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    const EMPTY: &str = "apiVersion: rdy/v1\nkind: TrustStore\nkeys: []\n";
+
+    fn layout(dir: &tempfile::TempDir) -> Layout {
         let v = Vars {
-            appdata: Some(dir.path().as_os_str().to_owned()),
             program_data: Some(dir.path().as_os_str().to_owned()),
-            ..Vars::default()
+            ..vars(dir.path().to_str(), dir.path().join(".config").to_str())
         };
-        let layout = Layout::from_env(&v, 0);
-        assert_eq!(load(&layout).expect("missing is empty"), TrustStore::new());
-        let path = layout.path(Scope::User).expect("user path").to_path_buf();
+        Layout::from_env(&v, 0)
+    }
+
+    fn make_store(layout: &Layout) -> PathBuf {
+        let path = layout
+            .path(Scope::System)
+            .expect("system path")
+            .to_path_buf();
         std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
-        std::fs::write(&path, "apiVersion: rdy/v1\nkind: TrustStore\nkeys: []\n").expect("write");
-        match load(&layout) {
-            Err(TrustStoreError::Insecure {
-                why: Insecurity::Unverifiable,
-                ..
-            }) => {}
-            other => panic!("{other:?}"),
+        std::fs::write(&path, EMPTY).expect("write");
+        path
+    }
+
+    fn assert_refused(layout: &Layout) {
+        match load(layout) {
+            Err(error) => {
+                assert!(
+                    matches!(
+                        error,
+                        TrustStoreError::Insecure {
+                            why: Insecurity::Unverifiable,
+                            scope: Scope::System,
+                            ..
+                        }
+                    ),
+                    "{error:?}"
+                );
+                assert_eq!(error.code(), ErrorCode::TrustStoreInsecure);
+                assert_eq!(error.code().exit_code().code(), 64);
+                assert!(!error.fix().is_empty());
+            }
+            Ok(store) => panic!("a Windows store was read: {store:?}"),
         }
+    }
+
+    #[test]
+    fn a_missing_store_is_empty_and_there_is_no_user_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = layout(&dir);
+        assert_eq!(layout.path(Scope::User), None);
+        assert_eq!(load(&layout).expect("missing is empty"), TrustStore::new());
+        // A folder that exists with no file in it is still an empty store.
+        std::fs::create_dir_all(dir.path().join("rdy")).expect("mkdir");
+        assert_eq!(load(&layout).expect("empty folder"), TrustStore::new());
+    }
+
+    #[test]
+    fn a_store_made_by_the_current_user_is_refused() {
+        // The temp folder and the file belong to the user who runs the test. On a hosted runner that user
+        // is an administrator and the store is still refused, because nothing is verified.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = layout(&dir);
+        make_store(&layout);
+        assert_refused(&layout);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_real_environment_gives_no_user_path() {
+        // A hosted runner has a real %APPDATA%, so the detected layout is what proves it is not used.
+        let layout = Layout::detect();
+        assert_eq!(layout.path(Scope::User), None);
+    }
+
+    /// Grants the Users group write access (S-1-5-32-545, so it works in any language) with `icacls`,
+    /// which every Windows image has. The store must still be refused.
+    #[cfg(windows)]
+    #[test]
+    fn a_store_with_a_users_write_ace_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = layout(&dir);
+        let path = make_store(&layout);
+        for target in [path.parent().expect("parent"), path.as_path()] {
+            let status = std::process::Command::new("icacls")
+                .arg(target)
+                .args(["/grant", "*S-1-5-32-545:(W)"])
+                .status()
+                .expect("icacls runs");
+            assert!(status.success(), "icacls failed: {status}");
+        }
+        assert_refused(&layout);
+    }
+
+    #[test]
+    fn saving_is_unsupported_even_without_a_place_to_write() {
+        let layout = Layout::from_env(&Vars::default(), 0);
+        assert!(matches!(
+            save(&layout, &TrustStore::new()),
+            Err(TrustStoreError::Unsupported)
+        ));
+    }
+
+    #[test]
+    fn saving_is_unsupported() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = layout(&dir);
         assert!(matches!(
             save(&layout, &TrustStore::new()),
             Err(TrustStoreError::Unsupported)

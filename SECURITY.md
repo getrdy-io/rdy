@@ -69,10 +69,16 @@ cosign verify-blob \
   --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity "https://github.com/getrdy-io/rdy/.github/workflows/sign-release.yml@refs/tags/v0.1.0-alpha.3" \
+  --certificate-github-workflow-repository getrdy-io/rdy \
+  --certificate-github-workflow-ref refs/tags/v0.1.0-alpha.3 \
+  --certificate-github-workflow-trigger push \
   SHA256SUMS
 ```
 
-Replace the tag with the release you downloaded. Then check your archive's line in `SHA256SUMS` with
+The three `--certificate-github-workflow-*` lines matter. The identity names our workflow file, and any
+repository can call that file. These lines say that the run that signed was ours, on this tag.
+
+Replace the tag with the release you downloaded (twice). Then check your archive's line in `SHA256SUMS` with
 `sha256sum` (Linux) or `shasum -a 256` (macOS).
 
 Specs are signed by the vendor that wrote them, in minisign format. `rdy` refuses unsigned or tampered

@@ -1,0 +1,89 @@
+# Signs the release (M1-010, SEC-06, SEC-07). release.yml calls this workflow as a publish job
+# (publish-jobs in dist-workspace.toml). It never runs on its own.
+#
+# What it does, in order:
+#   1. Waits for a required reviewer to approve the GitHub environment `release`.
+#   2. Downloads the artifacts that dist built.
+#   3. Runs scripts/sign-release.sh: checks the files, writes SHA256SUMS over every asset, signs it
+#      with cosign keyless, and verifies the signature with the exact identity
+#        https://github.com/<repo>/.github/workflows/sign-release.yml@refs/tags/<tag>
+#      The certificate carries the path of this file, so renaming it changes the identity that
+#      install.sh and the docs check. Rename it only together with docs/plan/06 and install.sh.
+#      That identity names this file, not the repository that called it, and any repository can
+#      call a public reusable workflow. So every verify also pins the caller's claims:
+#        --certificate-github-workflow-repository <owner/repo>
+#        --certificate-github-workflow-ref refs/tags/<tag>
+#        --certificate-github-workflow-trigger push
+#      The job also refuses to run for any owner other than getrdy-io (see `if:` below).
+#   4. Uploads SHA256SUMS, SHA256SUMS.sigstore.json and the stamped install.sh as the workflow
+#      artifact `artifacts-sign-release`.
+# No release exists yet. The `announce` job creates it after this job, from every `artifacts-*`
+# artifact, and first checks that SHA256SUMS lists exactly the files it publishes (ADR 0020,
+# decision 2; ADR 0024). So the release is not public, not even as a draft, until signing ends.
+#
+# This is the only job in the release workflow with `id-token: write`. Everything it runs is code from
+# the tagged source plus cosign, installed from a pinned file with a committed sha256
+# (.github/release-tools.txt). It uses no install action.
+#
+# Setup the founder does once (11-backlog.md, Founder hand steps): create the environment `release`
+# with a required reviewer, and let only `v*` tags deploy to it.
+
+name: sign-release
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: "dist's plan, passed by release.yml. Not used."
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  sign:
+    name: sign SHA256SUMS
+    # In a reusable workflow, `github` is the caller's context. A fork or another organization
+    # that calls this workflow never gets a certificate from us (SEC-06).
+    if: github.repository_owner == 'getrdy-io'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The job waits here until a reviewer approves. The wait does not count toward the timeout.
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch the built artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: artifacts-*
+          path: artifacts
+          merge-multiple: true
+      - name: Install cosign (pinned file, sha256 checked)
+        run: sh scripts/install-release-tool.sh cosign
+      - name: Sign SHA256SUMS and verify the signature
+        env:
+          # The tag reaches the shell as data. sign-release.sh checks its shape first.
+          TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$REF_TYPE" != tag ]; then
+            echo "error: this workflow signs releases from a tag, not from '$REF_TYPE $TAG'" >&2
+            echo "fix: push a release tag such as v0.1.0-alpha.1. Do not run sign-release from a branch." >&2
+            exit 1
+          fi
+          sh scripts/sign-release.sh artifacts "$TAG" "$REPO"
+      - name: Upload the signature files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: artifacts-sign-release
+          path: |
+            artifacts/SHA256SUMS
+            artifacts/SHA256SUMS.sigstore.json
+            artifacts/install.sh
+          if-no-files-found: error
