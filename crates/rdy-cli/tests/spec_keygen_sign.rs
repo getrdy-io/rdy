@@ -18,6 +18,8 @@ use std::sync::{Mutex, PoisonError};
 use rdy_spec::sig::{Policy, PublicKey, SignatureState, TrustSource, TrustStore};
 use rdy_spec::spec::ProductSlug;
 
+mod common;
+
 const PASSWORD: &str = "CANARY-ci password with spaces";
 const SPEC: &str = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme-platform\nchecks:\n  - id: host.cpu\n    min: 8\n    severity: block\n    fix: Use a node with at least 8 vCPUs.\n";
 
@@ -47,7 +49,7 @@ fn rdy(dir: &Path, args: &[&str], env_password: Option<&str>, stdin: &str) -> Ou
         .expect("stdin")
         .write_all(stdin.as_bytes())
         .expect("write stdin");
-    child.wait_with_output().expect("rdy finishes")
+    common::quiet(child.wait_with_output().expect("rdy finishes"))
 }
 
 fn code(out: &Output) -> i32 {
@@ -175,10 +177,8 @@ fn the_key_is_encrypted_and_private_and_the_public_key_is_not_a_secret() {
                 & 0o7777
         };
         assert_eq!(mode("k.key"), 0o600);
-        // 0644 is the most a public file gets. The umask of whoever runs the tests can only remove bits.
-        let public = mode("k.pub");
-        assert_eq!(public & !0o644, 0, "{public:o}");
-        assert_ne!(public & 0o400, 0, "{public:o}");
+        // The binary runs with umask 077 (M1-168) and sets the public file to 0644 itself.
+        assert_eq!(mode("k.pub"), 0o644);
     }
     let shown = stderr(&out);
     assert!(shown.contains("Wrote k.key"), "{shown}");
