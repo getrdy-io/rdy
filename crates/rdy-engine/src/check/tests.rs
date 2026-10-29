@@ -180,6 +180,7 @@ fn every_check_error() -> Vec<CheckError> {
     let all = vec![
         CheckError::MissingNeed(Need::KubeContext),
         CheckError::Unsupported("no /proc on this OS"),
+        CheckError::Probe(crate::probe::ProbeError::NotFound),
         CheckError::Failed {
             message: "parse failed".to_owned(),
             hint: "report it".to_owned(),
@@ -187,8 +188,10 @@ fn every_check_error() -> Vec<CheckError> {
     ];
     for error in &all {
         match error {
-            CheckError::MissingNeed(_) | CheckError::Unsupported(_) | CheckError::Failed { .. } => {
-            }
+            CheckError::MissingNeed(_)
+            | CheckError::Unsupported(_)
+            | CheckError::Probe(_)
+            | CheckError::Failed { .. } => {}
         }
     }
     all
@@ -234,6 +237,7 @@ fn check_errors_map_to_the_documented_outcome() {
         [
             Some(SkipKind::MissingNeed),
             Some(SkipKind::NotYetOnOs),
+            None,
             None
         ]
     );
