@@ -424,8 +424,9 @@ lints and signs one buffer.
 
 1. Read the spec (1 MiB cap) and the sidecar (4 KiB cap).
 2. Parse the sidecar; reject legacy `Ed` and any trusted comment not in the 4.2 form.
-3. Look up keys pinned for the comment's `product`: `--key` first, then the stores; preselect by key id,
-   match the full public key.
+3. Look up keys pinned for the comment's `product`. With `--key`, only that key is considered and **no
+   store is read** (`trust::load` is not called, ADR 0027), so a refused or planted store cannot stop a
+   `--key` run. Without it, the stores: preselect by key id, match the full public key.
 4. Verify the raw bytes, then the global signature over the comment.
 5. Only now parse the YAML (ADR 0001) and validate (2.5).
 6. Check `metadata.product` equals the comment's `product`.
@@ -508,13 +509,13 @@ known (ADR 0008 decision 7). Spec content errors are in 2.5.
 | --- | --- | --- | --- |
 | `spec_unreadable` | the spec file is missing, not a regular file, or unreadable | `error: cannot read acme-platfrom.yaml: no such file` | `fix: check the file name and the folder you are in` (07 C.6) |
 | `spec_unsigned` | no sidecar, no flag | `error: no signature found at acme-platform.yaml.minisig` | `fix: ask the vendor for acme-platform.yaml.minisig and put it next to the spec.` and `If you wrote this spec yourself, see https://docs.getrdy.io/unsigned` |
-| `spec_key_unknown` | no pinned key matches | `error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05 (fingerprint 4d2a...0a1c), which you have not trusted for acme-platform` | `fix: get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then run: rdy trust add acme-platform --key <file>` |
+| `spec_key_unknown` | no pinned key matches | `error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05 (fingerprint 4d2a...0a1c), which you have not trusted for acme-platform` | `fix: get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then run: rdy trust add acme-platform --key <file>` (Windows in M1, where `rdy trust add` is not supported: `fix: see https://docs.getrdy.io/unsigned`, ADR 0027) |
 | `spec_signature_invalid`, tampered | bytes or comment do not verify | `error: the signature on acme-platform.yaml does not match the file. It may have been changed after signing.` | `fix: get a fresh copy and its .minisig from the vendor. Do not run this file.` |
 | `spec_signature_invalid`, form | legacy `Ed`, malformed sidecar or comment, unreadable sidecar | `error: the signature on acme-platform.yaml is not in the form rdy accepts.` | same fix |
 | `spec_signature_invalid`, product | comment or metadata product differs | `error: acme-platform.yaml is signed for product 'acme-edge', but the spec says 'acme-platform'.` | same fix |
 | any of the above, file has CRLF | | adds `The file has Windows line endings. If it went through Git or email, ask for the original.` | |
 | `spec_expired` | `metadata.expires` has passed | `error: acme-platform.yaml expired on 2027-01-31. This machine's clock says 2027-02-03.` | `fix: ask the vendor for a current spec. If this machine's clock is wrong, set it and run again.` |
-| `trust_store_insecure` | 4.3 | `error: /etc/rdy/trust.yaml is writable by other users` | `fix: chmod 644 /etc/rdy/trust.yaml` (Windows in M1: `fix: move the file away. rdy cannot check who can change a trust store on Windows yet, so it reads none there. Windows support comes in a later release.`, ADR 0027; from M2-105: `fix: run rdy trust add from an elevated prompt to recreate the store`) |
+| `trust_store_insecure` | 4.3 | `error: /etc/rdy/trust.yaml is writable by other users` | `fix: chmod 644 /etc/rdy/trust.yaml` (Windows in M1: `fix: ask an administrator to remove <path>. rdy cannot check who can change a trust store on Windows yet, so it reads none there. To check a spec meanwhile, see https://docs.getrdy.io/unsigned`, ADR 0027; from M2-105: `fix: run rdy trust add from an elevated prompt to recreate the store`) |
 
 `spec_unreadable`, `spec_expired` and `trust_store_insecure` are new codes, added to ADR 0008's list
 under ADR 0007's additive rule. One more ErrorOutput code is not about spec loading: `interrupted`

@@ -139,7 +139,9 @@ run-level facade (`check: null`):
   `whoami` fails, the run counts as elevated for the trust store and `root` as unknown for checks.
 
 The CLI maps the snapshot to the `rdy-spec` trust store scope (system store only when elevated,
-INV-04); the loader never reads ids itself. One privilege answer per run.
+INV-04); the loader never reads ids itself. One privilege answer per run. In M1 the trust store does not
+use the Windows answer: Windows has no user store and every existing system store is refused, so
+elevation does not change what is read (ADR 0027). M2-105 revisits it.
 
 | Need (01 name) | Met when | Probed by | Never does |
 | --- | --- | --- | --- |

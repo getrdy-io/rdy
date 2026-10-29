@@ -2615,7 +2615,7 @@ checked by `cargo deny`.
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (and lower case) | `run` | Proxy settings for network checks. Printed without user info | M1 |
 | `SSL_CERT_FILE`, `SSL_CERT_DIR` | `run` | Extra trust roots, where the platform loader reads them (Linux) | M1 |
 | `KUBECONFIG` | `run` | Kubeconfig path list. `--kubeconfig` wins | M1 |
-| `HOME`, `XDG_CONFIG_HOME`, `APPDATA` | `trust`, `run`, `verify` | The user trust file. Never read when euid is 0 (ADR 0002). The kube client also reads `HOME` for `~/.kube/config` | M1 |
+| `HOME`, `XDG_CONFIG_HOME` | `trust`, `run`, `verify` | The user trust file (Unix only; Windows has no user store and never reads `APPDATA`, ADR 0027). Never read when euid is 0 (ADR 0002). The kube client also reads `HOME` for `~/.kube/config` | M1 |
 | `USERPROFILE` | `run` (Windows) | Default report folder `%USERPROFILE%\rdy-reports` (ADR 0016) | M1 |
 | `RDY_KEY_PASSWORD` | `spec sign`, `spec keygen` | Signing key password for CI. The prompt and `--password-file` are the other ways | M1 |
 | `RDY_TOKEN` | `run`, `bundle`, `upload` | Share-link token, `rdy_st_...` | M2 |

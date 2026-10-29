@@ -123,8 +123,11 @@ fn the_windows_layout_has_programdata_and_no_user_path() {
         Some(under("/programdata", &["rdy", "trust.yaml"]).as_path())
     );
     // Elevation is never detected, and there is no user store, so the only store to write is the system one.
-    #[cfg(windows)]
     assert_eq!(layout.write_scope(), Scope::System);
+    // The Unix layout keeps its own answer on every host, Windows included.
+    let unix = Layout::unix(&v, 1000);
+    assert_eq!(unix.write_scope(), Scope::User);
+    assert_eq!(Layout::unix(&v, 0).write_scope(), Scope::System);
 }
 
 #[test]
@@ -132,6 +135,24 @@ fn the_windows_layout_without_programdata_has_no_store_at_all() {
     let layout = Layout::windows(&Vars::default());
     assert_eq!(layout.path(Scope::User), None);
     assert_eq!(layout.path(Scope::System), None);
+}
+
+#[test]
+fn the_unverifiable_fix_points_at_an_administrator_and_the_docs() {
+    let path = PathBuf::from("/etc/rdy/trust.yaml");
+    let error = TrustStoreError::Insecure {
+        path,
+        scope: Scope::System,
+        why: Insecurity::Unverifiable,
+    };
+    let fix = error.fix();
+    assert!(fix.starts_with("ask an administrator to remove "), "{fix}");
+    assert!(fix.contains("https://docs.getrdy.io/unsigned"), "{fix}");
+    // 07 rule 8: no fix line suggests the flags that weaken the check.
+    assert!(
+        !fix.contains("--key") && !fix.contains("--allow-unsigned"),
+        "{fix}"
+    );
 }
 
 #[test]
@@ -751,9 +772,10 @@ mod unix {
 }
 
 /// Without Unix modes and owners, a store that exists is refused and a missing one is empty. A temp
-/// folder stands in for `C:\ProgramData` through `Vars::program_data`. Every store here is made by the
-/// current user, who is not trusted either way, so these are the exit test of M1-122 on Windows: a
-/// store a non-admin made, or one with a Users write ACE, exits 64 with `trust_store_insecure`.
+/// folder stands in for `C:\ProgramData` through `Vars::program_data`. These are the exit test of M1-122
+/// on Windows: a store that exists exits 64 with `trust_store_insecure`, whoever made it. A hosted CI
+/// runner user is an administrator, so these tests cannot make a non-admin store. They show that no
+/// store passes, which covers the non-admin case, and that a Users write ACE changes nothing.
 #[cfg(not(unix))]
 mod other {
     use super::*;
@@ -813,24 +835,20 @@ mod other {
 
     #[test]
     fn a_store_made_by_the_current_user_is_refused() {
-        // The temp folder and the file belong to the user who runs the test, not to Administrators.
+        // The temp folder and the file belong to the user who runs the test. On a hosted runner that user
+        // is an administrator and the store is still refused, because nothing is verified.
         let dir = tempfile::tempdir().expect("tempdir");
         let layout = layout(&dir);
         make_store(&layout);
         assert_refused(&layout);
     }
 
+    #[cfg(windows)]
     #[test]
-    fn a_user_store_under_appdata_is_never_read() {
-        // Even with APPDATA pointing at a store, there is no user path to read.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let appdata = tempfile::tempdir().expect("tempdir");
-        let user_store = appdata.path().join("rdy");
-        std::fs::create_dir_all(&user_store).expect("mkdir");
-        std::fs::write(user_store.join("trust.yaml"), EMPTY).expect("write");
-        let layout = layout(&dir);
+    fn the_real_environment_gives_no_user_path() {
+        // A hosted runner has a real %APPDATA%, so the detected layout is what proves it is not used.
+        let layout = Layout::detect();
         assert_eq!(layout.path(Scope::User), None);
-        assert_eq!(load(&layout).expect("loads"), TrustStore::new());
     }
 
     /// Grants the Users group write access (S-1-5-32-545, so it works in any language) with `icacls`,
@@ -850,6 +868,15 @@ mod other {
             assert!(status.success(), "icacls failed: {status}");
         }
         assert_refused(&layout);
+    }
+
+    #[test]
+    fn saving_is_unsupported_even_without_a_place_to_write() {
+        let layout = Layout::from_env(&Vars::default(), 0);
+        assert!(matches!(
+            save(&layout, &TrustStore::new()),
+            Err(TrustStoreError::Unsupported)
+        ));
     }
 
     #[test]

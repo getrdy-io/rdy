@@ -1,6 +1,6 @@
 # ADR 0027: Windows trust stores stay refused in M1
 
-- Status: Accepted (2026-10-29, M1-122). Settles what ADR 0021 decision 5 called temporary.
+- Status: Proposed (security-reviewer and rust-architect sign-off in PR #68). Settles what ADR 0021 decision 5 called temporary.
 - Date: 2026-10-29
 
 ## Context
@@ -26,22 +26,36 @@ which has the same two options.
    need to detect elevation.
 3. **No FFI and no unmaintained crate goes into the trust path in M1.** Neither `unsafe` nor `winapi`
    wrappers touch the code that decides what to trust.
-4. **The fix line does not name `run --key`.** 07 section 1, rule 8 and 01 section 4.7 forbid hints that suggest it. The line says
-   the file is not read on Windows yet and to move it away. The Windows page of the docs says that a
-   Windows run is verified with the vendor key given for that run.
-5. **The follow-up is M2-105**, "rdy-winacl FFI crate: admin-only ProgramData store and elevation
-   detection": a small crate with `windows-sys`, one documented `unsafe` block per call, and a safe
-   interface (`store_is_admin_only(path)`, `is_elevated()`). It follows CLAUDE.md's rule for FFI crates and
-   needs a security review. The coordinator files the backlog row in a correction PR.
-6. **Tests.** On Windows CI, a store made by the current user, a store in a folder where `Users` has a
-   write ACE (granted with `icacls`), and a store under a pretend `%ProgramData%` each exit 64 with
-   `trust_store_insecure`. The Windows layout has no user path even when `HOME`, `XDG_CONFIG_HOME` and
-   `APPDATA` point at stores.
+4. **A `--key` run never reads a store.** `rdy verify --key` and `rdy run --key` do not call
+   `trust::load`, so a store that is refused (or planted) cannot stop them. This is what keeps Windows
+   usable in M1: any member of `Users` can create `C:\ProgramData\rdy\trust.yaml`, and if a `--key` run
+   read the stores, every Windows run would exit 64. 01 section 4.4 says so. M1-126 owns the exit test
+   (PR #69): on `windows-x64` with a store present, `rdy verify --key` exits 0, and `rdy verify` without
+   `--key` exits 64 with `trust_store_insecure`.
+5. **The fix lines point at an administrator and the docs.** The `trust_store_insecure` fix on Windows is
+   `ask an administrator to remove <path>`, then a link to https://docs.getrdy.io/unsigned. The
+   `spec_key_unknown` fix on Windows points at the same page, because `rdy trust add` is not supported
+   there. No line names `run --key` or `--allow-unsigned` (07 section 1 rule 8, 01 section 4.7). The page
+   itself is written by M1-133 (docs-writer).
+6. **The follow-up is M2-105**, "rdy-winacl FFI crate: admin-only ProgramData store and elevation
+   detection" (8 h, depends on M1-122, filed in PR #69). It is a small crate with `windows-sys`, one
+   documented `unsafe` block per call and a safe interface (`store_is_admin_only(path)`,
+   `is_elevated()`), as CLAUDE.md allows for FFI crates, and it needs a security review. It takes the
+   ProgramData folder from `FOLDERID_ProgramData` (`SHGetKnownFolderPath`) and not from the environment,
+   because an environment variable is set by the caller.
+7. **Tests.** On Windows CI, a store made by the current user (an administrator on a hosted runner), a
+   store in a folder where `Users` has a write ACE (granted with `icacls`), and a store under a pretend
+   `%ProgramData%` each exit 64 with `trust_store_insecure`. The real environment gives no user path
+   (`Layout::detect()` with a real `%APPDATA%`). The Windows layout has no user path even when `HOME` and
+   `XDG_CONFIG_HOME` point at stores, and a Unix layout built on Windows still writes the user store.
+   The `strace` test of the root rule runs the library call, not the binary. The check on the real binary
+   is part of the M1-126 exit test (PR #69).
 
 ## Consequences
 
 - On Windows, a spec cannot be verified against a pinned key in M1. A run uses the vendor key for that run
-  only. This is the cost, and it is paid by the one platform whose ACL model we cannot read safely yet.
+  only (decision 4). This is the cost, and it is paid by the one platform whose ACL model we cannot read
+  safely yet.
 - Any account that can create `C:\ProgramData\rdy\trust.yaml` can make every Windows run that reads the
   system store exit 64. It blocks verification and never makes a planted store trusted (threat model S2).
 - `rdy trust add` on Windows exits 64 with "not supported". The Windows fix line of 01 section 4.8 changes
@@ -56,8 +70,11 @@ which has the same two options.
 | A tiny FFI crate with `windows-sys` in M1 | Right answer, but new unsafe code in the trust path needs its own review and is more than this ticket. It is M2-105. |
 | Safe crates (`windows-permissions`, `is_elevated`) | Unmaintained for years, on `winapi`, in the one place that decides trust. |
 | Shell out to `icacls` and parse the text | Output is localised and has no stable format. A wrong parse trusts a bad store. |
+| Elevation detection with `whoami.exe /groups /fo csv` (02, privilege snapshot) | It is not needed: Windows has no user path in M1, so an elevated and a normal run read the same single store. Without FFI it is a parsed tool output deciding trust, and the integrity SID is not the same fact as "this DACL is admin-only". M2-105 decides how to detect elevation. |
+| SDDL text from `icacls /save` or `(Get-Acl).Sddl`, parsed in Rust | SDDL is not localised, but it is still tool output parsed for a trust decision, with inheritance flags and well-known aliases to get right. A parse slip trusts a bad store. Waits for M2-105, which can compare real SIDs. |
+| The `exacl` crate for macOS ACLs (and a Windows twin) | `forbid(unsafe_code)` binds our crates, not their dependencies, so it is allowed in principle. A new dependency in the trust path needs its own review, and it does not cover Windows DACLs. Routed to M2-105 with the rest. |
 | Read the store without ACL checks | A store a non-admin planted would be trusted by an elevated run (threat model S2). |
 
 ## Tickets implied
 
-- [M2] M2-105 rdy-winacl FFI crate: admin-only ProgramData store and elevation detection | owner: rust-engineer | est: 8h | depends on: M1-122, security-reviewer sign-off | exit test: on Windows CI a ProgramData\rdy directory created by a non-admin user, or with a Users write ACE, exits 64 with trust_store_insecure, and an Administrators-owned store with a protected DACL is read.
+- [M2] M2-105 rdy-winacl FFI crate: admin-only ProgramData store and elevation detection | owner: rust-engineer | est: 8h | depends on: M1-122 | exit test: on Windows CI a ProgramData\rdy directory created by a non-admin user, or with a Users write ACE, exits 64 with trust_store_insecure, and an Administrators-owned store with a protected DACL is read.

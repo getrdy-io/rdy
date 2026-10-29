@@ -479,7 +479,7 @@ the 11 ticket named. 05 revision 3 itself is part of M1-001.
 | SEC-26 | M1-063 | M1 redaction corpus | yes |
 | SEC-32 | M1-011 | Security mailbox and security.txt (fold) | yes |
 | SEC-59 | M1-130 | Unsigned and unpinned-key banners and hint wording for spec loading | no |
-| SEC-60 | M1-122 | Root trust lookup touches no user path, Windows store ACL rules | no |
+| SEC-60 | M1-122 | Root trust lookup touches no user path; Windows stores stay refused, the ACL rules are M2-105 (ADR 0027) | no |
 | SEC-61 | M1-121 | Key fingerprint in the result and forged key id (fold) | no |
 | SEC-62 | M1-017 | YAML tags, directives and non-finite floats refused (fold) | no |
 | SEC-63 | M1-041 | Result schema caps, identity.kube exec plugin and action log retention | no |

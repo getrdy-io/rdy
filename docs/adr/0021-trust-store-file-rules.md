@@ -32,7 +32,7 @@ is unreadable or not valid gets. M1-121 has to pick. Each choice below is the on
 5. **Windows and other non-Unix systems refuse what they cannot check.** Until M1-122 adds the ACL rules,
    any trust file that exists there is refused with `trust_store_insecure`, a missing file is an empty
    store, and saving is reported as not supported. `--key` runs read no store and are not affected. The
-   fix line for this refusal tells the user to move the file away. It differs from the one in 01 section
+   fix line for this refusal tells the user to ask an administrator to remove the file (ADR 0027). It differs from the one in 01 section
    4.8 (run `rdy trust add` from an elevated prompt), because that command cannot work until M1-122.
 6. **Error codes.** A store that can be changed by the wrong people, that rdy cannot check, that is not
    a regular file (a folder, a pipe or a device), or whose folder is not a folder, is

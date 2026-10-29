@@ -9,6 +9,10 @@
 //! The child is this test binary itself, run with `--ignored --exact` on the probe below. The CLI does
 //! not call the trust store yet (M1-126), so the library call is what a root `rdy run` will make.
 //!
+//! The child is the test harness, not the `rdy` binary, so this proves INV-04 for the library call only.
+//! The same check on the real binary (`rdy verify` on a signed fixture) moves to M1-126, which wires the
+//! command to the store.
+//!
 //! A second test is the control: the same probe, with a layout for a normal user, must show the home in
 //! the log. Without it, an empty log would pass for the wrong reason (a broken `strace` command line).
 //!
@@ -96,13 +100,39 @@ impl Fixture {
     }
 }
 
-/// Runs the probe under `strace -f` and returns the log. `strace` is a hard requirement of the `root`
-/// job, so a missing one fails there and skips nowhere.
+/// Account database files and sockets. A lookup of `SUDO_USER` or `SUDO_UID` (`getpwnam`, `getpwuid`)
+/// would read one of these and so could find the user's home without ever naming it in a path that the
+/// fixture knows. The fixture user is not a real account, so the home check alone would miss it.
+const ACCOUNT_LOOKUPS: [&str; 5] = [
+    "/etc/passwd",
+    "/etc/nsswitch.conf",
+    "/run/systemd/userdb",
+    "/var/run/nscd",
+    "nscd/socket",
+];
+
+/// True when `strace` can run. A missing `strace` skips the test, except in the `root` job, which sets
+/// `RDY_REQUIRE_ROOT` and installs it.
+fn strace_or_skip() -> bool {
+    if Command::new("strace").arg("-V").output().is_ok() {
+        return true;
+    }
+    assert!(
+        std::env::var_os("RDY_REQUIRE_ROOT").is_none(),
+        "strace is not installed; the root job installs it (apt-get install strace)"
+    );
+    eprintln!("skipped: strace is not installed");
+    false
+}
+
+/// Runs the probe under `strace -f -y` and returns the log. `-y` prints the path behind every file
+/// descriptor, so a read through a descriptor shows the path too.
 fn run_probe_under_strace(fixture: &Fixture, layout: &str) -> String {
     let exe = std::env::current_exe().expect("current_exe");
     let home = fixture.home();
     let status = Command::new("strace")
         .arg("-f")
+        .arg("-y")
         .args(["-s", "512"])
         .arg("-o")
         .arg(fixture.log())
@@ -141,7 +171,7 @@ fn mentions(log: &str, path: &Path) -> Vec<String> {
 
 #[test]
 fn root_run_opens_no_path_under_sudo_users_home() {
-    if !root_or_skip() {
+    if !root_or_skip() || !strace_or_skip() {
         return;
     }
     let fixture = Fixture::new();
@@ -158,6 +188,15 @@ fn root_run_opens_no_path_under_sudo_users_home() {
         "a root run touched a path under the user's home:\n{}",
         hits.join("\n")
     );
+    // No account lookup either: SUDO_USER and SUDO_UID are set in the child and must not be used.
+    for needle in ACCOUNT_LOOKUPS {
+        let lookups: Vec<&str> = log.lines().filter(|l| l.contains(needle)).collect();
+        assert!(
+            lookups.is_empty(),
+            "a root run looked up an account ({needle}):\n{}",
+            lookups.join("\n")
+        );
+    }
     // Nothing under a `.config/rdy` folder either, wherever it is.
     let config: Vec<&str> = log.lines().filter(|l| l.contains(".config/rdy")).collect();
     assert!(
@@ -169,7 +208,7 @@ fn root_run_opens_no_path_under_sudo_users_home() {
 
 #[test]
 fn root_control_a_user_layout_does_show_the_home_in_the_log() {
-    if !root_or_skip() {
+    if !root_or_skip() || !strace_or_skip() {
         return;
     }
     let fixture = Fixture::new();

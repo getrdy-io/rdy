@@ -120,6 +120,9 @@ pub struct Layout {
     system_file_owner: u32,
     /// The effective uid of this process.
     euid: u32,
+    /// The store `rdy trust add` writes. Decided when the layout is built, so a Unix layout built on
+    /// any host (a test on Windows, for one) gives the Unix answer.
+    write_scope: Scope,
 }
 
 /// A path that is set, not empty and absolute. A relative `HOME` would put the store under the working
@@ -162,6 +165,11 @@ impl Layout {
             system_dir_owner: 0,
             system_file_owner: 0,
             euid,
+            write_scope: if euid == 0 {
+                Scope::System
+            } else {
+                Scope::User
+            },
         }
     }
 
@@ -175,6 +183,8 @@ impl Layout {
             system_dir_owner: 0,
             system_file_owner: 0,
             euid: u32::MAX,
+            // There is no user store, so the only store to write is the system one.
+            write_scope: Scope::System,
         }
     }
 
@@ -191,11 +201,7 @@ impl Layout {
     /// has no user store), the user store otherwise.
     #[must_use]
     pub fn write_scope(&self) -> Scope {
-        if self.euid == 0 || cfg!(windows) {
-            Scope::System
-        } else {
-            Scope::User
-        }
+        self.write_scope
     }
 
     /// The same layout with the system store somewhere else, and its folder and file owned by `owner`.
@@ -265,6 +271,10 @@ pub fn load_scope(layout: &Layout, scope: Scope) -> Result<TrustStore, TrustStor
 /// A [`TrustStoreError`] if there is no place to write, the folder or the old file is unsafe, the new
 /// text is larger than a store may be, or the write fails.
 pub fn save(layout: &Layout, store: &TrustStore) -> Result<PathBuf, TrustStoreError> {
+    // Without Unix modes and owners nothing can be written safely, whatever the environment says.
+    if !cfg!(unix) {
+        return Err(TrustStoreError::Unsupported);
+    }
     let scope = layout.write_scope();
     let path = layout.path(scope).ok_or(TrustStoreError::NoUserStore)?;
     let text = store.to_yaml();
@@ -461,7 +471,9 @@ impl TrustStoreError {
                         Scope::User => format!("chmod 700 {dir}"),
                     },
                     Insecurity::Unverifiable => {
-                        "move the file away. rdy cannot check who can change a trust store on Windows yet, so it reads none there. Windows support comes in a later release.".to_owned()
+                        format!(
+                            "ask an administrator to remove {file}. rdy cannot check who can change a trust store on Windows yet, so it reads none there. To check a spec meanwhile, see https://docs.getrdy.io/unsigned"
+                        )
                     }
                 }
             }
