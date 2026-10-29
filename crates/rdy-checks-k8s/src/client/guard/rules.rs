@@ -304,9 +304,9 @@ pub enum ImpersonateError {
     /// The value is longer than 253 bytes.
     #[error("the `as` value is longer than 253 bytes. Fix: use a shorter user name")]
     TooLong,
-    /// The value has a control character, or a space or tab at either end.
+    /// The value has a byte outside printable ASCII, or a space at either end.
     #[error(
-        "the `as` value has a control character, or a space at its start or end. Fix: remove it from the user name"
+        "the `as` value has a character that is not printable ASCII, or a space at its start or end. Fix: use only letters, digits and punctuation in the user name"
     )]
     BadCharacter,
     /// A `system:serviceaccount:` value that is not `system:serviceaccount:<namespace>:<name>`.
@@ -318,8 +318,10 @@ pub enum ImpersonateError {
 
 /// The user the two access review POSTs may impersonate: the spec's `as:` value, checked once.
 ///
-/// A value is 1 to 253 bytes, has no control character (the C0 and C1 ranges and DEL) and no space or
-/// tab at either end. A value that starts with `system:serviceaccount:` must be exactly
+/// A value is 1 to 253 bytes, uses only the bytes 0x20 to 0x7E (printable ASCII, so no control character,
+/// no non-ASCII letter and no Unicode format character such as a right-to-left override, which could
+/// spoof the user shown in a report and which an HTTP header value cannot carry anyway), and has no space
+/// at either end. A value that starts with `system:serviceaccount:` must be exactly
 /// `system:serviceaccount:<namespace>:<name>`, a DNS-1123 label and a DNS-1123 subdomain.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ImpersonateAs(String);
@@ -337,8 +339,10 @@ impl ImpersonateAs {
         if value.len() > MAX_AS {
             return Err(ImpersonateError::TooLong);
         }
-        let edge = |c: char| c == ' ' || c == '\t';
-        if value.chars().any(char::is_control) || value.starts_with(edge) || value.ends_with(edge) {
+        if !value.bytes().all(|b| (0x20..=0x7E).contains(&b))
+            || value.starts_with(' ')
+            || value.ends_with(' ')
+        {
             return Err(ImpersonateError::BadCharacter);
         }
         if let Some(rest) = value.strip_prefix(SERVICE_ACCOUNT_PREFIX) {
@@ -674,6 +678,12 @@ fn check_query_value(value: &str) -> Result<(), &'static str> {
 /// `namespace` is set only for a namespaced resource: `/api/v1/namespaces/x/pods` has namespace `x` and
 /// resource `pods`, while `/api/v1/namespaces/x` has resource `namespaces` and name `x`, and
 /// `/api/v1/namespaces/x/finalize` has resource `namespaces`, name `x` and subresource `finalize`.
+///
+/// This differs from the server's `NewRequestInfo` in two places, on purpose. For `/api/v1/namespaces/x`
+/// the server also sets the namespace to `x`; this parser leaves it `None`, so the `Get(Only::Any)`
+/// entry of `namespaces` matches by name and a namespaced list does not. And the server keeps one
+/// subresource part; this parser joins the whole tail (`proxy/a/b`) into `subresource`. Neither changes
+/// a verdict, because every subresource is refused. Do not "fix" either to match the server.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct RequestInfo<'a> {
     pub(super) group: &'a str,

@@ -107,6 +107,8 @@ struct Rig {
     mock: Mock,
     run: TestRun,
     client: kube::Client,
+    /// The check id its log entries carry. `None` for a client from the run probe.
+    check: Option<String>,
 }
 
 impl Rig {
@@ -129,6 +131,7 @@ impl Rig {
             mock: mock.clone(),
             run: run.clone(),
             client,
+            check: check.map(str::to_owned),
         }
     }
 
@@ -139,7 +142,12 @@ impl Rig {
         let probe = run.context("k8s.rbac", Os::Linux, []).probe().clone();
         let user = ImpersonateAs::new(user).expect("a valid user");
         let client = kube::Client::new(guarded_service_as(mock.clone(), &probe, user), "");
-        Self { mock, run, client }
+        Self {
+            mock,
+            run,
+            client,
+            check: Some("k8s.rbac".to_owned()),
+        }
     }
 
     /// Sends one request. `Err` holds the rule if the guard refused it.

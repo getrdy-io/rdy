@@ -5,7 +5,6 @@
 //! request is refused, the mock sees nothing, and the log has one denied entry with the check id.
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use super::super::rules::{RequestInfo, request_info};
 use super::*;
@@ -13,7 +12,7 @@ use super::*;
 // ---- helpers ---------------------------------------------------------------------------------------------
 
 /// Sends `sent`, and asserts the guard refused it with `rule`, that nothing reached the server, and that
-/// the log gained exactly one denied `kube` entry for `check`, `method` and `path` (no query string).
+/// the log gained exactly one denied `kube` entry for the rig's check, `method` and `path` (no query string).
 async fn refused_and_logged(rig: &Rig, sent: Request<Body>, path: &str, rule: &str) {
     let before = rig.log().len();
     let method = sent.method().to_string();
@@ -25,7 +24,7 @@ async fn refused_and_logged(rig: &Rig, sent: Request<Body>, path: &str, rule: &s
     let entry = log.last().expect("an entry");
     assert_eq!(entry.kind, ActionKind::Kube);
     assert_eq!(entry.outcome, ActionOutcome::Denied, "{method} {path}");
-    assert_eq!(entry.check.as_deref(), Some("k8s.nodes"));
+    assert_eq!(entry.check, rig.check, "{method} {path}");
     assert_eq!(field(entry, "rule"), Some(rule), "{method} {path}");
     assert_eq!(field(entry, "method"), Some(method.as_str()));
     assert_eq!(field(entry, "path"), Some(path), "{method} {path}");
@@ -314,16 +313,9 @@ async fn impersonate_user_on_a_get_is_refused_and_logged() {
             "/apis/authentication.k8s.io/v1/selfsubjectreviews",
         ),
     ] {
-        let before = rig.log().len();
-        let method = sent.method().to_string();
-        assert_eq!(
-            rig.send(sent).await,
-            Err(RULE_IMPERSONATE),
-            "{method} {path}"
-        );
-        let log = rig.log();
-        assert_eq!(log.len(), before + 1);
-        assert_eq!(field(&log[before], "path"), Some(path));
+        refused_and_logged(&rig, sent, path, RULE_IMPERSONATE).await;
+        let entry = rig.log().pop().expect("entry");
+        assert_eq!(field(&entry, "header"), Some("impersonate-user"), "{path}");
     }
     assert_eq!(rig.mock.seen(), Vec::<String>::new());
 }
@@ -391,7 +383,12 @@ fn parts(
 }
 
 #[test]
-fn the_parser_reads_a_path_as_the_api_server_does() {
+fn the_parser_reads_a_path_as_the_api_server_does_except_for_two_deliberate_differences() {
+    // The rows follow the cases of `TestGetAPIRequestInfo` in the API server's `requestinfo_test.go`
+    // (k8s.io/apiserver, pkg/endpoints/request), for the paths a GET can take. There are two deliberate
+    // differences, and neither changes a verdict:
+    // - For `/api/v1/namespaces/x` the server sets the namespace to `x`. This parser leaves it `None`.
+    // - The server keeps one subresource part. This parser joins the whole tail (`proxy/a/b`).
     // (path, group, version, namespace, resource, name, subresource)
     type Row = (
         &'static str,
@@ -402,7 +399,7 @@ fn the_parser_reads_a_path_as_the_api_server_does() {
         Option<&'static str>,
         Option<&'static str>,
     );
-    let rows: [Row; 18] = [
+    let rows: [Row; 25] = [
         ("/api/v1/nodes", "", "v1", None, "nodes", None, None),
         (
             "/api/v1/nodes/n1",
@@ -551,6 +548,62 @@ fn the_parser_reads_a_path_as_the_api_server_does() {
         ),
         // The version is whatever the path says. The table decides if it is listed.
         ("/api/v9/nodes", "", "v9", None, "nodes", None, None),
+        // More rows from the upstream test.
+        ("/api/v1/pods", "", "v1", None, "pods", None, None),
+        (
+            "/api/v1/namespaces/other/pods",
+            "",
+            "v1",
+            Some("other"),
+            "pods",
+            None,
+            None,
+        ),
+        (
+            "/api/v1/namespaces/other/pods/foo/status",
+            "",
+            "v1",
+            Some("other"),
+            "pods",
+            Some("foo"),
+            Some("status"),
+        ),
+        (
+            "/api/v1/namespaces/other/pods/foo/binding",
+            "",
+            "v1",
+            Some("other"),
+            "pods",
+            Some("foo"),
+            Some("binding"),
+        ),
+        (
+            "/apis/apps/v1/namespaces/other/deployments/foo/scale",
+            "apps",
+            "v1",
+            Some("other"),
+            "deployments",
+            Some("foo"),
+            Some("scale"),
+        ),
+        (
+            "/apis/extensions/v1beta1/namespaces/other/ingresses/foo/status",
+            "extensions",
+            "v1beta1",
+            Some("other"),
+            "ingresses",
+            Some("foo"),
+            Some("status"),
+        ),
+        (
+            "/api/v1/nodes/foo/status",
+            "",
+            "v1",
+            None,
+            "nodes",
+            Some("foo"),
+            Some("status"),
+        ),
     ];
     for (uri, group, version, namespace, resource, name, sub) in rows {
         assert_eq!(
@@ -582,6 +635,8 @@ fn the_parser_refuses_what_is_not_a_resource_path() {
         "/api/v1/watch/nodes",
         "/api/v1/watch/namespaces/x/pods",
         "/api/v1/proxy/nodes/n1",
+        "/api/v1/proxy/namespaces/other/pods/foo",
+        "/api/v1/watch/namespaces/other/pods/foo",
         "/apis/apps/v1/watch/namespaces/kube-system/deployments",
     ] {
         assert_eq!(info(uri), Err(RULE_NOT_ALLOWED), "{uri}");
@@ -801,7 +856,7 @@ fn an_as_value_is_checked_once() {
     let long_label = format!("system:serviceaccount:{}:sa", "n".repeat(64));
     let ok_label = format!("system:serviceaccount:{}:sa", "n".repeat(63));
     assert!(ImpersonateAs::new(&ok_label).is_ok());
-    let bad: [(&str, ImpersonateError); 22] = [
+    let bad: [(&str, ImpersonateError); 26] = [
         ("", ImpersonateError::Empty),
         (&too_long, ImpersonateError::TooLong),
         ("a\nb", ImpersonateError::BadCharacter),
@@ -813,6 +868,12 @@ fn an_as_value_is_checked_once() {
         ("a\tb", ImpersonateError::BadCharacter),
         ("a\u{7f}b", ImpersonateError::BadCharacter),
         ("a\u{85}b", ImpersonateError::BadCharacter),
+        // Only the bytes 0x20 to 0x7E: a non-ASCII letter, a bidirectional override and a zero-width
+        // space are refused, so the user a report shows cannot be spoofed.
+        ("j\u{f6}s\u{e9}", ImpersonateError::BadCharacter),
+        ("\u{202E}x", ImpersonateError::BadCharacter),
+        ("a\u{200B}b", ImpersonateError::BadCharacter),
+        ("\u{ff1a}", ImpersonateError::BadCharacter),
         (" jane", ImpersonateError::BadCharacter),
         ("jane ", ImpersonateError::BadCharacter),
         ("jane\t", ImpersonateError::BadCharacter),
@@ -978,15 +1039,9 @@ fn the_selector_a_list_needs_is_still_checked_after_the_value_rules() {
 
 // ---- the citation of ALLOWED by the checks -------------------------------------------------------------------
 
-/// The `CheckInfo` of every k8s check this crate has built. M1-106 and the check tickets after it put
-/// each check's info here (or, once `K8sFamily` exists, this returns `Family::checks`). Until then the
-/// crate has no check, so the list is empty and [`NOT_BUILT_YET`] names what is still to come.
-fn built_infos() -> Vec<&'static rdy_engine::check::CheckInfo> {
-    Vec::new()
-}
-
 /// Check ids that `ALLOWED` cites and that no `CheckInfo` exists for yet. A check ticket removes its id
-/// when it adds its info to [`built_infos`]; the test fails if an id is in both places.
+/// when it registers its info in `crate::registry::infos`; the test fails if an id is in both places or
+/// in neither. M1-115 requires this list to be empty.
 const NOT_BUILT_YET: &[&str] = &[
     "k8s.admission",
     "k8s.nodes",
@@ -1009,16 +1064,19 @@ fn uncited<'a>(
 
 #[test]
 fn every_allowed_entry_is_cited_by_a_check_that_exists_or_is_still_to_be_built() {
-    let missing = uncited(built_infos());
+    let registered = crate::registry::infos();
+    let missing = uncited(registered.iter().copied());
     let pending: BTreeSet<&str> = NOT_BUILT_YET.iter().copied().collect();
-    // Every id without a CheckInfo is on the pending list, and the list holds nothing else.
+    // Every id without a registered CheckInfo is on the pending list, and the list holds nothing else.
+    // An id in both places fails (it is pending but has an info); an id in neither fails (it is missing).
     assert_eq!(
         missing, pending,
-        "ALLOWED cites a check that has no CheckInfo and is not on NOT_BUILT_YET, or NOT_BUILT_YET names a check that has an info; \
-         when a k8s check lands, add its info to built_infos() and remove its id from NOT_BUILT_YET"
+        "ALLOWED cites a check that is not registered in crate::registry::infos and not on NOT_BUILT_YET, \
+         or NOT_BUILT_YET names a check that is registered; when a k8s check lands, register its info and \
+         remove its id from NOT_BUILT_YET"
     );
-    // The built infos are k8s checks.
-    assert!(built_infos().iter().all(|info| info.family == "k8s"));
+    // The registered infos are k8s checks.
+    assert!(registered.iter().all(|info| info.family == "k8s"));
 }
 
 #[test]
@@ -1056,6 +1114,13 @@ fn the_citation_check_bites() {
         .filter(|info| info.id != "k8s.nodes")
         .collect();
     assert_eq!(uncited(without), BTreeSet::from(["k8s.nodes"]));
+    // An id that is both registered and pending leaves the missing set short of the pending list, so the
+    // test above fails on it.
+    let both = [info("k8s.version")];
+    let missing = uncited(all.iter().copied().chain(both));
+    assert!(missing.is_empty());
+    let pending: BTreeSet<&str> = NOT_BUILT_YET.iter().copied().collect();
+    assert_ne!(missing, pending);
     // An info for a check that ALLOWED does not cite is not an error.
     let extra = [info("k8s.access")];
     assert_eq!(uncited(extra).len(), NOT_BUILT_YET.len());
@@ -1064,8 +1129,8 @@ fn the_citation_check_bites() {
 #[test]
 fn every_cited_check_id_is_a_check_in_the_catalog() {
     // The ids are not typos: each one is a heading of 03-check-catalog.md.
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/plan/03-check-catalog.md");
-    let catalog = std::fs::read_to_string(&path).expect("docs/plan/03-check-catalog.md exists");
+    // Embedded, not read at run time: a check crate may not read files (M1-044).
+    let catalog = include_str!("../../../../../../docs/plan/03-check-catalog.md");
     let ids: BTreeSet<&str> = ALLOWED
         .iter()
         .flat_map(|entry| entry.checks.iter().copied())

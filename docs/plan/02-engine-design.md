@@ -1051,7 +1051,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
    Every other method is refused.
 8. **Headers.** `Impersonate-*` headers are allowed only on the access and rules review POSTs. The value
    must equal the validated spec `as:` value: `system:serviceaccount:<dns1123>:<dns1123>`, or a user
-   string with no control characters and no space at either end, at most 253 bytes. Otherwise only
+   string of printable ASCII (bytes 0x20 to 0x7E) with no space at either end, at most 253 bytes. Otherwise only
    values the operator's kubeconfig sets are allowed. The header name is logged, never a token.
 
    The guard takes the `as:` value through `ImpersonateAs::new` and `guarded_service_as`. With it, one
