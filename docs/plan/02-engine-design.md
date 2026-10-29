@@ -323,7 +323,7 @@ tests policy.
   change loading or name resolution (`LOCPATH`, `NLSPATH`, `HOSTALIASES`, `BASH_ENV`, `IFS` and similar)
   are refused too. Code: `rdy_engine::exec::policy`.
 - Descriptors above 2 that `rdy` inherited reach children in M1. `exec::inherited_fds()` lists them
-  for a start-up warning (M1-168); closing them needs `unsafe` (M2-104, ADR 0023).
+  for the start-up warning (built, M1-168); closing them needs `unsafe` (M2-104, ADR 0023).
 - `exec::run` and `ExecSpec::new` are public only under `cfg(any(test, feature = "testing"))`. Check
   crates reach the runner through `exec::table::run` only: it checks the command table (03 Appendix A),
   then the policy. `exec::policy::run` is crate-private, and a compile-fail test proves it. The table
@@ -436,7 +436,8 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
   Linux-only checks with `os: [linux]`.
 - **Process model.** One foreground process: no daemon, no service, no listener. Children only through
   the facade, plus kube exec plugins.
-- **Startup order.** Watchdog thread; redacting log layer; privilege snapshot and binary refusal; ring
+- **Startup order.** `harden_umask()` and the inherited-descriptor list (a one-line `warning:` on stderr when
+  not empty, M1-168); watchdog thread; redacting log layer; privilege snapshot and binary refusal; ring
   provider; spec load (verify, then parse); output directory created and held; plan; probes; checks
   (each result redacted as it completes); final pass; single-writer write; kill leftover process
   groups; exit.

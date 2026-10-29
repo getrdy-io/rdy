@@ -315,6 +315,12 @@ from the three JSON fields; the JSON `message` does not repeat them. The error c
 ADR 0008 decision 7. This file adds `spec_unreadable` (exit 64: the spec file is missing, not a regular file or
 unreadable) and `interrupted` (exit 70). Samples of each object are in B and C.11.
 
+**Start-up warning (M1-168).** If the parent left file descriptors above 2 open, `rdy` prints one line on
+stderr before the redacted log layer starts, with `--json` too, and never on stdout: `warning: rdy inherited open file
+descriptor 7, and the commands it runs inherit them. To start without, close them in the shell: rdy ... 7>&-`.
+It names at most 8 numbers and counts the rest. It goes through the same redaction and escaping as every
+other stderr line. Windows prints nothing. The code is `crates/rdy-cli/src/startup.rs`.
+
 ### 4.2 The promise
 
 1. **Within `rdy/v1` the JSON only grows.** No field is removed, renamed, retyped or given a new meaning. New
@@ -558,7 +564,7 @@ refused before clap parses anything, on `spec sign` and `spec keygen` only, so t
 missing-argument error and the value is never read. The code is `crates/rdy-cli/src/password.rs`.
 
 **Secret key files (M1-125).** `spec keygen` writes `<name>.key` and `<name>.pub` with `create_new`, so it
-never replaces a file and never follows a link, and the secret key has mode 0600 from the first byte. It
+never replaces a file and never follows a link, and the secret key has mode 0600 from the first byte. The public key and the signature are set to mode 0644 after they are created, whatever the umask. It
 looks for both names before it asks for a password. The password comes from `--password-file`,
 `RDY_KEY_PASSWORD` or two prompts that must match, and an empty one is refused. With `--unencrypted` it asks
 for nothing and prints a warning, and `--password-file` is refused together with it. If `RDY_KEY_PASSWORD` is
