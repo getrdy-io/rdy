@@ -1,7 +1,7 @@
 # ADR 0033: `trust add` takes a key as a file or as text, refuses secret keys by form, and edits the store through `rdy-spec`
 
-- Status: Proposed (2026-10-29, M1-131). Fills gaps in 01 section 4.3 and 07 A.10 and C.10. It becomes
-  Accepted when the security-reviewer signs off (M1-132).
+- Status: Accepted, security-reviewed (PR #77) (2026-10-29, M1-131). Fills gaps in 01 section 4.3 and
+  07 A.10 and C.10.
 - Date: 2026-10-29
 
 ## Context

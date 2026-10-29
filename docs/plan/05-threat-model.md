@@ -293,11 +293,27 @@ runs to the end of the line or YAML block, because a cap would leave the tail of
   `deny.toml` wrappers keep I/O crates out of them as a second line.
 - Licenses allowed: Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, BSL-1.0,
   CDLA-Permissive-2.0. MPL-2.0 only as a reviewed per-crate exception. Never GPL, LGPL, AGPL, SSPL, BUSL
-  or unknown.
+  or unknown. The one exception today is `winx` (Apache-2.0 WITH LLVM-exception), a Windows-only
+  dependency of `cap-primitives` (M1-036).
 - Advisories: the PR gate uses `unmaintained = "workspace"`. The daily audit uses `"all"` and opens an
   issue instead of blocking. An ignore names a ticket and expires within 90 days.
 - A new direct dependency needs security-reviewer approval: purpose, maintainers, `unsafe`, `build.rs`,
-  license.
+  license. The approvals are recorded here.
+
+### Dependency approvals
+
+- `cap-std` and `cap-primitives` 4.0.3 (M1-036, ADR 0016). Approved by security-reviewer on PR #71.
+  - Purpose: open the report folder once and resolve every path under it without leaving it, so a
+    symlink cannot send a write elsewhere (T1, INV-09). 4.0.3 is above 3.4.1, which fixes
+    RUSTSEC-2024-0445.
+  - Maintainers: the Bytecode Alliance (crate authors Dan Gohman and Jakub Konka).
+  - `unsafe`: yes, inside the crates, for OS calls (`openat`-style system calls, Windows handle calls).
+    Our crates keep `#![forbid(unsafe_code)]` and call only the safe API.
+  - `build.rs`: yes. It only probes the compiler version (`rustc`) to set cfg flags. It runs no other
+    command and touches no network.
+  - License: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT. Allowed as Apache-2.0 or MIT. The
+    Windows-only transitive `winx` is Apache-2.0 WITH LLVM-exception and has the one exception in
+    `deny.toml`.
 
 ## SECURITY.md
 
