@@ -10,8 +10,8 @@
 # fails the build. `kube::client::Client` and `kube::config::Config` are re-exports of the same items as
 # `kube::Client` and `kube::Config`, and clippy matches the item, so one entry covers both paths.
 # A type entry covers every constructor and trait route reached by naming the type:
-# `TryFrom<Config>` for `Client` and `ClientBuilder`, `TryFrom<Kubeconfig>` for `Config`, and `Default`
-# for `Kubeconfig`. The method entries stay as a second line.
+# `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`, `TryFrom<Config>` for `ClientBuilder`,
+# `TryFrom<Kubeconfig>` for `Config`, and `Default` and `Deserialize` for `Kubeconfig`. The method entries stay as a second line.
 #
 # M1-044 merges the std and facade entries of Appendix A into this file. M1-107 carries the proof that the
 # kube entries bite, from `lint-wall/kube-use.rs.txt` (it uses all 18 entries, the trait routes and both

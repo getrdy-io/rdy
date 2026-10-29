@@ -44,7 +44,9 @@ kubeconfig read needed a settled path.
      the same check. A FIFO would block and `/dev/zero` would fill memory. `Loaded::files()` lists all of
      them, in read order, so the probe hook (M1-107) logs one `read` entry each, with no check id (SEC-22).
      A check and the later read are two steps, so a file swapped in between is not caught. The operator
-     owns these files.
+     owns these files. Two residuals: kube re-reads a token file about once a minute (`TokenFile::token`,
+     a synchronous read on a worker) and the pod's `ca.crt` about once a minute (`ReloadingVerifier`),
+     and neither re-read has rdy's type or size check. Both files sit in the pod's own projected volume.
 3. **No `infer`, no `try_default`.** The client module builds a `Config` from the `Kubeconfig` it read
    and never calls `apply_debug_overrides`.
 4. **Announce, then send.** `Loaded::connect(announce)` calls `announce` with the cluster line before it
@@ -63,7 +65,7 @@ kubeconfig read needed a settled path.
    as scheme, host and port, never user info, path or query. The hint says not to edit a working
    kubeconfig: run from a host that reaches the API directly, or pass a copy without `proxy-url` with
    `--kubeconfig`. A user entry with `auth-provider` is refused with a hint for its provider: `gcp` points
-   at `gke-gcloud-auth-plugin`, `azure` at `kubelogin convert-kubeconfig`, `oidc` says rdy does not run it
+   at `gke-gcloud-auth-plugin`, `azure` at `kubelogin convert-kubeconfig -l azurecli`, `oidc` says rdy does not run it
    yet and to use an exec plugin for the identity provider, and any other says the same in general words.
    The `oidc` hint makes no claim about kubectl, which still ships that provider. **`HTTPS_PROXY` is never
    read by kube.** kube parses it inside `Config::try_from` and a malformed value fails the load, so a fixed
@@ -91,15 +93,22 @@ kubeconfig read needed a settled path.
    bundled Mozilla roots whenever the kubeconfig has no CA, so `rustls-platform-verifier` is never
    reached and no AIA or OCSP fetch happens outside the INV-11 peer set (ADR 0014 decision 3). The
    crate is still in the dependency tree (kube builds it behind `rustls-tls`) and is unreachable. A
-   kubeconfig CA, or `ca.crt` in a pod, replaces the roots as before. A cluster with a private CA must have
-   it in the kubeconfig, as kubectl needs too. Proved in a child process: a CA that `SSL_CERT_FILE` names
-   is not trusted.
+   kubeconfig CA, or `ca.crt` in a pod, replaces the roots as before. **This differs from kubectl**,
+   which uses the operating system's roots when the kubeconfig has no CA, so a cluster whose API
+   certificate chains to a root that only this machine's store has (a corporate root) works in kubectl
+   and fails in rdy with an unknown issuer. The error says so: with no CA set, the hint names the
+   bundled-roots rule and says to pass a copy of the kubeconfig with `certificate-authority` set. This is a
+   deviation from ADR 0014 decision 3 (system roots plus the CA), which equals its `trust: bundled` mode
+   for the kube client. Follow-up (filed by the coordinator as a correction or carry): after M1-092, fill
+   `root_cert` from the facade's `SystemRoots` when the kubeconfig has no CA, so the kube client uses the
+   same store as the rest of rdy. Proved in a child process: a CA that `SSL_CERT_FILE` names is not
+   trusted (it discriminates on Linux only).
 10. **The plugin's environment.** `RDY_TOKEN`, `RDY_KEY_PASSWORD` and every `RDY_*` variable set in the
-    process (an ExternalId variable, for example) are removed from the plugin's environment through
+    process (an ExternalId variable, for example; matched without regard to case on Windows) are removed from the plugin's environment through
     kube's `drop_env`. Cloud credential variables are not removed: `aws eks get-token` and its kind need
     them, and the operator chose to run that plugin. Proved with a plugin that dumps its environment.
 11. **Hand-offs to the probe hook (M1-107).** `Loaded::known_secrets()` returns the inline token, password
-    and client key data, and the contents of a token file or client key file, for the run-scoped known-secret
+    and client key data, the contents of a token file or client key file, and the values of plugin `env` entries whose name looks like a secret (at least 8 characters), for the run-scoped known-secret
     set (02, ADR 0015 decision 3). A token that a plugin hands out exists only after `connect` and is not
     in it (the redactor's token rules cover its shape). `Loaded::plugin_exec()` returns the plugin command
     (an absolute path when the kubeconfig gave a path) and escaped arguments, for the `exec` action-log
@@ -123,6 +132,12 @@ kubeconfig read needed a settled path.
   `crates/rdy-checks-k8s/lint-wall/kube-use.rs.txt`. It is not compiled by default. M1-107 carries the
   permanent proof from it (backlog correction-11).
 - `oidc` auth-provider support is a follow-up if a design partner needs it.
+- Which proofs discriminate where: the system-roots test needs Linux (`SSL_CERT_FILE`); the `HTTPS_PROXY`
+  child test cannot tell `HTTPS_PROXY` from `https_proxy` on Windows (names are one variable there); the
+  plugin canary and environment tests use shell scripts and run on Unix only. The distribution kubeconfig
+  paths in hints appear on Linux only (07).
+- Carried to M1-107 (correction-12): `.cmd` plugin tests for Windows, and resolving a bare plugin command
+  name against `PATH` for the `exec` action-log entry.
 - Credential plugin tests that use shell scripts run on Unix only. Windows gets `.cmd` plugin tests in
   M1-107 or M1-108.
 - A kube bump needs a manual re-read of 02 Appendix A, of the error mapping in `client/error.rs`, and of

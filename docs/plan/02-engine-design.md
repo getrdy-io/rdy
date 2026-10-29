@@ -834,7 +834,7 @@ one clippy rule.
   `kube::config::Kubeconfig::read_from`, `kube::config::Kubeconfig::from_env`,
   `kube::config::Kubeconfig::from_yaml`. The paths `kube::client::Client` and `kube::config::Config`
   are re-exports of the same items, and clippy matches the item, so one entry covers both.
-  - Trait routes: `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`, `TryFrom<Config>` for
+  - Trait routes: `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`, `TryFrom<Kubeconfig>` for `Config`, `TryFrom<Config>` for
     `ClientBuilder`, and `Default` and `Deserialize` for `Kubeconfig`. Each needs a named `Config` or
     `Kubeconfig` (type inference cannot pick one), so the type entries cover them. `tests/lint-wall`
     uses each route once.

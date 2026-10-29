@@ -33,6 +33,11 @@ struct Pki {
 }
 
 fn pki(name: &str) -> Pki {
+    pki_for(name, "127.0.0.1")
+}
+
+/// A CA, and a server certificate for `leaf_name` signed by it.
+fn pki_for(name: &str, leaf_name: &str) -> Pki {
     let ca_key = KeyPair::generate().expect("ca key");
     let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("ca params");
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -41,7 +46,7 @@ fn pki(name: &str) -> Pki {
     let issuer = Issuer::from_params(&ca_params, &ca_key);
 
     let leaf_key = KeyPair::generate().expect("leaf key");
-    let leaf = CertificateParams::new(vec!["127.0.0.1".to_owned()])
+    let leaf = CertificateParams::new(vec![leaf_name.to_owned()])
         .expect("leaf params")
         .signed_by(&leaf_key, &issuer)
         .expect("leaf cert");
@@ -142,7 +147,33 @@ async fn a_certificate_from_another_ca_is_refused_with_the_reason() {
         .expect_err("unknown issuer");
 
     assert!(
-        matches!(&error, KubeError::Unreachable { cause, .. } if cause.contains("UnknownIssuer")),
+        matches!(&error, KubeError::Unreachable { cause, ca_set: true, .. } if cause.contains("UnknownIssuer")),
+        "{error:?}"
+    );
+    // A CA is set, so the hint is about the CA that does not match (03, k8s.access).
+    assert!(
+        error.hint().contains("does not match this server")
+            && error.hint().contains("net.tls_intercept"),
+        "{}",
+        error.hint()
+    );
+}
+
+#[tokio::test]
+async fn a_certificate_for_another_name_gets_its_own_phrase() {
+    // rustls 0.23 words this as "certificate not valid for name ...", not with the Debug name.
+    let pki = pki_for("rdy test ca", "localhost");
+    let addr = serve(pki.server.clone()).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    let error = loaded(dir.path(), addr, &pki.ca_pem, "")
+        .await
+        .connect(|_| {})
+        .await
+        .expect_err("the certificate is for localhost, the address is 127.0.0.1");
+
+    assert!(
+        matches!(&error, KubeError::Unreachable { cause, .. } if cause.contains("NotValidForName")),
         "{error:?}"
     );
 }
@@ -220,7 +251,15 @@ async fn without_a_ca_in_the_kubeconfig_only_the_bundled_roots_are_trusted() {
         .expect_err("the CA in SSL_CERT_FILE must not be trusted");
 
     assert!(
-        matches!(&error, KubeError::Unreachable { cause, .. } if cause.contains("UnknownIssuer")),
+        matches!(&error, KubeError::Unreachable { cause, ca_set: false, .. } if cause.contains("UnknownIssuer")),
         "{error:?}"
+    );
+    // No CA is set, so the hint says rdy trusts only its bundled roots (ADR 0031 decision 9).
+    let hint = error.hint();
+    assert!(
+        hint.contains("names no certificate authority")
+            && hint.contains("not this machine's store")
+            && hint.contains("certificate-authority"),
+        "{hint}"
     );
 }

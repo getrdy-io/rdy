@@ -138,13 +138,18 @@ fn nothing_found_is_no_kubeconfig_with_the_hint() {
     let error = load_sync(&options(), &env).expect_err("none");
     assert!(matches!(error, KubeError::NoKubeconfig), "{error:?}");
     assert_eq!(error.detail(), "no kubeconfig found");
-    assert!(
-        error
-            .hint()
-            .starts_with("Pass --kubeconfig <file> or set KUBECONFIG."),
-        "{}",
-        error.hint()
-    );
+    // The exact text: the distro paths are for Linux only (07 section 11).
+    let plain = "Pass --kubeconfig <file> or set KUBECONFIG.";
+    if cfg!(target_os = "linux") {
+        assert_eq!(
+            error.hint(),
+            format!(
+                "{plain} k3s keeps one at /etc/rancher/k3s/k3s.yaml, RKE2 at /etc/rancher/rke2/rke2.yaml and kubeadm at /etc/kubernetes/admin.conf. They are root-only: copy one to ~/.kube/config and chmod 600 it."
+            )
+        );
+    } else {
+        assert_eq!(error.hint(), plain);
+    }
 
     // No home, no variable, no in-cluster fallback.
     let error = load_sync(&options(), &Env::empty()).expect_err("none");
@@ -706,6 +711,14 @@ fn a_file_kube_would_read_must_be_a_regular_small_file() {
 #[test]
 fn the_no_kubeconfig_hint_names_the_distro_files_and_so_does_permission_denied() {
     let hint = KubeError::NoKubeconfig.hint();
+    let denied = KubeError::KubeconfigUnreadable {
+        path: "x".to_owned(),
+        reason: "permission denied",
+    };
+    if !cfg!(target_os = "linux") {
+        assert!(!hint.contains("k3s") && !denied.hint().contains("k3s"));
+        return;
+    }
     for part in [
         "/etc/rancher/k3s/k3s.yaml",
         "/etc/rancher/rke2/rke2.yaml",
@@ -715,10 +728,6 @@ fn the_no_kubeconfig_hint_names_the_distro_files_and_so_does_permission_denied()
     ] {
         assert!(hint.contains(part), "{part} missing from {hint}");
     }
-    let denied = KubeError::KubeconfigUnreadable {
-        path: "x".to_owned(),
-        reason: "permission denied",
-    };
     assert!(denied.hint().contains("/etc/rancher/k3s/k3s.yaml"));
     let other = KubeError::KubeconfigUnreadable {
         path: "x".to_owned(),
@@ -736,7 +745,7 @@ fn each_auth_provider_gets_its_own_hint_and_oidc_makes_no_false_claim() {
         .hint()
     };
     assert!(hint("gcp").contains("gke-gcloud-auth-plugin"));
-    assert!(hint("azure").contains("kubelogin convert-kubeconfig"));
+    assert!(hint("azure").contains("kubelogin convert-kubeconfig -l azurecli"));
     let oidc = hint("oidc");
     assert!(
         oidc.contains("does not run the oidc auth-provider yet"),
@@ -759,6 +768,7 @@ fn the_proxy_environment_note_shows_only_when_it_applies() {
             server: "https://a".to_owned(),
             cause: "the connection failed",
             proxy_env_set,
+            ca_set: true,
         };
         assert_eq!(timeout.hint().contains(note), proxy_env_set);
         assert_eq!(unreachable.hint().contains(note), proxy_env_set);
@@ -784,6 +794,8 @@ fn the_namespace_of_a_context_is_not_used_or_shown() {
     let loaded = load_one(text).expect("load");
     let shown = format!("{} {:?} {:?}", loaded.line(), loaded.line(), loaded);
     assert!(!shown.contains("other-ns"), "{shown}");
+    // kube's config does not hold it either.
+    assert!(loaded.config.default_namespace.is_empty());
 }
 
 #[test]
@@ -802,7 +814,7 @@ fn the_in_cluster_config_needs_the_service_account_files() {
 }
 
 #[tokio::test]
-async fn load_runs_on_the_blocking_pool_and_gives_the_same_answer() {
+async fn the_async_load_gives_the_same_answer_as_the_sync_one() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = write(dir.path(), "config", &simple(Some("ctx")));
     let loaded = load(&options().kubeconfig(&path), &Env::empty())
@@ -810,4 +822,82 @@ async fn load_runs_on_the_blocking_pool_and_gives_the_same_answer() {
         .expect("load");
     assert_eq!(loaded.line().server(), "https://prod.example:6443");
     assert_eq!(loaded.files(), [path]);
+}
+
+#[test]
+fn an_unknown_issuer_hint_depends_on_whether_the_kubeconfig_has_a_ca() {
+    let unknown = |ca_set| {
+        KubeError::Unreachable {
+            server: "https://a".to_owned(),
+            cause: "the server certificate is signed by an authority that is not trusted (UnknownIssuer)",
+            proxy_env_set: false,
+            ca_set,
+        }
+        .hint()
+    };
+    let without = unknown(false);
+    assert!(
+        without.contains("names no certificate authority"),
+        "{without}"
+    );
+    assert!(without.contains("not this machine's store"), "{without}");
+    assert!(without.contains("--kubeconfig"), "{without}");
+    assert!(!without.contains("VPN"), "{without}");
+    let with = unknown(true);
+    assert!(with.contains("does not match this server"), "{with}");
+    assert!(with.contains("net.tls_intercept"), "{with}");
+    // Another cause keeps the network hint.
+    let other = KubeError::Unreachable {
+        server: "https://a".to_owned(),
+        cause: "the connection was refused",
+        proxy_env_set: false,
+        ca_set: false,
+    };
+    assert!(other.hint().contains("VPN"));
+}
+
+#[test]
+fn the_ca_state_comes_from_the_kubeconfig() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    ca_fixture(dir.path());
+    let with_ca = kubeconfig_yaml(
+        Some("ctx"),
+        "https://prod.example:6443",
+        "    certificate-authority: ca.pem\n",
+        &token_user("t"),
+    );
+    let path = write(dir.path(), "config", &with_ca);
+    let loaded = load_sync(&options().kubeconfig(path), &Env::empty()).expect("load");
+    assert!(loaded.ca_set);
+    assert!(!load_one(&simple(Some("ctx"))).expect("load").ca_set);
+}
+
+#[test]
+fn rustls_wording_maps_to_the_fixed_phrases() {
+    use super::error::cause_words;
+    // The Display text of rustls 0.23.
+    let name = cause_words(
+        "invalid peer certificate: certificate not valid for name \"127.0.0.1\"",
+        None,
+    );
+    assert!(name.contains("NotValidForName"), "{name}");
+    let early = cause_words("invalid peer certificate: certificate not valid yet", None);
+    assert!(early.contains("NotValidYet"), "{early}");
+    let old = cause_words("invalid peer certificate: expired", None);
+    assert!(old.contains("Expired"), "{old}");
+}
+
+#[test]
+fn a_secret_looking_exec_env_value_is_a_known_secret() {
+    let user = "    exec:\n      apiVersion: client.authentication.k8s.io/v1\n      command: /opt/bin/get-token\n      env:\n      - name: API_TOKEN\n        value: ENVSECRET-12345\n      - name: AWS_PROFILE\n        value: prod-profile\n";
+    let text = kubeconfig_yaml(Some("ctx"), "https://prod.example:6443", "", user);
+    let loaded = load_one(&text).expect("load");
+    assert_eq!(loaded.known_secrets(), ["ENVSECRET-12345"]);
+}
+
+#[test]
+fn rdy_variable_names_are_matched_the_way_the_os_matches_names() {
+    assert!(is_rdy_var("RDY_TOKEN"));
+    assert!(!is_rdy_var("RDX_TOKEN"));
+    assert_eq!(is_rdy_var("rdy_token"), cfg!(windows));
 }

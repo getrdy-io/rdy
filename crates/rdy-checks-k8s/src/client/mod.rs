@@ -138,6 +138,16 @@ impl KubeOptions {
     }
 }
 
+/// True for a `RDY_*` variable name. Windows variable names are case-insensitive, so `rdy_token` counts
+/// there.
+fn is_rdy_var(name: &str) -> bool {
+    if cfg!(windows) {
+        name.len() >= 4 && name[..4].eq_ignore_ascii_case("RDY_")
+    } else {
+        name.starts_with("RDY_")
+    }
+}
+
 /// The parts of the process environment this module looks at, gathered once.
 ///
 /// Tests build one by hand, so they never change the process environment.
@@ -179,7 +189,7 @@ impl Env {
             proxy_env_set: set("HTTPS_PROXY") || set("https_proxy"),
             rdy_vars: std::env::vars_os()
                 .filter_map(|(name, _)| name.into_string().ok())
-                .filter(|name| name.starts_with("RDY_"))
+                .filter(|name| is_rdy_var(name))
                 .collect(),
         }
     }
@@ -368,6 +378,7 @@ pub struct Loaded {
     plugin_exec: Option<PluginExec>,
     secrets: Vec<String>,
     proxy_env_set: bool,
+    ca_set: bool,
 }
 
 impl fmt::Debug for Loaded {
@@ -442,6 +453,7 @@ impl Loaded {
             line,
             config,
             proxy_env_set,
+            ca_set,
             ..
         } = self;
         let server = line.server.clone();
@@ -456,14 +468,14 @@ impl Loaded {
                     &server,
                     plugin.as_deref(),
                     proxy_env_set,
+                    ca_set,
                 ));
             }
             Err(_) => return Err(KubeError::Cancelled),
         };
-        let info = client
-            .apiserver_version()
-            .await
-            .map_err(|error| from_kube_error(&error, &server, plugin.as_deref(), proxy_env_set))?;
+        let info = client.apiserver_version().await.map_err(|error| {
+            from_kube_error(&error, &server, plugin.as_deref(), proxy_env_set, ca_set)
+        })?;
         Ok(Connected {
             source,
             files,
@@ -803,6 +815,9 @@ fn from_kubeconfig(
         tls_verification_off: config.accept_invalid_certs,
     };
     let plugin_exec = plugin_exec_of(&config);
+    let ca_set = config.root_cert.is_some();
+    // No namespace is used (ADR 0031 decision 12), so the one from the context is not kept.
+    config.default_namespace = String::new();
     limit(&mut config, options.timeout);
     Ok(Loaded {
         source,
@@ -812,6 +827,7 @@ fn from_kubeconfig(
         plugin_exec,
         secrets,
         proxy_env_set: env.proxy_env_set,
+        ca_set,
     })
 }
 
@@ -846,12 +862,31 @@ fn inline_secrets(auth: Option<&AuthInfo>) -> Vec<String> {
     let Some(auth) = auth else {
         return Vec::new();
     };
-    [&auth.token, &auth.password, &auth.client_key_data]
+    let mut secrets: Vec<String> = [&auth.token, &auth.password, &auth.client_key_data]
         .into_iter()
         .flatten()
         .map(|secret| secret.expose_secret().trim().to_owned())
         .filter(|value| !value.is_empty())
-        .collect()
+        .collect();
+    // The `env` entries of an exec plugin go into the plugin's environment. The ones whose name looks
+    // like a secret are known secrets too (a short value such as a profile name is not).
+    for entry in auth
+        .exec
+        .iter()
+        .filter_map(|exec| exec.env.as_ref())
+        .flatten()
+    {
+        if let (Some(name), Some(value)) = (entry.get("name"), entry.get("value")) {
+            let name = name.to_ascii_uppercase();
+            let secret_name = ["TOKEN", "SECRET", "KEY", "PASSWORD", "PASS"]
+                .iter()
+                .any(|word| name.contains(word));
+            if secret_name && value.len() >= 8 {
+                secrets.push(value.clone());
+            }
+        }
+    }
+    secrets
 }
 
 /// The trimmed contents of a secret file that was already checked to be small and regular.
@@ -921,6 +956,7 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
         .and_then(|token| read_secret_file(token))
         .into_iter()
         .collect();
+    config.default_namespace = String::new();
     limit(&mut config, options.timeout);
     Ok(Loaded {
         source: Source::InCluster,
@@ -930,6 +966,7 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
         plugin_exec: None,
         secrets,
         proxy_env_set: env.proxy_env_set,
+        ca_set: true,
     })
 }
 

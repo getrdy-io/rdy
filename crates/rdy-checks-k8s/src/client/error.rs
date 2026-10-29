@@ -185,6 +185,9 @@ pub enum KubeError {
         /// `HTTPS_PROXY` or `https_proxy` is set in the environment. rdy does not use it for the
         /// cluster, and the hint says so.
         proxy_env_set: bool,
+        /// The kubeconfig (or the pod) names a certificate authority. Without one rdy trusts only its
+        /// bundled public roots, and the hint for an unknown issuer says so.
+        ca_set: bool,
     },
 
     /// The runtime shut down while the config was being read or the client was being built.
@@ -208,11 +211,11 @@ impl KubeError {
     #[must_use]
     pub fn hint(&self) -> String {
         match self {
-            Self::NoKubeconfig => format!("Pass --kubeconfig <file> or set KUBECONFIG. {DISTRO_FILES}"),
+            Self::NoKubeconfig => with_distro_files("Pass --kubeconfig <file> or set KUBECONFIG."),
             Self::KubeconfigUnreadable { reason, .. } => {
                 let base = "Check that the file exists, is a regular file under 8 MiB (1 MiB for a certificate, key or token file), and that you can read it.";
                 if *reason == "permission denied" {
-                    format!("{base} {DISTRO_FILES}")
+                    with_distro_files(base)
                 } else {
                     base.to_owned()
                 }
@@ -268,13 +271,23 @@ impl KubeError {
             Self::Api { .. } | Self::BadAnswer { .. } => {
                 "Check that the server address in the kubeconfig is the API server.".to_owned()
             }
-            Self::Timeout { proxy_env_set, .. } | Self::Unreachable { proxy_env_set, .. } => {
-                let base = "Check the server address in your kubeconfig and that you are on the right network or VPN, then run rdy again.";
-                if *proxy_env_set {
-                    format!("{base} {PROXY_ENV_NOTE}")
+            Self::Timeout { proxy_env_set, .. } => {
+                with_proxy_note(NETWORK_HINT, *proxy_env_set)
+            }
+            Self::Unreachable {
+                cause,
+                proxy_env_set,
+                ca_set,
+                ..
+            } => {
+                let base = if !cause.contains("UnknownIssuer") {
+                    NETWORK_HINT
+                } else if *ca_set {
+                    "The certificate authority in the kubeconfig does not match this server, or a proxy re-signs TLS (run net.tls_intercept)."
                 } else {
-                    base.to_owned()
-                }
+                    "The kubeconfig names no certificate authority, so rdy trusts only its bundled public roots, not this machine's store (kubectl uses it). Pass a copy with certificate-authority set with --kubeconfig."
+                };
+                with_proxy_note(base, *proxy_env_set)
             }
             Self::Cancelled => "Run the command again.".to_owned(),
             Self::Internal { .. } => "Run the command again, and tell the vendor if it repeats.".to_owned(),
@@ -290,6 +303,25 @@ impl KubeError {
     }
 }
 
+const NETWORK_HINT: &str = "Check the server address in your kubeconfig and that you are on the right network or VPN, then run rdy again.";
+
+fn with_proxy_note(base: &str, proxy_env_set: bool) -> String {
+    if proxy_env_set {
+        format!("{base} {PROXY_ENV_NOTE}")
+    } else {
+        base.to_owned()
+    }
+}
+
+/// Adds the distribution kubeconfig paths on Linux, where those distributions run.
+fn with_distro_files(base: &str) -> String {
+    if cfg!(target_os = "linux") {
+        format!("{base} {DISTRO_FILES}")
+    } else {
+        base.to_owned()
+    }
+}
+
 /// Where the common distributions keep a kubeconfig that only root can read.
 const DISTRO_FILES: &str = "k3s keeps one at /etc/rancher/k3s/k3s.yaml, RKE2 at /etc/rancher/rke2/rke2.yaml and kubeadm at /etc/kubernetes/admin.conf. They are root-only: copy one to ~/.kube/config and chmod 600 it.";
 
@@ -300,7 +332,7 @@ const PROXY_ENV_NOTE: &str = "HTTPS_PROXY is set; rdy does not use it for the cl
 fn auth_provider_hint(name: &str) -> String {
     match name {
         "gcp" => "Install gke-gcloud-auth-plugin and run gcloud container clusters get-credentials again. It writes an exec credential plugin entry that rdy can run.".to_owned(),
-        "azure" => "Run kubelogin convert-kubeconfig to switch the user to an exec credential plugin that rdy can run.".to_owned(),
+        "azure" => "Run kubelogin convert-kubeconfig -l azurecli to switch the user to an exec credential plugin that rdy can run.".to_owned(),
         "oidc" => "rdy does not run the oidc auth-provider yet. Switch the user to an exec credential plugin for your identity provider, or tell the vendor.".to_owned(),
         _ => "rdy does not run auth-provider entries. Switch the user to an exec credential plugin, or tell the vendor.".to_owned(),
     }
@@ -387,6 +419,7 @@ pub(crate) fn from_kube_error(
     server: &str,
     plugin: Option<&str>,
     proxy_env_set: bool,
+    ca_set: bool,
 ) -> KubeError {
     // An auth error can sit anywhere in the chain (the request path boxes it). Look for it first, so
     // nothing from a plugin is ever read from a `Display` text.
@@ -442,7 +475,7 @@ pub(crate) fn from_kube_error(
         },
         kube::Error::InferKubeconfig(inner) => from_kubeconfig_error(inner, ""),
         kube::Error::HyperError(_) | kube::Error::Service(_) | kube::Error::HttpError(_) => {
-            network_error(error, server, proxy_env_set)
+            network_error(error, server, proxy_env_set, ca_set)
         }
         kube::Error::SerdeError(_) | kube::Error::FromUtf8(_) => KubeError::BadAnswer {
             server: server.to_owned(),
@@ -453,7 +486,12 @@ pub(crate) fn from_kube_error(
     }
 }
 
-fn network_error(error: &kube::Error, server: &str, proxy_env_set: bool) -> KubeError {
+fn network_error(
+    error: &kube::Error,
+    server: &str,
+    proxy_env_set: bool,
+    ca_set: bool,
+) -> KubeError {
     // Everything read from the chain below is only looked at. None of it is copied into the result, so a
     // plugin cannot get text into the error through a network failure.
     let mut timed_out = false;
@@ -483,17 +521,20 @@ fn network_error(error: &kube::Error, server: &str, proxy_env_set: bool) -> Kube
         server: server.to_owned(),
         cause: cause_words(&seen, kind),
         proxy_env_set,
+        ca_set,
     }
 }
 
 /// A fixed phrase for a network failure, from what the error chain says (lowercase) and its io kind.
-fn cause_words(seen: &str, kind: Option<io::ErrorKind>) -> &'static str {
+pub(crate) fn cause_words(seen: &str, kind: Option<io::ErrorKind>) -> &'static str {
     let has = |word: &str| seen.contains(word);
+    // rustls 0.23 words these in its Display text ("certificate not valid for name ..."); older text
+    // and the Debug names are matched too.
     if has("unknownissuer") {
         "the server certificate is signed by an authority that is not trusted (UnknownIssuer)"
-    } else if has("notvalidforname") {
+    } else if has("notvalidforname") || has("not valid for name") {
         "the server certificate is not valid for this address (NotValidForName)"
-    } else if has("notvalidyet") {
+    } else if has("notvalidyet") || has("not valid yet") {
         "the server certificate is not valid yet (NotValidYet)"
     } else if has("expired") {
         "the server certificate has expired (Expired)"

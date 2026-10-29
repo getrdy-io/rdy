@@ -32,6 +32,8 @@ enum Mode {
     Status(u16),
     /// Read the request and never answer.
     Hang,
+    /// Answer `GET /version` with 200 and a body that is not a version document.
+    NotJson,
 }
 
 struct MockApi {
@@ -77,6 +79,7 @@ impl MockApi {
                                 r#"{{"kind":"Status","apiVersion":"v1","status":"Failure","message":"nope","reason":"Denied","code":{code}}}"#
                             ),
                         ),
+                        Mode::NotJson => (200, "<html>log in</html>".to_owned()),
                         Mode::Hang => {
                             tokio::time::sleep(Duration::from_secs(3600)).await;
                             return;
@@ -311,6 +314,20 @@ async fn another_status_keeps_the_code_and_reason() {
         "{error:?}"
     );
     assert_eq!(api.requests().len(), 1, "kube must not retry");
+}
+
+#[tokio::test]
+async fn an_answer_that_is_not_a_version_document_is_a_bad_answer() {
+    let api = MockApi::start(Mode::NotJson).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let loaded = load_text(dir.path(), &api.url(), &token("t"), TIMEOUT).await;
+    let error = loaded.connect(|_| {}).await.expect_err("not json");
+    assert!(
+        matches!(&error, KubeError::BadAnswer { server } if *server == api.url()),
+        "{error:?}"
+    );
+    assert!(error.hint().contains("API server"), "{}", error.hint());
+    assert!(!error.to_string().contains("log in"), "{error}");
 }
 
 #[tokio::test]
