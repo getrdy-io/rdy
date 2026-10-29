@@ -125,13 +125,13 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-056 | [#55](https://github.com/getrdy-io/rdy/pull/55) | 2026-10-29 | The proxy URL canary moves to M1-060 (PC-43): until the URL userinfo rule exists only the `secret_by_key` rule runs, so `tests/log_redaction.rs` holds it as `#[ignore = "M1-060"]` and M1-060 enables it and adds bare-token canaries. The exit test's JSON and HTML parts have no report to test before M1-062, so M1-062 proves them. Carry note for M1-061: the run-scoped known secrets must be shared through an `Arc`, so the log writer and the CLI error text see them (today the process redactor holds only the key and the built-in rules). `CliError::from_anyhow` still drops unknown error text on purpose, for the same reason; every printed CLI error string is redacted now, so M1-060 can show the redacted chain in that one function. A panic prints nothing from the hook (a panic inside a hook aborts, so the hook cannot redact); a panic inside a check is only an `ERROR` result (`PanicText`), and a panic outside a check makes `rdy_cli::entry::guarded` print the standard two lines (the `ErrorOutput` too with `--json`) and exit 70. The panic text goes to the log, redacted and then escaped (the key-name rule reads raw tabs, so redaction runs on the raw text first, in the log writer and in the CLI error text). No real-binary panic test, because a test-only trigger flag or env var is banned (02): `guarded` is tested in process and the hook in a child test process. The redactor has a `testing`-feature panic seam (`PANIC_TRIGGER`), a dev-dependency feature of rdy-cli only. With `RUST_LOG` unset, empty or invalid the filter is `off` (07 D.6, PC-43); a valid `RUST_LOG` is the operator's filter, but hyper, h2, rustls, tower and kube (and `hyper_*`, `tower_*`, `kube_*`) stay capped at warn whatever it says. Log lines have no time stamp, are redacted and then escaped per line, and the `log` bridge is off (rustls `log` records are dropped). A bare span field value runs to the end of its line and swallows the event message (M1-060 tunes the over-redaction). A PEM block split over several events is the known M1 gap. Carry notes: M1-060 accepts `\\+t` as a blank in `ASSIGNMENT` (a `&str` field is written with `Debug`, so a tab in a field value arrives as a literal backslash and `t`; `tests/log_redaction.rs` holds the case as `#[ignore = "M1-060"]`). M3: `CAPPED_TARGETS` needs `reqwest`, `aws_smithy_*` and `aws_config` when the cloud checks land.
 
-- M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code | backlog corrected 2026-10-29 (correction-09): a result with no fix of its own shows the check's `CheckMeta.remediation`, and `cargo xtask checks` reads the same family list as `rdy run` | backlog corrected 2026-10-29 (correction-11): depends on M1-037, because the Windows output-folder harden step fails open until then (PR #71 security review, finding 3) | backlog corrected 2026-10-29 (correction-13): the run report records `identity` from the privilege snapshot; depends on M1-042 too (PR #84 review)
+- M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code | backlog corrected 2026-10-29 (correction-09): a result with no fix of its own shows the check's `CheckMeta.remediation`, and `cargo xtask checks` reads the same family list as `rdy run` | backlog corrected 2026-10-29 (correction-11): depends on M1-037, because the Windows output-folder harden step fails open until then (PR #71 security review, finding 3) | backlog corrected 2026-10-29 (correction-13): the run report records `identity` from the privilege snapshot; depends on M1-042 too (PR #84 review); backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers declared secret-named env values before the first tracing event and the first check (PR #96 reviews)
 
 - M1-058 | todo | | Ctrl-C in M1: abort, remove the empty report folder, exit 70
 
 - M1-059 | todo | | --no-network and --jobs flags
 
-- M1-060 | todo | | M1 redaction rules for URLs, auth headers, AWS keys, PEM keys, JWTs, rdy tokens and key names
+- M1-060 | todo | | M1 redaction rules for URLs, auth headers, AWS keys, PEM keys, JWTs, rdy tokens and key names | backlog corrected 2026-10-29 (correction-16): depends on M1-061 and enables its held cut-buffer cases (PR #96 reviews)
 
 - M1-061 | todo | | Redact facade-truncated buffers and a run-scoped known-secret set
 
@@ -148,11 +148,11 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-067 | [#49](https://github.com/getrdy-io/rdy/pull/49) | 2026-10-28 | The seven host ids are stubs. On Linux a stub that is run returns a check error, not a finding, until M1-068 and later replace it. Rule: `HostFamily` must not be registered in the CLI while `HostFamily::stub_ids()` is not empty, because a Linux stub reports `error` `check_failed`. M1-057 (wire `rdy run`) must either drop the stubs or have the engine add a `not_in_build` skip first. The facade backend does not exist yet, so the OS comes from the plan and from `CheckContext::os`, and no `probe.native` closure exists to gate.
 
-- M1-068 | todo | | host.disk (Linux: statvfs flags, mountinfo with escapes, whole-component match, hung-mount timeout)
+- M1-068 | todo | | host.disk (Linux: statvfs flags, mountinfo with escapes, whole-component match, hung-mount timeout) | backlog corrected 2026-10-29 (correction-16): depends on M1-171 (`statfs` prefixes, PR #94 review)
 
 - M1-069 | todo | | host.memory (meminfo, swap, cgroup limit, nominal band)
 
-- M1-070 | todo | | Terminal styling layer: colour choice, width, escaping and ASCII text
+- M1-070 | todo | | Terminal styling layer: colour choice, width, escaping and ASCII text | backlog corrected 2026-10-29 (correction-16): moved from week 13 to week 14
 
 - M1-071 | todo | | host.cpu (cores with quota, arch, flags through std macros, levels, Rosetta)
 
@@ -178,13 +178,13 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-082 | todo | | HTML structure test: headings, landmarks, tables and links
 
-- M1-083 | todo | | Golden tests for JSON and HTML reports
+- M1-083 | todo | | Golden tests for JSON and HTML reports | backlog corrected 2026-10-29 (correction-16): depends on M1-060 and M1-061; HTML halves of M1-046 and M1-061: no machine id, cut-buffer canary or known secret in the HTML (PR #94, PR #96 reviews)
 
 - M1-084 | [#89](https://github.com/getrdy-io/rdy/pull/89) | 2026-10-29 | Enum values, a table per oneOf option and per check id (allOf if/then), the Example column (YAML, read back to the same value) and the missing-description failure. Every check parameter row now has a description, and each of the 17 check ids has an example. Deferred: the render does not validate examples, the test suite does, because a normal `jsonschema` dependency fails the license policy (ADR 0034; 09 section 5 says otherwise). No example on the top-level spec yet. The result reference waits for M1-085 | backlog corrected 2026-10-29 (correction-12): title says oneOf or allOf if/then variants, since check parameters are `allOf` with if/then (PR #80 review)
 
 - M1-085 | todo | | Spec and result reference pages with hand-written intro
 
-- M1-086 | todo | | Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict
+- M1-086 | todo | | Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict | backlog corrected 2026-10-29 (correction-16): depends on M1-060 and M1-061; stderr half of M1-061 (PR #96 review)
 
 - M1-087 | todo | | Exit-code golden suite for 0, 1, 2, 64 and 70
 
@@ -194,9 +194,9 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case)
 
-- M1-091 | todo | | Facade TCP attempts, proxy CONNECT and per-check host sets | backlog corrected 2026-10-29 (correction-12): one action-log entry per tcp call, proxy CONNECT included, moved from M1-040
+- M1-091 | todo | | Facade TCP attempts, proxy CONNECT and per-check host sets | backlog corrected 2026-10-29 (correction-12): one action-log entry per tcp call, proxy CONNECT included, moved from M1-040; backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers the proxy password raw and percent-decoded, exit 70 if refused (PR #96 reviews)
 
-- M1-092 | todo | | Facade TLS with system roots and the recording chain probe | backlog corrected 2026-10-29 (correction-12): one action-log entry per tls call, moved from M1-040 (02 line 272)
+- M1-092 | todo | | Facade TLS with system roots and the recording chain probe | backlog corrected 2026-10-29 (correction-12): one action-log entry per tls call, moved from M1-040 (02 line 272); backlog corrected 2026-10-29 (correction-16): `SystemRoots` caps (PR #94 review)
 
 - M1-093 | todo | | Facade HTTP/1.1 probe with 64 KiB discard and no redirects | backlog corrected 2026-10-29 (correction-12): one action-log entry per http call, moved from M1-040
 
@@ -222,11 +222,11 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-104 | todo | | Kube guard path parser, resource allowlist and pending log entries
 
-- M1-105 | todo | | Kube mock harness (tower service replaying api/ JSON, paging and 410, selectors, legacy discovery, review table) | backlog corrected 2026-10-29 (correction-15): builds the `ReadOnlyClient` discovery and raw `SelfSubjectReview` routes (4 h); after every fixture run the harness checks each recorded request against `ALLOWED` (INV-14; PR #92 reviews)
+- M1-105 | todo | | Kube mock harness (tower service replaying api/ JSON, paging and 410, selectors, legacy discovery, review table) | backlog corrected 2026-10-29 (correction-15): builds the `ReadOnlyClient` discovery and raw `SelfSubjectReview` routes (4 h); after every fixture run the harness checks each recorded request against `ALLOWED` (INV-14; PR #92 reviews); backlog corrected 2026-10-29 (correction-16): each recorded request matches an entry citing the logging check, with a failing test (PR #95 review)
 
 - M1-106 | todo | | k8s.version (gitVersion parse, distribution, discovery API availability)
 
-- M1-107 | todo | | Family probe hook and lazy KubeContext probe | backlog corrected 2026-10-29 (correction-11): with no kubeconfig every k8s check is SKIP with the hint, the cluster line prints to stderr before the first request, and a timed-out exec plugin does not keep rdy from exiting (ADR 0031 residual), and each kube entry from M1-102's use file fails clippy in tests/lint-wall; depends on M1-044 too; 2.5 h | backlog corrected 2026-10-29 (correction-12): a Windows `.cmd` exec plugin test, PATH resolution of a bare plugin name for the exec action-log entry, and with no CA in the kubeconfig the client trusts the facade SystemRoots (ADR 0031 decision 9); depends on M1-092 too; 3 h (PR #76 reviews)
+- M1-107 | todo | | Family probe hook and lazy KubeContext probe | backlog corrected 2026-10-29 (correction-11): with no kubeconfig every k8s check is SKIP with the hint, the cluster line prints to stderr before the first request, and a timed-out exec plugin does not keep rdy from exiting (ADR 0031 residual), and each kube entry from M1-102's use file fails clippy in tests/lint-wall; depends on M1-044 too; 2.5 h | backlog corrected 2026-10-29 (correction-12): a Windows `.cmd` exec plugin test, PATH resolution of a bare plugin name for the exec action-log entry, and with no CA in the kubeconfig the client trusts the facade SystemRoots (ADR 0031 decision 9); depends on M1-092 too; 3 h (PR #76 reviews); backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers every kubeconfig user's credentials and the exec plugin's token, exit 70 if refused, kubeconfig canary at trace (PR #96 reviews)
 
 - M1-108 | todo | | kind integration job with a restricted PSA namespace and review round trips | backlog corrected 2026-10-29 (correction-11): depends on M1-106 and runs `tests/live_cluster.rs`, the ignored kind test from M1-102; backlog corrected 2026-10-29 (correction-15): depends on M1-103; applies `examples/rbac/rdy-readonly.yaml` and passes the read-only live test with that service account (SEC-24; PR #92 reviews)
 
@@ -234,7 +234,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-110 | todo | | k8s.storageclass (normalised provisioners, CSINode evidence, default rules, provisioner table)
 
-- M1-111 | todo | | k8s.rbac (SelfSubjectReview, access reviews, non-resource items, escalate and bind as warn)
+- M1-111 | todo | | k8s.rbac (SelfSubjectReview, access reviews, non-resource items, escalate and bind as warn) | backlog corrected 2026-10-29 (correction-16): impersonation wiring; refuses a spec `as:` when the kubeconfig impersonates; wire test (PR #95 reviews)
 
 - M1-112 | [#19](https://github.com/getrdy-io/rdy/pull/19) | 2026-10-28 | The "sign a spec in CI" half of the exit test is proved at the helper level (`RDY_KEY_PASSWORD` and `--password-file -` through `rdy_cli::password`); `spec sign` itself is M1-125, which must call `read_key_password`. `--password` is refused by a raw argv check, not a hidden clap flag, so it wins over missing-argument errors; only `spec sign` and `spec keygen` get the reason. Windows checks the file type and refuses reparse points but not ACLs; its file tests run on the Windows CI leg only (compiled here, not run). `read_key_password` now takes stderr for the env-variable note (tty only); it adds the `rustix` dependency (Unix only) for O_NOFOLLOW and geteuid without unsafe. Follow-up fix PR for macOS test build.
 
@@ -242,7 +242,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-114 | todo | | k8s.admission PSA labels, policy engine and SCC discovery
 
-- M1-115 | todo | | Review k8s checks and fixtures (semantics, API groups, RBAC degrade, per-distro sets)
+- M1-115 | todo | | Review k8s checks and fixtures (semantics, API groups, RBAC degrade, per-distro sets) | backlog corrected 2026-10-29 (correction-16): `NOT_BUILT_YET` empty, every k8s check in `infos()`, every entry and check pair hit (PR #95 reviews)
 
 - M1-116 | todo | | Check family renderer and the host, network and Kubernetes pages with hand-written intros | backlog corrected 2026-10-29 (correction-09): ids still in `HostFamily::stub_ids()` get no section, and reads are listed without an OS split until the manifest is keyed by OS
 
@@ -351,6 +351,10 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-168 | [#74](https://github.com/getrdy-io/rdy/pull/74) | 2026-10-29 | none; CLI start-up hardening: call `harden_umask()` and warn on inherited descriptors
 
 - M1-169 | todo | | Facade `read_link` with an action-log kind and the /proc fd walk rule | backlog corrected 2026-10-29 (correction-14): new ticket, runs in week 14; only `socket:[N]` targets come back from the fd walk and security-reviewer signs off (PR #88 review, PR #90 review)
+
+- M1-170 | todo | | Machine identity files denied in the read policy | backlog corrected 2026-10-29 (correction-16): new ticket (PR #94 review)
+
+- M1-171 | todo | | `statfs` prefixes judge `NativeCall::Statvfs` | backlog corrected 2026-10-29 (correction-16): new ticket (PR #94 review)
 
 ## Summary
 
