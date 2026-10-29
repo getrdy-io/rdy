@@ -3,16 +3,20 @@
 
 use std::process::{Command, Output};
 
+mod common;
+
 const WANT: &str = "error: passwords on the command line show up in shell history and in ps\n\
                     fix: use --password-file, the RDY_KEY_PASSWORD variable, or the prompt\n";
 
 fn rdy(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rdy"))
-        .args(args)
-        .env_remove("RDY_PROGRESS")
-        .env_remove("RDY_KEY_PASSWORD")
-        .output()
-        .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"))
+    common::quiet(
+        Command::new(env!("CARGO_BIN_EXE_rdy"))
+            .args(args)
+            .env_remove("RDY_PROGRESS")
+            .env_remove("RDY_KEY_PASSWORD")
+            .output()
+            .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
+    )
 }
 
 fn stderr_of(out: &Output) -> &str {
@@ -88,8 +92,10 @@ fn password_file_and_the_variable_are_not_refused() {
         if let Some(password) = password {
             cmd.env("RDY_KEY_PASSWORD", password);
         }
-        cmd.output()
-            .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"))
+        common::quiet(
+            cmd.output()
+                .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
+        )
     };
     // A spec that is not there: the error is about the file, never about the password flag.
     let out = run(
