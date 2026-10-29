@@ -62,6 +62,7 @@
         "argv": {
           "description": "exec, after redaction",
           "type": "array",
+          "maxItems": 256,
           "items": {
             "type": "string",
             "maxLength": 4096
@@ -350,7 +351,8 @@
           "items": {
             "type": "string",
             "maxLength": 4096
-          }
+          },
+          "maxItems": 1000
         },
         "timeout_after_ms": {
           "description": "Present when `status` is `timeout`.",
@@ -396,13 +398,88 @@
           "maxLength": 4096
         },
         "observed": {
-          "description": "Measured values, at most 64 KiB. Keys are per check id, in snake_case, with the unit in the name (`_bytes`, `_ms`, `_percent`). Keys are only ever added.",
+          "description": "Measured values, at most 64 KiB and 64 keys. Keys are per check id, in snake_case, with the unit in the name (`_bytes`, `_ms`, `_percent`). Keys are only ever added. A value is a scalar, or a list or object of at most three levels, with every text at most 4 KiB.",
           "type": [
             "object",
             "null"
           ],
-          "additionalProperties": true,
-          "default": null
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null",
+              "array",
+              "object"
+            ],
+            "maxLength": 4096,
+            "maxItems": 256,
+            "maxProperties": 64,
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null",
+                "array",
+                "object"
+              ],
+              "maxLength": 4096,
+              "maxItems": 256,
+              "maxProperties": 64,
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ],
+                "maxLength": 4096
+              },
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ],
+                "maxLength": 4096
+              }
+            },
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null",
+                "array",
+                "object"
+              ],
+              "maxLength": 4096,
+              "maxItems": 256,
+              "maxProperties": 64,
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ],
+                "maxLength": 4096
+              },
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ],
+                "maxLength": 4096
+              }
+            }
+          },
+          "default": null,
+          "maxProperties": 64
         },
         "expected": {
           "description": "Thresholds that applied after defaults. Same rules as `observed`.",
@@ -410,15 +487,91 @@
             "object",
             "null"
           ],
-          "additionalProperties": true,
-          "default": null
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null",
+              "array",
+              "object"
+            ],
+            "maxLength": 4096,
+            "maxItems": 256,
+            "maxProperties": 64,
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null",
+                "array",
+                "object"
+              ],
+              "maxLength": 4096,
+              "maxItems": 256,
+              "maxProperties": 64,
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ],
+                "maxLength": 4096
+              },
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ],
+                "maxLength": 4096
+              }
+            },
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null",
+                "array",
+                "object"
+              ],
+              "maxLength": 4096,
+              "maxItems": 256,
+              "maxProperties": 64,
+              "items": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ],
+                "maxLength": 4096
+              },
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ],
+                "maxLength": 4096
+              }
+            }
+          },
+          "default": null,
+          "maxProperties": 64
         },
         "needs": {
-          "description": "Hard and soft needs the check declared, and whether each was met.",
+          "description": "Hard and soft needs the check declared, and whether each was met. At most 32.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/NeedState"
-          }
+          },
+          "maxItems": 32
         },
         "partial": {
           "description": "Set when some sources could not be read. A partial check never blocks on data it could not read.",
@@ -934,13 +1087,14 @@
           "type": "boolean"
         },
         "exec_plugin": {
-          "description": "Base name of the kubeconfig credential plugin that ran, if any.",
+          "description": "Base name of the kubeconfig credential plugin that ran, if any. At most 255 characters, with no white space, `/` or `\\`: it never carries a path or arguments.",
           "type": [
             "string",
             "null"
           ],
-          "default": null,
-          "maxLength": 4096
+          "maxLength": 255,
+          "pattern": "^[^\\s/\\\\]+$",
+          "default": null
         },
         "insecure_tls": {
           "description": "The context skips TLS verification.",
@@ -991,7 +1145,8 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/Finding"
-          }
+          },
+          "maxItems": 1000
         },
         "errors": {
           "description": "How many findings are errors.",
@@ -1076,7 +1231,8 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/Need"
-          }
+          },
+          "maxItems": 1000
         },
         "note": {
           "description": "What is missing, or the OS note for a `Partial` OS.",
@@ -1159,7 +1315,8 @@
             "type": "string",
             "maxLength": 4096
           },
-          "default": []
+          "default": [],
+          "maxItems": 1000
         }
       }
     },
@@ -1177,12 +1334,13 @@
           "minimum": 0
         },
         "by_rule": {
-          "description": "Replacements per rule name.",
+          "description": "Replacements per rule name, at most 64 rules.",
           "type": "object",
           "additionalProperties": {
             "type": "integer",
             "minimum": 0
-          }
+          },
+          "maxProperties": 64
         }
       },
       "required": [
@@ -1260,7 +1418,8 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/Capability"
-          }
+          },
+          "maxItems": 1000
         },
         "verdict": {
           "description": "The overall answer. Closed in v1: a new verdict value needs `rdy/v2`. Use it as written.",
@@ -1290,11 +1449,12 @@
           "$ref": "#/$defs/Summary"
         },
         "checks": {
-          "description": "One entry per spec check, in spec order. Sort by bucket for display.",
+          "description": "One entry per spec check, in spec order, at most 256. Sort by bucket for display.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/CheckResult"
-          }
+          },
+          "maxItems": 256
         },
         "actions": {
           "description": "Every file read, command, lookup, connection and API request, in order. At most 5000 entries.",
@@ -1314,7 +1474,8 @@
           "additionalProperties": {
             "type": "integer",
             "minimum": 0
-          }
+          },
+          "maxProperties": 32
         },
         "redaction": {
           "description": "What the redactor changed in this report.",
@@ -1770,13 +1931,14 @@
           "maxLength": 4096
         },
         "annotations": {
-          "description": "`metadata.annotations`.",
+          "description": "`metadata.annotations`, at most 32.",
           "type": "object",
           "additionalProperties": {
             "type": "string",
             "maxLength": 4096
           },
-          "default": {}
+          "default": {},
+          "maxProperties": 32
         }
       },
       "required": [

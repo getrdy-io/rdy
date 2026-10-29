@@ -31,7 +31,7 @@
 //!   repeated denials fold, so the log holds one per distinct (check, kind, rule, target). A check keeps
 //!   at most [`DENIED_TARGETS`] distinct targets apart per (check, kind, rule); the calls to any more
 //!   fold into one `coalesced` entry whose `under` is `*`. `denied` keys have a budget of their own
-//!   (2000), apart from the 20 000 keys of `failed` file calls; past either, a call is written without
+//!   (2000), apart from the 20 000 keys of `failed` file calls and the 20 000 of `ok` ones; past any, a call is written without
 //!   folding. When a `denied` entry still finds a check at [`CHECK_QUOTA`] or the log at [`MAX_ENTRIES`],
 //!   it displaces `ok` and `failed` file entries, then a spare entry of its own check only (the newest
 //!   `exec`, `connect`, `tls`, `http`, `kube` or timed out read), never another check's. If there is
@@ -64,9 +64,13 @@ pub const COALESCE_AFTER: usize = 20;
 /// How many `ok` file calls for one (check, kind, directory) are written one by one before they fold.
 pub const COALESCE_OK_AFTER: usize = 200;
 
-/// The most distinct keys of `failed` and `ok` file calls the log tracks. Past it a new key is not folded, only
+/// The most distinct keys of `failed` file calls the log tracks. Past it a new key is not folded, only
 /// subject to the quotas, so memory stays bounded.
 const MAX_COALESCE_KEYS: usize = 20_000;
+
+/// The most distinct keys of `ok` file calls the log tracks, a budget of its own so a walk of many
+/// directories cannot use up the keys of `failed` calls.
+const MAX_OK_KEYS: usize = 20_000;
 
 /// The most distinct keys of `denied` calls the log tracks, a budget of its own so a flood of failed
 /// reads cannot use it up.
@@ -204,9 +208,10 @@ struct State {
     folds: HashMap<FoldKey, Folded>,
     /// How many `denied` keys each (check, kind, rule) has, for the cap of [`DENIED_TARGETS`].
     spread: HashMap<(Option<String>, String, String), usize>,
-    /// Keys in `folds` by sort: `denied` ones, and `failed` and `ok` ones together, each with its own budget.
+    /// Keys in `folds` by sort: `denied`, `failed` and `ok` ones, each with its own budget.
     denied_keys: usize,
     failed_keys: usize,
+    ok_keys: usize,
     dropped: BTreeMap<String, u64>,
     truncated: bool,
     last_resort: u64,
@@ -469,7 +474,7 @@ fn fold_key(action: &Action) -> Option<FoldKey> {
     };
     let dir = if files {
         let path = text("path").unwrap_or_default();
-        path.rsplit_once('/')
+        path.rsplit_once(['/', '\\'])
             .map_or(String::new(), |(dir, _)| dir.to_owned())
     } else {
         ["program", "host", "url", "api", "path"]
@@ -535,20 +540,20 @@ fn record(state: &mut State, action: Action, limits: Limits) {
     }
     let is_new = !state.folds.contains_key(&key);
     let budget_full = is_new
-        && if denied {
-            state.denied_keys >= MAX_DENIED_KEYS
-        } else {
-            state.failed_keys >= MAX_COALESCE_KEYS
+        && match key.class {
+            Class::Denied => state.denied_keys >= MAX_DENIED_KEYS,
+            Class::Failed => state.failed_keys >= MAX_COALESCE_KEYS,
+            Class::Ok => state.ok_keys >= MAX_OK_KEYS,
         };
     if budget_full {
         place(state, action, limits);
         return;
     }
     if is_new {
-        if denied {
-            state.denied_keys += 1;
-        } else {
-            state.failed_keys += 1;
+        match key.class {
+            Class::Denied => state.denied_keys += 1,
+            Class::Failed => state.failed_keys += 1,
+            Class::Ok => state.ok_keys += 1,
         }
     }
     let slot = state.folds.entry(key.clone()).or_default();
@@ -577,8 +582,20 @@ fn record(state: &mut State, action: Action, limits: Limits) {
     place(state, entry, limits);
 }
 
-fn count_drop(state: &mut State, kind: &ActionKind) {
-    *state.dropped.entry(kind.as_str().to_owned()).or_insert(0) += 1;
+/// Counts a dropped entry. A `coalesced` entry stands for `count` calls of the kind in `of`, so it adds
+/// that many to that kind, not one to `coalesced`.
+fn count_drop(state: &mut State, action: &Action) {
+    let (kind, calls) = if action.kind == ActionKind::Coalesced {
+        let of = action.fields.get("of").and_then(Value::as_str);
+        let count = action.fields.get("count").and_then(Value::as_u64);
+        (
+            of.unwrap_or(ActionKind::Coalesced.as_str()).to_owned(),
+            count.unwrap_or(1),
+        )
+    } else {
+        (action.kind.as_str().to_owned(), 1)
+    };
+    *state.dropped.entry(kind).or_insert(0) += calls;
     state.truncated = true;
 }
 
@@ -605,7 +622,7 @@ fn evict(state: &mut State, seq: u64, tier: Tier) {
         slots.count = slots.count.saturating_sub(1);
         slots.tiers.remove(tier, seq);
     }
-    count_drop(state, &removed.kind);
+    count_drop(state, &removed);
     if tier == Tier::Spare {
         count_last_resort(state, &removed.kind);
     }
@@ -672,7 +689,7 @@ fn place(state: &mut State, action: Action, limits: Limits) {
         || (state.entries.len() >= limits.max_entries
             && !make_room(state, Scope::Log, tier, &check));
     if full {
-        count_drop(state, &action.kind);
+        count_drop(state, &action);
         if matches!(tier, Tier::Spare | Tier::Denied) {
             count_last_resort(state, &action.kind);
         }

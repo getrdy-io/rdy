@@ -11,6 +11,8 @@
 //!    value in a spec, though the typed reader treats it as unset.
 //! 4. In the result schema, a text with no other limit gets `maxLength` 4096 (docs/plan/05, SEC-63),
 //!    so a field added later is capped without anyone remembering to do it.
+//! 5. In the result schema, a list with no `maxItems` gets 1000 and a map with no `maxProperties`
+//!    gets 256, for the same reason.
 
 use schemars::Schema;
 use schemars::transform::Transform;
@@ -61,6 +63,7 @@ impl Transform for Tidy {
         }
         if self.cap_text {
             cap_text(object);
+            cap_collections(object);
         }
     }
 }
@@ -149,6 +152,30 @@ fn cap_text(object: &mut Map<String, Value>) {
         .any(|key| object.contains_key(*key));
     if is_text && !limited {
         object.insert("maxLength".into(), json!(MAX_TEXT));
+    }
+}
+
+/// The most items in a result list with no smaller limit of its own.
+pub(crate) const MAX_ITEMS: u64 = 1000;
+
+/// The most keys in a result map with no smaller limit of its own.
+pub(crate) const MAX_KEYS: u64 = 256;
+
+/// Gives a list or a map with no limit one.
+fn cap_collections(object: &mut Map<String, Value>) {
+    let has = |object: &Map<String, Value>, kind: &str| match object.get("type") {
+        Some(Value::String(t)) => t == kind,
+        Some(Value::Array(types)) => types.iter().any(|t| t == kind),
+        _ => false,
+    };
+    if has(object, "array") && !object.contains_key("maxItems") {
+        object.insert("maxItems".into(), json!(MAX_ITEMS));
+    }
+    let is_map = object
+        .get("additionalProperties")
+        .is_some_and(|value| !matches!(value, Value::Bool(false)));
+    if has(object, "object") && is_map && !object.contains_key("maxProperties") {
+        object.insert("maxProperties".into(), json!(MAX_KEYS));
     }
 }
 

@@ -261,9 +261,19 @@ fn an_exec_plugin_is_valid_and_shows_in_the_json_the_model_writes() -> TestResul
     assert_eq!(written["identity"]["kube"]["exec_plugin"], json!("aws"));
     assert_valid(&v, &written, "the written report");
 
-    // The text is capped like every other result text, and only a string or null is allowed.
-    doc["identity"]["kube"]["exec_plugin"] = json!("p".repeat(4097));
-    assert!(!errors(&v, &doc).is_empty(), "a 4097 character plugin name");
+    // The text is a bare name of at most 255 characters (no path, no arguments), and only a string or null.
+    for bad in [
+        "aws --token=x",
+        "/usr/bin/aws",
+        "C:\\bin\\aws.exe",
+        "",
+        "p".repeat(256).as_str(),
+    ] {
+        doc["identity"]["kube"]["exec_plugin"] = json!(bad);
+        assert!(!errors(&v, &doc).is_empty(), "plugin name {bad:?}");
+    }
+    doc["identity"]["kube"]["exec_plugin"] = json!("p".repeat(255));
+    assert_valid(&v, &doc, "a 255 character plugin name");
     doc["identity"]["kube"]["exec_plugin"] = json!(["aws"]);
     assert!(!errors(&v, &doc).is_empty(), "a plugin name that is a list");
     Ok(())
@@ -515,6 +525,68 @@ fn hostile_result_fixtures_give_the_documented_answer() -> TestResult {
                 d["actions"] = Value::Array(vec![one; 5001]);
             }),
             false,
+        ),
+        (
+            "a 5 MiB text inside observed",
+            edited(&|d| d["checks"][0]["observed"]["note"] = json!("a".repeat(5 * 1024 * 1024))),
+            false,
+        ),
+        (
+            "a 5 MiB text in a list inside observed",
+            edited(&|d| {
+                d["checks"][0]["observed"]["list"] = json!(["a".repeat(5 * 1024 * 1024)]);
+            }),
+            false,
+        ),
+        (
+            "65 keys in observed",
+            edited(&|d| {
+                let many: serde_json::Map<String, Value> =
+                    (0..65).map(|i| (format!("k{i}"), json!(i))).collect();
+                d["checks"][0]["observed"] = Value::Object(many);
+            }),
+            false,
+        ),
+        (
+            "257 checks",
+            edited(&|d| {
+                let one = d["checks"][0].clone();
+                d["checks"] = Value::Array(vec![one; 257]);
+            }),
+            false,
+        ),
+        (
+            "33 needs in one check",
+            edited(&|d| {
+                let need = json!({"need": "root", "name": null, "hard": true, "met": true});
+                d["checks"][0]["needs"] = Value::Array(vec![need; 33]);
+            }),
+            false,
+        ),
+        (
+            "33 spec annotations",
+            edited(&|d| {
+                let many: serde_json::Map<String, Value> =
+                    (0..33).map(|i| (format!("k{i}"), json!("v"))).collect();
+                d["spec"]["annotations"] = Value::Object(many);
+            }),
+            false,
+        ),
+        (
+            "33 kinds in actions_dropped",
+            edited(&|d| {
+                let many: serde_json::Map<String, Value> =
+                    (0..33).map(|i| (format!("k{i}"), json!(1))).collect();
+                d["actions_dropped"] = Value::Object(many);
+            }),
+            false,
+        ),
+        (
+            "a small observed object is accepted",
+            edited(&|d| {
+                d["checks"][0]["observed"]["mounts"] = json!([{"path": "/", "free_bytes": 5}])
+            }),
+            true,
         ),
         (
             "21 notes",

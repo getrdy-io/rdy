@@ -1458,9 +1458,13 @@ fn a_denied_entry_at_log_scope_evicts_only_its_own_checks_spare_entry() {
     let own = hub.check_probe("net.own", Os::Linux, None);
     let neighbour = hub.check_probe("net.neighbour", Os::Linux, None);
     let bare = hub.check_probe("net.bare", Os::Linux, None);
+    // The neighbour's entries are the newest, so a rule that took the newest spare entry of any check
+    // would take one of them.
+    for _ in 0..2 {
+        put(&own, ActionKind::Connect, ActionOutcome::Ok);
+    }
     for _ in 0..2 {
         put(&neighbour, ActionKind::Connect, ActionOutcome::Ok);
-        put(&own, ActionKind::Connect, ActionOutcome::Ok);
     }
     assert_eq!(hub.action_log().actions.len(), 4);
 
@@ -1527,19 +1531,26 @@ fn the_denied_key_budget_is_two_thousand_and_a_new_key_past_it_is_written_unfold
     assert_eq!(log.actions.len(), 2030);
     assert_eq!(count_of(&log, "coalesced", ActionOutcome::Denied), 0);
 
-    // A key already tracked still folds: 1 call held, 19 more written, 10 folded.
-    for _ in 0..29 {
-        deny(&probes[0], ActionKind::Connect, "host", "h0.acme.example");
+    // The first and the 2000th key are tracked and still fold: 1 call held, 19 more written, 10 folded.
+    for (probe, host) in [
+        (&probes[0], "h0.acme.example"),
+        (&probes[19], "h99.acme.example"),
+    ] {
+        for _ in 0..29 {
+            deny(probe, ActionKind::Connect, "host", host);
+        }
     }
     let log = hub.action_log();
-    assert_eq!(log.actions.len(), 2030 + 19 + 1);
+    assert_eq!(log.actions.len(), 2030 + 2 * (19 + 1));
     let folded: Vec<_> = log
         .actions
         .iter()
         .filter(|a| a.kind == ActionKind::Coalesced)
         .collect();
-    assert_eq!(folded.len(), 1);
-    assert_eq!(field(folded[0], "count"), Some(&json!(10)));
+    assert_eq!(folded.len(), 2);
+    for entry in folded {
+        assert_eq!(field(entry, "count"), Some(&json!(10)));
+    }
     assert_eq!(log.last_resort_drops, 0);
     assert!(!log.truncated);
 }
@@ -1582,6 +1593,173 @@ fn ok_reads_past_two_hundred_per_directory_fold_into_one_ok_entry() {
 }
 
 #[test]
+fn ok_reads_fold_per_directory_on_windows_paths_too() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    for dir in ["C:\\Windows\\System32", "C:\\Windows\\Logs"] {
+        for i in 0..COALESCE_OK_AFTER + 10 {
+            put_at(
+                &probe,
+                ActionKind::Read,
+                ActionOutcome::Ok,
+                Some(&format!("{dir}\\f{i}")),
+                "",
+            );
+        }
+    }
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 2 * (COALESCE_OK_AFTER + 1));
+    let unders: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .map(|a| (field(a, "under").cloned(), field(a, "count").cloned()))
+        .collect();
+    assert_eq!(
+        unders,
+        vec![
+            (Some(json!("C:\\Windows\\System32")), Some(json!(10))),
+            (Some(json!("C:\\Windows\\Logs")), Some(json!(10))),
+        ]
+    );
+}
+
+#[test]
+fn a_denied_read_in_a_folded_directory_is_its_own_entry() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    for i in 0..COALESCE_OK_AFTER + 20 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/etc/f{i}")),
+            "",
+        );
+    }
+    put_at(
+        &probe,
+        ActionKind::Read,
+        ActionOutcome::Denied,
+        Some("/etc/shadow"),
+        "password and sudo files are never read",
+    );
+    let log = hub.action_log();
+    assert_eq!(count_of(&log, "read", ActionOutcome::Denied), 1);
+    assert_eq!(count_of(&log, "coalesced", ActionOutcome::Ok), 1);
+    assert_eq!(count_of(&log, "coalesced", ActionOutcome::Denied), 0);
+    assert!(!log.truncated);
+}
+
+#[test]
+fn the_ok_key_budget_is_twenty_thousand_and_does_not_use_up_the_failed_keys() {
+    let hub = hub(Replay::new()).with_limits(100_000, 100_000);
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    // 20 000 directories are 20 000 ok keys.
+    for i in 0..20_000 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/d{i}/f")),
+            "",
+        );
+    }
+    // The budget of failed keys is untouched: a failed flood still folds.
+    for i in 0..COALESCE_AFTER + 5 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Failed,
+            Some(&format!("/gone/f{i}")),
+            "not found",
+        );
+    }
+    // A new ok key is past the budget and is written unfolded.
+    for i in 0..COALESCE_OK_AFTER + 10 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/new/f{i}")),
+            "",
+        );
+    }
+    // A key already tracked still folds: 1 held, 199 more written, 11 folded.
+    for i in 0..COALESCE_OK_AFTER + 10 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/d0/g{i}")),
+            "",
+        );
+    }
+    let log = hub.action_log();
+    let folded: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .map(|a| (a.outcome.clone(), field(a, "under").cloned()))
+        .collect();
+    assert_eq!(
+        folded,
+        vec![
+            (ActionOutcome::Failed, Some(json!("/gone"))),
+            (ActionOutcome::Ok, Some(json!("/d0"))),
+        ]
+    );
+    let new_dir = log
+        .actions
+        .iter()
+        .filter(|a| {
+            field(a, "path").is_some_and(|p| p.as_str().is_some_and(|p| p.starts_with("/new/")))
+        })
+        .count();
+    assert_eq!(new_dir, COALESCE_OK_AFTER + 10);
+    assert!(!log.truncated);
+}
+
+#[test]
+fn ok_and_failed_file_calls_fold_under_their_own_keys() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    // The same directory and kind, two outcomes: two keys, each with its own limit (20 and 200).
+    for i in 0..COALESCE_AFTER + 5 {
+        put_at(
+            &probe,
+            ActionKind::Stat,
+            ActionOutcome::Failed,
+            Some(&format!("/opt/d/f{i}")),
+            "not found",
+        );
+    }
+    for i in 0..COALESCE_OK_AFTER + 5 {
+        put_at(
+            &probe,
+            ActionKind::Stat,
+            ActionOutcome::Ok,
+            Some(&format!("/opt/d/g{i}")),
+            "",
+        );
+    }
+    let log = hub.action_log();
+    let folded: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .map(|a| (a.outcome.clone(), field(a, "count").cloned()))
+        .collect();
+    assert_eq!(
+        folded,
+        vec![
+            (ActionOutcome::Failed, Some(json!(5))),
+            (ActionOutcome::Ok, Some(json!(5))),
+        ]
+    );
+}
+
+#[test]
 fn a_folded_ok_entry_is_dropped_with_the_ok_reads_and_before_anything_else() {
     let hub = hub(Replay::new()).with_limits(COALESCE_OK_AFTER + 2, 1000);
     let probe = hub.check_probe("host.walker", Os::Linux, None);
@@ -1608,7 +1786,9 @@ fn a_folded_ok_entry_is_dropped_with_the_ok_reads_and_before_anything_else() {
     assert_eq!(count_of(&log, "exec", ActionOutcome::Ok), 1);
     assert_eq!(count_of(&log, "stat", ActionOutcome::Failed), 1);
     assert_eq!(count_of(&log, "coalesced", ActionOutcome::Ok), 0);
-    assert_eq!(log.dropped.get("coalesced"), Some(&1));
+    // The folded entry stood for 5 reads, so 5 reads are counted as dropped, and none as `coalesced`.
+    assert_eq!(log.dropped.get("read"), Some(&5));
+    assert_eq!(log.dropped.get("coalesced"), None);
     assert_eq!(log.last_resort_drops, 0);
 }
 
