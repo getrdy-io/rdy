@@ -192,9 +192,9 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-089 | [#62](https://github.com/getrdy-io/rdy/pull/62) | 2026-10-29 | ADR 0026 (Accepted after the cli-ux review on PR #62). The family list lives in `xtask::checks::registry` until M1-057 moves it into `rdy_cli` (correction-09). `HostFamily` is not registered in the CLI (M1-067 rule stands). `xtask checks` lists the seven host stubs, so M1-116 must skip ids in `HostFamily::stub_ids()` (correction-09). The report does not fall back to `meta.remediation` yet: correction-09 adds it to M1-057. `docs-lint` runs the same validation, but neither command is in `ci.yml` yet; a unit test runs it in `cargo test`.
 
-- M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case) | backlog corrected 2026-10-29 (correction-18): connects the stream a Replay `dial` names (PR #100 review)
+- M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case)
 
-- M1-091 | todo | | Facade TCP attempts, proxy CONNECT and per-check host sets | backlog corrected 2026-10-29 (correction-12): one action-log entry per tcp call, proxy CONNECT included, moved from M1-040; backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers the proxy password raw and percent-decoded, exit 70 if refused (PR #96 reviews)
+- M1-091 | todo | | Facade TCP attempts, proxy CONNECT and per-check host sets | backlog corrected 2026-10-29 (correction-12): one action-log entry per tcp call, proxy CONNECT included, moved from M1-040; backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers the proxy password raw and percent-decoded, exit 70 if refused (PR #96 reviews); backlog corrected 2026-10-29 (correction-18): connects the stream a Replay `dial` names (PR #100 review)
 
 - M1-092 | todo | | Facade TLS with system roots and the recording chain probe | backlog corrected 2026-10-29 (correction-12): one action-log entry per tls call, moved from M1-040 (02 line 272); backlog corrected 2026-10-29 (correction-16): `SystemRoots` caps (PR #94 review)
 
