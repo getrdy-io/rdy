@@ -325,7 +325,10 @@ tests policy.
 - Descriptors above 2 that `rdy` inherited reach children in M1. `exec::inherited_fds()` lists them
   for a start-up warning (M1-168); closing them needs `unsafe` (M2-104, ADR 0023).
 - `exec::run` and `ExecSpec::new` are public only under `cfg(any(test, feature = "testing"))`. Check
-  crates reach the runner through `exec::policy::run` only.
+  crates reach the runner through `exec::table::run` only: it checks the command table (03 Appendix A),
+  then the policy. `exec::policy::run` is crate-private, and a compile-fail test proves it. The table
+  and `table::validate_for` need no `runtime` feature, so a probe gate without a runtime can refuse an
+  unlisted command too.
 - Each child gets its own process group, recorded in a lock-free list until reaped, and the group is
   killed on timeout. A child not reaped within 1 s of SIGKILL returns `Hung { pid }`; a detached task
   reaps it later.
@@ -768,8 +771,9 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
 
 // output, report, redact
 impl OutputDir { pub fn create_new(parent: &Path, product: &str, ts: &str) -> Result<Self, ReportError>;
-                 pub fn write_report(&self, r: &RedactedReport) -> Result<(), ReportError>;
-                 pub fn write_spec(&self, s: &VerifiedSpecBytes) -> Result<(), ReportError>; }
+                 pub fn write_atomic<T: AsRef<[u8]>>(&self, name: &str, c: &Redacted<T>) -> Result<PathBuf, ReportError>;  // M1-036
+                 pub fn write_report(&self, r: &RedactedReport) -> Result<(), ReportError>;  // M1-062, calls write_atomic
+                 pub fn write_spec(&self, s: &VerifiedSpecBytes) -> Result<Vec<PathBuf>, ReportError>; }  // M1-036
 pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<(), ReportError>;
 pub fn render_html(r: &RedactedReport) -> Result<String, ReportError>;
 pub struct RedactedReport(/* private */ Report);   // no From<Report>, no Deserialize, no DerefMut

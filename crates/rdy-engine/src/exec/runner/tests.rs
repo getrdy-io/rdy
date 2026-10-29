@@ -228,7 +228,7 @@ mod process {
         let output = std::process::Command::new(exe)
             .args([
                 "--exact",
-                "exec::tests::process::umask_probe",
+                "exec::runner::tests::process::umask_probe",
                 "--nocapture",
                 "--test-threads=1",
             ])

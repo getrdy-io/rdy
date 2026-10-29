@@ -35,6 +35,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0025](0025-install-sh-core.md) | install.sh refuses a cut-off copy by an end marker, stops when it cannot check a signature, and trusts only what it has hashed | Accepted, security-reviewed (PR #65) |
 | [0026](0026-checkmeta-in-checkinfo.md) | CheckMeta holds a check's title and remediation and lives in its static CheckInfo | Accepted |
 | [0027](0027-windows-trust-stores-stay-refused-in-m1.md) | Windows trust stores stay refused in M1: reading a DACL needs FFI or unmaintained crates, and Windows has no user store | Accepted, security-reviewed and architect-reviewed (PR #68) |
+| [0028](0028-command-table-and-fix-text-lists.md) | The command table is typed data in `rdy-engine`, and fix text is audited against two reviewed lists | Accepted, security-reviewed (PR #70) |
 | [0031](0031-kube-client-layer.md) | The kube client layer reads the kubeconfig itself, announces first, and keeps plugin output out of every error | Proposed (M1-102) |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
