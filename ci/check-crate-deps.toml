@@ -1,0 +1,30 @@
+# The direct dependencies a check crate may have (INV-07, docs/plan/02-engine-design.md "Lint wall", ADR 0014
+# decision 7, M1-044). Normal and build dependencies only: dev-dependencies are not listed, except that
+# tests/lint-wall/tests/deps_allowlist.rs holds two of them (`tempfile`, `tokio-rustls`) to rdy-checks-k8s.
+#
+# A check crate reaches the OS through its Probe. Clippy bans the std items. It cannot ban another crate's
+# API (tokio::fs, cap_std, TcpSocket, JoinSet::spawn, hyper-util, rustix and the rest), so the only way a
+# check crate can use one is to depend on it, and this file says which crates it may depend on.
+# tests/lint-wall/tests/deps_allowlist.rs reads `cargo metadata` and fails on any direct normal or build
+# dependency of a `rdy-checks-*` crate that is not listed for it here.
+#
+# Rules:
+# - Every `crates/rdy-checks-*` crate has a section. A new check crate fails the test until it has one.
+# - A change to this file needs the `security-review` label (CODEOWNERS covers /ci/).
+# - Never add tokio, cap-std, cap-primitives, rustix, nix, socket2, hyper, hyper-util, walkdir, tempfile,
+#   sysinfo, which, ureq, reqwest or hickory-*. The test refuses them. A check needs the machine through
+#   the Probe, not through a crate.
+# - One section, then one `allow = [..]` line, sorted. Nothing else is read.
+
+# rdy-checks-host: the base list of 02.
+[rdy-checks-host]
+allow = ["futures-util", "rdy-engine", "rdy-spec", "serde", "serde_json", "thiserror"]
+
+# rdy-checks-net: the base list, and x509-parser for the TLS interception check (02).
+[rdy-checks-net]
+allow = ["futures-util", "rdy-engine", "rdy-spec", "serde", "serde_json", "thiserror", "x509-parser"]
+
+# rdy-checks-k8s: the base list, and the only crate that may depend on kube (deny.toml) and k8s-openapi.
+# `secrecy` holds kubeconfig token values until they are handed to the known-secret set (M1-102, M1-061).
+[rdy-checks-k8s]
+allow = ["futures-util", "k8s-openapi", "kube", "rdy-engine", "rdy-spec", "secrecy", "serde", "serde_json", "thiserror"]

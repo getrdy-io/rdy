@@ -97,8 +97,8 @@ deny = [
     { crate = "rustix", wrappers = ["cap-primitives", "cap-std", "fs-set-times", "rdy", "rdy-engine", "rustix-linux-procfs", "tempfile"], reason = "02 lint wall: safe syscall wrappers belong to the engine and the CLI, not to a check" },
     # The k8s check crate has two dev-dependencies that the wall would otherwise ban. Both are test only
     # (a local TLS server and kubeconfig files for the client tests). deny cannot tell a dev-dependency
-    # from a normal one, so the name is listed here. The direct dependency allowlist (backlog row
-    # "Direct dependency allowlist for check crates") is the check that tells them apart.
+    # from a normal one, so the name is listed here. tests/lint-wall/tests/deps_allowlist.rs tells them
+    # apart: it fails if either is anything but a dev-dependency of rdy-checks-k8s.
     { crate = "tempfile", wrappers = ["rdy", "rdy-checks-k8s", "rdy-engine", "rexpect", "xtask"], reason = "02 lint wall: file creation is not a check's; rdy-checks-k8s uses it in tests only" },
     { crate = "tokio-rustls", wrappers = ["hyper-rustls", "rdy-checks-k8s"], reason = "02 lint wall: TLS goes through the probe or kube; rdy-checks-k8s uses it in its test server only" },
 ]

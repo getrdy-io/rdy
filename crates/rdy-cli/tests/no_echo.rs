@@ -215,6 +215,9 @@ fn near_misses_of_key_and_allow_unsigned_never_name_them() {
         &["run", "spec.yaml", "--allow-unsigend"],
         &["run", "spec.yaml", "--alow-unsigned"],
         &["run", "spec.yaml", "--allow-unsignd"],
+        // One letter short: the near-miss the M1-030 review asked to pin (carried to M1-044).
+        &["run", "spec.yaml", "--allow-unsigne"],
+        &["verify", "spec.yaml", "--allow-unsigne"],
         &["verify", "spec.yaml", "--keey"],
         &["verify", "spec.yaml", "--allow-unsgned"],
         &["trust", "add", "acme", "--kye", "acme.pub"],

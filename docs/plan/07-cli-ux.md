@@ -2623,7 +2623,6 @@ checked by `cargo deny`.
 | `indicatif` | The live progress line (section 3) | Pulls `console`. Both MIT. Drawn only through `ProgressDrawTarget::stderr_with_hz(10)` or `hidden()` |
 | `anstream` | Colour stripping and Windows console handling (section 6) | MIT or Apache-2.0. Replaces `atty`, which is banned; TTY checks use `std::io::IsTerminal` |
 | `unicode-width` | Pad columns by display width (section 6) | MIT or Apache-2.0 |
-| `strsim` | The flag suggester (section 1) | MIT. Levenshtein distance over the visible flags |
 
 ### D.6 Environment variables
 

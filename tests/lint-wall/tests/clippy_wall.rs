@@ -37,6 +37,37 @@ const ENGINE_ENTRIES: &[&str] = &[
     "rdy_engine::live_backend",
 ];
 
+/// Entries whose path exists on Unix only. `uses.rs` uses each inside a `#[cfg(unix)] mod`. Explicit and
+/// exact, so a new OS-only entry cannot be forgotten: `os_only_entries_are_used_only_inside_their_cfg_module`
+/// fails on every leg when a list and `uses.rs` disagree, and `every_entry_fails_clippy` fails on the leg of
+/// the other OS when an entry is on no list.
+const UNIX_ONLY: &[&str] = &[
+    "std::os::unix::fs::symlink",
+    "std::os::unix::fs::chown",
+    "std::os::unix::fs::fchown",
+    "std::os::unix::fs::lchown",
+    "std::os::unix::fs::chroot",
+    "std::os::unix::net::UnixStream",
+    "std::os::unix::net::UnixListener",
+    "std::os::unix::net::UnixDatagram",
+    "std::os::unix::net::UnixStream::connect",
+    "std::os::unix::net::UnixStream::connect_addr",
+    "std::os::unix::net::UnixStream::pair",
+    "std::os::unix::net::UnixListener::bind",
+    "std::os::unix::net::UnixListener::bind_addr",
+    "std::os::unix::net::UnixDatagram::bind",
+    "std::os::unix::net::UnixDatagram::bind_addr",
+    "std::os::unix::net::UnixDatagram::unbound",
+    "std::os::unix::net::UnixDatagram::pair",
+    "tokio::net::UnixStream::connect",
+];
+
+/// Entries whose path exists on Windows only. Used inside a `#[cfg(windows)] mod`.
+const WINDOWS_ONLY: &[&str] = &[
+    "std::os::windows::fs::symlink_file",
+    "std::os::windows::fs::symlink_dir",
+];
+
 fn paths(entries: &[Entry]) -> BTreeSet<&str> {
     entries.iter().map(|e| e.path.as_str()).collect()
 }
@@ -185,28 +216,157 @@ fn std_io_escapes_are_on_every_check_crate_deny_list() {
 
 #[test]
 fn pending_entries_still_do_not_exist() {
+    // Search every file under the engine, not only the top level: M1-045 may define it under probe/live/.
+    fn defines(dir: &Path, item: &str) -> bool {
+        std::fs::read_dir(dir).expect("read dir").any(|e| {
+            let p = e.expect("entry").path();
+            if p.is_dir() {
+                defines(&p, item)
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                std::fs::read_to_string(&p)
+                    .expect("read")
+                    .contains(&format!("fn {item}"))
+            } else {
+                false
+            }
+        })
+    }
     for (path, ticket) in PENDING {
         let (_, item) = path.rsplit_once("::").expect("a path");
-        let defined = std::fs::read_dir(root().join("crates/rdy-engine/src"))
-            .expect("engine src")
-            .map(|e| e.expect("entry").path())
-            .filter(|p| p.extension().is_some_and(|x| x == "rs"))
-            .any(|p| {
-                let text = std::fs::read_to_string(&p).expect("read");
-                text.contains(&format!("pub fn {item}"))
-            });
         assert!(
-            !defined,
+            !defines(&root().join("crates/rdy-engine/src"), item),
             "`{path}` exists now. Add its use to tests/lint-wall/src/uses.rs and delete it from PENDING ({ticket})"
         );
+    }
+}
+
+/// Which OS a use of `uses.rs` is built on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Os {
+    Any,
+    Unix,
+    Windows,
+}
+
+/// One `fn` of `uses.rs`: its name, the OS it is built on and its 1-based line range.
+struct Use {
+    name: String,
+    os: Os,
+    first: u64,
+    last: u64,
+}
+
+fn uses_text() -> String {
+    std::fs::read_to_string(root().join("tests/lint-wall/src/uses.rs")).expect("uses.rs")
+}
+
+/// Reads `uses.rs`: every `fn` and the text of each OS block. A block is a line `#[cfg(unix)]` or
+/// `#[cfg(windows)]`, the `mod` line after it, and everything up to the `}` in column 0.
+fn parse_uses(text: &str) -> (Vec<Use>, String, String, String) {
+    let mut uses: Vec<Use> = Vec::new();
+    let (mut any, mut unix, mut windows) = (String::new(), String::new(), String::new());
+    let mut os = Os::Any;
+    let mut next_cfg = None;
+    let total = text.lines().count() as u64;
+    for (n, line) in text.lines().enumerate() {
+        let n = n as u64 + 1;
+        match line {
+            "#[cfg(unix)]" => {
+                next_cfg = Some(Os::Unix);
+                continue;
+            }
+            "#[cfg(windows)]" => {
+                next_cfg = Some(Os::Windows);
+                continue;
+            }
+            _ => {}
+        }
+        if let Some(cfg) = next_cfg.take() {
+            assert!(
+                line.starts_with("mod "),
+                "uses.rs:{n}: a cfg line must be followed by a mod"
+            );
+            os = cfg;
+        }
+        if line == "}" && os != Os::Any {
+            os = Os::Any;
+            continue;
+        }
+        let code = line.split("//").next().unwrap_or("");
+        let sink = match os {
+            Os::Any => &mut any,
+            Os::Unix => &mut unix,
+            Os::Windows => &mut windows,
+        };
+        sink.push_str(code);
+        sink.push('\n');
+        if let Some(rest) = line.trim_start().strip_prefix("fn ") {
+            if let Some(last) = uses.last_mut() {
+                last.last = n - 1;
+            }
+            let name = rest.split(['(', '<']).next().expect("a name").to_owned();
+            uses.push(Use {
+                name,
+                os,
+                first: n,
+                last: total,
+            });
+        }
+    }
+    (uses, any, unix, windows)
+}
+
+#[test]
+fn os_only_entries_are_used_only_inside_their_cfg_module() {
+    // The proof, on every leg, that the lists above match the fixture. A failure that would show only on
+    // Windows (an entry that is not reported there) shows here on Linux.
+    let (_, any, unix, windows) = parse_uses(&uses_text());
+    for p in UNIX_ONLY {
+        assert!(
+            unix.contains(p),
+            "{p} is in UNIX_ONLY but not used inside a #[cfg(unix)] mod of uses.rs"
+        );
+        assert!(
+            !any.contains(p) && !windows.contains(p),
+            "{p} is in UNIX_ONLY but is also used outside the unix mod"
+        );
+    }
+    for p in WINDOWS_ONLY {
+        assert!(
+            windows.contains(p),
+            "{p} is in WINDOWS_ONLY but not used inside a #[cfg(windows)] mod"
+        );
+        assert!(
+            !any.contains(p) && !unix.contains(p),
+            "{p} is used outside the windows mod"
+        );
+    }
+    // The other way: an entry that only an OS mod uses must be on that OS's list.
+    for dir in check_crates() {
+        for e in wall_of(&dir) {
+            if unix.contains(&e.path) && !any.contains(&e.path) {
+                assert!(
+                    UNIX_ONLY.contains(&e.path.as_str()),
+                    "{} is used in the unix mod only; add it to UNIX_ONLY",
+                    e.path
+                );
+            }
+            if windows.contains(&e.path) && !any.contains(&e.path) {
+                assert!(
+                    WINDOWS_ONLY.contains(&e.path.as_str()),
+                    "{} is used in the windows mod only; add it to WINDOWS_ONLY",
+                    e.path
+                );
+            }
+        }
     }
 }
 
 /// What clippy said about the fixture.
 struct Run {
     succeeded: bool,
-    /// Every path named by a `disallowed_*` report.
-    reported: BTreeSet<String>,
+    /// Every `disallowed_*` report: the path it names and the line of `uses.rs` it points at.
+    reported: Vec<(String, u64)>,
     /// Any other warning or error, which means the fixture or a clippy.toml is broken.
     stray: Vec<String>,
 }
@@ -237,7 +397,7 @@ fn clippy_over_uses(conf_dir: &Path) -> Run {
         .expect("start cargo clippy");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut reported = BTreeSet::new();
+    let mut reported = Vec::new();
     let mut stray = Vec::new();
     for line in stdout.lines().filter(|l| l.starts_with('{')) {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
@@ -255,7 +415,12 @@ fn clippy_over_uses(conf_dir: &Path) -> Run {
         ) {
             // "use of a disallowed method `std::fs::read`"
             let path = text.split('`').nth(1).unwrap_or(text);
-            reported.insert(path.to_owned());
+            let line = message["spans"]
+                .as_array()
+                .and_then(|spans| spans.iter().find(|s| s["is_primary"] == true))
+                .and_then(|s| s["line_start"].as_u64())
+                .unwrap_or(0);
+            reported.push((path.to_owned(), line));
         } else if !text.starts_with("aborting due to") && !text.contains("previous error") {
             stray.push(message["rendered"].as_str().unwrap_or(text).to_owned());
         }
@@ -267,13 +432,13 @@ fn clippy_over_uses(conf_dir: &Path) -> Run {
     }
 }
 
-/// The entries of `dir` that `uses.rs` can use on this OS.
+/// The entries of a file that `uses.rs` can use on this OS.
 fn provable(list: &[Entry]) -> Vec<&Entry> {
     list.iter()
         .filter(|e| !is_kube(e))
         .filter(|e| PENDING.iter().all(|(p, _)| e.path != *p))
-        .filter(|e| cfg!(unix) || !e.path.starts_with("std::os::unix::"))
-        .filter(|e| cfg!(windows) || !e.path.starts_with("std::os::windows::"))
+        .filter(|e| cfg!(unix) || !UNIX_ONLY.contains(&e.path.as_str()))
+        .filter(|e| cfg!(windows) || !WINDOWS_ONLY.contains(&e.path.as_str()))
         .collect()
 }
 
@@ -281,11 +446,13 @@ fn provable(list: &[Entry]) -> Vec<&Entry> {
 fn every_entry_fails_clippy() {
     // The root file first, then every check crate. Each run changes CLIPPY_CONF_DIR, which cargo tracks,
     // so clippy looks at the fixture again every time. After the first run the dependencies are built.
+    let (uses, ..) = parse_uses(&uses_text());
     let mut dirs = vec![root()];
     dirs.extend(check_crates());
     let mut failures = Vec::new();
     for dir in dirs {
-        let label = if dir == root() {
+        let is_root = dir == root();
+        let label = if is_root {
             "the root clippy.toml".to_owned()
         } else {
             format!("{}/clippy.toml", name(&dir))
@@ -299,12 +466,56 @@ fn every_entry_fails_clippy() {
                 "{label}: clippy passed over uses.rs, but every use must fail"
             ));
         }
+        // The fn of uses.rs that a report points into.
+        let fn_of = |line: u64| uses.iter().find(|u| u.first <= line && line <= u.last);
         for e in &want {
-            if !run.reported.contains(&e.path) {
+            let fns: BTreeSet<&str> = run
+                .reported
+                .iter()
+                .filter(|(p, _)| *p == e.path)
+                .filter_map(|(_, line)| fn_of(*line))
+                .map(|u| u.name.as_str())
+                .collect();
+            if fns.is_empty() {
                 failures.push(format!(
                     "{label}: `{}` was not reported. Is its use in tests/lint-wall/src/uses.rs, and is the path right?",
                     e.path
                 ));
+                continue;
+            }
+            // A type entry is also reported by every method use of the type, so the proof that it fires
+            // on its own is a use that only names the type (a `type_*` fn). A method or macro entry needs
+            // a use that is not one of those.
+            let own = match e.kind {
+                Kind::Type => fns.iter().any(|f| f.starts_with("type_")),
+                Kind::Method | Kind::Macro => fns.iter().any(|f| !f.starts_with("type_")),
+            };
+            if !own {
+                failures.push(format!(
+                    "{label}: `{}` is reported only by {fns:?}; it needs a use of its own",
+                    e.path
+                ));
+            }
+        }
+        // Every use of this OS reports something. A use that reports nothing is dead weight, or its
+        // entry is missing from this file. The root file has fewer entries, so only the check crates.
+        if !is_root {
+            for u in &uses {
+                let this_os = match u.os {
+                    Os::Any => true,
+                    Os::Unix => cfg!(unix),
+                    Os::Windows => cfg!(windows),
+                };
+                let hit = run
+                    .reported
+                    .iter()
+                    .any(|(_, line)| u.first <= *line && *line <= u.last);
+                if this_os && !hit {
+                    failures.push(format!(
+                        "{label}: the use `{}` in uses.rs reports nothing",
+                        u.name
+                    ));
+                }
             }
         }
         // A path that clippy cannot find gives a warning with the path in it. The wall must not rot.
@@ -314,7 +525,7 @@ fn every_entry_fails_clippy() {
         // Everything reported is an entry of the file (the fixture uses items of the other files too, and
         // under this file they must not be reported, or the file would be wider than it says).
         let known = paths(&list);
-        for r in &run.reported {
+        for (r, _) in &run.reported {
             if !known.contains(r.as_str()) {
                 failures.push(format!(
                     "{label}: reported `{r}`, which is not one of its entries"

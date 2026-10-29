@@ -1,10 +1,12 @@
 //! The allow grep (M1-044, INV-07, ADR 0014 decision 7).
 //!
 //! `allow(clippy::disallowed_..)` is legal only in the facade's `live/` module and the k8s client module.
-//! This test reads every `.rs` file of the workspace, and fails on a lint attribute that names a
-//! `disallowed_*` lint (or a group that holds one) in a file that is not on the list below. A line of a
-//! comment does not count. To add a place, edit the list in this file. `/tests/lint-wall/` is in CODEOWNERS,
-//! so the change gets the security review.
+//! This test parses every `.rs` file of the workspace with `syn`, walks every attribute (inside `cfg_attr`
+//! too, and in the tokens of a macro), and fails on one that relaxes a `disallowed_*` lint, or a group that
+//! holds one, in a file that is not on the list below. Spacing, line breaks and a second attribute on a
+//! line do not matter, and a comment or a string does not count. No directory is skipped, because
+//! `#[path]` can reach any file. To add a place, edit the list in this file. `/tests/lint-wall/` is in
+//! CODEOWNERS, so the change gets the security review.
 //!
 //! The check crates get no exemption for tests, except the client tests of `rdy-checks-k8s`, which start
 //! mock servers and write kubeconfigs. A test of a check uses `TestRun`, not the machine.
@@ -75,6 +77,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "an integration test of the raw runner",
     ),
     (
+        "crates/rdy-engine/tests/watchdog_hang.rs",
+        "an integration test of the watchdog that starts a real process with the raw runner (M1-043)",
+    ),
+    (
         "crates/rdy-spec/tests/semantic_limits.rs",
         "a test that pins the clock with load_at",
     ),
@@ -84,7 +90,8 @@ const ALLOWED: &[(&str, &str)] = &[
     ),
 ];
 
-/// Lints that cover `disallowed_*`: the three lints, and the groups that include them.
+/// Lints that cover `disallowed_*`: the three lints, and the groups that include them. Compared with
+/// whitespace removed, so `clippy :: disallowed_methods` matches.
 const COVERING: &[&str] = &[
     "clippy::disallowed_",
     "clippy::all",
@@ -92,57 +99,128 @@ const COVERING: &[&str] = &[
     "warnings",
 ];
 
+/// The attributes that relax a lint. `deny` and `forbid` tighten, so they pass.
+const RELAXING: &[&str] = &["allow(", "expect(", "warn("];
+
+fn strip(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+fn covers(stripped: &str) -> bool {
+    COVERING.iter().any(|c| stripped.contains(c))
+}
+
+/// Whether the text of one attribute (without `#[` and `]`, whitespace removed) relaxes a `disallowed_*`
+/// lint: `allow(..)`, `expect(..)` or `warn(..)` naming one, or a `cfg_attr(..)` that holds one of those.
+fn attribute_relaxes(stripped: &str) -> bool {
+    let direct = RELAXING.iter().any(|r| stripped.starts_with(r));
+    let through_cfg_attr =
+        stripped.starts_with("cfg_attr(") && RELAXING.iter().any(|r| stripped.contains(r));
+    (direct || through_cfg_attr) && covers(stripped)
+}
+
+/// `#[..]` and `#![..]` inside the tokens of a macro, which syn does not parse as attributes: a
+/// `macro_rules!` body can hold `#[allow(clippy::disallowed_methods)]` and expand it anywhere.
+fn tokens_hide_a_relaxing_attribute(tokens: proc_macro2::TokenStream) -> bool {
+    use proc_macro2::{Delimiter, TokenTree};
+    let trees: Vec<TokenTree> = tokens.into_iter().collect();
+    for (i, tree) in trees.iter().enumerate() {
+        if let TokenTree::Group(g) = tree
+            && tokens_hide_a_relaxing_attribute(g.stream())
+        {
+            return true;
+        }
+        let is_hash = matches!(tree, TokenTree::Punct(p) if p.as_char() == '#');
+        if !is_hash {
+            continue;
+        }
+        let mut j = i + 1;
+        if matches!(trees.get(j), Some(TokenTree::Punct(p)) if p.as_char() == '!') {
+            j += 1;
+        }
+        if let Some(TokenTree::Group(g)) = trees.get(j)
+            && g.delimiter() == Delimiter::Bracket
+            && attribute_relaxes(&strip(&g.stream().to_string()))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Walks every attribute of a parsed file, including those inside `cfg_attr`, and the tokens of every
+/// macro.
+struct Finder {
+    found: bool,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for Finder {
+    fn visit_attribute(&mut self, attr: &'ast syn::Attribute) {
+        let name = attr
+            .path()
+            .segments
+            .last()
+            .map(|s| s.ident.to_string())
+            .unwrap_or_default();
+        let tokens = match &attr.meta {
+            syn::Meta::List(list) => strip(&list.tokens.to_string()),
+            _ => String::new(),
+        };
+        if attribute_relaxes(&format!("{name}({tokens})")) {
+            self.found = true;
+        }
+        syn::visit::visit_attribute(self, attr);
+    }
+
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        if tokens_hide_a_relaxing_attribute(mac.tokens.clone()) {
+            self.found = true;
+        }
+        syn::visit::visit_macro(self, mac);
+    }
+}
+
+/// Whether the source relaxes a `disallowed_*` lint anywhere. A file that does not parse is judged by its
+/// text: any lint-relaxing word and any covering lint name in it counts, because a file that syn cannot
+/// read is one nobody checked.
+fn relaxes_a_disallowed_lint(source: &str) -> bool {
+    match syn::parse_file(source) {
+        Ok(file) => {
+            let mut finder = Finder { found: false };
+            syn::visit::Visit::visit_file(&mut finder, &file);
+            finder.found
+        }
+        Err(_) => {
+            let stripped = strip(source);
+            RELAXING.iter().any(|r| stripped.contains(r)) && covers(&stripped)
+        }
+    }
+}
+
+/// Every `.rs` file under `dir`, in every directory. Nothing is skipped: `#[path = ".."]` can reach a file
+/// in a directory named `target` or one that starts with a dot.
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
         let path = entry.expect("dir entry").path();
-        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if path.is_dir() {
-            // Build output and the vendored trees are not source.
-            if file_name != "target" && !file_name.starts_with('.') {
-                rust_files(&path, out);
-            }
+            rust_files(&path, out);
         } else if path.extension().is_some_and(|x| x == "rs") {
             out.push(path);
         }
     }
 }
 
-/// Whether a line is a lint attribute that silences or relaxes a lint it names. It sees `allow(`,
-/// `expect(`, `warn(` and `cfg_attr(.., allow(..))`, and it skips comment lines. `deny` and `forbid`
-/// tighten, so they pass.
-fn relaxes_a_disallowed_lint(line: &str) -> bool {
-    let t = line.trim_start();
-    if t.starts_with("//") {
-        return false;
-    }
-    let relaxes = ["allow(", "expect(", "warn("].iter().any(|a| t.contains(a));
-    relaxes && COVERING.iter().any(|c| t.contains(c))
-}
-
-/// An attribute can span lines. Join each `#[..]` or `#![..]` into one string before looking.
-fn attributes(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut open: Option<String> = None;
-    for line in text.lines() {
-        let t = line.trim_start();
-        if open.is_none() && (t.starts_with("#[") || t.starts_with("#![")) {
-            open = Some(String::new());
-        }
-        if let Some(buf) = open.as_mut() {
-            buf.push_str(t);
-            buf.push(' ');
-            if t.trim_end().ends_with(']') {
-                out.push(open.take().expect("open"));
-            }
-        }
-    }
-    out
-}
-
 fn allowed(relative: &str) -> bool {
     ALLOWED
         .iter()
         .any(|(p, _)| relative == *p || (p.ends_with('/') && relative.starts_with(p)))
+}
+
+fn relative(base: &Path, file: &Path) -> String {
+    file.strip_prefix(base)
+        .expect("under the root")
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 #[test]
@@ -154,17 +232,10 @@ fn an_allow_of_a_disallowed_lint_is_only_in_the_allowlisted_files() {
     assert!(files.len() > 50, "found only {} source files", files.len());
     let mut bad = Vec::new();
     for file in files {
-        let relative = file
-            .strip_prefix(&base)
-            .expect("under the root")
-            .to_string_lossy()
-            .replace('\\', "/");
+        let rel = relative(&base, &file);
         let text = std::fs::read_to_string(&file).expect("read source");
-        let hit = attributes(&text)
-            .iter()
-            .any(|a| relaxes_a_disallowed_lint(a));
-        if hit && !allowed(&relative) {
-            bad.push(relative);
+        if relaxes_a_disallowed_lint(&text) && !allowed(&rel) {
+            bad.push(rel);
         }
     }
     assert!(
@@ -192,12 +263,9 @@ fn every_allowlisted_file_still_exists_and_still_needs_the_allow() {
         } else {
             files.push(full);
         }
-        let used = files.iter().any(|f| {
-            let text = std::fs::read_to_string(f).expect("read source");
-            attributes(&text)
-                .iter()
-                .any(|a| relaxes_a_disallowed_lint(a))
-        });
+        let used = files
+            .iter()
+            .any(|f| relaxes_a_disallowed_lint(&std::fs::read_to_string(f).expect("read source")));
         assert!(
             used,
             "{path} is on the allowlist but no longer relaxes a disallowed_* lint: remove it from the list ({why})"
@@ -206,30 +274,105 @@ fn every_allowlisted_file_still_exists_and_still_needs_the_allow() {
 }
 
 #[test]
-fn the_grep_sees_the_forms_it_must() {
-    for hit in [
-        "#[allow(clippy::disallowed_methods)]",
-        "#![allow(clippy::disallowed_types, clippy::disallowed_methods)]",
-        "#[expect(clippy::disallowed_macros)]",
-        "#[cfg_attr(test, allow(clippy::disallowed_methods))]",
-        "#![allow(clippy::all)]",
-        "#![allow(warnings)]",
-        "#[allow(\n    clippy::disallowed_methods,\n    clippy::expect_used\n)]",
+fn the_grep_sees_every_form_it_must() {
+    for (what, source) in [
+        ("plain", "#[allow(clippy::disallowed_methods)] fn f() {}"),
+        (
+            "inner",
+            "#![allow(clippy::disallowed_types, clippy::disallowed_methods)]",
+        ),
+        ("expect", "#[expect(clippy::disallowed_macros)] fn f() {}"),
+        (
+            "an attribute after code on the same line",
+            "fn f() {} #[allow(clippy::disallowed_methods)] fn g() {}",
+        ),
+        (
+            "a space after the hash",
+            "# [allow(clippy::disallowed_methods)] fn f() {}",
+        ),
+        (
+            "spaces in the lint path",
+            "#[allow(clippy :: disallowed_methods)] fn f() {}",
+        ),
+        (
+            "a newline in the lint path",
+            "#[allow(\n    clippy\n    ::\n    disallowed_methods,\n)] fn f() {}",
+        ),
+        (
+            "inside cfg_attr",
+            "#[cfg_attr(test, allow(clippy::disallowed_methods))] fn f() {}",
+        ),
+        (
+            "inside a nested cfg_attr",
+            "#[cfg_attr(unix, cfg_attr(test, allow(clippy::disallowed_methods)))] fn f() {}",
+        ),
+        ("the all group", "#![allow(clippy::all)]"),
+        ("the style group", "#[allow(clippy::style)] fn f() {}"),
+        ("warnings", "#![allow(warnings)]"),
+        (
+            "in a macro_rules body",
+            "macro_rules! m { () => { #[allow(clippy::disallowed_methods)] fn f() {} }; }",
+        ),
+        (
+            "in an inner attribute of a macro body",
+            "macro_rules! m { () => { #![allow(clippy::disallowed_methods)] }; }",
+        ),
+        (
+            "in a nested module",
+            "mod a { mod b { #[allow(clippy::disallowed_methods)] fn f() {} } }",
+        ),
+        (
+            "on a statement",
+            "fn f() { #[allow(clippy::disallowed_methods)] let _x = 1; }",
+        ),
+        (
+            "in a file that does not parse",
+            "fn f( { #[allow(clippy::disallowed_methods)]",
+        ),
     ] {
-        let found = attributes(hit).iter().any(|a| relaxes_a_disallowed_lint(a));
-        assert!(found, "the grep missed: {hit}");
+        assert!(relaxes_a_disallowed_lint(source), "the grep missed: {what}");
     }
-    for miss in [
-        "// #[allow(clippy::disallowed_methods)]",
-        "#![allow(clippy::expect_used)]",
-        "#![deny(clippy::disallowed_methods)]",
-        "#![forbid(unsafe_code)]",
+    for (what, source) in [
+        (
+            "a comment",
+            "// #[allow(clippy::disallowed_methods)]\nfn f() {}",
+        ),
+        (
+            "a block comment",
+            "/* #[allow(clippy::disallowed_methods)] */ fn f() {}",
+        ),
+        (
+            "a string",
+            "const S: &str = \"#[allow(clippy::disallowed_methods)]\";",
+        ),
+        ("an unrelated allow", "#![allow(clippy::expect_used)]"),
+        ("deny", "#![deny(clippy::disallowed_methods)]"),
+        ("forbid", "#![forbid(unsafe_code)]"),
+        (
+            "cfg_attr that does not relax",
+            "#[cfg_attr(test, deny(clippy::disallowed_methods))] fn f() {}",
+        ),
+        ("an empty file", ""),
     ] {
-        let found = attributes(miss)
-            .iter()
-            .any(|a| relaxes_a_disallowed_lint(a));
-        assert!(!found, "the grep flagged: {miss}");
+        assert!(
+            !relaxes_a_disallowed_lint(source),
+            "the grep flagged: {what}"
+        );
     }
+}
+
+#[test]
+fn the_walk_reaches_every_directory() {
+    // `#[path]` can name a file in a directory the walk would skip if it skipped `target` or dot dirs.
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("allow-grep-walk");
+    let _ = std::fs::remove_dir_all(&dir);
+    for sub in [".hidden", "target", "src/deep/er"] {
+        std::fs::create_dir_all(dir.join(sub)).expect("create dir");
+        std::fs::write(dir.join(sub).join("x.rs"), "").expect("write");
+    }
+    let mut found = Vec::new();
+    rust_files(&dir, &mut found);
+    assert_eq!(found.len(), 3, "{found:?}");
 }
 
 #[test]

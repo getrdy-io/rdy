@@ -29,7 +29,9 @@ socket2 = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["net", "process", "rt"], optional = true }
 
 [dev-dependencies]
+proc-macro2 = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
+syn = { workspace = true, features = ["full", "parsing", "visit"] }
 
 [lints]
 workspace = true

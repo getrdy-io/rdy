@@ -87,6 +87,11 @@ tokio-rustls = { version = "0.26", default-features = false }
 # version is the one tokio uses. cargo deny keeps it out of every check crate (deny.toml).
 socket2 = { version = "0.6", default-features = false }
 
+# Test-only: the allow grep of the lint wall parses every source file (M1-044). Both are already in the tree
+# through the derive crates.
+syn = { version = "2", default-features = false }
+proc-macro2 = { version = "1", default-features = false }
+
 # The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field
 # name and `=` would hide `password=hunter2` from the key-name rule (04 section 3.4).
 tracing = { version = "0.1", default-features = false }

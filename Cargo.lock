@@ -1812,10 +1812,12 @@ name = "rdy-lint-wall"
 version = "0.0.0"
 dependencies = [
  "clap",
+ "proc-macro2",
  "rdy-engine",
  "rdy-spec",
  "serde_json",
  "socket2",
+ "syn 2.0.119",
  "tokio",
 ]
 

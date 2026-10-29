@@ -139,6 +139,8 @@ disallowed-methods = [
     { path = "std::env::current_exe", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
     { path = "std::env::home_dir", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
     { path = "std::env::temp_dir", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::args", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
+    { path = "std::env::args_os", reason = "a check reads the environment only through Probe::env (ADR 0014)" },
     # Environment, write (`set_var` and `remove_var` are `unsafe` in edition 2024, so `forbid(unsafe_code)` also stops them).
     { path = "std::env::set_var", reason = "a check never changes the process environment or directory (ADR 0014)" },
     { path = "std::env::remove_var", reason = "a check never changes the process environment or directory (ADR 0014)" },
@@ -161,6 +163,19 @@ disallowed-methods = [
     { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
     # Engine: test helper.
     { path = "rdy_engine::testing::TestRun::context", reason = "TestRun::context skips the declaration step; a check test uses TestRun::context_for", allow-invalid = true },
+    # First-party escapes: the run's own files (M1-044 fix round, PC-47).
+    { path = "rdy_engine::output::ReportParent::open", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::output::OutputDir::create_new", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::output::OutputDir::create_new_in", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::output::OutputDir::write_atomic", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::output::OutputDir::write_spec", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    { path = "rdy_engine::output::default_report_parent", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
+    # First-party escapes: process-wide effects (PC-47).
+    { path = "rdy_engine::exec::kill_all_groups", reason = "a check never signals processes or changes the process umask; the run owns those (ADR 0016, ADR 0023)", allow-invalid = true },
+    { path = "rdy_engine::exec::harden_umask", reason = "a check never signals processes or changes the process umask; the run owns those (ADR 0016, ADR 0023)", allow-invalid = true },
+    { path = "rdy_engine::exec::inherited_fds", reason = "a check never signals processes or changes the process umask; the run owns those (ADR 0016, ADR 0023)", allow-invalid = true },
+    # First-party escapes: the spec (PC-47).
+    { path = "rdy_spec::load", reason = "a check never loads or verifies a spec; the run does", allow-invalid = true },
 ]
 
 disallowed-macros = [

@@ -292,6 +292,12 @@ fn env_home_dir() {
 fn env_temp_dir() {
     let _ = std::env::temp_dir;
 }
+fn env_args() {
+    let _ = std::env::args;
+}
+fn env_args_os() {
+    let _ = std::env::args_os;
+}
 // `set_var` and `remove_var` are `unsafe fn`. Naming one as a value needs no `unsafe` block.
 fn env_set_var() {
     let _ = std::env::set_var::<&str, &str>;
@@ -386,4 +392,38 @@ fn engine_exec_spec_new() {
 }
 fn engine_test_run_context(run: &rdy_engine::testing::TestRun, os: rdy_engine::check::Os) {
     let _ = run.context("x", os, Vec::<rdy_engine::check::Need>::new());
+}
+
+// ---- First-party escapes (PC-47) ----------------------------------------------------------------
+// The run owns the output folder, the process-wide effects and the spec. A check owns none of them.
+
+fn output_report_parent_open() {
+    let _ = rdy_engine::output::ReportParent::open;
+}
+fn output_create_new() {
+    let _ = rdy_engine::output::OutputDir::create_new;
+}
+fn output_create_new_in() {
+    let _ = rdy_engine::output::OutputDir::create_new_in;
+}
+fn output_write_atomic() {
+    let _ = rdy_engine::output::OutputDir::write_atomic::<Vec<u8>>;
+}
+fn output_write_spec() {
+    let _ = rdy_engine::output::OutputDir::write_spec;
+}
+fn output_default_report_parent() {
+    let _ = rdy_engine::output::default_report_parent;
+}
+fn exec_kill_all_groups() {
+    let _ = rdy_engine::exec::kill_all_groups;
+}
+fn exec_harden_umask() {
+    let _ = rdy_engine::exec::harden_umask;
+}
+fn exec_inherited_fds() {
+    let _ = rdy_engine::exec::inherited_fds;
+}
+fn spec_load() {
+    let _ = rdy_spec::load;
 }
