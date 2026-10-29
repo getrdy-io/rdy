@@ -221,6 +221,22 @@ mod unix {
         rustix::process::geteuid().as_raw()
     }
 
+    /// The gate for every `root_*` test (docs/plan/08-testing.md, section 6). True when the process is
+    /// root. A non-root run returns false and the test returns early, unless `RDY_REQUIRE_ROOT` is set
+    /// (the `root` CI job sets it). Then not being root is a failure, so the job cannot go green by
+    /// skipping.
+    fn is_root_or_skip() -> bool {
+        if me() == 0 {
+            return true;
+        }
+        assert!(
+            std::env::var_os("RDY_REQUIRE_ROOT").is_none(),
+            "euid is not 0; the root job must run under sudo"
+        );
+        eprintln!("skipped: needs uid 0 (the root job sets RDY_REQUIRE_ROOT=1)");
+        false
+    }
+
     /// An effective uid for a user-run layout. It is never 0, because a root layout has no user path.
     /// A user store owned by the current user passes for this uid, or, when the tests run as root, as
     /// a store that root owns.
@@ -303,10 +319,11 @@ mod unix {
     }
 
     #[test]
-    fn a_real_root_process_has_no_user_path_whatever_its_environment_is() {
-        // Only meaningful when the tests run as root (the sudo leg of INV-04). The process environment is
-        // whatever it is, with a HOME and perhaps an XDG_CONFIG_HOME, and a root layout ignores both.
-        if me() != 0 {
+    fn root_real_process_has_no_user_path() {
+        // Only meaningful when the tests run as root (the `root` CI job, the sudo leg of INV-04). The
+        // process environment is whatever it is, with a HOME and perhaps an XDG_CONFIG_HOME, and a root
+        // layout ignores both. sudo resets HOME and XDG_CONFIG_HOME, so this test builds nothing from them.
+        if !is_root_or_skip() {
             return;
         }
         let layout = Layout::detect();
@@ -434,10 +451,12 @@ mod unix {
     }
 
     #[test]
-    fn a_user_store_owned_by_another_user_is_refused() {
-        // Giving a file to another user needs root, so this runs only when the tests run as root. The
-        // folder stays root's, which a user layout accepts, so the file is the one that fails.
-        if me() != 0 {
+    fn root_user_store_owned_by_another_user_is_refused() {
+        // Giving a file to another user needs root, so this runs only when the tests run as root (the
+        // `root` CI job). The folder stays root's, which a user layout accepts, so the file is the one
+        // that fails. The layout comes from the fixture, never from HOME or XDG_CONFIG_HOME, because sudo
+        // resets both.
+        if !is_root_or_skip() {
             return;
         }
         let f = Fixture::new(1000);
@@ -584,8 +603,9 @@ mod unix {
 
     #[test]
     fn a_device_is_not_a_store_and_is_not_read() {
-        // INV-02. `/dev/zero` never ends, so a read would run until memory is gone. Its folder is
-        // `/dev`, which root owns, so the folder passes and the type check is what refuses it.
+        // INV-02. `/dev/zero` never ends. The read is already capped, so this test does not rely on the
+        // cap. It proves the type check refuses a device before any read. Its folder is `/dev`, which
+        // root owns, so the folder passes and the type check is what refuses it.
         let f = Fixture::new(1000);
         let layout = f.layout().with_system_file(PathBuf::from("/dev/zero"), 0);
         let started = std::time::Instant::now();

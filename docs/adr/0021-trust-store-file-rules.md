@@ -34,8 +34,9 @@ is unreadable or not valid gets. M1-121 has to pick. Each choice below is the on
    store, and saving is reported as not supported. `--key` runs read no store and are not affected. The
    fix line for this refusal tells the user to move the file away. It differs from the one in 01 section
    4.8 (run `rdy trust add` from an elevated prompt), because that command cannot work until M1-122.
-6. **Error codes.** A store that can be changed by the wrong people, that rdy cannot check, or that is not
-   a regular file (a folder, a pipe or a device), is `trust_store_insecure`. A store that cannot be read, is not valid, or cannot be written is `usage`
+6. **Error codes.** A store that can be changed by the wrong people, that rdy cannot check, that is not
+   a regular file (a folder, a pipe or a device), or whose folder is not a folder, is
+   `trust_store_insecure`. A store that cannot be read, is not valid, or cannot be written is `usage`
    (exit 64, the input has to change). No new code is added to ADR 0008's closed list. If the reviewers want
    a separate code for an invalid store, that is an additive change under ADR 0007.
 7. **One-run keys are never saved.** A pin made with `TrustStore::pin` has no `added_at`, and
