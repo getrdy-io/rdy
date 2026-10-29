@@ -931,6 +931,12 @@ dependencies = [
 [[package]]
 name = "rdy-checks-host"
 version = "0.1.0-alpha.0"
+dependencies = [
+ "rdy-engine",
+ "rdy-spec",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "rdy-checks-k8s"
