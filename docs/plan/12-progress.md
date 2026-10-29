@@ -29,7 +29,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-009 | [#13](https://github.com/getrdy-io/rdy/pull/13) | 2026-10-28 | none for the repo: CLAUDE.md edits C-1 to C-9 (rust-architect's exact text) applied by the coordinator in this PR; ADR 0015 sign-off is security-reviewer's in this PR; PC-35 and PC-37 left as cosmetic
 
-- M1-010 | todo | | sign-release with cosign keyless, SHA256SUMS and self-verify (SEC-06, SEC-07)
+- M1-010 | PR #TBD | | Deferred (ADR 0024, agents never push tags or approve environments): the release-sandbox signing proof in 06 "Sandbox proof, signing (M1-010)" (environment `release` with a required reviewer, tag push, approval click, `cosign verify-blob` on a clean machine, one-byte tamper), and `scripts/test-cosign-roundtrip.sh`, written without a cosign binary to run it on; its CI job `cosign-roundtrip` is outside `ci-ok` until its first green run. Built and tested locally with a fake cosign: `sign-release.yml`, `scripts/sign-release.sh`, `scripts/make-sha256sums.sh`, the `custom-sign-release` job in the regenerated `release.yml`, and `check-release-artifacts.sh --files-only --signed` in `announce`. No release exists until signing ends, not even a draft (ADR 0020, decision 2), so the exit test's "draft" should read "no release". `sign-release` needs only `contents: read` and `id-token: write`, so the plan's `contents = write` is dropped. PR #47 carried notes done. ADR 0024.
 
 - M1-011 | todo | | SEC-04 Org 2FA, private reporting, immutable releases, CODEOWNERS and a settings check script | backlog corrected 2026-10-28: account steps moved to Founder hand steps
 

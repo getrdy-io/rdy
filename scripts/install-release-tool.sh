@@ -2,7 +2,7 @@
 # install-release-tool.sh: install a pinned release tool for CI after checking its sha256 (ADR 0020).
 #
 # Usage: scripts/install-release-tool.sh <tool> [<table>]
-#   <tool>   dist or cargo-cyclonedx
+#   <tool>   dist, cargo-cyclonedx or cosign
 #   <table>  the pin file. Default: .github/release-tools.txt next to this script's repo root.
 # It picks the file for this OS and CPU from the table, downloads it over HTTPS, checks the hash and
 # only then unpacks it and copies the program to $HOME/.cargo/bin. A hash that does not match
@@ -27,9 +27,10 @@ table=${2:-$here/../.github/release-tools.txt}
 case $tool in
     dist) program=dist ;;
     cargo-cyclonedx) program=cargo-cyclonedx ;;
+    cosign) program=cosign ;;
     *)
         echo "error: unknown tool '$tool'" >&2
-        echo "fix: use dist or cargo-cyclonedx, or add the tool to $table" >&2
+        echo "fix: use dist, cargo-cyclonedx or cosign, or add the tool to $table" >&2
         exit 64
         ;;
 esac
@@ -58,10 +59,27 @@ case $triple in
     *) ;;
 esac
 
+# The text that marks this platform in a file name. cosign publishes bare programs named
+# cosign-<os>-<cpu>, so it does not use the target triple.
+key=$triple
+if [ "$tool" = cosign ]; then
+    case $triple in
+        x86_64-unknown-linux-musl) key=linux-amd64 ;;
+        aarch64-unknown-linux-musl) key=linux-arm64 ;;
+        x86_64-apple-darwin) key=darwin-amd64 ;;
+        aarch64-apple-darwin) key=darwin-arm64 ;;
+        *)
+            echo "error: no pinned cosign for $os on $cpu" >&2
+            echo "fix: install cosign by hand from its release page and check the hash" >&2
+            exit 1
+            ;;
+    esac
+fi
+
 # The line for this tool and platform: <tool> <version> <file> <sha256> <url>.
-line=$(awk -v t="$tool" -v s="$triple" '$1 == t && index($3, s) > 0 { print; exit }' "$table")
+line=$(awk -v t="$tool" -v s="$key" '$1 == t && index($3, s) > 0 { print; exit }' "$table")
 if [ -z "$line" ]; then
-    echo "error: $table has no $tool for $triple" >&2
+    echo "error: $table has no $tool for $key" >&2
     echo "fix: add a line with the file name, its sha256 and its URL" >&2
     exit 1
 fi
@@ -115,6 +133,10 @@ echo "sha256 ok: $file"
 
 mkdir "$work/x"
 case $file in
+    cosign-*-*)
+        # A bare program, not an archive. The hash above is the only check on it.
+        cp "$work/$file" "$work/x/$program"
+        ;;
     *.tar.xz) tar -xJf "$work/$file" -C "$work/x" ;;
     *.zip)
         if command -v unzip > /dev/null 2>&1; then
@@ -125,7 +147,7 @@ case $file in
         ;;
     *)
         echo "error: unknown file type: $file" >&2
-        echo "fix: use .tar.xz or .zip in $table" >&2
+        echo "fix: use .tar.xz, .zip or a bare cosign program in $table" >&2
         exit 1
         ;;
 esac

@@ -142,6 +142,8 @@ fresh() {
     hash_all "$d"
 }
 
+extra_path=""
+
 # check <name> <expected exit> <expected text in output> <dir> [env assignments are set by the caller]
 # The stubs come first on PATH. STUB_DLLS, STUB_AUDIT and STUB_CODE are read from the caller's shell.
 check() {
@@ -149,7 +151,7 @@ check() {
     want=$2
     text=$3
     shift 3
-    out=$(PATH="$tmp/stubs:$PATH" "$script" "$@" 2>&1)
+    out=$(PATH="${extra_path}$tmp/stubs:$PATH" "$script" "$@" 2>&1)
     code=$?
     if [ "$code" -ne "$want" ]; then
         bad "$name (exit $code, want $want)"
@@ -323,6 +325,69 @@ RDY_DIST_CONFIG="$tmp/does-not-exist.toml"
 check "a missing dist-workspace.toml fails" 1 "FAIL dist builds one package at a time" "$tmp/good"
 unset RDY_DIST_CONFIG
 check "the committed dist-workspace.toml passes" 0 "PASS dist builds one package at a time" "$tmp/good"
+
+# The override is for tests only, so it warns.
+RDY_DIST_CONFIG="$here/../dist-workspace.toml"
+export RDY_DIST_CONFIG
+check "RDY_DIST_CONFIG prints a warning" 0 "WARNING: RDY_DIST_CONFIG overrides dist-workspace.toml (test only)" "$tmp/good"
+unset RDY_DIST_CONFIG
+out=$(PATH="$tmp/stubs:$PATH" "$script" "$tmp/good" 2>&1)
+if printf '%s\n' "$out" | grep -q "RDY_DIST_CONFIG"; then
+    bad "no warning when RDY_DIST_CONFIG is not set"
+else
+    ok "no warning when RDY_DIST_CONFIG is not set"
+fi
+
+# A python3 without tomllib (older than 3.11) exits 3 inside the check. The stub fakes that for the
+# tomllib snippet only and runs the real python3 for the SBOM check.
+real_py=$(command -v python3)
+mkdir "$tmp/oldpy"
+cat > "$tmp/oldpy/python3" << EOF
+#!/bin/sh
+case "\$*" in
+    *tomllib*)
+        echo "ModuleNotFoundError: No module named 'tomllib'" >&2
+        exit 3
+        ;;
+esac
+exec "$real_py" "\$@"
+EOF
+chmod +x "$tmp/oldpy/python3"
+extra_path="$tmp/oldpy:"
+check "python3 without tomllib says what to install" 1 "needs python3 3.11 or newer (tomllib)" "$tmp/good"
+extra_path=""
+
+# 9. Signed folder: the folder `announce` publishes (--files-only --signed).
+signed_folder() {
+    fresh "$1"
+    echo "synthetic install script" > "$tmp/$1/install.sh"
+    "$here/make-sha256sums.sh" "$tmp/$1" > "$tmp/$1/SHA256SUMS"
+    echo '{"synthetic":"bundle"}' > "$tmp/$1/SHA256SUMS.sigstore.json"
+}
+signed_folder signed
+check "a signed folder passes --files-only --signed" 0 "release files ok" --files-only --signed "$tmp/signed"
+check "the full check accepts install.sh, SHA256SUMS and the bundle" 0 "release artifacts ok" "$tmp/signed"
+signed_folder nosums
+rm "$tmp/nosums/SHA256SUMS"
+check "--signed fails without SHA256SUMS" 1 "FAIL SHA256SUMS and SHA256SUMS.sigstore.json are in the folder" --files-only --signed "$tmp/nosums"
+signed_folder nobundle
+rm "$tmp/nobundle/SHA256SUMS.sigstore.json"
+check "--signed fails without the bundle" 1 "FAIL SHA256SUMS and SHA256SUMS.sigstore.json are in the folder" --files-only --signed "$tmp/nobundle"
+signed_folder changed
+printf 'x' >> "$tmp/changed/rdy-x86_64-apple-darwin.tar.gz"
+check "--signed fails when one byte of a file changed after hashing" 1 "FAIL SHA256SUMS lists exactly the files" --files-only --signed "$tmp/changed"
+signed_folder added
+echo '{}' > "$tmp/added/rdy.cdx.json"
+check "--signed fails when a file was added after hashing" 1 "FAIL SHA256SUMS lists exactly the files" --files-only --signed "$tmp/added"
+signed_folder removed
+rm "$tmp/removed/rdy.cdx.xml"
+check "--signed fails when a file was removed after hashing" 1 "FAIL SHA256SUMS lists exactly the files" --files-only --signed "$tmp/removed"
+signed_folder stray
+echo surprise > "$tmp/stray/notes.txt"
+check "--signed still fails on an unexpected name" 1 "FAIL notes.txt is an expected release file" --files-only --signed "$tmp/stray"
+check "--signed without --files-only is a usage error" 64 "usage:" --signed "$tmp/signed"
+check "--skip-audit with --files-only is a usage error" 64 "usage:" --skip-audit --files-only "$tmp/signed"
+check "an unknown flag is a usage error" 64 "usage:" --bogus "$tmp/signed"
 
 # Usage.
 check "no argument is a usage error" 64 "usage:"
