@@ -89,9 +89,9 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-038 | [#44](https://github.com/getrdy-io/rdy/pull/44) | 2026-10-28 | Built as `rdy_engine::blocking` and `rdy_engine::exec` (async `tokio::process`, so no command runs on an abandoned blocking thread). Windows kills only the child, not its tree, until job objects (M2-006): `KILLS_PROCESS_TREE` is false there and M1-039 limits Windows to `whoami.exe`. The exit wait polls `waitid(WNOWAIT)` on every Unix instead of using `pidfd_open`, because every safe `tokio::io::unix::AsyncFd` constructor is deprecated in tokio 1.54 and the supported one is `unsafe`. Descriptors above 2 inherited by `rdy` still reach children (safe rustix cannot set CLOEXEC on a raw descriptor): M1-039 or the CLI start-up closes them. Shell and sudo refusal, PATH and env-name policy are M1-039. Wiring into `Probe` and `ProbeError` is M1-040. The watchdog and Ctrl-C callers of `kill_all_groups` are M1-043 and M1-058. The Hung proof uses a no-op kill function because a test cannot make a process survive SIGKILL.
 
-- M1-039 | todo | | SEC-18 Command policy: search path, declared directories, caps and Windows whoami only
+- M1-039 | todo | | SEC-18 Command policy: search path, declared directories, caps and Windows whoami only | backlog corrected 2026-10-29 (correction-08): inherited descriptors above 2 are detected and listed by `inherited_fds()`, not closed (ADR 0023); the CLI warning is M1-168 and closing them is M2-104
 
-- M1-040 | todo | | SEC-17 Mediated Context handles with action log and read denylist
+- M1-040 | todo | | SEC-17 Mediated Context handles with action log and read denylist | backlog corrected 2026-10-29 (correction-08): `rdy_engine::exec::run` and `ExecSpec` go on the check-crate deny list
 
 - M1-041 | todo | | SEC-63 Result schema caps, identity.kube exec plugin and action log retention
 
@@ -99,7 +99,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-043 | todo | | Run deadline and watchdog with a report on hang
 
-- M1-044 | todo | | Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers
+- M1-044 | todo | | Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | backlog corrected 2026-10-29 (correction-08): `rdy_engine::exec::run` and `ExecSpec` go on the check-crate deny list
 
 - M1-045 | todo | | File and env read policy in the facade
 
@@ -347,6 +347,8 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-166 | todo | | Fixture env net-airgapped
 
 - M1-167 | todo | | Time the quickstart with two design-partner SEs | backlog corrected 2026-10-28: human steps moved to Founder hand steps
+
+- M1-168 | todo | | CLI start-up hardening: call `harden_umask()` and warn on inherited descriptors
 
 ## Summary
 
