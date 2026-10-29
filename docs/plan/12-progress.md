@@ -33,13 +33,13 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-011 | [#60](https://github.com/getrdy-io/rdy/pull/60) | 2026-10-29 | Founder hand steps (docs/security/github-settings.md sections 1 to 8): org 2FA, private reporting, immutable releases, `main` and `v*` rulesets, Dependabot alerts, security@ mailbox and serving security.txt. First run 2026-10-29 (no token): 1 pass, 4 fail, 1 unknown. Found: `getrdy-io` is a personal account, not an organization, so org-wide 2FA needs the account turned into an organization first (founder decision; the plan assumed an org). SEC-03 is zizmor `unpinned-uses` hash-pin from M1-005, not a new check; the red throwaway PR with an unpinned `uses:` is for the coordinator to run. CODEOWNERS uses `@getrdy-io`; code owner review is not required while there is one maintainer. zizmor not run locally (not installed); shellcheck 0.9.0 clean. The curl HTTPS-only protocol option (review nit 6) is not in the script: the agent sandbox refused to write it, so the founder adds it by hand
 
-- M1-012 | todo | | First signed alpha, scripts/verify-release.sh and RELEASING.md
+- M1-012 | todo | | First signed alpha, scripts/verify-release.sh and RELEASING.md | backlog corrected 2026-10-29 (correction-11): a wrong caller repository, ref and trigger each fail (PR #66 security review, finding 1)
 
 - M1-013 | [#11](https://github.com/getrdy-io/rdy/pull/11) | 2026-10-28 | `schema` writes no file yet (M1-022 adds the schemars output). `docs` writes one placeholder page under `docs/src/content/docs/reference/spec/`, and M1-076 replaces it. The page is not published yet because the Starlight scaffold is not in the repo. `docs --check` and `docs-lint` are not in `ci.yml`. 09 section 10 puts the docs-gen job in M1, but the backlog has it only at M3-002, so the coordinator should file a correction. The banned-token list holds the coordinator's hash list, with the synthetic test hash. The lint applies NFKC normalization before it matches tokens, and it lints every tracked file with no NUL byte, replacing invalid UTF-8 bytes. A UTF-16 file has NUL bytes, so the lint skips it. A generator path that climbs out of its root or is absolute is refused. The check does not yet find stale generated files that no generator emits
 
 - M1-014 | [#65](https://github.com/getrdy-io/rdy/pull/65) | 2026-10-29 | busybox (Alpine container) and macOS /bin/sh legs run only in CI (the local busybox is Ubuntu busybox-static, which the harness now rejects); verify_signature is the seam and stops unless the override is set until M1-015; sign-release (M1-010) must stamp RDY_STAMPED_VERSION (ADR 0025); carry to M1-015: the fake rdy touches a canary file and the bad-hash and bad-signature cases assert it is absent, and `fetch NAME WHAT CAUSE FIX` takes the 404 message so the bundle gets 06's "this release looks incomplete"
 
-- M1-015 | todo | | install.sh signature check, fail closed, with tamper tests (SEC-09, SEC-10) | backlog corrected 2026-10-29 (correction-11): a wrong caller repository, ref and trigger each fail (PR #66 security review, finding 5)
+- M1-015 | todo | | install.sh signature check, fail closed, with tamper tests (SEC-09, SEC-10) | backlog corrected 2026-10-29 (correction-11): a wrong caller repository, ref and trigger each fail (PR #66 security review, finding 1)
 
 - M1-016 | [#10](https://github.com/getrdy-io/rdy/pull/10) | 2026-10-28 | check params stay a raw map (M1-019), timeout, max_size and expires stay text (M1-018, M1-026), load() is a fail-closed stub (M1-017, M1-120)
 
@@ -99,7 +99,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-043 | todo | | Run deadline and watchdog with a report on hang
 
-- M1-044 | todo | | Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | backlog corrected 2026-10-29 (correction-08): `rdy_engine::exec::run` and `ExecSpec` go on the check-crate deny list | backlog corrected 2026-10-29 (correction-11): the kube entries are included through M1-102's committed use file; depends on M1-102, so it runs in week 19
+- M1-044 | todo | | Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | backlog corrected 2026-10-29 (correction-08): `rdy_engine::exec::run` and `ExecSpec` go on the check-crate deny list
 
 - M1-045 | todo | | File and env read policy in the facade
 
@@ -216,7 +216,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-101 | todo | | Security review of the TLS recording verifier and 03 Appendix A
 
-- M1-102 | todo | | Kube client from kubeconfig or in-cluster with rustls and timeouts | backlog corrected 2026-10-29 (correction-11): exit test trimmed to library level (announce before the first request, `no kubeconfig found` with the 07 hint, no plugin output at trace, kube clippy entries and a use file for M1-044); 3.5 h; the rest moves to M1-107, M1-108 and M1-044
+- M1-102 | todo | | Kube client from kubeconfig or in-cluster with rustls and timeouts | backlog corrected 2026-10-29 (correction-11): exit test trimmed to library level (announce callback before the first request, `no kubeconfig found` with the 07 hint, no plugin output at trace, kube clippy entries and a use file for M1-107); 3.5 h; the rest moves to M1-107 and M1-108
 
 - M1-103 | todo | | Read-only guard layer and test for rdy-checks-k8s
 
@@ -226,7 +226,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-106 | todo | | k8s.version (gitVersion parse, distribution, discovery API availability)
 
-- M1-107 | todo | | Family probe hook and lazy KubeContext probe | backlog corrected 2026-10-29 (correction-11): with no kubeconfig every k8s check is SKIP with the hint, the cluster line prints to stderr before the first request, and a timed-out exec plugin does not keep rdy from exiting (ADR 0031 residual); 2.5 h
+- M1-107 | todo | | Family probe hook and lazy KubeContext probe | backlog corrected 2026-10-29 (correction-11): with no kubeconfig every k8s check is SKIP with the hint, the cluster line prints to stderr before the first request, and a timed-out exec plugin does not keep rdy from exiting (ADR 0031 residual), and each kube entry from M1-102's use file fails clippy in tests/lint-wall; depends on M1-044 too; 2.5 h
 
 - M1-108 | todo | | kind integration job with a restricted PSA namespace and review round trips | backlog corrected 2026-10-29 (correction-11): depends on M1-106 and runs `tests/live_cluster.rs`, the ignored kind test from M1-102
 
