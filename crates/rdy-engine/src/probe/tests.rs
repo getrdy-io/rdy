@@ -408,9 +408,14 @@ mod commands {
 
     use super::*;
     use crate::check::CommandSpec;
-    use crate::check::{CheckInfo, OsSupport, Support};
-    use crate::exec::policy::CommandError;
+    use crate::check::{CheckInfo, CheckMeta, OsSupport, Support};
     use crate::exec::ExecError;
+    use crate::exec::policy::CommandError;
+
+    const META: CheckMeta = CheckMeta {
+        title: "Fixture check",
+        remediation: "Nothing to fix. This check is a test double.",
+    };
 
     const ALL_OS: OsSupport = OsSupport {
         linux: Support::Full,
@@ -423,6 +428,7 @@ mod commands {
         id: "net.dns",
         family: "net",
         summary: "Runs getent.",
+        meta: META,
         needs: &[],
         wants: &[],
         default_timeout: None,
@@ -443,6 +449,7 @@ mod commands {
         id: "gpu.driver",
         family: "gpu",
         summary: "Runs nvidia-smi from a directory of its own.",
+        meta: META,
         needs: &[],
         wants: &[],
         default_timeout: None,
@@ -484,10 +491,11 @@ mod commands {
                     .iter()
                     .map(|a| a.to_string_lossy().into_owned())
                     .collect();
-                self.seen
-                    .lock()
-                    .expect("lock")
-                    .push((cmd.program().to_owned(), args, cmd.output_cap()));
+                self.seen.lock().expect("lock").push((
+                    cmd.program().to_owned(),
+                    args,
+                    cmd.output_cap(),
+                ));
                 Ok(Output::new(Some(0), b"ok".to_vec()))
             })
         }
@@ -1244,13 +1252,17 @@ mod scheduled {
 
     use super::*;
     use crate::check::{Check, CheckContext, CheckInfo, CheckOutcome, Finding};
-    use crate::check::{CommandSpec, Need, Os, OsSupport, Support};
+    use crate::check::{CheckMeta, CommandSpec, Need, Os, OsSupport, Support};
     use crate::sched::{End, Planned, Scheduler};
 
     static WALKER: CheckInfo = CheckInfo {
         id: "fixture.walker",
         family: "fixture",
         summary: "Reads, runs, connects and calls the cluster, then leaks its probe.",
+        meta: CheckMeta {
+            title: "Fixture walker",
+            remediation: "Nothing to fix. This check is a test double.",
+        },
         needs: &[],
         wants: &[],
         default_timeout: None,

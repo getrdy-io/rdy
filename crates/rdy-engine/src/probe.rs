@@ -396,12 +396,7 @@ impl ProbeHub {
             reason = "only the scheduler and the test helpers open probes"
         )
     )]
-    pub(crate) fn check_probe(
-        &self,
-        key: &str,
-        os: Os,
-        info: Option<&'static CheckInfo>,
-    ) -> Probe {
+    pub(crate) fn check_probe(&self, key: &str, os: Os, info: Option<&'static CheckInfo>) -> Probe {
         self.probe(Some(key.to_owned()), os, info)
     }
 

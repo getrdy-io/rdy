@@ -752,8 +752,10 @@ impl Probe {
     pub fn kube_guard(&self) -> KubeGuardLayer;        // used only by guarded_service
 }
 // One Cmd type: rdy_engine::exec::policy::Cmd { program: &'static str, args, extra_dirs, env names, timeout, stdout_cap }.
-// Probe::exec applies the check's CommandSpec (dirs, env names, cap), runs the policy and resolves the
-// program; the backend gets only a ResolvedCmd (PC-44).
+// Build it with CommandEntry::cmd (the command table, ADR 0028). Probe::exec applies the check's
+// CommandSpec (dirs, env names, cap), then table::validate_for(ctx.os, ..), so a command that is not in
+// the table never reaches any backend, replay included (PC-44).
+
 pub enum Target { Direct { host: String, port: u16 }, ViaProxy { host: String, port: u16 } }
 pub struct HttpProbe { pub url: String, pub method: Method /* Head | Get */, pub route: Route,
                        pub roots: Roots /* System | Bundled */ }
@@ -769,8 +771,8 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
     fn read_link<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<PathBuf>>;
     fn stat<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
     fn env(&self, name: &str) -> Option<String>;
-    fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, Result<Output, ProbeError>>;   // PC-44
-    fn resolves_on_disk(&self) -> bool { true }   // Replay says false: every rule applies, no lookup (PC-44)
+    // Provided: the live path, exec::table::run (the only public runner). Replay overrides it. (PC-44)
+    fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> { /* table::run */ }
     fn resolve<'a>(&'a self, host: &'a str) -> BoxFuture<'a, io::Result<Vec<IpAddr>>>;
     fn connect<'a>(&'a self, addr: SocketAddr) -> BoxFuture<'a, io::Result<BoxedStream>>;
     fn native<'a>(&'a self, call: &'a NativeCall) -> BoxFuture<'a, io::Result<NativeValue>>;

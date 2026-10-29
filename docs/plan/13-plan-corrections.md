@@ -254,13 +254,15 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
 - PC-32 (cosmetic): C-9.
 - PC-44 (found by the M1-040 review, PR #58): applied in 01 section 5.4, 02 (the Files deny list and the
   `Backend` sketch), 05 I5, 11 and ADR 0014. Four changes. (1) One `Cmd` type, the one in
-  `exec::policy`. `Probe::exec` applies the check's `CommandSpec` (extra directories, environment names,
-  stdout cap), runs the command policy and resolves the program, then calls
-  `Backend::spawn(&ResolvedCmd) -> Result<Output, ProbeError>`. 02's `io::Result<Output>` is replaced,
-  because a start failure, a timeout and a hung child are not `io::Error` kinds. The backend gets a new
-  method `resolves_on_disk()` (true; the replay backend says false), so a fixture run applies every rule
-  but the lookup and never depends on the tools of the test machine. A fixture can never "run" `sh` or
-  `sudo`. (2) The action log keeps a `denied` entry always. A `denied` or `failed` file call folds into one
+  `exec::policy`, built with `CommandEntry::cmd` (ADR 0028). `Probe::exec` applies the check's
+  `CommandSpec` (extra directories, environment names, stdout cap), then checks the command with
+  `table::validate_for(os, ..)` for the check's OS, then calls
+  `Backend::spawn(Cmd) -> Result<Output, ProbeError>`. The provided `spawn` is the live path and calls
+  `exec::table::run`, the only public runner (`policy::run` is crate-private); the replay backend
+  overrides it. 02's `io::Result<Output>` is replaced, because a start failure, a timeout and a hung
+  child are not `io::Error` kinds. The gate runs for every backend, so a fixture can never "run" `sh`,
+  `sudo` or any program the table does not list, and a replayed run depends on no tool of the test
+  machine. There is no `ResolvedCmd`, no `resolves_on_disk` and no second `Cmd`. (2) The action log keeps a `denied` entry always. A `denied` or `failed` file call folds into one
   `coalesced` entry after 20 per (check, kind, rule or error, directory); the entry carries `rule` or
   `error` as well as `of`, `under` and `count` (schema description of `under` and `count` and the docs of
   `actions_truncated` and `actions_dropped` updated through `cargo xtask schema`; `ActionKind::Coalesced`
