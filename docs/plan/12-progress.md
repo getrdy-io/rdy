@@ -264,7 +264,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-125 | todo | | rdy spec keygen and rdy spec sign
 
-- M1-126 | todo | | rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner
+- M1-126 | todo | | rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner | backlog corrected 2026-10-29 (correction-10): on windows-x64 with a ProgramData trust store present, `rdy verify --key <pub>` exits 0 and `rdy verify` without `--key` exits 64 with `trust_store_insecure` (ADR 0027); the INV-04 strace check runs the real `rdy verify` on a signed fixture as root (carried from M1-122)
 
 - M1-127 | todo | | Real-binary smoke on five legs: live exit codes 0, 1, 2 and 64
 
@@ -278,7 +278,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-132 | todo | | Security review of spec signing and trust store
 
-- M1-133 | todo | | Install, exit codes and unsigned pages
+- M1-133 | todo | | Install, exit codes and unsigned pages | backlog corrected 2026-10-29 (correction-10): the unsigned page has a Windows section on verifying with the vendor key while Windows trust stores are refused (ADR 0027)
 
 - M1-134 | todo | | Sign and verify page
 
