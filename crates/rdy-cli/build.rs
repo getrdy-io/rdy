@@ -9,7 +9,8 @@
 //! - Otherwise git is used only if its top-level directory is this workspace.
 //! - Otherwise the line is just `<version>`.
 //!
-//! The script runs `git` and nothing else. It uses no network and writes only `RDY_VERSION`.
+//! The script runs `git` and nothing else. It uses no network. It writes `RDY_VERSION`, and `RDY_COMMIT`,
+//! `RDY_DATE` and `RDY_TARGET` for `rdy version --json` (empty when the build does not know them).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -34,6 +35,15 @@ fn main() {
     let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
     let line = build_version::line(&version, &source);
     println!("cargo:rustc-env=RDY_VERSION={line}");
+
+    // The same facts for `rdy version --json`. An empty value means the build does not know it.
+    let (commit, date) = build_version::commit_and_date(&source);
+    println!("cargo:rustc-env=RDY_COMMIT={}", commit.unwrap_or_default());
+    println!("cargo:rustc-env=RDY_DATE={}", date.unwrap_or_default());
+    println!(
+        "cargo:rustc-env=RDY_TARGET={}",
+        std::env::var("TARGET").unwrap_or_default()
+    );
 }
 
 /// Run git in the package directory and return trimmed stdout, or `None` on any failure.

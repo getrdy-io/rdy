@@ -155,7 +155,7 @@ fn scheduler(jobs: usize) -> Scheduler {
 }
 
 fn passed(ran: &Ran) -> bool {
-    matches!(&ran.end, End::Done(Ok(finding)) if finding.level == Level::Pass)
+    matches!(&ran.end, End::Done(done) if matches!(&**done, Ok(finding) if finding.level == Level::Pass))
 }
 
 #[test]
@@ -355,7 +355,10 @@ async fn a_fake_family_comes_back_as_pass_and_missing_need() {
 
     let ran = scheduler(8).run(items.clone()).await;
     assert!(passed(&ran[0]));
-    let End::Done(Err(error)) = &ran[1].end else {
+    let End::Done(done) = &ran[1].end else {
+        panic!("expected a skip, got {:?}", ran[1].end);
+    };
+    let Err(error) = &**done else {
         panic!("expected a skip, got {:?}", ran[1].end);
     };
     assert_eq!(error, &CheckError::MissingNeed(Need::Root));
@@ -380,7 +383,10 @@ async fn the_check_sees_its_key_and_the_os_it_was_given() {
     let ran = Scheduler::new(2, Os::Macos, [Need::Network])
         .run(vec![planned("fake.plain/named", Mode::Pass)])
         .await;
-    let End::Done(Ok(finding)) = &ran[0].end else {
+    let End::Done(done) = &ran[0].end else {
+        panic!("expected a finding");
+    };
+    let Ok(finding) = &**done else {
         panic!("expected a finding");
     };
     assert_eq!(finding.message, "fake.plain/named ran");

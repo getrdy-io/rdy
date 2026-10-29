@@ -25,12 +25,7 @@ fn check_validator() -> TestResult<Validator> {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("schema/spec.v1.schema.json"),
     )?;
     let whole: Value = serde_json::from_str(&text)?;
-    // Only the definitions a check entry uses. The `Bundle` definition has a pattern
-    // (`^file:/[^\0]{0,1023}$`) that this validator refuses as a regex, so it is left out.
-    let mut defs = whole["$defs"].clone();
-    defs.as_object_mut()
-        .ok_or("$defs is an object")?
-        .remove("Bundle");
+    let defs = whole["$defs"].clone();
     let schema = json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$ref": "#/$defs/Check",
@@ -152,6 +147,7 @@ fn net_entries_both_refuse() -> TestResult {
             json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["10.0.0.300/8"]}]}),
             json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["256.0.0.0/8"]}]}),
             json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["10.0.0.0/33"]}]}),
+            json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": [":::/8"]}]}),
             json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["10.0.0.0/08"]}]}),
             json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["10.0.0.0/8/8"]}]}),
             json!({"id": "net.dns", "names": [{"name": "a.example", "expect_in": ["::1/129"]}]}),
@@ -215,6 +211,8 @@ fn k8s_entries_both_accept() -> TestResult {
             json!({"id": "k8s.nodes", "min_ready": 1, "per_node": {"cpu": "1000000000m"}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "per_node": {"cpu": 1.234}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"a.example/b_c": "V-1.x", "k": ""}}),
+            json!({"id": "k8s.nodes", "min_ready": 1,
+                "selector": {"a-b.c1.example/x": "v", format!("{}/y", vec!["a"; 126].join(".")): "v"}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"operator": "Exists"},
                 {"operator": "Exists", "value": ""}, {"key": "k"}, {"key": "k", "value": "v"},
                 {"key": "a.example/k", "operator": "Equal", "value": "v", "effect": "NoExecute"}]}),
@@ -313,6 +311,15 @@ fn k8s_entries_both_refuse() -> TestResult {
             json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"a": 1}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"": "x"}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"k": "x".repeat(64)}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"a..b/x": "v"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"a-.b/x": "v"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"a.-b/x": "v"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {".a/x": "v"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1, "selector": {"a./x": "v"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1,
+                "selector": {format!("{}.b/x", "a".repeat(64)): "v"}}),
+            json!({"id": "k8s.nodes", "min_ready": 1,
+                "selector": {format!("{}/x", vec!["a"; 128].join(".")): "v"}}),
             json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"operator": "Maybe"}]}),
             json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{}]}),
             json!({"id": "k8s.nodes", "min_ready": 1, "tolerations": [{"operator": "Equal"}]}),

@@ -212,6 +212,10 @@ fn cases() -> Vec<Case> {
                 ),
                 (
                     "names",
+                    json!([{"name": "a.example", "expect_in": [":::/8"]}]),
+                ),
+                (
+                    "names",
                     json!([{"name": "a.example", "expect_in": ranges_17}]),
                 ),
                 (
@@ -451,6 +455,37 @@ fn a_refused_target_does_not_echo_a_query_string() {
     let text = reason.to_string();
     assert!(!text.contains("hunter2"), "{text}");
     assert!(!text.contains("secret-token"), "{text}");
+}
+
+/// A name of valid labels is still refused when the whole name is over 253 characters (PR #36 review).
+#[test]
+fn a_dns_name_of_valid_labels_is_refused_for_its_total_length() {
+    let name_of = |len: usize| {
+        // Labels of 63 characters joined by dots, the last one cut to fit.
+        let mut parts: Vec<String> = Vec::new();
+        let mut left = len;
+        while left > 0 {
+            let take = left.min(63);
+            parts.push("a".repeat(take));
+            left = left.saturating_sub(take + 1);
+        }
+        let name = parts.join(".");
+        assert_eq!(name.len(), len);
+        name
+    };
+    typed("net.dns", &json!({"names": [name_of(253)]}));
+    let long = name_of(254);
+    assert!(long.split('.').all(|label| (1..=63).contains(&label.len())));
+    let reason = why("net.dns", &json!({"names": [long.clone()]}));
+    assert!(
+        matches!(&reason, UnsupportedReason::BadValue { field: Some(f), .. } if f == "names"),
+        "{reason:?}"
+    );
+    let reason = why("net.tls_intercept", &json!({"hosts": [long]}));
+    assert!(
+        matches!(&reason, UnsupportedReason::BadValue { field: Some(f), .. } if f == "hosts"),
+        "{reason:?}"
+    );
 }
 
 /// ADR 0006 decision 5: the name reaches `getent ahosts` as an argument, so it must not read as an option.

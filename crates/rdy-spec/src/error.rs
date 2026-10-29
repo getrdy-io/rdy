@@ -214,6 +214,14 @@ pub enum SpecError {
         /// The key, already cut and escaped so it is safe to print.
         key: String,
     },
+    /// A key that the spec format does not have, inside `metadata`, `bundle` or a redact pattern.
+    #[error("unknown key '{key}' in {section}")]
+    UnknownKeyIn {
+        /// The key, already cut and escaped so it is safe to print.
+        key: String,
+        /// The block the key is in: `metadata`, `bundle` or `a redact pattern`.
+        section: &'static str,
+    },
     /// A required key is missing.
     #[error("missing the key '{field}'")]
     MissingField {
@@ -231,6 +239,46 @@ pub enum SpecError {
     MissingCheckId {
         /// The place of the entry in `checks`, counting from 1.
         number: usize,
+    },
+    /// The spec has more checks than the limit.
+    #[error("{count} checks. The limit is {limit}")]
+    TooManyChecks {
+        /// How many checks the spec has.
+        count: usize,
+        /// The most checks a spec may have.
+        limit: usize,
+    },
+    /// The `checks` list is empty.
+    #[error("the spec has no checks")]
+    NoChecks,
+    /// The checks name more distinct hosts than the limit (threat model INV-11).
+    #[error("{count} endpoints. The limit is {limit}")]
+    TooManyHosts {
+        /// How many distinct hosts the spec names across `net.egress`, `net.tls_intercept` and
+        /// `net.dns`.
+        count: usize,
+        /// The most distinct hosts a spec may name.
+        limit: usize,
+    },
+    /// The checks name more distinct host and port pairs than the limit (threat model INV-11).
+    #[error("{count} host and port pairs. The limit is {limit}")]
+    TooManyEndpoints {
+        /// How many distinct host and port pairs the spec names across `net.egress` and
+        /// `net.tls_intercept`.
+        count: usize,
+        /// The most distinct host and port pairs a spec may name.
+        limit: usize,
+    },
+    /// `metadata.expires` is not a full UTC time.
+    #[error("expires must be a full UTC time")]
+    BadExpires,
+    /// `metadata.expires` has passed. Both dates are in the message.
+    #[error("expired on {expired_on}. This machine's clock says {today}")]
+    Expired {
+        /// The day `metadata.expires` names, `YYYY-MM-DD`.
+        expired_on: String,
+        /// The day it is on this machine's clock, `YYYY-MM-DD`.
+        today: String,
     },
     /// Two check entries have the same key, which is `id`, or `id/name` when there is a name.
     #[error("{}", duplicate_check_message(.id, .name.as_deref()))]
@@ -340,12 +388,24 @@ impl SpecError {
             }
             Self::BadApiVersion { .. } => "add 'apiVersion: rdy/v1' as the first line.",
             Self::UnsupportedApiVersion { .. } => "install the latest rdy.",
-            Self::UnknownKey { .. } => {
+            Self::UnknownKey { .. } | Self::UnknownKeyIn { .. } => {
                 "check the spelling. If it is right, this spec needs a newer rdy. Install the latest and run again."
             }
             Self::MissingField { .. } => "add the key. The spec reference lists the required keys.",
             Self::InvalidValue { .. } => {
                 "change the value to the form the spec reference shows for this key."
+            }
+            Self::TooManyChecks { .. } => "split the spec in two, or remove checks.",
+            Self::NoChecks => "add at least one check under 'checks:'.",
+            Self::TooManyHosts { .. } => {
+                "remove hosts, or split the spec in two. A host counts once, however many checks name it."
+            }
+            Self::TooManyEndpoints { .. } => {
+                "remove endpoints, or split the spec in two. A host and port counts once, however many checks name it."
+            }
+            Self::BadExpires => "write it like 'expires: 2027-01-31T00:00:00Z'.",
+            Self::Expired { .. } => {
+                "ask the vendor for a current spec. If this machine's clock is wrong, set it and run again."
             }
             Self::MissingCheckId { .. } => "add an id such as 'id: host.memory'.",
             Self::DuplicateCheck { .. } => {
@@ -397,6 +457,13 @@ mod tests {
             | SpecError::BadApiVersion { .. }
             | SpecError::UnsupportedApiVersion { .. }
             | SpecError::UnknownKey { .. }
+            | SpecError::UnknownKeyIn { .. }
+            | SpecError::TooManyChecks { .. }
+            | SpecError::NoChecks
+            | SpecError::TooManyHosts { .. }
+            | SpecError::TooManyEndpoints { .. }
+            | SpecError::BadExpires
+            | SpecError::Expired { .. }
             | SpecError::MissingField { .. }
             | SpecError::MissingCheckId { .. }
             | SpecError::DuplicateCheck { .. }
@@ -446,6 +513,28 @@ mod tests {
                 found: "rdy/v2".into(),
             },
             SpecError::UnknownKey { key: "k".into() },
+            SpecError::UnknownKeyIn {
+                key: "k".into(),
+                section: "metadata",
+            },
+            SpecError::TooManyChecks {
+                count: 257,
+                limit: 256,
+            },
+            SpecError::NoChecks,
+            SpecError::TooManyHosts {
+                count: 65,
+                limit: 64,
+            },
+            SpecError::TooManyEndpoints {
+                count: 257,
+                limit: 256,
+            },
+            SpecError::BadExpires,
+            SpecError::Expired {
+                expired_on: "2027-01-31".into(),
+                today: "2027-02-03".into(),
+            },
             SpecError::MissingField { field: "k".into() },
             SpecError::InvalidValue { reason: "r".into() },
             SpecError::MissingCheckId { number: 3 },
@@ -520,6 +609,45 @@ mod tests {
                 key: "metdata".into()
             }),
             "unknown key 'metdata'"
+        );
+        assert_eq!(
+            msg(SpecError::UnknownKeyIn {
+                key: "prodcut".into(),
+                section: "metadata"
+            }),
+            "unknown key 'prodcut' in metadata"
+        );
+        assert_eq!(
+            msg(SpecError::TooManyChecks {
+                count: 257,
+                limit: 256
+            }),
+            "257 checks. The limit is 256"
+        );
+        assert_eq!(
+            msg(SpecError::TooManyHosts {
+                count: 65,
+                limit: 64
+            }),
+            "65 endpoints. The limit is 64"
+        );
+        assert_eq!(
+            msg(SpecError::TooManyEndpoints {
+                count: 257,
+                limit: 256
+            }),
+            "257 host and port pairs. The limit is 256"
+        );
+        assert_eq!(
+            msg(SpecError::BadExpires),
+            "expires must be a full UTC time"
+        );
+        assert_eq!(
+            msg(SpecError::Expired {
+                expired_on: "2027-01-31".into(),
+                today: "2027-02-03".into()
+            }),
+            "expired on 2027-01-31. This machine's clock says 2027-02-03"
         );
         assert_eq!(
             msg(SpecError::UnsupportedApiVersion {
