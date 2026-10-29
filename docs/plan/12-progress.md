@@ -158,15 +158,15 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-072 | todo | | host.ports (Linux /proc/net TCP and UDP, lazy owner lookup, ephemeral overlap)
 
-- M1-073 | todo | | host.os (os-release, uname, FIPS, container and WSL detection, match rules)
+- M1-073 | todo | | host.os (os-release, uname, FIPS, container and WSL detection, match rules) | backlog corrected 2026-10-29 (correction-13): runs in week 18, not week 14, to make room for M1-074's extra 0.5 h
 
-- M1-074 | todo | | In-process CLI entry point rdy_cli::run taking a Backend | backlog corrected 2026-10-29 (correction-13): the entry point calls the privilege gate (`gate_then`, M1-042) before any command reads a spec or writes trust.yaml, and a setuid-root `rdy` and an `rdy` with a file capability each exit 70 on linux-x64 without opening the spec; depends on M1-042 too (PR #84 reviews)
+- M1-074 | todo | | In-process CLI entry point rdy_cli::run taking a Backend | backlog corrected 2026-10-29 (correction-13): the entry point calls the privilege gate (`gate_then`, M1-042) before any command reads a spec or writes trust.yaml, and a setuid-root `rdy` and an `rdy` with a file capability each exit 70 within 5 s on linux-x64 with a FIFO spec path that has no writer (gated on `RDY_REQUIRE_SETUID=1`, CI installs `libcap2-bin`); depends on M1-042 too; 2.5 h (PR #84 reviews)
 
 - M1-075 | todo | | Env-level harness, in process
 
 - M1-076 | [#80](https://github.com/getrdy-io/rdy/pull/80) | 2026-10-29 | Objects, scalars and arrays get rows. Array items that are objects get their own sections, so the `checks` entry fields and the `redact_patterns` entry fields are listed. `oneOf`, `anyOf` and `enum` fields show `choice` only, and their values, the Example column and the missing-description failure wait for M1-084. Per-id check parameters (`allOf` if/then) wait for M1-084 too. The committed page is the golden: `docs` tests run `check_all` on it, so CI catches a stale page.
 
-- M1-077 | todo | | askama HTML report with inline CSS, dark mode and print | backlog corrected 2026-10-29 (correction-13): the golden HTML header shows `credential plugin: <name>` for a fixture with `identity.kube.exec_plugin` set, moved from M1-041; depends on M1-041 too (PR #83 reviews)
+- M1-077 | todo | | askama HTML report with inline CSS, dark mode and print | backlog corrected 2026-10-29 (correction-13): the golden HTML run details show the credential plugin name (01 section 6, item 6) for a fixture with `identity.kube.exec_plugin` set, moved from M1-041; depends on M1-041 too (PR #83 reviews)
 
 - M1-078 | todo | | Embed result JSON in the HTML report safely
 
