@@ -26,6 +26,8 @@ rdy-checks-host = { path = "../rdy-checks-host", version = "0.1.0-alpha.0" }
 # reads only `CheckInfo` and the registry, and asks for no more of the engine than that.
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", default-features = false }
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0", features = ["schema"] }
+# Writes each example as YAML, and reads it back to check that it says the same thing.
+serde-saphyr = { workspace = true, features = ["serialize", "deserialize"] }
 # preserve_order keeps the schema field order, so the spec table lists fields as the types declare them.
 serde_json = { workspace = true, features = ["std", "preserve_order"] }
 sha2 = { workspace = true, features = ["std"] }
@@ -33,6 +35,9 @@ unicode-normalization = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# The test that checks every spec example runs it with the validator rdy-spec uses. It is a dev
+# dependency because a normal dependency on it fails the cargo-deny license policy (ADR 0034).
+jsonschema = { workspace = true }
 
 [lints]
 workspace = true
