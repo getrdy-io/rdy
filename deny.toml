@@ -25,9 +25,6 @@ ignore = []
 # exception (add it under `exceptions` with the crate name and the review link).
 allow = [
     "Apache-2.0",
-    # winx, a Windows-only dependency of cap-primitives (M1-036), is licensed this way alone. The
-    # exception only widens what Apache-2.0 allows.
-    "Apache-2.0 WITH LLVM-exception",
     "MIT",
     "BSD-2-Clause",
     "BSD-3-Clause",
@@ -38,6 +35,13 @@ allow = [
     "BSL-1.0",
     # webpki-roots ships Mozilla's root list under this license.
     "CDLA-Permissive-2.0",
+]
+# Per-crate exceptions. Each names the crate, the one license it may use and the reason.
+exceptions = [
+    # winx is a Windows-only dependency of cap-primitives (M1-036). Its license is
+    # Apache-2.0 WITH LLVM-exception, which only widens what Apache-2.0 allows. Reviewed in 05,
+    # "Dependency policy".
+    { crate = "winx", allow = ["Apache-2.0 WITH LLVM-exception"] },
 ]
 confidence-threshold = 0.9
 # The allowlist is ahead of the dependency tree on purpose. Do not warn about unused entries.

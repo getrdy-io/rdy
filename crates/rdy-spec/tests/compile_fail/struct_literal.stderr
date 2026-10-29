@@ -1,22 +1,13 @@
-error: cannot construct `LoadedSpec` with struct literal syntax due to private fields
-  --> tests/compile_fail/struct_literal.rs:12:13
+error[E0451]: fields `spec`, `signature`, `sha256` and `bytes` of struct `LoadedSpec` are private
+  --> tests/compile_fail/struct_literal.rs:18:9
    |
-12 |     let _ = LoadedSpec {
-   |             ^^^^^^^^^^
-13 |         spec: sample(),
-   |         -------------- private field
-14 |         signature: SignatureState::Unsigned,
-   |         ----------------------------------- private field
-15 |         sha256: String::new(),
-   |         --------------------- private field
-   |
-   = note: ...and other private field `bytes` that was not provided
-help: you might have meant to use the `new` associated function
-   |
-12 -     let _ = LoadedSpec {
-13 -         spec: sample(),
-14 -         signature: SignatureState::Unsigned,
-15 -         sha256: String::new(),
-16 -     };
-12 +     let _ = LoadedSpec::new(_, _, _, _);
-   |
+17 |     let _ = LoadedSpec {
+   |             ---------- in this type
+18 |         spec: sample(),
+   |         ^^^^ private field
+19 |         signature: SignatureState::Unsigned,
+   |         ^^^^^^^^^ private field
+20 |         sha256: String::new(),
+   |         ^^^^^^ private field
+21 |         bytes: bytes(),
+   |         ^^^^^ private field

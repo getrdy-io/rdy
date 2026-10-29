@@ -17,7 +17,8 @@
 //!   it is resolved by `cap-std`, which cannot leave the folder.
 //! - **Owner and mode (Unix).** The opened handle must be a folder owned by the effective user.
 //!   rdy then sets it to 0700 with `fchmod`, which also clears a setgid bit that the parent passed
-//!   on, and reads the mode back. Nothing depends on the umask. The Windows checks are M1-037.
+//!   on, and reads the mode back. Nothing depends on the umask. The Windows checks are M1-037; until
+//!   then Windows only gets the no-follow open and the checks of the next point.
 //! - **Files.** Each file is made with `create_new` at 0600 (and `fchmod`, so the umask does not
 //!   matter) as `.<name>.tmp`, written, flushed to disk, and then given its final name without
 //!   replacing anything. A run that is killed leaves at most `.tmp` files, never a half-written file
@@ -50,6 +51,9 @@ const MAX_NAME_TRIES: u32 = 9;
 
 /// The longest file name `write_atomic` accepts.
 const MAX_FILE_NAME: usize = 128;
+
+/// The `action` of the [`ReportError::Io`] for a parent folder that cannot be opened.
+pub const OPEN_PARENT: &str = "open the output folder";
 
 /// The fixed name of the spec copy.
 pub const SPEC_COPY_NAME: &str = "spec.yaml";
@@ -178,8 +182,8 @@ impl OutputDir {
             return Err(ReportError::BadTimestamp);
         }
         let parent_dir = Dir::open_ambient_dir(parent, ambient_authority())
-            .map_err(|e| ReportError::io("open the output folder", parent, e))?;
-        let base = format!("rdy-report-{product}-{ts}");
+            .map_err(|e| ReportError::io(OPEN_PARENT, parent, e))?;
+        let base = report_folder_name(product.as_ref(), ts);
         for attempt in 1..=MAX_NAME_TRIES {
             let name = if attempt == 1 {
                 base.clone()
@@ -194,6 +198,8 @@ impl OutputDir {
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(ReportError::io("create the report folder", &path, e)),
             }
+            #[cfg(test)]
+            tests::after_make_dir(parent, &name);
             let opened = open_new_dir(&parent_dir, &name)
                 .map_err(|e| ReportError::io("open the report folder", &path, e))
                 .and_then(|dir| harden(&dir, &path).map(|()| dir));
@@ -300,8 +306,11 @@ impl OutputDir {
     }
 
     /// Gives a finished temp file its final name. An existing file is never replaced.
+    ///
+    /// A hard link first: it fails if the name exists, and it is atomic. Only when the file system
+    /// cannot make hard links does it fall back to a rename that refuses to replace, see
+    /// [`no_hard_links`]. Any other error is an error.
     fn publish(&self, tmp: &str, name: &str, final_path: &Path) -> Result<(), ReportError> {
-        #[cfg(unix)]
         match self.dir.hard_link(tmp, &self.dir, name) {
             Ok(()) => {
                 // The data is complete under the final name. A leftover `.tmp` is harmless.
@@ -313,8 +322,35 @@ impl OutputDir {
                     path: final_path.to_path_buf(),
                 });
             }
-            // A file system without hard links. Fall through to the check and rename below.
-            Err(_) => {}
+            Err(e) if no_hard_links(&e) => {}
+            Err(e) => return Err(ReportError::io("rename to", final_path, e)),
+        }
+        self.rename_no_replace(tmp, name, final_path)
+    }
+
+    /// The fallback for a file system without hard links. It never replaces a file.
+    fn rename_no_replace(
+        &self,
+        tmp: &str,
+        name: &str,
+        final_path: &Path,
+    ) -> Result<(), ReportError> {
+        // The kernel can refuse to replace in one step (Linux 3.15 and later, macOS).
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            use rustix::fs::{RenameFlags, renameat_with};
+            use rustix::io::Errno;
+            match renameat_with(&self.dir, tmp, &self.dir, name, RenameFlags::NOREPLACE) {
+                Ok(()) => return Ok(()),
+                Err(Errno::EXIST) => {
+                    return Err(ReportError::FileExists {
+                        path: final_path.to_path_buf(),
+                    });
+                }
+                // This kernel or file system has no such flag. Check and rename below.
+                Err(Errno::INVAL | Errno::NOSYS | Errno::OPNOTSUPP) => {}
+                Err(e) => return Err(ReportError::io("rename to", final_path, e.into())),
+            }
         }
         // The folder is private and new, so nobody else is adding names while this runs.
         if self.dir.symlink_metadata(name).is_ok() {
@@ -339,13 +375,39 @@ impl OutputDir {
     }
 }
 
+/// True when a failed `link` means "this file system has no hard links", and a rename may take over.
+///
+/// Unix: only `EPERM` (FAT, some FUSE and network file systems), `EOPNOTSUPP`, `EMLINK` and `ENOSYS`.
+/// Every other error, such as `EACCES`, `EIO` or `ENOSPC`, is a real failure and is reported.
+#[cfg(unix)]
+fn no_hard_links(err: &io::Error) -> bool {
+    use rustix::io::Errno;
+    [Errno::PERM, Errno::OPNOTSUPP, Errno::MLINK, Errno::NOSYS]
+        .iter()
+        .any(|e| err.raw_os_error() == Some(e.raw_os_error()))
+}
+
+/// Windows: `CreateHardLink` fails on FAT, exFAT and some network shares with codes that std does
+/// not map to a kind, so any error other than "exists" falls back to the checked rename.
+#[cfg(not(unix))]
+fn no_hard_links(_err: &io::Error) -> bool {
+    true
+}
+
 /// The default parent folder when `--out-dir` is not given.
 ///
 /// Unix: `.`. Windows will use `%USERPROFILE%\rdy-reports` (ADR 0016 decision 1); that default and
-/// its reparse-point checks are M1-037, and until then it is `.` there too.
+/// its reparse-point checks are M1-037, and until then it is `.` there too, with `harden` failing open.
 #[must_use]
 pub fn default_parent() -> PathBuf {
     PathBuf::from(".")
+}
+
+/// The folder name before any `-2` to `-9`: `rdy-report-<product>-<ts>`. For messages and for
+/// [`OutputDir::create_new`], which checks both parts first.
+#[must_use]
+pub fn report_folder_name(product: &str, ts: &str) -> String {
+    format!("rdy-report-{product}-{ts}")
 }
 
 /// The time stamp of a report folder, `YYYYMMDDTHHMMSSZ` in UTC, for [`OutputDir::create_new`].
@@ -502,7 +564,11 @@ fn harden(dir: &Dir, path: &Path) -> Result<(), ReportError> {
     Ok(())
 }
 
-/// Windows: not a reparse point, final path equals the expected one. M1-037 builds it.
+/// Windows: not a reparse point, final path equals the expected one, ACL checks. M1-037 builds it.
+///
+/// This stub FAILS OPEN: it checks nothing and always returns `Ok`. Until M1-037 lands, a Windows
+/// run relies on `open_dir_nofollow` alone, and the default parent is `.` and not a private folder.
+/// M1-057 (wiring `rdy run`) depends on M1-037 for this reason.
 #[cfg(not(unix))]
 fn harden(_dir: &Dir, _path: &Path) -> Result<(), ReportError> {
     Ok(())

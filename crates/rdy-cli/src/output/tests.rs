@@ -1,6 +1,7 @@
 //! `--out-dir` and `--no-report` through the real command tree.
 
 use std::fs;
+use std::io;
 use std::time::{Duration, UNIX_EPOCH};
 
 use clap::FromArgMatches;
@@ -60,22 +61,102 @@ fn no_report_creates_nothing_and_ignores_out_dir() {
 }
 
 #[test]
-fn an_out_dir_that_cannot_be_used_is_an_exit_70_error_with_the_documented_fix() {
+fn a_missing_out_dir_is_reported_as_the_folder_that_could_not_be_made() {
     let parent = tempfile::tempdir().expect("temp dir");
     let missing = parent.path().join("missing");
     let given = missing.to_str().expect("utf8");
     let err = open_report_dir(&args(&["--out-dir", given]), "acme", now()).expect_err("fails");
     assert_eq!(err.code(), ErrorCode::ReportWrite);
     assert_eq!(err.exit_code().code(), 70);
-    assert!(
-        err.to_string()
-            .starts_with(&format!("cannot create the report folder {given}")),
-        "{err}"
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "cannot create the report folder {given}/rdy-report-acme-20270309T143005Z (no such file)"
+        )
     );
-    assert!(err.to_string().ends_with("(no such file)"), "{err}");
     assert_eq!(
         err.hint(),
         "use --out-dir <a folder you can write to>, or --no-report to skip the files"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_read_only_out_dir_gives_the_exact_row_6_message_and_fix() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let parent = tempfile::tempdir().expect("temp dir");
+    fs::set_permissions(parent.path(), fs::Permissions::from_mode(0o500)).expect("chmod");
+    if fs::create_dir(parent.path().join("probe")).is_ok() {
+        // root ignores the mode. The root job covers the other rows.
+        eprintln!("skipped: this user can write to a 0500 folder");
+        return;
+    }
+    let given = parent.path().to_str().expect("utf8");
+    let err = open_report_dir(&args(&["--out-dir", given]), "acme", now()).expect_err("fails");
+    assert_eq!(err.code(), ErrorCode::ReportWrite);
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "cannot create the report folder {given}/rdy-report-acme-20270309T143005Z (permission denied)"
+        )
+    );
+    assert_eq!(
+        err.hint(),
+        "use --out-dir <a folder you can write to>, or --no-report to skip the files"
+    );
+    assert!(entries(parent.path()).is_empty());
+}
+
+#[test]
+fn every_engine_error_maps_to_its_own_reason_and_fix() {
+    let shown = Path::new("/out/rdy-report-acme-20270309T143005Z");
+    let map = |err| report_error(ReportStep::CreateFolder, shown, err);
+    let check = |err: CliError, message: &str, fix_has: &str| {
+        assert_eq!(err.code(), ErrorCode::ReportWrite);
+        assert_eq!(err.to_string(), message);
+        assert!(err.hint().contains(fix_has), "{}", err.hint());
+    };
+    check(
+        map(ReportError::NotOwner {
+            path: "/out/x".into(),
+            owner: 0,
+            euid: 1000,
+        }),
+        "cannot create the report folder /out/x (the folder is owned by another user)",
+        "root_squash",
+    );
+    check(
+        map(ReportError::NotPrivate {
+            path: "/out/x".into(),
+            mode: 0o755,
+        }),
+        "cannot create the report folder /out/x (the folder cannot be made private)",
+        "keeps Unix permissions",
+    );
+    check(
+        map(ReportError::NameTaken {
+            parent: "/out".into(),
+        }),
+        "cannot create the report folder in /out (all the folder names are taken)",
+        "wait a second",
+    );
+    check(
+        map(ReportError::FileExists {
+            path: "/out/x/report.json".into(),
+        }),
+        "cannot create the report folder /out/x/report.json (the file already exists)",
+        "bug in rdy",
+    );
+    // An error with no path of its own shows the folder rdy meant to make.
+    check(
+        map(ReportError::Io {
+            action: OPEN_PARENT,
+            path: "/out".into(),
+            source: io::Error::from(io::ErrorKind::PermissionDenied),
+        }),
+        "cannot create the report folder /out/rdy-report-acme-20270309T143005Z (permission denied)",
+        "--out-dir",
     );
 }
 

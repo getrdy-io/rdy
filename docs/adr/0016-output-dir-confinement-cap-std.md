@@ -53,7 +53,7 @@ no Windows meaning, and that the watchdog could race the normal write.
 
 ## Build notes (M1-036)
 
-Two details the build settled. Neither changes a decision above.
+Four details the build settled. None changes a decision above.
 
 - **Version.** The pin is `cap-std` and `cap-primitives` 4.0.3, the newest release when this was built.
   It is above the 3.4.1 floor of decision 8.
@@ -63,7 +63,10 @@ Two details the build settled. Neither changes a decision above.
   path component that `OutputDir` built, so it cannot leave the parent. Every file operation inside
   still goes through `cap-std`. Windows uses `cap_primitives::fs::open_dir_nofollow`.
 - **No replace.** The final name is given with a hard link from the temp file, which fails if the name
-  exists. On a file system without hard links it falls back to a check and a rename.
+  exists. It falls back only when the link fails with `EPERM`, `EOPNOTSUPP`, `EMLINK` or `ENOSYS`, the
+  codes of a file system without hard links. Any other error is reported. The fallback is
+  `renameat2(RENAME_NOREPLACE)` on Linux and macOS, and a check plus a rename where that flag is
+  missing. Windows tries the hard link first and falls back on any error but "exists".
 - **File names.** The files in a `-2` folder are named after the folder (`rdy-report-<product>-<ts>-2.json`).
 
 ## Alternatives considered

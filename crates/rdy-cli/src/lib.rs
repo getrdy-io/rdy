@@ -25,6 +25,7 @@ pub mod cli;
 pub mod error;
 #[doc(hidden)]
 pub mod lint;
+#[doc(hidden)]
 pub mod output;
 #[doc(hidden)]
 pub mod password;
