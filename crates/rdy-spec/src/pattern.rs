@@ -5,8 +5,7 @@
 //! not by the customer. [`crate::check::RegexText`] checks the length only. This module does the rest.
 //!
 //! A `bundle.redact_patterns` regex has one more rule (01 section 2.8): it must not match the empty
-//! string, because a pattern that matches nothing everywhere would replace nothing and would
-//! cost the redactor a match at every byte.
+//! string, because a pattern that matches the empty string matches at every byte and replaces nothing.
 
 use regex::{Error, Regex, RegexBuilder};
 

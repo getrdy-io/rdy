@@ -15,6 +15,9 @@ use std::time::SystemTime;
 
 use serde::Serialize;
 
+#[cfg(doc)]
+use crate::result::Report;
+
 use super::locate::locate;
 use super::{CheckLint, Level, Spot};
 use crate::error::echo_safe;
@@ -27,7 +30,7 @@ use crate::{API_VERSION, SpecError};
 /// The most characters of a file name that a report keeps (the schema's `maxLength`).
 const MAX_FILE_CHARS: usize = 4096;
 
-/// Not a report. What rdy spec lint prints with --json.
+/// Not a [`Report`]. What `rdy spec lint` prints with `--json`.
 ///
 /// The counts equal the number of findings of each level.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -68,8 +71,8 @@ pub struct Finding {
     /// The column in the file, from 1, when it is known.
     #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub column: Option<u32>,
-    /// The key of the check the finding is about (`host.disk` or `host.disk/data`). `None` for a finding
-    /// about the file as a whole. Null in the JSON for that case.
+    /// The key of the check the finding is about (`host.disk` or `host.disk/data`). Null for a finding
+    /// about the file as a whole.
     pub key: Option<String>,
     /// What is wrong. Safe to print: text from the file is cut and escaped.
     pub message: String,

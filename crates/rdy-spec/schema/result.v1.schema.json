@@ -709,7 +709,7 @@
           "minimum": 1
         },
         "key": {
-          "description": "The key of the check the finding is about (`host.disk` or `host.disk/data`). `None` for a finding about the file as a whole. Null in the JSON for that case.",
+          "description": "The key of the check the finding is about (`host.disk` or `host.disk/data`). Null for a finding about the file as a whole.",
           "type": [
             "string",
             "null"
@@ -968,7 +968,7 @@
       ]
     },
     "LintReport": {
-      "description": "Not a report. What rdy spec lint prints with --json.\n\nThe counts equal the number of findings of each level.",
+      "description": "Not a `Report`. What `rdy spec lint` prints with `--json`.\n\nThe counts equal the number of findings of each level.",
       "type": "object",
       "properties": {
         "api_version": {

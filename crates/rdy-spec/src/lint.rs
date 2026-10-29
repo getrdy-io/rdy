@@ -265,6 +265,7 @@ fn lint_params(index: usize, params: &CheckParams) -> Option<CheckLint> {
                 ),
             })
         }
+        // A new check struct with a regex key needs its own arm here, and `REGEX_FIELDS` set.
         CheckParams::NetTlsIntercept(p) => regex_finding(
             index,
             params.id(),
