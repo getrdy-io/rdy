@@ -27,6 +27,14 @@ fn samples(form: &Form) -> Vec<&'static str> {
         .collect()
 }
 
+/// A command for a form of a Linux entry, built for Linux whatever OS the tests run on.
+fn linux(program: &str, form: &str, params: &[&str]) -> Cmd {
+    entry(program)
+        .expect("entry")
+        .cmd_for(Os::Linux, form, params)
+        .expect("builds")
+}
+
 fn file_name(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or_default()
 }
@@ -196,6 +204,54 @@ fn nothing_that_takes_code_or_a_command_line_is_listed() {
         "pwsh",
         "sudo",
         "su",
+        "find",
+        "sed",
+        "m4",
+        "dc",
+        "ed",
+        "ex",
+        "vi",
+        "vim",
+        "ip",
+        "ssh",
+        "git",
+        "tar",
+        "rsync",
+        "make",
+        "perf",
+        "valgrind",
+        "lldb",
+        "faketime",
+        "fakeroot",
+        "unbuffer",
+        "parallel",
+        "sqlite3",
+        "bpftrace",
+        "java",
+        "jshell",
+        "irb",
+        "jruby",
+        "deno",
+        "bun",
+        "docker",
+        "podman",
+        "nerdctl",
+        "ctr",
+        "crictl",
+        "arch",
+        "caffeinate",
+        "launchctl",
+        "sandbox-exec",
+        "xcrun",
+        "cscript",
+        "wscript",
+        "mshta",
+        "rundll32",
+        "forfiles",
+        "wsl",
+        "pypy3",
+        "ld-linux-x86-64.so.2",
+        "ld-musl-x86_64.so.1",
     ] {
         assert!(is_refused_name(name), "{name} should be refused by name");
         assert!(entry(name).is_none(), "{name} must not have an entry");
@@ -207,6 +263,10 @@ fn the_policy_accepts_every_listed_command_up_to_resolution() {
     // `prepare` also looks the program up on this machine, so NotFound and the Windows rule are
     // fine here. Anything about the name, the directories or the caps is not.
     for entry in entries() {
+        // The policy resolves for the OS it runs on, and refuses the paths of another OS.
+        if !entry.runs_on(current_os()) {
+            continue;
+        }
         for form in entry.forms {
             let params = samples(form);
             let cmd = entry
@@ -264,6 +324,7 @@ fn the_same_command_is_refused_on_an_os_that_does_not_list_it() {
 #[test]
 fn spec_text_cannot_become_an_option_or_carry_a_separator() {
     let getent = entry("getent").expect("entry");
+    let build = |value: &str| getent.cmd_for(Os::Linux, "ahosts", &[value]);
     for bad in [
         "-x",
         "--help",
@@ -280,16 +341,16 @@ fn spec_text_cannot_become_an_option_or_carry_a_separator() {
         "h\u{f6}st",
         "a=b",
     ] {
-        let error = getent.cmd("ahosts", &[bad]).expect_err(bad);
+        let error = build(bad).expect_err(bad);
         assert!(
             matches!(error, TableError::BadParam { param: "name", .. }),
             "{bad:?}: {error}"
         );
     }
     let too_long = "a".repeat(MAX_HOST_NAME_LEN + 1);
-    assert!(getent.cmd("ahosts", &[&too_long]).is_err());
+    assert!(build(&too_long).is_err());
     let longest = "a".repeat(MAX_HOST_NAME_LEN);
-    assert!(getent.cmd("ahosts", &[&longest]).is_ok());
+    assert!(build(&longest).is_ok());
     for good in [
         "localhost",
         "registry.example",
@@ -298,20 +359,25 @@ fn spec_text_cannot_become_an_option_or_carry_a_separator() {
         "a--b",
         "1",
     ] {
-        assert!(getent.cmd("ahosts", &[good]).is_ok(), "{good}");
+        assert!(build(good).is_ok(), "{good}");
     }
 }
 
 #[test]
 fn a_zone_is_one_joined_argument_with_a_stricter_rule() {
     let firewall = entry("firewall-cmd").expect("entry");
-    let cmd = firewall.cmd("list-all", &["public"]).expect("builds");
+    let cmd = firewall
+        .cmd_for(Os::Linux, "list-all", &["public"])
+        .expect("builds");
     assert_eq!(cmd.arguments(), ["--list-all", "--zone=public"]);
     for bad in ["-x", "", "a.b", "_a", "a b", "a=b", "a/b", "--zone=x"] {
-        assert!(firewall.cmd("list-all", &[bad]).is_err(), "{bad:?}");
+        assert!(
+            firewall.cmd_for(Os::Linux, "list-all", &[bad]).is_err(),
+            "{bad:?}"
+        );
     }
     let long = "z".repeat(MAX_ZONE_LEN + 1);
-    assert!(firewall.cmd("list-all", &[&long]).is_err());
+    assert!(firewall.cmd_for(Os::Linux, "list-all", &[&long]).is_err());
     // The same rule when someone builds the command by hand.
     let by_hand = Cmd::new("firewall-cmd", SECOND).args(["--list-all", "--zone=-bad"]);
     assert!(matches!(
@@ -329,14 +395,16 @@ fn a_zone_is_one_joined_argument_with_a_stricter_rule() {
 
 #[test]
 fn a_command_built_by_hand_must_match_a_form() {
-    let leading_dash = Cmd::new("getent", SECOND).args(["ahosts", "-x"]);
+    let leading_dash = Cmd::new("getent", SECOND).args(["ahosts", "--", "-x"]);
     assert!(matches!(
         validate_for(Os::Linux, &leading_dash),
         Err(TableError::BadParam { param: "name", .. })
     ));
     for args in [
         vec!["ahosts"],
-        vec!["ahosts", "a", "b"],
+        vec!["ahosts", "a"],
+        vec!["ahosts", "-x"],
+        vec!["ahosts", "--", "a", "b"],
         vec!["passwd", "root"],
         Vec::new(),
     ] {
@@ -359,10 +427,10 @@ fn an_unlisted_program_is_refused_with_a_fix() {
 
 #[test]
 fn time_cap_directories_and_variables_cannot_exceed_the_entry() {
-    let ok = Cmd::new("getent", Duration::from_secs(5)).args(["ahosts", "localhost"]);
+    let ok = Cmd::new("getent", Duration::from_secs(5)).args(["ahosts", "--", "localhost"]);
     assert!(validate_for(Os::Linux, &ok).is_ok());
 
-    let slow = Cmd::new("getent", Duration::from_secs(6)).args(["ahosts", "localhost"]);
+    let slow = Cmd::new("getent", Duration::from_secs(6)).args(["ahosts", "--", "localhost"]);
     assert_eq!(
         validate_for(Os::Linux, &slow).expect_err("slow"),
         TableError::TimeoutTooLong {
@@ -404,7 +472,7 @@ fn time_cap_directories_and_variables_cannot_exceed_the_entry() {
 #[test]
 fn gpu_tools_may_search_their_declared_directories_and_nothing_else() {
     let smi = entry("nvidia-smi").expect("entry");
-    let cmd = smi.cmd("query-xml", &[]).expect("builds");
+    let cmd = linux("nvidia-smi", "query-xml", &[]);
     assert_eq!(cmd.declared_dirs(), smi.extra_dirs);
     assert_eq!(cmd.output_cap(), 2 * 1024 * 1024);
     assert!(validate_for(Os::Linux, &cmd).is_ok());
@@ -414,7 +482,7 @@ fn gpu_tools_may_search_their_declared_directories_and_nothing_else() {
         Err(TableError::CapTooLarge { .. })
     ));
     // The other forms are capped at 1 MiB.
-    let topo = smi.cmd("topo", &[]).expect("builds");
+    let topo = linux("nvidia-smi", "topo", &[]);
     assert_eq!(topo.output_cap(), DEFAULT_STDOUT_CAP);
     assert_eq!(topo.time_limit(), Duration::from_secs(15));
     // Operator-managed nvcc is searched only in the CUDA directory.
@@ -426,7 +494,7 @@ fn gpu_tools_may_search_their_declared_directories_and_nothing_else() {
 fn the_wrong_value_count_and_unknown_forms_are_refused() {
     let getent = entry("getent").expect("entry");
     assert_eq!(
-        getent.cmd("ahosts", &[]).expect_err("none"),
+        getent.cmd_for(Os::Linux, "ahosts", &[]).expect_err("none"),
         TableError::ParamCount {
             program: "getent",
             want: 1,
@@ -434,17 +502,24 @@ fn the_wrong_value_count_and_unknown_forms_are_refused() {
         }
     );
     assert!(matches!(
-        getent.cmd("ahosts", &["a", "b"]),
+        getent.cmd_for(Os::Linux, "ahosts", &["a", "b"]),
         Err(TableError::ParamCount { got: 2, .. })
     ));
     assert_eq!(
-        getent.cmd("nope", &[]).expect_err("form"),
+        getent.cmd_for(Os::Linux, "nope", &[]).expect_err("form"),
         TableError::UnknownForm { program: "getent" }
     );
 }
 
 #[test]
-fn lookup_ignores_case() {
+fn lookup_is_exact_except_for_windows_programs() {
+    // Unix file names are case sensitive, so `Getent` is not `getent`.
+    for name in ["Getent", "GETENT", "Nvidia-Smi", "FIREWALL-CMD", "Scutil"] {
+        assert!(entry(name).is_none(), "{name}");
+    }
+    assert!(entry("getent").is_some());
+    // `NETSTAT.EXE` (Windows) and `netstat` (macOS) are two entries.
+    assert!(entry("netstat").is_some_and(|e| e.runs_on(Os::Macos)));
     assert!(entry("netstat.exe").is_some());
     assert!(entry("NETSTAT.EXE").is_some());
     assert!(entry("Whoami.exe").is_some());
@@ -483,7 +558,7 @@ fn a_form_renders_the_way_appendix_a_writes_it() {
             .map(Form::render)
             .unwrap_or_default()
     };
-    assert_eq!(render("getent", "ahosts"), "ahosts <name>");
+    assert_eq!(render("getent", "ahosts"), "ahosts -- <name>");
     assert_eq!(
         render("firewall-cmd", "list-all"),
         "--list-all --zone=<zone>"
@@ -507,11 +582,10 @@ async fn run_refuses_an_unlisted_command_before_anything_starts() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn run_starts_a_listed_command_under_the_policy() {
-    let getent = entry("getent").expect("entry");
-    let cmd = getent.cmd("ahosts", &["localhost"]).expect("builds");
+    let cmd = linux("getent", "ahosts", &["localhost"]);
     // Where getent is missing the policy says so, which still proves the table let it through.
     match run(cmd).await {
         Ok(_) => {}
@@ -519,5 +593,54 @@ async fn run_starts_a_listed_command_under_the_policy() {
             assert_eq!(program, "getent");
         }
         Err(other) => panic!("{other}"),
+    }
+}
+
+/// One argv that fits a form: its literals, with a sample value for each param.
+fn argv_of(form: &Form) -> Vec<String> {
+    form.args
+        .iter()
+        .map(|arg| match arg {
+            Arg::Lit(text) => (*text).to_owned(),
+            Arg::Param(param) => sample(*param).to_owned(),
+            Arg::Joined(prefix, param) => format!("{prefix}{}", sample(*param)),
+        })
+        .collect()
+}
+
+#[test]
+fn no_argv_matches_two_forms_of_one_entry() {
+    for entry in entries() {
+        for form in entry.forms {
+            let argv: Vec<std::ffi::OsString> = argv_of(form).into_iter().map(Into::into).collect();
+            let matching: Vec<&str> = entry
+                .forms
+                .iter()
+                .filter(|other| other.matches(&argv).is_ok())
+                .map(|other| other.id)
+                .collect();
+            assert_eq!(
+                matching,
+                [form.id],
+                "{} {}: the sample argv fits {matching:?}",
+                entry.program,
+                form.id
+            );
+        }
+    }
+}
+
+#[test]
+fn the_validated_form_is_the_one_the_command_was_built_from() {
+    // `validate_for` takes the first form that fits, so two forms that overlap would make the
+    // limits depend on the order of the list. The test above proves they do not overlap.
+    for entry in entries() {
+        for form in entry.forms {
+            let cmd = entry
+                .cmd_for(entry.os[0], form.id, &samples(form))
+                .expect("builds");
+            let listed = validate_for(entry.os[0], &cmd).expect("valid");
+            assert_eq!(listed.form.id, form.id, "{}", entry.program);
+        }
     }
 }

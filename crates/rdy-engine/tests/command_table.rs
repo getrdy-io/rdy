@@ -1,7 +1,9 @@
 //! The command table and the fix-text lists against the check catalog (docs/plan/03-check-catalog.md).
 //!
 //! 1. Every row of 03 Appendix A is a typed entry in the command table, with the same program, path,
-//!    arguments, operating systems and timeout, and the table holds no command the appendix lacks.
+//!    arguments, operating systems, timeout, exit-code meanings and stdout cap, and the table holds no
+//!    command the appendix lacks. A path the appendix does not give must come from the GPU tool
+//!    search list of section 6.
 //! 2. The fix bullets of the catalog name only commands and sysctls that are in the allow-list files.
 //!
 //! The catalog is in the workspace and not in the published crate, so these tests live in `tests/`,
@@ -11,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use rdy_engine::check::Os;
-use rdy_engine::exec::table;
+use rdy_engine::exec::table::{self, ExitClass};
 use rdy_engine::fixtext::{self, AllowLists};
 
 fn catalog() -> String {
@@ -103,9 +105,70 @@ type Key = (String, String);
 struct Facts {
     os: BTreeSet<char>,
     timeout_secs: BTreeSet<u64>,
+    /// Exit code and what it means.
+    exits: BTreeSet<(i32, &'static str)>,
+    /// Stdout cap in bytes.
+    caps: BTreeSet<usize>,
+}
+
+const MIB: usize = 1024 * 1024;
+
+fn class_label(class: ExitClass) -> &'static str {
+    match class {
+        ExitClass::Ok => "ok",
+        ExitClass::NotFound => "not found",
+        ExitClass::NotRunning => "not running",
+        ExitClass::KeyMissing => "key missing",
+        _ => "other",
+    }
+}
+
+/// The exit codes of an "Expected exit" cell: `0`, `0 found, 2 not found, other = tool error`,
+/// `0, 252 = not running`. Text in parentheses is a note. A segment with no leading number
+/// (`other = tool error`) says what every unlisted code is, which the table models by not listing it.
+fn doc_exits(cell: &str) -> BTreeSet<(i32, &'static str)> {
+    let mut plain = String::new();
+    let mut depth = 0_u32;
+    for c in cell.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            c if depth == 0 => plain.push(c),
+            _ => {}
+        }
+    }
+    let mut out = BTreeSet::new();
+    for segment in plain.split(',') {
+        let segment = segment.trim();
+        let Some(code) = segment
+            .split_whitespace()
+            .next()
+            .and_then(|word| word.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        let label = if code == 0 {
+            "ok"
+        } else if segment.contains("not found") {
+            "not found"
+        } else if segment.contains("not running") {
+            "not running"
+        } else if segment.contains("missing") {
+            "key missing"
+        } else {
+            panic!("Appendix A exit segment `{segment}` has no known meaning")
+        };
+        out.insert((code, label));
+    }
+    out
 }
 
 fn appendix_a_facts(catalog: &str) -> (BTreeMap<Key, Facts>, BTreeMap<Key, BTreeSet<String>>) {
+    // The caps are in the prose above the table. Hold the sentence, so an edit to it is an edit here.
+    assert!(
+        catalog.contains("stdout capped at 1 MiB (2 MiB for the GPU XML, a per-command cap)"),
+        "the stdout cap sentence of Appendix A changed; update the caps in this test"
+    );
     let mut facts: BTreeMap<Key, Facts> = BTreeMap::new();
     let mut paths: BTreeMap<Key, BTreeSet<String>> = BTreeMap::new();
     let mut in_appendix = false;
@@ -121,15 +184,20 @@ fn appendix_a_facts(catalog: &str) -> (BTreeMap<Key, Facts>, BTreeMap<Key, BTree
             continue;
         }
         let cells: Vec<&str> = line.split('|').map(str::trim).collect();
-        let (command, oses, timeout) = (cells[1], cells[3], cells[4]);
+        let (command, oses, timeout, exit) = (cells[1], cells[3], cells[4], cells[5]);
         let secs: u64 = timeout.trim_end_matches('s').parse().unwrap_or(0);
         assert!(secs > 0, "bad timeout `{timeout}` in: {line}");
         for doc in doc_commands(command) {
+            let gpu_xml = doc.stem == "nvidia-smi" && doc.args == "-q -x";
             let key = (doc.stem, doc.args);
             let entry = facts.entry(key.clone()).or_insert_with(|| Facts {
                 os: BTreeSet::new(),
                 timeout_secs: BTreeSet::new(),
+                exits: BTreeSet::new(),
+                caps: BTreeSet::new(),
             });
+            entry.exits.extend(doc_exits(exit));
+            entry.caps.insert(if gpu_xml { 2 * MIB } else { MIB });
             entry.os.extend(
                 oses.split(',')
                     .map(|part| part.trim().chars().next().unwrap_or('?')),
@@ -152,9 +220,17 @@ fn table_facts() -> (BTreeMap<Key, Facts>, BTreeMap<Key, BTreeSet<String>>) {
             let slot = facts.entry(key.clone()).or_insert_with(|| Facts {
                 os: BTreeSet::new(),
                 timeout_secs: BTreeSet::new(),
+                exits: BTreeSet::new(),
+                caps: BTreeSet::new(),
             });
             slot.os.extend(entry.os.iter().map(|os| os_letter(*os)));
             slot.timeout_secs.insert(form.timeout.as_secs());
+            slot.caps.insert(form.stdout_cap);
+            slot.exits.extend(
+                form.exits
+                    .iter()
+                    .map(|rule| (rule.code, class_label(rule.class))),
+            );
             paths.entry(key).or_default().insert(entry.path.to_owned());
         }
     }
@@ -162,7 +238,7 @@ fn table_facts() -> (BTreeMap<Key, Facts>, BTreeMap<Key, BTreeSet<String>>) {
 }
 
 #[test]
-fn every_appendix_a_row_is_a_typed_entry_with_the_same_os_and_timeout() {
+fn every_appendix_a_row_is_a_typed_entry_with_the_same_os_timeout_exits_and_cap() {
     let catalog = catalog();
     let (doc, doc_paths) = appendix_a_facts(&catalog);
     let (code, code_paths) = table_facts();
@@ -185,7 +261,7 @@ fn every_appendix_a_row_is_a_typed_entry_with_the_same_os_and_timeout() {
         assert_eq!(
             code.get(key),
             Some(want),
-            "OS or timeout differs for {key:?}"
+            "OS, timeout, exit codes or stdout cap differ for {key:?}"
         );
     }
     for (key, paths) in &doc_paths {
@@ -194,6 +270,29 @@ fn every_appendix_a_row_is_a_typed_entry_with_the_same_os_and_timeout() {
             assert!(
                 have.contains(path),
                 "Appendix A gives {path} for {key:?}, the table has {have:?}"
+            );
+        }
+    }
+    // A command the appendix gives no path for gets the one section 6 implies: the first directory of
+    // the GPU tool search list, or `System32` on Windows. A path invented outside that list fails.
+    let search_list = catalog
+        .lines()
+        .find(|line| line.starts_with("- **Tool search list**"))
+        .expect("section 6 has the tool search list");
+    for (key, have) in &code_paths {
+        if doc_paths.contains_key(key) {
+            continue;
+        }
+        for path in have {
+            let ok = if let Some(rest) = path.strip_prefix(r"C:\Windows\") {
+                search_list.contains("`System32`") && rest.starts_with(r"System32\")
+            } else {
+                let dir = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+                search_list.contains(&format!("`{dir}`"))
+            };
+            assert!(
+                ok,
+                "{path} for {key:?} is not in Appendix A or in the section 6 search list"
             );
         }
     }

@@ -20,18 +20,25 @@
 //!   nothing else ([`CommandEntry::env`] is empty for all of them, and [`validate`] refuses a declared
 //!   name that is not listed).
 //! - **Windows.** The Windows rows are typed entries now. The policy runs only `whoami.exe` there until
-//!   job objects land (M2-006), so [`validate`] accepts them and [`super::policy::run`] still refuses
+//!   job objects land (M2-006), so [`validate`] accepts them and the policy runner still refuses
 //!   the others.
 //! - **Never listed.** A program that is refused by name ([`super::policy::is_refused_name`]) can not
 //!   have an entry. A test walks the table to prove it.
 //!
 //! The probe builds commands with [`CommandEntry::cmd`] and runs them with [`run`], which calls
-//! [`validate`] first. A check crate that built its own [`Cmd`] gets the same answer from [`validate`].
+//! [`validate`] first. [`run`] is the only public command runner: the policy runner under it is
+//! crate-private, so a command that is not in the table cannot start. A check crate that built its own
+//! [`Cmd`] gets the same answer from [`validate`]. The entries and [`validate_for`] do not need the
+//! `runtime` feature, so a probe gate without a runtime (replay) can refuse an unlisted command too.
 
 use std::time::Duration;
 
-use super::policy::{Cmd, CommandError, WINDOWS_WHOAMI};
-use super::{DEFAULT_STDOUT_CAP, ExecOutput};
+use super::DEFAULT_STDOUT_CAP;
+#[cfg(feature = "runtime")]
+use super::ExecOutput;
+#[cfg(feature = "runtime")]
+use super::policy::CommandError;
+use super::policy::{Cmd, WINDOWS_WHOAMI};
 use crate::check::{Os, current_os};
 
 #[cfg(test)]
@@ -435,12 +442,17 @@ pub fn entries() -> &'static [CommandEntry] {
     COMMANDS
 }
 
-/// The entry for a program name. Case does not matter, so `NETSTAT.EXE` and `netstat.exe` are one.
+/// The entry for a program name. The match is exact, except for Windows entries, where case does not
+/// matter (`NETSTAT.EXE` and `netstat.exe` are one file there). On Unix `Getent` is not `getent`.
 #[must_use]
 pub fn entry(program: &str) -> Option<&'static CommandEntry> {
-    COMMANDS
-        .iter()
-        .find(|entry| entry.program.eq_ignore_ascii_case(program))
+    COMMANDS.iter().find(|entry| {
+        if entry.runs_on(Os::Windows) {
+            entry.program.eq_ignore_ascii_case(program)
+        } else {
+            entry.program == program
+        }
+    })
 }
 
 /// Checks `cmd` against the table for this machine's OS.
@@ -514,11 +526,14 @@ pub fn validate_for(os: Os, cmd: &Cmd) -> Result<Listed, TableError> {
     Ok(Listed { entry, form })
 }
 
-/// Runs `cmd` if the table lists it, then under the command policy ([`super::policy::run`]).
+/// Runs `cmd` if the table lists it, then under the command policy. This is the only public way to run
+/// a command: the policy runner is crate-private, so a check cannot skip the table.
 ///
 /// # Errors
 ///
-/// [`CommandError::Table`] when the table refuses, then whatever [`super::policy::run`] returns.
+/// [`CommandError::Table`] when the table refuses, then [`CommandError::Policy`] or
+/// [`CommandError::Exec`] from the policy and the runner.
+#[cfg(feature = "runtime")]
 pub async fn run(cmd: Cmd) -> Result<ExecOutput, CommandError> {
     validate(&cmd)?;
     super::policy::run(cmd).await
@@ -602,7 +617,7 @@ static COMMANDS: &[CommandEntry] = &[
         env: &[],
         forms: &[Form {
             id: "ahosts",
-            args: &[lit("ahosts"), Arg::Param(Param::HostName)],
+            args: &[lit("ahosts"), lit("--"), Arg::Param(Param::HostName)],
             timeout: SECS_5,
             stdout_cap: ONE_MIB,
             exits: EXIT_GETENT,

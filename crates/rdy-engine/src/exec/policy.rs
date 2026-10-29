@@ -1,6 +1,6 @@
 //! The command policy (SEC-18, INV-08): what may run, from where, with what environment.
 //!
-//! The facade runs a [`Cmd`] through [`run`]. Nothing here trusts the caller's environment.
+//! The facade runs a [`Cmd`] through [`super::table::run`], which checks the command table first. Nothing here trusts the caller's environment.
 //!
 //! - **Program names are constants.** [`Cmd::new`] takes a `&'static str`, so spec text cannot name a
 //!   program. The name must be a plain file name, with no separator.
@@ -43,12 +43,18 @@
 //! root and the running user can change a directory on the path. It does not close it against a
 //! process of the running user itself.
 
+// Without the `runtime` feature the name rules and the command type compile and the resolver does not,
+// so the helpers that only the resolver calls are unused there.
+#![cfg_attr(not(feature = "runtime"), allow(dead_code))]
+
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use super::{DEFAULT_STDERR_CAP, DEFAULT_STDOUT_CAP, ExecError, ExecOutput, ExecSpec};
+use super::DEFAULT_STDOUT_CAP;
+#[cfg(feature = "runtime")]
+use super::{DEFAULT_STDERR_CAP, ExecError, ExecOutput, ExecSpec};
 
 #[cfg(test)]
 mod tests;
@@ -151,12 +157,68 @@ pub const REFUSED_PROGRAMS: &[&str] = &[
     "node",
     "expect",
     "osascript",
+    // Programs that run a command from their arguments, or edit or fetch files, and that no catalog
+    // check needs (M1-066 review). `find -exec`, `sed e`, `m4 syscmd`, `dc !`, `ed !`, `ex` and `vi`
+    // and `vim` (`:!`), `ssh` (`ProxyCommand`), `git` (hooks, aliases), `tar --to-command`, `rsync -e`,
+    // `make`, `perf`, `valgrind`, `lldb`, `faketime`, `fakeroot`, `unbuffer`, `parallel`, `sqlite3`
+    // (`.shell`), `bpftrace`, and the language runtimes `java`, `jshell`, `irb`, `jruby`, `deno`, `bun`.
+    "find",
+    "sed",
+    "m4",
+    "dc",
+    "ed",
+    "ex",
+    "vi",
+    "vim",
+    "ip",
+    "ssh",
+    "git",
+    "tar",
+    "rsync",
+    "make",
+    "perf",
+    "valgrind",
+    "lldb",
+    "faketime",
+    "fakeroot",
+    "unbuffer",
+    "parallel",
+    "sqlite3",
+    "bpftrace",
+    "java",
+    "jshell",
+    "irb",
+    "jruby",
+    "deno",
+    "bun",
+    // Container clients. They run a command in a container, and the Docker socket has its own
+    // GET-only guard in M2.
+    "docker",
+    "podman",
+    "nerdctl",
+    "ctr",
+    "crictl",
+    // macOS and Windows tools that run another program or a script.
+    "arch",
+    "caffeinate",
+    "launchctl",
+    "sandbox-exec",
+    "xcrun",
+    "cscript",
+    "wscript",
+    "mshta",
+    "rundll32",
+    "forfiles",
+    "wsl",
 ];
 
 /// Prefixes of refused program names, in lower case: the interpreters, whatever version suffix the
-/// distribution gives them (`python3.12`, `perl5.36.0`, `ruby3.2`, `lua5.4`, `php8.2`).
-pub const REFUSED_PROGRAM_PREFIXES: &[&str] =
-    &["python", "perl", "ruby", "lua", "php", "tclsh", "nodejs"];
+/// distribution gives them (`python3.12`, `perl5.36.0`, `ruby3.2`, `lua5.4`, `php8.2`, `pypy3`), and
+/// the dynamic loaders (`ld-linux-x86-64.so.2`, `ld-musl-x86_64.so.1`), which run any file given as
+/// the first argument.
+pub const REFUSED_PROGRAM_PREFIXES: &[&str] = &[
+    "python", "pypy", "perl", "ruby", "lua", "php", "tclsh", "nodejs", "ld-linux", "ld-musl",
+];
 
 /// Multi-call binaries. Refused by the name a check asks for, never by the file a name resolves to:
 /// on a system built from one, `ls` and `cat` are links to it, and refusing the target would refuse
@@ -328,7 +390,7 @@ pub enum PolicyError {
     },
 }
 
-/// Why [`run`] gave no output: the policy said no, or the runner failed.
+/// Why a command gave no output: the table or the policy said no, or the runner failed.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CommandError {
@@ -339,11 +401,13 @@ pub enum CommandError {
     #[error(transparent)]
     Table(#[from] super::table::TableError),
     /// The command was allowed and failed to run to the end.
+    #[cfg(feature = "runtime")]
     #[error(transparent)]
     Exec(#[from] ExecError),
 }
 
-/// One command, as a check asks for it. Build it, then [`run`] it.
+/// One command, as a check asks for it. Build it with [`super::table::CommandEntry::cmd`], then run it
+/// with [`super::table::run`].
 #[derive(Clone)]
 pub struct Cmd {
     program: &'static str,
@@ -466,6 +530,7 @@ impl Cmd {
 /// # Errors
 ///
 /// A [`PolicyError`] for the first rule the command breaks.
+#[cfg(feature = "runtime")]
 pub(crate) fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
     check_name(cmd.program)?;
     check_env(&cmd.env)?;
@@ -490,6 +555,7 @@ pub(crate) fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
 }
 
 /// The variables every child gets before the declared ones.
+#[cfg(feature = "runtime")]
 fn base_env() -> Vec<(OsString, OsString)> {
     #[cfg(unix)]
     {
@@ -511,15 +577,16 @@ fn base_env() -> Vec<(OsString, OsString)> {
     }
 }
 
+#[cfg(feature = "runtime")]
 /// Runs `cmd` under the policy: checks it, resolves the program, and starts it with the process runner.
 ///
 /// # Errors
 ///
 /// [`CommandError::Policy`] when the policy refuses, [`CommandError::Exec`] for start, timeout and
 /// read failures.
-pub async fn run(cmd: Cmd) -> Result<ExecOutput, CommandError> {
+pub(crate) async fn run(cmd: Cmd) -> Result<ExecOutput, CommandError> {
     let spec = prepare(&cmd)?;
-    Ok(super::run(spec).await?)
+    Ok(super::runner::run(spec).await?)
 }
 
 /// The shape and refusal checks on a program name.
@@ -624,7 +691,7 @@ fn windows_program(program: &'static str) -> Result<PathBuf, PolicyError> {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), feature = "runtime"))]
 fn resolve(program: &'static str, extra: &'static [&'static str]) -> Result<PathBuf, PolicyError> {
     for dir in extra {
         check_dir(dir)?;
@@ -632,7 +699,7 @@ fn resolve(program: &'static str, extra: &'static [&'static str]) -> Result<Path
     windows_program(program)
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn resolve(program: &'static str, extra: &'static [&'static str]) -> Result<PathBuf, PolicyError> {
     let mut dirs: Vec<PathBuf> = SEARCH_DIRS.iter().map(PathBuf::from).collect();
     for dir in extra {
@@ -647,7 +714,7 @@ fn resolve(program: &'static str, extra: &'static [&'static str]) -> Result<Path
 /// A candidate that exists but cannot be resolved, or whose real name is a refused program, or whose
 /// file, links or directories are not trusted, ends the search with an error. It does not fall through
 /// to a later directory.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn resolve_in(program: &'static str, dirs: &[PathBuf]) -> Result<PathBuf, PolicyError> {
     use std::os::unix::fs::PermissionsExt;
     for dir in dirs {
@@ -677,7 +744,7 @@ fn resolve_in(program: &'static str, dirs: &[PathBuf]) -> Result<PathBuf, Policy
 }
 
 /// The most links followed while resolving one candidate. The same bound as the kernel's.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 const MAX_LINK_HOPS: usize = 40;
 
 /// Resolves `path` to a real path one component at a time, like `realpath`, and applies the directory
@@ -685,7 +752,7 @@ const MAX_LINK_HOPS: usize = 40;
 /// that holds it: someone who can write there can point it anywhere. `None` means a component is
 /// missing, a link could not be read, there were more than [`MAX_LINK_HOPS`] links, or a directory
 /// holding a link is not trusted.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn real_path_checked(path: &Path) -> Option<PathBuf> {
     use std::collections::VecDeque;
     let euid = rustix::process::geteuid().as_raw();
@@ -725,7 +792,7 @@ fn real_path_checked(path: &Path) -> Option<PathBuf> {
 /// The rule for one file or directory: owned by root or by `euid`, and not writable by the group or
 /// others. `sticky_excused` lets a writable directory with the sticky bit through (`/tmp` is `1777`),
 /// because the sticky bit stops others from renaming or removing an entry they do not own.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn trusted(uid: u32, mode: u32, euid: u32, sticky_excused: bool) -> bool {
     let owner_ok = uid == 0 || uid == euid;
     let writable_ok = mode & 0o022 == 0 || (sticky_excused && mode & 0o1000 != 0);
@@ -735,7 +802,7 @@ fn trusted(uid: u32, mode: u32, euid: u32, sticky_excused: bool) -> bool {
 /// Whether the real directory `dir` is safe to hold something that runs, or a link to it. The
 /// directory itself is never excused for being sticky: a hard link to a trusted file could be planted
 /// in it, or a link placed there. The directories above it are, as `/tmp` is.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn dir_is_trusted(dir: &Path, euid: u32) -> bool {
     use std::os::unix::fs::MetadataExt;
     dir.ancestors().enumerate().all(|(depth, ancestor)| {
@@ -746,7 +813,7 @@ fn dir_is_trusted(dir: &Path, euid: u32) -> bool {
 
 /// Whether the file at the real path `real`, and every directory above it, is safe to run from. See
 /// [`trusted`] and [`dir_is_trusted`]. Anything that cannot be read is untrusted.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn is_trusted(real: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let euid = rustix::process::geteuid().as_raw();

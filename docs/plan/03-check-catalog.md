@@ -663,7 +663,7 @@ Every external command any check runs, for security review. All by fixed argv wi
 
 | Command | Check | OS | Timeout | Expected exit | Why no file or API |
 | --- | --- | --- | --- | --- | --- |
-| `/usr/bin/getent ahosts <name>` (name matches `^[A-Za-z0-9._-]+$`, no leading `-`) | `net.dns` | L | 5s | 0 found, 2 not found, other = tool error | glibc's resolver path (`nsswitch.conf`, mDNS, sssd) is not reachable from a static musl binary |
+| `/usr/bin/getent ahosts -- <name>` (name matches `^[A-Za-z0-9._-]+$`, no leading `-`) | `net.dns` | L | 5s | 0 found, 2 not found, other = tool error | glibc's resolver path (`nsswitch.conf`, mDNS, sssd) is not reachable from a static musl binary |
 | `/usr/bin/timedatectl show -p NTPSynchronized -p NTP -p Timezone`, fallback `/usr/bin/timedatectl status` | `host.time_sync` | L | 5s | 0 | `show` needs systemd 239; RHEL 7 has 219 |
 | `/usr/bin/chronyc -n -c -t 3 tracking` | `host.time_sync` | L | 5s | 0 | Offset and leap status, CSV output |
 | `/usr/bin/firewall-cmd --state`, `--get-active-zones`, `--list-all --zone=<zone>` (zone validated) | `host.firewall` | L | 5s | 0, 252 = not running | firewalld state is in its D-Bus API only |

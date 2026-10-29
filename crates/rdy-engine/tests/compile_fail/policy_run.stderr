@@ -1,0 +1,11 @@
+error[E0603]: function `run` is private
+ --> tests/compile_fail/policy_run.rs:1:37
+  |
+1 | use rdy_engine::exec::policy::{Cmd, run};
+  |                                     ^^^ private function
+  |
+note: the function `run` is defined here
+ --> src/exec/policy.rs
+  |
+  | pub(crate) async fn run(cmd: Cmd) -> Result<ExecOutput, CommandError> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
