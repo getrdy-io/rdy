@@ -1,6 +1,6 @@
 //! The smallest HTTP/1.1 client that `Probe::unix_get` needs, as pure functions over bytes.
 //!
-//! It writes one fixed request (`GET`, a path from the allowlist in [`super::sock`], `Connection:
+//! It writes one fixed request (`GET`, a path from the allowlist in [`crate::probe::sock`], `Connection:
 //! close`) and reads one response. It has no I/O, so the live backend and the tests share it. Nothing
 //! here follows a redirect, sends a body or keeps a connection.
 //!
@@ -12,10 +12,14 @@
 pub(crate) const HEAD_CAP: usize = 16 * 1024;
 
 /// The most body bytes kept.
-pub(crate) const BODY_CAP: usize = super::sock::BODY_LIMIT;
+pub(crate) const BODY_CAP: usize = crate::probe::sock::BODY_LIMIT;
 
 /// The most raw bytes read from the socket in all: head, body and chunk framing.
-pub(crate) const RAW_CAP: usize = HEAD_CAP + BODY_CAP + 4096;
+pub(crate) const RAW_CAP: usize = HEAD_CAP + BODY_CAP + CHUNK_SLACK;
+
+/// Extra raw bytes read past [`BODY_CAP`] for a chunked body, so that the chunk framing does not eat
+/// into the bytes kept.
+pub(crate) const CHUNK_SLACK: usize = 4096;
 
 /// Why a response could not be read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -96,6 +100,10 @@ pub(crate) fn parse_head(buf: &[u8]) -> Result<Option<Head>, HttpError> {
             .ok_or(HttpError::Malformed("header without a colon"))?;
         let value = value.trim();
         if name.eq_ignore_ascii_case("content-length") {
+            // Digits only: `u64::parse` would also take a leading `+`.
+            if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(HttpError::Malformed("bad content-length"));
+            }
             let n: u64 = value
                 .parse()
                 .map_err(|_| HttpError::Malformed("bad content-length"))?;
@@ -113,7 +121,13 @@ pub(crate) fn parse_head(buf: &[u8]) -> Result<Option<Head>, HttpError> {
             }
         }
     }
-    // Chunked wins over a length, as RFC 9112 says. A body-less status has no body at all.
+    // A reply with both is ambiguous framing, the root of response smuggling (RFC 9112 6.3).
+    if chunked && length.is_some() {
+        return Err(HttpError::Malformed(
+            "both content-length and transfer-encoding",
+        ));
+    }
+    // A body-less status has no body at all.
     let framing = if status == 204 || status == 304 {
         Framing::Length(0)
     } else if chunked {
@@ -154,6 +168,10 @@ fn status_of(line: &str) -> Result<u16, HttpError> {
 
 /// Reads the body from the bytes after the head. `eof` says the server closed the stream.
 ///
+/// The caller runs this once, when [`finished`] says to stop, not on every read. `truncated` is set
+/// only when the body kept is cut short of what the server declared or sent: the cap was reached and
+/// more follows, or the stream ended before the framing was whole.
+///
 /// # Errors
 ///
 /// [`HttpError::Malformed`] when chunk framing is broken.
@@ -167,7 +185,7 @@ pub(crate) fn body(head: &Head, rest: &[u8], eof: bool) -> Result<Body, HttpErro
                 .min(BODY_CAP);
             Ok(Body {
                 bytes: rest[..keep].to_vec(),
-                truncated: n > BODY_CAP as u64 || (eof && !complete),
+                truncated: (keep == BODY_CAP && n > BODY_CAP as u64) || (eof && !complete),
                 complete: complete || eof,
             })
         }
@@ -183,16 +201,28 @@ pub(crate) fn body(head: &Head, rest: &[u8], eof: bool) -> Result<Body, HttpErro
     }
 }
 
-/// Whether the read loop can stop: the head is read and the body is whole or cannot grow any further
-/// within the caps.
-pub(crate) fn finished(head: &Head, rest: &[u8], eof: bool) -> Result<bool, HttpError> {
-    let body = body(head, rest, eof)?;
-    Ok(eof || body.complete || body.truncated)
+/// Whether the read loop can stop and read the body: the stream ended, or what is here cannot grow
+/// into a longer kept body. It looks at lengths only, so a one byte per read server costs nothing
+/// extra. A chunked body is read to the end of the stream (the request says `Connection: close`) or to
+/// [`BODY_CAP`] plus [`CHUNK_SLACK`] raw bytes.
+pub(crate) fn finished(head: &Head, rest: &[u8], eof: bool) -> bool {
+    if eof {
+        return true;
+    }
+    match head.framing {
+        Framing::Length(n) => {
+            u64::try_from(rest.len()).unwrap_or(u64::MAX) >= n || rest.len() > BODY_CAP
+        }
+        Framing::UntilClose => rest.len() > BODY_CAP,
+        Framing::Chunked => rest.len() >= BODY_CAP + CHUNK_SLACK,
+    }
 }
 
 fn chunked(mut rest: &[u8], eof: bool) -> Result<Body, HttpError> {
     let mut bytes = Vec::new();
     let mut truncated = false;
+    // The read loop stopped at its raw limit with the body still open: it is cut, not just early.
+    let at_limit = eof || rest.len() >= BODY_CAP + CHUNK_SLACK;
     loop {
         let Some(line_end) = rest.windows(2).position(|w| w == b"\r\n") else {
             return if rest.len() > 64 {
@@ -200,7 +230,7 @@ fn chunked(mut rest: &[u8], eof: bool) -> Result<Body, HttpError> {
             } else {
                 Ok(Body {
                     bytes,
-                    truncated: truncated || eof,
+                    truncated: truncated || at_limit,
                     complete: false,
                 })
             };
@@ -208,7 +238,9 @@ fn chunked(mut rest: &[u8], eof: bool) -> Result<Body, HttpError> {
         let line = std::str::from_utf8(&rest[..line_end])
             .map_err(|_| HttpError::Malformed("bad chunk size"))?;
         let digits = line.split(';').next().unwrap_or_default().trim();
-        if digits.is_empty() || digits.len() > 16 {
+        // Hex digits only: `from_str_radix` would also take a leading `+`.
+        if digits.is_empty() || digits.len() > 16 || !digits.bytes().all(|b| b.is_ascii_hexdigit())
+        {
             return Err(HttpError::Malformed("bad chunk size"));
         }
         let size = usize::try_from(
@@ -229,10 +261,11 @@ fn chunked(mut rest: &[u8], eof: bool) -> Result<Body, HttpError> {
             // Part of a chunk: keep what fits and wait for the rest.
             let take = rest.len().min(size).min(room);
             bytes.extend_from_slice(&rest[..take]);
-            truncated |= size > room;
+            // Cut only when the cap is full and the chunk declares more than fitted.
+            truncated |= bytes.len() == BODY_CAP && size > take;
             return Ok(Body {
                 bytes,
-                truncated: truncated || eof,
+                truncated: truncated || at_limit,
                 complete: false,
             });
         }
@@ -316,7 +349,7 @@ mod tests {
         let done = body(&head, &raw[head.len..], false).expect("body");
         assert_eq!(done.bytes.len(), BODY_CAP);
         assert!(done.truncated);
-        assert!(finished(&head, &raw[head.len..], false).expect("finished"));
+        assert!(finished(&head, &raw[head.len..], false));
     }
 
     #[test]
@@ -328,6 +361,8 @@ mod tests {
             b"HTTP/1.1 100 Continue\r\n\r\n",
             b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
             b"HTTP/1.1 200 OK\r\nContent-Length: x\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nContent-Length: +5\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n",
             b"HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
             b"HTTP/1.1 200 OK\r\nno colon\r\n\r\n",
         ] {
@@ -350,6 +385,9 @@ mod tests {
         let raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabcXX0\r\n\r\n";
         let head = head_of(raw);
         assert!(body(&head, &raw[head.len..], false).is_err());
+        let raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n+3\r\nabc\r\n0\r\n\r\n";
+        let head = head_of(raw);
+        assert!(body(&head, &raw[head.len..], true).is_err());
     }
 
     #[test]
@@ -358,5 +396,76 @@ mod tests {
         let head = head_of(raw);
         let done = body(&head, &[], false).expect("body");
         assert!(done.complete && done.bytes.is_empty());
+    }
+
+    /// Feeds `raw` the way the read loop does, in pieces of `step` bytes, and returns the body.
+    fn feed(raw: &[u8], step: usize) -> Body {
+        let mut seen = 0;
+        let mut head = None;
+        loop {
+            seen = (seen + step).min(raw.len());
+            let eof = seen == raw.len();
+            let part = &raw[..seen];
+            if head.is_none() {
+                head = parse_head(part).expect("head");
+            }
+            if let Some(head) = &head
+                && finished(head, &part[head.len..], eof)
+            {
+                return body(head, &part[head.len..], eof).expect("body");
+            }
+            assert!(!eof, "the loop must stop at the end of the stream");
+        }
+    }
+
+    #[test]
+    fn a_big_length_body_is_kept_to_the_cap_when_fed_in_pieces() {
+        let mut raw = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+            BODY_CAP + 10
+        )
+        .into_bytes();
+        raw.extend(std::iter::repeat_n(b'x', BODY_CAP + 10));
+        let done = feed(&raw, 8192);
+        assert_eq!(done.bytes.len(), BODY_CAP);
+        assert!(done.truncated);
+    }
+
+    #[test]
+    fn a_big_chunk_is_kept_to_the_cap_when_fed_in_pieces() {
+        let size = BODY_CAP + 10;
+        let mut raw = format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{size:x}\r\n")
+            .into_bytes();
+        raw.extend(std::iter::repeat_n(b'x', size));
+        raw.extend_from_slice(b"\r\n0\r\n\r\n");
+        let done = feed(&raw, 8192);
+        assert_eq!(done.bytes.len(), BODY_CAP);
+        assert!(done.truncated);
+    }
+
+    #[test]
+    fn a_body_that_fits_is_whole_and_not_flagged_when_fed_in_pieces() {
+        let mut raw = format!("HTTP/1.1 200 OK\r\nContent-Length: {BODY_CAP}\r\n\r\n").into_bytes();
+        raw.extend(std::iter::repeat_n(b'x', BODY_CAP));
+        let done = feed(&raw, 8192);
+        assert_eq!(done.bytes.len(), BODY_CAP);
+        assert!(!done.truncated && done.complete);
+        let raw = format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{BODY_CAP:x}\r\n");
+        let mut raw = raw.into_bytes();
+        raw.extend(std::iter::repeat_n(b'x', BODY_CAP));
+        raw.extend_from_slice(b"\r\n0\r\n\r\n");
+        let done = feed(&raw, 8192);
+        assert_eq!(done.bytes.len(), BODY_CAP);
+        assert!(!done.truncated && done.complete);
+    }
+
+    #[test]
+    fn a_partial_big_chunk_is_not_flagged_before_the_cap_is_full() {
+        let size = BODY_CAP + 10;
+        let raw = format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{size:x}\r\nabc");
+        let head = head_of(raw.as_bytes());
+        let part = body(&head, &raw.as_bytes()[head.len..], false).expect("body");
+        assert_eq!(part.bytes, b"abc");
+        assert!(!part.truncated && !part.complete);
     }
 }

@@ -1,27 +1,17 @@
 //! The live socket I/O under `Backend::resolve`, `Backend::udp_exchange` and `Backend::unix_get`.
 //!
 //! These functions enforce no policy and write no log: `Probe` has already done both. They bound every
-//! wait by the timeout they are given and never read more than the caps in [`super::sock`] and
-//! [`super::dockerhttp`]. Without feature `runtime` there is no timer and no socket, and each call
-//! fails.
+//! wait by the timeout they are given and never read more than the caps in [`crate::probe::sock`] and
+//! `dockerhttp`.
 
 use std::io;
-use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
-use super::ProbeError;
-use super::sock::{UdpReply, UnixResponse};
-
-#[cfg(not(feature = "runtime"))]
-fn off() -> ProbeError {
-    ProbeError::Io(
-        "this build of rdy-engine cannot open sockets (feature `runtime` is off)".to_owned(),
-    )
-}
+use crate::probe::ProbeError;
+use crate::probe::sock::UdpReply;
 
 /// Resolves a spec host name through the system resolver.
-#[cfg(feature = "runtime")]
 pub(super) async fn resolve(host: &str, port: u16, timeout: Duration) -> io::Result<Vec<IpAddr>> {
     let lookup = tokio::net::lookup_host((host, port));
     match tokio::time::timeout(timeout, lookup).await {
@@ -38,19 +28,13 @@ pub(super) async fn resolve(host: &str, port: u16, timeout: Duration) -> io::Res
     }
 }
 
-/// Without the runtime there is no resolver.
-#[cfg(not(feature = "runtime"))]
-pub(super) async fn resolve(
-    _host: &str,
-    _port: u16,
-    _timeout: Duration,
-) -> io::Result<Vec<IpAddr>> {
-    Err(io::Error::other(off().to_string()))
-}
+/// The largest UDP payload. A buffer of this size never loses bytes on any OS: Windows fails a `recv`
+/// into a smaller buffer with `WSAEMSGSIZE`, and Unix cuts silently. So the cut to the cap is made
+/// here in user space, the same way on every OS.
+const DATAGRAM_MAX: usize = 65_535;
 
 /// Sends one datagram from a fresh socket that is connected to `to`, so only `to` can answer, and
 /// reads one reply.
-#[cfg(feature = "runtime")]
 pub(super) async fn udp(
     to: SocketAddr,
     payload: &[u8],
@@ -61,9 +45,9 @@ pub(super) async fn udp(
 
     let local = SocketAddr::new(
         if to.is_ipv4() {
-            IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
         } else {
-            IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED)
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED)
         },
         0,
     );
@@ -71,8 +55,7 @@ pub(super) async fn udp(
         let socket = UdpSocket::bind(local).await?;
         socket.connect(to).await?;
         socket.send(payload).await?;
-        // One byte more than asked for tells whether the reply was cut.
-        let mut buf = vec![0_u8; max_reply.saturating_add(1)];
+        let mut buf = vec![0_u8; DATAGRAM_MAX];
         let n = socket.recv(&mut buf).await?;
         io::Result::Ok((buf, n))
     };
@@ -89,28 +72,18 @@ pub(super) async fn udp(
     }
 }
 
-/// Without the runtime there is no socket.
-#[cfg(not(feature = "runtime"))]
-pub(super) async fn udp(
-    _to: SocketAddr,
-    _payload: &[u8],
-    _max_reply: usize,
-    _timeout: Duration,
-) -> Result<UdpReply, ProbeError> {
-    Err(off())
-}
-
 /// Sends the fixed `GET` over the unix socket and reads one HTTP/1.x reply.
-#[cfg(all(feature = "runtime", unix))]
+#[cfg(unix)]
 pub(super) async fn unix_get(
-    socket: &Path,
+    socket: &std::path::Path,
     path: &str,
     timeout: Duration,
-) -> Result<UnixResponse, ProbeError> {
+) -> Result<crate::probe::sock::UnixResponse, ProbeError> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
 
-    use super::dockerhttp::{self, HttpError, RAW_CAP};
+    use super::dockerhttp::{self, HEAD_CAP, HttpError, RAW_CAP};
+    use crate::probe::sock::UnixResponse;
 
     let malformed = |error: HttpError| ProbeError::Io(error.to_string());
     let exchange = async {
@@ -130,13 +103,20 @@ pub(super) async fn unix_get(
                 .await
                 .map_err(|e| ProbeError::from_io(&e))?;
             let eof = n == 0;
+            // Look for the end of the head only in the new bytes and the three before them.
+            let from = raw.len().saturating_sub(3);
             raw.extend_from_slice(&chunk[..n]);
-            if head.is_none() {
+            if head.is_none()
+                && (eof
+                    || raw.len() >= HEAD_CAP
+                    || raw[from..].windows(4).any(|w| w == b"\r\n\r\n"))
+            {
                 head = dockerhttp::parse_head(&raw).map_err(malformed)?;
             }
             if let Some(head) = &head {
                 let rest = &raw[head.len..];
-                if dockerhttp::finished(head, rest, eof).map_err(malformed)? {
+                // The body is parsed once, when the loop is done.
+                if dockerhttp::finished(head, rest, eof) {
                     let body = dockerhttp::body(head, rest, eof).map_err(malformed)?;
                     let mut reply = UnixResponse::new(head.status, body.bytes);
                     reply.truncated = body.truncated;
@@ -148,7 +128,7 @@ pub(super) async fn unix_get(
                 ));
             }
             if raw.len() >= RAW_CAP {
-                // The caps are reached: a head is parsed by now, or HeadTooLarge was returned.
+                // Not reachable for a well framed reply: `finished` stops first.
                 return Err(ProbeError::Io(
                     "the reply is larger than rdy reads".to_owned(),
                 ));
@@ -159,16 +139,4 @@ pub(super) async fn unix_get(
         Ok(result) => result,
         Err(_elapsed) => Err(ProbeError::Timeout),
     }
-}
-
-/// Without unix sockets (Windows) or the runtime, the call fails. `Probe` refuses on Windows first.
-#[cfg(not(all(feature = "runtime", unix)))]
-pub(super) async fn unix_get(
-    _socket: &Path,
-    _path: &str,
-    _timeout: Duration,
-) -> Result<UnixResponse, ProbeError> {
-    Err(ProbeError::Io(
-        "this build of rdy cannot open unix sockets on this platform".to_owned(),
-    ))
 }

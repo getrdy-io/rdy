@@ -83,7 +83,6 @@ fn a_declared_program_matches_the_way_the_table_does() {
 
 // ---- the read denylist -------------------------------------------------------------------------
 
-#[cfg(unix)]
 mod denylist {
     use super::*;
     use crate::probe::policy::{
@@ -197,6 +196,32 @@ mod denylist {
             ("/dev", RULE_DEVICE),
             // Private keys by name.
             ("/etc/ssl/private/site.pem", RULE_PRIVATE_KEY),
+            // Key files in PEM form, by name and by directory.
+            ("/srv/app/tls/privkey.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/privkey1.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/server-key.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/server_key.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/key.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/server.key.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/tls-privkey.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/my.privkey.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/private-ca.pem", RULE_PRIVATE_KEY),
+            (
+                "/etc/letsencrypt/live/example.test/cert.pem",
+                RULE_PRIVATE_KEY,
+            ),
+            (
+                "/etc/letsencrypt/archive/example.test/chain1.pem",
+                RULE_PRIVATE_KEY,
+            ),
+            (
+                "/var/lib/kubelet/pki/kubelet-client-current.pem",
+                RULE_KUBECONFIG,
+            ),
+            ("/run/secrets/db_password", RULE_CREDENTIALS),
+            ("/var/run/secrets/db_password", RULE_CREDENTIALS),
+            // `auxv` is ours only under the real /proc, not under a mount of another one.
+            ("/host/proc/self/auxv", RULE_PROC),
             ("/etc/pki/tls/private/site.pem", RULE_PRIVATE_KEY),
             ("/srv/app/server.key", RULE_PRIVATE_KEY),
             ("/srv/app/SERVER.KEY", RULE_PRIVATE_KEY),
@@ -254,6 +279,10 @@ mod denylist {
             "/etc/kubernetes/pki/ca.crt",
             "/var/lib/kubelet/config.yaml",
             "/var/run/secrets/kubernetes.io",
+            "/etc/letsencrypt/renewal/example.test.conf",
+            "/srv/app/tls/fullchain.pem",
+            "/srv/app/tls/cert.pem",
+            "/run/secrets",
             "/home/ada/.docker",
             "/home/ada/.config/helm/repositories.yaml",
             "/home/ada/id_rsa.pub",
@@ -418,12 +447,15 @@ mod denylist {
     }
 }
 
-#[cfg(windows)]
 #[tokio::test]
-async fn windows_refuses_every_file_read() {
-    let hub = hub(Replay::new().file("C:\\x", "y"));
-    let probe = hub.check_probe("host.cpu", Os::Linux, None);
-    let error = probe.read(Path::new("C:\\x")).await.expect_err("refused");
+async fn a_windows_check_reads_no_files_on_any_host() {
+    // The policy follows the check's OS, not the machine rdy runs on.
+    let hub = hub(Replay::new().file("/proc/cpuinfo", "y"));
+    let probe = hub.check_probe("host.cpu", Os::Windows, None);
+    let error = probe
+        .read(Path::new("/proc/cpuinfo"))
+        .await
+        .expect_err("refused");
     assert!(matches!(
         error,
         ProbeError::Denied {
@@ -431,6 +463,210 @@ async fn windows_refuses_every_file_read() {
             ..
         }
     ));
+}
+
+// ---- the reads prefixes, size caps and env (M1-045) -------------------------------------------
+
+/// These run on every host, the Windows leg included: the policy follows the check's OS, and the replay
+/// backend is a map.
+mod reads {
+    use super::*;
+    use crate::check::{CheckInfo, CheckMeta, OsSupport, Support};
+    use crate::probe::policy::{RULE_OUTSIDE_READS, RULE_PROC, ReadGuard};
+
+    static READER: CheckInfo = CheckInfo {
+        id: "host.fixture",
+        family: "host",
+        summary: "Reads a few files and one variable.",
+        meta: CheckMeta {
+            title: "Fixture check",
+            remediation: "Nothing to fix. This check is a test double.",
+        },
+        needs: &[],
+        wants: &[],
+        default_timeout: None,
+        os: OsSupport {
+            linux: Support::Full,
+            macos: Support::Full,
+            windows: Support::NotYet,
+        },
+        reads: &["/proc", "/etc/os-release"],
+        env: &["HTTPS_PROXY"],
+        commands: &[],
+        peers: &[],
+    };
+
+    fn rule_of(error: &ProbeError) -> &'static str {
+        match error {
+            ProbeError::Denied { rule, .. } => rule,
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_outside_the_declared_prefixes_is_refused_and_logged() {
+        let hub = hub(Replay::new()
+            .file("/proc/cpuinfo", "cpu")
+            .file("/etc/os-release", "ID=fixture")
+            .file("/var/log/syslog", "boot")
+            .file("/procfoo/x", "no")
+            .file("/etc/os-release.d/x", "no"));
+        let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READER));
+
+        assert!(probe.read(Path::new("/proc/cpuinfo")).await.is_ok());
+        assert!(probe.read(Path::new("/etc/os-release")).await.is_ok());
+        for path in ["/var/log/syslog", "/procfoo/x", "/etc/os-release.d/x"] {
+            let error = probe.read(Path::new(path)).await.expect_err("refused");
+            assert_eq!(rule_of(&error), RULE_OUTSIDE_READS, "{path}");
+        }
+        assert!(probe.stat(Path::new("/var/log")).await.is_err());
+        assert!(probe.read_dir(Path::new("/var/log")).await.is_err());
+        assert!(
+            probe
+                .read_tail(Path::new("/var/log/syslog"), 4)
+                .await
+                .is_err()
+        );
+
+        let log = hub.action_log();
+        let denied: Vec<_> = log
+            .actions
+            .iter()
+            .filter(|a| a.outcome == ActionOutcome::Denied)
+            .collect();
+        assert_eq!(denied.len(), 6, "every refusal is logged");
+        for action in denied {
+            assert_eq!(field(action, "rule"), Some(&json!(RULE_OUTSIDE_READS)));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_denylist_wins_inside_a_declared_prefix() {
+        let hub = hub(Replay::new().file("/proc/1/environ", "SECRET=1"));
+        let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READER));
+        let error = probe
+            .read(Path::new("/proc/1/environ"))
+            .await
+            .expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_PROC);
+    }
+
+    #[tokio::test]
+    async fn a_probe_with_no_manifest_keeps_the_denylist_and_has_no_prefixes() {
+        let hub = hub(Replay::new().file("/var/log/syslog", "boot"));
+        let probe = hub.check_probe("host.fixture", Os::Linux, None);
+        assert!(probe.read(Path::new("/var/log/syslog")).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_two_mib_file_returns_one_mib_with_truncated_true() {
+        let mut big = vec![b'a'; MAX_READ];
+        big.extend(vec![b'b'; MAX_READ]);
+        let hub = hub(Replay::new().file("/proc/big", big));
+        let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READER));
+
+        let file = probe.read(Path::new("/proc/big")).await.expect("read");
+        assert_eq!(file.bytes.len(), MAX_READ);
+        assert!(file.truncated_tail && file.truncated());
+        let tail = probe
+            .read_tail(Path::new("/proc/big"), 8)
+            .await
+            .expect("tail");
+        assert_eq!(tail.bytes, b"bbbbbbbb");
+        assert!(tail.truncated_head && !tail.truncated_tail);
+
+        let log = hub.action_log();
+        assert_eq!(field(&log.actions[0], "bytes"), Some(&json!(MAX_READ)));
+        assert_eq!(field(&log.actions[0], "truncated"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn only_our_own_pid_reads_auxv_on_a_real_path() {
+        let guard = ReadGuard::new(Os::Linux, None);
+        let own = std::process::id();
+        let path = |pid: u32| format!("/proc/{pid}/auxv");
+        assert_eq!(guard.admit_real(Path::new(&path(own))), Ok(()));
+        // Never "any pid".
+        let other = path(own.wrapping_add(1));
+        let error = guard
+            .admit_real(Path::new(&other))
+            .expect_err("another pid");
+        assert_eq!(error.rule, RULE_PROC);
+        assert!(guard.admit_real(Path::new("/proc/1/environ")).is_err());
+        // As written, only `self` passes; a pid in the text does not.
+        assert!(guard.admit(Path::new("/proc/self/auxv")).is_ok());
+        assert!(guard.admit(Path::new(&path(own))).is_err());
+    }
+
+    #[test]
+    fn our_pid_in_a_path_as_written_does_not_depend_on_the_host() {
+        let guard = ReadGuard::new(Os::Linux, Some(&["/proc/self/mountinfo"]));
+        let own = format!("/proc/{}/mountinfo", std::process::id());
+        // As written, a pid is just a pid: a replay run decides the same on every host.
+        assert_eq!(
+            guard.admit(Path::new(&own)),
+            Err(RULE_OUTSIDE_READS),
+            "{own}"
+        );
+        // On a real path `/proc/self` has become our pid, and the same declaration covers it.
+        assert_eq!(guard.admit_real(Path::new(&own)), Ok(()));
+        assert!(guard.admit(Path::new("/proc/self/mountinfo")).is_ok());
+    }
+
+    #[test]
+    fn the_decision_follows_the_checks_os_and_not_the_host() {
+        let linux = ReadGuard::new(Os::Linux, Some(&["/proc"]));
+        assert_eq!(linux.admit(Path::new("/proc/cpuinfo")), Ok(()));
+        let windows = ReadGuard::new(Os::Windows, None);
+        assert_eq!(
+            windows.admit(Path::new("/proc/cpuinfo")),
+            Err(policy::RULE_WINDOWS)
+        );
+        // Names compare without case only for a macOS check.
+        let mac = ReadGuard::new(Os::Macos, Some(&["/Library"]));
+        assert_eq!(mac.admit(Path::new("/library/x")), Ok(()));
+        assert!(linux.admit(Path::new("/PROC/cpuinfo")).is_err());
+    }
+
+    #[tokio::test]
+    async fn an_undeclared_env_name_is_refused_and_logged_without_a_value() {
+        let hub = hub(Replay::new()
+            .env("HTTPS_PROXY", "http://proxy.example:3128")
+            .env("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI-secret"));
+        let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READER));
+
+        let value = probe.env("HTTPS_PROXY").expect("declared");
+        assert_eq!(value.as_deref(), Some("http://proxy.example:3128"));
+        let error = probe.env("AWS_SECRET_ACCESS_KEY").expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_ENV_NOT_DECLARED);
+        for bad in ["", "A=B", "A\0B"] {
+            let error = probe.env(bad).expect_err("not a name");
+            assert_eq!(rule_of(&error), RULE_ENV_BAD_NAME, "{bad:?}");
+        }
+
+        let log = hub.action_log();
+        assert!(log.actions.iter().all(|a| a.kind.to_string() == "env"));
+        assert_eq!(log.actions[0].outcome, ActionOutcome::Ok);
+        assert_eq!(field(&log.actions[0], "name"), Some(&json!("HTTPS_PROXY")));
+        assert!(
+            log.actions[1..]
+                .iter()
+                .all(|a| a.outcome == ActionOutcome::Denied)
+        );
+        let text = serde_json::to_string(&log.actions).expect("json");
+        assert!(!text.contains("proxy.example"), "the value is never logged");
+        assert!(!text.contains("wJalrXUtnFEMI"));
+    }
+
+    #[tokio::test]
+    async fn an_env_call_after_the_check_ended_is_refused() {
+        let hub = hub(Replay::new().env("HTTPS_PROXY", "x"));
+        let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READER));
+        probe.end();
+        let error = probe.env("HTTPS_PROXY").expect_err("ended");
+        assert_eq!(rule_of(&error), RULE_CHECK_FINISHED);
+        assert!(Probe::closed().env("HTTPS_PROXY").is_err());
+    }
 }
 
 // ---- exec --------------------------------------------------------------------------------------
@@ -508,14 +744,30 @@ mod commands {
     impl Sealed for Recorder {}
 
     impl Backend for Recorder {
-        fn open_read<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<FileBytes>> {
+        fn open_read<'a>(
+            &'a self,
+            _: &'a Path,
+            _: ReadRange,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<FileBytes>> {
             Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
         }
-        fn read_dir<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
+        fn read_dir<'a>(
+            &'a self,
+            _: &'a Path,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
             Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
         }
-        fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
+        fn stat<'a>(
+            &'a self,
+            _: &'a Path,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
             Box::pin(async { Ok(None) })
+        }
+        fn env(&self, _: &str) -> Option<String> {
+            None
         }
         fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
             Box::pin(async move {
@@ -540,14 +792,30 @@ mod commands {
     impl Sealed for Live {}
 
     impl Backend for Live {
-        fn open_read<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<FileBytes>> {
+        fn open_read<'a>(
+            &'a self,
+            _: &'a Path,
+            _: ReadRange,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<FileBytes>> {
             Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
         }
-        fn read_dir<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
+        fn read_dir<'a>(
+            &'a self,
+            _: &'a Path,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
             Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
         }
-        fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
+        fn stat<'a>(
+            &'a self,
+            _: &'a Path,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
             Box::pin(async { Ok(None) })
+        }
+        fn env(&self, _: &str) -> Option<String> {
+            None
         }
     }
 
@@ -916,7 +1184,6 @@ async fn a_closed_probe_refuses_everything() {
     assert!(ctx.probe().stat(Path::new("/proc")).await.is_err());
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn a_call_after_the_check_ended_is_denied_and_logged() {
     let hub = hub(Replay::new().file("/proc/cpuinfo", "x"));
@@ -957,14 +1224,30 @@ struct Hanging;
 impl Sealed for Hanging {}
 
 impl Backend for Hanging {
-    fn open_read<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<FileBytes>> {
+    fn open_read<'a>(
+        &'a self,
+        _: &'a Path,
+        _: ReadRange,
+        _: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<FileBytes>> {
         Box::pin(std::future::pending())
     }
-    fn read_dir<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
+    fn read_dir<'a>(
+        &'a self,
+        _: &'a Path,
+        _: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
         Box::pin(std::future::pending())
     }
-    fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
+    fn stat<'a>(
+        &'a self,
+        _: &'a Path,
+        _: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
         Box::pin(std::future::pending())
+    }
+    fn env(&self, _: &str) -> Option<String> {
+        None
     }
     fn spawn<'a>(&'a self, _: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
         Box::pin(std::future::pending())
@@ -1021,7 +1304,6 @@ async fn the_provided_process_ids_are_real_and_effective_with_the_rest_copied() 
     assert_eq!(ids.gid[1], ids.gid[3]);
 }
 
-#[cfg(unix)]
 #[tokio::test(start_paused = true)]
 async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {
     let hub = ProbeHub::new(Arc::new(Hanging), redactor());
@@ -1042,7 +1324,7 @@ async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {
     );
 }
 
-#[cfg(all(unix, feature = "runtime"))]
+#[cfg(feature = "runtime")]
 #[tokio::test]
 async fn a_call_still_running_when_the_check_ends_is_cut_off_and_logged_denied() {
     let hub = ProbeHub::new(Arc::new(Hanging), redactor());
@@ -1450,6 +1732,423 @@ fn the_last_resort_drops_other_entries_before_a_denied_one_and_counts_it() {
     assert_eq!(log.last_resort_drops, 2);
 }
 
+#[test]
+fn a_denied_entry_at_log_scope_evicts_another_checks_ok_and_failed_file_entries() {
+    let hub = hub(Replay::new()).with_limits(5, 1000);
+    let other = hub.check_probe("host.other", Os::Linux, None);
+    let noisy = hub.check_probe("net.noisy", Os::Linux, None);
+    for i in 0..3 {
+        put_at(
+            &other,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/etc/a{i}")),
+            "",
+        );
+    }
+    for i in 0..2 {
+        put_at(
+            &other,
+            ActionKind::Stat,
+            ActionOutcome::Failed,
+            Some(&format!("/opt/d{i}/f")),
+            "not found",
+        );
+    }
+    assert_eq!(hub.action_log().actions.len(), 5);
+    // Four denials: the three ok entries go first, then one failed entry.
+    for i in 0..4 {
+        deny(
+            &noisy,
+            ActionKind::Connect,
+            "host",
+            &format!("h{i}.acme.example"),
+        );
+    }
+    let log = hub.action_log();
+    let of = |check: &str, kind: &str, outcome: ActionOutcome| {
+        log.actions
+            .iter()
+            .filter(|a| {
+                a.check.as_deref() == Some(check) && a.kind.as_str() == kind && a.outcome == outcome
+            })
+            .count()
+    };
+    assert_eq!(log.actions.len(), 5, "the log cap holds");
+    assert_eq!(of("net.noisy", "connect", ActionOutcome::Denied), 4);
+    assert_eq!(of("host.other", "read", ActionOutcome::Ok), 0);
+    assert_eq!(of("host.other", "stat", ActionOutcome::Failed), 1);
+    assert_eq!(log.dropped.get("read"), Some(&3));
+    assert_eq!(log.dropped.get("stat"), Some(&1));
+    // Evicting file entries is the rule, not the last resort.
+    assert_eq!(log.last_resort_drops, 0);
+}
+
+#[test]
+fn a_denied_entry_at_log_scope_evicts_only_its_own_checks_spare_entry() {
+    let hub = hub(Replay::new()).with_limits(4, 1000);
+    let own = hub.check_probe("net.own", Os::Linux, None);
+    let neighbour = hub.check_probe("net.neighbour", Os::Linux, None);
+    let bare = hub.check_probe("net.bare", Os::Linux, None);
+    // The neighbour's entries are the newest, so a rule that took the newest spare entry of any check
+    // would take one of them.
+    for _ in 0..2 {
+        put(&own, ActionKind::Connect, ActionOutcome::Ok);
+    }
+    for _ in 0..2 {
+        put(&neighbour, ActionKind::Connect, ActionOutcome::Ok);
+    }
+    assert_eq!(hub.action_log().actions.len(), 4);
+
+    // No file entry anywhere: the check gives up its own newest connect entry.
+    deny(&own, ActionKind::Exec, "program", "timedatectl");
+    let log = hub.action_log();
+    let held = |check: &str, kind: &str| {
+        log.actions
+            .iter()
+            .filter(|a| a.check.as_deref() == Some(check) && a.kind.as_str() == kind)
+            .count()
+    };
+    assert_eq!(held("net.own", "connect"), 1);
+    assert_eq!(held("net.own", "exec"), 1);
+    assert_eq!(
+        held("net.neighbour", "connect"),
+        2,
+        "the neighbour keeps both"
+    );
+    assert_eq!(log.last_resort_drops, 1);
+
+    // A check with no spare entry of its own has nothing to give up: its denial is the one dropped.
+    deny(&bare, ActionKind::Exec, "program", "timedatectl");
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 4);
+    assert_eq!(held_by(&log, "net.bare"), 0);
+    assert_eq!(held_by(&log, "net.neighbour"), 2);
+    assert_eq!(held_by(&log, "net.own"), 2);
+    assert_eq!(log.dropped.get("exec"), Some(&1));
+    assert_eq!(log.last_resort_drops, 2);
+}
+
+fn held_by(log: &ActionLogOutput, check: &str) -> usize {
+    log.actions
+        .iter()
+        .filter(|a| a.check.as_deref() == Some(check))
+        .count()
+}
+
+#[test]
+fn the_denied_key_budget_is_two_thousand_and_a_new_key_past_it_is_written_unfolded() {
+    let hub = hub(Replay::new());
+    // 20 checks with 100 targets each are 2000 distinct keys.
+    let probes: Vec<Probe> = (0..21)
+        .map(|n| hub.check_probe(&format!("net.c{n}"), Os::Linux, None))
+        .collect();
+    for probe in &probes[..20] {
+        for i in 0..DENIED_TARGETS {
+            deny(
+                probe,
+                ActionKind::Connect,
+                "host",
+                &format!("h{i}.acme.example"),
+            );
+        }
+    }
+    assert_eq!(hub.action_log().actions.len(), 2000);
+
+    // The 2001st key is past the budget: 30 calls are 30 entries, none folded.
+    for _ in 0..30 {
+        deny(&probes[20], ActionKind::Connect, "host", "new.acme.example");
+    }
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 2030);
+    assert_eq!(count_of(&log, "coalesced", ActionOutcome::Denied), 0);
+
+    // The first and the 2000th key are tracked and still fold: 1 call held, 19 more written, 10 folded.
+    for (probe, host) in [
+        (&probes[0], "h0.acme.example"),
+        (&probes[19], "h99.acme.example"),
+    ] {
+        for _ in 0..29 {
+            deny(probe, ActionKind::Connect, "host", host);
+        }
+    }
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 2030 + 2 * (19 + 1));
+    let folded: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .collect();
+    assert_eq!(folded.len(), 2);
+    for entry in folded {
+        assert_eq!(field(entry, "count"), Some(&json!(10)));
+    }
+    assert_eq!(log.last_resort_drops, 0);
+    assert!(!log.truncated);
+}
+
+#[test]
+fn ok_reads_past_two_hundred_per_directory_fold_into_one_ok_entry() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    for i in 0..COALESCE_OK_AFTER + 50 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/sys/class/net/eth0/f{i}")),
+            "",
+        );
+    }
+    // Another directory has its own count.
+    put_at(
+        &probe,
+        ActionKind::Read,
+        ActionOutcome::Ok,
+        Some("/sys/class/net/eth1/f"),
+        "",
+    );
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), COALESCE_OK_AFTER + 1 + 1);
+    assert!(!log.truncated, "folding is not dropping");
+    let folded = log
+        .actions
+        .iter()
+        .find(|a| a.kind == ActionKind::Coalesced)
+        .expect("a coalesced entry");
+    assert_eq!(folded.outcome, ActionOutcome::Ok);
+    assert_eq!(field(folded, "of"), Some(&json!("read")));
+    assert_eq!(field(folded, "under"), Some(&json!("/sys/class/net/eth0")));
+    assert_eq!(field(folded, "count"), Some(&json!(50)));
+    assert_eq!(field(folded, "rule"), None);
+    assert_eq!(field(folded, "error"), None);
+}
+
+#[test]
+fn ok_reads_fold_per_directory_on_windows_paths_too() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    for dir in ["C:\\Windows\\System32", "C:\\Windows\\Logs"] {
+        for i in 0..COALESCE_OK_AFTER + 10 {
+            put_at(
+                &probe,
+                ActionKind::Read,
+                ActionOutcome::Ok,
+                Some(&format!("{dir}\\f{i}")),
+                "",
+            );
+        }
+    }
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 2 * (COALESCE_OK_AFTER + 1));
+    let unders: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .map(|a| (field(a, "under").cloned(), field(a, "count").cloned()))
+        .collect();
+    assert_eq!(
+        unders,
+        vec![
+            (Some(json!("C:\\Windows\\System32")), Some(json!(10))),
+            (Some(json!("C:\\Windows\\Logs")), Some(json!(10))),
+        ]
+    );
+}
+
+#[test]
+fn a_backslash_in_a_unix_name_does_not_split_the_directory() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    // Each name has a backslash in it. Split there, every call would be a directory of its own.
+    for i in 0..COALESCE_OK_AFTER + 10 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/opt/d/x{i}\\f")),
+            "",
+        );
+    }
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), COALESCE_OK_AFTER + 1);
+    let folded = log
+        .actions
+        .iter()
+        .find(|a| a.kind == ActionKind::Coalesced)
+        .expect("a coalesced entry");
+    assert_eq!(field(folded, "under"), Some(&json!("/opt/d")));
+    assert_eq!(field(folded, "count"), Some(&json!(10)));
+}
+
+#[test]
+fn a_denied_read_in_a_folded_directory_is_its_own_entry() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    for i in 0..COALESCE_OK_AFTER + 20 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/etc/f{i}")),
+            "",
+        );
+    }
+    put_at(
+        &probe,
+        ActionKind::Read,
+        ActionOutcome::Denied,
+        Some("/etc/shadow"),
+        "password and sudo files are never read",
+    );
+    let log = hub.action_log();
+    assert_eq!(count_of(&log, "read", ActionOutcome::Denied), 1);
+    assert_eq!(count_of(&log, "coalesced", ActionOutcome::Ok), 1);
+    assert_eq!(count_of(&log, "coalesced", ActionOutcome::Denied), 0);
+    assert!(!log.truncated);
+}
+
+#[test]
+fn the_ok_key_budget_is_twenty_thousand_and_does_not_use_up_the_failed_keys() {
+    let hub = hub(Replay::new()).with_limits(100_000, 100_000);
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    // 20 000 directories are 20 000 ok keys.
+    for i in 0..20_000 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/d{i}/f")),
+            "",
+        );
+    }
+    // The budget of failed keys is untouched: a failed flood still folds.
+    for i in 0..COALESCE_AFTER + 5 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Failed,
+            Some(&format!("/gone/f{i}")),
+            "not found",
+        );
+    }
+    // A new ok key is past the budget and is written unfolded.
+    for i in 0..COALESCE_OK_AFTER + 10 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/new/f{i}")),
+            "",
+        );
+    }
+    // A key already tracked still folds: 1 held, 199 more written, 11 folded.
+    for i in 0..COALESCE_OK_AFTER + 10 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/d0/g{i}")),
+            "",
+        );
+    }
+    let log = hub.action_log();
+    let folded: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .map(|a| (a.outcome.clone(), field(a, "under").cloned()))
+        .collect();
+    assert_eq!(
+        folded,
+        vec![
+            (ActionOutcome::Failed, Some(json!("/gone"))),
+            (ActionOutcome::Ok, Some(json!("/d0"))),
+        ]
+    );
+    let new_dir = log
+        .actions
+        .iter()
+        .filter(|a| {
+            field(a, "path").is_some_and(|p| p.as_str().is_some_and(|p| p.starts_with("/new/")))
+        })
+        .count();
+    assert_eq!(new_dir, COALESCE_OK_AFTER + 10);
+    assert!(!log.truncated);
+}
+
+#[test]
+fn ok_and_failed_file_calls_fold_under_their_own_keys() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    // The same directory and kind, two outcomes: two keys, each with its own limit (20 and 200).
+    for i in 0..COALESCE_AFTER + 5 {
+        put_at(
+            &probe,
+            ActionKind::Stat,
+            ActionOutcome::Failed,
+            Some(&format!("/opt/d/f{i}")),
+            "not found",
+        );
+    }
+    for i in 0..COALESCE_OK_AFTER + 5 {
+        put_at(
+            &probe,
+            ActionKind::Stat,
+            ActionOutcome::Ok,
+            Some(&format!("/opt/d/g{i}")),
+            "",
+        );
+    }
+    let log = hub.action_log();
+    let folded: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .map(|a| (a.outcome.clone(), field(a, "count").cloned()))
+        .collect();
+    assert_eq!(
+        folded,
+        vec![
+            (ActionOutcome::Failed, Some(json!(5))),
+            (ActionOutcome::Ok, Some(json!(5))),
+        ]
+    );
+}
+
+#[test]
+fn a_folded_ok_entry_is_dropped_with_the_ok_reads_and_before_anything_else() {
+    let hub = hub(Replay::new()).with_limits(COALESCE_OK_AFTER + 2, 1000);
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    for i in 0..COALESCE_OK_AFTER + 5 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/proc/sys/f{i}")),
+            "",
+        );
+    }
+    put(&probe, ActionKind::Exec, ActionOutcome::Ok);
+    // Full: 200 ok reads, one folded entry and the exec. A failed read pushes out the newest ok one.
+    put_at(
+        &probe,
+        ActionKind::Stat,
+        ActionOutcome::Failed,
+        Some("/x/y"),
+        "not found",
+    );
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), COALESCE_OK_AFTER + 2);
+    assert_eq!(count_of(&log, "exec", ActionOutcome::Ok), 1);
+    assert_eq!(count_of(&log, "stat", ActionOutcome::Failed), 1);
+    assert_eq!(count_of(&log, "coalesced", ActionOutcome::Ok), 0);
+    // The folded entry stood for 5 reads, so 5 reads are counted as dropped, and none as `coalesced`.
+    assert_eq!(log.dropped.get("read"), Some(&5));
+    assert_eq!(log.dropped.get("coalesced"), None);
+    assert_eq!(log.last_resort_drops, 0);
+}
+
 // ---- the fixture run, through the scheduler -------------------------------------------------------
 
 #[cfg(all(feature = "runtime", unix))]
@@ -1479,7 +2178,7 @@ mod scheduled {
             macos: Support::Full,
             windows: Support::Full,
         },
-        reads: &[],
+        reads: &["/proc", "/home/tester"],
         env: &[],
         commands: &[CommandSpec {
             program: "getent",

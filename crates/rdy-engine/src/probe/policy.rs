@@ -1,9 +1,25 @@
-//! The read denylist (threat model I5, 02 "Files").
+//! The read policy (threat model I5, 02 "Files").
 //!
-//! [`check_read`] decides from the path text alone, with no I/O. It runs before any file is touched,
-//! for `read`, `read_dir` and `stat`. It is the first of two layers. M1-045 adds the second: the real
-//! path (after links) is matched against the same list, and a check's declared `reads` prefixes are
-//! enforced. Until then a link to a denied file is not caught here.
+//! Two layers apply to `read`, `read_tail`, `read_dir` and `stat`, both through [`ReadGuard`]:
+//!
+//! 1. **The path as the check wrote it.** [`ReadGuard::admit`] decides from the text alone, with no I/O,
+//!    before any file is touched. The path must be absolute, with no `..`, off the denylist, and under
+//!    one of the check's declared `reads` prefixes. A replayed run gets this layer too.
+//! 2. **The real path.** The live backend resolves links without opening the file (Linux: `O_PATH`,
+//!    then `/proc/self/fd/<n>`), calls [`ReadGuard::admit_real`] on the result, and only then opens it
+//!    through the same descriptor. So a link to `/etc/shadow`, or a link out of the declared prefixes,
+//!    is refused even though its own name looked fine. The check's `reads` must therefore name the real
+//!    location too: a check that reads `/etc/os-release` on a system where it is a link to
+//!    `/usr/lib/os-release` declares both.
+//!
+//! Before the prefix match, `/proc/<rdy's pid>/...` and `/proc/net/...` are put in the `/proc/self/...`
+//! form, on the path and on the declared prefixes alike. A check that declares `/proc/net` or
+//! `/proc/self/mountinfo` is not refused for where those links lead.
+//!
+//! The decision follows the check's `Os`, not the machine rdy runs on: a Linux check's path is read as
+//! a Unix path on any host, so a replay test of a Linux check runs on the Windows leg too. A Windows
+//! check reads no files in M1 and is refused (`RULE_WINDOWS`). A probe built with no `CheckInfo`
+//! (run-level work, `TestRun::context`) has no prefixes to enforce and keeps the denylist.
 //!
 //! The list is matched on path components, not on text, so `/etc//shadow`, `/etc/./shadow` and
 //! `/etc/shadow/` are the same path. A path with a `..` component is refused outright, because
@@ -20,7 +36,9 @@
 //! **`/proc/<pid>/`** is an allowlist, not a denylist: only `status`, `stat`, `statm`, `comm`, `cgroup`,
 //! `mountinfo`, `mounts`, `limits` and `net` (and the same under `task/<tid>/`) are readable. Everything
 //! else there is refused, including `cwd`, `exe`, `root`, `fd`, `environ`, `cmdline`, `mem`, `maps`
-//! and `ns`, so `/proc/1/cwd/etc/shadow` cannot reach a file through a process link.
+//! and `ns`, so `/proc/1/cwd/etc/shadow` cannot reach a file through a process link. `auxv` is readable
+//! for `/proc/self` and, on the real path, for the directory of rdy's own process id. Never for another
+//! pid.
 //!
 //! **`/dev`** is refused for `stat` and `read_dir` as well as `read`, because a device node name says
 //! which hardware a machine has. M4 (GPU checks) adds a closed, stat-only list: `/dev/nvidia*`,
@@ -28,7 +46,11 @@
 //!
 //! The rules return a fixed text for the action log (`rule`) and the error.
 
-use std::path::{Component, Path};
+use std::error::Error;
+use std::fmt;
+use std::path::Path;
+
+use crate::check::Os;
 
 /// The path is not absolute.
 pub(crate) const RULE_RELATIVE: &str = "path must be absolute";
@@ -53,44 +75,175 @@ pub(crate) const RULE_PROC: &str = "process memory, environment and command line
 /// `/dev`.
 pub(crate) const RULE_DEVICE: &str = "device files are never read";
 
-/// Why a read of `path` is refused, or `Ok` when the denylist has no objection.
-///
-/// An `Ok` is not a grant. The caller still applies the declared `reads` prefixes (M1-045).
-pub(crate) fn check_read(path: &Path) -> Result<(), &'static str> {
-    if cfg!(windows) {
-        return Err(RULE_WINDOWS);
-    }
-    check_names(path, cfg!(target_os = "macos"))
+/// The path is outside every prefix the check declared in `reads`.
+pub(crate) const RULE_OUTSIDE_READS: &str = "path is outside the check's declared reads";
+/// The target is not a regular file (a FIFO, a socket, a device, a directory).
+#[cfg_attr(
+    not(all(feature = "runtime", unix)),
+    expect(dead_code, reason = "only the Unix live backend refuses a target")
+)]
+pub(crate) const RULE_NOT_REGULAR: &str = "only regular files are read";
+/// The target is not a directory.
+#[cfg_attr(
+    not(all(feature = "runtime", unix)),
+    expect(dead_code, reason = "only the Unix live backend refuses a target")
+)]
+pub(crate) const RULE_NOT_DIR: &str = "only directories are listed";
+/// The file changed between the check and the open.
+#[cfg_attr(
+    not(all(feature = "runtime", unix)),
+    expect(dead_code, reason = "only the Unix live backend refuses a target")
+)]
+pub(crate) const RULE_CHANGED: &str = "the file changed while it was being opened";
+
+/// Why the live backend refused a call. It travels inside an [`std::io::Error`] of kind
+/// `PermissionDenied`, and the probe turns it back into `ProbeError::Denied`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Refused {
+    pub(crate) rule: &'static str,
 }
 
-/// The matching, with the macOS rules switchable so they are testable on every OS.
-pub(super) fn check_names(path: &Path, mac: bool) -> Result<(), &'static str> {
-    if !path.is_absolute() {
+impl fmt::Display for Refused {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.rule)
+    }
+}
+
+impl Error for Refused {}
+
+impl Refused {
+    /// The `io::Error` that carries this refusal out of a backend.
+    #[cfg_attr(
+        not(all(feature = "runtime", unix)),
+        expect(dead_code, reason = "only the Unix live backend refuses a target")
+    )]
+    pub(crate) fn into_io(self) -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, self)
+    }
+
+    /// The refusal inside `error`, if it carries one.
+    pub(crate) fn from_io(error: &std::io::Error) -> Option<Self> {
+        error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<Self>())
+            .copied()
+    }
+}
+
+/// What a check may read: the rules of one check's file calls. The probe builds it from the check's
+/// `Os` and `CheckInfo::reads` and hands it to the backend, which applies [`ReadGuard::admit_real`] to
+/// the resolved path.
+#[derive(Debug, Clone, Copy)]
+pub struct ReadGuard {
+    os: Os,
+    /// `None` for a probe with no manifest: the denylist applies and no prefix is enforced.
+    reads: Option<&'static [&'static str]>,
+}
+
+impl ReadGuard {
+    pub(crate) fn new(os: Os, reads: Option<&'static [&'static str]>) -> Self {
+        Self { os, reads }
+    }
+
+    /// Decides from the path text alone. Used before any I/O.
+    pub(crate) fn admit(&self, path: &Path) -> Result<(), &'static str> {
+        self.decide(path, None)
+    }
+
+    /// Decides on a resolved path. The `auxv` file of rdy's own process id passes here (and no other
+    /// pid does).
+    ///
+    /// # Errors
+    ///
+    /// The rule that refused the path.
+    pub fn admit_real(&self, real: &Path) -> Result<(), Refused> {
+        let pid = std::process::id().to_string();
+        self.decide(real, Some(&pid))
+            .map_err(|rule| Refused { rule })
+    }
+
+    fn decide(&self, path: &Path, self_pid: Option<&str>) -> Result<(), &'static str> {
+        if self.os == Os::Windows {
+            return Err(RULE_WINDOWS);
+        }
+        let mac = self.os == Os::Macos;
+        let names = split(path, mac)?;
+        deny(
+            &names.iter().map(String::as_str).collect::<Vec<_>>(),
+            self_pid,
+        )
+        .map_or(Ok(()), Err)?;
+        let Some(reads) = self.reads else {
+            return Ok(());
+        };
+        // `/proc/net` is a link to `/proc/self/net`, and `/proc/self` is `/proc/<our pid>` once
+        // resolved. Both the path and the declared prefixes are put in the `self` form, so a check
+        // that declares `/proc/net` or `/proc/self/mountinfo` is not refused for where they lead.
+        // The pid is rewritten on the path only on a real path. As written, a path with our pid in it
+        // would otherwise decide differently on each host (a replay run has no pid of its own).
+        let pid = std::process::id().to_string();
+        let names = proc_form(names, &pid, self_pid.is_some());
+        let covered = reads.iter().any(|prefix| {
+            split(Path::new(prefix), mac)
+                .is_ok_and(|prefix| names.starts_with(&proc_form(prefix, &pid, true)))
+        });
+        if covered {
+            Ok(())
+        } else {
+            Err(RULE_OUTSIDE_READS)
+        }
+    }
+}
+
+/// Puts `proc/<our pid>/...` and `proc/net/...` in the `proc/self/...` form.
+fn proc_form(mut names: Vec<String>, pid: &str, rewrite_pid: bool) -> Vec<String> {
+    if names.first().map(String::as_str) == Some("proc") {
+        match names.get(1).map(String::as_str) {
+            Some("net") => names.insert(1, "self".to_owned()),
+            Some(second) if rewrite_pid && second == pid => {
+                if let Some(slot) = names.get_mut(1) {
+                    "self".clone_into(slot);
+                }
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+/// The names of an absolute Unix path, read as text so that the result does not depend on the host.
+/// On macOS they are lower case and a leading `private` is dropped.
+fn split(path: &Path, mac: bool) -> Result<Vec<String>, &'static str> {
+    let text = path.to_string_lossy();
+    if !text.starts_with('/') {
         return Err(RULE_RELATIVE);
     }
     let mut names: Vec<String> = Vec::new();
-    for component in path.components() {
-        match component {
-            Component::ParentDir => return Err(RULE_DOT_DOT),
-            Component::Normal(name) => {
-                let name = name.to_string_lossy();
-                names.push(if mac {
-                    name.to_ascii_lowercase()
-                } else {
-                    name.into_owned()
-                });
-            }
-            Component::RootDir | Component::CurDir | Component::Prefix(_) => {}
+    for part in text.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => return Err(RULE_DOT_DOT),
+            name => names.push(if mac {
+                name.to_ascii_lowercase()
+            } else {
+                name.to_owned()
+            }),
         }
     }
     if mac && names.first().map(String::as_str) == Some("private") {
         names.remove(0);
     }
-    let names: Vec<&str> = names.iter().map(String::as_str).collect();
-    deny(&names).map_or(Ok(()), Err)
+    Ok(names)
 }
 
-fn deny(names: &[&str]) -> Option<&'static str> {
+/// The denylist alone, with the macOS rules switchable so they are testable on every OS.
+#[cfg(test)]
+pub(super) fn check_names(path: &Path, mac: bool) -> Result<(), &'static str> {
+    let names = split(path, mac)?;
+    deny(&names.iter().map(String::as_str).collect::<Vec<_>>(), None).map_or(Ok(()), Err)
+}
+
+fn deny(names: &[&str], self_pid: Option<&str>) -> Option<&'static str> {
     for (index, name) in names.iter().enumerate() {
         let rest = names.get(index + 1..).unwrap_or_default();
         let rule = match *name {
@@ -103,7 +256,11 @@ fn deny(names: &[&str]) -> Option<&'static str> {
             "secrets" if matches!(rest, ["kubernetes.io", _, ..]) => Some(RULE_KUBECONFIG),
             "etc" => etc_rule(rest),
             "var" => var_rule(rest),
-            "proc" => proc_rule(rest),
+            "proc" => proc_rule(rest, self_pid, index == 0),
+            // Docker and Kubernetes secrets mounted into a container.
+            "run" if matches!(rest, ["secrets", name, ..] if *name != "kubernetes.io") => {
+                Some(RULE_CREDENTIALS)
+            }
             _ => None,
         };
         if rule.is_some() {
@@ -134,6 +291,8 @@ fn etc_rule(rest: &[&str]) -> Option<&'static str> {
         }
         ["security", "opasswd", ..] => Some(RULE_SYSTEM_SECRET),
         ["ssl", "private", ..] | ["pki", "tls", "private", ..] => Some(RULE_PRIVATE_KEY),
+        // Let's Encrypt keeps `privkey.pem` in `live` and every old copy in `archive`.
+        ["letsencrypt", "live" | "archive", ..] => Some(RULE_PRIVATE_KEY),
         // `admin.conf`, `kubelet.conf` and the other kubeconfigs of a control plane node.
         ["kubernetes", name, ..] if name.ends_with(".conf") => Some(RULE_KUBECONFIG),
         // `k3s.yaml`, `rke2.yaml` and `config.yaml`, which can hold the join token.
@@ -145,7 +304,7 @@ fn etc_rule(rest: &[&str]) -> Option<&'static str> {
 /// What follows a `var` component.
 fn var_rule(rest: &[&str]) -> Option<&'static str> {
     match rest {
-        ["lib", "kubelet", "kubeconfig", ..]
+        ["lib", "kubelet", "kubeconfig" | "pki", ..]
         | ["lib", "etcd", ..]
         | [
             "lib",
@@ -162,10 +321,10 @@ fn var_rule(rest: &[&str]) -> Option<&'static str> {
 }
 
 /// What follows a `proc` component: the process directories (an allowlist) and the kernel files.
-fn proc_rule(rest: &[&str]) -> Option<&'static str> {
+fn proc_rule(rest: &[&str], self_pid: Option<&str>, root: bool) -> Option<&'static str> {
     match rest {
         [first, tail @ ..] if is_pid(first) => {
-            (!pid_entry_allowed(first, tail)).then_some(RULE_PROC)
+            (!pid_entry_allowed(first, tail, self_pid, root)).then_some(RULE_PROC)
         }
         [name, ..]
             if matches!(
@@ -202,13 +361,14 @@ const PID_ALLOWED: &[&str] = &[
 /// Whether `tail`, the part of the path after `/proc/<pid>`, is on the allowlist. `pid` is the name
 /// of the process directory. `auxv` is allowed for `self` only: the privilege snapshot (M1-042) reads
 /// `AT_SECURE` from the running process's own `/proc/self/auxv`. Another process's auxv holds its
-/// load addresses and is not on the list. This match is on the name. When M1-045 matches the real
-/// path, `/proc/self` resolves to `/proc/<pid>`: compare that pid with `std::process::id()`, never
-/// accept any pid.
-fn pid_entry_allowed(pid: &str, tail: &[&str]) -> bool {
+/// load addresses and is not on the list. On a real path `/proc/self` has become `/proc/<pid>`, and
+/// `self_pid` is rdy's own process id: only that pid passes, never any pid. `root` is true when
+/// `proc` is the first component of the path: `/host/proc/self/auxv` belongs to another mount, and
+/// its `self` or its pid is not ours.
+fn pid_entry_allowed(pid: &str, tail: &[&str], self_pid: Option<&str>, root: bool) -> bool {
     match tail {
         [] | ["task"] => true,
-        ["auxv"] => pid == "self",
+        ["auxv"] => root && (pid == "self" || self_pid == Some(pid)),
         ["task", _tid, rest @ ..] => entry_allowed(rest),
         _ => entry_allowed(tail),
     }
@@ -228,6 +388,19 @@ fn private_key_name(name: &str) -> bool {
         return !key.ends_with(".pub");
     }
     if name.starts_with("ssh_host_") && name.ends_with("_key") {
+        return true;
+    }
+    // A key in PEM form: `privkey.pem`, `tls-key.pem`, `server_key.pem`, `key.pem`. A certificate
+    // (`cert.pem`, `fullchain.pem`) stays readable. `private*` also refuses a certificate such as
+    // `private-ca.pem`; refusing too much fails closed, which is the side we want.
+    if name.ends_with(".pem")
+        && (name == "key.pem"
+            || name.ends_with("-key.pem")
+            || name.ends_with("_key.pem")
+            || name.ends_with(".key.pem")
+            || name.contains("privkey")
+            || name.starts_with("private"))
+    {
         return true;
     }
     name.rsplit_once('.').is_some_and(|(_, extension)| {

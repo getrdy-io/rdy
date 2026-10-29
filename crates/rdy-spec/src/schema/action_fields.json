@@ -22,6 +22,7 @@
     "argv": {
       "description": "exec, after redaction",
       "type": "array",
+      "maxItems": 256,
       "items": {
         "type": "string",
         "maxLength": 4096
@@ -47,7 +48,7 @@
     "bytes": {
       "type": "integer",
       "minimum": 0,
-      "description": "read"
+      "description": "read, connect (the udp reply), http (the unix socket body)"
     },
     "entries": {
       "type": "integer",
@@ -86,7 +87,9 @@
     "proto": {
       "type": "string",
       "description": "connect: udp for a datagram exchange. Absent for a TCP connection.",
-      "maxLength": 16
+      "enum": [
+        "udp"
+      ]
     },
     "via_proxy": {
       "type": [
@@ -149,7 +152,7 @@
       "description": "coalesced: how many calls the entry stands for. Reads past 200 per directory, or denied calls and failed file calls past 20 per parent directory (file calls) or target (other denied calls) and reason."
     },
     "truncated": {
-      "description": "exec, read",
+      "description": "exec, read, connect (udp), http (unix socket)",
       "type": "boolean"
     }
   }

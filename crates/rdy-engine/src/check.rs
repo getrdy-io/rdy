@@ -146,8 +146,8 @@ pub enum PeerClass {
     /// servers must also be among the check's spec hosts.
     NtpServers,
     /// A unix socket the check may send a read-only `GET` to, through `Probe::unix_get`. The text is an
-    /// absolute path. A segment `{uid}` matches one run of digits, so `/run/user/{uid}/docker.sock`
-    /// names a rootless socket.
+    /// absolute path. A segment `{uid}` matches the real user id of the process and no other, so
+    /// `/run/user/{uid}/docker.sock` names the rootless socket of the user rdy runs as.
     UnixSocket(&'static str),
 }
 
@@ -235,8 +235,8 @@ pub struct CheckMeta {
 /// The static facts about a check.
 ///
 /// Every check has exactly one, as a `static`. The planner reads it without running anything, the
-/// facade will enforce the manifest fields (`reads`, `env`, `commands`, `peers`), and the action log
-/// proves them.
+/// facade enforces the manifest fields (`reads`, `env`, `commands`; `peers` follows with the network
+/// calls), and the action log proves them.
 #[derive(Debug)]
 pub struct CheckInfo {
     /// The check id, such as `host.memory`.
@@ -255,7 +255,8 @@ pub struct CheckInfo {
     pub default_timeout: Option<Duration>,
     /// Support per OS.
     pub os: OsSupport,
-    /// Absolute path prefixes the check may read.
+    /// Absolute path prefixes the check may read, matched on whole path components. A path and the real
+    /// path it resolves to must both sit under one of them, so name a link and its target.
     pub reads: &'static [&'static str],
     /// Environment variable names the check may read.
     pub env: &'static [&'static str],

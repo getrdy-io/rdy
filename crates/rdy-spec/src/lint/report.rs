@@ -46,7 +46,10 @@ pub struct LintReport {
     /// The file as the caller named it.
     #[cfg_attr(feature = "schema", schemars(length(max = 4096)))]
     pub file: String,
-    /// Every finding, in file order. Empty when the spec is clean.
+    /// Every finding, in file order. Empty when the spec is clean. A spec has at most 256 check entries
+    /// and each gives at most one finding, and the file itself gives at most two (a parse error, an
+    /// expired spec), so there are never more than 258.
+    #[cfg_attr(feature = "schema", schemars(length(max = 258)))]
     pub findings: Vec<Finding>,
     /// How many findings are errors.
     pub errors: usize,
@@ -249,6 +252,21 @@ mod tests {
         let f = only(&report);
         assert_eq!(f.message, "the spec is more than 1 MiB. The limit is 1 MiB");
         assert!(f.fix.contains("1 MiB"), "{}", f.fix);
+    }
+
+    #[test]
+    fn a_spec_of_the_most_bad_entries_stays_under_the_findings_cap() {
+        let entries: String = (0..crate::MAX_CHECKS)
+            .map(|i| format!("  - id: gpu.nothing{i}\n"))
+            .collect();
+        let report = lint(&entries);
+        assert_eq!(
+            report.findings.len(),
+            crate::MAX_CHECKS,
+            "{}",
+            report.errors
+        );
+        assert!(report.findings.len() <= 258);
     }
 
     #[test]

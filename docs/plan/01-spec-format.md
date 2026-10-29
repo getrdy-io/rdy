@@ -559,8 +559,11 @@ Summary arithmetic: `pass + warn + block + skipped + timeout + error = total`, w
 test asserts both identities, and that bucket counts match the summary.
 
 **Size caps in the schema.** `message` 1 KiB; `fix` and `builtin_fix` 4 KiB; `notes` 20 items of 1 KiB;
-`actions` 5000 items; every other string 4 KiB; `observed` and `expected` 64 KiB each (prose, checked by
-the writer). A string cut by a cap ends with ` [truncated]`, and the check's `truncated` flag is set. The whole document is at most 2 MiB, which the portal checks before it parses.
+`actions` 5000 items; `checks` 256, `needs` 32 and `argv` 256 items; `observed` and `expected` 64 keys each, with
+values of at most three levels; `annotations` 32, `actions_dropped` 32 and `by_rule` 64 keys; any other list 1000 items
+and any other map 256 keys; a key the schema does not know holds a value of at most three levels with the same
+bounds (readers ignore unknown keys, 3.4); `findings` in a lint report 258; `identity.kube.exec_plugin` a bare name of 1 to 255 letters, digits, `.`, `_`, `+` or `-`; every other string 4 KiB;
+`observed` and `expected` 64 KiB each (prose, checked by the writer). A string cut by a cap ends with ` [truncated]`, and the check's `truncated` flag is set. The whole document is at most 2 MiB, which every reader checks before it parses. That check is the real size control (05 Appendix A D2); a schema cannot cap bytes.
 
 ### 5.1 Host identity
 
@@ -720,7 +723,7 @@ Threat model R1 and INV-07: every side effect goes through the probe facade, whi
 | `connect`, `tls` | `host`, `port`, `addr`, `via_proxy`; or `host`, `sni`. A UDP exchange is a `connect` with `proto: udp` and `bytes` (the reply) |
 | `http`, `kube` | `method`, `url` (no query string) or `path`, `status`. A unix socket `GET` is an `http` with `path` (the socket) and `url` (the API path) |
 | `native` | `api`, `path` |
-| `coalesced` | `of` (the kind), `under` (the directory of a file call, or the program, host or path of another denied call, or `*` for the calls past 100 targets), `count`; with `rule` or `error` when the calls were `denied` or `failed` |
+| `coalesced` | `of` (the kind), `under` (the directory of a file call, or the program, host or path of another denied call, or `*` for the calls past 100 targets), `count`; with `rule` or `error` when the calls were `denied` or `failed`, and with neither when they were `ok` |
 
 Every string passes the redactor. Bodies are never recorded. **Retention:** `exec`, `connect`, `tls`,
 `http`, `dns`, `lookup` and `kube` entries are kept except in the last resort below; they are bounded already by the 256 host and
@@ -736,12 +739,16 @@ gives a count per kind. Only when nothing above can go does the log drop another
 one if any other can go), with a `tracing` warning; that is a bug in a check or a spec far outside the limits.
 A `denied` call keeps at most 100 distinct targets apart per check, kind and rule; the calls to any more fold
 into one `coalesced` entry whose `under` is `*`. `denied` keys have a budget of 2000 apart from the 20 000
-keys of `failed` file calls, and a call past either is written without folding. A `denied` entry that finds
+keys of `failed` file calls and 20 000 of `ok` ones, and a call past any of them is written without folding. A `denied` entry that finds
 its check at 1000 entries or the log at 5000 displaces `ok` and `failed` file entries, then a spare entry
 of its own check only, never another check's `exec`, `connect` or `http` entry; if there is none, the new
 entry is dropped and counted. So a `denied` entry is lost only when a check or the whole log is full of
 `denied` entries and the check has no spare entry of its own to give up.
-(M1-041 adds the folding of `ok` reads past 200 per directory.) `rdy run --plan` (M2) prints the same shape before running.
+An `ok` `read`, `read_dir` or `stat` is written up to 200 times per check, kind and parent directory; the calls
+after that fold into one `coalesced` entry with outcome `ok`, and that entry is dropped with the `ok` reads.
+When retention drops a `coalesced` entry, `actions_dropped` adds its `count` to the kind in its `of`, not one to `coalesced`.
+Both slashes and backslashes end a directory, so Windows paths fold per directory too.
+`rdy run --plan` (M2) prints the same shape before running.
 
 ### 5.5 Writer rules
 

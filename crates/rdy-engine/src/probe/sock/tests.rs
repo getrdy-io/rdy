@@ -164,6 +164,19 @@ async fn sntp_to_a_server_not_in_the_spec_is_refused_and_logged() {
     assert_eq!(field(&entry, "proto"), Some(&Value::from("udp")));
 }
 
+/// An IPv6 literal is shown in brackets, so the port is not mistaken for part of the address.
+#[tokio::test]
+async fn an_ipv6_literal_is_shown_in_brackets() {
+    let hub = hub(Replay::new());
+    let probe = probe(&hub, time_sync(), Os::Linux, &["pool.example:123"]);
+    let error = probe
+        .udp_exchange(&target("[2001:db8::1]:123"), &request(), 48)
+        .await
+        .expect_err("not a spec host");
+    let text = error.to_string();
+    assert!(text.contains("[2001:db8::1]:123"), "{text}");
+}
+
 #[tokio::test]
 async fn the_same_host_on_another_port_is_not_a_spec_host() {
     let hub = hub(Replay::new().host("pool.example", [ip("192.0.2.10")]));
@@ -503,7 +516,9 @@ async fn only_the_allowlisted_api_paths_are_asked() {
 async fn only_declared_sockets_are_opened() {
     let hub = hub(docker_fixture()
         .unix_get("/run/containerd/containerd.sock", "/info", 200, "{}")
-        .unix_get("/run/user/1000/docker.sock", "/info", 200, "{}"));
+        .unix_get("/run/user/1000/docker.sock", "/info", 200, "{}")
+        .unix_get("/run/user/1001/docker.sock", "/info", 200, "{}")
+        .ids([1000; 4], [1000; 4]));
     let probe = probe(&hub, runtime(), Os::Linux, &[]);
     for socket in [
         "/run/containerd/containerd.sock",
@@ -512,6 +527,8 @@ async fn only_declared_sockets_are_opened() {
         "/var/run/./docker.sock",
         "/var/run/docker.sock.bak",
         "/run/user/x/docker.sock",
+        "/run/user/1001/docker.sock",
+        "/run/user/0/docker.sock",
         "/run/user//docker.sock",
         "/run/user/1000/other.sock",
         "/run/user/1000/sub/docker.sock",
@@ -575,28 +592,52 @@ async fn windows_refuses_unix_sockets_with_a_logged_rule() {
     assert_eq!(rule(&entry), RULE_UNIX_OS);
 }
 
+/// With no readable user id the rootless pattern matches nothing, so the call fails closed.
+#[tokio::test]
+async fn a_uid_socket_needs_a_known_user_id() {
+    let hub = hub(Replay::new().unix_get("/run/user/1000/docker.sock", "/info", 200, "{}"));
+    let probe = probe(&hub, runtime(), Os::Linux, &[]);
+    let error = probe
+        .unix_get(Path::new("/run/user/1000/docker.sock"), "/info")
+        .await
+        .expect_err("no ids");
+    assert_eq!(denied_rule(&error), RULE_UNIX_UNDECLARED);
+}
+
 #[test]
 fn socket_patterns_match_whole_segments() {
-    assert!(socket_matches(
-        "/var/run/docker.sock",
-        Path::new("/var/run/docker.sock")
-    ));
-    assert!(socket_matches(
+    let at = |pattern, socket, uid| socket_matches(pattern, Path::new(socket), uid);
+    assert!(at("/var/run/docker.sock", "/var/run/docker.sock", None));
+    assert!(at(
         "/run/user/{uid}/docker.sock",
-        Path::new("/run/user/0/docker.sock")
+        "/run/user/0/docker.sock",
+        Some(0)
     ));
-    assert!(!socket_matches(
+    assert!(at(
         "/run/user/{uid}/docker.sock",
-        Path::new("/run/user/0a/docker.sock")
+        "/run/user/1000/docker.sock",
+        Some(1000)
     ));
-    assert!(!socket_matches(
+    for socket in [
+        "/run/user/0a/docker.sock",
+        "/run/user/+1000/docker.sock",
+        "/run/user/01000/docker.sock",
+        "/run/user/1001/docker.sock",
+        "/run/user/0/docker.sock",
+        "/run/user/docker.sock",
+    ] {
+        assert!(
+            !at("/run/user/{uid}/docker.sock", socket, Some(1000)),
+            "{socket}"
+        );
+    }
+    // With no known id, `{uid}` matches nothing.
+    assert!(!at(
         "/run/user/{uid}/docker.sock",
-        Path::new("/run/user/docker.sock")
+        "/run/user/1000/docker.sock",
+        None
     ));
-    assert!(!socket_matches(
-        "var/run/docker.sock",
-        Path::new("/var/run/docker.sock")
-    ));
+    assert!(!at("var/run/docker.sock", "/var/run/docker.sock", None));
 }
 
 #[test]
@@ -628,8 +669,15 @@ mod live {
     use crate::probe::Backend;
     use crate::probe::sealed::Sealed;
 
-    /// A backend that does no file I/O and uses the live socket bodies of `Backend`.
-    struct Sockets;
+    /// A backend that does no file I/O and hands every socket call to the live backend, so these tests
+    /// run the live socket bodies.
+    struct Sockets(Arc<dyn Backend>);
+
+    impl Sockets {
+        fn new() -> Self {
+            Self(crate::probe::live_backend())
+        }
+    }
 
     impl Sealed for Sockets {}
 
@@ -637,20 +685,52 @@ mod live {
         fn open_read<'a>(
             &'a self,
             _: &'a Path,
+            _: crate::probe::ReadRange,
+            _: &'a crate::probe::ReadGuard,
         ) -> crate::check::BoxFuture<'a, std::io::Result<crate::probe::FileBytes>> {
             Box::pin(async { Err(std::io::ErrorKind::NotFound.into()) })
         }
         fn read_dir<'a>(
             &'a self,
             _: &'a Path,
+            _: &'a crate::probe::ReadGuard,
         ) -> crate::check::BoxFuture<'a, std::io::Result<Vec<crate::probe::DirEntry>>> {
             Box::pin(async { Err(std::io::ErrorKind::NotFound.into()) })
         }
         fn stat<'a>(
             &'a self,
             _: &'a Path,
+            _: &'a crate::probe::ReadGuard,
         ) -> crate::check::BoxFuture<'a, std::io::Result<Option<crate::probe::FileMeta>>> {
             Box::pin(async { Ok(None) })
+        }
+        fn env(&self, _: &str) -> Option<String> {
+            None
+        }
+        fn resolve<'a>(
+            &'a self,
+            host: &'a str,
+            port: u16,
+            timeout: Duration,
+        ) -> crate::check::BoxFuture<'a, std::io::Result<Vec<IpAddr>>> {
+            self.0.resolve(host, port, timeout)
+        }
+        fn udp_exchange<'a>(
+            &'a self,
+            to: SocketAddr,
+            payload: &'a [u8],
+            max_reply: usize,
+            timeout: Duration,
+        ) -> crate::check::BoxFuture<'a, Result<UdpReply, ProbeError>> {
+            self.0.udp_exchange(to, payload, max_reply, timeout)
+        }
+        fn unix_get<'a>(
+            &'a self,
+            socket: &'a Path,
+            path: &'a str,
+            timeout: Duration,
+        ) -> crate::check::BoxFuture<'a, Result<UnixResponse, ProbeError>> {
+            self.0.unix_get(socket, path, timeout)
         }
     }
 
@@ -679,7 +759,7 @@ mod live {
                 .expect("send");
         });
 
-        let hub = hub(Sockets);
+        let hub = hub(Sockets::new());
         let text = format!("127.0.0.1:{port}");
         let probe = probe(&hub, time_sync(), Os::Linux, &[&text]);
         let reply = probe
@@ -703,7 +783,7 @@ mod live {
             let (_, client) = server.recv_from(&mut buf).await.expect("recv");
             server.send_to(&[7; 100], client).await.expect("send");
         });
-        let hub = hub(Sockets);
+        let hub = hub(Sockets::new());
         let text = format!("127.0.0.1:{port}");
         let probe = probe(&hub, time_sync(), Os::Linux, &[&text]);
         let reply = probe
@@ -714,12 +794,36 @@ mod live {
         assert!(reply.truncated);
     }
 
+    /// A datagram far past the cap is cut in user space and flagged. A reply of exactly the cap is
+    /// whole. The buffer is the largest datagram on every OS, so Windows does not fail the receive.
+    #[tokio::test]
+    async fn udp_reply_far_past_the_cap_is_cut_and_one_of_exactly_the_cap_is_whole() {
+        for (sent, truncated) in [(8000_usize, true), (64, false)] {
+            let server = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
+            let port = server.local_addr().expect("addr").port();
+            tokio::spawn(async move {
+                let mut buf = [0_u8; 512];
+                let (_, client) = server.recv_from(&mut buf).await.expect("recv");
+                server.send_to(&vec![7; sent], client).await.expect("send");
+            });
+            let hub = hub(Sockets::new());
+            let text = format!("127.0.0.1:{port}");
+            let probe = probe(&hub, time_sync(), Os::Linux, &[&text]);
+            let reply = probe
+                .udp_exchange(&target(&text), &request(), 64)
+                .await
+                .expect("a reply");
+            assert_eq!(reply.bytes.len(), 64, "{sent}");
+            assert_eq!(reply.truncated, truncated, "{sent}");
+        }
+    }
+
     #[tokio::test]
     async fn udp_to_a_silent_server_times_out() {
         // Bound and never read: nothing answers.
         let silent = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
         let port = silent.local_addr().expect("addr").port();
-        let hub = hub(Sockets);
+        let hub = hub(Sockets::new());
         let text = format!("127.0.0.1:{port}");
         let probe = probe(&hub, time_sync(), Os::Linux, &[&text]);
         short(&probe);
@@ -745,7 +849,7 @@ mod live {
                 let _ = server.send_to(&echo(&buf[..n]), client).await;
             }
         });
-        let hub = hub(Sockets);
+        let hub = hub(Sockets::new());
         let text = format!("localhost:{port}");
         let probe = probe(&hub, time_sync(), Os::Linux, &[&text]);
         short(&probe);
@@ -864,7 +968,7 @@ mod live {
             let seen = Arc::new(Seen::default());
             tokio::spawn(serve(listener, Arc::clone(&seen)));
 
-            let hub = hub(Sockets);
+            let hub = hub(Sockets::new());
             let probe = probe(&hub, declared(), Os::Linux, &[]);
             short(&probe);
 
@@ -960,7 +1064,7 @@ mod live {
                 commands: &[],
                 peers: &PEERS,
             };
-            let hub = hub(Sockets);
+            let hub = hub(Sockets::new());
             let probe = probe(&hub, &INFO, Os::Linux, &[]);
             let error = probe
                 .unix_get(Path::new(missing), "/info")

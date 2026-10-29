@@ -78,6 +78,33 @@ atomic install. M1-015 adds the cosign check. M1-014 had to settle five things t
   stamps a copy with `sed` and installs from it.
 - `RDY_VERSION` for a version that has no release gives "no file named" from the 404, not an API call.
 
+## Update (M1-015): the seam is filled
+
+Decision 2 held until M1-015. Now `verify_signature` runs the cosign check. What changed, and the small
+choices M1-015 made:
+
+- cosign is found, and its version and the trust variables are checked, before any download
+  (`check_cosign`). A missing or unusable cosign stops with nothing fetched. The stop message still gives
+  the manual route and does not name the override.
+- With `RDY_INSECURE_SKIP_SIGNATURE=1` (exactly `1`) cosign is not looked for, and the bundle is not
+  downloaded, so a release without a bundle installs on the hash only. The sha256 check still runs.
+- The rules are those of `scripts/verify-release.sh`: the 3.1.3 floor, the v0.3 `mediaType` guard, the
+  refusal of a `\u` escape and of legacy keys, the seven trust variables (even when empty), a private
+  `TUF_ROOT`, and the exact issuer, identity, repository, ref and trigger. A test keeps the variable list
+  of the two scripts equal.
+- A set trust variable exits 1 here (the script's only failure code), where `verify-release.sh` uses 64.
+  `install.sh` has no "tool missing" code, and 64 stays for bad usage.
+- The bundle and `SHA256SUMS` are each capped at 1 MiB. curl gets `--max-filesize` for both, and
+  `check_small` checks the size after the download for both tools. The cap on `SHA256SUMS` also holds
+  on the override path.
+- `COSIGN_`-prefixed variables are not refused, here or in `scripts/verify-release.sh`. The security
+  review read cosign v3.1.4 (`cmd/cosign/cli/commands.go` and `cmd/cosign/main.go`) and found no binding
+  from environment variables to flags. Only the seven trust variables change trust, and both scripts
+  refuse them. Re-check at every cosign pin bump (`.github/release-tools.txt`, `RELEASING.md`). If a
+  `COSIGN_` variable can weaken a check in a later version, add it to the list in both scripts and the
+  test that keeps them equal.
+- The real-cosign install of the first signed alpha is a founder hand step (`RELEASING.md`).
+
 ## Alternatives considered
 
 | Option | Why it lost |

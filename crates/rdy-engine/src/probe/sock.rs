@@ -29,7 +29,9 @@
 //! **Unix socket policy.**
 //! - The check must declare the socket as [`PeerClass::UnixSocket`] in `CheckInfo::peers`. The path is
 //!   absolute, has no `..`, and matches the declared text component by component. A component
-//!   `{uid}` matches one run of digits, for a rootless socket such as `/run/user/{uid}/docker.sock`.
+//!   `{uid}` matches the real user id of the process and no other (read through the backend, so a
+//!   fixture sets it with `Replay::ids`), for a rootless socket such as `/run/user/{uid}/docker.sock`.
+//!   Under `sudo` that is root's id, not the user's. If the id cannot be read, `{uid}` matches nothing.
 //!   The path is used as declared. A link in it (`/var/run` is one on most systems) is followed by the
 //!   OS.
 //! - The method is `GET`. [`Probe::unix_get`] cannot send anything else. The crate-private
@@ -210,7 +212,7 @@ impl Probe {
     ) -> Result<UdpReply, ProbeError> {
         let host = server.host().to_string();
         let port = server.port();
-        let what = format!("{host}:{port}");
+        let what = host_port(server);
         let mut fields = Map::new();
         fields.insert("host".to_owned(), host.into());
         fields.insert("port".to_owned(), port.into());
@@ -266,7 +268,7 @@ impl Probe {
         payload: &[u8],
         max_reply: usize,
     ) -> Result<usize, ProbeError> {
-        let what = format!("{}:{}", server.host(), server.port());
+        let what = host_port(server);
         let declared = self
             .scope
             .info
@@ -320,9 +322,19 @@ impl Probe {
         let what = format!("{shown} {}", clip(path));
         let (hub, entry) = self.begin(ActionKind::Http, fields, &what)?;
 
-        let result = match self.admit_unix(method, socket, path) {
+        let result = match self.admit_unix_shape(method, socket, path) {
             Err(rule) => return Err(refuse(entry, rule, &what)),
             Ok(()) => {
+                // The real user id, asked of the backend only when a declared socket has `{uid}`.
+                // If it cannot be read, `{uid}` matches nothing.
+                let uid = if self.declares_uid_socket() {
+                    hub.backend.process_ids().await.ok().map(|ids| ids.uid[0])
+                } else {
+                    None
+                };
+                if !self.socket_declared(socket, uid) {
+                    return Err(refuse(entry, RULE_UNIX_UNDECLARED, &what));
+                }
                 let timeout = self.scope.peers.timeout(UNIX_TIMEOUT);
                 self.unless_ended(&what, hub.backend.unix_get(socket, path, timeout))
                     .await
@@ -335,8 +347,14 @@ impl Probe {
         })
     }
 
-    /// The policy for a unix socket request. Returns the rule that refuses it.
-    fn admit_unix(&self, method: &str, socket: &Path, path: &str) -> Result<(), &'static str> {
+    /// The policy that needs no user id: the OS, the shape of the socket path, the method and the API
+    /// path. Returns the rule that refuses the request.
+    fn admit_unix_shape(
+        &self,
+        method: &str,
+        socket: &Path,
+        path: &str,
+    ) -> Result<(), &'static str> {
         if self.scope.os == Os::Windows {
             return Err(RULE_UNIX_OS);
         }
@@ -351,16 +369,25 @@ impl Probe {
         if !api_path_allowed(path) {
             return Err(RULE_UNIX_API_PATH);
         }
-        let declared = self.scope.info.is_some_and(|info| {
+        Ok(())
+    }
+
+    /// Whether any socket the check declared has a `{uid}` segment.
+    fn declares_uid_socket(&self) -> bool {
+        self.scope.info.is_some_and(|info| {
             info.peers
                 .iter()
-                .any(|peer| matches!(peer, PeerClass::UnixSocket(p) if socket_matches(p, socket)))
-        });
-        if declared {
-            Ok(())
-        } else {
-            Err(RULE_UNIX_UNDECLARED)
-        }
+                .any(|peer| matches!(peer, PeerClass::UnixSocket(p) if p.contains(UID_SEGMENT)))
+        })
+    }
+
+    /// Whether the check declared `socket`. `uid` is the process's real user id, if it is known.
+    fn socket_declared(&self, socket: &Path, uid: Option<u32>) -> bool {
+        self.scope.info.is_some_and(|info| {
+            info.peers.iter().any(
+                |peer| matches!(peer, PeerClass::UnixSocket(p) if socket_matches(p, socket, uid)),
+            )
+        })
     }
 
     /// The path as the log shows it.
@@ -369,6 +396,14 @@ impl Probe {
             || path.to_string_lossy().into_owned(),
             |hub| hub.log.display_path(path),
         )
+    }
+}
+
+/// `host:port` for messages, with brackets around an IPv6 literal.
+fn host_port(server: &Target) -> String {
+    match server.host() {
+        Host::Ipv6(addr) => format!("[{addr}]:{}", server.port()),
+        host => format!("{host}:{}", server.port()),
     }
 }
 
@@ -403,9 +438,14 @@ fn api_path_allowed(path: &str) -> bool {
         .any(|allowed| allowed.strip_prefix('/') == Some(tail))
 }
 
-/// Whether `socket` is the declared `pattern`, segment by segment, where `{uid}` matches one run of
-/// ASCII digits. Both are absolute. An empty segment (`//`), a `.` and a trailing slash do not match.
-fn socket_matches(pattern: &str, socket: &Path) -> bool {
+/// The segment of a declared socket that stands for the user id.
+const UID_SEGMENT: &str = "{uid}";
+
+/// Whether `socket` is the declared `pattern`, segment by segment, where `{uid}` matches the decimal
+/// text of `uid`, the real user id of this process, and nothing else (no sign, no leading zero). With
+/// no `uid`, `{uid}` matches nothing. Both are absolute. An empty segment (`//`), a `.` and a trailing
+/// slash do not match.
+fn socket_matches(pattern: &str, socket: &Path, uid: Option<u32>) -> bool {
     let Some(text) = socket.to_str() else {
         return false;
     };
@@ -418,8 +458,8 @@ fn socket_matches(pattern: &str, socket: &Path) -> bool {
         match (wanted.next(), have.next()) {
             (None, None) => return true,
             (Some(want), Some(got)) if !got.is_empty() && got != "." && got != ".." => {
-                let same = if want == "{uid}" {
-                    got.bytes().all(|b| b.is_ascii_digit())
+                let same = if want == UID_SEGMENT {
+                    uid.is_some_and(|uid| got == uid.to_string())
                 } else {
                     want == got
                 };
