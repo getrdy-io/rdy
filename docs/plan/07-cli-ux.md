@@ -75,7 +75,7 @@ On Windows `rdy trust add` exits 64 and is not supported in M1 (ADR 0027).
 | `--key <key>` | M1 | Trust this public key (file or text) for this run only. Argv only. Prints the KEY NOT PINNED banner |
 | `--sig <file>` | M1 | Signature file. Default `<spec>.minisig` |
 | `--json` | M1 | Write the Report to stdout |
-| `--out-dir <dir>` | M1 | Parent folder for the report folder. Default `.` on Unix, `%USERPROFILE%\rdy-reports` on Windows (made if missing, and refused if it is a link or junction) |
+| `--out-dir <dir>` | M1 | Parent folder for the report folder. Default `.` on Unix, `%USERPROFILE%\rdy-reports` on Windows (made if missing, and refused if it is a link or junction or on a network share). Windows keeps the ACL the folder inherits, and `--out-dir C:\` lets other local users read the report, so keep the default |
 | `--no-report` | M1 | Write no files |
 | `--kubeconfig <file>`, `--kube-context <name>` | M1 | Kubernetes access. Help warns that a kubeconfig from someone else can run programs |
 | `--no-network` | M1 | Open no sockets. Network and Kubernetes checks are skipped as `missing_need`. With a kube flag, the `cluster` header line says the flag is ignored; it is not a usage error |
@@ -2024,8 +2024,8 @@ and fix. Exact-text tests in `crates/rdy-cli/src/error/tests.rs` hold them.
 | --- | --- | --- |
 | The new folder is owned by another user | `error: cannot create the report folder <path> (the folder is owned by another user)` | `use --out-dir <a folder on a local disk>, or --no-report to skip the files. On NFS with root_squash, root cannot own new folders` |
 | The new folder cannot be made private | `error: cannot create the report folder <path> (the folder cannot be made private)` | `use --out-dir <a folder on a disk that keeps Unix permissions>, or --no-report to skip the files` |
-| A symlink, junction or other reparse point is in the way, or the path is not a folder (Windows) | `error: cannot create the report folder <path> (a link, junction or other redirect is in the way)` | `use --out-dir <an ordinary folder you own>, or --no-report to skip the files. Remove the link or junction at that path` |
-| `USERPROFILE` is not set to a full path, so the Windows default is unknown | `error: cannot create the report folder %USERPROFILE%\rdy-reports (USERPROFILE is not set to a full path)` | `set USERPROFILE, or use --out-dir <a folder you can write to>, or --no-report to skip the files` |
+| A symlink, junction, cloud-sync folder or other reparse point is in the way, or the path is not a folder (Windows) | `error: cannot create the report folder <path> (a link, junction, cloud-sync folder or other redirect is in the way, or it is not a folder)` | `use --out-dir <an ordinary folder you own on a local disk, not a link, junction or cloud-sync folder>, or --no-report to skip the files` |
+| `USERPROFILE` is not set, is relative, or is on a network share, so the Windows default is unknown | `error: cannot create the report folder %USERPROFILE%\rdy-reports (USERPROFILE is not set to a path on a local drive)` | `set USERPROFILE, or use --out-dir <a folder you can write to>, or --no-report to skip the files` |
 | The folder name and the next eight are taken | `error: cannot create the report folder in <parent> (all the folder names are taken)` | `wait a second and run again, or use --out-dir <another folder>` |
 | A report file with the final name exists (a bug, rdy never replaces it) | `error: cannot write the report files to <path> (the file already exists)` | The standard bug hint |
 

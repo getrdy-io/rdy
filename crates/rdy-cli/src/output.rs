@@ -13,7 +13,8 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use rdy_engine::output::{
-    OPEN_PARENT, OutputDir, ReportError, default_parent, report_folder_name, report_timestamp,
+    OPEN_PARENT, OutputDir, ReportError, default_report_parent, report_folder_name,
+    report_timestamp,
 };
 
 use crate::cli::RunArgs;
@@ -36,20 +37,22 @@ pub fn open_report_dir(
     if args.no_report {
         return Ok(None);
     }
-    let parent = match &args.out_dir {
-        Some(dir) => dir.clone(),
-        // Windows only: this makes `%USERPROFILE%\rdy-reports` and refuses a redirect there. On
-        // Unix it is `.` and cannot fail.
-        None => default_parent()
-            .map_err(|err| report_error(ReportStep::CreateFolder, Path::new(DEFAULT_LABEL), err))?,
-    };
     let ts = report_timestamp(now);
-    OutputDir::create_new(&parent, product, &ts)
-        .map(Some)
-        .map_err(|err| {
-            let shown = parent.join(report_folder_name(product, &ts));
-            report_error(ReportStep::CreateFolder, &shown, err)
-        })
+    let shown = |parent: &Path| parent.join(report_folder_name(product, &ts));
+    let made = match &args.out_dir {
+        Some(dir) => OutputDir::create_new(dir, product, &ts)
+            .map_err(|err| report_error(ReportStep::CreateFolder, &shown(dir), err)),
+        // Windows: opens `%USERPROFILE%\rdy-reports` without following a link and refuses a
+        // redirect there. On Unix it is `.` and cannot fail.
+        None => {
+            let label = Path::new(DEFAULT_LABEL);
+            let parent = default_report_parent()
+                .map_err(|err| report_error(ReportStep::CreateFolder, label, err))?;
+            OutputDir::create_new_in(&parent, product, &ts)
+                .map_err(|err| report_error(ReportStep::CreateFolder, &shown(parent.path()), err))
+        }
+    };
+    made.map(Some)
 }
 
 /// Maps an output directory error to the CLI error. `shown` is the folder as rdy names it, the

@@ -177,26 +177,62 @@ fn a_product_that_would_escape_is_a_bug_message_with_no_echo() {
 #[test]
 fn the_default_parent_is_the_current_folder() {
     assert!(args(&[]).out_dir.is_none());
-    assert_eq!(default_parent().expect("default"), Path::new("."));
+    assert_eq!(
+        default_report_parent().expect("default").path(),
+        Path::new(".")
+    );
+}
+
+#[cfg(windows)]
+const DEFAULT_CASE_ENV: &str = "RDY_CLI_OUTPUT_TEST_DEFAULT";
+
+/// The child side of the Windows default test: `USERPROFILE` is a temp folder set by the parent, so
+/// nothing is left in the real profile. With the variable unset this is a no-op that passes.
+#[cfg(windows)]
+#[test]
+fn child_default_lands_under_userprofile() {
+    if std::env::var_os(DEFAULT_CASE_ENV).is_none() {
+        return;
+    }
+    let profile = std::path::PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE"));
+    let out = open_report_dir(&args(&[]), "acme", now())
+        .expect("open")
+        .expect("a folder");
+    assert_eq!(
+        out.path().parent(),
+        Some(profile.join("rdy-reports").as_path())
+    );
+    assert!(out.path().is_dir());
 }
 
 /// The exit test of M1-037 through the real entry point: with no `--out-dir`, the report folder is
-/// made under `%USERPROFILE%\rdy-reports`.
+/// made under `%USERPROFILE%\rdy-reports`. The run is a child with a temp profile.
 #[cfg(windows)]
 #[test]
 fn the_default_lands_under_userprofile_rdy_reports() {
     assert!(args(&[]).out_dir.is_none());
-    let profile = std::path::PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE"));
-    let out = open_report_dir(&args(&[]), "acme-m1-037-test", now())
-        .expect("open")
-        .expect("a folder");
-    let expected_parent = profile.join("rdy-reports");
-    assert_eq!(out.path().parent(), Some(expected_parent.as_path()));
-    assert!(out.path().is_dir());
-    let path = out.path().to_path_buf();
-    drop(out);
-    // Take away only the folder this test made.
-    fs::remove_dir(&path).expect("remove the test folder");
+    let profile = tempfile::tempdir().expect("temp dir");
+    let out = std::process::Command::new(std::env::current_exe().expect("test exe"))
+        .args([
+            "--exact",
+            "output::tests::child_default_lands_under_userprofile",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(DEFAULT_CASE_ENV, "1")
+        .env("USERPROFILE", profile.path())
+        .output()
+        .expect("run child");
+    assert!(
+        out.status.success(),
+        "child failed: {}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        entries(&profile.path().join("rdy-reports")),
+        ["rdy-report-acme-20270309T143005Z"]
+    );
 }
 
 #[test]
@@ -213,9 +249,12 @@ fn a_redirect_error_maps_to_a_report_write_error_with_a_fix() {
     assert_eq!(err.exit_code().code(), 70);
     assert!(
         err.to_string()
-            .contains("a link, junction or other redirect")
+            .contains("a link, junction, cloud-sync folder or other redirect")
     );
-    assert!(err.hint().contains("Remove the link or junction"));
+    assert!(
+        err.hint()
+            .contains("not a link, junction or cloud-sync folder")
+    );
     let err = report_error(
         ReportStep::CreateFolder,
         Path::new(DEFAULT_LABEL),
@@ -224,6 +263,6 @@ fn a_redirect_error_maps_to_a_report_write_error_with_a_fix() {
     assert_eq!(err.code(), ErrorCode::ReportWrite);
     assert_eq!(
         err.to_string(),
-        r"cannot create the report folder %USERPROFILE%\rdy-reports (USERPROFILE is not set to a full path)"
+        r"cannot create the report folder %USERPROFILE%\rdy-reports (USERPROFILE is not set to a path on a local drive)"
     );
 }

@@ -223,7 +223,10 @@ fn unsafe_file_names_are_refused() {
 #[cfg(not(windows))]
 #[test]
 fn the_default_parent_is_the_current_folder_off_windows() {
-    assert_eq!(default_parent().expect("default"), Path::new("."));
+    assert_eq!(
+        default_report_parent().expect("default").path(),
+        Path::new(".")
+    );
 }
 
 #[test]
@@ -305,21 +308,23 @@ fn the_attribute_bits_tell_a_plain_folder_from_a_reparse_point() {
 fn the_default_folder_is_made_when_it_is_missing_and_reused_when_it_is_there() {
     let profile = tempfile::tempdir().expect("temp dir");
     let want = profile.path().join("rdy-reports");
-    assert_eq!(prepare_default_parent(profile.path()).expect("make"), want);
+    assert_eq!(open_default_in(profile.path()).expect("make").path(), want);
     assert!(want.is_dir());
     fs::write(want.join("keep"), b"old").expect("plant");
-    assert_eq!(prepare_default_parent(profile.path()).expect("reuse"), want);
+    let parent = open_default_in(profile.path()).expect("reuse");
+    assert_eq!(parent.path(), want);
     assert_eq!(names(&want), ["keep"], "nothing was removed or added");
-    // The run folder goes under it like under any parent.
-    let out = OutputDir::create_new(&want, "acme", TS).expect("create");
+    // The run folder goes under the held handle, and shows under the folder's name.
+    let out = OutputDir::create_new_in(&parent, "acme", TS).expect("create");
     assert_eq!(out.path().parent(), Some(want.as_path()));
+    assert_eq!(names(&want), ["keep", out.name()]);
 }
 
 #[test]
 fn the_default_folder_is_not_made_when_the_profile_is_missing() {
     let profile = tempfile::tempdir().expect("temp dir");
     let missing = profile.path().join("no-profile");
-    let err = prepare_default_parent(&missing).expect_err("no profile");
+    let err = open_default_in(&missing).expect_err("no profile");
     assert!(matches!(err, ReportError::Io { .. }), "{err}");
     assert!(!missing.exists(), "the profile folder is never made");
 }
@@ -330,7 +335,7 @@ fn a_default_folder_that_is_a_link_or_a_junction_is_refused_and_not_followed() {
     let elsewhere = tempfile::tempdir().expect("temp dir");
     let link = profile.path().join("rdy-reports");
     plant_redirect(&link, elsewhere.path());
-    let err = prepare_default_parent(profile.path()).expect_err("a redirect must be refused");
+    let err = open_default_in(profile.path()).expect_err("a redirect must be refused");
     assert!(
         matches!(&err, ReportError::NotPlainFolder { path } if *path == link),
         "{err}"
@@ -342,7 +347,7 @@ fn a_default_folder_that_is_a_link_or_a_junction_is_refused_and_not_followed() {
 fn a_default_folder_that_is_a_file_is_refused() {
     let profile = tempfile::tempdir().expect("temp dir");
     fs::write(profile.path().join("rdy-reports"), b"a file").expect("plant");
-    let err = prepare_default_parent(profile.path()).expect_err("a file");
+    let err = open_default_in(profile.path()).expect_err("a file");
     assert!(matches!(err, ReportError::NotPlainFolder { .. }), "{err}");
 }
 
@@ -397,16 +402,10 @@ fn a_folder_swapped_for_a_redirect_after_mkdir_is_refused_and_nothing_is_written
         plant_redirect(&dir.join(name), &target);
     })
     .expect_err("a redirect must be refused");
+    let planted = parent.path().join("rdy-report-acme-20270309T143005Z");
     assert!(
-        matches!(
-            &err,
-            ReportError::NotPlainFolder { .. }
-                | ReportError::Io {
-                    action: "open the report folder",
-                    ..
-                }
-        ),
-        "{err}"
+        matches!(&err, ReportError::NotPlainFolder { path } if *path == planted),
+        "{err:?}"
     );
     assert!(
         names(elsewhere.path()).is_empty(),
@@ -572,10 +571,9 @@ mod unix {
         })
         .expect_err("a symlink must be refused");
         assert!(
-            matches!(&err, ReportError::Io { action, .. } if *action == "open the report folder"),
-            "{err}"
+            matches!(&err, ReportError::NotPlainFolder { .. }),
+            "{err:?}"
         );
-        assert_refused_as_symlink(err.io_error().expect("an OS error"));
         assert!(
             names(elsewhere.path()).is_empty(),
             "nothing was written there"
@@ -910,26 +908,87 @@ mod windows {
         fs::symlink_metadata(path).expect("stat").file_attributes() & 0x400 != 0
     }
 
+    const CASE_ENV: &str = "RDY_OUTPUT_TEST_DEFAULT_CASE";
+
+    /// The child side of the default folder tests. `USERPROFILE` is set by the parent, so the real
+    /// profile is never touched. With `CASE_ENV` unset this is a no-op that passes.
+    #[test]
+    fn child_default_parent() {
+        let Ok(case) = std::env::var(CASE_ENV) else {
+            return;
+        };
+        let got = default_report_parent();
+        match case.as_str() {
+            "ok" => {
+                let parent = got.expect("default");
+                let out = OutputDir::create_new_in(&parent, "acme", TS).expect("create");
+                assert_eq!(out.path().parent(), Some(parent.path()));
+                out.write_atomic("report.json", &redacted("x"))
+                    .expect("write");
+            }
+            "refused" => assert!(matches!(got, Err(ReportError::NoDefaultFolder)), "{got:?}"),
+            "redirect" => assert!(
+                matches!(got, Err(ReportError::NotPlainFolder { .. })),
+                "{got:?}"
+            ),
+            other => panic!("unknown case {other}"),
+        }
+    }
+
+    fn child(case: &str, userprofile: &dyn AsRef<std::ffi::OsStr>) -> std::process::Output {
+        let mut cmd = Command::new(std::env::current_exe().expect("test exe"));
+        cmd.args([
+            "--exact",
+            "output::tests::windows::child_default_parent",
+            "--nocapture",
+            "--test-threads=1",
+        ]);
+        cmd.env(CASE_ENV, case).env("USERPROFILE", userprofile);
+        cmd.output().expect("run child")
+    }
+
+    fn assert_ok(out: &std::process::Output) {
+        assert!(
+            out.status.success(),
+            "child failed: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Exit test: the default lands under `%USERPROFILE%\rdy-reports`. The profile is a temp folder,
+    /// so nothing is left in the real one.
     #[test]
     fn the_default_parent_is_under_userprofile() {
-        let profile = PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE"));
-        let got = default_parent().expect("default");
-        assert_eq!(got, profile.join("rdy-reports"));
-        assert!(got.is_dir());
-        assert!(!is_reparse_point(&got));
+        let profile = tempfile::tempdir().expect("temp dir");
+        assert_ok(&child("ok", &profile.path()));
+        let reports = profile.path().join("rdy-reports");
+        let folders = names(&reports);
+        assert_eq!(folders, ["rdy-report-acme-20270309T143005Z"]);
+        assert!(!is_reparse_point(&reports));
+        assert!(reports.join(&folders[0]).join("report.json").is_file());
     }
 
     #[test]
-    fn a_report_folder_under_the_default_is_a_plain_folder_with_its_files() {
-        let parent = default_parent().expect("default");
-        let out = OutputDir::create_new(&parent, "acme-m1-037-engine", TS).expect("create");
-        assert_eq!(out.path().parent(), Some(parent.as_path()));
-        out.write_atomic("report.json", &redacted("x"))
-            .expect("write");
-        assert!(!is_reparse_point(out.path()));
-        let path = out.path().to_path_buf();
-        drop(out);
-        fs::remove_dir_all(&path).expect("remove the test folder");
+    fn a_default_folder_that_is_a_junction_is_refused_by_the_real_entry_point() {
+        let profile = tempfile::tempdir().expect("temp dir");
+        let elsewhere = tempfile::tempdir().expect("temp dir");
+        junction(&profile.path().join("rdy-reports"), elsewhere.path());
+        assert_ok(&child("redirect", &profile.path()));
+        assert!(names(elsewhere.path()).is_empty());
+    }
+
+    #[test]
+    fn a_userprofile_that_is_not_a_local_full_path_gives_no_default_folder() {
+        for bad in [
+            "",
+            "profile",
+            r"..\profile",
+            r"\\server\share\profile",
+            r"\\?\UNC\server\share\profile",
+        ] {
+            assert_ok(&child("refused", &bad));
+        }
     }
 
     #[test]
@@ -975,15 +1034,8 @@ mod windows {
         })
         .expect_err("a symlink must be refused");
         assert!(
-            matches!(
-                &err,
-                ReportError::NotPlainFolder { .. }
-                    | ReportError::Io {
-                        action: "open the report folder",
-                        ..
-                    }
-            ),
-            "{err}"
+            matches!(&err, ReportError::NotPlainFolder { .. }),
+            "{err:?}"
         );
         assert!(names(elsewhere.path()).is_empty());
     }
@@ -1006,18 +1058,61 @@ mod windows {
         assert!(matches!(err, ReportError::NotPlainFolder { .. }), "{err}");
     }
 
-    /// `open_new_dir` on a junction must not hand back a handle to the target's contents. Either
-    /// the open fails, or harden refuses the handle it returned.
+    /// `open_new_dir` on a junction must not follow it: the open fails with
+    /// `ERROR_STOPPED_ON_SYMLINK`, and `open_error` names that as a redirect.
     #[test]
-    fn a_junction_opened_by_name_is_refused_by_open_or_by_harden() {
+    fn a_junction_opened_by_name_fails_to_open_and_is_named_a_redirect() {
         let parent = tempfile::tempdir().expect("temp dir");
         let elsewhere = tempfile::tempdir().expect("temp dir");
         let link = parent.path().join("linked");
         junction(&link, elsewhere.path());
         let dir = Dir::open_ambient_dir(parent.path(), ambient_authority()).expect("open");
-        if let Ok(opened) = open_new_dir(&dir, "linked") {
-            let err = harden(&opened, &link).expect_err("harden must refuse the junction");
-            assert!(matches!(err, ReportError::NotPlainFolder { .. }), "{err}");
-        }
+        let err = match open_new_dir(&dir, "linked") {
+            Ok(_) => panic!("the junction must not open as a folder"),
+            Err(err) => err,
+        };
+        assert_eq!(err.raw_os_error(), Some(1281), "{err}");
+        let named = open_error("open", &dir, "linked", &link, err);
+        assert!(
+            matches!(named, ReportError::NotPlainFolder { .. }),
+            "{named:?}"
+        );
+    }
+
+    /// A handle on the junction itself (opened with `FILE_FLAG_OPEN_REPARSE_POINT`), the handle the
+    /// attribute check exists for. `check_plain_folder` must refuse it by its reparse bit, and a
+    /// handle on a real folder opened the same way must pass.
+    #[test]
+    fn a_handle_on_a_reparse_point_is_refused_by_its_attributes() {
+        use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+
+        const BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        let open_itself = |path: &Path| {
+            fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT)
+                .open(path)
+                .expect("open the entry itself")
+        };
+        let parent = tempfile::tempdir().expect("temp dir");
+        let elsewhere = tempfile::tempdir().expect("temp dir");
+        let real = parent.path().join("real");
+        fs::create_dir(&real).expect("mkdir");
+        let file = open_itself(&real);
+        assert_eq!(file.metadata().expect("stat").file_attributes() & 0x400, 0);
+        check_plain_folder(&Dir::from_std_file(file), &real).expect("a real folder passes");
+
+        let link = parent.path().join("linked");
+        junction(&link, elsewhere.path());
+        let file = open_itself(&link);
+        assert_ne!(
+            file.metadata().expect("stat").file_attributes() & 0x400,
+            0,
+            "the handle is on the junction itself"
+        );
+        let err = check_plain_folder(&Dir::from_std_file(file), &link)
+            .expect_err("a reparse handle must be refused");
+        assert!(matches!(err, ReportError::NotPlainFolder { .. }), "{err:?}");
     }
 }

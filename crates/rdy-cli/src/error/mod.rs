@@ -190,7 +190,7 @@ pub enum ReportReason {
     /// A link, a junction or another redirect is where the folder should be, or the path is not a
     /// folder. Windows.
     NotPlainFolder,
-    /// `USERPROFILE` is not set to a full path, so the Windows default folder is unknown.
+    /// `USERPROFILE` is not a path on a local drive, so the Windows default folder is unknown.
     NoDefaultFolder,
     /// The nine folder names of this second are all taken.
     NameTaken,
@@ -204,8 +204,8 @@ impl fmt::Display for ReportReason {
             Self::Io(reason) => reason.fmt(f),
             Self::NotOwner => f.write_str("the folder is owned by another user"),
             Self::NotPrivate => f.write_str("the folder cannot be made private"),
-            Self::NotPlainFolder => f.write_str("a link, junction or other redirect is in the way"),
-            Self::NoDefaultFolder => f.write_str("USERPROFILE is not set to a full path"),
+            Self::NotPlainFolder => f.write_str("a link, junction, cloud-sync folder or other redirect is in the way, or it is not a folder"),
+            Self::NoDefaultFolder => f.write_str("USERPROFILE is not set to a path on a local drive"),
             Self::NameTaken => f.write_str("all the folder names are taken"),
             Self::FileExists => f.write_str("the file already exists"),
         }
@@ -460,7 +460,7 @@ impl CliError {
                     "use --out-dir <a folder on a disk that keeps Unix permissions>, or --no-report to skip the files"
                 }
                 (ReportReason::NotPlainFolder, _) => {
-                    "use --out-dir <an ordinary folder you own>, or --no-report to skip the files. Remove the link or junction at that path"
+                    "use --out-dir <an ordinary folder you own on a local disk, not a link, junction or cloud-sync folder>, or --no-report to skip the files"
                 }
                 (ReportReason::NoDefaultFolder, _) => {
                     "set USERPROFILE, or use --out-dir <a folder you can write to>, or --no-report to skip the files"

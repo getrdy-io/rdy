@@ -465,8 +465,8 @@ fn every_report_folder_reason_has_its_own_message_and_fix() {
             r"C:\Users\jdoe\rdy-reports\rdy-report-x",
             ReportReason::NotPlainFolder
         )),
-        "error: cannot create the report folder C:\\Users\\jdoe\\rdy-reports\\rdy-report-x (a link, junction or other redirect is in the way)\n\
-         fix: use --out-dir <an ordinary folder you own>, or --no-report to skip the files. Remove the link or junction at that path\n"
+        "error: cannot create the report folder C:\\Users\\jdoe\\rdy-reports\\rdy-report-x (a link, junction, cloud-sync folder or other redirect is in the way, or it is not a folder)\n\
+         fix: use --out-dir <an ordinary folder you own on a local disk, not a link, junction or cloud-sync folder>, or --no-report to skip the files\n"
     );
     assert_eq!(
         text_of(&write(
@@ -474,7 +474,7 @@ fn every_report_folder_reason_has_its_own_message_and_fix() {
             r"%USERPROFILE%\rdy-reports",
             ReportReason::NoDefaultFolder
         )),
-        "error: cannot create the report folder %USERPROFILE%\\rdy-reports (USERPROFILE is not set to a full path)\n\
+        "error: cannot create the report folder %USERPROFILE%\\rdy-reports (USERPROFILE is not set to a path on a local drive)\n\
          fix: set USERPROFILE, or use --out-dir <a folder you can write to>, or --no-report to skip the files\n"
     );
     assert_eq!(
