@@ -164,7 +164,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-075 | todo | | Env-level harness, in process
 
-- M1-076 | PR #TBD | | Arrays and choices show their type only, and array items are not expanded. No backlog ticket covers array items (the `checks` entry fields, `bundle.collect` and `redact`), and M1-084 covers choices and examples only, so the coordinator should file one. The Example column and the missing-description failure wait for M1-084. The page has an empty cell for a property with no description until then.
+- M1-076 | [#80](https://github.com/getrdy-io/rdy/pull/80) | 2026-10-29 | Arrays and choices show their type only, and array items are not expanded. No backlog ticket covers array items (the `checks` entry fields, `bundle.collect` and `redact`), and M1-084 covers choices and examples only, so the coordinator should file one. The Example column and the missing-description failure wait for M1-084. The page has an empty cell for a property with no description until then.
 
 - M1-077 | todo | | askama HTML report with inline CSS, dark mode and print
 
