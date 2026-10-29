@@ -181,7 +181,9 @@ pub(super) fn stat(
 /// inode that passed the rules, never from the path a second time. Linux uses the judged `O_PATH`
 /// descriptor. The portable path opens the real path with no link followed (macOS: `O_NOFOLLOW_ANY`
 /// and `F_GETPATH`, judged again) and asks that descriptor, so a parent swapped after the judgment
-/// cannot give the numbers of another file system.
+/// cannot give the numbers of another file system. The guard here is the check's `statfs` prefixes,
+/// not its `reads`. A path the user cannot open for reading is measured through its parent when both
+/// are on one file system, and otherwise reported as `PermissionDenied` (see [`statvfs_by_path`]).
 pub(super) fn statvfs(
     path: &Path,
     guard: &ReadGuard,
@@ -195,9 +197,62 @@ pub(super) fn statvfs(
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let (fd, _) = target.open(path, guard, Want::Either)?;
-        Ok(fs::fstatvfs(&fd)?)
+        statvfs_by_path(path, &target.real, &target.stat, guard, secrets)
     }
+}
+
+/// The portable `statvfs`: open the real path and ask that descriptor. The open needs read permission,
+/// which Linux's `O_PATH` does not, so a directory the user can search but not read gets one more
+/// step. The numbers belong to the file system, so the parent will do when it is on the same file
+/// system (same device). A mount point is not: its parent is another file system, and its numbers
+/// would be wrong for the path. That case, and a parent that cannot be opened or that the rules
+/// refuse, return the original `PermissionDenied`, which the probe reports as
+/// `ProbeError::PermissionDenied` and the check reports as not verified. It is never a guess.
+/// Compiled on every Unix so Linux tests it.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(super) fn statvfs_by_path(
+    requested: &Path,
+    real: &Path,
+    before: &Stat,
+    guard: &ReadGuard,
+    secrets: &Secrets,
+) -> io::Result<fs::StatVfs> {
+    let error = match open_by_path(requested, real, before, guard, Want::Either) {
+        Ok((fd, _)) => return Ok(fs::fstatvfs(&fd)?),
+        Err(error) => error,
+    };
+    // A refusal by the rules (`Refused`) is final. Only a plain permission error gets the parent.
+    if error.kind() != io::ErrorKind::PermissionDenied || Refused::from_io(&error).is_some() {
+        return Err(error);
+    }
+    statvfs_through_parent(error, real, before, guard, secrets)
+}
+
+/// The parent step of [`statvfs_by_path`]: numbers from the parent directory when it is on the same
+/// file system as `real`, and `denied` (the error of the failed open) when it is not or cannot be used.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(super) fn statvfs_through_parent(
+    denied: io::Error,
+    real: &Path,
+    before: &Stat,
+    guard: &ReadGuard,
+    secrets: &Secrets,
+) -> io::Result<fs::StatVfs> {
+    let Some(parent) = real.parent() else {
+        return Err(denied);
+    };
+    // The parent goes through the same steps as any path: real path, rules, no secret, no link.
+    let Ok((parent_real, parent_stat)) = locate_by_path(parent, guard, secrets) else {
+        return Err(denied);
+    };
+    let Ok((fd, opened)) = open_by_path(parent, &parent_real, &parent_stat, guard, Want::Dir)
+    else {
+        return Err(denied);
+    };
+    if opened.st_dev != before.st_dev {
+        return Err(denied);
+    }
+    Ok(fs::fstatvfs(&fd)?)
 }
 
 fn refused(rule: &'static str) -> io::Error {

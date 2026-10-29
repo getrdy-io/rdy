@@ -94,6 +94,7 @@ calls on `spawn_blocking`, and pure CPU work over big input uses `rdy_engine::bl
 | `default_timeout` | From 03. The engine falls back to 10 s and caps at 60 s. |
 | `os` | `Full`, `Partial(note)` or `NotYet` per OS. There is no "not applicable" here (ADR 0013). |
 | `reads`, `env` | Absolute path prefixes and env var names. |
+| `statfs` | Absolute path prefixes for `NativeCall::Statvfs` only. A check with `statfs: ["/"]` and no `reads` gets file system numbers for any path and cannot read a file (M1-171). |
 | `commands` | `CommandSpec`: program name, extra search directories (absolute constants), stdout cap, extra env names. |
 | `peers` | Peer classes: `SpecHosts`, `Proxy`, `SystemResolver`, `KubeApi`. |
 
@@ -435,8 +436,10 @@ tests policy.
 - An exhaustive `match` maps each variant to its policy row. A snapshot test of the variant list fails
   CI until the snapshot and a 05 table row change in the same PR.
 - M1 variants:
-  - `Statvfs { path }`: the path passes the read rules; logged as `native`, `api: statvfs`, with
-    `path`.
+  - `Statvfs { path }`: the path passes the read denylist and the check's `statfs` prefixes, as written and
+    again on the real path; logged as `native`, `api: statvfs`, with `path`. `reads` does not judge it
+    (M1-171): a disk check declares `statfs: ["/"]` to measure any spec path and declares no `reads` over
+    the tree. A check with only `reads` is refused. A probe built with no `CheckInfo` gets the denylist alone.
   - `Uname`, `Rlimit(resource)`, `Hostname`, `SystemRoots`.
   - `MachineId`: Windows `MachineGuid`; Linux reads `/etc/machine-id` as a file; macOS has none in M1,
     so its `host_id` is null. The raw value never enters the log or the report; only 01's salted
@@ -450,6 +453,12 @@ tests policy.
   - `StatvfsInfo::no_exec` is an `Option<bool>`. Linux and Android set it from `ST_NOEXEC`. macOS has no
     such flag in `statvfs`, so it is `None`: unknown. A check that forbids `noexec` reports "not
     verified" for `None`, never a pass. Reading `MNT_NOEXEC` from `statfs` is a later ticket.
+  - macOS opens the real path for reading before it asks `fstatvfs`, so a directory the user can search
+    but not read fails to open. The live backend then asks the parent directory when the parent is on
+    the same device (the numbers belong to the file system), after the same real-path rules. A mount
+    point, a parent the rules refuse and a parent that cannot be opened are not guessed: the call returns
+    `ProbeError::PermissionDenied`, and the check reports "not verified" with that reason (M1-171).
+    Linux uses `O_PATH`, which needs no read permission, and never gets here.
 - No `sysinfo` in M1. In M2 its variants use refresh kinds without environ, cmdline, cwd and root.
 - No `bind()` port probes. `host.ports` reports "owner unknown, not verified".
 
@@ -776,7 +785,8 @@ pub struct CheckInfo {
     pub meta: CheckMeta, // ADR 0026 (M1-089)
     pub needs: &'static [Need], pub wants: &'static [Want],
     pub default_timeout: Option<Duration>, pub os: OsSupport,
-    pub reads: &'static [&'static str], pub env: &'static [&'static str],
+    pub reads: &'static [&'static str], pub statfs: &'static [&'static str],
+    pub env: &'static [&'static str],
     pub commands: &'static [CommandSpec], pub peers: &'static [PeerClass],
 }
 pub struct CheckMeta { pub title: &'static str, pub remediation: &'static str }
@@ -885,7 +895,8 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
     fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> { /* table::run */ }
     fn resolve<'a>(&'a self, host: &'a str) -> BoxFuture<'a, io::Result<Vec<IpAddr>>>;
     fn connect<'a>(&'a self, addr: SocketAddr) -> BoxFuture<'a, io::Result<BoxedStream>>;
-    // The ReadGuard matters to `Statvfs` only: a backend that resolves links judges the real path with
+    // The ReadGuard matters to `Statvfs` only, and for that call it holds the check's `statfs` prefixes,
+    // not `reads` (M1-171). A backend that resolves links judges the real path with
     // `guard.admit_real` before it asks the file system. An OS with no source returns an `io::Error` of
     // kind Unsupported, which the probe reports as `ProbeError::Unsupported` (M1-046).
     fn native<'a>(&'a self, call: &'a NativeCall, guard: &'a ReadGuard) -> BoxFuture<'a, io::Result<NativeValue>>;

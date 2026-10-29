@@ -43,13 +43,15 @@ static DISK_CHECK: CheckInfo = CheckInfo {
         macos: Support::Full,
         windows: Support::NotYet,
     },
-    reads: &["/var/lib"],
+    reads: &[],
+    statfs: &["/var/lib"],
     env: &[],
     commands: &[],
     peers: &[],
 };
 
-/// A check that declared `/` as a read prefix, as a disk check must to `statvfs` any spec path.
+/// A check that declared `/` as a read prefix and as a `statfs` prefix: it can read and measure anywhere
+/// the denylist allows.
 static BROAD_CHECK: CheckInfo = CheckInfo {
     id: "host.fixture",
     family: "host",
@@ -67,6 +69,56 @@ static BROAD_CHECK: CheckInfo = CheckInfo {
         windows: Support::NotYet,
     },
     reads: &["/"],
+    statfs: &["/"],
+    env: &[],
+    commands: &[],
+    peers: &[],
+};
+
+/// A disk check as M1-068 declares it: `statfs: ["/"]` and no `reads`, so any path gets file system
+/// numbers and no file can be read.
+static STATFS_ONLY: CheckInfo = CheckInfo {
+    id: "host.fixture",
+    family: "host",
+    summary: "Asks for free space on any path and reads no file.",
+    meta: CheckMeta {
+        title: "Fixture check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
+    needs: &[],
+    wants: &[],
+    default_timeout: None,
+    os: OsSupport {
+        linux: Support::Full,
+        macos: Support::Full,
+        windows: Support::NotYet,
+    },
+    reads: &[],
+    statfs: &["/"],
+    env: &[],
+    commands: &[],
+    peers: &[],
+};
+
+/// A check that declared `reads` over the tree and no `statfs`: `reads` does not judge `Statvfs`.
+static READS_ONLY: CheckInfo = CheckInfo {
+    id: "host.fixture",
+    family: "host",
+    summary: "Reads files and asks for no file system numbers.",
+    meta: CheckMeta {
+        title: "Fixture check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
+    needs: &[],
+    wants: &[],
+    default_timeout: None,
+    os: OsSupport {
+        linux: Support::Full,
+        macos: Support::Full,
+        windows: Support::NotYet,
+    },
+    reads: &["/"],
+    statfs: &[],
     env: &[],
     commands: &[],
     peers: &[],
@@ -194,6 +246,73 @@ async fn statvfs_outside_the_declared_prefixes_is_refused_and_logged() {
     assert_eq!(field(refused, "api"), Some(&json!("statvfs")));
     assert_eq!(field(refused, "path"), Some(&json!("/etc")));
     assert_eq!(field(refused, "rule"), Some(&json!(RULE_OUTSIDE_READS)));
+}
+
+#[tokio::test]
+async fn a_statfs_prefix_of_slash_measures_any_path_and_reads_no_file() {
+    let replay = answers()
+        .native(statvfs("/data/disk0"), NativeValue::Statvfs(disk()))
+        .file("/data/disk0/notes.txt", "hello");
+    let hub = hub(replay);
+    let probe = hub.check_probe("host.fixture", Os::Linux, Some(&STATFS_ONLY));
+    assert_eq!(
+        probe.native(statvfs("/data/disk0")).await,
+        Ok(NativeValue::Statvfs(disk()))
+    );
+    // No `reads`, so no file, directory or stat is available, wherever it is.
+    let file = Path::new("/data/disk0/notes.txt");
+    let errors = [
+        probe.read(file).await.expect_err("no reads"),
+        probe.stat(file).await.expect_err("no reads"),
+        probe
+            .read_dir(Path::new("/data/disk0"))
+            .await
+            .expect_err("no reads"),
+    ];
+    for error in &errors {
+        assert_eq!(rule_of(error), RULE_OUTSIDE_READS);
+    }
+}
+
+#[tokio::test]
+async fn the_denylist_still_applies_under_a_statfs_prefix_of_slash() {
+    let hub = hub(Replay::new().native(statvfs("/etc/shadow"), NativeValue::Statvfs(disk())));
+    let probe = hub.check_probe("host.fixture", Os::Linux, Some(&STATFS_ONLY));
+    for path in [
+        "/etc/shadow",
+        "/home/alice/.ssh/id_rsa",
+        "/etc/../etc/shadow",
+    ] {
+        assert!(
+            matches!(
+                probe.native(statvfs(path)).await,
+                Err(ProbeError::Denied { .. })
+            ),
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn reads_alone_do_not_judge_statvfs() {
+    let hub = hub(Replay::new().native(statvfs("/var/lib"), NativeValue::Statvfs(disk())));
+    let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READS_ONLY));
+    let error = probe
+        .native(statvfs("/var/lib"))
+        .await
+        .expect_err("no statfs prefix");
+    assert_eq!(rule_of(&error), RULE_OUTSIDE_READS);
+}
+
+#[tokio::test]
+async fn a_statfs_prefix_matches_whole_components() {
+    let hub = hub(Replay::new().native(statvfs("/var/library"), NativeValue::Statvfs(disk())));
+    let probe = hub.check_probe("host.fixture", Os::Linux, Some(&DISK_CHECK));
+    let error = probe
+        .native(statvfs("/var/library"))
+        .await
+        .expect_err("not under /var/lib");
+    assert_eq!(rule_of(&error), RULE_OUTSIDE_READS);
 }
 
 #[tokio::test]
@@ -486,7 +605,7 @@ fn snapshot_of_code() -> String {
             Who::RunLevel => "run-level probes only",
         };
         let rules = if policy.path_rules {
-            "read rules apply"
+            "read denylist and statfs prefixes apply"
         } else {
             "none"
         };

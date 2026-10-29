@@ -15,8 +15,8 @@ use crate::probe::policy::RULE_OUTSIDE_READS;
 use crate::probe::{Backend, Probe, ProbeError, ProbeHub};
 use crate::redact::{Redactor, TagKey};
 
-fn manifest(reads: &[&Path]) -> &'static CheckInfo {
-    let reads: Vec<&'static str> = reads
+fn manifest(statfs: &[&Path]) -> &'static CheckInfo {
+    let statfs: Vec<&'static str> = statfs
         .iter()
         .map(|path| &*Box::leak(path.to_string_lossy().into_owned().into_boxed_str()))
         .collect();
@@ -36,7 +36,8 @@ fn manifest(reads: &[&Path]) -> &'static CheckInfo {
             macos: Support::Full,
             windows: Support::NotYet,
         },
-        reads: Box::leak(reads.into_boxed_slice()),
+        reads: &[],
+        statfs: Box::leak(statfs.into_boxed_slice()),
         env: &[],
         commands: &[],
         peers: &[],
@@ -79,7 +80,7 @@ fn statvfs(path: &Path) -> NativeCall {
 }
 
 #[tokio::test]
-async fn statvfs_of_a_directory_inside_the_prefixes_answers_real_numbers() {
+async fn statvfs_of_a_directory_inside_the_statfs_prefixes_answers_real_numbers() {
     let sandbox = Sandbox::new();
     let value = sandbox
         .check()
@@ -99,13 +100,13 @@ async fn statvfs_of_a_directory_inside_the_prefixes_answers_real_numbers() {
 }
 
 #[tokio::test]
-async fn statvfs_outside_the_prefixes_is_refused_before_the_file_system_is_asked() {
+async fn statvfs_outside_the_statfs_prefixes_is_refused_before_the_file_system_is_asked() {
     let sandbox = Sandbox::new();
     let error = sandbox
         .check()
         .native(statvfs(Path::new("/")))
         .await
-        .expect_err("outside the reads");
+        .expect_err("outside the statfs prefixes");
     assert!(
         matches!(&error, ProbeError::Denied { rule, .. } if *rule == RULE_OUTSIDE_READS),
         "{error:?}"
@@ -121,7 +122,7 @@ async fn statvfs_through_a_link_to_a_place_outside_the_prefixes_is_refused() {
         .check()
         .native(statvfs(&link))
         .await
-        .expect_err("the real path is outside the reads");
+        .expect_err("the real path is outside the statfs prefixes");
     assert!(matches!(error, ProbeError::Denied { .. }), "{error:?}");
     let log = sandbox.hub.action_log().actions;
     assert_eq!(log[0].outcome, ActionOutcome::Denied);

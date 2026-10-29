@@ -47,6 +47,7 @@ fn manifest(reads: &[&Path], env: &'static [&'static str]) -> &'static CheckInfo
             windows: Support::NotYet,
         },
         reads: Box::leak(reads.into_boxed_slice()),
+        statfs: &[],
         env,
         commands: &[],
         peers: &[],
@@ -223,7 +224,7 @@ async fn the_exit_test_refusals_are_logged() {
         let result = tokio::time::timeout(Duration::from_secs(10), probe.read(path))
             .await
             .expect("the refusal does not wait");
-        let error = result.expect_err("refused");
+        let error = result.err().expect("refused");
         assert_eq!(rule_of(&error), *rule, "{}", path.display());
     }
 
@@ -611,6 +612,81 @@ fn the_portable_statvfs_asks_the_descriptor_it_opened() {
         crate::probe::Refused::from_io(&error).map(|r| r.rule),
         Some(RULE_NOT_FILE_OR_DIR)
     );
+}
+
+#[test]
+fn the_portable_statvfs_measures_a_readable_path_by_itself() {
+    let sandbox = Sandbox::new();
+    sandbox.write("data/file", b"x");
+    let guard = ReadGuard::new(Os::Linux, None);
+    let none = files::Secrets::default();
+    let dir = sandbox.path("data");
+    let (real, stat) = files::locate_by_path(&dir, &guard, &none).expect("ok");
+    let info = files::statvfs_by_path(&dir, &real, &stat, &guard, &none).expect("numbers");
+    assert!(info.f_blocks > 0);
+}
+
+#[test]
+fn a_rule_refusal_of_the_target_is_final_and_gets_no_parent() {
+    // A FIFO is refused by `open_by_path` with a `Refused`. `statvfs_by_path` returns it unchanged
+    // and does not try the parent.
+    let sandbox = Sandbox::new();
+    let fifo = sandbox.path("pipe");
+    mkfifo(&fifo);
+    let guard = ReadGuard::new(Os::Linux, None);
+    let none = files::Secrets::default();
+    let (real, stat) = files::locate_by_path(&fifo, &guard, &none).expect("described");
+    let error = files::statvfs_by_path(&fifo, &real, &stat, &guard, &none)
+        .err()
+        .expect("refused");
+    assert_eq!(
+        crate::probe::Refused::from_io(&error).map(|r| r.rule),
+        Some(RULE_NOT_FILE_OR_DIR)
+    );
+}
+
+#[test]
+fn an_unreadable_directory_is_measured_through_a_parent_on_the_same_file_system() {
+    // `statvfs_through_parent` runs when the open of the target fails with a plain permission error
+    // (macOS opens the directory for reading; Linux uses `O_PATH` and never gets here). A test run as
+    // root cannot make such a directory, so this starts from the step after the failure.
+    let sandbox = Sandbox::new();
+    sandbox.write("data/inner/file", b"x");
+    let guard = ReadGuard::new(Os::Linux, None);
+    let none = files::Secrets::default();
+    let (real, stat) =
+        files::locate_by_path(&sandbox.path("data/inner"), &guard, &none).expect("ok");
+    let denied = || io::Error::from(io::ErrorKind::PermissionDenied);
+    let info = files::statvfs_through_parent(denied(), &real, &stat, &guard, &none)
+        .expect("the parent is on the same file system");
+    assert!(info.f_blocks > 0);
+
+    // The check's prefixes cover the target and not its parent: the parent is refused, nothing is
+    // guessed, and the caller gets the original error.
+    let prefix: &'static str = Box::leak(real.to_string_lossy().into_owned().into_boxed_str());
+    let prefixes: &'static [&'static str] = Box::leak(vec![prefix].into_boxed_slice());
+    let narrow = ReadGuard::new(Os::Linux, Some(prefixes));
+    let error = files::statvfs_through_parent(denied(), &real, &stat, &narrow, &none)
+        .err()
+        .expect("the parent is outside the prefixes");
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+}
+
+#[test]
+fn a_mount_point_is_reported_not_measured_through_its_parent() {
+    // `/proc` is its own file system, so the numbers of `/` would be wrong for it.
+    let guard = ReadGuard::new(Os::Linux, None);
+    let none = files::Secrets::default();
+    let (real, stat) = files::locate_by_path(Path::new("/proc"), &guard, &none).expect("ok");
+    let root = rustix::fs::stat("/").expect("stat /");
+    if root.st_dev == stat.st_dev {
+        return; // a sandbox with no separate /proc: nothing to show
+    }
+    let denied = io::Error::from(io::ErrorKind::PermissionDenied);
+    let error = files::statvfs_through_parent(denied, &real, &stat, &guard, &none)
+        .err()
+        .expect("a mount point is not measured through its parent");
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
 }
 
 #[test]

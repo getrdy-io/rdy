@@ -354,7 +354,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-170 | todo | | Machine identity files denied in the read policy | backlog corrected 2026-10-29 (correction-16): new ticket (PR #94 review)
 
-- M1-171 | todo | | `statfs` prefixes judge `NativeCall::Statvfs` | backlog corrected 2026-10-29 (correction-16): new ticket (PR #94 review)
+- M1-171 | PR #TBD | | Built: `CheckInfo::statfs` (prefixes for `NativeCall::Statvfs` only). `Probe::native` builds the `ReadGuard` of a `Statvfs` call from `statfs`, so the denylist and whole-component prefixes apply as written and on the real path, and `reads` no longer counts; a check with `statfs: ["/"]` and no `reads` gets numbers for any path and cannot read, stat or list a file; a check with only `reads` is refused. Every `CheckInfo` literal gained `statfs: &[]`. macOS: when the open of the target fails with a plain permission error, `statvfs_through_parent` asks the parent directory if it is on the same device and passes the same real-path rules, otherwise the original `PermissionDenied` goes out (the check reports not verified); a rules refusal is never retried. 02, 03 (host.disk) and 05 say so; the variant snapshot row changed. No ADR. Deferred: the macOS branch is type-checked and unit-tested on Linux only (`statvfs_through_parent` and `statvfs_by_path` compile on every Unix), because there is no macOS runner or non-root user here; host.disk declaring `statfs: ["/"]` is M1-068
 
 - M1-172 | todo | | Parameter types for the M1-late check ids | backlog corrected 2026-10-29 (correction-17): new ticket (PR #98 review)
 
