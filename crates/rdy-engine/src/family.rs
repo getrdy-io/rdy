@@ -240,6 +240,14 @@ impl Registry {
             .map(|f| &**f)
     }
 
+    /// Every family, in the order it was registered.
+    ///
+    /// A family's [`Family::checks`] order is its catalog order, so walking the families and then
+    /// their checks gives the order the docs pages use. [`Registry::infos`] orders by id instead.
+    pub fn families(&self) -> impl Iterator<Item = &dyn Family> + '_ {
+        self.families.iter().map(|f| &**f)
+    }
+
     /// The family and static facts of the check `id`, if this build has it.
     #[must_use]
     pub fn check(&self, id: &str) -> Option<(&dyn Family, &'static CheckInfo)> {

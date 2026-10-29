@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use rdy_engine::check::{
-    BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckOutcome, Need, OsSupport, Support,
-    Want,
+    BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Need,
+    OsSupport, Support, Want,
 };
 use rdy_engine::family::{BuildError, Built, Family};
 use rdy_spec::check::CheckParams;
@@ -39,6 +39,7 @@ const ROOT: &[Want] = &[Want {
 const fn info(
     id: &'static str,
     summary: &'static str,
+    meta: CheckMeta,
     secs: u64,
     wants: &'static [Want],
 ) -> CheckInfo {
@@ -46,6 +47,7 @@ const fn info(
         id,
         family: "host",
         summary,
+        meta,
         needs: &[],
         wants,
         default_timeout: Some(Duration::from_secs(secs)),
@@ -57,28 +59,79 @@ const fn info(
     }
 }
 
+// Titles and remediation follow the Fix lines of 03 section 2, with the measured values taken out.
+// The check that replaces each stub may sharpen its text. Its findings carry the specific fix.
+
 static DISK: CheckInfo = info(
     "host.disk",
     "Free space, inodes, mount flags per path",
+    CheckMeta {
+        title: "Disk space and mount flags",
+        remediation: "Run `df -h` on the install path to see what is free. Grow the volume or point the install at a larger disk. If the path is on a `noexec` mount, remount it with `exec` and remove `noexec` from `/etc/fstab`, or move the install path.",
+    },
     5,
     &[],
 );
-static MEMORY: CheckInfo = info("host.memory", "RAM, swap, cgroup limit", 2, &[]);
-static PORTS: CheckInfo = info("host.ports", "Required ports free", 5, ROOT);
+static MEMORY: CheckInfo = info(
+    "host.memory",
+    "RAM, swap, cgroup limit",
+    CheckMeta {
+        title: "Memory",
+        remediation: "Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number. If the spec forbids swap, run `swapoff -a` and comment out the swap lines in `/etc/fstab`.",
+    },
+    2,
+    &[],
+);
+static PORTS: CheckInfo = info(
+    "host.ports",
+    "Required ports free",
+    CheckMeta {
+        title: "Free ports",
+        remediation: "Stop the process that holds the port, or change the product's port setting. If a required port is in the ephemeral range, reserve it with `net.ipv4.ip_local_reserved_ports` in a file under `/etc/sysctl.d/`, then run `sysctl --system`.",
+    },
+    5,
+    ROOT,
+);
 static LSM: CheckInfo = info(
     "host.lsm",
     "SELinux and AppArmor state, recent denials",
+    CheckMeta {
+        title: "SELinux and AppArmor",
+        remediation: "Read recent denials with `ausearch -m avc -ts recent`. Install the vendor's policy module, or label the volume with `chcon -Rt container_file_t` or the `:Z` mount option. As a last resort, run `setenforce 0` and set `SELINUX=permissive` in `/etc/selinux/config`.",
+    },
     3,
     ROOT,
 );
 static SECURITY_AGENTS: CheckInfo = info(
     "host.security_agents",
     "Security software processes that inspect file and process activity",
+    CheckMeta {
+        title: "Security software",
+        remediation: "Software in this category often inspects file opens and process launches. If the install is slow or fails, ask the security team to review exclusions for the product's paths, then run rdy again.",
+    },
     5,
     ROOT,
 );
-static CPU: CheckInfo = info("host.cpu", "Cores, arch, CPU flags, virtualization", 2, &[]);
-static HOST_OS: CheckInfo = info("host.os", "Distro, version, arch, FIPS", 2, &[]);
+static CPU: CheckInfo = info(
+    "host.cpu",
+    "Cores, arch, CPU flags, virtualization",
+    CheckMeta {
+        title: "CPU",
+        remediation: "Resize the instance to get more vCPUs or the right architecture. If a CPU flag is missing on a VM, set the VM CPU model to host passthrough or turn off CPU feature masking on the hypervisor.",
+    },
+    2,
+    &[],
+);
+static HOST_OS: CheckInfo = info(
+    "host.os",
+    "Distro, version, arch, FIPS",
+    CheckMeta {
+        title: "Operating system",
+        remediation: "Use an OS image the vendor supports, or ask the vendor about the one you have.",
+    },
+    2,
+    &[],
+);
 
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 7] = [

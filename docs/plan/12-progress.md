@@ -190,7 +190,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-088 | todo | | --json stdout hygiene on every exit path and the static TTY line
 
-- M1-089 | todo | | CheckMeta in the check registry, read by xtask
+- M1-089 | PR #TBD | | ADR 0026 (Proposed until cli-ux reviews the remediation text). The family list lives in `xtask::checks::registry` until M1-057 moves it into `rdy_cli` (correction for M1-057). `HostFamily` is not registered in the CLI (M1-067 rule stands). `xtask checks` lists the seven host stubs, so M1-116 must skip ids in `HostFamily::stub_ids()` (correction for M1-116). The report does not fall back to `meta.remediation` yet: ADR 0026 implies a 1h ticket. `docs-lint` runs the same validation, but neither command is in `ci.yml` yet; a unit test runs it in `cargo test`.
 
 - M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case)
 

@@ -1725,6 +1725,8 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "rdy-checks-host",
+ "rdy-engine",
  "rdy-spec",
  "serde_json",
  "sha2",

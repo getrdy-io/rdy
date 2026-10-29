@@ -205,6 +205,25 @@ impl OsSupport {
     }
 }
 
+/// The words a person reads about a check: its title and its remediation (ADR 0026).
+///
+/// The docs site prints these strings as they are, and the report will print the same remediation,
+/// so the two cannot disagree. The other facts a check catalog page shows already live elsewhere: the
+/// id, family, summary, OS support, needs and reads in [`CheckInfo`], the thresholds in the typed spec
+/// parameters, and the sort order in the order of [`Family::checks`](crate::family::Family::checks).
+///
+/// `cargo xtask checks` lists every registered check with these fields. It fails when one is blank or
+/// holds a control character.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CheckMeta {
+    /// A short name for headings and lists, such as `Memory`.
+    pub title: &'static str,
+    /// The general fix for this check, in plain sentences. It names no measured value and has no
+    /// placeholder to fill. A finding's own `fix` is more specific, and a spec `fix` replaces rdy's
+    /// text (`rdy_engine::outcome`).
+    pub remediation: &'static str,
+}
+
 /// The static facts about a check.
 ///
 /// Every check has exactly one, as a `static`. The planner reads it without running anything, the
@@ -216,8 +235,10 @@ pub struct CheckInfo {
     pub id: &'static str,
     /// The family prefix, such as `host`.
     pub family: &'static str,
-    /// One line for humans.
+    /// What the check measures, in one line.
     pub summary: &'static str,
+    /// The title and remediation that the docs print (ADR 0026).
+    pub meta: CheckMeta,
     /// Hard needs. A missing one means `skipped` with `skip_kind: missing_need`.
     pub needs: &'static [Need],
     /// Soft needs. A missing one means a partial result.

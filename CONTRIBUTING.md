@@ -67,9 +67,12 @@ cargo xtask docs
 cargo xtask docs --check
 cargo xtask schema --check
 cargo xtask docs-lint
+cargo xtask checks
 ```
 
 `cargo xtask docs` writes the generated pages under `docs/`. Never edit those pages by hand. Change the generator, then run the command again. `docs-lint` reads only the files that git tracks. Run `git add` on a new file before you lint it. `dist` and `publish` are off in this build.
+
+`cargo xtask checks` lists every registered check with its id, family, title and remediation, one tab-separated row each. It fails when a title or remediation is empty. A new check fills in the `meta` field of its `CheckInfo` (ADR 0026). `docs-lint` runs the same test.
 
 To try your change by hand:
 
