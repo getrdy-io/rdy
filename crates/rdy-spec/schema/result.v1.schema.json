@@ -86,7 +86,7 @@
           "maxLength": 4096
         },
         "bytes": {
-          "description": "read",
+          "description": "read, connect (the udp reply), http (the unix socket body)",
           "type": "integer",
           "minimum": 0
         },
@@ -123,6 +123,13 @@
             "null"
           ],
           "maxLength": 4096
+        },
+        "proto": {
+          "description": "connect: udp for a datagram exchange. Absent for a TCP connection.",
+          "type": "string",
+          "enum": [
+            "udp"
+          ]
         },
         "via_proxy": {
           "description": "connect, user info stripped",
@@ -190,7 +197,7 @@
           "minimum": 0
         },
         "truncated": {
-          "description": "exec, read",
+          "description": "exec, read, connect (udp), http (unix socket)",
           "type": "boolean"
         }
       },
