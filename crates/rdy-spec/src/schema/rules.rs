@@ -248,19 +248,37 @@ fn value_of(child: &Value) -> Value {
     })
 }
 
-/// Bounds what the free-form maps `observed` and `expected` may hold, so a text or a list inside one
-/// cannot be larger than any other field. The maps have at most 64 keys, and a value nests at most
-/// three levels: a scalar, a list or object of those, and a list or object of those.
-fn bound_values(schema: &mut Schema, names: &[&str]) {
+/// The name of the definition that bounds a value of an open map, and an unknown key of an object.
+pub(crate) const EXTRA: &str = "Extra";
+
+/// The definition behind [`EXTRA`]: a scalar, or a list or object of at most two more levels, with every
+/// text at most 4 KiB, at most 256 items and 64 keys at each level.
+pub(crate) fn extra_definition() -> Value {
     let leaf = scalar_value();
     let middle = value_of(&leaf);
-    let top = value_of(&middle);
+    let mut top = value_of(&middle);
+    if let Value::Object(map) = &mut top {
+        map.insert(
+            "description".into(),
+            "A value of an open map, or the value of a key this version does not know. A scalar, or a list or object of at most two more levels.".into(),
+        );
+    }
+    top
+}
+
+/// Bounds what the free-form maps `observed` and `expected` may hold, so a text or a list inside one
+/// cannot be larger than any other field. The maps have at most 64 keys, and a value nests at most
+/// three levels.
+fn bound_values(schema: &mut Schema, names: &[&str]) {
     let Some(Value::Object(properties)) = schema.get_mut("properties") else {
         return;
     };
     for name in names {
         if let Some(Value::Object(field)) = properties.get_mut(*name) {
-            field.insert("additionalProperties".into(), top.clone());
+            field.insert(
+                "additionalProperties".into(),
+                json!({ "$ref": format!("#/$defs/{EXTRA}") }),
+            );
             field.insert("maxProperties".into(), json!(64));
         }
     }

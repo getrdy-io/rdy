@@ -1625,6 +1625,31 @@ fn ok_reads_fold_per_directory_on_windows_paths_too() {
 }
 
 #[test]
+fn a_backslash_in_a_unix_name_does_not_split_the_directory() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    // Each name has a backslash in it. Split there, every call would be a directory of its own.
+    for i in 0..COALESCE_OK_AFTER + 10 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/opt/d/x{i}\\f")),
+            "",
+        );
+    }
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), COALESCE_OK_AFTER + 1);
+    let folded = log
+        .actions
+        .iter()
+        .find(|a| a.kind == ActionKind::Coalesced)
+        .expect("a coalesced entry");
+    assert_eq!(field(folded, "under"), Some(&json!("/opt/d")));
+    assert_eq!(field(folded, "count"), Some(&json!(10)));
+}
+
+#[test]
 fn a_denied_read_in_a_folded_directory_is_its_own_entry() {
     let hub = hub(Replay::new());
     let probe = hub.check_probe("host.walker", Os::Linux, None);

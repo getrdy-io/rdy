@@ -572,12 +572,12 @@ pub struct KubeIdentity {
     /// `true` when `user` came from `SelfSubjectReview`. `false` when it is the kubeconfig user, which
     /// the API server did not verify.
     pub user_verified: bool,
-    /// Base name of the kubeconfig credential plugin that ran, if any. At most 255 characters, with no
-    /// white space, `/` or `\`: it never carries a path or arguments.
+    /// Base name of the kubeconfig credential plugin that ran, if any. One to 255 letters, digits, `.`,
+    /// `_`, `+` or `-`: it never carries a path or arguments.
     #[serde(default)]
     #[cfg_attr(
         feature = "schema",
-        schemars(length(max = 255), regex(pattern = r"^[^\s/\\]+$"))
+        schemars(regex(pattern = r"^[A-Za-z0-9._+-]{1,255}$"))
     )]
     pub exec_plugin: Option<String>,
     /// The context skips TLS verification.

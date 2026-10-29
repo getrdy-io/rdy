@@ -266,6 +266,8 @@ fn an_exec_plugin_is_valid_and_shows_in_the_json_the_model_writes() -> TestResul
         "aws --token=x",
         "/usr/bin/aws",
         "C:\\bin\\aws.exe",
+        "aws\n",
+        "aws\u{7f}",
         "",
         "p".repeat(256).as_str(),
     ] {
@@ -537,6 +539,31 @@ fn hostile_result_fixtures_give_the_documented_answer() -> TestResult {
                 d["checks"][0]["observed"]["list"] = json!(["a".repeat(5 * 1024 * 1024)]);
             }),
             false,
+        ),
+        (
+            "a 5 MiB text under an unknown top-level key",
+            edited(&|d| d["junk"] = json!("a".repeat(5 * 1024 * 1024))),
+            false,
+        ),
+        (
+            "a 5 MiB text under an unknown key of a check result",
+            edited(&|d| d["checks"][0]["junk"] = json!("a".repeat(5 * 1024 * 1024))),
+            false,
+        ),
+        (
+            "a 5 MiB text under an unknown key of the kube identity",
+            edited(&|d| d["identity"]["kube"]["junk"] = json!("a".repeat(5 * 1024 * 1024))),
+            false,
+        ),
+        (
+            "an unknown key nested four levels deep",
+            edited(&|d| d["added_later"] = json!({"a": {"b": {"c": {"d": 1}}}})),
+            false,
+        ),
+        (
+            "an unknown key with a small nested value",
+            edited(&|d| d["checks"][0]["added_later"] = json!({"a": [1, "x"]})),
+            true,
         ),
         (
             "65 keys in observed",

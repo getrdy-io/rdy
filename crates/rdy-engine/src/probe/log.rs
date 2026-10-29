@@ -474,8 +474,16 @@ fn fold_key(action: &Action) -> Option<FoldKey> {
     };
     let dir = if files {
         let path = text("path").unwrap_or_default();
-        path.rsplit_once(['/', '\\'])
-            .map_or(String::new(), |(dir, _)| dir.to_owned())
+        // A backslash ends a directory only in a Windows path (`C:\Windows\f` or `\\host\share\f`).
+        // On Unix it is a character of a name, and splitting there would let `x1\f` defeat the fold.
+        let windows = path.starts_with("\\\\")
+            || matches!(path.as_bytes(), [drive, b':', b'\\' | b'/', ..] if drive.is_ascii_alphabetic());
+        let split = if windows {
+            path.rsplit_once(['/', '\\'])
+        } else {
+            path.rsplit_once('/')
+        };
+        split.map_or(String::new(), |(dir, _)| dir.to_owned())
     } else {
         ["program", "host", "url", "api", "path"]
             .iter()

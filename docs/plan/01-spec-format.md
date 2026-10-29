@@ -561,7 +561,8 @@ test asserts both identities, and that bucket counts match the summary.
 **Size caps in the schema.** `message` 1 KiB; `fix` and `builtin_fix` 4 KiB; `notes` 20 items of 1 KiB;
 `actions` 5000 items; `checks` 256, `needs` 32 and `argv` 256 items; `observed` and `expected` 64 keys each, with
 values of at most three levels; `annotations` 32, `actions_dropped` 32 and `by_rule` 64 keys; any other list 1000 items
-and any other map 256 keys; `identity.kube.exec_plugin` a bare name of at most 255 characters; every other string 4 KiB;
+and any other map 256 keys; a key the schema does not know holds a value of at most three levels with the same
+bounds (readers ignore unknown keys, 3.4); `findings` in a lint report 258; `identity.kube.exec_plugin` a bare name of 1 to 255 letters, digits, `.`, `_`, `+` or `-`; every other string 4 KiB;
 `observed` and `expected` 64 KiB each (prose, checked by the writer). A string cut by a cap ends with ` [truncated]`, and the check's `truncated` flag is set. The whole document is at most 2 MiB, which every reader checks before it parses. That check is the real size control (05 Appendix A D2); a schema cannot cap bytes.
 
 ### 5.1 Host identity

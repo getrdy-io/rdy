@@ -11,7 +11,10 @@
 //!    value in a spec, though the typed reader treats it as unset.
 //! 4. In the result schema, a text with no other limit gets `maxLength` 4096 (docs/plan/05, SEC-63),
 //!    so a field added later is capped without anyone remembering to do it.
-//! 5. In the result schema, a list with no `maxItems` gets 1000 and a map with no `maxProperties`
+//! 5. In the result schema, an object with named fields and no `additionalProperties` gets one that
+//!    points at the bounded `Extra` definition. Readers ignore keys they do not know (01 section 3.4), and
+//!    a schema that let an unknown key hold anything would leave it as the way around every cap above.
+//! 6. In the result schema, a list with no `maxItems` gets 1000 and a map with no `maxProperties`
 //!    gets 256, for the same reason.
 
 use schemars::Schema;
@@ -32,6 +35,7 @@ const NUMBER_FORMATS: &[&str] = &[
 pub(crate) struct Tidy {
     forbid_null: bool,
     cap_text: bool,
+    bound_unknown: bool,
 }
 
 impl Tidy {
@@ -39,11 +43,13 @@ impl Tidy {
     pub(crate) const SPEC: Self = Self {
         forbid_null: true,
         cap_text: false,
+        bound_unknown: false,
     };
     /// The pass for the result schema.
     pub(crate) const RESULT: Self = Self {
         forbid_null: false,
         cap_text: true,
+        bound_unknown: true,
     };
 }
 
@@ -64,6 +70,9 @@ impl Transform for Tidy {
         if self.cap_text {
             cap_text(object);
             cap_collections(object);
+        }
+        if self.bound_unknown {
+            bound_unknown_keys(object);
         }
     }
 }
@@ -160,6 +169,19 @@ pub(crate) const MAX_ITEMS: u64 = 1000;
 
 /// The most keys in a result map with no smaller limit of its own.
 pub(crate) const MAX_KEYS: u64 = 256;
+
+/// Points the unknown keys of an object with named fields at the bounded `Extra` definition.
+fn bound_unknown_keys(object: &mut Map<String, Value>) {
+    if object.get("type").is_some_and(|t| t == "object")
+        && object.contains_key("properties")
+        && !object.contains_key("additionalProperties")
+    {
+        object.insert(
+            "additionalProperties".into(),
+            json!({ "$ref": format!("#/$defs/{}", super::EXTRA) }),
+        );
+    }
+}
 
 /// Gives a list or a map with no limit one.
 fn cap_collections(object: &mut Map<String, Value>) {
