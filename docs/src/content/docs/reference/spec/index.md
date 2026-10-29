@@ -11,7 +11,7 @@ A vendor's readiness requirements (`apiVersion: rdy/v1`, `kind: Readiness`).
 
 Check ids this schema does not know are allowed and reported as not run. Every other unknown key is an error, so a newer spec fails loudly on an older rdy.
 
-Each table has one row per property. A field that lists values takes one of them. A `choice` field takes one of the shapes in its own section, below. Each example is a valid value for its field.
+Each table has one row per property. A field that lists values takes one of them. A field that takes an object in one of its forms has a section below for that form. Each example is a valid value for its field.
 
 ## Top-level fields
 
@@ -51,14 +51,14 @@ One check to run: an id, the common fields below, and the parameters of that che
 | `timeout` | string | no |  | How long this check may run, 1s to 60s. Replaces the check's own default. Outside that range the check is not run and lint reports an error. |  |
 | `os` | array of one of `linux`, `macos`, `windows` | no |  | Run only on these operating systems. On others the check is reported as not applicable and does not count. |  |
 
-## checks entries where id is host.cpu
+### host.cpu
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `min` | integer | no |  | Minimum CPU cores rdy can use (container limits count). | `4` |
-| `recommended` | integer | no |  | Below this many cores: warn. | `8` |
-| `arch` | array of one of `x86_64`, `aarch64`, `amd64`, `arm64` | no |  | CPU architectures the product runs on. A machine with another architecture blocks the check. |  |
-| `flags` | array of string | no |  | CPU feature flags the product needs, such as `avx2`. A missing flag blocks the check. |  |
+| `min` | integer | no |  | Fewer cores than this: the check fails. Container limits count. | `4` |
+| `recommended` | integer | no |  | Fewer cores than this: the check warns. | `8` |
+| `arch` | array of one of `x86_64`, `aarch64`, `amd64`, `arm64` | no |  | The host must have one of these architectures. `amd64` is `x86_64` and `arm64` is `aarch64`. |  |
+| `flags` | array of string | no |  | CPU flags the host must have, such as `avx2` or `x86-64-v3`. At most 64. |  |
 
 Example:
 
@@ -68,15 +68,15 @@ min: 4
 recommended: 8
 ```
 
-## checks entries where id is host.memory
+### host.memory
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `min` | choice | yes |  | Minimum total RAM. | `16Gi` |
-| `min_available` | choice | no |  | Below this much free RAM: warn. Default half of min. |  |
-| `swap` | one of `forbid`, `any` | no | `any` | forbid: swap must be off. |  |
-| `tolerance_percent` | number | no |  | How far below min still passes, in percent, because a 32 GiB machine shows a little less. Default 5, at least 256 MiB. 0 turns it off. |  |
-| `tolerance_result` | one of `pass`, `warn` | no | `pass` | What a value inside the tolerance counts as. |  |
+| `min` | integer or string | yes |  | Less total RAM than this: the check fails, after the tolerance. | `16Gi` |
+| `min_available` | integer or string | no |  | Less available RAM than this: the check warns. The default, half of `min`, is the check's. |  |
+| `swap` | one of `forbid`, `any` | no | `any` | What to do when swap is on. The default is `any`. |  |
+| `tolerance_percent` | number | no |  | How far below `min` the total may be and still pass, in percent. A 32 GiB machine shows a little less. The default is 5. The check applies it with a floor of 256 MiB. 0 turns it off. |  |
+| `tolerance_result` | one of `pass`, `warn` | no | `pass` | What a total inside the tolerance counts as. The default is `pass`. |  |
 
 Example:
 
@@ -85,16 +85,16 @@ id: host.memory
 min: 16Gi
 ```
 
-## checks entries where id is host.disk
+### host.disk
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `path` | string | yes |  | Install path. If it does not exist yet, the nearest existing parent is measured. | `/var/lib/acme` |
-| `min` | choice | yes |  | Minimum free space. | `50Gi` |
-| `recommended` | choice | no |  | Below this much free space: warn. Default min plus 20%. | `60Gi` |
-| `min_inodes` | integer | no |  | Fewest free inodes on the file system. A file system that reports no inode count is skipped. |  |
-| `forbid_options` | array of one of `noexec`, `nosuid`, `nodev`, `ro` | no |  | Mount options that block the check when the path has them, such as `noexec`. |  |
-| `forbid_fstypes` | array of string | no |  | File system types that block the check when the path uses them, such as `nfs`. |  |
+| `path` | string | yes |  | The install path. When it does not exist yet, the nearest existing parent is measured. | `/var/lib/acme` |
+| `min` | integer or string | yes |  | Less free space than this: the check fails. | `50Gi` |
+| `recommended` | integer or string | no |  | Less free space than this: the check warns. The default, `min` plus 20%, is the check's. | `60Gi` |
+| `min_inodes` | integer | no |  | Fewer free inodes than this: the check fails. |  |
+| `forbid_options` | array of one of `noexec`, `nosuid`, `nodev`, `ro` | no |  | Mount options that make the check fail. |  |
+| `forbid_fstypes` | array of string | no |  | Filesystem types that make the check fail, such as `nfs`. At most 32. |  |
 
 Example:
 
@@ -105,12 +105,12 @@ min: 50Gi
 recommended: 60Gi
 ```
 
-## checks entries where id is host.ports
+### host.ports
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `free` | array of choice | no |  | TCP ports that must be free. A port that another process holds blocks the check. | `[80, 443, 6443, 10250]` |
-| `udp_free` | array of integer | no |  | UDP ports that must be free. A port that another process holds blocks the check. |  |
+| `free` | array of integer or object | no |  | TCP ports that must be free. At most 256. | `[80, 443, 6443, 10250]` |
+| `udp_free` | array of integer | no |  | UDP ports that must be free. At most 256, none twice. |  |
 | `allow_owner` | array of string | no |  | Process names that may already hold a port, such as an earlier install of the product. |  |
 
 Example:
@@ -124,19 +124,19 @@ free:
 - 10250
 ```
 
-## checks[id=host.ports].free entries, option 2
+#### free entries, as an object
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
 | `port` | integer | yes |  | 1 to 65535. |  |
-| `bind` | one of `public`, `loopback` | no | `public` | `public` for a port the product serves on all addresses. `loopback` for a port it serves on the loopback address only. |  |
+| `bind` | one of `public`, `loopback` | no | `public` | How the product binds it. `public` is the default and means every address. `loopback` means loopback only. |  |
 
-## checks entries where id is host.lsm
+### host.lsm
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `selinux` | object | no |  | SELinux checks. Leave it out to skip them. | `{"allow": ["enforcing"], "denials_max": 0}` |
-| `apparmor` | object | no |  | AppArmor checks. Leave it out to skip them. |  |
+| `selinux` | object | no |  | What to expect of SELinux. | `{"allow": ["enforcing"], "denials_max": 0}` |
+| `apparmor` | object | no |  | What to expect of AppArmor. |  |
 
 Example:
 
@@ -148,32 +148,32 @@ selinux:
   denials_max: 0
 ```
 
-## checks[id=host.lsm].selinux
+#### selinux
 
-SELinux checks. Leave it out to skip them.
-
-| Property | Type | Required | Default | Description | Example |
-| --- | --- | --- | --- | --- | --- |
-| `allow` | array of one of `enforcing`, `permissive`, `disabled` | no |  | SELinux modes that pass. A mode outside this list blocks the check. |  |
-| `denials_max` | integer | no |  | Most SELinux denials allowed in the window. More than this warns. |  |
-| `denials_window` | string | no |  | A whole number and one unit: ms, s, m, h or d. Examples: 500ms, 10s, 7d. |  |
-| `watch` | array of string | no |  | Contexts whose denials block the check instead of warning, such as `container_t`. |  |
-
-## checks[id=host.lsm].apparmor
-
-AppArmor checks. Leave it out to skip them.
+What to expect of SELinux.
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `allow` | array of one of `enabled`, `disabled` | no |  | AppArmor modes that pass. A mode outside this list blocks the check. |  |
-| `require_profiles` | array of string | no |  | AppArmor profiles that must be loaded. |  |
+| `allow` | array of one of `enforcing`, `permissive`, `disabled` | no |  | The modes that are fine. Any other mode makes the check fail. Without it every mode is fine. |  |
+| `denials_max` | integer | no |  | More recent denials than this: the check warns. It fails when the context is in `watch`. |  |
+| `denials_window` | string | no |  | How far back denials count, such as `24h`. |  |
+| `watch` | array of string | no |  | Security contexts or programs whose denials make the check fail. |  |
 
-## checks entries where id is host.security_agents
+#### apparmor
+
+What to expect of AppArmor.
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `forbid` | array of string | no |  | Agent ids that block. Run rdy spec lint to see the known ids. | `["example-agent"]` |
-| `allow` | array of string | no |  | Agent ids that are fine. Run rdy spec lint to see the known ids. |  |
+| `allow` | array of one of `enabled`, `disabled` | no |  | The states that are fine. Any other state makes the check fail. |  |
+| `require_profiles` | array of string | no |  | Profiles that must be loaded. |  |
+
+### host.security_agents
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `forbid` | array of string | no |  | Agent ids that make the check fail when detected. `rdy spec lint` lists the known ids. | `["example-agent"]` |
+| `allow` | array of string | no |  | Agent ids that are fine when detected. |  |
 
 Example:
 
@@ -183,14 +183,14 @@ forbid:
 - example-agent
 ```
 
-## checks entries where id is host.os
+### host.os
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `supported` | array of object | no |  | Distributions and versions the product supports. Any other distribution or version blocks the check. | `[{"id": "ubuntu", "versions": ["22.04"]}]` |
-| `arch` | array of one of `x86_64`, `aarch64`, `amd64`, `arm64` | no |  | CPU architectures the product runs on. A machine with another architecture blocks the check. |  |
-| `fips` | one of `forbid`, `require`, `any` | no | `any` | `forbid` needs FIPS mode off, `require` needs it on, and `any` accepts either. | `any` |
-| `windows_min_build` | integer | no |  | Lowest Windows build number that passes. |  |
+| `supported` | array of object | no |  | The distributions the product supports. At most 64. | `[{"id": "ubuntu", "versions": ["22.04"]}]` |
+| `arch` | array of one of `x86_64`, `aarch64`, `amd64`, `arm64` | no |  | The host must have one of these architectures. |  |
+| `fips` | one of `forbid`, `require`, `any` | no | `any` | What to expect of FIPS mode. The default is `any`. | `any` |
+| `windows_min_build` | integer | no |  | The lowest Windows build number that is supported. |  |
 
 Example:
 
@@ -203,47 +203,47 @@ supported:
 fips: any
 ```
 
-## checks[id=host.os].supported entries
+#### supported entries
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `id` | string | yes |  | Distribution id from /etc/os-release, such as rhel or ubuntu. |  |
-| `versions` | array of string | no |  | Versions that pass, such as `8` for a major version or `22.04` for one exact version. |  |
+| `id` | string | yes |  | The distribution id from `/etc/os-release`, such as `rhel`. |  |
+| `versions` | array of string | no |  | The versions that are supported. `"8"` matches a major version and `"22.04"` an exact one. Without it every version is. |  |
 
-## checks entries where id is net.egress
+### net.egress
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `endpoints` | array of choice | yes |  | At most 64 endpoints in one check. A spec names at most 64 distinct hosts and 256 distinct host and port pairs across all its checks. | `["https://example.com/"]` |
-| `via_proxy` | one of `auto`, `direct`, `proxy_only` | no | `auto` | auto: try what the product would do and say if the other path works. direct: no proxy. proxy_only: only through the proxy. |  |
-| `trust` | one of `system`, `bundled` | no | `system` | Which certificate authorities verify each endpoint. `system` uses the operating system store. `bundled` uses the roots that ship inside rdy. |  |
-| `max_latency` | string | no |  | Connect slower than this: warn. Default 2s. |  |
+| `endpoints` | array of string or object | yes |  | The endpoints, 1 to 64. | `["https://registry.acme.test/"]` |
+| `via_proxy` | one of `auto`, `direct`, `proxy_only` | no | `auto` | Which path to try. The default is `auto`. `auto` tries what the product would do, and says if the other path works. `direct` uses no proxy. `proxy_only` goes only through the proxy. |  |
+| `trust` | one of `system`, `bundled` | no | `system` | Which certificates to trust. The default is `system`. `system` is the operating system's store, with the bundled public roots as a fallback. `bundled` is the bundled public roots only. |  |
+| `max_latency` | string | no |  | A connect slower than this: the check warns. The default, 2s, is the check's. |  |
 
 Example:
 
 ```yaml
 id: net.egress
 endpoints:
-- https://example.com/
+- https://registry.acme.test/
 ```
 
-## checks[id=net.egress].endpoints entries, option 2
+#### endpoints entries, as an object
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `target` | string | yes |  | host:port, [ipv6]:port, or an http or https URL. Never user:password in a URL; specs carry no credentials. |  |
-| `optional` | boolean | no | `false` | Unreachable gives warn instead of block. |  |
-| `expect_status` | array of integer | no |  | URL targets only. |  |
-| `method` | one of `HEAD`, `GET` | no | `HEAD` | URL targets only. |  |
-| `via_proxy` | one of `auto`, `direct`, `proxy_only` | no |  | How this endpoint uses the proxy. The values are the same as for the check. |  |
-| `tls` | boolean | no |  | false probes plain TCP only. Default true for port 443 and https URLs. |  |
+| `target` | string | yes |  | Where to connect. |  |
+| `optional` | boolean | no | `false` | Unreachable gives a warning and not a block. The default is false. |  |
+| `expect_status` | array of integer | no |  | The statuses that count as reachable, for a URL target. At most 16. |  |
+| `method` | one of `HEAD`, `GET` | no | `HEAD` | The request method, for a URL target. The default is `HEAD`. |  |
+| `via_proxy` | one of `auto`, `direct`, `proxy_only` | no |  | Overrides the `via_proxy` of the entry for this endpoint. |  |
+| `tls` | boolean | no |  | `false` probes plain TCP only. Without it TLS is tried for port 443 and `https` URLs. |  |
 
-## checks entries where id is net.proxy
+### net.proxy
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `required_no_proxy` | array of string | no |  | Entries NO_PROXY must cover, such as .svc or 10.0.0.0/8. | `[".svc", ".cluster.local"]` |
-| `daemons_need_proxy` | boolean | no | `false` | When true, a container runtime or the kubelet without the proxy settings blocks the check. When false, it warns. |  |
+| `required_no_proxy` | array of string | no |  | Entries that `NO_PROXY` must cover, such as `.svc` or `10.0.0.0/8`. | `[".svc", ".cluster.local"]` |
+| `daemons_need_proxy` | boolean | no | `false` | The container runtime and kubelet must have the proxy too. The default is false. |  |
 
 Example:
 
@@ -254,54 +254,54 @@ required_no_proxy:
 - .cluster.local
 ```
 
-## checks entries where id is net.tls_intercept
+### net.tls_intercept
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `hosts` | array of string | no |  | Default: the hosts of every net.egress endpoint in this spec. | `["example.com"]` |
-| `expected_issuer` | string | no |  | A regular expression in Rust regex syntax (linear time, no backreferences). |  |
-| `pin_sha256` | array of string | no |  | SHA-256 pins of the certificates the product expects, 64 lowercase hex characters each. A chain that matches none of them blocks the check. |  |
-| `forbid_interception` | boolean | no | `false` | When true, an inspecting proxy blocks the check. When false, it only warns. | `true` |
+| `hosts` | array of string | no |  | The hosts to test, 1 to 64. The default is every `net.egress` host in the spec. | `["registry.acme.test"]` |
+| `expected_issuer` | string | no |  | A pattern the issuer of the chain must match. A chain from another issuer blocks. |  |
+| `pin_sha256` | array of string | no |  | SHA-256 digests of certificates, 1 to 16, each 64 lowercase hex digits. |  |
+| `forbid_interception` | boolean | no | `false` | A chain that only this machine trusts blocks instead of warning. The default is false. | `true` |
 
 Example:
 
 ```yaml
 id: net.tls_intercept
 hosts:
-- example.com
+- registry.acme.test
 forbid_interception: true
 ```
 
-## checks entries where id is net.dns
+### net.dns
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `names` | array of choice | yes |  | Names to resolve. Each entry is a name, or an object with the name and what its answers must look like. | `["example.com"]` |
-| `max_latency` | string | no |  | Lookup slower than this: warn. Default 500ms. |  |
+| `names` | array of string or object | yes |  | The names to look up, 1 to 64. | `["registry.acme.test"]` |
+| `max_latency` | string | no |  | A lookup slower than this: the check warns. The default, 500ms, is the check's. |  |
 
 Example:
 
 ```yaml
 id: net.dns
 names:
-- example.com
+- registry.acme.test
 ```
 
-## checks[id=net.dns].names entries, option 2
+#### names entries, as an object
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `name` | string | yes |  | A host name by the grammar of Target: dot-separated labels of 1 to 63 letters, digits and hyphens that do not start or end with a hyphen. The last label is not a number (2852039166, 0xa9). |  |
-| `expect_in` | array of string | no |  | Ranges that the answers must fall in, such as `10.0.0.0/8`. |  |
-| `expect_public` | boolean | no |  | Whether the answers must be public addresses. Leave it out to skip this test. |  |
+| `name` | string | yes |  | The name to look up. |  |
+| `expect_in` | array of string | no |  | Every answer must be inside one of these ranges, 1 to 16. |  |
+| `expect_public` | boolean | no |  | The answers must be public addresses (`true`) or private ones (`false`). |  |
 
-## checks entries where id is k8s.access
+### k8s.access
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `context_pattern` | string | no |  | The current kube context must match, a guard against the wrong cluster. | `^acme-` |
-| `max_latency` | string | no |  | A whole number and one unit: ms, s, m, h or d. Examples: 500ms, 10s, 7d. |  |
-| `server_pattern` | string | no |  | The API server URL must match. |  |
+| `context_pattern` | string | no |  | The current kube context must match this pattern, a guard against the wrong cluster. | `^acme-` |
+| `max_latency` | string | no |  | A reply slower than this: the check warns. The default, 2s, is the check's. |  |
+| `server_pattern` | string | no |  | The API server URL must match this pattern. |  |
 
 Example:
 
@@ -310,15 +310,15 @@ id: k8s.access
 context_pattern: ^acme-
 ```
 
-## checks entries where id is k8s.storageclass
+### k8s.storageclass
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `class` | string | no |  | A storage class that must exist. Default: the cluster's default class. | `standard` |
-| `access_modes` | array of one of `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`, `ReadWriteOncePod` | no |  | Access modes the volumes need. The class must support each one. | `["ReadWriteOnce"]` |
-| `binding` | one of `WaitForFirstConsumer`, `Immediate`, `any` | no | `any` | When the volume is bound. `WaitForFirstConsumer` waits for a pod. `Immediate` binds at once. `any` accepts either. |  |
-| `expansion` | boolean | no |  | When true, the class must allow volume expansion. |  |
-| `reclaim_policy` | one of `Retain`, `Delete` | no |  | Mismatch gives warn. |  |
+| `class` | string | no |  | A class that must exist. The default is the cluster's default class. | `standard` |
+| `access_modes` | array of one of `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`, `ReadWriteOncePod` | no |  | Access modes the class must serve, 1 to 4. | `["ReadWriteOnce"]` |
+| `binding` | one of `WaitForFirstConsumer`, `Immediate`, `any` | no | `any` | The binding mode the class must have. The default is `any`. |  |
+| `expansion` | boolean | no |  | The class must allow expansion. |  |
+| `reclaim_policy` | one of `Retain`, `Delete` | no |  | The reclaim policy the class should have. A mismatch warns. |  |
 
 Example:
 
@@ -329,12 +329,12 @@ access_modes:
 - ReadWriteOnce
 ```
 
-## checks entries where id is k8s.rbac
+### k8s.rbac
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `can` | array of choice | yes |  | Permissions the install identity needs. Each entry is a verb and a resource as kubectl writes them, or an object with the parts spelled out. | `["create namespaces"]` |
-| `namespace` | string | no |  | Namespace for string items. Default: cluster scope. |  |
+| `can` | array of string or object | yes |  | The permissions to test, 1 to 100. Each one is an entry in the audit log of the cluster. | `["create namespaces"]` |
+| `namespace` | string | no |  | The namespace for the string items. The default is cluster scope. |  |
 
 Example:
 
@@ -344,27 +344,27 @@ can:
 - create namespaces
 ```
 
-## checks[id=k8s.rbac].can entries, option 2
+#### can entries, as an object
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `verb` | string | yes |  | The verb, such as `create`. Use `*` for any verb. |  |
-| `group` | string | no |  | The API group, such as `apps`. Leave it empty for the core group. |  |
-| `resource` | string | yes |  | The resource, such as `pods`. Use `*` for any resource. |  |
-| `subresource` | string | no |  | The subresource, such as `status`. Leave it out for the resource itself. |  |
-| `namespace` | string | no |  | The namespace the permission is needed in. Leave it out for cluster scope. |  |
-| `name` | string | no |  | The name of one object. Leave it out for any name. |  |
+| `verb` | string | yes |  | The verb. An RBAC verb such as `create`. `*` means all verbs. |  |
+| `group` | string | no |  | The API group. Empty, which is the default, is the core group. |  |
+| `resource` | string | yes |  | The resource. An RBAC resource such as `namespaces`. `*` means all resources. |  |
+| `subresource` | string | no |  | The subresource, such as `log`. |  |
+| `namespace` | string | no |  | The namespace of the object. For a string item this is the `namespace` of the entry. |  |
+| `name` | string | no |  | The name of the object. Leave it out to mean all names. |  |
 
-## checks entries where id is k8s.admission
+### k8s.admission
 
 Dry-run checks are not supported yet.
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
 | `pod_security` | one of `privileged`, `baseline`, `restricted` | no |  | The Pod Security level the product's pods need. | `baseline` |
-| `namespace` | string | no |  | The namespace the product's pods run in. The check reads the policies that apply there. | `acme` |
+| `namespace` | string | no |  | The namespace the product installs into. | `acme` |
 | `scc` | string | no |  | The OpenShift security context constraint the product documents. |  |
-| `uses` | array of one of `hostPath`, `hostNetwork`, `hostPID`, `privileged`, `runAsRoot` | no |  | Pod features the product needs; the check derives the minimum Pod Security level. |  |
+| `uses` | array of one of `hostPath`, `hostNetwork`, `hostPID`, `privileged`, `runAsRoot` | no |  | Pod features the product needs. The check derives the lowest level from them. |  |
 
 Example:
 
@@ -374,17 +374,17 @@ pod_security: baseline
 namespace: acme
 ```
 
-## checks entries where id is k8s.nodes
+### k8s.nodes
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `min_ready` | integer | no |  | Fewest ready nodes that match the selector and the architecture. | `3` |
-| `min_zones` | integer | no |  | Fewest availability zones that the matching nodes span. Zones come from node labels. |  |
-| `per_node` | object | no |  | Size of one matching node the product needs. Use allocatable values, not the instance size. | `{"cpu": 7, "memory": "28Gi"}` |
-| `free` | object | no |  | Capacity that must be unclaimed across the matching nodes. |  |
-| `arch` | array of one of `amd64`, `arm64`, `x86_64`, `aarch64` | no |  | CPU architectures of the nodes that count. Nodes with other architectures do not count. |  |
-| `selector` | object | no |  | Node labels that a node must have to count. Up to 16 pairs. |  |
-| `tolerations` | array of object | no |  | Taints the product tolerates. A node with a taint that is not listed does not count. |  |
+| `min_ready` | integer | no |  | Fewer ready nodes than this: the check fails. | `3` |
+| `min_zones` | integer | no |  | Fewer zones than this: the check fails. Without zone labels it is not evaluated. |  |
+| `per_node` | object | no |  | Each counted node must have at least this much allocatable. These are allocatable amounts, not the size of the instance. | `{"cpu": 7, "memory": "28Gi"}` |
+| `free` | object | no |  | The counted nodes together must have at least this much left after the pods' requests. |  |
+| `arch` | array of one of `amd64`, `arm64`, `x86_64`, `aarch64` | no |  | The architectures the counted nodes may have, 1 to 4. `amd64` is `x86_64`. |  |
+| `selector` | object | no |  | Only nodes with these labels are counted. |  |
+| `tolerations` | array of object | no |  | Tolerations that make tainted nodes count, at most 16. |  |
 
 Example:
 
@@ -396,44 +396,44 @@ per_node:
   memory: 28Gi
 ```
 
-## checks[id=k8s.nodes].per_node
+#### per_node
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `cpu` | choice | no |  | Cores as a number from 0.001 to 1000000 with at most three decimals, or a string of whole cores ("4") or millicores ("500m"), up to 1000000 cores. |  |
-| `memory` | choice | no |  | Bytes. A whole number with an optional binary suffix Ki, Mi, Gi, Ti, Pi. Decimal suffixes (G, GB) are rejected to avoid ambiguity. |  |
-| `pods` | integer | no |  | Pods that one node allows. This is the allocatable pod count, which is often low on small instances. |  |
-| `ephemeral` | choice | no |  | Bytes. A whole number with an optional binary suffix Ki, Mi, Gi, Ti, Pi. Decimal suffixes (G, GB) are rejected to avoid ambiguity. |  |
+| `cpu` | number or string | no |  | Cores as a number from 0.001 to 1000000 with at most three decimals, or a string of whole cores ("4") or millicores ("500m"), up to 1000000 cores. |  |
+| `memory` | integer or string | no |  | Memory. |  |
+| `pods` | integer | no |  | Pod slots. |  |
+| `ephemeral` | integer or string | no |  | Ephemeral storage. |  |
 
-## checks[id=k8s.nodes].free
+#### free
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `cpu` | choice | no |  | Cores as a number from 0.001 to 1000000 with at most three decimals, or a string of whole cores ("4") or millicores ("500m"), up to 1000000 cores. |  |
-| `memory` | choice | no |  | Bytes. A whole number with an optional binary suffix Ki, Mi, Gi, Ti, Pi. Decimal suffixes (G, GB) are rejected to avoid ambiguity. |  |
-| `pods` | integer | no |  | Pods that one node allows. This is the allocatable pod count, which is often low on small instances. |  |
-| `ephemeral` | choice | no |  | Bytes. A whole number with an optional binary suffix Ki, Mi, Gi, Ti, Pi. Decimal suffixes (G, GB) are rejected to avoid ambiguity. |  |
+| `cpu` | number or string | no |  | Cores as a number from 0.001 to 1000000 with at most three decimals, or a string of whole cores ("4") or millicores ("500m"), up to 1000000 cores. |  |
+| `memory` | integer or string | no |  | Memory. |  |
+| `pods` | integer | no |  | Pod slots. |  |
+| `ephemeral` | integer or string | no |  | Ephemeral storage. |  |
 
-## checks[id=k8s.nodes].tolerations entries
+#### tolerations entries
 
 Without a key the operator must be Exists. With Exists there is no value.
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `key` | string | no |  | A Kubernetes label or taint key: a name, or prefix/name with a lowercase DNS-style prefix. |  |
-| `operator` | one of `Equal`, `Exists` | no |  | How the key matches. `Exists` matches any value. `Equal` needs a value. |  |
-| `value` | string | no |  | A Kubernetes label or taint value: empty, or up to 63 letters, digits, -, _ and ., starting and ending with a letter or digit. |  |
-| `effect` | one of `NoSchedule`, `PreferNoSchedule`, `NoExecute` | no |  | The taint effect to tolerate. Leave it out to match every effect. |  |
+| `key` | string | no |  | The taint key. Without it the operator is `Exists` and every taint matches. |  |
+| `operator` | one of `Equal`, `Exists` | no |  | How the value is compared. Kubernetes treats a missing operator as `Equal`. |  |
+| `value` | string | no |  | The taint value. Not with `Exists`. |  |
+| `effect` | one of `NoSchedule`, `PreferNoSchedule`, `NoExecute` | no |  | The effect to tolerate. Without it every effect matches. |  |
 
-## checks entries where id is k8s.version
+### k8s.version
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `min` | choice | no |  | A dotted version such as 1.28 or 5.10, as a quoted string. A bare integer (14) is accepted. An unquoted decimal (1.30) is rejected because YAML reads it as the number 1.3. | `"1.28"` |
-| `max` | choice | no |  | A dotted version such as 1.28 or 5.10, as a quoted string. A bare integer (14) is accepted. An unquoted decimal (1.30) is rejected because YAML reads it as the number 1.3. |  |
-| `apis` | array of string | no |  | group/version Kind, for example networking.k8s.io/v1 Ingress. |  |
-| `openshift_min` | choice | no |  | Minimum OpenShift version, used when the cluster is OpenShift. |  |
-| `over_max` | one of `warn`, `block` | no | `warn` | What a server newer than max counts as. Default warn. |  |
+| `min` | string or integer | no |  | An older server blocks. | `"1.28"` |
+| `max` | string or integer | no |  | A newer server warns, or blocks with `over_max: block`. |  |
+| `apis` | array of string | no |  | APIs the server must serve, 1 to 64. Each one is written `group/version Kind`, or `version Kind` for the core group. |  |
+| `openshift_min` | string or integer | no |  | The lowest OpenShift version, used when the cluster is OpenShift. |  |
+| `over_max` | one of `warn`, `block` | no | `warn` | What a server newer than `max` counts as. The default is `warn`. |  |
 
 Example:
 
@@ -453,9 +453,9 @@ It parses in v1 and nothing acts on it yet. `rdy run` never collects anything, w
 | `collect` | array of string | no |  | Collectors: `journal:<duration>`, `k8s:events`, `file:<absolute path or glob>`. At most 64. |  |
 | `redact` | array of string | no |  | Redactor groups to add, such as `aws_keys`, `bearer_tokens` or `emails`. At most 64. The built-in rules always run, so a spec can add redaction and can never remove it. |  |
 | `redact_patterns` | array of object | no |  | Your own patterns, at most 32. A match is replaced with a `custom.<name>` placeholder. A pattern can only add redaction: where it overlaps a built-in match, the whole overlapping region is redacted. A pattern that matches the empty string is an error. |  |
-| `max_size` | choice | no |  | Bundle size cap, such as `200Mi`. It lowers rdy's own cap and never raises it. |  |
+| `max_size` | integer or string | no |  | Bundle size cap, such as `200Mi`. It lowers rdy's own cap and never raises it. |  |
 
-## bundle.redact_patterns entries
+### redact_patterns entries
 
 A vendor redaction pattern in the `bundle` block.
 

@@ -2,21 +2,23 @@
 //! (docs/plan/09-docs-site.md, section 5).
 //!
 //! The root object and each object with fields that a property names get one table, with one row per
-//! property. An array of objects gets a section for its items, and so does each object option of a
-//! `oneOf` or `anyOf`. An `allOf` `if`/`then` variant that fixes one property to a constant gets a
-//! section for its own fields. The check parameters are that kind of variant: each check id has its
-//! own table, keyed by `id`.
+//! property. An array of objects gets a section for its items. A `oneOf` or `anyOf` that mixes scalars
+//! and objects shows the types in its row, and each object form gets a section. An `allOf` `if`/`then`
+//! variant that fixes one property to a constant gets a section for its own fields, titled by that
+//! constant. The check parameters are that kind of variant: each check id has its own table, keyed by
+//! `id`. Sections nest, so a section inside a check variant is one heading level deeper.
 //!
 //! A row gives the name, the type, whether the field is required, the default, the description and an
 //! example. A scalar shows its JSON type, and an array shows `array of` and the type of its items. An
-//! object shows `object`. A fixed set of values, from `enum` or from `oneOf` or `anyOf` of constants,
-//! shows `one of` and the values. Any other `oneOf` or `anyOf` shows `choice`. A shape that none of
-//! these covers fails the run and names the property path. A property with no description fails the
-//! run too, and so does a variant example that does not carry the value that selects its variant.
+//! object shows `object`. A union of scalar types shows them joined with `or`. A fixed set of values,
+//! from `enum` or from `oneOf` or `anyOf` of constants, shows `one of` and the values. Any other
+//! `oneOf` or `anyOf` shows `choice`. A shape that none of these covers fails the run and names the
+//! property path. A property with no description fails the run too, and so does a variant example that
+//! does not carry the value that selects its variant.
 //!
 //! An example is a JSON value stored under `examples` in the schema. The page shows it as YAML, and the
-//! YAML must read back as the same value. Whether an example validates against the schema is checked by
-//! the test suite, with the validator that rdy-spec uses (ADR 0034), not by this render.
+//! YAML must read back as the same value. The test suite checks each example against the schema node it
+//! sits under, and decodes it with the rdy-spec parser (ADR 0034).
 //!
 //! The page depends only on the schema text, so its output is the same on every checkout.
 
@@ -35,7 +37,7 @@ description: Look up each rdy/v1 spec field, its type, whether it is required an
 
 const INTRO: &str = "You can use this page to look up each field of a `rdy/v1` spec. Each table shows the type, whether the field is required, its default, what the field does and an example.\n\n";
 
-const CHOICE_NOTE: &str = "Each table has one row per property. A field that lists values takes one of them. A `choice` field takes one of the shapes in its own section, below. Each example is a valid value for its field.\n\n";
+const CHOICE_NOTE: &str = "Each table has one row per property. A field that lists values takes one of them. A field that takes an object in one of its forms has a section below for that form. Each example is a valid value for its field.\n\n";
 
 const TABLE_HEAD: &str = "| Property | Type | Required | Default | Description | Example |\n| --- | --- | --- | --- | --- | --- |\n";
 
@@ -52,16 +54,17 @@ pub fn page(schema_text: &str) -> Result<String> {
     }
     out.push_str(CHOICE_NOTE);
     out.push_str("## Top-level fields\n\n");
-    write_table(&schema, &schema, "", &[], None, &mut out)?;
+    write_table(&schema, &schema, "", &[], None, 1, &mut out)?;
     Ok(out)
 }
 
-/// A table that gets its own section: an object with fields, an object option of a `oneOf` or `anyOf`,
+/// A table that gets its own section: an object with fields, an object form of a `oneOf` or `anyOf`,
 /// or a variant of an `allOf` `if`/`then`.
 struct Section<'a> {
-    /// The heading, without the `## ` that starts it.
+    /// The heading text, without the `#` marks that start it.
     heading: String,
-    /// The dotted name of `object`. Its properties are named under it, and errors start with it.
+    /// The dotted name of `object`, with array and variant marks. Its properties are named under it,
+    /// and errors start with it.
     path: String,
     object: &'a Value,
     /// The defs entered on the way to `object`.
@@ -82,13 +85,14 @@ struct Shape<'a> {
 /// Writes one table for `object`, its examples, then one section for each object with fields that a
 /// property names, and each variant of `object`. `path` is the dotted name of `object`, empty for the
 /// root. `chain` holds the defs that `object` came from. `context` is the example that fills the
-/// Example column.
+/// Example column. `level` is the heading level of this table, and its sections sit one level below.
 fn write_table<'a>(
     root: &'a Value,
     object: &'a Value,
     path: &str,
     chain: &[&'a str],
     context: Option<&'a Value>,
+    level: usize,
     out: &mut String,
 ) -> Result<()> {
     let required = required_names(object);
@@ -98,7 +102,7 @@ fn write_table<'a>(
         object.get("properties").and_then(Value::as_object);
     for (name, schema) in properties.into_iter().flatten() {
         let here = join(path, name);
-        let shape = shape(root, schema, &here, chain)?;
+        let shape = shape(root, schema, &here, name, chain)?;
         let description = text(schema, "description")
             .or_else(|| text(shape.node, "description"))
             .filter(|text| !text.trim().is_empty())
@@ -140,8 +144,9 @@ fn write_table<'a>(
         out.push_str(&yaml_block(example, &display(path))?);
         out.push_str("```\n");
     }
+    let marks = "#".repeat(level + 1);
     for section in sections {
-        out.push_str(&format!("\n## {}\n\n", section.heading));
+        out.push_str(&format!("\n{marks} {}\n\n", section.heading));
         if let Some(text) = text(section.object, "description") {
             out.push_str(text.trim_end());
             out.push_str("\n\n");
@@ -152,18 +157,22 @@ fn write_table<'a>(
             &section.path,
             &section.chain,
             section.context,
+            level + 1,
             out,
         )?;
     }
     Ok(())
 }
 
-/// Works out a property's label and the sections it adds. `chain` holds the defs already entered, so
-/// a schema that holds itself fails with the path instead of recursing forever.
+/// Works out a property's label and the sections it adds. `here` is the dotted path, and `base` is the
+/// readable name a section takes: the property name, or `name entries` for the items of an array.
+/// `chain` holds the defs already entered, so a schema that holds itself fails with the path instead of
+/// recursing forever.
 fn shape<'a>(
     root: &'a Value,
     schema: &'a Value,
     here: &str,
+    base: &str,
     chain: &[&'a str],
 ) -> Result<Shape<'a>> {
     let (names, node) = resolve(root, schema, here, chain)?;
@@ -177,10 +186,13 @@ fn shape<'a>(
         });
     }
     if node.get("type").is_none() && (node.get("oneOf").is_some() || node.get("anyOf").is_some()) {
+        if let Some(union) = union_shape(root, node, here, base, &inside)? {
+            return Ok(union);
+        }
         return Ok(Shape {
             label: "choice".to_owned(),
             node,
-            sections: option_sections(root, node, here, &inside)?,
+            sections: option_sections(root, node, here, base, &inside)?,
         });
     }
     let Some(kind) = node.get("type").and_then(Value::as_str) else {
@@ -198,7 +210,13 @@ fn shape<'a>(
             let Some(items) = node.get("items") else {
                 bail!("{here} is an array with no `items`. Give it `items` in rdy-spec.");
             };
-            let inner = shape(root, items, &format!("{here}[]"), &inside)?;
+            let inner = shape(
+                root,
+                items,
+                &format!("{here}[]"),
+                &format!("{base} entries"),
+                &inside,
+            )?;
             Ok(Shape {
                 label: format!("array of {}", inner.label),
                 node,
@@ -208,7 +226,7 @@ fn shape<'a>(
         "object" => {
             let sections = if has_fields(node) {
                 vec![Section {
-                    heading: plural(here),
+                    heading: base.to_owned(),
                     path: here.to_owned(),
                     object: node,
                     chain: inside.clone(),
@@ -229,35 +247,101 @@ fn shape<'a>(
     }
 }
 
-/// One section for each object option of a `oneOf` or `anyOf`. An option that is only a constant or a
-/// scalar has no fields and gets no section.
+/// The label of a `oneOf` or `anyOf` whose options are scalar types or objects: the types, joined with
+/// `or`. Each object option gets a section, from [`option_sections`]. `None` when an option is neither,
+/// such as a constraint with no type, so the caller falls back to `choice`.
+fn union_shape<'a>(
+    root: &'a Value,
+    node: &'a Value,
+    here: &str,
+    base: &str,
+    inside: &[&'a str],
+) -> Result<Option<Shape<'a>>> {
+    let Some(options) = options_of(node) else {
+        return Ok(None);
+    };
+    let mut labels: Vec<&str> = Vec::new();
+    let mut objects = 0_usize;
+    for option in options {
+        let (_, target) = resolve(root, option, here, inside)?;
+        let label = if has_fields(target) {
+            objects += 1;
+            "object"
+        } else {
+            match target.get("type").and_then(Value::as_str) {
+                Some("string") => "string",
+                Some("integer") => "integer",
+                Some("number") => "number",
+                Some("boolean") => "boolean",
+                Some("object") => "object",
+                _ => return Ok(None),
+            }
+        };
+        if !labels.contains(&label) {
+            labels.push(label);
+        }
+    }
+    if labels.is_empty() {
+        return Ok(None);
+    }
+    let sections = if objects > 0 {
+        option_sections(root, node, here, base, inside)?
+    } else {
+        Vec::new()
+    };
+    Ok(Some(Shape {
+        label: labels.join(" or "),
+        node,
+        sections,
+    }))
+}
+
+/// The options of a `oneOf` or `anyOf`, in that order. `None` when the node has neither.
+fn options_of(node: &Value) -> Option<&Vec<Value>> {
+    ["oneOf", "anyOf"]
+        .iter()
+        .find_map(|key| node.get(*key).and_then(Value::as_array))
+}
+
+/// One section for each object form of a `oneOf` or `anyOf`. When the object is one of several forms,
+/// the section is titled `as an object`. Otherwise it is titled by its number among the options.
 fn option_sections<'a>(
     root: &'a Value,
     node: &'a Value,
     here: &str,
+    base: &str,
     chain: &[&'a str],
 ) -> Result<Vec<Section<'a>>> {
-    let mut sections = Vec::new();
+    let mut forms: Vec<(usize, Vec<&'a str>, &'a Value)> = Vec::new();
     for key in ["oneOf", "anyOf"] {
         let Some(Value::Array(options)) = node.get(key) else {
             continue;
         };
         for (index, option) in options.iter().enumerate() {
             let (names, target) = resolve(root, option, here, chain)?;
-            if !has_fields(target) {
-                continue;
+            if has_fields(target) {
+                forms.push((index + 1, names, target));
             }
-            let number = index + 1;
-            let mut inside: Vec<&'a str> = chain.to_vec();
-            inside.extend(names);
-            sections.push(Section {
-                heading: format!("{}, option {number}", plural(here)),
-                path: with_selector(here, &format!("option {number}")),
-                object: target,
-                chain: inside,
-                context: None,
-            });
         }
+    }
+    let total = options_of(node).map_or(0, Vec::len);
+    let mixed = forms.len() == 1 && total > 1;
+    let mut sections = Vec::new();
+    for (number, names, target) in forms {
+        let mut inside: Vec<&'a str> = chain.to_vec();
+        inside.extend(names);
+        let heading = if mixed {
+            format!("{base}, as an object")
+        } else {
+            format!("{base}, option {number}")
+        };
+        sections.push(Section {
+            heading,
+            path: with_selector(here, &format!("option {number}")),
+            object: target,
+            chain: inside,
+            context: None,
+        });
     }
     Ok(sections)
 }
@@ -306,13 +390,8 @@ fn variant_sections<'a>(
         }
         let mut inside: Vec<&'a str> = chain.to_vec();
         inside.extend(names);
-        let heading = if path.is_empty() {
-            format!("When {key} is {shown}")
-        } else {
-            format!("{} where {key} is {shown}", plural(path))
-        };
         sections.push(Section {
-            heading,
+            heading: shown.clone(),
             path: with_selector(path, &format!("{key}={shown}")),
             object: target,
             chain: inside,
@@ -502,13 +581,8 @@ fn display(path: &str) -> String {
     }
 }
 
-/// A heading for the entries of an array: `checks[]` becomes `checks entries`.
-fn plural(path: &str) -> String {
-    path.replace("[]", " entries")
-}
-
-/// The path of a variant or an option of the object at `path`. A path that names array items keeps its
-/// place: `checks[]` becomes `checks[id=host.cpu]`.
+/// The path of an option of the object at `path`. A path that names array items keeps its place:
+/// `checks[]` becomes `checks[option 2]`.
 fn with_selector(path: &str, selector: &str) -> String {
     match path.strip_suffix("[]") {
         Some(base) => format!("{base}[{selector}]"),
@@ -535,6 +609,7 @@ fn default_cell(value: Option<&Value>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rdy_spec::check::CheckParams;
 
     /// The committed readiness schema, read from the repo.
     fn committed_schema() -> Result<String> {
@@ -567,13 +642,11 @@ mod tests {
                 if has_fields(node) {
                     total += expected_rows(root, node)?;
                 }
-                for key in ["oneOf", "anyOf"] {
-                    if let Some(Value::Array(options)) = node.get(key) {
-                        for option in options {
-                            let target = resolve(root, option, "test", &[])?.1;
-                            if has_fields(target) {
-                                total += expected_rows(root, target)?;
-                            }
+                if let Some(options) = options_of(node) {
+                    for option in options {
+                        let target = resolve(root, option, "test", &[])?.1;
+                        if has_fields(target) {
+                            total += expected_rows(root, target)?;
                         }
                     }
                 }
@@ -632,8 +705,9 @@ mod tests {
         }
     }
 
-    /// The validator rdy-spec uses in its tests: draft 2020-12, with formats checked. It is built over
-    /// the whole schema, so a `$ref` to a definition resolves, and it checks `example` as a `Check`.
+    /// The validator rdy-spec uses in its tests: draft 2020-12, with formats checked. It holds the
+    /// whole schema, so a `$ref` resolves, and it checks a value as a `Check`, the node the variant
+    /// examples sit under.
     fn check_validator(schema: &Value) -> Result<jsonschema::Validator> {
         let wrapper = serde_json::json!({
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -657,10 +731,8 @@ mod tests {
         // own tables under each checks entry.
         assert_eq!(expected, 124);
         assert!(page.contains("\n## checks entries\n\n"), "{page}");
-        assert!(
-            page.contains("\n## bundle.redact_patterns entries\n\n"),
-            "{page}"
-        );
+        // `bundle` is a section, so its own sections sit one level below it.
+        assert!(page.contains("\n### redact_patterns entries\n\n"), "{page}");
         assert!(
             page.contains("| `checks` | array of object | yes |"),
             "{page}"
@@ -669,13 +741,30 @@ mod tests {
     }
 
     #[test]
-    fn every_check_id_gets_its_own_section_and_example() -> Result<()> {
+    fn every_check_id_gets_its_own_titled_section_and_example() -> Result<()> {
         let page = page(&committed_schema()?)?;
-        assert_eq!(page.matches("\n## checks entries where id is ").count(), 17);
-        assert!(
-            page.contains("\n## checks entries where id is host.cpu\n\n"),
-            "{page}"
-        );
+        let ids = [
+            "host.cpu",
+            "host.memory",
+            "host.disk",
+            "host.ports",
+            "host.lsm",
+            "host.security_agents",
+            "host.os",
+            "net.egress",
+            "net.proxy",
+            "net.tls_intercept",
+            "net.dns",
+            "k8s.access",
+            "k8s.storageclass",
+            "k8s.rbac",
+            "k8s.admission",
+            "k8s.nodes",
+            "k8s.version",
+        ];
+        for id in ids {
+            assert!(page.contains(&format!("\n### {id}\n\n")), "{id}\n{page}");
+        }
         assert_eq!(page.matches("```yaml\n").count(), 17, "{page}");
         assert!(
             page.contains("```yaml\nid: host.cpu\nmin: 4\nrecommended: 8\n```"),
@@ -685,17 +774,53 @@ mod tests {
     }
 
     #[test]
-    fn every_example_in_the_committed_schema_validates_with_the_rdy_spec_validator() -> Result<()> {
-        let text = committed_schema()?;
-        let schema: Value = serde_json::from_str(&text)?;
+    fn headings_are_readable_and_nest_one_level_below_their_table() -> Result<()> {
+        let page = page(&committed_schema()?)?;
+        for line in page.lines().filter(|line| line.starts_with('#')) {
+            assert!(!line.contains('[') && !line.contains('='), "{line}");
+        }
+        assert!(page.contains("\n### host.ports\n\n"), "{page}");
+        assert!(
+            page.contains("\n#### free entries, as an object\n\n"),
+            "{page}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn every_example_validates_under_its_node_and_decodes() -> Result<()> {
+        let schema_text = committed_schema()?;
+        let schema: Value = serde_json::from_str(&schema_text)?;
         let mut examples = Vec::new();
         all_examples(&schema, "", &mut examples);
         assert_eq!(examples.len(), 17, "every check id has one example");
+        // Each variant's examples sit under `Check`, the object whose `allOf` names the variant.
         let validator = check_validator(&schema)?;
         for (at, example) in &examples {
             assert!(
                 validator.validate(example).is_ok(),
                 "{at} does not validate: {example}"
+            );
+            // Decode it the way rdy reads a spec: as the one check of a whole spec document.
+            let document = serde_json::json!({
+                "apiVersion": "rdy/v1",
+                "kind": "Readiness",
+                "metadata": {"product": "acme"},
+                "checks": [example],
+            });
+            let yaml = serde_saphyr::to_string(&document)?;
+            let spec = rdy_spec::parse_unverified(yaml.as_bytes())
+                .map_err(|e| anyhow!("{at} example does not parse as a spec: {e:?}"))?;
+            let entry = spec
+                .checks
+                .first()
+                .context("the example document has no check")?;
+            assert!(
+                !matches!(
+                    entry.decode_params(),
+                    CheckParams::Unsupported { .. } | CheckParams::Unknown { .. }
+                ),
+                "{at} does not decode: {example}"
             );
         }
         Ok(())
@@ -767,34 +892,62 @@ mod tests {
     }
 
     #[test]
-    fn each_object_option_of_a_one_of_gets_its_own_section() -> Result<()> {
+    fn a_union_of_scalar_types_is_labelled_with_its_types() -> Result<()> {
+        let schema = r#"{"type": "object", "properties": {"v": {"description": "Version.",
+            "oneOf": [{"type": "string"}, {"type": "integer"}]}}}"#;
+        let page = page(schema)?;
+        assert!(
+            page.contains("| `v` | string or integer | no |  | Version. |  |"),
+            "{page}"
+        );
+        assert!(!page.contains("\n## v"), "{page}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_scalar_or_object_union_gets_an_as_an_object_section() -> Result<()> {
         let schema = r#"{"type": "object", "properties": {"pick": {"description": "Pick one.",
             "oneOf": [{"description": "A name.", "type": "string"},
                       {"title": "Long form", "type": "object", "properties": {
                          "name": {"description": "The name.", "type": "string"}}}]}}}"#;
         let page = page(schema)?;
         assert!(
-            page.contains("| `pick` | choice | no |  | Pick one. |  |"),
+            page.contains("| `pick` | string or object | no |  | Pick one. |  |"),
             "{page}"
         );
         assert!(
-            page.contains("\n## pick, option 2\n\n| Property | Type | Required | Default | Description | Example |\n| --- | --- | --- | --- | --- | --- |\n| `name` | string | no |  | The name. |  |\n"),
+            page.contains("\n## pick, as an object\n\n| Property | Type | Required | Default | Description | Example |\n| --- | --- | --- | --- | --- | --- |\n| `name` | string | no |  | The name. |  |\n"),
             "{page}"
         );
         Ok(())
     }
 
     #[test]
-    fn an_array_of_one_of_options_names_its_option_by_the_entries() -> Result<()> {
+    fn several_object_options_are_numbered() -> Result<()> {
+        let schema = r#"{"type": "object", "properties": {"pick": {"description": "Pick one.",
+            "oneOf": [{"type": "object", "properties": {"a": {"description": "A.", "type": "string"}}},
+                      {"type": "object", "properties": {"b": {"description": "B.", "type": "string"}}}]}}}"#;
+        let page = page(schema)?;
+        assert!(
+            page.contains("| `pick` | object | no |  | Pick one. |  |"),
+            "{page}"
+        );
+        assert!(page.contains("\n## pick, option 1\n\n"), "{page}");
+        assert!(page.contains("\n## pick, option 2\n\n"), "{page}");
+        Ok(())
+    }
+
+    #[test]
+    fn an_array_of_one_of_options_names_its_form_by_the_entries() -> Result<()> {
         let schema = r#"{"type": "object", "properties": {"xs": {"description": "Items.", "type": "array",
             "items": {"oneOf": [{"type": "string"},
                                 {"type": "object", "properties": {"id": {"description": "Id.", "type": "string"}}}]}}}}"#;
         let page = page(schema)?;
         assert!(
-            page.contains("| `xs` | array of choice | no |  | Items. |  |"),
+            page.contains("| `xs` | array of string or object | no |  | Items. |  |"),
             "{page}"
         );
-        assert!(page.contains("\n## xs entries, option 2\n\n"), "{page}");
+        assert!(page.contains("\n## xs entries, as an object\n\n"), "{page}");
         assert!(
             page.contains("| `id` | string | no |  | Id. |  |"),
             "{page}"
@@ -815,7 +968,7 @@ mod tests {
             }}"##;
         let page = page(schema)?;
         assert!(
-            page.contains("\n## c where id is x.one\n\n| Property | Type | Required | Default | Description | Example |\n| --- | --- | --- | --- | --- | --- |\n| `min` | integer | no |  | Floor. | `2` |\n"),
+            page.contains("\n### x.one\n\n| Property | Type | Required | Default | Description | Example |\n| --- | --- | --- | --- | --- | --- |\n| `min` | integer | no |  | Floor. | `2` |\n"),
             "{page}"
         );
         assert!(page.contains("```yaml\nid: x.one\nmin: 2\n```"), "{page}");
