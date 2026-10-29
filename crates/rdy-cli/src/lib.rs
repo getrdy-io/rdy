@@ -25,11 +25,11 @@ pub mod entry;
 #[doc(hidden)]
 pub mod error;
 #[doc(hidden)]
+pub mod lint;
+#[doc(hidden)]
 pub mod logging;
 #[doc(hidden)]
 pub mod panic_hook;
-#[doc(hidden)]
-pub mod lint;
 #[doc(hidden)]
 pub mod password;
 
