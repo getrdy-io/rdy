@@ -16,9 +16,14 @@
 //! - **Fail closed.** If redaction cannot be trusted for a string, the whole string is replaced. Raw text
 //!   is never the fallback. If the OS cannot make a key, [`TagKey::generate`] fails and rdy exits 70.
 //!
-//! This is the M1-048 core: the engine, the key, the gate and the first rule (`secret_by_key`). M1-060
-//! adds the other M1 rules. M1-056 wires the tracing writer, panic hook and CLI errors. M1-062 adds the
-//! report walk and `RedactedReport`.
+//! - **Redact, then cap.** [`Redactor::redact_report`] walks a whole report, and
+//!   [`Redactor::redact_check`] and [`Redactor::redact_action`] do one entry as it completes. Every string
+//!   is redacted first and cut to its size cap second. The result is a [`RedactedReport`], the only type
+//!   the writers and renderers accept.
+//!
+//! This is the M1-048 core (the engine, the key, the gate and the first rule, `secret_by_key`) and the
+//! M1-062 report walk. M1-060 adds the other M1 rules. M1-056 wires the tracing writer, panic hook and
+//! CLI errors.
 
 // `TagKey::fixed` makes tags predictable. It is for tests only, so a release build with the `testing`
 // feature is refused. A debug build is allowed so `cargo test` and `cargo clippy --features testing` work.
@@ -30,6 +35,7 @@
 compile_error!("the `testing` feature of rdy-engine must not be enabled in a release build");
 
 mod key;
+mod report;
 mod rules;
 mod span;
 
@@ -63,6 +69,15 @@ pub enum RedactError {
          then run rdy again"
     )]
     NoRandomness,
+    /// The report, after redaction, no longer reads as a report.
+    ///
+    /// The text of the serde error is dropped on purpose: it can quote a value.
+    #[error(
+        "the report could not be redacted, so nothing was written. \
+         Fix: this is a bug in rdy. Please report it at https://github.com/getrdy-io/rdy/issues \
+         and include the output of rdy version"
+    )]
+    ReportShape,
 }
 
 /// Text that has been through a [`Redactor`].
@@ -93,6 +108,12 @@ impl<T: fmt::Display> fmt::Display for Redacted<T> {
         self.0.fmt(f)
     }
 }
+
+/// A report that has been through [`Redactor::redact_report`].
+///
+/// `write_json`, `render_html` and the terminal renderer take `&RedactedReport` and nothing else, so none
+/// of them compiles with a plain `Report`. There is no way to turn a `Report` into one except the redactor.
+pub type RedactedReport = Redacted<rdy_spec::result::Report>;
 
 /// How many placeholders each rule wrote in one call or one walk.
 ///

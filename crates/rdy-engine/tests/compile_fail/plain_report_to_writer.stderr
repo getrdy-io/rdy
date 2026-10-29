@@ -1,0 +1,47 @@
+error[E0308]: mismatched types
+  --> tests/compile_fail/plain_report_to_writer.rs:11:16
+   |
+11 |     write_json(report);
+   |     ---------- ^^^^^^ expected `&Redacted<Report>`, found `&Report`
+   |     |
+   |     arguments to this function are incorrect
+   |
+   = note: expected reference `&Redacted<Report>`
+              found reference `&Report`
+note: function defined here
+  --> tests/compile_fail/plain_report_to_writer.rs:6:4
+   |
+ 6 | fn write_json(_report: &RedactedReport) {}
+   |    ^^^^^^^^^^ ------------------------
+
+error[E0308]: mismatched types
+  --> tests/compile_fail/plain_report_to_writer.rs:12:17
+   |
+12 |     render_html(report);
+   |     ----------- ^^^^^^ expected `&Redacted<Report>`, found `&Report`
+   |     |
+   |     arguments to this function are incorrect
+   |
+   = note: expected reference `&Redacted<Report>`
+              found reference `&Report`
+note: function defined here
+  --> tests/compile_fail/plain_report_to_writer.rs:7:4
+   |
+ 7 | fn render_html(_report: &RedactedReport) {}
+   |    ^^^^^^^^^^^ ------------------------
+
+error[E0308]: mismatched types
+  --> tests/compile_fail/plain_report_to_writer.rs:13:21
+   |
+13 |     render_terminal(report);
+   |     --------------- ^^^^^^ expected `&Redacted<Report>`, found `&Report`
+   |     |
+   |     arguments to this function are incorrect
+   |
+   = note: expected reference `&Redacted<Report>`
+              found reference `&Report`
+note: function defined here
+  --> tests/compile_fail/plain_report_to_writer.rs:8:4
+   |
+ 8 | fn render_terminal(_report: &RedactedReport) {}
+   |    ^^^^^^^^^^^^^^^ ------------------------
