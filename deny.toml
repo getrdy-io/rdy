@@ -71,6 +71,11 @@ deny = [
     # The probe facade owns every socket in M1 (ADR 0014). The M2 upload client lifts
     # this with a reviewed change that names the crate that may depend on it.
     { crate = "reqwest", reason = "ADR 0014: the probe facade owns sockets in M1" },
+    # The kube client types are on the check-crate deny list (02 Appendix A, ADR 0031). Only the k8s
+    # check crate may depend on kube, and kube's own crates only through kube.
+    { crate = "kube", wrappers = ["rdy-checks-k8s"], reason = "ADR 0031: only rdy-checks-k8s builds a kube client" },
+    { crate = "kube-client", wrappers = ["kube"], reason = "ADR 0031: reached through kube only" },
+    { crate = "kube-core", wrappers = ["kube", "kube-client"], reason = "ADR 0031: reached through kube only" },
 ]
 
 [sources]

@@ -48,6 +48,16 @@ pub use key::TagKey;
 use rules::{BUILT_IN, Rule};
 use span::{Span, merge};
 
+/// True if `name` looks like it names a secret (`api_token`, `clientSecret`, `DB_PASSWORD`).
+///
+/// This is the key-name rule of the redactor, so a caller that picks values to register as known
+/// secrets (an environment variable name, say) judges names the same way the redactor does. Words are
+/// split on case and separators, and names such as `secretName` are not secret.
+#[must_use]
+pub fn is_secret_name(name: &str) -> bool {
+    rules::is_secret_key(name)
+}
+
 /// Text that makes [`Redactor::redact_str`] panic, so that a caller can prove it contains a redactor bug.
 ///
 /// Only built with the `testing` feature (or in this crate's own tests). CI keeps the feature out of the
