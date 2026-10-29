@@ -769,6 +769,13 @@ mod commands {
         fn env(&self, _: &str) -> Option<String> {
             None
         }
+        fn native<'a>(
+            &'a self,
+            _: &'a NativeCall,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<NativeValue>> {
+            Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
+        }
         fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
             Box::pin(async move {
                 let args = cmd
@@ -816,6 +823,13 @@ mod commands {
         }
         fn env(&self, _: &str) -> Option<String> {
             None
+        }
+        fn native<'a>(
+            &'a self,
+            _: &'a NativeCall,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<NativeValue>> {
+            Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
         }
     }
 
@@ -1248,6 +1262,13 @@ impl Backend for Hanging {
     }
     fn env(&self, _: &str) -> Option<String> {
         None
+    }
+    fn native<'a>(
+        &'a self,
+        _: &'a NativeCall,
+        _: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<NativeValue>> {
+        Box::pin(std::future::pending())
     }
     fn spawn<'a>(&'a self, _: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
         Box::pin(std::future::pending())

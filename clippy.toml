@@ -28,4 +28,8 @@ disallowed-methods = [
     { path = "rdy_engine::exec::table::run", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration", allow-invalid = true },
     { path = "rdy_engine::exec::run", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
     { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
+    # The live backend reads the real machine. A check gets its backend from the probe it is handed, and
+    # only the engine and the CLI make one (ADR 0014 decision 3). The CLI calls it with
+    # `#[expect(clippy::disallowed_methods)]`; so do the engine's own tests.
+    { path = "rdy_engine::live_backend", reason = "a check never builds a backend; it uses the Probe it is handed (ADR 0014)", allow-invalid = true },
 ]

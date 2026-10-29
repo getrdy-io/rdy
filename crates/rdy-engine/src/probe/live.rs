@@ -32,11 +32,15 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::sealed::Sealed;
-use super::{Backend, DirEntry, FileBytes, FileMeta, ReadGuard, ReadRange};
+use super::{
+    Backend, DirEntry, FileBytes, FileMeta, NativeCall, NativeValue, ReadGuard, ReadRange,
+};
 use crate::check::BoxFuture;
 
 #[cfg(unix)]
 mod files;
+#[cfg(unix)]
+mod native;
 
 /// The backend that reads the real machine.
 ///
@@ -63,7 +67,7 @@ impl Sealed for Live {}
 fn unsupported<T>() -> io::Result<T> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "file reads are not available on this OS in this version of rdy",
+        "this call is not available on this OS in this version of rdy",
     ))
 }
 
@@ -144,6 +148,29 @@ impl Backend for Live {
             #[cfg(not(unix))]
             {
                 let _ = (path, guard);
+                unsupported()
+            }
+        })
+    }
+
+    fn native<'a>(
+        &'a self,
+        call: &'a NativeCall,
+        guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<NativeValue>> {
+        let call = call.clone();
+        let guard = *guard;
+        #[cfg(unix)]
+        let secrets = self.secrets.clone();
+        Box::pin(async move {
+            #[cfg(unix)]
+            {
+                on_pool(move || native::call(&call, &guard, &secrets)).await
+            }
+            // Windows has no native calls in M1: its checks report "not yet on this OS".
+            #[cfg(not(unix))]
+            {
+                let _ = (call, guard);
                 unsupported()
             }
         })

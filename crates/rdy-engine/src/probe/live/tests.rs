@@ -64,6 +64,10 @@ impl Sandbox {
     fn new() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = std::fs::canonicalize(dir.path()).expect("real path");
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the engine's own tests build the live backend; check crates may not"
+        )]
         let hub = ProbeHub::new(live_backend(), Redactor::new(TagKey::fixed([5; 32])));
         Self {
             _dir: dir,

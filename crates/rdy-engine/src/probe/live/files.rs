@@ -169,6 +169,26 @@ pub(super) fn stat(
     }))
 }
 
+/// The size and mount flags of the file system that holds `path`. The path is resolved and judged
+/// like a read, so a link to a denied place is refused. Linux asks through the `O_PATH` descriptor
+/// that was judged, so the answer is for the file system of the inode that passed the rules.
+pub(super) fn statvfs(
+    path: &Path,
+    guard: &ReadGuard,
+    secrets: &Secrets,
+) -> io::Result<fs::StatVfs> {
+    let target = locate(path, guard, secrets)?;
+    target.confirm(path)?;
+    #[cfg(target_os = "linux")]
+    {
+        Ok(fs::fstatvfs(&target.anchor)?)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(fs::statvfs(&target.real)?)
+    }
+}
+
 fn refused(rule: &'static str) -> io::Error {
     Refused { rule }.into_io()
 }
