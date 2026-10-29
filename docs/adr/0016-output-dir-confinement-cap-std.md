@@ -81,7 +81,11 @@ target name. Nothing else here changes a decision.
   as a name below that handle without following a link, so a link swapped in for it after the make is
   refused. Its handle gets the same attribute and final path checks as the run folder, so a symlink,
   a junction, any other reparse point or a file in the way is `NotPlainFolder`. The run folder is then
-  made through that handle (`OutputDir::create_new_in`), so no name is resolved twice.
+  made through that held parent (`OutputDir::create_new_in`). The open is relative to the handle. On
+  Windows `cap-std` turns the handle back into a path to make a folder, so a race between the make and
+  the open is possible, and it fails closed: the open and the checks refuse a swapped link. The
+  profile is opened by its resolved local path, and resolved again after the open, because std has no
+  safe way to read the final path of a handle without FFI. A different answer is refused.
 - **No network default.** `USERPROFILE` must be an absolute path on a local drive, and so must its
   resolved form, so a share (`\\server\share`, or a mapped drive that points at one) is
   `NoDefaultFolder`. A default run never sends a report over SMB. `--out-dir` is the operator's

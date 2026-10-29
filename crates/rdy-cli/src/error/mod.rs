@@ -188,7 +188,8 @@ pub enum ReportReason {
     /// The new folder is not private, or the disk ignored the mode change.
     NotPrivate,
     /// A link, a junction or another redirect is where the folder should be, or the path is not a
-    /// folder. Windows.
+    /// folder. The reparse-point checks are Windows only, but a symlink swapped in is refused here
+    /// on Unix too.
     NotPlainFolder,
     /// `USERPROFILE` is not a path on a local drive, so the Windows default folder is unknown.
     NoDefaultFolder,

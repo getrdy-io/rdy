@@ -134,7 +134,7 @@ pub enum ReportError {
         mode: u32,
     },
     /// Something redirects the folder or is not a plain folder: a symlink, a junction, another
-    /// reparse point, a file, or a path that leads somewhere else. Windows only.
+    /// reparse point (Windows), a file, or a path that leads somewhere else.
     #[error(
         "the report folder {path} is a link, a junction, a cloud-sync folder or another redirect, or is not a folder. \
          Fix: use --out-dir <an ordinary folder you own on a local disk>, not a link, junction or cloud-sync folder"
@@ -234,8 +234,11 @@ impl OutputDir {
         Self::create_new_in(&ReportParent::open(parent)?, product, ts)
     }
 
-    /// Like [`OutputDir::create_new`], in a parent that is already open. The Windows default
-    /// parent comes from [`default_report_parent`], so no name is resolved twice.
+    /// Like [`OutputDir::create_new`], in a parent that is already open, such as the one from
+    /// [`default_report_parent`]. The open of the new folder is relative to the held parent handle. On
+    /// Windows `cap-std` turns the handle back into a path to make the folder, so a race between the
+    /// make and the open is possible, and it fails closed: the open and the checks refuse a swapped
+    /// link.
     ///
     /// # Errors
     ///
@@ -506,14 +509,20 @@ pub fn default_report_parent() -> Result<ReportParent, ReportError> {
             .filter(|p| p.is_absolute() && is_local_drive(p))
             .ok_or(ReportError::NoDefaultFolder)?;
         // A mapped drive that points at a share resolves to a network path, and is refused. The
-        // folder is then opened by the path as given, so messages show the familiar `C:\Users\...`
-        // and not the `\\?\` form.
-        let real = std::fs::canonicalize(&profile)
-            .map_err(|e| ReportError::io("resolve the user profile folder", &profile, e))?;
+        // profile is opened by its resolved local path, and the result keeps the path as given, so
+        // messages show the familiar `C:\Users\...` and not the `\\?\` form. std has no safe way to
+        // read the final path of a handle, so the profile is resolved again after the open, and a
+        // different answer (a swap in between) is refused.
+        let io = |e| ReportError::io("resolve the user profile folder", &profile, e);
+        let real = std::fs::canonicalize(&profile).map_err(io)?;
         if !is_local_drive(&real) {
             return Err(ReportError::NoDefaultFolder);
         }
-        open_default_in(&profile)
+        let parent = open_default_in(&real, &profile)?;
+        if std::fs::canonicalize(&profile).map_err(io)? != real {
+            return Err(ReportError::NotPlainFolder { path: parent.path });
+        }
+        Ok(parent)
     }
     #[cfg(not(windows))]
     ReportParent::open(Path::new("."))
@@ -536,12 +545,13 @@ const DEFAULT_FOLDER: &str = "rdy-reports";
 /// Makes `<profile>/rdy-reports` if it is missing, opens it without following a link and refuses it if
 /// it is not a plain folder.
 ///
-/// `profile` must exist. It is held open, and the default folder is opened as a name below that
+/// `profile` must exist. `shown` is the same folder as the operator knows it, for messages and for
+/// the path check, and is `profile` itself unless the caller opened a resolved form. It is held open, and the default folder is opened as a name below that
 /// handle, so a link swapped in for it after the make is refused by the open and not followed. A new
 /// folder inherits the profile ACL (owner, SYSTEM and Administrators by default).
 #[cfg(any(windows, test))]
-fn open_default_in(profile: &Path) -> Result<ReportParent, ReportError> {
-    let path = profile.join(DEFAULT_FOLDER);
+fn open_default_in(profile: &Path, shown: &Path) -> Result<ReportParent, ReportError> {
+    let path = shown.join(DEFAULT_FOLDER);
     let profile_dir = Dir::open_ambient_dir(profile, ambient_authority())
         .map_err(|e| ReportError::io("open the user profile folder", profile, e))?;
     match make_dir(&profile_dir, DEFAULT_FOLDER) {
@@ -580,7 +590,7 @@ fn open_error(
     err: io::Error,
 ) -> ReportError {
     // ERROR_STOPPED_ON_SYMLINK, which `cap-std` gives for a link on Windows.
-    const STOPPED_ON_SYMLINK: i32 = 1281;
+    const STOPPED_ON_SYMLINK: i32 = 681;
     let redirected = err.raw_os_error() == Some(STOPPED_ON_SYMLINK)
         || parent
             .symlink_metadata(name)

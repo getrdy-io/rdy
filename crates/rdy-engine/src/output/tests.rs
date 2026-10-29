@@ -308,10 +308,15 @@ fn the_attribute_bits_tell_a_plain_folder_from_a_reparse_point() {
 fn the_default_folder_is_made_when_it_is_missing_and_reused_when_it_is_there() {
     let profile = tempfile::tempdir().expect("temp dir");
     let want = profile.path().join("rdy-reports");
-    assert_eq!(open_default_in(profile.path()).expect("make").path(), want);
+    assert_eq!(
+        open_default_in(profile.path(), profile.path())
+            .expect("make")
+            .path(),
+        want
+    );
     assert!(want.is_dir());
     fs::write(want.join("keep"), b"old").expect("plant");
-    let parent = open_default_in(profile.path()).expect("reuse");
+    let parent = open_default_in(profile.path(), profile.path()).expect("reuse");
     assert_eq!(parent.path(), want);
     assert_eq!(names(&want), ["keep"], "nothing was removed or added");
     // The run folder goes under the held handle, and shows under the folder's name.
@@ -324,7 +329,7 @@ fn the_default_folder_is_made_when_it_is_missing_and_reused_when_it_is_there() {
 fn the_default_folder_is_not_made_when_the_profile_is_missing() {
     let profile = tempfile::tempdir().expect("temp dir");
     let missing = profile.path().join("no-profile");
-    let err = open_default_in(&missing).expect_err("no profile");
+    let err = open_default_in(&missing, &missing).expect_err("no profile");
     assert!(matches!(err, ReportError::Io { .. }), "{err}");
     assert!(!missing.exists(), "the profile folder is never made");
 }
@@ -335,7 +340,8 @@ fn a_default_folder_that_is_a_link_or_a_junction_is_refused_and_not_followed() {
     let elsewhere = tempfile::tempdir().expect("temp dir");
     let link = profile.path().join("rdy-reports");
     plant_redirect(&link, elsewhere.path());
-    let err = open_default_in(profile.path()).expect_err("a redirect must be refused");
+    let err =
+        open_default_in(profile.path(), profile.path()).expect_err("a redirect must be refused");
     assert!(
         matches!(&err, ReportError::NotPlainFolder { path } if *path == link),
         "{err}"
@@ -347,7 +353,7 @@ fn a_default_folder_that_is_a_link_or_a_junction_is_refused_and_not_followed() {
 fn a_default_folder_that_is_a_file_is_refused() {
     let profile = tempfile::tempdir().expect("temp dir");
     fs::write(profile.path().join("rdy-reports"), b"a file").expect("plant");
-    let err = open_default_in(profile.path()).expect_err("a file");
+    let err = open_default_in(profile.path(), profile.path()).expect_err("a file");
     assert!(matches!(err, ReportError::NotPlainFolder { .. }), "{err}");
 }
 
@@ -1059,7 +1065,7 @@ mod windows {
     }
 
     /// `open_new_dir` on a junction must not follow it: the open fails with
-    /// `ERROR_STOPPED_ON_SYMLINK`, and `open_error` names that as a redirect.
+    /// `ERROR_STOPPED_ON_SYMLINK` (681), and `open_error` names that as a redirect.
     #[test]
     fn a_junction_opened_by_name_fails_to_open_and_is_named_a_redirect() {
         let parent = tempfile::tempdir().expect("temp dir");
@@ -1071,7 +1077,7 @@ mod windows {
             Ok(_) => panic!("the junction must not open as a folder"),
             Err(err) => err,
         };
-        assert_eq!(err.raw_os_error(), Some(1281), "{err}");
+        assert_eq!(err.raw_os_error(), Some(681), "{err}");
         let named = open_error("open", &dir, "linked", &link, err);
         assert!(
             matches!(named, ReportError::NotPlainFolder { .. }),
