@@ -194,15 +194,14 @@ are in `12-progress.md`. Read this section, then check every open PR's head and 
 that were running at the pause may have pushed after it.
 
 Merged in this session: #48 M1-022, #49 M1-067, #47 M1-007, #57 M1-028, #51 M1-121, #59 M1-027,
-#60 M1-011, #54 M1-031, #53 M1-039, #56 correction-08, #62 M1-089, #52 M1-125, #67 correction-09. That
-makes 46 M1 tickets merged in all.
+#60 M1-011, #54 M1-031, #53 M1-039, #56 correction-08, #62 M1-089, #52 M1-125, #67 correction-09, #65 M1-014.
+That makes 47 M1 tickets merged in all.
 
 Open PRs at the pause. "Approved" means every required reviewer approved the current head.
 
 | PR | Ticket | State and next step |
 | --- | --- | --- |
 | #55 | M1-056 | Approved by code and security (three rounds). At 3dc8456 the `lint` job fails: the older guard from M1-022 in ci.yml ("the rdy binary would build the schema generator, serde_json/preserve_order or the rdy-engine testing feature") runs `cargo tree` with dev-dependencies, so it sees rdy-cli's dev-dependency on rdy-engine `testing`. Fix: make that guard use `-e normal,build` (the new M1-056 guard already does), merge main, CI, merge. |
-| #65 | M1-014 | Approved by both. Main merged at 9565d10. Next: CI green, then merge. |
 | #69 | correction-10 | Approved; the coordinator applied the review fixes at 78bfe79 (kept #66's version of the sandbox hand-step row, M2-105 is 8 h, a clause on M1-122). Next: merge main if dirty, CI, merge. Merge after #67. |
 | #71 | M1-036 | Opened at the pause; the coordinator merged main twice (lib.rs, rdy-cli Cargo.toml, Cargo.lock), clippy and fmt pass, the full test run was not finished. Next: CI, then code-reviewer and security-reviewer (filesystem writes, the new `Apache-2.0 WITH LLVM-exception` license for `winx`). |
 | #70 | M1-066 | Security review: changes required, findings in `reviews/open-findings-2026-10-29/pr70-sec.md` (two highs: `policy::run` must become crate-private with `table::run` the only public runner; Linux-only table tests fail on macOS and Windows). Code review: changes required too, in `pr70-code.md` (macOS and Windows legs red; shipped fix text unaudited). Next: fix round by rust-engineer or check-author. |
