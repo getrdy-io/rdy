@@ -52,15 +52,38 @@ fn both_edges_cut_drop_both_partial_lines() {
 }
 
 #[test]
-fn with_no_newline_a_window_of_4_kib_goes_from_the_cut_edge() {
-    let text = "a".repeat(10_000);
+fn with_no_newline_a_window_of_4_kib_goes_from_the_cut_edge_and_the_boundary_moves_to_a_separator()
+{
+    // Words of 9 bytes and a space: the boundary moves to the space nearest the window edge.
+    let text = "aaaaaaaaa ".repeat(1000);
     let tail = red(&text, TAIL);
-    assert_eq!(tail, format!("{} [truncated]", "a".repeat(10_000 - WINDOW)));
-    let head = red(&text, HEAD);
-    assert_eq!(
-        head,
-        format!("[truncated]\n{}", "a".repeat(10_000 - WINDOW))
+    let kept = tail.strip_suffix(" [truncated]").expect("marker");
+    assert!(kept.ends_with(' ') || kept.ends_with("aaaaaaaaa"), "{kept}");
+    assert!(
+        text.len() - kept.len() >= WINDOW && text.len() - kept.len() < WINDOW + 20,
+        "{}",
+        kept.len()
     );
+    let head = red(&text, HEAD);
+    let kept = head.strip_prefix("[truncated]\n").expect("marker");
+    assert!(kept.starts_with("aaaaaaaaa"), "{kept}");
+    assert!(
+        text.len() - kept.len() >= WINDOW && text.len() - kept.len() < WINDOW + 20,
+        "{}",
+        kept.len()
+    );
+}
+
+#[test]
+fn with_no_separator_near_the_window_edge_the_whole_buffer_goes() {
+    let text = "a".repeat(10_000);
+    assert_eq!(red(&text, TAIL), "[truncated]");
+    assert_eq!(red(&text, HEAD), "[truncated]\n");
+    // A separator exists, but further than a window away from the edge: still dropped whole.
+    let far = format!("{}{}", "b ", "a".repeat(10_000));
+    assert_eq!(red(&far, TAIL), "[truncated]");
+    let far = format!("{} b", "a".repeat(10_000));
+    assert_eq!(red(&far, HEAD), "[truncated]\n");
 }
 
 #[test]

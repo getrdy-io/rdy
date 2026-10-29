@@ -60,7 +60,9 @@ use crate::exec::table::{self, TableError};
 #[cfg(feature = "runtime")]
 use crate::exec::{ExecError, ExecOutput, policy::CommandError};
 use crate::privilege::ProcessIds;
-use crate::redact::{Cut, Redacted, Redactor, is_secret_name};
+use crate::redact::{
+    Cut, KNOWN_SECRET_REFUSED, Redacted, Redactor, is_secret_name, worth_registering,
+};
 
 #[cfg(feature = "runtime")]
 pub use live::live_backend;
@@ -565,9 +567,20 @@ impl ProbeHub {
     /// Adds a secret to the run-scoped known-secret set (ADR 0015 decision 3). Every string the log, the
     /// report and the CLI redact from now on has the exact value removed. The kubeconfig token and
     /// client key data and the proxy password come in through here. Returns `false` if the value was
-    /// refused (see [`Redactor::add_known_secret`]). Never log the value.
+    /// refused (see [`Redactor::add_known_secret`]).
+    ///
+    /// A refusal is not silent. It logs a warning with no value and counts `known_secret_refused` in
+    /// the report's `redaction.by_rule`. The caller decides whether it can go on (a refused kubeconfig
+    /// or proxy secret is the caller's to treat as fatal). Never log the value.
     pub fn add_known_secret(&self, secret: &str) -> bool {
-        self.log.redactor().add_known_secret(secret)
+        let accepted = self.log.redactor().add_known_secret(secret);
+        if !accepted {
+            tracing::warn!(
+                "a secret could not be added to the redaction set (too short, too long or no room), so it may not be removed from output"
+            );
+            self.log.count(KNOWN_SECRET_REFUSED);
+        }
+        accepted
     }
 
     /// The probe for run-level work on this OS, which the log records with `check: null`. The
@@ -955,11 +968,14 @@ impl Probe {
         }
         let value = hub.backend.env(name);
         // The value of a name that looks like a secret joins the run-scoped set before the check sees
-        // it, so it is removed wherever it later shows up (ADR 0015 decision 3).
+        // it, so it is removed wherever it later shows up (ADR 0015 decision 3). A plain word, a
+        // `${NAME}` reference or a path under /run/secrets/ does not: the key rule leaves those alone
+        // too, and in the set they would be removed from every string. A refusal is counted.
         if let Some(value) = &value
             && is_secret_name(name)
+            && worth_registering(value)
         {
-            hub.add_known_secret(value);
+            let _accepted = hub.add_known_secret(value);
         }
         settle(entry, Ok(value), |_, _| {})
     }

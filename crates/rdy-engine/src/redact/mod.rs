@@ -51,6 +51,11 @@ use std::ops::Deref;
 
 pub use buffer::Cut;
 pub use key::TagKey;
+/// The shortest secret [`Redactor::add_known_secret`] accepts, in bytes. A caller that filters values
+/// before it registers them (an exec plugin's environment, say) uses the same number.
+pub use known::MIN_LEN as KNOWN_SECRET_MIN_LEN;
+/// The count name of a refused known secret in the report's `redaction.by_rule`.
+pub(crate) use known::REFUSED_RULE as KNOWN_SECRET_REFUSED;
 
 use rules::{BUILT_IN, Rule};
 use span::{Span, merge};
@@ -63,6 +68,19 @@ use span::{Span, merge};
 #[must_use]
 pub fn is_secret_name(name: &str) -> bool {
     rules::is_secret_key(name)
+}
+
+/// True if a value is worth putting in the known-secret set: not a plain word the key rule leaves alone
+/// (`null`, `required`, a `${NAME}` reference, a path under `/run/secrets/`), and not a word that only
+/// configures a feature (`enabled`, `password`). Such a word in the set would be removed from every
+/// string of the report.
+pub(crate) fn worth_registering(value: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "enabled", "disabled", "enable", "disable", "yes", "no", "on", "off", "optional", "auto",
+        "default", "password", "passwd", "secret", "token", "key", "empty", "unset", "string",
+    ];
+    let value = value.trim();
+    !rules::is_exempt_value(value) && !WORDS.iter().any(|w| value.eq_ignore_ascii_case(w))
 }
 
 /// Text that makes [`Redactor::redact_str`] panic, so that a caller can prove it contains a redactor bug.
@@ -166,7 +184,7 @@ impl RuleCounts {
         }
     }
 
-    fn add(&mut self, rule: &'static str) {
+    pub(crate) fn add(&mut self, rule: &'static str) {
         *self.by_rule.entry(rule).or_insert(0) += 1;
     }
 }
@@ -199,8 +217,15 @@ impl Redactor {
     /// value of a declared environment variable whose name [`is_secret_name`]. A value of several lines
     /// is added whole and line by line. Surrounding blanks are ignored.
     ///
-    /// Returns `false` if the value was refused: under 6 bytes (it would match common words), over
-    /// 64 KiB, or the set already holds 1,024 values. Never log the value.
+    /// The value is also stored percent-encoded and JSON-escaped, when those differ. A caller that
+    /// holds a `user:password` pair, and a place where the base64 of the pair can appear, registers
+    /// that string too.
+    ///
+    /// Returns `false` if anything was refused: under 6 bytes ([`KNOWN_SECRET_MIN_LEN`], it would match
+    /// common words), over 64 KiB, or no room left in the set's 512 KiB budget. What fits is added. A
+    /// refusal means the value may reach the output, so the caller reports it and never ignores it.
+    /// Never log the value.
+    #[must_use = "a refused secret may reach the output: report it"]
     pub fn add_known_secret(&self, secret: &str) -> bool {
         self.known.add(secret)
     }

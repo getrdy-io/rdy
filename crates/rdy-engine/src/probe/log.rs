@@ -268,6 +268,11 @@ impl ActionLog {
         &self.shared.redactor
     }
 
+    /// Counts one more use of `rule` (a count name, not a placeholder) in the report's `redaction`.
+    pub(crate) fn count(&self, rule: &'static str) {
+        self.state().counts.add(rule);
+    }
+
     /// Redacts a buffer the facade returned and adds what the redactor did to the log's counts, so
     /// they reach the report's `redaction` summary with the log's own.
     pub(crate) fn redact_buffer(&self, bytes: &[u8], cut: Cut) -> Redacted<String> {

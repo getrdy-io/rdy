@@ -10,10 +10,13 @@
 //! - A secret in the partial edge line is dropped with the line, whatever rules exist. That is what
 //!   these tests place at the cap.
 //! - A private key that starts in a whole line and is cut before its end is removed through the end.
+//! - A buffer with no newline loses a window of 4 KiB and then up to the nearest separator, so a value
+//!   that straddles the cap goes whole, whatever rules exist.
 //! - A secret in a whole line near the cap needs a rule for its shape (key id, URL userinfo, a complete
-//!   PEM block). Those rules are M1-060, so those cases are `ignore`d until it lands.
-//! - The HTML part of the exit test belongs to M1-077 (there is no renderer yet), and the stderr part to
-//!   `rdy-cli/tests/log_redaction.rs`.
+//!   PEM block). Those rules are M1-060, which depends on M1-061 and enables the held case below
+//!   (`#[ignore = "M1-060"]`). The geometry of that case is checked now, without the ignore.
+//! - The HTML part of the exit test belongs to M1-083 (there is no renderer yet), and the stderr half of
+//!   cut buffers to M1-086. `rdy-cli/tests/log_redaction.rs` covers a known secret on stderr.
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -98,7 +101,8 @@ fn filler(n: usize) -> Vec<u8> {
 }
 
 /// A file whose first `cap` bytes hold `canary` starting `k` bytes before the cap. The canary is
-/// followed by `p` up to the cap, with no newline, then 100 more bytes the cap cuts off.
+/// followed by `p` up to the cap, with no newline (the partial last line), then 100 more bytes the cap
+/// cuts off.
 fn tail_cut_file(cap: usize, k: usize, canary: &str) -> Vec<u8> {
     let mut data = filler(cap - k);
     data.extend_from_slice(canary.as_bytes());
@@ -164,15 +168,9 @@ fn assert_clean(what: &str, offset: usize, text: &str, canary: &Canary) {
     }
 }
 
-/// The offsets from the cap to try. A cap of 64 KiB or less gets every offset from 1 to 64. The 1 MiB caps
-/// get a spread that includes both ends and every size of canary edge, because a debug build redacts
-/// 1 MiB slowly and the partial-line drop does not depend on the offset.
-fn offsets(cap: usize) -> Vec<usize> {
-    if cap <= 64 * 1024 {
-        (1..=64).collect()
-    } else {
-        vec![1, 2, 27, 28, 29, 63, 64]
-    }
+/// The offsets from the cap to try: every one from 1 to 64, at every cap including the 1 MiB ones.
+fn offsets(_cap: usize) -> Vec<usize> {
+    (1..=64).collect()
 }
 
 /// Where a canary starts, counted back from the cap. A key also starts further back, so whole body lines
@@ -286,31 +284,192 @@ async fn a_secret_cut_by_the_tail_cap_never_reaches_the_report() -> TestResult {
     Ok(())
 }
 
-/// A secret in a whole line near the cap needs the rule for its shape.
+/// The buffers a check can get from the facade, with the cap each is cut at.
+#[derive(Clone, Copy)]
+enum Source {
+    File,
+    Stdout,
+    Stderr,
+}
+
+const SOURCES: [(Source, usize); 4] = [
+    (Source::File, MAX_READ),
+    (Source::Stdout, DEFAULT_STDOUT_CAP),
+    (Source::Stdout, 64 * 1024),
+    (Source::Stderr, DEFAULT_STDERR_CAP),
+];
+
+/// Where a whole canary starts so that the cap cuts the buffer `k` bytes after the canary's end (a
+/// PEM block, which is longer than 64 bytes) or `k` bytes before the cap where the canary starts (a
+/// short canary, which then needs `k` to be at least its length). `None` if it does not fit.
+fn whole_start(canary: &Canary, cap: usize, k: usize) -> Option<usize> {
+    if canary.name == "pem" {
+        cap.checked_sub(k + canary.text.len())
+    } else {
+        (k >= canary.text.len()).then_some(cap - k)
+    }
+}
+
+/// `cap + 100` bytes of filler lines with the whole, newline-ended `canary` written at `start`, which is
+/// a line start.
+fn whole_line_buffer(cap: usize, start: usize, canary: &Canary) -> Vec<u8> {
+    let mut data = filler(cap + 100);
+    data[start - 1] = b'\n';
+    data[start..start + canary.text.len()].copy_from_slice(canary.text.as_bytes());
+    data
+}
+
+/// The geometry of the held case, checked without the rules it waits for: at every cap and every offset
+/// from 1 to 64 the canary lies whole inside the cap, on its own line.
+#[test]
+fn the_held_case_puts_each_canary_whole_inside_the_cap_at_every_offset() {
+    for (_, cap) in SOURCES {
+        for canary in [aws(), url(), pem()] {
+            let len = canary.text.len();
+            let mut placed = 0;
+            for k in 1..=64 {
+                let Some(start) = whole_start(&canary, cap, k) else {
+                    continue;
+                };
+                let data = whole_line_buffer(cap, start, &canary);
+                assert_eq!(&data[start..start + len], canary.text.as_bytes());
+                assert_eq!(data[start - 1], b'\n', "{} at {k}", canary.name);
+                assert!(start + len <= cap, "{} at {k} in {cap}", canary.name);
+                let expected_end = if canary.name == "pem" {
+                    cap - k
+                } else {
+                    cap - k + len
+                };
+                assert_eq!(start + len, expected_end, "{} at {k}", canary.name);
+                placed += 1;
+            }
+            // A short canary needs k >= its length. A key block fits at every offset.
+            let want = if canary.name == "pem" { 64 } else { 65 - len };
+            assert_eq!(placed, want, "{} at cap {cap}", canary.name);
+        }
+    }
+}
+
+/// A secret in a whole line near the cap needs the rule for its shape. M1-060 enables this test.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "M1-060"]
 async fn a_whole_line_secret_just_inside_the_cap_needs_its_rule() -> TestResult {
     let redactor = Redactor::new(TagKey::fixed([4; 32]));
-    for canary in [aws(), url(), pem()] {
-        for k in 1..=64 {
-            // The canary ends with a newline and `p` fill follows it, so it is whole.
-            let mut data = filler(MAX_READ - k - 100);
-            data.extend_from_slice(canary.text.as_bytes());
-            data.extend(filler(MAX_READ + 100 - data.len()));
-            let run = run_with(Replay::new().file(LOG, data));
-            let ctx = run.context("host.synthetic", Os::Linux, []);
-            let file = ctx.probe().read(Path::new(LOG)).await?;
-            let shown = ctx.probe().file_text(&file)?;
-            assert_clean("whole line", k, &shown, &canary);
-            assert_clean(
-                "whole line report",
-                k,
-                &through_report(&redactor, &shown)?,
-                &canary,
-            );
+    for (source, cap) in SOURCES {
+        for canary in [aws(), url(), pem()] {
+            for k in 1..=64 {
+                let Some(start) = whole_start(&canary, cap, k) else {
+                    continue;
+                };
+                let data = whole_line_buffer(cap, start, &canary);
+                let shown = shown_text(source, cap, data, &[]).await?;
+                assert_clean("whole line", k, &shown, &canary);
+                assert_clean(
+                    "whole line report",
+                    k,
+                    &through_report(&redactor, &shown)?,
+                    &canary,
+                );
+            }
         }
     }
     Ok(())
+}
+
+/// The redacted text of `data` as a check would get it from the facade, cut at `cap`. The `known`
+/// secrets are in the run's set first.
+async fn shown_text(
+    source: Source,
+    cap: usize,
+    data: Vec<u8>,
+    known: &[&str],
+) -> TestResult<String> {
+    let run = run_with(Replay::new().file(LOG, data.clone()));
+    for secret in known {
+        assert!(run.add_known_secret(secret));
+    }
+    let ctx = run.context("host.synthetic", Os::Linux, []);
+    let shown = match source {
+        Source::File => {
+            let file = ctx.probe().read(Path::new(LOG)).await?;
+            assert!(file.truncated_tail);
+            ctx.probe().file_text(&file)?
+        }
+        Source::Stdout => {
+            let mut out = Output::new(Some(0), data[..cap].to_vec());
+            out.stdout_truncated = true;
+            ctx.probe().stdout_text(&out)?
+        }
+        Source::Stderr => {
+            let mut out = Output::new(Some(1), Vec::new());
+            out.stderr = data[..cap].to_vec();
+            out.stderr_truncated = true;
+            ctx.probe().stderr_text(&out)?
+        }
+    };
+    Ok(shown.to_string())
+}
+
+/// `total` bytes of `xx ` filler, so there is no newline anywhere, with `text` written at `at` between
+/// two spaces.
+fn spaced(total: usize, at: usize, text: &str) -> Vec<u8> {
+    let mut data: Vec<u8> = (0..total)
+        .map(|i| if i % 3 == 2 { b' ' } else { b'x' })
+        .collect();
+    data[at - 1] = b' ';
+    data[at..at + text.len()].copy_from_slice(text.as_bytes());
+    data[at + text.len()] = b' ';
+    data
+}
+
+/// A buffer with no newline, cut by the cap, with a canary that starts `k` bytes before the cap. The
+/// 4 KiB window and the move to a separator remove it whole, with no rule for its shape.
+#[tokio::test(flavor = "current_thread")]
+async fn a_secret_in_a_buffer_with_no_newline_cut_by_the_cap_goes_whole() -> TestResult {
+    let redactor = Redactor::new(TagKey::fixed([4; 32]));
+    for (source, cap) in SOURCES {
+        for canary in [aws(), url()] {
+            let text = canary.text.trim_end_matches('\n').to_owned();
+            for k in 1..=64 {
+                let data = spaced(cap + 100, cap - k, &text);
+                let shown = shown_text(source, cap, data, &[]).await?;
+                assert_clean("no newline", k, &shown, &canary);
+                assert_clean(
+                    "no newline report",
+                    k,
+                    &through_report(&redactor, &shown)?,
+                    &canary,
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A known password has no shape and needs no rule: 8 bytes and 6 bytes, at every offset.
+#[tokio::test(flavor = "current_thread")]
+async fn a_known_password_in_a_buffer_with_no_newline_cut_by_the_cap_leaves_no_fragment()
+-> TestResult {
+    for secret in ["Qz7!kLm2", "Zq9k2m"] {
+        for (source, cap) in SOURCES {
+            for k in 1..=64 {
+                let data = spaced(cap + 100, cap - k, secret);
+                let shown = shown_text(source, cap, data, &[secret]).await?;
+                for needle in windows_of(secret, 3) {
+                    assert!(!shown.contains(&needle), "k {k}: {needle} survived");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn windows_of(secret: &str, width: usize) -> Vec<String> {
+    secret
+        .as_bytes()
+        .windows(width)
+        .filter_map(|w| std::str::from_utf8(w).ok().map(str::to_owned))
+        .collect()
 }
 
 const TOKEN: &str = "kt-Zk3v9Qx7canaryTOKEN";
@@ -423,5 +582,65 @@ async fn the_value_of_a_declared_secret_env_name_joins_the_set_and_a_plain_name_
     let shown = ctx.probe().file_text(&file)?;
     assert!(!shown.contains("env-pw-Zk3v9Qx7canary"), "{}", *shown);
     assert!(shown.contains("/home/synthetic-user-dir"), "{}", *shown);
+    Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_secret_named_variable_with_a_plain_value_does_not_join_the_set() -> TestResult {
+    // `password=enabled` and friends: the key rule leaves these values alone, and in the set they
+    // would be removed from every string of the report.
+    let values = [
+        ("API_PASSWORD", "enabled"),
+        ("API_TOKEN", "required"),
+        ("DB_SECRET", "password"),
+        ("DB_PASSWORD", "${DB_PW_FROM_VAULT}"),
+        ("TLS_KEY", "/run/secrets/tls_key"),
+        ("AUTH_TOKEN", "null"),
+    ];
+    let mut replay = Replay::new().file(
+        LOG,
+        "enabled required password ${DB_PW_FROM_VAULT} /run/secrets/tls_key null\n",
+    );
+    for (name, value) in values {
+        replay = replay.env(name, value);
+    }
+    let run = run_with(replay);
+    let ctx = run.context("host.synthetic", Os::Linux, []);
+    for (name, value) in values {
+        assert_eq!(ctx.probe().env(name)?.as_deref(), Some(value));
+    }
+    let file = ctx.probe().read(Path::new(LOG)).await?;
+    let shown = ctx.probe().file_text(&file)?;
+    assert_eq!(
+        *shown, "enabled required password ${DB_PW_FROM_VAULT} /run/secrets/tls_key null\n",
+        "nothing was removed"
+    );
+    assert_eq!(run.action_log().redaction.get("known_secret"), 0);
+    assert_eq!(run.action_log().redaction.get("known_secret_refused"), 0);
+    Ok(())
+}
+
+#[test]
+fn a_refused_known_secret_is_counted_and_never_silent() -> TestResult {
+    let run = run_with(Replay::new().env("DB_PASSWORD", "ab1"));
+    assert!(!run.add_known_secret("abc"));
+    assert!(
+        run.add_known_secret("abc123"),
+        "exactly 6 bytes is accepted"
+    );
+    let ctx = run.context("host.synthetic", Os::Linux, []);
+    // A short secret-named value is refused too, and counted.
+    assert_eq!(ctx.probe().env("DB_PASSWORD")?.as_deref(), Some("ab1"));
+    let log = run.action_log();
+    assert_eq!(log.redaction.get("known_secret_refused"), 2);
+    // The count reaches the report's redaction summary, and the value reaches nothing.
+    let mut report: Report = serde_json::from_value(sample()?)?;
+    log.apply(&mut report);
+    assert_eq!(
+        report.redaction.by_rule.get("known_secret_refused"),
+        Some(&2)
+    );
+    let json = serde_json::to_string(&report)?;
+    assert!(!json.contains("ab1\""), "{json}");
     Ok(())
 }

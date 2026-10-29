@@ -896,6 +896,43 @@ fn a_secret_looking_exec_env_value_is_a_known_secret() {
 }
 
 #[test]
+fn an_exec_env_value_of_the_redactors_minimum_length_is_a_known_secret() {
+    // 6 bytes is what the redactor accepts. The old filter wanted 8 and let this one through.
+    let user = "    exec:\n      apiVersion: client.authentication.k8s.io/v1\n      command: /opt/bin/get-token\n      env:\n      - name: API_TOKEN\n        value: abc123\n      - name: DB_PASSWORD\n        value: abc12\n";
+    let text = kubeconfig_yaml(Some("ctx"), "https://prod.example:6443", "", user);
+    let loaded = load_one(&text).expect("load");
+    assert_eq!(loaded.known_secrets(), ["abc123"]);
+    assert_eq!(rdy_engine::redact::KNOWN_SECRET_MIN_LEN, 6);
+}
+
+#[test]
+fn client_key_data_is_a_known_secret_as_base64_and_as_the_pem_lines_it_decodes_to() {
+    let pem = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqCANARY1111\nMIIEvQIBADANBgkqCANARY2222\n-----END PRIVATE KEY-----\n";
+    // The base64 of `pem`, written out so the test does not use the decoder it checks.
+    let encoded = "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2UUlCQURBTkJna3FDQU5BUlkxMTExCk1JSUV2UUlCQURBTkJna3FDQU5BUlkyMjIyCi0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K".to_owned();
+    let user = format!("    client-key-data: {encoded}\n");
+    let text = kubeconfig_yaml(Some("ctx"), "https://prod.example:6443", "", &user);
+    let loaded = load_one(&text).expect("load");
+    let secrets = loaded.known_secrets();
+    assert!(secrets.contains(&encoded), "the base64 form");
+    assert!(secrets.contains(&pem.trim().to_owned()), "the decoded key");
+
+    // Handed to the redactor, a key line that shows up on its own is removed.
+    let redactor = rdy_engine::redact::Redactor::new(rdy_engine::redact::TagKey::fixed([7; 32]));
+    for secret in &secrets {
+        assert!(redactor.add_known_secret(secret));
+    }
+    let out = redactor.redact_str("trace: MIIEvQIBADANBgkqCANARY2222 seen");
+    assert!(!out.contains("CANARY2222"), "{}", *out);
+    // A value that is not base64 or not text adds nothing but itself.
+    let user = "    client-key-data: not base64 !\n";
+    let text = kubeconfig_yaml(Some("ctx"), "https://prod.example:6443", "", user);
+    if let Ok(loaded) = load_one(&text) {
+        assert_eq!(loaded.known_secrets().len(), 1);
+    }
+}
+
+#[test]
 fn rdy_variable_names_are_matched_by_case_where_the_os_does() {
     for insensitive in [false, true] {
         assert!(is_rdy_var("RDY_TOKEN", insensitive));
