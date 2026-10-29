@@ -65,7 +65,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-027 | todo | | Property tests for rdy_spec::parse
 
-- M1-028 | PR #TBD | | none. The job could not be run here (no CI, no cargo-nextest on this machine): first CI run must confirm it. A guarded `root_*` test returns early without `RDY_REQUIRE_ROOT` so plain `cargo test` stays green
+- M1-028 | [#57](https://github.com/getrdy-io/rdy/pull/57) | 2026-10-29 | none. The job could not be run here (no CI, no cargo-nextest on this machine): first CI run must confirm it. A guarded `root_*` test returns early without `RDY_REQUIRE_ROOT` so plain `cargo test` stays green
 
 - M1-029 | [#12](https://github.com/getrdy-io/rdy/pull/12) | 2026-10-28 | `spec init` is M3 (07 section 1) so it is not in the tree; `version --json` waits for the Version schema and exits 70; usage errors print generic text with no flag names or did-you-mean until M1-030; `--help` puts each option text on the line below the flag (clap layout), see 07 Appendix A note
 
