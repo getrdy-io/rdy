@@ -524,3 +524,25 @@ fn the_search_for_the_block_is_bounded_in_depth() {
         reason(&params)
     );
 }
+
+/// `RegexText` checks the length only, so lint compiles the keys named in `ParamSet::REGEX_FIELDS`. A
+/// struct that gains a `RegexText` key and leaves it out of the list would let a broken pattern be signed.
+#[test]
+fn every_regex_key_is_named_in_regex_fields() {
+    for id in KNOWN_IDS {
+        let found = probe_regex_fields(id).expect("a known id");
+        let declared = declared_regex_fields(id).expect("a known id");
+        assert_eq!(
+            found, declared,
+            "{id}: ParamSet::REGEX_FIELDS is out of date"
+        );
+        let all = fields_of(id).expect("a known id");
+        for field in declared {
+            assert!(all.contains(field), "{id}: {field} is not a field");
+        }
+    }
+    assert_eq!(
+        declared_regex_fields("net.tls_intercept"),
+        Some(&["expected_issuer"][..])
+    );
+}

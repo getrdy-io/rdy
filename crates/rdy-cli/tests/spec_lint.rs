@@ -173,7 +173,7 @@ fn a_misspelled_field_exits_2_with_a_did_you_mean_and_its_line() {
     );
     assert!(
         ran.stderr
-            .contains("\n  fix: check the spelling (did you mean 'min'?), or remove it.\n"),
+            .contains("\n  fix: check the spelling (did you mean 'min'?)\n"),
         "{}",
         ran.stderr
     );

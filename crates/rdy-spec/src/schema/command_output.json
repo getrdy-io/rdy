@@ -1,0 +1,96 @@
+{
+  "ErrorOutput": {
+    "description": "Not a report. What rdy prints on stdout with --json when it exits 64 or 70 without a verdict. api_version and kind are written but not required.",
+    "type": "object",
+    "required": [
+      "error",
+      "verdict",
+      "complete"
+    ],
+    "properties": {
+      "api_version": {
+        "const": "rdy/v1"
+      },
+      "kind": {
+        "const": "Error"
+      },
+      "error": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "fix"
+        ],
+        "properties": {
+          "code": {
+            "description": "Stable code: usage, spec_unreadable, spec_parse, spec_invalid, spec_unsigned, spec_signature_invalid, spec_key_unknown, spec_expired, trust_store_insecure, report_write, interrupted, internal. Open.",
+            "$ref": "#/$defs/OpenCode"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "fix": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 4096
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "column": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
+        }
+      },
+      "verdict": {
+        "type": "null"
+      },
+      "complete": {
+        "const": false
+      }
+    }
+  },
+  "Verification": {
+    "description": "Not a report. What rdy verify prints with --json when the spec is accepted.",
+    "type": "object",
+    "required": [
+      "api_version",
+      "kind",
+      "producer",
+      "spec",
+      "signature"
+    ],
+    "properties": {
+      "api_version": {
+        "const": "rdy/v1"
+      },
+      "kind": {
+        "const": "Verification"
+      },
+      "producer": {
+        "$ref": "#/$defs/Producer"
+      },
+      "spec": {
+        "$ref": "#/$defs/SpecRef"
+      },
+      "signature": {
+        "$ref": "#/$defs/Signature"
+      }
+    }
+  }
+}

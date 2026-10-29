@@ -84,9 +84,18 @@ pub(crate) trait ParamSet: DeserializeOwned {
     /// [`UnsupportedReason::NoThreshold`].
     const THRESHOLD: &'static [&'static str] = &[];
 
+    /// A key and value to show a vendor whose entry has no threshold, such as `min: 4`. Empty when the
+    /// check has no one obvious example. Then the fix lists the threshold keys instead.
+    const THRESHOLD_EXAMPLE: &'static str = "";
+
     /// Keys that are required besides the threshold. They are named in a
     /// [`UnsupportedReason::NoThreshold`] when they are missing too, so one message asks for everything.
     const ALSO_REQUIRED: &'static [&'static str] = &[];
+
+    /// The keys whose value is a [`RegexText`]. Lint and sign compile each of them, because
+    /// `RegexText` checks the length only. A test finds the regex keys of every struct by trying them,
+    /// so a key left out of this list fails it.
+    const REGEX_FIELDS: &'static [&'static str] = &[];
 }
 
 /// Defines [`CheckParams`] and the table from check id to parameter struct.
@@ -149,6 +158,46 @@ macro_rules! known_checks {
         ) -> Option<Result<CheckParams, UnsupportedReason>> {
             match id {
                 $($id => Some(decode::<$ty>(fields).map(CheckParams::$variant)),)*
+                _ => None,
+            }
+        }
+
+        /// The example threshold of `id` for a lint fix, or `""` when it has none.
+        pub(crate) fn threshold_example_of(id: &str) -> &'static str {
+            match id {
+                $($id => <$ty as ParamSet>::THRESHOLD_EXAMPLE,)*
+                _ => "",
+            }
+        }
+
+        /// The keys of `id` whose value reads as a [`RegexText`], found by giving each key a text that is
+        /// too long for a pattern, for the test that keeps `ParamSet::REGEX_FIELDS` complete.
+        #[cfg(test)]
+        pub(crate) fn probe_regex_fields(id: &str) -> Option<Vec<&'static str>> {
+            fn probe<P: ParamSet>() -> Vec<&'static str> {
+                let too_long = "a".repeat(RegexText::MAX_CHARS + 1);
+                P::FIELDS
+                    .iter()
+                    .copied()
+                    .filter(|field| {
+                        let object = serde_json::json!({ *field: too_long });
+                        serde_json::from_value::<P>(object)
+                            .err()
+                            .is_some_and(|e| e.to_string().contains(RegexText::LENGTH_RULE))
+                    })
+                    .collect()
+            }
+            match id {
+                $($id => Some(probe::<$ty>()),)*
+                _ => None,
+            }
+        }
+
+        /// The keys of `id` that `rdy spec lint` compiles as patterns.
+        #[cfg(test)]
+        pub(crate) fn declared_regex_fields(id: &str) -> Option<&'static [&'static str]> {
+            match id {
+                $($id => Some(<$ty as ParamSet>::REGEX_FIELDS),)*
                 _ => None,
             }
         }
@@ -299,9 +348,16 @@ impl fmt::Display for UnsupportedReason {
 
 /// Reads `fields` into the parameter struct `P`, naming the first problem.
 fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReason> {
-    // Naming the field needs a list, because a serde message cannot be taken apart safely when the
-    // key is attacker text. The list is checked first and `deny_unknown_fields` stays as a backstop.
-    if let Some(field) = fields.keys().find(|k| !P::FIELDS.contains(&k.as_str())) {
+    // A top-level unknown key is named from the list of fields, not from serde's message, so the name
+    // is the key itself and not a guess at where the key ends. `deny_unknown_fields` stays as a
+    // backstop. The first unknown key in sorted order is named, whatever order the map keeps its keys in.
+    // An unknown key inside a nested block does come from serde's message: `nested_unknown_field`
+    // splits it at the last "`, expected ", which no struct field name contains, and escapes the name.
+    if let Some(field) = fields
+        .keys()
+        .filter(|k| !P::FIELDS.contains(&k.as_str()))
+        .min()
+    {
         return Err(UnsupportedReason::UnknownField {
             field: echo_safe(field),
         });
@@ -456,7 +512,10 @@ fn missing_field_name<'m, P: ParamSet>(
 
 /// The key whose value alone makes `P` fail. A required key that is absent is not a culprit.
 fn culprit<P: ParamSet>(fields: &Map<String, Value>) -> Option<String> {
-    fields.iter().find_map(|(key, value)| {
+    // Sorted, so the key named does not depend on the order the map keeps.
+    let mut entries: Vec<(&String, &Value)> = fields.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    entries.into_iter().find_map(|(key, value)| {
         let mut one = Map::new();
         one.insert(key.clone(), value.clone());
         match serde_json::from_value::<P>(Value::Object(one.clone())) {

@@ -29,6 +29,7 @@ homepage = "https://getrdy.io"
 anyhow = { version = "1", default-features = false }
 clap = { version = "4.6", default-features = false }
 jsonschema = { version = "0.60", default-features = false }
+schemars = { version = "1", default-features = false }
 serde = { version = "1", default-features = false }
 serde-saphyr = { version = "~2.0", default-features = false }
 serde_json = { version = "1", default-features = false }
@@ -38,6 +39,8 @@ thiserror = { version = "2", default-features = false }
 ring = { version = "0.17", default-features = false }
 # Linear-time matching for the redaction rules (04 section 3.4).
 regex = { version = "1", default-features = false }
+# The parsed form of a pattern, to read the shortest text it can match (01 section 2.8).
+regex-syntax = { version = "0.8", default-features = false }
 # The scheduler (M1-034). Each crate names the features it uses.
 tokio = { version = "1", default-features = false }
 rpassword = { version = "7.5", default-features = false }

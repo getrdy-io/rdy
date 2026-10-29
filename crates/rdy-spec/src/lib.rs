@@ -5,7 +5,8 @@
 //! [`check`], the signature checks in [`sig`], the result types and the verdict rule in [`result`], and
 //! the [`LoadedSpec`] guarantee. [`reserved`] lists the check ids that are reserved and [`lint`] turns a
 //! decoded entry into a finding and a spec file into a [`lint::LintReport`] with a line and column for
-//! each finding. The JSON schemas arrive in later M1 tickets.
+//! each finding. The JSON schemas of the spec and the result are generated from these types by the
+//! `schema` module, which the `schema` feature turns on.
 //!
 //! Two kinds of spec value exist, on purpose:
 //!
@@ -30,10 +31,13 @@ mod limits;
 pub mod lint;
 mod loaded;
 mod parse;
-mod pattern;
+#[doc(hidden)]
+pub mod pattern;
 pub mod reserved;
 pub mod result;
 pub mod scalar;
+#[cfg(feature = "schema")]
+pub mod schema;
 pub mod sig;
 pub mod spec;
 mod suggest;
@@ -50,3 +54,6 @@ pub use suggest::did_you_mean;
 
 /// The `apiVersion` every `rdy/v1` document carries.
 pub const API_VERSION: &str = "rdy/v1";
+
+/// The version of this crate, such as `0.1.0`. A result records it as `producer.rdy_spec`.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -12,32 +12,40 @@ use regex::{Error, Regex, RegexBuilder};
 
 use crate::error::echo_reason;
 
-/// The most memory a compiled pattern may use, 1 MiB. A pattern of 256 characters that needs more, such
-/// as `\w{1000}`, is refused. The regex crate's own default is ten times as much.
+/// The most memory a compiled pattern may use, 1 MiB, for the program and for the lazy DFA cache. A
+/// pattern of 256 characters that needs more, such as `\w{1000}`, is refused. The regex crate's own
+/// default is ten times as much for the program.
 const COMPILED_SIZE_LIMIT: usize = 1024 * 1024;
 
 /// The most characters of a compile error that a message keeps.
 const MAX_REASON_CHARS: usize = 160;
 
-/// Texts used to look for a pattern that matches the empty string. `""` finds `a*` and `^`. The others
-/// find an empty match at a boundary, such as `\b` or `(?m)$`, which `""` alone does not.
-const EMPTY_PROBES: [&str; 6] = ["", "a", " ", "a b", "line\nline", "A_1.-"];
-
-/// Compiles `pattern` with the size limit, or says why not. The reason is safe to print.
-pub(crate) fn compile(pattern: &str) -> Result<Regex, String> {
+/// Compiles `pattern` with the size limits, or says why not. The reason is safe to print.
+///
+/// This is the one place that builds a regex from the text of a spec, so lint, sign and the checks that
+/// run the pattern all apply the same limits to the same text.
+#[doc(hidden)]
+pub fn compile(pattern: &str) -> Result<Regex, String> {
     RegexBuilder::new(pattern)
         .size_limit(COMPILED_SIZE_LIMIT)
+        .dfa_size_limit(COMPILED_SIZE_LIMIT)
         .build()
         .map_err(|e| reason(&e))
 }
 
-/// Compiles a redact pattern and refuses one that matches the empty string. The reason is safe to print.
+/// Compiles a redact pattern and refuses one that can match the empty string. The reason is safe to
+/// print.
+///
+/// The rule is read from the parsed pattern: the shortest text it can match has length 0. That holds for
+/// `a*`, `^`, `\b` and `(?-u:\B)\b` alike, with no list of sample texts to dodge.
 pub(crate) fn check_redact_pattern(pattern: &str) -> Result<(), String> {
-    let regex = compile(pattern)?;
-    if EMPTY_PROBES
-        .iter()
-        .any(|probe| regex.find_iter(probe).any(|m| m.is_empty()))
-    {
+    compile(pattern)?;
+    // `compile` accepted the text, so this parse cannot fail. If it somehow does, refuse.
+    let hir = regex_syntax::ParserBuilder::new()
+        .build()
+        .parse(pattern)
+        .map_err(|_| "the pattern does not parse".to_owned())?;
+    if hir.properties().minimum_len() == Some(0) {
         return Err("the pattern matches the empty string".to_owned());
     }
     Ok(())
@@ -93,7 +101,28 @@ mod tests {
             };
             assert!(why.contains("empty string"), "{pattern:?}: {why}");
         }
-        for pattern in ["a+", "\\d{3}-\\d{4}", "\\bkey\\b", "(?i)secret"] {
+        // Patterns that match the empty string only at a boundary, which no short sample finds.
+        for pattern in [
+            "(?-u:\\B)\\b",
+            "(?:a|\\b)",
+            "\\B",
+            "(?m:^)",
+            "(?:x{0})",
+            "(?:abc){0,3}",
+            "\\b{start}",
+        ] {
+            let Err(why) = check_redact_pattern(pattern) else {
+                panic!("{pattern:?} was accepted");
+            };
+            assert!(why.contains("empty string"), "{pattern:?}: {why}");
+        }
+        for pattern in [
+            "a+",
+            "\\d{3}-\\d{4}",
+            "\\bkey\\b",
+            "(?i)secret",
+            "(?:ab){2,}",
+        ] {
             assert!(check_redact_pattern(pattern).is_ok(), "{pattern}");
         }
     }

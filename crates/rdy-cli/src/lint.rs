@@ -135,11 +135,11 @@ mod tests {
         );
         let want = "\
 t.yaml:7:5: error: unknown field 'mn' in host.memory
-  fix: check the spelling (did you mean 'min'?), or remove it.
+  fix: check the spelling (did you mean 'min'?)
 t.yaml:8:9: warning: gpu.cuda: this version of rdy has no gpu checks yet
   fix: customers will see this check as not run, and NOT READY while it is required. Keep it if that is what you want.
 t.yaml:10:5: error: host.cpu has no threshold, so it can only pass
-  fix: add at least one of 'min', 'arch', or 'flags'.
+  fix: add 'min: 4'.
 
 t.yaml: 2 errors, 1 warning
 ";
@@ -152,7 +152,10 @@ t.yaml: 2 errors, 1 warning
         assert!(text(&r).starts_with("t.yaml:1:"), "{}", text(&r));
         let r = lint_bytes("t.yaml", &vec![b'a'; MAX_SPEC_BYTES + 1]);
         let out = text(&r);
-        assert!(out.starts_with("t.yaml: error: the spec is "), "{out}");
+        assert!(
+            out.starts_with("t.yaml: error: the spec is more than 1 MiB. The limit is 1 MiB\n"),
+            "{out}"
+        );
         assert!(out.ends_with("t.yaml: 1 error, 0 warnings\n"), "{out}");
     }
 

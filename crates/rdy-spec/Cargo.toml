@@ -13,6 +13,8 @@ include = ["src/**", "Cargo.toml", "LICENSE"]
 blake2 = { workspace = true }
 ed25519-dalek = { workspace = true }
 regex = { workspace = true, features = ["std", "perf", "unicode"] }
+regex-syntax = { workspace = true, features = ["std", "unicode"] }
+schemars = { workspace = true, optional = true, features = ["derive", "std", "preserve_order"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde-saphyr = { workspace = true, features = ["deserialize"] }
 serde_json = { workspace = true, features = ["std"] }
@@ -20,10 +22,17 @@ sha2 = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+# The schema tests and the unit tests of the schema module need the feature.
+rdy-spec = { path = ".", features = ["schema"] }
 jsonschema = { workspace = true }
 minisign = { workspace = true }
 proptest = { workspace = true, features = ["std"] }
 trybuild = { workspace = true }
+
+[features]
+# The JSON schema generator. Off by default so schemars and serde_json/preserve_order stay out of the
+# binary and out of the library that rdy-cloud reads. xtask turns it on (ADR 0019).
+schema = ["dep:schemars"]
 
 [lints]
 workspace = true

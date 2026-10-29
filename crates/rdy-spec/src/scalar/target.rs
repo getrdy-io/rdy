@@ -1,9 +1,13 @@
 //! [`Target`]: a network endpoint a check talks to.
 
+#[cfg(feature = "schema")]
+use std::borrow::Cow;
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
+#[cfg(feature = "schema")]
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
@@ -407,6 +411,22 @@ impl fmt::Display for Target {
             write!(f, ":{port}")?;
         }
         f.write_str(&self.tail)
+    }
+}
+
+#[cfg(feature = "schema")]
+impl JsonSchema for Target {
+    fn schema_name() -> Cow<'static, str> {
+        "Target".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "host:port, [ipv6]:port, or an http or https URL. Never user:password in a URL; specs carry no credentials.",
+            "type": "string",
+            "maxLength": 512,
+            "pattern": "^(https?://[^/@\\s#]+(/[^\\s#]*)?|[A-Za-z0-9.-]+:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])|\\[[0-9A-Fa-f:]+\\]:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))$"
+        })
     }
 }
 

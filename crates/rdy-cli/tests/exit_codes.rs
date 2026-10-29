@@ -180,7 +180,7 @@ fn commands_for_later_tickets_exit_70_with_a_fix_line() {
 /// With `--json` the same failure also puts an error object on stdout (M1-021, 07 section 4.1).
 #[test]
 fn a_later_ticket_command_with_json_prints_the_error_object_too() {
-    let out = rdy(&["version", "--json"]);
+    let out = rdy(&["run", "spec.yaml", "--json"]);
     assert_eq!(code(&out), 70);
     let err = text(&out.stderr);
     assert!(

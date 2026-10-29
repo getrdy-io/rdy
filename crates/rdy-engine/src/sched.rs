@@ -107,7 +107,11 @@ impl std::fmt::Debug for Planned {
 #[non_exhaustive]
 pub enum End {
     /// The check returned, or was never started because a hard need was missing.
-    Done(CheckOutcome),
+    ///
+    /// The outcome is boxed. A finding carries two JSON values, and in a `--workspace` build
+    /// `serde_json`'s `preserve_order` feature is on (ADR 0019), which makes them large enough that an
+    /// unboxed outcome would make every `End`, even a timeout, as big as a finding.
+    Done(Box<CheckOutcome>),
     /// The check was still running at its timeout and was aborted.
     TimedOut {
         /// The timeout it had.
@@ -190,7 +194,7 @@ impl Scheduler {
                 .iter()
                 .find(|need| !self.available.contains(need))
             {
-                let end = End::Done(Err(CheckError::MissingNeed(missing.clone())));
+                let end = End::Done(Box::new(Err(CheckError::MissingNeed(missing.clone()))));
                 let now = Instant::now();
                 slots[index] = Some(ran(item.key, info.id, end, origin, now, now));
                 continue;
@@ -273,7 +277,7 @@ async fn drive(item: Planned, os: Os, available: &HashSet<Need>, origin: Instant
     let _guard = AbortOnDrop(handle.abort_handle());
 
     let end = match tokio::time::timeout(after, &mut handle).await {
-        Ok(Ok(outcome)) => End::Done(outcome),
+        Ok(Ok(outcome)) => End::Done(Box::new(outcome)),
         Ok(Err(error)) if error.is_panic() => End::Panicked {
             message: panic_message(error.into_panic()),
         },

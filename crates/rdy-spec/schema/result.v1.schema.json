@@ -5,21 +5,1330 @@
   "description": "The JSON report rdy writes and Rdy Cloud reads. Ignore fields you do not know. Accept values not listed where a description says Open. Use verdict as written. A whole document is at most 2 MiB; readers should check that before parsing.",
   "$ref": "#/$defs/Report",
   "$defs": {
+    "Action": {
+      "description": "One side effect, recorded as it happened. Fields beyond the required ones depend on kind.",
+      "type": "object",
+      "properties": {
+        "seq": {
+          "description": "Position in the log, from 1.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "check": {
+          "description": "Check key, or `null` for run level probes.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "at_ms": {
+          "description": "Milliseconds after `run.started_at`.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "description": "How long it took.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "description": "What kind of effect.",
+          "$ref": "#/$defs/ActionKind"
+        },
+        "outcome": {
+          "description": "How it ended.",
+          "$ref": "#/$defs/ActionOutcome"
+        },
+        "rule": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "program": {
+          "description": "exec",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "argv": {
+          "description": "exec, after redaction",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "exit": {
+          "description": "exec",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stdout_bytes": {
+          "description": "exec",
+          "type": "integer",
+          "minimum": 0
+        },
+        "path": {
+          "description": "read, read_dir, stat, native, kube. Paths under a home directory start with ~.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "bytes": {
+          "description": "read",
+          "type": "integer",
+          "minimum": 0
+        },
+        "entries": {
+          "description": "read_dir",
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "description": "env (the name only, never the value), dns",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "host": {
+          "description": "lookup, connect, tls",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "answers": {
+          "description": "lookup",
+          "type": "integer",
+          "minimum": 0
+        },
+        "port": {
+          "description": "connect",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "addr": {
+          "description": "connect: the IP address used.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "via_proxy": {
+          "description": "connect, user info stripped",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "sni": {
+          "description": "tls",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "method": {
+          "description": "http, kube",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "url": {
+          "description": "http, without query string",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "status": {
+          "description": "http, kube",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "server": {
+          "description": "dns: the nameserver's IP address.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "rtype": {
+          "description": "dns",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "api": {
+          "description": "native, for example statvfs",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "of": {
+          "description": "coalesced: the kind that was coalesced",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "under": {
+          "description": "coalesced",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "count": {
+          "description": "coalesced",
+          "type": "integer",
+          "minimum": 0
+        },
+        "truncated": {
+          "description": "exec, read",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "seq",
+        "at_ms",
+        "duration_ms",
+        "kind",
+        "outcome",
+        "check"
+      ]
+    },
+    "ActionKind": {
+      "description": "What a recorded side effect was. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "exec",
+            "read",
+            "read_dir",
+            "stat",
+            "env",
+            "lookup",
+            "connect",
+            "tls",
+            "http",
+            "dns",
+            "kube",
+            "native",
+            "coalesced"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
+    },
+    "ActionOutcome": {
+      "description": "How a recorded side effect ended. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "ok",
+            "denied",
+            "failed",
+            "timeout"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
+    },
+    "Bucket": {
+      "description": "The display group of a check, from the same rule as the verdict.\n\nSort by it in this order: blocker, required_not_run, warning, passed, not_applicable. Do not recompute it. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "blocker",
+            "required_not_run",
+            "warning",
+            "passed",
+            "not_applicable"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
+    },
+    "Capability": {
+      "description": "One thing rdy probed before running checks, such as root or a reachable cluster.",
+      "type": "object",
+      "properties": {
+        "need": {
+          "description": "What was probed.",
+          "$ref": "#/$defs/Need"
+        },
+        "name": {
+          "description": "Program name for `command`, provider for `cloud_credentials`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "available": {
+          "description": "Whether the need is met.",
+          "type": "boolean"
+        },
+        "detail": {
+          "description": "For example `uid 1000` or `context acme-staging`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "hint": {
+          "description": "What to do when not available.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "need",
+        "available"
+      ]
+    },
+    "CheckResult": {
+      "description": "The outcome of one check entry.",
+      "type": "object",
+      "properties": {
+        "key": {
+          "description": "`id`, or `id/name` when the spec gave a name. Unique in the report.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "id": {
+          "description": "The check id.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "name": {
+          "description": "The spec's name for this entry, shown next to the id.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "family": {
+          "description": "The check family, such as `host`.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "severity": {
+          "description": "From the spec. A value a consumer does not know counts as block. Open.",
+          "$ref": "#/$defs/Severity"
+        },
+        "status": {
+          "description": "After severity is applied. An unknown status counts as not run. Open.",
+          "$ref": "#/$defs/Status"
+        },
+        "bucket": {
+          "description": "Display group, from the same rule as the verdict. Sort by it in this order: blocker, required_not_run, warning, passed, not_applicable. Do not recompute it. Open.",
+          "$ref": "#/$defs/Bucket"
+        },
+        "skip_kind": {
+          "description": "Present when `status` is `skipped`. `not_applicable` comes only from the spec's `os` list. A check that cannot work on this OS is `not_yet_on_os`. Open.",
+          "$ref": "#/$defs/SkipKind"
+        },
+        "unsupported_fields": {
+          "description": "For `unsupported_spec`: the fields this rdy could not read.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "timeout_after_ms": {
+          "description": "Present when `status` is `timeout`.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_kind": {
+          "description": "Present when `status` is `error`. Open.",
+          "$ref": "#/$defs/ErrorKind"
+        },
+        "message": {
+          "description": "One line, at most 1 KiB, such as `15.4 GiB found, 32 GiB needed`.",
+          "type": "string",
+          "maxLength": 1024
+        },
+        "fix": {
+          "description": "What to do. `null` only for pass and not applicable.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "fix_source": {
+          "description": "Whose fix text `fix` is: `spec` is the vendor's text, `rdy` is rdy's own. `null` on pass. Open.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "builtin_fix": {
+          "description": "rdy's text when the spec's fix replaced it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "observed": {
+          "description": "Measured values, at most 64 KiB. Keys are per check id, in snake_case, with the unit in the name (`_bytes`, `_ms`, `_percent`). Keys are only ever added.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "default": null
+        },
+        "expected": {
+          "description": "Thresholds that applied after defaults. Same rules as `observed`.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "default": null
+        },
+        "needs": {
+          "description": "Hard and soft needs the check declared, and whether each was met.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/NeedState"
+          }
+        },
+        "partial": {
+          "description": "Set when some sources could not be read. A partial check never blocks on data it could not read.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Partial"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "truncated": {
+          "description": "A size cap cut `message`, `fix`, `observed` or `expected`.",
+          "type": "boolean"
+        },
+        "notes": {
+          "description": "Up to 20 notes of 1 KiB each.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "maxItems": 20
+        },
+        "started_ms": {
+          "description": "Milliseconds after `run.started_at`.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "description": "How long the check took.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "key",
+        "id",
+        "family",
+        "severity",
+        "status",
+        "bucket",
+        "message",
+        "needs",
+        "truncated",
+        "notes",
+        "started_ms",
+        "duration_ms",
+        "name",
+        "fix",
+        "fix_source",
+        "observed",
+        "expected",
+        "partial"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "skipped"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "skip_kind"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "timeout"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "timeout_after_ms"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "error"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "error_kind"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "warn",
+                  "block",
+                  "timeout",
+                  "error"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "fix": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "skipped"
+              },
+              "skip_kind": {
+                "not": {
+                  "const": "not_applicable"
+                }
+              }
+            },
+            "required": [
+              "skip_kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fix": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "pass"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "fix_source": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ErrorKind": {
+      "description": "Why a check ended in `error`. Present when the status is `error`. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "check_failed",
+            "panic"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
+    },
+    "ErrorOutput": {
+      "description": "Not a report. What rdy prints on stdout with --json when it exits 64 or 70 without a verdict. api_version and kind are written but not required.",
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "const": "rdy/v1"
+        },
+        "kind": {
+          "const": "Error"
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "description": "Stable code: usage, spec_unreadable, spec_parse, spec_invalid, spec_unsigned, spec_signature_invalid, spec_key_unknown, spec_expired, trust_store_insecure, report_write, interrupted, internal. Open.",
+              "$ref": "#/$defs/OpenCode"
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "fix": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "file": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 4096
+            },
+            "line": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "column": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "fix"
+          ]
+        },
+        "verdict": {
+          "type": "null"
+        },
+        "complete": {
+          "const": false
+        }
+      },
+      "required": [
+        "error",
+        "verdict",
+        "complete"
+      ]
+    },
+    "Finding": {
+      "description": "One finding of a `LintReport`.",
+      "type": "object",
+      "properties": {
+        "level": {
+          "description": "Warning or error.",
+          "$ref": "#/$defs/Level"
+        },
+        "code": {
+          "description": "The code: `unknown_key`, `unknown_check`, `unsupported_field`, `bad_value`, `not_in_build`, `no_threshold` or `structure`. The set only grows.",
+          "anyOf": [
+            {
+              "enum": [
+                "unknown_key",
+                "unknown_check",
+                "unsupported_field",
+                "bad_value",
+                "not_in_build",
+                "no_threshold",
+                "structure"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ]
+        },
+        "line": {
+          "description": "The line in the file, from 1, when it is known.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "column": {
+          "description": "The column in the file, from 1, when it is known.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "key": {
+          "description": "The key of the check the finding is about (`host.disk` or `host.disk/data`). `None` for a finding about the file as a whole. Null in the JSON for that case.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "message": {
+          "description": "What is wrong. Safe to print: text from the file is cut and escaped.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "fix": {
+          "description": "What to do about it. Never empty.",
+          "type": "string",
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "level",
+        "code",
+        "message",
+        "fix"
+      ]
+    },
+    "FixSource": {
+      "description": "Whose fix text a result carries. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "spec",
+            "rdy"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
+    },
+    "Host": {
+      "description": "The machine, coarsely. No MAC addresses, environment values, command line, working directory, home paths, kubeconfig contents, raw machine id or serial numbers.",
+      "type": "object",
+      "properties": {
+        "hostname": {
+          "description": "As the OS reports it.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "host_id": {
+          "description": "First 16 hex digits of an HMAC-SHA256 of the OS machine id with key `rdy-host-id-v1` plus the product. The same host and product give the same value. Different products give unrelated values. `null` when there is no usable machine id (macOS for now).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "os": {
+          "description": "The operating system.",
+          "$ref": "#/$defs/HostOs"
+        },
+        "kernel": {
+          "description": "Kernel version.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "arch": {
+          "description": "CPU architecture.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "virtualization": {
+          "description": "Whether the host is a virtual machine.",
+          "$ref": "#/$defs/Virtualization"
+        },
+        "container": {
+          "description": "rdy ran inside a container or WSL.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "hostname",
+        "os",
+        "arch",
+        "host_id"
+      ]
+    },
+    "HostOs": {
+      "description": "The operating system of the host.",
+      "type": "object",
+      "properties": {
+        "family": {
+          "description": "Linux, macOS or Windows.",
+          "$ref": "#/$defs/HostOsFamily"
+        },
+        "id": {
+          "description": "Distribution id, such as `rhel`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "version": {
+          "description": "OS version.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "pretty_name": {
+          "description": "Human readable name.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "family"
+      ]
+    },
+    "HostOsFamily": {
+      "description": "The OS family of the host. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "linux",
+            "macos",
+            "windows"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
+    },
+    "Identity": {
+      "description": "Who ran rdy.",
+      "type": "object",
+      "properties": {
+        "euid": {
+          "description": "Effective uid on Unix, `null` on Windows.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "user": {
+          "description": "Local login name.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "elevated": {
+          "description": "Effective uid 0 on Unix, a high integrity token on Windows.",
+          "type": "boolean"
+        },
+        "kube": {
+          "description": "The Kubernetes identity in use. `null` when no k8s check ran.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KubeIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "elevated",
+        "euid",
+        "user"
+      ]
+    },
+    "KubeIdentity": {
+      "description": "The Kubernetes identity of a run.",
+      "type": "object",
+      "properties": {
+        "context": {
+          "description": "The kubeconfig context in use.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "server": {
+          "description": "The API server URL.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "user": {
+          "description": "The authenticated user from `SelfSubjectReview`. When that API is missing or the call fails, the user entry named in the kubeconfig context, with `user_verified` false.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "user_verified": {
+          "description": "`true` when `user` came from `SelfSubjectReview`. `false` when it is the kubeconfig user, which the API server did not verify.",
+          "type": "boolean"
+        },
+        "exec_plugin": {
+          "description": "Base name of the kubeconfig credential plugin that ran, if any.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "insecure_tls": {
+          "description": "The context skips TLS verification.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "user_verified"
+      ]
+    },
+    "Level": {
+      "description": "How serious a finding is.",
+      "oneOf": [
+        {
+          "description": "Lint exits 1 and sign goes on.",
+          "type": "string",
+          "const": "warning"
+        },
+        {
+          "description": "Lint exits 2 and sign refuses.",
+          "type": "string",
+          "const": "error"
+        }
+      ]
+    },
+    "LintReport": {
+      "description": "Not a report. What rdy spec lint prints with --json.\n\nThe counts equal the number of findings of each level.",
+      "type": "object",
+      "properties": {
+        "api_version": {
+          "description": "Always `rdy/v1`.",
+          "type": "string",
+          "const": "rdy/v1"
+        },
+        "kind": {
+          "description": "Always `Lint`.",
+          "type": "string",
+          "const": "Lint"
+        },
+        "file": {
+          "description": "The file as the caller named it.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "findings": {
+          "description": "Every finding, in file order. Empty when the spec is clean.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Finding"
+          }
+        },
+        "errors": {
+          "description": "How many findings are errors.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "warnings": {
+          "description": "How many findings are warnings.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "api_version",
+        "kind",
+        "file",
+        "findings",
+        "errors",
+        "warnings"
+      ]
+    },
+    "Need": {
+      "description": "Something rdy needs for a check, such as root or a cluster. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "root",
+            "kube_context",
+            "network",
+            "command",
+            "cloud_credentials"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
+    },
+    "NeedState": {
+      "description": "A need a check declared and whether it was met.",
+      "type": "object",
+      "properties": {
+        "need": {
+          "description": "What the check needs.",
+          "$ref": "#/$defs/Need"
+        },
+        "name": {
+          "description": "Program name for `command`, provider for `cloud_credentials`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "hard": {
+          "description": "`true`: the check does not run without it. `false`: it runs partial.",
+          "type": "boolean"
+        },
+        "met": {
+          "description": "Whether it was available.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "need",
+        "hard",
+        "met"
+      ]
+    },
     "OpenCode": {
       "description": "A snake_case code. Newer producers may send values not listed.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]{0,63}$"
     },
-    "Timestamp": {
-      "type": "string",
-      "format": "date-time"
+    "Partial": {
+      "description": "Which sources a check could not read.",
+      "type": "object",
+      "properties": {
+        "missing": {
+          "description": "The needs that were missing.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Need"
+          }
+        },
+        "note": {
+          "description": "What is missing, or the OS note for a `Partial` OS.",
+          "type": "string",
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "missing",
+        "note"
+      ]
     },
-    "Sha256": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{64}$"
+    "Producer": {
+      "description": "The rdy build that wrote a report.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Always `rdy`.",
+          "type": "string",
+          "const": "rdy"
+        },
+        "version": {
+          "description": "Version of the rdy binary.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "commit": {
+          "description": "Short git commit of the build.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "rdy_spec": {
+          "description": "Version of the rdy-spec crate that wrote this file.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "target": {
+          "description": "Rust target triple.",
+          "type": "string",
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "rdy_spec",
+        "target"
+      ]
+    },
+    "Proxy": {
+      "description": "Proxy settings in effect, user info stripped from URLs.",
+      "type": "object",
+      "properties": {
+        "https": {
+          "description": "The HTTPS proxy URL.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "http": {
+          "description": "The HTTP proxy URL.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "no_proxy": {
+          "description": "The `no_proxy` entries.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "default": []
+        }
+      }
+    },
+    "Redaction": {
+      "description": "What the redactor changed in a report. Counts only, never the matched text.",
+      "type": "object",
+      "properties": {
+        "ruleset": {
+          "description": "Which compiled rule set ran.",
+          "$ref": "#/$defs/RedactionRuleset"
+        },
+        "total": {
+          "description": "Total replacements.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "by_rule": {
+          "description": "Replacements per rule name.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "required": [
+        "ruleset",
+        "total",
+        "by_rule"
+      ]
+    },
+    "RedactionRuleset": {
+      "description": "Which compiled redaction rule set ran. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "report",
+            "bundle"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
     },
     "Report": {
+      "description": "One run of rdy run: who ran what, where, and what came of it. Ignore fields you do not know. Use verdict as written.",
       "type": "object",
+      "properties": {
+        "api_version": {
+          "description": "Always `rdy/v1`.",
+          "type": "string",
+          "const": "rdy/v1"
+        },
+        "kind": {
+          "description": "Always `Report`.",
+          "type": "string",
+          "const": "Report"
+        },
+        "producer": {
+          "description": "The rdy build that wrote this.",
+          "$ref": "#/$defs/Producer"
+        },
+        "run": {
+          "description": "When and how the run went.",
+          "$ref": "#/$defs/Run"
+        },
+        "spec": {
+          "description": "Which spec ran.",
+          "$ref": "#/$defs/SpecRef"
+        },
+        "signature": {
+          "description": "Who signed the spec.",
+          "$ref": "#/$defs/Signature"
+        },
+        "host": {
+          "description": "The machine, coarsely.",
+          "$ref": "#/$defs/Host"
+        },
+        "identity": {
+          "description": "Who ran it.",
+          "$ref": "#/$defs/Identity"
+        },
+        "proxy": {
+          "description": "Proxy settings in effect, user info stripped. `null` when none.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Proxy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "capabilities": {
+          "description": "Every need rdy probed before running checks, and the result.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          }
+        },
+        "verdict": {
+          "description": "The overall answer. Closed in v1: a new verdict value needs `rdy/v2`. Use it as written.",
+          "$ref": "#/$defs/Verdict"
+        },
+        "verdict_reason": {
+          "description": "Set when the verdict is not explained by an observed block or warning. `required_check_not_run` means NOT READY with no block. `nothing_verified` means READY with warnings because no check reached pass, warn or block. Otherwise `null`. Open.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VerdictReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exit_code": {
+          "description": "The exit code for this verdict: 0, 1 or 2. When rdy cannot write the report it exits 70 instead and `complete` is false.",
+          "enum": [
+            0,
+            1,
+            2
+          ]
+        },
+        "summary": {
+          "description": "Counts of the results.",
+          "$ref": "#/$defs/Summary"
+        },
+        "checks": {
+          "description": "One entry per spec check, in spec order. Sort by bucket for display.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CheckResult"
+          }
+        },
+        "actions": {
+          "description": "Every file read, command, lookup, connection and API request, in order. At most 5000 entries.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Action"
+          },
+          "maxItems": 5000
+        },
+        "actions_truncated": {
+          "description": "`true` when the log hit its 5000 entry cap. `exec`, `connect`, `tls`, `http`, `dns`, `lookup` and `kube` entries are never dropped.",
+          "type": "boolean"
+        },
+        "actions_dropped": {
+          "description": "How many entries of each kind were dropped when the log hit its cap. Only `read`, `read_dir` and `stat` entries are ever dropped.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "redaction": {
+          "description": "What the redactor changed in this report.",
+          "$ref": "#/$defs/Redaction"
+        },
+        "complete": {
+          "description": "`false` when rdy could not finish or write the report (exit 70).",
+          "type": "boolean"
+        },
+        "interrupted": {
+          "description": "`true` when the run was cancelled (Ctrl-C).",
+          "type": "boolean"
+        }
+      },
       "required": [
         "api_version",
         "kind",
@@ -31,127 +1340,17 @@
         "identity",
         "capabilities",
         "verdict",
-        "verdict_reason",
         "exit_code",
         "summary",
         "checks",
         "actions",
         "actions_truncated",
+        "actions_dropped",
         "redaction",
         "complete",
         "interrupted",
-        "actions_dropped"
+        "verdict_reason"
       ],
-      "properties": {
-        "api_version": {
-          "const": "rdy/v1"
-        },
-        "kind": {
-          "const": "Report"
-        },
-        "producer": {
-          "$ref": "#/$defs/Producer"
-        },
-        "run": {
-          "$ref": "#/$defs/Run"
-        },
-        "spec": {
-          "$ref": "#/$defs/SpecRef"
-        },
-        "signature": {
-          "$ref": "#/$defs/Signature"
-        },
-        "host": {
-          "$ref": "#/$defs/Host"
-        },
-        "identity": {
-          "$ref": "#/$defs/Identity"
-        },
-        "proxy": {
-          "$ref": "#/$defs/Proxy"
-        },
-        "capabilities": {
-          "description": "Every need rdy probed before running checks, and the result.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Capability"
-          }
-        },
-        "verdict": {
-          "description": "Closed in v1. A new verdict value needs rdy/v2.",
-          "enum": [
-            "ready",
-            "ready_with_warnings",
-            "not_ready"
-          ]
-        },
-        "verdict_reason": {
-          "anyOf": [
-            {
-              "enum": [
-                "required_check_not_run",
-                "nothing_verified"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Set when the verdict is not explained by an observed block or warn: required_check_not_run (not_ready with no block), nothing_verified (ready_with_warnings because no check reached pass, warn or block). Otherwise null. Open."
-        },
-        "exit_code": {
-          "description": "Exit code for this verdict: 0, 1, 2. When rdy could not write the report it exits 70 instead and complete is false.",
-          "enum": [
-            0,
-            1,
-            2
-          ]
-        },
-        "summary": {
-          "$ref": "#/$defs/Summary"
-        },
-        "checks": {
-          "description": "One entry per spec check, in spec order. Sort by bucket for display.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/CheckResult"
-          }
-        },
-        "actions": {
-          "description": "Every file read, command, lookup, connection and API request, in order.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Action"
-          },
-          "maxItems": 5000
-        },
-        "actions_truncated": {
-          "description": "True when the log hit 5000 entries. exec, connect, tls, http, dns, lookup and kube entries are never dropped.",
-          "type": "boolean"
-        },
-        "actions_dropped": {
-          "description": "How many entries of each kind were dropped when the log hit its cap. Only read, read_dir and stat entries are ever dropped.",
-          "type": "object",
-          "additionalProperties": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "redaction": {
-          "$ref": "#/$defs/Redaction"
-        },
-        "complete": {
-          "description": "False when rdy could not finish or write the report (exit 70).",
-          "type": "boolean"
-        },
-        "interrupted": {
-          "description": "True when the run was cancelled (Ctrl-C). Unstarted and running checks are then skipped with skip_kind cancelled.",
-          "type": "boolean"
-        }
-      },
       "allOf": [
         {
           "if": {
@@ -263,52 +1462,9 @@
         }
       ]
     },
-    "Producer": {
-      "type": "object",
-      "required": [
-        "name",
-        "version",
-        "rdy_spec",
-        "target"
-      ],
-      "properties": {
-        "name": {
-          "const": "rdy"
-        },
-        "version": {
-          "type": "string",
-          "description": "Version of the rdy binary.",
-          "maxLength": 4096
-        },
-        "commit": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "Short git commit of the build.",
-          "maxLength": 4096
-        },
-        "rdy_spec": {
-          "type": "string",
-          "description": "Version of the rdy-spec crate that wrote this file.",
-          "maxLength": 4096
-        },
-        "target": {
-          "type": "string",
-          "description": "Rust target triple.",
-          "maxLength": 4096
-        }
-      }
-    },
     "Run": {
+      "description": "When a run happened and the options it ran with.",
       "type": "object",
-      "required": [
-        "id",
-        "started_at",
-        "finished_at",
-        "duration_ms",
-        "options"
-      ],
       "properties": {
         "id": {
           "description": "Random UUID v4.",
@@ -317,158 +1473,119 @@
         },
         "started_at": {
           "description": "UTC, with milliseconds.",
-          "$ref": "#/$defs/Timestamp"
+          "type": "string",
+          "format": "date-time"
         },
         "finished_at": {
           "description": "UTC, with milliseconds.",
-          "$ref": "#/$defs/Timestamp"
+          "type": "string",
+          "format": "date-time"
         },
         "duration_ms": {
+          "description": "Wall time of the run.",
           "type": "integer",
           "minimum": 0
         },
         "options": {
-          "type": "object",
-          "required": [
-            "jobs",
-            "deadline_ms",
-            "allow_unsigned",
-            "network"
-          ],
-          "properties": {
-            "jobs": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 32
-            },
-            "deadline_ms": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "allow_unsigned": {
-              "type": "boolean"
-            },
-            "network": {
-              "description": "false when sockets were turned off for this run.",
-              "type": "boolean"
-            },
-            "kube_context": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "Context given with --kube-context, if any.",
-              "maxLength": 4096
-            }
-          }
+          "description": "The options that shaped the run.",
+          "$ref": "#/$defs/RunOptions"
         }
-      }
-    },
-    "SpecRef": {
-      "type": "object",
+      },
       "required": [
-        "product",
-        "sha256",
-        "file_name",
-        "size_bytes"
-      ],
+        "id",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "options"
+      ]
+    },
+    "RunOptions": {
+      "description": "The options of a run that change what a reader should expect.",
+      "type": "object",
       "properties": {
-        "product": {
-          "type": "string",
-          "maxLength": 4096
+        "jobs": {
+          "description": "Checks that ran at once, 1 to 32.",
+          "type": "integer",
+          "maximum": 32,
+          "minimum": 1
         },
-        "version": {
+        "deadline_ms": {
+          "description": "The run limit in milliseconds.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "allow_unsigned": {
+          "description": "Whether `--allow-unsigned` was set.",
+          "type": "boolean"
+        },
+        "network": {
+          "description": "`false` when sockets were turned off for this run.",
+          "type": "boolean"
+        },
+        "kube_context": {
+          "description": "Context given with `--kube-context`, if any.",
           "type": [
             "string",
             "null"
           ],
+          "default": null,
           "maxLength": 4096
-        },
-        "sha256": {
-          "description": "SHA-256 of the exact bytes that were verified and parsed.",
-          "$ref": "#/$defs/Sha256"
-        },
-        "file_name": {
-          "type": "string",
-          "description": "Base name only, never the full path.",
-          "maxLength": 4096
-        },
-        "size_bytes": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "serial": {
-          "type": [
-            "integer",
-            "null"
+        }
+      },
+      "required": [
+        "jobs",
+        "deadline_ms",
+        "allow_unsigned",
+        "network"
+      ]
+    },
+    "Severity": {
+      "description": "How much a check matters, as the spec wrote it.\n\nAn unknown severity counts as `block` everywhere. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "block",
+            "warn"
           ]
         },
-        "expires": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "date-time"
-        },
-        "contact": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "maxLength": 4096
-        },
-        "annotations": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "maxLength": 4096
-          }
+        {
+          "$ref": "#/$defs/OpenCode"
         }
-      }
+      ]
     },
     "Signature": {
+      "description": "Who signed the spec, as far as rdy could tell.",
       "type": "object",
-      "required": [
-        "state"
-      ],
       "properties": {
         "state": {
-          "anyOf": [
-            {
-              "enum": [
-                "verified",
-                "unsigned",
-                "invalid"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
-          ],
-          "description": "verified: signed by a trusted key. unsigned: no signature, run with --allow-unsigned. invalid: only in the rdy verify object, never in a report. Open: treat an unknown value as not verified."
+          "description": "`verified` is signed by a trusted key. `unsigned` is no signature, run with `--allow-unsigned`. `invalid` appears only in the `rdy verify` object, never in a report. Open: treat an unknown value as not verified.",
+          "$ref": "#/$defs/SignatureState"
         },
         "key_id": {
-          "description": "minisign key id, 16 uppercase hex digits.",
+          "description": "Minisign key id, 16 uppercase hex digits.",
           "type": [
             "string",
             "null"
           ],
-          "pattern": "^[0-9A-F]{16}$"
+          "pattern": "^[0-9A-F]{16}$",
+          "default": null
         },
         "key_fingerprint": {
-          "description": "SHA-256 of the 32-byte ed25519 public key, 64 hex digits. The key id alone is not an identity.",
+          "description": "SHA-256 of the 32 byte ed25519 public key, 64 hex digits. The key id alone is not an identity.",
           "type": [
             "string",
             "null"
           ],
-          "pattern": "^[0-9a-f]{64}$"
+          "pattern": "^[0-9a-f]{64}$",
+          "default": null
         },
         "product": {
+          "description": "Product from the signed trusted comment.",
           "type": [
             "string",
             "null"
           ],
-          "description": "Product from the signed trusted comment.",
+          "default": null,
           "maxLength": 4096
         },
         "signed_at": {
@@ -477,43 +1594,43 @@
             "string",
             "null"
           ],
-          "format": "date-time"
+          "format": "date-time",
+          "default": null
         },
         "trust_note": {
+          "description": "The local note from the trust store entry. Never text from the spec.",
           "type": [
             "string",
             "null"
           ],
-          "description": "The local note from the trust store entry. Never text from the spec.",
+          "default": null,
           "maxLength": 4096
         },
         "trust_source": {
+          "description": "Where the key came from: the system or user trust store, or `flag` for a key given with `--key` for one run. Open: treat an unknown value like `flag`.",
           "anyOf": [
             {
-              "enum": [
-                "system",
-                "user",
-                "flag"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
+              "$ref": "#/$defs/TrustSource"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Where the key came from: system or user trust store, or flag for a key given with --key for one run. Open: treat an unknown value like flag."
+          "default": null
         },
         "reason": {
+          "description": "For `invalid` only.",
           "type": [
             "string",
             "null"
           ],
-          "description": "For invalid only.",
+          "default": null,
           "maxLength": 4096
         }
       },
+      "required": [
+        "state"
+      ],
       "allOf": [
         {
           "if": {
@@ -524,13 +1641,6 @@
             }
           },
           "then": {
-            "required": [
-              "key_id",
-              "key_fingerprint",
-              "product",
-              "signed_at",
-              "trust_source"
-            ],
             "properties": {
               "key_id": {
                 "type": "string",
@@ -552,275 +1662,203 @@
                 "type": "string",
                 "maxLength": 4096
               }
-            }
+            },
+            "required": [
+              "key_id",
+              "key_fingerprint",
+              "product",
+              "signed_at",
+              "trust_source"
+            ]
           }
         }
       ]
     },
-    "Host": {
-      "description": "The machine, coarsely. IP addresses appear only in check observed data and in the connect.addr and dns.server fields of actions. Never included: MAC addresses, environment values except proxy settings, the command line, the working directory, home paths, kubeconfig contents, the raw machine id, serial numbers.",
-      "type": "object",
-      "required": [
-        "hostname",
-        "host_id",
-        "os",
-        "arch"
-      ],
-      "properties": {
-        "hostname": {
-          "type": "string",
-          "description": "As the OS reports it.",
-          "maxLength": 4096
-        },
-        "host_id": {
-          "description": "HMAC-SHA256 of the OS machine id with key 'rdy-host-id-v1' plus the product, first 16 hex digits. Same host and product give the same value; different products give unrelated values. null when there is no usable machine id (macOS for now).",
-          "type": [
-            "string",
-            "null"
-          ],
-          "pattern": "^[0-9a-f]{16}$"
-        },
-        "os": {
-          "type": "object",
-          "required": [
-            "family"
-          ],
-          "properties": {
-            "family": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "linux",
-                    "macos",
-                    "windows"
-                  ]
-                },
-                {
-                  "$ref": "#/$defs/OpenCode"
-                }
-              ]
-            },
-            "id": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "maxLength": 4096
-            },
-            "version": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "maxLength": 4096
-            },
-            "pretty_name": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "maxLength": 4096
-            }
-          }
-        },
-        "kernel": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "maxLength": 4096
-        },
-        "arch": {
-          "type": "string",
-          "maxLength": 4096
-        },
-        "virtualization": {
-          "anyOf": [
-            {
-              "enum": [
-                "none",
-                "vm",
-                "unknown"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
+    "SignatureState": {
+      "description": "The state of the spec signature in a report.\n\nAn unknown state counts as not verified. `invalid` appears in the `rdy verify` object, never in a written report. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "verified",
+            "unsigned",
+            "invalid"
           ]
         },
-        "container": {
-          "description": "rdy ran inside a container or WSL.",
-          "type": "boolean"
+        {
+          "$ref": "#/$defs/OpenCode"
         }
-      }
+      ]
     },
-    "Identity": {
-      "description": "Who ran it.",
+    "SkipKind": {
+      "description": "Why a check did not run. Present when the status is `skipped`.\n\nEvery kind except `not_applicable` counts as not run, and so does an unknown kind. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "missing_need",
+            "not_in_build",
+            "unknown_check",
+            "unsupported_spec",
+            "not_yet_on_os",
+            "not_applicable",
+            "run_deadline",
+            "cancelled"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
+    },
+    "SpecRef": {
+      "description": "Which spec ran: the signed metadata and the hash of the exact bytes.",
       "type": "object",
-      "required": [
-        "euid",
-        "user",
-        "elevated"
-      ],
       "properties": {
-        "euid": {
-          "description": "Effective uid on Unix, null on Windows.",
+        "product": {
+          "description": "`metadata.product`.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "version": {
+          "description": "`metadata.version`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "maxLength": 4096
+        },
+        "sha256": {
+          "description": "SHA-256 of the exact bytes that were verified and parsed, 64 lowercase hex digits.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "file_name": {
+          "description": "Base name only, never the full path.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "size_bytes": {
+          "description": "Size of the spec file.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "serial": {
+          "description": "`metadata.serial`.",
           "type": [
             "integer",
             "null"
           ],
+          "default": null,
           "minimum": 0
         },
-        "user": {
+        "expires": {
+          "description": "`metadata.expires`.",
           "type": [
             "string",
             "null"
           ],
-          "description": "Local login name.",
-          "maxLength": 4096
+          "format": "date-time",
+          "default": null
         },
-        "elevated": {
-          "description": "euid 0 on Unix, a high-integrity token on Windows.",
-          "type": "boolean"
-        },
-        "kube": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "description": "null when no k8s check ran. When an object, user_verified is required.",
-          "required": [
-            "user_verified"
-          ],
-          "properties": {
-            "context": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "maxLength": 4096
-            },
-            "server": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "maxLength": 4096
-            },
-            "user": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "description": "The authenticated user from SelfSubjectReview. When that API is missing or the call fails, the user entry named in the kubeconfig context, with user_verified false.",
-              "maxLength": 4096
-            },
-            "user_verified": {
-              "description": "true when user came from SelfSubjectReview; false when it is the kubeconfig user, not verified by the API server.",
-              "type": "boolean"
-            },
-            "exec_plugin": {
-              "description": "Base name of the kubeconfig credential plugin that ran, if any.",
-              "type": [
-                "string",
-                "null"
-              ],
-              "maxLength": 4096
-            },
-            "insecure_tls": {
-              "description": "The context skips TLS verification.",
-              "type": "boolean"
-            }
-          }
-        }
-      }
-    },
-    "Proxy": {
-      "description": "Proxy settings in effect, user info stripped from URLs. null when none.",
-      "type": [
-        "object",
-        "null"
-      ],
-      "properties": {
-        "https": {
+        "contact": {
+          "description": "`metadata.contact`.",
           "type": [
             "string",
             "null"
           ],
+          "default": null,
           "maxLength": 4096
         },
-        "http": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "maxLength": 4096
-        },
-        "no_proxy": {
-          "type": "array",
-          "items": {
+        "annotations": {
+          "description": "`metadata.annotations`.",
+          "type": "object",
+          "additionalProperties": {
             "type": "string",
             "maxLength": 4096
-          }
-        }
-      }
-    },
-    "Capability": {
-      "type": "object",
-      "required": [
-        "need",
-        "available"
-      ],
-      "properties": {
-        "need": {
-          "anyOf": [
-            {
-              "enum": [
-                "root",
-                "kube_context",
-                "network",
-                "command",
-                "cloud_credentials"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
-          ],
-          "description": "Known: root, kube_context, network, command, cloud_credentials. Open."
-        },
-        "name": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "Program name for command, provider for cloud_credentials.",
-          "maxLength": 4096
-        },
-        "available": {
-          "type": "boolean"
-        },
-        "detail": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "For example 'uid 1000' or 'context acme-staging'.",
-          "maxLength": 4096
-        },
-        "hint": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "What to do when not available.",
-          "maxLength": 4096
+          },
+          "default": {}
         }
       },
-      "description": "One thing rdy probed before running checks, such as root or a reachable cluster."
+      "required": [
+        "product",
+        "sha256",
+        "file_name",
+        "size_bytes"
+      ]
+    },
+    "Status": {
+      "description": "What happened to a check, after its severity was applied.\n\nAn unknown status counts as not run. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "pass",
+            "warn",
+            "block",
+            "skipped",
+            "timeout",
+            "error"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
     },
     "Summary": {
+      "description": "Counts of the results.\n\n`pass + warn + block + skipped + timeout + error = total` for every result whose status is known. `skipped` counts every `status: skipped` entry, not applicable included. `not_applicable`, `required_not_run` and `optional_not_run` are views inside that sum. A result whose status this version does not know counts in `total` and in `required_not_run` or `optional_not_run` only. The summary may gain keys, so never sum every key.",
       "type": "object",
+      "properties": {
+        "total": {
+          "description": "Number of results.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "pass": {
+          "description": "Results with status `pass`.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "warn": {
+          "description": "Results with status `warn`.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "block": {
+          "description": "Results with status `block`.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "description": "Every result with status `skipped`, not applicable included.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeout": {
+          "description": "Results with status `timeout`.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "description": "Results with status `error`.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_applicable": {
+          "description": "Skipped because the spec's `os` list leaves this OS out. Never counts toward the verdict.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "required_not_run": {
+          "description": "Severity block (or unknown) and not run.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "optional_not_run": {
+          "description": "Severity warn and not run.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
       "required": [
         "total",
         "pass",
@@ -832,696 +1870,60 @@
         "not_applicable",
         "required_not_run",
         "optional_not_run"
-      ],
-      "properties": {
-        "total": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "pass": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "warn": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "block": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "skipped": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Every check with status skipped, not applicable included."
-        },
-        "timeout": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "error": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "not_applicable": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Skipped because the spec's os list leaves this OS out. Never counts toward the verdict."
-        },
-        "required_not_run": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "severity block and skipped (not not_applicable), timeout or error."
-        },
-        "optional_not_run": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "severity warn and skipped (not not_applicable), timeout or error."
-        }
-      },
-      "description": "Counts. pass + warn + block + skipped + timeout + error = total. not_applicable, required_not_run and optional_not_run are views inside that sum. New keys may be added, so do not sum every key."
+      ]
     },
-    "CheckResult": {
-      "type": "object",
-      "required": [
-        "key",
-        "id",
-        "name",
-        "family",
-        "severity",
-        "status",
-        "bucket",
-        "message",
-        "fix",
-        "fix_source",
-        "observed",
-        "expected",
-        "needs",
-        "partial",
-        "truncated",
-        "notes",
-        "started_ms",
-        "duration_ms"
-      ],
-      "properties": {
-        "key": {
-          "type": "string",
-          "description": "id, or id/name when the spec gave a name. Unique in the report.",
-          "maxLength": 4096
-        },
-        "id": {
-          "type": "string",
-          "maxLength": 4096
-        },
-        "name": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "The spec's name for this entry, shown next to the id.",
-          "maxLength": 4096
-        },
-        "family": {
-          "type": "string",
-          "maxLength": 4096
-        },
-        "severity": {
-          "anyOf": [
-            {
-              "enum": [
-                "block",
-                "warn"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
-          ],
-          "description": "From the spec. A value a consumer does not know counts as block. Open."
-        },
-        "status": {
-          "anyOf": [
-            {
-              "enum": [
-                "pass",
-                "warn",
-                "block",
-                "skipped",
-                "timeout",
-                "error"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
-          ],
-          "description": "After severity is applied. An unknown status counts as not run. Open."
-        },
-        "bucket": {
-          "description": "Display group, from the same rule as the verdict. Sort by it in this order: blocker, required_not_run, warning, passed, not_applicable. Do not recompute it. Open.",
-          "anyOf": [
-            {
-              "enum": [
-                "blocker",
-                "required_not_run",
-                "warning",
-                "passed",
-                "not_applicable"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
+    "TrustSource": {
+      "description": "Where the trusted key came from.\n\nAn unknown source is treated like `flag`. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "system",
+            "user",
+            "flag"
           ]
         },
-        "skip_kind": {
-          "anyOf": [
-            {
-              "enum": [
-                "missing_need",
-                "not_in_build",
-                "unknown_check",
-                "unsupported_spec",
-                "not_yet_on_os",
-                "not_applicable",
-                "run_deadline",
-                "cancelled"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
-          ],
-          "description": "Present when status is skipped. not_applicable comes only from the spec's os list; a check that cannot work on this OS is not_yet_on_os. Open."
-        },
-        "unsupported_fields": {
-          "description": "For unsupported_spec: the fields this rdy could not read.",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "maxLength": 4096
-          }
-        },
-        "timeout_after_ms": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Present when status is timeout."
-        },
-        "error_kind": {
-          "anyOf": [
-            {
-              "enum": [
-                "check_failed",
-                "panic"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
-          ],
-          "description": "Present when status is error. Open."
-        },
-        "message": {
-          "type": "string",
-          "description": "One line, at most 1 KiB, such as '15.4 GiB found, 32 GiB needed'.",
-          "maxLength": 1024
-        },
-        "fix": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "What to do. null only for pass and not applicable.",
-          "maxLength": 4096
-        },
-        "fix_source": {
-          "anyOf": [
-            {
-              "enum": [
-                "spec",
-                "rdy"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "spec: the vendor's fix text. rdy: rdy's own text. null on pass. Open."
-        },
-        "builtin_fix": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "rdy's text when the spec's fix replaced it.",
-          "maxLength": 4096
-        },
-        "observed": {
-          "description": "Measured values, at most 64 KiB. Keys per check id, snake_case, with the unit in the name (_bytes, _ms, _percent). Keys are only ever added.",
-          "type": [
-            "object",
-            "null"
-          ]
-        },
-        "expected": {
-          "description": "Thresholds that applied after defaults. Same rules as observed.",
-          "type": [
-            "object",
-            "null"
-          ]
-        },
-        "needs": {
-          "description": "Hard and soft needs the check declared, and whether each was met.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/NeedState"
-          }
-        },
-        "partial": {
-          "description": "Set when some sources could not be read. A partial check never blocks on data it could not read.",
-          "type": [
-            "object",
-            "null"
-          ],
-          "required": [
-            "missing",
-            "note"
-          ],
-          "properties": {
-            "missing": {
-              "type": "array",
-              "items": {
-                "anyOf": [
-                  {
-                    "enum": [
-                      "root",
-                      "kube_context",
-                      "network",
-                      "command",
-                      "cloud_credentials"
-                    ]
-                  },
-                  {
-                    "$ref": "#/$defs/OpenCode"
-                  }
-                ],
-                "description": "Known: root, kube_context, network, command, cloud_credentials. Open."
-              }
-            },
-            "note": {
-              "type": "string",
-              "maxLength": 4096
-            }
-          }
-        },
-        "truncated": {
-          "description": "A size cap cut message, fix, observed or expected.",
-          "type": "boolean"
-        },
-        "notes": {
-          "type": "array",
-          "maxItems": 20,
-          "items": {
-            "type": "string",
-            "maxLength": 1024
-          }
-        },
-        "started_ms": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Milliseconds after run.started_at."
-        },
-        "duration_ms": {
-          "type": "integer",
-          "minimum": 0
-        }
-      },
-      "allOf": [
         {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "skipped"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "skip_kind"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "timeout"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "timeout_after_ms"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "error"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "error_kind"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "enum": [
-                  "warn",
-                  "block",
-                  "timeout",
-                  "error"
-                ]
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "fix": {
-                "type": "string",
-                "maxLength": 4096
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "skipped"
-              },
-              "skip_kind": {
-                "not": {
-                  "const": "not_applicable"
-                }
-              }
-            },
-            "required": [
-              "skip_kind"
-            ]
-          },
-          "then": {
-            "properties": {
-              "fix": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 4096
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "pass"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "fix_source": {
-                "type": "null"
-              }
-            }
-          }
+          "$ref": "#/$defs/OpenCode"
         }
       ]
     },
-    "NeedState": {
-      "type": "object",
-      "required": [
-        "need",
-        "hard",
-        "met"
-      ],
-      "properties": {
-        "need": {
-          "anyOf": [
-            {
-              "enum": [
-                "root",
-                "kube_context",
-                "network",
-                "command",
-                "cloud_credentials"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
-          ],
-          "description": "Known: root, kube_context, network, command, cloud_credentials. Open."
+    "Verdict": {
+      "description": "The overall answer of a run. Closed in v1: a new value needs `rdy/v2`.",
+      "oneOf": [
+        {
+          "description": "Everything the spec asks for passed. Exit 0.",
+          "type": "string",
+          "const": "ready"
         },
-        "name": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "maxLength": 4096
+        {
+          "description": "Warnings only, or optional checks did not run, or nothing was verified. Exit 1.",
+          "type": "string",
+          "const": "ready_with_warnings"
         },
-        "hard": {
-          "description": "true: the check does not run without it. false: it runs partial.",
-          "type": "boolean"
-        },
-        "met": {
-          "type": "boolean"
+        {
+          "description": "A block, or a required check did not run. Exit 2.",
+          "type": "string",
+          "const": "not_ready"
         }
-      }
+      ]
     },
-    "Action": {
-      "description": "One side effect, recorded as it happened. Fields beyond the required ones depend on kind.",
-      "type": "object",
-      "required": [
-        "seq",
-        "check",
-        "at_ms",
-        "duration_ms",
-        "kind",
-        "outcome"
-      ],
-      "properties": {
-        "seq": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "check": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "Check key, or null for run-level probes.",
-          "maxLength": 4096
-        },
-        "at_ms": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Milliseconds after run.started_at."
-        },
-        "duration_ms": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "kind": {
-          "anyOf": [
-            {
-              "enum": [
-                "exec",
-                "read",
-                "read_dir",
-                "stat",
-                "env",
-                "lookup",
-                "connect",
-                "tls",
-                "http",
-                "dns",
-                "kube",
-                "native",
-                "coalesced"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
-          ],
-          "description": "Open."
-        },
-        "outcome": {
-          "anyOf": [
-            {
-              "enum": [
-                "ok",
-                "denied",
-                "failed",
-                "timeout"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
-          ],
-          "description": "denied: rdy's own policy refused it (see rule). failed: the OS or peer said no (see error). Open."
-        },
-        "rule": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "maxLength": 4096
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "maxLength": 4096
-        },
-        "program": {
-          "type": "string",
-          "description": "exec",
-          "maxLength": 4096
-        },
-        "argv": {
-          "description": "exec, after redaction",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "maxLength": 4096
-          }
-        },
-        "exit": {
-          "description": "exec",
-          "type": [
-            "integer",
-            "null"
+    "VerdictReason": {
+      "description": "Why the verdict is not explained by an observed block or warning. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "required_check_not_run",
+            "nothing_verified"
           ]
         },
-        "stdout_bytes": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "exec"
-        },
-        "path": {
-          "type": "string",
-          "description": "read, read_dir, stat, native, kube. Paths under a home directory start with ~.",
-          "maxLength": 4096
-        },
-        "bytes": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "read"
-        },
-        "entries": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "read_dir"
-        },
-        "name": {
-          "type": "string",
-          "description": "env (the name only, never the value), dns",
-          "maxLength": 4096
-        },
-        "host": {
-          "type": "string",
-          "description": "lookup, connect, tls",
-          "maxLength": 4096
-        },
-        "answers": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "lookup"
-        },
-        "port": {
-          "description": "connect",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 65535
-        },
-        "addr": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "connect: the IP address used.",
-          "maxLength": 4096
-        },
-        "via_proxy": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "connect, user info stripped",
-          "maxLength": 4096
-        },
-        "sni": {
-          "type": "string",
-          "description": "tls",
-          "maxLength": 4096
-        },
-        "method": {
-          "type": "string",
-          "description": "http, kube",
-          "maxLength": 4096
-        },
-        "url": {
-          "type": "string",
-          "description": "http, without query string",
-          "maxLength": 4096
-        },
-        "status": {
-          "description": "http, kube",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "server": {
-          "type": "string",
-          "description": "dns: the nameserver's IP address.",
-          "maxLength": 4096
-        },
-        "rtype": {
-          "type": "string",
-          "description": "dns",
-          "maxLength": 4096
-        },
-        "api": {
-          "type": "string",
-          "description": "native, for example statvfs",
-          "maxLength": 4096
-        },
-        "of": {
-          "type": "string",
-          "description": "coalesced: the kind that was coalesced",
-          "maxLength": 4096
-        },
-        "under": {
-          "type": "string",
-          "description": "coalesced",
-          "maxLength": 4096
-        },
-        "count": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "coalesced"
-        },
-        "truncated": {
-          "description": "exec, read",
-          "type": "boolean"
+        {
+          "$ref": "#/$defs/OpenCode"
         }
-      }
+      ]
     },
     "Verification": {
       "description": "Not a report. What rdy verify prints with --json when the spec is accepted.",
       "type": "object",
-      "required": [
-        "api_version",
-        "kind",
-        "producer",
-        "spec",
-        "signature"
-      ],
       "properties": {
         "api_version": {
           "const": "rdy/v1"
@@ -1538,210 +1940,85 @@
         "signature": {
           "$ref": "#/$defs/Signature"
         }
-      }
-    },
-    "ErrorOutput": {
-      "description": "Not a report. What rdy prints on stdout with --json when it exits 64 or 70 without a verdict. api_version and kind are written but not required.",
-      "type": "object",
-      "required": [
-        "error",
-        "verdict",
-        "complete"
-      ],
-      "properties": {
-        "api_version": {
-          "const": "rdy/v1"
-        },
-        "kind": {
-          "const": "Error"
-        },
-        "error": {
-          "type": "object",
-          "required": [
-            "code",
-            "message",
-            "fix"
-          ],
-          "properties": {
-            "code": {
-              "description": "Stable code: usage, spec_unreadable, spec_parse, spec_invalid, spec_unsigned, spec_signature_invalid, spec_key_unknown, spec_expired, trust_store_insecure, report_write, interrupted, internal. Open.",
-              "$ref": "#/$defs/OpenCode"
-            },
-            "message": {
-              "type": "string",
-              "maxLength": 4096
-            },
-            "fix": {
-              "type": "string",
-              "maxLength": 4096
-            },
-            "file": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "maxLength": 4096
-            },
-            "line": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 1
-            },
-            "column": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 1
-            }
-          }
-        },
-        "verdict": {
-          "type": "null"
-        },
-        "complete": {
-          "const": false
-        }
-      }
-    },
-    "Redaction": {
-      "description": "What the redactor changed in this report. Counts only, never the matched text.",
-      "type": "object",
-      "required": [
-        "ruleset",
-        "total",
-        "by_rule"
-      ],
-      "properties": {
-        "ruleset": {
-          "anyOf": [
-            {
-              "enum": [
-                "report",
-                "bundle"
-              ]
-            },
-            {
-              "$ref": "#/$defs/OpenCode"
-            }
-          ],
-          "description": "Which compiled rule set ran. Open."
-        },
-        "total": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "by_rule": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      }
-    },
-    "LintReport": {
-      "description": "Not a report. What rdy spec lint prints with --json.",
-      "type": "object",
+      },
       "required": [
         "api_version",
         "kind",
-        "file",
-        "findings",
-        "errors",
-        "warnings"
-      ],
+        "producer",
+        "spec",
+        "signature"
+      ]
+    },
+    "Version": {
+      "description": "The `rdy` binary's own identity, as `rdy version --json` prints it.\n\nLike the other `rdy/v1` objects it only grows: a later release may add fields, and a reader ignores the ones it does not know. `commit` and `date` are `null` when the build had no trustworthy git information, for example a build from a source tarball.",
+      "type": "object",
       "properties": {
-        "api_version": {
-          "const": "rdy/v1"
+        "name": {
+          "description": "Always `rdy`.",
+          "type": "string",
+          "const": "rdy"
         },
-        "kind": {
-          "const": "Lint"
-        },
-        "file": {
+        "version": {
+          "description": "Version of the rdy binary, such as `0.1.0` or `0.1.0-alpha.3`.",
           "type": "string",
           "maxLength": 4096
         },
-        "findings": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": [
-              "level",
-              "code",
-              "message",
-              "fix"
-            ],
-            "properties": {
-              "level": {
-                "enum": [
-                  "error",
-                  "warning"
-                ]
-              },
-              "code": {
-                "description": "Known: unknown_key, unknown_check, unsupported_field, bad_value, not_in_build, no_threshold, structure. Open.",
-                "anyOf": [
-                  {
-                    "enum": [
-                      "unknown_key",
-                      "unknown_check",
-                      "unsupported_field",
-                      "bad_value",
-                      "not_in_build",
-                      "no_threshold",
-                      "structure"
-                    ]
-                  },
-                  {
-                    "$ref": "#/$defs/OpenCode"
-                  }
-                ]
-              },
-              "line": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "minimum": 1
-              },
-              "column": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "minimum": 1
-              },
-              "key": {
-                "description": "Check key, or null for top-level findings.",
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "maxLength": 4096
-              },
-              "message": {
-                "type": "string",
-                "maxLength": 4096
-              },
-              "fix": {
-                "type": "string",
-                "maxLength": 4096
-              }
-            }
-          }
+        "commit": {
+          "description": "Short git commit of the build: the first 7 hex digits of the hash.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{7,40}$"
         },
-        "errors": {
-          "type": "integer",
-          "minimum": 0
+        "date": {
+          "description": "Date of that commit in UTC, as `YYYY-MM-DD`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
         },
-        "warnings": {
-          "type": "integer",
-          "minimum": 0
+        "target": {
+          "description": "Rust target triple the binary was built for.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "rdy_spec": {
+          "description": "Version of the rdy-spec crate inside this binary.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "api_version": {
+          "description": "The wire format this binary reads and writes. Always `rdy/v1` in this release line.",
+          "type": "string",
+          "const": "rdy/v1"
         }
-      }
+      },
+      "required": [
+        "name",
+        "version",
+        "target",
+        "rdy_spec",
+        "api_version",
+        "commit",
+        "date"
+      ]
+    },
+    "Virtualization": {
+      "description": "Whether the host is a virtual machine. Open: a newer producer may send other snake_case values.",
+      "anyOf": [
+        {
+          "enum": [
+            "none",
+            "vm",
+            "unknown"
+          ]
+        },
+        {
+          "$ref": "#/$defs/OpenCode"
+        }
+      ]
     }
   }
 }

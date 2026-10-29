@@ -27,17 +27,21 @@ use crate::{API_VERSION, SpecError};
 /// The most characters of a file name that a report keeps (the schema's `maxLength`).
 const MAX_FILE_CHARS: usize = 4096;
 
-/// What `rdy spec lint --json` prints.
+/// Not a report. What rdy spec lint prints with --json.
 ///
-/// It is not a [`crate::result::Report`]. The counts equal the number of findings of each level.
+/// The counts equal the number of findings of each level.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct LintReport {
     /// Always `rdy/v1`.
+    #[cfg_attr(feature = "schema", schemars(extend("const" = "rdy/v1")))]
     pub api_version: &'static str,
     /// Always `Lint`.
+    #[cfg_attr(feature = "schema", schemars(extend("const" = "Lint")))]
     pub kind: &'static str,
     /// The file as the caller named it.
+    #[cfg_attr(feature = "schema", schemars(length(max = 4096)))]
     pub file: String,
     /// Every finding, in file order. Empty when the spec is clean.
     pub findings: Vec<Finding>,
@@ -49,24 +53,50 @@ pub struct LintReport {
 
 /// One finding of a [`LintReport`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub struct Finding {
     /// Warning or error.
     pub level: Level,
     /// The code: `unknown_key`, `unknown_check`, `unsupported_field`, `bad_value`, `not_in_build`,
     /// `no_threshold` or `structure`. The set only grows.
+    #[cfg_attr(feature = "schema", schemars(schema_with = "code_schema"))]
     pub code: &'static str,
     /// The line in the file, from 1, when it is known.
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub line: Option<u32>,
     /// The column in the file, from 1, when it is known.
+    #[cfg_attr(feature = "schema", schemars(range(min = 1)))]
     pub column: Option<u32>,
     /// The key of the check the finding is about (`host.disk` or `host.disk/data`). `None` for a finding
-    /// about the file as a whole.
+    /// about the file as a whole. Null in the JSON for that case.
     pub key: Option<String>,
     /// What is wrong. Safe to print: text from the file is cut and escaped.
     pub message: String,
     /// What to do about it. Never empty.
     pub fix: String,
+}
+
+/// The schema of [`Finding::code`]: the known codes, and any snake_case code a later version adds.
+#[cfg(feature = "schema")]
+fn code_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    let open = generator.subschema_for::<crate::result::open::OpenCode>();
+    schemars::json_schema!({
+        "anyOf": [
+            {
+                "enum": [
+                    "unknown_key",
+                    "unknown_check",
+                    "unsupported_field",
+                    "bad_value",
+                    "not_in_build",
+                    "no_threshold",
+                    "structure"
+                ]
+            },
+            open
+        ]
+    })
 }
 
 impl LintReport {
@@ -160,7 +190,13 @@ fn structure_finding(error: &SpecError) -> Finding {
         line: at.map(|a| a.line),
         column: at.map(|a| a.column),
         key: None,
-        message: error.to_string(),
+        message: match error.kind() {
+            // `rdy spec lint` reads one byte past the limit and stops, so the size is not known.
+            SpecError::TooLarge { .. } => {
+                "the spec is more than 1 MiB. The limit is 1 MiB".to_owned()
+            }
+            _ => error.to_string(),
+        },
         fix: error.fix(),
     }
 }
@@ -203,6 +239,16 @@ mod tests {
     }
 
     #[test]
+    fn an_oversized_file_is_told_without_a_size() {
+        // The message says 1 MiB, so the limit must be 1 MiB.
+        assert_eq!(crate::MAX_SPEC_BYTES, 1024 * 1024);
+        let report = lint_bytes("t.yaml", &vec![b'a'; crate::MAX_SPEC_BYTES + 1]);
+        let f = only(&report);
+        assert_eq!(f.message, "the spec is more than 1 MiB. The limit is 1 MiB");
+        assert!(f.fix.contains("1 MiB"), "{}", f.fix);
+    }
+
+    #[test]
     fn a_clean_spec_has_no_findings_and_exits_ready() {
         let report = lint("  - id: host.cpu\n    min: 4\n");
         assert!(report.findings.is_empty());
@@ -229,10 +275,7 @@ mod tests {
         assert_eq!((f.level, f.code), (Level::Error, "unsupported_field"));
         assert_eq!((f.line, f.column), (Some(7), Some(5)));
         assert_eq!(f.message, "unknown field 'mn' in host.memory");
-        assert_eq!(
-            f.fix,
-            "check the spelling (did you mean 'min'?), or remove it."
-        );
+        assert_eq!(f.fix, "check the spelling (did you mean 'min'?)");
         assert_eq!(report.exit_code(), ExitCode::Blockers);
     }
 
@@ -250,7 +293,7 @@ mod tests {
         let f = only(&report);
         assert_eq!(f.code, "no_threshold");
         assert_eq!((f.line, f.column), (Some(8), Some(5)));
-        assert!(f.fix.contains("'min'"), "{}", f.fix);
+        assert_eq!(f.fix, "add 'min: 8Gi'.");
     }
 
     #[test]

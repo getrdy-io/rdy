@@ -21,7 +21,10 @@
 
 use serde::Serialize;
 
-use crate::check::{CheckParams, KNOWN_IDS, RegexText, UnsupportedReason, fields_of};
+use crate::check::{
+    CheckParams, K8sAccess, KNOWN_IDS, NetTlsIntercept, ParamSet, RegexText, UnsupportedReason,
+    fields_of, threshold_example_of,
+};
 use crate::error::echo_safe;
 use crate::pattern;
 use crate::reserved::{RESERVED_IDS, UnknownKind};
@@ -35,6 +38,7 @@ pub use report::{Finding, LintReport, lint_bytes};
 
 /// How serious a finding is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum Level {
@@ -251,7 +255,7 @@ fn lint_params(index: usize, params: &CheckParams) -> Option<CheckLint> {
                     "no_threshold",
                     Spot::Entry,
                     format!("{id} has no threshold, so it can only pass"),
-                    no_threshold_fix(one_of, and),
+                    no_threshold_fix(threshold_example_of(&id), one_of, and),
                 ),
                 UnsupportedReason::BadCommonField { field } => error(
                     "bad_value",
@@ -264,15 +268,14 @@ fn lint_params(index: usize, params: &CheckParams) -> Option<CheckLint> {
         CheckParams::NetTlsIntercept(p) => regex_finding(
             index,
             params.id(),
-            &[("expected_issuer", p.expected_issuer.as_ref())],
+            <NetTlsIntercept as ParamSet>::REGEX_FIELDS,
+            &[p.expected_issuer.as_ref()],
         ),
         CheckParams::K8sAccess(p) => regex_finding(
             index,
             params.id(),
-            &[
-                ("context_pattern", p.context_pattern.as_ref()),
-                ("server_pattern", p.server_pattern.as_ref()),
-            ],
+            <K8sAccess as ParamSet>::REGEX_FIELDS,
+            &[p.context_pattern.as_ref(), p.server_pattern.as_ref()],
         ),
         _ => None,
     }
@@ -281,7 +284,7 @@ fn lint_params(index: usize, params: &CheckParams) -> Option<CheckLint> {
 /// The fix for an unknown field: a did-you-mean when there is a near match.
 fn unknown_field_fix(field: &str, near: Option<&str>) -> String {
     match near {
-        Some(near) => format!("check the spelling (did you mean '{near}'?), or remove it."),
+        Some(near) => format!("check the spelling (did you mean '{near}'?)"),
         None => format!(
             "check the spelling of '{field}' against the parameters of the check, or remove it."
         ),
@@ -289,12 +292,17 @@ fn unknown_field_fix(field: &str, near: Option<&str>) -> String {
 }
 
 /// The finding for the first regex field of a typed check that does not compile.
+///
+/// `names` is `ParamSet::REGEX_FIELDS` of the check. `texts` holds the value of each name, in the same
+/// order. A test keeps `names` complete.
 fn regex_finding(
     index: usize,
     id: &str,
-    fields: &[(&'static str, Option<&RegexText>)],
+    names: &'static [&'static str],
+    texts: &[Option<&RegexText>],
 ) -> Option<CheckLint> {
-    fields.iter().find_map(|(field, text)| {
+    debug_assert_eq!(names.len(), texts.len());
+    names.iter().zip(texts).find_map(|(field, text)| {
         let why = pattern::compile((*text)?.as_str()).err()?;
         Some(CheckLint {
             index,
@@ -322,10 +330,12 @@ fn not_in_build_message(id: &str) -> String {
     }
 }
 
-/// The fix for a check with no threshold: one of the threshold keys, then the other required keys.
-fn no_threshold_fix(one_of: &[&str], and: &[&str]) -> String {
+/// The fix for a check with no threshold: an example when the check has one, else one of the threshold
+/// keys, then the other required keys.
+fn no_threshold_fix(example: &str, one_of: &[&str], and: &[&str]) -> String {
     let quoted: Vec<String> = one_of.iter().map(|k| format!("'{k}'")).collect();
     let mut fix = match quoted.as_slice() {
+        _ if !example.is_empty() => format!("add '{example}'"),
         [] => "add a threshold".to_owned(),
         [only] => format!("add {only}"),
         [init @ .., last] => format!("add at least one of {}, or {last}", init.join(", ")),

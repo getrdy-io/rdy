@@ -129,16 +129,18 @@ fn a_bare_host_memory_is_a_no_threshold_error_naming_the_missing_key() {
         f.message,
         "host.memory has no threshold, so it can only pass"
     );
-    assert_eq!(f.fix, "add 'min'.");
+    assert_eq!(f.fix, "add 'min: 8Gi'.");
 }
 
 #[test]
 fn a_no_threshold_fix_puts_or_before_the_last_key_and_names_the_other_required_keys() {
     let f = one("  - id: host.cpu\n");
-    assert_eq!(f.fix, "add at least one of 'min', 'arch', or 'flags'.");
+    assert_eq!(f.fix, "add 'min: 4'.");
+    let f = one("  - id: host.ports\n");
+    assert_eq!(f.fix, "add at least one of 'free', or 'udp_free'.");
     let f = one("  - id: host.disk\n");
     assert_eq!(f.code, LintCode::NoThreshold);
-    assert_eq!(f.fix, "add 'min'; also add 'path'.");
+    assert_eq!(f.fix, "add 'min: 20Gi'; also add 'path'.");
 }
 
 #[test]

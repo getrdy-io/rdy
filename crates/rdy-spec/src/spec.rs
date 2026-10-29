@@ -12,19 +12,26 @@
 //! fields and a `new(..)` that takes only the required fields. Outside this crate, build a value with
 //! `new` and then set the optional fields.
 
+#[cfg(feature = "schema")]
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 
+#[cfg(feature = "schema")]
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::{API_VERSION, Duration, Quantity, SpecError};
 
 /// Defines a string newtype whose constructor and `Deserialize` impl both check one grammar.
+///
+/// `$pattern` is the same grammar written as a regular expression for the JSON schema, and `$inline`
+/// says whether the schema writes the type in place or as a named definition.
 macro_rules! checked_string {
     (
         $(#[$meta:meta])*
-        $name:ident, $valid:path, $error:ident
+        $name:ident, $valid:path, $error:ident, $pattern:literal, $inline:literal
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -75,6 +82,23 @@ macro_rules! checked_string {
             }
         }
 
+        // The pattern is the grammar the checker above enforces. The schema tests feed both the same
+        // strings, so a change to one without the other fails.
+        #[cfg(feature = "schema")]
+        impl JsonSchema for $name {
+            fn schema_name() -> Cow<'static, str> {
+                stringify!($name).into()
+            }
+
+            fn inline_schema() -> bool {
+                $inline
+            }
+
+            fn json_schema(_: &mut SchemaGenerator) -> Schema {
+                json_schema!({ "type": "string", "pattern": $pattern })
+            }
+        }
+
         impl fmt::Display for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str(&self.0)
@@ -122,7 +146,7 @@ checked_string! {
     /// A product name, `^[a-z0-9][a-z0-9-]{0,62}$`.
     ///
     /// It binds a signature to a pinned key and names the report directory and files.
-    ProductSlug, is_product_slug, InvalidProduct
+    ProductSlug, is_product_slug, InvalidProduct, "^[a-z0-9][a-z0-9-]{0,62}$", true
 }
 
 checked_string! {
@@ -130,42 +154,50 @@ checked_string! {
     ///
     /// Any well-formed id is accepted here, including ids rdy does not know. Whether rdy has the check is
     /// decided later and gives a skipped result, never a parse error.
-    CheckId, is_check_id, InvalidCheckId
+    CheckId, is_check_id, InvalidCheckId, "^[a-z][a-z0-9]{0,15}\\.[a-z][a-z0-9_]{0,47}$", false
 }
 
 checked_string! {
     /// A short label for a check entry, `^[a-z0-9][a-z0-9_-]{0,62}$`.
     ///
     /// Needed when the same id appears twice. Reports show it as `host.disk (data)`.
-    CheckName, is_check_name, InvalidCheckName
+    CheckName, is_check_name, InvalidCheckName, "^[a-z0-9][a-z0-9_-]{0,62}$", true
 }
 
 /// The `kind` of a spec document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[non_exhaustive]
 pub enum Kind {
     /// A readiness spec. The only kind in `rdy/v1`.
     Readiness,
 }
 
-/// A whole `rdy/v1` readiness spec, as the YAML file describes it.
+/// A vendor's readiness requirements (`apiVersion: rdy/v1`, `kind: Readiness`).
 ///
-/// Unknown top-level keys are refused, so a newer spec fails loudly on an older rdy.
+/// Check ids this schema does not know are allowed and reported as not run. Every other unknown key is
+/// an error, so a newer spec fails loudly on an older rdy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schema", schemars(title = "rdy/v1 readiness spec"))]
 #[non_exhaustive]
 pub struct Spec {
-    /// Format version. Must be [`API_VERSION`] (`rdy/v1`). Kept as text so the message for a wrong
-    /// version can quote what the file said.
+    /// Format version. Must be `rdy/v1`. Kept as text so the message for a wrong version can quote
+    /// what the file said.
     #[serde(rename = "apiVersion")]
+    #[cfg_attr(feature = "schema", schemars(extend("const" = "rdy/v1")))]
     pub api_version: String,
-    /// Document kind. Only [`Kind::Readiness`] exists in v1.
+    /// Document kind. Only `Readiness` exists in v1.
     pub kind: Kind,
     /// Who the spec is for and how fresh it is.
     pub metadata: Metadata,
-    /// The checks to run, in report order. A valid spec has 1 to 256 entries.
+    /// The checks to run, in report order. Entries are keyed by id plus optional name, and keys must be
+    /// unique. A valid spec has 1 to 256 entries.
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 256)))]
     pub checks: Vec<CheckSpec>,
-    /// What `rdy bundle` collects, from M2. It parses today so specs written now keep working.
+    /// What `rdy bundle` collects. It parses today so specs written now keep working, and `rdy run`
+    /// never collects anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle: Option<BundleSpec>,
 }
@@ -221,33 +253,56 @@ fn deserialize_serial<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u
 ///
 /// Unknown keys are refused.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Metadata {
-    /// Product name. Binds the signature to a pinned key and names the report directory and files.
+    /// Product name: lowercase letters, digits and hyphens. Ties the signature to a trusted key and
+    /// names the report directory and files.
     pub product: ProductSlug,
     /// Product versions this spec is for, such as `>=4.2`, at most 64 characters. Shown in the report
     /// and never evaluated, because rdy cannot know the product version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 64)))]
     pub version: Option<String>,
     /// Where the customer asks questions, at most 256 characters. Shown as plain text, never as a link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(length(max = 256)))]
     pub contact: Option<String>,
-    /// Spec revision, rising on every signed release, 0 to [`MAX_SERIAL`]. Shown as "Spec revision 7".
+    /// Spec revision number, 0 to 9007199254740991. Should go up by at least one on every signed
+    /// release of this spec. Shown as "Spec revision 7".
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_serial"
     )]
+    #[cfg_attr(feature = "schema", schemars(range(min = 0, max = MAX_SERIAL)))]
     pub serial: Option<u64>,
-    /// The UTC time after which rdy refuses the spec, in the full form `YYYY-MM-DDTHH:MM:SSZ`. Kept as
-    /// text here. The shape and the comparison with the clock are checked when the spec is validated.
+    /// The UTC time after which rdy refuses to run this spec, in the full form
+    /// `YYYY-MM-DDTHH:MM:SSZ`, for example `2027-01-31T00:00:00Z`. Kept as text here. The shape and the
+    /// comparison with the clock are checked when the spec is validated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(regex(pattern = "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+    )]
     pub expires: Option<String>,
-    /// Up to 32 labels for vendor tooling and the portal. rdy never changes behaviour because of them
-    /// and copies them into the result. Sorted by key.
+    /// Up to 32 free-form labels for vendor tooling and the portal. rdy never changes behaviour because
+    /// of them and copies them into the result. Keys are lowercase, 1 to 63 characters, and values are
+    /// at most 256 characters.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(schema_with = "annotations_schema"))]
     pub annotations: BTreeMap<String, String>,
+}
+
+#[cfg(feature = "schema")]
+fn annotations_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "type": "object",
+        "maxProperties": 32,
+        "propertyNames": { "pattern": "^[a-z0-9][a-z0-9._/-]{0,62}$" },
+        "additionalProperties": { "type": "string", "maxLength": 256 }
+    })
 }
 
 impl Metadata {
@@ -266,8 +321,13 @@ impl Metadata {
 }
 
 /// How bad a failed check is.
+///
+/// `block` means required: a failure makes the run NOT READY. `warn` means optional: a failure gives
+/// READY with warnings. The default is `block`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "schema", schemars(extend("default" = "block")))]
 #[non_exhaustive]
 pub enum Severity {
     /// Required. A failure makes the run NOT READY. This is the default.
@@ -279,6 +339,7 @@ pub enum Severity {
 
 /// An operating system family a check can be limited to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum OsFamily {
@@ -323,6 +384,21 @@ impl FixText {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[cfg(feature = "schema")]
+impl JsonSchema for FixText {
+    fn schema_name() -> Cow<'static, str> {
+        "FixText".into()
+    }
+
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({ "type": "string", "minLength": 1, "maxLength": MAX_FIX_CHARS })
     }
 }
 
@@ -471,31 +547,85 @@ impl<'de, T: serde::de::DeserializeOwned> Deserialize<'de> for Lenient<T> {
 /// second step, [`CheckSpec::decode_params`], turns them into a [`crate::check::CheckParams`] and treats a
 /// [`Lenient::Invalid`] common field as `unsupported_spec`. A [`Lenient::Valid`] value is always one that
 /// step two accepts.
+///
+/// # Schema
+///
+/// The JSON schema is stricter than this type on purpose. The type keeps a bad common field as written
+/// so one bad entry skips one check (01 section 2.5). The schema describes the values an author should
+/// write, so an editor flags the bad ones. The schema also lists the parameters of every known check id
+/// (see `crate::schema`), which this type keeps as a raw map until step two.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(
+    rename = "Check",
+    description = "One check to run: an id, the common fields below, and the parameters of that check id. Parameters of ids this schema does not know are not checked here.",
+    transform = crate::schema::check_rules
+))]
 #[non_exhaustive]
 pub struct CheckSpec {
     /// Which check to run, as written. It should read `family.name` in lowercase. Use
     /// [`CheckSpec::check_id`] to test that. An id that does not fit, or that rdy does not know, skips
     /// this one check as unknown and never rejects the file.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(
+            with = "CheckId",
+            description = "Which check to run: family.name in lowercase, for example host.memory."
+        )
+    )]
     pub id: String,
     /// A short label. The entry's key is `id` or `id/name`, unique per spec.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(
+            with = "CheckName",
+            description = "Short label, shown next to the id. Needed when the same id appears twice."
+        )
+    )]
     pub name: Option<Lenient<CheckName>>,
     /// Whether a failure blocks or only warns. `None` means [`Severity::Block`]. A value that does not
     /// read, such as `info` or a typo, counts as block too. See [`CheckSpec::effective_severity`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(
+            with = "Severity",
+            description = "block (the default) makes a failure NOT READY. warn makes it READY with warnings."
+        )
+    )]
     pub severity: Option<Lenient<Severity>>,
     /// The vendor's advice, 1 to 2000 characters, shown instead of rdy's own as the headline fix. Plain
     /// text with no templating. See [`FixText`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(
+            with = "FixText",
+            description = "What the customer should do when this check fails. Plain text. Shown instead of rdy's own advice, which stays available below it."
+        )
+    )]
     pub fix: Option<Lenient<FixText>>,
     /// How long the check may run, `1s` to `60s`, written like `10s`. A value outside that range, or one
     /// that is not a duration, stays [`Lenient::Invalid`] and the check is skipped. See [`CheckTimeout`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(
+            with = "Duration",
+            description = "How long this check may run, 1s to 60s. Replaces the check's own default. Outside that range the check is not run and lint reports an error."
+        )
+    )]
     pub timeout: Option<Lenient<CheckTimeout>>,
     /// Run only on these operating systems. Elsewhere the check is skipped as not applicable and never
     /// counts. `None` means every system.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(
+        with = "Vec<OsFamily>",
+        length(min = 1),
+        extend("uniqueItems" = true),
+        description = "Run only on these operating systems. On others the check is reported as not applicable and does not count."
+    ))]
     pub os: Option<Lenient<Vec<OsFamily>>>,
     /// Every other key of the entry: the parameters of the check id, such as `min` or `endpoints`.
     ///
@@ -505,6 +635,7 @@ pub struct CheckSpec {
     /// with a line and column, before this type sees them. A `Spec` built any other way has no such
     /// guarantee.
     #[serde(flatten)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
     pub params: Map<String, Value>,
 }
 
@@ -547,25 +678,70 @@ impl CheckSpec {
 
 /// The `bundle` block: what `rdy bundle` collects and how it redacts.
 ///
-/// It parses in v1 and nothing acts on it before M2. `rdy run` never collects anything, whatever this
-/// says. Unknown keys are refused.
+/// It parses in v1 and nothing acts on it yet. `rdy run` never collects anything, whatever this says.
+/// Unknown keys are refused.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct BundleSpec {
-    /// Collectors such as `journal:7d`, `k8s:events` or `file:/etc/acme/*.yaml`. At most 64.
+    /// Collectors: `journal:<duration>`, `k8s:events`, `file:<absolute path or glob>`. At most 64.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(schema_with = "collect_schema"))]
     pub collect: Vec<String>,
-    /// Redactor groups to add, such as `aws_keys`. At most 64. The built-in rules always run, so a spec
-    /// can add redaction and can never remove it.
+    /// Redactor groups to add, such as `aws_keys`, `bearer_tokens` or `emails`. At most 64. The
+    /// built-in rules always run, so a spec can add redaction and can never remove it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(length(max = 64), inner(regex(pattern = "^[a-z][a-z0-9_]{0,31}$")))
+    )]
     pub redact: Vec<String>,
-    /// The vendor's own redaction patterns. At most 32. A pattern can only add redaction.
+    /// Your own patterns, at most 32. A match is replaced with a `custom.<name>` placeholder. A pattern
+    /// can only add redaction: where it overlaps a built-in match, the whole overlapping region is
+    /// redacted. A pattern that matches the empty string is an error.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "schema", schemars(length(max = 32)))]
     pub redact_patterns: Vec<RedactPattern>,
-    /// A size cap, such as `200Mi`. It lowers rdy's own cap and never raises it.
+    /// Bundle size cap, such as `200Mi`. It lowers rdy's own cap and never raises it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_size: Option<Quantity>,
+}
+
+/// The schema of `bundle.collect`: a list of `kind:argument` strings with a rule for each kind.
+///
+/// The kind must be `journal`, `k8s` or `file`. `journal:` takes a duration, `k8s:` takes only `events`,
+/// and `file:` takes an absolute path with no backslash, no control character, no line or paragraph
+/// separator and no `..` part. The control characters are written as `\u` escapes, which both ECMA 262
+/// and Rust regex accept.
+#[cfg(feature = "schema")]
+fn collect_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "type": "array",
+        "maxItems": 64,
+        "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,15}:.{1,1024}$",
+            "allOf": [
+                { "pattern": "^(journal:|k8s:|file:)" },
+                {
+                    "if": { "pattern": "^journal:" },
+                    "then": { "pattern": "^journal:[1-9][0-9]{0,8}(ms|s|m|h|d)$" }
+                },
+                {
+                    "if": { "pattern": "^k8s:" },
+                    "then": { "enum": ["k8s:events"] }
+                },
+                {
+                    "if": { "pattern": "^file:" },
+                    "then": {
+                        "pattern": "^file:/[^\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]{0,1023}$",
+                        "not": { "pattern": "(^file:|/)\\.\\.(/|$)" }
+                    }
+                }
+            ]
+        }
+    })
 }
 
 impl BundleSpec {
@@ -578,12 +754,19 @@ impl BundleSpec {
 
 /// A vendor redaction pattern in the `bundle` block.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct RedactPattern {
     /// The rule name. A match is replaced with a `custom.<name>` placeholder.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(regex(pattern = "^[a-z][a-z0-9_]{0,31}$"))
+    )]
     pub name: String,
-    /// The pattern, in Rust `regex` syntax, at most 256 characters. Not compiled here.
+    /// The pattern, in Rust `regex` syntax (linear time, no backreferences), 1 to 256 characters. Not
+    /// compiled here.
+    #[cfg_attr(feature = "schema", schemars(length(min = 1, max = 256)))]
     pub regex: String,
 }
 

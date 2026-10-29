@@ -373,7 +373,9 @@ impl SpecError {
                 match *section {
                     "metadata" => METADATA_KEYS,
                     "bundle" => BUNDLE_KEYS,
-                    _ => REDACT_PATTERN_KEYS,
+                    "a redact pattern" => REDACT_PATTERN_KEYS,
+                    // A section this version does not know has no list of keys to suggest from.
+                    _ => &[],
                 },
             ),
             other => other.hint().to_owned(),
