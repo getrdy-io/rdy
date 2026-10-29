@@ -11,13 +11,18 @@
 #   1. org 2FA                       2FA required for every member of the owning organization
 #   2. private vulnerability reports the "Report a vulnerability" button on the Security tab
 #   3. immutable releases            published releases cannot change
-#   4. main ruleset                  PR required, ci-ok required, linear history, no force push,
-#                                    no deletion, nobody may push to main directly
-#   5. v* tag ruleset                only repo or org admins create v* tags; no update, no delete
+#   4. main ruleset                  PR required, ci-ok from GitHub Actions required, linear history,
+#                                    no force push, no deletion, nobody may push to main directly.
+#                                    Only an admin role may bypass, and only "for pull requests"
+#                                    (the emergency path in the settings doc, section 4).
+#   5. v* tag ruleset                only repo or org admins create v* tags; no update, no delete.
+#                                    Every covering ruleset with creation, update or deletion fails
+#                                    on any bypass actor that is not an admin role.
 #   6. Security tab policy           SECURITY.md on the default branch names both channels
 #
 # Usage: scripts/check-org-settings.sh [owner/repo]     (default getrdy-io/rdy)
-# Exit:  0 all items PASS, 1 at least one FAIL, 2 no FAIL but at least one UNKNOWN, 64 usage error.
+# Exit:  0 all items PASS, 1 at least one FAIL, 2 no FAIL but at least one UNKNOWN, 64 usage error,
+#        70 internal error (no temporary directory), 130 or 143 interrupted.
 #
 # Tools: curl and jq. Only GET requests, only to https://api.github.com. Nothing is changed.
 #
@@ -39,7 +44,7 @@ RERUN="Rerun with a repo admin token: GH_TOKEN=\$(gh auth token) scripts/check-o
 
 case "$REPO" in
 -h | --help)
-  sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
   ;;
 -* | */*/* | .* | */.* | *[!A-Za-z0-9._/-]*)
@@ -73,7 +78,9 @@ if ! have curl || ! have jq; then
 fi
 
 tmp=$(mktemp -d) || exit 70
-trap 'rm -rf "$tmp"' EXIT INT TERM
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 PASSES=0
 FAILS=0
@@ -236,6 +243,11 @@ actors_that() {
   jqb "[.bypass_actors[] | select($1) | \"\(.actor_type):\(.actor_id // \"-\")(\(.bypass_mode // \"always\"))\"] | join(\" \")"
 }
 
+# The admin roles, as a jq test on one bypass actor. Repository admin is RepositoryRole 5
+# (4 is Write, 2 is Maintain). OrganizationAdmin is the org owner role. Anything else, such as
+# another role, a team, an app or a deploy key, is not an admin.
+IS_ADMIN='((.actor_type == "RepositoryRole" and .actor_id == 5) or .actor_type == "OrganizationAdmin")'
+
 # ---- 4. main ruleset ----------------------------------------------------------------
 check_main() {
   item="main ruleset"
@@ -252,17 +264,22 @@ check_main() {
       missing="$missing $r"
     fi
   done
+  # 15368 is the GitHub Actions app. Without integration_id any app or token could post ci-ok.
   if ! jq -e 'any(.[]; .type == "required_status_checks"
-        and any(.parameters.required_status_checks[]?; .context == "ci-ok"))' "$tmp/main-rules" >/dev/null 2>&1; then
-    missing="$missing required_status_checks(ci-ok)"
+        and any(.parameters.required_status_checks[]?; .context == "ci-ok" and .integration_id == 15368))' \
+    "$tmp/main-rules" >/dev/null 2>&1; then
+    missing="$missing required_status_checks(ci-ok from GitHub Actions)"
   fi
   if [ -n "$missing" ]; then
     fail "$item" "the active rules on main lack:$missing (via GET /repos/$REPO/rules/branches/main)" "$fixmsg"
     return
   fi
 
-  # An actor who may bypass "always" (or is "exempt") can push to main without a PR.
+  # An actor who may bypass "always" (or is "exempt") can push to main without a PR. A bypass
+  # "for pull requests" is the documented emergency path (section 4): it passes for an admin role
+  # only, because it lets the actor merge a PR without ci-ok.
   direct=""
+  merge=""
   unread=""
   for id in $(jq -r '[.[].ruleset_id | numbers] | unique | .[]' "$tmp/main-rules" 2>/dev/null); do
     api "repos/$REPO/rulesets/$id"
@@ -276,17 +293,24 @@ check_main() {
     fi
     found=$(actors_that '(.bypass_mode // "always") != "pull_request"')
     if [ -n "$found" ]; then direct="$direct ruleset $id: $found;"; fi
+    found=$(actors_that "(.bypass_mode // \"always\") == \"pull_request\" and ($IS_ADMIN | not)")
+    if [ -n "$found" ]; then merge="$merge ruleset $id: $found;"; fi
   done
   if [ -n "$direct" ]; then
     fail "$item" "the rules are on, but these actors can push to main without a PR:$direct" \
       "Remove them from the bypass list, or set their bypass mode to pull requests only ($DOC, section 4)."
     return
   fi
+  if [ -n "$merge" ]; then
+    fail "$item" "the rules are on, but these actors are not admins and can merge to main without ci-ok:$merge" \
+      "Remove them from the bypass list. Only Repository admin may bypass, for pull requests only ($DOC, section 4)."
+    return
+  fi
   if [ -n "$unread" ]; then
     unknown "$item" "the rules are on, but GitHub hides the bypass list of ruleset$unread from this caller" "$RERUN."
     return
   fi
-  pass "$item" "PR, ci-ok, linear history, no force push, no deletion, no direct-push bypass (via GET /repos/$REPO/rules/branches/main and /rulesets)"
+  pass "$item" "PR, ci-ok from GitHub Actions, linear history, no force push, no deletion, no direct-push bypass, admin-only PR bypass (via GET /repos/$REPO/rules/branches/main and /rulesets)"
 }
 
 # ---- 5. v* tag ruleset ---------------------------------------------------------------
@@ -300,7 +324,7 @@ check_tags() {
   fi
   ids=$(jqb '[.[] | select(.target == "tag" and .enforcement == "active") | .id] | .[]')
   : >"$tmp/tag-rules"
-  creators=""
+  guarded=""
   bad=""
   noone=""
   unread=""
@@ -320,19 +344,23 @@ check_tags() {
         | tostring')
     if [ "$covers" != true ]; then continue; fi
     jqb '.rules[]?.type' >>"$tmp/tag-rules"
-    if [ "$(jqb 'any(.rules[]?; .type == "creation") | tostring')" != true ]; then continue; fi
-    creators="$creators $id"
+    # Every covering ruleset that guards creation, update or deletion is checked, not only the one
+    # with creation. Section 5 of the settings doc puts update and deletion in a separate "frozen"
+    # ruleset, and a bypass actor there could move or delete a released tag.
+    if [ "$(jqb 'any(.rules[]?; .type == "creation" or .type == "update" or .type == "deletion") | tostring')" != true ]; then
+      continue
+    fi
+    guarded="$guarded $id"
     if [ "$(jqb 'has("bypass_actors") | tostring')" != true ]; then
       unread="$unread $id"
       continue
     fi
-    if [ "$(jqb '.bypass_actors | length')" = 0 ]; then
-      noone="$noone $id"
-      continue
-    fi
-    # Repository admin is RepositoryRole 5. OrganizationAdmin is the org owner role.
-    found=$(actors_that '((.actor_type == "RepositoryRole" and .actor_id == 5) or .actor_type == "OrganizationAdmin") | not')
+    found=$(actors_that "$IS_ADMIN | not")
     if [ -n "$found" ]; then bad="$bad ruleset $id: $found;"; fi
+    # Creation with no bypass at all means nobody, not even an admin, can push a release tag.
+    if [ "$(jqb 'any(.rules[]?; .type == "creation") and (.bypass_actors | length) == 0 | tostring')" = true ]; then
+      noone="$noone $id"
+    fi
   done
 
   missing=""
@@ -344,8 +372,8 @@ check_tags() {
     return
   fi
   if [ -n "$bad" ]; then
-    fail "$item" "actors other than admins can create v* tags:$bad" \
-      "Keep only the Repository admin role (or Organization admin) in the bypass list ($DOC, section 5)."
+    fail "$item" "actors other than admins can bypass the v* tag rules (create, move or delete a tag):$bad" \
+      "Keep only the Repository admin role (or Organization admin) in the create ruleset, and nobody in the frozen ruleset ($DOC, section 5)."
     return
   fi
   if [ -n "$noone" ]; then
@@ -357,7 +385,7 @@ check_tags() {
     unknown "$item" "GitHub hides ruleset$unread or its bypass list from this caller" "$RERUN."
     return
   fi
-  pass "$item" "creation, update and deletion of refs/tags/v* are blocked and only admins bypass creation (ruleset$creators)"
+  pass "$item" "creation, update and deletion of refs/tags/v* are blocked and only admins may bypass (ruleset$guarded)"
 }
 
 # ---- 6. Security tab policy ----------------------------------------------------------

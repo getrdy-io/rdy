@@ -14,6 +14,7 @@
 /.github/                               @getrdy-io
 /deny.toml                              @getrdy-io
 /Cargo.toml                             @getrdy-io
+/crates/*/Cargo.toml                    @getrdy-io
 /Cargo.lock                             @getrdy-io
 /rust-toolchain.toml                    @getrdy-io
 /.cargo/                                @getrdy-io
@@ -30,10 +31,13 @@
 /docs/security/                         @getrdy-io
 /docs/plan/05-threat-model.md           @getrdy-io
 
-# Spec signing, trust and key handling (ADR 0002, ADR 0018).
+# Spec signing, trust, key handling and the consent and password prompts (ADR 0002, ADR 0018).
 /crates/rdy-spec/src/sig.rs             @getrdy-io
 /crates/rdy-spec/src/sig/               @getrdy-io
 /crates/rdy-cli/src/password.rs         @getrdy-io
+/crates/rdy-cli/src/prompt.rs           @getrdy-io
+/crates/rdy-cli/src/trust.rs            @getrdy-io
+/crates/rdy-cli/src/trust/              @getrdy-io
 /tests/fixtures/signed/                 @getrdy-io
 /tests/fixtures/wycheproof/             @getrdy-io
 

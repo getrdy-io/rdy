@@ -13,8 +13,10 @@ case "$here" in
 esac
 script="$here/check-org-settings.sh"
 FIXTURES="$here/test-check-org-settings.json"
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+tmp=$(mktemp -d) || exit 70
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 mkdir "$tmp/bin"
 cat >"$tmp/bin/curl" <<'EOF'
@@ -135,6 +137,19 @@ case "$out" in
   ;;
 *) echo "ok      the token is never printed" ;;
 esac
+# Every request has a time limit and never follows a redirect, so the token stays on api.github.com.
+if [ -s "$tmp/logs/argv.log" ] && ! grep -vq -- '--max-time 20' "$tmp/logs/argv.log"; then
+  echo "ok      every curl call has --max-time"
+else
+  echo "NOT OK  a curl call has no --max-time"
+  failures=$((failures + 1))
+fi
+if grep -Eq -- '(^| )(-L|--location|--location-trusted)( |$)' "$tmp/logs/argv.log"; then
+  echo "NOT OK  a curl call follows redirects"
+  failures=$((failures + 1))
+else
+  echo "ok      no curl call follows redirects"
+fi
 
 # 2. a personal account cannot require 2FA: FAIL, not PASS.
 all_good
@@ -179,7 +194,7 @@ expect "403 is unknown with the reason" '^UNKNOWN immutable releases: cannot rea
 all_good
 route "$R/rules/branches/main?per_page=100" 200 main-rules-pr-only
 run
-expect "missing main rules fail" '^FAIL +main ruleset: the active rules on main lack: non_fast_forward deletion required_linear_history required_status_checks\(ci-ok\)'
+expect "missing main rules fail" '^FAIL +main ruleset: the active rules on main lack: non_fast_forward deletion required_linear_history required_status_checks\(ci-ok from GitHub Actions\)'
 all_good
 route "$R/rules/branches/main?per_page=100" 200 empty-list
 run
@@ -192,6 +207,20 @@ all_good
 route "$R/rulesets/1" 200 ruleset-1-hidden
 run
 expect "a hidden main bypass list is unknown" '^UNKNOWN main ruleset: the rules are on, but GitHub hides the bypass list of ruleset 1'
+all_good
+route "$R/rules/branches/main?per_page=100" 200 main-rules-ci-ok-any-source
+run
+expect "ci-ok from any source fails" '^FAIL +main ruleset: the active rules on main lack: required_status_checks\(ci-ok from GitHub Actions\)'
+all_good
+route "$R/rules/branches/main?per_page=100" 200 main-rules-ci-ok-other-app
+run
+expect "ci-ok from another app fails" '^FAIL +main ruleset: the active rules on main lack: required_status_checks\(ci-ok from GitHub Actions\)'
+# The emergency path in section 4: Repository admin "for pull requests" passes (all_good uses it),
+# but the same mode for a non-admin role fails, because it merges without ci-ok.
+all_good
+route "$R/rulesets/1" 200 ruleset-1-write-pr-bypass
+run
+expect "a non-admin pull request bypass on main fails" '^FAIL +main ruleset: .*not admins and can merge to main without ci-ok: ruleset 1: RepositoryRole:4\(pull_request\)'
 
 # 7. tag ruleset: none, an app that bypasses, no bypass at all, hidden bypass, other tags, evaluate only.
 all_good
@@ -201,7 +230,7 @@ expect "no tag ruleset fails" '^FAIL +v\* tag ruleset: no active tag ruleset tha
 all_good
 route "$R/rulesets/2?includes_parents=true" 200 ruleset-2-app
 run
-expect "an app that bypasses tag creation fails" '^FAIL +v\* tag ruleset: actors other than admins can create v\* tags: ruleset 2: Integration:99\(always\)'
+expect "an app that bypasses tag creation fails" '^FAIL +v\* tag ruleset: actors other than admins can bypass the v\* tag rules .*: ruleset 2: Integration:99\(always\)'
 all_good
 route "$R/rulesets/2?includes_parents=true" 200 ruleset-2-nobody
 run
@@ -218,6 +247,37 @@ all_good
 route "$R/rulesets?includes_parents=true&per_page=100" 200 rulesets-evaluate
 run
 expect "an evaluate-only ruleset does not count" '^FAIL +v\* tag ruleset: no active tag ruleset'
+
+# 7b. the two-ruleset layout from section 5: "release tags: create" (creation, admin bypass) and
+# "release tags: frozen" (update, deletion, force push, no bypass). Any non-admin bypass on the
+# frozen ruleset fails, because it could move or delete a released tag.
+two_tag() {
+  all_good
+  route "$R/rulesets?includes_parents=true&per_page=100" 200 rulesets-two-tag
+  route "$R/rulesets/2?includes_parents=true" 200 ruleset-2-create
+  route "$R/rulesets/3?includes_parents=true" 200 ruleset-3-frozen
+}
+two_tag
+run
+expect_code "the two-ruleset layout exits 0" 0
+expect "the two-ruleset layout passes" '^PASS +v\* tag ruleset: .*\(ruleset 2 3\)'
+two_tag
+route "$R/rulesets/3?includes_parents=true" 200 ruleset-3-frozen-write
+run
+expect_code "a Write-role bypass on the frozen ruleset exits 1" 1
+expect "a Write-role bypass on the frozen ruleset fails" '^FAIL +v\* tag ruleset: actors other than admins can bypass the v\* tag rules .*: ruleset 3: RepositoryRole:4\(always\)'
+two_tag
+route "$R/rulesets/3?includes_parents=true" 200 ruleset-3-frozen-deploy-key
+run
+expect "a deploy key bypass on the frozen ruleset fails" '^FAIL +v\* tag ruleset: actors other than admins .*: ruleset 3: DeployKey:-\(always\)'
+two_tag
+route "$R/rulesets/3?includes_parents=true" 200 ruleset-3-frozen-hidden
+run
+expect "a hidden frozen bypass list is unknown" '^UNKNOWN v\* tag ruleset: GitHub hides ruleset 3'
+two_tag
+route "$R/rulesets/3?includes_parents=true" 404 not-found
+run
+expect "an unreadable frozen ruleset is unknown, not a pass" '^UNKNOWN v\* tag ruleset: GitHub hides ruleset 3 \(HTTP 404'
 
 # 8. Security tab policy: no file fails, one channel fails, a file under .github/ passes.
 all_good

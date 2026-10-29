@@ -15,7 +15,8 @@ requests, only to `https://api.github.com`, and changes nothing. Each item print
 - `FAIL`: the setting is off or wrong. A fix line follows.
 - `UNKNOWN`: GitHub would not show the setting to this caller. A fix line follows. This is never a pass.
 
-Exit codes: 0 all PASS, 1 at least one FAIL, 2 no FAIL but at least one UNKNOWN, 64 usage error.
+Exit codes: 0 all PASS, 1 at least one FAIL, 2 no FAIL but at least one UNKNOWN, 64 usage error,
+70 internal error (it could not make a temporary directory), 130 or 143 interrupted.
 
 ```sh
 GH_TOKEN=$(gh auth token) scripts/check-org-settings.sh            # checks getrdy-io/rdy
@@ -31,8 +32,8 @@ never printed. A token with any character other than letters, digits and `_` is 
 | org 2FA | The owner is an organization and `two_factor_requirement_enabled` is true | `GET /orgs/{org}` | org owner |
 | private vulnerability reporting | `enabled` is true | `GET /repos/{repo}/private-vulnerability-reporting` | none (public repo) |
 | immutable releases | `enabled` is true. A 404 is FAIL only when the caller is a known repo admin | `GET /repos/{repo}/immutable-releases` | repo admin |
-| main ruleset | Active rules on `main` include pull request, required check `ci-ok`, linear history, block force push and restrict deletion, and no bypass actor has mode `always` or `exempt` | `GET /repos/{repo}/rules/branches/main`, then `GET /repos/{repo}/rulesets/{id}` | read for the rules, write to see bypass lists |
-| v* tag ruleset | Active tag rulesets that cover `refs/tags/v*` restrict creation, update and deletion, and only the Repository admin role or Organization admin may bypass creation | `GET /repos/{repo}/rulesets`, then each `rulesets/{id}` | read for the rules, write to see bypass lists |
+| main ruleset | Active rules on `main` include pull request, required check `ci-ok` with GitHub Actions as its source (`integration_id` 15368), linear history, block force push and restrict deletion. No bypass actor has mode `always` or `exempt`. A bypass "for pull requests" passes only for Repository admin or Organization admin: it is the emergency path in section 4 | `GET /repos/{repo}/rules/branches/main`, then `GET /repos/{repo}/rulesets/{id}` | read for the rules, write to see bypass lists |
+| v* tag ruleset | Active tag rulesets that cover `refs/tags/v*` restrict creation, update and deletion. Every covering ruleset with any of those rules lets only the Repository admin role or Organization admin bypass, and the one with creation lets at least one of them bypass | `GET /repos/{repo}/rulesets`, then each `rulesets/{id}` | read for the rules, write to see bypass lists |
 | Security tab policy | `SECURITY.md` is in the root, `.github/` or `docs/` of the default branch and names both the `security@` mailbox and private vulnerability reporting | `GET /repos/{repo}/contents/{path}` | none (public repo) |
 
 Token scopes. `gh auth token` with the default scopes (`repo`, `read:org`) is enough when the `gh` login
@@ -95,11 +96,13 @@ This is the setting from `docs/plan/06-release-and-distribution.md`, "Repo setti
   Active.
 - [ ] Bypass list: empty. If you want an emergency path, add Repository admin with "For pull requests
   only", never "Always". An "Always" bypass lets that actor push to `main` with no PR, and the script
-  fails on it.
+  fails on it. The script passes a "For pull requests only" bypass for an admin role, because that is
+  this emergency path, and fails it for any other actor, who could then merge without `ci-ok`.
 - [ ] Target branches: Include default branch.
 - [ ] Rules: Restrict deletions. Require linear history. Require a pull request before merging, with 0
   required approvals (one maintainer). Require status checks to pass, add `ci-ok`, and pick GitHub
-  Actions as its source so no other app can post that check. Block force pushes.
+  Actions as its source so no other app can post that check. The script fails if `ci-ok` has any
+  other source or none. Block force pushes.
 - [ ] Leave "Require review from Code Owners" off while there is one maintainer (section 9).
 - [ ] How to verify: the script shows PASS for main ruleset, and a test direct push to `main` from a
   clean clone is rejected. Paste both into the Done log.
@@ -116,6 +119,9 @@ version number. Two rulesets do this best:
   session can move a released tag.
 - [ ] One ruleset with all four rules and Repository admin in the bypass list also passes the script. It
   is weaker, because an admin could then move a tag.
+- [ ] The script checks the bypass list of every covering ruleset with creation, update or deletion.
+  Any actor other than Repository admin or Organization admin fails it, in any mode. A Write role,
+  team, app or deploy key in the frozen ruleset could move or delete a released tag.
 - [ ] How to verify: the script shows PASS for v* tag ruleset, and a `v*` tag push from a non-admin test
   account is rejected. Paste both into the Done log.
 
@@ -154,9 +160,10 @@ first, then `security@getrdy.io`.
 ### 9. CODEOWNERS
 
 `.github/CODEOWNERS` names `@getrdy-io`, the owner account, for every path. A separate block lists the
-security paths: CI and release files, dependency and toolchain files, `scripts/`, `install.sh`, the
-policy and threat model, spec signing and trust code, the redactor and its corpus, the probe facade and
-exec code, the network and cluster crates, and the security ADRs. A change there needs a
+security paths: CI and release files, dependency and toolchain files (including every crate's
+`Cargo.toml`), `scripts/`, `install.sh`, the policy and threat model, spec signing and trust code, the
+consent and password prompts, the redactor and its corpus, the probe facade and exec code, the network
+and cluster crates, and the security ADRs. A change there needs a
 security-reviewer review (05, 04 section 4, ADR 0014).
 
 - [ ] Code owner review cannot be required yet: nobody can approve their own PR, and a required review

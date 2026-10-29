@@ -65,6 +65,64 @@
     "conditions": {"ref_name": {"include": ["refs/tags/release-*"], "exclude": []}},
     "rules": [{"type": "creation"}, {"type": "update"}, {"type": "deletion"}]
   },
+  "main-rules-ci-ok-any-source": [
+    {"type": "pull_request", "ruleset_id": 1, "parameters": {"required_approving_review_count": 0}},
+    {"type": "required_status_checks", "ruleset_id": 1,
+     "parameters": {"required_status_checks": [{"context": "ci-ok"}],
+                    "strict_required_status_checks_policy": false}},
+    {"type": "non_fast_forward", "ruleset_id": 1},
+    {"type": "deletion", "ruleset_id": 1},
+    {"type": "required_linear_history", "ruleset_id": 1}
+  ],
+  "main-rules-ci-ok-other-app": [
+    {"type": "pull_request", "ruleset_id": 1, "parameters": {"required_approving_review_count": 0}},
+    {"type": "required_status_checks", "ruleset_id": 1,
+     "parameters": {"required_status_checks": [{"context": "ci-ok", "integration_id": 99}],
+                    "strict_required_status_checks_policy": false}},
+    {"type": "non_fast_forward", "ruleset_id": 1},
+    {"type": "deletion", "ruleset_id": 1},
+    {"type": "required_linear_history", "ruleset_id": 1}
+  ],
+  "ruleset-1-write-pr-bypass": {"id": 1, "bypass_actors": [{"actor_id": 4, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"}]},
+  "rulesets-two-tag": [
+    {"id": 1, "target": "branch", "enforcement": "active"},
+    {"id": 2, "target": "tag", "enforcement": "active"},
+    {"id": 3, "target": "tag", "enforcement": "active"}
+  ],
+  "ruleset-2-create": {
+    "id": 2,
+    "name": "release tags: create",
+    "bypass_actors": [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+    "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+    "rules": [{"type": "creation"}]
+  },
+  "ruleset-3-frozen": {
+    "id": 3,
+    "name": "release tags: frozen",
+    "bypass_actors": [],
+    "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+    "rules": [{"type": "update"}, {"type": "deletion"}, {"type": "non_fast_forward"}]
+  },
+  "ruleset-3-frozen-write": {
+    "id": 3,
+    "name": "release tags: frozen",
+    "bypass_actors": [{"actor_id": 4, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+    "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+    "rules": [{"type": "update"}, {"type": "deletion"}, {"type": "non_fast_forward"}]
+  },
+  "ruleset-3-frozen-deploy-key": {
+    "id": 3,
+    "name": "release tags: frozen",
+    "bypass_actors": [{"actor_id": null, "actor_type": "DeployKey", "bypass_mode": "always"}],
+    "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+    "rules": [{"type": "update"}, {"type": "deletion"}]
+  },
+  "ruleset-3-frozen-hidden": {
+    "id": 3,
+    "name": "release tags: frozen",
+    "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+    "rules": [{"type": "update"}, {"type": "deletion"}, {"type": "non_fast_forward"}]
+  },
   "security-both": "Email security@getrdy.io, or open the Security tab and choose \"Report a vulnerability\".\n",
   "security-mail-only": "Email security@getrdy.io.\n",
   "security-advisory-link": "Mail security@getrdy.io or use https://github.com/getrdy-io/rdy/security/advisories/new\n"
