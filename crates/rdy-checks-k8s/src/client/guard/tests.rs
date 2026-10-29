@@ -29,12 +29,16 @@ use tower_service::Service;
 
 use super::*;
 
+mod parser;
+
 // ---- the mock API server ------------------------------------------------------------------------------
 
 /// Records `METHOD path-and-query` of every request that reaches it and answers 200 with `body`.
 #[derive(Clone, Default)]
 struct Mock {
     seen: Arc<Mutex<Vec<String>>>,
+    /// The `Impersonate-User` value of every request that reached the server and carried one.
+    impersonated: Arc<Mutex<Vec<String>>>,
     body: Arc<Mutex<String>>,
     /// The status of every answer.
     status: StatusCode,
@@ -49,6 +53,10 @@ impl Mock {
 
     fn seen(&self) -> Vec<String> {
         self.seen.lock().expect("seen").clone()
+    }
+
+    fn impersonated(&self) -> Vec<String> {
+        self.impersonated.lock().expect("impersonated").clone()
     }
 }
 
@@ -71,6 +79,12 @@ impl Service<Request<Body>> for Mock {
                 .map_or("", http::uri::PathAndQuery::as_str)
         );
         self.seen.lock().expect("seen").push(line);
+        for value in request.headers().get_all("impersonate-user") {
+            self.impersonated
+                .lock()
+                .expect("impersonated")
+                .push(String::from_utf8_lossy(value.as_bytes()).into_owned());
+        }
         if self.hang {
             return Box::pin(std::future::pending());
         }
@@ -93,6 +107,8 @@ struct Rig {
     mock: Mock,
     run: TestRun,
     client: kube::Client,
+    /// The check id its log entries carry. `None` for a client from the run probe.
+    check: Option<String>,
 }
 
 impl Rig {
@@ -115,6 +131,22 @@ impl Rig {
             mock: mock.clone(),
             run: run.clone(),
             client,
+            check: check.map(str::to_owned),
+        }
+    }
+
+    /// A client for `check` whose review POSTs may impersonate `user` (`guarded_service_as`).
+    fn impersonating(user: &str) -> Self {
+        let run = TestRun::new(Replay::new());
+        let mock = Mock::default();
+        let probe = run.context("k8s.rbac", Os::Linux, []).probe().clone();
+        let user = ImpersonateAs::new(user).expect("a valid user");
+        let client = kube::Client::new(guarded_service_as(mock.clone(), &probe, user), "");
+        Self {
+            mock,
+            run,
+            client,
+            check: Some("k8s.rbac".to_owned()),
         }
     }
 
@@ -159,7 +191,13 @@ fn field<'a>(action: &'a Action, name: &str) -> Option<&'a str> {
 
 fn judge_get(uri: &str) -> Result<(), &'static str> {
     let uri: http::Uri = uri.parse().expect("uri");
-    judge(&Method::GET, &uri, &http::HeaderMap::new(), BodyView::Empty)
+    judge(
+        &Method::GET,
+        &uri,
+        &http::HeaderMap::new(),
+        BodyView::Empty,
+        None,
+    )
 }
 
 #[test]
@@ -271,8 +309,6 @@ fn a_pod_list_needs_the_phase_field_selector() {
         "?fieldSelector=metadata.name%3Dstatus.phase",
         "?fieldSelector=xstatus.phase%3DRunning",
         "?fieldSelector=status.phasex%3DRunning",
-        "?fieldSelector=status.phase",
-        "?fieldSelector=status.phase%2Cspec.nodeName%3Dn1",
     ] {
         assert_eq!(
             judge_get(&format!("{pods}{query}")),
@@ -280,8 +316,10 @@ fn a_pod_list_needs_the_phase_field_selector() {
             "{query}"
         );
     }
-    // A selector the guard cannot read is a query error, not a pass.
+    // A selector the guard cannot read is a query error, not a pass. A term with no operator is one.
     for query in [
+        "fieldSelector=status.phase",
+        "fieldSelector=status.phase%2Cspec.nodeName%3Dn1",
         "fieldSelector=status.phase%21%3DFailed&fieldSelector=status.phase%21%3DRunning",
         "fieldSelector=spec.nodeName%3Da%5C%2Cstatus.phase%3Dx",
         "fieldSelector=status.phase%3D%ff",
@@ -339,8 +377,12 @@ fn a_raw_semicolon_in_the_query_is_refused() {
     ] {
         assert_eq!(judge_get(uri), Err(RULE_QUERY), "{uri}");
     }
-    // An encoded `;` is a byte in the value, decoded once after the split.
-    assert_eq!(judge_get("/api/v1/nodes?labelSelector=a%3Bb"), Ok(()));
+    // An encoded `;` is a byte in the value, decoded once after the split. No selector holds one, so the
+    // decoded value is refused too (see `decoded_selector_and_token_values_are_checked`).
+    assert_eq!(
+        judge_get("/api/v1/nodes?labelSelector=a%3Bb"),
+        Err(RULE_QUERY)
+    );
 }
 
 #[test]
@@ -441,7 +483,13 @@ fn the_path_pre_filter_refuses_anything_not_plain() {
     ] {
         // Not every one parses as a URI. Those that do must be refused.
         if let Ok(uri) = path.parse::<http::Uri>() {
-            let verdict = judge(&Method::GET, &uri, &http::HeaderMap::new(), BodyView::Empty);
+            let verdict = judge(
+                &Method::GET,
+                &uri,
+                &http::HeaderMap::new(),
+                BodyView::Empty,
+                None,
+            );
             assert_eq!(verdict, Err(RULE_PATH_SHAPE), "{path}");
         }
     }
@@ -507,7 +555,7 @@ fn upgrade_and_impersonate_headers_are_refused() {
             http::HeaderName::from_bytes(name.as_bytes()).expect("name"),
             value.parse().expect("value"),
         );
-        let verdict = judge(&Method::GET, &uri, &headers, BodyView::Empty);
+        let verdict = judge(&Method::GET, &uri, &headers, BodyView::Empty, None);
         assert_eq!(verdict, Err(rule), "{name}");
     }
     // The three headers kube sets (and the length) pass.
@@ -515,7 +563,10 @@ fn upgrade_and_impersonate_headers_are_refused() {
     headers.insert("accept", "application/json".parse().expect("value"));
     headers.insert("content-type", "application/json".parse().expect("value"));
     headers.insert("content-length", "0".parse().expect("value"));
-    assert_eq!(judge(&Method::GET, &uri, &headers, BodyView::Empty), Ok(()));
+    assert_eq!(
+        judge(&Method::GET, &uri, &headers, BodyView::Empty, None),
+        Ok(())
+    );
 }
 
 /// One test per refused header, through the real layer: the request is refused with `rule`, never
@@ -611,7 +662,7 @@ async fn the_headers_kube_sets_pass_the_guard() {
 fn a_get_with_a_body_is_refused() {
     let uri: http::Uri = "/api/v1/nodes".parse().expect("uri");
     for body in [BodyView::Bytes(b"{}"), BodyView::Opaque] {
-        let verdict = judge(&Method::GET, &uri, &http::HeaderMap::new(), body);
+        let verdict = judge(&Method::GET, &uri, &http::HeaderMap::new(), body, None);
         assert_eq!(verdict, Err(RULE_GET_BODY));
     }
 }
@@ -909,7 +960,7 @@ fn a_body_the_guard_cannot_read_is_refused() {
     // kube builds every body from a `Vec`, so this is a request that did not come from kube's builders.
     let post = |path: &str, body| {
         let uri: http::Uri = path.parse().expect("uri");
-        judge(&Method::POST, &uri, &http::HeaderMap::new(), body)
+        judge(&Method::POST, &uri, &http::HeaderMap::new(), body, None)
     };
     assert_eq!(
         post(
@@ -988,14 +1039,14 @@ async fn unlisted_resources_subresources_and_hostile_requests_are_refused() {
         ("/api/v1/namespaces/app/serviceaccounts", RULE_NOT_ALLOWED),
         ("/api/v1/namespaces/app/pods", RULE_NOT_ALLOWED),
         ("/api/v1/namespaces/app/pods/p", RULE_NOT_ALLOWED),
-        ("/api/v1/namespaces/app/pods/p/log", RULE_NOT_ALLOWED),
-        ("/api/v1/namespaces/app/pods/p/exec", RULE_NOT_ALLOWED),
+        ("/api/v1/namespaces/app/pods/p/log", RULE_SUBRESOURCE),
+        ("/api/v1/namespaces/app/pods/p/exec", RULE_SUBRESOURCE),
         ("/api/v1/nodes/n1", RULE_NOT_ALLOWED),
-        ("/api/v1/nodes/n1/proxy", RULE_NOT_ALLOWED),
-        ("/api/v1/nodes/n1/status", RULE_NOT_ALLOWED),
+        ("/api/v1/nodes/n1/proxy", RULE_SUBRESOURCE),
+        ("/api/v1/nodes/n1/status", RULE_SUBRESOURCE),
         ("/api/v1/namespaces", RULE_NOT_ALLOWED),
-        ("/api/v1/namespaces/app/finalize", RULE_NOT_ALLOWED),
-        ("/api/v1/namespaces/app/status", RULE_NOT_ALLOWED),
+        ("/api/v1/namespaces/app/finalize", RULE_SUBRESOURCE),
+        ("/api/v1/namespaces/app/status", RULE_SUBRESOURCE),
         (
             "/api/v1/namespaces/app/persistentvolumeclaims/c",
             RULE_NOT_ALLOWED,
@@ -1011,7 +1062,7 @@ async fn unlisted_resources_subresources_and_hostile_requests_are_refused() {
         ),
         (
             "/apis/apps/v1/namespaces/kube-system/deployments/x/scale",
-            RULE_NOT_ALLOWED,
+            RULE_SUBRESOURCE,
         ),
         ("/api/v1/nodes?watch=true", RULE_QUERY),
         ("/api/v1/nodes?dryRun=All", RULE_QUERY),
@@ -1117,7 +1168,7 @@ const SSRR: &str = "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews";
 const PHASE: &str = "fieldSelector=status.phase%21%3DSucceeded%2Cstatus.phase%21%3DFailed";
 
 /// Every API call the M1 checks make, from 03 and 02 Appendix B, one list per check. The checks are not
-/// built yet (M1-104 onward), so these are the calls the design says each one sends, written as the
+/// built yet (M1-106 onward), so these are the calls the design says each one sends, written as the
 /// requests kube builds. M1-105 replaces them with the real checks over the mock harness.
 fn calls_of(check: &str) -> Vec<Call> {
     let get = |uri| ("GET", uri, &b""[..]);
@@ -1225,7 +1276,7 @@ fn hostile_calls() -> Vec<(Call, &'static str)> {
         ),
         (
             ("GET", "/api/v1/namespaces/app/pods/p/log", b""),
-            RULE_NOT_ALLOWED,
+            RULE_SUBRESOURCE,
         ),
         (("GET", "/api/v1/nodes?watch=true", b""), RULE_QUERY),
     ]
@@ -1345,7 +1396,7 @@ async fn every_request_writes_one_entry_under_its_check() {
     );
     assert_eq!(rig.send(post).await, Ok(StatusCode::OK));
     assert_eq!(
-        rig.get("/api/v1/nodes?fieldSelector=canary-selector&limit=5")
+        rig.get("/api/v1/nodes?fieldSelector=metadata.name%3Dcanary-selector&limit=5")
             .await,
         Ok(StatusCode::OK)
     );
