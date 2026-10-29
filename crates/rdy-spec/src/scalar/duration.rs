@@ -1,8 +1,12 @@
 //! [`Duration`]: a span of time.
 
+#[cfg(feature = "schema")]
+use std::borrow::Cow;
 use std::fmt;
 use std::str::FromStr;
 
+#[cfg(feature = "schema")]
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
@@ -193,6 +197,21 @@ impl FromStr for Duration {
 impl fmt::Display for Duration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.source)
+    }
+}
+
+#[cfg(feature = "schema")]
+impl JsonSchema for Duration {
+    fn schema_name() -> Cow<'static, str> {
+        "Duration".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A whole number and one unit: ms, s, m, h or d. Examples: 500ms, 10s, 7d.",
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,8}(ms|s|m|h|d)$"
+        })
     }
 }
 

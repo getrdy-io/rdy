@@ -53,7 +53,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-021 | [#31](https://github.com/getrdy-io/rdy/pull/31) | 2026-10-28 | `spec_expired` and `trust_store_insecure` are in the code list with exit 64 but have no `CliError` source: rdy-spec does not check `metadata.expires` and the trust file loader is not built (M1-126 adds the variants and fixtures). The signature codes `spec_unsigned`, `spec_key_unknown` and `spec_signature_invalid` are mapped from `SignatureError`; the exact 01 section 4.8 first-line wording is M1-126's golden. `ErrorOutput` is typed in rdy-cli, not rdy-spec (rdy-spec is in parallel work); move it to `rdy_spec::result` when rdy-cloud needs it. Did-you-mean for unknown spec keys needs the key lists from rdy-spec (M1-031); `SkipWhy` and `timeout_text` hold the 01 section 5.2 words but nothing builds results yet (M1-057). Control characters are escaped as `\x1b` or `\u{202e}` per 07 section 9 rule 9, not deleted. A new `SpecError` variant in rdy-spec falls into `spec_invalid` through a wildcard (the enum is non-exhaustive), so rdy-spec's own hint test is its guard.
 
-- M1-022 | todo | | Generate JSON schemas with schemars behind cargo xtask schema and check drift in CI
+- M1-022 | [#48](https://github.com/getrdy-io/rdy/pull/48) | 2026-10-28 | Three parts of the schema come from JSON fragments in crates/rdy-spec/src/schema/ until their types derive (ADR 0019): the parameters of the 17 check ids (M1-024, M1-025), the kind-specific action fields (action log ticket), and ErrorOutput, Verification and LintReport (verify, lint and error tickets). The generator is the `schema` feature of rdy-spec, off by default; xtask and the rdy-spec tests turn it on, so `serde_json/preserve_order` stays out of a `-p rdy` build but is on in `--workspace` builds, which is why `End::Done` is boxed (ADR 0019 decision 4). No tests/fixtures/results/ directory exists, so the golden results checked are B.1 to B.3 of the CLI plan, and files in that directory are checked once it exists. `docs --check` and `docs-lint` are still not in ci.yml; the schema check is a step of the lint job. Quantity sums and URL host labels stay the parser's job (the pattern is looser)
 
 - M1-023 | [#35](https://github.com/getrdy-io/rdy/pull/35) | 2026-10-28 | per-line locations and did-you-mean are M1-031; the bare-threshold case (`no_threshold`) maps to unsupported_spec with a fix naming the missing keys
 
@@ -61,7 +61,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-025 | [#36](https://github.com/getrdy-io/rdy/pull/36) | 2026-10-28 | Regex fields (expected_issuer, context_pattern, server_pattern) are checked for length only (rdy-spec has no regex engine); compiling them is for lint and sign (M1-031). Schema entries for my ids were tightened to match the structs: minItems 1 on hosts, pin_sha256, apis, arch, expect_in, expect_status; maxItems 16 on expect_status; a host pattern with a port range; maxLength on RBAC parts; scc is a K8sName; typed tolerations; minProperties 1 on K8sResources; stricter cpu string. expect_status and method on a non-URL target are read but not refused (the check decides). Toleration has no tolerationSeconds (refused by name). For M1-026: count egress endpoints, tls_intercept hosts and DNS names against the 64-host spec-wide limit (INV-11). For the k8s.nodes check ticket: a toleration with no key and operator Exists matches every taint, so the check must report control-plane nodes as their own item
 
-- M1-026 | todo | | Semantic validation and structural limits for specs
+- M1-026 | [#43](https://github.com/getrdy-io/rdy/pull/43) | 2026-10-28 | regex compile of redact_patterns (M1-031), did-you-mean in the unknown-key fix line (M1-031), Windows paths in file: collectors (schema allows `/` only; M2); the CLI prints the `expired on` line with no `:` after the file name, and CLI exit 64 on an expired spec (M1-126)
 
 - M1-027 | todo | | Property tests for rdy_spec::parse
 
@@ -87,7 +87,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-037 | todo | | Windows output directory default and reparse-point checks
 
-- M1-038 | todo | | Blocking helper and subprocess kill on timeout
+- M1-038 | [#44](https://github.com/getrdy-io/rdy/pull/44) | 2026-10-28 | Built as `rdy_engine::blocking` and `rdy_engine::exec` (async `tokio::process`, so no command runs on an abandoned blocking thread). Windows kills only the child, not its tree, until job objects (M2-006): `KILLS_PROCESS_TREE` is false there and M1-039 limits Windows to `whoami.exe`. The exit wait polls `waitid(WNOWAIT)` on every Unix instead of using `pidfd_open`, because every safe `tokio::io::unix::AsyncFd` constructor is deprecated in tokio 1.54 and the supported one is `unsafe`. Descriptors above 2 inherited by `rdy` still reach children (safe rustix cannot set CLOEXEC on a raw descriptor): M1-039 or the CLI start-up closes them. Shell and sudo refusal, PATH and env-name policy are M1-039. Wiring into `Probe` and `ProbeError` is M1-040. The watchdog and Ctrl-C callers of `kill_all_groups` are M1-043 and M1-058. The Hung proof uses a no-op kill function because a test cannot make a process survive SIGKILL.
 
 - M1-039 | todo | | SEC-18 Command policy: search path, declared directories, caps and Windows whoami only
 

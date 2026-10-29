@@ -1,0 +1,76 @@
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-platform
+checks:
+  - id: net.egress
+    endpoints:
+      - host01.acme.example:443
+      - host02.acme.example:443
+      - host03.acme.example:443
+      - host04.acme.example:443
+      - host05.acme.example:443
+      - host06.acme.example:443
+      - host07.acme.example:443
+      - host08.acme.example:443
+      - host09.acme.example:443
+      - host10.acme.example:443
+      - host11.acme.example:443
+      - host12.acme.example:443
+      - host13.acme.example:443
+      - host14.acme.example:443
+      - host15.acme.example:443
+      - host16.acme.example:443
+      - host17.acme.example:443
+      - host18.acme.example:443
+      - host19.acme.example:443
+      - host20.acme.example:443
+      - host21.acme.example:443
+      - host22.acme.example:443
+      - host23.acme.example:443
+      - host24.acme.example:443
+      - host25.acme.example:443
+      - host26.acme.example:443
+      - host27.acme.example:443
+      - host28.acme.example:443
+      - host29.acme.example:443
+      - host30.acme.example:443
+  - id: net.tls_intercept
+    hosts:
+      - host31.acme.example
+      - host32.acme.example
+      - host33.acme.example
+      - host34.acme.example
+      - host35.acme.example
+      - host36.acme.example
+      - host37.acme.example
+      - host38.acme.example
+      - host39.acme.example
+      - host40.acme.example
+      - host41.acme.example
+      - host42.acme.example
+      - host43.acme.example
+      - host44.acme.example
+      - host45.acme.example
+      - host46.acme.example
+      - host47.acme.example
+      - host48.acme.example
+      - host49.acme.example
+      - host50.acme.example
+      - host51.acme.example
+      - host52.acme.example
+      - host53.acme.example
+      - host54.acme.example
+      - host55.acme.example
+      - host56.acme.example
+      - host57.acme.example
+      - host58.acme.example
+      - host59.acme.example
+      - host60.acme.example
+  - id: net.dns
+    names:
+      - host61.acme.example
+      - host62.acme.example
+      - host63.acme.example
+      - host64.acme.example
+      - host65.acme.example

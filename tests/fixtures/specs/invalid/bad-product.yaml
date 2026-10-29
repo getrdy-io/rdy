@@ -1,0 +1,7 @@
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: Acme Platform
+checks:
+  - id: host.cpu
+    min: 2
