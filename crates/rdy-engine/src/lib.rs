@@ -12,7 +12,8 @@
 //! - [`plan`]: [`family::Registry::plan`] decides, with no I/O, which spec entries run and which are
 //!   skipped, and why.
 //! - [`probe`]: the facade a check reads the machine through, with the action log and the read
-//!   denylist. Only the replay backend exists so far, in `testing` behind the `testing` feature.
+//!   policy. `live_backend` (feature `runtime`) reads real files; the replay backend is in `testing`
+//!   behind the `testing` feature.
 //! - `sched` (feature `runtime`, on by default): runs checks with a concurrency limit, a timeout each
 //!   and panic isolation.
 //! - `blocking` (feature `runtime`): runs blocking work off the async workers.
@@ -24,7 +25,7 @@
 //! - [`redact`]: the redactor. [`redact::Redactor::redact_report`] redacts and then caps every string of a
 //!   report and returns a [`redact::RedactedReport`], the only type the writers and renderers accept.
 //!
-//! The live backend and the renderers arrive in later M1 tickets.
+//! The renderers arrive in later M1 tickets.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -47,3 +48,8 @@ pub mod sched;
 pub mod testing;
 pub mod text;
 pub mod units;
+
+/// The backend that reads real files. Only the engine and the CLI may call it; check crates reach the
+/// machine through their `Probe` (ADR 0014, SEC-17).
+#[cfg(feature = "runtime")]
+pub use probe::live_backend;
