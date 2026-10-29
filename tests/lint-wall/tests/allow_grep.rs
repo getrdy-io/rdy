@@ -33,12 +33,20 @@ const ALLOWED: &[(&str, &str)] = &[
     ),
     (
         "crates/rdy-engine/src/probe/live/",
-        "the facade's live backend, M1-045 (ADR 0014); the directory does not exist yet",
+        "the facade's live backend, M1-045 (ADR 0014)",
     ),
     // The client module's integration tests.
     (
         "crates/rdy-checks-k8s/tests/client.rs",
         "tests of the client module: a mock API server, kubeconfig files, plugin scripts",
+    ),
+    (
+        "crates/rdy-checks-k8s/tests/guard.rs",
+        "tests of the read-only guard on the real client stack: a mock API server and kubeconfig files",
+    ),
+    (
+        "crates/rdy-checks-k8s/tests/rbac_example.rs",
+        "reads examples/rbac/rdy-readonly.yaml to compare it with the guard's allowlist (SEC-24)",
     ),
     (
         "crates/rdy-checks-k8s/tests/tls.rs",
@@ -57,6 +65,10 @@ const ALLOWED: &[(&str, &str)] = &[
     (
         "crates/rdy-engine/src/probe.rs",
         "the one call of exec::table::run, in the probe spawn (ADR 0014, ADR 0028)",
+    ),
+    (
+        "crates/rdy-engine/src/probe/tests.rs",
+        "the tests of the probe call Probe::kube_call, which only the k8s guard may call in a check crate (M1-103)",
     ),
     (
         "crates/rdy-engine/src/exec/policy.rs",

@@ -867,6 +867,8 @@ const MODULE_WISE: &[(&str, &[&str])] = &[("rdy-checks-k8s", &["client"])];
 /// plugin scripts. They are on the allowlist of `allow_grep.rs` for the same reason.
 const TEST_ROOTS_EXEMPT: &[&str] = &[
     "rdy-checks-k8s/tests/client.rs",
+    "rdy-checks-k8s/tests/guard.rs",
+    "rdy-checks-k8s/tests/rbac_example.rs",
     "rdy-checks-k8s/tests/live_cluster.rs",
     "rdy-checks-k8s/tests/tls.rs",
 ];

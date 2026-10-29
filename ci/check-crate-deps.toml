@@ -26,5 +26,7 @@ allow = ["futures-util", "rdy-engine", "rdy-spec", "serde", "serde_json", "thise
 
 # rdy-checks-k8s: the base list, and the only crate that may depend on kube (deny.toml) and k8s-openapi.
 # `secrecy` holds kubeconfig token values until they are handed to the known-secret set (M1-102, M1-061).
+# `http`, `http-body`, `tower-layer` and `tower-service` are the types the read-only guard layer names
+# (M1-103). They hold no I/O.
 [rdy-checks-k8s]
-allow = ["futures-util", "k8s-openapi", "kube", "rdy-engine", "rdy-spec", "secrecy", "serde", "serde_json", "thiserror"]
+allow = ["futures-util", "http", "http-body", "k8s-openapi", "kube", "rdy-engine", "rdy-spec", "secrecy", "serde", "serde_json", "thiserror", "tower-layer", "tower-service"]
