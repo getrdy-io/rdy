@@ -564,7 +564,7 @@ refused before clap parses anything, on `spec sign` and `spec keygen` only, so t
 missing-argument error and the value is never read. The code is `crates/rdy-cli/src/password.rs`.
 
 **Secret key files (M1-125).** `spec keygen` writes `<name>.key` and `<name>.pub` with `create_new`, so it
-never replaces a file and never follows a link, and the secret key has mode 0600 from the first byte. It
+never replaces a file and never follows a link, and the secret key has mode 0600 from the first byte. The public key and the signature are set to mode 0644 after they are created, whatever the umask. It
 looks for both names before it asks for a password. The password comes from `--password-file`,
 `RDY_KEY_PASSWORD` or two prompts that must match, and an empty one is refused. With `--unencrypted` it asks
 for nothing and prints a warning, and `--password-file` is refused together with it. If `RDY_KEY_PASSWORD` is

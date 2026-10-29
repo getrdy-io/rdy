@@ -124,8 +124,9 @@ mod unix {
             & 0o7777
     }
 
-    /// The operator's umask is 000, the loosest there is. `rdy` makes its own files private anyway,
-    /// and sets the public ones to 0644 (the black-box half of `startup_umask.rs`).
+    /// File modes are exact under umask 000, the loosest there is: 0600 for the secret key, 0644 for
+    /// the public key and the signature. The modes are set explicitly, so this does not prove that
+    /// `harden_umask` ran. `startup_umask.rs` proves the 077.
     #[test]
     fn files_rdy_creates_ignore_a_umask_of_000() {
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));

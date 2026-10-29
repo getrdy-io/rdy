@@ -13,6 +13,8 @@ fn main_code_sets_the_umask_to_077() {
     // The harness arguments are not an `rdy` command line: 64 (usage), or 0 (help) with none. It ran the
     // start-up steps first either way, which is all this test needs.
     let code = rdy_cli::entry::main_code();
+    // `main_code` installed the silent panic hook. Put the default back for the harness.
+    drop(std::panic::take_hook());
     assert!(code == 64 || code == 0, "exit code {code}");
     let after = rustix::process::umask(Mode::empty());
     assert_eq!(
