@@ -316,7 +316,7 @@ ADR 0008 decision 7. This file adds `spec_unreadable` (exit 64: the spec file is
 unreadable) and `interrupted` (exit 70). Samples of each object are in B and C.11.
 
 **Start-up warning (M1-168).** If the parent left file descriptors above 2 open, `rdy` prints one line on
-stderr before anything else, with `--json` too, and never on stdout: `warning: rdy inherited open file
+stderr before the redacted log layer starts, with `--json` too, and never on stdout: `warning: rdy inherited open file
 descriptor 7, and the commands it runs inherit them. To start without, close them in the shell: rdy ... 7>&-`.
 It names at most 8 numbers and counts the rest. It goes through the same redaction and escaping as every
 other stderr line. Windows prints nothing. The code is `crates/rdy-cli/src/startup.rs`.

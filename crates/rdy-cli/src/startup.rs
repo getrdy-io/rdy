@@ -14,6 +14,8 @@ use crate::redaction;
 const MAX_LISTED: usize = 8;
 
 /// The `warning:` text for `fds`, or `None` when there are none. It has no line break.
+///
+/// It names at most 8 descriptors and counts the rest, with a hint to close those too.
 #[must_use]
 pub fn inherited_fd_warning(fds: &[u32]) -> Option<String> {
     if fds.is_empty() {
@@ -35,8 +37,13 @@ pub fn inherited_fd_warning(fds: &[u32]) -> Option<String> {
     } else {
         "descriptors"
     };
+    let rest = if more > 0 {
+        " and close the rest the same way"
+    } else {
+        ""
+    };
     Some(format!(
-        "warning: rdy inherited open file {noun} {numbers}, and the commands it runs inherit them. To start without, close them in the shell: rdy ... {}",
+        "warning: rdy inherited open file {noun} {numbers}, and the commands it runs inherit them. To start without, close them in the shell: rdy ... {}{rest}",
         closers.join(" ")
     ))
 }
@@ -80,6 +87,12 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("11,"), "{text}");
+        assert!(
+            text.ends_with(
+                "rdy ... 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- 10>&- and close the rest the same way"
+            ),
+            "{text}"
+        );
     }
 
     #[test]

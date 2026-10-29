@@ -146,7 +146,17 @@ pub fn inherited_fds() -> Vec<u32> {
             .filter(|fd| *fd > 2)
             .collect();
         // The directory handle itself was listed. It is closed now, so a second look drops it.
-        found.retain(|fd| std::fs::metadata(format!("{dir}/{fd}")).is_ok());
+        // On Linux the entry is a link to the target. `symlink_metadata` looks at the link itself, so a
+        // hung network or FUSE mount behind the descriptor cannot block start-up, and a failed stat of
+        // the target cannot drop a real descriptor.
+        found.retain(|fd| {
+            let entry = format!("{dir}/{fd}");
+            if cfg!(target_os = "linux") {
+                std::fs::symlink_metadata(entry).is_ok()
+            } else {
+                std::fs::metadata(entry).is_ok()
+            }
+        });
         found.sort_unstable();
         found
     }

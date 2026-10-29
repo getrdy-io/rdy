@@ -41,6 +41,8 @@ pub fn main_code() -> u8 {
             return EXIT_INTERNAL;
         }
     };
+    // Outside `guarded` and before the panic hook: this call has no panic path (a write error is
+    // ignored), so there is nothing for either to catch.
     startup::warn_inherited(&inherited, &mut io::stderr());
     logging::init_stderr(redactor);
     panic_hook::install();
