@@ -228,8 +228,8 @@ pub struct CheckMeta {
 /// The static facts about a check.
 ///
 /// Every check has exactly one, as a `static`. The planner reads it without running anything, the
-/// facade will enforce the manifest fields (`reads`, `env`, `commands`, `peers`), and the action log
-/// proves them.
+/// facade enforces the manifest fields (`reads`, `env`, `commands`; `peers` follows with the network
+/// calls), and the action log proves them.
 #[derive(Debug)]
 pub struct CheckInfo {
     /// The check id, such as `host.memory`.
@@ -248,7 +248,8 @@ pub struct CheckInfo {
     pub default_timeout: Option<Duration>,
     /// Support per OS.
     pub os: OsSupport,
-    /// Absolute path prefixes the check may read.
+    /// Absolute path prefixes the check may read, matched on whole path components. A path and the real
+    /// path it resolves to must both sit under one of them, so name a link and its target.
     pub reads: &'static [&'static str],
     /// Environment variable names the check may read.
     pub env: &'static [&'static str],
