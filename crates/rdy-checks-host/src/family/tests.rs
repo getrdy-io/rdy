@@ -146,7 +146,10 @@ fn a_stub_that_reaches_the_scheduler_follows_the_run_os_not_the_build() {
         let ran = runtime.block_on(scheduler.run(checks));
         assert_eq!(ran.len(), 7);
         for one in ran {
-            let End::Done(Err(error)) = one.end else {
+            let End::Done(done) = one.end else {
+                panic!("{} did not end", one.key);
+            };
+            let Err(error) = *done else {
                 panic!("{} did not end in an error", one.key);
             };
             assert_eq!(error.skip_kind(), Some(SkipKind::NotYetOnOs), "{}", one.key);
@@ -155,7 +158,10 @@ fn a_stub_that_reaches_the_scheduler_follows_the_run_os_not_the_build() {
 
     let (scheduler, checks) = built(Os::Linux);
     for one in runtime.block_on(scheduler.run(checks)) {
-        let End::Done(Err(error)) = one.end else {
+        let End::Done(done) = one.end else {
+            panic!("{} did not end", one.key);
+        };
+        let Err(error) = *done else {
             panic!("{} did not end in an error", one.key);
         };
         assert!(
