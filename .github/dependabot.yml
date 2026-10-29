@@ -1,0 +1,36 @@
+# Dependabot version updates (SEC-03, SEC-04, M1-011). docs/security/github-settings.md, section 7.
+#
+# - Alerts and security updates are repo settings, not this file. Security updates skip the cooldown.
+# - The 7-day cooldown keeps a new release out until it has been public for a week (zizmor
+#   dependabot-cooldown). A hijacked release is usually caught and yanked within that time.
+# - github-actions updates keep every `uses:` pinned to a commit SHA and update the version comment.
+# - npm in docs/ joins when the Starlight site lands (09).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

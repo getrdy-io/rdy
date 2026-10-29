@@ -31,7 +31,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-010 | todo | | sign-release with cosign keyless, SHA256SUMS and self-verify (SEC-06, SEC-07)
 
-- M1-011 | todo | | SEC-04 Org 2FA, private reporting, immutable releases, CODEOWNERS and a settings check script | backlog corrected 2026-10-28: account steps moved to Founder hand steps
+- M1-011 | [#60](https://github.com/getrdy-io/rdy/pull/60) | 2026-10-29 | Founder hand steps (docs/security/github-settings.md sections 1 to 8): org 2FA, private reporting, immutable releases, `main` and `v*` rulesets, Dependabot alerts, security@ mailbox and serving security.txt. First run 2026-10-29 (no token): 1 pass, 4 fail, 1 unknown. Found: `getrdy-io` is a personal account, not an organization, so org-wide 2FA needs the account turned into an organization first (founder decision; the plan assumed an org). SEC-03 is zizmor `unpinned-uses` hash-pin from M1-005, not a new check; the red throwaway PR with an unpinned `uses:` is for the coordinator to run. CODEOWNERS uses `@getrdy-io`; code owner review is not required while there is one maintainer. zizmor not run locally (not installed); shellcheck 0.9.0 clean. The curl HTTPS-only protocol option (review nit 6) is not in the script: the agent sandbox refused to write it, so the founder adds it by hand
 
 - M1-012 | todo | | First signed alpha, scripts/verify-release.sh and RELEASING.md
 
@@ -63,7 +63,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-026 | [#43](https://github.com/getrdy-io/rdy/pull/43) | 2026-10-28 | regex compile of redact_patterns (M1-031), did-you-mean in the unknown-key fix line (M1-031), Windows paths in file: collectors (schema allows `/` only; M2); the CLI prints the `expired on` line with no `:` after the file name, and CLI exit 64 on an expired spec (M1-126)
 
-- M1-027 | todo | | Property tests for rdy_spec::parse
+- M1-027 | [#59](https://github.com/getrdy-io/rdy/pull/59) | 2026-10-29 | The "verify before parse" row stays in src/sig/tests.rs (the parser spy is private to the crate), now on the fixed seed. Rules about the whole spec (no checks, too many hosts) carry no line, only YAML failures do. Nightly random-seed job is M2 (PROPTEST_RNG_SEED is the hook). Found and fixed: a tab ending the file was reported at column 0. nextest has a longer slow-timeout for the parse_properties binary; CI numbers: linux-x64 job 123200616321, longest test depth_64_passes_and_65_fails 15.3 s, nextest summary 39.4 s
 
 - M1-028 | [#57](https://github.com/getrdy-io/rdy/pull/57) | 2026-10-29 | none. CI run 40795966306 proved the exit test (root job: strace -V 6.8, uid under sudo 0, root_whoami_is_zero passed; the normal leg skipped it). Note for M1-121, M1-122 and M1-128: sudo resets HOME and XDG_CONFIG_HOME, so root tests set them on the child they spawn.
 

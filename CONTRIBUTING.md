@@ -61,6 +61,12 @@ and `cargo test --doc --workspace`. A test named `root_*` needs uid 0. Nextest s
 `--profile root`, and CI runs it in the `root` job under `sudo`. On Linux, CI also builds the musl binary and checks it with
 `scripts/check-static.sh target/<triple>/debug/rdy`.
 
+Property tests use `proptest`. Each test sets its own case count (10,000 for "never panics" and
+limits, 256 for the rest), so do not set `PROPTEST_CASES`. Pull requests use a fixed seed, so a
+test never fails on an unrelated change. To try other draws, set `PROPTEST_RNG_SEED=<number>`. A
+failure is saved in `crates/rdy-spec/proptest-regressions/`. Commit that file with the fix, and add
+a plain test with the smallest input next to the fix.
+
 Repo tasks run through `cargo xtask`, from `crates/xtask`. Run these when you change docs or generated files:
 
 ```sh
