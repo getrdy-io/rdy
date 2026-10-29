@@ -1,6 +1,6 @@
 # ADR 0010: Use kube-rs (client only) behind a runtime read-only guard, not raw REST or kubectl
 
-- Status: Accepted (revised 2026-10-28 after security-reviewer review; amended 2026-10-28: `selfsubjectreviews` POST in M1, family-owned client, per the review of ADRs 0013 to 0016)
+- Status: Accepted (revised 2026-10-28 after security-reviewer review; amended 2026-10-28: `selfsubjectreviews` POST in M1, family-owned client, per the review of ADRs 0013 to 0016; decisions 1, 3, 4 and 7 refined by ADR 0031: the features (`ring`, `webpki-roots`), how the kubeconfig is read, the plugin exception (terminal use and environment), and errors that hold no plugin output)
 - Date: 2026-10-27
 
 ## Context
