@@ -165,8 +165,8 @@ the equality easier to see in a diff.
   come from the same `Redacted<Report>`.
 - **Logs.** A redacting writer under the `tracing` fmt layer redacts each formatted event whole before stderr.
   The inner fmt layer uses `.with_ansi(false)`, because colour codes between a field name and `=` would hide
-  `password=hunter2` from the key-name rule. With `RUST_LOG` unset nothing is logged (07 D.6); a set
-  `RUST_LOG` is the operator's filter. A PEM block split over several events is a known gap in M1. Panic and CLI error text is
+  `password=hunter2` from the key-name rule. With `RUST_LOG` unset nothing is logged (07 D.6); with it set,
+  hyper, h2, rustls, tower and kube stay capped at warn whatever the filter says. A PEM block split over several events is a known gap in M1. Panic and CLI error text is
   redacted too.
 - **Raw bytes** live only in memory owned by the collector task and the redactor: no temp file, and no raw
   value in the action log, `tracing` or an error.

@@ -7,7 +7,11 @@
 //!   hide `password=hunter2` from the key-name rule.
 //! - **Off by default.** With `RUST_LOG` unset (or empty, or not a valid filter) nothing is logged
 //!   ([`DEFAULT_FILTER`], 07 appendix D.6: "Unset means no log output"). With a valid `RUST_LOG` the
-//!   operator's filter wins, and every line is still redacted.
+//!   operator's filter applies, and every line is still redacted.
+//! - **Capped dependencies.** Whatever `RUST_LOG` says, hyper, h2, rustls, tower and kube (and crates
+//!   named `hyper_*`, `tower_*`, `kube_*`) log at `warn` at most ([`CAPPED_TARGETS`], threat model I2).
+//!   Those crates can log headers and secrets at debug and trace. `RUST_LOG=hyper=trace` does not lift
+//!   the cap.
 //! - **Escaped.** Each line is escaped for the terminal (control and invisible characters become
 //!   `\xNN` and `\u{..}`) and then redacted, so a field value cannot move the cursor or hide a line.
 //! - **A redactor bug drops the event.** If the redactor panics, the event is replaced by a fixed
@@ -22,14 +26,16 @@
 use std::io::{self, Write};
 
 use rdy_engine::redact::Redactor;
-use tracing::Subscriber;
-use tracing_subscriber::EnvFilter;
+use tracing::{Level, Subscriber};
+use tracing_subscriber::filter::{FilterExt, filter_fn};
 use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::{EnvFilter, Layer};
 
 use crate::error::escape_untrusted;
 use crate::redaction::{DROPPED, try_redact};
 
-/// The filter used when `RUST_LOG` is unset: no log output (07 section 13).
+/// The filter used when `RUST_LOG` is unset: no log output (07 appendix D.6).
 pub const DEFAULT_FILTER: &str = "off";
 
 /// The filter for a `RUST_LOG` value. Unset, empty and invalid values give [`DEFAULT_FILTER`].
@@ -41,6 +47,19 @@ pub fn filter(rust_log: Option<&str>) -> EnvFilter {
         .unwrap_or_else(|| EnvFilter::new(DEFAULT_FILTER))
 }
 
+/// The dependency targets that never log above `warn`, whatever `RUST_LOG` asks for.
+pub const CAPPED_TARGETS: [&str; 5] = ["hyper", "h2", "rustls", "tower", "kube"];
+
+/// True when `target` is one of [`CAPPED_TARGETS`], a module of one, or a crate named after one
+/// (`hyper_util`, `kube_client`).
+fn is_capped(target: &str) -> bool {
+    CAPPED_TARGETS.iter().any(|name| {
+        target
+            .strip_prefix(name)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with("::") || rest.starts_with('_'))
+    })
+}
+
 /// A `tracing` subscriber that writes redacted lines to the writers `make` builds.
 pub fn subscriber<M>(
     make: M,
@@ -50,12 +69,14 @@ pub fn subscriber<M>(
 where
     M: for<'a> MakeWriter<'a> + Send + Sync + 'static,
 {
-    tracing_subscriber::fmt()
-        .with_env_filter(filter(rust_log))
+    // The cap sits next to the operator's filter and both must pass, so no `RUST_LOG` can lift it.
+    let cap = filter_fn(|meta| !is_capped(meta.target()) || *meta.level() <= Level::WARN);
+    let layer = tracing_subscriber::fmt::layer()
         .with_ansi(false)
         .without_time()
         .with_writer(RedactingMakeWriter::new(make, redactor))
-        .finish()
+        .with_filter(filter(rust_log).and(cap));
+    tracing_subscriber::registry().with(layer)
 }
 
 /// Installs the global subscriber on stderr. Call it first in `main`, with the process redactor.

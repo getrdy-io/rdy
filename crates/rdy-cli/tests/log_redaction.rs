@@ -106,7 +106,8 @@ fn emit_canaries() {
         output = "Authorization: Bearer canary-output-hdr-4\nok",
         "command output"
     );
-    tracing::trace!(
+    // A capped dependency still logs at warn, so its line goes through the redactor too.
+    tracing::warn!(
         target: "hyper::proto::h1::io",
         "write headers: authorization: Bearer canary-dep-hdr-5"
     );
@@ -174,11 +175,37 @@ fn a_plain_level_in_rust_log_turns_logging_on() {
 }
 
 #[test]
+fn a_set_rust_log_still_caps_the_noisy_dependencies_at_warn() {
+    for rust_log in [
+        "trace",
+        "debug",
+        "hyper=trace,h2=trace,kube=trace",
+        "rdy_cli=trace,trace",
+    ] {
+        let out = captured(Some(rust_log), || {
+            tracing::trace!(target: "hyper::proto::h1::io", "hyper trace canary-cap-1");
+            tracing::debug!(target: "h2::codec", "h2 debug canary-cap-2");
+            tracing::info!(target: "rustls::client", "rustls info canary-cap-3");
+            tracing::debug!(target: "tower::buffer", "tower debug canary-cap-4");
+            tracing::debug!(target: "kube_client::client", "kube debug canary-cap-5");
+            tracing::debug!(target: "hyper_util::client", "hyper_util debug canary-cap-6");
+            tracing::warn!(target: "h2::codec", "h2 warn line");
+            tracing::error!(target: "kube::client", "kube error line");
+            tracing::debug!(target: "hypermedia", "other crate trace line");
+        });
+        assert!(!out.contains("canary-cap"), "{rust_log}: {out}");
+        assert!(out.contains("h2 warn line"), "{rust_log}: {out}");
+        assert!(out.contains("kube error line"), "{rust_log}: {out}");
+        assert!(out.contains("other crate trace line"), "{rust_log}: {out}");
+    }
+}
+
+#[test]
 fn a_set_rust_log_names_the_targets_and_is_still_redacted() {
     let out = captured(Some("trace"), || {
-        tracing::trace!(target: "h2::codec", "frame token=canary-lift-1");
+        tracing::trace!(target: "my_crate::codec", "frame token=canary-lift-1");
     });
-    assert!(out.contains("h2::codec"), "{out}");
+    assert!(out.contains("my_crate::codec"), "{out}");
     assert!(!out.contains("canary-lift-1"), "{out}");
 }
 

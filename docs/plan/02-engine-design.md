@@ -247,7 +247,7 @@ Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
    events carry id, status and duration only.
 
 `rdy` installs the redacting `tracing` layer first in `main`. With `RUST_LOG` unset nothing is logged (07
-D.6); a set `RUST_LOG` is the operator's filter. `EngineError`, `ReportError` and panic text are redacted before
+D.6). With it set, hyper, h2, rustls, tower and kube stay capped at `warn` whatever the filter says. `EngineError`, `ReportError` and panic text are redacted before
 printing.
 
 ## The action log
