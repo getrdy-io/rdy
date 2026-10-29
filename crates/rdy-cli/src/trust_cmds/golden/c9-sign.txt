@@ -1,0 +1,14 @@
+Password for acme-signing.key (input hidden):
+Signed acme-platform.yaml
+  signature    acme-platform.yaml.minisig
+  sha256       231d161afdf97fb9aa5a2ea3cfbd3f4645249d218e9aaefe3f4000dc598d0d4f
+  signing key  9F3A6C21D4E87B05
+  fingerprint  4d2a 7c0e 9b1f 3a5c 6e8d 0b2f 4a6c 8e0d
+               1b3f 5a7c 9e2d 4b6f 8a0c 2e4d 6b8f 0a1c
+  signed on    2027-03-02T15:40:09Z
+Checked the new signature: it verifies.
+
+Send your customer the spec, the .minisig file, acme-signing.pub, and this line:
+  rdy trust add acme-platform --key acme-signing.pub
+The fingerprint is 4d2a7c0e9b1f3a5c6e8d0b2f4a6c8e0d1b3f5a7c9e2d4b6f8a0c2e4d6b8f0a1c.
+Tell them to compare it with your docs page before they say yes.

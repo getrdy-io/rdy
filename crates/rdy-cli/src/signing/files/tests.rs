@@ -167,3 +167,110 @@ fn write_and_sync_writes_everything() {
     write_and_sync(&mut file, b"hello").expect("write");
     assert_eq!(std::fs::read(&path).expect("read"), b"hello");
 }
+
+#[test]
+fn a_public_file_is_read_whatever_its_mode() {
+    let d = dir();
+    let path = d.path().join("k.pub");
+    std::fs::write(&path, "public text").expect("write");
+    #[cfg(unix)]
+    set_mode(&path, 0o644);
+    assert_eq!(read_public(&path, 64).expect("read"), b"public text");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_public_file_may_be_a_symlink_to_a_regular_file() {
+    let d = dir();
+    let real = d.path().join("real.pub");
+    std::fs::write(&real, "public text").expect("write");
+    let link = d.path().join("link.pub");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    assert_eq!(read_public(&link, 64).expect("read"), b"public text");
+}
+
+#[test]
+fn a_public_file_that_is_missing_a_folder_or_too_large_is_refused() {
+    let d = dir();
+    let err = read_public(&d.path().join("nope"), 64).unwrap_err();
+    assert!(matches!(
+        err,
+        FileError::Unreadable {
+            reason: IoReason::NoSuchFile
+        }
+    ));
+    assert!(matches!(
+        read_public(d.path(), 64).unwrap_err(),
+        FileError::NotRegular | FileError::Unreadable { .. }
+    ));
+    let big = d.path().join("big");
+    std::fs::write(&big, vec![b'a'; 65]).expect("write");
+    assert!(matches!(
+        read_public(&big, 64).unwrap_err(),
+        FileError::TooLarge
+    ));
+    std::fs::write(&big, vec![b'a'; 64]).expect("write");
+    assert_eq!(read_public(&big, 64).expect("exactly the cap").len(), 64);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_named_pipe_is_refused_and_does_not_hang() {
+    let d = dir();
+    let path = d.path().join("fifo");
+    // `rustix` has no `mknodat` on Apple targets. `mkfifo` is on every Unix CI image.
+    let made = std::process::Command::new("mkfifo")
+        .arg(&path)
+        .status()
+        .expect("mkfifo runs");
+    assert!(made.success());
+    assert!(matches!(
+        read_public(&path, 64).unwrap_err(),
+        FileError::NotRegular
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_device_is_refused_by_stat_and_a_link_to_one_too() {
+    // /dev/null is a character device on every Unix. The refusal comes from `stat`, before any open.
+    assert!(matches!(
+        read_public(Path::new("/dev/null"), 64).unwrap_err(),
+        FileError::NotRegular
+    ));
+    let d = dir();
+    let link = d.path().join("null.pub");
+    std::os::unix::fs::symlink("/dev/null", &link).expect("symlink");
+    assert!(matches!(
+        read_public(&link, 64).unwrap_err(),
+        FileError::NotRegular
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_unix_socket_is_refused_by_stat_not_by_a_failed_open() {
+    // Opening a socket fails with ENXIO, so code that opens first reports it as unreadable. Only a
+    // `stat` before the open can say it is not a regular file.
+    let d = dir();
+    let path = d.path().join("sock");
+    let _listener = std::os::unix::net::UnixListener::bind(&path).expect("bind");
+    assert!(matches!(
+        read_public(&path, 64).unwrap_err(),
+        FileError::NotRegular
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_handle_that_is_not_the_file_stat_saw_is_refused() {
+    let d = dir();
+    let (a, b) = (d.path().join("a"), d.path().join("b"));
+    std::fs::write(&a, "one").expect("write");
+    std::fs::write(&b, "two").expect("write");
+    let seen = std::fs::metadata(&a).expect("stat");
+    let other = File::open(&b).expect("open").metadata().expect("fstat");
+    let same = File::open(&a).expect("open").metadata().expect("fstat");
+    assert!(!same_file(&seen, &other));
+    assert!(same_file(&seen, &same));
+}

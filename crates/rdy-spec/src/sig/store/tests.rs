@@ -503,3 +503,171 @@ fn an_unsigned_spec_converts_to_an_unsigned_signature() {
     let signature = Signature::from(&SignatureState::Unsigned);
     assert_eq!(signature, Signature::unsigned());
 }
+
+#[test]
+fn add_writes_an_entry_that_reads_back_and_lists() {
+    let pair = Pair::new();
+    let mut store = TrustStore::new();
+    store
+        .add(
+            slug("acme-platform"),
+            pair.key(),
+            TrustSource::User,
+            ADDED,
+            Some("Acme security page"),
+        )
+        .expect("adds");
+    let listed: Vec<_> = store.entries().collect();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].product().as_str(), "acme-platform");
+    assert_eq!(listed[0].key(), &pair.key());
+    assert_eq!(listed[0].added_at(), ADDED);
+    assert_eq!(listed[0].note(), Some("Acme security page"));
+    assert_eq!(listed[0].source(), TrustSource::User);
+    let text = store.to_yaml();
+    assert_eq!(read(&text).expect("reads back"), store);
+}
+
+#[test]
+fn entries_leave_out_a_one_run_key() {
+    let pair = Pair::new();
+    let mut store = TrustStore::new();
+    store.pin(slug("acme-platform"), pair.key(), TrustSource::Flag);
+    assert_eq!(store.entries().count(), 0);
+}
+
+#[test]
+fn add_refuses_a_second_key_with_the_same_id_and_says_if_it_is_the_same_key() {
+    let pair = Pair::new();
+    let mut store = TrustStore::new();
+    store
+        .add(
+            slug("acme-platform"),
+            pair.key(),
+            TrustSource::User,
+            ADDED,
+            None,
+        )
+        .expect("adds");
+    let again = store
+        .add(
+            slug("acme-platform"),
+            pair.key(),
+            TrustSource::User,
+            ADDED,
+            None,
+        )
+        .expect_err("same key twice");
+    assert!(matches!(
+        again,
+        TrustAddError::DuplicateKeyId { same_key: true, .. }
+    ));
+    // A different key that carries the same id: the id bytes of one, the key material of another.
+    let other = Pair::new();
+    let mut raw = base64::decode(&other.text()).expect("base64");
+    let mine = base64::decode(&pair.text()).expect("base64");
+    raw[2..10].copy_from_slice(&mine[2..10]);
+    let forged = PublicKey::from_base64(&base64::encode(&raw)).expect("a key with the same id");
+    let clash = store
+        .add(
+            slug("acme-platform"),
+            forged,
+            TrustSource::User,
+            ADDED,
+            None,
+        )
+        .expect_err("same id");
+    assert!(matches!(
+        clash,
+        TrustAddError::DuplicateKeyId {
+            same_key: false,
+            ..
+        }
+    ));
+    assert_eq!(store.entries().count(), 1, "the store is unchanged");
+    // The same key may be trusted for another product.
+    store
+        .add(
+            slug("acme-edge"),
+            pair.key(),
+            TrustSource::User,
+            ADDED,
+            None,
+        )
+        .expect("another product");
+}
+
+#[test]
+fn add_applies_the_rules_the_reader_applies() {
+    let pair = Pair::new();
+    let mut store = TrustStore::new();
+    let mut try_add = |added_at: &str, note: Option<&str>| {
+        store.add(
+            slug("acme-platform"),
+            pair.key(),
+            TrustSource::User,
+            added_at,
+            note,
+        )
+    };
+    assert_eq!(try_add("yesterday", None), Err(TrustAddError::BadTime));
+    assert!(matches!(
+        try_add(ADDED, Some("a\nb")),
+        Err(TrustAddError::BadNote { .. })
+    ));
+    assert!(matches!(
+        try_add(ADDED, Some(&"x".repeat(513))),
+        Err(TrustAddError::BadNote { .. })
+    ));
+    // An empty note is no note.
+    assert_eq!(try_add(ADDED, Some("")), Ok(()));
+    assert_eq!(store.entries().next().expect("entry").note(), None);
+}
+
+#[test]
+fn add_refuses_a_one_run_source_and_leaves_the_store_unchanged() {
+    let pair = Pair::new();
+    let mut store = TrustStore::new();
+    let err = store
+        .add(
+            slug("acme-platform"),
+            pair.key(),
+            TrustSource::Flag,
+            ADDED,
+            None,
+        )
+        .expect_err("a flag key is never kept");
+    assert_eq!(err, TrustAddError::NotAStore);
+    assert_eq!(store.entries().count(), 0);
+    assert!(!store.to_yaml().contains("acme-platform"));
+}
+
+#[test]
+fn remove_takes_out_one_entry_by_product_and_key_id() {
+    let (a, b) = (Pair::new(), Pair::new());
+    let mut store = TrustStore::new();
+    for pair in [&a, &b] {
+        store
+            .add(
+                slug("acme-platform"),
+                pair.key(),
+                TrustSource::User,
+                ADDED,
+                None,
+            )
+            .expect("adds");
+    }
+    assert!(!store.remove(&slug("acme-edge"), a.key().key_id()));
+    assert!(store.remove(&slug("acme-platform"), a.key().key_id()));
+    assert!(!store.remove(&slug("acme-platform"), a.key().key_id()));
+    let left: Vec<_> = store.entries().map(|e| e.key().clone()).collect();
+    assert_eq!(left, [b.key()]);
+}
+
+#[test]
+fn remove_never_touches_a_one_run_key() {
+    let pair = Pair::new();
+    let mut store = TrustStore::new();
+    store.pin(slug("acme-platform"), pair.key(), TrustSource::Flag);
+    assert!(!store.remove(&slug("acme-platform"), pair.key().key_id()));
+}
