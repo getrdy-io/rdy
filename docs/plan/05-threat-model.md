@@ -163,8 +163,11 @@ STRIDE table: Appendix B.
 - Key distribution is manual in M1. Pinning the wrong key trusts the wrong vendor.
 - No revocation in v1 (ADR 0002). A leaked key stays trusted until removed by hand.
 - From M2, the portal is in the trust chain. The bounded sentence is what limits a compromised portal.
-- Trust store file checks use Unix modes and owners. Extended ACLs on macOS are not seen by them, and
-  Windows refuses any store until the ACL rules land (M1-122, ADR 0021).
+- Trust store file checks use Unix modes and owners. Extended ACLs on macOS are not seen by them. This is
+  accepted, not scheduled: reading them needs FFI, and `#![forbid(unsafe_code)]` holds in `rdy-cli`
+  (M1-122, ADR 0021). The mitigation is that a store is trusted only if its owner is right and its mode
+  bits are tight, and on macOS the system store is in `/etc/rdy`, which only root can create. Windows
+  refuses any store and has no user store, until the ACL rules land (M2-105, ADR 0027).
 
 ## Surface 3: install script and release pipeline
 
@@ -248,7 +251,7 @@ Each is a statement that CI tests. The ticket in the test column carries it.
 | INV-01 | No spec byte reaches the YAML parser before verification succeeds, except under `--allow-unsigned` or `rdy spec lint`. | Parser spy: a tampered spec is never parsed (M1-120). |
 | INV-02 | Spec (1 MiB), `.minisig` (4 KiB) and `trust.yaml` (256 KiB) are read through `take(limit + 1)`. Oversize exits 64. | Oversize files, a FIFO and `/dev/zero` each exit 64 within 1 s. |
 | INV-03 | A spec verifies only if its key id is pinned for the trusted-comment product and `metadata.product` matches. | Unpinned id gives "unknown key"; a key pinned for A fails on B; a comment and metadata mismatch fails. |
-| INV-04 | With euid 0, only the system store is read, and it is refused unless root-owned, not group or world writable, and not a symlink. | Run under `sudo` in CI with `HOME` and `XDG_CONFIG_HOME` set to a user dir holding a pin; the pin is ignored. Bad owner, mode and symlink cases exit 64 (M1-121, SEC-60 M1-122). |
+| INV-04 | With euid 0, only the system store is read, and it is refused unless root-owned, not group or world writable, and not a symlink. | Run under `sudo` in CI with `HOME` and `XDG_CONFIG_HOME` set to a user dir holding a pin; the pin is ignored. A `strace -f` of the load shows no call that mentions that home, and a control run with a user layout does (`root_trust_strace.rs`, SEC-60 M1-122). Bad owner, mode and symlink cases exit 64 (M1-121). |
 | INV-05 | `--allow-unsigned` is read from argv only. `RDY_ALLOW_UNSIGNED=1` and an `allow_unsigned` config key have no effect. An unsigned run says `signature: unsigned` in JSON and HTML. A present but failing signature exits 64 with or without the flag. | Integration tests and golden output (M1-126, SEC-59 M1-130). |
 | INV-06 | Duplicate keys, anchors, aliases, merge keys, multi-document input and unknown top-level keys exit 64. Unknown check ids and unknown per-check fields become `Skipped` and run no code. A required check that did not run makes the verdict `not_ready` (ADR 0013). | Fixtures, including the plan's example with `gpu.cuda` and `aws.iam` (M1-017, M1-035). |
 | INV-07 | Check crates reach the OS and clusters only through the probe facade and the guarded kube client (ADR 0014). `clippy.toml` lists the exact items in 02 Appendix A: std file, directory, link, permission, process, socket, thread and env APIs, and kube client and config types outside the k8s client module. `allow(clippy::disallowed_` is legal only in the facade's `live/` module and the k8s client module. `ci/check-crate-deps.toml` allowlists each check crate's direct dependencies. The named exceptions are kube's own sockets, its proxy CONNECT and TLS, and its exec plugins, each recorded in the action log. | Each entry, used once in `tests/lint-wall`, fails clippy (M1-044; kube entries in M1-102). Adding `walkdir` to a check crate fails CI. Action-log completeness under strace (SEC-22). |
@@ -476,7 +479,7 @@ the 11 ticket named. 05 revision 3 itself is part of M1-001.
 | SEC-26 | M1-063 | M1 redaction corpus | yes |
 | SEC-32 | M1-011 | Security mailbox and security.txt (fold) | yes |
 | SEC-59 | M1-130 | Unsigned and unpinned-key banners and hint wording for spec loading | no |
-| SEC-60 | M1-122 | Root trust lookup touches no user path, Windows store ACL rules | no |
+| SEC-60 | M1-122 | Root trust lookup touches no user path; Windows stores stay refused, the ACL rules are M2-105 (ADR 0027) | no |
 | SEC-61 | M1-121 | Key fingerprint in the result and forged key id (fold) | no |
 | SEC-62 | M1-017 | YAML tags, directives and non-finite floats refused (fold) | no |
 | SEC-63 | M1-041 | Result schema caps, identity.kube exec plugin and action log retention | no |
