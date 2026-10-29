@@ -119,13 +119,13 @@ and Dec 28 run at half capacity.
 | 11 | Feb 1 to Feb 7, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-049 to M1-056 | `v0.1.0-alpha.10`: replay fixtures, fixture lint and golden helpers; logs redacted |
 | 12 | Feb 8 to Feb 14, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-057 to M1-062 | `v0.1.0-alpha.11`: `rdy run <file> --allow-unsigned --json` writes a 0700 report dir, every check SKIP; Ctrl-C exits 70; `--no-network` |
 | 13 | Feb 15 to Feb 21, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-063 to M1-070 | `v0.1.0-alpha.12`: every report string redacted, 28-case corpus gates CI; host.memory and host.disk |
-| 14 | Feb 22 to Feb 28, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-071 to M1-076 | `v0.1.0-alpha.13`: host.cpu, host.ports, host.os on Linux; in-process env harness |
+| 14 | Feb 22 to Feb 28, 2027 | 13 | 11 | 3 Host checks, HTML report | M1-071, M1-074 to M1-076, M1-169 | `v0.1.0-alpha.13`: host.cpu on Linux; facade `read_link`; in-process env harness |
 | 15 | Mar 1 to Mar 7, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-077 to M1-085 | `v0.1.0-alpha.14`: HTML report next to the JSON, with golden reports; generated spec reference |
 | 16 | Mar 8 to Mar 14, 2027 | 13 | 12.5 | 3 Host checks, HTML report; 4 Network checks | M1-086 to M1-090, M1-168 | `v0.1.0-alpha.15`: the demo: bucket-sorted terminal output with fix lines and the verdict last; umask 077 and an inherited-descriptor warning at start-up |
 | 17 | Mar 15 to Mar 21, 2027 | 13 | 12.5 | 4 Network checks | M1-091 to M1-095 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy |
-| 18 | Mar 22 to Mar 28, 2027 | 13 | 11.5 | 4 Network checks | M1-096 to M1-101 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept |
-| 19 | Mar 29 to Apr 4, 2027 | 13 | 11 | 5 Kubernetes checks | M1-102 to M1-104 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard with path parser and resource allowlist |
-| 20 | Apr 5 to Apr 11, 2027 | 13 | 12 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |
+| 18 | Mar 22 to Mar 28, 2027 | 13 | 13 | 3 Host checks, HTML report; 4 Network checks | M1-096 to M1-101, M1-073 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept; host.os on Linux |
+| 19 | Mar 29 to Apr 4, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-102 to M1-104, M1-072 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard with path parser and resource allowlist; host.ports on Linux |
+| 20 | Apr 5 to Apr 11, 2027 | 13 | 13 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |
 | 21 | Apr 12 to Apr 18, 2027 | 13 | 12.5 | 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-110 to M1-115 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed |
 | 22 | Apr 19 to Apr 25, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-116 to M1-120 | `v0.1.0-alpha.21`: family pages; fixture envs for every verdict; timeouts env; signatures verified before parsing |
 | 23 | Apr 26 to May 2, 2027 | 13 | 11.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-121 to M1-125 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign` |
