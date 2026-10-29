@@ -55,19 +55,26 @@ pub fn short_hash(full: &str) -> Option<String> {
 
 /// `<version>`, `<version> (<commit>)` or `<version> (<commit> <date>)`.
 pub fn line(version: &str, source: &Source) -> String {
+    match commit_and_date(source) {
+        (Some(commit), Some(date)) => format!("{version} ({commit} {date})"),
+        (Some(commit), None) => format!("{version} ({commit})"),
+        (None, _) => version.to_string(),
+    }
+}
+
+/// The short commit and the UTC commit date (`YYYY-MM-DD`) that `rdy version --json` prints. Either
+/// is `None` when the build has no trustworthy value. A date never appears without a commit.
+pub fn commit_and_date(source: &Source) -> (Option<String>, Option<String>) {
     match source {
         Source::Git { commit, unix_secs } => match short_hash(commit) {
             Some(short) => {
                 let (year, month, day) = civil_from_days(unix_secs.div_euclid(86_400));
-                format!("{version} ({short} {year:04}-{month:02}-{day:02})")
+                (Some(short), Some(format!("{year:04}-{month:02}-{day:02}")))
             }
-            None => version.to_string(),
+            None => (None, None),
         },
-        Source::Packaged { commit } => match short_hash(commit) {
-            Some(short) => format!("{version} ({short})"),
-            None => version.to_string(),
-        },
-        Source::None => version.to_string(),
+        Source::Packaged { commit } => (short_hash(commit), None),
+        Source::None => (None, None),
     }
 }
 

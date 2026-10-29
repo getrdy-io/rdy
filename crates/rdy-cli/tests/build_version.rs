@@ -3,7 +3,9 @@
 #[path = "../build_version.rs"]
 mod build_version;
 
-use build_version::{Source, civil_from_days, commit_from_vcs_info, line, short_hash, source};
+use build_version::{
+    Source, civil_from_days, commit_and_date, commit_from_vcs_info, line, short_hash, source,
+};
 
 const FULL: &str = "0123456789abcdef0123456789abcdef01234567";
 const VCS_INFO: &str =
@@ -54,6 +56,30 @@ fn own_checkout_prints_commit_and_utc_date() {
 fn own_checkout_without_a_commit_prints_version_only() {
     let got = source(None, || true, || None);
     assert_eq!(line("1.2.3", &got), "1.2.3");
+}
+
+#[test]
+fn json_fields_follow_the_same_rules_as_the_line() {
+    let git = source(None, || true, || Some((FULL.to_string(), 1_798_675_200)));
+    assert_eq!(
+        commit_and_date(&git),
+        (Some("0123456".to_string()), Some("2026-12-31".to_string()))
+    );
+    let packaged = Source::Packaged {
+        commit: FULL.to_string(),
+    };
+    assert_eq!(
+        commit_and_date(&packaged),
+        (Some("0123456".to_string()), None)
+    );
+    assert_eq!(commit_and_date(&Source::None), (None, None));
+    // A commit that is not a hash gives neither field, as the line gives only the version.
+    let junk = Source::Git {
+        commit: "not a hash".to_string(),
+        unix_secs: 0,
+    };
+    assert_eq!(commit_and_date(&junk), (None, None));
+    assert_eq!(line("1.2.3", &junk), "1.2.3");
 }
 
 #[test]
