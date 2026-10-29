@@ -766,8 +766,9 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
 
 // output, report, redact
 impl OutputDir { pub fn create_new(parent: &Path, product: &str, ts: &str) -> Result<Self, ReportError>;
-                 pub fn write_report(&self, r: &RedactedReport) -> Result<(), ReportError>;
-                 pub fn write_spec(&self, s: &VerifiedSpecBytes) -> Result<(), ReportError>; }
+                 pub fn write_atomic<T: AsRef<[u8]>>(&self, name: &str, c: &Redacted<T>) -> Result<PathBuf, ReportError>;  // M1-036
+                 pub fn write_report(&self, r: &RedactedReport) -> Result<(), ReportError>;  // M1-062, calls write_atomic
+                 pub fn write_spec(&self, s: &VerifiedSpecBytes) -> Result<Vec<PathBuf>, ReportError>; }  // M1-036
 pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<(), ReportError>;
 pub fn render_html(r: &RedactedReport) -> Result<String, ReportError>;
 pub struct RedactedReport(/* private */ Report);   // no From<Report>, no Deserialize, no DerefMut
