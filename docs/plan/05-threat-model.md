@@ -160,6 +160,8 @@ STRIDE table: Appendix B.
 - Key distribution is manual in M1. Pinning the wrong key trusts the wrong vendor.
 - No revocation in v1 (ADR 0002). A leaked key stays trusted until removed by hand.
 - From M2, the portal is in the trust chain. The bounded sentence is what limits a compromised portal.
+- Trust store file checks use Unix modes and owners. Extended ACLs on macOS are not seen by them, and
+  Windows refuses any store until the ACL rules land (M1-122, ADR 0021).
 
 ## Surface 3: install script and release pipeline
 
