@@ -427,3 +427,28 @@ fn exec_inherited_fds() {
 fn spec_load() {
     let _ = rdy_spec::load;
 }
+fn type_watchdog_process_effects(_: Option<rdy_engine::watchdog::ProcessEffects>) {}
+fn watchdog_effects_exit(effects: &dyn rdy_engine::watchdog::Effects) {
+    effects.exit(0);
+}
+fn watchdog_effects_kill_groups(effects: &dyn rdy_engine::watchdog::Effects) {
+    effects.kill_groups();
+}
+fn watchdog_effects_notice(effects: &dyn rdy_engine::watchdog::Effects) {
+    effects.notice();
+}
+fn watchdog_start() {
+    let _ = rdy_engine::watchdog::Watchdog::start;
+}
+fn watchdog_write_state_claim() {
+    let _ = rdy_engine::watchdog::WriteState::claim;
+}
+fn watchdog_write_state_claim_or_park() {
+    let _ = rdy_engine::watchdog::WriteState::claim_or_park;
+}
+fn watchdog_write_state_finish() {
+    let _ = rdy_engine::watchdog::WriteState::finish;
+}
+fn exec_live_groups() {
+    let _ = rdy_engine::exec::live_groups;
+}

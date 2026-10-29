@@ -92,6 +92,9 @@ socket2 = { version = "0.6", default-features = false }
 syn = { version = "2", default-features = false }
 proc-macro2 = { version = "1", default-features = false }
 
+# Test-only: the lint wall tests read manifests and Cargo configs as TOML (M1-044). Already in the tree.
+toml = { version = "1", default-features = false }
+
 # The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field
 # name and `=` would hide `password=hunter2` from the key-name rule (04 section 3.4).
 tracing = { version = "0.1", default-features = false }

@@ -31,7 +31,6 @@ below.
 | PC-37 | Plan, Milestones table, M3 | The M3 exit test ("First 10 paying vendors") can only be measured after the launch that M3 contains. | Launch when M3 scope is done; measure the exit test over the next eight weeks. The 12-month star and install targets start on launch day. | cosmetic | 10 |
 | PC-45 | 02 "Scheduling, timeouts and hangs", Watchdog, Snapshot bullet | It says that with no snapshot the watchdog reports every check as `error`, `interrupted`. `error_kind` has only `check_failed` and `panic` (01 section 5.2), and `interrupted` is a field of the report that means Ctrl-C. | Say "as `error` with `error_kind: check_failed`". M1-043 builds it that way (`unfinished_result`). | cosmetic | M1-043 review |
 | PC-46 | 02 "Scheduling, timeouts and hangs", Watchdog, "One writer" bullet | It says that when the watchdog loses the write race it waits for `Done` and then does nothing. M1-043 adds a backstop: once the state is `Done`, a process that is still alive `loser_wait` (5 s) after the watchdog fires is killed and exits with the code stored by `WriteState::finish`. It covers a print to a blocked stdout after the report is written. | Add the backstop to the bullet. The M2 upload prompt after the result (07 section 5) must disarm or re-bound the watchdog first, or it is killed at deadline plus 15 s. | should-fix | M1-043 review |
-| PC-47 | 02 Appendix A, lint wall entries | The list covers the std and kube items, the engine runners and `live_backend`, but not the first-party items a check could call to write files or change the process: `rdy_engine::output` (`ReportParent::open`, `OutputDir::create_new`, `create_new_in`, `write_atomic`, `write_spec`, `default_report_parent`), `rdy_engine::exec::{kill_all_groups, harden_umask, inherited_fds}` and `rdy_spec::load`, nor `std::env::args` and `args_os`, the terminal (`std::io::stdout`, `stderr`, `stdin`, the print macros) or `TestRun::context`. The dependency allowlist has no owner either, because old M1-065 was merged into M1-044. | Add all of them to every check crate's `clippy.toml` and to `tests/lint-wall/src/uses.rs`. Build `ci/check-crate-deps.toml` and its `cargo metadata` test in M1-044. Found by the security review of PR #85. | should-fix | PR #85 review |
 
 ## Decisions made
 
@@ -297,6 +296,18 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   enforces it at compile time. `exec::table::run`, `exec::run` and `ExecSpec::new` are also on the root
   `clippy.toml` `disallowed-methods` list now, so a check crate that calls the table runner without a
   `Probe` fails clippy. The one call in `probe.rs` carries `#[expect(clippy::disallowed_methods)]`.
+
+- PC-47 (found by the security review of PR #85, applied in M1-044): applied in 02 Appendix A, in the
+  `clippy.toml` of every check crate and in `tests/lint-wall/src/uses.rs`. The wall list gains the
+  first-party items a check must not call, because clippy bans only what is listed: the output folder
+  (`rdy_engine::output::{ReportParent::open, OutputDir::create_new, create_new_in, write_atomic,
+  write_spec, default_report_parent}`), the process-wide effects (`rdy_engine::exec::{kill_all_groups,
+  harden_umask, inherited_fds, live_groups}`), the watchdog (`watchdog::ProcessEffects`,
+  `watchdog::Effects::{exit, kill_groups, notice}`, `Watchdog::start`, `WriteState::{claim,
+  claim_or_park, finish}`), `rdy_spec::load`, `std::env::args` and `args_os`, the terminal
+  (`std::io::{stdout, stderr, stdin}`, the print macros) and `TestRun::context`. M1-042 and M1-045 add
+  `privilege_gate`, `gate_then` and `live_backend` the same way when they merge. The direct dependency
+  allowlist (`ci/check-crate-deps.toml`) is built in M1-044, because old M1-065 was merged into it.
 
 ADR amendments in the ticket title:
 

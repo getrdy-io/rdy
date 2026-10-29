@@ -49,6 +49,10 @@ struct Dep {
     name: String,
     /// `normal`, `dev` or `build`.
     kind: String,
+    /// The registry or git source, or `None` for a path dependency.
+    source: Option<String>,
+    /// The path of a path dependency.
+    path: Option<String>,
 }
 
 fn allowlist() -> BTreeMap<String, BTreeSet<String>> {
@@ -124,6 +128,8 @@ fn check_crate_deps() -> BTreeMap<String, Vec<Dep>> {
             .map(|d| Dep {
                 name: d["name"].as_str().expect("dep name").to_owned(),
                 kind: d["kind"].as_str().unwrap_or("normal").to_owned(),
+                source: d["source"].as_str().map(str::to_owned),
+                path: d["path"].as_str().map(str::to_owned),
             })
             .collect();
         result.insert(name.to_owned(), deps);
@@ -208,4 +214,73 @@ fn tempfile_and_tokio_rustls_are_dev_dependencies_of_the_k8s_crate_only() {
             );
         }
     }
+}
+
+/// Whether a dependency comes from crates.io, or is one of the two first-party crates by path.
+fn trusted_origin(d: &Dep) -> bool {
+    match (&d.source, &d.path) {
+        (Some(src), _) => {
+            src == "registry+https://github.com/rust-lang/crates.io-index"
+                || src.starts_with("sparse+https://index.crates.io/")
+        }
+        (None, Some(path)) => ["rdy-engine", "rdy-spec"].iter().any(|krate| {
+            let want = std::fs::canonicalize(root().join("crates").join(krate));
+            let have = std::fs::canonicalize(path);
+            matches!((want, have), (Ok(w), Ok(h)) if w == h)
+        }),
+        (None, None) => false,
+    }
+}
+
+#[test]
+fn every_dependency_of_a_check_crate_comes_from_crates_io_or_the_two_first_party_crates() {
+    // The allowlist names crates, not their origin: `kube = { path = "../fake" }` has the name `kube` and
+    // deny's wrappers see only names. A check crate gets nothing from a git source, another registry or a
+    // path other than crates/rdy-engine and crates/rdy-spec. Dev-dependencies count too.
+    let mut bad = Vec::new();
+    for (name, deps) in check_crate_deps() {
+        for d in deps {
+            if !trusted_origin(&d) {
+                bad.push(format!(
+                    "{name}: `{}` ({}) comes from {:?} {:?}",
+                    d.name, d.kind, d.source, d.path
+                ));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "\n{}", bad.join("\n"));
+}
+
+#[test]
+fn the_origin_rule_refuses_a_fake_path_and_a_git_source() {
+    let dep = |source: Option<&str>, path: Option<&str>| Dep {
+        name: "kube".to_owned(),
+        kind: "normal".to_owned(),
+        source: source.map(str::to_owned),
+        path: path.map(str::to_owned),
+    };
+    let engine = root().join("crates/rdy-engine");
+    assert!(trusted_origin(&dep(None, engine.to_str())));
+    assert!(trusted_origin(&dep(
+        Some("registry+https://github.com/rust-lang/crates.io-index"),
+        None
+    )));
+    assert!(trusted_origin(&dep(
+        Some("sparse+https://index.crates.io/"),
+        None
+    )));
+    assert!(!trusted_origin(&dep(
+        None,
+        root().join("crates/rdy-cli").to_str()
+    )));
+    assert!(!trusted_origin(&dep(None, Some("/tmp/fake/kube"))));
+    assert!(!trusted_origin(&dep(
+        Some("git+https://example.invalid/kube"),
+        None
+    )));
+    assert!(!trusted_origin(&dep(
+        Some("registry+https://example.invalid/index"),
+        None
+    )));
+    assert!(!trusted_origin(&dep(None, None)));
 }

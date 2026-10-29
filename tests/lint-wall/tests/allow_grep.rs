@@ -3,22 +3,24 @@
 //! `allow(clippy::disallowed_..)` is legal only in the facade's `live/` module and the k8s client module.
 //! This test parses every `.rs` file of the workspace with `syn`, walks every attribute (inside `cfg_attr`
 //! too, and in the tokens of a macro), and fails on one that relaxes a `disallowed_*` lint, or a group that
-//! holds one, in a file that is not on the list below. Spacing, line breaks and a second attribute on a
-//! line do not matter, and a comment or a string does not count. No directory is skipped, because
-//! `#[path]` can reach any file. To add a place, edit the list in this file. `/tests/lint-wall/` is in
-//! CODEOWNERS, so the change gets the security review.
+//! holds one, in a file that is not on the list below. Spacing, line breaks, raw identifiers and a second
+//! attribute on a line do not matter, a comment or a string does not count, and an attribute that a macro
+//! builds from the caller's tokens (`#[allow($($t)*)]`, `#[$a(..)]`) is refused too. The walk starts at the
+//! repository root and skips only `target/`, `.git/` and the local agent checkouts, because a source file
+//! can reach any other with `#[path]` or `include!`; a check crate may use neither. To add a place, edit
+//! the list in this file. `/tests/lint-wall/` is in CODEOWNERS, so the change gets the security review.
 //!
 //! The check crates get no exemption for tests, except the client tests of `rdy-checks-k8s`, which start
 //! mock servers and write kubeconfigs. A test of a check uses `TestRun`, not the machine.
 //!
-//! The grep also fails a check crate whose Cargo.toml turns the lint off with a `[lints.clippy]` table or
-//! leaves the workspace lints, because that has the same effect.
+//! The manifests are checked in `wall_intact.rs`.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 mod common;
 
-use common::{check_crates, name, root};
+use common::{check_crates, root};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Where an attribute naming a disallowed lint is legal. Paths are relative to the workspace root, with
@@ -90,6 +92,13 @@ const ALLOWED: &[(&str, &str)] = &[
     ),
 ];
 
+/// Check-crate files that embed a data file with `include_str!` or `include_bytes!`. Data only: the file
+/// is text, never Rust. `include!` and `#[path]` are never allowed in a check crate.
+const INCLUDE_DATA_ALLOWED: &[(&str, &str)] = &[(
+    "crates/rdy-checks-host/src/family/tests.rs",
+    "embeds examples/specs/acme-platform.yaml for a test",
+)];
+
 /// Lints that cover `disallowed_*`: the three lints, and the groups that include them. Compared with
 /// whitespace removed, so `clippy :: disallowed_methods` matches.
 const COVERING: &[&str] = &[
@@ -102,16 +111,19 @@ const COVERING: &[&str] = &[
 /// The attributes that relax a lint. `deny` and `forbid` tighten, so they pass.
 const RELAXING: &[&str] = &["allow(", "expect(", "warn("];
 
+/// Whitespace and the `r#` of a raw identifier removed, so `# [r#allow(clippy :: disallowed_methods)]`
+/// reads like the plain form.
 fn strip(text: &str) -> String {
-    text.chars().filter(|c| !c.is_whitespace()).collect()
+    let squeezed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    squeezed.replace("r#", "")
 }
 
 fn covers(stripped: &str) -> bool {
     COVERING.iter().any(|c| stripped.contains(c))
 }
 
-/// Whether the text of one attribute (without `#[` and `]`, whitespace removed) relaxes a `disallowed_*`
-/// lint: `allow(..)`, `expect(..)` or `warn(..)` naming one, or a `cfg_attr(..)` that holds one of those.
+/// Whether the text of one attribute (without `#[` and `]`, stripped) relaxes a `disallowed_*` lint:
+/// `allow(..)`, `expect(..)` or `warn(..)` naming one, or a `cfg_attr(..)` that holds one of those.
 fn attribute_relaxes(stripped: &str) -> bool {
     let direct = RELAXING.iter().any(|r| stripped.starts_with(r));
     let through_cfg_attr =
@@ -119,39 +131,125 @@ fn attribute_relaxes(stripped: &str) -> bool {
     (direct || through_cfg_attr) && covers(stripped)
 }
 
-/// `#[..]` and `#![..]` inside the tokens of a macro, which syn does not parse as attributes: a
-/// `macro_rules!` body can hold `#[allow(clippy::disallowed_methods)]` and expand it anywhere.
-fn tokens_hide_a_relaxing_attribute(tokens: proc_macro2::TokenStream) -> bool {
+/// An attribute in a macro body that is built from the caller's tokens: `#[$a(..)]`, or a relaxing
+/// attribute or `cfg_attr` that holds a `$`. `macro_rules! m { ($($t:tt)*) => { #[allow($($t)*)] .. } }`
+/// called as `m!(clippy::disallowed_methods)` relaxes the lint with no lint name in the source of the
+/// macro, so any such attribute is refused.
+fn attribute_forwards_tokens(stripped: &str) -> bool {
+    if stripped.starts_with('$') {
+        return true;
+    }
+    let direct = RELAXING.iter().any(|r| stripped.starts_with(r));
+    let through_cfg_attr = stripped.starts_with("cfg_attr(")
+        && (RELAXING.iter().any(|r| stripped.contains(r)) || stripped.contains(",$"));
+    (direct || through_cfg_attr) && stripped.contains('$')
+}
+
+/// What a source file does that the wall cares about.
+#[derive(Default, Debug)]
+struct Findings {
+    /// An attribute relaxes a `disallowed_*` lint.
+    relaxes: bool,
+    /// A `#[path = ".."]` attribute: it can pull in any file.
+    path_attribute: bool,
+    /// `include!`: it can pull in any Rust file.
+    include_code: bool,
+    /// `include_str!` or `include_bytes!`.
+    include_data: bool,
+}
+
+/// The macro names that read a file at build time.
+fn note_macro_name(findings: &mut Findings, name: &str) {
+    match name {
+        "include" => findings.include_code = true,
+        "include_str" | "include_bytes" => findings.include_data = true,
+        _ => {}
+    }
+}
+
+/// Looks through the tokens of a macro, which syn does not parse as attributes or macro calls: a
+/// `macro_rules!` body can hold `#[allow(clippy::disallowed_methods)]`, `#[path = ".."]` and
+/// `include!(..)`, and expand them anywhere.
+fn scan_tokens(findings: &mut Findings, tokens: proc_macro2::TokenStream) {
+    let mut passthrough = BTreeSet::new();
+    meta_passthrough(&mut passthrough, tokens.clone());
+    scan_with(findings, tokens, &passthrough);
+}
+
+/// The names `$m` of every `#[$m:meta]` in the tokens: the matcher of a macro that takes attributes
+/// written as attributes at the call site, so the call site shows them (`$(#[$meta:meta])*` is how a
+/// macro forwards doc comments). `#[$m]` in its output is then no more than those.
+fn meta_passthrough(names: &mut BTreeSet<String>, tokens: proc_macro2::TokenStream) {
     use proc_macro2::{Delimiter, TokenTree};
     let trees: Vec<TokenTree> = tokens.into_iter().collect();
     for (i, tree) in trees.iter().enumerate() {
-        if let TokenTree::Group(g) = tree
-            && tokens_hide_a_relaxing_attribute(g.stream())
-        {
-            return true;
+        if let TokenTree::Group(g) = tree {
+            meta_passthrough(names, g.stream());
         }
-        let is_hash = matches!(tree, TokenTree::Punct(p) if p.as_char() == '#');
-        if !is_hash {
-            continue;
-        }
-        let mut j = i + 1;
-        if matches!(trees.get(j), Some(TokenTree::Punct(p)) if p.as_char() == '!') {
-            j += 1;
-        }
-        if let Some(TokenTree::Group(g)) = trees.get(j)
+        let hash = matches!(tree, TokenTree::Punct(p) if p.as_char() == '#');
+        if hash
+            && let Some(TokenTree::Group(g)) = trees.get(i + 1)
             && g.delimiter() == Delimiter::Bracket
-            && attribute_relaxes(&strip(&g.stream().to_string()))
         {
-            return true;
+            let text = strip(&g.stream().to_string());
+            if let Some(name) = text.strip_prefix('$').and_then(|t| t.strip_suffix(":meta")) {
+                names.insert(name.to_owned());
+            }
         }
     }
-    false
+}
+
+fn scan_with(
+    findings: &mut Findings,
+    tokens: proc_macro2::TokenStream,
+    passthrough: &BTreeSet<String>,
+) {
+    use proc_macro2::{Delimiter, TokenTree};
+    let trees: Vec<TokenTree> = tokens.into_iter().collect();
+    for (i, tree) in trees.iter().enumerate() {
+        match tree {
+            TokenTree::Group(g) => scan_with(findings, g.stream(), passthrough),
+            TokenTree::Ident(id) => {
+                let bang =
+                    matches!(trees.get(i + 1), Some(TokenTree::Punct(p)) if p.as_char() == '!');
+                if bang {
+                    note_macro_name(findings, &id.to_string().replace("r#", ""));
+                }
+            }
+            TokenTree::Punct(p) if p.as_char() == '#' => {
+                let mut j = i + 1;
+                if matches!(trees.get(j), Some(TokenTree::Punct(p)) if p.as_char() == '!') {
+                    j += 1;
+                }
+                if let Some(TokenTree::Group(g)) = trees.get(j)
+                    && g.delimiter() == Delimiter::Bracket
+                {
+                    let text = strip(&g.stream().to_string());
+                    let forwarded_meta = text
+                        .strip_prefix('$')
+                        .map(|name| name.strip_suffix(":meta").unwrap_or(name))
+                        .is_some_and(|name| passthrough.contains(name));
+                    if attribute_relaxes(&text)
+                        || (attribute_forwards_tokens(&text) && !forwarded_meta)
+                    {
+                        findings.relaxes = true;
+                    }
+                    if text.starts_with("path=")
+                        || text.contains("cfg_attr(") && text.contains("path=")
+                    {
+                        findings.path_attribute = true;
+                    }
+                }
+            }
+            TokenTree::Punct(_) | TokenTree::Literal(_) => {}
+        }
+    }
 }
 
 /// Walks every attribute of a parsed file, including those inside `cfg_attr`, and the tokens of every
 /// macro.
 struct Finder {
-    found: bool,
+    findings: Findings,
 }
 
 impl<'ast> syn::visit::Visit<'ast> for Finder {
@@ -162,39 +260,63 @@ impl<'ast> syn::visit::Visit<'ast> for Finder {
             .last()
             .map(|s| s.ident.to_string())
             .unwrap_or_default();
+        let name = name.replace("r#", "");
         let tokens = match &attr.meta {
             syn::Meta::List(list) => strip(&list.tokens.to_string()),
             _ => String::new(),
         };
-        if attribute_relaxes(&format!("{name}({tokens})")) {
-            self.found = true;
+        let text = strip(&format!("{name}({tokens})"));
+        if attribute_relaxes(&text) {
+            self.findings.relaxes = true;
+        }
+        if name == "path" && matches!(attr.meta, syn::Meta::NameValue(_)) {
+            self.findings.path_attribute = true;
+        }
+        if name == "cfg_attr" && text.contains("path=") {
+            self.findings.path_attribute = true;
         }
         syn::visit::visit_attribute(self, attr);
     }
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if tokens_hide_a_relaxing_attribute(mac.tokens.clone()) {
-            self.found = true;
+        if let Some(last) = mac.path.segments.last() {
+            note_macro_name(
+                &mut self.findings,
+                &last.ident.to_string().replace("r#", ""),
+            );
         }
+        scan_tokens(&mut self.findings, mac.tokens.clone());
         syn::visit::visit_macro(self, mac);
     }
 }
 
-/// Whether the source relaxes a `disallowed_*` lint anywhere. A file that does not parse is judged by its
-/// text: any lint-relaxing word and any covering lint name in it counts, because a file that syn cannot
-/// read is one nobody checked.
-fn relaxes_a_disallowed_lint(source: &str) -> bool {
+/// What the source does. A file that does not parse is judged by its text: any lint-relaxing word and any
+/// covering lint name in it counts, and so does any `include` or `path` word, because a file that syn
+/// cannot read is one nobody checked.
+fn findings_of(source: &str) -> Findings {
     match syn::parse_file(source) {
         Ok(file) => {
-            let mut finder = Finder { found: false };
+            let mut finder = Finder {
+                findings: Findings::default(),
+            };
             syn::visit::Visit::visit_file(&mut finder, &file);
-            finder.found
+            finder.findings
         }
         Err(_) => {
             let stripped = strip(source);
-            RELAXING.iter().any(|r| stripped.contains(r)) && covers(&stripped)
+            Findings {
+                relaxes: RELAXING.iter().any(|r| stripped.contains(r)) && covers(&stripped),
+                path_attribute: stripped.contains("#[path=") || stripped.contains("path="),
+                include_code: stripped.contains("include!"),
+                include_data: stripped.contains("include_str!")
+                    || stripped.contains("include_bytes!"),
+            }
         }
     }
+}
+
+fn relaxes_a_disallowed_lint(source: &str) -> bool {
+    findings_of(source).relaxes
 }
 
 /// Every `.rs` file under `dir`, in every directory. Nothing is skipped: `#[path = ".."]` can reach a file
@@ -208,6 +330,40 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+/// Every `.rs` file of the repository. A source file can reach any other with `#[path]` or `include!`,
+/// so the walk starts at the root and skips only the build output (`target/`), `.git/` and the local
+/// agent checkouts in `.claude/worktrees/`, which are other copies of this repository and never in CI.
+fn repo_rust_files(base: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(base).unwrap_or_else(|e| panic!("{}: {e}", base.display())) {
+        let path = entry.expect("dir entry").path();
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if path.is_dir() {
+            if file_name == "target" || file_name == ".git" {
+                continue;
+            }
+            if file_name == ".claude" {
+                for inner in std::fs::read_dir(&path).expect("read .claude") {
+                    let inner = inner.expect("entry").path();
+                    if inner.file_name().is_some_and(|n| n == "worktrees") {
+                        continue;
+                    }
+                    if inner.is_dir() {
+                        rust_files(&inner, &mut out);
+                    } else if inner.extension().is_some_and(|x| x == "rs") {
+                        out.push(inner);
+                    }
+                }
+                continue;
+            }
+            rust_files(&path, &mut out);
+        } else if path.extension().is_some_and(|x| x == "rs") {
+            out.push(path);
+        }
+    }
+    out
 }
 
 fn allowed(relative: &str) -> bool {
@@ -226,9 +382,7 @@ fn relative(base: &Path, file: &Path) -> String {
 #[test]
 fn an_allow_of_a_disallowed_lint_is_only_in_the_allowlisted_files() {
     let base = root();
-    let mut files = Vec::new();
-    rust_files(&base.join("crates"), &mut files);
-    rust_files(&base.join("tests"), &mut files);
+    let files = repo_rust_files(&base);
     assert!(files.len() > 50, "found only {} source files", files.len());
     let mut bad = Vec::new();
     for file in files {
@@ -242,6 +396,39 @@ fn an_allow_of_a_disallowed_lint_is_only_in_the_allowlisted_files() {
         bad.is_empty(),
         "these files relax a disallowed_* lint and are not on the list in tests/lint-wall/tests/allow_grep.rs: {bad:#?}\nA check reaches the machine through its Probe. Do not allow the lint; use the facade."
     );
+}
+
+#[test]
+fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
+    // `#[path]` and `include!` pull a file that is outside the crate's own module tree into it, so the
+    // grep above would have to know where it is. A check crate has neither.
+    let base = root();
+    let mut bad = Vec::new();
+    for dir in check_crates() {
+        let mut files = Vec::new();
+        rust_files(&dir, &mut files);
+        for file in files {
+            let rel = relative(&base, &file);
+            let found = findings_of(&std::fs::read_to_string(&file).expect("read source"));
+            if found.path_attribute || found.include_code {
+                bad.push(format!("{rel}: #[path] or include!"));
+            }
+            if found.include_data && !INCLUDE_DATA_ALLOWED.iter().any(|(p, _)| *p == rel) {
+                bad.push(format!("{rel}: include_str! or include_bytes!"));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "a check crate may not reach other files this way (add a data include to INCLUDE_DATA_ALLOWED in tests/lint-wall/tests/allow_grep.rs with a reason): {bad:#?}"
+    );
+    for (path, why) in INCLUDE_DATA_ALLOWED {
+        let found = findings_of(&std::fs::read_to_string(base.join(path)).expect("read source"));
+        assert!(
+            found.include_data,
+            "{path} is on INCLUDE_DATA_ALLOWED but embeds nothing now ({why})"
+        );
+    }
 }
 
 #[test]
@@ -299,6 +486,14 @@ fn the_grep_sees_every_form_it_must() {
             "#[allow(\n    clippy\n    ::\n    disallowed_methods,\n)] fn f() {}",
         ),
         (
+            "a raw identifier for the attribute",
+            "#[r#allow(clippy::disallowed_methods)] fn f() {}",
+        ),
+        (
+            "a raw identifier in the lint path",
+            "#[allow(clippy::r#disallowed_methods)] fn f() {}",
+        ),
+        (
             "inside cfg_attr",
             "#[cfg_attr(test, allow(clippy::disallowed_methods))] fn f() {}",
         ),
@@ -316,6 +511,22 @@ fn the_grep_sees_every_form_it_must() {
         (
             "in an inner attribute of a macro body",
             "macro_rules! m { () => { #![allow(clippy::disallowed_methods)] }; }",
+        ),
+        (
+            "tokens forwarded into allow",
+            "macro_rules! m { ($($t:tt)*) => { #[allow($($t)*)] fn f() {} }; } m!(clippy::disallowed_methods);",
+        ),
+        (
+            "an attribute name forwarded",
+            "macro_rules! m { ($a:ident) => { #[$a(clippy::disallowed_methods)] fn f() {} }; } m!(allow);",
+        ),
+        (
+            "a whole meta forwarded",
+            "macro_rules! m { ($m:meta) => { #[$m] fn f() {} }; } m!(allow(clippy::disallowed_methods));",
+        ),
+        (
+            "tokens forwarded into cfg_attr",
+            "macro_rules! m { ($($t:tt)*) => { #[cfg_attr(test, allow($($t)*))] fn f() {} }; }",
         ),
         (
             "in a nested module",
@@ -352,11 +563,107 @@ fn the_grep_sees_every_form_it_must() {
             "cfg_attr that does not relax",
             "#[cfg_attr(test, deny(clippy::disallowed_methods))] fn f() {}",
         ),
+        (
+            "a macro that forwards a deny",
+            "macro_rules! m { ($l:ident) => { #[deny(clippy::$l)] fn f() {} }; }",
+        ),
+        (
+            "doc attributes forwarded as written at the call site",
+            "macro_rules! m { ($(#[$meta:meta])* $n:ident) => { $(#[$meta])* struct $n; }; }",
+        ),
         ("an empty file", ""),
     ] {
         assert!(
             !relaxes_a_disallowed_lint(source),
             "the grep flagged: {what}"
+        );
+    }
+}
+
+#[test]
+fn the_reach_scan_sees_path_and_include() {
+    for (what, source, code, data, path) in [
+        ("path", "#[path = \"x.rs\"] mod a;", false, false, true),
+        (
+            "path to another directory",
+            "#[path = \"../../../examples/x.rs\"] mod a;",
+            false,
+            false,
+            true,
+        ),
+        (
+            "path with spaces",
+            "# [ path = \"x.rs\" ] mod a;",
+            false,
+            false,
+            true,
+        ),
+        (
+            "path in cfg_attr",
+            "#[cfg_attr(unix, path = \"x.rs\")] mod a;",
+            false,
+            false,
+            true,
+        ),
+        (
+            "path in a macro body",
+            "macro_rules! m { () => { #[path = \"x.rs\"] mod a; }; }",
+            false,
+            false,
+            true,
+        ),
+        ("include", "include!(\"x.rs\");", true, false, false),
+        (
+            "include in an expression",
+            "fn f() { include!(\"x.rs\"); }",
+            true,
+            false,
+            false,
+        ),
+        (
+            "include in a macro body",
+            "macro_rules! m { () => { include!(\"x.rs\") }; }",
+            true,
+            false,
+            false,
+        ),
+        (
+            "include_str",
+            "const A: &str = include_str!(\"x\");",
+            false,
+            true,
+            false,
+        ),
+        (
+            "include_bytes",
+            "const A: &[u8] = include_bytes!(\"x\");",
+            false,
+            true,
+            false,
+        ),
+        (
+            "qualified include",
+            "include_str!(\"a\"); core::include!(\"x.rs\");",
+            true,
+            true,
+            false,
+        ),
+    ] {
+        let f = findings_of(source);
+        assert_eq!(f.include_code, code, "{what}: include!");
+        assert_eq!(f.include_data, data, "{what}: include_str or include_bytes");
+        assert_eq!(f.path_attribute, path, "{what}: path");
+    }
+    for (what, source) in [
+        ("a comment", "// include!(\"x.rs\")\nfn f() {}"),
+        ("a string", "const S: &str = \"include!(x) #[path = y]\";"),
+        ("a plain mod", "mod a;"),
+        ("an unrelated attribute", "#[derive(Debug)] struct S;"),
+    ] {
+        let f = findings_of(source);
+        assert!(
+            !f.include_code && !f.include_data && !f.path_attribute,
+            "flagged: {what}"
         );
     }
 }
@@ -376,18 +683,40 @@ fn the_walk_reaches_every_directory() {
 }
 
 #[test]
-fn a_check_crate_keeps_the_workspace_lints() {
-    for dir in check_crates() {
-        let text = std::fs::read_to_string(dir.join("Cargo.toml")).expect("Cargo.toml");
-        assert!(
-            text.contains("[lints]\nworkspace = true"),
-            "{}: Cargo.toml must have `[lints]` with `workspace = true`",
-            name(&dir)
-        );
-        assert!(
-            !text.contains("[lints."),
-            "{}: Cargo.toml has a `[lints.*]` table; a check crate takes the workspace lints as they are",
-            name(&dir)
-        );
+fn the_repo_walk_starts_at_the_root_and_skips_only_build_output() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("allow-grep-repo");
+    let _ = std::fs::remove_dir_all(&dir);
+    for sub in [
+        "docs",
+        "examples",
+        "scripts",
+        ".github",
+        ".claude/agents",
+        "crates/a",
+        // The three that are skipped.
+        "target",
+        ".git",
+        ".claude/worktrees/w",
+    ] {
+        std::fs::create_dir_all(dir.join(sub)).expect("create dir");
+        std::fs::write(dir.join(sub).join("x.rs"), "").expect("write");
     }
+    std::fs::write(dir.join("build.rs"), "").expect("write");
+    let mut found: Vec<String> = repo_rust_files(&dir)
+        .iter()
+        .map(|p| relative(&dir, p))
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            ".claude/agents/x.rs",
+            ".github/x.rs",
+            "build.rs",
+            "crates/a/x.rs",
+            "docs/x.rs",
+            "examples/x.rs",
+            "scripts/x.rs"
+        ]
+    );
 }
