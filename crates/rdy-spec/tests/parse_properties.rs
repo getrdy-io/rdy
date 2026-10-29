@@ -650,7 +650,7 @@ fn with_unique_names(checks: Vec<(CheckSpec, bool)>) -> Vec<CheckSpec> {
 
 fn metadata() -> impl Strategy<Value = Metadata> {
     (
-        text_strategy("[a-z0-9][a-z0-9-]{0,20}"),
+        text_strategy("[a-z0-9][a-z0-9-]{0,62}"),
         proptest::option::of(text_strategy(">=[0-9]{1,2}\\.[0-9]{1,2}")),
         proptest::option::of(text_strategy("[ -~]{0,40}")),
         proptest::option::of(0..=rdy_spec::spec::MAX_SERIAL),
@@ -898,8 +898,8 @@ enum Place {
     ParamInList,
 }
 
-/// A spec with `written` (already quoted, or not) in `place`. The line it is on is 6 for `metadata` and
-/// 8 for a parameter.
+/// A spec with `written` (already quoted, or not) in `place`. The line it is on is 5 for `metadata` and
+/// 7 for a parameter.
 fn spec_with_version(place: Place, written: &str) -> String {
     match place {
         Place::MetadataVersion => format!(

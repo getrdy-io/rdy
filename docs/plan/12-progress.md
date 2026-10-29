@@ -63,7 +63,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-026 | [#43](https://github.com/getrdy-io/rdy/pull/43) | 2026-10-28 | regex compile of redact_patterns (M1-031), did-you-mean in the unknown-key fix line (M1-031), Windows paths in file: collectors (schema allows `/` only; M2); the CLI prints the `expired on` line with no `:` after the file name, and CLI exit 64 on an expired spec (M1-126)
 
-- M1-027 | [#59](https://github.com/getrdy-io/rdy/pull/59) | 2026-10-29 | The "verify before parse" row stays in src/sig/tests.rs (the parser spy is private to the crate), now on the fixed seed. Rules about the whole spec (no checks, too many hosts) carry no line, only YAML failures do. Nightly random-seed job is M2 (PROPTEST_RNG_SEED is the hook). Found and fixed: a tab ending the file was reported at column 0. nextest has a longer slow-timeout for the parse_properties binary; nextest was not installed here, so that override was not run
+- M1-027 | [#59](https://github.com/getrdy-io/rdy/pull/59) | 2026-10-29 | The "verify before parse" row stays in src/sig/tests.rs (the parser spy is private to the crate), now on the fixed seed. Rules about the whole spec (no checks, too many hosts) carry no line, only YAML failures do. Nightly random-seed job is M2 (PROPTEST_RNG_SEED is the hook). Found and fixed: a tab ending the file was reported at column 0. nextest has a longer slow-timeout for the parse_properties binary; CI numbers: linux-x64 job 123200616321, longest test depth_64_passes_and_65_fails 15.3 s, nextest summary 39.4 s
 
 - M1-028 | todo | | linux-x64 root job: nextest archive under sudo, root_* filter, strace installed
 
