@@ -109,11 +109,11 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-048 | [#29](https://github.com/getrdy-io/rdy/pull/29) | 2026-10-28 | M1-060 also owns the space-separated flag form `--password hunter2` and tuning the over-redaction of bare values (they run to the end of the line on purpose: it fails closed, and splitting at ` --` would leak a password with spaces seen in `ps` output). The key rule parses no quotes, brackets or escapes (every such parser leaked). `value_span` in `redact/rules.rs` says how it fails closed: a simple value (`A-Za-z0-9._~+/=:@%-`) is redacted in place with the deeper lines below it, and any other value takes the rest of its line and every following line up to the next line that is at or left of the key's indent and starts with a key (`name:`, `name=`, `"name":`), or to the end of the text. That stop is held back while a plain count of `[{` exceeds `]}`. It over-redacts on purpose, and M1-060 tunes it with corpus evidence: a one-line JSON object after a secret key loses the rest of its line, `[INFO]` log lines are not keys so a quoted secret in a log can take every line below it, and sibling list items and closing brackets go with the value. A test-only byte counter proves the work is linear. The stop is also held back while the value's opening quote count is odd, while a `-----BEGIN ` has no `-----END `, and `name=` followed by `=`, a quote or the line end is not a key (so `QUJD==` is not). Carried to M1-060: commented-out blocks, including commented PEM lines (`# token: |` then `#   hunter2`; add a corpus case), escapes of the bracket and quote counts (`{"a}": x,` then `v: ...`), and tuning for all-quoted .env files and stray apostrophes. The M1 rules other than `secret_by_key` (M1-060), the report walk and `RedactedReport` (M1-062), the tracing writer and panic hook (M1-056), and the truncated-edge and known-secret handling (M1-061) are their own tickets. `TagKey::fixed` is behind the `testing` feature; the CI check that keeps that feature out of the release binary is not part of this ticket.
 
-- M1-049 | todo | | Replay backend and fixture loader in the 08 format
+- M1-049 | todo | | Replay backend and fixture loader in the 08 format | backlog corrected 2026-10-29 (correction-18): the link-local refusal moves to M1-094; M1-049 loads the recorded answer (PR #100 reviews)
 
-- M1-050 | todo | | Fixture lint as a nextest test
+- M1-050 | todo | | Fixture lint as a nextest test | backlog corrected 2026-10-29 (correction-18): the host.disk Timeout clause moves to M1-068 (PR #100 review)
 
-- M1-051 | todo | | Engine test helpers FakeCheck, run_fixture and normalize
+- M1-051 | todo | | Engine test helpers FakeCheck, run_fixture and normalize | backlog corrected 2026-10-29 (correction-18): `run_fixture` calls `ensure_answers` (PR #100 review)
 
 - M1-052 | todo | | Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check
 
@@ -148,7 +148,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-067 | [#49](https://github.com/getrdy-io/rdy/pull/49) | 2026-10-28 | The seven host ids are stubs. On Linux a stub that is run returns a check error, not a finding, until M1-068 and later replace it. Rule: `HostFamily` must not be registered in the CLI while `HostFamily::stub_ids()` is not empty, because a Linux stub reports `error` `check_failed`. M1-057 (wire `rdy run`) must either drop the stubs or have the engine add a `not_in_build` skip first. The facade backend does not exist yet, so the OS comes from the plan and from `CheckContext::os`, and no `probe.native` closure exists to gate.
 
-- M1-068 | todo | | host.disk (Linux: statvfs flags, mountinfo with escapes, whole-component match, hung-mount timeout) | backlog corrected 2026-10-29 (correction-16): depends on M1-171 (`statfs` prefixes, PR #94 review)
+- M1-068 | todo | | host.disk (Linux: statvfs flags, mountinfo with escapes, whole-component match, hung-mount timeout) | backlog corrected 2026-10-29 (correction-16): depends on M1-171 (`statfs` prefixes, PR #94 review); backlog corrected 2026-10-29 (correction-18): depends on M1-050; deleting its Timeout case fails the fixture lint (PR #100 review)
 
 - M1-069 | todo | | host.memory (meminfo, swap, cgroup limit, nominal band)
 
@@ -192,7 +192,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-089 | [#62](https://github.com/getrdy-io/rdy/pull/62) | 2026-10-29 | ADR 0026 (Accepted after the cli-ux review on PR #62). The family list lives in `xtask::checks::registry` until M1-057 moves it into `rdy_cli` (correction-09). `HostFamily` is not registered in the CLI (M1-067 rule stands). `xtask checks` lists the seven host stubs, so M1-116 must skip ids in `HostFamily::stub_ids()` (correction-09). The report does not fall back to `meta.remediation` yet: correction-09 adds it to M1-057. `docs-lint` runs the same validation, but neither command is in `ci.yml` yet; a unit test runs it in `cargo test`.
 
-- M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case)
+- M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case) | backlog corrected 2026-10-29 (correction-18): connects the stream a Replay `dial` names (PR #100 review)
 
 - M1-091 | todo | | Facade TCP attempts, proxy CONNECT and per-check host sets | backlog corrected 2026-10-29 (correction-12): one action-log entry per tcp call, proxy CONNECT included, moved from M1-040; backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers the proxy password raw and percent-decoded, exit 70 if refused (PR #96 reviews)
 
@@ -200,7 +200,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-093 | todo | | Facade HTTP/1.1 probe with 64 KiB discard and no redirects | backlog corrected 2026-10-29 (correction-12): one action-log entry per http call, moved from M1-040
 
-- M1-094 | todo | | SEC-21 Egress address policy, no redirects, no bodies | backlog corrected 2026-10-29 (correction-15): refuses the GCP IPv6 metadata address `fd20:ce::254` too (PR #91 review)
+- M1-094 | todo | | SEC-21 Egress address policy, no redirects, no bodies | backlog corrected 2026-10-29 (correction-15): refuses the GCP IPv6 metadata address `fd20:ce::254` too (PR #91 review); backlog corrected 2026-10-29 (correction-18): refuses a recorded link-local answer from the Replay lookup (PR #100 reviews)
 
 - M1-095 | todo | | net.egress staged connector (lookup, dual-stack connect, TLS, ALPN)
 
