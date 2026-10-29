@@ -1235,6 +1235,56 @@ impl Backend for Hanging {
     }
 }
 
+#[test]
+fn run_env_is_for_run_level_probes_and_never_logs_the_value() {
+    let hub = hub(Replay::new().env("SystemRoot", r"C:\Windows"));
+    let run = hub.run_probe_for(Os::Windows);
+    assert_eq!(
+        run.run_env("SystemRoot"),
+        Ok(Some(r"C:\Windows".to_owned()))
+    );
+    assert_eq!(run.run_env("Unset"), Ok(None));
+    let check = hub.check_probe("host.os", Os::Windows, None);
+    assert!(matches!(
+        check.run_env("SystemRoot"),
+        Err(ProbeError::Denied {
+            rule: RULE_ENV_UNDECLARED,
+            ..
+        })
+    ));
+    let log = hub.action_log();
+    let outcomes: Vec<(&str, ActionOutcome)> = log
+        .actions
+        .iter()
+        .map(|a| (a.kind.as_str(), a.outcome.clone()))
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            ("env", ActionOutcome::Ok),
+            ("env", ActionOutcome::Ok),
+            ("env", ActionOutcome::Denied)
+        ]
+    );
+    let text = serde_json::to_string(&log.actions).expect("log");
+    assert!(!text.contains(r"C:\\Windows"), "{text}");
+}
+
+/// The provided `Backend::process_ids` is the live path (M1-042): the real and effective ids of this
+/// process, with the saved and filesystem ids reported as the effective one.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_provided_process_ids_are_real_and_effective_with_the_rest_copied() {
+    let ids = Hanging.process_ids().await.expect("ids");
+    let (uid, euid) = (
+        rustix::process::getuid().as_raw(),
+        rustix::process::geteuid().as_raw(),
+    );
+    assert_eq!(ids.uid, [uid, euid, euid, euid]);
+    assert_eq!(ids.gid[1], rustix::process::getegid().as_raw());
+    assert_eq!(ids.gid[1], ids.gid[3]);
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {
     let hub = ProbeHub::new(Arc::new(Hanging), redactor());

@@ -130,13 +130,20 @@ There are no inter-check dependencies. Every k8s check except `k8s.access` needs
 run-level facade (`check: null`):
 - Linux: all four values on the `Uid:` and `Gid:` lines of `/proc/self/status` (real, effective, saved,
   filesystem), `CapEff` and `CapAmb`, and `AT_SECURE` (type 23) from `/proc/self/auxv`.
-- macOS: the four ids from `rustix`.
+- macOS: the real and effective ids from `rustix`, through the probe as a `native` call
+  (`api: process_ids`). macOS has no call for the saved id and no filesystem id, so M1-042 reports both as the
+  effective one and the capability and `AT_SECURE` fields stay unset. The refusal compares real with
+  effective.
+- A source that cannot be read or parsed (no `/proc`, an auxv with no `AT_SECURE`) is a refusal too, exit 70
+  with its own hint, because a snapshot that cannot be taken cannot show that the binary is safe. A kernel
+  before 4.3 has no `CapAmb` line, which reads as zero.
 - `rdy` exits 70 if any uid or gid value differs from the real one, `CapEff` or `CapAmb` is nonzero for
   a non-root uid, or `AT_SECURE` is set (INV-10). The hint names `chmod u-s,g-s`, `setcap -r`, or
   ambient capabilities.
 - Windows: `C:\Windows\System32\whoami.exe /groups /fo csv`, from a constant path, never from
-  `%SystemRoot%`. Integrity SID `S-1-16-12288` (High) or `S-1-16-16384` (System) means elevated. If
-  `whoami` fails, `root` is unknown for checks and `identity.elevated` is unset. In M1 `whoami` feeds only
+  `%SystemRoot%`, and only when `%SystemRoot%` is `C:\Windows` (read through the run-level probe, compared
+  without regard to case; any other value skips `whoami`, so the answer is unknown). Integrity SID `S-1-16-12288` (High) or `S-1-16-16384` (System) means elevated. If
+  `whoami` fails, `root` is unknown for checks and `identity.elevated` is false. In M1 `whoami` feeds only
   the `root` need and `identity.elevated`, never trust. M2-105 owns elevation detection for the trust path.
 
 The CLI maps the snapshot to the `rdy-spec` trust store scope (system store only when elevated,
@@ -751,11 +758,17 @@ pub struct Built { pub check: Box<dyn Check>, pub hosts: HostSet }  // HostSet: 
 impl Registry { pub fn plan(&self, spec: &Spec, os: Os, rdy_version: &str) -> RunPlan; }
 
 // privilege.rs, sched.rs
-pub struct Privilege { pub uid: [u32; 4], pub gid: [u32; 4], // real, effective, saved, filesystem
+// Built in M1-042 as rdy_engine::privilege. Differences from the first sketch: `ids` is an Option (Windows has
+// none), the error is `PrivilegeError` (message and hint, exit 70 in the CLI), and there is no `trust_scope`
+// (the CLI keeps mapping the euid to the trust store layout; M2-105 revisits Windows).
+pub struct Privilege { pub ids: Option<ProcessIds>, // uid and gid: [u32; 4], real, effective, saved, filesystem
                        pub cap_eff: u64, pub cap_amb: u64, pub at_secure: bool, pub elevation: Elevation }
 pub enum Elevation { Root, High, System, NotElevated, Unknown }
-impl Privilege { pub async fn snapshot(probe: &Probe) -> Result<Self, EngineError>; // all ids, CapEff, CapAmb, AT_SECURE
-                 pub fn trust_scope(&self) -> rdy_spec::sig::TrustScope; }
+impl Privilege { pub async fn snapshot(probe: &Probe) -> Result<Self, PrivilegeError>; // all ids, CapEff, CapAmb, AT_SECURE
+                 pub fn check(&self) -> Result<(), PrivilegeError>;     // INV-10
+                 pub fn identity(&self) -> rdy_spec::result::Identity; }  // euid and elevated for the report
+pub async fn capabilities(probe: &Probe, p: &Privilege, wanted: &[Need], network: bool) -> Vec<Capability>;
+// probes only the needs in the plan; kube_context is the family probe's (M1-107)
 pub struct RunOptions { pub jobs: usize /* <= 32 */, pub deadline: Duration, pub network: bool,
                         pub cancel: CancellationToken, pub on_progress: Option<Box<dyn Fn(&Progress) + Send + Sync>>,
                         pub clock: Clock, pub run_id: Option<String> }
