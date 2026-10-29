@@ -225,7 +225,7 @@ async fn the_machine_id_is_run_level_and_never_in_the_log() {
     shown.push_str(&format!("{answer:?}"));
     if let Some(raw) = raw {
         assert!(!shown.contains(&raw), "the raw id leaked");
-        // The read itself works through the guard that admits only the two files.
+        // The read itself works through the guard that admits only the three files.
         #[cfg(target_os = "linux")]
         match answer {
             Ok(NativeValue::MachineId(id)) => assert_eq!(id.expose(), raw),

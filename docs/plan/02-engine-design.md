@@ -445,8 +445,8 @@ tests policy.
   - `Statvfs { path }`: the path passes the read rules; logged as `native`, `api: statvfs`, with
     `path`.
   - `Uname`, `Rlimit(resource)`, `Hostname`, `SystemRoots`.
-  - `MachineId`: Windows `MachineGuid`; Linux reads `/etc/machine-id`, then `/var/lib/dbus/machine-id`, then `/run/machine-id` as a file; macOS has none in M1,
-    so its `host_id` is null. The raw value never enters the log or the report; only 01's salted
+  - `MachineId`: Windows `MachineGuid`; Linux reads `/etc/machine-id`, then `/var/lib/dbus/machine-id`,
+    then `/run/machine-id` as a file; macOS has none in M1, so its `host_id` is null. The raw value never enters the log or the report; only 01's salted
     `host_id` does. The probe refuses it from a check's probe (run-level only), and its type,
     `MachineId`, has no `Display`, `Serialize` or public getter and a `Debug` that shows nothing (M1-046).
   - As built in M1-046: Linux has all of them except `SystemRoots`, which M1-092 builds with the TLS

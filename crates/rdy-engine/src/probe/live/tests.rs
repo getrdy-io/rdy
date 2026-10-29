@@ -239,7 +239,7 @@ async fn the_exit_test_refusals_are_logged() {
 #[tokio::test]
 async fn the_machine_id_files_are_refused_to_a_check_that_declares_the_root() {
     let sandbox = Sandbox::new();
-    // Files shaped like the two, inside the sandbox: the deny rule matches at any depth, so no real
+    // Files shaped like the id files, inside the sandbox: the deny rule matches at any depth, so no real
     // `/etc` is needed. A link to each looks fine by name and is judged on its real path.
     let etc = sandbox.write("etc/machine-id", b"0f1e2d3c4b5a69788796a5b4c3d2e1f0\n");
     let dbus = sandbox.write(
@@ -248,7 +248,6 @@ async fn the_machine_id_files_are_refused_to_a_check_that_declares_the_root() {
     );
     symlink(&etc, sandbox.path("looks-fine")).expect("symlink");
     symlink(&dbus, sandbox.path("also-fine")).expect("symlink");
-    // The same two names on the real machine, where they exist.
     let run = sandbox.write("run/machine-id", b"0f1e2d3c4b5a69788796a5b4c3d2e1f0\n");
     symlink(&run, sandbox.path("run-looks-fine")).expect("symlink");
     // The DMI files, under both sysfs names, and a copy of one under a host mount.
@@ -272,6 +271,7 @@ async fn the_machine_id_files_are_refused_to_a_check_that_declares_the_root() {
         sandbox.path("dmi-looks-fine"),
     ];
     cases.extend(dmi);
+    // The same names on the real machine, where they exist.
     cases.extend(
         [
             "/etc/machine-id",

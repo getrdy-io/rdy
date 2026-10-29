@@ -178,6 +178,8 @@ pub struct ReadGuard {
     reads: Option<&'static [&'static str]>,
     /// The `MachineId` call's guard: only these paths pass, and the denylist is not asked.
     only: Option<&'static [&'static str]>,
+    /// True for the `MachineId` guard alone. A future `only` list would not set it.
+    machine_id: bool,
 }
 
 impl ReadGuard {
@@ -186,6 +188,7 @@ impl ReadGuard {
             os,
             reads,
             only: None,
+            machine_id: false,
         }
     }
 
@@ -200,6 +203,7 @@ impl ReadGuard {
             os: Os::Linux,
             reads: None,
             only: Some(MACHINE_ID_FILES),
+            machine_id: true,
         }
     }
 
@@ -210,7 +214,7 @@ impl ReadGuard {
         expect(dead_code, reason = "only the Unix live backend knows files by inode")
     )]
     pub(crate) fn reads_machine_id(&self) -> bool {
-        self.only.is_some()
+        self.machine_id
     }
 
     /// Decides from the path text alone. Used before any I/O.
@@ -508,4 +512,21 @@ fn private_key_name(name: &str) -> bool {
                 | "keychain-db"
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_machine_id_guard_reads_the_machine_id() {
+        assert!(ReadGuard::machine_id_files().reads_machine_id());
+        assert!(!ReadGuard::new(Os::Linux, None).reads_machine_id());
+        // Another `only` allowlist does not skip the inode check.
+        let other = ReadGuard {
+            only: Some(&["/etc/hostname"]),
+            ..ReadGuard::new(Os::Linux, None)
+        };
+        assert!(!other.reads_machine_id());
+    }
 }

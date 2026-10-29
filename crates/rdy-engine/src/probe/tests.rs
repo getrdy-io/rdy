@@ -88,7 +88,6 @@ fn a_declared_program_matches_the_way_the_table_does() {
 
 mod denylist {
     use super::*;
-    use crate::probe::policy::MACHINE_ID_FILES;
     use crate::probe::policy::{
         RULE_CREDENTIALS, RULE_DEVICE, RULE_DOT_DOT, RULE_KERNEL, RULE_KUBECONFIG,
         RULE_MACHINE_ID_FILE, RULE_PRIVATE_KEY, RULE_PROC, RULE_RELATIVE, RULE_SSH,
@@ -348,9 +347,6 @@ mod denylist {
     #[test]
     fn the_machine_id_guard_admits_the_three_files_and_nothing_else() {
         let guard = ReadGuard::machine_id_files();
-        for file in MACHINE_ID_FILES {
-            assert!(guard.admit_real(Path::new(file)).is_ok(), "{file}");
-        }
         for file in [
             "/etc/machine-id",
             "/var/lib/dbus/machine-id",
