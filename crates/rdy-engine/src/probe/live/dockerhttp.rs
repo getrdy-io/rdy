@@ -7,6 +7,11 @@
 //! Limits: the head is at most [`HEAD_CAP`] bytes and the body at most [`BODY_CAP`]. A longer body is
 //! cut and flagged, not an error. A response that is not HTTP/1.x, or whose framing contradicts
 //! itself, is [`HttpError`].
+//!
+//! A chunked body is read until its terminal chunk, the end of the stream, or [`BODY_CAP`] plus
+//! [`CHUNK_SLACK`] raw bytes. The slack pays for chunk framing. A reply of many tiny chunks can use
+//! all of it before [`BODY_CAP`] body bytes arrive. The read then stops and the reply is flagged
+//! truncated.
 
 /// The most bytes of status line and headers read.
 pub(crate) const HEAD_CAP: usize = 16 * 1024;
@@ -214,7 +219,15 @@ pub(crate) fn finished(head: &Head, rest: &[u8], eof: bool) -> bool {
             u64::try_from(rest.len()).unwrap_or(u64::MAX) >= n || rest.len() > BODY_CAP
         }
         Framing::UntilClose => rest.len() > BODY_CAP,
-        Framing::Chunked => rest.len() >= BODY_CAP + CHUNK_SLACK,
+        Framing::Chunked => {
+            if rest.len() >= BODY_CAP + CHUNK_SLACK {
+                return true;
+            }
+            // A body that ends in a blank line may be whole: stop at the terminal chunk instead of
+            // waiting for a server that keeps the connection open. A framing error also stops the read,
+            // so that `body` reports it.
+            rest.ends_with(b"\r\n\r\n") && chunked(rest, false).map_or(true, |body| body.complete)
+        }
     }
 }
 
@@ -237,7 +250,11 @@ fn chunked(mut rest: &[u8], eof: bool) -> Result<Body, HttpError> {
         };
         let line = std::str::from_utf8(&rest[..line_end])
             .map_err(|_| HttpError::Malformed("bad chunk size"))?;
-        let digits = line.split(';').next().unwrap_or_default().trim();
+        // Spaces are allowed only between the size and a `;` that starts chunk extensions.
+        let digits = match line.split_once(';') {
+            Some((size, _extensions)) => size.trim_end_matches([' ', '\t']),
+            None => line,
+        };
         // Hex digits only: `from_str_radix` would also take a leading `+`.
         if digits.is_empty() || digits.len() > 16 || !digits.bytes().all(|b| b.is_ascii_hexdigit())
         {
@@ -326,6 +343,40 @@ mod tests {
         let done = body(&head, &raw[head.len..], false).expect("body");
         assert_eq!(done.bytes, b"abcde");
         assert!(done.complete && !done.truncated);
+    }
+
+    #[test]
+    fn chunked_body_finishes_at_the_terminal_chunk_without_eof() {
+        let raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n";
+        let head = head_of(raw);
+        assert!(finished(&head, &raw[head.len..], false));
+        let open = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n";
+        let head = head_of(open);
+        assert!(!finished(&head, &open[head.len..], false));
+        // Chunk data that happens to end in a blank line is not the end.
+        let data = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\n\r\n\r\n\r\n";
+        let head = head_of(data);
+        assert!(!finished(&head, &data[head.len..], false));
+    }
+
+    #[test]
+    fn chunk_size_allows_space_only_before_extensions() {
+        let ok = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2 ;x=1\r\nhi\r\n0\r\n\r\n";
+        let head = head_of(ok);
+        let done = body(&head, &ok[head.len..], false).expect("body");
+        assert_eq!(done.bytes, b"hi");
+        for bad in [
+            &b" 5\r\nhello\r\n0\r\n\r\n"[..],
+            b"5 \r\nhello\r\n0\r\n\r\n",
+        ] {
+            let mut raw = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+            raw.extend_from_slice(bad);
+            let head = head_of(&raw);
+            assert_eq!(
+                body(&head, &raw[head.len..], false),
+                Err(HttpError::Malformed("bad chunk size"))
+            );
+        }
     }
 
     #[test]

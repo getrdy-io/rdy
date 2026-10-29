@@ -328,7 +328,7 @@ impl Probe {
                 // The real user id, asked of the backend only when a declared socket has `{uid}`.
                 // If it cannot be read, `{uid}` matches nothing.
                 let uid = if self.declares_uid_socket() {
-                    hub.backend.process_ids().await.ok().map(|ids| ids.uid[0])
+                    self.process_ids().await.ok().map(|ids| ids.uid[0])
                 } else {
                     None
                 };

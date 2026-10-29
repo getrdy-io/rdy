@@ -98,6 +98,15 @@ fn only(hub: &ProbeHub) -> Action {
     actions.remove(0)
 }
 
+/// The one request entry of a unix socket call, set apart from the `process_ids` entry that a
+/// declared `{uid}` socket makes the probe log first.
+fn request_entry(hub: &ProbeHub) -> Action {
+    let mut actions = hub.action_log().actions;
+    actions.retain(|a| a.kind != ActionKind::Native);
+    assert_eq!(actions.len(), 1, "one request entry: {actions:?}");
+    actions.remove(0)
+}
+
 fn field<'a>(action: &'a Action, name: &str) -> Option<&'a Value> {
     action.fields.get(name)
 }
@@ -573,7 +582,33 @@ async fn a_missing_socket_is_not_found_not_a_denial() {
         .await
         .expect_err("no such socket");
     assert_eq!(error, ProbeError::NotFound);
-    assert_eq!(only(&hub).outcome, ActionOutcome::Failed);
+    assert_eq!(request_entry(&hub).outcome, ActionOutcome::Failed);
+}
+
+/// The user id lookup goes through the probe, so it is logged as a `native` call.
+#[tokio::test]
+async fn the_user_id_lookup_for_a_uid_socket_is_logged() {
+    let hub = hub(Replay::new().ids([1000; 4], [1000; 4]).unix_get(
+        "/run/user/1000/docker.sock",
+        "/info",
+        200,
+        "{}",
+    ));
+    let probe = probe(&hub, runtime(), Os::Linux, &[]);
+    let reply = probe
+        .unix_get(Path::new("/run/user/1000/docker.sock"), "/info")
+        .await
+        .expect("the declared uid socket");
+    assert_eq!(reply.status, 200);
+    let actions = hub.action_log().actions;
+    let native = actions
+        .iter()
+        .find(|a| a.kind == ActionKind::Native)
+        .expect("a native entry");
+    assert_eq!(
+        field(native, "api").and_then(Value::as_str),
+        Some("process_ids")
+    );
 }
 
 /// Windows has no unix sockets. The call is refused with a fixed rule and logged, whatever the host
@@ -939,6 +974,14 @@ mod live {
                         "GET /version HTTP/1.1" => {
                             b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n6\r\n{\"Vers\r\na\r\nion\":\"27\"}\r\n0\r\n\r\n"
                         }
+                        "GET /v1.43/_ping HTTP/1.1" => {
+                            // A whole chunked reply, then the connection stays open.
+                            let _ = stream
+                                .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nOK\r\n0\r\n\r\n")
+                                .await;
+                            tokio::time::sleep(Duration::from_secs(30)).await;
+                            return;
+                        }
                         "GET /v1.43/info HTTP/1.1" => b"SSH-2.0-OpenSSH_9.6\r\n\r\n",
                         "GET /_ping HTTP/1.1" => {
                             // Never answers.
@@ -1021,6 +1064,15 @@ mod live {
             assert_eq!(failed.status, 500);
             assert!(failed.body.is_empty());
 
+            // A whole chunked reply on a connection the server keeps open returns the body, not a
+            // timeout.
+            let ping = probe
+                .unix_get(socket, "/v1.43/_ping")
+                .await
+                .expect("a complete chunked reply");
+            assert_eq!(ping.body, b"OK");
+            assert!(!ping.truncated);
+
             // A server that never answers hits the timeout.
             let error = probe.unix_get(socket, "/_ping").await.expect_err("silent");
             assert_eq!(error, ProbeError::Timeout);
@@ -1039,6 +1091,7 @@ mod live {
                     ActionOutcome::Denied,
                     ActionOutcome::Denied,
                     ActionOutcome::Failed,
+                    ActionOutcome::Ok,
                     ActionOutcome::Ok,
                     ActionOutcome::Timeout,
                 ]
