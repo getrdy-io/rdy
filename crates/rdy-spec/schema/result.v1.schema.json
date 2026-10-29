@@ -174,12 +174,12 @@
           "maxLength": 4096
         },
         "under": {
-          "description": "coalesced",
+          "description": "coalesced: the directory the calls were under",
           "type": "string",
           "maxLength": 4096
         },
         "count": {
-          "description": "coalesced",
+          "description": "coalesced: how many calls the entry stands for. Reads past 200 per directory, or denied and failed file calls past 20 per directory and reason.",
           "type": "integer",
           "minimum": 0
         },
@@ -1305,11 +1305,11 @@
           "maxItems": 5000
         },
         "actions_truncated": {
-          "description": "`true` when the log hit its 5000 entry cap. `exec`, `connect`, `tls`, `http`, `dns`, `lookup` and `kube` entries are never dropped.",
+          "description": "`true` when the log dropped an entry: at the 5000 entry cap or a check's 1000 entry quota. `ok` then `failed` `read`, `read_dir` and `stat` entries go first. A `denied` entry is never dropped.",
           "type": "boolean"
         },
         "actions_dropped": {
-          "description": "How many entries of each kind were dropped when the log hit its cap. Only `read`, `read_dir` and `stat` entries are ever dropped.",
+          "description": "How many entries of each kind were dropped. `read`, `read_dir`, `stat` and `coalesced` entries are dropped first; any other kind only as a last resort.",
           "type": "object",
           "additionalProperties": {
             "type": "integer",

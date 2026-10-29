@@ -44,6 +44,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use super::{DEFAULT_STDERR_CAP, DEFAULT_STDOUT_CAP, ExecError, ExecOutput, ExecSpec};
+use crate::check::CommandSpec;
 
 #[cfg(test)]
 mod tests;
@@ -392,6 +393,100 @@ impl Cmd {
         self.stdout_cap = bytes;
         self
     }
+
+    /// The program name.
+    #[must_use]
+    pub fn program(&self) -> &'static str {
+        self.program
+    }
+
+    /// The arguments, as given.
+    #[must_use]
+    pub fn arguments(&self) -> &[OsString] {
+        &self.args
+    }
+
+    /// Applies what the check declared for this program (`CheckInfo::commands`). The probe calls this
+    /// so a check cannot widen its own limits: the declared directories and the declared stdout cap
+    /// replace whatever the command carried, and every environment name must be one the check declared.
+    ///
+    /// # Errors
+    ///
+    /// The first environment name that the check did not declare.
+    pub(crate) fn declared(mut self, spec: &CommandSpec) -> Result<Self, &'static str> {
+        if let Some((name, _)) = self.env.iter().find(|(name, _)| !spec.env.contains(name)) {
+            return Err(name);
+        }
+        self.extra_dirs = spec.extra_dirs;
+        self.stdout_cap = spec.max_stdout;
+        Ok(self)
+    }
+}
+
+/// A command that passed the policy, with the real path it will start from.
+///
+/// This is all a backend ever sees (02, "The probe facade"): the name was checked, the environment
+/// names were checked and the program was found on the trusted path before the backend is asked to
+/// do anything. A fixture backend therefore cannot be made to "run" a shell or a privilege tool.
+#[derive(Clone)]
+pub struct ResolvedCmd {
+    program: &'static str,
+    spec: ExecSpec,
+}
+
+impl fmt::Debug for ResolvedCmd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResolvedCmd")
+            .field("program", &self.program)
+            .field("spec", &self.spec)
+            .finish()
+    }
+}
+
+impl ResolvedCmd {
+    /// The name the check asked for.
+    #[must_use]
+    pub fn program(&self) -> &'static str {
+        self.program
+    }
+
+    /// The real path the program starts from.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.spec.program
+    }
+
+    /// The arguments, passed as argv.
+    #[must_use]
+    pub fn arguments(&self) -> &[OsString] {
+        &self.spec.args
+    }
+
+    /// The most stdout kept.
+    #[must_use]
+    pub fn stdout_cap(&self) -> usize {
+        self.spec.stdout_cap
+    }
+
+    /// The timeout.
+    #[must_use]
+    pub fn timeout(&self) -> Duration {
+        self.spec.timeout
+    }
+}
+
+/// Checks `cmd` and resolves it, for the facade. With `on_disk` false the program is not looked up:
+/// every other rule still applies, and the path is `/usr/bin/<name>`. A fixture backend asks for that,
+/// so a replayed run does not depend on which tools the test machine has.
+///
+/// # Errors
+///
+/// A [`PolicyError`] for the first rule the command breaks.
+pub(crate) fn resolve_cmd(cmd: &Cmd, on_disk: bool) -> Result<ResolvedCmd, PolicyError> {
+    Ok(ResolvedCmd {
+        program: cmd.program,
+        spec: prepare_with(cmd, on_disk)?,
+    })
 }
 
 /// Checks `cmd` against the policy and turns it into a runnable [`ExecSpec`].
@@ -400,6 +495,10 @@ impl Cmd {
 ///
 /// A [`PolicyError`] for the first rule the command breaks.
 pub(crate) fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
+    prepare_with(cmd, true)
+}
+
+fn prepare_with(cmd: &Cmd, on_disk: bool) -> Result<ExecSpec, PolicyError> {
     check_name(cmd.program)?;
     check_env(&cmd.env)?;
     if cmd.stdout_cap > MAX_STDOUT_CAP {
@@ -407,7 +506,14 @@ pub(crate) fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
             cap: cmd.stdout_cap,
         });
     }
-    let path = resolve(cmd.program, cmd.extra_dirs)?;
+    let path = if on_disk {
+        resolve(cmd.program, cmd.extra_dirs)?
+    } else {
+        for dir in cmd.extra_dirs {
+            check_dir(dir)?;
+        }
+        PathBuf::from(format!("/usr/bin/{}", cmd.program))
+    };
 
     let mut env = base_env();
     env.extend(
@@ -446,6 +552,10 @@ fn base_env() -> Vec<(OsString, OsString)> {
 
 /// Runs `cmd` under the policy: checks it, resolves the program, and starts it with the process runner.
 ///
+/// This writes no action-log entry. A check reaches commands through `Probe::exec`, which resolves with
+/// `resolve_cmd` and logs; the live backend (a later ticket) will call this function. It stays `pub`
+/// until then because making it crate-private leaves the whole runner unused, and the lint wall
+/// (M1-044) lists it for check crates.
 /// # Errors
 ///
 /// [`CommandError::Policy`] when the policy refuses, [`CommandError::Exec`] for start, timeout and

@@ -41,6 +41,8 @@ ring = { version = "0.17", default-features = false }
 regex = { version = "1", default-features = false }
 # The parsed form of a pattern, to read the shortest text it can match (01 section 2.8).
 regex-syntax = { version = "0.8", default-features = false }
+# Diagnostics from the engine (M1-040): the action log warns when it has to drop an entry it should keep.
+tracing = { version = "0.1", default-features = false }
 # The scheduler (M1-034). Each crate names the features it uses.
 tokio = { version = "1", default-features = false }
 rpassword = { version = "7.5", default-features = false }

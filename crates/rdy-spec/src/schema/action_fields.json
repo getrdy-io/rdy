@@ -135,13 +135,13 @@
     },
     "under": {
       "type": "string",
-      "description": "coalesced",
+      "description": "coalesced: the directory the calls were under",
       "maxLength": 4096
     },
     "count": {
       "type": "integer",
       "minimum": 0,
-      "description": "coalesced"
+      "description": "coalesced: how many calls the entry stands for. Reads past 200 per directory, or denied and failed file calls past 20 per directory and reason."
     },
     "truncated": {
       "description": "exec, read",

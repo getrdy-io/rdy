@@ -304,7 +304,7 @@ async fn drive(
     let started = Instant::now();
     let mut ctx =
         CheckContext::new(key.clone(), os, available.iter().cloned()).at_deadline(started + after);
-    let probe = probes.map(|hub| hub.check_probe(&key));
+    let probe = probes.map(|hub| hub.check_probe(&key, Some(check.info())));
     if let Some(probe) = &probe {
         ctx = ctx.with_probe(probe.clone());
     }

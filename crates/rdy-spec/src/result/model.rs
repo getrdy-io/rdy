@@ -116,11 +116,11 @@ pub struct Report {
     /// Every file read, command, lookup, connection and API request, in order. At most 5000 entries.
     #[cfg_attr(feature = "schema", schemars(length(max = 5000)))]
     pub actions: Vec<Action>,
-    /// `true` when the log hit its 5000 entry cap. `exec`, `connect`, `tls`, `http`, `dns`, `lookup` and
-    /// `kube` entries are never dropped.
+    /// `true` when the log dropped an entry: at the 5000 entry cap or a check's 1000 entry quota. `ok`
+    /// then `failed` `read`, `read_dir` and `stat` entries go first. A `denied` entry is never dropped.
     pub actions_truncated: bool,
-    /// How many entries of each kind were dropped when the log hit its cap. Only `read`, `read_dir` and
-    /// `stat` entries are ever dropped.
+    /// How many entries of each kind were dropped. `read`, `read_dir`, `stat` and `coalesced` entries
+    /// are dropped first; any other kind only as a last resort.
     pub actions_dropped: BTreeMap<String, u64>,
     /// What the redactor changed in this report.
     pub redaction: Redaction,

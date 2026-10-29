@@ -811,3 +811,51 @@ mod unix {
         );
     }
 }
+
+// ---- the facade seam: declared limits and resolution without a lookup ------------------------------
+
+#[test]
+fn a_fixture_resolution_keeps_every_rule_but_the_lookup() {
+    let resolved = resolve_cmd(&cmd("ip").args(["-j", "addr"]), false).expect("resolves");
+    assert_eq!(resolved.program(), "ip");
+    assert_eq!(resolved.path(), Path::new("/usr/bin/ip"));
+    assert_eq!(resolved.arguments(), ["-j", "addr"]);
+    assert_eq!(resolved.timeout(), SECOND);
+    assert_eq!(resolved.stdout_cap(), DEFAULT_STDOUT_CAP);
+    for name in ["sh", "sudo", "env", "busybox"] {
+        let error = resolve_cmd(&cmd(name), false).expect_err(name);
+        assert_eq!(error, PolicyError::Refused { program: name });
+    }
+    assert!(matches!(
+        resolve_cmd(&cmd("ip").env([("LD_PRELOAD", "x")]), false),
+        Err(PolicyError::RefusedEnv { .. })
+    ));
+    assert!(matches!(
+        resolve_cmd(&cmd("ip").extra_dirs(&["relative"]), false),
+        Err(PolicyError::InvalidDir { .. })
+    ));
+}
+
+#[test]
+fn declared_limits_replace_what_the_command_carried() {
+    use crate::check::CommandSpec;
+    const SPEC: CommandSpec = CommandSpec {
+        program: "ip",
+        extra_dirs: &["/opt/acme/bin"],
+        max_stdout: 2048,
+        env: &["ACME_REGION"],
+    };
+    let declared = cmd("ip")
+        .stdout_cap(MAX_STDOUT_CAP)
+        .env([("ACME_REGION", "eu")])
+        .declared(&SPEC)
+        .expect("declared");
+    assert_eq!(declared.stdout_cap, 2048);
+    assert_eq!(declared.extra_dirs, ["/opt/acme/bin"]);
+
+    let refused = cmd("ip")
+        .env([("ACME_REGION", "eu"), ("HTTPS_PROXY", "p")])
+        .declared(&SPEC)
+        .expect_err("undeclared name");
+    assert_eq!(refused, "HTTPS_PROXY");
+}

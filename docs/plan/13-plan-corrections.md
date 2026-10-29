@@ -252,6 +252,27 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
 - PC-28: applied to the plan and `KICKOFF.md` item 7. C-5, C-8.
 - PC-31, PC-33, PC-36, PC-39, PC-41, PC-42 (cosmetic): applied to the plan.
 - PC-32 (cosmetic): C-9.
+- PC-44 (found by the M1-040 review, PR #58): applied in 01 section 5.4, 02 (the Files deny list and the
+  `Backend` sketch), 05 I5, 11 and ADR 0014. Four changes. (1) One `Cmd` type, the one in
+  `exec::policy`. `Probe::exec` applies the check's `CommandSpec` (extra directories, environment names,
+  stdout cap), runs the command policy and resolves the program, then calls
+  `Backend::spawn(&ResolvedCmd) -> Result<Output, ProbeError>`. 02's `io::Result<Output>` is replaced,
+  because a start failure, a timeout and a hung child are not `io::Error` kinds. The backend gets a new
+  method `resolves_on_disk()` (true; the replay backend says false), so a fixture run applies every rule
+  but the lookup and never depends on the tools of the test machine. A fixture can never "run" `sh` or
+  `sudo`. (2) The action log keeps a `denied` entry always. A `denied` or `failed` file call folds into one
+  `coalesced` entry after 20 per (check, kind, rule or error, directory); the entry carries `rule` or
+  `error` as well as `of`, `under` and `count` (schema description of `under` and `count` and the docs of
+  `actions_truncated` and `actions_dropped` updated through `cargo xtask schema`; `ActionKind::Coalesced`
+  and the fields already existed). A check holds 1000 entries. Drop order: `ok` file entries, then
+  `failed` ones, then (last resort, with a `tracing` warning and a counter) other kept entries. (3) The
+  M1-040 exit test says "retention drops ok read, read_dir and stat entries first, then failed ones, and
+  never a denied entry" in place of "truncation drops only ok read, read_dir and stat entries" (11, 02,
+  ADR 0014). (4) The deny list in 02 and 05 I5 gains the any-depth `etc` rules, the credential files,
+  the cluster credential paths, the `/proc/<pid>/` allowlist, the kernel files and `/dev` for `stat` and
+  `read_dir`. Carried: M1-091 and M1-103 inherit "every tcp, http and kube call writes one entry"; M1-102
+  settles how the engine's own kubeconfig read gets past the `.kube` rule; M4 adds a closed stat-only
+  `/dev` list (`/dev/nvidia*`, `/dev/dri/*`, `/dev/kfd`).
 - PC-35 (cosmetic): left in the table. It is a repo-wide wording sweep plus a brief kept outside the
   repo, and no M1 ticket depends on it.
 - PC-37 (cosmetic): left in the table. It changes how a business milestone is measured, which is the

@@ -1,9 +1,12 @@
-//! Tests for the probe facade: the read denylist, the action log and the per-check handle.
+//! Tests for the probe facade: the read denylist, the command seam, the action log and the per-check
+//! handle.
 //!
 //! The fixture run at the bottom is the exit test of M1-040.
 
 use std::path::Path;
 use std::sync::Arc;
+#[cfg(feature = "runtime")]
+use std::time::Duration;
 
 use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use serde_json::{Value, json};
@@ -26,6 +29,11 @@ fn field<'a>(action: &'a Action, name: &str) -> Option<&'a Value> {
     action.fields.get(name)
 }
 
+#[cfg(feature = "runtime")]
+fn cmd(program: &'static str) -> Cmd {
+    Cmd::new(program, Duration::from_secs(5))
+}
+
 #[test]
 fn probe_errors_are_clone_eq_like_check_errors() {
     fn needs<T: Clone + PartialEq + Eq>() {}
@@ -42,8 +50,8 @@ fn probe_errors_are_clone_eq_like_check_errors() {
 mod denylist {
     use super::*;
     use crate::probe::policy::{
-        RULE_DEVICE, RULE_DOT_DOT, RULE_KUBECONFIG, RULE_PRIVATE_KEY, RULE_PROC, RULE_RELATIVE,
-        RULE_SSH, RULE_SYSTEM_SECRET, check_names,
+        RULE_CREDENTIALS, RULE_DEVICE, RULE_DOT_DOT, RULE_KERNEL, RULE_KUBECONFIG,
+        RULE_PRIVATE_KEY, RULE_PROC, RULE_RELATIVE, RULE_SSH, RULE_SYSTEM_SECRET, check_names,
     };
 
     fn verdict(path: &str) -> Result<(), &'static str> {
@@ -53,15 +61,68 @@ mod denylist {
     #[test]
     fn the_listed_files_are_refused_with_their_rule() {
         let cases = [
+            // Password and sudo files, at the root.
             ("/etc/shadow", RULE_SYSTEM_SECRET),
             ("/etc/shadow-", RULE_SYSTEM_SECRET),
             ("/etc/gshadow", RULE_SYSTEM_SECRET),
             ("/etc/sudoers", RULE_SYSTEM_SECRET),
             ("/etc/sudoers.d/90-cloud-init", RULE_SYSTEM_SECRET),
+            ("/etc/security/opasswd", RULE_SYSTEM_SECRET),
+            ("/etc/master.passwd", RULE_SYSTEM_SECRET),
+            (
+                "/var/db/dslocal/nodes/Default/users/root.plist",
+                RULE_SYSTEM_SECRET,
+            ),
+            // The same files under a mount, a container layer and a data volume.
+            ("/host/etc/shadow", RULE_SYSTEM_SECRET),
+            (
+                "/var/lib/docker/overlay2/ab12/diff/etc/shadow",
+                RULE_SYSTEM_SECRET,
+            ),
+            (
+                "/System/Volumes/Data/private/etc/sudoers",
+                RULE_SYSTEM_SECRET,
+            ),
+            ("/host/etc/ssl/private/site.pem", RULE_PRIVATE_KEY),
+            ("/host/etc/pki/tls/private/site.pem", RULE_PRIVATE_KEY),
+            // ssh and kube directories.
             ("/home/ada/.ssh/id_ed25519", RULE_SSH),
             ("/home/ada/.ssh", RULE_SSH),
             ("/root/.kube/config", RULE_KUBECONFIG),
             ("/home/ada/.kube/cache/discovery/x.json", RULE_KUBECONFIG),
+            // Credential files.
+            ("/home/ada/.aws/credentials", RULE_CREDENTIALS),
+            ("/home/ada/.azure/accessTokens.json", RULE_CREDENTIALS),
+            ("/home/ada/.config/gcloud/credentials.db", RULE_CREDENTIALS),
+            ("/home/ada/.gnupg/private-keys-v1.d/x", RULE_CREDENTIALS),
+            ("/home/ada/.docker/config.json", RULE_CREDENTIALS),
+            ("/home/ada/.netrc", RULE_CREDENTIALS),
+            ("/home/ada/.git-credentials", RULE_CREDENTIALS),
+            ("/home/ada/.pgpass", RULE_CREDENTIALS),
+            ("/home/ada/.vault-token", RULE_CREDENTIALS),
+            ("/etc/krb5.keytab", RULE_PRIVATE_KEY),
+            (
+                "/Users/ada/Library/Keychains/login.keychain-db",
+                RULE_PRIVATE_KEY,
+            ),
+            (
+                "/Users/ada/Library/Keychains/old.keychain",
+                RULE_PRIVATE_KEY,
+            ),
+            // Cluster credentials.
+            ("/etc/kubernetes/admin.conf", RULE_KUBECONFIG),
+            ("/etc/kubernetes/kubelet.conf", RULE_KUBECONFIG),
+            ("/etc/rancher/k3s/k3s.yaml", RULE_KUBECONFIG),
+            ("/etc/rancher/rke2/rke2.yaml", RULE_KUBECONFIG),
+            ("/var/lib/kubelet/kubeconfig", RULE_KUBECONFIG),
+            ("/var/lib/etcd/member/snap/db", RULE_KUBECONFIG),
+            ("/var/lib/rancher/k3s/server/token", RULE_KUBECONFIG),
+            ("/var/lib/rancher/rke2/server/cred/passwd", RULE_KUBECONFIG),
+            (
+                "/var/run/secrets/kubernetes.io/serviceaccount/token",
+                RULE_KUBECONFIG,
+            ),
+            // Process entries off the allowlist, including the links that reach other files.
             ("/proc/1/environ", RULE_PROC),
             ("/proc/self/environ", RULE_PROC),
             ("/proc/1/cmdline", RULE_PROC),
@@ -69,12 +130,30 @@ mod denylist {
             ("/proc/1/fd", RULE_PROC),
             ("/proc/1/fd/3", RULE_PROC),
             ("/proc/1/root/etc/passwd", RULE_PROC),
+            ("/proc/1/cwd", RULE_PROC),
+            ("/proc/1/cwd/etc/shadow", RULE_PROC),
+            ("/proc/self/exe", RULE_PROC),
             ("/proc/1/map_files/7f00-7f01", RULE_PROC),
+            ("/proc/1/maps", RULE_PROC),
+            ("/proc/1/ns/mnt", RULE_PROC),
             ("/proc/1/task/1/environ", RULE_PROC),
-            ("/proc/kcore", RULE_PROC),
+            ("/host/proc/1/environ", RULE_PROC),
+            // Kernel files.
+            ("/proc/kcore", RULE_KERNEL),
+            ("/proc/kmsg", RULE_KERNEL),
+            ("/proc/vmcore", RULE_KERNEL),
+            ("/proc/kpagecount", RULE_KERNEL),
+            ("/proc/kpageflags", RULE_KERNEL),
+            ("/proc/kallsyms", RULE_KERNEL),
+            ("/sys/kernel/debug", RULE_KERNEL),
+            ("/sys/kernel/debug/tracing/trace", RULE_KERNEL),
+            ("/sys/kernel/tracing/trace", RULE_KERNEL),
+            // Devices, for stat and read_dir too.
             ("/dev/mem", RULE_DEVICE),
             ("/dev/null", RULE_DEVICE),
+            ("/dev/nvidia0", RULE_DEVICE),
             ("/dev", RULE_DEVICE),
+            // Private keys by name.
             ("/etc/ssl/private/site.pem", RULE_PRIVATE_KEY),
             ("/etc/pki/tls/private/site.pem", RULE_PRIVATE_KEY),
             ("/srv/app/server.key", RULE_PRIVATE_KEY),
@@ -110,16 +189,30 @@ mod denylist {
         for path in [
             "/proc/cpuinfo",
             "/proc/meminfo",
+            "/proc/net/tcp",
+            "/proc/1",
             "/proc/1/status",
+            "/proc/1/limits",
+            "/proc/1/task",
+            "/proc/1/task/1/status",
             "/proc/self/mountinfo",
+            "/proc/self/cgroup",
+            "/proc/self/net/dev",
             "/proc/sys/kernel/osrelease",
             "/sys/fs/cgroup/cpu.max",
+            "/sys/kernel/mm/transparent_hugepage/enabled",
             "/etc/os-release",
             "/etc/passwd",
             "/etc/sudo.conf",
             "/etc/ssl/certs/ca-certificates.crt",
             "/etc/ssl/openssl.cnf",
             "/etc/ssh/ssh_host_ed25519_key.pub",
+            "/etc/kubernetes/manifests/kube-apiserver.yaml",
+            "/etc/kubernetes/pki/ca.crt",
+            "/var/lib/kubelet/config.yaml",
+            "/var/run/secrets/kubernetes.io",
+            "/home/ada/.docker",
+            "/home/ada/.config/helm/repositories.yaml",
             "/home/ada/id_rsa.pub",
             "/usr/share/ca-certificates/site.crt",
         ] {
@@ -132,10 +225,12 @@ mod denylist {
         let mac = |path: &str| check_names(Path::new(path), true);
         assert_eq!(mac("/ETC/Shadow"), Err(RULE_SYSTEM_SECRET));
         assert_eq!(mac("/private/etc/sudoers"), Err(RULE_SYSTEM_SECRET));
+        assert_eq!(mac("/private/etc/master.passwd"), Err(RULE_SYSTEM_SECRET));
         assert_eq!(mac("/Users/ada/.SSH/id_rsa"), Err(RULE_SSH));
-        // On a case-sensitive file system these are other files.
+        // On a case-sensitive file system these are other files. Only the any-depth rule still sees
+        // the second one, because `etc` is not at the root there.
         assert_eq!(verdict("/ETC/Shadow"), Ok(()));
-        assert_eq!(verdict("/private/etc/sudoers"), Ok(()));
+        assert_eq!(verdict("/private/etc/sudoers"), Err(RULE_SYSTEM_SECRET));
     }
 
     #[tokio::test]
@@ -145,7 +240,7 @@ mod denylist {
             .file("/proc/1/environ", "AWS_SECRET_ACCESS_KEY=xyz")
             .file("/etc/shadow", "root:$6$salt$hash::");
         let hub = hub(replay);
-        let probe = hub.check_probe("host.cpu");
+        let probe = hub.check_probe("host.cpu", None);
 
         let error = probe
             .read(Path::new("/proc/1/environ"))
@@ -160,10 +255,12 @@ mod denylist {
         );
         assert!(probe.read_dir(Path::new("/proc/1/fd")).await.is_err());
         assert!(probe.stat(Path::new("/etc/shadow")).await.is_err());
+        assert!(probe.stat(Path::new("/dev/nvidia0")).await.is_err());
+        assert!(probe.read_dir(Path::new("/dev")).await.is_err());
 
         let log = hub.action_log();
         let kinds: Vec<_> = log.actions.iter().map(|a| a.kind.to_string()).collect();
-        assert_eq!(kinds, ["read", "read_dir", "stat"]);
+        assert_eq!(kinds, ["read", "read_dir", "stat", "stat", "read_dir"]);
         for action in &log.actions {
             assert_eq!(action.outcome, ActionOutcome::Denied);
             assert_eq!(action.check.as_deref(), Some("host.cpu"));
@@ -175,9 +272,37 @@ mod denylist {
     }
 
     #[tokio::test]
+    async fn a_denied_error_names_the_path_the_way_the_log_does() {
+        // The error becomes a result message. A home directory must not be in it.
+        let hub =
+            hub(Replay::new().file("/home/tester/.ssh/id_rsa", "KEY")).with_home("/home/tester");
+        let probe = hub.check_probe("host.cpu", None);
+        let error = probe
+            .read(Path::new("/home/tester/.ssh/id_rsa"))
+            .await
+            .expect_err("refused");
+        assert_eq!(
+            error,
+            ProbeError::Denied {
+                rule: policy::RULE_SSH,
+                what: "~/.ssh/id_rsa".to_owned()
+            }
+        );
+        let message = CheckError::from(error).to_string();
+        assert!(!message.contains("/home/tester"), "{message}");
+        assert!(message.contains("~/.ssh/id_rsa"), "{message}");
+
+        let log = hub.action_log();
+        assert_eq!(
+            field(&log.actions[0], "path"),
+            Some(&json!("~/.ssh/id_rsa"))
+        );
+    }
+
+    #[tokio::test]
     async fn reads_show_home_paths_with_a_tilde() {
         let hub = hub(Replay::new().file("/home/tester/notes.txt", "hi")).with_home("/home/tester");
-        let probe = hub.check_probe("host.cpu");
+        let probe = hub.check_probe("host.cpu", None);
         probe
             .read(Path::new("/home/tester/notes.txt"))
             .await
@@ -193,7 +318,7 @@ mod denylist {
             vec![DirEntry::new("eth0", true), DirEntry::new("lo", true)],
         );
         let hub = hub(replay);
-        let probe = hub.check_probe("host.cpu");
+        let probe = hub.check_probe("host.cpu", None);
 
         assert_eq!(
             probe
@@ -254,7 +379,7 @@ mod denylist {
 #[tokio::test]
 async fn windows_refuses_every_file_read() {
     let hub = hub(Replay::new().file("C:\\x", "y"));
-    let probe = hub.check_probe("host.cpu");
+    let probe = hub.check_probe("host.cpu", None);
     let error = probe.read(Path::new("C:\\x")).await.expect_err("refused");
     assert!(matches!(
         error,
@@ -267,31 +392,258 @@ async fn windows_refuses_every_file_read() {
 
 // ---- exec --------------------------------------------------------------------------------------
 
-#[tokio::test]
-async fn a_command_is_logged_with_its_path_argv_and_exit() {
-    let hub = hub(Replay::new().command("ip", &["-j", "addr"], 0, "[]"));
-    let probe = hub.check_probe("net.mtu");
-    let output = probe
-        .exec(Cmd::new("ip").args(["-j", "addr"]))
-        .await
-        .expect("ran");
-    assert_eq!(output.exit, Some(0));
-    assert_eq!(output.stdout, b"[]");
+#[cfg(feature = "runtime")]
+mod commands {
+    use std::sync::Mutex;
 
-    let missing = probe.exec(Cmd::new("ss").args(["-lnt"])).await;
-    assert_eq!(missing, Err(ProbeError::NotFound));
+    use super::*;
+    use crate::check::CommandSpec;
+    use crate::check::{CheckInfo, OsSupport, Support};
 
-    let log = hub.action_log();
-    let ok = &log.actions[0];
-    assert_eq!(ok.kind, ActionKind::Exec);
-    assert_eq!(ok.outcome, ActionOutcome::Ok);
-    assert_eq!(field(ok, "program"), Some(&json!("/usr/bin/ip")));
-    assert_eq!(field(ok, "argv"), Some(&json!(["-j", "addr"])));
-    assert_eq!(field(ok, "exit"), Some(&json!(0)));
-    assert_eq!(field(ok, "stdout_bytes"), Some(&json!(2)));
-    let failed = &log.actions[1];
-    assert_eq!(failed.outcome, ActionOutcome::Failed);
-    assert_eq!(field(failed, "program"), Some(&json!("ss")));
+    static IP_ONLY: CheckInfo = CheckInfo {
+        id: "net.mtu",
+        family: "net",
+        summary: "Runs ip.",
+        needs: &[],
+        wants: &[],
+        default_timeout: None,
+        os: OsSupport {
+            linux: Support::Full,
+            macos: Support::Full,
+            windows: Support::Full,
+        },
+        reads: &[],
+        env: &[],
+        commands: &[CommandSpec {
+            program: "ip",
+            extra_dirs: &["/opt/acme/bin"],
+            max_stdout: 4096,
+            env: &["ACME_REGION"],
+        }],
+        peers: &[],
+    };
+
+    /// A backend that records what it was asked to run.
+    #[derive(Default)]
+    struct Recorder {
+        seen: Mutex<Vec<(String, Vec<String>, usize)>>,
+    }
+
+    impl Sealed for Recorder {}
+
+    impl Backend for Recorder {
+        fn open_read<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<FileBytes>> {
+            Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
+        }
+        fn read_dir<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
+            Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
+        }
+        fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
+            Box::pin(async { Ok(None) })
+        }
+        fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
+            Box::pin(async move {
+                let args = cmd
+                    .arguments()
+                    .iter()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect();
+                self.seen.lock().expect("lock").push((
+                    cmd.path().to_string_lossy().into_owned(),
+                    args,
+                    cmd.stdout_cap(),
+                ));
+                Ok(Output::new(Some(0), b"ok".to_vec()))
+            })
+        }
+        fn resolves_on_disk(&self) -> bool {
+            false
+        }
+    }
+
+    fn recording_hub() -> (ProbeHub, Arc<Recorder>) {
+        let recorder = Arc::new(Recorder::default());
+        let backend: Arc<dyn Backend> = recorder.clone();
+        (ProbeHub::new(backend, redactor()), recorder)
+    }
+
+    #[tokio::test]
+    async fn a_command_is_logged_with_its_path_argv_and_exit() {
+        let hub = hub(Replay::new().command("ip", &["-j", "addr"], 0, "[]"));
+        let probe = hub.check_probe("net.mtu", None);
+        let output = probe
+            .exec(cmd("ip").args(["-j", "addr"]))
+            .await
+            .expect("ran");
+        assert_eq!(output.exit, Some(0));
+        assert_eq!(output.stdout, b"[]");
+
+        let missing = probe.exec(cmd("ss").args(["-lnt"])).await;
+        assert_eq!(missing, Err(ProbeError::NotFound));
+
+        let log = hub.action_log();
+        let ok = &log.actions[0];
+        assert_eq!(ok.kind, ActionKind::Exec);
+        assert_eq!(ok.outcome, ActionOutcome::Ok);
+        assert_eq!(field(ok, "program"), Some(&json!("/usr/bin/ip")));
+        assert_eq!(field(ok, "argv"), Some(&json!(["-j", "addr"])));
+        assert_eq!(field(ok, "exit"), Some(&json!(0)));
+        assert_eq!(field(ok, "stdout_bytes"), Some(&json!(2)));
+        let failed = &log.actions[1];
+        assert_eq!(failed.outcome, ActionOutcome::Failed);
+        assert_eq!(field(failed, "program"), Some(&json!("/usr/bin/ss")));
+    }
+
+    #[tokio::test]
+    async fn a_fixture_can_never_run_a_shell_or_a_privilege_tool() {
+        // The fixture holds output for both, so only the policy stands between the check and it.
+        let replay = Replay::new()
+            .command("sh", &["-c", "id"], 0, "uid=0")
+            .command("sudo", &["id"], 0, "uid=0")
+            .command("env", &["id"], 0, "uid=0");
+        let hub = hub(replay);
+        let probe = hub.check_probe("host.cpu", None);
+        for (program, args) in [
+            ("sh", ["-c", "id"]),
+            ("sudo", ["id", "-u"]),
+            ("env", ["id", "-u"]),
+        ] {
+            let error = probe
+                .exec(cmd(program).args(args))
+                .await
+                .expect_err(program);
+            assert!(
+                matches!(error, ProbeError::Policy(_)),
+                "{program}: {error:?}"
+            );
+            assert!(error.to_string().contains("Fix:"), "{error}");
+        }
+        let log = hub.action_log();
+        assert_eq!(log.actions.len(), 3);
+        for action in &log.actions {
+            assert_eq!(action.outcome, ActionOutcome::Denied);
+            assert!(
+                field(action, "rule")
+                    .and_then(Value::as_str)
+                    .is_some_and(|rule| rule.contains("refused")),
+                "{action:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_checks_declaration_decides_directories_cap_and_env() {
+        let (hub, recorder) = recording_hub();
+        let probe = hub.check_probe("net.mtu", Some(&IP_ONLY));
+
+        // A declared command runs with the declared cap, whatever the command carried.
+        probe
+            .exec(cmd("ip").stdout_cap(1).env([("ACME_REGION", "eu-west-1")]))
+            .await
+            .expect("declared");
+        // An undeclared program, an undeclared env name, a name the policy refuses: all denied, and the
+        // backend sees none of them.
+        let undeclared = probe.exec(cmd("ss")).await.expect_err("undeclared");
+        assert!(matches!(
+            undeclared,
+            ProbeError::Denied {
+                rule: RULE_COMMAND_UNDECLARED,
+                ..
+            }
+        ));
+        let env = probe
+            .exec(cmd("ip").env([("HTTPS_PROXY", "http://proxy.invalid:3128")]))
+            .await
+            .expect_err("env");
+        assert!(matches!(
+            env,
+            ProbeError::Denied { rule: RULE_ENV_UNDECLARED, what } if what == "HTTPS_PROXY"
+        ));
+
+        let seen = recorder.seen.lock().expect("lock").clone();
+        assert_eq!(seen, [("/usr/bin/ip".to_owned(), Vec::new(), 4096)]);
+
+        let log = hub.action_log();
+        let outcomes: Vec<_> = log.actions.iter().map(|a| a.outcome.to_string()).collect();
+        assert_eq!(outcomes, ["ok", "denied", "denied"]);
+        assert_eq!(
+            field(&log.actions[1], "rule"),
+            Some(&json!(RULE_COMMAND_UNDECLARED))
+        );
+    }
+
+    #[tokio::test]
+    async fn the_element_after_a_secret_flag_is_redacted() {
+        let hub = hub(Replay::new()
+            .command("ip", &["--password", "hunter2hunter2", "addr"], 0, "")
+            .command("ip", &["--token", "tok-abc-123", "--name", "plain"], 0, "")
+            .command("ip", &["--api-key", "--token", "k-1", "z"], 0, "")
+            .command("ip", &["--password"], 0, ""));
+        let probe = hub.check_probe("net.mtu", None);
+        for args in [
+            vec!["--password", "hunter2hunter2", "addr"],
+            vec!["--token", "tok-abc-123", "--name", "plain"],
+            vec!["--api-key", "--token", "k-1", "z"],
+            vec!["--password"],
+        ] {
+            probe.exec(cmd("ip").args(args)).await.expect("ran");
+        }
+        let log = hub.action_log();
+        let argv = |index: usize| -> Vec<String> {
+            field(&log.actions[index], "argv")
+                .and_then(Value::as_array)
+                .expect("argv")
+                .iter()
+                .map(|v| v.as_str().expect("text").to_owned())
+                .collect()
+        };
+        let first = argv(0);
+        assert_eq!(first[0], "--password");
+        assert!(
+            first[1].starts_with("[REDACTED:secret_by_key:"),
+            "{first:?}"
+        );
+        assert_eq!(first[2], "addr");
+        let second = argv(1);
+        assert!(
+            second[1].starts_with("[REDACTED:secret_by_key:"),
+            "{second:?}"
+        );
+        assert_eq!(second[2], "--name");
+        assert_eq!(second[3], "plain", "a non-secret flag keeps its value");
+        // A secret flag followed by another secret flag does not hide the second one's value.
+        let third = argv(2);
+        assert!(
+            third[2].starts_with("[REDACTED:secret_by_key:"),
+            "{third:?}"
+        );
+        assert_eq!(argv(3), ["--password"]);
+
+        let text = serde_json::to_string(&log.actions).expect("json");
+        for secret in ["hunter2hunter2", "tok-abc-123", "k-1"] {
+            assert!(!text.contains(secret), "{secret} reached the log");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_command_dropped_before_it_finished_is_logged_as_a_timeout() {
+        let hub = ProbeHub::new(Arc::new(Hanging), redactor());
+        let probe = hub.check_probe("net.dns", None);
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(1),
+            probe.exec(cmd("dig").args(["example.com"])),
+        )
+        .await;
+        assert!(outcome.is_err(), "the call hangs");
+
+        let log = hub.action_log();
+        assert_eq!(log.actions.len(), 1);
+        assert_eq!(log.actions[0].outcome, ActionOutcome::Timeout);
+        assert_eq!(
+            field(&log.actions[0], "program"),
+            Some(&json!("/usr/bin/dig"))
+        );
+    }
 }
 
 // ---- the handle's life -------------------------------------------------------------------------
@@ -299,7 +651,10 @@ async fn a_command_is_logged_with_its_path_argv_and_exit() {
 #[tokio::test]
 async fn a_closed_probe_refuses_everything() {
     let probe = Probe::closed();
-    let error = probe.exec(Cmd::new("ip")).await.expect_err("refused");
+    let error = probe
+        .stat(Path::new("/proc/cpuinfo"))
+        .await
+        .expect_err("refused");
     assert!(matches!(
         error,
         ProbeError::Denied {
@@ -312,10 +667,11 @@ async fn a_closed_probe_refuses_everything() {
     assert!(ctx.probe().stat(Path::new("/proc")).await.is_err());
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_call_after_the_check_ended_is_denied_and_logged() {
     let hub = hub(Replay::new().file("/proc/cpuinfo", "x"));
-    let probe = hub.check_probe("host.cpu");
+    let probe = hub.check_probe("host.cpu", None);
     let straggler = probe.clone();
     probe
         .read(Path::new("/proc/cpuinfo"))
@@ -334,7 +690,7 @@ async fn a_call_after_the_check_ended_is_denied_and_logged() {
             ..
         }
     ));
-    assert!(probe.exec(Cmd::new("ip")).await.is_err());
+    assert!(probe.stat(Path::new("/proc")).await.is_err());
     assert!(probe.begin(ActionKind::Connect, Map::new(), "h").is_err());
 
     let log = hub.action_log();
@@ -361,18 +717,24 @@ impl Backend for Hanging {
     fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
         Box::pin(std::future::pending())
     }
-    fn spawn<'a>(&'a self, _: &'a Cmd) -> BoxFuture<'a, Result<Executed, ProbeError>> {
+    #[cfg(feature = "runtime")]
+    fn spawn<'a>(&'a self, _: &'a ResolvedCmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
         Box::pin(std::future::pending())
+    }
+    #[cfg(feature = "runtime")]
+    fn resolves_on_disk(&self) -> bool {
+        false
     }
 }
 
+#[cfg(unix)]
 #[tokio::test(start_paused = true)]
 async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {
     let hub = ProbeHub::new(Arc::new(Hanging), redactor());
-    let probe = hub.check_probe("net.dns");
+    let probe = hub.check_probe("net.dns", None);
     let outcome = tokio::time::timeout(
-        Duration::from_secs(1),
-        probe.exec(Cmd::new("dig").args(["example.com"])),
+        std::time::Duration::from_secs(1),
+        probe.read(Path::new("/proc/cpuinfo")),
     )
     .await;
     assert!(outcome.is_err(), "the call hangs");
@@ -380,17 +742,66 @@ async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {
     let log = hub.action_log();
     assert_eq!(log.actions.len(), 1);
     assert_eq!(log.actions[0].outcome, ActionOutcome::Timeout);
-    assert_eq!(field(&log.actions[0], "program"), Some(&json!("dig")));
+    assert_eq!(
+        field(&log.actions[0], "path"),
+        Some(&json!("/proc/cpuinfo"))
+    );
+}
+
+#[cfg(all(unix, feature = "runtime"))]
+#[tokio::test]
+async fn a_call_still_running_when_the_check_ends_is_cut_off_and_logged_denied() {
+    let hub = ProbeHub::new(Arc::new(Hanging), redactor());
+    let probe = hub.check_probe("net.dns", None);
+    let ender = probe.clone();
+    let (result, ()) = tokio::join!(probe.read(Path::new("/proc/cpuinfo")), async move {
+        tokio::task::yield_now().await;
+        ender.end();
+    });
+    assert!(matches!(
+        result,
+        Err(ProbeError::Denied {
+            rule: RULE_CHECK_FINISHED,
+            ..
+        })
+    ));
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 1);
+    assert_eq!(log.actions[0].outcome, ActionOutcome::Denied);
+    assert_eq!(
+        field(&log.actions[0], "rule"),
+        Some(&json!(RULE_CHECK_FINISHED))
+    );
 }
 
 // ---- retention ---------------------------------------------------------------------------------
 
 /// Writes one entry of `kind` with `outcome` straight into the log, as a facade method would.
 fn put(probe: &Probe, kind: ActionKind, outcome: ActionOutcome) {
-    let (_, entry) = probe
+    put_at(probe, kind, outcome, None, "");
+}
+
+/// The same, with the path and the reason the entry folds under.
+fn put_at(probe: &Probe, kind: ActionKind, outcome: ActionOutcome, path: Option<&str>, why: &str) {
+    let (_, mut entry) = probe
         .begin(kind, Map::new(), "fixture")
         .expect("probe is live");
+    if let Some(path) = path {
+        entry.set("path", path);
+    }
+    match outcome {
+        ActionOutcome::Denied => entry.set("rule", why),
+        ActionOutcome::Failed => entry.set("error", why),
+        _ => {}
+    }
     entry.finish(outcome);
+}
+
+fn count_of(log: &ActionLogOutput, kind: &str, outcome: ActionOutcome) -> usize {
+    log.actions
+        .iter()
+        .filter(|a| a.kind.as_str() == kind && a.outcome == outcome)
+        .count()
 }
 
 fn is_droppable_kind(kind: &str) -> bool {
@@ -398,9 +809,9 @@ fn is_droppable_kind(kind: &str) -> bool {
 }
 
 #[test]
-fn truncation_drops_only_ok_read_read_dir_and_stat() {
-    let hub = hub(Replay::new()).with_max_entries(20);
-    let probe = hub.check_probe("fixture.flood");
+fn ok_reads_go_first_and_everything_else_stays() {
+    let hub = hub(Replay::new()).with_limits(20, 1000);
+    let probe = hub.check_probe("fixture.flood", None);
     let keep = [
         (ActionKind::Exec, ActionOutcome::Ok),
         (ActionKind::Connect, ActionOutcome::Ok),
@@ -411,11 +822,9 @@ fn truncation_drops_only_ok_read_read_dir_and_stat() {
         (ActionKind::Lookup, ActionOutcome::Ok),
         (ActionKind::Native, ActionOutcome::Ok),
         (ActionKind::Read, ActionOutcome::Denied),
-        (ActionKind::Read, ActionOutcome::Failed),
-        (ActionKind::Stat, ActionOutcome::Failed),
         (ActionKind::ReadDir, ActionOutcome::Timeout),
     ];
-    // A flood of droppable entries first, then the entries that must survive, then more flood.
+    // A flood of ok reads first, then the entries that must survive, then more flood.
     for _ in 0..20 {
         put(&probe, ActionKind::Read, ActionOutcome::Ok);
         put(&probe, ActionKind::ReadDir, ActionOutcome::Ok);
@@ -439,34 +848,241 @@ fn truncation_drops_only_ok_read_read_dir_and_stat() {
     assert_eq!(kept, keep.to_vec());
 
     assert!(log.truncated);
-    assert!(!log.dropped.is_empty());
     for kind in log.dropped.keys() {
         assert!(is_droppable_kind(kind), "dropped a {kind} entry");
     }
+    assert_eq!(log.last_resort_drops, 0);
     assert_eq!(log.actions.len(), 20, "the log holds exactly its cap");
-    // Every dropped entry is a gap in seq: 92 entries were made, 20 are left.
+    // Every dropped entry is a gap in seq: 60 + 10 + 20 entries were made, 20 are left.
     let total_dropped: u64 = log.dropped.values().sum();
-    assert_eq!(total_dropped + 20, 60 + 12 + 20);
+    assert_eq!(total_dropped + 20, 60 + 10 + 20);
     let seqs: Vec<u64> = log.actions.iter().map(|a| a.seq).collect();
     assert!(seqs.windows(2).all(|w| w[0] < w[1]));
 }
 
 #[test]
-fn a_full_log_with_nothing_droppable_keeps_its_bound_and_counts_the_loss() {
-    let hub = hub(Replay::new()).with_max_entries(2);
-    let probe = hub.check_probe("fixture.flood");
+fn failed_reads_go_second_and_never_for_an_ok_read() {
+    let hub = hub(Replay::new()).with_limits(10, 1000);
+    let probe = hub.check_probe("fixture.flood", None);
+    // Ten failed reads, each under its own directory so none fold.
+    for i in 0..10 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Failed,
+            Some(&format!("/d{i}/f")),
+            "not found",
+        );
+    }
+    // A new ok read does not displace a failed one.
+    put(&probe, ActionKind::Read, ActionOutcome::Ok);
+    assert_eq!(
+        count_of(&hub.action_log(), "read", ActionOutcome::Failed),
+        10
+    );
+    // An exec and a denied read each displace one failed read.
+    put(&probe, ActionKind::Exec, ActionOutcome::Ok);
+    put_at(
+        &probe,
+        ActionKind::Read,
+        ActionOutcome::Denied,
+        Some("/etc/shadow"),
+        "password and sudo files are never read",
+    );
+    let log = hub.action_log();
+    assert_eq!(count_of(&log, "read", ActionOutcome::Failed), 8);
+    assert_eq!(count_of(&log, "exec", ActionOutcome::Ok), 1);
+    assert_eq!(count_of(&log, "read", ActionOutcome::Denied), 1);
+    assert_eq!(log.last_resort_drops, 0);
+    assert_eq!(log.dropped.get("read"), Some(&3), "1 ok read and 2 failed");
+}
+
+#[test]
+fn many_failed_reads_under_one_directory_fold_into_one_entry() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("fixture.flood", None);
+    for i in 0..(COALESCE_AFTER + 30) {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Failed,
+            Some(&format!("/sys/class/net/eth0/f{i}")),
+            "not found",
+        );
+    }
+    // A different reason under the same directory is another key.
+    put_at(
+        &probe,
+        ActionKind::Read,
+        ActionOutcome::Failed,
+        Some("/sys/class/net/eth0/g"),
+        "permission denied",
+    );
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), COALESCE_AFTER + 1 + 1);
+    let folded = log
+        .actions
+        .iter()
+        .find(|a| a.kind == ActionKind::Coalesced)
+        .expect("a coalesced entry");
+    assert_eq!(folded.outcome, ActionOutcome::Failed);
+    assert_eq!(folded.check.as_deref(), Some("fixture.flood"));
+    assert_eq!(field(folded, "of"), Some(&json!("read")));
+    assert_eq!(field(folded, "under"), Some(&json!("/sys/class/net/eth0")));
+    assert_eq!(field(folded, "error"), Some(&json!("not found")));
+    assert_eq!(field(folded, "count"), Some(&json!(30)));
+    assert!(!log.truncated, "folding is not dropping");
+}
+
+#[test]
+fn a_flood_of_denied_reads_folds_and_nothing_is_dropped() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("fixture.flood", None);
+    for i in 0..6000 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Denied,
+            Some(&format!("/home/ada/.ssh/k{i}")),
+            "ssh directories are never read",
+        );
+    }
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), COALESCE_AFTER + 1);
+    assert!(log.dropped.is_empty());
+    assert_eq!(log.last_resort_drops, 0);
+    let folded = log.actions.last().expect("entry");
+    assert_eq!(folded.kind, ActionKind::Coalesced);
+    assert_eq!(folded.outcome, ActionOutcome::Denied);
+    assert_eq!(
+        field(folded, "rule"),
+        Some(&json!("ssh directories are never read"))
+    );
+    assert_eq!(field(folded, "count"), Some(&json!(6000 - COALESCE_AFTER)));
+}
+
+#[test]
+fn six_thousand_failed_reads_then_a_denied_read_keeps_the_denied_entry() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.flood", None);
+    for i in 0..6000 {
+        // A directory each, so folding does not help and retention has to.
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Failed,
+            Some(&format!("/d{i}/f")),
+            "not found",
+        );
+    }
+    let before = hub.action_log();
+    assert_eq!(before.actions.len(), CHECK_QUOTA, "the quota holds");
+    assert!(before.truncated);
+
+    put_at(
+        &probe,
+        ActionKind::Read,
+        ActionOutcome::Denied,
+        Some("/etc/shadow"),
+        "password and sudo files are never read",
+    );
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), CHECK_QUOTA);
+    assert_eq!(count_of(&log, "read", ActionOutcome::Denied), 1);
+    assert_eq!(
+        field(log.actions.last().expect("entry"), "path"),
+        Some(&json!("/etc/shadow"))
+    );
+    assert_eq!(
+        log.last_resort_drops, 0,
+        "failed reads gave way, not the last resort"
+    );
+    assert_eq!(log.dropped.get("read"), Some(&(6001 - CHECK_QUOTA as u64)));
+}
+
+#[test]
+fn the_whole_log_cap_holds_across_checks_and_still_keeps_a_denied_entry() {
+    let hub = hub(Replay::new());
+    // Six checks at their quota is 6000 failed reads, more than the 5000 the log may hold.
+    for check in 0..6 {
+        let probe = hub.check_probe(&format!("host.c{check}"), None);
+        for i in 0..CHECK_QUOTA {
+            put_at(
+                &probe,
+                ActionKind::Stat,
+                ActionOutcome::Failed,
+                Some(&format!("/c{check}/d{i}/f")),
+                "not found",
+            );
+        }
+    }
+    assert_eq!(hub.action_log().actions.len(), MAX_ENTRIES);
+    let late = hub.check_probe("host.late", None);
+    put_at(
+        &late,
+        ActionKind::Read,
+        ActionOutcome::Denied,
+        Some("/etc/shadow"),
+        "password and sudo files are never read",
+    );
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), MAX_ENTRIES);
+    assert_eq!(count_of(&log, "read", ActionOutcome::Denied), 1);
+    assert_eq!(log.last_resort_drops, 0);
+}
+
+#[test]
+fn one_check_cannot_use_more_than_its_quota() {
+    let hub = hub(Replay::new()).with_limits(5000, 3);
+    let noisy = hub.check_probe("host.noisy", None);
+    let quiet = hub.check_probe("host.quiet", None);
+    for _ in 0..10 {
+        put(&noisy, ActionKind::Read, ActionOutcome::Ok);
+    }
+    put(&quiet, ActionKind::Exec, ActionOutcome::Ok);
+    let log = hub.action_log();
+    let by = |key: &str| {
+        log.actions
+            .iter()
+            .filter(|a| a.check.as_deref() == Some(key))
+            .count()
+    };
+    assert_eq!(by("host.noisy"), 3);
+    assert_eq!(by("host.quiet"), 1);
+}
+
+#[test]
+fn the_last_resort_drops_other_entries_before_a_denied_one_and_counts_it() {
+    let hub = hub(Replay::new()).with_limits(3, 1000);
+    let probe = hub.check_probe("fixture.flood", None);
     for _ in 0..3 {
         put(&probe, ActionKind::Connect, ActionOutcome::Ok);
     }
+    // A new spare entry has nothing to displace: it is the one dropped.
+    put(&probe, ActionKind::Connect, ActionOutcome::Ok);
     let log = hub.action_log();
-    assert_eq!(log.actions.len(), 2);
-    assert!(log.truncated);
+    assert_eq!(log.actions.len(), 3);
     assert_eq!(log.dropped.get("connect"), Some(&1));
+    assert_eq!(log.last_resort_drops, 1);
+
+    // A denied entry displaces the newest spare one.
+    put_at(
+        &probe,
+        ActionKind::Read,
+        ActionOutcome::Denied,
+        Some("/etc/shadow"),
+        "password and sudo files are never read",
+    );
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 3);
+    assert_eq!(count_of(&log, "read", ActionOutcome::Denied), 1);
+    assert_eq!(count_of(&log, "connect", ActionOutcome::Ok), 2);
+    assert_eq!(log.last_resort_drops, 2);
 }
 
 // ---- the fixture run, through the scheduler -------------------------------------------------------
 
-#[cfg(feature = "runtime")]
+#[cfg(all(feature = "runtime", unix))]
 mod scheduled {
     use std::sync::Mutex;
 
@@ -474,7 +1090,7 @@ mod scheduled {
 
     use super::*;
     use crate::check::{Check, CheckContext, CheckInfo, CheckOutcome, Finding};
-    use crate::check::{Need, Os, OsSupport, Support};
+    use crate::check::{CommandSpec, Need, Os, OsSupport, Support};
     use crate::sched::{End, Planned, Scheduler};
 
     static WALKER: CheckInfo = CheckInfo {
@@ -491,7 +1107,12 @@ mod scheduled {
         },
         reads: &[],
         env: &[],
-        commands: &[],
+        commands: &[CommandSpec {
+            program: "ip",
+            extra_dirs: &[],
+            max_stdout: 4096,
+            env: &[],
+        }],
         peers: &[],
     };
 
@@ -513,11 +1134,18 @@ mod scheduled {
                 probe.read(Path::new("/proc/cpuinfo")).await?;
                 let refused = probe.read(Path::new("/proc/1/environ")).await;
                 assert!(matches!(refused, Err(ProbeError::Denied { .. })));
+                let refused = probe.read(Path::new("/home/tester/.ssh/id_rsa")).await;
+                assert!(
+                    matches!(&refused, Err(ProbeError::Denied { what, .. }) if what == "~/.ssh/id_rsa"),
+                    "{refused:?}"
+                );
                 probe
-                    .exec(Cmd::new("ip").args(["--password=hunter2hunter2", "addr"]))
+                    .exec(cmd("ip").args(["--password", "hunter2hunter2", "addr"]))
                     .await?;
 
-                // The network and kube tickets open their entries through the same door.
+                // The network and kube tickets open their entries through the same door. Until
+                // their methods exist (M1-091, M1-103), the rows are written by hand here, and those
+                // tickets inherit "every tcp, http and kube call writes exactly one entry".
                 let (_, mut connect) =
                     probe.begin(ActionKind::Connect, Map::new(), "registry.acme.example")?;
                 connect.set("host", "registry.acme.example");
@@ -536,32 +1164,49 @@ mod scheduled {
         }
     }
 
-    /// The first `json` block of the `### 7.2` example in 01, the report of a run.
+    /// The report of 01 section 7.2, as a fixture. The run puts its own action log into it.
     fn sample_report() -> Report {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let doc = std::fs::read_to_string(root.join("docs/plan/01-spec-format.md"))
-            .expect("01 is in the repo")
-            .replace("\r\n", "\n");
-        let start = doc.find("\n### 7.2 ").expect("section 7.2");
-        let section = &doc[start + 1..];
-        let open = section.find("```json\n").expect("json block") + "```json\n".len();
-        let body = &section[open..];
-        let close = body.find("\n```").expect("end of block");
-        serde_json::from_str(&body[..close]).expect("the sample is a report")
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/reports/not-ready-7.2.json");
+        let text = std::fs::read_to_string(path).expect("the fixture is in the repo");
+        serde_json::from_str(&text).expect("the sample is a report")
     }
 
-    #[cfg(unix)]
+    /// The result schema, as the generator wrote it.
+    fn assert_matches_result_schema(report: &Value) {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../rdy-spec/schema/result.v1.schema.json");
+        let schema: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("schema file"))
+                .expect("schema json");
+        let validator = jsonschema::draft202012::options()
+            .should_validate_formats(true)
+            .build(&schema)
+            .expect("schema compiles");
+        let errors: Vec<String> = validator
+            .iter_errors(report)
+            .map(|e| format!("{e} at {}", e.instance_path()))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "the report fails the schema: {errors:#?}"
+        );
+    }
+
     #[tokio::test]
     async fn the_fixture_run_lists_every_side_effect_in_the_json_report() {
         let leaked = Arc::new(Mutex::new(None));
         let replay = Replay::new()
             .file("/proc/cpuinfo", "processor : 0\n")
-            // The fixture has the file. Only the denylist stands between the check and it.
+            // The fixture has these files. Only the denylist stands between the check and them.
             .file("/proc/1/environ", "TOKEN=abc")
-            .command("ip", &["--password=hunter2hunter2", "addr"], 0, "[]");
+            .file("/home/tester/.ssh/id_rsa", "KEY")
+            .command("ip", &["--password", "hunter2hunter2", "addr"], 0, "[]");
         let hub = hub(replay).with_home("/home/tester");
 
         // Run-level work: the engine reads the kubeconfig itself and logs it with `check: null`.
+        // The real read goes through the run probe once M1-102 settles the path: the denylist
+        // refuses `.kube` for every probe, so the engine's own kubeconfig read needs an exception.
         let run = hub.run_probe();
         let (_, mut kubeconfig) = run
             .begin(ActionKind::Read, Map::new(), "~/.kube/config")
@@ -601,6 +1246,7 @@ mod scheduled {
         hub.action_log().apply(&mut report);
         let json = serde_json::to_value(&report).expect("report");
         let text = serde_json::to_string(&json).expect("text");
+        assert_matches_result_schema(&json);
 
         let actions = json["actions"].as_array().expect("actions");
         let seen: Vec<(Option<&str>, &str, &str)> = actions
@@ -619,6 +1265,7 @@ mod scheduled {
                 (None, "read", "ok"),
                 (Some("host.cpu"), "read", "ok"),
                 (Some("host.cpu"), "read", "denied"),
+                (Some("host.cpu"), "read", "denied"),
                 (Some("host.cpu"), "exec", "ok"),
                 (Some("host.cpu"), "connect", "ok"),
                 (Some("host.cpu"), "kube", "ok"),
@@ -627,39 +1274,45 @@ mod scheduled {
         );
         // seq runs from 1 and the entries sit in seq order.
         let seqs: Vec<u64> = actions.iter().filter_map(|a| a["seq"].as_u64()).collect();
-        assert_eq!(seqs, [1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(seqs, [1, 2, 3, 4, 5, 6, 7, 8]);
 
-        // A command: the resolved path and argv, with the secret already gone.
-        assert_eq!(actions[3]["program"], "/usr/bin/ip");
-        let argv = actions[3]["argv"].as_array().expect("argv");
-        assert!(
-            argv[0]
-                .as_str()
-                .is_some_and(|a| a.starts_with("--password=[REDACTED:secret_by_key:"))
-        );
-        assert!(!text.contains("hunter2"), "a secret reached the report");
-        // A file, and the refused read of /proc/1/environ with its rule.
+        // A file, and the refused reads with their rules. The home directory shows as `~`.
         assert_eq!(actions[1]["path"], "/proc/cpuinfo");
         assert_eq!(actions[2]["path"], "/proc/1/environ");
         assert_eq!(actions[2]["rule"], policy::RULE_PROC);
         assert!(actions[2].get("bytes").is_none());
+        assert_eq!(actions[3]["path"], "~/.ssh/id_rsa");
+        assert_eq!(actions[3]["rule"], policy::RULE_SSH);
+        assert!(
+            !text.contains("/home/tester"),
+            "a home path reached the report"
+        );
+        // A command: the resolved path and argv, with the secret already gone.
+        assert_eq!(actions[4]["program"], "/usr/bin/ip");
+        let argv = actions[4]["argv"].as_array().expect("argv");
+        assert_eq!(argv[0], "--password");
+        assert!(
+            argv[1]
+                .as_str()
+                .is_some_and(|a| a.starts_with("[REDACTED:secret_by_key:"))
+        );
+        assert!(!text.contains("hunter2"), "a secret reached the report");
         // An endpoint and a kube request.
-        assert_eq!(actions[4]["host"], "registry.acme.example");
-        assert_eq!(actions[4]["port"], 443);
-        assert_eq!(actions[5]["path"], "/version");
+        assert_eq!(actions[5]["host"], "registry.acme.example");
+        assert_eq!(actions[5]["port"], 443);
+        assert_eq!(actions[6]["path"], "/version");
         // The late call names the check and the rule.
-        assert_eq!(actions[6]["rule"], RULE_CHECK_FINISHED);
+        assert_eq!(actions[7]["rule"], RULE_CHECK_FINISHED);
 
-        // Identity is the report's own, and the redaction count includes what the log redacted.
-        assert!(json["identity"]["euid"].is_number());
+        // The redaction count includes what the log redacted.
         assert_eq!(json["redaction"]["total"], 1);
         assert_eq!(json["redaction"]["by_rule"]["secret_by_key"], 1);
         assert_eq!(json["actions_truncated"], false);
 
         // It is still a report.
         let again: Report = serde_json::from_value(json).expect("round trip");
-        assert_eq!(again.actions.len(), 7);
-        assert_eq!(hub.action_log().actions.len(), 7);
+        assert_eq!(again.actions.len(), 8);
+        assert_eq!(hub.action_log().actions.len(), 8);
     }
 
     #[tokio::test(start_paused = true)]
@@ -710,7 +1363,7 @@ mod scheduled {
 #[test]
 fn the_log_survives_a_poisoned_lock() {
     let hub = hub(Replay::new());
-    let probe = hub.check_probe("fixture.walker");
+    let probe = hub.check_probe("fixture.walker", None);
     hub.log.poison();
     put(&probe, ActionKind::Exec, ActionOutcome::Ok);
     assert_eq!(hub.action_log().actions.len(), 1);

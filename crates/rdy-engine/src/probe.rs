@@ -7,42 +7,55 @@
 //! - **The log names the check.** Each entry carries the check's result key.
 //! - **It dies with the check.** The scheduler ends the handle when the check ends, however it ends.
 //!   A call made later, for example from a task the check left running, is refused with rule
-//!   [`RULE_CHECK_FINISHED`] and logged as `denied`.
+//!   [`RULE_CHECK_FINISHED`] and logged as `denied`. A call that is still running when the check ends
+//!   is cut off the same way (feature `runtime`; without it the call finishes first).
 //! - **A context built without a hub is closed.** Every call is refused with [`RULE_NO_PROBE`]. There
 //!   is nothing to log it in.
 //!
 //! Policy and the log sit above [`Backend`], which does the raw I/O and nothing else. A call goes in
-//! this order: the handle is checked, the policy (`policy` module) is applied, the backend runs, the
-//! entry is closed. A refused call never reaches the backend.
+//! this order: the handle is checked, the policy is applied, the backend runs, the entry is closed. A
+//! refused call never reaches the backend.
+//!
+//! **Commands.** `Probe::exec` takes the one `Cmd` type of `exec::policy`. The probe applies what
+//! the check declared for that program in `CheckInfo::commands` (extra search directories, stdout cap,
+//! environment names), checks the name, resolves it to a real path, and only then hands a
+//! `ResolvedCmd` to `Backend::spawn`. A replayed run therefore refuses `sh` and `sudo` exactly as a
+//! live run does, and the backend never sees a name it could be tricked into running. A probe built
+//! with no `CheckInfo` (run-level work, or a test context from `TestRun::context`) applies the command
+//! policy only.
 //!
 //! **What is here, and what is not.** This ticket (M1-040) builds the handle, the log and the read
 //! denylist, with `read`, `read_dir`, `stat` and `exec`. Still to come, each in its own ticket:
 //!
 //! - the real path check, the `reads` prefixes, the size caps, `read_tail` and `env`: M1-045;
-//! - the command policy (fixed search path, refused programs, environment): M1-039. [`Probe::exec`]
-//!   hands a [`Cmd`] to [`Backend::spawn`]. The live backend will implement `spawn` by calling
-//!   `exec::policy::run` and mapping its error to [`ProbeError`];
 //! - names, TCP, TLS, HTTP and native calls: the network and native tickets. They open their entries
-//!   with the crate-private `Probe::begin`, the same way the methods here do;
-//! - the live backend itself, which only these tickets can make safe to ship. Only the replay backend
-//!   (feature `testing`) exists today, so nothing in a release build reaches the machine yet.
+//!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp, http and kube
+//!   call writes exactly one entry (M1-091, M1-103);
+//! - the live backend itself, which only these tickets can make safe to ship. It will implement
+//!   `Backend::spawn` by running the `ResolvedCmd` and mapping the runner's error to [`ProbeError`].
+//!   Only the replay backend (feature `testing`) exists today, so nothing in a release build reaches
+//!   the machine yet.
 
 use std::fmt;
+use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 use rdy_spec::result::{ActionKind, ActionOutcome};
 use serde_json::{Map, Value};
 
-use crate::check::BoxFuture;
+use crate::check::{BoxFuture, CheckInfo};
+#[cfg(feature = "runtime")]
+use crate::exec::policy::PolicyError;
 use crate::redact::Redactor;
 
-pub use log::{ActionLogOutput, MAX_ENTRIES};
+#[cfg(feature = "runtime")]
+pub use crate::exec::policy::{Cmd, ResolvedCmd};
+pub use log::{ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, MAX_ENTRIES};
 
-use log::{ActionLog, Pending};
+use log::{ActionLog, Limits, Pending};
 
 mod log;
 mod policy;
@@ -57,6 +70,12 @@ pub const RULE_CHECK_FINISHED: &str = "check finished";
 /// The rule of a call on a context that has no probe hub.
 pub const RULE_NO_PROBE: &str = "no probe in this context";
 
+/// The rule of a command the check did not declare in `CheckInfo::commands`.
+pub const RULE_COMMAND_UNDECLARED: &str = "command not declared by the check";
+
+/// The rule of an environment name the check did not declare for that command.
+pub const RULE_ENV_UNDECLARED: &str = "environment name not declared by the check";
+
 /// Why a probe call did not give a value.
 ///
 /// It is `Clone`, `PartialEq` and `Eq` because [`CheckError`](crate::check::CheckError) is. The
@@ -64,7 +83,8 @@ pub const RULE_NO_PROBE: &str = "no probe in this context";
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ProbeError {
-    /// rdy's own policy refused the call. `rule` is a fixed sentence, `what` names the target.
+    /// rdy's own policy refused the call. `rule` is a fixed sentence, `what` names the target. For a
+    /// path, `what` is the path as the log shows it (`~/...` under the home directory).
     #[error("refused by rdy policy ({rule}): {what}")]
     Denied {
         /// The rule that refused it.
@@ -72,6 +92,10 @@ pub enum ProbeError {
         /// What was refused, such as a path. Redact it before it is shown.
         what: String,
     },
+    /// The command policy refused the command. The text ends with what to do.
+    #[cfg(feature = "runtime")]
+    #[error("refused by rdy policy: {0}")]
+    Policy(#[from] PolicyError),
     /// The file, directory or program does not exist.
     #[error("not found")]
     NotFound,
@@ -107,6 +131,8 @@ impl ProbeError {
     fn outcome(&self) -> ActionOutcome {
         match self {
             Self::Denied { .. } => ActionOutcome::Denied,
+            #[cfg(feature = "runtime")]
+            Self::Policy(_) => ActionOutcome::Denied,
             Self::Timeout | Self::Hung { .. } => ActionOutcome::Timeout,
             Self::NotFound | Self::PermissionDenied | Self::Io(_) => ActionOutcome::Failed,
         }
@@ -205,40 +231,6 @@ impl FileMeta {
     }
 }
 
-/// A command to run. The program is a constant, so spec text cannot name one (02 "Exec").
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Cmd {
-    /// The program name. The backend resolves it (M1-039).
-    pub program: &'static str,
-    /// The arguments after the program, passed as argv. No shell sees them.
-    pub args: Vec<String>,
-    /// The timeout. `None` lets the backend choose.
-    pub timeout: Option<Duration>,
-}
-
-impl Cmd {
-    /// A command with no arguments and the backend's timeout.
-    #[must_use]
-    pub fn new(program: &'static str) -> Self {
-        Self {
-            program,
-            args: Vec::new(),
-            timeout: None,
-        }
-    }
-
-    /// Sets the arguments.
-    #[must_use]
-    pub fn args<I, S>(mut self, args: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.args = args.into_iter().map(Into::into).collect();
-        self
-    }
-}
-
 /// What a command that ran left behind.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -267,27 +259,6 @@ impl Output {
     }
 }
 
-/// A finished command and the absolute path it ran from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct Executed {
-    /// The resolved program path. The action log records it.
-    pub path: PathBuf,
-    /// What the command left behind.
-    pub output: Output,
-}
-
-impl Executed {
-    /// A command that ran from `path`.
-    #[must_use]
-    pub fn new(path: impl Into<PathBuf>, output: Output) -> Self {
-        Self {
-            path: path.into(),
-            output,
-        }
-    }
-}
-
 mod sealed {
     /// Keeps [`super::Backend`] closed: only this crate can implement it (ADR 0014 decision 1).
     pub trait Sealed {}
@@ -304,9 +275,18 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
     fn read_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>>;
     /// Inspects a path. `Ok(None)` means it does not exist.
     fn stat<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
-    /// Runs a command. Unlike the file calls this returns a [`ProbeError`], because the command
-    /// policy (M1-039) refuses and times out in ways an `io::Error` cannot carry.
-    fn spawn<'a>(&'a self, cmd: &'a Cmd) -> BoxFuture<'a, Result<Executed, ProbeError>>;
+    /// Runs a command that already passed the policy. Unlike the file calls this returns a
+    /// [`ProbeError`], because a start failure, a timeout and a command that would not die are not
+    /// `io::Error` kinds.
+    #[cfg(feature = "runtime")]
+    fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, Result<Output, ProbeError>>;
+    /// Whether the policy looks the program up on this machine. The live backend does. A fixture
+    /// backend says no: every other rule still applies, and the program gets the path
+    /// `/usr/bin/<name>`, so a replayed run does not depend on the tools the test machine has.
+    #[cfg(feature = "runtime")]
+    fn resolves_on_disk(&self) -> bool {
+        true
+    }
 }
 
 /// The run-wide side of the facade: the backend and the action log.
@@ -330,7 +310,7 @@ impl ProbeHub {
     pub fn new(backend: Arc<dyn Backend>, redactor: Redactor) -> Self {
         Self {
             backend,
-            log: ActionLog::new(redactor, None, MAX_ENTRIES),
+            log: ActionLog::new(redactor, None, Limits::default()),
         }
     }
 
@@ -339,19 +319,28 @@ impl ProbeHub {
     #[must_use]
     pub fn with_home(mut self, home: impl Into<PathBuf>) -> Self {
         let redactor = self.log.redactor().clone();
-        self.log = ActionLog::new(redactor, Some(home.into()), MAX_ENTRIES);
+        self.log = ActionLog::new(redactor, Some(home.into()), Limits::default());
         self
     }
 
-    /// Caps the log at `max` entries. For tests of retention.
+    /// Sets the log limits. For tests of retention.
     #[cfg(test)]
-    fn with_max_entries(mut self, max: usize) -> Self {
+    fn with_limits(mut self, max_entries: usize, check_quota: usize) -> Self {
         let redactor = self.log.redactor().clone();
-        self.log = ActionLog::new(redactor, None, max);
+        self.log = ActionLog::new(
+            redactor,
+            None,
+            Limits {
+                max_entries,
+                check_quota,
+            },
+        );
         self
     }
 
-    /// The probe for one check. `key` is the check's result key.
+    /// The probe for one check. `key` is the check's result key. `info` is the check's manifest: with
+    /// it, a command must be one the check declared, and its directories, environment names and stdout
+    /// cap come from the declaration.
     #[cfg_attr(
         not(any(test, feature = "runtime", feature = "testing")),
         expect(
@@ -359,26 +348,23 @@ impl ProbeHub {
             reason = "only the scheduler and the test helpers open probes"
         )
     )]
-    pub(crate) fn check_probe(&self, key: &str) -> Probe {
-        self.probe(Some(key.to_owned()))
+    pub(crate) fn check_probe(&self, key: &str, info: Option<&'static CheckInfo>) -> Probe {
+        self.probe(Some(key.to_owned()), info)
     }
 
     /// The probe for run-level work, which the log records with `check: null`.
     #[cfg_attr(
-        not(all(test, feature = "runtime")),
+        not(all(test, feature = "runtime", unix)),
         expect(dead_code, reason = "the engine run (M1-057) opens run-level probes")
     )]
     pub(crate) fn run_probe(&self) -> Probe {
-        self.probe(None)
+        self.probe(None, None)
     }
 
-    fn probe(&self, check: Option<String>) -> Probe {
+    fn probe(&self, check: Option<String>, info: Option<&'static CheckInfo>) -> Probe {
         Probe {
             hub: Some(self.clone()),
-            scope: Arc::new(Scope {
-                check,
-                ended: AtomicBool::new(false),
-            }),
+            scope: Arc::new(Scope::new(check, info)),
         }
     }
 
@@ -391,7 +377,28 @@ impl ProbeHub {
 
 struct Scope {
     check: Option<String>,
+    /// The check's manifest. Only commands read it so far (M1-045 adds files and env).
+    #[cfg_attr(
+        not(feature = "runtime"),
+        expect(dead_code, reason = "commands need the runtime feature")
+    )]
+    info: Option<&'static CheckInfo>,
     ended: AtomicBool,
+    /// Tells calls in flight that the check ended.
+    #[cfg(feature = "runtime")]
+    ended_signal: tokio::sync::watch::Sender<bool>,
+}
+
+impl Scope {
+    fn new(check: Option<String>, info: Option<&'static CheckInfo>) -> Self {
+        Self {
+            check,
+            info,
+            ended: AtomicBool::new(false),
+            #[cfg(feature = "runtime")]
+            ended_signal: tokio::sync::watch::channel(false).0,
+        }
+    }
 }
 
 /// What a check uses to read the machine. See the [module docs](self).
@@ -411,26 +418,34 @@ impl fmt::Debug for Probe {
     }
 }
 
+/// A call that passed the handle checks and the read denylist.
+struct Gate<'a> {
+    hub: &'a ProbeHub,
+    entry: Pending,
+    /// The path as the log shows it. This, never the raw path, goes into an error.
+    what: String,
+}
+
 impl Probe {
     /// A probe that refuses every call. It is what a context has until the scheduler or a test hub
     /// gives it a real one.
     pub(crate) fn closed() -> Self {
         Self {
             hub: None,
-            scope: Arc::new(Scope {
-                check: None,
-                ended: AtomicBool::new(false),
-            }),
+            scope: Arc::new(Scope::new(None, None)),
         }
     }
 
-    /// Ends the probe. Every later call, on this handle or a clone, is refused and logged.
+    /// Ends the probe. Every later call, on this handle or a clone, is refused and logged. A call in
+    /// flight is cut off.
     #[cfg_attr(
         not(any(test, feature = "runtime")),
         expect(dead_code, reason = "only the scheduler ends probes")
     )]
     pub(crate) fn end(&self) {
         self.scope.ended.store(true, Ordering::Release);
+        #[cfg(feature = "runtime")]
+        self.scope.ended_signal.send_replace(true);
     }
 
     /// Opens the log entry for a call, after the handle checks. This is the one door every method
@@ -455,6 +470,30 @@ impl Probe {
         Ok((hub, entry))
     }
 
+    /// Runs `work`, unless the check ends first. Then the call is refused as a late call.
+    async fn unless_ended<T>(
+        &self,
+        what: &str,
+        work: impl Future<Output = Result<T, ProbeError>>,
+    ) -> Result<T, ProbeError> {
+        #[cfg(feature = "runtime")]
+        {
+            let mut ended = self.scope.ended_signal.subscribe();
+            tokio::select! {
+                biased;
+                _ = ended.wait_for(|ended| *ended) => {
+                    Err(ProbeError::denied(RULE_CHECK_FINISHED, what))
+                }
+                result = work => result,
+            }
+        }
+        #[cfg(not(feature = "runtime"))]
+        {
+            let _ = what;
+            work.await
+        }
+    }
+
     /// Reads a whole file.
     ///
     /// # Errors
@@ -462,12 +501,15 @@ impl Probe {
     /// [`ProbeError::Denied`] for a path on the denylist, a relative path, a `..` path, or a call after
     /// the check ended; the other variants when the backend fails.
     pub async fn read(&self, path: &Path) -> Result<FileBytes, ProbeError> {
-        let (hub, entry) = self.gate_file(ActionKind::Read, path)?;
-        let result = hub
-            .backend
-            .open_read(path)
-            .await
-            .map_err(|e| ProbeError::from_io(&e));
+        let Gate { hub, entry, what } = self.gate_file(ActionKind::Read, path)?;
+        let result = self
+            .unless_ended(&what, async {
+                hub.backend
+                    .open_read(path)
+                    .await
+                    .map_err(|e| ProbeError::from_io(&e))
+            })
+            .await;
         settle(entry, result, |file, entry| {
             entry.set("bytes", file.bytes.len());
             entry.set("truncated", file.truncated());
@@ -480,12 +522,15 @@ impl Probe {
     ///
     /// The same as [`Probe::read`].
     pub async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ProbeError> {
-        let (hub, entry) = self.gate_file(ActionKind::ReadDir, path)?;
-        let result = hub
-            .backend
-            .read_dir(path)
-            .await
-            .map_err(|e| ProbeError::from_io(&e));
+        let Gate { hub, entry, what } = self.gate_file(ActionKind::ReadDir, path)?;
+        let result = self
+            .unless_ended(&what, async {
+                hub.backend
+                    .read_dir(path)
+                    .await
+                    .map_err(|e| ProbeError::from_io(&e))
+            })
+            .await;
         settle(entry, result, |entries, entry| {
             entry.set("entries", entries.len());
         })
@@ -497,12 +542,15 @@ impl Probe {
     ///
     /// The same as [`Probe::read`].
     pub async fn stat(&self, path: &Path) -> Result<Option<FileMeta>, ProbeError> {
-        let (hub, entry) = self.gate_file(ActionKind::Stat, path)?;
-        let result = hub
-            .backend
-            .stat(path)
-            .await
-            .map_err(|e| ProbeError::from_io(&e));
+        let Gate { hub, entry, what } = self.gate_file(ActionKind::Stat, path)?;
+        let result = self
+            .unless_ended(&what, async {
+                hub.backend
+                    .stat(path)
+                    .await
+                    .map_err(|e| ProbeError::from_io(&e))
+            })
+            .await;
         settle(entry, result, |meta, entry| {
             if let Some(meta) = meta {
                 entry.set("bytes", meta.len);
@@ -512,41 +560,78 @@ impl Probe {
 
     /// Runs a command.
     ///
-    /// The entry records the resolved program path, the arguments, the exit code and how many bytes of
-    /// stdout were kept. M1-039 routes this through `exec::policy::run`.
+    /// The probe applies what the check declared for this program, checks the name, resolves it and
+    /// hands the backend a [`ResolvedCmd`]. The entry records the resolved program path, the arguments
+    /// (redacted, including the value after a secret flag), the exit code and how many bytes of stdout
+    /// were kept.
     ///
     /// # Errors
     ///
-    /// [`ProbeError::Denied`] after the check ended, or when the command policy refuses; the other
-    /// variants when the command fails or times out.
+    /// [`ProbeError::Denied`] after the check ended, for a program or environment name the check did
+    /// not declare; [`ProbeError::Policy`] when the command policy refuses; the other variants when the
+    /// command fails or times out.
+    #[cfg(feature = "runtime")]
     pub async fn exec(&self, cmd: Cmd) -> Result<Output, ProbeError> {
         let mut fields = Map::new();
-        fields.insert("program".to_owned(), cmd.program.into());
+        fields.insert("program".to_owned(), cmd.program().into());
         fields.insert(
             "argv".to_owned(),
-            Value::Array(cmd.args.iter().cloned().map(Value::String).collect()),
+            Value::Array(
+                cmd.arguments()
+                    .iter()
+                    .map(|arg| Value::String(arg.to_string_lossy().into_owned()))
+                    .collect(),
+            ),
         );
-        let (hub, entry) = self.begin(ActionKind::Exec, fields, cmd.program)?;
-        let result = hub.backend.spawn(&cmd).await;
+        let (hub, mut entry) = self.begin(ActionKind::Exec, fields, cmd.program())?;
+        let resolved = match self.resolve(hub, cmd) {
+            Ok(resolved) => resolved,
+            Err(error) => return settle(entry, Err(error), |_: &Output, _| {}),
+        };
+        entry.set("program", hub.log.display_path(resolved.path()));
+        let result = self
+            .unless_ended(resolved.program(), hub.backend.spawn(&resolved))
+            .await;
         settle(entry, result, |done, entry| {
-            entry.set("program", done.path.to_string_lossy().into_owned());
-            entry.set("exit", done.output.exit);
-            entry.set("stdout_bytes", done.output.stdout.len());
-            entry.set("truncated", done.output.stdout_truncated);
+            entry.set("exit", done.exit);
+            entry.set("stdout_bytes", done.stdout.len());
+            entry.set("truncated", done.stdout_truncated);
         })
-        .map(|done| done.output)
+    }
+
+    /// Applies the check's declaration to `cmd`, then the command policy.
+    #[cfg(feature = "runtime")]
+    fn resolve(&self, hub: &ProbeHub, cmd: Cmd) -> Result<ResolvedCmd, ProbeError> {
+        let cmd = match self.scope.info {
+            Some(info) => {
+                let program = cmd.program();
+                let spec = info
+                    .commands
+                    .iter()
+                    .find(|spec| spec.program == program)
+                    .ok_or_else(|| ProbeError::denied(RULE_COMMAND_UNDECLARED, program))?;
+                cmd.declared(spec)
+                    .map_err(|name| ProbeError::denied(RULE_ENV_UNDECLARED, name))?
+            }
+            None => cmd,
+        };
+        crate::exec::policy::resolve_cmd(&cmd, hub.backend.resolves_on_disk())
+            .map_err(ProbeError::Policy)
     }
 
     /// The common start of a file call: the handle checks, then the read denylist.
-    fn gate_file(&self, kind: ActionKind, path: &Path) -> Result<(&ProbeHub, Pending), ProbeError> {
+    fn gate_file(&self, kind: ActionKind, path: &Path) -> Result<Gate<'_>, ProbeError> {
+        // The path as the log shows it. The error carries this text, and an error becomes a result
+        // message, so a home directory name must not be in it.
+        let what = self.hub.as_ref().map_or_else(
+            || path.to_string_lossy().into_owned(),
+            |hub| hub.log.display_path(path),
+        );
         let mut fields = Map::new();
-        if let Some(hub) = &self.hub {
-            fields.insert("path".to_owned(), hub.log.display_path(path).into());
-        }
-        let what = path.to_string_lossy();
+        fields.insert("path".to_owned(), what.clone().into());
         let (hub, entry) = self.begin(kind, fields, &what)?;
         match policy::check_read(path) {
-            Ok(()) => Ok((hub, entry)),
+            Ok(()) => Ok(Gate { hub, entry, what }),
             Err(rule) => Err(refuse(entry, rule, &what)),
         }
     }
@@ -575,6 +660,8 @@ fn settle<T>(
         Err(error) => {
             match error {
                 ProbeError::Denied { rule, .. } => entry.set("rule", *rule),
+                #[cfg(feature = "runtime")]
+                ProbeError::Policy(policy) => entry.set("rule", policy.to_string()),
                 other => entry.set("error", other.to_string()),
             }
             entry.finish(error.outcome());

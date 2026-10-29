@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 pub use crate::probe::replay::Replay;
 
-use crate::check::{CheckContext, Need, Os};
+use crate::check::{CheckContext, CheckInfo, Need, Os};
 use crate::probe::{ActionLogOutput, ProbeHub};
 use crate::redact::{Redactor, TagKey};
 
@@ -47,7 +47,9 @@ impl TestRun {
     }
 
     /// A context for the check with result `key`, on `os`, where the `available` needs are met. Its
-    /// probe is bound to `key` and never ends, so a test can call it after the check returns.
+    /// probe is bound to `key` and never ends, so a test can call it after the check returns. The
+    /// probe has no manifest, so it applies the command policy only. Use [`TestRun::context_for`] to
+    /// test a check against what it declared.
     #[must_use]
     pub fn context(
         &self,
@@ -55,7 +57,21 @@ impl TestRun {
         os: Os,
         available: impl IntoIterator<Item = Need>,
     ) -> CheckContext {
-        CheckContext::new(key, os, available).with_probe(self.hub.check_probe(key))
+        CheckContext::new(key, os, available).with_probe(self.hub.check_probe(key, None))
+    }
+
+    /// Like [`TestRun::context`], for a check with the manifest `info`. A command must be one that
+    /// `info.commands` declares, and its directories, environment names and stdout cap come from
+    /// there, as in a real run.
+    #[must_use]
+    pub fn context_for(
+        &self,
+        info: &'static CheckInfo,
+        key: &str,
+        os: Os,
+        available: impl IntoIterator<Item = Need>,
+    ) -> CheckContext {
+        CheckContext::new(key, os, available).with_probe(self.hub.check_probe(key, Some(info)))
     }
 
     /// The action log so far.

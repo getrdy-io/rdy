@@ -1,15 +1,20 @@
 //! The replay backend: answers from a recorded fixture and touches nothing.
 //!
 //! Policy and the log sit above the backend, so a fixture run exercises the same denylist and the same
-//! action log as a live run (02 "The probe facade"). Anything the fixture does not hold is "not found",
-//! so a test that forgets a file fails loudly.
+//! action log as a live run (02 "The probe facade"). A command arrives here already resolved, so the
+//! fixture can never be asked to "run" a shell or a privilege tool: the policy refused it first. The one
+//! difference from a live run is that the program is not looked up on the machine (see
+//! `Backend::resolves_on_disk`). Anything the fixture does not hold is "not found", so a test that
+//! forgets a file fails loudly.
 
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use super::sealed::Sealed;
-use super::{Backend, Cmd, DirEntry, Executed, FileBytes, FileMeta, Output, ProbeError};
+use super::{Backend, DirEntry, FileBytes, FileMeta};
+#[cfg(feature = "runtime")]
+use super::{Output, ProbeError, ResolvedCmd};
 use crate::check::BoxFuture;
 
 /// A recorded machine: files, directories and command output.
@@ -17,7 +22,8 @@ use crate::check::BoxFuture;
 pub struct Replay {
     files: HashMap<PathBuf, Vec<u8>>,
     dirs: HashMap<PathBuf, Vec<DirEntry>>,
-    commands: HashMap<(String, Vec<String>), Executed>,
+    #[cfg(feature = "runtime")]
+    commands: HashMap<(String, Vec<String>), Output>,
 }
 
 impl Replay {
@@ -41,7 +47,8 @@ impl Replay {
         self
     }
 
-    /// Adds the output of `program args...`, which ran from `/usr/bin/<program>`.
+    /// Adds the output of `program args...`. The log shows the program as `/usr/bin/<program>`.
+    #[cfg(feature = "runtime")]
     #[must_use]
     pub fn command(mut self, program: &str, args: &[&str], exit: i32, stdout: &str) -> Self {
         let output = Output::new(Some(exit), stdout.as_bytes().to_vec());
@@ -50,7 +57,7 @@ impl Replay {
                 program.to_owned(),
                 args.iter().map(|a| (*a).to_owned()).collect(),
             ),
-            Executed::new(format!("/usr/bin/{program}"), output),
+            output,
         );
         self
     }
@@ -92,12 +99,23 @@ impl Backend for Replay {
         })
     }
 
-    fn spawn<'a>(&'a self, cmd: &'a Cmd) -> BoxFuture<'a, Result<Executed, ProbeError>> {
+    #[cfg(feature = "runtime")]
+    fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
         Box::pin(async move {
+            let args = cmd
+                .arguments()
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
             self.commands
-                .get(&(cmd.program.to_owned(), cmd.args.clone()))
+                .get(&(cmd.program().to_owned(), args))
                 .cloned()
                 .ok_or(ProbeError::NotFound)
         })
+    }
+
+    #[cfg(feature = "runtime")]
+    fn resolves_on_disk(&self) -> bool {
+        false
     }
 }

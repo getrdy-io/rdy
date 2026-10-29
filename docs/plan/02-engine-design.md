@@ -334,9 +334,20 @@ tests policy.
   and `/sys`.
 - macOS: `realpath`, open with `O_NOFOLLOW | O_NONBLOCK`, and recheck with `F_GETPATH`.
 - Windows: no M1 check reads files, so the facade refuses them.
-- Deny list: `/etc/shadow`, `/etc/gshadow`, `/etc/sudoers*`, `*/.ssh/*`, private key files, `~/.kube/*`
-  and `/root/.kube/*` (kube reads the kubeconfig itself), `/proc/*/environ`, `/proc/*/cmdline`,
-  `/proc/*/mem`, `/proc/*/fd/*`, `/proc/*/root/*`, `/proc/*/map_files/*`, `/proc/kcore`, `/dev/*`.
+- Deny list, matched on components at any depth (`/host/etc/shadow`, an overlay `diff/etc/shadow`, a
+  macOS data volume): `etc/shadow*`, `etc/gshadow*`, `etc/sudoers*`, `etc/master.passwd`,
+  `etc/security/opasswd`, `var/db/dslocal`; `.ssh`, `.kube` (the engine's own kubeconfig read needs a
+  settled path: M1-102), `.aws`, `.azure`, `.config/gcloud`, `.gnupg`, `.docker/config.json`, `.netrc`,
+  `.git-credentials`, `.pgpass`, `.vault-token`; private key files by name and extension (`*.key`,
+  `*.p12`, `*.keytab`, `*.keychain`, `*.keychain-db`, `id_*`, `ssh_host_*_key`), `etc/ssl/private`,
+  `etc/pki/tls/private`; cluster credentials (`etc/kubernetes/*.conf`, `etc/rancher/{k3s,rke2}/*.yaml`,
+  `var/lib/kubelet/kubeconfig`, `var/lib/etcd`, `var/lib/rancher/*/server/{token,node-token,cred}`,
+  `secrets/kubernetes.io/*`). `/proc/<pid>/` is an allowlist (`status`, `stat`, `statm`, `comm`,
+  `cgroup`, `mountinfo`, `mounts`, `limits`, `net`, and the same under `task/<tid>/`), so `cwd`,
+  `exe`, `root`, `fd`, `environ`, `cmdline`, `mem`, `maps` and `ns` are refused. At the root: `/proc/kcore`,
+  `kmsg`, `vmcore`, `kallsyms`, `kpage*`, `/sys/kernel/debug`, `/sys/kernel/tracing`, and `/dev/*` for
+  `stat` and `read_dir` as well as `read` (M4 adds a closed stat-only list: `/dev/nvidia*`, `/dev/dri/*`,
+  `/dev/kfd`).
 - 1 MiB cap; `read_tail` sets `truncated_head`. Reads run on `spawn_blocking`.
 - Env names must be declared; values matching the secret-name rule join the known-secret set.
 
@@ -613,7 +624,7 @@ revision.
 - [M1] Scheduler with concurrency limit, per-check timeout and panic isolation | owner: rust-engineer | est: 4h | depends on: Check trait, Need and Context in rdy-engine | exit test: with the timer on the join handle, FakeCheck Sleep reports timeout, Panic reports error panic, and Spin on a 2-worker runtime still lets the other checks finish; a fake family's passing and need-missing checks come back through the scheduler as pass and skipped missing_need.
 - [M1] Run deadline and watchdog with a report on hang | owner: rust-engineer | est: 3.5h | depends on: Scheduler with concurrency limit, per-check timeout and panic isolation, SEC-19 Confine writes to a new output dir with safe names | exit test: under paused time running checks become timeout and unstarted ones run_deadline; a finish at deadline plus 9.9 s keeps the complete report; two Spin checks with a blocked stdout pipe and a held snapshot lock still give a complete false report and exit 70 within deadline plus 22 s, with no child process group left.
 - [M1] Map outcomes to CheckResult with fix source, partial and needs | owner: rust-engineer | est: 2h | depends on: Check trait, Need and Context in rdy-engine, Define result model and verdict mapping in rdy-spec | exit test: a spec fix replaces the built-in text on block with fix_source spec and is hidden on skipped, a partial pass on a block check becomes warn unless evidence_only, a result from a Partial OS is marked partial, and needs carry met flags.
-- [M1] SEC-17 Mediated Context handles with action log and read denylist | owner: rust-engineer | est: 4h | depends on: Check trait, Need and Context in rdy-engine | exit test: the fixture run's action log lists every command, file, endpoint and kube request; a read of /proc/1/environ is refused; a Probe call after its check ends is denied and logged; truncation drops only ok read, read_dir and stat entries.
+- [M1] SEC-17 Mediated Context handles with action log and read denylist | owner: rust-engineer | est: 4h | depends on: Check trait, Need and Context in rdy-engine | exit test: the fixture run's action log lists every command, file, endpoint and kube request; a read of /proc/1/environ is refused; a Probe call after its check ends is denied and logged; retention drops ok read, read_dir and stat entries first, then failed ones, and never a denied entry (a denied or failed file call folds into one `coalesced` entry after 20 per directory).
 - [M1] Blocking helper and subprocess kill on timeout | owner: rust-engineer | est: 4h | depends on: Scheduler with concurrency limit, per-check timeout and panic isolation | exit test: a check running `sleep 600` times out, its process group is gone, a child that ignores reaping returns Hung within 1 s of SIGKILL, and rdy exits within 2 s of the deadline.
 - [M1] Command policy: search path, declared directories, caps and Windows whoami only | owner: rust-engineer | est: 2h | depends on: Blocking helper and subprocess kill on timeout | exit test: shells and the sudo family are refused, PATH is fixed for non-root runs too, LD_PRELOAD in the parent never reaches the child, a declared extra directory resolves, and on Windows only the constant whoami.exe path runs.
 - [M1] File and env read policy in the facade | owner: rust-engineer | est: 3.5h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: /etc/shadow, a symlink to it, a `..` path, a FIFO and /dev/zero under an allowed prefix are refused and logged; a 2 MiB file returns 1 MiB with truncated true; an undeclared env name is refused; a file read outside the check's `reads` prefixes is refused and logged.
@@ -732,7 +743,9 @@ impl Probe {
     pub async fn native(&self, call: NativeCall) -> Result<NativeValue, ProbeError>;
     pub fn kube_guard(&self) -> KubeGuardLayer;        // used only by guarded_service
 }
-pub struct Cmd { pub program: &'static str, pub args: Vec<String>, pub timeout: Option<Duration> }
+// One Cmd type: rdy_engine::exec::policy::Cmd { program: &'static str, args, extra_dirs, env names, timeout, stdout_cap }.
+// Probe::exec applies the check's CommandSpec (dirs, env names, cap), runs the policy and resolves the
+// program; the backend gets only a ResolvedCmd (PC-44).
 pub enum Target { Direct { host: String, port: u16 }, ViaProxy { host: String, port: u16 } }
 pub struct HttpProbe { pub url: String, pub method: Method /* Head | Get */, pub route: Route,
                        pub roots: Roots /* System | Bundled */ }
@@ -748,7 +761,8 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
     fn read_link<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<PathBuf>>;
     fn stat<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
     fn env(&self, name: &str) -> Option<String>;
-    fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, io::Result<Output>>;
+    fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, Result<Output, ProbeError>>;   // PC-44
+    fn resolves_on_disk(&self) -> bool { true }   // Replay says false: every rule applies, no lookup (PC-44)
     fn resolve<'a>(&'a self, host: &'a str) -> BoxFuture<'a, io::Result<Vec<IpAddr>>>;
     fn connect<'a>(&'a self, addr: SocketAddr) -> BoxFuture<'a, io::Result<BoxedStream>>;
     fn native<'a>(&'a self, call: &'a NativeCall) -> BoxFuture<'a, io::Result<NativeValue>>;

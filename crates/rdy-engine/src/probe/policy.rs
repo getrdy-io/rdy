@@ -10,6 +10,22 @@
 //! `/tmp/../etc/shadow` would otherwise pass a text match. On macOS names compare without regard to
 //! case, and a leading `/private` is ignored (`/etc` is a link to `/private/etc` there).
 //!
+//! **Where a rule applies.** A name that marks a secret is matched at any depth, because the same file
+//! shows up under a host mount (`/host/etc/shadow`), a container layer
+//! (`.../overlay2/<id>/diff/etc/shadow`) and a data volume (`/System/Volumes/Data/private/etc/sudoers`).
+//! That covers the `etc` rules, `.ssh`, `.kube`, the cloud and tool credential files, the cluster
+//! credential paths and the process directories under `proc`. Only `/dev` and `/sys/kernel/...` are
+//! matched at the root, because those names mean something else elsewhere.
+//!
+//! **`/proc/<pid>/`** is an allowlist, not a denylist: only `status`, `stat`, `statm`, `comm`, `cgroup`,
+//! `mountinfo`, `mounts`, `limits` and `net` (and the same under `task/<tid>/`) are readable. Everything
+//! else there is refused, including `cwd`, `exe`, `root`, `fd`, `environ`, `cmdline`, `mem`, `maps`
+//! and `ns`, so `/proc/1/cwd/etc/shadow` cannot reach a file through a process link.
+//!
+//! **`/dev`** is refused for `stat` and `read_dir` as well as `read`, because a device node name says
+//! which hardware a machine has. M4 (GPU checks) adds a closed, stat-only list: `/dev/nvidia*`,
+//! `/dev/dri/*` and `/dev/kfd`.
+//!
 //! The rules return a fixed text for the action log (`rule`) and the error.
 
 use std::path::{Component, Path};
@@ -20,15 +36,19 @@ pub(crate) const RULE_RELATIVE: &str = "path must be absolute";
 pub(crate) const RULE_DOT_DOT: &str = "path must not contain ..";
 /// No M1 check reads files on Windows.
 pub(crate) const RULE_WINDOWS: &str = "file reads are not available on Windows";
-/// `/etc/shadow`, `/etc/gshadow` and `/etc/sudoers*`.
+/// `/etc/shadow`, `/etc/gshadow`, `/etc/sudoers*`, `/etc/security/opasswd`, `/etc/master.passwd`.
 pub(crate) const RULE_SYSTEM_SECRET: &str = "password and sudo files are never read";
+/// Cloud, tool and keychain credential files in a home directory.
+pub(crate) const RULE_CREDENTIALS: &str = "credential files are never read";
+/// Kernel memory, log and debug files.
+pub(crate) const RULE_KERNEL: &str = "kernel memory, log and debug files are never read";
 /// A `.ssh` directory.
 pub(crate) const RULE_SSH: &str = "ssh directories are never read";
 /// A private key file by name.
 pub(crate) const RULE_PRIVATE_KEY: &str = "private key files are never read";
-/// A `.kube` directory.
-pub(crate) const RULE_KUBECONFIG: &str = "kubeconfig directories are never read";
-/// `/proc/<pid>/environ` and friends, and `/proc/kcore`.
+/// A `.kube` directory, a cluster node's kubeconfig, etcd data and service account tokens.
+pub(crate) const RULE_KUBECONFIG: &str = "kubeconfig and cluster credential files are never read";
+/// `/proc/<pid>/` entries that are not on the short allowlist.
 pub(crate) const RULE_PROC: &str = "process memory, environment and command lines are never read";
 /// `/dev`.
 pub(crate) const RULE_DEVICE: &str = "device files are never read";
@@ -71,17 +91,28 @@ pub(super) fn check_names(path: &Path, mac: bool) -> Result<(), &'static str> {
 }
 
 fn deny(names: &[&str]) -> Option<&'static str> {
-    if names.contains(&".ssh") {
-        return Some(RULE_SSH);
-    }
-    if names.contains(&".kube") {
-        return Some(RULE_KUBECONFIG);
+    for (index, name) in names.iter().enumerate() {
+        let rest = names.get(index + 1..).unwrap_or_default();
+        let rule = match *name {
+            ".ssh" => Some(RULE_SSH),
+            ".kube" => Some(RULE_KUBECONFIG),
+            ".aws" | ".azure" | ".gnupg" | ".netrc" | ".git-credentials" | ".pgpass"
+            | ".vault-token" => Some(RULE_CREDENTIALS),
+            ".config" if rest.first() == Some(&"gcloud") => Some(RULE_CREDENTIALS),
+            ".docker" if rest.first() == Some(&"config.json") => Some(RULE_CREDENTIALS),
+            "secrets" if matches!(rest, ["kubernetes.io", _, ..]) => Some(RULE_KUBECONFIG),
+            "etc" => etc_rule(rest),
+            "var" => var_rule(rest),
+            "proc" => proc_rule(rest),
+            _ => None,
+        };
+        if rule.is_some() {
+            return rule;
+        }
     }
     match names {
         ["dev", ..] => return Some(RULE_DEVICE),
-        ["proc", rest @ ..] if proc_secret(rest) => return Some(RULE_PROC),
-        ["etc", name, ..] if system_secret(name) => return Some(RULE_SYSTEM_SECRET),
-        ["etc", "ssl" | "pki", ..] if private_dir(names) => return Some(RULE_PRIVATE_KEY),
+        ["sys", "kernel", "debug" | "tracing", ..] => return Some(RULE_KERNEL),
         _ => {}
     }
     names
@@ -90,37 +121,93 @@ fn deny(names: &[&str]) -> Option<&'static str> {
         .map(|_| RULE_PRIVATE_KEY)
 }
 
-/// `/proc/kcore`, and the secret entries of a process directory and of its tasks.
-fn proc_secret(rest: &[&str]) -> bool {
+/// What follows an `etc` component.
+fn etc_rule(rest: &[&str]) -> Option<&'static str> {
     match rest {
-        ["kcore", ..] => true,
-        [_pid, "task", _tid, name, ..] => proc_entry(name),
-        [_pid, name, ..] => proc_entry(name),
-        _ => false,
+        // The prefix also catches `shadow-`, the backup copy, and `sudoers.d`.
+        [name, ..]
+            if ["shadow", "gshadow", "sudoers", "master.passwd", "spwd.db"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix)) =>
+        {
+            Some(RULE_SYSTEM_SECRET)
+        }
+        ["security", "opasswd", ..] => Some(RULE_SYSTEM_SECRET),
+        ["ssl", "private", ..] | ["pki", "tls", "private", ..] => Some(RULE_PRIVATE_KEY),
+        // `admin.conf`, `kubelet.conf` and the other kubeconfigs of a control plane node.
+        ["kubernetes", name, ..] if name.ends_with(".conf") => Some(RULE_KUBECONFIG),
+        // `k3s.yaml`, `rke2.yaml` and `config.yaml`, which can hold the join token.
+        ["rancher", "k3s" | "rke2", name, ..] if name.ends_with(".yaml") => Some(RULE_KUBECONFIG),
+        _ => None,
     }
 }
 
-fn proc_entry(name: &str) -> bool {
-    matches!(
-        name,
-        "environ" | "cmdline" | "mem" | "fd" | "root" | "map_files"
-    )
+/// What follows a `var` component.
+fn var_rule(rest: &[&str]) -> Option<&'static str> {
+    match rest {
+        ["lib", "kubelet", "kubeconfig", ..]
+        | ["lib", "etcd", ..]
+        | [
+            "lib",
+            "rancher",
+            _,
+            "server",
+            "token" | "node-token" | "cred",
+            ..,
+        ] => Some(RULE_KUBECONFIG),
+        // The macOS directory service: account records with password hashes.
+        ["db", "dslocal", ..] => Some(RULE_SYSTEM_SECRET),
+        _ => None,
+    }
 }
 
-/// Names directly under `/etc` that start with `shadow`, `gshadow` or `sudoers`. The prefix also
-/// catches `shadow-`, the backup copy, and `sudoers.d`.
-fn system_secret(name: &str) -> bool {
-    ["shadow", "gshadow", "sudoers"]
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
+/// What follows a `proc` component: the process directories (an allowlist) and the kernel files.
+fn proc_rule(rest: &[&str]) -> Option<&'static str> {
+    match rest {
+        [first, tail @ ..] if is_pid(first) => (!pid_entry_allowed(tail)).then_some(RULE_PROC),
+        [name, ..]
+            if matches!(
+                *name,
+                "kcore" | "kmsg" | "vmcore" | "kallsyms" | "keys" | "key-users" | "sysrq-trigger"
+            ) || name.starts_with("kpage") =>
+        {
+            Some(RULE_KERNEL)
+        }
+        _ => None,
+    }
 }
 
-/// `/etc/ssl/private` and `/etc/pki/tls/private`, and everything below them.
-fn private_dir(names: &[&str]) -> bool {
-    matches!(
-        names,
-        ["etc", "ssl", "private", ..] | ["etc", "pki", "tls", "private", ..]
-    )
+/// A process directory name: digits, `self` or `thread-self`.
+fn is_pid(name: &str) -> bool {
+    name == "self"
+        || name == "thread-self"
+        || (!name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The entries of `/proc/<pid>/` a check may read.
+const PID_ALLOWED: &[&str] = &[
+    "status",
+    "stat",
+    "statm",
+    "comm",
+    "cgroup",
+    "mountinfo",
+    "mounts",
+    "limits",
+    "net",
+];
+
+/// Whether `tail`, the part of the path after `/proc/<pid>`, is on the allowlist.
+fn pid_entry_allowed(tail: &[&str]) -> bool {
+    match tail {
+        [] | ["task"] => true,
+        ["task", _tid, rest @ ..] => entry_allowed(rest),
+        _ => entry_allowed(tail),
+    }
+}
+
+fn entry_allowed(tail: &[&str]) -> bool {
+    tail.first().is_none_or(|name| PID_ALLOWED.contains(name))
 }
 
 /// File names that hold private keys. A certificate (`.pem`, `.crt`) is not on the list: checks read
@@ -138,7 +225,15 @@ fn private_key_name(name: &str) -> bool {
     name.rsplit_once('.').is_some_and(|(_, extension)| {
         matches!(
             extension,
-            "key" | "p12" | "pfx" | "jks" | "keystore" | "ppk"
+            "key"
+                | "p12"
+                | "pfx"
+                | "jks"
+                | "keystore"
+                | "ppk"
+                | "keytab"
+                | "keychain"
+                | "keychain-db"
         )
     })
 }
