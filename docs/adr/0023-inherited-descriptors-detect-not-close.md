@@ -71,5 +71,5 @@ Closing or marking a descriptor needs its raw number, and every API that takes a
 
 ## Tickets implied
 
-- [M1] M1-168: CLI start-up warns on inherited descriptors, before the first public release | owner: rust-engineer | est: 0.5h | depends on: M1-039, the CLI `run` command | exit test: `rdy run` started with `3</dev/null` logs one warning that names descriptor 3 and no path.
+- [M1] M1-168: CLI start-up warns on inherited descriptors, before the first public release | owner: rust-engineer | est: 1h | depends on: M1-039, the CLI `run` command | exit test: `rdy run` started with `3</dev/null` logs one warning that names descriptor 3 and no path.
 - [M2] M2-104: FFI module that marks inherited descriptors close-on-exec | owner: rust-engineer | est: 2h | depends on: M1-039 | exit test: a child started after start-up with `3</dev/null` does not have descriptor 3.

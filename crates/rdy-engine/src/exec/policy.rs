@@ -12,16 +12,20 @@
 //!   `powershell`, `pwsh` and a few more), the privilege tools (`sudo`, `su`, `doas`, `pkexec`, `runas`,
 //!   `run0`, `sudoedit`, `runuser`, `setpriv`, `sg`, `newgrp`, `ksu`, `machinectl`, `systemd-run`) and
 //!   the programs that run another program (`env`, `xargs`, `nice`, `nohup`, `timeout`, `setsid`,
-//!   `chroot`, `nsenter`, `unshare`, `stdbuf`). See [`REFUSED_PROGRAMS`]. The check is on the name and
-//!   on the file the name resolves to, so a link named `tool` that points at `bash` is refused too. A
-//!   multi-call binary such as `busybox` is not on the list, because on a system built from it every
-//!   tool is a link to it; the applet is picked by `argv[0]`, which is the name asked for, so a link
-//!   cannot become a shell. Arguments go to the program as argv, so no shell parses spec text.
-//! - **Trust.** The name resolves to a real path (links followed). The file and every directory above
-//!   it, up to `/`, must be owned by root or by the user `rdy` runs as, and none may be writable by
-//!   the group or by others. A writable directory with the sticky bit (like `/tmp`) is accepted above
-//!   the file, never the file itself. Anything that cannot be read is refused. The program starts from
-//!   that real path with `argv[0]` set to the name.
+//!   `chroot`, `nsenter`, `unshare`, `stdbuf`, `taskset`, `flock`, `strace`, `gdb`, `bwrap` and more).
+//!   See [`REFUSED_PROGRAMS`]. The check is on the name and on the file the name resolves to, so a
+//!   link named `tool` that points at `bash` is refused too. The multi-call binaries `busybox` and
+//!   `toybox` are refused by the name a check asks for and not by the file it resolves to: on a
+//!   system built from one, every tool is a link to it, and the applet is picked by `argv[0]`, which
+//!   is the requested name, so a link cannot become a shell. Arguments go to the program as argv, so
+//!   no shell parses spec text.
+//! - **Trust.** The name resolves to a real path one component at a time. Every link on the way, and
+//!   the file, and every directory above them up to `/`, must be owned by root or by the user `rdy`
+//!   runs as, and none may be writable by the group or by others. The directory that holds a link is
+//!   judged like the directory that holds the file: whoever can write there can re-point the link.
+//!   A writable directory with the sticky bit (like `/tmp`) is accepted only above that directory,
+//!   never as the holder of the file or a link. More than 40 links, or anything that cannot be read,
+//!   is refused. The program starts from the real path with `argv[0]` set to the name.
 //! - **Environment.** Cleared, then the base variables and the declared names. On Unix the base is
 //!   `LC_ALL=C` and the fixed `PATH`; on Windows it is `SystemRoot` and `PATH` set to constants. `LD_*`,
 //!   `DYLD_*`, `MALLOC_*`, `PYTHON*` and a list of other variables that change how a program loads
@@ -99,7 +103,29 @@ pub const REFUSED_PROGRAMS: &[&str] = &[
     "nsenter",
     "unshare",
     "stdbuf",
+    "taskset",
+    "ionice",
+    "chrt",
+    "numactl",
+    "prlimit",
+    "flock",
+    "watch",
+    "capsh",
+    "script",
+    "strace",
+    "ltrace",
+    "gdb",
+    "cgexec",
+    "bwrap",
+    "firejail",
+    "systemd-nspawn",
 ];
+
+/// Multi-call binaries. Refused by the name a check asks for, never by the file a name resolves to:
+/// on a system built from one, `ls` and `cat` are links to it, and refusing the target would refuse
+/// every tool. The applet is picked by `argv[0]`, which is the requested name, so a link cannot turn
+/// into `busybox sh -c`. A check that names `busybox` itself is the one that could.
+const REFUSED_BY_REQUESTED_NAME: &[&str] = &["busybox", "toybox"];
 
 /// Variables that change how a program loads code, resolves names or starts helpers. Refused as
 /// declared names, in upper case. The prefixes in `REFUSED_ENV_PREFIXES` are refused as well.
@@ -135,6 +161,17 @@ const REFUSED_ENV: &[&str] = &[
     "OPENSSL_ENGINES",
     "OPENSSL_MODULES",
     // Language runtimes.
+    "LUA_INIT",
+    "LUA_PATH",
+    "LUA_CPATH",
+    "PERLLIB",
+    "PERL5DB",
+    "NODE_PATH",
+    "DOTNET_STARTUP_HOOKS",
+    "COR_PROFILER",
+    "COR_PROFILER_PATH",
+    "COMSPEC",
+    "PATHEXT",
     "PERL5LIB",
     "PERL5OPT",
     "RUBYLIB",
@@ -143,6 +180,12 @@ const REFUSED_ENV: &[&str] = &[
     "JAVA_TOOL_OPTIONS",
     "_JAVA_OPTIONS",
     // Helpers a program starts on its own.
+    "SSH_ASKPASS",
+    "SUDO_ASKPASS",
+    "BROWSER",
+    "TERMINFO",
+    "TERMINFO_DIRS",
+    "KUBECONFIG",
     "LESSOPEN",
     "PAGER",
     "EDITOR",
@@ -153,7 +196,14 @@ const REFUSED_ENV: &[&str] = &[
 ];
 
 /// Prefixes of refused variable names, in upper case.
-const REFUSED_ENV_PREFIXES: &[&str] = &["LD_", "DYLD_", "MALLOC_", "PYTHON"];
+const REFUSED_ENV_PREFIXES: &[&str] = &[
+    "LD_",
+    "DYLD_",
+    "MALLOC_",
+    "PYTHON",
+    "GIT_",
+    "CORECLR_PROFILER",
+];
 
 /// The `SystemRoot` a Windows child gets.
 pub const WINDOWS_SYSTEM_ROOT: &str = r"C:\Windows";
@@ -408,7 +458,8 @@ fn check_name(program: &'static str) -> Result<(), PolicyError> {
     if !plain {
         return Err(PolicyError::InvalidProgram { program });
     }
-    if is_refused(&stem(program)) {
+    let stem = stem(program);
+    if is_refused(&stem) || REFUSED_BY_REQUESTED_NAME.contains(&stem.as_str()) {
         return Err(PolicyError::Refused { program });
     }
     Ok(())
@@ -506,8 +557,8 @@ fn resolve(program: &'static str, extra: &'static [&'static str]) -> Result<Path
 /// The first directory in `dirs` that holds an executable `program`, as a real path that passed the
 /// trust rule. The order is the whole policy: the caller puts the fixed directories first.
 ///
-/// A candidate that exists but cannot be canonicalised, or whose real name is a refused program, or
-/// whose file or directories are not trusted, ends the search with an error. It does not fall through
+/// A candidate that exists but cannot be resolved, or whose real name is a refused program, or whose
+/// file, links or directories are not trusted, ends the search with an error. It does not fall through
 /// to a later directory.
 #[cfg(unix)]
 fn resolve_in(program: &'static str, dirs: &[PathBuf]) -> Result<PathBuf, PolicyError> {
@@ -522,8 +573,7 @@ fn resolve_in(program: &'static str, dirs: &[PathBuf]) -> Result<PathBuf, Policy
         }
         // A link named like a harmless tool must not lead to a shell, and the trust rule is about the
         // file that runs, not the link. Failing to find the real path is a refusal.
-        let real =
-            std::fs::canonicalize(&candidate).map_err(|_| PolicyError::Untrusted { program })?;
+        let real = real_path_checked(&candidate).ok_or(PolicyError::Untrusted { program })?;
         if real
             .file_name()
             .and_then(|name| name.to_str())
@@ -539,31 +589,83 @@ fn resolve_in(program: &'static str, dirs: &[PathBuf]) -> Result<PathBuf, Policy
     Err(PolicyError::NotFound { program })
 }
 
-/// Whether the file at the real path `real`, and every directory above it, is safe to run from.
-///
-/// - Owner is root or the user `rdy` runs as. As root that means root only.
-/// - The file is not writable by group or others.
-/// - A directory is not writable by group or others, unless it has the sticky bit (`/tmp` is `1777`),
-///   which stops others from renaming or removing an entry they do not own.
-///
-/// Anything that cannot be read is untrusted.
+/// The most links followed while resolving one candidate. The same bound as the kernel's.
+#[cfg(unix)]
+const MAX_LINK_HOPS: usize = 40;
+
+/// Resolves `path` to a real path one component at a time, like `realpath`, and applies the directory
+/// rule to the directory that holds every link it follows. A link is only as safe as the directory
+/// that holds it: someone who can write there can point it anywhere. `None` means a component is
+/// missing, a link could not be read, there were more than [`MAX_LINK_HOPS`] links, or a directory
+/// holding a link is not trusted.
+#[cfg(unix)]
+fn real_path_checked(path: &Path) -> Option<PathBuf> {
+    use std::collections::VecDeque;
+    let euid = rustix::process::geteuid().as_raw();
+    let mut pending: VecDeque<std::ffi::OsString> = path
+        .components()
+        .map(|part| part.as_os_str().to_owned())
+        .collect();
+    let mut real = PathBuf::new();
+    let mut hops = 0;
+    while let Some(part) = pending.pop_front() {
+        if part == "/" {
+            real = PathBuf::from("/");
+        } else if part == "." {
+            continue;
+        } else if part == ".." {
+            // `real` holds no links, so removing its last name is the true parent.
+            real.pop();
+        } else {
+            let next = real.join(&part);
+            if std::fs::symlink_metadata(&next).ok()?.is_symlink() {
+                hops += 1;
+                if hops > MAX_LINK_HOPS || !dir_is_trusted(&real, euid) {
+                    return None;
+                }
+                let target = std::fs::read_link(&next).ok()?;
+                for name in target.components().rev() {
+                    pending.push_front(name.as_os_str().to_owned());
+                }
+            } else {
+                real = next;
+            }
+        }
+    }
+    Some(real)
+}
+
+/// The rule for one file or directory: owned by root or by `euid`, and not writable by the group or
+/// others. `sticky_excused` lets a writable directory with the sticky bit through (`/tmp` is `1777`),
+/// because the sticky bit stops others from renaming or removing an entry they do not own.
+#[cfg(unix)]
+fn trusted(uid: u32, mode: u32, euid: u32, sticky_excused: bool) -> bool {
+    let owner_ok = uid == 0 || uid == euid;
+    let writable_ok = mode & 0o022 == 0 || (sticky_excused && mode & 0o1000 != 0);
+    owner_ok && writable_ok
+}
+
+/// Whether the real directory `dir` is safe to hold something that runs, or a link to it. The
+/// directory itself is never excused for being sticky: a hard link to a trusted file could be planted
+/// in it, or a link placed there. The directories above it are, as `/tmp` is.
+#[cfg(unix)]
+fn dir_is_trusted(dir: &Path, euid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    dir.ancestors().enumerate().all(|(depth, ancestor)| {
+        std::fs::metadata(ancestor)
+            .is_ok_and(|meta| trusted(meta.uid(), meta.mode(), euid, depth > 0))
+    })
+}
+
+/// Whether the file at the real path `real`, and every directory above it, is safe to run from. See
+/// [`trusted`] and [`dir_is_trusted`]. Anything that cannot be read is untrusted.
 #[cfg(unix)]
 fn is_trusted(real: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let euid = rustix::process::geteuid().as_raw();
-    let owner_ok = |uid: u32| uid == 0 || uid == euid;
     let Ok(file) = std::fs::metadata(real) else {
         return false;
     };
-    if !owner_ok(file.uid()) || file.mode() & 0o022 != 0 {
-        return false;
-    }
-    real.ancestors().skip(1).all(|dir| {
-        let Ok(meta) = std::fs::metadata(dir) else {
-            return false;
-        };
-        let mode = meta.mode();
-        let writable_ok = mode & 0o022 == 0 || mode & 0o1000 != 0;
-        owner_ok(meta.uid()) && writable_ok
-    })
+    trusted(file.uid(), file.mode(), euid, false)
+        && real.parent().is_some_and(|dir| dir_is_trusted(dir, euid))
 }

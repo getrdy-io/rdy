@@ -43,6 +43,25 @@ fn shells_the_sudo_family_and_exec_wrappers_are_refused_in_every_spelling() {
         "nsenter",
         "unshare",
         "stdbuf",
+        "taskset",
+        "ionice",
+        "chrt",
+        "numactl",
+        "prlimit",
+        "flock",
+        "watch",
+        "capsh",
+        "script",
+        "strace",
+        "ltrace",
+        "gdb",
+        "cgexec",
+        "bwrap",
+        "firejail",
+        "systemd-nspawn",
+        "busybox",
+        "toybox",
+        "BusyBox",
         "cmd.exe",
         "PowerShell.exe",
         "BASH",
@@ -123,6 +142,27 @@ fn declared_variables_that_change_loading_are_refused() {
         "SYSTEMD_PAGER",
         "ZDOTDIR",
         "PROMPT_COMMAND",
+        "LUA_INIT",
+        "LUA_PATH",
+        "LUA_CPATH",
+        "PERLLIB",
+        "PERL5DB",
+        "NODE_PATH",
+        "GIT_SSH_COMMAND",
+        "GIT_CONFIG_GLOBAL",
+        "SSH_ASKPASS",
+        "SUDO_ASKPASS",
+        "BROWSER",
+        "TERMINFO",
+        "TERMINFO_DIRS",
+        "KUBECONFIG",
+        "DOTNET_STARTUP_HOOKS",
+        "COR_PROFILER",
+        "COR_PROFILER_PATH",
+        "CORECLR_PROFILER",
+        "CORECLR_PROFILER_PATH",
+        "COMSPEC",
+        "PATHEXT",
         "CUDA_INJECTION64_PATH",
     ] {
         let error = prepare(&cmd("true").env([(name, "x")])).expect_err(name);
@@ -196,7 +236,8 @@ fn on_windows_a_command_resolves_to_the_constant_path_only() {
 #[cfg(windows)]
 #[tokio::test]
 async fn on_windows_whoami_runs_through_the_policy_and_cmd_is_refused() {
-    let out = run(cmd("whoami")).await.expect("whoami runs");
+    let whoami = Cmd::new("whoami", Duration::from_secs(10));
+    let out = run(whoami).await.expect("whoami runs");
     assert!(out.status.success(), "{out:?}");
     assert!(!out.stdout.is_empty());
     for name in ["cmd", "cmd.exe", "powershell"] {
@@ -367,17 +408,60 @@ mod unix {
     }
 
     #[test]
-    fn a_sticky_writable_directory_is_accepted_above_a_trusted_file() {
-        let dir = trusted_dir();
-        let path = write_exec(dir.path(), "tool", "#!/bin/true\n");
-        let dirs = [dir.path().to_path_buf()];
+    fn a_sticky_writable_directory_is_accepted_only_above_the_files_own_directory() {
+        let outer = trusted_dir();
+        let inner = outer.path().join("inner");
+        fs::create_dir(&inner).expect("mkdir");
+        mode(&inner, 0o755);
+        let path = write_exec(&inner, "tool", "#!/bin/true\n");
+        let dirs = [inner.clone()];
         for sticky in [0o1777, 0o1775] {
-            mode(dir.path(), sticky);
+            // One level up, like /tmp above a directory of ours: accepted.
+            mode(outer.path(), sticky);
             assert_eq!(resolve_in("tool", &dirs), Ok(real(&path)), "{sticky:o}");
         }
-        // The file is never excused: a sticky bit does not help a writable leaf.
+        // The file's own directory is never excused: a hard link to a trusted file could be planted.
+        mode(outer.path(), 0o755);
+        for sticky in [0o1777, 0o1775] {
+            mode(&inner, sticky);
+            assert_eq!(resolve_in("tool", &dirs), untrusted("tool"), "{sticky:o}");
+        }
+        // The file is never excused either: a sticky bit does not help a writable leaf.
+        mode(&inner, 0o755);
         mode(&path, 0o777);
         assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+    }
+
+    #[test]
+    fn the_trust_rule_as_a_table() {
+        const ME: u32 = 1000;
+        // (uid, mode, sticky_excused, trusted)
+        let table = [
+            (0, 0o755, false, true),
+            (ME, 0o755, false, true),
+            (ME, 0o700, false, true),
+            (STRANGER, 0o755, false, false),
+            (STRANGER, 0o755, true, false),
+            (0, 0o775, false, false),
+            (0, 0o757, false, false),
+            (0, 0o777, true, false),
+            (0, 0o1777, false, false),
+            (0, 0o1777, true, true),
+            (0, 0o1775, true, true),
+            (ME, 0o1757, true, true),
+            (STRANGER, 0o1777, true, false),
+            (0, 0o1755, false, true),
+        ];
+        for (uid, mode, sticky_excused, expected) in table {
+            assert_eq!(
+                trusted(uid, mode, ME, sticky_excused),
+                expected,
+                "uid {uid} mode {mode:o} excused {sticky_excused}"
+            );
+        }
+        // Root is trusted even when the running user is someone else.
+        assert!(trusted(0, 0o755, ME, false));
+        assert!(!trusted(ME, 0o755, 2000, false));
     }
 
     #[test]
@@ -395,12 +479,18 @@ mod unix {
         assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
     }
 
+    /// Needs root to set up. The root job in CI sets `RDY_REQUIRE_ROOT`, and there a failure to give a
+    /// file away is a failure of the test, not a reason to skip it.
     #[test]
-    fn a_file_or_directory_owned_by_someone_else_is_untrusted() {
+    fn root_a_file_or_directory_owned_by_someone_else_is_untrusted() {
         let dir = trusted_dir();
         let path = write_exec(dir.path(), "tool", "#!/bin/true\n");
         let dirs = [dir.path().to_path_buf()];
         if !give_away(&path) {
+            assert!(
+                std::env::var_os("RDY_REQUIRE_ROOT").is_none(),
+                "RDY_REQUIRE_ROOT is set but chown failed: this job is not root"
+            );
             // Not root: giving a file away is not allowed, so the case cannot be set up.
             return;
         }
@@ -427,6 +517,77 @@ mod unix {
         mode(writable.path(), 0o755);
         mode(&target, 0o777);
         assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+        mode(&target, 0o755);
+        // The directory that holds the link is judged as well.
+        mode(safe.path(), 0o775);
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+    }
+
+    #[test]
+    fn the_directory_that_holds_a_link_is_judged_like_the_directory_that_holds_the_file() {
+        let safe = trusted_dir();
+        let target = write_exec(safe.path(), "real-tool", "#!/bin/true\n");
+        // The search directory holds the link. Group-writable, someone could re-point it.
+        let holder = trusted_dir();
+        symlink(&target, holder.path().join("tool")).expect("symlink");
+        let dirs = [holder.path().to_path_buf()];
+        assert_eq!(resolve_in("tool", &dirs), Ok(real(&target)));
+        mode(holder.path(), 0o775);
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+        mode(holder.path(), 0o755);
+
+        // A link in the middle of a chain: tool -> hop/second -> real-tool.
+        let hop = trusted_dir();
+        symlink(&target, hop.path().join("second")).expect("symlink");
+        let first = trusted_dir();
+        symlink(hop.path().join("second"), first.path().join("tool")).expect("symlink");
+        let dirs = [first.path().to_path_buf()];
+        assert_eq!(resolve_in("tool", &dirs), Ok(real(&target)));
+        mode(hop.path(), 0o777);
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+        mode(hop.path(), 0o755);
+
+        // A link in a directory on the way: tool -> linked-dir/real-tool, linked-dir -> safe.
+        let via = trusted_dir();
+        symlink(safe.path(), via.path().join("linked-dir")).expect("symlink");
+        let first = trusted_dir();
+        symlink(
+            via.path().join("linked-dir").join("real-tool"),
+            first.path().join("tool"),
+        )
+        .expect("symlink");
+        let dirs = [first.path().to_path_buf()];
+        assert_eq!(resolve_in("tool", &dirs), Ok(real(&target)));
+        mode(via.path(), 0o775);
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+    }
+
+    #[test]
+    fn a_relative_link_is_followed_from_its_own_directory() {
+        let dir = trusted_dir();
+        let target = write_exec(dir.path(), "real-tool", "#!/bin/true\n");
+        fs::create_dir(dir.path().join("sub")).expect("mkdir");
+        mode(&dir.path().join("sub"), 0o755);
+        symlink("../real-tool", dir.path().join("sub").join("tool")).expect("symlink");
+        let dirs = [dir.path().join("sub")];
+        assert_eq!(resolve_in("tool", &dirs), Ok(real(&target)));
+    }
+
+    #[test]
+    fn a_chain_of_more_than_forty_links_is_refused() {
+        let dir = trusted_dir();
+        let mut previous = write_exec(dir.path(), "end", "#!/bin/true\n");
+        for index in 0..=MAX_LINK_HOPS {
+            let link = dir.path().join(format!("link{index}"));
+            symlink(&previous, &link).expect("symlink");
+            previous = link;
+        }
+        assert_eq!(real_path_checked(&previous), None);
+        assert!(real_path_checked(&dir.path().join("link1")).is_some());
+        // A loop never reaches a file, so the candidate is skipped before the walk.
+        symlink("b", dir.path().join("a")).expect("symlink");
+        symlink("a", dir.path().join("b")).expect("symlink");
+        assert_eq!(real_path_checked(&dir.path().join("a")), None);
     }
 
     #[test]
@@ -445,15 +606,15 @@ mod unix {
         let dir = trusted_dir();
         let target = write_exec(dir.path(), "real-name", "#!/bin/true\n");
         let extra = trusted_dir();
-        symlink(&target, extra.path().join("applet")).expect("symlink");
-        let spec = prepare(&cmd("applet").extra_dirs(constants(constant(extra.path()))))
+        symlink(&target, extra.path().join("rdy-policy-argv0")).expect("symlink");
+        let spec = prepare(&cmd("rdy-policy-argv0").extra_dirs(constants(constant(extra.path()))))
             .expect("resolves");
         let text = format!("{spec:?}");
         assert!(
             text.contains(&format!("{}", real(&target).display())),
             "{text}"
         );
-        assert!(text.contains("arg0: Some(\"applet\")"), "{text}");
+        assert!(text.contains("arg0: Some(\"rdy-policy-argv0\")"), "{text}");
     }
 
     #[cfg(target_os = "linux")]
