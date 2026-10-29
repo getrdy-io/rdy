@@ -132,7 +132,7 @@ The version picker is part of the header, not a page. The site has no pricing, r
 
 - Each property gets a row: name, type, required, default, description, example. Descriptions come from doc comments through schemars, so the rule "every public item documented" carries over.
 - A property with no description fails `cargo xtask docs`, and the error names the property path.
-- `oneOf` renders one subsection per variant. Check parameters use this, so each check kind shows its own fields.
+- `oneOf` or `allOf` if/then variants render one subsection per variant. Check parameters use `allOf` with if/then, so each check kind shows its own fields.
 - Examples are stored as JSON in the schema. The renderer validates each example against its schema, then shows it as YAML.
 - Output is deterministic. It depends only on committed files: no timestamps, no git history, schema key order, LF line endings. Checkouts stay shallow.
 
