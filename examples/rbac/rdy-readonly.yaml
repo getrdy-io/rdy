@@ -1,0 +1,103 @@
+# A read-only identity for rdy. You do not need cluster-admin to run it.
+#
+# rdy only reads. It lists a few resources and makes three self-review requests (who am I, may I do
+# this, what may I do). It never changes a cluster and never reads Secrets. A guard inside rdy refuses
+# anything else before it is sent. This file is the second line: even if the guard had a bug, this
+# identity could not write or read Secrets.
+#
+# The rules below are the list in crates/rdy-checks-k8s/src/client/guard/rules.rs (ALLOWED). A test
+# keeps the two in step.
+#
+# Use it:
+#   kubectl apply -f rdy-readonly.yaml
+#   kubectl -n rdy-system create token rdy-readonly --duration 1h
+# Put that token in a kubeconfig user and run rdy with it. Delete the namespace and the roles when you
+# are done: kubectl delete -f rdy-readonly.yaml
+#
+# Discovery (/version, /api, /apis) and the self reviews are open to every signed-in user in a standard
+# cluster. The self review rules are listed anyway, so a cluster that removed them still works.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rdy-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rdy-readonly
+  namespace: rdy-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rdy-readonly
+rules:
+  # k8s.admission, k8s.storageclass, k8s.rbac: the target namespace and its Pod Security labels.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
+  # k8s.nodes, k8s.version: capacity, conditions, taints, labels, providerID, kubelet version.
+  # k8s.nodes: pod requests, node name and phase. k8s.storageclass: claims and their events.
+  - apiGroups: [""]
+    resources: ["nodes", "pods", "persistentvolumeclaims", "events"]
+    verbs: ["list"]
+  # k8s.storageclass: classes, the default marker, provisioners and registered drivers.
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["csinodes", "csidrivers"]
+    verbs: ["list"]
+  # k8s.admission: OpenShift security context constraints. k8s.version: the OpenShift version.
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    verbs: ["list"]
+  - apiGroups: ["config.openshift.io"]
+    resources: ["clusterversions"]
+    verbs: ["get"]
+  # k8s.access, k8s.rbac: who am I, may I do this, what may I do. Nothing is stored.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["selfsubjectreviews"]
+    verbs: ["create"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectaccessreviews", "selfsubjectrulesreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rdy-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rdy-readonly
+subjects:
+  - kind: ServiceAccount
+    name: rdy-readonly
+    namespace: rdy-system
+---
+# k8s.nodes looks for the cluster-autoscaler deployment by name, in kube-system only. A Role keeps
+# that to one namespace instead of every namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rdy-readonly-deployments
+  namespace: kube-system
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rdy-readonly-deployments
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rdy-readonly-deployments
+subjects:
+  - kind: ServiceAccount
+    name: rdy-readonly
+    namespace: rdy-system

@@ -1767,16 +1767,23 @@ dependencies = [
 name = "rdy-checks-k8s"
 version = "0.1.0-alpha.0"
 dependencies = [
+ "http",
+ "http-body",
  "k8s-openapi",
  "kube",
  "log",
  "rcgen",
  "rdy-engine",
+ "rdy-spec",
  "secrecy",
+ "serde-saphyr 2.0.0",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",
  "tokio-rustls",
+ "tower-layer",
+ "tower-service",
  "tracing",
  "tracing-subscriber",
 ]

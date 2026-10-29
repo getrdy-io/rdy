@@ -426,6 +426,12 @@ pub(crate) fn from_kube_error(
     if let Some(auth) = find_auth(error) {
         return from_auth_error(auth, plugin);
     }
+    // The read-only guard refused the request. That is not a network failure.
+    if find_guard(error) {
+        return KubeError::Internal {
+            what: "the read-only guard refused the request",
+        };
+    }
     match error {
         kube::Error::Api(status) => match status.code {
             401 => KubeError::Unauthorized {
@@ -571,6 +577,23 @@ pub(crate) fn proxy_display(raw: &str) -> String {
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
     let host_port = authority.rsplit('@').next().unwrap_or("");
     escape_capped(&format!("{scheme}://{host_port}"), CAUSE_CAP)
+}
+
+/// True when the read-only guard refused the request, whatever the wrapping.
+fn find_guard(error: &kube::Error) -> bool {
+    if let kube::Error::Service(inner) = error
+        && inner.downcast_ref::<super::GuardError>().is_some()
+    {
+        return true;
+    }
+    let mut current: Option<&(dyn std::error::Error + 'static)> = error.source();
+    while let Some(err) = current {
+        if err.downcast_ref::<super::GuardError>().is_some() {
+            return true;
+        }
+        current = err.source();
+    }
+    false
 }
 
 /// Looks for an auth error in `error` and its sources.
