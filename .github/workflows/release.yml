@@ -333,6 +333,20 @@ jobs:
     permissions:
       "contents": "read"
 
+  custom-sign-release:
+    needs:
+      - plan
+      - host
+      - custom-check-release-artifacts
+    if: ${{ !fromJson(needs.plan.outputs.val).announcement_is_prerelease || fromJson(needs.plan.outputs.val).publish_prereleases }}
+    uses: ./.github/workflows/sign-release.yml
+    with:
+      plan: ${{ needs.plan.outputs.val }}
+    # publish jobs get escalated permissions
+    permissions:
+      "contents": "read"
+      "id-token": "write"
+
   # Create a GitHub Release while uploading all files to it
   announce:
     permissions:
@@ -341,10 +355,11 @@ jobs:
       - plan
       - host
       - custom-check-release-artifacts
+      - custom-sign-release
     # use "always() && ..." to allow us to wait for all publish jobs while
     # still allowing individual publish jobs to skip themselves (for prereleases).
     # "host" however must run to completion, no skipping allowed!
-    if: ${{ always() && needs.host.result == 'success' && (needs.custom-check-release-artifacts.result == 'skipped' || needs.custom-check-release-artifacts.result == 'success') }}
+    if: ${{ always() && needs.host.result == 'success' && (needs.custom-check-release-artifacts.result == 'skipped' || needs.custom-check-release-artifacts.result == 'success') && needs.custom-sign-release.result == 'success' }}
     runs-on: "ubuntu-22.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -365,8 +380,26 @@ jobs:
           # Remove the granular manifests
           rm -f artifacts/*-dist-manifest.json
       - name: Check the files to publish
-        # Only the expected names, regular files only (ADR 0020).
-        run: sh scripts/check-release-artifacts.sh --files-only artifacts
+        # Only the expected names, regular files only, all listed in the signed SHA256SUMS (ADR 0020).
+        run: sh scripts/check-release-artifacts.sh --files-only --signed artifacts
+      - name: Verify the release signature
+        # The same exact identity and caller claims as sign-release.sh, install.sh and the docs
+        # (06, trust roots). The hashes above prove the files match SHA256SUMS. This proves SHA256SUMS
+        # was signed by sign-release.yml of this repository at this tag. The job token is not passed
+        # to the downloaded tool.
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          env -u GH_TOKEN sh scripts/install-release-tool.sh cosign
+          cd artifacts && env -u GH_TOKEN "$HOME/.cargo/bin/cosign" verify-blob \
+            --bundle SHA256SUMS.sigstore.json \
+            --certificate-identity "https://github.com/$REPO/.github/workflows/sign-release.yml@refs/tags/$TAG" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-github-workflow-repository "$REPO" \
+            --certificate-github-workflow-ref "refs/tags/$TAG" \
+            --certificate-github-workflow-trigger push \
+            SHA256SUMS
       - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(needs.host.outputs.val).announcement_is_prerelease && '--prerelease' || '' }}"

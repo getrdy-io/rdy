@@ -119,6 +119,28 @@ export STUB_CURL_CODE
 run "a failed download installs nothing and says so" 1 "could not download" dist "$tmp/table.txt"
 unset STUB_CURL_CODE
 
+# cosign is a bare program named cosign-<os>-<cpu>.
+case $triple in
+    x86_64-unknown-linux-musl) cosign_key=linux-amd64 ;;
+    *) cosign_key=linux-arm64 ;;
+esac
+printf '#!/bin/sh\necho fake cosign\n' > "$tmp/cosign-$cosign_key"
+cosign_hash=$(sha256sum "$tmp/cosign-$cosign_key" | awk '{ print $1 }')
+printf 'cosign 9.9.9 cosign-%s %s https://example.invalid/cosign-%s\n' "$cosign_key" "$cosign_hash" "$cosign_key" > "$tmp/table.txt"
+STUB_FILE="$tmp/cosign-$cosign_key"
+export STUB_FILE
+run "a bare cosign program with the pinned hash installs" 0 "installed" cosign "$tmp/table.txt"
+if [ -x "$tmp/home/.cargo/bin/cosign" ] && [ "$("$tmp/home/.cargo/bin/cosign")" = "fake cosign" ]; then
+    ok "the installed cosign is executable and is the downloaded file"
+else
+    bad "the installed cosign is executable and is the downloaded file"
+fi
+printf 'cosign 9.9.9 cosign-%s %s https://example.invalid/cosign-%s\n' "$cosign_key" "$bad_hash" "$cosign_key" > "$tmp/table.txt"
+run "a cosign file with another hash fails and installs nothing" 1 "has sha256" cosign "$tmp/table.txt"
+if [ -e "$tmp/home/.cargo/bin/cosign" ]; then bad "a failed cosign check installs nothing"; else ok "a failed cosign check installs nothing"; fi
+STUB_FILE="$tmp/cargo-dist-$triple.tar.xz"
+export STUB_FILE
+
 printf '# empty\n' > "$tmp/table.txt"
 run "a tool with no line for this platform fails" 1 "has no dist for" dist "$tmp/table.txt"
 
@@ -132,6 +154,13 @@ for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwi
         ok "the committed table pins dist for $t"
     else
         bad "the committed table pins dist for $t"
+    fi
+done
+for k in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+    if awk -v s="$k" '$1 == "cosign" && index($3, s) > 0 && length($4) == 64 { f = 1 } END { exit !f }' "$real"; then
+        ok "the committed table pins cosign for $k"
+    else
+        bad "the committed table pins cosign for $k"
     fi
 done
 if awk '$1 == "cargo-cyclonedx" { f = 1 } END { exit !f }' "$real"; then

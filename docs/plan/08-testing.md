@@ -344,7 +344,7 @@ Rules that keep these stable:
   set, not being root is a failure. `crates/rdy-cli/tests/root_smoke.rs` (`root_whoami_is_zero`) is the
   canary. It proves the job really runs as root, and `--no-tests=fail` proves the filter still matches.
 - The `test` job on linux-x64 lists the `ci` profile and fails if a `root_*` test appears.
-- Root tests never run on macOS or Windows. The Windows store ACL checks (M1-122) are `windows-only` tests.
+- Root tests never run on macOS or Windows. The Windows store refusal tests (M1-122, ADR 0027) are `windows-only` tests; the ACL checks themselves are M2-105.
 
 What is `cfg`-gated, and nothing else:
 

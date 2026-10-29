@@ -136,10 +136,13 @@ run-level facade (`check: null`):
   ambient capabilities.
 - Windows: `C:\Windows\System32\whoami.exe /groups /fo csv`, from a constant path, never from
   `%SystemRoot%`. Integrity SID `S-1-16-12288` (High) or `S-1-16-16384` (System) means elevated. If
-  `whoami` fails, the run counts as elevated for the trust store and `root` as unknown for checks.
+  `whoami` fails, `root` is unknown for checks and `identity.elevated` is unset. In M1 `whoami` feeds only
+  the `root` need and `identity.elevated`, never trust. M2-105 owns elevation detection for the trust path.
 
 The CLI maps the snapshot to the `rdy-spec` trust store scope (system store only when elevated,
-INV-04); the loader never reads ids itself. One privilege answer per run.
+INV-04); the loader never reads ids itself. One privilege answer per run. In M1 the trust store does not
+use the Windows answer: Windows has no user store and every existing system store is refused, so
+elevation does not change what is read (ADR 0027). M2-105 revisits it.
 
 | Need (01 name) | Met when | Probed by | Never does |
 | --- | --- | --- | --- |
@@ -611,7 +614,7 @@ are retired as duplicates (review SF-12). The ADR 0010 amendment ticket of revis
 revision.
 
 - [M1] Check trait, Need and Context in rdy-engine | owner: rust-engineer | est: 3.5h | depends on: Define result model and verdict mapping in rdy-spec | exit test: a fake family with one passing and one need-missing check maps to pass and skipped missing_need through the outcome types, and no CheckError or Support variant can produce not_applicable.
-- [M1] Privilege snapshot, binary refusal and capability probes | owner: rust-engineer | est: 3.5h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: injected mismatches of real, effective, saved and filesystem uid or gid, a nonzero CapEff or CapAmb, and AT_SECURE each exit 70 with the hint before the spec is read; recorded whoami output maps High and System to elevated and a whoami failure to system trust scope; needs absent from the plan are not probed.
+- [M1] Privilege snapshot, binary refusal and capability probes | owner: rust-engineer | est: 3.5h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: injected mismatches of real, effective, saved and filesystem uid or gid, a nonzero CapEff or CapAmb, and AT_SECURE each exit 70 with the hint before the spec is read; recorded whoami output maps High and System to elevated and a whoami failure to an unknown `root` need; needs absent from the plan are not probed.
 - [M1] Family trait, registry and run plan | owner: rust-engineer | est: 3h | depends on: Unknown check ids report Skipped with a "needs a newer rdy" reason | exit test: the plan for examples/specs/acme-platform.yaml gives not_in_build for gpu.cuda and aws.iam, unknown_check for a typo id, not_yet_on_os for host checks on Windows, not_applicable only for an `os: [linux]` entry on macOS, per-check host sets, and does no I/O.
 - [M1] Family probe hook and lazy KubeContext probe | owner: rust-engineer | est: 2.5h | depends on: Privilege snapshot, binary refusal and capability probes, Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: a spec with no k8s checks loads no kubeconfig and sends no request; `--no-network` builds no client; a fake exec plugin that sleeps 600 s makes kube_context unavailable after 10 s with no worker blocked.
 - [M1] Scheduler with concurrency limit, per-check timeout and panic isolation | owner: rust-engineer | est: 4h | depends on: Check trait, Need and Context in rdy-engine | exit test: with the timer on the join handle, FakeCheck Sleep reports timeout, Panic reports error panic, and Spin on a 2-worker runtime still lets the other checks finish; a fake family's passing and need-missing checks come back through the scheduler as pass and skipped missing_need.

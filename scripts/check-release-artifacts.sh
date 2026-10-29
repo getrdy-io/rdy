@@ -1,11 +1,11 @@
 #!/bin/sh
 # check-release-artifacts.sh: prove the files dist built are the files we mean to ship (M1-007).
 #
-# Usage: scripts/check-release-artifacts.sh [--skip-audit | --files-only] <dir>
+# Usage: scripts/check-release-artifacts.sh [--skip-audit | --files-only [--signed]] <dir>
 # <dir> holds the release assets in one flat folder: what dist writes to target/distrib, or what
 # `gh release download` fetches. The release workflow runs this on the built artifacts in a publish
 # job before the GitHub Release is created (.github/workflows/check-release-artifacts.yml). Its
-# `announce` job runs it again with --files-only on the folder it publishes.
+# `announce` job runs it again with --files-only --signed on the folder it publishes.
 #
 # Checks:
 #   0. The folder holds only files from the expected list (below), as regular files. Any other
@@ -14,6 +14,12 @@
 #      (rdy-<t>.zip on Windows) and its .sha256, source.tar.gz and its .sha256, sha256.sum,
 #      rdy.cdx.xml (or rdy.cdx.json), dist-manifest.json, and dist's per-job manifests (plan-,
 #      global- and <t>-dist-manifest.json), which the announce job deletes before it publishes.
+#      Also allowed: install.sh, SHA256SUMS and SHA256SUMS.sigstore.json, which sign-release adds
+#      (M1-010).
+#      --signed (with --files-only, for the folder `announce` publishes) also requires SHA256SUMS and
+#      its bundle, and that SHA256SUMS is exactly what scripts/make-sha256sums.sh prints for the
+#      folder. So a file that sign-release did not hash, or a changed byte, stops the release. It
+#      checks the hashes, not the signature: the signing job verified that with the exact identity.
 #   1. All five archives exist, each with its .sha256 file, and the hashes match. If dist's
 #      sha256.sum exists, it must agree too.
 #   2. Each archive holds only safe paths and rdy-<triple>/{rdy|rdy.exe,LICENSE,README.md,CHANGELOG.md}.
@@ -32,7 +38,8 @@
 # Exit: 0 all checks pass, 1 at least one fails, 64 usage error or a missing tool.
 #
 # Environment: RDY_DIST_CONFIG overrides the path of dist-workspace.toml. It exists only for
-# scripts/test-check-release-artifacts.sh. Do not set it in a release.
+# scripts/test-check-release-artifacts.sh. Do not set it in a release. The script prints a warning
+# when it is set.
 #
 # Needs: tar, unzip, readelf, objdump, od, awk, jq, python3 3.11 or newer (tomllib), cargo with
 # cargo-audit, and sha256sum or shasum. Pass --skip-audit only for offline runs of the script tests. It prints a loud warning.
@@ -44,22 +51,31 @@ export LC_ALL
 
 here=$(cd "$(dirname "$0")" && pwd)
 
+usage() {
+    echo "usage: scripts/check-release-artifacts.sh [--skip-audit | --files-only [--signed]] <dir>" >&2
+    exit 64
+}
+
 skip_audit=0
 files_only=0
-if [ "$#" -eq 2 ]; then
+signed=0
+while [ "$#" -gt 1 ]; do
     case $1 in
         --skip-audit) skip_audit=1 ;;
         --files-only) files_only=1 ;;
-        *)
-            echo "usage: scripts/check-release-artifacts.sh [--skip-audit | --files-only] <dir>" >&2
-            exit 64
-            ;;
+        --signed) signed=1 ;;
+        *) usage ;;
     esac
     shift
-fi
+done
 if [ "$#" -ne 1 ]; then
-    echo "usage: scripts/check-release-artifacts.sh [--skip-audit | --files-only] <dir>" >&2
-    exit 64
+    usage
+fi
+if [ "$signed" -eq 1 ] && [ "$files_only" -eq 0 ]; then
+    usage
+fi
+if [ "$skip_audit" -eq 1 ] && [ "$files_only" -eq 1 ]; then
+    usage
 fi
 dir=${1%/}
 if [ ! -d "$dir" ]; then
@@ -77,6 +93,10 @@ need() {
 }
 need awk "install awk"
 need find "install findutils"
+if [ "$signed" -eq 1 ]; then
+    need cmp "install diffutils"
+    need diff "install diffutils"
+fi
 if [ "$files_only" -eq 0 ]; then
     need tar "install tar"
     need unzip "install unzip (on Debian or Ubuntu, 'apt-get install unzip')"
@@ -125,7 +145,8 @@ archive_of() {
         printf '%s\n' "$a" "$a.sha256" "$t-dist-manifest.json"
     done
     printf '%s\n' source.tar.gz source.tar.gz.sha256 sha256.sum rdy.cdx.xml rdy.cdx.json \
-        dist-manifest.json plan-dist-manifest.json global-dist-manifest.json
+        dist-manifest.json plan-dist-manifest.json global-dist-manifest.json \
+        install.sh SHA256SUMS SHA256SUMS.sigstore.json
 } > "$work/allowed.txt"
 find "$dir" -mindepth 1 > "$work/found.txt"
 unexpected=0
@@ -144,6 +165,20 @@ while IFS= read -r f; do
 done < "$work/found.txt"
 if [ "$unexpected" -eq 0 ]; then
     pass "the folder holds only expected release files"
+fi
+if [ "$signed" -eq 1 ]; then
+    if [ "$unexpected" -eq 1 ]; then
+        :
+    elif [ ! -s "$dir/SHA256SUMS" ] || [ ! -s "$dir/SHA256SUMS.sigstore.json" ]; then
+        fail "SHA256SUMS and SHA256SUMS.sigstore.json are in the folder" "the signing job did not add them. Do not publish. Look at the sign-release job in the release run."
+    elif ! "$here/make-sha256sums.sh" "$dir" > "$work/sums.expected" 2> "$work/sums.err"; then
+        fail "SHA256SUMS can be checked" "$(head -c 300 "$work/sums.err")"
+    elif cmp -s "$work/sums.expected" "$dir/SHA256SUMS"; then
+        pass "SHA256SUMS lists exactly the files in the folder, with matching hashes"
+    else
+        diff "$work/sums.expected" "$dir/SHA256SUMS" | sed 's/^/  | /'
+        fail "SHA256SUMS lists exactly the files in the folder, with matching hashes" "a file was added, removed or changed after sign-release hashed it. Do not publish. The lines above show the difference (< is what the folder holds, > is what was signed)."
+    fi
 fi
 if [ "$files_only" -eq 1 ]; then
     if [ "$bad" -gt 0 ]; then
@@ -404,12 +439,25 @@ fi
 # `cargo tree --package rdy` resolves features for rdy alone, so it passes even when dist builds the
 # whole workspace. The setting that prevents that is precise-builds, so require it too.
 dist_config=${RDY_DIST_CONFIG:-$here/../dist-workspace.toml}
-if python3 -c 'import sys, tomllib
+if [ -n "${RDY_DIST_CONFIG:-}" ]; then
+    echo "WARNING: RDY_DIST_CONFIG overrides dist-workspace.toml (test only)"
+fi
+# -I: isolated mode, so nothing in the current folder can shadow tomllib. Exit 3 means python3 is
+# older than 3.11. stderr is kept, so a broken file or an old python3 says why.
+python3 -I -c 'import sys
+try:
+    import tomllib
+except ImportError:
+    sys.exit(3)
 with open(sys.argv[1], "rb") as f:
-    sys.exit(0 if tomllib.load(f).get("dist", {}).get("precise-builds") is True else 1)' "$dist_config" 2> /dev/null; then
+    sys.exit(0 if tomllib.load(f).get("dist", {}).get("precise-builds") is True else 1)' "$dist_config" 2> "$work/toml.err"
+toml_code=$?
+if [ "$toml_code" -eq 0 ]; then
     pass "dist builds one package at a time (precise-builds = true)"
+elif [ "$toml_code" -eq 3 ]; then
+    fail "dist-workspace.toml can be read" "needs python3 3.11 or newer (tomllib). Install it, then run this script again."
 else
-    fail "dist builds one package at a time (precise-builds = true)" "$dist_config must set 'precise-builds = true' under [dist]. Without it dist builds the whole workspace and feature unification can put xtask's features (preserve_order) into rdy."
+    fail "dist builds one package at a time (precise-builds = true)" "$dist_config must set 'precise-builds = true' under [dist]. Without it dist builds the whole workspace and feature unification can put xtask's features (preserve_order) into rdy. $(head -c 300 "$work/toml.err")"
 fi
 # The features that `cargo build --package rdy` would turn on, for each release target. cargo-dist
 # builds one package at a time (precise-builds), so this must match what was shipped.
