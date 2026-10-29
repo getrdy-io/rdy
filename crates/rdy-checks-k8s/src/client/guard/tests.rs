@@ -1076,27 +1076,26 @@ async fn a_refusal_is_a_fixed_error_that_holds_no_request_text() {
 
 #[test]
 fn a_call_after_its_check_ended_has_its_own_text_and_hint() {
-    for rule in [RULE_CHECK_FINISHED] {
-        let late = GuardError { rule };
-        assert!(late.is_late(), "{rule}");
-        let text = late.to_string();
-        assert!(
-            text.contains(rule) && text.contains("after its check ended"),
-            "{text}"
-        );
-        assert!(!text.contains("Secrets"), "{text}");
-        let error = kube::Error::Service(Box::new(late));
-        let mapped = crate::client::error::from_kube_error(&error, "https://s", None, false, true);
-        assert!(
-            matches!(mapped, crate::client::KubeError::Refused { late: true, .. }),
-            "{mapped:?}"
-        );
-        let hint = mapped.hint();
-        assert!(
-            hint.contains("after it ended") && hint.contains("action log"),
-            "{hint}"
-        );
-    }
+    let rule = RULE_CHECK_FINISHED;
+    let late = GuardError { rule };
+    assert!(late.is_late(), "{rule}");
+    let text = late.to_string();
+    assert!(
+        text.contains(rule) && text.contains("after its check ended"),
+        "{text}"
+    );
+    assert!(!text.contains("Secrets"), "{text}");
+    let error = kube::Error::Service(Box::new(late));
+    let mapped = crate::client::error::from_kube_error(&error, "https://s", None, false, true);
+    assert!(
+        matches!(mapped, crate::client::KubeError::Refused { late: true, .. }),
+        "{mapped:?}"
+    );
+    let hint = mapped.hint();
+    assert!(
+        hint.contains("after it ended") && hint.contains("action log"),
+        "{hint}"
+    );
     assert!(!GuardError { rule: RULE_SECRETS }.is_late());
     // A closed probe is not a late call: it is a client built without a probe.
     let closed = GuardError {
