@@ -322,7 +322,10 @@ tests policy.
 - Descriptors above 2 that `rdy` inherited reach children in M1. `exec::inherited_fds()` lists them
   for the start-up warning (built, M1-168); closing them needs `unsafe` (M2-104, ADR 0023).
 - `exec::run` and `ExecSpec::new` are public only under `cfg(any(test, feature = "testing"))`. Check
-  crates reach the runner through `exec::policy::run` only.
+  crates reach the runner through `exec::table::run` only: it checks the command table (03 Appendix A),
+  then the policy. `exec::policy::run` is crate-private, and a compile-fail test proves it. The table
+  and `table::validate_for` need no `runtime` feature, so a probe gate without a runtime can refuse an
+  unlisted command too.
 - Each child gets its own process group, recorded in a lock-free list until reaped, and the group is
   killed on timeout. A child not reaped within 1 s of SIGKILL returns `Hung { pid }`; a detached task
   reaps it later.

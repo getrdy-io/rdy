@@ -174,6 +174,18 @@ fn a_stub_that_reaches_the_scheduler_follows_the_run_os_not_the_build() {
 }
 
 #[test]
+fn every_remediation_passes_the_fix_text_audit() {
+    // The text ships in reports. Every command and sysctl name in it must be on the reviewed lists
+    // (ADR 0028), so a typo or an unreviewed tool fails here and not in a customer's report.
+    for info in HostFamily.checks() {
+        let text = info.meta.remediation;
+        if let Err(error) = rdy_engine::fixtext::check(text) {
+            panic!("{} has fix text that is not on the lists: {error}", info.id);
+        }
+    }
+}
+
+#[test]
 fn build_refuses_an_id_the_family_does_not_have() {
     let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
     let entry: CheckSpec = serde_json::from_value(json!({"id": "net.egress"})).expect("an entry");
