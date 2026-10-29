@@ -149,6 +149,14 @@ The ticket's exit test needs the sandbox, a required-reviewer approval and a tag
 
 If step 3 never shows the waiting job, the environment name in the sandbox is not exactly `release`. If step 5 fails in `cosign sign-blob` with an OIDC error, the caller job lacks `id-token: write`: check `release.yml`.
 
+## verify-release.sh and RELEASING.md (M1-012)
+
+`scripts/verify-release.sh [--dir <folder>] <tag>` is the verification command in script form (05, Surface 3; `install.sh` follows the same contract). From the tag alone it downloads `SHA256SUMS` and `SHA256SUMS.sigstore.json` with `curl` (`--proto '=https' --proto-redir '=https' --tlsv1.2`, only from `github.com/getrdy-io/rdy/releases/download/<tag>/`). It runs cosign 3 or newer (a note when it differs from the pin in `.github/release-tools.txt`) with the full contract: issuer, exact identity, repository, ref and trigger. Only then does it read `SHA256SUMS`: plain file names only, the five archives must be listed, and every listed file is downloaded and its sha256 compared. It prints the sha256 of `SHA256SUMS` and the Rekor log index, which the founder records for each release. The repository and host are fixed in the script. `--dir` checks files already on disk (the air-gapped route, or `gh release download`). Exit 0 verified, 1 a check failed, 64 usage or a missing tool. A missing cosign is never skipped.
+
+The tests (`scripts/test-verify-release.sh`, in the `release-workflow` CI job) use a fake cosign and a stub `curl`. A wrong caller repository, ref and trigger each fail. The fake accepts the wrong caller when the claim flags are left off, so those tests prove the script passes them. A wrong identity, a changed byte, a changed archive, a missing archive, a missing bundle and an unsafe file name fail too.
+
+`RELEASING.md` is the founder's runbook: the one-time hand steps (the signing proof above, the `release` environment, the rulesets), the release PR (version bump, changelog assembly per ADR 0017), the tag push, the approval click, and the clean-machine `verify-release.sh` run that closes the M1-012 exit test. Agents never push the tag (ADR 0024).
+
 ## SBOM and auditable binaries
 
 - `cargo-auditable` (`cargo-auditable = true`) embeds the dependency list in every binary. `cargo audit bin ./rdy` works on any shipped file. Confirmed in M1-007: the section survives `strip = "symbols"` (`[profile.dist]`), and `scripts/check-release-artifacts.sh` runs `cargo audit bin` on all five binaries.

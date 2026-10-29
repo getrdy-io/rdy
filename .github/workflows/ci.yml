@@ -401,6 +401,7 @@ jobs:
           sh scripts/test-install-release-tool.sh
           sh scripts/test-harden-release-workflow.sh
           sh scripts/test-sign-release.sh
+          sh scripts/test-verify-release.sh
       - name: release.yml matches dist and the hardening script
         run: sh scripts/gen-release-workflow.sh --check
 
