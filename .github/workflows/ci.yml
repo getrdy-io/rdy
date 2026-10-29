@@ -65,16 +65,27 @@ jobs:
       # serde_json/preserve_order, which must stay out of the shipped binary (ADR 0019).
       - name: The binary does not build the schema generator
         run: |
-          tree="$(cargo tree --locked -p rdy -e features --target x86_64-unknown-linux-gnu)"
+          tree="$(cargo tree --locked -p rdy -e normal,build,features --target x86_64-unknown-linux-gnu)"
           if printf '%s\n' "$tree" | grep -E 'preserve_order|rdy-spec feature "schema"|rdy-engine feature "testing"'; then
             echo "::error::the rdy binary would build the schema generator, serde_json/preserve_order or the rdy-engine testing feature"
+            exit 1
+          fi
+      # rdy-cli's tests turn on the rdy-engine `testing` feature (the panicking-redactor seam) through a
+      # dev-dependency. It must never reach the shipped binary, so check the normal build graph.
+      - name: The binary does not build the rdy-engine testing feature
+        run: |
+          tree="$(cargo tree --locked -p rdy -e normal,features --target x86_64-unknown-linux-gnu)"
+          if printf '%s\n' "$tree" | grep -E 'rdy-engine feature "testing"'; then
+            echo "::error::the rdy binary would build the rdy-engine testing feature"
             exit 1
           fi
       # exec::run and ExecSpec::new are pub(crate) without the `testing` feature. A normal build, with no
       # dev-dependencies, must compile with that narrower surface.
       - name: The binary builds without the testing feature
         run: cargo check --locked -p rdy
-      # A --workspace build turns the feature on through xtask. This runs the binary's own feature set.
+      # A --workspace build turns the schema feature on through xtask. This runs the binary's own feature
+      # set for the normal dependencies. Tests of rdy still see the dev-dependency `testing` feature of
+      # rdy-engine, which the guard above keeps out of the shipped binary.
       - name: Test the binary's feature set
         run: cargo test --locked -p rdy -p rdy-engine
 

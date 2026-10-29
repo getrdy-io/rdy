@@ -165,8 +165,8 @@ the equality easier to see in a diff.
   come from the same `Redacted<Report>`.
 - **Logs.** A redacting writer under the `tracing` fmt layer redacts each formatted event whole before stderr.
   The inner fmt layer uses `.with_ansi(false)`, because colour codes between a field name and `=` would hide
-  `password=hunter2` from the key-name rule. With `RUST_LOG` unset, hyper, h2, rustls, tower and kube are
-  capped at warn. A PEM block split over several events is a known gap in M1. Panic and CLI error text is
+  `password=hunter2` from the key-name rule. With `RUST_LOG` unset nothing is logged (07 D.6); with it set,
+  hyper, h2, rustls, tower and kube stay capped at warn whatever the filter says. A PEM block split over several events is a known gap in M1. Panic and CLI error text is
   redacted too.
 - **Raw bytes** live only in memory owned by the collector task and the redactor: no temp file, and no raw
   value in the action log, `tracing` or an error.
@@ -620,7 +620,7 @@ M1 redactor: six tickets, 14.5 hours, plus a 0.5-hour clause on SEC-31 (15 hours
 - [M1] SEC-25 Minimal redactor for evidence, errors and logs | owner: rust-engineer | est: 2.5h | depends on: Amend ADR 0015 with span union and keyed tags and Redacted<T> and ring; Define result model and verdict mapping in rdy-spec | exit test: overlapping spans give one placeholder, equal secrets share a tag per Redactor, `password=[REDACTED:x:00000000]hunter2` is redacted, and `Redacted` has no public constructor or Deserialize.
 - [M1] M1 redaction rules for URLs and auth headers and AWS keys and PEM keys and JWTs and rdy tokens and key names | owner: rust-engineer | est: 3.5h | depends on: SEC-25 Minimal redactor for evidence, errors and logs | exit test: the 23 positive corpus inputs come out typed with quotes kept, and `secretName: acme-tls`, `${DB_PASSWORD}`, `passed: 12` and a certificate are unchanged.
 - [M1] Redact then cap every Report string and return RedactedReport | owner: rust-engineer | est: 2.5h | depends on: SEC-25 Minimal redactor for evidence, errors and logs; Map outcomes to CheckResult with fix source, partial and needs | exit test: a PEM key across a 64 KiB cap is fully redacted, 01's sample reports 7.2 to 7.4 round-trip byte-identical apart from planted canaries, `by_rule` is the same with RUST_LOG unset and at trace, the watchdog report is redacted, and an error exits 70 with no report.
-- [M1] Redacting tracing writer and panic hook and CLI error text | owner: rust-engineer | est: 2h | depends on: SEC-25 Minimal redactor for evidence, errors and logs | exit test: canaries in env, a proxy URL, kubeconfig, command output and a tracing field never reach stderr at RUST_LOG=trace.
+- [M1] Redacting tracing writer and panic hook and CLI error text | owner: rust-engineer | est: 2h | depends on: SEC-25 Minimal redactor for evidence, errors and logs | exit test: canaries in env, kubeconfig, command output and a tracing field never reach stderr at RUST_LOG=trace (the proxy URL canary moves to M1-060, PC-43).
 - [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: M1 redaction rules for URLs and auth headers and AWS keys and PEM keys and JWTs and rdy tokens and key names | exit test: the 28 cases run in `cargo test` on five legs and the harness fails on a survivor or a rule or syntax form with no positive case.
 - Fold, +0.5h on "SEC-31 Docs security page and verify-first install": list the M1 rules, what stays (hostnames, addresses, encoded values, the verified spec copy) and the placeholder format.
 
