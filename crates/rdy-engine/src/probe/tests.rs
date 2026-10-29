@@ -971,6 +971,21 @@ impl Backend for Hanging {
     }
 }
 
+/// The provided `Backend::process_ids` is the live path (M1-042): the real and effective ids of this
+/// process, with the saved and filesystem ids reported as the effective one.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_provided_process_ids_are_real_and_effective_with_the_rest_copied() {
+    let ids = Hanging.process_ids().await.expect("ids");
+    let (uid, euid) = (
+        rustix::process::getuid().as_raw(),
+        rustix::process::geteuid().as_raw(),
+    );
+    assert_eq!(ids.uid, [uid, euid, euid, euid]);
+    assert_eq!(ids.gid[1], rustix::process::getegid().as_raw());
+    assert_eq!(ids.gid[1], ids.gid[3]);
+}
+
 #[cfg(unix)]
 #[tokio::test(start_paused = true)]
 async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {

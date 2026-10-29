@@ -25,6 +25,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, Write};
 
+use rdy_engine::privilege::PrivilegeError;
 use rdy_spec::result::{ExitCode, Verdict};
 use rdy_spec::sig::SignatureError;
 use rdy_spec::{ScalarError, SpecError};
@@ -244,6 +245,9 @@ pub enum InternalKind {
     },
     /// The system could not give random bytes, so no key or file name could be made.
     NoRandomness,
+    /// rdy carries more privilege than the user who started it, or could not prove that it does not
+    /// (INV-10). It is raised before the spec is read. The engine's text is fixed and holds no input.
+    Privilege(PrivilegeError),
     /// The command exists in the tree but a later ticket builds it.
     NotImplemented {
         /// The command as typed in the tree, such as `spec lint`. Always a name from the command tree.
@@ -334,6 +338,7 @@ fn internal_message(kind: &InternalKind) -> String {
         InternalKind::OutputClosed => "rdy could not write its output".to_owned(),
         InternalKind::NoRandomness => "the system could not give random bytes".to_owned(),
         InternalKind::FileWrite { path, reason } => format!("cannot write {path} ({reason})"),
+        InternalKind::Privilege(error) => error.message(),
         InternalKind::NotImplemented { command } => {
             format!("rdy {command} is not yet implemented in this build")
         }
@@ -491,6 +496,7 @@ impl CliError {
                 "check that the folder exists, that you can write to it and that the disk has room, then run again"
                     .to_owned()
             }
+            Self::Internal(InternalKind::Privilege(error)) => error.hint().to_owned(),
             Self::Internal(InternalKind::NotImplemented { .. }) => {
                 "use a later release of rdy, listed at https://github.com/getrdy-io/rdy/releases"
                     .to_owned()

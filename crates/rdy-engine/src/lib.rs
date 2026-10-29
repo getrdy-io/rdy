@@ -21,7 +21,9 @@
 //! - `exec`: the command table and the command policy, which need no runtime, and (feature `runtime`)
 //!   the runner that starts a command in its own process group and kills the group on timeout, on
 //!   drop and at exit. `exec::table::run` is the only public way to run a command.
-//! - [`redact`]: the redactor. [`redact::Redactor::redact_report`] redacts and then caps every string of a
+//! - [`privilege`]: the privilege snapshot, the refusal of a setuid or capability-carrying binary
+//!   (INV-10) and the capability probes.
+//! - [`redact`]: the redactor.[`redact::Redactor::redact_report`] redacts and then caps every string of a
 //!   report and returns a [`redact::RedactedReport`], the only type the writers and renderers accept.
 //!
 //! The live backend and the renderers arrive in later M1 tickets.
@@ -39,6 +41,7 @@ pub mod outcome;
 #[cfg(feature = "runtime")]
 pub mod output;
 pub mod plan;
+pub mod privilege;
 pub mod probe;
 pub mod redact;
 #[cfg(feature = "runtime")]

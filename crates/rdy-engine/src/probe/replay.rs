@@ -15,6 +15,7 @@ use super::sealed::Sealed;
 use super::{Backend, DirEntry, FileBytes, FileMeta, Output, ProbeError};
 use crate::check::BoxFuture;
 use crate::exec::policy::Cmd;
+use crate::privilege::ProcessIds;
 
 /// A recorded machine: files, directories and command output.
 #[derive(Debug, Clone, Default)]
@@ -22,6 +23,7 @@ pub struct Replay {
     files: HashMap<PathBuf, Vec<u8>>,
     dirs: HashMap<PathBuf, Vec<DirEntry>>,
     commands: HashMap<(String, Vec<String>), Output>,
+    ids: Option<ProcessIds>,
 }
 
 impl Replay {
@@ -57,6 +59,14 @@ impl Replay {
             ),
             output,
         );
+        self
+    }
+
+    /// Sets the real, effective, saved and filesystem ids that `process_ids` answers with (the macOS
+    /// snapshot). A backend with none set answers "not found".
+    #[must_use]
+    pub fn ids(mut self, uid: [u32; 4], gid: [u32; 4]) -> Self {
+        self.ids = Some(ProcessIds::new(uid, gid));
         self
     }
 }
@@ -109,5 +119,9 @@ impl Backend for Replay {
                 .cloned()
                 .ok_or(ProbeError::NotFound)
         })
+    }
+
+    fn process_ids(&self) -> BoxFuture<'_, Result<ProcessIds, ProbeError>> {
+        Box::pin(async move { self.ids.ok_or(ProbeError::NotFound) })
     }
 }
