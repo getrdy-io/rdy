@@ -20,6 +20,9 @@
 //!   the runner that starts a command in its own process group and kills the group on timeout, on
 //!   drop and at exit. `exec::table::run` is the only public way to run a command.
 //!
+//! - [`redact`]: the redactor. [`redact::Redactor::redact_report`] redacts and then caps every string of a
+//!   report and returns a [`redact::RedactedReport`], the only type the writers and renderers accept.
+//!
 //! The probe facade and the renderers arrive in later M1 tickets.
 
 #![forbid(unsafe_code)]
