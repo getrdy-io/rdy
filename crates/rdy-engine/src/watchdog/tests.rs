@@ -306,6 +306,39 @@ fn a_process_that_leaves_by_itself_after_done_is_not_exited_by_the_watchdog() {
 }
 
 #[test]
+fn the_real_clock_counts_from_the_origin_it_is_given() {
+    // An origin 12 s in the past: 12 s have already gone, so waiting for 12 s plus 50 ms takes about 50 ms.
+    let origin = Instant::now()
+        .checked_sub(Duration::from_secs(12))
+        .expect("an instant 12 s back");
+    let clock = SystemClock::new(origin);
+    let stop = Stop::default();
+
+    let started = Instant::now();
+    assert!(clock.wait_until(Duration::from_secs(12) + Duration::from_millis(50), &stop));
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_millis(30) && took < Duration::from_secs(2),
+        "{took:?}"
+    );
+
+    // A time already past returns at once.
+    let started = Instant::now();
+    assert!(clock.wait_until(Duration::from_secs(5), &stop));
+    assert!(started.elapsed() < Duration::from_millis(500));
+
+    // A time far ahead returns false when stopped.
+    let stop = Arc::new(Stop::default());
+    let stopper = Arc::clone(&stop);
+    let handle = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(30));
+        stopper.stop();
+    });
+    assert!(!clock.wait_until(Duration::from_secs(20), &stop));
+    handle.join().unwrap();
+}
+
+#[test]
 fn the_scheduler_and_the_watchdog_share_one_origin() {
     use crate::check::{BoxFuture, Check, CheckContext, CheckInfo, CheckMeta, CheckOutcome, Os};
     use crate::check::{OsSupport, Support};

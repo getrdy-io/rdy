@@ -268,6 +268,12 @@ pub trait Effects: Send + Sync {
 }
 
 /// Kills the real process groups, writes to the real stderr and ends the real process.
+///
+/// `std::process::exit` runs std's one-time cleanup, which flushes stdout. If another thread is stuck
+/// writing to a full stdout pipe, that flush can block, and then the exit never happens. So
+/// [`Effects::exit`] first starts a thread that calls `std::process::abort` after
+/// 1 s, which ends the process no matter what. The CLI still flushes stdout explicitly
+/// before [`WriteState::finish`], so a normal exit has nothing left to flush.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ProcessEffects;
 
@@ -281,9 +287,19 @@ impl Effects for ProcessEffects {
     }
 
     fn exit(&self, code: i32) {
+        // If the spawn fails there is nothing more to do: the exit below is still the best we have.
+        let _ = thread::Builder::new()
+            .name("rdy-watchdog-abort".into())
+            .spawn(|| {
+                thread::sleep(ABORT_AFTER);
+                std::process::abort();
+            });
         std::process::exit(code);
     }
 }
+
+/// How long [`ProcessEffects`] gives `std::process::exit` before it aborts the process instead.
+const ABORT_AFTER: Duration = Duration::from_secs(1);
 
 /// How long the watchdog waits for the stderr line before it exits anyway.
 const NOTICE_WAIT: Duration = Duration::from_millis(200);
