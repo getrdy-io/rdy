@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::io;
 
 use anyhow::Context as _;
+use rdy_engine::privilege::{PrivilegeError, Refusal};
 use rdy_spec::result::ExitCode;
 use rdy_spec::scalar::{DurationProblem, QuantityProblem, TargetProblem, VersionProblem};
 use rdy_spec::sig::{KeyId, SignatureError};
@@ -86,6 +87,9 @@ fn every_cli_error() -> Vec<CliError> {
             reason: IoReason::DiskFull,
         }),
         CliError::Internal(InternalKind::NotImplemented { command: "run" }),
+        CliError::Internal(InternalKind::Privilege(PrivilegeError::Refused(vec![
+            Refusal::AtSecure,
+        ]))),
     ]
 }
 
