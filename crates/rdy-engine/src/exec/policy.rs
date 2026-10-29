@@ -8,20 +8,31 @@
 //!   every run, root or not. The parent's `PATH` is never read. Only after those four directories does
 //!   it try the check's declared extra directories ([`Cmd::extra_dirs`]), which are absolute constants
 //!   for operator-managed tools. An extra directory can never shadow a system tool.
-//! - **Refusals.** Shells (`sh`, `bash`, `zsh`, `dash`, `cmd`, `powershell`, `pwsh` and a few more) and
-//!   the privilege tools (`sudo`, `su`, `doas`, `pkexec`, `runas`) never run. The check is on the name
-//!   and on the file the name resolves to, so a link named `tool` that points at `bash` is refused too.
-//!   Arguments go to the program as argv, so no shell parses spec text.
-//! - **Environment.** Cleared, then `LC_ALL=C`, `PATH=<fixed>` and the declared names. `LD_*`,
-//!   `DYLD_*` and a short list of other variables that change how a program loads or resolves are
-//!   refused as declared names. The parent's `LD_PRELOAD` never reaches a child because the parent's
-//!   environment is never copied.
+//! - **Refusals.** Three groups never run, by name: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`,
+//!   `powershell`, `pwsh` and a few more), the privilege tools (`sudo`, `su`, `doas`, `pkexec`, `runas`,
+//!   `run0`, `sudoedit`, `runuser`, `setpriv`, `sg`, `newgrp`, `ksu`, `machinectl`, `systemd-run`) and
+//!   the programs that run another program (`env`, `xargs`, `nice`, `nohup`, `timeout`, `setsid`,
+//!   `chroot`, `nsenter`, `unshare`, `stdbuf`). See [`REFUSED_PROGRAMS`]. The check is on the name and
+//!   on the file the name resolves to, so a link named `tool` that points at `bash` is refused too. A
+//!   multi-call binary such as `busybox` is not on the list, because on a system built from it every
+//!   tool is a link to it; the applet is picked by `argv[0]`, which is the name asked for, so a link
+//!   cannot become a shell. Arguments go to the program as argv, so no shell parses spec text.
+//! - **Trust.** The name resolves to a real path (links followed). The file and every directory above
+//!   it, up to `/`, must be owned by root or by the user `rdy` runs as, and none may be writable by
+//!   the group or by others. A writable directory with the sticky bit (like `/tmp`) is accepted above
+//!   the file, never the file itself. Anything that cannot be read is refused. The program starts from
+//!   that real path with `argv[0]` set to the name.
+//! - **Environment.** Cleared, then the base variables and the declared names. On Unix the base is
+//!   `LC_ALL=C` and the fixed `PATH`; on Windows it is `SystemRoot` and `PATH` set to constants. `LD_*`,
+//!   `DYLD_*`, `MALLOC_*`, `PYTHON*` and a list of other variables that change how a program loads
+//!   code, resolves names or starts helpers are refused as declared names (see [`PolicyError::RefusedEnv`]).
+//!   The parent's `LD_PRELOAD` never reaches a child because the parent's environment is never copied.
 //! - **Caps.** Stdout defaults to 1 MiB and is at most 4 MiB. Stderr is 64 KiB.
 //! - **Windows.** In M1 only `C:\Windows\System32\whoami.exe` runs, until job objects land (M2-006).
 //!
-//! A resolved binary must be executable and not writable by everyone (neither the file nor its
-//! directory). Resolution and start are two steps, so a root-owned search directory is assumed; a
-//! writable one is the host's own problem and is refused above for world-writable cases only.
+//! Resolution and start are two steps. The trust rule above makes the gap small, because no one but
+//! root and the running user can change a directory on the path. It does not close it against a
+//! process of the running user itself.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -45,8 +56,8 @@ pub const WINDOWS_WHOAMI: &str = r"C:\Windows\System32\whoami.exe";
 /// The most stdout a command may keep: 4 MiB (02, "Exec").
 pub const MAX_STDOUT_CAP: usize = 4 * 1024 * 1024;
 
-/// Programs that never run, by name without extension and in lower case. Shells and the tools that
-/// raise privilege.
+/// Programs that never run, by name without extension and in lower case: shells, the tools that raise
+/// privilege, and the programs that run another program from their arguments.
 pub const REFUSED_PROGRAMS: &[&str] = &[
     // Shells and command interpreters.
     "sh",
@@ -67,32 +78,88 @@ pub const REFUSED_PROGRAMS: &[&str] = &[
     "doas",
     "pkexec",
     "runas",
+    "run0",
+    "sudoedit",
+    "runuser",
+    "setpriv",
+    "sg",
+    "newgrp",
+    "ksu",
+    "machinectl",
+    "systemd-run",
+    // Programs that run another program from their arguments. A spec-controlled argument would
+    // reach a shell through them.
+    "env",
+    "xargs",
+    "nice",
+    "nohup",
+    "timeout",
+    "setsid",
+    "chroot",
+    "nsenter",
+    "unshare",
+    "stdbuf",
 ];
 
-/// Variables that change how a program loads code or resolves names. Refused as declared names, in
-/// upper case. `LD_*` and `DYLD_*` are refused by prefix.
+/// Variables that change how a program loads code, resolves names or starts helpers. Refused as
+/// declared names, in upper case. The prefixes in `REFUSED_ENV_PREFIXES` are refused as well.
 const REFUSED_ENV: &[&str] = &[
+    // Set by the policy.
     "PATH",
     "LC_ALL",
+    "SYSTEMROOT",
+    // The C library and the resolver.
     "GCONV_PATH",
     "GETCONF_DIR",
+    "GLIBC_TUNABLES",
     "HOSTALIASES",
     "LOCALDOMAIN",
     "LOCPATH",
-    "MALLOC_TRACE",
     "NIS_PATH",
     "NLSPATH",
     "RES_OPTIONS",
     "RESOLV_HOST_CONF",
     "TZDIR",
+    // Shells and shell startup.
     "BASH_ENV",
     "BASHOPTS",
     "CDPATH",
     "ENV",
     "IFS",
+    "PROMPT_COMMAND",
     "PS4",
     "SHELLOPTS",
+    "ZDOTDIR",
+    // TLS libraries.
+    "OPENSSL_CONF",
+    "OPENSSL_ENGINES",
+    "OPENSSL_MODULES",
+    // Language runtimes.
+    "PERL5LIB",
+    "PERL5OPT",
+    "RUBYLIB",
+    "RUBYOPT",
+    "NODE_OPTIONS",
+    "JAVA_TOOL_OPTIONS",
+    "_JAVA_OPTIONS",
+    // Helpers a program starts on its own.
+    "LESSOPEN",
+    "PAGER",
+    "EDITOR",
+    "VISUAL",
+    "SYSTEMD_PAGER",
+    // GPU tooling.
+    "CUDA_INJECTION64_PATH",
 ];
+
+/// Prefixes of refused variable names, in upper case.
+const REFUSED_ENV_PREFIXES: &[&str] = &["LD_", "DYLD_", "MALLOC_", "PYTHON"];
+
+/// The `SystemRoot` a Windows child gets.
+pub const WINDOWS_SYSTEM_ROOT: &str = r"C:\Windows";
+
+/// The `PATH` a Windows child gets.
+pub const WINDOWS_PATH: &str = r"C:\Windows\System32";
 
 const MAX_NAME_LEN: usize = 64;
 
@@ -146,7 +213,7 @@ pub enum PolicyError {
     },
     /// A declared environment name is one the policy sets itself or one that changes program loading.
     #[error(
-        "the environment name `{name}` is refused. Fix: remove it; the policy sets `PATH` and `LC_ALL` and refuses `LD_*` and `DYLD_*`"
+        "the environment name `{name}` is refused. Fix: remove it; the policy sets the search path itself and refuses names that change how programs load code, such as `LD_*`, `DYLD_*` and `PYTHON*`"
     )]
     RefusedEnv {
         /// The name that was given.
@@ -246,7 +313,8 @@ impl Cmd {
     }
 
     /// Declares environment variables for the child. Names are constants; values may come from the
-    /// spec or the host. The child gets nothing else but `LC_ALL` and `PATH`.
+    /// spec or the host. The child gets nothing else but the base variables (`LC_ALL` and `PATH` on
+    /// Unix, `SystemRoot` and `PATH` on Windows).
     #[must_use]
     pub fn env<I, V>(mut self, vars: I) -> Self
     where
@@ -273,7 +341,7 @@ impl Cmd {
 /// # Errors
 ///
 /// A [`PolicyError`] for the first rule the command breaks.
-pub fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
+pub(crate) fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
     check_name(cmd.program)?;
     check_env(&cmd.env)?;
     if cmd.stdout_cap > MAX_STDOUT_CAP {
@@ -283,22 +351,42 @@ pub fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
     }
     let path = resolve(cmd.program, cmd.extra_dirs)?;
 
-    let mut env: Vec<(OsString, OsString)> = vec![
-        (OsString::from("LC_ALL"), OsString::from("C")),
-        (OsString::from("PATH"), OsString::from(SEARCH_PATH)),
-    ];
+    let mut env = base_env();
     env.extend(
         cmd.env
             .iter()
             .map(|(name, value)| (OsString::from(*name), value.clone())),
     );
     Ok(ExecSpec::new(path, cmd.timeout)
+        .arg0(cmd.program)
         .args(cmd.args.iter().cloned())
         .env(env)
         .caps(cmd.stdout_cap, DEFAULT_STDERR_CAP))
 }
 
-/// Runs `cmd` under the policy: checks it, resolves the program, and starts it with [`super::run`].
+/// The variables every child gets before the declared ones.
+fn base_env() -> Vec<(OsString, OsString)> {
+    #[cfg(unix)]
+    {
+        vec![
+            (OsString::from("LC_ALL"), OsString::from("C")),
+            (OsString::from("PATH"), OsString::from(SEARCH_PATH)),
+        ]
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows programs need `SystemRoot`. A Unix `PATH` would mean nothing there.
+        vec![
+            (
+                OsString::from("SystemRoot"),
+                OsString::from(WINDOWS_SYSTEM_ROOT),
+            ),
+            (OsString::from("PATH"), OsString::from(WINDOWS_PATH)),
+        ]
+    }
+}
+
+/// Runs `cmd` under the policy: checks it, resolves the program, and starts it with the process runner.
 ///
 /// # Errors
 ///
@@ -347,8 +435,9 @@ fn check_env(vars: &[(&'static str, OsString)]) -> Result<(), PolicyError> {
             return Err(PolicyError::InvalidEnv { name });
         }
         let upper = name.to_ascii_uppercase();
-        if upper.starts_with("LD_")
-            || upper.starts_with("DYLD_")
+        if REFUSED_ENV_PREFIXES
+            .iter()
+            .any(|prefix| upper.starts_with(prefix))
             || REFUSED_ENV.contains(&upper.as_str())
         {
             return Err(PolicyError::RefusedEnv { name });
@@ -411,19 +500,15 @@ fn resolve(program: &'static str, extra: &'static [&'static str]) -> Result<Path
     for dir in extra {
         dirs.push(check_dir(dir)?);
     }
-    let found = resolve_in(program, &dirs)?;
-    // A link named like a harmless tool must not lead to a shell.
-    if let Ok(real) = std::fs::canonicalize(&found)
-        && let Some(name) = real.file_name().and_then(|name| name.to_str())
-        && is_refused(&stem(name))
-    {
-        return Err(PolicyError::Refused { program });
-    }
-    Ok(found)
+    resolve_in(program, &dirs)
 }
 
-/// The first directory in `dirs` that holds an executable `program`. The order is the whole policy:
-/// the caller puts the fixed directories first.
+/// The first directory in `dirs` that holds an executable `program`, as a real path that passed the
+/// trust rule. The order is the whole policy: the caller puts the fixed directories first.
+///
+/// A candidate that exists but cannot be canonicalised, or whose real name is a refused program, or
+/// whose file or directories are not trusted, ends the search with an error. It does not fall through
+/// to a later directory.
 #[cfg(unix)]
 fn resolve_in(program: &'static str, dirs: &[PathBuf]) -> Result<PathBuf, PolicyError> {
     use std::os::unix::fs::PermissionsExt;
@@ -435,13 +520,50 @@ fn resolve_in(program: &'static str, dirs: &[PathBuf]) -> Result<PathBuf, Policy
         if !meta.is_file() || meta.permissions().mode() & 0o111 == 0 {
             continue;
         }
-        let dir_writable = std::fs::metadata(dir)
-            .map(|dir_meta| dir_meta.permissions().mode() & 0o002 != 0)
-            .unwrap_or(true);
-        if meta.permissions().mode() & 0o002 != 0 || dir_writable {
+        // A link named like a harmless tool must not lead to a shell, and the trust rule is about the
+        // file that runs, not the link. Failing to find the real path is a refusal.
+        let real =
+            std::fs::canonicalize(&candidate).map_err(|_| PolicyError::Untrusted { program })?;
+        if real
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| is_refused(&stem(name)))
+        {
+            return Err(PolicyError::Refused { program });
+        }
+        if !is_trusted(&real) {
             return Err(PolicyError::Untrusted { program });
         }
-        return Ok(candidate);
+        return Ok(real);
     }
     Err(PolicyError::NotFound { program })
+}
+
+/// Whether the file at the real path `real`, and every directory above it, is safe to run from.
+///
+/// - Owner is root or the user `rdy` runs as. As root that means root only.
+/// - The file is not writable by group or others.
+/// - A directory is not writable by group or others, unless it has the sticky bit (`/tmp` is `1777`),
+///   which stops others from renaming or removing an entry they do not own.
+///
+/// Anything that cannot be read is untrusted.
+#[cfg(unix)]
+fn is_trusted(real: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let euid = rustix::process::geteuid().as_raw();
+    let owner_ok = |uid: u32| uid == 0 || uid == euid;
+    let Ok(file) = std::fs::metadata(real) else {
+        return false;
+    };
+    if !owner_ok(file.uid()) || file.mode() & 0o022 != 0 {
+        return false;
+    }
+    real.ancestors().skip(1).all(|dir| {
+        let Ok(meta) = std::fs::metadata(dir) else {
+            return false;
+        };
+        let mode = meta.mode();
+        let writable_ok = mode & 0o022 == 0 || mode & 0o1000 != 0;
+        owner_ok(meta.uid()) && writable_ok
+    })
 }

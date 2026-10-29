@@ -286,16 +286,31 @@ tests policy.
 - The program resolves to an absolute path from the fixed search path (`/usr/sbin:/usr/bin:/sbin:/bin`)
   always, then the check's declared extra directories (absolute constants, for operator-managed GPU
   tools). Windows: in M1 only `C:\Windows\System32\whoami.exe`, until job objects land.
-- Refused outright: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`, `powershell`, `pwsh`) and `sudo`,
-  `su`, `doas`, `pkexec`, `runas`.
-- Environment cleared, then `LC_ALL=C`, `PATH=<fixed>` and declared names only; no `LD_*`, `DYLD_*`.
+- Refused outright: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`, `powershell`, `pwsh`), the privilege
+  family (`sudo`, `su`, `doas`, `pkexec`, `runas`, `run0`, `sudoedit`, `runuser`, `setpriv`, `sg`,
+  `newgrp`, `ksu`, `machinectl`, `systemd-run`) and the programs that run another program from their
+  arguments (`env`, `xargs`, `nice`, `nohup`, `timeout`, `setsid`, `chroot`, `nsenter`, `unshare`,
+  `stdbuf`). A check that needs one of these effects runs the tool itself.
+- Trust: the name resolves to a real path. The file and every directory above it must be owned by root
+  or the running user (root only, when run as root) and not group- or world-writable. A writable
+  directory with the sticky bit (like `/tmp`) is accepted above the file, never the file. A path that cannot be resolved or
+  read is refused. The program starts from the real path with `argv[0]` set to the name, so multi-call
+  binaries (`busybox`, `kmod`) still pick the right applet.
+- Environment cleared, then `LC_ALL=C`, `PATH=<fixed>` and declared names only (Windows: `SystemRoot`
+  and a System32 `PATH`, no Unix path). Declared names may not be `LD_*`, `DYLD_*`, `MALLOC_*`,
+  `PYTHON*`, `GLIBC_TUNABLES`, `OPENSSL_CONF`, `OPENSSL_MODULES`, `OPENSSL_ENGINES`, `PERL5LIB`,
+  `PERL5OPT`, `RUBYLIB`, `RUBYOPT`, `NODE_OPTIONS`, `JAVA_TOOL_OPTIONS`, `_JAVA_OPTIONS`, `LESSOPEN`,
+  `PAGER`, `EDITOR`, `VISUAL`, `SYSTEMD_PAGER`, `ZDOTDIR`, `PROMPT_COMMAND` or
+  `CUDA_INJECTION64_PATH`.
 - stdin null; cwd `/`; umask `0o077` (set process-wide before each start, since a child-only umask needs
   `pre_exec`, which is `unsafe`). The refusal list also holds `ash`, `ksh`, `csh`, `tcsh` and `fish`, and
   a program that resolves to a listed shell through a link is refused. The extra variable names that
   change loading or name resolution (`LOCPATH`, `NLSPATH`, `HOSTALIASES`, `BASH_ENV`, `IFS` and similar)
   are refused too. Code: `rdy_engine::exec::policy`.
 - Descriptors above 2 that `rdy` inherited reach children in M1. `exec::inherited_fds()` lists them
-  for a start-up warning; closing them needs `unsafe` (ADR 0023).
+  for a start-up warning (M1-168); closing them needs `unsafe` (M2-104, ADR 0023).
+- `exec::run` and `ExecSpec::new` are public only under `cfg(any(test, feature = "testing"))`. Check
+  crates reach the runner through `exec::policy::run` only.
 - Each child gets its own process group, recorded in a lock-free list until reaped, and the group is
   killed on timeout. A child not reaped within 1 s of SIGKILL returns `Hung { pid }`; a detached task
   reaps it later.

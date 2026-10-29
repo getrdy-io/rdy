@@ -31,6 +31,10 @@ tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "s
 rustix = { workspace = true, features = ["std", "process", "fs"], optional = true }
 
 [dev-dependencies]
+# The integration tests start commands through the raw runner (`exec::run`, `ExecSpec::new`), which
+# is public only under `testing` (M1-039). A dev-dependency on the crate itself turns the feature on
+# for test builds only. A normal or release build never sees dev-dependencies.
+rdy-engine = { path = ".", features = ["testing"] }
 serde = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tempfile = { workspace = true }

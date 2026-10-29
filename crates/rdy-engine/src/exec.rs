@@ -2,8 +2,10 @@
 //!
 //! This is the mechanism under the facade's `exec` (02, "Exec"). The command policy (search path,
 //! refused programs, environment names, output caps) is [`policy`] and sits on top: facade code runs a
-//! [`policy::Cmd`] and never builds an [`ExecSpec`] itself. This module answers: how does a child start,
-//! how does it end, and what is left when it does not end by itself.
+//! [`policy::Cmd`] and never builds an [`ExecSpec`] itself. `ExecSpec::new` and the raw `run` are
+//! `pub` only under `cfg(any(test, feature = "testing"))`, so a check crate cannot reach the runner
+//! without the policy (SEC-18). This module answers: how does a child start, how does it end, and what
+//! is left when it does not end by itself.
 //!
 //! - **Own process group.** On Unix each child leads a new process group, so `sh -c 'sleep 600 &'`
 //!   and everything it forks share one group id. Killing the group kills them all.
@@ -26,8 +28,7 @@
 //!   as soon as it is registered, and none start afterwards.
 //!
 //! The program must be an absolute path, so no `PATH` or working-directory lookup happens here ([`policy`]
-//! resolves names from the fixed search path). The
-//! environment is cleared, stdin is null, the working directory is the root of the file system
+//! resolves names from the fixed search path). The environment is cleared, stdin is null, the working directory is the root of the file system
 //! ([`child_cwd`]), and stdout and stderr are read up to a byte cap each. The rest is drained and
 //! dropped, so a chatty child never blocks on a full pipe.
 //!
@@ -40,8 +41,10 @@
 //! **Inherited descriptors.** The standard library opens its own descriptors with close-on-exec, but a
 //! descriptor above 2 that `rdy` inherited from its parent (a shell that left a file open) passes to
 //! every child. Setting close-on-exec or closing it needs a raw descriptor number, which no safe API
-//! accepts. M1 does not close them. [`inherited_fds`] lists them so the CLI can warn at start-up, and
-//! ADR 0023 records why and what the M2 fix is.
+//! accepts. M1 does not close them. [`inherited_fds`] lists them so the CLI can warn at start-up
+//! (M1-168, before the first public release), and the M2 fix is an FFI close (M2-104). ADR 0023 records
+//! why. The children are fixed system tools with fixed argv, so a leaked descriptor is a detected
+//! residual in M1, not an open door.
 //!
 //! **Windows.** Job objects are M2-006. Until then a timeout or a drop kills the child process only
 //! ([`KILLS_PROCESS_TREE`] is `false`), which is enough for the one program M1 runs there
@@ -103,9 +106,10 @@ pub const CHILD_UMASK: u32 = 0o077;
 
 /// Sets the process umask to [`CHILD_UMASK`]. Children inherit it.
 ///
-/// [`run`] calls this before every start, so a caller never has to. It is public so the CLI can call it
-/// first thing at start-up, before `rdy` creates any file. Process-wide and idempotent. A no-op on
-/// Windows, which has no umask.
+/// The runner calls this before every start, so a caller never has to. It is public so the CLI can call
+/// it first thing in `main`, before `rdy` creates any file or thread. That call belongs to the CLI
+/// start-up work (M1-168); until it lands, files `rdy` creates before the first command keep the
+/// operator's umask. Process-wide and idempotent. A no-op on Windows, which has no umask.
 pub fn harden_umask() {
     #[cfg(unix)]
     {
@@ -122,6 +126,9 @@ pub fn harden_umask() {
 /// the list is not empty. The numbers carry no secret; the targets are not read. Later in a run it also
 /// lists descriptors that the runtime opened without close-on-exec, so call it early. Empty on
 /// targets with no descriptor directory (Windows).
+///
+/// Calling it first in `main`, before anything is opened, and logging the warning is the CLI start-up
+/// work (M1-168). Closing the descriptors is M2-104 (ADR 0023).
 #[must_use]
 pub fn inherited_fds() -> Vec<u32> {
     #[cfg(unix)]
@@ -187,6 +194,7 @@ pub enum ExecError {
 #[derive(Clone)]
 pub struct ExecSpec {
     program: PathBuf,
+    arg0: Option<OsString>,
     args: Vec<OsString>,
     env: Vec<(OsString, OsString)>,
     timeout: Duration,
@@ -200,6 +208,7 @@ impl fmt::Debug for ExecSpec {
         let names: Vec<&OsString> = self.env.iter().map(|(name, _)| name).collect();
         f.debug_struct("ExecSpec")
             .field("program", &self.program)
+            .field("arg0", &self.arg0)
             .field("args", &self.args)
             .field("env_names", &names)
             .field("timeout", &self.timeout)
@@ -211,16 +220,41 @@ impl fmt::Debug for ExecSpec {
 
 impl ExecSpec {
     /// A command with no arguments, an empty environment and the default output caps.
+    ///
+    /// Public only under `cfg(any(test, feature = "testing"))`. Production code reaches the runner
+    /// through [`policy::run`], which applies the command policy first.
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn new(program: impl Into<PathBuf>, timeout: Duration) -> Self {
+        Self::build(program, timeout)
+    }
+
+    /// The same as the test-only `new`, for the policy layer.
+    #[cfg(not(any(test, feature = "testing")))]
+    #[must_use]
+    pub(crate) fn new(program: impl Into<PathBuf>, timeout: Duration) -> Self {
+        Self::build(program, timeout)
+    }
+
+    fn build(program: impl Into<PathBuf>, timeout: Duration) -> Self {
         Self {
             program: program.into(),
+            arg0: None,
             args: Vec::new(),
             env: Vec::new(),
             timeout,
             stdout_cap: DEFAULT_STDOUT_CAP,
             stderr_cap: DEFAULT_STDERR_CAP,
         }
+    }
+
+    /// Sets `argv[0]`, which is the program's path when this is not called. Multi-call binaries (a
+    /// `busybox` or `kmod` that several names link to) pick what to do from it. Unix only; ignored
+    /// elsewhere.
+    #[must_use]
+    pub(crate) fn arg0(mut self, arg0: impl Into<OsString>) -> Self {
+        self.arg0 = Some(arg0.into());
+        self
     }
 
     /// Sets the arguments. They go to the program as is. No shell sees them.
@@ -286,7 +320,17 @@ pub struct ExecOutput {
 /// [`ExecError::Timeout`] after the group was killed and reaped, [`ExecError::Hung`] when the child
 /// would not be reaped, and the other variants for start and read failures. The `Timeout` also covers
 /// a descendant that left the group (see the module docs) and still holds the output pipe.
+///
+/// Public only under `cfg(any(test, feature = "testing"))`. Production code goes through
+/// [`policy::run`].
+#[cfg(any(test, feature = "testing"))]
 pub async fn run(spec: ExecSpec) -> Result<ExecOutput, ExecError> {
+    run_with(spec, &REGISTRY, LIVE, REAP_GRACE).await
+}
+
+/// The runner for the policy layer, in builds where [`run`] is not public.
+#[cfg(not(any(test, feature = "testing")))]
+pub(crate) async fn run(spec: ExecSpec) -> Result<ExecOutput, ExecError> {
     run_with(spec, &REGISTRY, LIVE, REAP_GRACE).await
 }
 
@@ -294,7 +338,7 @@ pub async fn run(spec: ExecSpec) -> Result<ExecOutput, ExecError> {
 /// the registry.
 ///
 /// The flag comes first, so a command being started at this moment is killed as soon as it is
-/// registered, and later calls to [`run`] return [`ExecError::ShuttingDown`]. The flag is never
+/// registered, and later calls to [`policy::run`] return [`ExecError::ShuttingDown`]. The flag is never
 /// cleared. Lock-free and non-blocking: the watchdog calls it before it exits, and so does the
 /// normal exit path. It kills nothing on Windows (see [`KILLS_PROCESS_TREE`]).
 pub fn kill_all_groups() {
@@ -545,7 +589,12 @@ async fn run_with(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     #[cfg(unix)]
-    command.process_group(0);
+    {
+        command.process_group(0);
+        if let Some(arg0) = &spec.arg0 {
+            command.arg0(arg0);
+        }
+    }
 
     let mut child = match command.spawn() {
         Ok(child) => child,

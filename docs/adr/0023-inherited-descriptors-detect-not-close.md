@@ -1,6 +1,6 @@
 # ADR 0023: Descriptors inherited by `rdy` are listed and reported in M1, not closed
 
-- Status: Accepted (2026-10-28, M1-039; security review follows the PR)
+- Status: Accepted, security-reviewed (PR #53)
 - Date: 2026-10-28
 
 ## Context
@@ -32,17 +32,26 @@ Closing or marking a descriptor needs its raw number, and every API that takes a
    nothing. Windows returns an empty list.
 3. The CLI start-up calls it before it opens anything of its own and, if the list is not empty, logs one
    warning with the count and numbers. The warning says that the descriptors reach child commands and how
-   to start `rdy` without them (`rdy ... 3>&-` in a shell).
+   to start `rdy` without them (`rdy ... 3>&-` in a shell). That is M1-168, and it lands before the
+   first public release. The CLI also calls `harden_umask()` there, first in `main`.
 4. The residual is acceptable in M1 because the programs are a fixed set of system tools run with fixed
    argv, none of which reads a descriptor it was not told about, and the environment carries no hint of
-   one. Shells and `sudo` are refused, so nothing can walk the descriptor table on a spec's behalf.
+   one. Shells, `sudo` and the programs that run other programs (`env`, `xargs`, `timeout` and
+   similar) are refused, so nothing can walk the descriptor table on a spec's behalf. The security
+   review accepted this for M1 on those grounds: children run with `rdy`'s own credentials, with
+   fixed tools and fixed argv, and `sudo` closes descriptors above 2 itself.
 5. Because the umask cannot be set for the child alone without `pre_exec`, the process-wide umask is set
    to `0o077` before each start (and the CLI may call `harden_umask()` earlier). This only makes files
    that `rdy` creates tighter, and the report writer sets modes explicitly (ADR 0016).
-6. The M2 fix is one small FFI module, allowed by INV-18, that calls `close_range(3, ~0, CLOSE_RANGE_CLOEXEC)`
+6. The M2 fix is M2-104: one small FFI module, allowed by INV-18, that calls `close_range(3, ~0, CLOSE_RANGE_CLOEXEC)`
    on Linux and sets `FD_CLOEXEC` on the listed descriptors elsewhere, run first thing in `main`. A test
    in `rdy-engine` already shows the leak (`only_descriptors_without_close_on_exec_reach_a_child`) and
    turns into the regression test for the fix.
+7. This narrows the M1-039 exit test, which said a descriptor above 2 that `rdy` inherited does not reach
+   the child. The backlog correction (correction-08) amends that exit test to "is listed by
+   `inherited_fds()`", adds M1-168 and M2-104, and adds the rule that `exec::run` and `ExecSpec::new`
+   are not available to check crates (they are public only under `cfg(any(test, feature = "testing"))`)
+   to the M1-040 and M1-044 rows.
 
 ## Consequences
 
@@ -62,5 +71,5 @@ Closing or marking a descriptor needs its raw number, and every API that takes a
 
 ## Tickets implied
 
-- [M1] CLI start-up warns on inherited descriptors | owner: rust-engineer | est: 0.5h | depends on: M1-039, the CLI `run` command | exit test: `rdy run` started with `3</dev/null` logs one warning that names descriptor 3 and no path.
-- [M2] FFI module that marks inherited descriptors close-on-exec | owner: rust-engineer | est: 2h | depends on: M1-039 | exit test: a child started after start-up with `3</dev/null` does not have descriptor 3.
+- [M1] M1-168: CLI start-up warns on inherited descriptors, before the first public release | owner: rust-engineer | est: 0.5h | depends on: M1-039, the CLI `run` command | exit test: `rdy run` started with `3</dev/null` logs one warning that names descriptor 3 and no path.
+- [M2] M2-104: FFI module that marks inherited descriptors close-on-exec | owner: rust-engineer | est: 2h | depends on: M1-039 | exit test: a child started after start-up with `3</dev/null` does not have descriptor 3.

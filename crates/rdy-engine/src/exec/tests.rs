@@ -208,11 +208,37 @@ mod process {
         assert_eq!(out.stdout, b"/\n");
     }
 
+    /// The child role of the next test. It does nothing unless the parent set the marker. The umask is
+    /// process-wide, so setting it to zero must happen in a process of its own, not in the shared
+    /// test binary where other tests create files in parallel.
     #[tokio::test]
-    async fn the_child_gets_a_tight_umask_even_when_the_parent_had_a_loose_one() {
+    async fn umask_probe() {
+        if std::env::var_os("RDY_UMASK_PROBE").is_none() {
+            return;
+        }
         let _ = rustix::process::umask(rustix::fs::Mode::from_bits_truncate(0o000));
         let out = run(sh("umask", SECOND * 10)).await.expect("runs");
         assert_eq!(out.stdout, b"0077\n");
+        println!("umask probe ok");
+    }
+
+    #[test]
+    fn the_child_gets_a_tight_umask_even_when_the_parent_had_a_loose_one() {
+        let exe = std::env::current_exe().expect("test binary");
+        let output = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "exec::tests::process::umask_probe",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("RDY_UMASK_PROBE", "1")
+            .output()
+            .expect("start the test binary");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stdout}\n{stderr}");
+        assert!(stdout.contains("umask probe ok"), "{stdout}");
         assert_eq!(CHILD_UMASK, 0o077);
     }
 

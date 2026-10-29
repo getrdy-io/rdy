@@ -1,5 +1,5 @@
 //! Command policy tests. The rules that run before resolution are portable. The resolution tests run
-//! real programs (`env`, `true`) and are Unix only; the Windows rule has its own test.
+//! real programs (`printenv`, `true`) and are Unix only; the Windows rule has its own test.
 
 use super::*;
 
@@ -10,7 +10,7 @@ fn cmd(program: &'static str) -> Cmd {
 }
 
 #[test]
-fn shells_and_the_sudo_family_are_refused_in_every_spelling() {
+fn shells_the_sudo_family_and_exec_wrappers_are_refused_in_every_spelling() {
     for name in [
         "sh",
         "bash",
@@ -24,6 +24,25 @@ fn shells_and_the_sudo_family_are_refused_in_every_spelling() {
         "doas",
         "pkexec",
         "runas",
+        "run0",
+        "sudoedit",
+        "runuser",
+        "setpriv",
+        "sg",
+        "newgrp",
+        "ksu",
+        "machinectl",
+        "systemd-run",
+        "env",
+        "xargs",
+        "nice",
+        "nohup",
+        "timeout",
+        "setsid",
+        "chroot",
+        "nsenter",
+        "unshare",
+        "stdbuf",
         "cmd.exe",
         "PowerShell.exe",
         "BASH",
@@ -81,6 +100,30 @@ fn declared_variables_that_change_loading_are_refused() {
         "BASH_ENV",
         "LOCPATH",
         "HOSTALIASES",
+        "SystemRoot",
+        "GLIBC_TUNABLES",
+        "MALLOC_ARENA_MAX",
+        "malloc_perturb_",
+        "OPENSSL_CONF",
+        "OPENSSL_MODULES",
+        "OPENSSL_ENGINES",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "PERL5LIB",
+        "PERL5OPT",
+        "RUBYLIB",
+        "RUBYOPT",
+        "NODE_OPTIONS",
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        "LESSOPEN",
+        "PAGER",
+        "EDITOR",
+        "VISUAL",
+        "SYSTEMD_PAGER",
+        "ZDOTDIR",
+        "PROMPT_COMMAND",
+        "CUDA_INJECTION64_PATH",
     ] {
         let error = prepare(&cmd("true").env([(name, "x")])).expect_err(name);
         assert_eq!(error, PolicyError::RefusedEnv { name }, "{name}");
@@ -150,6 +193,38 @@ fn on_windows_a_command_resolves_to_the_constant_path_only() {
     ));
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn on_windows_whoami_runs_through_the_policy_and_cmd_is_refused() {
+    let out = run(cmd("whoami")).await.expect("whoami runs");
+    assert!(out.status.success(), "{out:?}");
+    assert!(!out.stdout.is_empty());
+    for name in ["cmd", "cmd.exe", "powershell"] {
+        let error = run(cmd(name)).await.expect_err(name);
+        assert!(
+            matches!(error, CommandError::Policy(PolicyError::Refused { .. })),
+            "{name}: {error:?}"
+        );
+    }
+}
+
+#[test]
+fn the_base_environment_fits_the_target() {
+    let env = base_env();
+    let names: Vec<String> = env
+        .iter()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect();
+    if cfg!(unix) {
+        assert_eq!(names, ["LC_ALL", "PATH"]);
+        assert_eq!(env[1].1, OsString::from(SEARCH_PATH));
+    } else {
+        assert_eq!(names, ["SystemRoot", "PATH"]);
+        assert_eq!(env[0].1, OsString::from(WINDOWS_SYSTEM_ROOT));
+        assert_eq!(env[1].1, OsString::from(WINDOWS_PATH));
+    }
+}
+
 #[test]
 fn debug_output_shows_env_names_and_never_values() {
     let text = format!(
@@ -206,6 +281,27 @@ mod unix {
         lines
     }
 
+    /// What `resolve_in` returns for a file: its real path.
+    fn real(path: &Path) -> PathBuf {
+        fs::canonicalize(path).expect("canonical")
+    }
+
+    fn mode(path: &Path, mode: u32) {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("chmod");
+    }
+
+    fn untrusted(program: &'static str) -> Result<PathBuf, PolicyError> {
+        Err(PolicyError::Untrusted { program })
+    }
+
+    /// A uid that is neither root nor the user running the tests.
+    const STRANGER: u32 = 31_337;
+
+    /// Gives `path` to another user. Only root may; `false` means the test cannot run here.
+    fn give_away(path: &Path) -> bool {
+        std::os::unix::fs::chown(path, Some(STRANGER), None).is_ok()
+    }
+
     #[test]
     fn the_first_directory_in_the_list_wins() {
         let first = trusted_dir();
@@ -213,10 +309,13 @@ mod unix {
         write_exec(first.path(), "tool", "#!/bin/true\n");
         write_exec(second.path(), "tool", "#!/bin/true\n");
         let dirs = [first.path().to_path_buf(), second.path().to_path_buf()];
-        assert_eq!(resolve_in("tool", &dirs), Ok(first.path().join("tool")));
+        assert_eq!(
+            resolve_in("tool", &dirs),
+            Ok(real(&first.path().join("tool")))
+        );
         assert_eq!(
             resolve_in("tool", &dirs[1..]),
-            Ok(second.path().join("tool"))
+            Ok(real(&second.path().join("tool")))
         );
     }
 
@@ -237,7 +336,7 @@ mod unix {
         let dir = trusted_dir();
         let path = dir.path().join("tool");
         fs::write(&path, "x").expect("write");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("chmod");
+        mode(&path, 0o644);
         let dirs = [dir.path().to_path_buf()];
         assert_eq!(
             resolve_in("tool", &dirs),
@@ -246,21 +345,135 @@ mod unix {
     }
 
     #[test]
-    fn a_world_writable_file_or_directory_is_untrusted() {
+    fn a_world_or_group_writable_file_is_untrusted() {
+        for bad in [0o757, 0o775, 0o777] {
+            let dir = trusted_dir();
+            let path = write_exec(dir.path(), "tool", "#!/bin/true\n");
+            let dirs = [dir.path().to_path_buf()];
+            mode(&path, bad);
+            assert_eq!(resolve_in("tool", &dirs), untrusted("tool"), "{bad:o}");
+        }
+    }
+
+    #[test]
+    fn a_world_or_group_writable_directory_is_untrusted() {
+        for bad in [0o777, 0o757, 0o775, 0o770] {
+            let dir = trusted_dir();
+            write_exec(dir.path(), "tool", "#!/bin/true\n");
+            let dirs = [dir.path().to_path_buf()];
+            mode(dir.path(), bad);
+            assert_eq!(resolve_in("tool", &dirs), untrusted("tool"), "{bad:o}");
+        }
+    }
+
+    #[test]
+    fn a_sticky_writable_directory_is_accepted_above_a_trusted_file() {
         let dir = trusted_dir();
         let path = write_exec(dir.path(), "tool", "#!/bin/true\n");
         let dirs = [dir.path().to_path_buf()];
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o757)).expect("chmod");
-        assert_eq!(
-            resolve_in("tool", &dirs),
-            Err(PolicyError::Untrusted { program: "tool" })
+        for sticky in [0o1777, 0o1775] {
+            mode(dir.path(), sticky);
+            assert_eq!(resolve_in("tool", &dirs), Ok(real(&path)), "{sticky:o}");
+        }
+        // The file is never excused: a sticky bit does not help a writable leaf.
+        mode(&path, 0o777);
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+    }
+
+    #[test]
+    fn a_writable_directory_higher_up_makes_the_file_untrusted() {
+        let outer = trusted_dir();
+        let inner = outer.path().join("inner");
+        fs::create_dir(&inner).expect("mkdir");
+        mode(&inner, 0o755);
+        write_exec(&inner, "tool", "#!/bin/true\n");
+        let dirs = [inner.clone()];
+        assert!(resolve_in("tool", &dirs).is_ok());
+        mode(outer.path(), 0o775);
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+        mode(outer.path(), 0o757);
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+    }
+
+    #[test]
+    fn a_file_or_directory_owned_by_someone_else_is_untrusted() {
+        let dir = trusted_dir();
+        let path = write_exec(dir.path(), "tool", "#!/bin/true\n");
+        let dirs = [dir.path().to_path_buf()];
+        if !give_away(&path) {
+            // Not root: giving a file away is not allowed, so the case cannot be set up.
+            return;
+        }
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+
+        let other = trusted_dir();
+        write_exec(other.path(), "tool", "#!/bin/true\n");
+        assert!(give_away(other.path()));
+        let dirs = [other.path().to_path_buf()];
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+    }
+
+    #[test]
+    fn a_link_into_a_writable_tree_is_judged_by_where_it_points() {
+        let safe = trusted_dir();
+        let writable = trusted_dir();
+        let target = write_exec(writable.path(), "real-tool", "#!/bin/true\n");
+        symlink(&target, safe.path().join("tool")).expect("symlink");
+        let dirs = [safe.path().to_path_buf()];
+        assert_eq!(resolve_in("tool", &dirs), Ok(real(&target)));
+        // The link and its directory are fine. The tree it points into is not.
+        mode(writable.path(), 0o777);
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+        mode(writable.path(), 0o755);
+        mode(&target, 0o777);
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+    }
+
+    #[test]
+    fn an_untrusted_candidate_ends_the_search() {
+        let first = trusted_dir();
+        let second = trusted_dir();
+        let bad = write_exec(first.path(), "tool", "#!/bin/true\n");
+        write_exec(second.path(), "tool", "#!/bin/true\n");
+        mode(&bad, 0o777);
+        let dirs = [first.path().to_path_buf(), second.path().to_path_buf()];
+        assert_eq!(resolve_in("tool", &dirs), untrusted("tool"));
+    }
+
+    #[test]
+    fn the_program_starts_from_its_real_path_with_the_name_as_argv0() {
+        let dir = trusted_dir();
+        let target = write_exec(dir.path(), "real-name", "#!/bin/true\n");
+        let extra = trusted_dir();
+        symlink(&target, extra.path().join("applet")).expect("symlink");
+        let spec = prepare(&cmd("applet").extra_dirs(constants(constant(extra.path()))))
+            .expect("resolves");
+        let text = format!("{spec:?}");
+        assert!(
+            text.contains(&format!("{}", real(&target).display())),
+            "{text}"
         );
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
-        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o777)).expect("chmod");
-        assert_eq!(
-            resolve_in("tool", &dirs),
-            Err(PolicyError::Untrusted { program: "tool" })
-        );
+        assert!(text.contains("arg0: Some(\"applet\")"), "{text}");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_multi_call_applet_sees_the_name_it_was_asked_for() {
+        let Ok(cat) = fs::canonicalize("/usr/bin/cat") else {
+            return;
+        };
+        if cat.file_name().is_some_and(|name| name != "cat") {
+            // A multi-call build (busybox, coreutils) picks the tool from argv[0] itself.
+            return;
+        }
+        let extra = trusted_dir();
+        symlink(&cat, extra.path().join("rdy-policy-applet")).expect("symlink");
+        let out = run(cmd("rdy-policy-applet")
+            .extra_dirs(constants(constant(extra.path())))
+            .args(["/proc/self/cmdline"]))
+        .await
+        .expect("runs");
+        assert_eq!(out.stdout, b"rdy-policy-applet\0/proc/self/cmdline\0");
     }
 
     #[test]
@@ -288,6 +501,22 @@ mod unix {
         // A system tool of the same name is not shadowed.
         let spec = prepare(&cmd("true").extra_dirs(dirs)).expect("resolves");
         assert!(!format!("{spec:?}").contains(dir), "{spec:?}");
+    }
+
+    #[test]
+    fn a_link_to_a_file_named_like_a_shell_is_refused() {
+        let shells = trusted_dir();
+        let target = write_exec(shells.path(), "dash", "#!/bin/true\n");
+        let extra = trusted_dir();
+        symlink(&target, extra.path().join("rdy-policy-link")).expect("symlink");
+        let error = prepare(&cmd("rdy-policy-link").extra_dirs(constants(constant(extra.path()))))
+            .expect_err("refused");
+        assert_eq!(
+            error,
+            PolicyError::Refused {
+                program: "rdy-policy-link"
+            }
+        );
     }
 
     #[test]
@@ -326,9 +555,9 @@ mod unix {
 
     #[tokio::test]
     async fn the_child_gets_the_fixed_environment_and_nothing_else() {
-        let out = run(cmd("env").env([("HTTPS_PROXY", "http://proxy.invalid:3128")]))
+        let out = run(cmd("printenv").env([("HTTPS_PROXY", "http://proxy.invalid:3128")]))
             .await
-            .expect("env runs");
+            .expect("printenv runs");
         assert_eq!(
             lines(&out),
             [
@@ -341,7 +570,9 @@ mod unix {
 
     #[tokio::test]
     async fn the_output_caps_come_from_the_command() {
-        let out = run(cmd("env").stdout_cap(8)).await.expect("env runs");
+        let out = run(cmd("printenv").stdout_cap(8))
+            .await
+            .expect("printenv runs");
         assert_eq!(out.stdout.len(), 8);
         assert!(out.stdout_truncated);
     }
@@ -363,16 +594,16 @@ mod unix {
         let Some(fake_dir) = std::env::var_os("RDY_POLICY_FAKE_DIR") else {
             return;
         };
-        // The set-up holds: this process has the hostile variables and a fake `env` first in PATH.
+        // The set-up holds: this process has the hostile variables and a fake `printenv` first in PATH.
         assert!(std::env::var_os("LD_PRELOAD").is_some());
         let path = std::env::var_os("PATH").expect("PATH");
         assert!(
             path.to_string_lossy()
                 .starts_with(&*fake_dir.to_string_lossy())
         );
-        let out = run(cmd("env")).await.expect("env runs");
+        let out = run(cmd("printenv")).await.expect("printenv runs");
         let text = String::from_utf8_lossy(&out.stdout);
-        assert!(!text.contains("FAKE"), "the fake env ran: {text}");
+        assert!(!text.contains("FAKE"), "the fake printenv ran: {text}");
         assert!(!text.contains("LD_"), "{text}");
         assert!(!text.contains("DYLD_"), "{text}");
         assert!(
@@ -385,7 +616,7 @@ mod unix {
     #[test]
     fn a_hostile_parent_environment_never_reaches_a_child() {
         let fake = trusted_dir();
-        write_exec(fake.path(), "env", "#!/bin/echo FAKE\n");
+        write_exec(fake.path(), "printenv", "#!/bin/echo FAKE\n");
         let fake_dir = fake.path().to_str().expect("utf-8");
         let exe = std::env::current_exe().expect("test binary");
         let output = Command::new(exe)
