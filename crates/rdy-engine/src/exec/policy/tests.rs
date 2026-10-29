@@ -81,6 +81,77 @@ fn shells_the_sudo_family_and_exec_wrappers_are_refused_in_every_spelling() {
 }
 
 #[test]
+fn programs_that_take_code_or_a_command_line_are_refused_in_every_spelling() {
+    for name in [
+        "time",
+        "setarch",
+        "linux32",
+        "linux64",
+        "chpst",
+        "start-stop-daemon",
+        "run-parts",
+        "awk",
+        "gawk",
+        "mawk",
+        "nawk",
+        "node",
+        "nodejs",
+        "expect",
+        "osascript",
+        "python",
+        "python3",
+        "python3.12",
+        "perl",
+        "perl5.36.0",
+        "ruby",
+        "ruby3.2",
+        "lua5.4",
+        "php8.2",
+        "tclsh",
+        "Python3.EXE",
+        "AWK",
+    ] {
+        let error = prepare(&cmd(name)).expect_err(name);
+        assert_eq!(error, PolicyError::Refused { program: name }, "{name}");
+        assert!(is_refused_name(name), "{name}");
+    }
+}
+
+#[test]
+fn is_refused_name_ignores_case_and_exe_and_spares_plain_tools() {
+    assert!(is_refused_name("SUDO.EXE"));
+    assert!(is_refused_name("busybox"));
+    for name in [
+        "getent",
+        "chronyc",
+        "nvidia-smi",
+        "whoami.exe",
+        "timedatectl",
+    ] {
+        assert!(!is_refused_name(name), "{name}");
+    }
+}
+
+#[test]
+fn a_command_reports_what_it_was_built_with() {
+    const DIRS: &[&str] = &["/opt/tools/bin"];
+    let built = Cmd::new("getent", SECOND)
+        .args(["ahosts", "localhost"])
+        .extra_dirs(DIRS)
+        .env([("RDY_TEST_NAME", "value")])
+        .stdout_cap(10);
+    assert_eq!(built.program(), "getent");
+    assert_eq!(built.arguments(), ["ahosts", "localhost"]);
+    assert_eq!(built.time_limit(), SECOND);
+    assert_eq!(built.output_cap(), 10);
+    assert_eq!(built.declared_dirs(), DIRS);
+    assert_eq!(
+        built.declared_env_names().collect::<Vec<_>>(),
+        ["RDY_TEST_NAME"]
+    );
+}
+
+#[test]
 fn the_refusal_names_a_fix() {
     let text = prepare(&cmd("sudo")).expect_err("refused").to_string();
     assert!(text.contains("Fix:"), "{text}");
