@@ -450,17 +450,58 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
 **Lint wall** (INV-07, ADR 0014 decision 7).
 - `clippy.toml` `disallowed-methods` and `disallowed-types` list exact items, never wildcards
   (Appendix A).
-- A `tests/lint-wall` crate uses each item, and CI expects each one to fail.
-- `allow(clippy::disallowed_` is legal only in the facade's `live/` module and the k8s client module.
-- **Direct dependency allowlist.** `ci/check-crate-deps.toml`:
+- A `tests/lint-wall` crate uses each item, and CI expects each one to fail (M1-044). The wall lives in
+  each check crate's own `clippy.toml`, not in the root file: a crate file replaces the root file, and a
+  root entry would also ban the engine and the CLI, which use these APIs on purpose. The crate's
+  `src/uses.rs` (feature `use-all`, off by default) uses each item once. `tests/clippy_wall.rs` runs
+  `cargo clippy` over it under the root file and under each check crate's file, and fails unless every
+  entry is reported. It also fails on drift between the check crates' files.
+- `allow(clippy::disallowed_` is legal only in the facade's `live/` module and the k8s client module
+  (and the tests of that client). `tests/lint-wall/tests/allow_grep.rs` parses every `.rs` file of the
+  repository with `syn` (the walk starts at the root and skips only `target/`, `.git/` and the local agent
+  checkouts), walks every attribute (inside `cfg_attr` and in the tokens of a macro too), and fails on any
+  other file that relaxes a `disallowed_*` lint or a group that holds one. An attribute that a macro
+  builds from the caller's tokens (`#[allow($($t)*)]`, `#[$a(..)]`) counts, and `#[$meta]` does not when
+  the arm of the macro takes `#[$meta:meta]` as written (bound per arm). A check crate may use neither `#[path]` nor `include!`
+  (`include_str!` only for the data files listed in the test). Its list also holds the engine, spec and
+  xtask files that call a root entry on purpose.
+- The compiler is the first layer, the grep the second. A token grep cannot model `macro_rules!` (a macro
+  can take the `#` of an attribute as a `tt`, or rewrite a matcher), so every check crate has
+  `#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]` at the
+  root of `lib.rs` and of each `tests/`, `benches/` and `examples/` root. Any `allow`, `expect` or
+  `warn` of those lints, built by a macro or not, is then error E0453 under clippy. `rdy-checks-k8s` cannot
+  forbid at the root, because the `client` module allows the kube APIs it wraps (and so do its integration
+  tests, which are exempt). Its `lib.rs` holds only `mod` and `use` items, and every module but `client`
+  has `#[forbid(..)]` on it. `wall_intact.rs` requires all of this and rejects `[[bin]]`, `[[test]]`,
+  `[[bench]]`, `[[example]]` and `[lib] path` in a check crate manifest.
+- The wall cannot be turned down quietly (`tests/lint-wall/tests/wall_intact.rs`): a hardcoded floor of the
+  Appendix A entries, no `.clippy.toml` anywhere, no `CLIPPY_CONF_DIR`, `rustflags`, compiler wrapper or
+  `clippy` alias in a Cargo config, no `RUSTFLAGS` in a workflow, the clippy commands of CI are exactly the three pinned in the test, no workflow carries
+  `continue-on-error`, `--config`, `GITHUB_PATH` or a flags variable (any case), no workflow sets or reads a `CARGO_` name except `CARGO_TERM_COLOR`, `CARGO_INCREMENTAL`, `CARGO_NET_RETRY` and `CARGO_PROFILE_*`, a `- run:` clippy line counts as a command, any other clippy line is refused, no `[patch]`, `[replace]`, `paths` or `[source]`
+  anywhere, nothing under `.claude/worktrees/` is tracked, no `disallowed_*`, `all`, `style` or `warnings` set to `allow` in the root
+  `[workspace.lints]`, a check crate's `lints` is exactly `workspace = true` (manifests are read as TOML,
+  so the spelling of a key does not matter), and every check crate says
+  `#![deny(clippy::print_stdout, clippy::print_stderr)]` and the `forbid` above.
+- **Direct dependency allowlist** (M1-044, `ci/check-crate-deps.toml`):
   - every check crate: `rdy-engine`, `rdy-spec`, `serde`, `serde_json`, `thiserror`, `futures-util`;
-  - `rdy-checks-k8s` adds `kube` and `k8s-openapi`, and is the only check crate that may depend on
-    `kube`; inside it, only the client module may name a kube client or config type (Appendix A);
+  - `rdy-checks-k8s` adds `kube` and `k8s-openapi` (and `secrecy` for kubeconfig token values), and is the
+    only check crate that may depend on `kube`; inside it, only the client module may name a kube client
+    or config type (Appendix A);
   - `rdy-checks-net` adds `x509-parser`.
 
-  A CI script compares `cargo metadata` against the file. A change needs the `security-review` label.
+  `tests/lint-wall/tests/deps_allowlist.rs` compares `cargo metadata` against the file and fails on any
+  direct normal or build dependency of a `rdy-checks-*` crate that is not listed, and on a new check crate
+  with no section. It also refuses a list that names `tokio`, `cap-std`, `rustix`, `hyper-util` or any
+  other crate that reaches the machine, because clippy cannot ban another crate's API and the allowlist is
+  what keeps `tokio::fs`, `cap_std` and `TcpSocket` out. Every dependency of a check crate, dev ones
+  too, comes from crates.io or is `crates/rdy-engine` or `crates/rdy-spec` by path, because the file and
+  deny's wrappers see only names. A change needs the `security-review` label.
 - `deny.toml` wrappers keep `rustix`, `socket2`, `hyper`, `tokio-rustls`, `hickory-*`, `sysinfo`,
-  `walkdir`, `tempfile`, `which`, `nix`, `ureq` and `reqwest` out of check crates.
+  `walkdir`, `tempfile`, `which`, `nix`, `ureq` and `reqwest` out of check crates (M1-044). A crate that
+  nothing in the tree uses is a plain ban. A crate that the tree uses lists the crates that may depend on
+  it, and no check crate is among them, except two test-only dev-dependencies of `rdy-checks-k8s`
+  (`tempfile`, `tokio-rustls`) that `deny.toml` names and `deps_allowlist.rs` holds to dev-only.
+  `tests/lint-wall/tests/deny_wrappers.rs` proves the bans with a throwaway workspace.
 
 ## Per-OS behaviour
 
@@ -882,10 +923,25 @@ one clippy rule.
   `tokio::task::spawn_blocking`.
 - Env, read and write: `std::env::var`, `std::env::var_os`, `std::env::vars`, `std::env::vars_os`,
   `std::env::set_var`, `std::env::remove_var`, `std::env::current_dir`, `std::env::set_current_dir`,
-  `std::env::current_exe`, `std::env::home_dir`, `std::env::temp_dir`. (`set_var` and `remove_var`
+  `std::env::current_exe`, `std::env::home_dir`, `std::env::temp_dir`, `std::env::args`,
+  `std::env::args_os`. (`set_var` and `remove_var`
   are `unsafe` in edition 2024, so `forbid(unsafe_code)` also stops them.)
 - Leaks: `Box::leak`, `String::leak`, `Vec::leak`.
-- Engine: `rdy_engine::live_backend`.
+- Engine: `rdy_engine::live_backend` (feature `runtime`, so the entry is `allow-invalid` in a crate that
+  builds the engine without it), `rdy_engine::exec::table::run`, `rdy_engine::exec::run`,
+  `rdy_engine::exec::ExecSpec::new` and `rdy_engine::testing::TestRun::context` (check tests use
+  `context_for`, which applies the check's declaration).
+- First-party escapes (PC-48): the run owns the output folder, the process-wide effects and the spec, and
+  a check owns none of them. `rdy_engine::output::ReportParent::open`,
+  `rdy_engine::output::OutputDir::create_new`, `OutputDir::create_new_in`, `OutputDir::write_atomic`,
+  `OutputDir::write_spec`, `rdy_engine::output::default_report_parent`, `rdy_engine::exec::kill_all_groups`,
+  `rdy_engine::exec::harden_umask`, `rdy_engine::exec::inherited_fds`, `rdy_engine::exec::live_groups`,
+  the watchdog (type `rdy_engine::watchdog::ProcessEffects`, `watchdog::Effects::exit`, `kill_groups` and
+  `notice`, `Watchdog::start`, `WriteState::claim`, `claim_or_park` and `finish`), `rdy_engine::probe::ProbeHub::new` and
+  `ProbeHub::run_probe` (a check gets its `Probe` from the run and never makes a hub), `rdy_engine::probe::Probe::kube_call` (only the guard in the `rdy-checks-k8s` client module opens a kube entry; M1-103) and `rdy_spec::load`.
+  `privilege_gate` and `gate_then` (M1-042) are in `rdy-cli`, which no check crate may depend on, so they need no entry.
+- Terminal (macros in `disallowed-macros`): `std::io::stdout`, `std::io::stderr`, `std::io::stdin`,
+  `std::print`, `std::println`, `std::eprint`, `std::eprintln`.
 - Kube, outside the `rdy-checks-k8s` client module: types `kube::Client`, `kube::Config`,
   `kube::client::ClientBuilder`, `kube::config::Kubeconfig`; `kube::Client::new`,
   `kube::Client::try_default`, `kube::client::ClientBuilder::new`, `kube::Config::new`,

@@ -7,6 +7,14 @@
 //! action log has one entry per call.
 
 #![allow(clippy::expect_used)]
+// These are tests of the client module. They start a mock server and write kubeconfigs, which the lint
+// wall bans in the rest of this crate (INV-07). This file is on the allowlist of
+// tests/lint-wall/tests/allow_grep.rs. A test of a check does not belong here: use the probe.
+#![allow(
+    clippy::disallowed_macros,
+    clippy::disallowed_methods,
+    clippy::disallowed_types
+)]
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
