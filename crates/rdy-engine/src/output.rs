@@ -323,7 +323,7 @@ impl OutputDir {
                 });
             }
             Err(e) if no_hard_links(&e) => {}
-            Err(e) => return Err(ReportError::io("rename to", final_path, e)),
+            Err(e) => return Err(ReportError::io("give the final name", final_path, e)),
         }
         self.rename_no_replace(tmp, name, final_path)
     }
@@ -348,11 +348,25 @@ impl OutputDir {
                     });
                 }
                 // This kernel or file system has no such flag. Check and rename below.
-                Err(Errno::INVAL | Errno::NOSYS | Errno::OPNOTSUPP) => {}
+                // ENOTSUP and EOPNOTSUPP are one number on Linux and two on macOS, so both are listed
+                // in a guard (a pattern would be "unreachable" on Linux).
+                Err(e)
+                    if [Errno::INVAL, Errno::NOSYS, Errno::OPNOTSUPP, Errno::NOTSUP]
+                        .contains(&e) => {}
                 Err(e) => return Err(ReportError::io("rename to", final_path, e.into())),
             }
         }
-        // The folder is private and new, so nobody else is adding names while this runs.
+        self.check_then_rename(tmp, name, final_path)
+    }
+
+    /// Refuses when the final name is taken, then renames. Used when the kernel has no
+    /// no-replace rename. The folder is private and new, so nobody else adds names in between.
+    fn check_then_rename(
+        &self,
+        tmp: &str,
+        name: &str,
+        final_path: &Path,
+    ) -> Result<(), ReportError> {
         if self.dir.symlink_metadata(name).is_ok() {
             return Err(ReportError::FileExists {
                 path: final_path.to_path_buf(),
@@ -377,14 +391,21 @@ impl OutputDir {
 
 /// True when a failed `link` means "this file system has no hard links", and a rename may take over.
 ///
-/// Unix: only `EPERM` (FAT, some FUSE and network file systems), `EOPNOTSUPP`, `EMLINK` and `ENOSYS`.
+/// Unix: only `EPERM` (FAT, some FUSE and network file systems), `EOPNOTSUPP`, `ENOTSUP` (a different
+/// number on macOS), `EMLINK` and `ENOSYS`.
 /// Every other error, such as `EACCES`, `EIO` or `ENOSPC`, is a real failure and is reported.
 #[cfg(unix)]
 fn no_hard_links(err: &io::Error) -> bool {
     use rustix::io::Errno;
-    [Errno::PERM, Errno::OPNOTSUPP, Errno::MLINK, Errno::NOSYS]
-        .iter()
-        .any(|e| err.raw_os_error() == Some(e.raw_os_error()))
+    [
+        Errno::PERM,
+        Errno::OPNOTSUPP,
+        Errno::NOTSUP,
+        Errno::MLINK,
+        Errno::NOSYS,
+    ]
+    .iter()
+    .any(|e| err.raw_os_error() == Some(e.raw_os_error()))
 }
 
 /// Windows: `CreateHardLink` fails on FAT, exFAT and some network shares with codes that std does

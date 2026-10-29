@@ -305,6 +305,47 @@ fn a_killed_run_leaves_no_file_under_a_final_name_for_the_file_it_was_writing() 
     );
 }
 
+#[test]
+fn the_rename_fallback_refuses_to_replace_and_moves_a_free_name() {
+    let parent = tempfile::tempdir().expect("temp dir");
+    let out = OutputDir::create_new(parent.path(), "acme", TS).expect("create");
+    fs::write(out.path().join(".a.tmp"), b"new").expect("tmp");
+    fs::write(out.path().join("a"), b"planted").expect("planted");
+    let err = out
+        .rename_no_replace(".a.tmp", "a", &out.path().join("a"))
+        .expect_err("exists");
+    assert!(matches!(err, ReportError::FileExists { .. }), "{err}");
+    assert_eq!(fs::read(out.path().join("a")).expect("read"), b"planted");
+    out.rename_no_replace(".a.tmp", "b", &out.path().join("b"))
+        .expect("free name");
+    assert_eq!(fs::read(out.path().join("b")).expect("read"), b"new");
+    assert!(!out.path().join(".a.tmp").exists());
+}
+
+/// The check-plus-rename step on its own, so that it runs on every OS, Windows included, and on
+/// Linux and macOS where the kernel path in `rename_no_replace` would take over first.
+#[test]
+fn check_then_rename_refuses_an_existing_name_and_moves_to_a_free_one() {
+    let parent = tempfile::tempdir().expect("temp dir");
+    let out = OutputDir::create_new(parent.path(), "acme", TS).expect("create");
+    fs::write(out.path().join(".a.tmp"), b"new").expect("tmp");
+    fs::write(out.path().join("a"), b"planted").expect("planted");
+    let err = out
+        .check_then_rename(".a.tmp", "a", &out.path().join("a"))
+        .expect_err("exists");
+    assert!(matches!(err, ReportError::FileExists { .. }), "{err}");
+    assert_eq!(fs::read(out.path().join("a")).expect("read"), b"planted");
+    assert_eq!(
+        fs::read(out.path().join(".a.tmp")).expect("read"),
+        b"new",
+        "the temp file is left for the caller to remove"
+    );
+    out.check_then_rename(".a.tmp", "b", &out.path().join("b"))
+        .expect("free name");
+    assert_eq!(fs::read(out.path().join("b")).expect("read"), b"new");
+    assert!(!out.path().join(".a.tmp").exists());
+}
+
 #[cfg(unix)]
 mod unix {
     use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
@@ -360,6 +401,8 @@ mod unix {
     fn a_folder_swapped_for_a_symlink_between_mkdir_and_open_is_refused_end_to_end() {
         let parent = tempfile::tempdir().expect("temp dir");
         let elsewhere = tempfile::tempdir().expect("temp dir");
+        // Not the 0700 a temp dir starts with, so a chmod through the symlink would show.
+        fs::set_permissions(elsewhere.path(), fs::Permissions::from_mode(0o755)).expect("chmod");
         let target = elsewhere.path().to_path_buf();
         let err = create_new_with_swap(parent.path(), move |dir, name| {
             fs::remove_dir(dir.join(name)).expect("rmdir");
@@ -377,8 +420,8 @@ mod unix {
         );
         assert_eq!(
             mode(elsewhere.path()) & 0o777,
-            0o700,
-            "tempdir mode untouched"
+            0o755,
+            "the other folder was not chmod'ed"
         );
         // Only the planted symlink is in the parent, and it is still a symlink.
         let left = names(parent.path());
@@ -428,7 +471,13 @@ mod unix {
     fn only_the_documented_link_errors_fall_back_to_a_rename() {
         use rustix::io::Errno;
         let os = |e: Errno| io::Error::from_raw_os_error(e.raw_os_error());
-        for e in [Errno::PERM, Errno::OPNOTSUPP, Errno::MLINK, Errno::NOSYS] {
+        for e in [
+            Errno::PERM,
+            Errno::OPNOTSUPP,
+            Errno::NOTSUP,
+            Errno::MLINK,
+            Errno::NOSYS,
+        ] {
             assert!(no_hard_links(&os(e)), "{e}");
         }
         for e in [
@@ -441,23 +490,6 @@ mod unix {
         ] {
             assert!(!no_hard_links(&os(e)), "{e}");
         }
-    }
-
-    #[test]
-    fn the_rename_fallback_refuses_to_replace_and_moves_a_free_name() {
-        let parent = tempfile::tempdir().expect("temp dir");
-        let out = OutputDir::create_new(parent.path(), "acme", TS).expect("create");
-        fs::write(out.path().join(".a.tmp"), b"new").expect("tmp");
-        fs::write(out.path().join("a"), b"planted").expect("planted");
-        let err = out
-            .rename_no_replace(".a.tmp", "a", &out.path().join("a"))
-            .expect_err("exists");
-        assert!(matches!(err, ReportError::FileExists { .. }), "{err}");
-        assert_eq!(fs::read(out.path().join("a")).expect("read"), b"planted");
-        out.rename_no_replace(".a.tmp", "b", &out.path().join("b"))
-            .expect("free name");
-        assert_eq!(fs::read(out.path().join("b")).expect("read"), b"new");
-        assert!(!out.path().join(".a.tmp").exists());
     }
 
     #[test]
