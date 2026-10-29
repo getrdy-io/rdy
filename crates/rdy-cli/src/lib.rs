@@ -43,6 +43,8 @@ pub mod redaction;
 
 #[doc(hidden)]
 pub mod signing;
+#[doc(hidden)]
+pub mod startup;
 
 mod spec_cmds;
 

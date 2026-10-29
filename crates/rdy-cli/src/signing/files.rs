@@ -225,16 +225,27 @@ pub fn create_new_public(path: &Path) -> io::Result<File> {
 
 #[cfg(unix)]
 fn create_new(path: &Path, mode: u32) -> io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
     use rustix::fs::OFlags;
 
-    OpenOptions::new()
+    let file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(mode)
         .custom_flags(OFlags::NOFOLLOW.bits().cast_signed())
-        .open(path)
+        .open(path)?;
+    // The mode given to open(2) is cut by the umask, and `rdy` runs with 077 (M1-168), so a public
+    // file would come out 0600. Set the mode exactly. It is never wider than `mode`, and the file is
+    // empty until then.
+    // The file was just created here with O_EXCL and is empty, so removing it by path removes this
+    // file and no other.
+    if let Err(err) = file.set_permissions(std::fs::Permissions::from_mode(mode)) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(err);
+    }
+    Ok(file)
 }
 
 #[cfg(not(unix))]

@@ -262,15 +262,13 @@ fn keygen_prints_the_key_id_and_the_fingerprint_in_groups_of_four() {
 
 #[cfg(unix)]
 #[test]
-fn keygen_makes_the_secret_key_0600_and_the_public_key_at_most_0644() {
+fn keygen_makes_the_secret_key_0600_and_the_public_key_0644() {
     let d = dir();
     let (result, _) = make_key(d.path(), "k", Some(PASSWORD));
     result.expect("keygen");
     assert_eq!(mode_of(&d.path().join("k.key")), 0o600);
-    // The umask of whoever runs the tests can only remove bits from 0644.
-    let public = mode_of(&d.path().join("k.pub"));
-    assert_eq!(public & !0o644, 0, "{public:o}");
-    assert_ne!(public & 0o400, 0, "{public:o}");
+    // Exactly 0644 whatever the umask: the file is set after it is created (M1-168 runs rdy with 077).
+    assert_eq!(mode_of(&d.path().join("k.pub")), 0o644);
 }
 
 #[cfg(unix)]
@@ -500,6 +498,9 @@ fn sign_writes_a_signature_that_verifies_and_prints_the_vendors_lines() {
 
     let sig_path = d.path().join("acme-platform.yaml.minisig");
     let loaded = verify_written(&args, &sig_path);
+    // The signature is public: 0644 whatever the umask (M1-168 runs rdy with 077).
+    #[cfg(unix)]
+    assert_eq!(mode_of(&sig_path), 0o644);
     assert_eq!(
         std::fs::read_to_string(&sig_path)
             .expect("sidecar")
@@ -778,6 +779,8 @@ fn sign_refuses_to_replace_a_signature_without_force_and_replaces_it_with_force(
     let (result, _) = run_sign(&args, &mut from_file_or_env, &mut Scripted::no_terminal().0);
     result.expect("sign with force");
     verify_written(&args, &sig_path);
+    #[cfg(unix)]
+    assert_eq!(mode_of(&sig_path), 0o644, "the replaced file too");
     let leftovers: Vec<_> = std::fs::read_dir(d.path())
         .expect("read dir")
         .filter_map(Result::ok)
