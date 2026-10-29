@@ -1,7 +1,9 @@
 # CI for rdy. docs/plan/06-release-and-distribution.md describes the design.
 #
 # Rules for this file (SEC-01, SEC-03):
-# - Every `uses:` line is pinned to a full commit SHA with the version in a comment.
+# - Every `uses:` line is pinned to a full commit SHA with the version in a comment. The zizmor job
+#   enforces it (.github/zizmor.yml, unpinned-uses with hash-pin for every owner), and Dependabot
+#   keeps the pins current (.github/dependabot.yml).
 # - The token is read-only. Each job names the permissions it needs.
 # - No pull_request_target. Fork PRs get a read-only token.
 # - `ci-ok` is the only required check. It lists every gating job in `needs:`.
@@ -137,6 +139,9 @@ jobs:
         run: shellcheck scripts/*.sh
       - name: DCO script tests
         run: sh scripts/test-check-dco.sh
+      # Offline: a fake curl answers from scripts/test-check-org-settings.json. No token, no network.
+      - name: Org settings check script tests
+        run: sh scripts/test-check-org-settings.sh
       # On push to main the job passes without checking. Squash and rebase merges
       # rewrite commits, and the PR already passed this check before it merged.
       - name: Every commit has a Signed-off-by line

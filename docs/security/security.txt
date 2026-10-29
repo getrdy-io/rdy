@@ -1,0 +1,10 @@
+# security.txt for getrdy.io (RFC 9116, SEC-32).
+# Source of truth: docs/security/security.txt in https://github.com/getrdy-io/rdy.
+# Serve it unchanged at https://getrdy.io/.well-known/security.txt as text/plain.
+# Renew Expires before it passes (docs/security/github-settings.md, section 8).
+Contact: https://github.com/getrdy-io/rdy/security/advisories/new
+Contact: mailto:security@getrdy.io
+Expires: 2027-10-28T00:00:00Z
+Preferred-Languages: en
+Canonical: https://getrdy.io/.well-known/security.txt
+Policy: https://github.com/getrdy-io/rdy/security/policy

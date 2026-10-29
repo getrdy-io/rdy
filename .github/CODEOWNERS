@@ -1,0 +1,71 @@
+# CODEOWNERS (SEC-04, M1-011). docs/security/github-settings.md, section 9, explains the setup.
+#
+# The last matching line wins. Every line has the same owner while Rdy has one maintainer, so a
+# code owner review cannot be required yet (nobody can approve their own PR). The security block
+# still matters: it names the paths where a change needs a security-reviewer review (05, 04
+# section 4, ADR 0014), and it is where a second maintainer or a security team is added first.
+
+# Default owner.
+*                                       @getrdy-io
+
+# ---- Security paths --------------------------------------------------------------------------
+
+# Supply chain: CI, release, dependencies, toolchain, repo settings.
+/.github/                               @getrdy-io
+/deny.toml                              @getrdy-io
+/Cargo.toml                             @getrdy-io
+/crates/*/Cargo.toml                    @getrdy-io
+/Cargo.lock                             @getrdy-io
+/rust-toolchain.toml                    @getrdy-io
+/.cargo/                                @getrdy-io
+/clippy.toml                            @getrdy-io
+/dist-workspace.toml                    @getrdy-io
+/ci/                                    @getrdy-io
+/tests/lint-wall/                       @getrdy-io
+/scripts/                               @getrdy-io
+/install.sh                             @getrdy-io
+/RELEASING.md                           @getrdy-io
+
+# Security policy, threat model and hardening docs.
+/SECURITY.md                            @getrdy-io
+/docs/security/                         @getrdy-io
+/docs/plan/05-threat-model.md           @getrdy-io
+
+# Spec signing, trust, key handling and the consent and password prompts (ADR 0002, ADR 0018).
+/crates/rdy-spec/src/sig.rs             @getrdy-io
+/crates/rdy-spec/src/sig/               @getrdy-io
+/crates/rdy-cli/src/password.rs         @getrdy-io
+/crates/rdy-cli/src/prompt.rs           @getrdy-io
+/crates/rdy-cli/src/trust.rs            @getrdy-io
+/crates/rdy-cli/src/trust/              @getrdy-io
+/tests/fixtures/signed/                 @getrdy-io
+/tests/fixtures/wycheproof/             @getrdy-io
+
+# Redaction: the redactor, its rule tables and the corpus (ADR 0015, 04 section 4).
+/crates/rdy-engine/src/redact/          @getrdy-io
+/crates/rdy-engine/tests/redacted_guarantee.rs @getrdy-io
+/tests/fixtures/redaction/              @getrdy-io
+
+# Side effects: the probe facade, exec, blocking helpers and the live backend (ADR 0014, ADR 0016).
+/crates/rdy-engine/src/probe.rs         @getrdy-io
+/crates/rdy-engine/src/probe/           @getrdy-io
+/crates/rdy-engine/src/exec.rs          @getrdy-io
+/crates/rdy-engine/src/exec/            @getrdy-io
+/crates/rdy-engine/src/blocking.rs      @getrdy-io
+/crates/rdy-engine/src/blocking/        @getrdy-io
+/crates/rdy-engine/src/live_backend.rs  @getrdy-io
+/crates/rdy-engine/src/live_backend/    @getrdy-io
+
+# Network and cluster access, bundles and upload (ADR 0009, ADR 0010, 04).
+/crates/rdy-checks-net/                 @getrdy-io
+/crates/rdy-checks-k8s/                 @getrdy-io
+/crates/rdy-bundle/                     @getrdy-io
+
+# Security ADRs.
+/docs/adr/0002-*                        @getrdy-io
+/docs/adr/0009-*                        @getrdy-io
+/docs/adr/0010-*                        @getrdy-io
+/docs/adr/0014-*                        @getrdy-io
+/docs/adr/0015-*                        @getrdy-io
+/docs/adr/0016-*                        @getrdy-io
+/docs/adr/0018-*                        @getrdy-io
