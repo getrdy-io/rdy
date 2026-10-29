@@ -468,3 +468,148 @@ async fn the_permit_comes_back_after_a_panic() {
     assert!(matches!(ran[0].end, End::Panicked { .. }));
     assert!(passed(&ran[1]));
 }
+
+// Run deadline (M1-043). All under paused time, so a 5 minute deadline costs nothing.
+
+/// Records what the scheduler tells an observer.
+#[derive(Default)]
+struct Log {
+    events: Mutex<Vec<String>>,
+}
+
+impl Observer for Log {
+    fn started(&self, index: usize, at: Duration, timeout: Duration) {
+        self.events.lock().expect("lock").push(format!(
+            "start {index} at {}s for {}s",
+            at.as_secs(),
+            timeout.as_secs()
+        ));
+    }
+
+    fn finished(&self, index: usize, ran: &Ran) {
+        let how = match &ran.end {
+            End::Done(_) => "done",
+            End::TimedOut { .. } => "timeout",
+            End::RunDeadline => "run_deadline",
+            End::Panicked { .. } => "panic",
+            End::Cancelled => "cancelled",
+        };
+        self.events
+            .lock()
+            .expect("lock")
+            .push(format!("end {index} {how}"));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn running_checks_time_out_at_the_deadline_and_unstarted_ones_are_run_deadline() {
+    let started = Instant::now();
+    let ran = scheduler(2)
+        .with_deadline(Duration::from_secs(30))
+        .run(vec![
+            planned("fake.plain/a", Mode::Forever).with_timeout(Duration::from_secs(60)),
+            planned("fake.plain/b", Mode::Forever).with_timeout(Duration::from_secs(60)),
+            planned("fake.plain/c", Mode::Pass),
+            planned("fake.plain/d", Mode::Pass),
+        ])
+        .await;
+    let at_deadline = End::TimedOut {
+        after: Duration::from_secs(30),
+    };
+    assert_eq!(ran[0].end, at_deadline);
+    assert_eq!(ran[1].end, at_deadline);
+    assert_eq!(ran[2].end, End::RunDeadline);
+    assert_eq!(ran[3].end, End::RunDeadline);
+    assert_eq!(started.elapsed(), Duration::from_secs(30));
+    assert_eq!(ran[2].elapsed, Duration::ZERO);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_timeout_is_held_to_the_time_left_in_the_run() {
+    // `late` starts at 20 s with 10 s of its own timeout and 5 s of run left.
+    let ran = scheduler(1)
+        .with_deadline(Duration::from_secs(25))
+        .run(vec![
+            planned("fake.plain/early", Mode::Sleep(Duration::from_secs(20)))
+                .with_timeout(Duration::from_secs(30)),
+            planned("fake.plain/late", Mode::Forever).with_timeout(Duration::from_secs(10)),
+        ])
+        .await;
+    assert!(passed(&ran[0]));
+    assert_eq!(
+        ran[1].end,
+        End::TimedOut {
+            after: Duration::from_secs(5)
+        }
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_check_sees_the_capped_time_as_what_remains() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let ran = scheduler(1)
+        .with_deadline(Duration::from_secs(2))
+        .run(vec![planned(
+            "fake.plain/r",
+            Mode::Remaining(Arc::clone(&seen)),
+        )])
+        .await;
+    // The check waits 3 s, the run has 2 s: it times out after having seen 2 s remaining.
+    assert!(matches!(ran[0].end, End::TimedOut { .. }));
+    assert_eq!(seen.lock().expect("lock")[0], Duration::from_secs(2));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_run_that_finishes_before_the_deadline_has_no_run_deadline_results() {
+    let ran = scheduler(2)
+        .with_deadline(Duration::from_secs(30))
+        .run(vec![
+            planned("fake.plain/a", Mode::Sleep(Duration::from_secs(5))),
+            planned("fake.plain/b", Mode::Pass),
+            planned("fake.plain/c", Mode::Pass),
+        ])
+        .await;
+    assert!(ran.iter().all(passed), "{ran:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_observer_sees_every_start_and_every_end_including_checks_never_started() {
+    let log = Arc::new(Log::default());
+    let ran = scheduler(1)
+        .with_deadline(Duration::from_secs(5))
+        .run_observed(
+            vec![
+                planned("fake.plain/a", Mode::Forever).with_timeout(Duration::from_secs(60)),
+                planned("fake.plain/b", Mode::Pass),
+            ],
+            log.clone(),
+        )
+        .await;
+    assert_eq!(ran.len(), 2);
+    // The timeout of check 0 and the wait of check 1 end at the same instant, so their order is not fixed.
+    let mut events = log.events.lock().expect("lock").clone();
+    assert_eq!(events.remove(0), "start 0 at 0s for 5s");
+    events.sort();
+    assert_eq!(events, ["end 0 timeout", "end 1 run_deadline"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_missing_need_is_reported_as_such_even_after_the_deadline() {
+    let ran = scheduler(1)
+        .with_deadline(Duration::from_secs(1))
+        .run(vec![
+            planned("fake.plain/a", Mode::Forever),
+            Planned::new(fake(&NEEDS_ROOT, Mode::Pass), "fake.needs_root"),
+        ])
+        .await;
+    assert!(matches!(
+        &ran[1].end,
+        End::Done(done) if matches!(&**done, Err(CheckError::MissingNeed(_)))
+    ));
+}
+
+#[test]
+fn the_default_deadline_is_five_minutes() {
+    assert_eq!(DEFAULT_DEADLINE, Duration::from_secs(300));
+    assert_eq!(scheduler(1).deadline(), DEFAULT_DEADLINE);
+}

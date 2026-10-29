@@ -78,9 +78,9 @@ fn millis(duration: Duration) -> u64 {
 /// "Timed out after 10 s." and "its 5 minute limit".
 fn limit_text(duration: Duration) -> String {
     let ms = millis(duration);
-    if ms >= 60_000 && ms % 60_000 == 0 {
+    if ms >= 60_000 && ms.is_multiple_of(60_000) {
         format!("{} minute", ms / 60_000)
-    } else if ms % 1000 == 0 {
+    } else if ms.is_multiple_of(1000) {
         format!("{} s", ms / 1000)
     } else {
         format!("{ms} ms")

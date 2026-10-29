@@ -22,6 +22,9 @@
 //! - [`redact`]: the redactor. [`redact::Redactor::redact_report`] redacts and then caps every string of a
 //!   report and returns a [`redact::RedactedReport`], the only type the writers and renderers accept.
 //!
+//! - `watchdog` (feature `runtime`): the run watchdog, a plain thread that writes an incomplete report
+//!   and exits 70 when a run hangs, and the run board that holds its snapshot.
+//!
 //! The probe facade and the renderers arrive in later M1 tickets.
 
 #![forbid(unsafe_code)]
@@ -41,3 +44,5 @@ pub mod redact;
 #[cfg(feature = "runtime")]
 pub mod sched;
 pub mod units;
+#[cfg(feature = "runtime")]
+pub mod watchdog;

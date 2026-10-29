@@ -306,7 +306,7 @@ impl Scheduler {
                 slots[index] = Some(result);
                 continue;
             };
-            let run = Run {
+            let run = RunCtx {
                 os: self.os,
                 available: Arc::clone(&self.available),
                 origin,
@@ -372,7 +372,7 @@ impl Drop for AbortOnDrop {
 }
 
 /// What a driver needs to know about the run.
-struct Run {
+struct RunCtx {
     os: Os,
     available: Arc<HashSet<Need>>,
     origin: Instant,
@@ -382,7 +382,7 @@ struct Run {
 }
 
 /// Starts one check as a task and waits for it under its timeout, held to the time left in the run.
-async fn drive(item: Planned, run: &Run) -> Ran {
+async fn drive(item: Planned, run: &RunCtx) -> Ran {
     let Planned {
         check,
         key,
