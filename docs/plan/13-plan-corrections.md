@@ -258,6 +258,9 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   founder's call when M3 is planned.
 - PC-40: applied to the plan (investor and angel names dropped). The optional "$16.5M" change moved to
   founder decisions (decision 2).
+- PC-43: applied in 02, 04, 05, 11. Unset, empty or invalid `RUST_LOG` means no log output (07 D.6),
+  and the five dependency caps hold whatever a valid `RUST_LOG` says. The proxy URL canary moved to
+  M1-060 and the JSON and HTML parts of the M1-056 exit test to M1-062.
 
 ADR amendments in the ticket title:
 
