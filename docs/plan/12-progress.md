@@ -33,13 +33,13 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-011 | [#60](https://github.com/getrdy-io/rdy/pull/60) | 2026-10-29 | Founder hand steps (docs/security/github-settings.md sections 1 to 8): org 2FA, private reporting, immutable releases, `main` and `v*` rulesets, Dependabot alerts, security@ mailbox and serving security.txt. First run 2026-10-29 (no token): 1 pass, 4 fail, 1 unknown. Found: `getrdy-io` is a personal account, not an organization, so org-wide 2FA needs the account turned into an organization first (founder decision; the plan assumed an org). SEC-03 is zizmor `unpinned-uses` hash-pin from M1-005, not a new check; the red throwaway PR with an unpinned `uses:` is for the coordinator to run. CODEOWNERS uses `@getrdy-io`; code owner review is not required while there is one maintainer. zizmor not run locally (not installed); shellcheck 0.9.0 clean. The curl HTTPS-only protocol option (review nit 6) is not in the script: the agent sandbox refused to write it, so the founder adds it by hand
 
-- M1-012 | todo | | First signed alpha, scripts/verify-release.sh and RELEASING.md
+- M1-012 | todo | | First signed alpha, scripts/verify-release.sh and RELEASING.md | backlog corrected 2026-10-29 (correction-11): a wrong caller repository, ref and trigger each fail (PR #66 security review, finding 1)
 
 - M1-013 | [#11](https://github.com/getrdy-io/rdy/pull/11) | 2026-10-28 | `schema` writes no file yet (M1-022 adds the schemars output). `docs` writes one placeholder page under `docs/src/content/docs/reference/spec/`, and M1-076 replaces it. The page is not published yet because the Starlight scaffold is not in the repo. `docs --check` and `docs-lint` are not in `ci.yml`. 09 section 10 puts the docs-gen job in M1, but the backlog has it only at M3-002, so the coordinator should file a correction. The banned-token list holds the coordinator's hash list, with the synthetic test hash. The lint applies NFKC normalization before it matches tokens, and it lints every tracked file with no NUL byte, replacing invalid UTF-8 bytes. A UTF-16 file has NUL bytes, so the lint skips it. A generator path that climbs out of its root or is absolute is refused. The check does not yet find stale generated files that no generator emits
 
 - M1-014 | [#65](https://github.com/getrdy-io/rdy/pull/65) | 2026-10-29 | busybox (Alpine container) and macOS /bin/sh legs run only in CI (the local busybox is Ubuntu busybox-static, which the harness now rejects); verify_signature is the seam and stops unless the override is set until M1-015; sign-release (M1-010) must stamp RDY_STAMPED_VERSION (ADR 0025); carry to M1-015: the fake rdy touches a canary file and the bad-hash and bad-signature cases assert it is absent, and `fetch NAME WHAT CAUSE FIX` takes the 404 message so the bundle gets 06's "this release looks incomplete"
 
-- M1-015 | todo | | install.sh signature check, fail closed, with tamper tests (SEC-09, SEC-10)
+- M1-015 | todo | | install.sh signature check, fail closed, with tamper tests (SEC-09, SEC-10) | backlog corrected 2026-10-29 (correction-11): a wrong caller repository, ref and trigger each fail (PR #66 security review, finding 1)
 
 - M1-016 | [#10](https://github.com/getrdy-io/rdy/pull/10) | 2026-10-28 | check params stay a raw map (M1-019), timeout, max_size and expires stay text (M1-018, M1-026), load() is a fail-closed stub (M1-017, M1-120)
 
@@ -125,7 +125,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-056 | [#55](https://github.com/getrdy-io/rdy/pull/55) | 2026-10-29 | The proxy URL canary moves to M1-060 (PC-43): until the URL userinfo rule exists only the `secret_by_key` rule runs, so `tests/log_redaction.rs` holds it as `#[ignore = "M1-060"]` and M1-060 enables it and adds bare-token canaries. The exit test's JSON and HTML parts have no report to test before M1-062, so M1-062 proves them. Carry note for M1-061: the run-scoped known secrets must be shared through an `Arc`, so the log writer and the CLI error text see them (today the process redactor holds only the key and the built-in rules). `CliError::from_anyhow` still drops unknown error text on purpose, for the same reason; every printed CLI error string is redacted now, so M1-060 can show the redacted chain in that one function. A panic prints nothing from the hook (a panic inside a hook aborts, so the hook cannot redact); a panic inside a check is only an `ERROR` result (`PanicText`), and a panic outside a check makes `rdy_cli::entry::guarded` print the standard two lines (the `ErrorOutput` too with `--json`) and exit 70. The panic text goes to the log, redacted and then escaped (the key-name rule reads raw tabs, so redaction runs on the raw text first, in the log writer and in the CLI error text). No real-binary panic test, because a test-only trigger flag or env var is banned (02): `guarded` is tested in process and the hook in a child test process. The redactor has a `testing`-feature panic seam (`PANIC_TRIGGER`), a dev-dependency feature of rdy-cli only. With `RUST_LOG` unset, empty or invalid the filter is `off` (07 D.6, PC-43); a valid `RUST_LOG` is the operator's filter, but hyper, h2, rustls, tower and kube (and `hyper_*`, `tower_*`, `kube_*`) stay capped at warn whatever it says. Log lines have no time stamp, are redacted and then escaped per line, and the `log` bridge is off (rustls `log` records are dropped). A bare span field value runs to the end of its line and swallows the event message (M1-060 tunes the over-redaction). A PEM block split over several events is the known M1 gap. Carry notes: M1-060 accepts `\\+t` as a blank in `ASSIGNMENT` (a `&str` field is written with `Debug`, so a tab in a field value arrives as a literal backslash and `t`; `tests/log_redaction.rs` holds the case as `#[ignore = "M1-060"]`). M3: `CAPPED_TARGETS` needs `reqwest`, `aws_smithy_*` and `aws_config` when the cloud checks land.
 
-- M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code | backlog corrected 2026-10-29 (correction-09): a result with no fix of its own shows the check's `CheckMeta.remediation`, and `cargo xtask checks` reads the same family list as `rdy run`
+- M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code | backlog corrected 2026-10-29 (correction-09): a result with no fix of its own shows the check's `CheckMeta.remediation`, and `cargo xtask checks` reads the same family list as `rdy run` | backlog corrected 2026-10-29 (correction-11): depends on M1-037, because the Windows output-folder harden step fails open until then (PR #71 security review, finding 3)
 
 - M1-058 | todo | | Ctrl-C in M1: abort, remove the empty report folder, exit 70
 
@@ -216,7 +216,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-101 | todo | | Security review of the TLS recording verifier and 03 Appendix A
 
-- M1-102 | todo | | Kube client from kubeconfig or in-cluster with rustls and timeouts
+- M1-102 | todo | | Kube client from kubeconfig or in-cluster with rustls and timeouts | backlog corrected 2026-10-29 (correction-11): exit test trimmed to library level (announce callback before the first request, `no kubeconfig found` with the 07 hint, no plugin output at trace, kube clippy entries and a use file for M1-107); 3.5 h; the rest moves to M1-107 and M1-108
 
 - M1-103 | todo | | Read-only guard layer and test for rdy-checks-k8s
 
@@ -226,9 +226,9 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-106 | todo | | k8s.version (gitVersion parse, distribution, discovery API availability)
 
-- M1-107 | todo | | Family probe hook and lazy KubeContext probe
+- M1-107 | todo | | Family probe hook and lazy KubeContext probe | backlog corrected 2026-10-29 (correction-11): with no kubeconfig every k8s check is SKIP with the hint, the cluster line prints to stderr before the first request, and a timed-out exec plugin does not keep rdy from exiting (ADR 0031 residual), and each kube entry from M1-102's use file fails clippy in tests/lint-wall; depends on M1-044 too; 2.5 h
 
-- M1-108 | todo | | kind integration job with a restricted PSA namespace and review round trips
+- M1-108 | todo | | kind integration job with a restricted PSA namespace and review round trips | backlog corrected 2026-10-29 (correction-11): depends on M1-106 and runs `tests/live_cluster.rs`, the ignored kind test from M1-102
 
 - M1-109 | todo | | k8s.access (kubeconfig, version, SelfSubjectReview, anonymous warn, exec classes, proxy resolution)
 
