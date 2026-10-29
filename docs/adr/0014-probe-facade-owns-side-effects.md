@@ -70,7 +70,13 @@ wildcards clippy cannot match, and nothing stopping a check crate from adding a 
 8. **Named exceptions**, each logged: the kube client's own sockets, its proxy CONNECT and TLS (the
    probe-time `connect` entry records `via_proxy`; the password comes from the same `ProxyUrl` and is
    never logged), and its exec credential plugins (ADR 0010). UDP, unix sockets and nonblocking record
-   reads arrive in M2 as facade methods.
+   reads arrive in M2 as facade methods. (Amendment, M1-144: UDP and unix sockets moved to M1 as the
+   facade methods `Probe::udp_exchange` and `Probe::unix_get`, because `host.time_sync` needs an SNTP
+   query and `host.container_runtime` needs the Docker and Podman Engine API. The UDP peers are the
+   check's own spec hosts and nothing else (INV-11). The unix socket call sends only `GET` of `/_ping`,
+   `/version` and `/info` to a declared socket (INV-28). Nonblocking record reads stay in M2. The
+   timing of this decision changed; its wall did not: both calls go through the facade, the policy and
+   the action log.)
 
 ## Consequences
 
