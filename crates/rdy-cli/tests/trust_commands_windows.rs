@@ -8,9 +8,11 @@
 
 use std::process::{Command, Output, Stdio};
 
+mod common;
+
 /// Runs `rdy` with a `ProgramData` folder that does not exist, from a temporary folder.
 fn rdy(dir: &std::path::Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rdy"))
+    let out = Command::new(env!("CARGO_BIN_EXE_rdy"))
         .args(args)
         .current_dir(dir)
         .env("ProgramData", dir.join("ProgramData"))
@@ -19,7 +21,8 @@ fn rdy(dir: &std::path::Path, args: &[&str]) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .expect("rdy runs")
+        .expect("rdy runs");
+    common::quiet(out)
 }
 
 fn code(out: &Output) -> i32 {

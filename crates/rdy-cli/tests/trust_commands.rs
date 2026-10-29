@@ -21,6 +21,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+mod common;
+
 use rdy_spec::sig::PublicKey;
 
 const GOLDEN_ADD_TTY: &str = include_str!("../src/trust_cmds/golden/c10-add-tty.txt");
@@ -111,7 +113,7 @@ impl Home {
     }
 
     fn run(&self, args: &[&str]) -> Output {
-        self.command(args).output().expect("rdy runs")
+        common::quiet(self.command(args).output().expect("rdy runs"))
     }
 }
 
@@ -192,11 +194,12 @@ fn add_without_a_terminal_and_without_yes_exits_64_with_a_fix_and_saves_nothing(
 
     // `--yes` is argv only (INV-05): the environment cannot stand in for it.
     for name in ["RDY_YES", "YES", "RDY_ASSUME_YES"] {
-        let out = home
-            .command(&["trust", "add", "acme-platform", "--key", &key])
-            .env(name, "1")
-            .output()
-            .expect("rdy runs");
+        let out = common::quiet(
+            home.command(&["trust", "add", "acme-platform", "--key", &key])
+                .env(name, "1")
+                .output()
+                .expect("rdy runs"),
+        );
         assert_eq!(code(&out), 64, "{name}: {}", stderr(&out));
     }
     assert!(!home.home().exists());
@@ -465,7 +468,13 @@ mod pty {
             WaitStatus::Exited(_, code) => code,
             other => panic!("rdy did not exit normally: {other:?}"),
         };
-        (format!("{before}[y/N] {rest}"), code)
+        // The terminal shows stderr. Drop the inherited-descriptor warning a CI runner causes (M1-168).
+        let screen = format!("{before}[y/N] {rest}");
+        let screen: String = screen
+            .split_inclusive('\n')
+            .filter(|line| !line.starts_with(common::FD_WARNING_PREFIX))
+            .collect();
+        (screen, code)
     }
 
     #[test]
@@ -598,12 +607,13 @@ mod root {
         let key = home.file("acme-platform.pub", &pub_a());
         // sudo resets HOME and XDG_CONFIG_HOME, but a root run must not depend on that. Both point at a
         // folder that must stay empty.
-        let out = home
-            .command(&["trust", "add", "acme-platform", "--key", &key, "--yes"])
-            .env("XDG_CONFIG_HOME", home.dir.path().join("xdg"))
-            .env("SUDO_USER", "nobody")
-            .output()
-            .expect("rdy runs");
+        let out = common::quiet(
+            home.command(&["trust", "add", "acme-platform", "--key", &key, "--yes"])
+                .env("XDG_CONFIG_HOME", home.dir.path().join("xdg"))
+                .env("SUDO_USER", "nobody")
+                .output()
+                .expect("rdy runs"),
+        );
         assert_eq!(code(&out), 0, "{}", stderr(&out));
         assert!(
             stderr(&out).contains(&format!("Saved to {SYSTEM_STORE}\n")),
