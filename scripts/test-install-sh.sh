@@ -64,9 +64,11 @@ cat > /dev/null
 if [ -n "${STUB_CURL_RC:-}" ]; then exit "$STUB_CURL_RC"; fi
 out=''
 url=''
+max=''
 while [ "$#" -gt 0 ]; do
     case $1 in
         -o) out=$2; shift 2 ;;
+        --max-filesize) max=$2; shift 2 ;;
         --proto | --proto-redir | --connect-timeout | --retry | --speed-limit | --speed-time) shift 2 ;;
         -*) shift ;;
         *) url=$1; shift ;;
@@ -78,6 +80,8 @@ case $url in
     *) echo "stub curl: unexpected url $url" >&2; exit 7 ;;
 esac
 [ -f "$STUB_REL/$name" ] || exit 22
+# Like curl, a file over --max-filesize is refused with exit 63.
+if [ -n "$max" ] && [ "$(wc -c < "$STUB_REL/$name")" -gt "$max" ]; then exit 63; fi
 cp "$STUB_REL/$name" "$out"
 EOF
 
@@ -159,14 +163,81 @@ if [ -n "${STUB_TRANSLATED:-}" ]; then echo "$STUB_TRANSLATED"; exit 0; fi
 echo "sysctl: unknown oid 'sysctl.proc_translated'" >&2
 exit 1
 EOF
+# A fake cosign (M1-015), the same idea as the one in scripts/test-verify-release.sh. The bundle that
+# mksig writes holds the sha256 of the blob, the signer identity and the caller claims (what Fulcio puts
+# in the certificate of a reusable workflow: the identity names the called file, the claims name the
+# caller). `verify-blob` fails unless the blob, the identity and the issuer match, and each
+# --certificate-github-workflow-* flag that it gets matches the claim. A flag that is not passed is not
+# checked, as in cosign, so a test can show that the wrong caller passes when install.sh leaves a flag
+# out. It logs every call to $STUB_LOG.cosign. It uses the host tools (FAKE_HOST_PATH), because the PATH
+# folder of install.sh holds only the few tools install.sh itself may use.
+# FAKE_COSIGN_VERSION sets the GitVersion (NONE prints no version line). FAKE_COSIGN_FAIL=network makes
+# verify-blob fail the way a blocked Sigstore does.
+cat > "$tmp/stubs/cosign" << 'EOF'
+#!/bin/sh
+PATH=$FAKE_HOST_PATH
+printf '%s\n' "$*" >> "$STUB_LOG.cosign"
+cmd=$1
+shift
+if [ "$cmd" = version ]; then
+    v=${FAKE_COSIGN_VERSION:-v3.1.4}
+    if [ "$v" = NONE ]; then
+        echo "cosign: a fake"
+    else
+        printf 'cosign: a fake\n\nGitVersion:    %s\nPlatform:      linux/amd64\n' "$v"
+    fi
+    exit 0
+fi
+[ "$cmd" = verify-blob ] || { echo "fake cosign: unexpected command $cmd" >&2; exit 2; }
+printf 'TUF_ROOT=%s\n' "${TUF_ROOT:-}" >> "$STUB_LOG.cosign"
+bundle=''
+identity=''
+issuer=''
+wf_repo=''
+wf_ref=''
+wf_trigger=''
+blob=''
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        --bundle) bundle=$2; shift ;;
+        --certificate-identity) identity=$2; shift ;;
+        --certificate-oidc-issuer) issuer=$2; shift ;;
+        --certificate-github-workflow-repository) wf_repo=$2; shift ;;
+        --certificate-github-workflow-ref) wf_ref=$2; shift ;;
+        --certificate-github-workflow-trigger) wf_trigger=$2; shift ;;
+        -*) echo "fake cosign: unexpected flag $1" >&2; exit 2 ;;
+        *) blob=$1 ;;
+    esac
+    shift
+done
+if [ "${FAKE_COSIGN_FAIL:-}" = network ]; then
+    echo "fake cosign: error updating to TUF remote mirror: no route to host" >&2
+    exit 1
+fi
+if command -v sha256sum > /dev/null 2>&1; then
+    digest=$(sha256sum "$blob" | awk '{ print $1 }')
+else
+    digest=$(shasum -a 256 "$blob" | awk '{ print $1 }')
+fi
+field() { sed -n "s/.*\"$1\":\"\\([^\"]*\\)\".*/\\1/p" "$bundle"; }
+[ "$(field digest)" = "$digest" ] || { echo "fake cosign: invalid signature when validating ASN.1 encoded signature" >&2; exit 1; }
+[ "$(field identity)" = "$identity" ] || { echo "fake cosign: none of the expected identities matched" >&2; exit 1; }
+[ "$issuer" = "https://token.actions.githubusercontent.com" ] || { echo "fake cosign: issuer mismatch" >&2; exit 1; }
+[ -z "$wf_repo" ] || [ "$(field repo)" = "$wf_repo" ] || { echo "fake cosign: expected GitHub workflow repository value does not match" >&2; exit 1; }
+[ -z "$wf_ref" ] || [ "$(field ref)" = "$wf_ref" ] || { echo "fake cosign: expected GitHub workflow ref value does not match" >&2; exit 1; }
+[ -z "$wf_trigger" ] || [ "$(field trigger)" = "$wf_trigger" ] || { echo "fake cosign: expected GitHub workflow trigger value does not match" >&2; exit 1; }
+echo "Verified OK" >&2
+EOF
 chmod +x "$tmp/stubs/"*
+
+HOST_PATH=$PATH
 
 # ---------------------------------------------------------------------------------------------
 # PATH folders
 # ---------------------------------------------------------------------------------------------
-base_tools="cat chmod cp grep gzip mkdir mv rm tar awk"
+base_tools="cat chmod cp grep gzip mkdir mv rm tar awk wc"
 
-# build_path <dir> <mode: real|busybox> <hash: sha256sum|shasum|openssl|none> <dl: curl|wget|wget-noconfig|wget-old|none>
+# build_path <dir> <mode: real|busybox> <hash: sha256sum|shasum|openssl|none> <dl: curl|wget|wget-noconfig|wget-old|none> <cosign: fake|none>
 build_path() {
     d=$1
     mkdir -p "$d"
@@ -186,6 +257,7 @@ build_path() {
     case $4 in
         curl | wget | wget-noconfig | wget-old) ln -s "$tmp/stubs/$4" "$d/${4%%-*}" ;;
     esac
+    if [ "$5" = fake ]; then ln -s "$tmp/stubs/cosign" "$d/cosign"; fi
     ln -s "$tmp/stubs/mktemp" "$d/mktemp"
     ln -s "$tmp/stubs/id" "$d/id"
     ln -s "$tmp/stubs/uname" "$d/uname"
@@ -212,16 +284,38 @@ begin() {
     ERR="$cdir/err"
     : > "$LOG"
     BIN_D="$HOME_D/.local/bin"
-    E="STUB_UID=1000 STUB_OS=Linux STUB_ARCH=x86_64 RDY_VERSION=$VER"
+    # The fake rdy touches STUB_CANARY when it runs. install.sh runs the new binary only after the
+    # signature and the hash have passed, so a refused install must leave no canary.
+    CANARY="$cdir/canary"
+    E="STUB_UID=1000 STUB_OS=Linux STUB_ARCH=x86_64 RDY_VERSION=$VER STUB_CANARY=$CANARY"
     HASH=$DEFHASH
     DL=curl
+    COS=fake
     PATH_SUFFIX=''
     STDIN=''
     TRIPLE=$LINUX
+    # What the fake cosign finds in the bundle that mksig writes: a good signature from our workflow.
+    B_ID="$SIGNER_PREFIX@refs/tags/v$VER"
+    B_REPO=getrdy-io/rdy
+    B_REF="refs/tags/v$VER"
+    B_TRIGGER=push
+    B_MEDIA=application/vnd.dev.sigstore.bundle.v0.3+json
+    B_EXTRA=''
 }
 
 addenv() { E="$E $1"; }
 skipsig() { addenv RDY_INSECURE_SKIP_SIGNATURE=1; }
+
+SIGNER_PREFIX=https://github.com/getrdy-io/rdy/.github/workflows/sign-release.yml
+
+# mksig: write $REL/SHA256SUMS.sigstore.json for the SHA256SUMS that is there now, from the B_* values.
+mksig() {
+    sd=$(host_hash "$REL/SHA256SUMS")
+    media=''
+    if [ -n "$B_MEDIA" ]; then media="\"mediaType\":\"$B_MEDIA\","; fi
+    printf '{%s"digest":"%s","identity":"%s","repo":"%s","ref":"%s","trigger":"%s"%s}\n' \
+        "$media" "$sd" "$B_ID" "$B_REPO" "$B_REF" "$B_TRIGGER" "$B_EXTRA" > "$REL/SHA256SUMS.sigstore.json"
+}
 
 # mkrel <ver> <triple> <what the fake rdy prints, or FAIL>: a valid synthetic release in $REL.
 mkrel() {
@@ -230,7 +324,8 @@ mkrel() {
     if [ "$3" = FAIL ]; then
         printf '#!/bin/sh\nexit 3\n' > "$pkg/rdy-$2/rdy"
     else
-        printf '#!/bin/sh\necho "rdy %s"\n' "$3" > "$pkg/rdy-$2/rdy"
+        # shellcheck disable=SC2016 # the fake rdy expands STUB_CANARY, not this script
+        printf '#!/bin/sh\n[ -z "${STUB_CANARY:-}" ] || : > "$STUB_CANARY"\necho "rdy %s"\n' "$3" > "$pkg/rdy-$2/rdy"
     fi
     # Mode 0644 on purpose: install.sh must be the one that makes the file executable.
     chmod 644 "$pkg/rdy-$2/rdy"
@@ -248,6 +343,7 @@ mkrel() {
         printf '%s  install.sh\n' "$d"
         printf '%s  rdy.cdx.xml\n' "$d"
     } > "$REL/SHA256SUMS"
+    mksig
 }
 
 # defrel: the release for the default case.
@@ -257,14 +353,14 @@ defrel() { mkrel "$VER" "$TRIPLE" "$VER"; }
 # shellcheck disable=SC2086 # $E and $SHELL_CMD are lists of words on purpose
 in_env() {
     env -i PATH="$pd$PATH_SUFFIX" HOME="$HOME_D" TMPDIR="$TMP_D" STUB_LOG="$LOG" STUB_REL="$REL" \
-        STUB_VERSION="$VER" STUB_REAL_MKTEMP="$REAL_MKTEMP" $E $SHELL_CMD "$@"
+        STUB_VERSION="$VER" STUB_REAL_MKTEMP="$REAL_MKTEMP" FAKE_HOST_PATH="$HOST_PATH" $E $SHELL_CMD "$@"
 }
 
 # Run $SHELL_CMD with the given arguments in a clean environment. Sets CODE. When $STDIN names a file,
 # it is fed through a real pipe (cat file | sh -s), as in `curl ... | sh`. Otherwise stdin is /dev/null.
 sh_run() {
-    pd="$tmp/path/$SHELL_LABEL-$HASH-$DL"
-    if [ ! -d "$pd" ]; then build_path "$pd" "$SHELL_MODE" "$HASH" "$DL"; fi
+    pd="$tmp/path/$SHELL_LABEL-$HASH-$DL-$COS"
+    if [ ! -d "$pd" ]; then build_path "$pd" "$SHELL_MODE" "$HASH" "$DL" "$COS"; fi
     if [ -n "$STDIN" ]; then
         # shellcheck disable=SC2002 # a real pipe on purpose, not a redirect
         cat "$STDIN" 2> /dev/null | in_env "$@" > "$OUT" 2> "$ERR"
@@ -301,6 +397,44 @@ want_installed() {
     ls_out=$(ls -A "$d")
     [ "$ls_out" = rdy ] || casebad "extra files in $d: $ls_out"
     [ -n "$(find "$d/rdy" -perm 755 -print)" ] || casebad "the mode of rdy is not 0755"
+}
+want_canary() { [ -e "$CANARY" ] || casebad "the new rdy never ran (no canary)"; }
+want_no_canary() { [ ! -e "$CANARY" ] || casebad "the new rdy ran (canary exists)"; }
+# The fake cosign logs one line per call. verify-blob lines start with the word.
+want_no_verify() {
+    if grep -q '^verify-blob' "$LOG.cosign" 2> /dev/null; then casebad "cosign verify-blob was called"; fi
+}
+want_no_cosign_call() { [ ! -e "$LOG.cosign" ] || casebad "cosign was called"; }
+# The exact verify-blob call from the contract in 06: absolute paths in the work folder, the exact
+# identity and issuer, and the three caller claims.
+want_verify_line() {
+    line=$(grep '^verify-blob' "$LOG.cosign" 2> /dev/null) || line=''
+    wantmid="--certificate-identity $SIGNER_PREFIX@refs/tags/v$VER --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-repository getrdy-io/rdy --certificate-github-workflow-ref refs/tags/v$VER --certificate-github-workflow-trigger push"
+    case $line in
+        "verify-blob --bundle $TMP_D/rdy-install."*"/SHA256SUMS.sigstore.json $wantmid $TMP_D/rdy-install."*"/SHA256SUMS") ;;
+        *) casebad "cosign verify-blob call is not the contract: $line" ;;
+    esac
+    # cosign gets its own trust root cache inside the work folder, not ~/.sigstore.
+    tuf=$(grep '^TUF_ROOT=' "$LOG.cosign" 2> /dev/null) || tuf=''
+    case $tuf in
+        "TUF_ROOT=$TMP_D/rdy-install."*"/tuf") ;;
+        *) casebad "cosign TUF_ROOT is not private to the work folder: $tuf" ;;
+    esac
+    [ ! -e "$HOME_D/.sigstore" ] || casebad "something wrote ~/.sigstore"
+}
+# A refused signature: exit 1, the attack wording, a contact, nothing installed, nothing run, no hash
+# step, everything cleaned up.
+want_sig_refused() {
+    want_code 1
+    want_err 'does not verify as'
+    want_err 'do not run this file'
+    want_err 'security@getrdy.io'
+    want_err 'fix:'
+    want_no_err 'sha256 ok'
+    want_nothing_installed
+    want_no_canary
+    want_tmp_clean
+    want_out_empty
 }
 endcase() {
     if [ "$casefail" = 0 ]; then
@@ -683,27 +817,8 @@ suite() {
     want_nothing_installed
     endcase
 
-    # --- signature seam (M1-015 replaces verify_signature) -----------------------------------
-    begin "without the override this copy stops before it trusts anything"
-    defrel
-    run
-    want_code 1
-    want_err 'cannot check the release signature yet'
-    want_err 'scripts/verify-release.sh'
-    want_err 'fix:'
-    # 06 and ADR 0025 document the override. The stop message does not name it.
-    want_no_err 'RDY_INSECURE_SKIP_SIGNATURE'
-    want_nothing_installed
-    want_tmp_clean
-    endcase
-
-    begin "the override must be exactly 1"
-    defrel
-    addenv RDY_INSECURE_SKIP_SIGNATURE=yes
-    run
-    want_code 1
-    want_nothing_installed
-    endcase
+    # --- signature (M1-015, SEC-09, SEC-10) --------------------------------------------------
+    sig_suite
 
     # --- sha256 ------------------------------------------------------------------------------
     begin "a wrong hash in SHA256SUMS stops, installs nothing, cleans up"
@@ -945,10 +1060,454 @@ suite() {
     trunc_suite
 }
 
+# wrong_caller <label> <flag> <B_ variable> <value>: the identity is ours, but the run that called the
+# reusable workflow was not. The second case shows that the first has teeth: a copy of install.sh that
+# leaves the flag out installs, so only the flag stops it.
+wrong_caller() {
+    begin "wrong caller $1: refused, nothing runs"
+    defrel
+    eval "$3=\$4"
+    mksig
+    run
+    want_sig_refused
+    want_err "expected GitHub workflow $2 value does not match"
+    endcase
+
+    begin "wrong caller $1: without the --certificate-github-workflow-$2 flag the fake accepts it"
+    defrel
+    eval "$3=\$4"
+    mksig
+    grep -v -e "--certificate-github-workflow-$2" "$script" > "$cdir/noflag.sh"
+    sh_run "$cdir/noflag.sh"
+    want_code 0
+    want_canary
+    endcase
+}
+
+# bad_bundle <label> <mediaType> <extra json members> <text the error must have>
+bad_bundle() {
+    begin "bundle with $1 is refused before cosign runs"
+    defrel
+    B_MEDIA=$2
+    B_EXTRA=$3
+    mksig
+    run
+    want_code 1
+    want_err "$4"
+    want_err 'do not run this file'
+    want_err 'security@getrdy.io'
+    want_no_verify
+    want_nothing_installed
+    want_no_canary
+    want_tmp_clean
+    endcase
+}
+
+# The signature suite. The fake cosign stands in for Sigstore. The real cosign is not used here: that
+# needs the network and a published signed release (the alpha.1 install is a founder hand step,
+# RELEASING.md).
+sig_suite() {
+    V3=application/vnd.dev.sigstore.bundle.v0.3+json
+
+    begin "a good signature installs, and cosign gets the exact contract"
+    defrel
+    run
+    want_code 0
+    want_installed
+    want_canary
+    want_out_empty
+    want_tmp_clean
+    want_err "signature ok: SHA256SUMS is signed by $SIGNER_PREFIX@refs/tags/v$VER"
+    want_err 'sha256 ok'
+    want_no_err 'WARNING'
+    want_log "/v$VER/SHA256SUMS.sigstore.json"
+    want_verify_line
+    # The signature check comes first, the hash check second.
+    awk '/signature ok/ { s = NR } /sha256 ok/ { h = NR } END { exit !(s && h && s < h) }' "$ERR" ||
+        casebad "the signature check did not come before the hash check"
+    endcase
+
+    begin "a good signature installs with GNU wget"
+    defrel
+    DL=wget
+    run
+    want_code 0
+    want_installed
+    want_canary
+    want_log "wget --no-config --https-only"
+    want_log "/v$VER/SHA256SUMS.sigstore.json"
+    endcase
+
+    begin "a good signature installs through the curl | sh route"
+    defrel
+    STDIN="$script"
+    sh_run -s --
+    want_code 0
+    want_installed
+    want_canary
+    want_out_empty
+    endcase
+
+    # --- bad hash ----------------------------------------------------------------------------
+    begin "bad hash: the archive differs from the signed list"
+    defrel
+    printf 'x' >> "$REL/rdy-$LINUX.tar.gz"
+    run
+    want_code 1
+    want_err 'signature ok'
+    want_err 'does not match SHA256SUMS'
+    want_err 'do not run this file'
+    want_nothing_installed
+    want_no_canary
+    want_tmp_clean
+    endcase
+
+    begin "bad hash: a wrong hash in a list that is signed"
+    defrel
+    sed "s/^[0-9a-f]\{64\}  rdy-$LINUX/$A64  rdy-$LINUX/" "$REL/SHA256SUMS" > "$REL/new"
+    mv "$REL/new" "$REL/SHA256SUMS"
+    mksig
+    run
+    want_code 1
+    want_err 'does not match SHA256SUMS'
+    want_nothing_installed
+    want_no_canary
+    want_tmp_clean
+    endcase
+
+    # --- bad signature -----------------------------------------------------------------------
+    begin "bad signature: SHA256SUMS changed by one byte after signing"
+    defrel
+    printf 'x' >> "$REL/SHA256SUMS"
+    run
+    want_sig_refused
+    want_err 'invalid signature'
+    want_verify_line
+    endcase
+
+    begin "bad signature: archive and list both replaced, the old bundle kept"
+    defrel
+    printf 'x' >> "$REL/rdy-$LINUX.tar.gz"
+    h=$(host_hash "$REL/rdy-$LINUX.tar.gz")
+    sed "s/^[0-9a-f]\{64\}  rdy-$LINUX/$h  rdy-$LINUX/" "$REL/SHA256SUMS" > "$REL/new"
+    mv "$REL/new" "$REL/SHA256SUMS"
+    run
+    want_sig_refused
+    endcase
+
+    begin "bad signature: a bundle for another file"
+    defrel
+    printf 'other file\n' > "$cdir/other-list"
+    sd=$(host_hash "$cdir/other-list")
+    printf '{"mediaType":"%s","digest":"%s","identity":"%s","repo":"getrdy-io/rdy","ref":"refs/tags/v%s","trigger":"push"}\n' \
+        "$B_MEDIA" "$sd" "$B_ID" "$VER" > "$REL/SHA256SUMS.sigstore.json"
+    run
+    want_sig_refused
+    endcase
+
+    begin "bad signature: cosign cannot reach Sigstore, so it fails closed and shows its lines"
+    defrel
+    addenv FAKE_COSIGN_FAIL=network
+    run
+    want_sig_refused
+    want_err 'no route to host'
+    want_err 'network error'
+    endcase
+
+    # --- wrong identity ----------------------------------------------------------------------
+    begin "wrong identity: another workflow file in our repository"
+    defrel
+    B_ID="https://github.com/getrdy-io/rdy/.github/workflows/release.yml@refs/tags/v$VER"
+    mksig
+    run
+    want_sig_refused
+    want_err 'none of the expected identities matched'
+    endcase
+
+    begin "wrong identity: the signature of another release (replay)"
+    defrel
+    B_ID="$SIGNER_PREFIX@refs/tags/v0.1.0-alpha.1"
+    mksig
+    run
+    want_sig_refused
+    want_err 'none of the expected identities matched'
+    endcase
+
+    begin "wrong identity: our workflow in another repository"
+    defrel
+    B_ID="https://github.com/evil-org/rdy/.github/workflows/sign-release.yml@refs/tags/v$VER"
+    mksig
+    run
+    want_sig_refused
+    want_err 'none of the expected identities matched'
+    endcase
+
+    begin "wrong identity: our workflow from a branch"
+    defrel
+    B_ID="$SIGNER_PREFIX@refs/heads/main"
+    mksig
+    run
+    want_sig_refused
+    want_err 'none of the expected identities matched'
+    endcase
+
+    # --- wrong caller (the reusable workflow hole) -------------------------------------------
+    wrong_caller "repository" repository B_REPO evil-org/rdy
+    wrong_caller "ref (a branch)" ref B_REF refs/heads/main
+    wrong_caller "ref (another tag)" ref B_REF refs/tags/v0.1.0-alpha.1
+    wrong_caller "trigger" trigger B_TRIGGER workflow_dispatch
+
+    # --- missing bundle ----------------------------------------------------------------------
+    begin "missing bundle: the release looks incomplete, in the plain wording"
+    defrel
+    rm -f "$REL/SHA256SUMS.sigstore.json"
+    run
+    want_code 1
+    want_err 'this release looks incomplete'
+    want_err 'SHA256SUMS.sigstore.json'
+    want_err 'fix:'
+    want_no_err 'do not run this file'
+    want_no_verify
+    want_nothing_installed
+    want_no_canary
+    want_tmp_clean
+    endcase
+
+    # --- missing cosign ----------------------------------------------------------------------
+    begin "missing cosign: stops before any download and gives the manual route"
+    defrel
+    COS=none
+    run
+    want_code 1
+    want_err 'cosign is not installed'
+    want_err "https://github.com/getrdy-io/rdy/blob/v$VER/scripts/verify-release.sh"
+    want_err 'fix:'
+    # ADR 0025: the stop message does not name the override. The docs do.
+    want_no_err 'RDY_INSECURE_SKIP_SIGNATURE'
+    want_no_net
+    want_nothing_installed
+    want_no_canary
+    want_tmp_clean
+    endcase
+
+    begin "missing cosign with the override: installs on the hash, with the loud warning"
+    defrel
+    COS=none
+    skipsig
+    run
+    want_code 0
+    want_installed
+    want_canary
+    want_err 'WARNING: RDY_INSECURE_SKIP_SIGNATURE=1'
+    want_err 'sha256 ok'
+    want_no_err 'signature ok'
+    ! grep -q 'sigstore.json' "$LOG" || casebad "the bundle was downloaded although the signature is skipped"
+    endcase
+
+    begin "missing cosign with the override: the sha256 check still runs"
+    defrel
+    COS=none
+    skipsig
+    printf 'x' >> "$REL/rdy-$LINUX.tar.gz"
+    run
+    want_code 1
+    want_err 'does not match SHA256SUMS'
+    want_nothing_installed
+    want_no_canary
+    endcase
+
+    for val in yes true 0 2 ''; do
+        begin "the override must be exactly 1 (RDY_INSECURE_SKIP_SIGNATURE='$val')"
+        defrel
+        COS=none
+        addenv "RDY_INSECURE_SKIP_SIGNATURE=$val"
+        run
+        want_code 1
+        want_err 'cosign is not installed'
+        want_nothing_installed
+        want_no_canary
+        endcase
+    done
+
+    begin "the override with a cosign present never calls cosign and never fetches the bundle"
+    defrel
+    skipsig
+    run
+    want_code 0
+    want_installed
+    want_no_cosign_call
+    ! grep -q 'sigstore.json' "$LOG" || casebad "the bundle was downloaded although the signature is skipped"
+    endcase
+
+    begin "the override installs a release that has no bundle, on the hash only"
+    defrel
+    skipsig
+    rm -f "$REL/SHA256SUMS.sigstore.json"
+    run
+    want_code 0
+    want_installed
+    endcase
+
+    # --- cosign version floor ----------------------------------------------------------------
+    for v in v3.1.3 v3.1.4 v3.1.10 v3.2.0 v3.10.0 v4.0.0; do
+        begin "cosign $v is accepted"
+        defrel
+        addenv "FAKE_COSIGN_VERSION=$v"
+        run
+        want_code 0
+        want_installed
+        want_canary
+        endcase
+    done
+    for v in v3.1.2 v3.1.0 v3.0.9 v3.0.0 v2.9.9 v1.13.6 v0.9.9; do
+        begin "cosign $v is too old"
+        defrel
+        addenv "FAKE_COSIGN_VERSION=$v"
+        run
+        want_code 1
+        want_err "cosign $v is too old"
+        want_err '3.1.3 or newer'
+        want_err 'fix:'
+        want_no_net
+        want_nothing_installed
+        want_no_canary
+        want_no_verify
+        endcase
+    done
+    for v in NONE v3.1 garbage 3.1.3.1 v3.1.4-rc1 v3..1 v3.1.x v99999999999999999999.1.1; do
+        begin "cosign version '$v' cannot be read, so it is refused"
+        defrel
+        addenv "FAKE_COSIGN_VERSION=$v"
+        run
+        want_code 1
+        want_err 'could not read the version of cosign'
+        want_no_net
+        want_nothing_installed
+        want_no_canary
+        want_no_verify
+        endcase
+    done
+    begin "with the override an old cosign is never asked"
+    defrel
+    skipsig
+    addenv FAKE_COSIGN_VERSION=v2.0.0
+    run
+    want_code 0
+    want_no_cosign_call
+    endcase
+
+    # --- trust-root variables ----------------------------------------------------------------
+    for v in SIGSTORE_ROOT_FILE SIGSTORE_REKOR_PUBLIC_KEY SIGSTORE_CT_LOG_PUBLIC_KEY_FILE \
+        SIGSTORE_TSA_CERTIFICATE_FILE TUF_MIRROR TUF_ROOT_JSON TUF_ROOT; do
+        begin "refuses $v when it is set"
+        defrel
+        addenv "$v=/tmp/x"
+        run
+        want_code 1
+        want_err "$v is set"
+        want_err "unset $v"
+        want_err 'fix:'
+        want_no_net
+        want_nothing_installed
+        want_no_canary
+        want_no_cosign_call
+        want_tmp_clean
+        endcase
+
+        begin "refuses $v even when it is empty"
+        defrel
+        addenv "$v="
+        run
+        want_code 1
+        want_err "$v is set"
+        want_no_net
+        want_nothing_installed
+        want_no_cosign_call
+        endcase
+    done
+    begin "with the override a trust variable is not read, because cosign is not used"
+    defrel
+    skipsig
+    addenv TUF_ROOT=/tmp/x
+    run
+    want_code 0
+    want_installed
+    want_no_cosign_call
+    endcase
+
+    # --- bundle format -----------------------------------------------------------------------
+    bad_bundle "an old mediaType" 'application/vnd.dev.sigstore.bundle+json;version=0.2' '' 'v0.3 format'
+    bad_bundle "no mediaType" '' '' 'v0.3 format'
+    bad_bundle "a legacy base64Signature key" "$V3" ',"base64Signature":"ZmFrZQ=="' 'v0.3 format'
+    bad_bundle "a legacy rekorBundle key" "$V3" ',"rekorBundle":{}' 'v0.3 format'
+    # base64 + backslash + u0053 + ignature spells base64Signature once the escape is decoded.
+    BS=$(printf '\134')
+    bad_bundle "a JSON \\u escape" "$V3" ",\"base64${BS}u0053ignature\":\"x\"" 'JSON \u escape'
+
+    begin "a bundle over 1 MiB is refused"
+    defrel
+    head -c 1100000 /dev/zero | tr '\0' ' ' >> "$REL/SHA256SUMS.sigstore.json"
+    run
+    want_code 1
+    want_err 'too large'
+    want_no_verify
+    want_nothing_installed
+    want_no_canary
+    want_tmp_clean
+    endcase
+
+    begin "a SHA256SUMS over 1 MiB is refused"
+    defrel
+    head -c 1100000 /dev/zero | tr '\0' ' ' >> "$REL/SHA256SUMS"
+    mksig
+    run
+    want_code 1
+    want_err 'too large'
+    want_no_verify
+    want_nothing_installed
+    want_no_canary
+    endcase
+
+    begin "a SHA256SUMS over 1 MiB is refused on the override path too, with curl and with wget"
+    defrel
+    skipsig
+    head -c 1100000 /dev/zero | tr '\0' ' ' >> "$REL/SHA256SUMS"
+    run
+    want_code 1
+    want_err 'too large'
+    want_nothing_installed
+    want_no_canary
+    want_log '--max-filesize 1048576'
+    DL=wget
+    run
+    want_code 1
+    want_err 'too large'
+    want_nothing_installed
+    want_no_canary
+    endcase
+
+    # --- the contract is the same everywhere -------------------------------------------------
+    begin "install.sh refuses the same trust variables as scripts/verify-release.sh"
+    mine=$(sed -n "s/^TRUST_VARS='\(.*\)'\$/\1/p" "$script" | tr ' ' '\n' | sort)
+    theirs=$(awk '/^for var in/ { p = 1 } p { print } /; do$/ { p = 0 }' "$root/scripts/verify-release.sh" | grep -o '[A-Z][A-Z_]*' | sort)
+    if [ -z "$mine" ] || [ "$mine" != "$theirs" ]; then
+        casebad "install.sh has [$mine], verify-release.sh has [$theirs]"
+    fi
+    endcase
+
+    begin "the signer repository and the download base agree"
+    sr=$(sed -n "s/^SIGNER_REPO='\(.*\)'\$/\1/p" "$script")
+    rb=$(sed -n "s/^RELEASE_BASE='\(.*\)'\$/\1/p" "$script")
+    if [ "$sr" != getrdy-io/rdy ] || [ "$rb" != "https://github.com/$sr/releases/download" ]; then
+        casebad "SIGNER_REPO='$sr' RELEASE_BASE='$rb'"
+    fi
+    endcase
+}
+
 # Used by the version loop: RDY_VERSION holds spaces or glob characters, so it cannot go through $E.
 sh_run_bad_version() {
-    pd="$tmp/path/$SHELL_LABEL-$HASH-$DL"
-    if [ ! -d "$pd" ]; then build_path "$pd" "$SHELL_MODE" "$HASH" "$DL"; fi
+    pd="$tmp/path/$SHELL_LABEL-$HASH-$DL-$COS"
+    if [ ! -d "$pd" ]; then build_path "$pd" "$SHELL_MODE" "$HASH" "$DL" "$COS"; fi
     # shellcheck disable=SC2086 # $SHELL_CMD is a list of words on purpose
     env -i PATH="$pd" HOME="$HOME_D" TMPDIR="$TMP_D" STUB_LOG="$LOG" STUB_REL="$REL" STUB_VERSION="$VER" \
         STUB_REAL_MKTEMP="$REAL_MKTEMP" STUB_UID=1000 STUB_OS=Linux STUB_ARCH=x86_64 RDY_INSECURE_SKIP_SIGNATURE=1 RDY_VERSION="$1" \
@@ -1060,8 +1619,8 @@ trunc_suite() {
 # that runs its own applets first (Debian, Ubuntu) fails this, and every case after it would test the
 # host, not the script. Returns 1 and says why.
 check_stubs() {
-    pd="$tmp/path/$SHELL_LABEL-$DEFHASH-curl"
-    if [ ! -d "$pd" ]; then build_path "$pd" "$SHELL_MODE" "$DEFHASH" curl; fi
+    pd="$tmp/path/$SHELL_LABEL-$DEFHASH-curl-fake"
+    if [ ! -d "$pd" ]; then build_path "$pd" "$SHELL_MODE" "$DEFHASH" curl fake; fi
     # shellcheck disable=SC2086 # $SHELL_CMD is a list of words on purpose
     got=$(env -i PATH="$pd" STUB_UID=4242 STUB_OS=StubOS $SHELL_CMD -c 'id -u; uname -s' 2>&1 < /dev/null) || got=''
     want_stub="4242
