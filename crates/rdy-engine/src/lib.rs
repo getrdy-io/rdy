@@ -11,6 +11,8 @@
 //! - [`family`]: the `Family` trait and the `Registry` of the checks in this build.
 //! - [`plan`]: [`family::Registry::plan`] decides, with no I/O, which spec entries run and which are
 //!   skipped, and why.
+//! - [`probe`]: the facade a check reads the machine through, with the action log and the read
+//!   denylist. Only the replay backend exists so far, in `testing` behind the `testing` feature.
 //! - `sched` (feature `runtime`, on by default): runs checks with a concurrency limit, a timeout each
 //!   and panic isolation.
 //! - `blocking` (feature `runtime`): runs blocking work off the async workers.
@@ -19,14 +21,13 @@
 //! - `exec`: the command table and the command policy, which need no runtime, and (feature `runtime`)
 //!   the runner that starts a command in its own process group and kills the group on timeout, on
 //!   drop and at exit. `exec::table::run` is the only public way to run a command.
-//!
 //! - [`redact`]: the redactor. [`redact::Redactor::redact_report`] redacts and then caps every string of a
 //!   report and returns a [`redact::RedactedReport`], the only type the writers and renderers accept.
 //!
 //! - `watchdog` (feature `runtime`): the run watchdog, a plain thread that writes an incomplete report
 //!   and exits 70 when a run hangs, and the run board that holds its snapshot.
 //!
-//! The probe facade and the renderers arrive in later M1 tickets.
+//! The live backend and the renderers arrive in later M1 tickets.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -41,9 +42,12 @@ pub mod outcome;
 #[cfg(feature = "runtime")]
 pub mod output;
 pub mod plan;
+pub mod probe;
 pub mod redact;
 #[cfg(feature = "runtime")]
 pub mod sched;
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod text;
 pub mod units;
 #[cfg(feature = "runtime")]

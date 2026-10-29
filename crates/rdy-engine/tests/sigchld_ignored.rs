@@ -6,6 +6,8 @@
 //! itself through `bash -c 'trap "" CHLD; exec ...'` so the ignore is inherited, and checks that exit
 //! status, output, timeout and group kill all still work.
 #![cfg(all(unix, feature = "runtime"))]
+// These tests drive the raw runner on purpose; a check never may (root clippy.toml).
+#![allow(clippy::disallowed_methods)]
 
 use std::error::Error;
 use std::path::Path;

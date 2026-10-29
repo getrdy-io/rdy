@@ -95,7 +95,10 @@ impl Check for SpinCheck {
     }
 }
 
+// The test starts a shell with the raw runner on purpose: it needs a live process group and no policy
+// in the way (as in `exit_bound.rs`).
 #[cfg(unix)]
+#[allow(clippy::disallowed_methods)]
 mod unix_only {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};

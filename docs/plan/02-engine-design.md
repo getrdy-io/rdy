@@ -345,9 +345,20 @@ tests policy.
   and `/sys`.
 - macOS: `realpath`, open with `O_NOFOLLOW | O_NONBLOCK`, and recheck with `F_GETPATH`.
 - Windows: no M1 check reads files, so the facade refuses them.
-- Deny list: `/etc/shadow`, `/etc/gshadow`, `/etc/sudoers*`, `*/.ssh/*`, private key files, `~/.kube/*`
-  and `/root/.kube/*` (kube reads the kubeconfig itself), `/proc/*/environ`, `/proc/*/cmdline`,
-  `/proc/*/mem`, `/proc/*/fd/*`, `/proc/*/root/*`, `/proc/*/map_files/*`, `/proc/kcore`, `/dev/*`.
+- Deny list, matched on components at any depth (`/host/etc/shadow`, an overlay `diff/etc/shadow`, a
+  macOS data volume): `etc/shadow*`, `etc/gshadow*`, `etc/sudoers*`, `etc/master.passwd`,
+  `etc/security/opasswd`, `var/db/dslocal`; `.ssh`, `.kube`, `.aws`, `.azure`, `.config/gcloud`, `.gnupg`, `.docker/config.json`, `.netrc`,
+  `.git-credentials`, `.pgpass`, `.vault-token`; private key files by name and extension (`*.key`,
+  `*.p12`, `*.keytab`, `*.keychain`, `*.keychain-db`, `id_*`, `ssh_host_*_key`), `etc/ssl/private`,
+  `etc/pki/tls/private`; cluster credentials (`etc/kubernetes/*.conf`, `etc/rancher/{k3s,rke2}/*.yaml`,
+  `var/lib/kubelet/kubeconfig`, `var/lib/etcd`, `var/lib/rancher/*/server/{token,node-token,cred}`,
+  `secrets/kubernetes.io/*`). `/proc/<pid>/` is an allowlist (`status`, `stat`, `statm`, `comm`,
+  `cgroup`, `mountinfo`, `mounts`, `limits`, `net`, and the same under `task/<tid>/`, plus `auxv` for
+  `self` only, which M1-042 reads for `AT_SECURE`), so `cwd`,
+  `exe`, `root`, `fd`, `environ`, `cmdline`, `mem`, `maps` and `ns` are refused. At the root: `/proc/kcore`,
+  `kmsg`, `vmcore`, `kallsyms`, `kpage*`, `/sys/kernel/debug`, `/sys/kernel/tracing`, and `/dev/*` for
+  `stat` and `read_dir` as well as `read` (M4 adds a closed stat-only list: `/dev/nvidia*`, `/dev/dri/*`,
+  `/dev/kfd`).
   The deny applies to the run-level probe too. The engine's own kubeconfig read is not a probe read: the
   `rdy-checks-k8s` client module reads the file the operator chose (`--kubeconfig`, `KUBECONFIG` or
   `~/.kube/config`), and the probe hook logs it as a `read` entry with no check id from
@@ -750,7 +761,11 @@ impl Probe {
     pub async fn native(&self, call: NativeCall) -> Result<NativeValue, ProbeError>;
     pub fn kube_guard(&self) -> KubeGuardLayer;        // used only by guarded_service
 }
-pub struct Cmd { pub program: &'static str, pub args: Vec<String>, pub timeout: Option<Duration> }
+// One Cmd type: rdy_engine::exec::policy::Cmd { program: &'static str, args, extra_dirs, env names, timeout, stdout_cap }.
+// Build it with CommandEntry::cmd (the command table, ADR 0028). Probe::exec applies the check's
+// CommandSpec (dirs, env names, cap), then table::validate_for(ctx.os, ..), so a command that is not in
+// the table never reaches any backend, replay included (PC-44).
+
 pub enum Target { Direct { host: String, port: u16 }, ViaProxy { host: String, port: u16 } }
 pub struct HttpProbe { pub url: String, pub method: Method /* Head | Get */, pub route: Route,
                        pub roots: Roots /* System | Bundled */ }
@@ -758,15 +773,17 @@ pub struct HttpProbe { pub url: String, pub method: Method /* Head | Get */, pub
 pub enum NativeCall { Statvfs { path: PathBuf }, Uname, Rlimit(Resource), Hostname,
                       MachineId /* raw value never logged or reported */, SystemRoots }
 #[non_exhaustive]
-pub enum ProbeError { Denied { rule: &'static str, what: String }, NotFound, PermissionDenied,
-                      Timeout, Hung { pid: u32 }, Net(NetFailure), Io(String), NotRecorded(String) }
+pub enum ProbeError { Denied { rule: &'static str, what: String }, Policy(PolicyError), Table(TableError),
+                      NotFound, PermissionDenied, Timeout, Hung { pid: u32 }, Net(NetFailure), Io(String),
+                      NotRecorded(String) }   // Clone + PartialEq + Eq; every message ends with a Fix: hint
 pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay only; raw I/O, no policy
     fn open_read<'a>(&'a self, path: &'a Path, range: ReadRange) -> BoxFuture<'a, io::Result<FileBytes>>;
     fn read_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>>;
     fn read_link<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<PathBuf>>;
     fn stat<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
     fn env(&self, name: &str) -> Option<String>;
-    fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, io::Result<Output>>;
+    // Provided: the live path, exec::table::run (the only public runner). Replay overrides it. (PC-44)
+    fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> { /* table::run */ }
     fn resolve<'a>(&'a self, host: &'a str) -> BoxFuture<'a, io::Result<Vec<IpAddr>>>;
     fn connect<'a>(&'a self, addr: SocketAddr) -> BoxFuture<'a, io::Result<BoxedStream>>;
     fn native<'a>(&'a self, call: &'a NativeCall) -> BoxFuture<'a, io::Result<NativeValue>>;

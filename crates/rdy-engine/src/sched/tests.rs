@@ -92,6 +92,8 @@ enum Mode {
     Remaining(Arc<Mutex<Vec<Duration>>>),
     /// Sets the flag when the future is dropped.
     DropFlag(Arc<AtomicBool>),
+    /// Saves its probe where the test can reach it after the run, then waits forever.
+    KeepProbe(Arc<Mutex<Option<crate::probe::Probe>>>),
 }
 
 #[derive(Default)]
@@ -146,6 +148,10 @@ impl Check for Fake {
                 }
                 Mode::DropFlag(dropped) => {
                     let _flag = SetOnDrop(Arc::clone(dropped));
+                    std::future::pending::<()>().await;
+                }
+                Mode::KeepProbe(slot) => {
+                    *slot.lock().expect("lock") = Some(ctx.probe().clone());
                     std::future::pending::<()>().await;
                 }
             }
@@ -606,6 +612,45 @@ async fn a_missing_need_is_reported_as_such_even_after_the_deadline() {
         &ran[1].end,
         End::Done(done) if matches!(&**done, Err(CheckError::MissingNeed(_)))
     ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_check_cut_by_the_run_deadline_has_its_probe_ended() {
+    use crate::probe::{ProbeError, ProbeHub, RULE_CHECK_FINISHED, replay::Replay};
+
+    let hub = ProbeHub::new(
+        Arc::new(Replay::new().file("/etc/hostname", "host-a")),
+        redactor(),
+    );
+    let slot = Arc::new(Mutex::new(None));
+    let ran = scheduler(1)
+        .with_probes(hub)
+        .with_deadline(Duration::from_secs(5))
+        .run(vec![
+            planned("fake.plain/held", Mode::KeepProbe(Arc::clone(&slot)))
+                .with_timeout(Duration::from_secs(60)),
+        ])
+        .await;
+    // The deadline, not the check's own 60 s, ended it.
+    assert_eq!(
+        ran[0].end,
+        End::TimedOut {
+            after: Duration::from_secs(5)
+        }
+    );
+    let probe = slot.lock().expect("lock").take().expect("the check ran");
+    // A late call, on the handle the check kept, is refused.
+    let error = probe
+        .read(std::path::Path::new("/etc/hostname"))
+        .await
+        .expect_err("the probe has ended");
+    assert_eq!(
+        error,
+        ProbeError::Denied {
+            rule: RULE_CHECK_FINISHED,
+            what: "/etc/hostname".to_owned()
+        }
+    );
 }
 
 #[test]

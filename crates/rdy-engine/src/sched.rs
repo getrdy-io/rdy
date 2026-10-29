@@ -21,6 +21,9 @@
 //!   to [`Scheduler::with_origin`], which is the origin of the watchdog's clock too.
 //! - **Panics.** A panic stays inside the check's task. The join handle returns it and the result is
 //!   [`End::Panicked`].
+//! - **Probe.** With a hub ([`Scheduler::with_probes`]) each check gets its own probe, bound to its key.
+//!   The probe ends when the check does, whether it returned, timed out, panicked or was aborted. A
+//!   scheduler without a hub gives checks a closed probe that refuses every call.
 //! - **Hard needs.** A check whose hard need is missing is not started. Its result is
 //!   `Err(CheckError::MissingNeed)`, the same value a check would return itself.
 //!
@@ -39,6 +42,7 @@ use tokio::task::{AbortHandle, JoinSet};
 use tokio::time::Instant;
 
 use crate::check::{Check, CheckContext, CheckError, CheckOutcome, Need, Os};
+use crate::probe::{Probe, ProbeHub};
 use crate::redact::{Redacted, Redactor};
 
 #[cfg(test)]
@@ -212,6 +216,7 @@ pub struct Scheduler {
     available: Arc<HashSet<Need>>,
     deadline: Duration,
     origin: Option<std::time::Instant>,
+    probes: Option<ProbeHub>,
 }
 
 impl Scheduler {
@@ -226,6 +231,7 @@ impl Scheduler {
             available: Arc::new(available.into_iter().collect()),
             deadline: DEFAULT_DEADLINE,
             origin: None,
+            probes: None,
         }
     }
 
@@ -252,6 +258,13 @@ impl Scheduler {
     #[must_use]
     pub fn deadline(&self) -> Duration {
         self.deadline
+    }
+
+    /// Gives every check a probe from `hub`. Without it checks get a closed probe.
+    #[must_use]
+    pub fn with_probes(mut self, hub: ProbeHub) -> Self {
+        self.probes = Some(hub);
+        self
     }
 
     /// The number of checks that may run at once, after the cap.
@@ -323,6 +336,7 @@ impl Scheduler {
             let run = RunCtx {
                 os: self.os,
                 available: Arc::clone(&self.available),
+                probes: self.probes.clone(),
                 origin,
                 deadline_at,
                 index,
@@ -385,10 +399,23 @@ impl Drop for AbortOnDrop {
     }
 }
 
+/// Ends a check's probe when dropped, so every way out of `drive` (a result, a timeout, an abort of
+/// the whole run) stops the check from touching the machine.
+struct EndProbe(Option<Probe>);
+
+impl Drop for EndProbe {
+    fn drop(&mut self) {
+        if let Some(probe) = &self.0 {
+            probe.end();
+        }
+    }
+}
+
 /// What a driver needs to know about the run.
 struct RunCtx {
     os: Os,
     available: Arc<HashSet<Need>>,
+    probes: Option<ProbeHub>,
     origin: Instant,
     deadline_at: Instant,
     index: usize,
@@ -406,12 +433,21 @@ async fn drive(item: Planned, run: &RunCtx) -> Ran {
     let started = Instant::now();
     let left = run.deadline_at.saturating_duration_since(started);
     if left.is_zero() {
-        // The permit came at the deadline. Nothing starts now.
+        // The permit came at the deadline. Nothing starts now, and no probe is made.
         return ran(key, id, End::RunDeadline, run.origin, started, started);
     }
     let after = effective_timeout(timeout, check.info().default_timeout).min(left);
-    let ctx = CheckContext::new(key.clone(), run.os, run.available.iter().cloned())
+    let mut ctx = CheckContext::new(key.clone(), run.os, run.available.iter().cloned())
         .at_deadline(started + after);
+    let probe = run
+        .probes
+        .as_ref()
+        .map(|hub| hub.check_probe(&key, run.os, Some(check.info())));
+    if let Some(probe) = &probe {
+        ctx = ctx.with_probe(probe.clone());
+    }
+    // Dropped on every way out, including the deadline cut: the probe ends with the check.
+    let _end = EndProbe(probe);
     run.observer.started(
         run.index,
         started.saturating_duration_since(run.origin),
