@@ -103,12 +103,13 @@ impl Fixture {
 /// Account database files and sockets. A lookup of `SUDO_USER` or `SUDO_UID` (`getpwnam`, `getpwuid`)
 /// would read one of these and so could find the user's home without ever naming it in a path that the
 /// fixture knows. The fixture user is not a real account, so the home check alone would miss it.
-const ACCOUNT_LOOKUPS: [&str; 5] = [
+const ACCOUNT_LOOKUPS: [&str; 6] = [
     "/etc/passwd",
     "/etc/nsswitch.conf",
     "/run/systemd/userdb",
     "/var/run/nscd",
     "nscd/socket",
+    "/var/lib/sss",
 ];
 
 /// True when `strace` can run. A missing `strace` skips the test, except in the `root` job, which sets

@@ -33,7 +33,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0023](0023-inherited-descriptors-detect-not-close.md) | Descriptors inherited by `rdy` are listed and reported in M1, not closed | Accepted, security-reviewed (PR #53) |
 | [0025](0025-install-sh-core.md) | install.sh refuses a cut-off copy by an end marker, stops when it cannot check a signature, and trusts only what it has hashed | Accepted, security-reviewed (PR #65) |
 | [0026](0026-checkmeta-in-checkinfo.md) | CheckMeta holds a check's title and remediation and lives in its static CheckInfo | Accepted |
-| [0027](0027-windows-trust-stores-stay-refused-in-m1.md) | Windows trust stores stay refused in M1: reading a DACL needs FFI or unmaintained crates, and Windows has no user store | Proposed (sign-off in PR #68) |
+| [0027](0027-windows-trust-stores-stay-refused-in-m1.md) | Windows trust stores stay refused in M1: reading a DACL needs FFI or unmaintained crates, and Windows has no user store | Accepted, security-reviewed and architect-reviewed (PR #68) |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.

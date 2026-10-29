@@ -61,6 +61,7 @@ every shell tool uses it.
 `rdy verify` stays top level because the plan names it; `rdy spec --help` ends with "See also: rdy verify".
 `rdy`, `rdy spec` and `rdy trust` with no subcommand print help on stdout and exit 0. A missing required
 argument is a usage error: exit 64.
+On Windows `rdy trust add` exits 64 and is not supported in M1 (ADR 0027).
 
 **Global flags** (every command, before or after the subcommand): `--color <auto|always|never>`,
 `--progress <auto|never>` (env `RDY_PROGRESS`), `-q/--quiet` (conflicts with `-v`), `-v/--verbose`, `-h`
