@@ -15,7 +15,10 @@ use std::time::Duration;
 
 use super::sealed::Sealed;
 use super::sock::{UdpReply, UnixResponse};
-use super::{Backend, DirEntry, FileBytes, FileMeta, Output, ProbeError, ReadGuard, ReadRange};
+use super::{
+    Backend, DirEntry, FileBytes, FileMeta, NativeCall, NativeValue, Output, ProbeError, ReadGuard,
+    ReadRange,
+};
 use crate::check::BoxFuture;
 use crate::exec::policy::Cmd;
 use crate::privilege::ProcessIds;
@@ -30,6 +33,7 @@ pub struct Replay {
     ids: Option<ProcessIds>,
     /// Names, datagram servers and unix socket replies (M1-144). Its builders are in `sock::replay`.
     pub(super) net: super::sock::replay::ReplayNet,
+    native: Vec<(NativeCall, NativeValue)>,
 }
 
 impl Replay {
@@ -73,6 +77,15 @@ impl Replay {
             ),
             output,
         );
+        self
+    }
+
+    /// Records the answer to a native call. A call with no answer recorded is "not found", so a test
+    /// that forgets one fails loudly. A later answer to the same call replaces the earlier one.
+    #[must_use]
+    pub fn native(mut self, call: NativeCall, value: NativeValue) -> Self {
+        self.native.retain(|(recorded, _)| *recorded != call);
+        self.native.push((call, value));
         self
     }
 
@@ -136,6 +149,25 @@ impl Backend for Replay {
 
     fn env(&self, name: &str) -> Option<String> {
         self.env.get(name).cloned()
+    }
+
+    fn native<'a>(
+        &'a self,
+        call: &'a NativeCall,
+        _guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<NativeValue>> {
+        Box::pin(async move {
+            self.native
+                .iter()
+                .find(|(recorded, _)| recorded == call)
+                .map(|(_, value)| value.clone())
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("no answer in the replay fixture for {}", call.policy().api),
+                    )
+                })
+        })
     }
 
     fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {

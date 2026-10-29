@@ -710,7 +710,12 @@ mod live {
 
     impl Sockets {
         fn new() -> Self {
-            Self(crate::probe::live_backend())
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the engine's own tests build the live backend; check crates may not"
+            )]
+            let live = crate::probe::live_backend();
+            Self(live)
         }
     }
 
@@ -741,6 +746,13 @@ mod live {
         }
         fn env(&self, _: &str) -> Option<String> {
             None
+        }
+        fn native<'a>(
+            &'a self,
+            _: &'a crate::probe::NativeCall,
+            _: &'a crate::probe::ReadGuard,
+        ) -> crate::check::BoxFuture<'a, std::io::Result<crate::probe::NativeValue>> {
+            Box::pin(async { Err(std::io::ErrorKind::NotFound.into()) })
         }
         fn resolve<'a>(
             &'a self,

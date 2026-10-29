@@ -366,6 +366,10 @@ tests policy.
   the declared prefixes alike, so `reads: ["/proc/net"]` reads `/proc/net/tcp`. The device and inode of
   each password and sudo file is recorded when the live backend is made, and a hard link or a bind
   mount with that identity is refused whatever its name.
+- The machine id files (`etc/machine-id*`, `var/lib/dbus/machine-id*`) are on the deny list at any depth,
+  for every reader. A check that declares `/` still cannot read them, so the raw id cannot reach
+  `observed` or the report. The `MachineId` call reads them through a guard that admits those two real
+  paths and nothing else (M1-046).
 - macOS: `realpath`, the checks, then open with `O_NOFOLLOW_ANY | O_NONBLOCK` (no link anywhere along
   the path, so a directory swapped for a link after the check cannot redirect the open). The type comes
   from `fstat` of the descriptor, the descriptor must have the same device and inode as the first
@@ -436,7 +440,16 @@ tests policy.
   - `Uname`, `Rlimit(resource)`, `Hostname`, `SystemRoots`.
   - `MachineId`: Windows `MachineGuid`; Linux reads `/etc/machine-id` as a file; macOS has none in M1,
     so its `host_id` is null. The raw value never enters the log or the report; only 01's salted
-    `host_id` does.
+    `host_id` does. The probe refuses it from a check's probe (run-level only), and its type,
+    `MachineId`, has no `Display`, `Serialize` or public getter and a `Debug` that shows nothing (M1-046).
+  - As built in M1-046: Linux has all of them except `SystemRoots`, which M1-092 builds with the TLS
+    facade. macOS has all of them except `SystemRoots` and `MachineId` (it has no machine id in M1).
+    Windows has none yet, so each reports `Unsupported`, which a check maps to skipped, not yet
+    on this OS; the Windows `MachineGuid` read goes with `host_id` in M2-002. The log entry holds
+    `api` and `path` or `resource`, never the answer.
+  - `StatvfsInfo::no_exec` is an `Option<bool>`. Linux and Android set it from `ST_NOEXEC`. macOS has no
+    such flag in `statvfs`, so it is `None`: unknown. A check that forbids `noexec` reports "not
+    verified" for `None`, never a pass. Reading `MNT_NOEXEC` from `statfs` is a later ticket.
 - No `sysinfo` in M1. In M2 its variants use refresh kinds without environ, cmdline, cwd and root.
 - No `bind()` port probes. `host.ports` reports "owner unknown, not verified".
 
@@ -859,7 +872,7 @@ pub enum NativeCall { Statvfs { path: PathBuf }, Uname, Rlimit(Resource), Hostna
 #[non_exhaustive]
 pub enum ProbeError { Denied { rule: &'static str, what: String }, Policy(PolicyError), Table(TableError),
                       NotFound, PermissionDenied, Timeout, Hung { pid: u32 }, Net(NetFailure), Io(String),
-                      NotRecorded(String) }   // Clone + PartialEq + Eq; every message ends with a Fix: hint
+                      NotRecorded(String), Unsupported(String) }   // Clone + PartialEq + Eq; every message ends with a Fix: hint
 pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay only; raw I/O, no policy
     // The ReadGuard is the check's os and `reads`. A backend that resolves links applies
     // `guard.admit_real(real)` to the real path before it opens anything and reports a refusal as
@@ -872,7 +885,10 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
     fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> { /* table::run */ }
     fn resolve<'a>(&'a self, host: &'a str) -> BoxFuture<'a, io::Result<Vec<IpAddr>>>;
     fn connect<'a>(&'a self, addr: SocketAddr) -> BoxFuture<'a, io::Result<BoxedStream>>;
-    fn native<'a>(&'a self, call: &'a NativeCall) -> BoxFuture<'a, io::Result<NativeValue>>;
+    // The ReadGuard matters to `Statvfs` only: a backend that resolves links judges the real path with
+    // `guard.admit_real` before it asks the file system. An OS with no source returns an `io::Error` of
+    // kind Unsupported, which the probe reports as `ProbeError::Unsupported` (M1-046).
+    fn native<'a>(&'a self, call: &'a NativeCall, guard: &'a ReadGuard) -> BoxFuture<'a, io::Result<NativeValue>>;
 }
 
 // output, report, redact
