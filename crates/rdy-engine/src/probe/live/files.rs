@@ -238,7 +238,7 @@ impl Target {
 fn proc_error(error: rustix::io::Errno) -> io::Error {
     if error == rustix::io::Errno::NOENT {
         io::Error::other(
-            "/proc is not mounted, and rdy needs it to check a file before it reads it",
+            "/proc is not mounted, and rdy needs it to check a file before it reads it. Mount /proc, or run rdy where /proc is visible",
         )
     } else {
         error.into()
@@ -411,16 +411,17 @@ fn read_tail(mut file: File, size: u64, max: usize) -> io::Result<FileBytes> {
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(error),
         };
+        if scanned >= TAIL_SCAN_LIMIT {
+            // There is more after the budget, so the bytes held are not the tail. A file that ends
+            // exactly at the budget never gets here: the read above returns 0 first.
+            tail_cut = true;
+            break;
+        }
         kept.extend(chunk.iter().take(n));
         scanned = scanned.saturating_add(u64::try_from(n).unwrap_or(u64::MAX));
         if kept.len() > max.saturating_add(CHUNK) {
             kept.drain(..kept.len() - max);
             head_cut = true;
-        }
-        if scanned >= TAIL_SCAN_LIMIT {
-            // The end was not reached, so the bytes held are not the tail.
-            tail_cut = true;
-            break;
         }
     }
     if kept.len() > max {

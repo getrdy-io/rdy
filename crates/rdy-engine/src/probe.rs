@@ -41,7 +41,7 @@
 //!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp, http and kube
 //!   call writes exactly one entry (M1-091, M1-103);
 //! - `read_link`: `host.ports` (M1-072) needs it for `/proc/self/ns/net` and `/proc/<pid>/fd`, and the
-//!   action log has no kind for it yet. A follow-up ticket before M1-072 adds both (plan correction 14).
+//!   action log has no kind for it yet. M1-169 adds both (plan correction 14).
 
 use std::fmt;
 use std::future::Future;
@@ -63,7 +63,9 @@ use crate::redact::Redactor;
 
 #[cfg(feature = "runtime")]
 pub use live::live_backend;
-pub use log::{ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, DENIED_TARGETS, MAX_ENTRIES};
+pub use log::{
+    ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, COALESCE_OK_AFTER, DENIED_TARGETS, MAX_ENTRIES,
+};
 pub use policy::{ReadGuard, Refused};
 
 use log::{ActionLog, Limits, Pending};

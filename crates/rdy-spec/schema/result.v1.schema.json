@@ -62,6 +62,7 @@
         "argv": {
           "description": "exec, after redaction",
           "type": "array",
+          "maxItems": 256,
           "items": {
             "type": "string",
             "maxLength": 4096
@@ -195,7 +196,10 @@
         "kind",
         "outcome",
         "check"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "ActionKind": {
       "description": "What a recorded side effect was. Open: a newer producer may send other snake_case values.",
@@ -298,7 +302,10 @@
       "required": [
         "need",
         "available"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "CheckResult": {
       "description": "The outcome of one check entry.",
@@ -350,7 +357,8 @@
           "items": {
             "type": "string",
             "maxLength": 4096
-          }
+          },
+          "maxItems": 1000
         },
         "timeout_after_ms": {
           "description": "Present when `status` is `timeout`.",
@@ -396,13 +404,16 @@
           "maxLength": 4096
         },
         "observed": {
-          "description": "Measured values, at most 64 KiB. Keys are per check id, in snake_case, with the unit in the name (`_bytes`, `_ms`, `_percent`). Keys are only ever added.",
+          "description": "Measured values, at most 64 KiB and 64 keys. Keys are per check id, in snake_case, with the unit in the name (`_bytes`, `_ms`, `_percent`). Keys are only ever added. A value is a scalar, or a list or object of at most three levels, with every text at most 4 KiB.",
           "type": [
             "object",
             "null"
           ],
-          "additionalProperties": true,
-          "default": null
+          "additionalProperties": {
+            "$ref": "#/$defs/Extra"
+          },
+          "default": null,
+          "maxProperties": 64
         },
         "expected": {
           "description": "Thresholds that applied after defaults. Same rules as `observed`.",
@@ -410,15 +421,19 @@
             "object",
             "null"
           ],
-          "additionalProperties": true,
-          "default": null
+          "additionalProperties": {
+            "$ref": "#/$defs/Extra"
+          },
+          "default": null,
+          "maxProperties": 64
         },
         "needs": {
-          "description": "Hard and soft needs the check declared, and whether each was met.",
+          "description": "Hard and soft needs the check declared, and whether each was met. At most 32.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/NeedState"
-          }
+          },
+          "maxItems": 32
         },
         "partial": {
           "description": "Set when some sources could not be read. A partial check never blocks on data it could not read.",
@@ -583,7 +598,10 @@
             }
           }
         }
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "ErrorKind": {
       "description": "Why a check ended in `error`. Present when the status is `error`. Open: a newer producer may send other snake_case values.",
@@ -650,7 +668,10 @@
             "code",
             "message",
             "fix"
-          ]
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/Extra"
+          }
         },
         "verdict": {
           "type": "null"
@@ -663,7 +684,86 @@
         "error",
         "verdict",
         "complete"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
+    },
+    "Extra": {
+      "description": "A value of an open map, or the value of a key this version does not know. A scalar, or a list or object of at most two more levels.",
+      "type": [
+        "string",
+        "number",
+        "boolean",
+        "null",
+        "array",
+        "object"
+      ],
+      "maxLength": 4096,
+      "maxItems": 256,
+      "maxProperties": 64,
+      "items": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null",
+          "array",
+          "object"
+        ],
+        "maxLength": 4096,
+        "maxItems": 256,
+        "maxProperties": 64,
+        "items": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "additionalProperties": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "maxLength": 4096
+        }
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null",
+          "array",
+          "object"
+        ],
+        "maxLength": 4096,
+        "maxItems": 256,
+        "maxProperties": 64,
+        "items": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "additionalProperties": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ],
+          "maxLength": 4096
+        }
+      }
     },
     "Finding": {
       "description": "One finding of a `LintReport`.",
@@ -732,7 +832,10 @@
         "code",
         "message",
         "fix"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "FixSource": {
       "description": "Whose fix text a result carries. Open: a newer producer may send other snake_case values.",
@@ -798,7 +901,10 @@
         "os",
         "arch",
         "host_id"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "HostOs": {
       "description": "The operating system of the host.",
@@ -838,7 +944,10 @@
       },
       "required": [
         "family"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "HostOsFamily": {
       "description": "The OS family of the host. Open: a newer producer may send other snake_case values.",
@@ -896,7 +1005,10 @@
         "elevated",
         "euid",
         "user"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "KubeIdentity": {
       "description": "The Kubernetes identity of a run.",
@@ -934,13 +1046,13 @@
           "type": "boolean"
         },
         "exec_plugin": {
-          "description": "Base name of the kubeconfig credential plugin that ran, if any.",
+          "description": "Base name of the kubeconfig credential plugin that ran, if any. One to 255 letters, digits, `.`, `_`, `+` or `-`: it never carries a path or arguments.",
           "type": [
             "string",
             "null"
           ],
-          "default": null,
-          "maxLength": 4096
+          "pattern": "^[A-Za-z0-9._+-]{1,255}$",
+          "default": null
         },
         "insecure_tls": {
           "description": "The context skips TLS verification.",
@@ -950,7 +1062,10 @@
       },
       "required": [
         "user_verified"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "Level": {
       "description": "How serious a finding is.",
@@ -987,11 +1102,12 @@
           "maxLength": 4096
         },
         "findings": {
-          "description": "Every finding, in file order. Empty when the spec is clean.",
+          "description": "Every finding, in file order. Empty when the spec is clean. A spec has at most 256 check entries and each gives at most one finding, and the file itself gives at most two (a parse error, an expired spec), so there are never more than 258.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/Finding"
-          }
+          },
+          "maxItems": 258
         },
         "errors": {
           "description": "How many findings are errors.",
@@ -1011,7 +1127,10 @@
         "findings",
         "errors",
         "warnings"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "Need": {
       "description": "Something rdy needs for a check, such as root or a cluster. Open: a newer producer may send other snake_case values.",
@@ -1060,7 +1179,10 @@
         "need",
         "hard",
         "met"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "OpenCode": {
       "description": "A snake_case code. Newer producers may send values not listed.",
@@ -1076,7 +1198,8 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/Need"
-          }
+          },
+          "maxItems": 1000
         },
         "note": {
           "description": "What is missing, or the OS note for a `Partial` OS.",
@@ -1087,7 +1210,10 @@
       "required": [
         "missing",
         "note"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "Producer": {
       "description": "The rdy build that wrote a report.",
@@ -1128,7 +1254,10 @@
         "version",
         "rdy_spec",
         "target"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "Proxy": {
       "description": "Proxy settings in effect, user info stripped from URLs.",
@@ -1159,8 +1288,12 @@
             "type": "string",
             "maxLength": 4096
           },
-          "default": []
+          "default": [],
+          "maxItems": 1000
         }
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
       }
     },
     "Redaction": {
@@ -1177,19 +1310,23 @@
           "minimum": 0
         },
         "by_rule": {
-          "description": "Replacements per rule name.",
+          "description": "Replacements per rule name, at most 64 rules.",
           "type": "object",
           "additionalProperties": {
             "type": "integer",
             "minimum": 0
-          }
+          },
+          "maxProperties": 64
         }
       },
       "required": [
         "ruleset",
         "total",
         "by_rule"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "RedactionRuleset": {
       "description": "Which compiled redaction rule set ran. Open: a newer producer may send other snake_case values.",
@@ -1260,7 +1397,8 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/Capability"
-          }
+          },
+          "maxItems": 1000
         },
         "verdict": {
           "description": "The overall answer. Closed in v1: a new verdict value needs `rdy/v2`. Use it as written.",
@@ -1290,11 +1428,12 @@
           "$ref": "#/$defs/Summary"
         },
         "checks": {
-          "description": "One entry per spec check, in spec order. Sort by bucket for display.",
+          "description": "One entry per spec check, in spec order, at most 256. Sort by bucket for display.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/CheckResult"
-          }
+          },
+          "maxItems": 256
         },
         "actions": {
           "description": "Every file read, command, lookup, connection and API request, in order. At most 5000 entries.",
@@ -1314,7 +1453,8 @@
           "additionalProperties": {
             "type": "integer",
             "minimum": 0
-          }
+          },
+          "maxProperties": 32
         },
         "redaction": {
           "description": "What the redactor changed in this report.",
@@ -1460,7 +1600,10 @@
             }
           }
         }
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "Run": {
       "description": "When a run happened and the options it ran with.",
@@ -1497,7 +1640,10 @@
         "finished_at",
         "duration_ms",
         "options"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "RunOptions": {
       "description": "The options of a run that change what a reader should expect.",
@@ -1537,7 +1683,10 @@
         "deadline_ms",
         "allow_unsigned",
         "network"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "Severity": {
       "description": "How much a check matters, as the spec wrote it.\n\nAn unknown severity counts as `block` everywhere. Open: a newer producer may send other snake_case values.",
@@ -1672,7 +1821,10 @@
             ]
           }
         }
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "SignatureState": {
       "description": "The state of the spec signature in a report.\n\nAn unknown state counts as not verified. `invalid` appears in the `rdy verify` object, never in a written report. Open: a newer producer may send other snake_case values.",
@@ -1770,13 +1922,14 @@
           "maxLength": 4096
         },
         "annotations": {
-          "description": "`metadata.annotations`.",
+          "description": "`metadata.annotations`, at most 32.",
           "type": "object",
           "additionalProperties": {
             "type": "string",
             "maxLength": 4096
           },
-          "default": {}
+          "default": {},
+          "maxProperties": 32
         }
       },
       "required": [
@@ -1784,7 +1937,10 @@
         "sha256",
         "file_name",
         "size_bytes"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "Status": {
       "description": "What happened to a check, after its severity was applied.\n\nAn unknown status counts as not run. Open: a newer producer may send other snake_case values.",
@@ -1870,7 +2026,10 @@
         "not_applicable",
         "required_not_run",
         "optional_not_run"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "TrustSource": {
       "description": "Where the trusted key came from.\n\nAn unknown source is treated like `flag`. Open: a newer producer may send other snake_case values.",
@@ -1947,7 +2106,10 @@
         "producer",
         "spec",
         "signature"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "Version": {
       "description": "The `rdy` binary's own identity, as `rdy version --json` prints it.\n\nLike the other `rdy/v1` objects it only grows: a later release may add fields, and a reader ignores the ones it does not know. `commit` and `date` are `null` when the build had no trustworthy git information, for example a build from a source tarball.",
@@ -2003,7 +2165,10 @@
         "api_version",
         "commit",
         "date"
-      ]
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/Extra"
+      }
     },
     "Virtualization": {
       "description": "Whether the host is a virtual machine. Open: a newer producer may send other snake_case values.",

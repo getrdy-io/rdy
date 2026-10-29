@@ -7,6 +7,9 @@
 # The hashes were taken from the project's own release page, so the first trust is in that page.
 # After that, a changed file fails the check.
 #
+# Re-check at every cosign pin bump: cosign must still have no environment-to-flag binding, so that only
+# the seven variables that install.sh and verify-release.sh refuse can change trust (ADR 0025, RELEASING.md).
+#
 # cosign is a bare program, one file per platform, named cosign-<os>-<cpu>. Its hashes are the lines of
 # cosign_checksums.txt on the v3.1.4 release page. The sign-release job installs it from here, so the one
 # job that holds an OIDC token runs no third-party install action.

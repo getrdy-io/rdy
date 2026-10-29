@@ -22,6 +22,7 @@
     "argv": {
       "description": "exec, after redaction",
       "type": "array",
+      "maxItems": 256,
       "items": {
         "type": "string",
         "maxLength": 4096

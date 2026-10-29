@@ -366,9 +366,9 @@ tests policy.
 - macOS: `realpath`, the checks, then open with `O_NOFOLLOW_ANY | O_NONBLOCK` (no link anywhere along
   the path, so a directory swapped for a link after the check cannot redirect the open). The type comes
   from `fstat` of the descriptor, the descriptor must have the same device and inode as the first
-  look, and `F_GETPATH` gives the path that is judged again. A tail streams to the end of the file
-  through a buffer of the last `max` bytes (a file in `/proc` reports size 0) and sets `truncated_tail`
-  when a 16 MiB scan budget ran out before the end.
+  look, and `F_GETPATH` gives the path that is judged again.
+- Every Unix: a tail streams to the end of the file through a buffer of the last `max` bytes (a file in
+  `/proc` reports size 0) and sets `truncated_tail` when a 16 MiB scan budget ran out before the end.
 - Windows: no M1 check reads files, so the facade refuses them.
 - Deny list, matched on components at any depth (`/host/etc/shadow`, an overlay `diff/etc/shadow`, a
   macOS data volume): `etc/shadow*`, `etc/gshadow*`, `etc/sudoers*`, `etc/master.passwd`,
@@ -784,8 +784,8 @@ impl Probe {
     pub async fn read(&self, path: &Path) -> Result<FileBytes, ProbeError>;
     pub async fn read_tail(&self, path: &Path, max: usize) -> Result<FileBytes, ProbeError>;
     pub async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ProbeError>;
-    // read_link: deferred to a follow-up ticket before M1-072 (plan correction 14). host.ports needs it for
-    // /proc/self/ns/net and /proc/<pid>/fd, and the action log needs a kind for it.
+    // read_link: M1-169 (plan correction 14). host.ports needs it for /proc/self/ns/net and /proc/<pid>/fd,
+    // and the action log needs a kind for it.
     pub async fn stat(&self, path: &Path) -> Result<Option<FileMeta>, ProbeError>;
     pub fn env(&self, name: &str) -> Result<Option<String>, ProbeError>;
     pub async fn exec(&self, cmd: Cmd) -> Result<Output, ProbeError>;

@@ -179,11 +179,13 @@ impl ReadGuard {
         // `/proc/net` is a link to `/proc/self/net`, and `/proc/self` is `/proc/<our pid>` once
         // resolved. Both the path and the declared prefixes are put in the `self` form, so a check
         // that declares `/proc/net` or `/proc/self/mountinfo` is not refused for where they lead.
+        // The pid is rewritten on the path only on a real path. As written, a path with our pid in it
+        // would otherwise decide differently on each host (a replay run has no pid of its own).
         let pid = std::process::id().to_string();
-        let names = proc_form(names, &pid);
+        let names = proc_form(names, &pid, self_pid.is_some());
         let covered = reads.iter().any(|prefix| {
             split(Path::new(prefix), mac)
-                .is_ok_and(|prefix| names.starts_with(&proc_form(prefix, &pid)))
+                .is_ok_and(|prefix| names.starts_with(&proc_form(prefix, &pid, true)))
         });
         if covered {
             Ok(())
@@ -194,11 +196,11 @@ impl ReadGuard {
 }
 
 /// Puts `proc/<our pid>/...` and `proc/net/...` in the `proc/self/...` form.
-fn proc_form(mut names: Vec<String>, pid: &str) -> Vec<String> {
+fn proc_form(mut names: Vec<String>, pid: &str, rewrite_pid: bool) -> Vec<String> {
     if names.first().map(String::as_str) == Some("proc") {
         match names.get(1).map(String::as_str) {
             Some("net") => names.insert(1, "self".to_owned()),
-            Some(second) if second == pid => {
+            Some(second) if rewrite_pid && second == pid => {
                 if let Some(slot) = names.get_mut(1) {
                     "self".clone_into(slot);
                 }
@@ -390,10 +392,13 @@ fn private_key_name(name: &str) -> bool {
     }
     // A key in PEM form: `privkey.pem`, `tls-key.pem`, `server_key.pem`, `key.pem`. A certificate
     // (`cert.pem`, `fullchain.pem`) stays readable.
-    if name == "key.pem"
-        || name.ends_with("-key.pem")
-        || name.ends_with("_key.pem")
-        || (name.starts_with("privkey") && name.ends_with(".pem"))
+    if name.ends_with(".pem")
+        && (name == "key.pem"
+            || name.ends_with("-key.pem")
+            || name.ends_with("_key.pem")
+            || name.ends_with(".key.pem")
+            || name.contains("privkey")
+            || name.starts_with("private"))
     {
         return true;
     }

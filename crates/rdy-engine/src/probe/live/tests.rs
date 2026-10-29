@@ -555,11 +555,51 @@ fn a_directory_swapped_for_a_link_is_not_followed() {
     let guard = ReadGuard::new(Os::Linux, None);
     let none = files::Secrets::default();
     let requested = sandbox.path("d/file");
-    let (real, stat) = files::locate_by_path(&requested, &guard, &none).expect("ok");
+    let (real, _) = files::locate_by_path(&requested, &guard, &none).expect("ok");
     std::fs::rename(sandbox.path("d"), sandbox.path("d-moved")).expect("rename");
     symlink(sandbox.path("elsewhere"), sandbox.path("d")).expect("symlink");
-    let result = files::open_by_path(&requested, &real, &stat, &guard, files::Want::File);
-    assert!(result.is_err(), "the swapped path is not read");
+    // The attacker also won the race for the stat: `before` describes the file the swapped path
+    // leads to, so the device and inode test cannot be what stops the open.
+    let before = rustix::fs::stat(sandbox.path("elsewhere/file")).expect("stat");
+    let error = files::open_by_path(&requested, &real, &before, &guard, files::Want::File)
+        .expect_err("the swapped path is not read");
+    #[cfg(target_vendor = "apple")]
+    assert_eq!(
+        error.raw_os_error(),
+        Some(rustix::io::Errno::LOOP.raw_os_error()),
+        "O_NOFOLLOW_ANY refuses a link in the middle of the path"
+    );
+    // Without `O_NOFOLLOW_ANY` the open follows the middle link, and the second `realpath` of the
+    // requested path is what catches it.
+    #[cfg(not(target_vendor = "apple"))]
+    assert_eq!(
+        crate::probe::Refused::from_io(&error).map(|r| r.rule),
+        Some(RULE_CHANGED),
+        "{error:?}"
+    );
+}
+
+/// The path of the descriptor is judged again after the open (`F_GETPATH`). Calling the open directly
+/// with a guard that does not cover the file shows the second judgement is wired.
+#[cfg(target_vendor = "apple")]
+#[test]
+fn the_path_of_the_descriptor_is_judged_again_on_macos() {
+    let sandbox = Sandbox::new();
+    let file = sandbox.write("a/file", b"x");
+    let root: &'static str =
+        Box::leak(sandbox.root.to_string_lossy().into_owned().into_boxed_str());
+    let covered: &'static [&'static str] = Box::leak(Box::new([root]));
+    let wide = ReadGuard::new(Os::Macos, Some(covered));
+    let (real, stat) =
+        files::locate_by_path(&file, &wide, &files::Secrets::default()).expect("located");
+    assert!(files::open_by_path(&file, &real, &stat, &wide, files::Want::File).is_ok());
+    let narrow = ReadGuard::new(Os::Macos, Some(&["/nowhere-near-here"]));
+    let error = files::open_by_path(&file, &real, &stat, &narrow, files::Want::File)
+        .expect_err("judged again");
+    assert_eq!(
+        crate::probe::Refused::from_io(&error).map(|r| r.rule),
+        Some(RULE_OUTSIDE_READS)
+    );
 }
 
 #[tokio::test]
@@ -609,8 +649,9 @@ fn a_file_with_no_names_left_is_refused() {
         &files::Secrets::default(),
     )
     .expect_err("refused");
-    assert!(
-        crate::probe::Refused::from_io(&error).is_some(),
+    assert_eq!(
+        crate::probe::Refused::from_io(&error).map(|r| r.rule),
+        Some(RULE_CHANGED),
         "{error:?}"
     );
 }
@@ -636,4 +677,11 @@ fn a_tail_streams_to_the_end_and_says_when_it_could_not() {
     let tail = files::read_part(file, 0, ReadRange::Tail(10)).expect("tail");
     assert_eq!(tail.bytes.len(), 10);
     assert!(tail.truncated_head && tail.truncated_tail);
+
+    // A file that ends exactly at the budget has been read to its end: no cut.
+    let exact = sandbox.write("exact", &vec![b'y'; 16 << 20]);
+    let file = std::fs::File::open(&exact).expect("open");
+    let tail = files::read_part(file, 0, ReadRange::Tail(10)).expect("tail");
+    assert_eq!(tail.bytes, b"yyyyyyyyyy");
+    assert!(tail.truncated_head && !tail.truncated_tail);
 }
