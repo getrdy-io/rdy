@@ -33,6 +33,9 @@ pub mod signing;
 
 mod spec_cmds;
 
+#[doc(hidden)]
+pub mod trust;
+
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
 use error::{CliError, InternalKind, emit};
 use rdy_spec::result::{ExitCode, VersionInfo};
