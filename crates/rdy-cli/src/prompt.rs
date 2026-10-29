@@ -332,6 +332,13 @@ impl<T: Terminal> Prompter<T> {
         Self { term }
     }
 
+    /// True when a person can answer. A command that must not print a key before it can ask about it
+    /// (`rdy trust add`) checks this first.
+    #[must_use]
+    pub fn is_interactive(&self) -> bool {
+        self.term.is_interactive()
+    }
+
     /// Ask `question` and return true only for `y` or `yes`.
     ///
     /// `question` is a plain question without the `[y/N]` suffix, such as

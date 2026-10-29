@@ -1,0 +1,2 @@
+No keys are trusted yet.
+To trust a vendor key: rdy trust add <product> --key <file>

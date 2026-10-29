@@ -25,7 +25,7 @@ use crate::spec::ProductSlug;
 pub use error::SignatureError;
 pub(crate) use key::hex;
 pub use key::{KeyId, MAX_KEY_FILE_BYTES, PublicKey};
-pub use store::{MAX_TRUST_BYTES, TrustFileError};
+pub use store::{MAX_TRUST_BYTES, TrustAddError, TrustEntry, TrustFileError};
 
 /// The largest signature file rdy reads, 4 KiB (threat model INV-02).
 pub const MAX_SIGNATURE_BYTES: usize = 4096;
