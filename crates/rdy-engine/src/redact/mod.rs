@@ -42,6 +42,13 @@ pub use key::TagKey;
 use rules::{BUILT_IN, Rule};
 use span::{Span, merge};
 
+/// Text that makes [`Redactor::redact_str`] panic, so that a caller can prove it contains a redactor bug.
+///
+/// Only built with the `testing` feature (or in this crate's own tests). CI keeps the feature out of the
+/// release binary.
+#[cfg(any(test, feature = "testing"))]
+pub const PANIC_TRIGGER: &str = "__rdy_redactor_panic__";
+
 /// The rule name used when a string had to be replaced whole because redaction failed.
 const FAIL_CLOSED_RULE: &str = "redactor_error";
 
@@ -149,6 +156,12 @@ impl Redactor {
 
     /// The engine. Runs every rule on the original text, merges the spans, writes the output once.
     fn run(&self, rules: &[Rule], text: &str, counts: &mut RuleCounts) -> Redacted<String> {
+        // The seam for callers that must prove they survive a redactor bug (M1-056).
+        #[cfg(any(test, feature = "testing"))]
+        assert!(
+            !text.contains(PANIC_TRIGGER),
+            "redactor test panic (the text held PANIC_TRIGGER)"
+        );
         let mut spans = Vec::new();
         let mut found = Vec::new();
         // An inverted range (start after end) is a rule bug. It must fail closed, not vanish.

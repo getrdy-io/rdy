@@ -20,7 +20,7 @@ envelope is a classic way to get crypto wrong. Untrusted bytes should not reach 
 2. **Crates.** `rdy-spec` verifies with `minisign-verify`, pinned to an exact version and reviewed on
    every bump, called with legacy (non-prehashed) signatures off. (Amended by ADR 0018: `rdy-spec` reads
    the envelope itself and verifies with `ed25519-dalek` `verify_strict` and `blake2`.) Wycheproof EdDSA vectors and
-   malleability cases run against it in CI. `rdy` creates keys and signs with the `minisign` crate.
+   malleability cases run against it in CI. `rdy` creates keys and signs with the `minisign` crate (amended by ADR 0022: `rdy-cli` does this itself, and the crate is a test-only second implementation).
    Stock `minisign` interoperates.
 3. **Verify, then parse.** `rdy_spec::load` reads the key id and the trusted comment from the signature,
    looks up keys pinned for that product, verifies the raw bytes, and only then parses. After parsing,
@@ -53,7 +53,7 @@ envelope is a classic way to get crypto wrong. Untrusted bytes should not reach 
 - Offline verification, no transparency log. Partner runs never parse unverified bytes.
 - Rotation is pin-new, remove-old by hand. No revocation list in v1. Rollback of an old signed spec is
   visible through `signed_at` in the report; portal-served specs (M2) fix it.
-- `ed25519-dalek` (plan) is not a direct dependency. Signing is still ed25519.
+- `ed25519-dalek` (plan) is not a direct dependency. Signing is still ed25519. (Amended by ADR 0022: `rdy` depends on `ed25519-dalek` directly to sign, with `zeroize`, because it writes the key file and signs itself.)
 - Tightens CLAUDE.md rule 3: a tampered spec is refused even with `--allow-unsigned` (plan correction).
 
 ## Alternatives considered

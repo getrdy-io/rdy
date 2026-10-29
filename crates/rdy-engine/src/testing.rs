@@ -48,7 +48,8 @@ impl TestRun {
 
     /// A context for the check with result `key`, on `os`, where the `available` needs are met. Its
     /// probe is bound to `key` and never ends, so a test can call it after the check returns. The
-    /// probe has no manifest, so it applies the command policy only. Use [`TestRun::context_for`] to
+    /// probe has no manifest, so a command skips the declaration step and still has to be in the command
+    /// table for `os`. Use [`TestRun::context_for`] to
     /// test a check against what it declared.
     #[must_use]
     pub fn context(
@@ -57,7 +58,7 @@ impl TestRun {
         os: Os,
         available: impl IntoIterator<Item = Need>,
     ) -> CheckContext {
-        CheckContext::new(key, os, available).with_probe(self.hub.check_probe(key, None))
+        CheckContext::new(key, os, available).with_probe(self.hub.check_probe(key, os, None))
     }
 
     /// Like [`TestRun::context`], for a check with the manifest `info`. A command must be one that
@@ -71,7 +72,7 @@ impl TestRun {
         os: Os,
         available: impl IntoIterator<Item = Need>,
     ) -> CheckContext {
-        CheckContext::new(key, os, available).with_probe(self.hub.check_probe(key, Some(info)))
+        CheckContext::new(key, os, available).with_probe(self.hub.check_probe(key, os, Some(info)))
     }
 
     /// The action log so far.

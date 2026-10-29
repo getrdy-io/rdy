@@ -51,11 +51,12 @@ tests/fixtures/
   reports/*.json                 sample reports that engine tests put their own action log into
   specs/{valid,malformed}/       parser corpus
   signed/                        one signed spec, its .minisig and public key, never edited
+  minisign-c/                    a key and a signature made by the C minisign tool, never edited
   wycheproof/                    ed25519 test vectors for the signature verifier
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `signed/`, `specs/malformed/`, `wycheproof/`, `canary/` and `reports/`. The rest arrives with the
+What exists today: `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/` and `reports/`. The rest arrives with the
 tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -69,6 +70,7 @@ tickets that need it. The names above are fixed now so nobody invents another.
 | `reports/*.json` | A valid sample report (`not-ready-7.2.json` is the 01 section 7.2 sample). A test replaces its `actions` and checks the result against the schema | By hand, when the sample in 01 changes |
 | `specs/valid/`, `specs/malformed/` | Parser corpus. Each malformed file is one way a spec can be wrong | By hand |
 | `signed/` | One signed spec. See `signed/README.md` | Never. New cases get new files |
+| `minisign-c/` | A key with a published test password and a signature, both made by C minisign 0.11. See `minisign-c/README.md` | Never |
 | `wycheproof/` | Test vectors for ed25519. See `wycheproof/README.md` | Never |
 | `canary/` | Files that must reach every OS byte for byte. See "Line endings" below | Never |
 

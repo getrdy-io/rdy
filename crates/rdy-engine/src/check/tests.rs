@@ -31,6 +31,10 @@ static PASSING_INFO: CheckInfo = CheckInfo {
     id: "fake.pass",
     family: "fake",
     summary: "Always passes.",
+    meta: CheckMeta {
+        title: "Fake check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
     needs: &[],
     wants: &[],
     default_timeout: None,
@@ -45,6 +49,10 @@ static NEEDY_INFO: CheckInfo = CheckInfo {
     id: "fake.needs_root",
     family: "fake",
     summary: "Needs root.",
+    meta: CheckMeta {
+        title: "Fake check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
     needs: &[Need::Root],
     wants: &[Want {
         need: Need::Command("ss"),

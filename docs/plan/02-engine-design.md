@@ -136,10 +136,13 @@ run-level facade (`check: null`):
   ambient capabilities.
 - Windows: `C:\Windows\System32\whoami.exe /groups /fo csv`, from a constant path, never from
   `%SystemRoot%`. Integrity SID `S-1-16-12288` (High) or `S-1-16-16384` (System) means elevated. If
-  `whoami` fails, the run counts as elevated for the trust store and `root` as unknown for checks.
+  `whoami` fails, `root` is unknown for checks and `identity.elevated` is unset. In M1 `whoami` feeds only
+  the `root` need and `identity.elevated`, never trust. M2-105 owns elevation detection for the trust path.
 
 The CLI maps the snapshot to the `rdy-spec` trust store scope (system store only when elevated,
-INV-04); the loader never reads ids itself. One privilege answer per run.
+INV-04); the loader never reads ids itself. One privilege answer per run. In M1 the trust store does not
+use the Windows answer: Windows has no user store and every existing system store is refused, so
+elevation does not change what is read (ADR 0027). M2-105 revisits it.
 
 | Need (01 name) | Met when | Probed by | Never does |
 | --- | --- | --- | --- |
@@ -246,8 +249,8 @@ Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
    `write_json`, `render_html`, the terminal renderer and the watchdog accept nothing else. `Progress`
    events carry id, status and duration only.
 
-`rdy` installs the redacting `tracing` layer first in `main`. With `RUST_LOG` unset, hyper, h2, rustls,
-tower and kube are capped at `warn`. `EngineError`, `ReportError` and panic text are redacted before
+`rdy` installs the redacting `tracing` layer first in `main`. With `RUST_LOG` unset nothing is logged (07
+D.6). With it set, hyper, h2, rustls, tower and kube stay capped at `warn` whatever the filter says. `EngineError`, `ReportError` and panic text are redacted before
 printing.
 
 ## The action log
@@ -319,7 +322,10 @@ tests policy.
 - Descriptors above 2 that `rdy` inherited reach children in M1. `exec::inherited_fds()` lists them
   for a start-up warning (M1-168); closing them needs `unsafe` (M2-104, ADR 0023).
 - `exec::run` and `ExecSpec::new` are public only under `cfg(any(test, feature = "testing"))`. Check
-  crates reach the runner through `exec::policy::run` only.
+  crates reach the runner through `exec::table::run` only: it checks the command table (03 Appendix A),
+  then the policy. `exec::policy::run` is crate-private, and a compile-fail test proves it. The table
+  and `table::validate_for` need no `runtime` feature, so a probe gate without a runtime can refuse an
+  unlisted command too.
 - Each child gets its own process group, recorded in a lock-free list until reaped, and the group is
   killed on timeout. A child not reaped within 1 s of SIGKILL returns `Hung { pid }`; a detached task
   reaps it later.
@@ -618,7 +624,7 @@ are retired as duplicates (review SF-12). The ADR 0010 amendment ticket of revis
 revision.
 
 - [M1] Check trait, Need and Context in rdy-engine | owner: rust-engineer | est: 3.5h | depends on: Define result model and verdict mapping in rdy-spec | exit test: a fake family with one passing and one need-missing check maps to pass and skipped missing_need through the outcome types, and no CheckError or Support variant can produce not_applicable.
-- [M1] Privilege snapshot, binary refusal and capability probes | owner: rust-engineer | est: 3.5h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: injected mismatches of real, effective, saved and filesystem uid or gid, a nonzero CapEff or CapAmb, and AT_SECURE each exit 70 with the hint before the spec is read; recorded whoami output maps High and System to elevated and a whoami failure to system trust scope; needs absent from the plan are not probed.
+- [M1] Privilege snapshot, binary refusal and capability probes | owner: rust-engineer | est: 3.5h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: injected mismatches of real, effective, saved and filesystem uid or gid, a nonzero CapEff or CapAmb, and AT_SECURE each exit 70 with the hint before the spec is read; recorded whoami output maps High and System to elevated and a whoami failure to an unknown `root` need; needs absent from the plan are not probed.
 - [M1] Family trait, registry and run plan | owner: rust-engineer | est: 3h | depends on: Unknown check ids report Skipped with a "needs a newer rdy" reason | exit test: the plan for examples/specs/acme-platform.yaml gives not_in_build for gpu.cuda and aws.iam, unknown_check for a typo id, not_yet_on_os for host checks on Windows, not_applicable only for an `os: [linux]` entry on macOS, per-check host sets, and does no I/O.
 - [M1] Family probe hook and lazy KubeContext probe | owner: rust-engineer | est: 2.5h | depends on: Privilege snapshot, binary refusal and capability probes, Kube client from kubeconfig or in-cluster with rustls and timeouts | exit test: a spec with no k8s checks loads no kubeconfig and sends no request; `--no-network` builds no client; a fake exec plugin that sleeps 600 s makes kube_context unavailable after 10 s with no worker blocked.
 - [M1] Scheduler with concurrency limit, per-check timeout and panic isolation | owner: rust-engineer | est: 4h | depends on: Check trait, Need and Context in rdy-engine | exit test: with the timer on the join handle, FakeCheck Sleep reports timeout, Panic reports error panic, and Spin on a 2-worker runtime still lets the other checks finish; a fake family's passing and need-missing checks come back through the scheduler as pass and skipped missing_need.
@@ -637,7 +643,7 @@ revision.
 - [M1] Kube guard path parser, resource allowlist and pending log entries | owner: rust-engineer | est: 3.5h | depends on: Read-only guard layer and test for rdy-checks-k8s | exit test: `%73ecrets`, `secrets` in every segment position, `/api/v1/namespaces/x/finalize`, GET pods/exec with Upgrade, a dryRun POST, a SelfSubjectReview with another body, Impersonate-User on a GET and an unlisted resource are each refused and logged; `/api/v1/namespaces/secrets` is allowed; every ALLOWED entry is cited by a CheckInfo; a dropped request leaves a timeout entry with its check id.
 - [M1] Replay backend and fixture loader | owner: rust-engineer | est: 3h | depends on: File and env read policy in the facade, Closed NativeCall enum in the facade | exit test: a host.memory fixture runs with no real file read, an unrecorded argv fails with NotRecorded, a recorded link-local lookup is refused by the address rule, and the release feature tree excludes `testing`.
 - [M1] Engine test helpers FakeCheck, run_fixture and normalize | owner: qa-engineer | est: 2h | depends on: Replay backend and fixture loader | exit test: scheduler tests use every Fake variant including Spin, and assert_within_manifest fails on a fixture check that reads an undeclared path.
-- [M1] Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | owner: rust-engineer | est: 2h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: every Appendix A entry except the kube ones (added with the kube client ticket) used in tests/lint-wall fails clippy, an allow attribute outside the allowlisted files fails CI, and a check crate depending on socket2 fails cargo deny.
+- [M1] Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | owner: rust-engineer | est: 2h | depends on: SEC-17 Mediated Context handles with action log and read denylist | exit test: every Appendix A entry except the kube ones (kube entries: clippy lists in M1-102, lint-wall proof in M1-107) used in tests/lint-wall fails clippy, an allow attribute outside the allowlisted files fails CI, and a check crate depending on socket2 fails cargo deny.
 - [M1] Direct dependency allowlist for check crates | owner: rust-engineer | est: 1h | depends on: Lint wall: clippy lists, lint-wall test crate, allow grep and deny wrappers | exit test: adding `walkdir` to rdy-checks-host fails CI, and the lint-wall crate has one exact entry per item with no wildcard.
 - [M1] SEC-19 Confine writes to a new output dir with safe names | owner: rust-engineer | est: 4h | depends on: Define public spec types in rdy-spec | exit test: product `../x` fails validation, a pre-planted symlink is not followed, a taken name moves to `-2`, modes are 0700 and 0600 under a setgid parent, the spec copy matches the verified bytes under fixed names, and a killed run leaves no file under a final name.
 - [M1] Windows output directory default and reparse-point checks | owner: rust-engineer | est: 1h | depends on: SEC-19 Confine writes to a new output dir with safe names | exit test: on the Windows CI leg the default lands under %USERPROFILE%\rdy-reports, and a pre-planted junction and a symlink with the target name are both refused before the first check.
@@ -667,11 +673,13 @@ revision.
 // check.rs
 pub struct CheckInfo {
     pub id: &'static str, pub family: &'static str, pub summary: &'static str,
+    pub meta: CheckMeta, // ADR 0026 (M1-089)
     pub needs: &'static [Need], pub wants: &'static [Want],
     pub default_timeout: Option<Duration>, pub os: OsSupport,
     pub reads: &'static [&'static str], pub env: &'static [&'static str],
     pub commands: &'static [CommandSpec], pub peers: &'static [PeerClass],
 }
+pub struct CheckMeta { pub title: &'static str, pub remediation: &'static str }
 pub struct Want { pub need: Need, pub evidence_only: bool }
 pub struct CommandSpec { pub program: &'static str, pub extra_dirs: &'static [&'static str],
                          pub max_stdout: usize, pub env: &'static [&'static str] }
@@ -842,8 +850,8 @@ one clippy rule.
     the type.
   - Verified on 2026-10-28 against kube 4.2.0 on docs.rs (`kube`, `kube::client` and `kube::config`
     index pages, and the `Client`, `Config`, `ClientBuilder`, `Kubeconfig` and `Api` pages). M1-102
-    adds and pins kube, so the kube entries and their lint-wall uses land there, re-checked against
-    the pinned version.
+    adds and pins kube, so the kube entries land there, re-checked against the pinned version (kube
+    entries: clippy lists in M1-102, lint-wall proof in M1-107).
 - Not listed: crates other than std, kube and the facade. `tokio`, `rustix`, `nix`, `socket2`,
   `walkdir`, `sysinfo` and the rest are not direct dependencies of any check crate, so their APIs are
   out of reach. The direct dependency allowlist enforces that, not clippy. The `tokio` and `socket2`

@@ -54,7 +54,8 @@ mkdir -p "$work/.github/workflows"
 cp "$root/Cargo.toml" "$root/Cargo.lock" "$root/rust-toolchain.toml" "$work/"
 cp -R "$root/crates" "$work/crates"
 cp "$root/.github/build-setup.yml" "$work/.github/"
-cp "$root/.github/workflows/check-release-artifacts.yml" "$work/.github/workflows/"
+# The reusable workflows that release.yml calls (publish-jobs in dist-workspace.toml).
+cp "$root/.github/workflows/check-release-artifacts.yml" "$root/.github/workflows/sign-release.yml" "$work/.github/workflows/"
 grep -v '^allow-dirty' "$root/dist-workspace.toml" > "$work/dist-workspace.toml"
 
 (cd "$work" && dist generate > /dev/null)

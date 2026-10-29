@@ -107,8 +107,8 @@ mod process {
 
     use super::*;
     use crate::check::{
-        BoxFuture, Check, CheckContext, CheckInfo, CheckOutcome, Finding, Need, OsSupport, Support,
-        current_os,
+        BoxFuture, Check, CheckContext, CheckInfo, CheckMeta, CheckOutcome, Finding, Need,
+        OsSupport, Support, current_os,
     };
     use crate::sched::{End, Planned, Scheduler};
 
@@ -228,7 +228,7 @@ mod process {
         let output = std::process::Command::new(exe)
             .args([
                 "--exact",
-                "exec::tests::process::umask_probe",
+                "exec::runner::tests::process::umask_probe",
                 "--nocapture",
                 "--test-threads=1",
             ])
@@ -495,6 +495,10 @@ mod process {
         id: "fake.exec",
         family: "fake",
         summary: "A fake check that runs a script.",
+        meta: CheckMeta {
+            title: "Fake check",
+            remediation: "Nothing to fix. This check is a test double.",
+        },
         needs: &[],
         wants: &[],
         default_timeout: None,

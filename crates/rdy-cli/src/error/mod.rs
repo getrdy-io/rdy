@@ -194,6 +194,15 @@ pub enum InternalKind {
     Bug,
     /// stdout could not be written.
     OutputClosed,
+    /// A file could not be written, such as a key or a signature. The path is escaped when printed.
+    FileWrite {
+        /// The path as the user gave it.
+        path: String,
+        /// Why, in plain words.
+        reason: IoReason,
+    },
+    /// The system could not give random bytes, so no key or file name could be made.
+    NoRandomness,
     /// The command exists in the tree but a later ticket builds it.
     NotImplemented {
         /// The command as typed in the tree, such as `spec lint`. Always a name from the command tree.
@@ -279,6 +288,8 @@ fn internal_message(kind: &InternalKind) -> String {
     match kind {
         InternalKind::Bug => "rdy hit an internal error".to_owned(),
         InternalKind::OutputClosed => "rdy could not write its output".to_owned(),
+        InternalKind::NoRandomness => "the system could not give random bytes".to_owned(),
+        InternalKind::FileWrite { path, reason } => format!("cannot write {path} ({reason})"),
         InternalKind::NotImplemented { command } => {
             format!("rdy {command} is not yet implemented in this build")
         }
@@ -323,8 +334,10 @@ impl CliError {
     ///
     /// Looks through `.context(..)` layers for a [`CliError`], a [`PasswordError`], a [`PromptError`], a
     /// [`TrustStoreError`], a [`SpecError`] or a [`ScalarError`]. Anything else is a bug. The text of an
-    /// unknown error is dropped on purpose: it may hold a path, a URL or a secret, and it has not been
-    /// through the redactor.
+    /// unknown error is dropped on purpose: it may hold a path, a URL or a secret, and the M1 redactor has
+    /// only the key-name rule until M1-060 adds URL userinfo, headers and token shapes. Every string that
+    /// [`CliError::render`] prints does go through the redactor (M1-056), so showing the redacted chain
+    /// later is a change in this one function.
     #[must_use]
     pub fn from_anyhow(err: anyhow::Error) -> Self {
         let err = match err.downcast::<Self>() {
@@ -410,6 +423,14 @@ impl CliError {
             Self::Internal(InternalKind::OutputClosed) => {
                 "check that the output is not closed or full".to_owned()
             }
+            Self::Internal(InternalKind::NoRandomness) => {
+                "check that the system random source works (on Linux, /dev/urandom and the getrandom call), then run again"
+                    .to_owned()
+            }
+            Self::Internal(InternalKind::FileWrite { .. }) => {
+                "check that the folder exists, that you can write to it and that the disk has room, then run again"
+                    .to_owned()
+            }
             Self::Internal(InternalKind::NotImplemented { .. }) => {
                 "use a later release of rdy, listed at https://github.com/getrdy-io/rdy/releases"
                     .to_owned()
@@ -441,13 +462,21 @@ impl CliError {
         };
         Rendered {
             code: self.code(),
-            message: escape_untrusted(&self.to_string()),
-            fix: escape_untrusted(&self.hint()),
-            file: file.map(escape_untrusted),
+            message: clean(&self.to_string()),
+            fix: clean(&self.hint()),
+            file: file.map(clean),
             line: location.map(|at| at.line),
             column: location.map(|at| at.column),
         }
     }
+}
+
+/// The text as it is printed: secrets removed, then control characters escaped (ADR 0015 decision 6).
+///
+/// Redaction runs on the raw text, because the key-name rule reads raw tabs and spaces. The escaped
+/// result is what reaches the terminal and the JSON document.
+fn clean(text: &str) -> String {
+    crate::redaction::redact_text_then(text, escape_untrusted)
 }
 
 /// The code of a prompt error: Ctrl-C is `interrupted`, a terminal failure is `internal`, and the rest
@@ -534,8 +563,8 @@ impl Rendered {
     fn plain(code: ErrorCode, message: &str, fix: &str) -> Self {
         Self {
             code,
-            message: escape_untrusted(message),
-            fix: escape_untrusted(fix),
+            message: clean(message),
+            fix: clean(fix),
             file: None,
             line: None,
             column: None,

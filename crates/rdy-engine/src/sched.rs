@@ -27,6 +27,7 @@
 
 use std::any::Any;
 use std::collections::HashSet;
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,6 +37,7 @@ use tokio::time::Instant;
 
 use crate::check::{Check, CheckContext, CheckError, CheckOutcome, Need, Os};
 use crate::probe::{Probe, ProbeHub};
+use crate::redact::{Redacted, Redactor};
 
 #[cfg(test)]
 mod tests;
@@ -123,15 +125,37 @@ pub enum End {
     },
     /// The check panicked.
     ///
-    /// The text is raw. Redact it before it is shown or written: this type's `Debug` output prints it
-    /// as is, and so does the default panic hook, which writes it to stderr before the scheduler
-    /// catches the panic. The CLI replaces that hook.
+    /// The text is raw and can only be read through [`PanicText::redacted`]. The default panic hook
+    /// writes the raw text to stderr before the scheduler catches the panic. The CLI replaces that hook.
     Panicked {
-        /// The panic message when it was text, else a fixed note. It is not redacted yet.
-        message: String,
+        /// The panic message when it was text, else a fixed note.
+        message: PanicText,
     },
     /// The task was cancelled from outside, which means the runtime was shutting down.
     Cancelled,
+}
+
+/// The raw text of a panic.
+///
+/// A panic message can hold anything the check had in hand, such as a value from an environment
+/// variable. There is no `Display`, no `Deref` and no accessor for the raw text, and `Debug` hides it,
+/// so the only way to read it is [`PanicText::redacted`] (ADR 0015 decision 6).
+#[derive(Clone, PartialEq, Eq)]
+pub struct PanicText(String);
+
+impl PanicText {
+    /// The panic text with secrets removed.
+    #[must_use]
+    pub fn redacted(&self, redactor: &Redactor) -> Redacted<String> {
+        redactor.redact_str(&self.0)
+    }
+}
+
+impl fmt::Debug for PanicText {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The text is raw. A log line with `{:?}` of a `Ran` must not print it.
+        f.write_str("PanicText(..)")
+    }
 }
 
 /// One check's result from the scheduler, with timing.
@@ -304,7 +328,7 @@ async fn drive(
     let started = Instant::now();
     let mut ctx =
         CheckContext::new(key.clone(), os, available.iter().cloned()).at_deadline(started + after);
-    let probe = probes.map(|hub| hub.check_probe(&key, Some(check.info())));
+    let probe = probes.map(|hub| hub.check_probe(&key, os, Some(check.info())));
     if let Some(probe) = &probe {
         ctx = ctx.with_probe(probe.clone());
     }
@@ -316,7 +340,7 @@ async fn drive(
     let end = match tokio::time::timeout(after, &mut handle).await {
         Ok(Ok(outcome)) => End::Done(Box::new(outcome)),
         Ok(Err(error)) if error.is_panic() => End::Panicked {
-            message: panic_message(error.into_panic()),
+            message: PanicText(panic_message(error.into_panic())),
         },
         Ok(Err(_)) => End::Cancelled,
         Err(_elapsed) => {

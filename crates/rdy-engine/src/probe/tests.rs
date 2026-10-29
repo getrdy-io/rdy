@@ -29,9 +29,19 @@ fn field<'a>(action: &'a Action, name: &str) -> Option<&'a Value> {
     action.fields.get(name)
 }
 
+/// A table command for `getent ahosts -- <name>`, built the way a check builds it.
 #[cfg(feature = "runtime")]
-fn cmd(program: &'static str) -> Cmd {
-    Cmd::new(program, Duration::from_secs(5))
+fn getent(name: &str) -> Cmd {
+    table::entry("getent")
+        .expect("getent is in the table")
+        .cmd_for(Os::Linux, "ahosts", &[name])
+        .expect("a valid name")
+}
+
+/// The argv of `getent ahosts -- <name>`, as the fixture keys it.
+#[cfg(feature = "runtime")]
+fn getent_args(name: &str) -> [&str; 3] {
+    ["ahosts", "--", name]
 }
 
 #[test]
@@ -240,7 +250,7 @@ mod denylist {
             .file("/proc/1/environ", "AWS_SECRET_ACCESS_KEY=xyz")
             .file("/etc/shadow", "root:$6$salt$hash::");
         let hub = hub(replay);
-        let probe = hub.check_probe("host.cpu", None);
+        let probe = hub.check_probe("host.cpu", Os::Linux, None);
 
         let error = probe
             .read(Path::new("/proc/1/environ"))
@@ -276,7 +286,7 @@ mod denylist {
         // The error becomes a result message. A home directory must not be in it.
         let hub =
             hub(Replay::new().file("/home/tester/.ssh/id_rsa", "KEY")).with_home("/home/tester");
-        let probe = hub.check_probe("host.cpu", None);
+        let probe = hub.check_probe("host.cpu", Os::Linux, None);
         let error = probe
             .read(Path::new("/home/tester/.ssh/id_rsa"))
             .await
@@ -302,7 +312,7 @@ mod denylist {
     #[tokio::test]
     async fn reads_show_home_paths_with_a_tilde() {
         let hub = hub(Replay::new().file("/home/tester/notes.txt", "hi")).with_home("/home/tester");
-        let probe = hub.check_probe("host.cpu", None);
+        let probe = hub.check_probe("host.cpu", Os::Linux, None);
         probe
             .read(Path::new("/home/tester/notes.txt"))
             .await
@@ -318,7 +328,7 @@ mod denylist {
             vec![DirEntry::new("eth0", true), DirEntry::new("lo", true)],
         );
         let hub = hub(replay);
-        let probe = hub.check_probe("host.cpu", None);
+        let probe = hub.check_probe("host.cpu", Os::Linux, None);
 
         assert_eq!(
             probe
@@ -379,7 +389,7 @@ mod denylist {
 #[tokio::test]
 async fn windows_refuses_every_file_read() {
     let hub = hub(Replay::new().file("C:\\x", "y"));
-    let probe = hub.check_probe("host.cpu", None);
+    let probe = hub.check_probe("host.cpu", Os::Linux, None);
     let error = probe.read(Path::new("C:\\x")).await.expect_err("refused");
     assert!(matches!(
         error,
@@ -399,31 +409,57 @@ mod commands {
     use super::*;
     use crate::check::CommandSpec;
     use crate::check::{CheckInfo, OsSupport, Support};
+    use crate::exec::policy::CommandError;
+    use crate::exec::ExecError;
 
-    static IP_ONLY: CheckInfo = CheckInfo {
-        id: "net.mtu",
+    const ALL_OS: OsSupport = OsSupport {
+        linux: Support::Full,
+        macos: Support::Full,
+        windows: Support::Full,
+    };
+
+    /// A check that declares getent, with a small cap and one environment name.
+    static GETENT_ONLY: CheckInfo = CheckInfo {
+        id: "net.dns",
         family: "net",
-        summary: "Runs ip.",
+        summary: "Runs getent.",
         needs: &[],
         wants: &[],
         default_timeout: None,
-        os: OsSupport {
-            linux: Support::Full,
-            macos: Support::Full,
-            windows: Support::Full,
-        },
+        os: ALL_OS,
         reads: &[],
         env: &[],
         commands: &[CommandSpec {
-            program: "ip",
-            extra_dirs: &["/opt/acme/bin"],
+            program: "getent",
+            extra_dirs: &[],
             max_stdout: 4096,
             env: &["ACME_REGION"],
         }],
         peers: &[],
     };
 
-    /// A backend that records what it was asked to run.
+    /// A check that declares a search directory that no table entry lists.
+    static WIDE_DIRS: CheckInfo = CheckInfo {
+        id: "gpu.driver",
+        family: "gpu",
+        summary: "Runs nvidia-smi from a directory of its own.",
+        needs: &[],
+        wants: &[],
+        default_timeout: None,
+        os: ALL_OS,
+        reads: &[],
+        env: &[],
+        commands: &[CommandSpec {
+            program: "nvidia-smi",
+            extra_dirs: &["/opt/acme/bin"],
+            max_stdout: 4096,
+            env: &[],
+        }],
+        peers: &[],
+    };
+
+    /// A backend that records what it was asked to run. It overrides `spawn`, so any command that
+    /// reaches it passed the probe's gate.
     #[derive(Default)]
     struct Recorder {
         seen: Mutex<Vec<(String, Vec<String>, usize)>>,
@@ -441,23 +477,36 @@ mod commands {
         fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
             Box::pin(async { Ok(None) })
         }
-        fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
+        fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
             Box::pin(async move {
                 let args = cmd
                     .arguments()
                     .iter()
                     .map(|a| a.to_string_lossy().into_owned())
                     .collect();
-                self.seen.lock().expect("lock").push((
-                    cmd.path().to_string_lossy().into_owned(),
-                    args,
-                    cmd.stdout_cap(),
-                ));
+                self.seen
+                    .lock()
+                    .expect("lock")
+                    .push((cmd.program().to_owned(), args, cmd.output_cap()));
                 Ok(Output::new(Some(0), b"ok".to_vec()))
             })
         }
-        fn resolves_on_disk(&self) -> bool {
-            false
+    }
+
+    /// A backend that keeps the provided `spawn`, which is the live path.
+    struct Live;
+
+    impl Sealed for Live {}
+
+    impl Backend for Live {
+        fn open_read<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<FileBytes>> {
+            Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
+        }
+        fn read_dir<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
+            Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
+        }
+        fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
+            Box::pin(async { Ok(None) })
         }
     }
 
@@ -468,58 +517,81 @@ mod commands {
     }
 
     #[tokio::test]
-    async fn a_command_is_logged_with_its_path_argv_and_exit() {
-        let hub = hub(Replay::new().command("ip", &["-j", "addr"], 0, "[]"));
-        let probe = hub.check_probe("net.mtu", None);
+    async fn a_command_is_logged_with_its_program_form_argv_and_exit() {
+        let hub = hub(Replay::new().command(
+            "getent",
+            &getent_args("registry.acme.example"),
+            0,
+            "10.0.0.7 STREAM\n",
+        ));
+        let probe = hub.check_probe("net.dns", Os::Linux, None);
         let output = probe
-            .exec(cmd("ip").args(["-j", "addr"]))
+            .exec(getent("registry.acme.example"))
             .await
             .expect("ran");
         assert_eq!(output.exit, Some(0));
-        assert_eq!(output.stdout, b"[]");
+        assert_eq!(output.stdout, b"10.0.0.7 STREAM\n");
 
-        let missing = probe.exec(cmd("ss").args(["-lnt"])).await;
+        let missing = probe.exec(getent("other.acme.example")).await;
         assert_eq!(missing, Err(ProbeError::NotFound));
 
         let log = hub.action_log();
         let ok = &log.actions[0];
         assert_eq!(ok.kind, ActionKind::Exec);
         assert_eq!(ok.outcome, ActionOutcome::Ok);
-        assert_eq!(field(ok, "program"), Some(&json!("/usr/bin/ip")));
-        assert_eq!(field(ok, "argv"), Some(&json!(["-j", "addr"])));
+        assert_eq!(field(ok, "program"), Some(&json!("getent")));
+        assert_eq!(field(ok, "form"), Some(&json!("ahosts")));
+        assert_eq!(
+            field(ok, "argv"),
+            Some(&json!(["ahosts", "--", "registry.acme.example"]))
+        );
         assert_eq!(field(ok, "exit"), Some(&json!(0)));
-        assert_eq!(field(ok, "stdout_bytes"), Some(&json!(2)));
+        assert_eq!(field(ok, "stdout_bytes"), Some(&json!(16)));
         let failed = &log.actions[1];
         assert_eq!(failed.outcome, ActionOutcome::Failed);
-        assert_eq!(field(failed, "program"), Some(&json!("/usr/bin/ss")));
+        assert_eq!(field(failed, "program"), Some(&json!("getent")));
     }
 
     #[tokio::test]
-    async fn a_fixture_can_never_run_a_shell_or_a_privilege_tool() {
-        // The fixture holds output for both, so only the policy stands between the check and it.
-        let replay = Replay::new()
+    async fn a_command_the_table_does_not_list_never_reaches_the_backend() {
+        // The fixture holds output for a shell, a privilege tool and table programs with arguments
+        // that fit no form, so only the table stands between the check and them.
+        let hub = hub(Replay::new()
             .command("sh", &["-c", "id"], 0, "uid=0")
             .command("sudo", &["id"], 0, "uid=0")
-            .command("env", &["id"], 0, "uid=0");
-        let hub = hub(replay);
-        let probe = hub.check_probe("host.cpu", None);
-        for (program, args) in [
-            ("sh", ["-c", "id"]),
-            ("sudo", ["id", "-u"]),
-            ("env", ["id", "-u"]),
-        ] {
-            let error = probe
-                .exec(cmd(program).args(args))
-                .await
-                .expect_err(program);
-            assert!(
-                matches!(error, ProbeError::Policy(_)),
-                "{program}: {error:?}"
-            );
+            .command("getent", &["passwd"], 0, "root:x:0:0")
+            .command("getent", &["ahosts", "--", "a b"], 0, "x")
+            .command("getent", &["ahosts", "--", "-x"], 0, "x"));
+        let probe = hub.check_probe("net.dns", Os::Linux, None);
+        let secs = Duration::from_secs(5);
+        let cases = [
+            Cmd::new("sh", secs).args(["-c", "id"]),
+            Cmd::new("sudo", secs).args(["id"]),
+            Cmd::new("getent", secs).args(["passwd"]),
+            Cmd::new("getent", secs).args(["ahosts", "--", "a b"]),
+            Cmd::new("getent", secs).args(["ahosts", "--", "-x"]),
+            // Past the form's time limit.
+            Cmd::new("getent", Duration::from_secs(600)).args(["ahosts", "--", "h"]),
+        ];
+        for cmd in cases {
+            let name = format!("{cmd:?}");
+            let error = probe.exec(cmd).await.expect_err(&name);
+            assert!(matches!(error, ProbeError::Table(_)), "{name}: {error:?}");
             assert!(error.to_string().contains("Fix:"), "{error}");
         }
+        // Not listed for this OS: getent is a Linux row.
+        let mac = hub.check_probe("net.dns", Os::Macos, None);
+        let error = mac
+            .exec(getent("registry.acme.example"))
+            .await
+            .expect_err("macos");
+        assert!(matches!(
+            error,
+            ProbeError::Table(TableError::NotOnThisOs { .. })
+        ));
+
         let log = hub.action_log();
-        assert_eq!(log.actions.len(), 3);
+        assert_eq!(log.actions.len(), 7);
         for action in &log.actions {
             assert_eq!(action.outcome, ActionOutcome::Denied);
             assert!(
@@ -534,16 +606,23 @@ mod commands {
     #[tokio::test]
     async fn the_checks_declaration_decides_directories_cap_and_env() {
         let (hub, recorder) = recording_hub();
-        let probe = hub.check_probe("net.mtu", Some(&IP_ONLY));
+        let probe = hub.check_probe("net.dns", Os::Linux, Some(&GETENT_ONLY));
 
-        // A declared command runs with the declared cap, whatever the command carried.
+        // A declared command runs with the declared cap, which can only narrow the table's.
         probe
-            .exec(cmd("ip").stdout_cap(1).env([("ACME_REGION", "eu-west-1")]))
+            .exec(getent("a.acme.example"))
             .await
             .expect("declared");
-        // An undeclared program, an undeclared env name, a name the policy refuses: all denied, and the
-        // backend sees none of them.
-        let undeclared = probe.exec(cmd("ss")).await.expect_err("undeclared");
+        probe
+            .exec(getent("b.acme.example").stdout_cap(1))
+            .await
+            .expect("a lower cap stays lower");
+        // An undeclared program and an undeclared env name are denied, and the backend sees neither.
+        let timedatectl = table::entry("timedatectl")
+            .expect("entry")
+            .cmd_for(Os::Linux, "status", &[])
+            .expect("cmd");
+        let undeclared = probe.exec(timedatectl).await.expect_err("undeclared");
         assert!(matches!(
             undeclared,
             ProbeError::Denied {
@@ -552,42 +631,128 @@ mod commands {
             }
         ));
         let env = probe
-            .exec(cmd("ip").env([("HTTPS_PROXY", "http://proxy.invalid:3128")]))
+            .exec(getent("c.acme.example").env([("HTTPS_PROXY", "http://proxy.invalid:3128")]))
             .await
             .expect_err("env");
         assert!(matches!(
             env,
             ProbeError::Denied { rule: RULE_ENV_UNDECLARED, what } if what == "HTTPS_PROXY"
         ));
+        // A declared name is not enough: the table gives every command the base environment only.
+        let declared_env = probe
+            .exec(getent("d.acme.example").env([("ACME_REGION", "eu-west-1")]))
+            .await
+            .expect_err("table env");
+        assert!(matches!(
+            declared_env,
+            ProbeError::Table(TableError::EnvNotAllowed { .. })
+        ));
+        // A check cannot add a search directory the table does not list.
+        let smi = table::entry("nvidia-smi")
+            .expect("entry")
+            .cmd_for(Os::Linux, "query-xml", &[])
+            .expect("cmd");
+        let wide = hub.check_probe("gpu.driver", Os::Linux, Some(&WIDE_DIRS));
+        let error = wide.exec(smi).await.expect_err("dirs");
+        assert!(matches!(
+            error,
+            ProbeError::Table(TableError::DirNotAllowed { .. })
+        ));
 
         let seen = recorder.seen.lock().expect("lock").clone();
-        assert_eq!(seen, [("/usr/bin/ip".to_owned(), Vec::new(), 4096)]);
+        let want = |name: &str, cap: usize| {
+            (
+                "getent".to_owned(),
+                getent_args(name).map(str::to_owned).to_vec(),
+                cap,
+            )
+        };
+        assert_eq!(
+            seen,
+            [want("a.acme.example", 4096), want("b.acme.example", 1)]
+        );
 
         let log = hub.action_log();
         let outcomes: Vec<_> = log.actions.iter().map(|a| a.outcome.to_string()).collect();
-        assert_eq!(outcomes, ["ok", "denied", "denied"]);
         assert_eq!(
-            field(&log.actions[1], "rule"),
+            outcomes,
+            ["ok", "ok", "denied", "denied", "denied", "denied"]
+        );
+        assert_eq!(
+            field(&log.actions[2], "rule"),
             Some(&json!(RULE_COMMAND_UNDECLARED))
         );
     }
 
     #[tokio::test]
-    async fn the_element_after_a_secret_flag_is_redacted() {
-        let hub = hub(Replay::new()
-            .command("ip", &["--password", "hunter2hunter2", "addr"], 0, "")
-            .command("ip", &["--token", "tok-abc-123", "--name", "plain"], 0, "")
-            .command("ip", &["--api-key", "--token", "k-1", "z"], 0, "")
-            .command("ip", &["--password"], 0, ""));
-        let probe = hub.check_probe("net.mtu", None);
-        for args in [
-            vec!["--password", "hunter2hunter2", "addr"],
-            vec!["--token", "tok-abc-123", "--name", "plain"],
-            vec!["--api-key", "--token", "k-1", "z"],
-            vec!["--password"],
-        ] {
-            probe.exec(cmd("ip").args(args)).await.expect("ran");
+    async fn the_provided_spawn_runs_commands_through_the_table_runner() {
+        // `table::run` refuses an unlisted program before anything starts, so this proves the live
+        // path goes through the table without starting a process.
+        let error = Live
+            .spawn(Cmd::new("sh", Duration::from_secs(5)).args(["-c", "id"]))
+            .await
+            .expect_err("refused");
+        assert!(
+            matches!(error, ProbeError::Table(TableError::UnknownProgram { .. })),
+            "{error:?}"
+        );
+        // The probe's own gate stops the same command before the backend is asked.
+        let hub = ProbeHub::new(Arc::new(Live), redactor());
+        let probe = hub.check_probe("net.dns", Os::Linux, None);
+        let error = probe
+            .exec(Cmd::new("sh", Duration::from_secs(5)))
+            .await
+            .expect_err("gate");
+        assert!(matches!(error, ProbeError::Table(_)));
+    }
+
+    #[test]
+    fn runner_errors_map_to_probe_errors() {
+        let spawn_failed = ExecError::Spawn(io::Error::from(io::ErrorKind::NotFound));
+        let cases = [
+            (CommandError::Exec(ExecError::Timeout), ProbeError::Timeout),
+            (
+                CommandError::Exec(ExecError::Hung { pid: 7 }),
+                ProbeError::Hung { pid: 7 },
+            ),
+            (CommandError::Exec(spawn_failed), ProbeError::NotFound),
+            (
+                CommandError::Exec(ExecError::Io("pipe".to_owned())),
+                ProbeError::Io("pipe".to_owned()),
+            ),
+        ];
+        for (error, want) in cases {
+            assert_eq!(ProbeError::from_command(error), want);
         }
+        assert!(matches!(
+            ProbeError::from_command(CommandError::Exec(ExecError::TooMany)),
+            ProbeError::Io(_)
+        ));
+        let table = CommandError::Table(TableError::UnknownProgram { program: "sh" });
+        assert!(matches!(
+            ProbeError::from_command(table),
+            ProbeError::Table(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn the_element_after_a_secret_flag_is_redacted() {
+        // No table form has a secret flag, so the entries are written the way the network tickets
+        // write theirs: through `begin`. The argv logic is the log's, not the command's.
+        let hub = hub(Replay::new());
+        let probe = hub.check_probe("net.dns", Os::Linux, None);
+        let write = |argv: &[&str]| {
+            let mut fields = Map::new();
+            fields.insert("argv".to_owned(), json!(argv));
+            let (_, entry) = probe
+                .begin(ActionKind::Exec, fields, "getent")
+                .expect("live");
+            entry.finish(ActionOutcome::Ok);
+        };
+        write(&["--password", "hunter2hunter2", "addr"]);
+        write(&["--token", "tok-abc-123", "--name", "plain"]);
+        write(&["--api-key", "--token", "k-1", "z"]);
+        write(&["--password"]);
         let log = hub.action_log();
         let argv = |index: usize| -> Vec<String> {
             field(&log.actions[index], "argv")
@@ -628,21 +793,15 @@ mod commands {
     #[tokio::test(start_paused = true)]
     async fn a_command_dropped_before_it_finished_is_logged_as_a_timeout() {
         let hub = ProbeHub::new(Arc::new(Hanging), redactor());
-        let probe = hub.check_probe("net.dns", None);
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(1),
-            probe.exec(cmd("dig").args(["example.com"])),
-        )
-        .await;
+        let probe = hub.check_probe("net.dns", Os::Linux, None);
+        let outcome =
+            tokio::time::timeout(Duration::from_secs(1), probe.exec(getent("acme.example"))).await;
         assert!(outcome.is_err(), "the call hangs");
 
         let log = hub.action_log();
         assert_eq!(log.actions.len(), 1);
         assert_eq!(log.actions[0].outcome, ActionOutcome::Timeout);
-        assert_eq!(
-            field(&log.actions[0], "program"),
-            Some(&json!("/usr/bin/dig"))
-        );
+        assert_eq!(field(&log.actions[0], "program"), Some(&json!("getent")));
     }
 }
 
@@ -671,7 +830,7 @@ async fn a_closed_probe_refuses_everything() {
 #[tokio::test]
 async fn a_call_after_the_check_ended_is_denied_and_logged() {
     let hub = hub(Replay::new().file("/proc/cpuinfo", "x"));
-    let probe = hub.check_probe("host.cpu", None);
+    let probe = hub.check_probe("host.cpu", Os::Linux, None);
     let straggler = probe.clone();
     probe
         .read(Path::new("/proc/cpuinfo"))
@@ -717,13 +876,8 @@ impl Backend for Hanging {
     fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
         Box::pin(std::future::pending())
     }
-    #[cfg(feature = "runtime")]
-    fn spawn<'a>(&'a self, _: &'a ResolvedCmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
+    fn spawn<'a>(&'a self, _: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
         Box::pin(std::future::pending())
-    }
-    #[cfg(feature = "runtime")]
-    fn resolves_on_disk(&self) -> bool {
-        false
     }
 }
 
@@ -731,7 +885,7 @@ impl Backend for Hanging {
 #[tokio::test(start_paused = true)]
 async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {
     let hub = ProbeHub::new(Arc::new(Hanging), redactor());
-    let probe = hub.check_probe("net.dns", None);
+    let probe = hub.check_probe("net.dns", Os::Linux, None);
     let outcome = tokio::time::timeout(
         std::time::Duration::from_secs(1),
         probe.read(Path::new("/proc/cpuinfo")),
@@ -752,7 +906,7 @@ async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {
 #[tokio::test]
 async fn a_call_still_running_when_the_check_ends_is_cut_off_and_logged_denied() {
     let hub = ProbeHub::new(Arc::new(Hanging), redactor());
-    let probe = hub.check_probe("net.dns", None);
+    let probe = hub.check_probe("net.dns", Os::Linux, None);
     let ender = probe.clone();
     let (result, ()) = tokio::join!(probe.read(Path::new("/proc/cpuinfo")), async move {
         tokio::task::yield_now().await;
@@ -811,7 +965,7 @@ fn is_droppable_kind(kind: &str) -> bool {
 #[test]
 fn ok_reads_go_first_and_everything_else_stays() {
     let hub = hub(Replay::new()).with_limits(20, 1000);
-    let probe = hub.check_probe("fixture.flood", None);
+    let probe = hub.check_probe("fixture.flood", Os::Linux, None);
     let keep = [
         (ActionKind::Exec, ActionOutcome::Ok),
         (ActionKind::Connect, ActionOutcome::Ok),
@@ -863,7 +1017,7 @@ fn ok_reads_go_first_and_everything_else_stays() {
 #[test]
 fn failed_reads_go_second_and_never_for_an_ok_read() {
     let hub = hub(Replay::new()).with_limits(10, 1000);
-    let probe = hub.check_probe("fixture.flood", None);
+    let probe = hub.check_probe("fixture.flood", Os::Linux, None);
     // Ten failed reads, each under its own directory so none fold.
     for i in 0..10 {
         put_at(
@@ -900,7 +1054,7 @@ fn failed_reads_go_second_and_never_for_an_ok_read() {
 #[test]
 fn many_failed_reads_under_one_directory_fold_into_one_entry() {
     let hub = hub(Replay::new());
-    let probe = hub.check_probe("fixture.flood", None);
+    let probe = hub.check_probe("fixture.flood", Os::Linux, None);
     for i in 0..(COALESCE_AFTER + 30) {
         put_at(
             &probe,
@@ -937,7 +1091,7 @@ fn many_failed_reads_under_one_directory_fold_into_one_entry() {
 #[test]
 fn a_flood_of_denied_reads_folds_and_nothing_is_dropped() {
     let hub = hub(Replay::new());
-    let probe = hub.check_probe("fixture.flood", None);
+    let probe = hub.check_probe("fixture.flood", Os::Linux, None);
     for i in 0..6000 {
         put_at(
             &probe,
@@ -964,7 +1118,7 @@ fn a_flood_of_denied_reads_folds_and_nothing_is_dropped() {
 #[test]
 fn six_thousand_failed_reads_then_a_denied_read_keeps_the_denied_entry() {
     let hub = hub(Replay::new());
-    let probe = hub.check_probe("host.flood", None);
+    let probe = hub.check_probe("host.flood", Os::Linux, None);
     for i in 0..6000 {
         // A directory each, so folding does not help and retention has to.
         put_at(
@@ -1005,7 +1159,7 @@ fn the_whole_log_cap_holds_across_checks_and_still_keeps_a_denied_entry() {
     let hub = hub(Replay::new());
     // Six checks at their quota is 6000 failed reads, more than the 5000 the log may hold.
     for check in 0..6 {
-        let probe = hub.check_probe(&format!("host.c{check}"), None);
+        let probe = hub.check_probe(&format!("host.c{check}"), Os::Linux, None);
         for i in 0..CHECK_QUOTA {
             put_at(
                 &probe,
@@ -1017,7 +1171,7 @@ fn the_whole_log_cap_holds_across_checks_and_still_keeps_a_denied_entry() {
         }
     }
     assert_eq!(hub.action_log().actions.len(), MAX_ENTRIES);
-    let late = hub.check_probe("host.late", None);
+    let late = hub.check_probe("host.late", Os::Linux, None);
     put_at(
         &late,
         ActionKind::Read,
@@ -1034,8 +1188,8 @@ fn the_whole_log_cap_holds_across_checks_and_still_keeps_a_denied_entry() {
 #[test]
 fn one_check_cannot_use_more_than_its_quota() {
     let hub = hub(Replay::new()).with_limits(5000, 3);
-    let noisy = hub.check_probe("host.noisy", None);
-    let quiet = hub.check_probe("host.quiet", None);
+    let noisy = hub.check_probe("host.noisy", Os::Linux, None);
+    let quiet = hub.check_probe("host.quiet", Os::Linux, None);
     for _ in 0..10 {
         put(&noisy, ActionKind::Read, ActionOutcome::Ok);
     }
@@ -1054,7 +1208,7 @@ fn one_check_cannot_use_more_than_its_quota() {
 #[test]
 fn the_last_resort_drops_other_entries_before_a_denied_one_and_counts_it() {
     let hub = hub(Replay::new()).with_limits(3, 1000);
-    let probe = hub.check_probe("fixture.flood", None);
+    let probe = hub.check_probe("fixture.flood", Os::Linux, None);
     for _ in 0..3 {
         put(&probe, ActionKind::Connect, ActionOutcome::Ok);
     }
@@ -1108,7 +1262,7 @@ mod scheduled {
         reads: &[],
         env: &[],
         commands: &[CommandSpec {
-            program: "ip",
+            program: "getent",
             extra_dirs: &[],
             max_stdout: 4096,
             env: &[],
@@ -1139,9 +1293,7 @@ mod scheduled {
                     matches!(&refused, Err(ProbeError::Denied { what, .. }) if what == "~/.ssh/id_rsa"),
                     "{refused:?}"
                 );
-                probe
-                    .exec(cmd("ip").args(["--password", "hunter2hunter2", "addr"]))
-                    .await?;
+                probe.exec(getent("registry.acme.example")).await?;
 
                 // The network and kube tickets open their entries through the same door. Until
                 // their methods exist (M1-091, M1-103), the rows are written by hand here, and those
@@ -1155,7 +1307,7 @@ mod scheduled {
                 connect.finish(ActionOutcome::Ok);
                 let (_, mut kube) = probe.begin(ActionKind::Kube, Map::new(), "/version")?;
                 kube.set("method", "GET");
-                kube.set("path", "/version");
+                kube.set("path", "/version?access_token=s3cr3t-value-123");
                 kube.set("status", 200);
                 kube.finish(ActionOutcome::Ok);
 
@@ -1201,7 +1353,12 @@ mod scheduled {
             // The fixture has these files. Only the denylist stands between the check and them.
             .file("/proc/1/environ", "TOKEN=abc")
             .file("/home/tester/.ssh/id_rsa", "KEY")
-            .command("ip", &["--password", "hunter2hunter2", "addr"], 0, "[]");
+            .command(
+                "getent",
+                &getent_args("registry.acme.example"),
+                0,
+                "10.0.0.7 STREAM\n",
+            );
         let hub = hub(replay).with_home("/home/tester");
 
         // Run-level work: the engine reads the kubeconfig itself and logs it with `check: null`.
@@ -1287,20 +1444,27 @@ mod scheduled {
             !text.contains("/home/tester"),
             "a home path reached the report"
         );
-        // A command: the resolved path and argv, with the secret already gone.
-        assert_eq!(actions[4]["program"], "/usr/bin/ip");
-        let argv = actions[4]["argv"].as_array().expect("argv");
-        assert_eq!(argv[0], "--password");
-        assert!(
-            argv[1]
-                .as_str()
-                .is_some_and(|a| a.starts_with("[REDACTED:secret_by_key:"))
+        // A command: the program, the table form and the argv.
+        assert_eq!(actions[4]["program"], "getent");
+        assert_eq!(actions[4]["form"], "ahosts");
+        assert_eq!(
+            actions[4]["argv"],
+            json!(["ahosts", "--", "registry.acme.example"])
         );
-        assert!(!text.contains("hunter2"), "a secret reached the report");
+        assert!(
+            !text.contains("s3cr3t-value"),
+            "a secret reached the report"
+        );
         // An endpoint and a kube request.
         assert_eq!(actions[5]["host"], "registry.acme.example");
         assert_eq!(actions[5]["port"], 443);
-        assert_eq!(actions[6]["path"], "/version");
+        assert!(
+            actions[6]["path"]
+                .as_str()
+                .is_some_and(|p| p.starts_with("/version?access_token=[REDACTED:")),
+            "{}",
+            actions[6]["path"]
+        );
         // The late call names the check and the rule.
         assert_eq!(actions[7]["rule"], RULE_CHECK_FINISHED);
 
@@ -1363,7 +1527,7 @@ mod scheduled {
 #[test]
 fn the_log_survives_a_poisoned_lock() {
     let hub = hub(Replay::new());
-    let probe = hub.check_probe("fixture.walker", None);
+    let probe = hub.check_probe("fixture.walker", Os::Linux, None);
     hub.log.poison();
     put(&probe, ActionKind::Exec, ActionOutcome::Ok);
     assert_eq!(hub.action_log().actions.len(), 1);

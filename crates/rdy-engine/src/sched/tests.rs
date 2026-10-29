@@ -10,7 +10,7 @@ use rdy_spec::result::SkipKind;
 use serde_json::json;
 
 use super::*;
-use crate::check::{BoxFuture, CheckInfo, Finding, Level, OsSupport, Support};
+use crate::check::{BoxFuture, CheckInfo, CheckMeta, Finding, Level, OsSupport, Support};
 
 const FULL: OsSupport = OsSupport {
     linux: Support::Full,
@@ -22,6 +22,10 @@ static PLAIN: CheckInfo = CheckInfo {
     id: "fake.plain",
     family: "fake",
     summary: "A fake check with no needs.",
+    meta: CheckMeta {
+        title: "Fake check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
     needs: &[],
     wants: &[],
     default_timeout: None,
@@ -36,6 +40,10 @@ static QUICK: CheckInfo = CheckInfo {
     id: "fake.quick",
     family: "fake",
     summary: "A fake check with a 2 s default timeout.",
+    meta: CheckMeta {
+        title: "Fake check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
     needs: &[],
     wants: &[],
     default_timeout: Some(Duration::from_secs(2)),
@@ -50,6 +58,10 @@ static NEEDS_ROOT: CheckInfo = CheckInfo {
     id: "fake.needs_root",
     family: "fake",
     summary: "A fake check that needs root.",
+    meta: CheckMeta {
+        title: "Fake check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
     needs: &[Need::Root],
     wants: &[],
     default_timeout: None,
@@ -251,13 +263,33 @@ async fn a_panicking_check_reports_the_panic_and_the_others_still_pass() {
         ])
         .await;
     assert!(passed(&ran[0]));
-    assert_eq!(
-        ran[1].end,
-        End::Panicked {
-            message: "index out of range".to_owned()
-        }
-    );
+    let End::Panicked { message } = &ran[1].end else {
+        panic!("want a panic, got {:?}", ran[1].end);
+    };
+    assert_eq!(&**message.redacted(&redactor()), "index out of range");
     assert!(passed(&ran[2]));
+}
+
+fn redactor() -> Redactor {
+    Redactor::new(crate::redact::TagKey::fixed([7; 32]))
+}
+
+#[tokio::test]
+async fn panic_text_is_redacted_and_its_debug_output_is_hidden() {
+    // The default panic hook still prints the raw text. The CLI replaces it (M1-056).
+    let ran = scheduler(1)
+        .run(vec![planned(
+            "fake.plain/bad",
+            Mode::Panic("bad config: password=canary-hunter2 end"),
+        )])
+        .await;
+    let End::Panicked { message } = &ran[0].end else {
+        panic!("want a panic, got {:?}", ran[0].end);
+    };
+    let shown = message.redacted(&redactor());
+    assert!(!shown.contains("canary-hunter2"), "{}", *shown);
+    assert!(shown.contains("[REDACTED:secret_by_key:"), "{}", *shown);
+    assert!(!format!("{ran:?}").contains("canary-hunter2"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

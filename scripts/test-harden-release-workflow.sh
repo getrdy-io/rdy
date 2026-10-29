@@ -60,7 +60,19 @@ prop "the tag is not pasted into shell text" lacks '\$\{\{ *needs\.plan\.outputs
 prop "the old tag-flag output is gone" lacks 'tag-flag'
 prop "the plan step checks the tag shape" has "grep -Eq '\^v\[0-9\]\+"
 prop "the SBOM step output name is outputs" lacks 'cargo-cyclonedx\.output\.'
-prop "announce checks the files it publishes" has 'check-release-artifacts.sh --files-only artifacts'
+prop "announce checks the files it publishes, and the signed list" has 'check-release-artifacts.sh --files-only --signed artifacts'
+prop "the signing job waits for the artifact check" has '^      - custom-check-release-artifacts$'
+prop "no workflow inherits secrets" lacks 'secrets: inherit'
+prop "announce needs the signing job to have succeeded, not skipped" has "&& needs\\.custom-sign-release\\.result == 'success' \\}\\}$"
+prop "announce does not accept a skipped signing job" lacks "custom-sign-release\\.result == 'skipped'"
+# shellcheck disable=SC2016  # $REPO and $TAG are literal text in the workflow
+prop "announce verifies the signature with the caller repository" has '^            --certificate-github-workflow-repository "\$REPO" \\$'
+# shellcheck disable=SC2016
+prop "announce verifies the signature with the tag ref" has '^            --certificate-github-workflow-ref "refs/tags/\$TAG" \\$'
+prop "announce verifies the signature with the push trigger" has '^            --certificate-github-workflow-trigger push \\$'
+# shellcheck disable=SC2016
+prop "announce verifies the exact signing identity" has 'certificate-identity "https://github.com/\$REPO/.github/workflows/sign-release.yml@refs/tags/\$TAG"'
+prop "announce verifies no identity by regular expression" lacks 'certificate-(identity|oidc-issuer)-regexp'
 
 # Every `uses:` is a full commit SHA, except the local reusable workflow.
 unpinned=$(grep -E '^[[:space:]]*-?[[:space:]]*uses:' "$wf" | grep -Ev 'uses: \./' | grep -Ev '@[0-9a-f]{40}( |$)' || true)
@@ -82,10 +94,57 @@ for j in build-local-artifacts build-global-artifacts; do
         ok "$j has no GH_TOKEN variable"
     fi
 done
-# Both install-action steps refuse the cargo fallback.
-n=$(grep -c 'taiki-e/install-action' "$wf")
-f=$(grep -c 'fallback: none' "$wf")
-if [ "$n" -ge 1 ] && [ "$n" -eq "$f" ]; then ok "install-action steps set fallback: none"; else bad "install-action steps set fallback: none"; fi
+# Every taiki-e/install-action step has its own `fallback: none`, so a missing prebuilt binary fails
+# the job instead of running `cargo install`. A count of the two strings would pass when one step has
+# two and another has none, so this reads step by step. A step starts at a "- " list line.
+# missing_fallback <file>: line numbers of install-action steps that lack the setting.
+missing_fallback() {
+    awk '
+        function flush() { if (inst && !fb) printf "%s ", start; inst = 0; fb = 0 }
+        /^[[:space:]]*- / { flush(); start = NR }
+        /taiki-e\/install-action@/ { inst = 1; seen = 1 }
+        /^[[:space:]]+fallback: none[[:space:]]*(#.*)?$/ { fb = 1 }
+        END { flush(); if (!seen) printf "none-found" }
+    ' "$1"
+}
+# The checker itself: a file where only the second step has the setting, and a file where only the
+# first has it.
+cat > "$tmp/fb-bad.yml" << 'EOF'
+steps:
+  - name: one
+    uses: taiki-e/install-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    with:
+      tool: a@1
+  - name: two
+    uses: taiki-e/install-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    with:
+      tool: b@1
+      fallback: none
+EOF
+cat > "$tmp/fb-dup.yml" << 'EOF'
+steps:
+  - uses: taiki-e/install-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    with:
+      tool: a@1
+      fallback: none
+  - uses: taiki-e/install-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    with:
+      tool: b@1
+EOF
+if [ "$(missing_fallback "$tmp/fb-bad.yml")" = "2 " ] && [ "$(missing_fallback "$tmp/fb-dup.yml")" = "6 " ]; then
+    ok "the fallback check finds the step that lacks fallback: none"
+else
+    bad "the fallback check finds the step that lacks fallback: none"
+fi
+for f in "$wf" "$root/.github/workflows/check-release-artifacts.yml" "$root/.github/workflows/sign-release.yml"; do
+    name=${f##*/}
+    m=$(missing_fallback "$f")
+    case $m in
+        "") ok "$name: every install-action step sets fallback: none" ;;
+        none-found) ok "$name: no install-action step" ;;
+        *) bad "$name: install-action steps without fallback: none start at line $m" ;;
+    esac
+done
 
 # Every job names its permissions, and only announce can write.
 jobs=$(awk '/^jobs:/ { j = 1; next } j && /^  [a-z][a-z-]*:$/ { sub(/:$/, "", $1); print $1 }' "$wf")
@@ -101,6 +160,29 @@ if [ -z "$missing" ]; then
     ok "every job names its permissions"
 else
     bad "every job names its permissions (missing:$missing)"
+fi
+# Only the signing job has an OIDC token. Find every id-token line and the job it sits in.
+idjobs=$(awk '/^jobs:/ { j = 1; next } j && /^  [a-z][a-z-]*:$/ { name = $1; sub(/:$/, "", name) } j && /id-token/ { print name }' "$wf" | sort -u | tr '\n' ' ')
+if [ "$idjobs" = "custom-sign-release " ]; then
+    ok "only custom-sign-release has id-token"
+else
+    bad "only custom-sign-release has id-token (found: $idjobs)"
+fi
+sw="$root/.github/workflows/sign-release.yml"
+if grep -q '^    environment: release$' "$sw"; then
+    ok "the signing job runs in the environment release"
+else
+    bad "the signing job runs in the environment release"
+fi
+if grep -q "^    if: github.repository_owner == 'getrdy-io'\$" "$sw"; then
+    ok "the signing job runs only for the getrdy-io owner"
+else
+    bad "the signing job runs only for the getrdy-io owner"
+fi
+if grep -q 'contents: write' "$sw"; then
+    bad "the signing workflow has no write token"
+else
+    ok "the signing workflow has no write token"
 fi
 writers=$(awk '/^jobs:/ { j = 1; next } j && /^  [a-z][a-z-]*:$/ { name = $1; sub(/:$/, "", name) } j && /contents.*write/ { print name }' "$wf" | sort -u | tr '\n' ' ')
 if [ "$writers" = "announce " ]; then

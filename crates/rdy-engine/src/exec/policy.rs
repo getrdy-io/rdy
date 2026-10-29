@@ -1,6 +1,6 @@
 //! The command policy (SEC-18, INV-08): what may run, from where, with what environment.
 //!
-//! The facade runs a [`Cmd`] through [`run`]. Nothing here trusts the caller's environment.
+//! The facade runs a [`Cmd`] through `table::run`, which checks the command table first. Nothing here trusts the caller's environment.
 //!
 //! - **Program names are constants.** [`Cmd::new`] takes a `&'static str`, so spec text cannot name a
 //!   program. The name must be a plain file name, with no separator.
@@ -11,9 +11,10 @@
 //! - **Refusals.** Three groups never run, by name: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`,
 //!   `powershell`, `pwsh` and a few more), the privilege tools (`sudo`, `su`, `doas`, `pkexec`, `runas`,
 //!   `run0`, `sudoedit`, `runuser`, `setpriv`, `sg`, `newgrp`, `ksu`, `machinectl`, `systemd-run`) and
-//!   the programs that run another program (`env`, `xargs`, `nice`, `nohup`, `timeout`, `setsid`,
-//!   `chroot`, `nsenter`, `unshare`, `stdbuf`, `taskset`, `flock`, `strace`, `gdb`, `bwrap` and more).
-//!   See [`REFUSED_PROGRAMS`]. The check is on the name and on the file the name resolves to, so a
+//!   the programs that run another program or take code in their arguments (`env`, `xargs`, `nice`,
+//!   `nohup`, `timeout`, `time`, `setsid`, `setarch`, `chroot`, `nsenter`, `unshare`, `stdbuf`,
+//!   `taskset`, `flock`, `strace`, `gdb`, `bwrap`, `awk`, `python3`, `perl` and more).
+//!   See [`REFUSED_PROGRAMS`] and [`REFUSED_PROGRAM_PREFIXES`]. The check is on the name and on the file the name resolves to, so a
 //!   link named `tool` that points at `bash` is refused too. The multi-call binaries `busybox` and
 //!   `toybox` are refused by the name a check asks for and not by the file it resolves to: on a
 //!   system built from one, every tool is a link to it, and the applet is picked by `argv[0]`, which
@@ -32,19 +33,28 @@
 //!   code, resolves names or starts helpers are refused as declared names (see [`PolicyError::RefusedEnv`]).
 //!   The parent's `LD_PRELOAD` never reaches a child because the parent's environment is never copied.
 //! - **Caps.** Stdout defaults to 1 MiB and is at most 4 MiB. Stderr is 64 KiB.
+//! - **The command table.** This module says what can never run. [`super::table`] says what may: the
+//!   typed entries of 03 Appendix A, each with its argument forms, limits and exit-code meanings.
+//!   [`Cmd`] does not require a table entry, so the policy tests can run `true`. The probe runs
+//!   commands through `table::run`, which checks the table first.
 //! - **Windows.** In M1 only `C:\Windows\System32\whoami.exe` runs, until job objects land (M2-006).
 //!
 //! Resolution and start are two steps. The trust rule above makes the gap small, because no one but
 //! root and the running user can change a directory on the path. It does not close it against a
 //! process of the running user itself.
 
+// Without the `runtime` feature the name rules and the command type compile and the resolver does not,
+// so the helpers that only the resolver calls are unused there.
+#![cfg_attr(not(feature = "runtime"), allow(dead_code))]
+
 use std::ffi::OsString;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use super::{DEFAULT_STDERR_CAP, DEFAULT_STDOUT_CAP, ExecError, ExecOutput, ExecSpec};
-use crate::check::CommandSpec;
+use super::DEFAULT_STDOUT_CAP;
+#[cfg(feature = "runtime")]
+use super::{DEFAULT_STDERR_CAP, ExecError, ExecOutput, ExecSpec};
 
 #[cfg(test)]
 mod tests;
@@ -128,6 +138,96 @@ pub const REFUSED_PROGRAMS: &[&str] = &[
     "bwrap",
     "firejail",
     "systemd-nspawn",
+    // Programs that take code or a whole command line in their arguments (M1-066). `time`,
+    // `setarch`, `linux32`, `linux64`, `chpst`, `start-stop-daemon` and `run-parts` run another
+    // program. The interpreters run text that a spec-controlled argument could carry (`python3 -c`,
+    // `perl -e`, `awk 'BEGIN{system(..)}'`). Versioned names such as `python3.12` are caught by
+    // [`REFUSED_PROGRAM_PREFIXES`].
+    "time",
+    "setarch",
+    "linux32",
+    "linux64",
+    "chpst",
+    "start-stop-daemon",
+    "run-parts",
+    "awk",
+    "gawk",
+    "mawk",
+    "nawk",
+    "node",
+    "expect",
+    "osascript",
+    // Programs that run a command from their arguments, or edit or fetch files, and that no catalog
+    // check needs (M1-066 review). `find -exec`, `sed e`, `m4 syscmd`, `dc !`, `ed !`, `ex` and `vi`
+    // and `vim` (`:!`), `ssh` (`ProxyCommand`), `git` (hooks, aliases), `tar --to-command`, `rsync -e`,
+    // `make`, `perf`, `valgrind`, `lldb`, `faketime`, `fakeroot`, `unbuffer`, `parallel`, `sqlite3`
+    // (`.shell`), `bpftrace`, and the language runtimes `java`, `jshell`, `irb`, `jruby`, `deno`, `bun`.
+    "find",
+    "sed",
+    "m4",
+    "dc",
+    "ed",
+    "ex",
+    "vi",
+    "vim",
+    "ip",
+    "ssh",
+    "git",
+    "tar",
+    "rsync",
+    "make",
+    "perf",
+    "valgrind",
+    "lldb",
+    "faketime",
+    "fakeroot",
+    "unbuffer",
+    "parallel",
+    "sqlite3",
+    "bpftrace",
+    "java",
+    "jshell",
+    "irb",
+    "jruby",
+    "deno",
+    "bun",
+    // Container clients. They run a command in a container, and the Docker socket has its own
+    // GET-only guard in M2.
+    "docker",
+    "podman",
+    "nerdctl",
+    "ctr",
+    "crictl",
+    // macOS and Windows tools that run another program or a script.
+    "arch",
+    "caffeinate",
+    "launchctl",
+    "sandbox-exec",
+    "xcrun",
+    "cscript",
+    "wscript",
+    "mshta",
+    "rundll32",
+    "forfiles",
+    "wsl",
+    // Network relays and file copiers that open a connection or run a command (`socat EXEC:`,
+    // `nc -e`, `scp -S`, `sftp -S`), and `emacs`, which runs code (`--eval`) (M1-066 final review).
+    "socat",
+    "nc",
+    "ncat",
+    "scp",
+    "sftp",
+    "emacs",
+];
+
+/// Prefixes of refused program names, in lower case: the interpreters, whatever version suffix the
+/// distribution gives them (`python3.12`, `perl5.36.0`, `ruby3.2`, `lua5.4`, `php8.2`, `pypy3`), and
+/// the dynamic loaders (`ld-linux-x86-64.so.2`, `ld-musl-x86_64.so.1`, `ld.so.1`, `ld64.so.1`,
+/// `ld-2.31.so`), which run any file given as
+/// the first argument.
+pub const REFUSED_PROGRAM_PREFIXES: &[&str] = &[
+    "python", "pypy", "perl", "ruby", "lua", "php", "tclsh", "nodejs", "ld-linux", "ld-musl",
+    "ld.so", "ld64.so", "ld-2",
 ];
 
 /// Multi-call binaries. Refused by the name a check asks for, never by the file a name resolves to:
@@ -300,19 +400,24 @@ pub enum PolicyError {
     },
 }
 
-/// Why [`run`] gave no output: the policy said no, or the runner failed.
+/// Why a command gave no output: the table or the policy said no, or the runner failed.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CommandError {
     /// The command was refused before anything started.
     #[error(transparent)]
     Policy(#[from] PolicyError),
+    /// The command is not in the command table (03 Appendix A), or does not fit its entry.
+    #[error(transparent)]
+    Table(#[from] super::table::TableError),
     /// The command was allowed and failed to run to the end.
+    #[cfg(feature = "runtime")]
     #[error(transparent)]
     Exec(#[from] ExecError),
 }
 
-/// One command, as a check asks for it. Build it, then [`run`] it.
+/// One command, as a check asks for it. Build it with [`super::table::CommandEntry::cmd`], then run it
+/// with `table::run`.
 #[derive(Clone)]
 pub struct Cmd {
     program: &'static str,
@@ -394,99 +499,40 @@ impl Cmd {
         self
     }
 
-    /// The program name.
+    /// The program name this command asks for.
     #[must_use]
     pub fn program(&self) -> &'static str {
         self.program
     }
 
-    /// The arguments, as given.
+    /// The arguments, as set.
     #[must_use]
     pub fn arguments(&self) -> &[OsString] {
         &self.args
     }
 
-    /// Applies what the check declared for this program (`CheckInfo::commands`). The probe calls this
-    /// so a check cannot widen its own limits: the declared directories and the declared stdout cap
-    /// replace whatever the command carried, and every environment name must be one the check declared.
-    ///
-    /// # Errors
-    ///
-    /// The first environment name that the check did not declare.
-    pub(crate) fn declared(mut self, spec: &CommandSpec) -> Result<Self, &'static str> {
-        if let Some((name, _)) = self.env.iter().find(|(name, _)| !spec.env.contains(name)) {
-            return Err(name);
-        }
-        self.extra_dirs = spec.extra_dirs;
-        self.stdout_cap = spec.max_stdout;
-        Ok(self)
-    }
-}
-
-/// A command that passed the policy, with the real path it will start from.
-///
-/// This is all a backend ever sees (02, "The probe facade"): the name was checked, the environment
-/// names were checked and the program was found on the trusted path before the backend is asked to
-/// do anything. A fixture backend therefore cannot be made to "run" a shell or a privilege tool.
-#[derive(Clone)]
-pub struct ResolvedCmd {
-    program: &'static str,
-    spec: ExecSpec,
-}
-
-impl fmt::Debug for ResolvedCmd {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ResolvedCmd")
-            .field("program", &self.program)
-            .field("spec", &self.spec)
-            .finish()
-    }
-}
-
-impl ResolvedCmd {
-    /// The name the check asked for.
+    /// The wall-clock limit.
     #[must_use]
-    pub fn program(&self) -> &'static str {
-        self.program
+    pub fn time_limit(&self) -> Duration {
+        self.timeout
     }
 
-    /// The real path the program starts from.
+    /// The stdout cap in bytes.
     #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.spec.program
+    pub fn output_cap(&self) -> usize {
+        self.stdout_cap
     }
 
-    /// The arguments, passed as argv.
+    /// The declared extra search directories.
     #[must_use]
-    pub fn arguments(&self) -> &[OsString] {
-        &self.spec.args
+    pub fn declared_dirs(&self) -> &'static [&'static str] {
+        self.extra_dirs
     }
 
-    /// The most stdout kept.
-    #[must_use]
-    pub fn stdout_cap(&self) -> usize {
-        self.spec.stdout_cap
+    /// The declared environment variable names. Never the values.
+    pub fn declared_env_names(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.env.iter().map(|(name, _)| *name)
     }
-
-    /// The timeout.
-    #[must_use]
-    pub fn timeout(&self) -> Duration {
-        self.spec.timeout
-    }
-}
-
-/// Checks `cmd` and resolves it, for the facade. With `on_disk` false the program is not looked up:
-/// every other rule still applies, and the path is `/usr/bin/<name>`. A fixture backend asks for that,
-/// so a replayed run does not depend on which tools the test machine has.
-///
-/// # Errors
-///
-/// A [`PolicyError`] for the first rule the command breaks.
-pub(crate) fn resolve_cmd(cmd: &Cmd, on_disk: bool) -> Result<ResolvedCmd, PolicyError> {
-    Ok(ResolvedCmd {
-        program: cmd.program,
-        spec: prepare_with(cmd, on_disk)?,
-    })
 }
 
 /// Checks `cmd` against the policy and turns it into a runnable [`ExecSpec`].
@@ -494,11 +540,8 @@ pub(crate) fn resolve_cmd(cmd: &Cmd, on_disk: bool) -> Result<ResolvedCmd, Polic
 /// # Errors
 ///
 /// A [`PolicyError`] for the first rule the command breaks.
+#[cfg(feature = "runtime")]
 pub(crate) fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
-    prepare_with(cmd, true)
-}
-
-fn prepare_with(cmd: &Cmd, on_disk: bool) -> Result<ExecSpec, PolicyError> {
     check_name(cmd.program)?;
     check_env(&cmd.env)?;
     if cmd.stdout_cap > MAX_STDOUT_CAP {
@@ -506,14 +549,7 @@ fn prepare_with(cmd: &Cmd, on_disk: bool) -> Result<ExecSpec, PolicyError> {
             cap: cmd.stdout_cap,
         });
     }
-    let path = if on_disk {
-        resolve(cmd.program, cmd.extra_dirs)?
-    } else {
-        for dir in cmd.extra_dirs {
-            check_dir(dir)?;
-        }
-        PathBuf::from(format!("/usr/bin/{}", cmd.program))
-    };
+    let path = resolve(cmd.program, cmd.extra_dirs)?;
 
     let mut env = base_env();
     env.extend(
@@ -529,6 +565,7 @@ fn prepare_with(cmd: &Cmd, on_disk: bool) -> Result<ExecSpec, PolicyError> {
 }
 
 /// The variables every child gets before the declared ones.
+#[cfg(feature = "runtime")]
 fn base_env() -> Vec<(OsString, OsString)> {
     #[cfg(unix)]
     {
@@ -550,19 +587,16 @@ fn base_env() -> Vec<(OsString, OsString)> {
     }
 }
 
+#[cfg(feature = "runtime")]
 /// Runs `cmd` under the policy: checks it, resolves the program, and starts it with the process runner.
 ///
-/// This writes no action-log entry. A check reaches commands through `Probe::exec`, which resolves with
-/// `resolve_cmd` and logs; the live backend (a later ticket) will call this function. It stays `pub`
-/// until then because making it crate-private leaves the whole runner unused, and the lint wall
-/// (M1-044) lists it for check crates.
 /// # Errors
 ///
 /// [`CommandError::Policy`] when the policy refuses, [`CommandError::Exec`] for start, timeout and
 /// read failures.
-pub async fn run(cmd: Cmd) -> Result<ExecOutput, CommandError> {
+pub(crate) async fn run(cmd: Cmd) -> Result<ExecOutput, CommandError> {
     let spec = prepare(&cmd)?;
-    Ok(super::run(spec).await?)
+    Ok(super::runner::run(spec).await?)
 }
 
 /// The shape and refusal checks on a program name.
@@ -591,6 +625,18 @@ fn stem(name: &str) -> String {
 
 fn is_refused(stem: &str) -> bool {
     REFUSED_PROGRAMS.contains(&stem)
+        || REFUSED_PROGRAM_PREFIXES
+            .iter()
+            .any(|prefix| stem.starts_with(prefix))
+}
+
+/// Whether a program name is refused by name: a shell, a privilege tool, a program that runs another
+/// program or takes code in its arguments, or a multi-call binary. Case and a `.exe` suffix do not
+/// matter. The command table uses it to keep such names out of the list.
+#[must_use]
+pub fn is_refused_name(program: &str) -> bool {
+    let stem = stem(program);
+    is_refused(&stem) || REFUSED_BY_REQUESTED_NAME.contains(&stem.as_str())
 }
 
 fn check_env(vars: &[(&'static str, OsString)]) -> Result<(), PolicyError> {
@@ -655,7 +701,7 @@ fn windows_program(program: &'static str) -> Result<PathBuf, PolicyError> {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), feature = "runtime"))]
 fn resolve(program: &'static str, extra: &'static [&'static str]) -> Result<PathBuf, PolicyError> {
     for dir in extra {
         check_dir(dir)?;
@@ -663,7 +709,7 @@ fn resolve(program: &'static str, extra: &'static [&'static str]) -> Result<Path
     windows_program(program)
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn resolve(program: &'static str, extra: &'static [&'static str]) -> Result<PathBuf, PolicyError> {
     let mut dirs: Vec<PathBuf> = SEARCH_DIRS.iter().map(PathBuf::from).collect();
     for dir in extra {
@@ -678,7 +724,7 @@ fn resolve(program: &'static str, extra: &'static [&'static str]) -> Result<Path
 /// A candidate that exists but cannot be resolved, or whose real name is a refused program, or whose
 /// file, links or directories are not trusted, ends the search with an error. It does not fall through
 /// to a later directory.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn resolve_in(program: &'static str, dirs: &[PathBuf]) -> Result<PathBuf, PolicyError> {
     use std::os::unix::fs::PermissionsExt;
     for dir in dirs {
@@ -708,7 +754,7 @@ fn resolve_in(program: &'static str, dirs: &[PathBuf]) -> Result<PathBuf, Policy
 }
 
 /// The most links followed while resolving one candidate. The same bound as the kernel's.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 const MAX_LINK_HOPS: usize = 40;
 
 /// Resolves `path` to a real path one component at a time, like `realpath`, and applies the directory
@@ -716,7 +762,7 @@ const MAX_LINK_HOPS: usize = 40;
 /// that holds it: someone who can write there can point it anywhere. `None` means a component is
 /// missing, a link could not be read, there were more than [`MAX_LINK_HOPS`] links, or a directory
 /// holding a link is not trusted.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn real_path_checked(path: &Path) -> Option<PathBuf> {
     use std::collections::VecDeque;
     let euid = rustix::process::geteuid().as_raw();
@@ -756,7 +802,7 @@ fn real_path_checked(path: &Path) -> Option<PathBuf> {
 /// The rule for one file or directory: owned by root or by `euid`, and not writable by the group or
 /// others. `sticky_excused` lets a writable directory with the sticky bit through (`/tmp` is `1777`),
 /// because the sticky bit stops others from renaming or removing an entry they do not own.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn trusted(uid: u32, mode: u32, euid: u32, sticky_excused: bool) -> bool {
     let owner_ok = uid == 0 || uid == euid;
     let writable_ok = mode & 0o022 == 0 || (sticky_excused && mode & 0o1000 != 0);
@@ -766,7 +812,7 @@ fn trusted(uid: u32, mode: u32, euid: u32, sticky_excused: bool) -> bool {
 /// Whether the real directory `dir` is safe to hold something that runs, or a link to it. The
 /// directory itself is never excused for being sticky: a hard link to a trusted file could be planted
 /// in it, or a link placed there. The directories above it are, as `/tmp` is.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn dir_is_trusted(dir: &Path, euid: u32) -> bool {
     use std::os::unix::fs::MetadataExt;
     dir.ancestors().enumerate().all(|(depth, ancestor)| {
@@ -777,7 +823,7 @@ fn dir_is_trusted(dir: &Path, euid: u32) -> bool {
 
 /// Whether the file at the real path `real`, and every directory above it, is safe to run from. See
 /// [`trusted`] and [`dir_is_trusted`]. Anything that cannot be read is untrusted.
-#[cfg(unix)]
+#[cfg(all(unix, feature = "runtime"))]
 fn is_trusted(real: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let euid = rustix::process::geteuid().as_raw();

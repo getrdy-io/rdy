@@ -1,28 +1,26 @@
 //! The replay backend: answers from a recorded fixture and touches nothing.
 //!
 //! Policy and the log sit above the backend, so a fixture run exercises the same denylist and the same
-//! action log as a live run (02 "The probe facade"). A command arrives here already resolved, so the
-//! fixture can never be asked to "run" a shell or a privilege tool: the policy refused it first. The one
-//! difference from a live run is that the program is not looked up on the machine (see
-//! `Backend::resolves_on_disk`). Anything the fixture does not hold is "not found", so a test that
-//! forgets a file fails loudly.
+//! action log as a live run (02 "The probe facade"). A command arrives here after the probe checked it
+//! against the command table for the check's OS, so the fixture can never be asked to "run" a shell, a
+//! privilege tool or any program the table does not list: the table refused it first. Nothing is
+//! started and no program is looked up on the machine. Anything the fixture does not hold is "not
+//! found", so a test that forgets a file fails loudly.
 
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use super::sealed::Sealed;
-use super::{Backend, DirEntry, FileBytes, FileMeta};
-#[cfg(feature = "runtime")]
-use super::{Output, ProbeError, ResolvedCmd};
+use super::{Backend, DirEntry, FileBytes, FileMeta, Output, ProbeError};
 use crate::check::BoxFuture;
+use crate::exec::policy::Cmd;
 
 /// A recorded machine: files, directories and command output.
 #[derive(Debug, Clone, Default)]
 pub struct Replay {
     files: HashMap<PathBuf, Vec<u8>>,
     dirs: HashMap<PathBuf, Vec<DirEntry>>,
-    #[cfg(feature = "runtime")]
     commands: HashMap<(String, Vec<String>), Output>,
 }
 
@@ -47,8 +45,8 @@ impl Replay {
         self
     }
 
-    /// Adds the output of `program args...`. The log shows the program as `/usr/bin/<program>`.
-    #[cfg(feature = "runtime")]
+    /// Adds the output of `program args...`. The command must still be one the table lists for the
+    /// check's OS, or the probe refuses it before the fixture is asked.
     #[must_use]
     pub fn command(mut self, program: &str, args: &[&str], exit: i32, stdout: &str) -> Self {
         let output = Output::new(Some(exit), stdout.as_bytes().to_vec());
@@ -99,8 +97,7 @@ impl Backend for Replay {
         })
     }
 
-    #[cfg(feature = "runtime")]
-    fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
+    fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
         Box::pin(async move {
             let args = cmd
                 .arguments()
@@ -112,10 +109,5 @@ impl Backend for Replay {
                 .cloned()
                 .ok_or(ProbeError::NotFound)
         })
-    }
-
-    #[cfg(feature = "runtime")]
-    fn resolves_on_disk(&self) -> bool {
-        false
     }
 }

@@ -1,0 +1,8 @@
+# Whole backtick spans in fix text that are not commands: quoted log messages and lines of config
+# files (crates/rdy-engine/src/fixtext.rs). The text must match the span exactly. One per line,
+# sorted by byte. A line that starts with # is a comment.
+blacklist nouveau
+forward . {upstream}
+invalid peer certificate: UnknownIssuer
+options nouveau modeset=0
+unexpected EOF

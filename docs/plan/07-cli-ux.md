@@ -61,6 +61,7 @@ every shell tool uses it.
 `rdy verify` stays top level because the plan names it; `rdy spec --help` ends with "See also: rdy verify".
 `rdy`, `rdy spec` and `rdy trust` with no subcommand print help on stdout and exit 0. A missing required
 argument is a usage error: exit 64.
+On Windows `rdy trust add` exits 64 and is not supported in M1 (ADR 0027).
 
 **Global flags** (every command, before or after the subcommand): `--color <auto|always|never>`,
 `--progress <auto|never>` (env `RDY_PROGRESS`), `-q/--quiet` (conflicts with `-v`), `-v/--verbose`, `-h`
@@ -555,6 +556,19 @@ the fix is `chmod 600 <file>`. Windows opens the file without following a repars
 type only; it does not check ACLs. The password is held in memory that is wiped on drop. `--password` is
 refused before clap parses anything, on `spec sign` and `spec keygen` only, so the refusal beats a
 missing-argument error and the value is never read. The code is `crates/rdy-cli/src/password.rs`.
+
+**Secret key files (M1-125).** `spec keygen` writes `<name>.key` and `<name>.pub` with `create_new`, so it
+never replaces a file and never follows a link, and the secret key has mode 0600 from the first byte. It
+looks for both names before it asks for a password. The password comes from `--password-file`,
+`RDY_KEY_PASSWORD` or two prompts that must match, and an empty one is refused. With `--unencrypted` it asks
+for nothing and prints a warning, and `--password-file` is refused together with it. If `RDY_KEY_PASSWORD` is
+also set, it prints `note: RDY_KEY_PASSWORD is set and was not used (--unencrypted)`. `spec sign` lints the
+spec first and asks for nothing if lint fails. It opens the key once without following a symlink and checks
+the open handle (regular file, yours, no group or other access, at most 1 KiB), then asks for the password
+only if the key is encrypted, and prints `warning: <key> is not protected by a password` when it is not. A key
+file may ask for no more than scrypt N = 2^20 and 1 GiB, with p = 1 (ADR 0022).
+Windows checks the file type only and a new file gets its folder's access list, and the success message
+says so. The code is `crates/rdy-cli/src/spec_cmds.rs` and `crates/rdy-cli/src/signing/`.
 
 **`RDY_KEY_PASSWORD` is the weakest source.** The same user's processes and root can read it from
 `/proc/<pid>/environ`, and every child process inherits it. In CI, store it as a masked secret and prefer a
@@ -2602,7 +2616,7 @@ checked by `cargo deny`.
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (and lower case) | `run` | Proxy settings for network checks. Printed without user info | M1 |
 | `SSL_CERT_FILE`, `SSL_CERT_DIR` | `run` | Extra trust roots, where the platform loader reads them (Linux) | M1 |
 | `KUBECONFIG` | `run` | Kubeconfig path list. `--kubeconfig` wins | M1 |
-| `HOME`, `XDG_CONFIG_HOME`, `APPDATA` | `trust`, `run`, `verify` | The user trust file. Never read when euid is 0 (ADR 0002). The kube client also reads `HOME` for `~/.kube/config` | M1 |
+| `HOME`, `XDG_CONFIG_HOME` | `trust`, `run`, `verify` | The user trust file (Unix only; Windows has no user store and never reads `APPDATA`, ADR 0027). Never read when euid is 0 (ADR 0002). The kube client also reads `HOME` for `~/.kube/config` | M1 |
 | `USERPROFILE` | `run` (Windows) | Default report folder `%USERPROFILE%\rdy-reports` (ADR 0016) | M1 |
 | `RDY_KEY_PASSWORD` | `spec sign`, `spec keygen` | Signing key password for CI. The prompt and `--password-file` are the other ways | M1 |
 | `RDY_TOKEN` | `run`, `bundle`, `upload` | Share-link token, `rdy_st_...` | M2 |

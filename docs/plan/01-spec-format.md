@@ -372,8 +372,8 @@ id for the same product, and refuses malformed and small-order keys, as does `--
 | Running as | Reads | `rdy trust add` writes |
 | --- | --- | --- |
 | euid 0 on Unix | only `/etc/rdy/trust.yaml`, whatever `HOME`, `SUDO_USER` or `XDG_CONFIG_HOME` say | `/etc/rdy/trust.yaml` |
-| elevated on Windows | only `%ProgramData%\rdy\trust.yaml` | that file |
-| a normal user | `$XDG_CONFIG_HOME/rdy/trust.yaml` (default `~/.config/rdy/trust.yaml`; Windows `%APPDATA%\rdy\trust.yaml`), then the system file (threat model Surface 2, requirement 3) | the user file |
+| Windows | only `%ProgramData%\rdy\trust.yaml`, never `%APPDATA%`, elevated or not (ADR 0027) | nothing in M1 (M2-105) |
+| a normal user on Unix | `$XDG_CONFIG_HOME/rdy/trust.yaml` (default `~/.config/rdy/trust.yaml`), then the system file (threat model Surface 2, requirement 3) | the user file |
 
 **A root run never stats, opens or parses any path under a user's home**, not even to word a hint
 (threat model INV-04). Whenever a root run finds no matching key it prints the same hint: `as root, rdy
@@ -385,9 +385,9 @@ trust add acme-platform --key <file>`.
 - Unix system file: a symlink, not owned by root, group or world writable, or in a directory writable by
   anyone but root (ADR 0002 decision 4). User file: group or world writable, and, by ADR 0021, a symlink or a
   file that another user owns, or a user folder (`~/.config/rdy`) that is a symlink, is owned by another
-  user, or is group or world writable. Until the Windows rules below are built (M1-122), a Windows trust file that
-  exists is refused as unverifiable (ADR 0021).
-- Windows, elevated runs: refused unless the file and `%ProgramData%\rdy` are owned by `Administrators`
+  user, or is group or world writable. Until the Windows rules below are built (M2-105), a Windows trust file that
+  exists is refused as unverifiable (ADR 0021, ADR 0027).
+- Windows (M2-105; in M1 every existing store is refused, ADR 0027), elevated runs: refused unless the file and `%ProgramData%\rdy` are owned by `Administrators`
   or `SYSTEM`, their DACLs grant write, delete or `WRITE_DAC` to no other principal (CREATOR OWNER
   included), and neither is a reparse point. By default `BUILTIN\Users` may create folders under
   `C:\ProgramData`, so a store a non-admin user pre-created must fail. `rdy trust add`, run elevated,
@@ -424,8 +424,9 @@ lints and signs one buffer.
 
 1. Read the spec (1 MiB cap) and the sidecar (4 KiB cap).
 2. Parse the sidecar; reject legacy `Ed` and any trusted comment not in the 4.2 form.
-3. Look up keys pinned for the comment's `product`: `--key` first, then the stores; preselect by key id,
-   match the full public key.
+3. Look up keys pinned for the comment's `product`. With `--key`, only that key is considered and **no
+   store is read** (`trust::load` is not called, ADR 0027), so a refused or planted store cannot stop a
+   `--key` run. Without it, the stores: preselect by key id, match the full public key.
 4. Verify the raw bytes, then the global signature over the comment.
 5. Only now parse the YAML (ADR 0001) and validate (2.5).
 6. Check `metadata.product` equals the comment's `product`.
@@ -435,16 +436,19 @@ lints and signs one buffer.
 
 `rdy spec keygen` writes the secret key with `create_new`, mode 0600, password-encrypted unless
 `--unencrypted` (for vendor CI, ADR 0002 decision 8), plus the public key file, and prints the
-fingerprint for the vendor to publish on its docs page.
+fingerprint for the vendor to publish on its docs page. The encryption is scrypt at the cost stock
+minisign uses, N = 2^20 and 1 GiB, which is also the most a key file may ask for (ADR 0022).
 
 `rdy spec sign <spec> [--secret-key <file>] [--sig <out>] [--force]` (flags final in 07-cli-ux.md):
 
 1. Runs `rdy spec lint` on the buffer. Any error refuses to sign (2.5); warnings are printed.
 2. Refuses a secret key readable by group or others. Asks for its password if encrypted.
 3. Signs the exact bytes with the 4.2 trusted comment, `signed_at` = now.
-4. Writes `<spec>.minisig` with exclusive create; `--force` replaces it.
-5. Verifies its own output, then prints the key id, the fingerprint, the spec SHA-256 and the lines the
-   vendor sends to customers: `rdy trust add acme-platform --key acme-platform.pub` and "the fingerprint
+4. Checks the signature with `rdy_spec::load`, the code a customer's rdy runs, with the key pinned for the
+   product. This happens before anything is written. A failure is an internal error (exit 70).
+5. Writes `<spec>.minisig` with exclusive create; `--force` writes a new file beside it and renames it over
+   the old one, so a symlink at the path is replaced and never written through. Then it prints the key id,
+   the fingerprint, the spec SHA-256 and the lines the vendor sends to customers: `rdy trust add acme-platform --key acme-platform.pub` and "the fingerprint
    is <hex>; compare it before you say yes".
 
 Stock minisign interoperates: `minisign -V` verifies an rdy signature, and a spec signed with
@@ -505,13 +509,13 @@ known (ADR 0008 decision 7). Spec content errors are in 2.5.
 | --- | --- | --- | --- |
 | `spec_unreadable` | the spec file is missing, not a regular file, or unreadable | `error: cannot read acme-platfrom.yaml: no such file` | `fix: check the file name and the folder you are in` (07 C.6) |
 | `spec_unsigned` | no sidecar, no flag | `error: no signature found at acme-platform.yaml.minisig` | `fix: ask the vendor for acme-platform.yaml.minisig and put it next to the spec.` and `If you wrote this spec yourself, see https://docs.getrdy.io/unsigned` |
-| `spec_key_unknown` | no pinned key matches | `error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05 (fingerprint 4d2a...0a1c), which you have not trusted for acme-platform` | `fix: get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then run: rdy trust add acme-platform --key <file>` |
+| `spec_key_unknown` | no pinned key matches | `error: acme-platform.yaml is signed with key 9F3A6C21D4E87B05 (fingerprint 4d2a...0a1c), which you have not trusted for acme-platform` | `fix: get the vendor's public key from their docs, compare its fingerprint with what the vendor tells you, then run: rdy trust add acme-platform --key <file>` (Windows in M1, where `rdy trust add` is not supported: `fix: see https://docs.getrdy.io/unsigned`, ADR 0027) |
 | `spec_signature_invalid`, tampered | bytes or comment do not verify | `error: the signature on acme-platform.yaml does not match the file. It may have been changed after signing.` | `fix: get a fresh copy and its .minisig from the vendor. Do not run this file.` |
 | `spec_signature_invalid`, form | legacy `Ed`, malformed sidecar or comment, unreadable sidecar | `error: the signature on acme-platform.yaml is not in the form rdy accepts.` | same fix |
 | `spec_signature_invalid`, product | comment or metadata product differs | `error: acme-platform.yaml is signed for product 'acme-edge', but the spec says 'acme-platform'.` | same fix |
 | any of the above, file has CRLF | | adds `The file has Windows line endings. If it went through Git or email, ask for the original.` | |
 | `spec_expired` | `metadata.expires` has passed | `error: acme-platform.yaml expired on 2027-01-31. This machine's clock says 2027-02-03.` | `fix: ask the vendor for a current spec. If this machine's clock is wrong, set it and run again.` |
-| `trust_store_insecure` | 4.3 | `error: /etc/rdy/trust.yaml is writable by other users` | `fix: chmod 644 /etc/rdy/trust.yaml` (Windows: `fix: run rdy trust add from an elevated prompt to recreate the store`) |
+| `trust_store_insecure` | 4.3 | `error: /etc/rdy/trust.yaml is writable by other users` | `fix: chmod 644 /etc/rdy/trust.yaml` (Windows in M1: `fix: ask an administrator to remove <path>. rdy cannot check who can change a trust store on Windows yet, so it reads none there. To check a spec meanwhile, see https://docs.getrdy.io/unsigned`, ADR 0027; from M2-105: `fix: run rdy trust add from an elevated prompt to recreate the store`) |
 
 `spec_unreadable`, `spec_expired` and `trust_store_insecure` are new codes, added to ADR 0008's list
 under ADR 0007's additive rule. One more ErrorOutput code is not about spec loading: `interrupted`

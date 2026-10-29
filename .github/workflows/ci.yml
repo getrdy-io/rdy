@@ -57,6 +57,14 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --locked
+      # The workspace build turns `runtime` on through the other crates. A probe gate without a runtime
+      # (replay) builds rdy-engine alone, so lint and document that build too (ADR 0028).
+      - name: cargo clippy rdy-engine without default features
+        run: cargo clippy --locked -p rdy-engine --no-default-features -- -D warnings
+      - name: cargo doc rdy-engine without default features
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked -p rdy-engine --no-default-features --no-deps
       # The JSON schemas are generated from the rdy-spec types. A type or doc comment that changed
       # without `cargo xtask schema` fails here and names the file to regenerate.
       - name: Generated schemas are current
@@ -65,16 +73,27 @@ jobs:
       # serde_json/preserve_order, which must stay out of the shipped binary (ADR 0019).
       - name: The binary does not build the schema generator
         run: |
-          tree="$(cargo tree --locked -p rdy -e features --target x86_64-unknown-linux-gnu)"
+          tree="$(cargo tree --locked -p rdy -e normal,build,features --target x86_64-unknown-linux-gnu)"
           if printf '%s\n' "$tree" | grep -E 'preserve_order|rdy-spec feature "schema"|rdy-engine feature "testing"'; then
             echo "::error::the rdy binary would build the schema generator, serde_json/preserve_order or the rdy-engine testing feature"
+            exit 1
+          fi
+      # rdy-cli's tests turn on the rdy-engine `testing` feature (the panicking-redactor seam) through a
+      # dev-dependency. It must never reach the shipped binary, so check the normal build graph.
+      - name: The binary does not build the rdy-engine testing feature
+        run: |
+          tree="$(cargo tree --locked -p rdy -e normal,features --target x86_64-unknown-linux-gnu)"
+          if printf '%s\n' "$tree" | grep -E 'rdy-engine feature "testing"'; then
+            echo "::error::the rdy binary would build the rdy-engine testing feature"
             exit 1
           fi
       # exec::run and ExecSpec::new are pub(crate) without the `testing` feature. A normal build, with no
       # dev-dependencies, must compile with that narrower surface.
       - name: The binary builds without the testing feature
         run: cargo check --locked -p rdy
-      # A --workspace build turns the feature on through xtask. This runs the binary's own feature set.
+      # A --workspace build turns the schema feature on through xtask. This runs the binary's own feature
+      # set for the normal dependencies. Tests of rdy still see the dev-dependency `testing` feature of
+      # rdy-engine, which the guard above keeps out of the shipped binary.
       - name: Test the binary's feature set
         run: cargo test --locked -p rdy -p rdy-engine
 
@@ -155,6 +174,41 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: scripts/check-dco.sh "$BASE_SHA" "$HEAD_SHA"
 
+  # install.sh (M1-014, SEC-08): shellcheck, then the shell tests with stub curl, id and uname. dash runs
+  # on the runner. busybox sh runs in an Alpine container pinned by digest, because Alpine's busybox
+  # looks up applets on PATH and so runs the stubs. The Ubuntu busybox-static package runs its own
+  # built-in id, uname and sha256sum first, so the stubs would be ignored. The harness checks this
+  # before the suite and fails if the stubs are bypassed. macOS /bin/sh runs in the `test` job.
+  # The tests fail, not skip, when a shell is missing (CI is set).
+  install-sh:
+    name: install-sh
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # alpine:3.24 (3.24.3), index digest resolved 2026-10-29. Dependabot does not read this line.
+      # Bump the tag and the digest by hand when the Alpine release line moves.
+      ALPINE_IMAGE: alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install shellcheck
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: shellcheck@0.11.0
+      - name: shellcheck
+        run: shellcheck install.sh scripts/test-install-sh.sh
+      - name: Shell tests (dash)
+        run: sh scripts/test-install-sh.sh dash
+      # The repo is mounted read-only. The tests write only under the container's /tmp. openssl and
+      # perl-utils (shasum) are there to test the other two hash tools.
+      - name: Shell tests (busybox sh, Alpine)
+        run: |
+          docker run --rm -e CI=true -v "$PWD:/src:ro" "$ALPINE_IMAGE" \
+            sh -c 'apk add --no-cache openssl perl-utils > /dev/null && sh /src/scripts/test-install-sh.sh busybox'
+
   # Four native test legs and one compile leg (docs/plan/06, ADR 0006 decision 8). The Linux legs
   # build and test the musl targets, so CI tests what ships. The org has no macOS arm64 runners
   # (correction 05), so `macos-arm64-compile` builds the aarch64-apple-darwin target and compiles its
@@ -191,6 +245,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # install.sh under macOS /bin/sh (bash in POSIX mode) with the BSD tools. The dash and busybox
+      # runs are in the install-sh job.
+      - name: install.sh tests (macOS /bin/sh)
+        if: matrix.name == 'macos-x64'
+        run: sh scripts/test-install-sh.sh sh
       - name: Install musl-tools
         if: runner.os == 'Linux'
         run: |
@@ -213,6 +272,8 @@ jobs:
         uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest@0.9.149
+          # A missing prebuilt binary fails the step. It never falls back to `cargo install`.
+          fallback: none
       - name: Build the rdy binary
         if: ${{ !matrix.compile_only }}
         run: cargo build --locked --target "$TARGET" --package rdy
@@ -244,8 +305,15 @@ jobs:
           out=$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534:65534 -v "$dir:/rdy:ro" rdy-scratch /rdy/rdy version)
           echo "$out"
           echo "$out" | grep -q '^rdy '
+      # The C minisign program is the other end of the interop test (M1-125, ADR 0022). It is installed
+      # on this leg only, and the variable below makes a missing program fail the test, never skip it.
+      - name: Install C minisign
+        if: matrix.name == 'linux-x64'
+        run: sudo apt-get install -y --no-install-recommends minisign
       - name: Test (nextest, no retries)
         if: ${{ !matrix.compile_only }}
+        env:
+          RDY_REQUIRE_C_MINISIGN: ${{ matrix.name == 'linux-x64' && '1' || '' }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
       # nextest does not run doc tests. They build for the host, so they run on one leg only.
       - name: Doc tests
@@ -340,14 +408,34 @@ jobs:
         run: |
           sh scripts/test-install-release-tool.sh
           sh scripts/test-harden-release-workflow.sh
+          sh scripts/test-sign-release.sh
       - name: release.yml matches dist and the hardening script
         run: sh scripts/gen-release-workflow.sh --check
+
+  # M1-010: the real cosign verify-blob forms from 06 against real keyless signatures: cosign's own
+  # v3.1.4 release (identity and issuer) and goreleaser v2.19.0 (a GitHub Actions run: identity, issuer,
+  # repository, ref and trigger), each also after a change that must fail. It needs the network (GitHub
+  # and Sigstore's TUF mirror) and cosign, which the pinned installer provides. It is in ci-ok (ADR 0024).
+  cosign-roundtrip:
+    name: cosign-roundtrip
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install cosign (pinned file, sha256 checked)
+        run: sh scripts/install-release-tool.sh cosign
+      - name: verify-blob passes with the exact identity and claims, and fails on every change
+        run: sh scripts/test-cosign-roundtrip.sh
 
   # The only required check. Keep `needs:` equal to the list of gating jobs.
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, zizmor, deny, dco, test, root, release-workflow]
+    needs: [lint, zizmor, deny, dco, install-sh, test, root, release-workflow, cosign-roundtrip]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

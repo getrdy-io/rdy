@@ -16,13 +16,16 @@
 //! this order: the handle is checked, the policy is applied, the backend runs, the entry is closed. A
 //! refused call never reaches the backend.
 //!
-//! **Commands.** `Probe::exec` takes the one `Cmd` type of `exec::policy`. The probe applies what
-//! the check declared for that program in `CheckInfo::commands` (extra search directories, stdout cap,
-//! environment names), checks the name, resolves it to a real path, and only then hands a
-//! `ResolvedCmd` to `Backend::spawn`. A replayed run therefore refuses `sh` and `sudo` exactly as a
-//! live run does, and the backend never sees a name it could be tricked into running. A probe built
-//! with no `CheckInfo` (run-level work, or a test context from `TestRun::context`) applies the command
-//! policy only.
+//! **Commands.** `Probe::exec` takes the one `Cmd` type of `exec::policy`, built with
+//! `CommandEntry::cmd` from the command table (ADR 0028). The probe applies what the check declared for
+//! that program in `CheckInfo::commands` (extra search directories, stdout cap, environment names),
+//! then checks the command with `table::validate_for` for the check's OS, and only then hands it to
+//! `Backend::spawn`. A command that is not in the table is refused here, whichever backend is under
+//! it, so a replayed run refuses `sh`, `sudo` and anything unlisted exactly as a live run does. The
+//! provided `Backend::spawn` runs the command with `exec::table::run`, the only public command runner
+//! (it validates again, then applies the command policy). The replay backend overrides it with
+//! recorded output. A probe built with no `CheckInfo` (run-level work, or a test context from
+//! `TestRun::context`) skips the declaration step and still gets the table.
 //!
 //! **What is here, and what is not.** This ticket (M1-040) builds the handle, the log and the read
 //! denylist, with `read`, `read_dir`, `stat` and `exec`. Still to come, each in its own ticket:
@@ -31,10 +34,8 @@
 //! - names, TCP, TLS, HTTP and native calls: the network and native tickets. They open their entries
 //!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp, http and kube
 //!   call writes exactly one entry (M1-091, M1-103);
-//! - the live backend itself, which only these tickets can make safe to ship. It will implement
-//!   `Backend::spawn` by running the `ResolvedCmd` and mapping the runner's error to [`ProbeError`].
-//!   Only the replay backend (feature `testing`) exists today, so nothing in a release build reaches
-//!   the machine yet.
+//! - the live backend for files, which only these tickets can make safe to ship. Only the replay
+//!   backend (feature `testing`) exists today, so nothing in a release build reaches the machine yet.
 
 use std::fmt;
 use std::future::Future;
@@ -46,13 +47,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rdy_spec::result::{ActionKind, ActionOutcome};
 use serde_json::{Map, Value};
 
-use crate::check::{BoxFuture, CheckInfo};
+use crate::check::{BoxFuture, CheckInfo, Os, current_os};
+use crate::exec::policy::{Cmd, PolicyError};
+use crate::exec::table::{self, TableError};
 #[cfg(feature = "runtime")]
-use crate::exec::policy::PolicyError;
+use crate::exec::{ExecError, ExecOutput, policy::CommandError};
 use crate::redact::Redactor;
 
-#[cfg(feature = "runtime")]
-pub use crate::exec::policy::{Cmd, ResolvedCmd};
 pub use log::{ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, MAX_ENTRIES};
 
 use log::{ActionLog, Limits, Pending};
@@ -93,9 +94,12 @@ pub enum ProbeError {
         what: String,
     },
     /// The command policy refused the command. The text ends with what to do.
-    #[cfg(feature = "runtime")]
     #[error("refused by rdy policy: {0}")]
     Policy(#[from] PolicyError),
+    /// The command is not in the command table, or does not fit its entry. The text ends with what
+    /// to do, and never holds an argument value.
+    #[error("refused by rdy policy: {0}")]
+    Table(#[from] TableError),
     /// The file, directory or program does not exist.
     #[error("not found")]
     NotFound,
@@ -127,12 +131,25 @@ impl ProbeError {
         }
     }
 
+    /// Maps what `table::run` returns.
+    #[cfg(feature = "runtime")]
+    fn from_command(error: CommandError) -> Self {
+        match error {
+            CommandError::Policy(policy) => Self::Policy(policy),
+            CommandError::Table(table) => Self::Table(table),
+            CommandError::Exec(ExecError::Spawn(io)) => Self::from_io(&io),
+            CommandError::Exec(ExecError::Timeout) => Self::Timeout,
+            CommandError::Exec(ExecError::Hung { pid }) => Self::Hung { pid },
+            CommandError::Exec(ExecError::Io(text)) => Self::Io(text),
+            other => Self::Io(other.to_string()),
+        }
+    }
+
     /// How the action log records this error.
     fn outcome(&self) -> ActionOutcome {
         match self {
             Self::Denied { .. } => ActionOutcome::Denied,
-            #[cfg(feature = "runtime")]
-            Self::Policy(_) => ActionOutcome::Denied,
+            Self::Policy(_) | Self::Table(_) => ActionOutcome::Denied,
             Self::Timeout | Self::Hung { .. } => ActionOutcome::Timeout,
             Self::NotFound | Self::PermissionDenied | Self::Io(_) => ActionOutcome::Failed,
         }
@@ -259,6 +276,19 @@ impl Output {
     }
 }
 
+#[cfg(feature = "runtime")]
+impl From<ExecOutput> for Output {
+    fn from(done: ExecOutput) -> Self {
+        Self {
+            exit: done.status.code(),
+            stdout: done.stdout,
+            stdout_truncated: done.stdout_truncated,
+            stderr: done.stderr,
+            stderr_truncated: done.stderr_truncated,
+        }
+    }
+}
+
 mod sealed {
     /// Keeps [`super::Backend`] closed: only this crate can implement it (ADR 0014 decision 1).
     pub trait Sealed {}
@@ -275,17 +305,34 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
     fn read_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>>;
     /// Inspects a path. `Ok(None)` means it does not exist.
     fn stat<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
-    /// Runs a command that already passed the policy. Unlike the file calls this returns a
-    /// [`ProbeError`], because a start failure, a timeout and a command that would not die are not
-    /// `io::Error` kinds.
-    #[cfg(feature = "runtime")]
-    fn spawn<'a>(&'a self, cmd: &'a ResolvedCmd) -> BoxFuture<'a, Result<Output, ProbeError>>;
-    /// Whether the policy looks the program up on this machine. The live backend does. A fixture
-    /// backend says no: every other rule still applies, and the program gets the path
-    /// `/usr/bin/<name>`, so a replayed run does not depend on the tools the test machine has.
-    #[cfg(feature = "runtime")]
-    fn resolves_on_disk(&self) -> bool {
-        true
+    /// Runs a command that the probe already checked against the command table. Unlike the file
+    /// calls this returns a [`ProbeError`], because a start failure, a timeout and a command that would
+    /// not die are not `io::Error` kinds.
+    ///
+    /// The provided body is the live path: it hands the command to `exec::table::run`, the only public
+    /// command runner, which validates the command again and applies the command policy before
+    /// anything starts. A fixture backend overrides it and starts nothing. Without feature `runtime`
+    /// there is no runner and the call fails.
+    fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
+        #[cfg(feature = "runtime")]
+        {
+            Box::pin(async move {
+                table::run(cmd)
+                    .await
+                    .map(Output::from)
+                    .map_err(ProbeError::from_command)
+            })
+        }
+        #[cfg(not(feature = "runtime"))]
+        {
+            let _ = cmd;
+            Box::pin(async {
+                Err(ProbeError::Io(
+                    "this build of rdy-engine cannot run commands. Fix: build with feature `runtime`"
+                        .to_owned(),
+                ))
+            })
+        }
     }
 }
 
@@ -338,9 +385,10 @@ impl ProbeHub {
         self
     }
 
-    /// The probe for one check. `key` is the check's result key. `info` is the check's manifest: with
-    /// it, a command must be one the check declared, and its directories, environment names and stdout
-    /// cap come from the declaration.
+    /// The probe for one check. `key` is the check's result key and `os` the operating system the
+    /// check runs on, which the command table is read for. `info` is the check's manifest: with it, a
+    /// command must be one the check declared, and its directories, environment names and stdout cap
+    /// come from the declaration.
     #[cfg_attr(
         not(any(test, feature = "runtime", feature = "testing")),
         expect(
@@ -348,8 +396,13 @@ impl ProbeHub {
             reason = "only the scheduler and the test helpers open probes"
         )
     )]
-    pub(crate) fn check_probe(&self, key: &str, info: Option<&'static CheckInfo>) -> Probe {
-        self.probe(Some(key.to_owned()), info)
+    pub(crate) fn check_probe(
+        &self,
+        key: &str,
+        os: Os,
+        info: Option<&'static CheckInfo>,
+    ) -> Probe {
+        self.probe(Some(key.to_owned()), os, info)
     }
 
     /// The probe for run-level work, which the log records with `check: null`.
@@ -358,13 +411,13 @@ impl ProbeHub {
         expect(dead_code, reason = "the engine run (M1-057) opens run-level probes")
     )]
     pub(crate) fn run_probe(&self) -> Probe {
-        self.probe(None, None)
+        self.probe(None, current_os(), None)
     }
 
-    fn probe(&self, check: Option<String>, info: Option<&'static CheckInfo>) -> Probe {
+    fn probe(&self, check: Option<String>, os: Os, info: Option<&'static CheckInfo>) -> Probe {
         Probe {
             hub: Some(self.clone()),
-            scope: Arc::new(Scope::new(check, info)),
+            scope: Arc::new(Scope::new(check, os, info)),
         }
     }
 
@@ -377,11 +430,9 @@ impl ProbeHub {
 
 struct Scope {
     check: Option<String>,
+    /// The OS the command table is read for.
+    os: Os,
     /// The check's manifest. Only commands read it so far (M1-045 adds files and env).
-    #[cfg_attr(
-        not(feature = "runtime"),
-        expect(dead_code, reason = "commands need the runtime feature")
-    )]
     info: Option<&'static CheckInfo>,
     ended: AtomicBool,
     /// Tells calls in flight that the check ended.
@@ -390,9 +441,10 @@ struct Scope {
 }
 
 impl Scope {
-    fn new(check: Option<String>, info: Option<&'static CheckInfo>) -> Self {
+    fn new(check: Option<String>, os: Os, info: Option<&'static CheckInfo>) -> Self {
         Self {
             check,
+            os,
             info,
             ended: AtomicBool::new(false),
             #[cfg(feature = "runtime")]
@@ -432,7 +484,7 @@ impl Probe {
     pub(crate) fn closed() -> Self {
         Self {
             hub: None,
-            scope: Arc::new(Scope::new(None, None)),
+            scope: Arc::new(Scope::new(None, current_os(), None)),
         }
     }
 
@@ -560,17 +612,18 @@ impl Probe {
 
     /// Runs a command.
     ///
-    /// The probe applies what the check declared for this program, checks the name, resolves it and
-    /// hands the backend a [`ResolvedCmd`]. The entry records the resolved program path, the arguments
+    /// Build the command with `CommandEntry::cmd` from the command table. The probe applies what the
+    /// check declared for this program, checks the command against the table for the check's OS, and
+    /// hands it to the backend. The entry records the program name, the form id, the arguments
     /// (redacted, including the value after a secret flag), the exit code and how many bytes of stdout
     /// were kept.
     ///
     /// # Errors
     ///
     /// [`ProbeError::Denied`] after the check ended, for a program or environment name the check did
-    /// not declare; [`ProbeError::Policy`] when the command policy refuses; the other variants when the
+    /// not declare; [`ProbeError::Table`] when the command is not in the table or does not fit its
+    /// entry; [`ProbeError::Policy`] when the command policy refuses; the other variants when the
     /// command fails or times out.
-    #[cfg(feature = "runtime")]
     pub async fn exec(&self, cmd: Cmd) -> Result<Output, ProbeError> {
         let mut fields = Map::new();
         fields.insert("program".to_owned(), cmd.program().into());
@@ -584,14 +637,13 @@ impl Probe {
             ),
         );
         let (hub, mut entry) = self.begin(ActionKind::Exec, fields, cmd.program())?;
-        let resolved = match self.resolve(hub, cmd) {
-            Ok(resolved) => resolved,
+        let (cmd, form) = match self.admit(cmd) {
+            Ok(admitted) => admitted,
             Err(error) => return settle(entry, Err(error), |_: &Output, _| {}),
         };
-        entry.set("program", hub.log.display_path(resolved.path()));
-        let result = self
-            .unless_ended(resolved.program(), hub.backend.spawn(&resolved))
-            .await;
+        entry.set("form", form);
+        let program = cmd.program();
+        let result = self.unless_ended(program, hub.backend.spawn(cmd)).await;
         settle(entry, result, |done, entry| {
             entry.set("exit", done.exit);
             entry.set("stdout_bytes", done.stdout.len());
@@ -599,9 +651,9 @@ impl Probe {
         })
     }
 
-    /// Applies the check's declaration to `cmd`, then the command policy.
-    #[cfg(feature = "runtime")]
-    fn resolve(&self, hub: &ProbeHub, cmd: Cmd) -> Result<ResolvedCmd, ProbeError> {
+    /// Applies the check's declaration to `cmd`, then the command table. Returns the command and the
+    /// id of the table form it matched.
+    fn admit(&self, cmd: Cmd) -> Result<(Cmd, &'static str), ProbeError> {
         let cmd = match self.scope.info {
             Some(info) => {
                 let program = cmd.program();
@@ -610,13 +662,21 @@ impl Probe {
                     .iter()
                     .find(|spec| spec.program == program)
                     .ok_or_else(|| ProbeError::denied(RULE_COMMAND_UNDECLARED, program))?;
-                cmd.declared(spec)
-                    .map_err(|name| ProbeError::denied(RULE_ENV_UNDECLARED, name))?
+                if let Some(name) = cmd
+                    .declared_env_names()
+                    .find(|name| !spec.env.contains(name))
+                {
+                    return Err(ProbeError::denied(RULE_ENV_UNDECLARED, name));
+                }
+                // The declaration can narrow the command and never widen it: the declared
+                // directories replace the entry's, and the cap is the lower of the two.
+                let cap = cmd.output_cap().min(spec.max_stdout);
+                cmd.extra_dirs(spec.extra_dirs).stdout_cap(cap)
             }
             None => cmd,
         };
-        crate::exec::policy::resolve_cmd(&cmd, hub.backend.resolves_on_disk())
-            .map_err(ProbeError::Policy)
+        let listed = table::validate_for(self.scope.os, &cmd)?;
+        Ok((cmd, listed.form.id))
     }
 
     /// The common start of a file call: the handle checks, then the read denylist.
@@ -660,8 +720,9 @@ fn settle<T>(
         Err(error) => {
             match error {
                 ProbeError::Denied { rule, .. } => entry.set("rule", *rule),
-                #[cfg(feature = "runtime")]
-                ProbeError::Policy(policy) => entry.set("rule", policy.to_string()),
+                ProbeError::Policy(_) | ProbeError::Table(_) => {
+                    entry.set("rule", error.to_string());
+                }
                 other => entry.set("error", other.to_string()),
             }
             entry.finish(error.outcome());
