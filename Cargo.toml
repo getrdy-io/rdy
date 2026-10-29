@@ -58,7 +58,7 @@ cap-primitives = { version = "4.0.3", default-features = false }
 zeroize = { version = "1", default-features = false, features = ["alloc"] }
 # Spec signature checks (M1-120, ADR 0018). Exact pins: every bump is reviewed by hand.
 ed25519-dalek = { version = "=2.2.0", default-features = false }
-blake2 = { version = "=0.10.6", default-features = false }
+blake2 = { version = "=0.11.0", default-features = false }
 # Secret key files and signing (M1-125, ADR 0022). `scrypt` and `ct-codecs` are the crates stock minisign
 # tooling in Rust uses for the same format. `getrandom` makes the keys. Exact pins (ADR 0018): they touch
 # secret bytes, so every bump is reviewed by hand.
