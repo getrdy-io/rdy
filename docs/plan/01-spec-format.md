@@ -383,7 +383,10 @@ trust add acme-platform --key <file>`.
 **Refusal rules** (exit 64, `trust_store_insecure`, with the reason):
 
 - Unix system file: a symlink, not owned by root, group or world writable, or in a directory writable by
-  anyone but root (ADR 0002 decision 4). User file: group or world writable.
+  anyone but root (ADR 0002 decision 4). User file: group or world writable, and, by ADR 0021, a symlink or a
+  file that another user owns, or a user folder (`~/.config/rdy`) that is a symlink, is owned by another
+  user, or is group or world writable. Until the Windows rules below are built (M1-122), a Windows trust file that
+  exists is refused as unverifiable (ADR 0021).
 - Windows, elevated runs: refused unless the file and `%ProgramData%\rdy` are owned by `Administrators`
   or `SYSTEM`, their DACLs grant write, delete or `WRITE_DAC` to no other principal (CREATOR OWNER
   included), and neither is a reparse point. By default `BUILTIN\Users` may create folders under

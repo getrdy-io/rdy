@@ -170,11 +170,13 @@ fn back_onto_tab(text: &str, at: Location) -> Location {
     let before = usize::try_from(at.column)
         .unwrap_or(usize::MAX)
         .saturating_sub(2);
-    let is_tab = text
-        .split('\n')
-        .nth(line)
-        .and_then(|l| l.chars().nth(before))
-        == Some('\t');
+    // Column 1 has no character before it, so the reader already points at the tab.
+    let is_tab = at.column >= 2
+        && text
+            .split('\n')
+            .nth(line)
+            .and_then(|l| l.chars().nth(before))
+            == Some('\t');
     if is_tab {
         Location::new(at.line, at.column - 1)
     } else {
