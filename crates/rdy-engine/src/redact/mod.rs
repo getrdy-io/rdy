@@ -74,7 +74,8 @@ pub enum RedactError {
     /// The text of the serde error is dropped on purpose: it can quote a value.
     #[error(
         "the report could not be redacted, so nothing was written. \
-         Fix: this is a bug in rdy. Run again, and if it repeats, tell the vendor"
+         Fix: this is a bug in rdy. Please report it at https://github.com/getrdy-io/rdy/issues \
+         and include the output of rdy version"
     )]
     ReportShape,
 }

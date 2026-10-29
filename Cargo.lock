@@ -958,6 +958,7 @@ version = "0.1.0-alpha.0"
 name = "rdy-engine"
 version = "0.1.0-alpha.0"
 dependencies = [
+ "proptest",
  "rdy-engine",
  "rdy-spec",
  "regex",

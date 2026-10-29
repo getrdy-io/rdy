@@ -38,6 +38,7 @@ rustix = { workspace = true, features = ["std", "process", "fs"], optional = tru
 rdy-engine = { path = ".", features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tempfile = { workspace = true }
+proptest = { workspace = true, features = ["std"] }
 trybuild = { workspace = true }
 
 [lints]

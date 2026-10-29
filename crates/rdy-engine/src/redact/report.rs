@@ -16,19 +16,29 @@
 //! | `observed` and `expected` | 64 KiB each, measured as compact JSON, and lists cut to 200 items |
 //!
 //! `observed`, `expected`, an action's `argv` and the env pairs inside them are free-form, so they also
-//! get the whole-member rule: the string values under a member whose key names a secret (`password`,
-//! `api_token`) and the `value` of a `{name, value}` pair whose `name` does are replaced whole. Numbers,
-//! booleans and `null` are kept: a count such as `token_ttl_ms` is not a secret. The rule never touches
-//! a schema-defined field, so `summary.pass` and a key such as `passed` survive.
+//! get the whole-member rule: the strings and numbers under a member whose key names a secret
+//! (`password`, `api_token`) and the `value` of a `{name, value}` (or `{key, value}`) pair whose name
+//! does are replaced whole. Numbers stay only when the key's last word is a unit or a count
+//! (`token_ttl_ms`, `password_len`). Booleans and `null` stay. A list of strings in free-form data is read
+//! as a command line, so `["--password", "hunter2"]` loses its second item. The rule never touches a
+//! schema-defined field, so `summary.pass` and a key such as `passed` survive.
+//!
+//! `redaction.total` and `by_rule` count every replacement the walk made, including in text that a later
+//! cap or cut dropped (a list past 200 items, notes past 20, keys dropped to fit 64 KiB). They are never
+//! lower than what was hidden.
 //!
 //! The 2 MiB cap on the whole document is measured on the written bytes, so it belongs to the writer.
 
-use rdy_spec::result::{Action, CheckResult, RedactionRuleset, Report};
+use std::collections::HashSet;
+
+use rdy_spec::result::{Action, CheckResult, Redaction, RedactionRuleset, Report};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
-use super::rules::{SECRET_BY_KEY, is_exempt_value, is_secret_key, placeholder_spans};
+use super::rules::{
+    SECRET_BY_KEY, is_exempt_value, is_secret_key, last_word_is_unit, placeholder_spans,
+};
 use super::{RedactError, Redacted, RedactedReport, Redactor, RuleCounts};
 
 const KIB: usize = 1024;
@@ -73,12 +83,14 @@ impl Redactor {
         report: Report,
         earlier: RuleCounts,
     ) -> Result<RedactedReport, RedactError> {
+        let mut report = report;
+        // Whatever the caller put there is not trusted: the block is rebuilt from this walk's counts.
+        report.redaction = Redaction::new(RedactionRuleset::Report);
         let mut value = to_value(&report)?;
         drop(report);
         let mut counts = earlier;
         Walk::new(self, &mut counts).report(&mut value);
         let mut out: Report = from_value(value)?;
-        out.redaction.ruleset = RedactionRuleset::Report;
         out.redaction.total = counts.total();
         out.redaction.by_rule = counts
             .iter()
@@ -132,15 +144,24 @@ fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, RedactError> {
     serde_json::from_value(value).map_err(|_| RedactError::ReportShape)
 }
 
-/// One walk: the redactor and the tally it adds to.
+/// Room kept in a key for the `~2` suffix of a collision.
+const SUFFIX_ROOM: usize = 12;
+
+/// One walk: the redactor, the tally it adds to, and whether any cap cut something since the flag was
+/// last taken.
 struct Walk<'a> {
     redactor: &'a Redactor,
     counts: &'a mut RuleCounts,
+    cut: bool,
 }
 
 impl<'a> Walk<'a> {
     fn new(redactor: &'a Redactor, counts: &'a mut RuleCounts) -> Self {
-        Self { redactor, counts }
+        Self {
+            redactor,
+            counts,
+            cut: false,
+        }
     }
 
     /// Redacts one string.
@@ -148,8 +169,15 @@ impl<'a> Walk<'a> {
         self.redactor.redact_str_counted(text, self.counts).0
     }
 
-    /// The report: results and actions get their own caps, `redaction` is rewritten by the caller, and
-    /// everything else is a plain string field.
+    /// Caps a redacted string and remembers whether it was cut.
+    fn capped_text(&mut self, redacted: String, max: usize) -> String {
+        let (text, was_cut) = cap(redacted, max);
+        self.cut |= was_cut;
+        text
+    }
+
+    /// The report: results and actions get their own caps, and everything else is a plain string field.
+    /// The `redaction` block was reset before the walk, so walking it changes nothing.
     fn report(&mut self, report: &mut Value) {
         let Value::Object(fields) = report else {
             return self.generic(report);
@@ -166,46 +194,50 @@ impl<'a> Walk<'a> {
                         self.action(action);
                     }
                 }
-                // Rewritten after the walk. Walking it would count the rule names as text.
-                ("redaction", _) => {}
                 (_, value) => self.generic(value),
             }
         }
     }
 
-    /// One result. Sets `truncated` when a cap cut `message`, `fix`, `builtin_fix`, `notes`, `observed`
-    /// or `expected`.
+    /// One result. Sets `truncated` when a cap cut any string, list or map in it.
     fn check(&mut self, check: &mut Value) {
-        let Value::Object(fields) = check else {
-            return self.generic(check);
-        };
-        let mut cut = false;
-        for (name, value) in fields.iter_mut() {
-            match name.as_str() {
-                "message" => self.capped(value, MESSAGE_CAP, &mut cut),
-                "fix" | "builtin_fix" => self.capped(value, STRING_CAP, &mut cut),
-                "notes" => self.notes(value, &mut cut),
-                "observed" | "expected" => self.free_form(value, &mut cut),
-                "truncated" => {}
-                _ => self.generic(value),
-            }
-        }
-        if cut {
+        let outer = std::mem::replace(&mut self.cut, false);
+        self.check_fields(check);
+        let cut = std::mem::replace(&mut self.cut, outer);
+        if cut && let Value::Object(fields) = check {
             fields.insert("truncated".to_owned(), Value::Bool(true));
         }
     }
 
+    fn check_fields(&mut self, check: &mut Value) {
+        let Value::Object(fields) = check else {
+            return self.generic(check);
+        };
+        for (name, value) in fields.iter_mut() {
+            match name.as_str() {
+                "message" => self.capped(value, MESSAGE_CAP),
+                "fix" | "builtin_fix" => self.capped(value, STRING_CAP),
+                "notes" => self.notes(value),
+                "observed" | "expected" => self.free_form(value),
+                "truncated" => {}
+                _ => self.generic(value),
+            }
+        }
+    }
+
     /// One action entry. `argv` is free-form: a flag that names a secret takes the next argument whole.
+    /// The entry's other fields are flattened into the same object, so its keys are redacted too.
     fn action(&mut self, action: &mut Value) {
         let Value::Object(fields) = action else {
             return self.generic(action);
         };
         for (name, value) in fields.iter_mut() {
             match (name.as_str(), value) {
-                ("argv", Value::Array(args)) => self.argv(args),
+                ("argv", Value::Array(args)) => self.argv(args, true),
                 (_, value) => self.generic(value),
             }
         }
+        self.rekey(fields);
     }
 
     /// Redacts every string, capped at [`STRING_CAP`], and the keys of every object.
@@ -213,7 +245,7 @@ impl<'a> Walk<'a> {
         match value {
             Value::String(s) => {
                 let redacted = self.text(s);
-                *s = cap(redacted, STRING_CAP).0;
+                *s = self.capped_text(redacted, STRING_CAP);
             }
             Value::Array(items) => {
                 for item in items {
@@ -231,61 +263,65 @@ impl<'a> Walk<'a> {
     }
 
     /// A string field with its own cap. Other value types are walked as plain fields.
-    fn capped(&mut self, value: &mut Value, max: usize, cut: &mut bool) {
+    fn capped(&mut self, value: &mut Value, max: usize) {
         let Value::String(s) = value else {
             return self.generic(value);
         };
         let redacted = self.text(s);
-        let (text, was_cut) = cap(redacted, max);
-        *s = text;
-        *cut |= was_cut;
+        *s = self.capped_text(redacted, max);
     }
 
-    fn notes(&mut self, value: &mut Value, cut: &mut bool) {
+    fn notes(&mut self, value: &mut Value) {
         let Value::Array(notes) = value else {
             return self.generic(value);
         };
         for note in notes.iter_mut() {
-            self.capped(note, MESSAGE_CAP, cut);
+            self.capped(note, MESSAGE_CAP);
         }
         if notes.len() > MAX_NOTES {
             notes.truncate(MAX_NOTES);
-            *cut = true;
+            self.cut = true;
         }
     }
 
     /// `observed` or `expected`: the whole-member rule, the list cut, then the size cap.
-    fn free_form(&mut self, value: &mut Value, cut: &mut bool) {
-        self.free(value, cut);
+    fn free_form(&mut self, value: &mut Value) {
+        self.free(value);
         if let Value::Object(map) = value {
-            *cut |= cap_map(map);
+            self.cut |= cap_map(map);
         }
     }
 
-    fn free(&mut self, value: &mut Value, cut: &mut bool) {
+    fn free(&mut self, value: &mut Value) {
         match value {
             Value::String(s) => *s = self.text(s),
             Value::Array(items) => {
-                // Redact first and cut second, so what is dropped has been counted like the rest.
-                for item in items.iter_mut() {
-                    self.free(item, cut);
+                // A list of strings may be a command line: `["--password", "hunter2"]`.
+                if !items.is_empty() && items.iter().all(Value::is_string) {
+                    self.argv(items, false);
+                } else {
+                    // Redact first and cut second, so what is dropped has been counted like the rest.
+                    for item in items.iter_mut() {
+                        self.free(item);
+                    }
                 }
                 if items.len() > MAX_LIST_ITEMS {
                     items.truncate(MAX_LIST_ITEMS);
-                    *cut = true;
+                    self.cut = true;
                 }
             }
             Value::Object(map) => {
                 // `{"name": "DB_PASSWORD", "value": "..."}`: the name says what the value is.
-                let pair_is_secret = map
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .is_some_and(is_secret_key);
+                let pair = pair_name_is_secret(map);
                 for (key, item) in map.iter_mut() {
-                    if is_secret_key(key) || (pair_is_secret && key == "value") {
-                        self.blank(item);
+                    if is_secret_key(key) {
+                        self.blank(item, last_word_is_unit(key));
+                    } else if let Some(keep_numbers) = pair
+                        && key.eq_ignore_ascii_case("value")
+                    {
+                        self.blank(item, keep_numbers);
                     } else {
-                        self.free(item, cut);
+                        self.free(item);
                     }
                 }
                 self.rekey(map);
@@ -294,11 +330,13 @@ impl<'a> Walk<'a> {
         }
     }
 
-    /// Replaces every string under a secret-named member with a placeholder of that string.
+    /// Replaces every string and number under a secret-named member with a placeholder of its text.
     ///
-    /// Empty strings and the forms the key rule leaves alone (`${NAME}`, `null`, a `/run/secrets/` path,
-    /// a placeholder) stay, so the two rules agree.
-    fn blank(&mut self, value: &mut Value) {
+    /// `keep_numbers` is true when the key's last word is a unit or a count (`token_ttl_ms`), so its
+    /// numbers stay. Empty strings and the forms the key rule leaves alone (`${NAME}`, `null`, a
+    /// `/run/secrets/` path, a placeholder, the cut marker) stay, so the two rules agree. Booleans and
+    /// `null` stay.
+    fn blank(&mut self, value: &mut Value, keep_numbers: bool) {
         match value {
             Value::String(s) => {
                 if !s.is_empty() && !is_exempt_value(s) {
@@ -306,14 +344,19 @@ impl<'a> Walk<'a> {
                     self.counts.add(SECRET_BY_KEY);
                 }
             }
+            Value::Number(n) if !keep_numbers => {
+                let text = n.to_string();
+                *value = Value::String(self.redactor.placeholder(SECRET_BY_KEY, text.as_bytes()));
+                self.counts.add(SECRET_BY_KEY);
+            }
             Value::Array(items) => {
                 for item in items {
-                    self.blank(item);
+                    self.blank(item, keep_numbers);
                 }
             }
             Value::Object(map) => {
                 for (_, item) in map.iter_mut() {
-                    self.blank(item);
+                    self.blank(item, keep_numbers);
                 }
                 self.rekey(map);
             }
@@ -322,8 +365,9 @@ impl<'a> Walk<'a> {
     }
 
     /// Arguments of a command. Each is redacted as a string. An argument that is a flag naming a secret
-    /// (`--password`, with no `=`) takes the next argument whole.
-    fn argv(&mut self, args: &mut [Value]) {
+    /// (`--password`, with no `=`) takes the next argument whole. `capped` cuts each string at
+    /// [`STRING_CAP`]; inside `observed` the 64 KiB cap does that job.
+    fn argv(&mut self, args: &mut [Value], capped: bool) {
         let mut next_is_secret = false;
         for arg in args {
             let Value::String(s) = arg else {
@@ -332,39 +376,69 @@ impl<'a> Walk<'a> {
                 continue;
             };
             if next_is_secret {
-                self.blank(arg);
+                self.blank(arg, false);
                 next_is_secret = false;
                 continue;
             }
             next_is_secret =
                 s.starts_with('-') && !s.contains('=') && is_secret_key(s.trim_start_matches('-'));
-            self.generic(arg);
+            if capped {
+                self.generic(arg);
+            } else {
+                let redacted = self.text(s);
+                *s = redacted;
+            }
         }
     }
 
-    /// Redacts the keys of an object. A key that changes keeps its value. If two keys end up equal the
-    /// later one gets `~2`, `~3` and so on, so no value is lost.
+    /// Redacts the keys of an object. A key that changes keeps its value and its place. If a changed key
+    /// equals another key, the changed one gets `~2`, `~3` and so on, so no value is lost. The map is
+    /// rebuilt in order, so the result does not depend on whether `serde_json` keeps insertion order.
     fn rekey(&mut self, map: &mut Map<String, Value>) {
-        let renamed: Vec<(String, String)> = map
+        let new_keys: Vec<String> = map
             .keys()
-            .filter_map(|key| {
-                let new = cap(self.text(key), STRING_CAP).0;
-                (new != *key).then(|| (key.clone(), new))
+            .map(|key| {
+                let redacted = self.text(key);
+                self.capped_text(redacted, STRING_CAP)
             })
             .collect();
-        for (old, new) in renamed {
-            let Some(value) = map.remove(&old) else {
+        if map.keys().zip(&new_keys).all(|(old, new)| old == new) {
+            return;
+        }
+        let old_map = std::mem::take(map);
+        // Keys that did not change keep their names, so a renamed key never takes one.
+        let mut taken: HashSet<String> = old_map
+            .keys()
+            .zip(&new_keys)
+            .filter(|(old, new)| old == new)
+            .map(|(old, _)| old.clone())
+            .collect();
+        for ((old, value), new) in old_map.into_iter().zip(new_keys) {
+            if old == new {
+                map.insert(old, value);
                 continue;
-            };
-            let mut key = new.clone();
+            }
+            let base = cut_str(&new, STRING_CAP - SUFFIX_ROOM).unwrap_or_else(|| new.clone());
+            let mut key = new;
             let mut n = 2_u32;
-            while map.contains_key(&key) {
-                key = format!("{new}~{n}");
+            while taken.contains(&key) {
+                key = format!("{base}~{n}");
                 n = n.saturating_add(1);
             }
+            taken.insert(key.clone());
             map.insert(key, value);
         }
     }
+}
+
+/// For a `{name, value}` pair (any of `name`/`Name`/`key`/`Key` next to `value`/`Value`): `Some` if the
+/// name is a secret key, holding whether numbers under it stay (the name's last word is a unit).
+fn pair_name_is_secret(map: &Map<String, Value>) -> Option<bool> {
+    ["name", "Name", "key", "Key"]
+        .iter()
+        .filter_map(|k| map.get(*k).and_then(Value::as_str))
+        .find(|name| is_secret_key(name))
+        .map(last_word_is_unit)
 }
 
 /// Cuts `text` to at most `max` bytes, with the marker at the end, if it is longer. The flag says whether

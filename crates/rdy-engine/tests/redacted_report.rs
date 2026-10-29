@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::sync::Barrier;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
@@ -158,8 +159,11 @@ fn by_rule_does_not_depend_on_what_the_logs_redact_at_the_same_time() -> TestRes
     };
 
     let stop = AtomicBool::new(false);
+    // Both threads start together, so the logger is busy for the whole time the reports are walked.
+    let start = Barrier::new(2);
     let loud = thread::scope(|scope| -> TestResult<RedactedReport> {
         let logger = scope.spawn(|| {
+            start.wait();
             let mut lines = 0_u32;
             while !stop.load(Ordering::Relaxed) {
                 let line = shared.redact_str(&format!("TRACE rdy: password={CANARY}-log {lines}"));
@@ -168,6 +172,7 @@ fn by_rule_does_not_depend_on_what_the_logs_redact_at_the_same_time() -> TestRes
             }
         });
         let mut last = None;
+        start.wait();
         for _ in 0..50 {
             let report: Report = serde_json::from_value(planted.clone())?;
             last = Some(shared.redact_report(report)?);
@@ -231,5 +236,90 @@ fn results_are_redacted_as_they_complete_so_a_snapshot_never_holds_raw_text() ->
     let total = counts.total();
     let out = redactor().redact_report_counted(report, counts)?;
     assert_eq!(out.redaction.total, total);
+    Ok(())
+}
+
+/// The exit test of M1-056 that has no report before M1-062 (PC-43): canaries in an env pair, a kubeconfig,
+/// command output and an argv never reach the serialized report. The tracing field part is proved on the
+/// real binary by M1-057, and the HTML part by M1-077.
+const PC43_CANARIES: [&str; 6] = [
+    "canary-env-token-2",
+    "canary-kube-token-3",
+    "canary-kube-text-3b",
+    "canary-output-hdr-4",
+    "canary-argv-5",
+    "canary-action-argv-6",
+];
+
+fn plant_pc43(doc: &mut Value) {
+    doc["checks"][0]["observed"] = json!({
+        "env": [
+            {"name": "API_TOKEN", "value": "canary-env-token-2"},
+            {"name": "HOME", "value": "/home/synthetic"},
+        ],
+        "kubeconfig": {"users": [{"name": "synthetic", "user": {"token": "canary-kube-token-3"}}]},
+        "kubeconfig_text":
+            "users:\n- name: synthetic\n  user:\n    token: canary-kube-text-3b\n",
+        "stdout": "Authorization: Bearer canary-output-hdr-4\nok",
+        "cmdline": ["kubectl", "--token", "canary-argv-5"],
+    });
+    doc["actions"][0]["argv"] = json!(["/usr/bin/tool", "--password", "canary-action-argv-6"]);
+}
+
+#[test]
+fn canaries_in_env_kubeconfig_output_and_argv_never_reach_the_report() -> TestResult {
+    for heading in ["7.2 ", "7.3 "] {
+        let mut planted = sample(heading)?;
+        plant_pc43(&mut planted);
+
+        // The whole report in one call.
+        let out = redact(&planted)?;
+        let text = serde_json::to_string(&*out)?;
+        for canary in PC43_CANARIES {
+            assert!(!text.contains(canary), "{heading}: {canary} leaked");
+        }
+        assert!(
+            out.redaction.total >= 6,
+            "{heading}: {}",
+            out.redaction.total
+        );
+
+        // Result by result as they complete, then the final pass, the way the engine will run it.
+        let report: Report = serde_json::from_value(planted)?;
+        let mut counts = RuleCounts::default();
+        let mut done = report.clone();
+        done.checks = report
+            .checks
+            .into_iter()
+            .map(|c| {
+                redactor()
+                    .redact_check(c, &mut counts)
+                    .map(|r| (*r).clone())
+            })
+            .collect::<Result<_, _>>()?;
+        let out = redactor().redact_report_counted(done, counts)?;
+        let text = serde_json::to_string(&*out)?;
+        for canary in PC43_CANARIES {
+            assert!(
+                !text.contains(canary),
+                "{heading}: {canary} leaked in pass two"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// `client-key-data` is a kubeconfig key (04 Appendix B, `kubeconfig_credential`). The M1 key rule has no
+/// stem for it, so M1-060 adds the stem and removes the `ignore`.
+#[test]
+#[ignore = "M1-060"]
+fn a_kubeconfig_client_key_never_reaches_the_report() -> TestResult {
+    let mut planted = sample("7.2 ")?;
+    planted["checks"][0]["observed"] = json!({
+        "kubeconfig": {"users": [{"user": {"client-key-data": "canary-kube-key-7"}}]},
+        "kubeconfig_text": "user:\n  client-key-data: canary-kube-key-7b\n",
+    });
+    let text = serde_json::to_string(&*redact(&planted)?)?;
+    assert!(!text.contains("canary-kube-key-7"), "a client key leaked");
     Ok(())
 }

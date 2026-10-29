@@ -99,6 +99,14 @@ const NOT_SECRET_WORDS: &[&str] = &[
 /// A key whose last word is one of these names a thing, not a secret: `secretName`, `tokenFile`, `keyRef`.
 const NAME_SUFFIXES: &[&str] = &["name", "ref", "file", "path", "namespace"];
 
+/// A key whose last word is one of these holds a number about a secret, not the secret: `token_ttl_ms`,
+/// `password_len`, `api_key_count`. The report walk keeps a number under such a key.
+const UNIT_WORDS: &[&str] = &["ms", "seconds", "ttl", "count", "bytes", "size", "len"];
+
+/// What the size caps leave at the end of a cut string, without its leading space. A cut right after
+/// `password=` puts it in the value position, so it is exempt: a second pass must change nothing.
+pub(crate) const TRUNCATED_WORD: &str = "[truncated]";
+
 /// Values that are not secrets, compared case-insensitively.
 const PLAIN_VALUES: &[&str] = &["null", "true", "false", "none", "required"];
 
@@ -422,9 +430,19 @@ pub(crate) fn is_secret_key(key: &str) -> bool {
     })
 }
 
+/// True if the last word of the key is a unit or a count (`ms`, `seconds`, `ttl`, `count`, `bytes`,
+/// `size`, `len`). Words split as in [`is_secret_key`].
+pub(crate) fn last_word_is_unit(key: &str) -> bool {
+    let (norm, boundary) = normalize_key(key);
+    let start = boundary.iter().rposition(|&b| b).unwrap_or(0);
+    norm.get(start..)
+        .is_some_and(|word| UNIT_WORDS.contains(&word))
+}
+
 /// The key lowercased with `-`, `_` and `.` removed, and for each byte of it whether a word starts
 /// there. Words split at the removed separators and at camelCase: `apiKey` is `api|key`, `APIKey` is
-/// `api|key`. The key comes from an ASCII-only pattern, so byte offsets and char offsets agree.
+/// `api|key`. Keys can come from any JSON, so a multibyte character gets one entry per byte, with only the
+/// first one set, and `boundary` always has the same length as the returned string.
 fn normalize_key(key: &str) -> (String, Vec<bool>) {
     let chars: Vec<char> = key.chars().collect();
     let mut norm = String::with_capacity(key.len());
@@ -444,6 +462,7 @@ fn normalize_key(key: &str) -> (String, Vec<bool>) {
                     || (p.is_ascii_uppercase() && next.is_some_and(|n| n.is_ascii_lowercase()))
             });
         boundary.push(at_word_start || camel);
+        boundary.extend(std::iter::repeat_n(false, c.len_utf8() - 1));
         norm.push(c.to_ascii_lowercase());
         at_word_start = false;
     }
@@ -505,6 +524,7 @@ pub(crate) fn is_exempt_value(value: &str) -> bool {
         || is_cat_reference(value)
         || is_template_reference(value)
         || is_single_placeholder(value)
+        || value == TRUNCATED_WORD
 }
 
 fn is_path_char(b: u8) -> bool {
@@ -602,6 +622,99 @@ mod tests {
                 "{secret:?} leaks at {at} in {text:?}, spans {spans:?}"
             );
         }
+    }
+
+    /// Keys with multibyte characters used to index the word boundaries by character, so they panicked
+    /// (`ññññname`, `日本path`) or were judged on shifted boundaries.
+    #[test]
+    fn multibyte_keys_do_not_panic_and_keep_their_boundaries() {
+        for key in [
+            "ññññname",
+            "日本path",
+            "日本日本passed",
+            "é",
+            "日本",
+            "ñ_ñ-ñ.ñ",
+        ] {
+            let (norm, boundary) = normalize_key(key);
+            assert_eq!(norm.len(), boundary.len(), "{key}");
+            let _ = is_secret_key(key);
+            let _ = last_word_is_unit(key);
+        }
+        // A multibyte character is judged like one ASCII letter. There is no word boundary after it, so
+        // `日本日本passed` is `xxxxpassed`, which fails closed as a secret.
+        for (key, ascii) in [
+            ("ññññname", "xxxxname"),
+            ("日本path", "xxpath"),
+            ("日本日本passed", "xxxxpassed"),
+        ] {
+            assert_eq!(is_secret_key(key), is_secret_key(ascii), "{key}");
+        }
+        assert!(!is_secret_key("ññññname"));
+        assert!(!is_secret_key("日本path"));
+        // The boundary is still right after multibyte text: `名前` then a camelCase word.
+        assert!(is_secret_key("日本Password"));
+        assert!(is_secret_key("ñññ_password"));
+        assert!(!is_secret_key("ñññ_tokenName"));
+        assert!(is_secret_key("ññtoken"));
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn is_secret_key_never_panics(key in proptest::prelude::any::<String>()) {
+            let (norm, boundary) = normalize_key(&key);
+            proptest::prop_assert_eq!(norm.len(), boundary.len());
+            let _ = last_word_is_unit(&key);
+            // Any non-ASCII character counts like one ASCII letter that is not a separator.
+            let ascii: String = key.chars().map(|c| if c.is_ascii() { c } else { 'x' }).collect();
+            proptest::prop_assert_eq!(is_secret_key(&key), is_secret_key(&ascii));
+        }
+
+        #[test]
+        fn is_secret_key_never_panics_on_mixed_text(
+            key in "[a-zA-Z_.ñ日é-]{0,24}(name|path|passed|word|token|Key)?"
+        ) {
+            let _ = is_secret_key(&key);
+            let _ = last_word_is_unit(&key);
+        }
+    }
+
+    #[test]
+    fn a_last_word_that_is_a_unit_or_a_count_is_found() {
+        for key in [
+            "token_ttl_ms",
+            "tokenTtlMs",
+            "password_len",
+            "api-key-count",
+            "secretSize",
+            "db.password.bytes",
+            "ttl",
+        ] {
+            assert!(last_word_is_unit(key), "{key}");
+        }
+        for key in [
+            "password",
+            "token_length",
+            "msToken",
+            "api_key",
+            "secret_names",
+            "",
+        ] {
+            assert!(!last_word_is_unit(key), "{key}");
+        }
+    }
+
+    #[test]
+    fn the_cut_marker_is_an_exempt_value_and_nothing_longer_is() {
+        assert!(is_exempt_value("[truncated]"));
+        assert!(!is_exempt_value("[truncated] hunter2"));
+        assert!(!is_exempt_value("hunter2 [truncated]"));
+        assert!(found("password= [truncated]").is_empty());
+        assert!(found("password: [truncated]").is_empty());
+        assert_eq!(
+            found("password= [truncated] hunter2"),
+            ["[truncated] hunter2"]
+        );
     }
 
     #[test]

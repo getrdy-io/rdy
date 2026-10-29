@@ -153,15 +153,24 @@ fn a_cut_lands_on_a_char_boundary() {
 
 #[test]
 fn redaction_comes_before_the_cap_for_message_too() {
-    // The secret sits across the 1 KiB cap. It is replaced first, so no fragment is left.
-    let secret = "S3cr3tValueThatMustNotLeak";
+    // The raw text is over the 1 KiB cap, but the redacted text is under it. Redact first and nothing is
+    // cut: the message holds a placeholder and `truncated` stays false. Cap first and the secret would be
+    // chopped (and the flag set), with no placeholder.
+    let secret = "S3cr3tValueThatMustNotLeakS3cr3tValueThatMustNotLeakS3cr3tValue";
     let mut result = check("host.cpu");
-    result.message = format!("{} password={secret} tail", "x".repeat(1010));
+    result.message = format!("{} password={secret}", "x".repeat(960));
+    assert!(result.message.len() > MESSAGE_CAP);
     let out = redactor()
         .redact_check(result, &mut RuleCounts::default())
         .expect("redacts");
     assert!(!out.message.contains("S3cr3t"), "{}", out.message);
-    assert!(!out.message.contains("Leak"), "{}", out.message);
+    assert!(
+        out.message.contains("[REDACTED:secret_by_key:"),
+        "{}",
+        out.message
+    );
+    assert!(!out.truncated);
+    assert!(!out.message.contains(CUT_MARKER));
 }
 
 #[test]
@@ -173,6 +182,10 @@ fn the_whole_member_rule_works_in_free_form_data_only() {
         "passed": 12,
         "secretName": "acme-tls",
         "token_ttl_ms": 3600,
+        "password_len": 8,
+        "db_password": 12345678,
+        "pins": {"api_key": [1, 2]},
+        "has_password": true,
         "ref": "${DB_PASSWORD}",
         "empty_password": "",
         "env": [
@@ -201,6 +214,17 @@ fn the_whole_member_rule_works_in_free_form_data_only() {
     assert_eq!(seen["passed"], 12);
     assert_eq!(seen["secretName"], "acme-tls");
     assert_eq!(seen["token_ttl_ms"], 3600);
+    assert_eq!(seen["password_len"], 8);
+    assert_eq!(seen["has_password"], true);
+    // A number under a secret key is a secret too, unless the key's last word is a unit or a count.
+    for number in [&seen["db_password"], &seen["pins"]["api_key"][0]] {
+        assert!(
+            number
+                .as_str()
+                .is_some_and(|s| s.starts_with("[REDACTED:secret_by_key:")),
+            "{number}"
+        );
+    }
     assert_eq!(seen["ref"], "${DB_PASSWORD}");
     assert_eq!(seen["empty_password"], "");
     assert_eq!(seen["env"][1], json!({"name": "HOME", "value": "/root"}));
@@ -210,13 +234,62 @@ fn the_whole_member_rule_works_in_free_form_data_only() {
             .as_str()
             .is_some_and(|s| s.starts_with("[REDACTED:secret_by_key:"))
     );
-    assert_eq!(counts.get("secret_by_key"), 4);
+    assert_eq!(counts.get("secret_by_key"), 7);
     // The same password under two keys gets one tag, as in text.
     assert!(
         !serde_json::to_string(&*out)
             .expect("json")
             .contains("hunter2")
     );
+    assert!(
+        !serde_json::to_string(&*out)
+            .expect("json")
+            .contains("12345678")
+    );
+}
+
+#[test]
+fn pairs_are_matched_by_name_and_value_in_any_of_the_usual_spellings() {
+    let mut result = check("host.cpu");
+    result.observed = Some(observed(json!({
+        "env": [
+            {"Name": "DB_PASSWORD", "Value": "hunter2-a"},
+            {"key": "api_token", "value": "hunter2-b"},
+            {"Key": "API_TOKEN", "Value": "hunter2-c"},
+            {"name": "DB_PASSWORD", "value": 987654321},
+            {"name": "TOKEN_TTL_MS", "value": 3600},
+            {"Name": "HOME", "Value": "/root"},
+        ],
+    })));
+    let out = redactor()
+        .redact_check(result, &mut RuleCounts::default())
+        .expect("redacts");
+    let text = serde_json::to_string(&*out).expect("json");
+    for leaked in ["hunter2", "987654321"] {
+        assert!(!text.contains(leaked), "{leaked} in {text}");
+    }
+    let seen = out.observed.as_ref().expect("observed");
+    assert_eq!(seen["env"][4]["value"], 3600);
+    assert_eq!(seen["env"][5], json!({"Name": "HOME", "Value": "/root"}));
+}
+
+#[test]
+fn a_command_line_inside_observed_is_read_as_argv() {
+    let mut result = check("host.cpu");
+    result.observed = Some(observed(json!({
+        "cmdline": ["/usr/bin/tool", "--password", "hunter2-x", "--user", "ada"],
+        "nested": {"args": ["--api-token", "hunter2-y"]},
+        "mixed": ["--password", 5],
+    })));
+    let out = redactor()
+        .redact_check(result, &mut RuleCounts::default())
+        .expect("redacts");
+    let text = serde_json::to_string(&*out).expect("json");
+    assert!(!text.contains("hunter2"), "{text}");
+    let seen = out.observed.as_ref().expect("observed");
+    assert_eq!(seen["cmdline"][0], "/usr/bin/tool");
+    assert_eq!(seen["cmdline"][3], "--user");
+    assert_eq!(seen["cmdline"][4], "ada");
 }
 
 #[test]
@@ -345,16 +418,146 @@ fn argv_redacts_a_secret_flag_and_its_argument() {
 }
 
 #[test]
-fn keys_are_redacted_and_a_collision_keeps_both_values() {
+fn a_real_key_collision_keeps_both_values_and_the_suffixed_key_fits() {
+    // Two keys of 5001 bytes share their first 5000. Both are cut to the same 4 KiB text, so they collide.
+    let mut result = check("host.cpu");
+    result.observed = Some(observed(json!({
+        format!("{}a", "k".repeat(5000)): 1,
+        format!("{}b", "k".repeat(5000)): 2,
+        "other": 3,
+    })));
+    let out = redactor()
+        .redact_check(result, &mut RuleCounts::default())
+        .expect("redacts");
+    let seen = out.observed.as_ref().expect("observed");
+    assert_eq!(seen.len(), 3);
+    let cut_key = format!("{}{CUT_MARKER}", "k".repeat(STRING_CAP - CUT_MARKER.len()));
+    assert_eq!(cut_key.len(), STRING_CAP);
+    assert_eq!(seen.get(&cut_key), Some(&json!(1)));
+    let suffixed: Vec<_> = seen.keys().filter(|k| k.ends_with("~2")).collect();
+    assert_eq!(suffixed.len(), 1, "{:?}", seen.keys().map(String::len));
+    assert_eq!(seen[suffixed[0]], 2);
+    assert!(suffixed[0].len() <= STRING_CAP);
+    assert_eq!(seen["other"], 3);
+    assert!(out.truncated);
+}
+
+#[test]
+fn a_redacted_key_never_takes_the_name_of_a_key_that_did_not_change() {
     let mut walk_counts = RuleCounts::default();
     let r = redactor();
     let mut walk = Walk::new(&r, &mut walk_counts);
     let mut map = Map::new();
-    // Both keys redact to the same text, so the second one gets a suffix.
-    map.insert("a=1".to_owned(), json!(1));
-    map.insert("a=2".to_owned(), json!(2));
+    map.insert("password=hunter2".to_owned(), json!(1));
+    let placeholder: String = (*r.redact_str("password=hunter2")).clone();
+    map.insert(placeholder.clone(), json!(2));
     walk.rekey(&mut map);
     assert_eq!(map.len(), 2);
+    assert_eq!(map[&placeholder], 2);
+    assert_eq!(map[&format!("{placeholder}~2")], 1);
+}
+
+#[test]
+fn rekey_keeps_the_other_keys_and_their_values() {
+    let mut walk_counts = RuleCounts::default();
+    let r = redactor();
+    let mut walk = Walk::new(&r, &mut walk_counts);
+    let mut map = Map::new();
+    for (k, v) in [("a", 1), ("password=hunter2", 2), ("c", 3)] {
+        map.insert(k.to_owned(), json!(v));
+    }
+    walk.rekey(&mut map);
+    assert_eq!(map["a"], 1);
+    assert_eq!(map["c"], 3);
+    assert_eq!(map.len(), 3);
+    assert!(!map.keys().any(|k| k.contains("hunter2")));
+}
+
+#[test]
+fn the_keys_of_an_action_are_redacted() {
+    let mut action = Action::new(
+        1,
+        None,
+        1,
+        1,
+        ActionKind::Unknown("exec".to_owned()),
+        ActionOutcome::Unknown("ok".to_owned()),
+    );
+    action
+        .fields
+        .insert("env password=hunter2".to_owned(), json!("x"));
+    let out = redactor()
+        .redact_action(action, &mut RuleCounts::default())
+        .expect("redacts");
+    let text = serde_json::to_string(&*out).expect("json");
+    assert!(!text.contains("hunter2"), "{text}");
+}
+
+#[test]
+fn a_cut_in_name_partial_or_unsupported_fields_sets_truncated() {
+    let long = format!("a {}", "n".repeat(5000));
+    let mut named = check("host.cpu");
+    named.name = Some(long.clone());
+    let mut partial = check("host.cpu");
+    partial.partial = Some(rdy_spec::result::Partial::new(Vec::new(), long.clone()));
+    let mut unsupported = check("host.cpu");
+    unsupported.unsupported_fields = Some(vec![long]);
+    for result in [named, partial, unsupported] {
+        let out = redactor()
+            .redact_check(result, &mut RuleCounts::default())
+            .expect("redacts");
+        assert!(out.truncated);
+        let text = serde_json::to_string(&*out).expect("json");
+        assert!(text.contains(CUT_MARKER));
+    }
+}
+
+/// A secret that sits across a cap is redacted first and the cut then lands after `password=`. The
+/// marker then stands where the value was, and a second pass must read it as a value that is not a
+/// secret: nothing changes and nothing is counted.
+#[test]
+fn a_second_pass_changes_nothing_when_a_cut_lands_after_the_key() {
+    let secret = "S3cr3tValueThatMustNotLeak";
+    let mut hit_marker_in_value_position = false;
+    for offset in 1..=64 {
+        // `password=` starts `offset` bytes before the cap, so the cut lands inside the placeholder for
+        // some offsets and right after the `=` for one of them.
+        let lead = MESSAGE_CAP - offset;
+        let mut result = check("host.cpu");
+        result.message = format!("{}password={secret} tail", "x".repeat(lead));
+        let mut counts = RuleCounts::default();
+        let first = redactor()
+            .redact_check(result, &mut counts)
+            .expect("redacts");
+        assert!(!first.message.contains("S3cr3t"), "{offset}");
+        hit_marker_in_value_position |= first.message.ends_with("password= [truncated]");
+
+        let mut r = report(vec![(*first).clone()]);
+        r.refresh_verdict();
+        let before = counts.clone();
+        let second = redactor()
+            .redact_report_counted(r, counts)
+            .expect("redacts");
+        assert_eq!(second.checks[0], *first, "offset {offset} changed");
+        assert_eq!(second.redaction.total, before.total(), "offset {offset}");
+        assert_eq!(
+            second.redaction.by_rule.get("secret_by_key"),
+            Some(&before.get("secret_by_key")),
+            "offset {offset}"
+        );
+    }
+    assert!(
+        hit_marker_in_value_position,
+        "no offset put the marker right after `password=`"
+    );
+}
+
+#[test]
+fn the_cut_marker_matches_the_exempt_word() {
+    assert_eq!(
+        CUT_MARKER.trim_start(),
+        crate::redact::rules::TRUNCATED_WORD
+    );
 }
 
 #[test]
