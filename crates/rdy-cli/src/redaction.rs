@@ -5,8 +5,14 @@
 //!
 //! The key is made once. If the OS cannot supply random bytes, [`init`] fails and rdy exits 70.
 //! A caller that asks for the redactor before `init` (an in-process test) gets the same lazy key.
-//! If no key can be made, [`redact_text`] replaces the whole text. It never returns the raw text.
+//! If no key can be made, or the redactor itself panics, [`redact_text`] replaces the whole text. It
+//! never returns the raw text.
+//!
+//! Carry note for M1-061: the run-scoped known-secret set must be shared through an `Arc`, so that the
+//! log writer, the CLI error text and the report all see the same secrets. Today the process redactor is
+//! the key and the built-in rules only.
 
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::OnceLock;
 
 use rdy_engine::redact::{RedactError, Redactor, TagKey};
@@ -14,7 +20,7 @@ use rdy_engine::redact::{RedactError, Redactor, TagKey};
 static REDACTOR: OnceLock<Option<Redactor>> = OnceLock::new();
 
 /// What replaces a whole text when no redactor can be built.
-const DROPPED: &str = "[REDACTED:redactor_error:00000000]";
+pub const DROPPED: &str = "[REDACTED:redactor_error:00000000]";
 
 fn get() -> Option<&'static Redactor> {
     REDACTOR
@@ -31,11 +37,28 @@ pub fn init() -> Result<&'static Redactor, RedactError> {
     get().ok_or(RedactError::NoRandomness)
 }
 
-/// `text` with secrets removed, or a fixed placeholder if no redactor can be built.
+/// `text` with secrets removed, or a fixed placeholder if no redactor can be built or it panics.
 #[must_use]
 pub fn redact_text(text: &str) -> String {
     match get() {
-        Some(redactor) => (**redactor.redact_str(text)).to_owned(),
+        Some(redactor) => redact_guarded(redactor, text),
         None => DROPPED.to_owned(),
     }
+}
+
+/// `text` redacted by `redactor`. A panic inside the redactor gives [`DROPPED`], never the raw text.
+///
+/// The panic is caught here, not in a panic hook: a panic inside a hook aborts the process.
+#[must_use]
+pub fn redact_guarded(redactor: &Redactor, text: &str) -> String {
+    try_redact(redactor, text).unwrap_or_else(|| DROPPED.to_owned())
+}
+
+/// `text` redacted by `redactor`, or `None` if the redactor panicked.
+#[must_use]
+pub fn try_redact(redactor: &Redactor, text: &str) -> Option<String> {
+    panic::catch_unwind(AssertUnwindSafe(|| {
+        (**redactor.redact_str(text)).to_owned()
+    }))
+    .ok()
 }

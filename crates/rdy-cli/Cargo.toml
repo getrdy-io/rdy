@@ -42,7 +42,11 @@ rustix = { workspace = true, features = ["std", "fs", "process", "termios"] }
 
 [dev-dependencies]
 jsonschema = { workspace = true }
+# `testing` adds the panicking-redactor seam. It is a dev-dependency feature, so the shipped binary
+# never has it (rdy-engine refuses a release build with it).
+rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing"] }
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 rexpect.workspace = true

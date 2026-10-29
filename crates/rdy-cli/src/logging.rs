@@ -5,9 +5,15 @@
 //!
 //! - **No colour.** The formatter runs with ANSI off. Colour codes between a field name and `=` would
 //!   hide `password=hunter2` from the key-name rule.
-//! - **Caps.** With `RUST_LOG` unset (or empty, or not a valid filter), the level is `warn` and hyper,
-//!   h2, rustls, tower and kube are capped at `warn` by name ([`DEFAULT_FILTER`]). With a valid
-//!   `RUST_LOG` the operator's filter wins, and every line is still redacted.
+//! - **Off by default.** With `RUST_LOG` unset (or empty, or not a valid filter) nothing is logged
+//!   ([`DEFAULT_FILTER`], 07 appendix D.6: "Unset means no log output"). With a valid `RUST_LOG` the
+//!   operator's filter wins, and every line is still redacted.
+//! - **Escaped.** Each line is escaped for the terminal (control and invisible characters become
+//!   `\xNN` and `\u{..}`) and then redacted, so a field value cannot move the cursor or hide a line.
+//! - **A redactor bug drops the event.** If the redactor panics, the event is replaced by a fixed
+//!   placeholder. The raw text is never written.
+//! - **No `log` bridge.** Records from crates that use the `log` facade (rustls, for one) are dropped,
+//!   because the `tracing-log` feature is off. Those crates are quiet in M1.
 //! - **No time stamp.** Lines are the level, the target and the message, which keeps them stable for
 //!   golden files.
 //!
@@ -20,8 +26,11 @@ use tracing::Subscriber;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::MakeWriter;
 
-/// The filter used when `RUST_LOG` is unset: `warn` everywhere, and the noisy dependencies named.
-pub const DEFAULT_FILTER: &str = "warn,hyper=warn,h2=warn,rustls=warn,tower=warn,kube=warn";
+use crate::error::escape_untrusted;
+use crate::redaction::{DROPPED, try_redact};
+
+/// The filter used when `RUST_LOG` is unset: no log output (07 section 13).
+pub const DEFAULT_FILTER: &str = "off";
 
 /// The filter for a `RUST_LOG` value. Unset, empty and invalid values give [`DEFAULT_FILTER`].
 #[must_use]
@@ -125,9 +134,28 @@ impl<W: Write> Drop for RedactingWriter<W> {
         }
         // Bytes that are not UTF-8 become U+FFFD first, so the redactor always sees text.
         let text = String::from_utf8_lossy(&self.held);
-        let redacted = self.redactor.redact_str(&text);
+        // Escape first: this is the text that reaches the terminal. Then redact it. A redactor panic
+        // is caught (this drop can run while another panic unwinds, and a second one would abort) and
+        // the whole event is replaced.
+        let out = try_redact(&self.redactor, &escape_lines(&text))
+            .unwrap_or_else(|| format!("{DROPPED}\n"));
         // A closed stderr has nowhere to report to.
-        let _ = self.inner.write_all(redacted.as_bytes());
+        let _ = self.inner.write_all(out.as_bytes());
         let _ = self.inner.flush();
     }
+}
+
+/// Escapes each line of `text` and keeps the line ends, which are the one control character a log needs.
+fn escape_lines(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        match line.strip_suffix('\n') {
+            Some(body) => {
+                out.push_str(&escape_untrusted(body));
+                out.push('\n');
+            }
+            None => out.push_str(&escape_untrusted(line)),
+        }
+    }
+    out
 }

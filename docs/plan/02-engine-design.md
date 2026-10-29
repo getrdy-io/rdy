@@ -246,8 +246,8 @@ Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
    `write_json`, `render_html`, the terminal renderer and the watchdog accept nothing else. `Progress`
    events carry id, status and duration only.
 
-`rdy` installs the redacting `tracing` layer first in `main`. With `RUST_LOG` unset, hyper, h2, rustls,
-tower and kube are capped at `warn`. `EngineError`, `ReportError` and panic text are redacted before
+`rdy` installs the redacting `tracing` layer first in `main`. With `RUST_LOG` unset nothing is logged (07
+D.6); a set `RUST_LOG` is the operator's filter. `EngineError`, `ReportError` and panic text are redacted before
 printing.
 
 ## The action log

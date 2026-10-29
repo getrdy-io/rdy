@@ -113,8 +113,15 @@ fn dispatch(command: &Commands, json: bool, stdout: &mut dyn Write, stderr: &mut
         Commands::Version(args) if !args.json => finish(writeln!(stdout, "rdy {VERSION}"), stderr),
         Commands::Help { command } => show_help(command, json, stdout, stderr),
         Commands::Version(_) => finish(write!(stdout, "{}", version_json()), stderr),
-        Commands::Run(_) => not_implemented("run", json, stdout, stderr),
-        Commands::Verify(_) => not_implemented("verify", json, stdout, stderr),
+        Commands::Run(args) => {
+            // A user-supplied value in the log: the redactor has to cover it (threat model I2).
+            tracing::debug!(spec = %args.spec.display(), "run requested");
+            not_implemented("run", json, stdout, stderr)
+        }
+        Commands::Verify(args) => {
+            tracing::debug!(spec = %args.spec.display(), "verify requested");
+            not_implemented("verify", json, stdout, stderr)
+        }
         Commands::Spec { command } => match command {
             SpecCommand::Lint(_) => not_implemented("spec lint", json, stdout, stderr),
             SpecCommand::Sign(_) => not_implemented("spec sign", json, stdout, stderr),

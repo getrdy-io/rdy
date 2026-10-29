@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use rdy_cli::logging::{self, DEFAULT_FILTER, RedactingMakeWriter};
 use rdy_cli::redaction;
+use rdy_engine::redact::PANIC_TRIGGER;
 use tracing_subscriber::fmt::MakeWriter;
 
 /// A capture buffer that hands out writers onto the same bytes.
@@ -148,30 +149,32 @@ fn an_event_is_redacted_whole_not_line_by_line() {
 }
 
 #[test]
-fn unset_empty_and_invalid_rust_log_use_the_default_caps() {
+fn unset_empty_and_invalid_rust_log_log_nothing() {
+    assert_eq!(DEFAULT_FILTER, "off");
     for rust_log in [None, Some(""), Some("  "), Some("=[bad")] {
         let out = captured(rust_log, || {
+            tracing::error!("error line");
+            tracing::warn!("rdy warn line");
             tracing::info!("info line");
             tracing::debug!(target: "hyper::client", "hyper debug line");
-            tracing::info!(target: "rustls::client", "rustls info line");
             tracing::warn!(target: "hyper::client", "hyper warn line");
-            tracing::warn!("rdy warn line");
         });
-        assert!(!out.contains("info line"), "{rust_log:?}: {out}");
-        assert!(!out.contains("debug line"), "{rust_log:?}: {out}");
-        assert!(out.contains("hyper warn line"), "{rust_log:?}: {out}");
-        assert!(out.contains("rdy warn line"), "{rust_log:?}: {out}");
-    }
-    for name in ["hyper", "h2", "rustls", "tower", "kube"] {
-        assert!(
-            DEFAULT_FILTER.contains(&format!("{name}=warn")),
-            "{name} is not capped"
-        );
+        assert!(out.is_empty(), "{rust_log:?}: {out}");
     }
 }
 
 #[test]
-fn a_set_rust_log_lifts_the_caps_and_is_still_redacted() {
+fn a_plain_level_in_rust_log_turns_logging_on() {
+    let out = captured(Some("warn"), || {
+        tracing::warn!("rdy warn line");
+        tracing::info!("info line");
+    });
+    assert!(out.contains("rdy warn line"), "{out}");
+    assert!(!out.contains("info line"), "{out}");
+}
+
+#[test]
+fn a_set_rust_log_names_the_targets_and_is_still_redacted() {
     let out = captured(Some("trace"), || {
         tracing::trace!(target: "h2::codec", "frame token=canary-lift-1");
     });
@@ -221,4 +224,98 @@ fn bytes_that_are_not_utf8_do_not_panic_and_do_not_leak() {
     // The replacement character is not a plain value character, so the rest of the line goes too.
     // That is the fail-closed choice of the key-name rule.
     assert!(out.starts_with("token=[REDACTED:secret_by_key:"), "{out}");
+}
+
+#[test]
+fn a_span_field_is_redacted_when_an_event_is_logged_inside_the_span() {
+    let out = captured(Some("trace"), || {
+        let span = tracing::info_span!("s", token = "canary-span-1");
+        let _guard = span.enter();
+        tracing::info!("event inside the span");
+    });
+    // The bare value runs to the end of the line on purpose (it fails closed), so the message after the
+    // span is swallowed with it. M1-060 tunes that. The event is live if its line is there at all.
+    assert!(
+        out.starts_with(" INFO s{token=[REDACTED:secret_by_key:"),
+        "{out}"
+    );
+    assert!(!out.contains("canary-span-1"), "{out}");
+    assert!(out.contains("[REDACTED:secret_by_key:"), "{out}");
+}
+
+#[test]
+fn control_and_invisible_characters_in_a_field_are_escaped_and_line_ends_stay() {
+    // A message is written with Display, so the characters reach the writer raw.
+    let out = captured(Some("trace"), || {
+        tracing::info!("a\rb\u{202e}c\u{1b}[2Jd\nsecond line");
+    });
+    assert!(!out.contains('\r'), "{out:?}");
+    assert!(!out.contains('\u{202e}'), "{out:?}");
+    assert!(!out.contains('\u{1b}'), "{out:?}");
+    assert!(out.contains("a\\x0db\\u{202e}c\\x1b[2Jd"), "{out:?}");
+    assert!(out.contains("d\nsecond line"), "{out:?}");
+}
+
+#[test]
+fn a_crlf_line_end_is_escaped_not_passed_on() {
+    let sink = Sink::default();
+    let make = RedactingMakeWriter::new(sink.clone(), redactor());
+    {
+        let mut w = make.make_writer();
+        w.write_all(b"first\r\nsecond\n")
+            .unwrap_or_else(|e| panic!("{e}"));
+    }
+    assert_eq!(sink.text(), "first\\x0d\nsecond\n");
+}
+
+#[test]
+fn a_panicking_redactor_drops_the_event_and_never_writes_the_raw_text() {
+    let out = captured(Some("trace"), || {
+        tracing::info!("before");
+        tracing::info!("{PANIC_TRIGGER} password=canary-panic-rule-1");
+        tracing::info!("after");
+    });
+    assert!(!out.contains("canary-panic-rule-1"), "{out}");
+    assert!(!out.contains(PANIC_TRIGGER), "{out}");
+    assert!(
+        out.contains("[REDACTED:redactor_error:00000000]\n"),
+        "{out}"
+    );
+    assert!(out.contains("before") && out.contains("after"), "{out}");
+}
+
+#[test]
+fn a_panicking_redactor_while_another_panic_unwinds_does_not_abort() {
+    struct LogOnDrop;
+    impl Drop for LogOnDrop {
+        fn drop(&mut self) {
+            tracing::info!("{PANIC_TRIGGER} token=canary-unwind-1");
+        }
+    }
+    let out = captured(Some("trace"), || {
+        let caught = std::panic::catch_unwind(|| {
+            let _guard = LogOnDrop;
+            panic!("first panic");
+        });
+        assert!(caught.is_err());
+    });
+    assert!(!out.contains("canary-unwind-1"), "{out}");
+    assert!(out.contains("[REDACTED:redactor_error:00000000]"), "{out}");
+}
+
+#[test]
+fn redact_text_drops_the_whole_text_when_the_redactor_panics() {
+    let got = redaction::redact_text(&format!("x {PANIC_TRIGGER} password=canary-text-1"));
+    assert_eq!(got, "[REDACTED:redactor_error:00000000]");
+}
+
+/// A proxy URL with userinfo needs the URL rule of M1-060. Until then only the key-name rule exists, so
+/// the password of `http://user:pass@host` is not found. M1-060 removes the `ignore` (13 correction).
+#[test]
+#[ignore = "M1-060"]
+fn a_proxy_url_with_userinfo_never_reaches_the_log() {
+    let out = captured(Some("trace"), || {
+        tracing::debug!(proxy = %"http://synthetic:canary-proxy-url-1@proxy.example:3128", "using proxy");
+    });
+    assert!(!out.contains("canary-proxy-url-1"), "{out}");
 }
