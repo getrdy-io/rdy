@@ -200,18 +200,7 @@ impl TrustStore {
             }
             let note = entry.note.filter(|note| !note.is_empty());
             if let Some(note) = &note {
-                if note.chars().count() > MAX_NOTE_CHARS {
-                    return Err(TrustFileError::Entry {
-                        index,
-                        reason: "the note is longer than 512 characters",
-                    });
-                }
-                if note.chars().any(char::is_control) {
-                    return Err(TrustFileError::Entry {
-                        index,
-                        reason: "the note has a control character",
-                    });
-                }
+                check_note(note).map_err(|reason| TrustFileError::Entry { index, reason })?;
             }
             if store
                 .pins_for(&product)
@@ -272,6 +261,160 @@ impl TrustStore {
     pub fn extend(&mut self, other: Self) {
         self.pins.extend(other.pins);
     }
+
+    /// The pins that are kept in a file: those read by [`TrustStore::from_yaml`] and those made with
+    /// [`TrustStore::add`], in file order. One-run keys made with [`TrustStore::pin`] are not listed,
+    /// for the same reason [`TrustStore::to_yaml`] never writes them.
+    pub fn entries(&self) -> impl Iterator<Item = TrustEntry<'_>> {
+        self.pins
+            .iter()
+            .filter(|pin| pin.added_at.is_some())
+            .map(|pin| TrustEntry { pin })
+    }
+
+    /// Pins `key` for `product` as a kept entry: it is written by [`TrustStore::to_yaml`].
+    ///
+    /// `added_at` is `YYYY-MM-DDTHH:MM:SSZ`. An empty `note` is no note. The checks are the ones
+    /// [`TrustStore::from_yaml`] makes, so the text this store writes always reads back.
+    ///
+    /// # Errors
+    ///
+    /// [`TrustAddError`] if `source` is not [`TrustSource::System`] or [`TrustSource::User`] (a one-run
+    /// key from the `--key` flag is never kept, so it is never added), if `product` already has a key
+    /// with this key id (a second key with one id would make the id useless for picking the key), if
+    /// `added_at` is not a time of that form, or if the note is longer than 512 characters or has a
+    /// control character. The store is unchanged on an error.
+    pub fn add(
+        &mut self,
+        product: ProductSlug,
+        key: PublicKey,
+        source: TrustSource,
+        added_at: &str,
+        note: Option<&str>,
+    ) -> Result<(), TrustAddError> {
+        // Only a file can hold a kept entry. Anything but the two stores is refused, so a source added
+        // to the enum later is not written to a file by accident.
+        if !matches!(source, TrustSource::System | TrustSource::User) {
+            return Err(TrustAddError::NotAStore);
+        }
+        if !valid_timestamp(added_at) {
+            return Err(TrustAddError::BadTime);
+        }
+        let note = note.filter(|note| !note.is_empty());
+        if let Some(note) = note {
+            check_note(note).map_err(|reason| TrustAddError::BadNote { reason })?;
+        }
+        let clash = self
+            .pins_for(&product)
+            .find(|pin| pin.key.key_id() == key.key_id())
+            .map(|pin| pin.key == key);
+        if let Some(same_key) = clash {
+            return Err(TrustAddError::DuplicateKeyId {
+                product,
+                key_id: key.key_id(),
+                same_key,
+            });
+        }
+        self.pins.push(Pin {
+            product,
+            key,
+            source,
+            added_at: Some(added_at.to_owned()),
+            note: note.map(str::to_owned),
+        });
+        Ok(())
+    }
+
+    /// Removes the kept entry for `product` with this key id. Returns true if there was one.
+    ///
+    /// A store read from one file has one entry per product and key id, so one entry goes. A store that
+    /// was joined with [`TrustStore::extend`] can hold the same key id from both files, and then both
+    /// entries go.
+    pub fn remove(&mut self, product: &ProductSlug, key_id: KeyId) -> bool {
+        let before = self.pins.len();
+        self.pins.retain(|pin| {
+            !(pin.added_at.is_some() && pin.product == *product && pin.key.key_id() == key_id)
+        });
+        self.pins.len() != before
+    }
+}
+
+/// One kept entry of a [`TrustStore`], as `rdy trust list` shows it.
+#[derive(Debug, Clone, Copy)]
+pub struct TrustEntry<'a> {
+    pin: &'a Pin,
+}
+
+impl<'a> TrustEntry<'a> {
+    /// The product the key is trusted for.
+    #[must_use]
+    pub fn product(&self) -> &'a ProductSlug {
+        &self.pin.product
+    }
+
+    /// The key.
+    #[must_use]
+    pub fn key(&self) -> &'a PublicKey {
+        &self.pin.key
+    }
+
+    /// The store the entry came from.
+    #[must_use]
+    pub fn source(&self) -> TrustSource {
+        self.pin.source
+    }
+
+    /// When the key was pinned, `YYYY-MM-DDTHH:MM:SSZ`.
+    #[must_use]
+    pub fn added_at(&self) -> &'a str {
+        self.pin.added_at.as_deref().unwrap_or_default()
+    }
+
+    /// The note the user wrote, if any.
+    #[must_use]
+    pub fn note(&self) -> Option<&'a str> {
+        self.pin.note.as_deref()
+    }
+}
+
+/// Why [`TrustStore::add`] refused an entry.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum TrustAddError {
+    /// The product already has a key with this key id.
+    #[error("{product} already has a key with the id {key_id}")]
+    DuplicateKeyId {
+        /// The product.
+        product: ProductSlug,
+        /// The id both keys have.
+        key_id: KeyId,
+        /// True when the two keys are the same key. False when only the id matches, which anyone can
+        /// arrange, so the fingerprints must be compared.
+        same_key: bool,
+    },
+    /// The source is not a trust file. A key with [`TrustSource::Flag`] is for one run and is never kept.
+    #[error("only a key pinned in the system or user store can be kept in a trust file")]
+    NotAStore,
+    /// `added_at` is not a time like `2026-11-30T16:20:00Z`.
+    #[error("the time of the entry is not a time like 2026-11-30T16:20:00Z")]
+    BadTime,
+    /// The note cannot be written to a trust file.
+    #[error("the note is not usable: {reason}")]
+    BadNote {
+        /// What is wrong, in fixed words.
+        reason: &'static str,
+    },
+}
+
+/// The rules for a note, shared by the reader and [`TrustStore::add`].
+fn check_note(note: &str) -> Result<(), &'static str> {
+    if note.chars().count() > MAX_NOTE_CHARS {
+        return Err("the note is longer than 512 characters");
+    }
+    if note.chars().any(char::is_control) {
+        return Err("the note has a control character");
+    }
+    Ok(())
 }
 
 /// A double-quoted YAML string. JSON string syntax is valid YAML, and it escapes every control

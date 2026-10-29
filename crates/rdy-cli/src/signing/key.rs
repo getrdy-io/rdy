@@ -139,6 +139,38 @@ enum Kdf {
     },
 }
 
+/// The comments that rdy and minisign write at the top of a secret key file. A public key file may
+/// say "secret key" in its comment for another reason ("the secret key was discarded"), so only these
+/// openings count.
+const SECRET_COMMENTS: [&str; 4] = [
+    "rdy secret key",
+    "rdy encrypted secret key",
+    "minisign secret key",
+    "minisign encrypted secret key",
+];
+
+/// True when `text` is, or is meant to be, a secret key file: a line that decodes to the 158 bytes of a
+/// secret key record, or a comment line that opens like the ones rdy and minisign write for one.
+///
+/// This is for a command that was given a key to trust and must not take a secret key by mistake
+/// (`rdy trust add`). It reads only the form, never a password, and it does not fail on a damaged or
+/// too costly key: those are secret keys too.
+#[must_use]
+pub fn looks_like_secret_key(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim();
+        let comment = line.strip_prefix("untrusted comment:").is_some_and(|rest| {
+            SECRET_COMMENTS
+                .iter()
+                .any(|c| rest.trim_start().starts_with(c))
+        });
+        comment
+            || Base64::decode_to_vec(line, None)
+                .map(Zeroizing::new)
+                .is_ok_and(|record| record.len() == RECORD_BYTES)
+    })
+}
+
 impl StoredKey {
     /// Reads the text of a key file.
     ///

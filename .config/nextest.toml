@@ -17,12 +17,20 @@ nextest-version = "0.9.145"
 [test-groups]
 trybuild = { max-threads = 1 }
 real-kdf = { max-threads = 1 }
+etc-rdy = { max-threads = 1 }
 
 [[profile.default.overrides]]
 filter = 'binary(spec_keygen_sign) | binary(spec_keygen_sign_pty) | binary(password_argv) | binary(minisign_c_interop) | test(a_key_made_at_the_standard_cost)'
 test-group = 'real-kdf'
 # One key derivation takes a few seconds on a busy runner. This is the slack for a slow one.
 slow-timeout = { period = "60s", terminate-after = 4 }
+
+# Root tests that use the real `/etc/rdy` (M1-131): one asserts `/etc/rdy/trust.yaml` is absent while the
+# other creates it, and nextest runs each test in its own process, so they must not overlap. Add a root
+# test that touches `/etc/rdy` to the filter below.
+[[profile.default.overrides]]
+filter = 'binary(trust_commands) & test(/(^|::)root_[^:]*$/)'
+test-group = 'etc-rdy'
 
 # Root tests. Convention (docs/plan/08-testing.md, section 6): a test that needs uid 0 has a name whose
 # last path segment starts with `root_`, for example `root_whoami_is_zero`. The default and `ci` profiles

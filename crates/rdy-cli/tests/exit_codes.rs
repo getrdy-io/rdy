@@ -160,13 +160,7 @@ fn a_usage_error_never_names_the_trust_flags() {
 
 #[test]
 fn commands_for_later_tickets_exit_70_with_a_fix_line() {
-    for args in [
-        &["run", "spec.yaml"][..],
-        &["verify", "spec.yaml"],
-        &["trust", "add", "acme", "--key", "acme.pub"],
-        &["trust", "list"],
-        &["trust", "remove", "acme"],
-    ] {
+    for args in [&["run", "spec.yaml"][..], &["verify", "spec.yaml"]] {
         let out = rdy(args);
         assert_eq!(code(&out), 70, "rdy {args:?}: {out:?}");
         assert!(out.stdout.is_empty(), "rdy {args:?} wrote to stdout");
