@@ -91,8 +91,8 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 167 | 368.5 |
-| M1, core | 139 | 309.5 |
+| M1, all | 168 | 369.5 |
+| M1, core | 140 | 310.5 |
 | M1, `core: no` (the cut list) | 28 | 59 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
@@ -121,7 +121,7 @@ and Dec 28 run at half capacity.
 | 13 | Feb 15 to Feb 21, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-063 to M1-070 | `v0.1.0-alpha.12`: every report string redacted, 28-case corpus gates CI; host.memory and host.disk |
 | 14 | Feb 22 to Feb 28, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-071 to M1-076 | `v0.1.0-alpha.13`: host.cpu, host.ports, host.os on Linux; in-process env harness |
 | 15 | Mar 1 to Mar 7, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-077 to M1-085 | `v0.1.0-alpha.14`: HTML report next to the JSON, with golden reports; generated spec reference |
-| 16 | Mar 8 to Mar 14, 2027 | 13 | 11.5 | 3 Host checks, HTML report; 4 Network checks | M1-086 to M1-090 | `v0.1.0-alpha.15`: the demo: bucket-sorted terminal output with fix lines and the verdict last |
+| 16 | Mar 8 to Mar 14, 2027 | 13 | 12.5 | 3 Host checks, HTML report; 4 Network checks | M1-086 to M1-090, M1-168 | `v0.1.0-alpha.15`: the demo: bucket-sorted terminal output with fix lines and the verdict last; umask 077 and an inherited-descriptor warning at start-up |
 | 17 | Mar 15 to Mar 21, 2027 | 13 | 12.5 | 4 Network checks | M1-091 to M1-095 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy |
 | 18 | Mar 22 to Mar 28, 2027 | 13 | 11.5 | 4 Network checks | M1-096 to M1-101 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept |
 | 19 | Mar 29 to Apr 4, 2027 | 13 | 11 | 5 Kubernetes checks | M1-102 to M1-104 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard with path parser and resource allowlist |
