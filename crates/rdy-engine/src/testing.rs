@@ -20,7 +20,7 @@ use std::sync::Arc;
 pub use crate::probe::replay::Replay;
 
 use crate::check::{CheckContext, CheckInfo, Need, Os};
-use crate::probe::{ActionLogOutput, ProbeHub};
+use crate::probe::{ActionLogOutput, Probe, ProbeHub};
 use crate::redact::{Redactor, TagKey};
 
 /// One fixture run: a replay backend, a probe hub and the action log they write.
@@ -74,6 +74,13 @@ impl TestRun {
         available: impl IntoIterator<Item = Need>,
     ) -> CheckContext {
         CheckContext::new(key, os, available).with_probe(self.hub.check_probe(key, os, Some(info)))
+    }
+
+    /// The run-level probe (`check: null` in the log) for `os`, as the privilege snapshot and the
+    /// capability probes use it.
+    #[must_use]
+    pub fn run_probe(&self, os: Os) -> Probe {
+        self.hub.run_probe_for(os)
     }
 
     /// The action log so far.

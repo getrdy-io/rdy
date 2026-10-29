@@ -203,6 +203,15 @@ if ! (cd "$dir" && cosign verify-blob \
     cleanup_signature
     die "the signature does not verify as $identity" "do not publish. The signing identity is not the one install.sh will check. Look for a renamed workflow file, a different tag, a different repository or a trigger other than a tag push."
 fi
+# The bundle must be the v0.3 format, with no legacy key names and no JSON escapes. install.sh and
+# scripts/verify-release.sh refuse anything else, so a bundle that fails here would fail every user.
+# cosign 3 writes v0.3 by default, and this catches a change of that default before publication.
+bundle=$dir/SHA256SUMS.sigstore.json
+if ! grep -Eq '"mediaType"[[:space:]]*:[[:space:]]*"application/vnd\.dev\.sigstore\.bundle\.v0\.3\+json"' "$bundle" ||
+    grep -Eq '"(base64Signature|rekorBundle)"' "$bundle" || grep -q '\\u' "$bundle"; then
+    cleanup_signature
+    die "SHA256SUMS.sigstore.json is not a plain Sigstore bundle of the v0.3 format (mediaType application/vnd.dev.sigstore.bundle.v0.3+json, no legacy keys, no \\u escapes)" "do not publish. install.sh and verify-release.sh would refuse this release. Check the cosign version and its bundle format setting."
+fi
 if ! "$here/make-sha256sums.sh" "$dir" > "$work/SHA256SUMS.again" 2> /dev/null || ! cmp -s "$work/SHA256SUMS.again" "$dir/SHA256SUMS"; then
     cleanup_signature
     die "the files in $dir changed while signing" "do not publish. Find out what wrote to the folder."
