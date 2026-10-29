@@ -22,6 +22,13 @@
 //! file with the device and inode of a password or sudo file, whatever its name. Windows has no file
 //! reads in M1: every file call fails with a typed error.
 //!
+//! **Native calls.** `Backend::native` runs the closed `NativeCall` list in the `native` module (Unix;
+//! Windows reports `Unsupported` for every call until its sources land). A `Statvfs` call takes the same
+//! steps as a file call. Linux asks `fstatvfs` on the judged `O_PATH` descriptor. macOS opens the real
+//! path as above and asks that descriptor, so the numbers are for the inode that passed the rules.
+//! `MachineId` is the one read of the machine id files: it uses a guard that admits those two paths only,
+//! because the denylist refuses them to everyone else. The answer is never logged.
+//!
 //! **Bounds.** A read returns at most `MAX_READ` bytes. A directory listing holds at most
 //! `MAX_DIR_ENTRIES` entries. The work runs on the blocking pool; a call that outlives its check's
 //! timeout leaves a thread that ends when the read does, and only regular files are ever opened, so
@@ -32,11 +39,15 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::sealed::Sealed;
-use super::{Backend, DirEntry, FileBytes, FileMeta, ReadGuard, ReadRange};
+use super::{
+    Backend, DirEntry, FileBytes, FileMeta, NativeCall, NativeValue, ReadGuard, ReadRange,
+};
 use crate::check::BoxFuture;
 
 #[cfg(unix)]
 mod files;
+#[cfg(unix)]
+mod native;
 
 /// The backend that reads the real machine.
 ///
@@ -63,7 +74,7 @@ impl Sealed for Live {}
 fn unsupported<T>() -> io::Result<T> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "file reads are not available on this OS in this version of rdy",
+        "this call is not available on this OS in this version of rdy",
     ))
 }
 
@@ -144,6 +155,29 @@ impl Backend for Live {
             #[cfg(not(unix))]
             {
                 let _ = (path, guard);
+                unsupported()
+            }
+        })
+    }
+
+    fn native<'a>(
+        &'a self,
+        call: &'a NativeCall,
+        guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<NativeValue>> {
+        let call = call.clone();
+        let guard = *guard;
+        #[cfg(unix)]
+        let secrets = self.secrets.clone();
+        Box::pin(async move {
+            #[cfg(unix)]
+            {
+                on_pool(move || native::call(&call, &guard, &secrets)).await
+            }
+            // Windows has no native calls in M1: its checks report "not yet on this OS".
+            #[cfg(not(unix))]
+            {
+                let _ = (call, guard);
                 unsupported()
             }
         })

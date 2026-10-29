@@ -35,7 +35,7 @@ cap-primitives = { workspace = true, optional = true }
 
 # Process group kill (M1-038) and the umask (M1-039) on Unix. Safe wrappers, so the crate keeps `forbid(unsafe_code)`.
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["std", "process", "fs"], optional = true }
+rustix = { workspace = true, features = ["std", "process", "fs", "system"], optional = true }
 
 [dev-dependencies]
 # The integration tests start commands through the raw runner (`exec::run`, `ExecSpec::new`), which

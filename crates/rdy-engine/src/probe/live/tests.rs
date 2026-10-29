@@ -18,8 +18,8 @@ use crate::check::{CheckInfo, CheckMeta, Os, OsSupport, Support};
 #[cfg(target_os = "linux")]
 use crate::probe::policy::RULE_PROC;
 use crate::probe::policy::{
-    RULE_CHANGED, RULE_DEVICE, RULE_DOT_DOT, RULE_NOT_DIR, RULE_NOT_REGULAR, RULE_OUTSIDE_READS,
-    RULE_SSH, RULE_SYSTEM_SECRET,
+    RULE_CHANGED, RULE_DEVICE, RULE_DOT_DOT, RULE_MACHINE_ID_FILE, RULE_NOT_DIR,
+    RULE_NOT_FILE_OR_DIR, RULE_NOT_REGULAR, RULE_OUTSIDE_READS, RULE_SSH, RULE_SYSTEM_SECRET,
 };
 use crate::probe::{MAX_READ, Probe, ProbeError, ProbeHub};
 use crate::redact::{Redactor, TagKey};
@@ -64,6 +64,10 @@ impl Sandbox {
     fn new() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = std::fs::canonicalize(dir.path()).expect("real path");
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the engine's own tests build the live backend; check crates may not"
+        )]
         let hub = ProbeHub::new(live_backend(), Redactor::new(TagKey::fixed([5; 32])));
         Self {
             _dir: dir,
@@ -230,6 +234,43 @@ async fn the_exit_test_refusals_are_logged() {
         assert_eq!(field(action, "rule"), Some(&Value::from(*rule)));
         assert!(field(action, "bytes").is_none());
     }
+}
+
+#[tokio::test]
+async fn the_machine_id_files_are_refused_to_a_check_that_declares_the_root() {
+    let sandbox = Sandbox::new();
+    // Files shaped like the two, inside the sandbox: the deny rule matches at any depth, so no real
+    // `/etc` is needed. A link to each looks fine by name and is judged on its real path.
+    let etc = sandbox.write("etc/machine-id", b"0f1e2d3c4b5a69788796a5b4c3d2e1f0\n");
+    let dbus = sandbox.write(
+        "var/lib/dbus/machine-id",
+        b"0f1e2d3c4b5a69788796a5b4c3d2e1f0\n",
+    );
+    symlink(&etc, sandbox.path("looks-fine")).expect("symlink");
+    symlink(&dbus, sandbox.path("also-fine")).expect("symlink");
+    // The same two names on the real machine, where they exist.
+    let mut cases = vec![
+        etc,
+        dbus,
+        sandbox.path("looks-fine"),
+        sandbox.path("also-fine"),
+    ];
+    cases.extend(
+        ["/etc/machine-id", "/var/lib/dbus/machine-id"]
+            .map(PathBuf::from)
+            .into_iter()
+            .filter(|file| file.exists()),
+    );
+    let probe = sandbox.probe(&[Path::new("/")], &[]);
+    for path in &cases {
+        let error = probe.read(path).await.expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_MACHINE_ID_FILE, "{}", path.display());
+        let error = probe.stat(path).await.expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_MACHINE_ID_FILE, "{}", path.display());
+    }
+    // A sibling that is not a machine id file is still read.
+    let other = sandbox.write("etc/hostname", b"node\n");
+    assert_eq!(probe.read(&other).await.expect("read").bytes, b"node\n");
 }
 
 #[tokio::test]
@@ -542,6 +583,33 @@ fn the_portable_path_gives_the_same_answers() {
     assert_eq!(
         crate::probe::Refused::from_io(&error).map(|r| r.rule),
         Some(RULE_CHANGED)
+    );
+}
+
+#[test]
+fn the_portable_statvfs_asks_the_descriptor_it_opened() {
+    // Linux asks the judged `O_PATH` descriptor; macOS opens the real path and asks that descriptor.
+    // The second is compiled everywhere, so its pieces are tested here. A file or a directory is
+    // measured; a FIFO is not opened.
+    let sandbox = Sandbox::new();
+    let file = sandbox.write("data/file", b"x");
+    let fifo = sandbox.path("pipe");
+    mkfifo(&fifo);
+    let guard = ReadGuard::new(Os::Linux, None);
+    let none = files::Secrets::default();
+    for path in [sandbox.path("data"), file] {
+        let (real, stat) = files::locate_by_path(&path, &guard, &none).expect("ok");
+        let (fd, _) =
+            files::open_by_path(&path, &real, &stat, &guard, files::Want::Either).expect("open");
+        let info = rustix::fs::fstatvfs(&fd).expect("fstatvfs");
+        assert!(info.f_blocks > 0, "{}", path.display());
+    }
+    let (real, stat) = files::locate_by_path(&fifo, &guard, &none).expect("a FIFO is described");
+    let error = files::open_by_path(&fifo, &real, &stat, &guard, files::Want::Either)
+        .expect_err("not opened");
+    assert_eq!(
+        crate::probe::Refused::from_io(&error).map(|r| r.rule),
+        Some(RULE_NOT_FILE_OR_DIR)
     );
 }
 
