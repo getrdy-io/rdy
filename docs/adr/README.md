@@ -9,7 +9,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | Number | Title | Status |
 | --- | --- | --- |
 | [0001](0001-spec-language-yaml.md) | Spec language is YAML, parsed with serde-saphyr | Accepted |
-| [0002](0002-spec-signatures-ed25519-minisign.md) | Specs are signed with ed25519 in minisign format, verified before parsing, keys pinned per product | Accepted; decision 5 amended 2026-10-28 (declined `trust add` exits 64); decision 2 amended by 0018 (verifier crate) |
+| [0002](0002-spec-signatures-ed25519-minisign.md) | Specs are signed with ed25519 in minisign format, verified before parsing, keys pinned per product | Accepted; decision 5 amended 2026-10-28 (declined `trust add` exits 64); decision 2 amended by 0018 (verifier crate) and 0022 (signing crate) |
 | [0003](0003-report-format-html-json.md) | Reports are one JSON file plus one self-contained HTML file, rendered with askama | Accepted; decisions 1, 2 and 6 amended 2026-10-28 (ADR 0016 timing, banner first) |
 | [0004](0004-async-runtime-tokio.md) | tokio multi-thread runtime, blocking work on spawn_blocking, every check under a timeout | Accepted; decision 5 tightened by 0014 |
 | [0005](0005-plugin-model-custom-checks.md) | No plugins in M1; a sandboxed `custom.exec` check in M4; no dynamic loading or WASM in v1 | Accepted; amended 2026-10-28 (`custom.exec` in M4, not M3) |
@@ -29,6 +29,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0019](0019-schema-generation-derive-and-fragments.md) | Schemas are derived from the types where they are typed, and from fragments where they are not yet | Accepted |
 | [0020](0020-dist-release-workflow-settings.md) | Releases are built by a generated and hardened dist workflow, published last, and gated by an artifact check | Accepted |
 | [0021](0021-trust-store-file-rules.md) | Trust store file rules where the design is silent are the strict ones (user symlink and owner, Windows refuses until M1-122) | Accepted |
+| [0022](0022-secret-key-file-and-signing-in-rdy-cli.md) | rdy writes minisign secret keys with scrypt at the stock cost, and signs in rdy-cli | Accepted, security-reviewed (PR #52) |
 | [0023](0023-inherited-descriptors-detect-not-close.md) | Descriptors inherited by `rdy` are listed and reported in M1, not closed | Accepted, security-reviewed (PR #53) |
 | [0026](0026-checkmeta-in-checkinfo.md) | CheckMeta holds a check's title and remediation and lives in its static CheckInfo | Accepted |
 

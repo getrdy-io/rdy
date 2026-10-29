@@ -59,10 +59,29 @@ zeroize = { version = "1", default-features = false, features = ["alloc"] }
 # Spec signature checks (M1-120, ADR 0018). Exact pins: every bump is reviewed by hand.
 ed25519-dalek = { version = "=2.2.0", default-features = false }
 blake2 = { version = "=0.10.6", default-features = false }
+# Secret key files and signing (M1-125, ADR 0022). `scrypt` and `ct-codecs` are the crates stock minisign
+# tooling in Rust uses for the same format. `getrandom` makes the keys. Exact pins (ADR 0018): they touch
+# secret bytes, so every bump is reviewed by hand.
+scrypt = { version = "=0.11.0", default-features = false }
+ct-codecs = { version = "=1.1.8", default-features = false, features = ["std"] }
+getrandom = { version = "=0.4.3", default-features = false }
 # Test-only: signs synthetic specs the way stock minisign does, and generates property-test cases.
 minisign = { version = "=0.10.0", default-features = false }
 # 1.5 is the first release with a fixed seed (docs/plan/08-testing.md section 4).
 proptest = { version = "1.5", default-features = false }
+
+# The key derivation of a secret key file (ADR 0022) takes a second or so with optimizations. An
+# unoptimized debug build would take minutes, so these crates are optimized in every profile.
+[profile.dev.package.scrypt]
+opt-level = 3
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
 
 # The profile `dist` builds release archives with (dist-workspace.toml). Keep unwinding: the
 # scheduler isolates a panicking check with catch_unwind (docs/plan/02-engine-design.md). Symbols

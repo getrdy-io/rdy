@@ -23,9 +23,14 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true, features = ["std"] }
+blake2 = { workspace = true }
 clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "env"] }
+ct-codecs = { workspace = true }
+ed25519-dalek = { workspace = true, features = ["zeroize"] }
+getrandom = { workspace = true }
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
+scrypt = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
@@ -40,6 +45,7 @@ rustix = { workspace = true, features = ["std", "fs", "process", "termios"] }
 
 [dev-dependencies]
 jsonschema = { workspace = true }
+minisign = { workspace = true }
 tempfile = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]
