@@ -57,6 +57,14 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --locked
+      # The workspace build turns `runtime` on through the other crates. A probe gate without a runtime
+      # (replay) builds rdy-engine alone, so lint and document that build too (ADR 0028).
+      - name: cargo clippy rdy-engine without default features
+        run: cargo clippy --locked -p rdy-engine --no-default-features -- -D warnings
+      - name: cargo doc rdy-engine without default features
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked -p rdy-engine --no-default-features --no-deps
       # The JSON schemas are generated from the rdy-spec types. A type or doc comment that changed
       # without `cargo xtask schema` fails here and names the file to regenerate.
       - name: Generated schemas are current
