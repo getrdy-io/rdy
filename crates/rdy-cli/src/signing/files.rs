@@ -84,6 +84,53 @@ pub fn read_private(path: &Path, cap: usize) -> Result<Zeroizing<Vec<u8>>, FileE
     Ok(buf)
 }
 
+/// Reads a public file of at most `cap` bytes, such as the `.pub` file given to `rdy trust add --key`.
+///
+/// Nothing in a public key is secret, so there is no owner or mode rule, and a symlink is followed:
+/// the person who runs the command names the file and then compares the fingerprint it holds with the
+/// one the vendor published, which is what makes the key trusted. The file must be a regular file. On
+/// Unix it is opened without blocking, so a named pipe cannot hang the command.
+///
+/// # Errors
+///
+/// [`FileError::Unreadable`], [`FileError::NotRegular`] or [`FileError::TooLarge`].
+pub fn read_public(path: &Path, cap: usize) -> Result<Vec<u8>, FileError> {
+    let unreadable = |err: &io::Error| FileError::Unreadable {
+        reason: crate::error::IoReason::from_io(err),
+    };
+    let mut file = open_public(path).map_err(|err| unreadable(&err))?;
+    let opened = file.metadata().map_err(|err| unreadable(&err))?;
+    if !opened.is_file() {
+        return Err(FileError::NotRegular);
+    }
+    let mut buf = Vec::new();
+    (&mut file)
+        .take(cap as u64 + 1)
+        .read_to_end(&mut buf)
+        .map_err(|err| unreadable(&err))?;
+    if buf.len() > cap {
+        return Err(FileError::TooLarge);
+    }
+    Ok(buf)
+}
+
+#[cfg(unix)]
+fn open_public(path: &Path) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    use rustix::fs::OFlags;
+
+    OpenOptions::new()
+        .read(true)
+        .custom_flags((OFlags::NONBLOCK | OFlags::NOCTTY).bits().cast_signed())
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_public(path: &Path) -> io::Result<File> {
+    File::open(path)
+}
+
 #[cfg(unix)]
 fn open_private(path: &Path) -> io::Result<File> {
     use std::os::unix::fs::OpenOptionsExt;

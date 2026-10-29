@@ -1,0 +1,1 @@
+Removed key 9F3A6C21D4E87B05 for acme-platform.

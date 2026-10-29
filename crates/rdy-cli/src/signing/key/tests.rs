@@ -324,3 +324,28 @@ fn the_public_key_file_is_what_stock_minisign_writes() {
         .expect("stock crate reads it");
     assert_eq!(theirs.to_base64(), lines[1]);
 }
+
+#[test]
+fn secret_key_text_is_told_from_public_key_text() {
+    let key = SecretKey::generate().expect("key");
+    // Both forms rdy writes, the stock tool's comment, and the key line alone.
+    assert!(looks_like_secret_key(&encrypted(&key)));
+    let plain = key.key_file(None, CHEAP).expect("key file");
+    assert!(looks_like_secret_key(&plain));
+    let line = plain.lines().nth(1).expect("key line");
+    assert!(looks_like_secret_key(line));
+    assert!(looks_like_secret_key(
+        "untrusted comment: minisign encrypted secret key\nnot base64 at all\n"
+    ));
+    assert!(looks_like_secret_key(
+        "untrusted comment: rdy secret key ..."
+    ));
+    // A public key file, even one whose comment mentions a secret key, is not one.
+    assert!(!looks_like_secret_key(&key.public_key_file()));
+    assert!(!looks_like_secret_key(&format!(
+        "untrusted comment: synthetic key. The secret key was discarded\n{}\n",
+        key.public_key_base64()
+    )));
+    assert!(!looks_like_secret_key(&key.public_key_base64()));
+    assert!(!looks_like_secret_key(""));
+}

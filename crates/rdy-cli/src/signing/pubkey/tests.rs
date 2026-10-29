@@ -1,0 +1,169 @@
+//! Tests for key arguments. Keys are synthetic and made in each test.
+
+use ct_codecs::{Base64, Encoder};
+
+use super::*;
+use crate::signing::key::{KdfCost, SecretKey};
+
+const CHEAP: KdfCost = KdfCost::new(32_768, 1 << 20);
+
+fn dir() -> tempfile::TempDir {
+    tempfile::tempdir().expect("tempdir")
+}
+
+/// A public key file text and a secret key file text, from one key.
+fn pair() -> (SecretKey, String, String) {
+    let key = SecretKey::generate().expect("key");
+    let public = key.public_key_file();
+    let secret = key.key_file(None, CHEAP).expect("key file").to_string();
+    (key, public, secret)
+}
+
+#[test]
+fn a_pub_file_a_bare_key_and_the_key_text_give_the_same_key() {
+    let d = dir();
+    let (key, public, _) = pair();
+    let path = d.path().join("acme.pub");
+    std::fs::write(&path, &public).expect("write");
+    let from_file = resolve(path.to_str().expect("utf8")).expect("file");
+    assert_eq!(from_file.origin, Origin::File(path));
+    assert_eq!(from_file.key.key_id(), key.key_id());
+    let from_text = resolve(&public).expect("text");
+    assert_eq!(from_text.origin, Origin::Text);
+    assert_eq!(from_text.key, from_file.key);
+    let bare = resolve(&key.public_key_base64()).expect("bare key");
+    assert_eq!(bare.origin, Origin::Text);
+    assert_eq!(bare.key, from_file.key);
+}
+
+#[test]
+fn a_secret_key_file_is_refused_and_named_by_its_origin() {
+    let d = dir();
+    let (_, _, secret) = pair();
+    let path = d.path().join("acme.key");
+    std::fs::write(&path, &secret).expect("write");
+    let err = resolve(path.to_str().expect("utf8")).expect_err("secret");
+    assert!(matches!(
+        err,
+        GivenKeyError::SecretKey { origin: Origin::File(ref p) } if *p == path
+    ));
+}
+
+#[test]
+fn secret_key_text_on_the_command_line_is_refused_without_echo() {
+    let (_, _, secret) = pair();
+    let line = secret.lines().nth(1).expect("key line").to_owned();
+    for text in [secret.clone(), line.clone()] {
+        let err = resolve(&text).expect_err("secret");
+        assert!(matches!(
+            err,
+            GivenKeyError::SecretKey {
+                origin: Origin::Text
+            }
+        ));
+        let shown = format!("{err} {err:?}");
+        assert!(!shown.contains(&line), "{shown}");
+    }
+    assert!(matches!(
+        resolve("untrusted comment: rdy secret key ..."),
+        Err(GivenKeyError::SecretKey {
+            origin: Origin::Text
+        })
+    ));
+}
+
+#[test]
+fn a_public_key_comment_that_mentions_a_secret_key_is_still_a_public_key() {
+    let (key, _, _) = pair();
+    let text = format!(
+        "untrusted comment: synthetic key. The secret key was discarded\n{}\n",
+        key.public_key_base64()
+    );
+    assert_eq!(resolve(&text).expect("public").key.key_id(), key.key_id());
+}
+
+#[test]
+fn text_that_is_not_a_public_key_is_refused_without_echo() {
+    let err = resolve("untrusted comment: x\nthis is not a key\n").expect_err("not a key");
+    assert!(matches!(
+        err,
+        GivenKeyError::NotPublic {
+            origin: Origin::Text,
+            ..
+        }
+    ));
+    assert!(!format!("{err}").contains("this is not a key"));
+    let long = format!("RW{}", "A".repeat(2000));
+    assert!(matches!(
+        resolve(&long),
+        Err(GivenKeyError::NotPublic { .. })
+    ));
+}
+
+#[test]
+fn a_weak_key_is_refused() {
+    // Algorithm bytes, a key id, and the identity point: a key of small order.
+    let mut bytes = b"Ed".to_vec();
+    bytes.extend_from_slice(&[7; 8]);
+    let mut identity = [0u8; 32];
+    identity[0] = 1;
+    bytes.extend_from_slice(&identity);
+    let text = Base64::encode_to_string(&bytes).expect("encode");
+    assert!(matches!(
+        resolve(&text),
+        Err(GivenKeyError::NotPublic {
+            source: SignatureError::WeakKey,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_missing_file_a_folder_and_a_binary_file_are_refused() {
+    let d = dir();
+    let missing = d.path().join("nope.pub");
+    assert!(matches!(
+        resolve(missing.to_str().expect("utf8")),
+        Err(GivenKeyError::File { .. })
+    ));
+    assert!(matches!(
+        resolve(d.path().to_str().expect("utf8")),
+        Err(GivenKeyError::File { .. })
+    ));
+    let binary = d.path().join("bin");
+    std::fs::write(&binary, [0xff, 0xfe, 0x00, 0x80]).expect("write");
+    assert!(matches!(
+        resolve(binary.to_str().expect("utf8")),
+        Err(GivenKeyError::NotText { .. })
+    ));
+    let big = d.path().join("big.pub");
+    std::fs::write(&big, vec![b'a'; MAX_KEY_FILE_BYTES + 1]).expect("write");
+    assert!(matches!(
+        resolve(big.to_str().expect("utf8")),
+        Err(GivenKeyError::File {
+            source: FileError::TooLarge,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn file_names_are_not_mistaken_for_key_text() {
+    for name in [
+        "acme-platform.pub",
+        "./RWkeys/acme.pub",
+        "keys/acme-platform-public-key",
+        "RW.pub",
+        "C:\\keys\\acme.pub",
+        "a",
+    ] {
+        assert!(!is_key_text(name), "{name}");
+    }
+    for text in [
+        "untrusted comment: minisign public key X",
+        "line one\nline two",
+        &format!("RW{}", "A".repeat(54)),
+    ] {
+        assert!(is_key_text(text), "{text}");
+    }
+}

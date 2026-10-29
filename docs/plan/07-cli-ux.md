@@ -2146,6 +2146,13 @@ error: acme-platform has 2 trusted keys
 fix: say which one to remove with --key-id: 9F3A6C21D4E87B05, 51B0C4D7E2A93F68
 ```
 
+Built in M1-131 (ADR 0033). Details the examples do not show: `trust add` and `remove` print on stderr, `list` on
+stdout. With no terminal and no `--yes`, `trust add` refuses before it prints the key. With `--yes` it prints the
+summary and the result, without the compare paragraph. When `--key` is key text, the `file` row reads `(key text
+from the command line)`. `--key-id` takes the id in any case. A normal user who runs `trust remove` for a key that
+only the system store has is told to use `sudo rdy trust remove <product>`. On Windows the empty `trust list` does not
+suggest `trust add`.
+
 ### C.11 JSON objects other than the Report
 
 stdout. Each validates against its definition in `result.v1.schema.json`. Exit 64 for a spec that is

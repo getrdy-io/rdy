@@ -274,7 +274,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-130 | todo | | SEC-59 Unsigned and unpinned-key banners and hint wording for spec loading
 
-- M1-131 | todo | | rdy trust add, list and remove
+- M1-131 | PR #TBD | | ADR 0033. `rdy-spec` gains `TrustStore::entries`, `add`, `remove` (the pin list was private, and M1-121 left `trust add/list/remove` here). `signing::pubkey::resolve` is the shared `--key` argument reader for M1-126. Deferred: the "`run --key` leaves the store unchanged" half of the exit test runs against today's stub `run` and `verify` (exit 70) and is the assertion M1-126 keeps true once they are real, and the library test shows saving a store with a one-run pin writes no trace of it; C.9 goldens use the document text with this run's key id, fingerprint, hash and paths swapped in (keygen is random), and the C.9 sign golden starts at the password prompt because `spec sign` prints lint findings without line and column today; no lock between two `trust add` runs (last writer wins, ADR 0033); the Windows tests are written but only the Windows CI leg runs them; security review of the `--key` file-or-text rule is M1-132.
 
 - M1-132 | todo | | Security review of spec signing and trust store
 
