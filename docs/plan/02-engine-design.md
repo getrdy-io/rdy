@@ -337,6 +337,10 @@ tests policy.
 - Deny list: `/etc/shadow`, `/etc/gshadow`, `/etc/sudoers*`, `*/.ssh/*`, private key files, `~/.kube/*`
   and `/root/.kube/*` (kube reads the kubeconfig itself), `/proc/*/environ`, `/proc/*/cmdline`,
   `/proc/*/mem`, `/proc/*/fd/*`, `/proc/*/root/*`, `/proc/*/map_files/*`, `/proc/kcore`, `/dev/*`.
+  The deny applies to the run-level probe too. The engine's own kubeconfig read is not a probe read: the
+  `rdy-checks-k8s` client module reads the file the operator chose (`--kubeconfig`, `KUBECONFIG` or
+  `~/.kube/config`), and the probe hook logs it as a `read` entry with no check id from
+  `Loaded::files()` (ADR 0031, M1-102).
 - 1 MiB cap; `read_tail` sets `truncated_head`. Reads run on `spawn_blocking`.
 - Env names must be declared; values matching the secret-name rule join the known-secret set.
 
@@ -829,9 +833,12 @@ one clippy rule.
   - `ReadOnlyClient` hands out `kube::Api<K>` and never a `kube::Client`, so check code never names
     the type.
   - Verified on 2026-10-28 against kube 4.2.0 on docs.rs (`kube`, `kube::client` and `kube::config`
-    index pages, and the `Client`, `Config`, `ClientBuilder`, `Kubeconfig` and `Api` pages). M1-102
-    adds and pins kube, so the kube entries and their lint-wall uses land there, re-checked against
-    the pinned version.
+    index pages, and the `Client`, `Config`, `ClientBuilder`, `Kubeconfig` and `Api` pages). Re-checked
+    on 2026-10-29 (M1-102) against the pinned `=4.2.0` crate source: all 4 type and 14 method entries
+    exist, and they are in `crates/rdy-checks-k8s/clippy.toml`, where a path that stops resolving
+    fails `clippy -D warnings`. A scratch file outside the client module that used each entry, each
+    trait route and both re-export paths drew a clippy hit for every use, and every method entry
+    fired on its own. M1-044 adds the permanent `tests/lint-wall` uses.
 - Not listed: crates other than std, kube and the facade. `tokio`, `rustix`, `nix`, `socket2`,
   `walkdir`, `sysinfo` and the rest are not direct dependencies of any check crate, so their APIs are
   out of reach. The direct dependency allowlist enforces that, not clippy. The `tokio` and `socket2`

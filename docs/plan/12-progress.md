@@ -216,7 +216,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-101 | todo | | Security review of the TLS recording verifier and 03 Appendix A
 
-- M1-102 | todo | | Kube client from kubeconfig or in-cluster with rustls and timeouts
+- M1-102 | PR #TBD | | Built: client from kubeconfig or in-cluster (rustls on ring), timeouts, cluster line announced before the first request, no-kubeconfig error with the hint, plugin output kept out of errors and logs (tested at TRACE), kube clippy entries checked against kube 4.2.0. Moved by the proposed row correction: `k8s.version` passes on kind to M1-106 and M1-108 (the check is M1-106, the kind job M1-108); the SKIP of every k8s check with the hint to M1-107 (the family probe hook); the permanent `tests/lint-wall` uses of the kube entries to M1-044 (the crate does not exist yet); the identity from `SelfSubjectReview` to M1-103 and M1-109. ADR 0031 (Proposed, needs security-reviewer). Settled: the kubeconfig is read by the client module, not through a Probe. Unproven here: the real kind run (ignored test `tests/live_cluster.rs` is for M1-108), the in-cluster path, and `HTTPS_PROXY` being ignored (the process env cannot be set without unsafe)
 
 - M1-103 | todo | | Read-only guard layer and test for rdy-checks-k8s
 

@@ -131,7 +131,7 @@ files indented under it (not with `--no-report`); (8) the banner's first line ag
 | `spec` | `<product> <version>   (<file as typed>)`, with `, revision N` when the spec has a `serial` |
 | `sig` | `verified, key <id>, <trust>, signed <date>` with `<trust>` one of `trusted by you`, `trusted on this machine`, `key given with --key, not pinned`; or `UNSIGNED (allowed by --allow-unsigned)` |
 | `host`, `user`, `proxy` | `<hostname>   <os> <version>   <arch>`; `<login> (root)` or `(not root)`; the proxy in effect with user info stripped, left out when none |
-| `cluster` | `<context>, <server>`, plus `, credential plugin: <name>` and `, TLS verification is OFF` when they apply. Printed before the first request, so the user sees which cluster rdy is about to touch. `no kubeconfig found` when none. `ignored: --no-network is set` with `--no-network`, plus `(--kube-context <name> was given)` when a kube flag was passed. Left out when the spec has no Kubernetes checks |
+| `cluster` | `<context>, <server>, user <kubeconfig user>`, plus `, credential plugin: <name>` and `, TLS verification is OFF` when they apply. The user is the entry name in the kubeconfig. The identity the API server sees comes later (ADR 0031). Printed before the first request, so the user sees which cluster rdy is about to touch. `no kubeconfig found` when none. `ignored: --no-network is set` with `--no-network`, plus `(--kube-context <name> was given)` when a kube flag was passed. Left out when the spec has no Kubernetes checks |
 | `limits` (M2) | `20 s per check (set by --timeout)`. Left out without `--timeout` |
 
 **The root Tip.** Shown when two or more checks were skipped with `missing_need: root`: `Tip: 2 checks need root:

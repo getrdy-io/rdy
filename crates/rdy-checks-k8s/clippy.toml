@@ -1,0 +1,45 @@
+# The kube entries of the lint wall (docs/plan/02-engine-design.md, Appendix A, and ADR 0031).
+#
+# Outside `src/client/`, check code must not name a kube client or config type or call a constructor of
+# one. Only the client module builds a client, so every request goes through the read-only guard that
+# M1-103 puts in `build_client`. `src/client/mod.rs` allows `clippy::disallowed_types` and
+# `clippy::disallowed_methods` for itself, and nowhere else may.
+#
+# Re-checked on 2026-10-29 against kube 4.2.0 (the pinned version, from the crate source): every item
+# below exists. If a kube bump renames or removes one, clippy says so with a warning, and `-D warnings`
+# fails the build. `kube::client::Client` and `kube::config::Config` are re-exports of the same items as
+# `kube::Client` and `kube::Config`, and clippy matches the item, so one entry covers both paths.
+# A type entry covers every constructor and trait route reached by naming the type:
+# `TryFrom<Config>` and `TryFrom<Kubeconfig>` for `Client`, `TryFrom<Config>` for `ClientBuilder`, and
+# `Default` and `Deserialize` for `Kubeconfig`. The method entries stay as a second line.
+#
+# M1-044 merges the std and facade entries of Appendix A into this file and adds `tests/lint-wall`,
+# which uses each entry once and expects clippy to fail.
+
+# Same test settings as the workspace clippy.toml (a crate's own file replaces the root file).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+disallowed-types = [
+    { path = "kube::Client", reason = "only src/client/ builds a client; checks get the guarded ReadOnlyClient (ADR 0010)" },
+    { path = "kube::Config", reason = "only src/client/ builds a kube config (ADR 0010)" },
+    { path = "kube::client::ClientBuilder", reason = "only src/client/ builds a client; the guard layer goes in build_client (ADR 0010)" },
+    { path = "kube::config::Kubeconfig", reason = "only src/client/ reads a kubeconfig; the probe facade denies .kube (ADR 0031)" },
+]
+
+disallowed-methods = [
+    { path = "kube::Client::new", reason = "builds a client with no guard; use the client module (ADR 0010)" },
+    { path = "kube::Client::try_default", reason = "infers a config and builds an unguarded client; use the client module (ADR 0010)" },
+    { path = "kube::client::ClientBuilder::new", reason = "builds a client with no guard; use the client module (ADR 0010)" },
+    { path = "kube::Config::new", reason = "builds a kube config by hand; use the client module (ADR 0010)" },
+    { path = "kube::Config::infer", reason = "applies KUBE_RS_DEBUG_* overrides that can swap the server; use the client module (ADR 0031)" },
+    { path = "kube::Config::incluster", reason = "use the client module (ADR 0010)" },
+    { path = "kube::Config::incluster_env", reason = "use the client module (ADR 0010)" },
+    { path = "kube::Config::incluster_dns", reason = "use the client module (ADR 0010)" },
+    { path = "kube::Config::from_kubeconfig", reason = "reads a kubeconfig outside the client module; use the client module (ADR 0031)" },
+    { path = "kube::Config::from_custom_kubeconfig", reason = "use the client module (ADR 0010)" },
+    { path = "kube::config::Kubeconfig::read", reason = "reads ~/.kube outside the client module; use the client module (ADR 0031)" },
+    { path = "kube::config::Kubeconfig::read_from", reason = "reads a kubeconfig outside the client module; use the client module (ADR 0031)" },
+    { path = "kube::config::Kubeconfig::from_env", reason = "reads KUBECONFIG outside the client module; use the client module (ADR 0031)" },
+    { path = "kube::config::Kubeconfig::from_yaml", reason = "parses a kubeconfig outside the client module; use the client module (ADR 0031)" },
+]
