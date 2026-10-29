@@ -41,7 +41,7 @@ pub use rdy_spec::did_you_mean;
 
 #[cfg(test)]
 mod tests {
-    use super::{did_you_mean, echo, escape_untrusted, shell_word};
+    use super::{did_you_mean, echo, shell_word};
 
     #[test]
     fn echo_cuts_long_values() {
