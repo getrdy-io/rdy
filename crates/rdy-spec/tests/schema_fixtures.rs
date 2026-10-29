@@ -238,6 +238,37 @@ fn the_golden_results_and_command_objects_of_the_cli_plan_validate() -> TestResu
     Ok(())
 }
 
+/// A credential plugin named in `identity.kube.exec_plugin` is valid, survives the typed model and
+/// shows in the JSON the model writes (SEC-63; the named exception of the threat model, row E5).
+#[test]
+fn an_exec_plugin_is_valid_and_shows_in_the_json_the_model_writes() -> TestResult {
+    let v = result_validator()?;
+    let mut doc = report("### 7.2 ")?;
+    assert_eq!(doc["identity"]["kube"]["exec_plugin"], Value::Null);
+    doc["identity"]["kube"]["exec_plugin"] = json!("aws");
+    assert_valid(&v, &doc, "7.2 with an exec plugin");
+
+    let typed: rdy_spec::result::Report = serde_json::from_value(doc.clone())?;
+    let plugin = typed
+        .identity
+        .kube
+        .as_ref()
+        .and_then(|kube| kube.exec_plugin.as_deref());
+    assert_eq!(plugin, Some("aws"));
+
+    // Written back, the field is still there and still valid.
+    let written = serde_json::to_value(&typed)?;
+    assert_eq!(written["identity"]["kube"]["exec_plugin"], json!("aws"));
+    assert_valid(&v, &written, "the written report");
+
+    // The text is capped like every other result text, and only a string or null is allowed.
+    doc["identity"]["kube"]["exec_plugin"] = json!("p".repeat(4097));
+    assert!(!errors(&v, &doc).is_empty(), "a 4097 character plugin name");
+    doc["identity"]["kube"]["exec_plugin"] = json!(["aws"]);
+    assert!(!errors(&v, &doc).is_empty(), "a plugin name that is a list");
+    Ok(())
+}
+
 /// Every golden result file under `tests/fixtures/results/` validates. The directory does not exist
 /// yet, so this holds until the first golden is added, and then it checks that one and every later one.
 #[test]

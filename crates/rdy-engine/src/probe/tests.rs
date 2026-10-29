@@ -1400,6 +1400,218 @@ fn the_last_resort_drops_other_entries_before_a_denied_one_and_counts_it() {
     assert_eq!(log.last_resort_drops, 2);
 }
 
+#[test]
+fn a_denied_entry_at_log_scope_evicts_another_checks_ok_and_failed_file_entries() {
+    let hub = hub(Replay::new()).with_limits(5, 1000);
+    let other = hub.check_probe("host.other", Os::Linux, None);
+    let noisy = hub.check_probe("net.noisy", Os::Linux, None);
+    for i in 0..3 {
+        put_at(
+            &other,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/etc/a{i}")),
+            "",
+        );
+    }
+    for i in 0..2 {
+        put_at(
+            &other,
+            ActionKind::Stat,
+            ActionOutcome::Failed,
+            Some(&format!("/opt/d{i}/f")),
+            "not found",
+        );
+    }
+    assert_eq!(hub.action_log().actions.len(), 5);
+    // Four denials: the three ok entries go first, then one failed entry.
+    for i in 0..4 {
+        deny(
+            &noisy,
+            ActionKind::Connect,
+            "host",
+            &format!("h{i}.acme.example"),
+        );
+    }
+    let log = hub.action_log();
+    let of = |check: &str, kind: &str, outcome: ActionOutcome| {
+        log.actions
+            .iter()
+            .filter(|a| {
+                a.check.as_deref() == Some(check) && a.kind.as_str() == kind && a.outcome == outcome
+            })
+            .count()
+    };
+    assert_eq!(log.actions.len(), 5, "the log cap holds");
+    assert_eq!(of("net.noisy", "connect", ActionOutcome::Denied), 4);
+    assert_eq!(of("host.other", "read", ActionOutcome::Ok), 0);
+    assert_eq!(of("host.other", "stat", ActionOutcome::Failed), 1);
+    assert_eq!(log.dropped.get("read"), Some(&3));
+    assert_eq!(log.dropped.get("stat"), Some(&1));
+    // Evicting file entries is the rule, not the last resort.
+    assert_eq!(log.last_resort_drops, 0);
+}
+
+#[test]
+fn a_denied_entry_at_log_scope_evicts_only_its_own_checks_spare_entry() {
+    let hub = hub(Replay::new()).with_limits(4, 1000);
+    let own = hub.check_probe("net.own", Os::Linux, None);
+    let neighbour = hub.check_probe("net.neighbour", Os::Linux, None);
+    let bare = hub.check_probe("net.bare", Os::Linux, None);
+    for _ in 0..2 {
+        put(&neighbour, ActionKind::Connect, ActionOutcome::Ok);
+        put(&own, ActionKind::Connect, ActionOutcome::Ok);
+    }
+    assert_eq!(hub.action_log().actions.len(), 4);
+
+    // No file entry anywhere: the check gives up its own newest connect entry.
+    deny(&own, ActionKind::Exec, "program", "timedatectl");
+    let log = hub.action_log();
+    let held = |check: &str, kind: &str| {
+        log.actions
+            .iter()
+            .filter(|a| a.check.as_deref() == Some(check) && a.kind.as_str() == kind)
+            .count()
+    };
+    assert_eq!(held("net.own", "connect"), 1);
+    assert_eq!(held("net.own", "exec"), 1);
+    assert_eq!(
+        held("net.neighbour", "connect"),
+        2,
+        "the neighbour keeps both"
+    );
+    assert_eq!(log.last_resort_drops, 1);
+
+    // A check with no spare entry of its own has nothing to give up: its denial is the one dropped.
+    deny(&bare, ActionKind::Exec, "program", "timedatectl");
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 4);
+    assert_eq!(held_by(&log, "net.bare"), 0);
+    assert_eq!(held_by(&log, "net.neighbour"), 2);
+    assert_eq!(held_by(&log, "net.own"), 2);
+    assert_eq!(log.dropped.get("exec"), Some(&1));
+    assert_eq!(log.last_resort_drops, 2);
+}
+
+fn held_by(log: &ActionLogOutput, check: &str) -> usize {
+    log.actions
+        .iter()
+        .filter(|a| a.check.as_deref() == Some(check))
+        .count()
+}
+
+#[test]
+fn the_denied_key_budget_is_two_thousand_and_a_new_key_past_it_is_written_unfolded() {
+    let hub = hub(Replay::new());
+    // 20 checks with 100 targets each are 2000 distinct keys.
+    let probes: Vec<Probe> = (0..21)
+        .map(|n| hub.check_probe(&format!("net.c{n}"), Os::Linux, None))
+        .collect();
+    for probe in &probes[..20] {
+        for i in 0..DENIED_TARGETS {
+            deny(
+                probe,
+                ActionKind::Connect,
+                "host",
+                &format!("h{i}.acme.example"),
+            );
+        }
+    }
+    assert_eq!(hub.action_log().actions.len(), 2000);
+
+    // The 2001st key is past the budget: 30 calls are 30 entries, none folded.
+    for _ in 0..30 {
+        deny(&probes[20], ActionKind::Connect, "host", "new.acme.example");
+    }
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 2030);
+    assert_eq!(count_of(&log, "coalesced", ActionOutcome::Denied), 0);
+
+    // A key already tracked still folds: 1 call held, 19 more written, 10 folded.
+    for _ in 0..29 {
+        deny(&probes[0], ActionKind::Connect, "host", "h0.acme.example");
+    }
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 2030 + 19 + 1);
+    let folded: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .collect();
+    assert_eq!(folded.len(), 1);
+    assert_eq!(field(folded[0], "count"), Some(&json!(10)));
+    assert_eq!(log.last_resort_drops, 0);
+    assert!(!log.truncated);
+}
+
+#[test]
+fn ok_reads_past_two_hundred_per_directory_fold_into_one_ok_entry() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    for i in 0..COALESCE_OK_AFTER + 50 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/sys/class/net/eth0/f{i}")),
+            "",
+        );
+    }
+    // Another directory has its own count.
+    put_at(
+        &probe,
+        ActionKind::Read,
+        ActionOutcome::Ok,
+        Some("/sys/class/net/eth1/f"),
+        "",
+    );
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), COALESCE_OK_AFTER + 1 + 1);
+    assert!(!log.truncated, "folding is not dropping");
+    let folded = log
+        .actions
+        .iter()
+        .find(|a| a.kind == ActionKind::Coalesced)
+        .expect("a coalesced entry");
+    assert_eq!(folded.outcome, ActionOutcome::Ok);
+    assert_eq!(field(folded, "of"), Some(&json!("read")));
+    assert_eq!(field(folded, "under"), Some(&json!("/sys/class/net/eth0")));
+    assert_eq!(field(folded, "count"), Some(&json!(50)));
+    assert_eq!(field(folded, "rule"), None);
+    assert_eq!(field(folded, "error"), None);
+}
+
+#[test]
+fn a_folded_ok_entry_is_dropped_with_the_ok_reads_and_before_anything_else() {
+    let hub = hub(Replay::new()).with_limits(COALESCE_OK_AFTER + 2, 1000);
+    let probe = hub.check_probe("host.walker", Os::Linux, None);
+    for i in 0..COALESCE_OK_AFTER + 5 {
+        put_at(
+            &probe,
+            ActionKind::Read,
+            ActionOutcome::Ok,
+            Some(&format!("/proc/sys/f{i}")),
+            "",
+        );
+    }
+    put(&probe, ActionKind::Exec, ActionOutcome::Ok);
+    // Full: 200 ok reads, one folded entry and the exec. A failed read pushes out the newest ok one.
+    put_at(
+        &probe,
+        ActionKind::Stat,
+        ActionOutcome::Failed,
+        Some("/x/y"),
+        "not found",
+    );
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), COALESCE_OK_AFTER + 2);
+    assert_eq!(count_of(&log, "exec", ActionOutcome::Ok), 1);
+    assert_eq!(count_of(&log, "stat", ActionOutcome::Failed), 1);
+    assert_eq!(count_of(&log, "coalesced", ActionOutcome::Ok), 0);
+    assert_eq!(log.dropped.get("coalesced"), Some(&1));
+    assert_eq!(log.last_resort_drops, 0);
+}
+
 // ---- the fixture run, through the scheduler -------------------------------------------------------
 
 #[cfg(all(feature = "runtime", unix))]
