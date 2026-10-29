@@ -261,6 +261,39 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
 - PC-43: applied in 02, 04, 05, 11. Unset, empty or invalid `RUST_LOG` means no log output (07 D.6),
   and the five dependency caps hold whatever a valid `RUST_LOG` says. The proxy URL canary moved to
   M1-060 and the JSON and HTML parts of the M1-056 exit test to M1-062.
+- PC-44 (found by the M1-040 review, PR #58): applied in 01 section 5.4, 02 (the Files deny list and the
+  `Backend` sketch) and 05 I5. The backlog row changed in correction-12 (PR #82). The ticket lines quoted in ADR 0014 and 02 are
+  frozen inputs and keep their old wording; 11 is the authority. Four changes. (1) One `Cmd` type, the one in
+  `exec::policy`, built with `CommandEntry::cmd` (ADR 0028). `Probe::exec` applies the check's
+  `CommandSpec` (extra directories, environment names, stdout cap), then checks the command with
+  `table::validate_for(os, ..)` for the check's OS, then calls
+  `Backend::spawn(Cmd) -> Result<Output, ProbeError>`. The provided `spawn` is the live path and calls
+  `exec::table::run`, the only public runner (`policy::run` is crate-private); the replay backend
+  overrides it. 02's `io::Result<Output>` is replaced, because a start failure, a timeout and a hung
+  child are not `io::Error` kinds. The gate runs for every backend, so a fixture can never "run" `sh`,
+  `sudo` or any program the table does not list, and a replayed run depends on no tool of the test
+  machine. There is no `ResolvedCmd`, no `resolves_on_disk` and no second `Cmd`. (2) The action log keeps a `denied` entry always. A `denied` or `failed` file call folds into one
+  `coalesced` entry after 20 per (check, kind, rule or error, directory); the entry carries `rule` or
+  `error` as well as `of`, `under` and `count` (schema description of `under` and `count` and the docs of
+  `actions_truncated` and `actions_dropped` updated through `cargo xtask schema`; `ActionKind::Coalesced`
+  and the fields already existed). A check holds 1000 entries. Drop order: `ok` file entries, then
+  `failed` ones, then (last resort, with a `tracing` warning and a counter) other kept entries. (3) The
+  M1-040 exit test says "retention drops ok read, read_dir and stat entries first, then failed ones, and
+  never a denied entry" in place of "truncation drops only ok read, read_dir and stat entries" (the
+  row in 11 changed in correction-12, PR #82). (4) The deny list in 02 and 05 I5 gains the any-depth `etc` rules, the credential files,
+  the cluster credential paths, the `/proc/<pid>/` allowlist, the kernel files and `/dev` for `stat` and
+  `read_dir`. Carried: M1-091 and M1-103 inherit "every tcp, http and kube call writes one entry"; M1-102
+  settled the engine's own kubeconfig read (not a probe read, ADR 0031); M4 adds a closed stat-only
+  `/dev` list (`/dev/nvidia*`, `/dev/dri/*`, `/dev/kfd`).
+  Fix round 2 (re-review of 2cd0026): (5) `/proc/self/auxv` is allowed for `self` only, because M1-042
+  reads `AT_SECURE` from it (02 Files, 05 I5). (6) A `denied` call of any kind folds too, per
+  (check, kind, rule, program or host or path), so 1001 denied execs hold 21 entries and none is
+  dropped; "never a denied entry" means never dropped for another kind of entry, and only a check with
+  more than 1000 distinct denied targets can lose one (01 section 5.4, the schema, ADR 0014 unchanged).
+  (7) The `exec::run` and `ExecSpec` deny clause lives only in M1-044, and since M1-066 the cfg gate
+  enforces it at compile time. `exec::table::run`, `exec::run` and `ExecSpec::new` are also on the root
+  `clippy.toml` `disallowed-methods` list now, so a check crate that calls the table runner without a
+  `Probe` fails clippy. The one call in `probe.rs` carries `#[expect(clippy::disallowed_methods)]`.
 
 ADR amendments in the ticket title:
 

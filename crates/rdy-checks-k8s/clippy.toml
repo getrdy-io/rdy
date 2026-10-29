@@ -56,4 +56,7 @@ disallowed-methods = [
     { path = "clap::error::Error::exit", reason = "exits 2; print the error with rdy_cli::error::emit and return exit code 64", allow-invalid = true },
     { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
     { path = "rdy_spec::loaded::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
+    { path = "rdy_engine::exec::table::run", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration", allow-invalid = true },
+    { path = "rdy_engine::exec::run", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
+    { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
 ]

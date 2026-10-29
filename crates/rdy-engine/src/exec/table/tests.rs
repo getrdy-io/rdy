@@ -593,6 +593,10 @@ fn a_form_renders_the_way_appendix_a_writes_it() {
     );
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "these tests exercise the table runner itself"
+)]
 #[tokio::test]
 async fn run_refuses_an_unlisted_command_before_anything_starts() {
     let error = run(Cmd::new("true", SECOND)).await.expect_err("unlisted");
@@ -606,6 +610,10 @@ async fn run_refuses_an_unlisted_command_before_anything_starts() {
 }
 
 #[cfg(target_os = "linux")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "these tests exercise the table runner itself"
+)]
 #[tokio::test]
 async fn run_starts_a_listed_command_under_the_policy() {
     let cmd = linux("getent", "ahosts", &["localhost"]);

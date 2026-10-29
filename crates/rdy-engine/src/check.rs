@@ -12,8 +12,7 @@
 //! - A requirement met by absence is a pass built through [`Finding::pass_by_absence`], so the call
 //!   sites can be listed and reviewed.
 //!
-//! The probe facade (ADR 0014) is not here yet. [`CheckContext`] gains `probe()` with the ticket that
-//! builds it. [`CheckContext::remaining`] came with the scheduler.
+//! A check reaches the machine only through [`CheckContext::probe`] (ADR 0014, [`crate::probe`]).
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -21,6 +20,8 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use rdy_spec::result::SkipKind;
+
+use crate::probe::{Probe, ProbeError};
 #[cfg(feature = "runtime")]
 use tokio::time::Instant;
 
@@ -406,8 +407,6 @@ impl Finding {
 }
 
 /// Why a check could not produce a [`Finding`].
-///
-/// Probe errors from the facade join this enum with the facade ticket (M1-040).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum CheckError {
@@ -418,6 +417,10 @@ pub enum CheckError {
     /// not_yet_on_os`. The text names what is missing.
     #[error("not supported here: {0}")]
     Unsupported(&'static str),
+    /// A probe call failed and the check did not handle it. The result is `error` with `error_kind:
+    /// check_failed`. A check that expects a failure, such as a missing file, matches on it instead.
+    #[error("the check could not read the machine: {0}")]
+    Probe(#[from] ProbeError),
     /// The check itself failed. The result is `error` with `error_kind: check_failed`.
     #[error("{message}")]
     Failed {
@@ -437,7 +440,7 @@ impl CheckError {
         match self {
             Self::MissingNeed(_) => Some(SkipKind::MissingNeed),
             Self::Unsupported(_) => Some(SkipKind::NotYetOnOs),
-            Self::Failed { .. } => None,
+            Self::Probe(_) | Self::Failed { .. } => None,
         }
     }
 }
@@ -462,6 +465,7 @@ pub struct CheckContext {
     key: String,
     os: Os,
     available: HashSet<Need>,
+    probe: Probe,
     #[cfg(feature = "runtime")]
     deadline: Option<Instant>,
 }
@@ -469,8 +473,11 @@ pub struct CheckContext {
 impl CheckContext {
     /// A context for the check with `key`, on `os`, where the `available` needs are met.
     #[cfg_attr(
-        not(any(test, feature = "runtime")),
-        expect(dead_code, reason = "only the scheduler builds contexts")
+        not(any(test, feature = "runtime", feature = "testing")),
+        expect(
+            dead_code,
+            reason = "only the scheduler and the test helpers build contexts"
+        )
     )]
     pub(crate) fn new(
         key: impl Into<String>,
@@ -481,9 +488,23 @@ impl CheckContext {
             key: key.into(),
             os,
             available: available.into_iter().collect(),
+            probe: Probe::closed(),
             #[cfg(feature = "runtime")]
             deadline: None,
         }
+    }
+
+    /// Gives the context its probe. Until then the probe refuses every call.
+    #[cfg_attr(
+        not(any(feature = "runtime", feature = "testing")),
+        expect(
+            dead_code,
+            reason = "only the scheduler and the test helpers set a probe"
+        )
+    )]
+    pub(crate) fn with_probe(mut self, probe: Probe) -> Self {
+        self.probe = probe;
+        self
     }
 
     /// Sets the instant this check's timeout fires. The scheduler calls it as it starts the check.
@@ -503,6 +524,14 @@ impl CheckContext {
     #[must_use]
     pub fn os(&self) -> Os {
         self.os
+    }
+
+    /// The handle for everything this check reads or runs. Every call is logged.
+    ///
+    /// It stops working when the check ends: a call made later is refused and logged.
+    #[must_use]
+    pub fn probe(&self) -> &Probe {
+        &self.probe
     }
 
     /// Whether `need` is met on this host.

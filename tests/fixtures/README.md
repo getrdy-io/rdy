@@ -48,6 +48,7 @@ tests/fixtures/
   envs/<env>/                    one whole environment plus a spec to run against it
   redaction/<category>/<case>.{in,expected,toml}
   results/<rdy-version>/*.json   result files from released versions, append only
+  reports/*.json                 sample reports that engine tests put their own action log into
   specs/{valid,malformed}/       parser corpus
   signed/                        one signed spec, its .minisig and public key, never edited
   minisign-c/                    a key and a signature made by the C minisign tool, never edited
@@ -55,7 +56,7 @@ tests/fixtures/
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/` and `canary/`. The rest arrives with the
+What exists today: `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/` and `reports/`. The rest arrives with the
 tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -66,6 +67,7 @@ tickets that need it. The names above are fixed now so nobody invents another.
 | `envs/<env>/` | A whole environment and the spec the env test runs against it. Five in M1: `all-pass`, `warnings-only`, `all-block`, `no-privileges`, `timeouts` | By hand, goldens by `UPDATE_GOLDENS=1` |
 | `redaction/<category>/<case>.in`, `.expected`, `.toml` | Input, expected output and the rule setup for a redaction case | By hand only. `UPDATE_GOLDENS` never touches it |
 | `results/<rdy-version>/*.json` | Result files written by released versions. They must stay parseable | Append only. Never edited |
+| `reports/*.json` | A valid sample report (`not-ready-7.2.json` is the 01 section 7.2 sample). A test replaces its `actions` and checks the result against the schema | By hand, when the sample in 01 changes |
 | `specs/valid/`, `specs/malformed/` | Parser corpus. Each malformed file is one way a spec can be wrong | By hand |
 | `signed/` | One signed spec. See `signed/README.md` | Never. New cases get new files |
 | `minisign-c/` | A key with a published test password and a signature, both made by C minisign 0.11. See `minisign-c/README.md` | Never |

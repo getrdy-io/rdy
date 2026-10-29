@@ -26,6 +26,7 @@ ring = { workspace = true, features = ["alloc"] }
 serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
+tracing = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "signal", "sync", "time"], optional = true }
 
 # Windows opens the report folder without following a reparse point (M1-036, M1-037).
@@ -41,6 +42,7 @@ rustix = { workspace = true, features = ["std", "process", "fs"], optional = tru
 # is public only under `testing` (M1-039). A dev-dependency on the crate itself turns the feature on
 # for test builds only. A normal or release build never sees dev-dependencies.
 rdy-engine = { path = ".", features = ["testing"] }
+jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tempfile = { workspace = true }
 proptest = { workspace = true, features = ["std"] }

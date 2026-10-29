@@ -3,6 +3,9 @@
 //! The process tests run real `sh` and `sleep`, so they are Unix only. They use real time with
 //! generous timeouts and check upper bounds only. The registry tests are portable.
 
+// These tests drive the raw runner on purpose; a check never may (root clippy.toml).
+#![allow(clippy::disallowed_methods)]
+
 use super::*;
 
 static IDLE: Registry<REGISTRY_SLOTS> = Registry::new();

@@ -1791,6 +1791,7 @@ version = "0.1.0-alpha.0"
 dependencies = [
  "cap-primitives",
  "cap-std",
+ "jsonschema",
  "proptest",
  "rdy-engine",
  "rdy-spec",
@@ -1802,6 +1803,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tracing",
  "trybuild",
 ]
 

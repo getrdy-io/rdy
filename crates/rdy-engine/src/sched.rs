@@ -15,6 +15,9 @@
 //!   is the run watchdog (M1-043).
 //! - **Panics.** A panic stays inside the check's task. The join handle returns it and the result is
 //!   [`End::Panicked`].
+//! - **Probe.** With a hub ([`Scheduler::with_probes`]) each check gets its own probe, bound to its key.
+//!   The probe ends when the check does, whether it returned, timed out, panicked or was aborted. A
+//!   scheduler without a hub gives checks a closed probe that refuses every call.
 //! - **Hard needs.** A check whose hard need is missing is not started. Its result is
 //!   `Err(CheckError::MissingNeed)`, the same value a check would return itself.
 //!
@@ -33,6 +36,7 @@ use tokio::task::{AbortHandle, JoinSet};
 use tokio::time::Instant;
 
 use crate::check::{Check, CheckContext, CheckError, CheckOutcome, Need, Os};
+use crate::probe::{Probe, ProbeHub};
 use crate::redact::{Redacted, Redactor};
 
 #[cfg(test)]
@@ -176,6 +180,7 @@ pub struct Scheduler {
     jobs: usize,
     os: Os,
     available: Arc<HashSet<Need>>,
+    probes: Option<ProbeHub>,
 }
 
 impl Scheduler {
@@ -188,7 +193,15 @@ impl Scheduler {
             jobs: cap_jobs(jobs),
             os,
             available: Arc::new(available.into_iter().collect()),
+            probes: None,
         }
+    }
+
+    /// Gives every check a probe from `hub`. Without it checks get a closed probe.
+    #[must_use]
+    pub fn with_probes(mut self, hub: ProbeHub) -> Self {
+        self.probes = Some(hub);
+        self
     }
 
     /// The number of checks that may run at once, after the cap.
@@ -228,8 +241,9 @@ impl Scheduler {
             };
             let os = self.os;
             let available = Arc::clone(&self.available);
+            let probes = self.probes.clone();
             drivers.spawn(async move {
-                let result = drive(item, os, &available, origin).await;
+                let result = drive(item, os, &available, probes.as_ref(), origin).await;
                 drop(permit);
                 (index, result)
             });
@@ -284,8 +298,26 @@ impl Drop for AbortOnDrop {
     }
 }
 
+/// Ends a check's probe when dropped, so every way out of `drive` (a result, a timeout, an abort of
+/// the whole run) stops the check from touching the machine.
+struct EndProbe(Option<Probe>);
+
+impl Drop for EndProbe {
+    fn drop(&mut self) {
+        if let Some(probe) = &self.0 {
+            probe.end();
+        }
+    }
+}
+
 /// Starts one check as a task and waits for it under its timeout.
-async fn drive(item: Planned, os: Os, available: &HashSet<Need>, origin: Instant) -> Ran {
+async fn drive(
+    item: Planned,
+    os: Os,
+    available: &HashSet<Need>,
+    probes: Option<&ProbeHub>,
+    origin: Instant,
+) -> Ran {
     let Planned {
         check,
         key,
@@ -294,8 +326,13 @@ async fn drive(item: Planned, os: Os, available: &HashSet<Need>, origin: Instant
     let id = check.info().id;
     let after = effective_timeout(timeout, check.info().default_timeout);
     let started = Instant::now();
-    let ctx =
+    let mut ctx =
         CheckContext::new(key.clone(), os, available.iter().cloned()).at_deadline(started + after);
+    let probe = probes.map(|hub| hub.check_probe(&key, os, Some(check.info())));
+    if let Some(probe) = &probe {
+        ctx = ctx.with_probe(probe.clone());
+    }
+    let _end = EndProbe(probe);
 
     let mut handle = tokio::spawn(async move { check.run(&ctx).await });
     let _guard = AbortOnDrop(handle.abort_handle());

@@ -6,6 +6,8 @@
 //! forks `sleep 600`, waits for the scheduler's timeout, kills leftover groups and calls
 //! `std::process::exit`, the way the CLI will. Timing is an upper bound only.
 #![cfg(all(unix, feature = "runtime"))]
+// These tests drive the raw runner on purpose; a check never may (root clippy.toml).
+#![allow(clippy::disallowed_methods)]
 
 use std::error::Error;
 use std::path::Path;
