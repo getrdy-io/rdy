@@ -1,6 +1,7 @@
 # ADR 0020: Releases are built by a generated and hardened dist workflow, published last, and gated by an artifact check
 
-- Status: Proposed (2026-10-28, M1-007). Becomes Accepted when security-reviewer signs off on decisions 3 to 6. Amends the dist settings in 06, Appendix B.
+- Status: Accepted (2026-10-29, M1-007). security-reviewer signed off on decisions 3 to 6 in PR #47.
+  Amends the dist settings in 06, Appendix B.
 - Date: 2026-10-28
 
 ## Context
@@ -67,8 +68,8 @@ script tests, not from a sandbox run.
      over HTTPS. A tool that was already malicious on that day is not caught. A later change is.
    - The build jobs still run every dependency's build script, now with a read-only token that is
      not exposed as a variable, and no `id-token`. A malicious dependency can still change the binary it
-     builds. `cargo deny`, the lock
-     file and the artifact check (static-pie, `cargo audit bin`) are the controls.
+     builds. `cargo deny`, the lock file and the artifact check (static-pie, `cargo audit bin`) are the
+     controls.
    - `taiki-e/install-action` is a third-party action trusted to fetch `cargo-auditable` correctly. It is
      pinned by SHA and checks its own hashes.
    - The Windows and macOS install paths of `install-release-tool.sh` and the changed Windows build
