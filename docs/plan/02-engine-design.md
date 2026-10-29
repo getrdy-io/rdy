@@ -143,7 +143,7 @@ run-level facade (`check: null`):
 - Windows: `C:\Windows\System32\whoami.exe /groups /fo csv`, from a constant path, never from
   `%SystemRoot%`, and only when `%SystemRoot%` is `C:\Windows` (read through the run-level probe, compared
   without regard to case; any other value skips `whoami`, so the answer is unknown). Integrity SID `S-1-16-12288` (High) or `S-1-16-16384` (System) means elevated. If
-  `whoami` fails, `root` is unknown for checks and `identity.elevated` is unset. In M1 `whoami` feeds only
+  `whoami` fails, `root` is unknown for checks and `identity.elevated` is false. In M1 `whoami` feeds only
   the `root` need and `identity.elevated`, never trust. M2-105 owns elevation detection for the trust path.
 
 The CLI maps the snapshot to the `rdy-spec` trust store scope (system store only when elevated,
