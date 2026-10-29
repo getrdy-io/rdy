@@ -21,6 +21,8 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true, features = ["std"] }
 clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0", features = ["schema"] }
+serde_json = { workspace = true, features = ["std"] }
 sha2 = { workspace = true, features = ["std"] }
 unicode-normalization = { workspace = true, features = ["std"] }
 

@@ -55,6 +55,22 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --locked
+      # The JSON schemas are generated from the rdy-spec types. A type or doc comment that changed
+      # without `cargo xtask schema` fails here and names the file to regenerate.
+      - name: Generated schemas are current
+        run: cargo run --locked --quiet --package xtask -- schema --check
+      # The schema generator is the optional `schema` feature of rdy-spec. It pulls in schemars and
+      # serde_json/preserve_order, which must stay out of the shipped binary (ADR 0019).
+      - name: The binary does not build the schema generator
+        run: |
+          tree="$(cargo tree --locked -p rdy -e features --target x86_64-unknown-linux-gnu)"
+          if printf '%s\n' "$tree" | grep -E 'preserve_order|rdy-spec feature "schema"'; then
+            echo "::error::the rdy binary would build the schema generator or serde_json/preserve_order"
+            exit 1
+          fi
+      # A --workspace build turns the feature on through xtask. This runs the binary's own feature set.
+      - name: Test the binary's feature set
+        run: cargo test --locked -p rdy -p rdy-engine
 
   # zizmor has its own job on purpose. It runs no cargo, so build scripts and proc macros from a PR
   # never run beside its token or its binary. Do not add cargo steps here.

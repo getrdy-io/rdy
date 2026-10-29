@@ -39,7 +39,7 @@ script tests, not from a sandbox run.
    shows no `preserve_order` (the schema tooling's serde_json feature, used only by xtask). That command
    resolves features for `rdy` alone, so it cannot see a workspace build. The setting that stops one is
    `precise-builds = true`, which makes dist build `--package=rdy`. The check therefore also fails
-   unless `dist-workspace.toml` has the line `precise-builds = true`.
+   unless `dist-workspace.toml` sets `precise-builds = true` under `[dist]` (read with a TOML parser).
 4. `github-attestations` stays off. It adds `id-token: write` to the build jobs, and 06 says the signing
    job is the only job that has it. The cosign signature of `SHA256SUMS` (M1-010) is the trust path.
    Revisit in M2.
@@ -47,13 +47,16 @@ script tests, not from a sandbox run.
    - The workflow has no default token (`permissions: {}`). `plan`, both build jobs and `host` get
      `contents: read`. Only `announce` gets `contents: write`. The plan job no longer holds a write token
      on same-repo pull requests.
+   - The build jobs get no `GH_TOKEN` variable, so build scripts see no token variable. The test script
+     fails if one comes back.
    - Only tags like `v1.2.3` and `v1.2.3-alpha.1` start a release. The plan job checks the tag against
      `^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$` before anything else uses it. Later jobs read the tag from
      `env:` and quote it. dist's `tag-flag` output, which put the tag into shell text, is removed.
    - `dist` and `cargo-cyclonedx` are installed by `scripts/install-release-tool.sh` from a pinned
      release file. The script compares the file's sha256 (from `sha256sum`, or `shasum` on macOS) with the
-     pin in `.github/release-tools.txt` and unpacks nothing on a difference. `cargo-auditable` is installed by `taiki-e/install-action` (SHA-pinned) at the exact
-     version 0.7.7, not from `latest`.
+     pin in `.github/release-tools.txt` and unpacks nothing on a difference. `cargo-auditable` is
+     installed by `taiki-e/install-action` (SHA-pinned) at the exact version 0.7.7, not from `latest`,
+     with `fallback: none` so it never builds from source with `cargo install`.
    - The musl packages are installed by a fixed step, not by text from the build matrix. Container builds
      and the `curl | sh` Rust installer that serves them are removed: we configure none.
    - dist's typo `steps.cargo-cyclonedx.output.paths` becomes `outputs`, so the SBOM path is no longer
@@ -62,8 +65,9 @@ script tests, not from a sandbox run.
 6. Gaps that remain, for security-reviewer to confirm:
    - The pinned hashes in `.github/release-tools.txt` were read from the projects' own release pages
      over HTTPS. A tool that was already malicious on that day is not caught. A later change is.
-   - The build jobs still run every dependency's build script, now with a read-only token and no
-     `id-token`. A malicious dependency can still change the binary it builds. `cargo deny`, the lock
+   - The build jobs still run every dependency's build script, now with a read-only token that is
+     not exposed as a variable, and no `id-token`. A malicious dependency can still change the binary it
+     builds. `cargo deny`, the lock
      file and the artifact check (static-pie, `cargo audit bin`) are the controls.
    - `taiki-e/install-action` is a third-party action trusted to fetch `cargo-auditable` correctly. It is
      pinned by SHA and checks its own hashes.

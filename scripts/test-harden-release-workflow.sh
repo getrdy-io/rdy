@@ -74,7 +74,9 @@ fi
 # The build jobs run dependency build scripts, so they get no GH_TOKEN variable.
 for j in build-local-artifacts build-global-artifacts; do
     block=$(awk -v j="$j" '$0 == "  " j ":" { f = 1; next } f && /^  [a-z][a-z-]*:$/ { exit } f { print }' "$wf")
-    if printf '%s\n' "$block" | grep -q 'GH_TOKEN'; then
+    if [ -z "$block" ]; then
+        bad "$j has no GH_TOKEN variable (job not found in the workflow)"
+    elif printf '%s\n' "$block" | grep -q 'GH_TOKEN'; then
         bad "$j has no GH_TOKEN variable"
     else
         ok "$j has no GH_TOKEN variable"
@@ -88,6 +90,7 @@ if [ "$n" -ge 1 ] && [ "$n" -eq "$f" ]; then ok "install-action steps set fallba
 # Every job names its permissions, and only announce can write.
 jobs=$(awk '/^jobs:/ { j = 1; next } j && /^  [a-z][a-z-]*:$/ { sub(/:$/, "", $1); print $1 }' "$wf")
 missing=""
+[ -n "$jobs" ] || missing=" (no jobs found)"
 for j in $jobs; do
     block=$(awk -v j="$j" '$0 == "  " j ":" { f = 1; next } f && /^  [a-z][a-z-]*:$/ { exit } f { print }' "$wf")
     if ! printf '%s\n' "$block" | grep -q '^    permissions:$'; then

@@ -27,12 +27,15 @@
 #      serde_json belongs to the schema tooling (rdy-spec's optional `schema` feature, used only by
 #      xtask). It would reach the binary if dist built the whole workspace, so a build with
 #      `precise-builds = false` fails here. `cargo tree -p rdy` cannot see a workspace build, so
-#      this step also requires the line `precise-builds = true` in dist-workspace.toml.
+#      this step also requires `precise-builds = true` under [dist] in dist-workspace.toml.
 #      Run from a full checkout: it reads Cargo.lock.
 # Exit: 0 all checks pass, 1 at least one fails, 64 usage error or a missing tool.
 #
-# Needs: tar, unzip, readelf, objdump, od, awk, jq, python3, cargo with cargo-audit, and sha256sum or
-# shasum. Pass --skip-audit only for offline runs of the script tests. It prints a loud warning.
+# Environment: RDY_DIST_CONFIG overrides the path of dist-workspace.toml. It exists only for
+# scripts/test-check-release-artifacts.sh. Do not set it in a release.
+#
+# Needs: tar, unzip, readelf, objdump, od, awk, jq, python3 3.11 or newer (tomllib), cargo with
+# cargo-audit, and sha256sum or shasum. Pass --skip-audit only for offline runs of the script tests. It prints a loud warning.
 
 set -u
 
@@ -401,10 +404,12 @@ fi
 # `cargo tree --package rdy` resolves features for rdy alone, so it passes even when dist builds the
 # whole workspace. The setting that prevents that is precise-builds, so require it too.
 dist_config=${RDY_DIST_CONFIG:-$here/../dist-workspace.toml}
-if grep -Eq '^precise-builds = true$' "$dist_config" 2> /dev/null; then
+if python3 -c 'import sys, tomllib
+with open(sys.argv[1], "rb") as f:
+    sys.exit(0 if tomllib.load(f).get("dist", {}).get("precise-builds") is True else 1)' "$dist_config" 2> /dev/null; then
     pass "dist builds one package at a time (precise-builds = true)"
 else
-    fail "dist builds one package at a time (precise-builds = true)" "$dist_config must have the line 'precise-builds = true'. Without it dist builds the whole workspace and feature unification can put xtask's features (preserve_order) into rdy."
+    fail "dist builds one package at a time (precise-builds = true)" "$dist_config must set 'precise-builds = true' under [dist]. Without it dist builds the whole workspace and feature unification can put xtask's features (preserve_order) into rdy."
 fi
 # The features that `cargo build --package rdy` would turn on, for each release target. cargo-dist
 # builds one package at a time (precise-builds), so this must match what was shipped.

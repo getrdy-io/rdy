@@ -19,13 +19,14 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0009](0009-http-client-and-tls.md) | HTTP with reqwest on rustls and ring, a strict egress policy, dual roots only for the interception probe | Accepted; decisions 1, 2, 3 and 5 superseded by 0014 |
 | [0010](0010-kubernetes-client-kube-rs.md) | Use kube-rs (client only) behind a runtime read-only guard, not raw REST or kubectl | Accepted; amended 2026-10-28 (selfsubjectreviews in M1, family-owned client) |
 | [0011](0011-binary-name-and-cli-package.md) | The package is `rdy`, it lives in `crates/rdy-cli`, the binary is `rdy` | Accepted; decision 4 amended 2026-10-28 (in-process test entry point) |
-| [0012](0012-wire-types-in-rdy-spec-schema-generated.md) | All `rdy/v1` wire types live in rdy-spec; JSON schemas are generated from them | Accepted |
+| [0012](0012-wire-types-in-rdy-spec-schema-generated.md) | All `rdy/v1` wire types live in rdy-spec; JSON schemas are generated from them | Accepted; decision 5 amended 2026-10-28 (file names, M1-022; see 0019) |
 | [0013](0013-verdict-refinements-not-run.md) | Verdict refinements: what counts as not run, and the one thing that never counts | Accepted |
 | [0014](0014-probe-facade-owns-side-effects.md) | The probe facade owns every check side effect, including TCP, proxy CONNECT, TLS and HTTP | Accepted; decision 7 amended 2026-10-28 (MF-04: wall over std and kube plus the dependency allowlist) |
 | [0015](0015-redactor-in-rdy-engine.md) | The minimal redactor lives in rdy-engine and runs on whole strings before any cap or write | Accepted (security-reviewer sign-off in PR #13, 2026-10-28); decision 10 added (span union, keyed tags, `Redacted<T>`, `ring`) |
 | [0016](0016-output-dir-confinement-cap-std.md) | Output is confined to one new directory, opened early through a cap-std handle | Accepted |
 | [0017](0017-changelog-fragments.md) | Changelog fragments: each PR adds one file in changelog.d/, and the release step assembles CHANGELOG.md | Accepted |
 | [0018](0018-verify-minisign-envelope-with-strict-ed25519.md) | rdy-spec checks the minisign envelope itself, over strict ed25519 and BLAKE2b | Accepted |
+| [0019](0019-schema-generation-derive-and-fragments.md) | Schemas are derived from the types where they are typed, and from fragments where they are not yet | Accepted |
 | [0020](0020-dist-release-workflow-settings.md) | Releases are built by a generated and hardened dist workflow, published last, and gated by an artifact check | Proposed (security-reviewer sign-off pending) |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
