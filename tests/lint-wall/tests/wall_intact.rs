@@ -151,6 +151,8 @@ const FLOOR: &[(Kind, &str)] = &[
     ),
     (Kind::Method, "rdy_engine::watchdog::WriteState::finish"),
     (Kind::Method, "rdy_engine::exec::live_groups"),
+    (Kind::Method, "rdy_engine::probe::ProbeHub::new"),
+    (Kind::Method, "rdy_engine::probe::ProbeHub::run_probe"),
     (Kind::Method, "rdy_spec::load"),
     (Kind::Macro, "std::print"),
     (Kind::Macro, "std::println"),
@@ -288,66 +290,138 @@ fn all_keys(table: &toml::Table, prefix: &str, out: &mut Vec<String>) {
     }
 }
 
+/// What is wrong with the text of one Cargo config, as one line each. Empty when it is fine.
+///
+/// `CLIPPY_CONF_DIR` in `[env]` moves the lookup of clippy.toml. `rustflags` can say `-A
+/// clippy::disallowed_methods` or `--cap-lints warn`. A wrapper can replace clippy-driver. An alias can
+/// replace `cargo clippy`. `paths`, `[source]` and `[patch]` swap the code of a dependency for other code.
+fn config_problems(text: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    for banned in [
+        "CLIPPY_CONF_DIR",
+        "CLIPPY_ARGS",
+        "CLIPPY_DISABLE_DOCS_LINKS",
+    ] {
+        if text.contains(banned) {
+            problems.push(format!(
+                "sets {banned}, which can move or weaken clippy.toml"
+            ));
+        }
+    }
+    let table = match text.parse::<toml::Table>() {
+        Ok(t) => t,
+        Err(e) => return vec![format!("is not TOML: {e}")],
+    };
+    let mut keys = Vec::new();
+    all_keys(&table, "", &mut keys);
+    for key in keys {
+        let last = key.rsplit('.').next().unwrap_or("");
+        if matches!(
+            last,
+            "rustflags" | "rustc-wrapper" | "rustc-workspace-wrapper"
+        ) {
+            problems.push(format!(
+                "sets `{key}`: a check crate takes the flags of the CI steps as they are"
+            ));
+        }
+        if key.starts_with("env.")
+            && matches!(
+                last,
+                "RUSTFLAGS"
+                    | "CARGO_ENCODED_RUSTFLAGS"
+                    | "RUSTC_WRAPPER"
+                    | "RUSTC_WORKSPACE_WRAPPER"
+            )
+        {
+            problems.push(format!("sets the environment variable {last}"));
+        }
+        if key == "alias.clippy" {
+            problems.push("defines an alias for `clippy`".to_owned());
+        }
+        // Top-level tables that replace where a dependency's code comes from.
+        if matches!(key.split('.').next(), Some("paths" | "source" | "patch")) {
+            problems.push(format!(
+                "sets `{key}`, which swaps the code of a dependency"
+            ));
+        }
+    }
+    problems
+}
+
 #[test]
 fn no_cargo_config_weakens_clippy_or_the_flags_it_runs_with() {
-    // `CLIPPY_CONF_DIR` in `[env]` moves the lookup of clippy.toml. `rustflags` can say `-A
-    // clippy::disallowed_methods` or `--cap-lints warn`. A wrapper can replace clippy-driver. An alias
-    // can replace `cargo clippy`.
     let configs = cargo_configs();
     assert!(
         configs.iter().any(|p| p.ends_with(".cargo/config.toml")),
         "found no .cargo/config.toml?"
     );
     for config in configs {
-        let text = read(&config);
-        for banned in [
-            "CLIPPY_CONF_DIR",
-            "CLIPPY_ARGS",
-            "CLIPPY_DISABLE_DOCS_LINKS",
-        ] {
-            assert!(
-                !text.contains(banned),
-                "{} sets {banned}, which can move or weaken clippy.toml",
-                config.display()
-            );
-        }
-        let mut keys = Vec::new();
-        all_keys(&toml_of(&config), "", &mut keys);
-        for key in keys {
-            let last = key.rsplit('.').next().unwrap_or("");
-            assert!(
-                !matches!(
-                    last,
-                    "rustflags" | "rustc-wrapper" | "rustc-workspace-wrapper"
-                ),
-                "{} sets `{key}`: a check crate takes the flags of the CI steps as they are",
-                config.display()
-            );
-            assert!(
-                !(key.starts_with("env.")
-                    && matches!(
-                        last,
-                        "RUSTFLAGS"
-                            | "CARGO_ENCODED_RUSTFLAGS"
-                            | "RUSTC_WRAPPER"
-                            | "RUSTC_WORKSPACE_WRAPPER"
-                    )),
-                "{} sets the environment variable {last}",
-                config.display()
-            );
-            assert!(
-                key != "alias.clippy",
-                "{} defines an alias for `clippy`",
-                config.display()
-            );
-        }
+        let problems = config_problems(&read(&config));
+        assert!(problems.is_empty(), "{}: {problems:?}", config.display());
+    }
+}
+
+#[test]
+fn the_config_reader_sees_every_way_to_weaken_clippy() {
+    for (what, text) in [
+        (
+            "rustflags in build",
+            "[build]\nrustflags = [\"-A\", \"clippy::disallowed_methods\"]\n",
+        ),
+        (
+            "rustflags for a target",
+            "[target.x86_64-unknown-linux-gnu]\nrustflags = [\"--cap-lints\", \"warn\"]\n",
+        ),
+        (
+            "a target cfg",
+            "[target.'cfg(unix)']\nrustflags = [\"-A\", \"warnings\"]\n",
+        ),
+        (
+            "a compiler wrapper",
+            "[build]\nrustc-wrapper = \"/tmp/w\"\n",
+        ),
+        (
+            "a workspace wrapper",
+            "[build]\nrustc-workspace-wrapper = \"/tmp/w\"\n",
+        ),
+        ("CLIPPY_CONF_DIR", "[env]\nCLIPPY_CONF_DIR = \"/tmp/x\"\n"),
+        ("RUSTFLAGS in env", "[env]\nRUSTFLAGS = \"-A warnings\"\n"),
+        ("an alias for clippy", "[alias]\nclippy = \"check\"\n"),
+        ("paths", "paths = [\"/tmp/fake\"]\n"),
+        (
+            "a source replacement",
+            "[source.crates-io]\nreplace-with = \"mine\"\n[source.mine]\ndirectory = \"/tmp/v\"\n",
+        ),
+        (
+            "a patch",
+            "[patch.crates-io]\nkube = { path = \"/tmp/kube\" }\n",
+        ),
+        ("not TOML", "[build\n"),
+    ] {
+        assert!(!config_problems(text).is_empty(), "missed: {what}");
+    }
+    for (what, text) in [
+        (
+            "rustdocflags",
+            "[build]\nrustdocflags = [\"-D\", \"warnings\"]\n",
+        ),
+        (
+            "a linker",
+            "[target.aarch64-unknown-linux-musl]\nlinker = \"scripts/musl-pie-linker.sh\"\n",
+        ),
+        (
+            "an unrelated alias",
+            "[alias]\nxtask = \"run --quiet --package xtask --\"\n",
+        ),
+        ("empty", ""),
+    ] {
+        assert!(config_problems(text).is_empty(), "flagged: {what}");
     }
 }
 
 /// The lines of a workflow file or action with the YAML comments cut off.
-fn workflow_code(path: &Path) -> Vec<String> {
-    read(path)
-        .lines()
+fn workflow_lines(text: &str) -> Vec<String> {
+    text.lines()
         .map(|l| {
             // A `#` starts a comment at the start of a line or after a space.
             let mut cut = l.len();
@@ -380,43 +454,155 @@ fn files_named_ext(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-#[test]
-fn no_workflow_sets_flags_and_every_clippy_step_ends_in_deny_warnings() {
-    let files = workflow_files();
-    assert!(files.len() >= 4, "found only {files:?}");
-    let mut clippy_steps = 0;
-    for file in files {
-        for line in workflow_code(&file) {
-            for banned in [
-                "RUSTFLAGS",
-                "CARGO_ENCODED_RUSTFLAGS",
-                "CARGO_BUILD_RUSTFLAGS",
-                "RUSTC_WRAPPER",
-                "RUSTC_WORKSPACE_WRAPPER",
-                "CLIPPY_CONF_DIR",
-                "CLIPPY_ARGS",
-            ] {
-                assert!(
-                    !line.contains(banned),
-                    "{} sets {banned}: `{line}`. Flags come from rust-toolchain.toml and the steps, nothing else",
-                    file.display()
-                );
-            }
-            // A command: `run: cargo clippy ..` or a line of a script that starts with it. A step name that
-            // mentions clippy is not one.
-            let command = line.trim_start().trim_start_matches("run: ");
-            if command.starts_with("cargo clippy") {
-                clippy_steps += 1;
-                assert!(
-                    line.trim_end().ends_with(" -- -D warnings")
-                        && line.matches(" -- ").count() == 1,
-                    "{}: a clippy step must end in exactly ` -- -D warnings`: `{line}`",
-                    file.display()
-                );
+/// The three clippy commands of CI, exactly. A fourth, or a change to one (`--config`, `--exclude`,
+/// `--cap-lints`, a dropped `--all-targets`), is a change to this list, which is in CODEOWNERS.
+const CLIPPY_COMMANDS: &[&str] = &[
+    "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "cargo clippy --locked -p rdy-engine --no-default-features --all-targets -- -D warnings",
+    "cargo clippy --locked -p rdy-engine --no-default-features --features testing --all-targets -- -D warnings",
+];
+
+/// Names a workflow may not carry: flags and wrappers that change how clippy judges, and
+/// `continue-on-error`, which lets a red step pass. Compared in lower case.
+const WORKFLOW_BANNED: &[&str] = &[
+    "RUSTFLAGS",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_BUILD_RUSTFLAGS",
+    "RUSTC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER",
+    "CLIPPY_CONF_DIR",
+    "CLIPPY_ARGS",
+    "continue-on-error",
+];
+
+/// What is wrong with one workflow: banned names (any case) and, appended to `commands`, every clippy
+/// command in it.
+fn workflow_problems(text: &str, commands: &mut Vec<String>) -> Vec<String> {
+    let mut problems = Vec::new();
+    for line in workflow_lines(text) {
+        let lower = line.to_lowercase();
+        for banned in WORKFLOW_BANNED {
+            if lower.contains(&banned.to_lowercase()) {
+                problems.push(format!("`{line}` carries {banned}"));
             }
         }
+        // A command: `run: cargo clippy ..` or a line of a script that starts with it. A step name that
+        // mentions clippy is not one.
+        let command = line.trim_start().trim_start_matches("run: ");
+        if command.starts_with("cargo clippy") {
+            commands.push(command.trim_end().to_owned());
+        }
     }
-    assert!(clippy_steps >= 3, "found only {clippy_steps} clippy steps");
+    problems
+}
+
+#[test]
+fn no_workflow_sets_flags_and_the_clippy_steps_are_the_three_pinned_ones() {
+    let files = workflow_files();
+    assert!(files.len() >= 4, "found only {files:?}");
+    let mut commands = Vec::new();
+    for file in &files {
+        let problems = workflow_problems(&read(file), &mut commands);
+        assert!(
+            problems.is_empty(),
+            "{}: {problems:?}. Flags come from rust-toolchain.toml and the steps, nothing else",
+            file.display()
+        );
+    }
+    commands.sort();
+    let mut want: Vec<String> = CLIPPY_COMMANDS.iter().map(|c| (*c).to_owned()).collect();
+    want.sort();
+    assert_eq!(
+        commands, want,
+        "the clippy commands of the workflows must be exactly the pinned ones (CLIPPY_COMMANDS in wall_intact.rs)"
+    );
+    for c in &commands {
+        assert!(
+            c.ends_with(" -- -D warnings") && c.matches(" -- ").count() == 1,
+            "{c}"
+        );
+    }
+}
+
+#[test]
+fn the_workflow_reader_sees_what_it_must() {
+    let check = |text: &str| {
+        let mut commands = Vec::new();
+        let problems = workflow_problems(text, &mut commands);
+        (problems, commands)
+    };
+    for (what, text) in [
+        ("RUSTFLAGS", "    env:\n      RUSTFLAGS: -A warnings\n"),
+        (
+            "RUSTFLAGS in another case",
+            "    env:\n      rustflags: -A warnings\n",
+        ),
+        ("a wrapper", "    env:\n      Rustc_Wrapper: x\n"),
+        ("continue-on-error", "    continue-on-error: true\n"),
+        (
+            "continue-on-error in upper case",
+            "    CONTINUE-ON-ERROR: true\n",
+        ),
+        ("CLIPPY_CONF_DIR", "      CLIPPY_CONF_DIR: /tmp\n"),
+    ] {
+        assert!(!check(text).0.is_empty(), "missed: {what}");
+    }
+    // A comment is not code.
+    assert!(
+        check("# RUSTFLAGS and continue-on-error are banned\n")
+            .0
+            .is_empty()
+    );
+    let (_, commands) =
+        check("        run: cargo clippy --workspace --exclude rdy -- -D warnings\n");
+    assert_eq!(commands.len(), 1);
+    assert!(!CLIPPY_COMMANDS.contains(&commands[0].as_str()));
+    let (_, commands) = check("      - name: cargo clippy\n");
+    assert!(commands.is_empty());
+}
+
+#[test]
+fn the_root_manifest_replaces_no_dependency() {
+    // `[patch]` and `[replace]` swap the code of a dependency by name, below the allowlist and deny.
+    let manifest = toml_of(&root().join("Cargo.toml"));
+    for key in ["patch", "replace"] {
+        assert!(
+            manifest.get(key).is_none(),
+            "root Cargo.toml has [{key}]: it swaps the code of a dependency"
+        );
+    }
+    assert!(
+        manifest
+            .get("workspace")
+            .and_then(|w| w.get("patch").or_else(|| w.get("replace")))
+            .is_none(),
+        "root Cargo.toml has a patch or replace under [workspace]"
+    );
+}
+
+#[test]
+fn no_agent_checkout_is_tracked() {
+    // The walks skip `.claude/worktrees/` because it holds other copies of this repository on a
+    // developer's machine. That is only safe while git never tracks anything under it.
+    if !root().join(".git").exists() {
+        eprintln!("SKIPPED: not a git checkout");
+        return;
+    }
+    let out = std::process::Command::new("git")
+        .current_dir(root())
+        .args(["ls-files", "--", ".claude/worktrees"])
+        .output()
+        .expect("start git");
+    assert!(
+        out.status.success(),
+        "git ls-files failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let tracked = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        tracked.trim().is_empty(),
+        "files under .claude/worktrees are tracked, and the wall's walks skip that directory: {tracked}"
+    );
 }
 
 /// The level of a lint entry of a manifest: `"allow"`, or `{ level = "allow", .. }`.

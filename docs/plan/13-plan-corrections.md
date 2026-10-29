@@ -304,7 +304,7 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   write_spec, default_report_parent}`), the process-wide effects (`rdy_engine::exec::{kill_all_groups,
   harden_umask, inherited_fds, live_groups}`), the watchdog (`watchdog::ProcessEffects`,
   `watchdog::Effects::{exit, kill_groups, notice}`, `Watchdog::start`, `WriteState::{claim,
-  claim_or_park, finish}`), `rdy_spec::load`, `std::env::args` and `args_os`, the terminal
+  claim_or_park, finish}`), `probe::ProbeHub::{new, run_probe}`, `rdy_spec::load`, `std::env::args` and `args_os`, the terminal
   (`std::io::{stdout, stderr, stdin}`, the print macros) and `TestRun::context`. `privilege_gate` and `gate_then`
   (M1-042) are in `rdy-cli`, which no check crate may depend on. M1-045 adds `live_backend` the same way
   when it merges. The direct dependency

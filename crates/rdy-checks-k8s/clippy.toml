@@ -218,6 +218,9 @@ disallowed-methods = [
     { path = "rdy_engine::watchdog::WriteState::claim_or_park", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::watchdog::WriteState::finish", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::exec::live_groups", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    # First-party escapes: the probe hub (PC-47).
+    { path = "rdy_engine::probe::ProbeHub::new", reason = "the run builds the probe hub and hands each check its Probe; a check never makes its own", allow-invalid = true },
+    { path = "rdy_engine::probe::ProbeHub::run_probe", reason = "the run builds the probe hub and hands each check its Probe; a check never makes its own", allow-invalid = true },
     # First-party escapes: the spec (PC-47).
     { path = "rdy_spec::load", reason = "a check never loads or verifies a spec; the run does", allow-invalid = true },
 ]

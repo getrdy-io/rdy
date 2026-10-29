@@ -437,13 +437,14 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
   checkouts), walks every attribute (inside `cfg_attr` and in the tokens of a macro too), and fails on any
   other file that relaxes a `disallowed_*` lint or a group that holds one. An attribute that a macro
   builds from the caller's tokens (`#[allow($($t)*)]`, `#[$a(..)]`) counts, and `#[$meta]` does not when
-  the macro takes `#[$meta:meta]` as written. A check crate may use neither `#[path]` nor `include!`
+  the arm of the macro takes `#[$meta:meta]` as written (bound per arm). A check crate may use neither `#[path]` nor `include!`
   (`include_str!` only for the data files listed in the test). Its list also holds the engine, spec and
   xtask files that call a root entry on purpose.
 - The wall cannot be turned down quietly (`tests/lint-wall/tests/wall_intact.rs`): a hardcoded floor of the
   Appendix A entries, no `.clippy.toml` anywhere, no `CLIPPY_CONF_DIR`, `rustflags`, compiler wrapper or
-  `clippy` alias in a Cargo config, no `RUSTFLAGS` in a workflow, every clippy step ends in exactly
-  `-- -D warnings`, no `disallowed_*`, `all`, `style` or `warnings` set to `allow` in the root
+  `clippy` alias in a Cargo config, no `RUSTFLAGS` in a workflow, the clippy commands of CI are exactly the three pinned in the test, no workflow carries
+  `continue-on-error` or a flags variable (any case), no `[patch]`, `[replace]`, `paths` or `[source]`
+  anywhere, nothing under `.claude/worktrees/` is tracked, no `disallowed_*`, `all`, `style` or `warnings` set to `allow` in the root
   `[workspace.lints]`, a check crate's `lints` is exactly `workspace = true` (manifests are read as TOML,
   so the spelling of a key does not matter), and every check crate says
   `#![deny(clippy::print_stdout, clippy::print_stderr)]`.
@@ -899,7 +900,8 @@ one clippy rule.
   `OutputDir::write_spec`, `rdy_engine::output::default_report_parent`, `rdy_engine::exec::kill_all_groups`,
   `rdy_engine::exec::harden_umask`, `rdy_engine::exec::inherited_fds`, `rdy_engine::exec::live_groups`,
   the watchdog (type `rdy_engine::watchdog::ProcessEffects`, `watchdog::Effects::exit`, `kill_groups` and
-  `notice`, `Watchdog::start`, `WriteState::claim`, `claim_or_park` and `finish`) and `rdy_spec::load`.
+  `notice`, `Watchdog::start`, `WriteState::claim`, `claim_or_park` and `finish`), `rdy_engine::probe::ProbeHub::new` and
+  `ProbeHub::run_probe` (a check gets its `Probe` from the run and never makes a hub) and `rdy_spec::load`.
   `privilege_gate` and `gate_then` (M1-042) are in `rdy-cli`, which no check crate may depend on, so they need no entry. M1-045 adds `live_backend` when it merges.
 - Terminal (macros in `disallowed-macros`): `std::io::stdout`, `std::io::stderr`, `std::io::stdin`,
   `std::print`, `std::println`, `std::eprint`, `std::eprintln`.

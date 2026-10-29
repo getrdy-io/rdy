@@ -452,3 +452,9 @@ fn watchdog_write_state_finish() {
 fn exec_live_groups() {
     let _ = rdy_engine::exec::live_groups;
 }
+fn probe_hub_new() {
+    let _ = rdy_engine::probe::ProbeHub::new;
+}
+fn probe_hub_run_probe() {
+    let _ = rdy_engine::probe::ProbeHub::run_probe;
+}

@@ -170,10 +170,45 @@ fn note_macro_name(findings: &mut Findings, name: &str) {
 /// Looks through the tokens of a macro, which syn does not parse as attributes or macro calls: a
 /// `macro_rules!` body can hold `#[allow(clippy::disallowed_methods)]`, `#[path = ".."]` and
 /// `include!(..)`, and expand them anywhere.
+///
+/// The body of `macro_rules!` is a list of arms, `(matcher) => { transcriber };`. The `$m:meta` names that
+/// make `#[$m]` safe are bound per arm: only the arm whose matcher takes `#[$m:meta]` as written may
+/// forward `#[$m]`. Tokens outside an arm (the arguments of a call) are scanned with no names bound.
 fn scan_tokens(findings: &mut Findings, tokens: proc_macro2::TokenStream) {
-    let mut passthrough = BTreeSet::new();
-    meta_passthrough(&mut passthrough, tokens.clone());
-    scan_with(findings, tokens, &passthrough);
+    use proc_macro2::{Spacing, TokenStream, TokenTree};
+    let trees: Vec<TokenTree> = tokens.into_iter().collect();
+    let mut in_an_arm = vec![false; trees.len()];
+    let mut i = 0;
+    while i + 3 < trees.len() {
+        if let (
+            TokenTree::Group(matcher),
+            TokenTree::Punct(eq),
+            TokenTree::Punct(gt),
+            TokenTree::Group(transcriber),
+        ) = (&trees[i], &trees[i + 1], &trees[i + 2], &trees[i + 3])
+            && eq.as_char() == '='
+            && eq.spacing() == Spacing::Joint
+            && gt.as_char() == '>'
+        {
+            let mut bound = BTreeSet::new();
+            meta_passthrough(&mut bound, matcher.stream());
+            scan_with(findings, matcher.stream(), &bound);
+            scan_with(findings, transcriber.stream(), &bound);
+            for flag in &mut in_an_arm[i..=i + 3] {
+                *flag = true;
+            }
+            i += 4;
+        } else {
+            i += 1;
+        }
+    }
+    let rest: TokenStream = trees
+        .into_iter()
+        .zip(in_an_arm)
+        .filter(|(_, arm)| !arm)
+        .map(|(tree, _)| tree)
+        .collect();
+    scan_with(findings, rest, &BTreeSet::new());
 }
 
 /// The names `$m` of every `#[$m:meta]` in the tokens: the matcher of a macro that takes attributes
@@ -540,6 +575,10 @@ fn the_grep_sees_every_form_it_must() {
             "in a file that does not parse",
             "fn f( { #[allow(clippy::disallowed_methods)]",
         ),
+        (
+            "a doc-style arm and a bare-meta arm in one macro",
+            "macro_rules! m { (#[$a:meta]) => {}; ($a:meta) => { #[$a] fn f() {} }; } m!(allow(clippy::disallowed_methods));",
+        ),
     ] {
         assert!(relaxes_a_disallowed_lint(source), "the grep missed: {what}");
     }
@@ -570,6 +609,10 @@ fn the_grep_sees_every_form_it_must() {
         (
             "doc attributes forwarded as written at the call site",
             "macro_rules! m { ($(#[$meta:meta])* $n:ident) => { $(#[$meta])* struct $n; }; }",
+        ),
+        (
+            "two arms that both take the attribute as written",
+            "macro_rules! m { (#[$a:meta] $n:ident) => { #[$a] struct $n; }; (#[$b:meta] #[$c:meta] $n:ident) => { #[$b] #[$c] struct $n; }; }",
         ),
         ("an empty file", ""),
     ] {
