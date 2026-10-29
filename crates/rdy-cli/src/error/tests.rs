@@ -11,7 +11,10 @@ use rdy_spec::spec::ProductSlug;
 use rdy_spec::{Location, ScalarError, SpecError};
 use serde_json::{Value, json};
 
-use super::{BUG_HINT, CliError, ErrorCode, InternalKind, IoReason, ReportStep, emit, wants_json};
+use super::{
+    BUG_HINT, CliError, ErrorCode, InternalKind, IoReason, ReportReason, ReportStep, emit,
+    wants_json,
+};
 use crate::password::{Origin, PasswordError};
 use crate::prompt::{Cancel, PromptError};
 use crate::trust::{Insecurity, Scope, TrustStoreError};
@@ -67,12 +70,12 @@ fn every_cli_error() -> Vec<CliError> {
         CliError::ReportWrite {
             step: ReportStep::CreateFolder,
             path: s("/usr/share/rdy-report-x"),
-            reason: IoReason::PermissionDenied,
+            reason: IoReason::PermissionDenied.into(),
         },
         CliError::ReportWrite {
             step: ReportStep::WriteFiles,
             path: s("rdy-report-x"),
-            reason: IoReason::DiskFull,
+            reason: IoReason::DiskFull.into(),
         },
         CliError::Interrupted,
         CliError::Internal(InternalKind::Bug),
@@ -417,7 +420,7 @@ fn golden_text_for_the_report_folder_and_for_ctrl_c() {
     let e = CliError::ReportWrite {
         step: ReportStep::CreateFolder,
         path: s("/usr/share/rdy-report-acme-quickstart-20270309T101502Z"),
-        reason: IoReason::PermissionDenied,
+        reason: IoReason::PermissionDenied.into(),
     };
     assert_eq!(
         text_of(&e),
@@ -427,6 +430,49 @@ fn golden_text_for_the_report_folder_and_for_ctrl_c() {
     assert_eq!(
         text_of(&CliError::Interrupted),
         "error: interrupted. No report was written.\nfix: run rdy again and let it finish\n"
+    );
+}
+
+#[test]
+fn every_report_folder_reason_has_its_own_message_and_fix() {
+    let write = |step, path: &str, reason: ReportReason| CliError::ReportWrite {
+        step,
+        path: s(path),
+        reason,
+    };
+    let folder = ReportStep::CreateFolder;
+    assert_eq!(
+        text_of(&write(
+            folder,
+            "/mnt/nfs/rdy-report-x",
+            ReportReason::NotOwner
+        )),
+        "error: cannot create the report folder /mnt/nfs/rdy-report-x (the folder is owned by another user)\n\
+         fix: use --out-dir <a folder on a local disk>, or --no-report to skip the files. On NFS with root_squash, root cannot own new folders\n"
+    );
+    assert_eq!(
+        text_of(&write(
+            folder,
+            "/mnt/fat/rdy-report-x",
+            ReportReason::NotPrivate
+        )),
+        "error: cannot create the report folder /mnt/fat/rdy-report-x (the folder cannot be made private)\n\
+         fix: use --out-dir <a folder on a disk that keeps Unix permissions>, or --no-report to skip the files\n"
+    );
+    assert_eq!(
+        text_of(&write(folder, "/tmp/out", ReportReason::NameTaken)),
+        "error: cannot create the report folder in /tmp/out (all the folder names are taken)\n\
+         fix: wait a second and run again, or use --out-dir <another folder>\n"
+    );
+    assert_eq!(
+        text_of(&write(
+            ReportStep::WriteFiles,
+            "/tmp/out/rdy-report-x/report.json",
+            ReportReason::FileExists
+        )),
+        format!(
+            "error: cannot write the report files to /tmp/out/rdy-report-x/report.json (the file already exists)\nfix: {BUG_HINT}\n"
+        )
     );
 }
 

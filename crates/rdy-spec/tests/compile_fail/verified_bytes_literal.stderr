@@ -1,0 +1,9 @@
+error[E0451]: fields `yaml` and `signature` of struct `VerifiedSpecBytes` are private
+ --> tests/compile_fail/verified_bytes_literal.rs:5:9
+  |
+4 |     let _ = VerifiedSpecBytes {
+  |             ----------------- in this type
+5 |         yaml: b"apiVersion: rdy/v1".to_vec(),
+  |         ^^^^ private field
+6 |         signature: None,
+  |         ^^^^^^^^^ private field
