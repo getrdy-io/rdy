@@ -74,9 +74,33 @@ fn stderr(output: &Output) -> String {
 
 const DOCS_PAGE: &str = "docs/src/content/docs/reference/spec/index.md";
 
+/// A temporary repo with the schema files written, as `cargo xtask schema` leaves them. The docs
+/// pages render from those files, so every docs test starts here.
+fn repo_with_schema() -> Result<Repo> {
+    let repo = Repo::new()?;
+    let out = xtask(repo.path(), &["schema"])?;
+    if code(&out) != Some(0) {
+        bail!("xtask schema failed: {}", stderr(&out));
+    }
+    Ok(repo)
+}
+
+#[test]
+fn docs_refuses_to_render_without_the_schema_and_names_the_fix() -> Result<()> {
+    let repo = Repo::new()?;
+    let docs = xtask(repo.path(), &["docs"])?;
+    assert_eq!(code(&docs), Some(70), "{}", stderr(&docs));
+    assert!(
+        stderr(&docs).contains("cargo xtask schema"),
+        "{}",
+        stderr(&docs)
+    );
+    Ok(())
+}
+
 #[test]
 fn docs_check_passes_on_a_clean_tree() -> Result<()> {
-    let repo = Repo::new()?;
+    let repo = repo_with_schema()?;
     assert_eq!(code(&xtask(repo.path(), &["docs"])?), Some(0));
     let check = xtask(repo.path(), &["docs", "--check"])?;
     assert_eq!(code(&check), Some(0), "{}", stderr(&check));
@@ -85,7 +109,7 @@ fn docs_check_passes_on_a_clean_tree() -> Result<()> {
 
 #[test]
 fn docs_check_exits_one_after_a_hand_edit_and_zero_on_a_clean_tree() -> Result<()> {
-    let repo = Repo::new()?;
+    let repo = repo_with_schema()?;
     assert_eq!(code(&xtask(repo.path(), &["docs"])?), Some(0));
     assert_eq!(code(&xtask(repo.path(), &["docs", "--check"])?), Some(0));
 
@@ -107,7 +131,7 @@ fn docs_check_exits_one_after_a_hand_edit_and_zero_on_a_clean_tree() -> Result<(
 
 #[test]
 fn docs_check_fails_when_a_generated_page_is_missing() -> Result<()> {
-    let repo = Repo::new()?;
+    let repo = repo_with_schema()?;
     assert_eq!(code(&xtask(repo.path(), &["docs"])?), Some(0));
     fs::remove_file(repo.path().join(DOCS_PAGE))?;
     let check = xtask(repo.path(), &["docs", "--check"])?;
@@ -118,7 +142,7 @@ fn docs_check_fails_when_a_generated_page_is_missing() -> Result<()> {
 
 #[test]
 fn docs_check_passes_on_a_crlf_checkout() -> Result<()> {
-    let repo = Repo::new()?;
+    let repo = repo_with_schema()?;
     assert_eq!(code(&xtask(repo.path(), &["docs"])?), Some(0));
     let page = repo.path().join(DOCS_PAGE);
     let lf = fs::read_to_string(&page)?;
