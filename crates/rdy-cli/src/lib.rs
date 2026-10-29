@@ -3,8 +3,9 @@
 //! The binary in `src/main.rs` is a thin wrapper around [`run`]. Tests and the docs CLI reference
 //! use the same code (ADR 0011).
 //!
-//! This is the M1 command tree (M1-029). `rdy version` and `rdy spec lint` do their job. Every other
-//! command prints "not yet implemented in this build" and exits 70 until its own ticket lands.
+//! This is the M1 command tree (M1-029). `rdy version`, `rdy spec lint`, `rdy spec keygen` and
+//! `rdy spec sign` do their jobs. Every other command prints "not yet implemented in this build" and
+//! exits 70 until its own ticket lands.
 //!
 //! Exit codes (CLAUDE.md, Output): clap's own exit code is 2, but in rdy 2 means NOT READY. So rdy
 //! parses with [`clap::Parser::try_parse_from`] and maps the outcome itself. Help and version go to
@@ -29,6 +30,11 @@ pub mod password;
 
 #[doc(hidden)]
 pub mod prompt;
+
+#[doc(hidden)]
+pub mod signing;
+
+mod spec_cmds;
 
 #[doc(hidden)]
 pub mod trust;
@@ -111,8 +117,8 @@ fn dispatch(command: &Commands, json: bool, stdout: &mut dyn Write, stderr: &mut
         Commands::Verify(_) => not_implemented("verify", json, stdout, stderr),
         Commands::Spec { command } => match command {
             SpecCommand::Lint(args) => lint::run(&args.spec, json, stdout, stderr),
-            SpecCommand::Sign(_) => not_implemented("spec sign", json, stdout, stderr),
-            SpecCommand::Keygen(_) => not_implemented("spec keygen", json, stdout, stderr),
+            SpecCommand::Sign(args) => spec_cmds::run_sign(args, json, stdout, stderr),
+            SpecCommand::Keygen(args) => spec_cmds::run_keygen(args, json, stdout, stderr),
         },
         Commands::Trust { command } => match command {
             TrustCommand::Add(_) => not_implemented("trust add", json, stdout, stderr),

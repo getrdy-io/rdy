@@ -690,6 +690,7 @@ pub struct KeygenArgs {
     /// Do not protect the secret key with a password.
     #[arg(
         long,
+        conflicts_with = "password_file",
         help = "Do not protect the secret key with a password",
         long_help = "Do not protect the secret key with a password.\nFor CI only."
     )]
