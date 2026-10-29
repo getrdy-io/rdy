@@ -449,6 +449,7 @@
           "maximum": 4096
         },
         "arch": {
+          "description": "CPU architectures the product runs on. A machine with another architecture blocks the check.",
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
@@ -462,6 +463,7 @@
           }
         },
         "flags": {
+          "description": "CPU feature flags the product needs, such as `avx2`. A missing flag blocks the check.",
           "type": "array",
           "minItems": 1,
           "maxItems": 64,
@@ -487,6 +489,13 @@
             "flags"
           ]
         }
+      ],
+      "examples": [
+        {
+          "id": "host.cpu",
+          "min": 4,
+          "recommended": 8
+        }
       ]
     },
     "HostDiskParams": {
@@ -504,10 +513,12 @@
           "$ref": "#/$defs/Quantity"
         },
         "min_inodes": {
+          "description": "Fewest free inodes on the file system. A file system that reports no inode count is skipped.",
           "type": "integer",
           "minimum": 0
         },
         "forbid_options": {
+          "description": "Mount options that block the check when the path has them, such as `noexec`.",
           "type": "array",
           "uniqueItems": true,
           "items": {
@@ -520,6 +531,7 @@
           }
         },
         "forbid_fstypes": {
+          "description": "File system types that block the check when the path uses them, such as `nfs`.",
           "type": "array",
           "maxItems": 32,
           "items": {
@@ -531,14 +543,24 @@
       "required": [
         "path",
         "min"
+      ],
+      "examples": [
+        {
+          "id": "host.disk",
+          "path": "/var/lib/acme",
+          "min": "50Gi",
+          "recommended": "60Gi"
+        }
       ]
     },
     "HostLsmParams": {
       "properties": {
         "selinux": {
+          "description": "SELinux checks. Leave it out to skip them.",
           "type": "object",
           "properties": {
             "allow": {
+              "description": "SELinux modes that pass. A mode outside this list blocks the check.",
               "type": "array",
               "uniqueItems": true,
               "items": {
@@ -550,6 +572,7 @@
               }
             },
             "denials_max": {
+              "description": "Most SELinux denials allowed in the window. More than this warns.",
               "type": "integer",
               "minimum": 0,
               "maximum": 4294967295
@@ -558,15 +581,18 @@
               "$ref": "#/$defs/Duration"
             },
             "watch": {
+              "description": "Contexts whose denials block the check instead of warning, such as `container_t`.",
               "$ref": "#/$defs/StringList"
             }
           },
           "additionalProperties": false
         },
         "apparmor": {
+          "description": "AppArmor checks. Leave it out to skip them.",
           "type": "object",
           "properties": {
             "allow": {
+              "description": "AppArmor modes that pass. A mode outside this list blocks the check.",
               "type": "array",
               "uniqueItems": true,
               "items": {
@@ -577,12 +603,24 @@
               }
             },
             "require_profiles": {
+              "description": "AppArmor profiles that must be loaded.",
               "$ref": "#/$defs/StringList"
             }
           },
           "additionalProperties": false
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "host.lsm",
+          "selinux": {
+            "allow": [
+              "enforcing"
+            ],
+            "denials_max": 0
+          }
+        }
+      ]
     },
     "HostMemoryParams": {
       "properties": {
@@ -619,11 +657,18 @@
       },
       "required": [
         "min"
+      ],
+      "examples": [
+        {
+          "id": "host.memory",
+          "min": "16Gi"
+        }
       ]
     },
     "HostOsParams": {
       "properties": {
         "supported": {
+          "description": "Distributions and versions the product supports. Any other distribution or version blocks the check.",
           "type": "array",
           "maxItems": 64,
           "items": {
@@ -635,6 +680,7 @@
                 "pattern": "^[a-z0-9._-]{1,32}$"
               },
               "versions": {
+                "description": "Versions that pass, such as `8` for a major version or `22.04` for one exact version.",
                 "type": "array",
                 "items": {
                   "type": "string",
@@ -649,6 +695,7 @@
           }
         },
         "arch": {
+          "description": "CPU architectures the product runs on. A machine with another architecture blocks the check.",
           "type": "array",
           "uniqueItems": true,
           "items": {
@@ -661,6 +708,7 @@
           }
         },
         "fips": {
+          "description": "`forbid` needs FIPS mode off, `require` needs it on, and `any` accepts either.",
           "enum": [
             "forbid",
             "require",
@@ -669,15 +717,31 @@
           "default": "any"
         },
         "windows_min_build": {
+          "description": "Lowest Windows build number that passes.",
           "type": "integer",
           "minimum": 0,
           "maximum": 4294967295
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "host.os",
+          "supported": [
+            {
+              "id": "ubuntu",
+              "versions": [
+                "22.04"
+              ]
+            }
+          ],
+          "fips": "any"
+        }
+      ]
     },
     "HostPortsParams": {
       "properties": {
         "free": {
+          "description": "TCP ports that must be free. A port that another process holds blocks the check.",
           "type": "array",
           "minItems": 1,
           "maxItems": 256,
@@ -693,6 +757,7 @@
                     "$ref": "#/$defs/Port"
                   },
                   "bind": {
+                    "description": "`public` for a port the product serves on all addresses. `loopback` for a port it serves on the loopback address only.",
                     "enum": [
                       "public",
                       "loopback"
@@ -709,6 +774,7 @@
           }
         },
         "udp_free": {
+          "description": "UDP ports that must be free. A port that another process holds blocks the check.",
           "type": "array",
           "minItems": 1,
           "maxItems": 256,
@@ -733,6 +799,17 @@
             "udp_free"
           ]
         }
+      ],
+      "examples": [
+        {
+          "id": "host.ports",
+          "free": [
+            80,
+            443,
+            6443,
+            10250
+          ]
+        }
       ]
     },
     "HostSecurityAgentsParams": {
@@ -745,7 +822,15 @@
           "description": "Agent ids that are fine. Run rdy spec lint to see the known ids.",
           "$ref": "#/$defs/StringList"
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "host.security_agents",
+          "forbid": [
+            "example-agent"
+          ]
+        }
+      ]
     },
     "K8sAccessParams": {
       "properties": {
@@ -760,7 +845,13 @@
           "description": "The API server URL must match.",
           "$ref": "#/$defs/Regex"
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "k8s.access",
+          "context_pattern": "^acme-"
+        }
+      ]
     },
     "K8sAdmissionParams": {
       "description": "Dry-run checks are not supported yet.",
@@ -774,6 +865,7 @@
           ]
         },
         "namespace": {
+          "description": "The namespace the product's pods run in. The check reads the policies that apply there.",
           "$ref": "#/$defs/K8sName"
         },
         "scc": {
@@ -794,7 +886,14 @@
             ]
           }
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "k8s.admission",
+          "pod_security": "baseline",
+          "namespace": "acme"
+        }
+      ]
     },
     "K8sLabelKey": {
       "description": "A Kubernetes label or taint key: a name, or prefix/name with a lowercase DNS-style prefix.",
@@ -816,22 +915,27 @@
     "K8sNodesParams": {
       "properties": {
         "min_ready": {
+          "description": "Fewest ready nodes that match the selector and the architecture.",
           "type": "integer",
           "minimum": 1,
           "maximum": 4294967295
         },
         "min_zones": {
+          "description": "Fewest availability zones that the matching nodes span. Zones come from node labels.",
           "type": "integer",
           "minimum": 1,
           "maximum": 4294967295
         },
         "per_node": {
+          "description": "Size of one matching node the product needs. Use allocatable values, not the instance size.",
           "$ref": "#/$defs/K8sResources"
         },
         "free": {
+          "description": "Capacity that must be unclaimed across the matching nodes.",
           "$ref": "#/$defs/K8sResources"
         },
         "arch": {
+          "description": "CPU architectures of the nodes that count. Nodes with other architectures do not count.",
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
@@ -845,6 +949,7 @@
           }
         },
         "selector": {
+          "description": "Node labels that a node must have to count. Up to 16 pairs.",
           "type": "object",
           "maxProperties": 16,
           "propertyNames": {
@@ -855,6 +960,7 @@
           }
         },
         "tolerations": {
+          "description": "Taints the product tolerates. A node with a taint that is not listed does not count.",
           "type": "array",
           "maxItems": 16,
           "items": {
@@ -865,6 +971,7 @@
                 "$ref": "#/$defs/K8sLabelKey"
               },
               "operator": {
+                "description": "How the key matches. `Exists` matches any value. `Equal` needs a value.",
                 "enum": [
                   "Equal",
                   "Exists"
@@ -874,6 +981,7 @@
                 "$ref": "#/$defs/K8sLabelValue"
               },
               "effect": {
+                "description": "The taint effect to tolerate. Leave it out to match every effect.",
                 "enum": [
                   "NoSchedule",
                   "PreferNoSchedule",
@@ -923,11 +1031,22 @@
             "free"
           ]
         }
+      ],
+      "examples": [
+        {
+          "id": "k8s.nodes",
+          "min_ready": 3,
+          "per_node": {
+            "cpu": 7,
+            "memory": "28Gi"
+          }
+        }
       ]
     },
     "K8sRbacParams": {
       "properties": {
         "can": {
+          "description": "Permissions the install identity needs. Each entry is a verb and a resource as kubectl writes them, or an object with the parts spelled out.",
           "type": "array",
           "minItems": 1,
           "maxItems": 100,
@@ -942,29 +1061,35 @@
                 "type": "object",
                 "properties": {
                   "verb": {
+                    "description": "The verb, such as `create`. Use `*` for any verb.",
                     "type": "string",
                     "pattern": "^[a-z*]+$",
                     "maxLength": 63
                   },
                   "group": {
+                    "description": "The API group, such as `apps`. Leave it empty for the core group.",
                     "type": "string",
                     "pattern": "^[a-z0-9.-]*$",
                     "maxLength": 253
                   },
                   "resource": {
+                    "description": "The resource, such as `pods`. Use `*` for any resource.",
                     "type": "string",
                     "pattern": "^[a-z0-9*-]+$",
                     "maxLength": 253
                   },
                   "subresource": {
+                    "description": "The subresource, such as `status`. Leave it out for the resource itself.",
                     "type": "string",
                     "pattern": "^[a-z]+$",
                     "maxLength": 63
                   },
                   "namespace": {
+                    "description": "The namespace the permission is needed in. Leave it out for cluster scope.",
                     "$ref": "#/$defs/K8sName"
                   },
                   "name": {
+                    "description": "The name of one object. Leave it out for any name.",
                     "$ref": "#/$defs/K8sName"
                   }
                 },
@@ -984,6 +1109,14 @@
       },
       "required": [
         "can"
+      ],
+      "examples": [
+        {
+          "id": "k8s.rbac",
+          "can": [
+            "create namespaces"
+          ]
+        }
       ]
     },
     "K8sResources": {
@@ -1007,6 +1140,7 @@
           "$ref": "#/$defs/Quantity"
         },
         "pods": {
+          "description": "Pods that one node allows. This is the allocatable pod count, which is often low on small instances.",
           "type": "integer",
           "minimum": 1,
           "maximum": 4294967295
@@ -1025,9 +1159,11 @@
           "$ref": "#/$defs/K8sName"
         },
         "access_modes": {
+          "description": "Access modes the volumes need. The class must support each one.",
           "$ref": "#/$defs/AccessModes"
         },
         "binding": {
+          "description": "When the volume is bound. `WaitForFirstConsumer` waits for a pod. `Immediate` binds at once. `any` accepts either.",
           "enum": [
             "WaitForFirstConsumer",
             "Immediate",
@@ -1036,6 +1172,7 @@
           "default": "any"
         },
         "expansion": {
+          "description": "When true, the class must allow volume expansion.",
           "type": "boolean"
         },
         "reclaim_policy": {
@@ -1045,7 +1182,16 @@
             "Delete"
           ]
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "k8s.storageclass",
+          "class": "standard",
+          "access_modes": [
+            "ReadWriteOnce"
+          ]
+        }
+      ]
     },
     "K8sVersionParams": {
       "properties": {
@@ -1099,6 +1245,12 @@
           "required": [
             "openshift_min"
           ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "k8s.version",
+          "min": "1.28"
         }
       ]
     },
@@ -1164,6 +1316,7 @@
     "NetDnsParams": {
       "properties": {
         "names": {
+          "description": "Names to resolve. Each entry is a name, or an object with the name and what its answers must look like.",
           "type": "array",
           "minItems": 1,
           "maxItems": 64,
@@ -1179,6 +1332,7 @@
                     "$ref": "#/$defs/DnsName"
                   },
                   "expect_in": {
+                    "description": "Ranges that the answers must fall in, such as `10.0.0.0/8`.",
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 16,
@@ -1187,6 +1341,7 @@
                     }
                   },
                   "expect_public": {
+                    "description": "Whether the answers must be public addresses. Leave it out to skip this test.",
                     "type": "boolean"
                   }
                 },
@@ -1205,6 +1360,14 @@
       },
       "required": [
         "names"
+      ],
+      "examples": [
+        {
+          "id": "net.dns",
+          "names": [
+            "example.com"
+          ]
+        }
       ]
     },
     "NetEgressParams": {
@@ -1251,6 +1414,7 @@
                     "default": "HEAD"
                   },
                   "via_proxy": {
+                    "description": "How this endpoint uses the proxy. The values are the same as for the check.",
                     "enum": [
                       "auto",
                       "direct",
@@ -1280,6 +1444,7 @@
           "default": "auto"
         },
         "trust": {
+          "description": "Which certificate authorities verify each endpoint. `system` uses the operating system store. `bundled` uses the roots that ship inside rdy.",
           "enum": [
             "system",
             "bundled"
@@ -1293,6 +1458,14 @@
       },
       "required": [
         "endpoints"
+      ],
+      "examples": [
+        {
+          "id": "net.egress",
+          "endpoints": [
+            "https://example.com/"
+          ]
+        }
       ]
     },
     "NetProxyParams": {
@@ -1302,10 +1475,20 @@
           "$ref": "#/$defs/StringList"
         },
         "daemons_need_proxy": {
+          "description": "When true, a container runtime or the kubelet without the proxy settings blocks the check. When false, it warns.",
           "type": "boolean",
           "default": false
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "net.proxy",
+          "required_no_proxy": [
+            ".svc",
+            ".cluster.local"
+          ]
+        }
+      ]
     },
     "NetTlsInterceptParams": {
       "properties": {
@@ -1324,6 +1507,7 @@
           "$ref": "#/$defs/Regex"
         },
         "pin_sha256": {
+          "description": "SHA-256 pins of the certificates the product expects, 64 lowercase hex characters each. A chain that matches none of them blocks the check.",
           "type": "array",
           "minItems": 1,
           "maxItems": 16,
@@ -1333,10 +1517,20 @@
           }
         },
         "forbid_interception": {
+          "description": "When true, an inspecting proxy blocks the check. When false, it only warns.",
           "type": "boolean",
           "default": false
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "net.tls_intercept",
+          "hosts": [
+            "example.com"
+          ],
+          "forbid_interception": true
+        }
+      ]
     },
     "OsFamily": {
       "description": "An operating system family a check can be limited to.",

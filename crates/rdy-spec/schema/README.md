@@ -27,6 +27,10 @@ Three parts of the contract have no Rust type yet. They are JSON fragments in
 the kind-specific fields of an action, and the `Verification` and `ErrorOutput` objects. Edit
 the fragment, then regenerate. Each goes away when its type derives the schema.
 
+Each check parameter needs a `description` in the fragment. The fragment also holds one `examples` entry per
+check id. `cargo xtask docs` shows each example as YAML, and it fails with the path of any property that has
+no description. The test suite checks each example against the schema (ADR 0034).
+
 Editors can use the spec schema today, for example with yaml-language-server:
 
 ```yaml
