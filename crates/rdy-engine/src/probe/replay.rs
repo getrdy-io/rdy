@@ -9,9 +9,12 @@
 
 use std::collections::HashMap;
 use std::io;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::sealed::Sealed;
+use super::sock::{UdpReply, UnixResponse};
 use super::{
     Backend, DirEntry, FileBytes, FileMeta, NativeCall, NativeValue, Output, ProbeError, ReadGuard,
     ReadRange,
@@ -28,6 +31,8 @@ pub struct Replay {
     env: HashMap<String, String>,
     commands: HashMap<(String, Vec<String>), Output>,
     ids: Option<ProcessIds>,
+    /// Names, datagram servers and unix socket replies (M1-144). Its builders are in `sock::replay`.
+    pub(super) net: super::sock::replay::ReplayNet,
     native: Vec<(NativeCall, NativeValue)>,
 }
 
@@ -177,6 +182,34 @@ impl Backend for Replay {
                 .cloned()
                 .ok_or(ProbeError::NotFound)
         })
+    }
+
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        _port: u16,
+        _timeout: Duration,
+    ) -> BoxFuture<'a, io::Result<Vec<IpAddr>>> {
+        Box::pin(async move { self.net.resolve(host) })
+    }
+
+    fn udp_exchange<'a>(
+        &'a self,
+        to: SocketAddr,
+        payload: &'a [u8],
+        max_reply: usize,
+        _timeout: Duration,
+    ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
+        Box::pin(async move { self.net.udp(to, payload, max_reply) })
+    }
+
+    fn unix_get<'a>(
+        &'a self,
+        socket: &'a Path,
+        path: &'a str,
+        _timeout: Duration,
+    ) -> BoxFuture<'a, Result<UnixResponse, ProbeError>> {
+        Box::pin(async move { self.net.unix(socket, path) })
     }
 
     fn process_ids(&self) -> BoxFuture<'_, Result<ProcessIds, ProbeError>> {
