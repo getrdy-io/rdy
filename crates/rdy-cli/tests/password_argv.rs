@@ -77,8 +77,22 @@ fn the_refusal_wins_over_a_missing_required_argument() {
 
 #[test]
 fn password_file_and_the_variable_are_not_refused() {
-    // The commands are not built yet (M1-125), so they exit 70, not 64 with the password reason.
-    for args in [
+    // The commands run (M1-125). Run them in an empty folder so nothing lands in the source tree.
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+    let run = |args: &[&str], password: Option<&str>| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_rdy"));
+        cmd.args(args)
+            .current_dir(dir.path())
+            .env_remove("RDY_PROGRESS")
+            .env_remove("RDY_KEY_PASSWORD");
+        if let Some(password) = password {
+            cmd.env("RDY_KEY_PASSWORD", password);
+        }
+        cmd.output()
+            .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"))
+    };
+    // A spec that is not there: the error is about the file, never about the password flag.
+    let out = run(
         &[
             "spec",
             "sign",
@@ -87,7 +101,14 @@ fn password_file_and_the_variable_are_not_refused() {
             "k.key",
             "--password-file",
             "-",
-        ][..],
+        ],
+        None,
+    );
+    assert_eq!(out.status.code(), Some(64), "{out:?}");
+    assert!(stderr_of(&out).contains("cannot read s.yaml"), "{out:?}");
+    assert!(!stderr_of(&out).contains("shell history"));
+    // A password file that is not there.
+    let out = run(
         &[
             "spec",
             "keygen",
@@ -95,18 +116,16 @@ fn password_file_and_the_variable_are_not_refused() {
             "--password-file",
             "pw.txt",
         ],
-    ] {
-        let out = rdy(args);
-        assert_eq!(out.status.code(), Some(70), "rdy {args:?}: {out:?}");
-        assert!(!stderr_of(&out).contains("shell history"), "rdy {args:?}");
-    }
-    let out = Command::new(env!("CARGO_BIN_EXE_rdy"))
-        .args(["spec", "keygen", "acme-signing"])
-        .env("RDY_KEY_PASSWORD", "CANARY-7f3a")
-        .output()
-        .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"));
-    assert_eq!(out.status.code(), Some(70));
+        None,
+    );
+    assert_eq!(out.status.code(), Some(64), "{out:?}");
+    assert!(!stderr_of(&out).contains("shell history"));
+    assert!(!dir.path().join("acme-signing.key").exists());
+    // The variable works, and its value is never echoed.
+    let out = run(&["spec", "keygen", "acme-signing"], Some("CANARY-7f3a"));
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
     assert!(!stderr_of(&out).contains("CANARY"));
+    assert!(dir.path().join("acme-signing.key").exists());
 }
 
 #[test]

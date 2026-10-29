@@ -10,7 +10,7 @@ use rdy_spec::result::SkipKind;
 use serde_json::json;
 
 use super::*;
-use crate::check::{BoxFuture, CheckInfo, Finding, Level, OsSupport, Support};
+use crate::check::{BoxFuture, CheckInfo, CheckMeta, Finding, Level, OsSupport, Support};
 
 const FULL: OsSupport = OsSupport {
     linux: Support::Full,
@@ -22,6 +22,10 @@ static PLAIN: CheckInfo = CheckInfo {
     id: "fake.plain",
     family: "fake",
     summary: "A fake check with no needs.",
+    meta: CheckMeta {
+        title: "Fake check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
     needs: &[],
     wants: &[],
     default_timeout: None,
@@ -36,6 +40,10 @@ static QUICK: CheckInfo = CheckInfo {
     id: "fake.quick",
     family: "fake",
     summary: "A fake check with a 2 s default timeout.",
+    meta: CheckMeta {
+        title: "Fake check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
     needs: &[],
     wants: &[],
     default_timeout: Some(Duration::from_secs(2)),
@@ -50,6 +58,10 @@ static NEEDS_ROOT: CheckInfo = CheckInfo {
     id: "fake.needs_root",
     family: "fake",
     summary: "A fake check that needs root.",
+    meta: CheckMeta {
+        title: "Fake check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
     needs: &[Need::Root],
     wants: &[],
     default_timeout: None,

@@ -435,16 +435,19 @@ lints and signs one buffer.
 
 `rdy spec keygen` writes the secret key with `create_new`, mode 0600, password-encrypted unless
 `--unencrypted` (for vendor CI, ADR 0002 decision 8), plus the public key file, and prints the
-fingerprint for the vendor to publish on its docs page.
+fingerprint for the vendor to publish on its docs page. The encryption is scrypt at the cost stock
+minisign uses, N = 2^20 and 1 GiB, which is also the most a key file may ask for (ADR 0022).
 
 `rdy spec sign <spec> [--secret-key <file>] [--sig <out>] [--force]` (flags final in 07-cli-ux.md):
 
 1. Runs `rdy spec lint` on the buffer. Any error refuses to sign (2.5); warnings are printed.
 2. Refuses a secret key readable by group or others. Asks for its password if encrypted.
 3. Signs the exact bytes with the 4.2 trusted comment, `signed_at` = now.
-4. Writes `<spec>.minisig` with exclusive create; `--force` replaces it.
-5. Verifies its own output, then prints the key id, the fingerprint, the spec SHA-256 and the lines the
-   vendor sends to customers: `rdy trust add acme-platform --key acme-platform.pub` and "the fingerprint
+4. Checks the signature with `rdy_spec::load`, the code a customer's rdy runs, with the key pinned for the
+   product. This happens before anything is written. A failure is an internal error (exit 70).
+5. Writes `<spec>.minisig` with exclusive create; `--force` writes a new file beside it and renames it over
+   the old one, so a symlink at the path is replaced and never written through. Then it prints the key id,
+   the fingerprint, the spec SHA-256 and the lines the vendor sends to customers: `rdy trust add acme-platform --key acme-platform.pub` and "the fingerprint
    is <hex>; compare it before you say yes".
 
 Stock minisign interoperates: `minisign -V` verifies an rdy signature, and a spec signed with

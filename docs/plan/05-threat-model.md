@@ -340,7 +340,7 @@ runs to the end of the line or YAML block, because a cap would leave the tail of
 | T3 | Parser differential | Duplicate keys or a second YAML document | L | H | `[M1]` One document; duplicate keys, anchors, aliases, merge keys and tags rejected (ADR 0001). | fold: wire serde-saphyr (M1-017), SEC-62 |
 | T4 | Rollback | Replay an older signed spec | L | L | `[M1]` Report shows `signed_at` and spec digest. `[M2+]` portal serves latest. | SEC-46 (M2-032) |
 | R1 | Dispute over which spec ran | "We never sent that" | L | M | `[M1]` Result records spec sha256, key id, fingerprint and product. | fold: verify minisign (M1-120), SEC-61 (M1-121) |
-| I1 | Vendor key leak | Secret key committed or printed | M | H | `[M1]` Encrypted by default, `create_new` 0600, `spec sign` refuses readable key files, secrets never printed. | fold: keygen and sign (M1-125) |
+| I1 | Vendor key leak | Secret key committed or printed | M | H | `[M1]` Encrypted by default, `create_new` 0600, `spec sign` refuses readable key files, secrets never printed. Scrypt at the stock cost (N = 2^20, 1 GiB), and a key file may not ask for more (ADR 0022). `[M2]` Windows: a new key file gets its folder's access list until SEC-58 gives key files an owner-only ACL. The success message names it. | fold: keygen and sign (M1-125), SEC-58 (M2-085) |
 | D1 | Parser exhaustion | Billion laughs, deep nesting, `/dev/zero` as the spec | M | L | `[M1]` Bounded reads, ADR 0001 limits; mostly unreachable once INV-01 holds. | fold: wire serde-saphyr (M1-017) |
 | E1 | Capability creep | Unknown check id, exec block | M | H | `[M1]` Unknown check ids and fields become Skipped, no code runs for them, and a required one gives `not_ready` (ADR 0005, 0007, 0013). Unknown top-level keys exit 64. No exec in M1. | fold: unknown ids (M1-035) |
 
@@ -519,7 +519,7 @@ Folds from revision 2 and where they live now:
 | SEC-47 | M2-033 | Portal-delivered spec and key trust |
 | SEC-56 | M2-034 | TTY confirmation for unsigned specs |
 | SEC-57 | M2-084 | Contact-set tests on macOS and Windows |
-| SEC-58 | M2-085 | Windows output dir ACL hardening |
+| SEC-58 | M2-085 | Windows output dir and key file ACL hardening |
 | SEC-65 | M2-062 | Redaction span union with hostile custom patterns |
 | SEC-66 | M2-068 | rdy bundle ignores spec collectors unless the spec is verified with a pinned key |
 | SEC-31 | M3-008 | Docs security page and verify-first install (extended by M3-053) |

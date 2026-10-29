@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rdy_engine::check::{
-    BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckOutcome, Finding, Need, OsSupport,
-    Support, current_os,
+    BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Need,
+    OsSupport, Support, current_os,
 };
 use rdy_engine::exec::{self, ExecSpec};
 use rdy_engine::sched::{End, Planned, Scheduler};
@@ -29,6 +29,10 @@ static SCRIPT_CHECK: CheckInfo = CheckInfo {
     id: "fake.script",
     family: "fake",
     summary: "A fake check that runs a script which forks a long sleep.",
+    meta: CheckMeta {
+        title: "Fake check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
     needs: &[],
     wants: &[],
     default_timeout: None,
