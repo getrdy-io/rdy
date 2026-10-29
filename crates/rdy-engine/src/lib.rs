@@ -3,7 +3,7 @@
 //! It runs checks, applies timeouts and renders reports. So far it has the check contract, the
 //! scheduler and the mapping from what a check returns to a report entry.
 //!
-//! - [`check`]: the `Check` trait, `CheckInfo`, needs, `Finding` and `CheckError`.
+//! - [`check`]: the `Check` trait, `CheckInfo` with its `CheckMeta`, needs, `Finding` and `CheckError`.
 //! - [`outcome`]: [`outcome::map_outcome`] turns a check's outcome into a `CheckResult`.
 //! - [`units`]: version compare, byte sizes, the nominal band and the severity cap that checks share.
 //! - [`fixtext`]: the audit that keeps commands and sysctl names in fix text on two reviewed lists.

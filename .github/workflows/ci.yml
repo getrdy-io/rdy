@@ -244,8 +244,15 @@ jobs:
           out=$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534:65534 -v "$dir:/rdy:ro" rdy-scratch /rdy/rdy version)
           echo "$out"
           echo "$out" | grep -q '^rdy '
+      # The C minisign program is the other end of the interop test (M1-125, ADR 0022). It is installed
+      # on this leg only, and the variable below makes a missing program fail the test, never skip it.
+      - name: Install C minisign
+        if: matrix.name == 'linux-x64'
+        run: sudo apt-get install -y --no-install-recommends minisign
       - name: Test (nextest, no retries)
         if: ${{ !matrix.compile_only }}
+        env:
+          RDY_REQUIRE_C_MINISIGN: ${{ matrix.name == 'linux-x64' && '1' || '' }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
       # nextest does not run doc tests. They build for the host, so they run on one leg only.
       - name: Doc tests

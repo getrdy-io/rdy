@@ -10,7 +10,7 @@ use rdy_spec::spec::{CheckSpec, FixText, Lenient, Severity as SpecSeverity};
 use serde_json::json;
 
 use super::*;
-use crate::check::{Level, OsSupport, Want};
+use crate::check::{CheckMeta, Level, OsSupport, Want};
 
 const VENDOR_FIX: &str = "Add RAM or choose a larger node class.";
 const RDY_FIX: &str = "Add memory to the machine.";
@@ -37,6 +37,10 @@ const fn info(
         id,
         family: "fake",
         summary: "A fake check.",
+        meta: CheckMeta {
+            title: "Fake check",
+            remediation: "Nothing to fix. This check is a test double.",
+        },
         needs,
         wants,
         default_timeout: Some(Duration::from_secs(5)),
