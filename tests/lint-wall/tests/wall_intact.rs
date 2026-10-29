@@ -441,7 +441,7 @@ fn turns_the_wall_down(key: &str, value: &toml::Value) -> bool {
 }
 
 /// The lints of a `[lints]`-like table, `clippy` and `rust` tool tables flattened.
-fn lint_entries<'a>(lints: &'a toml::Table) -> Vec<(String, &'a toml::Value)> {
+fn lint_entries(lints: &toml::Table) -> Vec<(String, &toml::Value)> {
     let mut out = Vec::new();
     for (tool, value) in lints {
         match value.as_table() {

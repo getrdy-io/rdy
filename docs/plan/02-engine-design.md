@@ -900,7 +900,7 @@ one clippy rule.
   `rdy_engine::exec::harden_umask`, `rdy_engine::exec::inherited_fds`, `rdy_engine::exec::live_groups`,
   the watchdog (type `rdy_engine::watchdog::ProcessEffects`, `watchdog::Effects::exit`, `kill_groups` and
   `notice`, `Watchdog::start`, `WriteState::claim`, `claim_or_park` and `finish`) and `rdy_spec::load`.
-  M1-042 (`privilege_gate`, `gate_then`) and M1-045 (`live_backend`) add theirs when they merge.
+  `privilege_gate` and `gate_then` (M1-042) are in `rdy-cli`, which no check crate may depend on, so they need no entry. M1-045 adds `live_backend` when it merges.
 - Terminal (macros in `disallowed-macros`): `std::io::stdout`, `std::io::stderr`, `std::io::stdin`,
   `std::print`, `std::println`, `std::eprint`, `std::eprintln`.
 - Kube, outside the `rdy-checks-k8s` client module: types `kube::Client`, `kube::Config`,
