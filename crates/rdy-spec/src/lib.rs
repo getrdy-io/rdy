@@ -46,7 +46,7 @@ mod suggest;
 pub use error::echo_capped;
 pub use error::{Location, SpecError};
 pub use limits::{MAX_CHECKS, MAX_ENDPOINTS, MAX_HOSTS};
-pub use loaded::{LoadedSpec, load, load_at};
+pub use loaded::{LoadedSpec, VerifiedSpecBytes, load, load_at};
 pub use parse::{MAX_DEPTH, MAX_SPEC_BYTES, parse_unverified};
 pub use scalar::{Duration, Quantity, ScalarError, Target, Version};
 #[doc(hidden)]

@@ -178,6 +178,39 @@ impl fmt::Display for IoReason {
     }
 }
 
+/// Why the report folder or files could not be written. Plain words, never an OS error number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportReason {
+    /// The OS refused, for a reason in [`IoReason`].
+    Io(IoReason),
+    /// The new folder is owned by another user. On NFS with `root_squash` this is what root gets.
+    NotOwner,
+    /// The new folder is not private, or the disk ignored the mode change.
+    NotPrivate,
+    /// The nine folder names of this second are all taken.
+    NameTaken,
+    /// A report file with the final name is already there. rdy never replaces it.
+    FileExists,
+}
+
+impl fmt::Display for ReportReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(reason) => reason.fmt(f),
+            Self::NotOwner => f.write_str("the folder is owned by another user"),
+            Self::NotPrivate => f.write_str("the folder cannot be made private"),
+            Self::NameTaken => f.write_str("all the folder names are taken"),
+            Self::FileExists => f.write_str("the file already exists"),
+        }
+    }
+}
+
+impl From<IoReason> for ReportReason {
+    fn from(reason: IoReason) -> Self {
+        Self::Io(reason)
+    }
+}
+
 /// What rdy was writing when [`CliError::ReportWrite`] happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportStep {
@@ -262,10 +295,10 @@ pub enum CliError {
     ReportWrite {
         /// What rdy was doing.
         step: ReportStep,
-        /// The folder or file as rdy names it.
+        /// The folder or file as rdy names it. For [`ReportReason::NameTaken`] it is the parent.
         path: String,
         /// Why, in plain words.
-        reason: IoReason,
+        reason: ReportReason,
     },
     /// Ctrl-C in M1 (07 section 5.1).
     #[error("interrupted. No report was written.")]
@@ -275,8 +308,11 @@ pub enum CliError {
     Internal(InternalKind),
 }
 
-fn report_write_message(step: ReportStep, path: &str, reason: IoReason) -> String {
+fn report_write_message(step: ReportStep, path: &str, reason: ReportReason) -> String {
     match step {
+        ReportStep::CreateFolder if reason == ReportReason::NameTaken => {
+            format!("cannot create the report folder in {path} ({reason})")
+        }
         ReportStep::CreateFolder => {
             format!("cannot create the report folder {path} ({reason})")
         }
@@ -409,11 +445,21 @@ impl CliError {
             Self::Password(err) => err.fix(),
             Self::Prompt(err) => err.fix().to_owned(),
             Self::TrustStore(err) => err.fix(),
-            Self::ReportWrite { step, .. } => match step {
-                ReportStep::CreateFolder => {
+            Self::ReportWrite { step, reason, .. } => match (reason, step) {
+                (ReportReason::NotOwner, _) => {
+                    "use --out-dir <a folder on a local disk>, or --no-report to skip the files. On NFS with root_squash, root cannot own new folders"
+                }
+                (ReportReason::NotPrivate, _) => {
+                    "use --out-dir <a folder on a disk that keeps Unix permissions>, or --no-report to skip the files"
+                }
+                (ReportReason::NameTaken, _) => {
+                    "wait a second and run again, or use --out-dir <another folder>"
+                }
+                (ReportReason::FileExists, _) => BUG_HINT,
+                (ReportReason::Io(_), ReportStep::CreateFolder) => {
                     "use --out-dir <a folder you can write to>, or --no-report to skip the files"
                 }
-                ReportStep::WriteFiles => {
+                (ReportReason::Io(_), ReportStep::WriteFiles) => {
                     "make room or use --out-dir <a folder you can write to>, then run again"
                 }
             }
