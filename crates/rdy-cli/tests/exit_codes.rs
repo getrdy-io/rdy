@@ -159,8 +159,6 @@ fn commands_for_later_tickets_exit_70_with_a_fix_line() {
     for args in [
         &["run", "spec.yaml"][..],
         &["verify", "spec.yaml"],
-        &["spec", "sign", "spec.yaml", "--secret-key", "k.key"],
-        &["spec", "keygen", "acme-signing"],
         &["trust", "add", "acme", "--key", "acme.pub"],
         &["trust", "list"],
         &["trust", "remove", "acme"],

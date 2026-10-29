@@ -262,7 +262,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-124 | todo | | Review CONTRIBUTING.md on a fresh clone
 
-- M1-125 | todo | | rdy spec keygen and rdy spec sign
+- M1-125 | [#52](https://github.com/getrdy-io/rdy/pull/52) | 2026-10-28 | ADR 0022: rdy writes the minisign key file itself (scrypt N=2^20, 1 GiB, the stock cost and the most a file may ask for, with p = 1 only) instead of the `minisign` crate, whose key cost is fixed at N=2^15; the crate stays as a dev-dependency interop check, and a key and signature made by C minisign 0.11 are committed in tests/fixtures/minisign-c/. Lint findings print as `file: level: message` with no line and column until `spec lint` (M1-031) maps checks to lines. Windows checks the file type only and a new key gets its folder's access list (named in the success message); owner-only ACLs on key files joined SEC-58 (M2-085); the Windows tests compile here and run on the Windows leg. Ctrl-C during the 2 to 4 second key derivation is the M1 Ctrl-C ticket's. CI: the linux-x64 leg installs C minisign and sets RDY_REQUIRE_C_MINISIGN, so the `minisign -V` and `minisign -S` test cannot skip there; the other legs skip it (the committed C-made fixtures run everywhere); the `real-kdf` nextest group holds the 1 GiB tests to one at a time.
 
 - M1-126 | todo | | rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner
 
