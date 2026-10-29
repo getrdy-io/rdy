@@ -12,7 +12,13 @@
 //!   free worker: it fails once as many checks spin as there are workers, or on a `current_thread`
 //!   runtime. Threads abandoned on `spawn_blocking` also outlive the timeout, but a command does not:
 //!   [`crate::exec`] kills its process group when the aborted task drops it. The backstop for the rest
-//!   is the run watchdog (M1-043).
+//!   is the run watchdog ([`crate::watchdog`]).
+//! - **Run deadline.** The whole run has a deadline ([`DEFAULT_DEADLINE`], 5 minutes, 02 "Scheduling,
+//!   timeouts and hangs"). A check's timeout is held to the time left in the run, so a check that is
+//!   still running at the deadline ends as [`End::TimedOut`]. A check that has not started by then
+//!   ends as [`End::RunDeadline`] and is never started. The deadline is read from the tokio clock, so
+//!   tests under paused time cover it. It is counted from the start of `run`, or from the origin given
+//!   to [`Scheduler::with_origin`], which is the origin of the watchdog's clock too.
 //! - **Panics.** A panic stays inside the check's task. The join handle returns it and the result is
 //!   [`End::Panicked`].
 //! - **Probe.** With a hub ([`Scheduler::with_probes`]) each check gets its own probe, bound to its key.
@@ -22,8 +28,8 @@
 //!   `Err(CheckError::MissingNeed)`, the same value a check would return itself.
 //!
 //! The scheduler returns the raw [`CheckOutcome`] and the timing. Mapping them to a `CheckResult`
-//! (status, severity, fix, redaction) is the outcome mapping (M1-033). The run deadline, the watchdog
-//! and the "time left in the run" cap on a timeout come with M1-043.
+//! (status, severity, fix, redaction) is the outcome mapping (M1-033). An [`Observer`] sees each check
+//! start and finish while the run is going, which is how the watchdog's snapshot stays current.
 
 use std::any::Any;
 use std::collections::HashSet;
@@ -47,6 +53,9 @@ pub const DEFAULT_JOBS: usize = 8;
 
 /// The most checks that may run at once. `--jobs` above this is capped.
 pub const MAX_JOBS: usize = 32;
+
+/// How long a whole run may take when the operator does not say (02, "Run deadline").
+pub const DEFAULT_DEADLINE: Duration = Duration::from_secs(300);
 
 /// The timeout of a check with neither a spec value nor a check default.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -131,6 +140,8 @@ pub enum End {
         /// The panic message when it was text, else a fixed note.
         message: PanicText,
     },
+    /// The run reached its deadline before this check started, so it never started.
+    RunDeadline,
     /// The task was cancelled from outside, which means the runtime was shutting down.
     Cancelled,
 }
@@ -174,12 +185,37 @@ pub struct Ran {
     pub elapsed: Duration,
 }
 
+/// Sees checks start and finish while a run is going.
+///
+/// The scheduler calls it from its own tasks, so an implementation must not block for long. The
+/// watchdog's snapshot ([`crate::watchdog::Board`]) is the one in this crate. `index` is the check's
+/// place in the list given to [`Scheduler::run_observed`].
+pub trait Observer: Send + Sync {
+    /// The check started. `at` is counted from the start of the run and `timeout` is the limit it was
+    /// given, already held to the time left in the run.
+    fn started(&self, index: usize, at: Duration, timeout: Duration);
+
+    /// The check ended in any way, or was never started.
+    fn finished(&self, index: usize, ran: &Ran);
+}
+
+/// An [`Observer`] that does nothing.
+struct NoObserver;
+
+impl Observer for NoObserver {
+    fn started(&self, _index: usize, _at: Duration, _timeout: Duration) {}
+
+    fn finished(&self, _index: usize, _ran: &Ran) {}
+}
+
 /// Runs checks. Build one per run.
 #[derive(Debug, Clone)]
 pub struct Scheduler {
     jobs: usize,
     os: Os,
     available: Arc<HashSet<Need>>,
+    deadline: Duration,
+    origin: Option<std::time::Instant>,
     probes: Option<ProbeHub>,
 }
 
@@ -193,8 +229,35 @@ impl Scheduler {
             jobs: cap_jobs(jobs),
             os,
             available: Arc::new(available.into_iter().collect()),
+            deadline: DEFAULT_DEADLINE,
+            origin: None,
             probes: None,
         }
+    }
+
+    /// Sets the run deadline, counted from the start of [`Scheduler::run`]. The default is
+    /// [`DEFAULT_DEADLINE`].
+    #[must_use]
+    pub fn with_deadline(mut self, deadline: Duration) -> Self {
+        self.deadline = deadline;
+        self
+    }
+
+    /// Counts the deadline from `origin` instead of from the start of [`Scheduler::run`].
+    ///
+    /// Give the watchdog the same `origin` ([`crate::watchdog::WatchdogConfig::new`]). It fires at the
+    /// deadline plus its grace, counted from that origin, so the two clocks agree even when a probe
+    /// or other set-up ran before the checks. Time spent before `run` comes out of the run's budget.
+    #[must_use]
+    pub fn with_origin(mut self, origin: std::time::Instant) -> Self {
+        self.origin = Some(origin);
+        self
+    }
+
+    /// The run deadline.
+    #[must_use]
+    pub fn deadline(&self) -> Duration {
+        self.deadline
     }
 
     /// Gives every check a probe from `hub`. Without it checks get a closed probe.
@@ -213,9 +276,21 @@ impl Scheduler {
     /// Runs every check and returns one [`Ran`] per input, in input order.
     ///
     /// Checks start in input order as permits free up. A check that times out, panics or misses a hard
-    /// need does not stop the others. Dropping the returned future aborts every check still running.
+    /// need does not stop the others. When the run deadline passes, checks still running end as
+    /// timeouts and checks not yet started end as [`End::RunDeadline`]. Dropping the returned future
+    /// aborts every check still running.
     pub async fn run(&self, planned: Vec<Planned>) -> Vec<Ran> {
-        let origin = Instant::now();
+        self.run_observed(planned, Arc::new(NoObserver)).await
+    }
+
+    /// Like [`Scheduler::run`], and tells `observer` about every start and every end.
+    pub async fn run_observed(
+        &self,
+        planned: Vec<Planned>,
+        observer: Arc<dyn Observer>,
+    ) -> Vec<Ran> {
+        let origin = self.origin.map_or_else(Instant::now, Instant::from_std);
+        let deadline_at = origin + self.deadline;
         let semaphore = Arc::new(Semaphore::new(self.jobs));
         let mut slots: Vec<Option<Ran>> = vec![None; planned.len()];
         let mut drivers: JoinSet<(usize, Ran)> = JoinSet::new();
@@ -233,17 +308,43 @@ impl Scheduler {
             {
                 let end = End::Done(Box::new(Err(CheckError::MissingNeed(missing.clone()))));
                 let now = Instant::now();
-                slots[index] = Some(ran(item.key, info.id, end, origin, now, now));
+                let result = ran(item.key, info.id, end, origin, now, now);
+                observer.finished(index, &result);
+                slots[index] = Some(result);
                 continue;
             }
-            let Ok(permit) = Arc::clone(&semaphore).acquire_owned().await else {
+            // Past the deadline nothing new starts. A permit that frees up at the deadline does not
+            // count: the wait for one ends at the deadline too.
+            let permit = if Instant::now() >= deadline_at {
+                None
+            } else {
+                match tokio::time::timeout_at(deadline_at, Arc::clone(&semaphore).acquire_owned())
+                    .await
+                {
+                    Ok(Ok(permit)) => Some(permit),
+                    Ok(Err(_closed)) => continue,
+                    Err(_elapsed) => None,
+                }
+            };
+            let Some(permit) = permit else {
+                let now = Instant::now();
+                let result = ran(item.key, info.id, End::RunDeadline, origin, now, now);
+                observer.finished(index, &result);
+                slots[index] = Some(result);
                 continue;
             };
-            let os = self.os;
-            let available = Arc::clone(&self.available);
-            let probes = self.probes.clone();
+            let run = RunCtx {
+                os: self.os,
+                available: Arc::clone(&self.available),
+                probes: self.probes.clone(),
+                origin,
+                deadline_at,
+                index,
+                observer: Arc::clone(&observer),
+            };
             drivers.spawn(async move {
-                let result = drive(item, os, &available, probes.as_ref(), origin).await;
+                let result = drive(item, &run).await;
+                run.observer.finished(index, &result);
                 drop(permit);
                 (index, result)
             });
@@ -310,29 +411,48 @@ impl Drop for EndProbe {
     }
 }
 
-/// Starts one check as a task and waits for it under its timeout.
-async fn drive(
-    item: Planned,
+/// What a driver needs to know about the run.
+struct RunCtx {
     os: Os,
-    available: &HashSet<Need>,
-    probes: Option<&ProbeHub>,
+    available: Arc<HashSet<Need>>,
+    probes: Option<ProbeHub>,
     origin: Instant,
-) -> Ran {
+    deadline_at: Instant,
+    index: usize,
+    observer: Arc<dyn Observer>,
+}
+
+/// Starts one check as a task and waits for it under its timeout, held to the time left in the run.
+async fn drive(item: Planned, run: &RunCtx) -> Ran {
     let Planned {
         check,
         key,
         timeout,
     } = item;
     let id = check.info().id;
-    let after = effective_timeout(timeout, check.info().default_timeout);
     let started = Instant::now();
-    let mut ctx =
-        CheckContext::new(key.clone(), os, available.iter().cloned()).at_deadline(started + after);
-    let probe = probes.map(|hub| hub.check_probe(&key, os, Some(check.info())));
+    let left = run.deadline_at.saturating_duration_since(started);
+    if left.is_zero() {
+        // The permit came at the deadline. Nothing starts now, and no probe is made.
+        return ran(key, id, End::RunDeadline, run.origin, started, started);
+    }
+    let after = effective_timeout(timeout, check.info().default_timeout).min(left);
+    let mut ctx = CheckContext::new(key.clone(), run.os, run.available.iter().cloned())
+        .at_deadline(started + after);
+    let probe = run
+        .probes
+        .as_ref()
+        .map(|hub| hub.check_probe(&key, run.os, Some(check.info())));
     if let Some(probe) = &probe {
         ctx = ctx.with_probe(probe.clone());
     }
+    // Dropped on every way out, including the deadline cut: the probe ends with the check.
     let _end = EndProbe(probe);
+    run.observer.started(
+        run.index,
+        started.saturating_duration_since(run.origin),
+        after,
+    );
 
     let mut handle = tokio::spawn(async move { check.run(&ctx).await });
     let _guard = AbortOnDrop(handle.abort_handle());
@@ -348,7 +468,7 @@ async fn drive(
             End::TimedOut { after }
         }
     };
-    ran(key, id, end, origin, started, Instant::now())
+    ran(key, id, end, run.origin, started, Instant::now())
 }
 
 fn panic_message(payload: Box<dyn Any + Send>) -> String {
