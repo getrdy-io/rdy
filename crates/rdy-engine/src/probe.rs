@@ -52,6 +52,7 @@ use crate::exec::policy::{Cmd, PolicyError};
 use crate::exec::table::{self, TableError};
 #[cfg(feature = "runtime")]
 use crate::exec::{ExecError, ExecOutput, policy::CommandError};
+use crate::privilege::ProcessIds;
 use crate::redact::Redactor;
 
 pub use log::{ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, DENIED_TARGETS, MAX_ENTRIES};
@@ -350,6 +351,42 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
             })
         }
     }
+
+    /// The value of one environment variable of this process, for the run-level probe only. The live
+    /// body reads the process environment. A fixture backend overrides it.
+    fn env(&self, name: &str) -> Option<String> {
+        std::env::var(name).ok()
+    }
+
+    /// The process's real and effective user and group ids, for the privilege snapshot on macOS.
+    ///
+    /// Linux reads all four of each from `/proc/self/status` through `read`, and Windows has none. The
+    /// provided body is the live path: the real and effective ids from the OS (`rustix`, safe). macOS
+    /// has no call for the saved id and no filesystem id, so both are reported as the effective one.
+    /// A fixture backend overrides it.
+    fn process_ids(&self) -> BoxFuture<'_, Result<ProcessIds, ProbeError>> {
+        #[cfg(all(feature = "runtime", unix))]
+        {
+            Box::pin(async {
+                let uid = rustix::process::getuid().as_raw();
+                let euid = rustix::process::geteuid().as_raw();
+                let gid = rustix::process::getgid().as_raw();
+                let egid = rustix::process::getegid().as_raw();
+                Ok(ProcessIds::new(
+                    [uid, euid, euid, euid],
+                    [gid, egid, egid, egid],
+                ))
+            })
+        }
+        #[cfg(not(all(feature = "runtime", unix)))]
+        {
+            Box::pin(async {
+                Err(ProbeError::Io(
+                    "this build of rdy-engine cannot read the process ids".to_owned(),
+                ))
+            })
+        }
+    }
 }
 
 /// The run-wide side of the facade: the backend and the action log.
@@ -416,13 +453,19 @@ impl ProbeHub {
         self.probe(Some(key.to_owned()), os, info)
     }
 
-    /// The probe for run-level work, which the log records with `check: null`.
-    #[cfg_attr(
-        not(all(test, feature = "runtime", unix)),
-        expect(dead_code, reason = "the engine run (M1-057) opens run-level probes")
-    )]
-    pub(crate) fn run_probe(&self) -> Probe {
-        self.probe(None, current_os(), None)
+    /// The probe for run-level work on this OS, which the log records with `check: null`. The
+    /// privilege snapshot, the machine id and the capability probes use it.
+    #[must_use]
+    pub fn run_probe(&self) -> Probe {
+        self.run_probe_for(current_os())
+    }
+
+    /// Like [`ProbeHub::run_probe`], for an explicit OS. The command table and the privilege snapshot
+    /// read it, so a test can run the Windows path on any machine. It is crate-private: a caller
+    /// outside the crate must not be able to pick an OS whose snapshot skips the INV-10 sources
+    /// (`TestRun::run_probe` is the test door).
+    pub(crate) fn run_probe_for(&self, os: Os) -> Probe {
+        self.probe(None, os, None)
     }
 
     fn probe(&self, check: Option<String>, os: Os, info: Option<&'static CheckInfo>) -> Probe {
@@ -555,6 +598,47 @@ impl Probe {
             let _ = what;
             work.await
         }
+    }
+
+    /// The OS this probe's command table and privilege snapshot are read for.
+    #[must_use]
+    pub fn os(&self) -> Os {
+        self.scope.os
+    }
+
+    /// The process's user and group ids from the OS, for the privilege snapshot on macOS. Linux reads
+    /// `/proc/self/status` instead. The entry is a `native` call with `api` `process_ids`.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] after the check ended, or the backend's error.
+    pub(crate) async fn process_ids(&self) -> Result<ProcessIds, ProbeError> {
+        let mut fields = Map::new();
+        fields.insert("api".to_owned(), "process_ids".into());
+        let (hub, entry) = self.begin(ActionKind::Native, fields, "process ids")?;
+        let result = self
+            .unless_ended("process ids", hub.backend.process_ids())
+            .await;
+        settle(entry, result, |_, _| {})
+    }
+
+    /// One environment variable, for run-level work (the Windows snapshot reads `SystemRoot`). The
+    /// entry names the variable and never holds the value. A check's probe is refused: a check reads
+    /// the names it declares, which M1-045 builds.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] for a check's probe, or after the probe ended.
+    pub(crate) fn run_env(&self, name: &'static str) -> Result<Option<String>, ProbeError> {
+        let mut fields = Map::new();
+        fields.insert("name".to_owned(), name.into());
+        let (hub, entry) = self.begin(ActionKind::Env, fields, name)?;
+        if self.scope.check.is_some() {
+            return Err(refuse(entry, RULE_ENV_UNDECLARED, name));
+        }
+        let value = hub.backend.env(name);
+        entry.finish(ActionOutcome::Ok);
+        Ok(value)
     }
 
     /// Reads a whole file.

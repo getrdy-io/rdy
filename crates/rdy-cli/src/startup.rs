@@ -4,11 +4,55 @@
 //! creates is private, and lists the inherited descriptors before it opens anything of its own. When
 //! the list is not empty, [`warn_inherited`] prints one `warning:` line on stderr. It never goes to
 //! stdout, so `--json` output stays clean. Closing the descriptors is M2-104.
+//!
+//! ## The privilege gate (M1-042, INV-10)
+//!
+//! After the redacting log layer and before the spec is read, the run takes one privilege snapshot
+//! through the run-level probe ([`rdy_engine::privilege::Privilege::snapshot`]). [`privilege_gate`]
+//! turns a snapshot that shows extra privilege, or that could not be taken, into a [`CliError`]: exit 70
+//! with the hint, as every other internal error prints. [`gate_then`] runs the next step (reading the
+//! spec) only when the gate passes, so a refused run never opens the spec file.
+//!
+//! The real binary does not call it yet. It needs the live backend and the async runtime, which
+//! M1-074 and M1-057 bring, and they must call [`gate_then`] first in `rdy run`.
 
 use std::io::Write;
 
-use crate::error::escape_untrusted;
+use rdy_engine::privilege::{Privilege, PrivilegeError};
+
+use crate::error::{CliError, InternalKind, emit, escape_untrusted};
 use crate::redaction;
+
+/// Maps a privilege snapshot to the error of INV-10, or hands the snapshot back when it is clean.
+///
+/// A snapshot that could not be taken is an error too: without it rdy cannot show that the binary
+/// carries no privilege.
+///
+/// # Errors
+///
+/// [`CliError::Internal`] with [`InternalKind::Privilege`], exit 70.
+pub fn privilege_gate(snapshot: Result<Privilege, PrivilegeError>) -> Result<Privilege, CliError> {
+    let privilege = snapshot.map_err(|error| CliError::Internal(InternalKind::Privilege(error)))?;
+    privilege
+        .check()
+        .map_err(|error| CliError::Internal(InternalKind::Privilege(error)))?;
+    Ok(privilege)
+}
+
+/// Runs `next` with the clean snapshot, or prints the refusal and returns its exit code without
+/// running `next`. `next` is the step that reads the spec, so a refused run never opens it.
+pub fn gate_then(
+    snapshot: Result<Privilege, PrivilegeError>,
+    json: bool,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+    next: impl FnOnce(&Privilege, &mut dyn Write, &mut dyn Write) -> u8,
+) -> u8 {
+    match privilege_gate(snapshot) {
+        Ok(privilege) => next(&privilege, stdout, stderr),
+        Err(error) => emit(&error, json, stdout, stderr),
+    }
+}
 
 /// The most descriptor numbers the warning names. The rest are counted.
 const MAX_LISTED: usize = 8;
@@ -56,6 +100,9 @@ pub fn warn_inherited(fds: &[u32], stderr: &mut dyn Write) {
         let _ = writeln!(stderr, "{line}");
     }
 }
+
+#[cfg(test)]
+mod gate_tests;
 
 #[cfg(test)]
 mod tests {
