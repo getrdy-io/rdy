@@ -17,7 +17,7 @@
 //! | --- | --- | --- |
 //! | `check_params.json` | the parameters of the 17 check ids, and the small shared definitions they use | the typed parameter structs derive `JsonSchema` |
 //! | `action_fields.json` | the fields of an action that depend on its `kind` | the action log is typed |
-//! | `command_output.json` | the `ErrorOutput`, `Verification` and `LintReport` objects | the commands that print them own their types |
+//! | `command_output.json` | the `ErrorOutput` and `Verification` objects | the commands that print them own their types |
 //!
 //! A fragment is checked like the rest: its descriptions go through the same lint, and a test keeps
 //! its list of check ids equal to [`crate::check::KNOWN_IDS`].
@@ -35,6 +35,7 @@ pub(crate) use rules::{
     report_rules, signature_rules, version_rules,
 };
 
+use crate::lint::LintReport;
 use crate::result::{Report, VersionInfo};
 use crate::scalar::{Target, Version};
 use crate::spec::Spec;
@@ -115,12 +116,14 @@ pub fn spec_schema_json() -> String {
 /// The result schema (`result.v1.schema.json`) as text, ready to write to disk.
 ///
 /// The root points at the `Report` definition. The other objects the CLI prints with `--json`
-/// (`Verification`, `ErrorOutput`, `LintReport` and `Version`) are definitions beside it.
+/// (`Verification`, `ErrorOutput`, `LintReport` and `Version`) are definitions beside it. `LintReport` and
+/// `Version` are derived. The other two come from `command_output.json`.
 #[must_use]
 pub fn result_schema_json() -> String {
     let mut generator = generator();
     generator.subschema_for::<Report>();
     generator.subschema_for::<VersionInfo>();
+    generator.subschema_for::<LintReport>();
     let mut defs = generator.take_definitions(false);
     merge_defs(&mut defs, Some(Value::Object(fragment(COMMAND_OUTPUT))));
 

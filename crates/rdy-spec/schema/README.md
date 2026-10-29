@@ -24,7 +24,7 @@ reaches customers.
 
 Three parts of the contract have no Rust type yet. They are JSON fragments in
 `crates/rdy-spec/src/schema/` that the generator merges in as they are: the parameters of the 17 check ids,
-the kind-specific fields of an action, and the `Verification`, `ErrorOutput` and `LintReport` objects. Edit
+the kind-specific fields of an action, and the `Verification` and `ErrorOutput` objects. Edit
 the fragment, then regenerate. Each goes away when its type derives the schema.
 
 Editors can use the spec schema today, for example with yaml-language-server:

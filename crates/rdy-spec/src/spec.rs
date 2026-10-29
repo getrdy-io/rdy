@@ -216,6 +216,26 @@ impl Spec {
     }
 }
 
+/// The keys of the top level of a spec, for did-you-mean. A test compares the lists of this section with
+/// what serde itself accepts, so they cannot drift from the structs.
+pub(crate) const SPEC_KEYS: &[&str] = &["apiVersion", "kind", "metadata", "checks", "bundle"];
+
+/// The keys of `metadata`. See [`SPEC_KEYS`].
+pub(crate) const METADATA_KEYS: &[&str] = &[
+    "product",
+    "version",
+    "contact",
+    "serial",
+    "expires",
+    "annotations",
+];
+
+/// The keys of `bundle`. See [`SPEC_KEYS`].
+pub(crate) const BUNDLE_KEYS: &[&str] = &["collect", "redact", "redact_patterns", "max_size"];
+
+/// The keys of one item of `bundle.redact_patterns`. See [`SPEC_KEYS`].
+pub(crate) const REDACT_PATTERN_KEYS: &[&str] = &["name", "regex"];
+
 /// The largest `metadata.serial`, 2^53 - 1. Larger numbers lose precision in JSON consumers.
 pub const MAX_SERIAL: u64 = 9_007_199_254_740_991;
 
@@ -778,6 +798,41 @@ mod tests {
         m.annotations.insert("portal.id".into(), "spec-123".into());
         m.annotations.insert("team".into(), "se".into());
         m
+    }
+
+    /// serde names the keys a struct accepts when it refuses a key: "unknown field `x`, expected one of
+    /// `a`, `b`", "..., expected `a` or `b`" or "..., expected `a`".
+    fn serde_keys<T: serde::de::DeserializeOwned>() -> Vec<String> {
+        let probe = serde_json::json!({ "__rdy_probe__": 1 });
+        let Err(error) = serde_json::from_value::<T>(probe) else {
+            panic!("the struct accepted an unknown key");
+        };
+        let message = error.to_string();
+        let Some((_, expected)) = message.split_once("`, ") else {
+            panic!("unexpected serde message: {message}");
+        };
+        let mut keys: Vec<String> = expected
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    fn sorted(list: &[&str]) -> Vec<String> {
+        let mut keys: Vec<String> = list.iter().map(|k| (*k).to_owned()).collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn the_key_lists_for_did_you_mean_match_the_structs() {
+        assert_eq!(sorted(SPEC_KEYS), serde_keys::<Spec>());
+        assert_eq!(sorted(METADATA_KEYS), serde_keys::<Metadata>());
+        assert_eq!(sorted(BUNDLE_KEYS), serde_keys::<BundleSpec>());
+        assert_eq!(sorted(REDACT_PATTERN_KEYS), serde_keys::<RedactPattern>());
     }
 
     #[test]
