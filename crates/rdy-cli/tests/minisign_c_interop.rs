@@ -22,6 +22,8 @@ use std::sync::{Mutex, PoisonError};
 use rdy_spec::sig::{Policy, PublicKey, SignatureState, TrustSource, TrustStore};
 use rdy_spec::spec::ProductSlug;
 
+mod common;
+
 /// The password of the committed fixture key. It protects nothing.
 const FIXTURE_PASSWORD: &str = "rdy-test-password-not-a-secret";
 /// The key id C minisign gave the fixture key.
@@ -46,7 +48,7 @@ fn rdy(dir: &Path, args: &[&str], password: &str) -> Output {
         .spawn()
         .expect("the rdy binary starts");
     drop(child.stdin.take());
-    child.wait_with_output().expect("rdy finishes")
+    common::quiet(child.wait_with_output().expect("rdy finishes"))
 }
 
 fn stderr(out: &Output) -> String {

@@ -5,12 +5,16 @@
 
 use std::process::{Command, Output};
 
+mod common;
+
 fn rdy(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rdy"))
-        .args(args)
-        .env_remove("RDY_PROGRESS")
-        .output()
-        .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"))
+    common::quiet(
+        Command::new(env!("CARGO_BIN_EXE_rdy"))
+            .args(args)
+            .env_remove("RDY_PROGRESS")
+            .output()
+            .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
+    )
 }
 
 fn text(bytes: &[u8]) -> &str {
@@ -199,11 +203,13 @@ fn version_still_works() {
 
 #[test]
 fn a_bad_progress_variable_is_not_echoed_and_not_blamed_on_a_flag() {
-    let out = Command::new(env!("CARGO_BIN_EXE_rdy"))
-        .args(["version"])
-        .env("RDY_PROGRESS", "CANARY-7f3a")
-        .output()
-        .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"));
+    let out = common::quiet(
+        Command::new(env!("CARGO_BIN_EXE_rdy"))
+            .args(["version"])
+            .env("RDY_PROGRESS", "CANARY-7f3a")
+            .output()
+            .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
+    );
     assert_eq!(code(&out), 64);
     let err = text(&out.stderr);
     assert!(!err.contains("CANARY"), "{err:?}");

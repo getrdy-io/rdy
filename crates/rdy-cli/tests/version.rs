@@ -3,11 +3,15 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+mod common;
+
 fn rdy(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rdy"))
-        .args(args)
-        .output()
-        .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}"))
+    common::quiet(
+        Command::new(env!("CARGO_BIN_EXE_rdy"))
+            .args(args)
+            .output()
+            .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
+    )
 }
 
 /// The 7-character commit of `HEAD` when this is a git checkout of the workspace, so the build had
