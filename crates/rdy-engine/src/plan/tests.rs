@@ -279,11 +279,15 @@ fn a_family_that_refuses_the_entry_gives_unsupported_spec() {
     // The fake host family refuses an id it does not build. Route one through by listing it in a
     // family that claims it, then asking for a different entry id is not possible, so use a family
     // that always refuses.
-    use crate::check::{CheckInfo, OsSupport, Support};
+    use crate::check::{CheckInfo, CheckMeta, OsSupport, Support};
     static REFUSED: CheckInfo = CheckInfo {
         id: "host.cpu",
         family: "host",
         summary: "A fake check.",
+        meta: CheckMeta {
+            title: "Fake check",
+            remediation: "Nothing to fix. This check is a test double.",
+        },
         needs: &[],
         wants: &[],
         default_timeout: None,

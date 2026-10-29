@@ -317,3 +317,26 @@ fn help_exits_zero() -> Result<()> {
     assert_eq!(code(&xtask(repo.path(), &["--help"])?), Some(0));
     Ok(())
 }
+
+/// The empty-remediation failure is a unit test in `src/checks.rs`: the registry is compiled in, so
+/// only a fake registry can plant one.
+#[test]
+fn checks_lists_each_registered_check_with_id_family_title_and_remediation() -> Result<()> {
+    let repo = Repo::new()?;
+    let listed = xtask(repo.path(), &["checks"])?;
+    assert_eq!(code(&listed), Some(0), "{}", stderr(&listed));
+    let stdout = String::from_utf8(listed.stdout)?;
+    let mut lines = stdout.lines();
+    assert_eq!(lines.next(), Some("id\tfamily\ttitle\tremediation"));
+    let rows: Vec<Vec<&str>> = lines.map(|line| line.split('\t').collect()).collect();
+    assert!(
+        rows.iter().any(|row| row.first() == Some(&"host.disk")),
+        "{stdout}"
+    );
+    for row in &rows {
+        assert_eq!(row.len(), 4, "{row:?}");
+        assert!(row.iter().all(|field| !field.is_empty()), "{row:?}");
+        assert!(row[0].starts_with(&format!("{}.", row[1])), "{row:?}");
+    }
+    Ok(())
+}
