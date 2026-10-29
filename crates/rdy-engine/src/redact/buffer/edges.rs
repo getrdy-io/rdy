@@ -147,8 +147,62 @@ fn with_both_ends_cut_a_bare_key_body_goes() {
         "{out}"
     );
     assert!(out.contains("[REDACTED:pem_private_key:"), "{out}");
-    // One long line is not a body, and a buffer cut at one end alone does not run this guard.
-    let one = format!("x\n{}\ny\n", "A".repeat(64));
-    assert!(!red(&one, Cut::new(true, true)).contains("pem_private_key"));
+    // A buffer cut at one end alone does not run this guard.
     assert!(red(&format!("x\n{body}y\n"), HEAD).contains("AAAA"));
+    assert!(red(&format!("x\n{body}y\n"), TAIL).contains("AAAA"));
+}
+
+#[test]
+fn with_both_ends_cut_a_single_full_key_body_line_goes() {
+    let one = format!("x\n{}\ny\n", "A".repeat(64));
+    let out = red(&one, Cut::new(true, true));
+    assert!(!out.contains("AAAA"), "{out}");
+    assert!(out.contains("[REDACTED:pem_private_key:"), "{out}");
+    // A line shorter than a key body line stays.
+    let short = format!("x\n{}\ny\n", "A".repeat(39));
+    assert!(red(&short, Cut::new(true, true)).contains("AAAA"));
+}
+
+#[test]
+fn a_quoted_value_with_separators_across_either_window_edge_is_dropped_whole() {
+    // The key rule matches the whole quoted value on the full text. The boundary must not land on the
+    // space or `;` inside it and keep half.
+    let value = "ab cd;ef gh,ij";
+    let text = format!("password: \"{value}\"");
+    for k in 1..text.len() {
+        let out = red(&place(TOTAL, TAIL_EDGE - k, &text), TAIL);
+        for part in ["ab", "cd", "ef", "gh", "ij"] {
+            assert!(
+                !out.contains(&format!("\"{part}")),
+                "tail at {k}: {out:.60}"
+            );
+            assert!(
+                !out.contains(&format!(" {part}\"")),
+                "tail at {k}: {out:.60}"
+            );
+        }
+        assert!(!out.contains("cd;ef"), "tail at {k}");
+        let out = red(&place(TOTAL, HEAD_EDGE - k, &text), HEAD);
+        assert!(
+            !out.contains("ef gh") && !out.contains("gh,ij") && !out.contains("ij\""),
+            "head at {k}"
+        );
+    }
+}
+
+/// URL userinfo may hold `;`, `&`, `,`, `'` and a space (RFC 3986 lets a password carry them). A
+/// boundary at one of them would keep `svc:pa` and drop `ss@h`. Needs the URL userinfo rule of M1-060.
+#[test]
+#[ignore = "M1-060"]
+fn a_url_password_with_a_separator_across_either_window_edge_is_dropped_whole() {
+    let url = "https://svc:pa;ss@h.example.test/";
+    for k in 1..url.len() {
+        let out = red(&place(TOTAL, TAIL_EDGE - k, url), TAIL);
+        assert!(
+            !out.contains("svc:pa") && !out.contains("pa;"),
+            "tail at {k}: {out:.60}"
+        );
+        let out = red(&place(TOTAL, HEAD_EDGE - k, url), HEAD);
+        assert!(!out.contains("ss@h"), "head at {k}: {out:.60}");
+    }
 }

@@ -927,9 +927,8 @@ fn client_key_data_is_a_known_secret_as_base64_and_as_the_pem_lines_it_decodes_t
     // A value that is not base64 or not text adds nothing but itself.
     let user = "    client-key-data: not base64 !\n";
     let text = kubeconfig_yaml(Some("ctx"), "https://prod.example:6443", "", user);
-    if let Ok(loaded) = load_one(&text) {
-        assert_eq!(loaded.known_secrets().len(), 1);
-    }
+    let loaded = load_one(&text).expect("a client-key-data that is not base64 still loads");
+    assert_eq!(loaded.known_secrets().len(), 1);
 }
 
 #[test]

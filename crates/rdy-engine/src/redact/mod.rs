@@ -93,6 +93,14 @@ pub const PANIC_TRIGGER: &str = "__rdy_redactor_panic__";
 /// The rule name used when a string had to be replaced whole because redaction failed.
 const FAIL_CLOSED_RULE: &str = "redactor_error";
 
+/// True if `name` is the rule part of a placeholder this redactor writes: a built-in rule, the key
+/// guard of a cut buffer, the known-secret rule or the fail-closed rule. The known-secret scan skips a
+/// match only inside a placeholder with such a name, so text cannot hide a secret in a lookalike.
+pub(crate) fn is_rule_name(name: &str) -> bool {
+    BUILT_IN.iter().any(|rule| rule.name == name)
+        || [known::RULE, buffer::PEM_RULE, FAIL_CLOSED_RULE].contains(&name)
+}
+
 /// Why redaction could not run.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]

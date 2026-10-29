@@ -8,13 +8,13 @@
 //!    after the last newline. With no newline at all, the first or last [`WINDOW`] bytes go, and then
 //!    the boundary moves to the nearest separator (NUL, white space, `,` `;` `&` `"` `'`) so that it
 //!    does not split a value. If there is none within another [`WINDOW`] bytes, the whole buffer goes.
-//!    A known secret that crosses the boundary on the full text moves the boundary to its start (tail)
-//!    or its end (head). The cap marker takes the place of what went.
+//!    A known secret or a rule match that crosses the boundary on the full text moves the boundary to
+//!    its start (tail) or its end (head). The cap marker takes the place of what went.
 //! 2. **A private key with no end goes to the end.** A `-----BEGIN ... PRIVATE KEY-----` with no
 //!    `-----END` of the same label is removed through the end of the buffer, and an
 //!    `-----END ... PRIVATE KEY-----` with no `BEGIN` of the same label before it from the start of the
-//!    buffer. With both ends cut (a tail read of a file past the scan budget), a run of long base64
-//!    lines that has neither armor line is removed as well. The full PEM rule is M1-060; this is the
+//!    buffer. With both ends cut (a tail read of a file past the scan budget), a base64 line of 40
+//!    bytes or more, even a single one, is removed as well. The full PEM rule is M1-060; this is the
 //!    part that only a cut buffer needs.
 //! 3. **Known secrets cut by the edge.** An 8-byte or longer prefix of a known secret at the end, or
 //!    suffix at the start, is removed.
@@ -34,11 +34,12 @@ const WINDOW: usize = 4096;
 /// are 64 characters a line (70 for OpenSSH keys).
 const BODY_LINE_MIN: usize = 40;
 
-/// How many such lines in a row count as a key body.
-const BODY_LINES_MIN: usize = 2;
+/// How many such lines in a row count as a key body. One is enough: a buffer cut at both ends that
+/// keeps a single full-length base64 line may hold the whole of one body line of a key.
+const BODY_LINES_MIN: usize = 1;
 
 /// The rule name of the unterminated key guard. It is the name of the PEM rule of 04 Appendix B.
-const PEM_RULE: &str = "pem_private_key";
+pub(super) const PEM_RULE: &str = "pem_private_key";
 
 /// Priority of the guard: above every other rule, below known secrets.
 const PEM_PRIORITY: u8 = 90;
@@ -119,8 +120,10 @@ impl Redactor {
 
     /// The byte range of `text` that survives the edge drop.
     ///
-    /// The known secrets are matched on the full text first. One that crosses a boundary moves it to
-    /// the secret's own start (tail) or end (head), so a value the rules cannot see is never half kept.
+    /// The known secrets and the rules are matched on the full text first. A span that crosses a
+    /// boundary moves it to the span's own start (tail) or end (head), so a value is never half kept.
+    /// At a head boundary that fell inside a line, a rule span that starts right after it (past quotes
+    /// and blanks only) goes too: its key was in the part that went, so the rules would not see it.
     fn kept(&self, text: &str, cut: Cut) -> (usize, usize) {
         let (mut start, mut end) = edge_drop(text, cut);
         if !cut.head && !cut.tail {
@@ -128,13 +131,38 @@ impl Redactor {
         }
         let mut known = Vec::new();
         self.known.exact_spans(text, &mut known);
+        // The rules run on the full text too: a value with a separator inside it (`pa;ss` in URL
+        // userinfo, a quoted value with a space) must not be split by the boundary and left half kept.
+        let mut by_rule = Vec::new();
+        let mut found = Vec::new();
+        for rule in super::rules::BUILT_IN {
+            found.clear();
+            (rule.find)(text, &mut found);
+            by_rule.append(&mut found);
+        }
         loop {
             let before = (start, end);
+            let mid_line = start > 0 && !text.get(..start).is_some_and(|t| t.ends_with('\n'));
             for span in &known {
                 if cut.tail && span.start < end && span.end > end {
                     end = span.start;
                 }
                 if cut.head && span.start < start && span.end > start {
+                    start = span.end;
+                }
+            }
+            for span in &by_rule {
+                if cut.tail && span.start < end && span.end > end {
+                    end = span.start;
+                }
+                let crosses = span.start < start && span.end > start;
+                let after_key = mid_line
+                    && span.start >= start
+                    && span.end > span.start
+                    && text
+                        .get(start..span.start)
+                        .is_some_and(|gap| gap.chars().all(is_gap));
+                if cut.head && (crosses || after_key) {
                     start = span.end;
                 }
             }
@@ -144,6 +172,12 @@ impl Redactor {
             }
         }
     }
+}
+
+/// True for a character that can sit between a key and its value without being part of either: white
+/// space, a quote or a backslash (JSON inside JSON).
+fn is_gap(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '"' | '\'' | '\\')
 }
 
 /// The edge drop without the known secrets.
@@ -269,7 +303,8 @@ fn unmatched_end(text: &str, out: &mut Vec<Span>) {
 }
 
 /// With both ends cut, the body of a key can be the whole kept text, with neither armor line in it. A
-/// run of long base64 lines is removed. It also removes a base64 blob, which is the safe side.
+/// base64 line of 40 bytes or more is removed, even one alone. It also removes a hash or a blob, which
+/// is the safe side.
 fn bare_body(text: &str, out: &mut Vec<Span>) {
     // start, end and line count of the run so far.
     let mut run: Option<(usize, usize, usize)> = None;

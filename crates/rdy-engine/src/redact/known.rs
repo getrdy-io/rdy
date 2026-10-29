@@ -213,8 +213,12 @@ fn json_escaped(value: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The byte ranges of well-formed placeholders (`[REDACTED:<rule>:<8 hex>]`) in `text`, in order. A
-/// bracket that only looks like one is not a placeholder, so text cannot hide a secret inside it.
+/// The longest rule name looked at. Real names are far shorter.
+const MAX_RULE_LEN: usize = 64;
+
+/// The byte ranges of placeholders this redactor wrote (`[REDACTED:<rule>:<8 hex>]`, with `<rule>` the
+/// name of one of its rules) in `text`, in order. A bracket that only looks like one, or that names a
+/// rule the redactor does not have, is not a placeholder, so text cannot hide a secret inside it.
 fn placeholders(text: &str) -> Vec<(usize, usize)> {
     const OPEN: &str = "[REDACTED:";
     let bytes = text.as_bytes();
@@ -222,13 +226,15 @@ fn placeholders(text: &str) -> Vec<(usize, usize)> {
     for (at, _) in text.match_indices(OPEN) {
         let rule_start = at + OPEN.len();
         let mut i = rule_start;
-        while bytes
-            .get(i)
-            .is_some_and(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.'))
+        while i - rule_start <= MAX_RULE_LEN
+            && bytes
+                .get(i)
+                .is_some_and(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.'))
         {
             i += 1;
         }
-        if i == rule_start || bytes.get(i) != Some(&b':') {
+        let rule = text.get(rule_start..i).unwrap_or_default();
+        if !super::is_rule_name(rule) || bytes.get(i) != Some(&b':') {
             continue;
         }
         let tag = bytes.get(i + 1..i + 9).unwrap_or_default();
@@ -359,10 +365,41 @@ mod tests {
         assert!(set.add("deadbeef"));
         assert!(set.add("known_secret"));
         // Well formed: nothing inside it matches, so a second pass changes nothing.
-        let text = "a [REDACTED:known_secret:deadbeef] b [REDACTED:rule.x:0123abcd]";
+        let text = "a [REDACTED:known_secret:deadbeef] b [REDACTED:secret_by_key:0123abcd]";
         assert!(spans(&set, text).is_empty(), "{:?}", spans(&set, text));
         // A bracket that is not a placeholder does not hide a secret.
         assert_eq!(spans(&set, "[REDACTED:A:deadbeef"), [(1, 9), (12, 20)]);
+    }
+
+    #[test]
+    fn a_fake_placeholder_with_a_rule_name_the_redactor_lacks_hides_nothing() {
+        let set = KnownSecrets::default();
+        assert!(set.add("hunter2pw"));
+        assert!(set.add("cafe1234"));
+        // The secret sits in the rule slot, and in the tag slot, of a well-formed lookalike.
+        assert_eq!(
+            spans(&set, "[REDACTED:hunter2pw:00000000]").len(),
+            1,
+            "rule slot"
+        );
+        assert_eq!(
+            spans(&set, "[REDACTED:fake_rule:cafe1234]").len(),
+            1,
+            "tag slot"
+        );
+        // A rule slot longer than any real name is not looked at either.
+        let long = format!("[REDACTED:{}hunter2pw:00000000]", "a".repeat(80));
+        assert_eq!(spans(&set, &long).len(), 1);
+        // Every name the redactor writes is a placeholder.
+        for rule in [
+            "known_secret",
+            "pem_private_key",
+            "redactor_error",
+            "secret_by_key",
+        ] {
+            let text = format!("[REDACTED:{rule}:cafe1234]");
+            assert!(spans(&set, &text).is_empty(), "{rule}");
+        }
     }
 
     #[test]

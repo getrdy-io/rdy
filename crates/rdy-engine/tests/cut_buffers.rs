@@ -285,67 +285,76 @@ async fn a_secret_cut_by_the_tail_cap_never_reaches_the_report() -> TestResult {
 }
 
 /// The buffers a check can get from the facade, with the cap each is cut at.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Source {
     File,
+    /// A tail read, which cuts the head.
+    Tail,
     Stdout,
     Stderr,
 }
 
-const SOURCES: [(Source, usize); 4] = [
+const SOURCES: [(Source, usize); 5] = [
     (Source::File, MAX_READ),
+    (Source::Tail, TAIL_MAX),
     (Source::Stdout, DEFAULT_STDOUT_CAP),
     (Source::Stdout, 64 * 1024),
     (Source::Stderr, DEFAULT_STDERR_CAP),
 ];
 
-/// Where a whole canary starts so that the cap cuts the buffer `k` bytes after the canary's end (a
-/// PEM block, which is longer than 64 bytes) or `k` bytes before the cap where the canary starts (a
-/// short canary, which then needs `k` to be at least its length). `None` if it does not fit.
-fn whole_start(canary: &Canary, cap: usize, k: usize) -> Option<usize> {
-    if canary.name == "pem" {
-        cap.checked_sub(k + canary.text.len())
-    } else {
-        (k >= canary.text.len()).then_some(cap - k)
+/// The bytes after the cap that a buffer holds, and the bytes before the kept window of a tail read.
+const SLACK: usize = 100;
+
+/// Where in a buffer of `cap + SLACK` bytes a whole canary starts so that the cut is `k` bytes from it.
+///
+/// For a cut at the end, the canary ENDS `k` bytes before the cap, for every canary (a short one and
+/// the PEM block alike). For a tail read, which cuts the head, the kept window starts at `SLACK` and
+/// the canary starts `k` bytes after that. `None` if it does not fit.
+fn whole_start(source: Source, canary: &Canary, cap: usize, k: usize) -> Option<usize> {
+    match source {
+        Source::Tail => Some(SLACK + k),
+        _ => cap.checked_sub(k + canary.text.len()),
     }
 }
 
-/// `cap + 100` bytes of filler lines with the whole, newline-ended `canary` written at `start`, which is
-/// a line start.
+/// Where a canary starts in the no-newline buffers, `k` bytes from the cut: before the cap for a cut
+/// at the end, after the start of the kept window for a tail read.
+fn spaced_start(source: Source, cap: usize, k: usize) -> usize {
+    match source {
+        Source::Tail => SLACK + k,
+        _ => cap - k,
+    }
+}
+
+/// `cap + SLACK` bytes of filler lines with the whole, newline-ended `canary` written at `start`, which
+/// is a line start.
 fn whole_line_buffer(cap: usize, start: usize, canary: &Canary) -> Vec<u8> {
-    let mut data = filler(cap + 100);
+    let mut data = filler(cap + SLACK);
     data[start - 1] = b'\n';
     data[start..start + canary.text.len()].copy_from_slice(canary.text.as_bytes());
     data
 }
 
 /// The geometry of the held case, checked without the rules it waits for: at every cap and every offset
-/// from 1 to 64 the canary lies whole inside the cap, on its own line.
+/// from 1 to 64 the canary lies whole inside the buffer, on its own line, and ends `k` bytes before the
+/// cap (or starts `k` bytes after the start of a tail read's window).
 #[test]
-fn the_held_case_puts_each_canary_whole_inside_the_cap_at_every_offset() {
-    for (_, cap) in SOURCES {
+fn the_held_case_puts_each_canary_whole_inside_the_cut_at_every_offset() {
+    for (source, cap) in SOURCES {
         for canary in [aws(), url(), pem()] {
             let len = canary.text.len();
-            let mut placed = 0;
             for k in 1..=64 {
-                let Some(start) = whole_start(&canary, cap, k) else {
-                    continue;
-                };
+                let start = whole_start(source, &canary, cap, k).expect("fits");
                 let data = whole_line_buffer(cap, start, &canary);
                 assert_eq!(&data[start..start + len], canary.text.as_bytes());
                 assert_eq!(data[start - 1], b'\n', "{} at {k}", canary.name);
-                assert!(start + len <= cap, "{} at {k} in {cap}", canary.name);
-                let expected_end = if canary.name == "pem" {
-                    cap - k
+                if source == Source::Tail {
+                    assert_eq!(start, SLACK + k, "{} at {k}", canary.name);
+                    assert!(start + len <= SLACK + cap, "{} at {k}", canary.name);
                 } else {
-                    cap - k + len
-                };
-                assert_eq!(start + len, expected_end, "{} at {k}", canary.name);
-                placed += 1;
+                    assert_eq!(start + len, cap - k, "{} at {k} in {cap}", canary.name);
+                }
             }
-            // A short canary needs k >= its length. A key block fits at every offset.
-            let want = if canary.name == "pem" { 64 } else { 65 - len };
-            assert_eq!(placed, want, "{} at cap {cap}", canary.name);
         }
     }
 }
@@ -358,9 +367,7 @@ async fn a_whole_line_secret_just_inside_the_cap_needs_its_rule() -> TestResult 
     for (source, cap) in SOURCES {
         for canary in [aws(), url(), pem()] {
             for k in 1..=64 {
-                let Some(start) = whole_start(&canary, cap, k) else {
-                    continue;
-                };
+                let start = whole_start(source, &canary, cap, k).ok_or("does not fit")?;
                 let data = whole_line_buffer(cap, start, &canary);
                 let shown = shown_text(source, cap, data, &[]).await?;
                 assert_clean("whole line", k, &shown, &canary);
@@ -393,6 +400,11 @@ async fn shown_text(
         Source::File => {
             let file = ctx.probe().read(Path::new(LOG)).await?;
             assert!(file.truncated_tail);
+            ctx.probe().file_text(&file)?
+        }
+        Source::Tail => {
+            let file = ctx.probe().read_tail(Path::new(LOG), cap).await?;
+            assert!(file.truncated_head && !file.truncated_tail);
             ctx.probe().file_text(&file)?
         }
         Source::Stdout => {
@@ -431,7 +443,7 @@ async fn a_secret_in_a_buffer_with_no_newline_cut_by_the_cap_goes_whole() -> Tes
         for canary in [aws(), url()] {
             let text = canary.text.trim_end_matches('\n').to_owned();
             for k in 1..=64 {
-                let data = spaced(cap + 100, cap - k, &text);
+                let data = spaced(cap + SLACK, spaced_start(source, cap, k), &text);
                 let shown = shown_text(source, cap, data, &[]).await?;
                 assert_clean("no newline", k, &shown, &canary);
                 assert_clean(
@@ -453,7 +465,7 @@ async fn a_known_password_in_a_buffer_with_no_newline_cut_by_the_cap_leaves_no_f
     for secret in ["Qz7!kLm2", "Zq9k2m"] {
         for (source, cap) in SOURCES {
             for k in 1..=64 {
-                let data = spaced(cap + 100, cap - k, secret);
+                let data = spaced(cap + SLACK, spaced_start(source, cap, k), secret);
                 let shown = shown_text(source, cap, data, &[secret]).await?;
                 for needle in windows_of(secret, 3) {
                     assert!(!shown.contains(&needle), "k {k}: {needle} survived");
