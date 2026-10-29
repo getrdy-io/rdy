@@ -41,7 +41,7 @@
 //! descriptor above 2 that `rdy` inherited from its parent (a shell that left a file open) passes to
 //! every child. Setting close-on-exec or closing it needs a raw descriptor number, which no safe API
 //! accepts. M1 does not close them. [`inherited_fds`] lists them so the CLI can warn at start-up, and
-//! ADR 0019 records why and what the M2 fix is.
+//! ADR 0023 records why and what the M2 fix is.
 //!
 //! **Windows.** Job objects are M2-006. Until then a timeout or a drop kills the child process only
 //! ([`KILLS_PROCESS_TREE`] is `false`), which is enough for the one program M1 runs there

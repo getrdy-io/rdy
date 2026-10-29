@@ -218,7 +218,7 @@ mod process {
 
     /// Descriptors the standard library opens do not reach a child. One whose close-on-exec flag was
     /// cleared (as a descriptor inherited from a shell would be) does. That second half is the
-    /// documented residual of ADR 0019, and `inherited_fds` lists it.
+    /// documented residual of ADR 0023, and `inherited_fds` lists it.
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn only_descriptors_without_close_on_exec_reach_a_child() {

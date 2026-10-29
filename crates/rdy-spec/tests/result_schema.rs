@@ -202,8 +202,26 @@ fn check_order(out: &Ordered, node: &Ordered, defs: &Ordered, path: &str) -> Tes
     Ok(())
 }
 
+/// The value with every object's keys in sorted order. `serde_json` keeps keys in the order they were
+/// inserted (the schema generator needs that), so the sorting is done here, not by the map.
+fn sorted(v: &Value) -> Value {
+    match v {
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            Value::Object(
+                keys.into_iter()
+                    .filter_map(|k| map.get(k).map(|inner| (k.clone(), sorted(inner))))
+                    .collect(),
+            )
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sorted).collect()),
+        other => other.clone(),
+    }
+}
+
 fn canonical(v: &Value) -> TestResult<String> {
-    Ok(serde_json::to_string(v)?)
+    Ok(serde_json::to_string(&sorted(v))?)
 }
 
 #[test]

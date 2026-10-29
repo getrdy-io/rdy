@@ -4,7 +4,8 @@
 //! typed scalars in [`scalar`], the YAML reader [`parse_unverified`], the two-step check decoding in
 //! [`check`], the signature checks in [`sig`], the result types and the verdict rule in [`result`], and
 //! the [`LoadedSpec`] guarantee. [`reserved`] lists the check ids that are reserved and [`lint`] turns a
-//! decoded entry into a finding. The JSON schemas arrive in later M1 tickets.
+//! decoded entry into a finding. The JSON schemas of the spec and the result are generated from these
+//! types by the `schema` module, which the `schema` feature turns on.
 //!
 //! Two kinds of spec value exist, on purpose:
 //!
@@ -32,6 +33,8 @@ mod parse;
 pub mod reserved;
 pub mod result;
 pub mod scalar;
+#[cfg(feature = "schema")]
+pub mod schema;
 pub mod sig;
 pub mod spec;
 
@@ -45,3 +48,6 @@ pub use scalar::{Duration, Quantity, ScalarError, Target, Version};
 
 /// The `apiVersion` every `rdy/v1` document carries.
 pub const API_VERSION: &str = "rdy/v1";
+
+/// The version of this crate, such as `0.1.0`. A result records it as `producer.rdy_spec`.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

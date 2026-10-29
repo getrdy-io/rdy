@@ -2,206 +2,140 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://getrdy.io/schema/rdy/v1/spec.v1.schema.json",
   "title": "rdy/v1 readiness spec",
-  "description": "A vendor's readiness requirements (apiVersion rdy/v1, kind Readiness). Check ids this schema does not know are allowed and reported as not run. Every other unknown key is an error.",
+  "description": "A vendor's readiness requirements (`apiVersion: rdy/v1`, `kind: Readiness`).\n\nCheck ids this schema does not know are allowed and reported as not run. Every other unknown key is an error, so a newer spec fails loudly on an older rdy.",
   "type": "object",
+  "properties": {
+    "apiVersion": {
+      "description": "Format version. Must be `rdy/v1`. Kept as text so the message for a wrong version can quote what the file said.",
+      "type": "string",
+      "const": "rdy/v1"
+    },
+    "kind": {
+      "description": "Document kind. Only `Readiness` exists in v1.",
+      "$ref": "#/$defs/Kind"
+    },
+    "metadata": {
+      "description": "Who the spec is for and how fresh it is.",
+      "$ref": "#/$defs/Metadata"
+    },
+    "checks": {
+      "description": "The checks to run, in report order. Entries are keyed by id plus optional name, and keys must be unique. A valid spec has 1 to 256 entries.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Check"
+      },
+      "minItems": 1,
+      "maxItems": 256
+    },
+    "bundle": {
+      "description": "What `rdy bundle` collects. It parses today so specs written now keep working, and `rdy run` never collects anything.",
+      "$ref": "#/$defs/BundleSpec"
+    }
+  },
+  "additionalProperties": false,
   "required": [
     "apiVersion",
     "kind",
     "metadata",
     "checks"
   ],
-  "additionalProperties": false,
-  "properties": {
-    "apiVersion": {
-      "description": "Format version. Must be rdy/v1.",
-      "const": "rdy/v1"
-    },
-    "kind": {
-      "description": "Document kind. Only Readiness exists in v1.",
-      "const": "Readiness"
-    },
-    "metadata": {
-      "$ref": "#/$defs/Metadata"
-    },
-    "checks": {
-      "description": "The checks to run, in report order. Entries are keyed by id plus optional name; keys must be unique.",
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 256,
-      "items": {
-        "$ref": "#/$defs/Check"
-      }
-    },
-    "bundle": {
-      "$ref": "#/$defs/Bundle"
-    }
-  },
   "$defs": {
-    "Metadata": {
-      "type": "object",
-      "required": [
-        "product"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "product": {
-          "description": "Product name: lowercase letters, digits and hyphens. Ties the signature to a trusted key and names the report files.",
-          "type": "string",
-          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
-        },
-        "version": {
-          "description": "Product versions this spec is for, such as >=4.2. Shown in the report, not checked.",
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 64
-        },
-        "contact": {
-          "description": "Where the customer asks questions, shown in the report as plain text.",
-          "type": "string",
-          "maxLength": 256
-        },
-        "serial": {
-          "description": "Spec revision number. Should go up by at least one on every signed release of this spec.",
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "expires": {
-          "description": "UTC time after which rdy refuses to run this spec, for example 2027-01-31T00:00:00Z.",
-          "type": "string",
-          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
-        },
-        "annotations": {
-          "description": "Free-form labels for vendor tooling. rdy never changes behaviour because of them and copies them into the result.",
-          "type": "object",
-          "maxProperties": 32,
-          "propertyNames": {
-            "pattern": "^[a-z0-9][a-z0-9._/-]{0,62}$"
-          },
-          "additionalProperties": {
-            "type": "string",
-            "maxLength": 256
-          }
-        }
-      }
-    },
-    "CheckId": {
-      "description": "family.name, lowercase, for example host.memory.",
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9]{0,15}\\.[a-z][a-z0-9_]{0,47}$"
-    },
-    "Severity": {
-      "description": "block means required: a failure makes the run NOT READY. warn means optional: a failure gives READY with warnings.",
-      "type": "string",
-      "enum": [
-        "block",
-        "warn"
-      ],
-      "default": "block"
-    },
-    "Duration": {
-      "description": "A whole number and one unit: ms, s, m, h or d. Examples: 500ms, 10s, 7d.",
-      "type": "string",
-      "pattern": "^[1-9][0-9]{0,8}(ms|s|m|h|d)$"
-    },
-    "Quantity": {
-      "description": "Bytes. A whole number with an optional binary suffix Ki, Mi, Gi, Ti, Pi. Decimal suffixes (G, GB) are rejected to avoid ambiguity.",
-      "oneOf": [
-        {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 999999999999999
-        },
-        {
-          "type": "string",
-          "pattern": "^[0-9]{1,15}(Ki|Mi|Gi|Ti|Pi)?$"
-        }
-      ]
-    },
-    "Version": {
-      "description": "A dotted version such as 1.28 or 5.10, as a quoted string. A bare integer (14) is accepted. An unquoted decimal (1.30) is rejected because YAML reads it as the number 1.3.",
-      "oneOf": [
-        {
-          "type": "string",
-          "pattern": "^v?[0-9]{1,9}(\\.[0-9]{1,9}){0,3}$"
-        },
-        {
-          "type": "integer",
-          "minimum": 0
-        }
-      ]
-    },
-    "Regex": {
-      "description": "A regular expression in Rust regex syntax (linear time, no backreferences).",
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 256
-    },
-    "Port": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 65535,
-      "description": "1 to 65535."
-    },
-    "Cidr": {
-      "description": "An IPv4 or IPv6 address range such as 10.0.0.0/8 or fd00::/8.",
-      "type": "string",
-      "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(3[0-2]|[12]?[0-9])|(([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,7}:|([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,5}(:[0-9A-Fa-f]{1,4}){1,2}|([0-9A-Fa-f]{1,4}:){1,4}(:[0-9A-Fa-f]{1,4}){1,3}|([0-9A-Fa-f]{1,4}:){1,3}(:[0-9A-Fa-f]{1,4}){1,4}|([0-9A-Fa-f]{1,4}:){1,2}(:[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(:[0-9A-Fa-f]{1,4}){1,6}|:((:[0-9A-Fa-f]{1,4}){1,7}|:))/(12[0-8]|1[01][0-9]|[1-9]?[0-9]))$"
-    },
-    "Target": {
-      "description": "host:port, [ipv6]:port, or an http or https URL. Never user:password in a URL; specs carry no credentials.",
-      "type": "string",
-      "maxLength": 512,
-      "pattern": "^(https?://[^/@\\s#]+(/[^\\s#]*)?|[A-Za-z0-9.-]+:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])|\\[[0-9A-Fa-f:]+\\]:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))$"
-    },
     "AbsPath": {
       "description": "An absolute path: /... on Unix, C:\\... on Windows. No control characters.",
       "type": "string",
       "maxLength": 1024,
       "pattern": "^(/|[A-Za-z]:\\\\)[^\\u0000-\\u001f\\u007f-\\u009f]*$"
     },
-    "K8sName": {
-      "type": "string",
-      "maxLength": 253,
-      "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$"
-    },
-    "K8sLabelKey": {
-      "description": "A Kubernetes label or taint key: a name, or prefix/name with a lowercase DNS-style prefix.",
-      "type": "string",
-      "maxLength": 317,
-      "pattern": "^(?![^/]{254,}/)([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
-    },
-    "K8sLabelValue": {
-      "description": "A Kubernetes label or taint value: empty, or up to 63 letters, digits, -, _ and ., starting and ending with a letter or digit.",
-      "type": "string",
-      "maxLength": 63,
-      "pattern": "^([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$"
-    },
-    "DnsName": {
-      "description": "A host name by the grammar of Target: dot-separated labels of 1 to 63 letters, digits and hyphens that do not start or end with a hyphen. The last label is not a number (2852039166, 0xa9).",
-      "type": "string",
-      "maxLength": 253,
-      "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
-      "not": {
-        "pattern": "(^|\\.)([0-9]+|0[xX][0-9a-fA-F]*)$"
-      }
-    },
-    "StringList": {
+    "AccessModes": {
       "type": "array",
-      "maxItems": 256,
+      "minItems": 1,
+      "uniqueItems": true,
       "items": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 256
+        "enum": [
+          "ReadWriteOnce",
+          "ReadOnlyMany",
+          "ReadWriteMany",
+          "ReadWriteOncePod"
+        ]
       }
+    },
+    "BundleSpec": {
+      "description": "The `bundle` block: what `rdy bundle` collects and how it redacts.\n\nIt parses in v1 and nothing acts on it yet. `rdy run` never collects anything, whatever this says. Unknown keys are refused.",
+      "type": "object",
+      "properties": {
+        "collect": {
+          "description": "Collectors: `journal:<duration>`, `k8s:events`, `file:<absolute path or glob>`. At most 64.",
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,15}:.{1,1024}$",
+            "allOf": [
+              {
+                "pattern": "^(journal:|k8s:|file:)"
+              },
+              {
+                "if": {
+                  "pattern": "^journal:"
+                },
+                "then": {
+                  "pattern": "^journal:[1-9][0-9]{0,8}(ms|s|m|h|d)$"
+                }
+              },
+              {
+                "if": {
+                  "pattern": "^k8s:"
+                },
+                "then": {
+                  "enum": [
+                    "k8s:events"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "pattern": "^file:"
+                },
+                "then": {
+                  "pattern": "^file:/[^\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]{0,1023}$",
+                  "not": {
+                    "pattern": "(^file:|/)\\.\\.(/|$)"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "redact": {
+          "description": "Redactor groups to add, such as `aws_keys`, `bearer_tokens` or `emails`. At most 64. The built-in rules always run, so a spec can add redaction and can never remove it.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,31}$"
+          },
+          "maxItems": 64
+        },
+        "redact_patterns": {
+          "description": "Your own patterns, at most 32. A match is replaced with a `custom.<name>` placeholder. A pattern can only add redaction: where it overlaps a built-in match, the whole overlapping region is redacted. A pattern that matches the empty string is an error.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RedactPattern"
+          },
+          "maxItems": 32
+        },
+        "max_size": {
+          "description": "Bundle size cap, such as `200Mi`. It lowers rdy's own cap and never raises it.",
+          "$ref": "#/$defs/Quantity"
+        }
+      },
+      "additionalProperties": false
     },
     "Check": {
+      "description": "One check to run: an id, the common fields below, and the parameters of that check id. Parameters of ids this schema does not know are not checked here.",
       "type": "object",
-      "required": [
-        "id"
-      ],
       "properties": {
         "id": {
+          "description": "Which check to run: family.name in lowercase, for example host.memory.",
           "$ref": "#/$defs/CheckId"
         },
         "name": {
@@ -210,6 +144,7 @@
           "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
         },
         "severity": {
+          "description": "block (the default) makes a failure NOT READY. warn makes it READY with warnings.",
           "$ref": "#/$defs/Severity"
         },
         "fix": {
@@ -225,18 +160,16 @@
         "os": {
           "description": "Run only on these operating systems. On others the check is reported as not applicable and does not count.",
           "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
           "items": {
-            "type": "string",
-            "enum": [
-              "linux",
-              "macos",
-              "windows"
-            ]
-          }
+            "$ref": "#/$defs/OsFamily"
+          },
+          "minItems": 1,
+          "uniqueItems": true
         }
       },
+      "required": [
+        "id"
+      ],
       "allOf": [
         {
           "if": {
@@ -478,6 +411,29 @@
       ],
       "unevaluatedProperties": false
     },
+    "CheckId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]{0,15}\\.[a-z][a-z0-9_]{0,47}$"
+    },
+    "Cidr": {
+      "description": "An IPv4 or IPv6 address range such as 10.0.0.0/8 or fd00::/8.",
+      "type": "string",
+      "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}/(3[0-2]|[12]?[0-9])|(([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,7}:|([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,5}(:[0-9A-Fa-f]{1,4}){1,2}|([0-9A-Fa-f]{1,4}:){1,4}(:[0-9A-Fa-f]{1,4}){1,3}|([0-9A-Fa-f]{1,4}:){1,3}(:[0-9A-Fa-f]{1,4}){1,4}|([0-9A-Fa-f]{1,4}:){1,2}(:[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(:[0-9A-Fa-f]{1,4}){1,6}|:((:[0-9A-Fa-f]{1,4}){1,7}|:))/(12[0-8]|1[01][0-9]|[1-9]?[0-9]))$"
+    },
+    "DnsName": {
+      "description": "A host name by the grammar of Target: dot-separated labels of 1 to 63 letters, digits and hyphens that do not start or end with a hyphen. The last label is not a number (2852039166, 0xa9).",
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
+      "not": {
+        "pattern": "(^|\\.)([0-9]+|0[xX][0-9a-fA-F]*)$"
+      }
+    },
+    "Duration": {
+      "description": "A whole number and one unit: ms, s, m, h or d. Examples: 500ms, 10s, 7d.",
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,8}(ms|s|m|h|d)$"
+    },
     "HostCpuParams": {
       "properties": {
         "min": {
@@ -533,48 +489,7 @@
         }
       ]
     },
-    "HostMemoryParams": {
-      "properties": {
-        "min": {
-          "description": "Minimum total RAM.",
-          "$ref": "#/$defs/Quantity"
-        },
-        "min_available": {
-          "description": "Below this much free RAM: warn. Default half of min.",
-          "$ref": "#/$defs/Quantity"
-        },
-        "swap": {
-          "description": "forbid: swap must be off.",
-          "enum": [
-            "forbid",
-            "any"
-          ],
-          "default": "any"
-        },
-        "tolerance_percent": {
-          "description": "How far below min still passes, in percent, because a 32 GiB machine shows a little less. Default 5, at least 256 MiB. 0 turns it off.",
-          "type": "number",
-          "minimum": 0,
-          "maximum": 20
-        },
-        "tolerance_result": {
-          "description": "What a value inside the tolerance counts as.",
-          "enum": [
-            "pass",
-            "warn"
-          ],
-          "default": "pass"
-        }
-      },
-      "required": [
-        "min"
-      ]
-    },
     "HostDiskParams": {
-      "required": [
-        "path",
-        "min"
-      ],
       "properties": {
         "path": {
           "description": "Install path. If it does not exist yet, the nearest existing parent is measured.",
@@ -612,6 +527,152 @@
             "pattern": "^[a-z0-9_.]{1,32}$"
           }
         }
+      },
+      "required": [
+        "path",
+        "min"
+      ]
+    },
+    "HostLsmParams": {
+      "properties": {
+        "selinux": {
+          "type": "object",
+          "properties": {
+            "allow": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "enforcing",
+                  "permissive",
+                  "disabled"
+                ]
+              }
+            },
+            "denials_max": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "denials_window": {
+              "$ref": "#/$defs/Duration"
+            },
+            "watch": {
+              "$ref": "#/$defs/StringList"
+            }
+          },
+          "additionalProperties": false
+        },
+        "apparmor": {
+          "type": "object",
+          "properties": {
+            "allow": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "enabled",
+                  "disabled"
+                ]
+              }
+            },
+            "require_profiles": {
+              "$ref": "#/$defs/StringList"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "HostMemoryParams": {
+      "properties": {
+        "min": {
+          "description": "Minimum total RAM.",
+          "$ref": "#/$defs/Quantity"
+        },
+        "min_available": {
+          "description": "Below this much free RAM: warn. Default half of min.",
+          "$ref": "#/$defs/Quantity"
+        },
+        "swap": {
+          "description": "forbid: swap must be off.",
+          "enum": [
+            "forbid",
+            "any"
+          ],
+          "default": "any"
+        },
+        "tolerance_percent": {
+          "description": "How far below min still passes, in percent, because a 32 GiB machine shows a little less. Default 5, at least 256 MiB. 0 turns it off.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "tolerance_result": {
+          "description": "What a value inside the tolerance counts as.",
+          "enum": [
+            "pass",
+            "warn"
+          ],
+          "default": "pass"
+        }
+      },
+      "required": [
+        "min"
+      ]
+    },
+    "HostOsParams": {
+      "properties": {
+        "supported": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "Distribution id from /etc/os-release, such as rhel or ubuntu.",
+                "type": "string",
+                "pattern": "^[a-z0-9._-]{1,32}$"
+              },
+              "versions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 32
+                }
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "arch": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "x86_64",
+              "aarch64",
+              "amd64",
+              "arm64"
+            ]
+          }
+        },
+        "fips": {
+          "enum": [
+            "forbid",
+            "require",
+            "any"
+          ],
+          "default": "any"
+        },
+        "windows_min_build": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
       }
     },
     "HostPortsParams": {
@@ -627,10 +688,6 @@
               },
               {
                 "type": "object",
-                "required": [
-                  "port"
-                ],
-                "additionalProperties": false,
                 "properties": {
                   "port": {
                     "$ref": "#/$defs/Port"
@@ -642,7 +699,11 @@
                     ],
                     "default": "public"
                   }
-                }
+                },
+                "required": [
+                  "port"
+                ],
+                "additionalProperties": false
               }
             ]
           }
@@ -674,57 +735,6 @@
         }
       ]
     },
-    "HostLsmParams": {
-      "properties": {
-        "selinux": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "allow": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": {
-                "enum": [
-                  "enforcing",
-                  "permissive",
-                  "disabled"
-                ]
-              }
-            },
-            "denials_max": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 4294967295
-            },
-            "denials_window": {
-              "$ref": "#/$defs/Duration"
-            },
-            "watch": {
-              "$ref": "#/$defs/StringList"
-            }
-          }
-        },
-        "apparmor": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "allow": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": {
-                "enum": [
-                  "enabled",
-                  "disabled"
-                ]
-              }
-            },
-            "require_profiles": {
-              "$ref": "#/$defs/StringList"
-            }
-          }
-        }
-      }
-    },
     "HostSecurityAgentsParams": {
       "properties": {
         "forbid": {
@@ -734,237 +744,6 @@
         "allow": {
           "description": "Agent ids that are fine. Run rdy spec lint to see the known ids.",
           "$ref": "#/$defs/StringList"
-        }
-      }
-    },
-    "HostOsParams": {
-      "properties": {
-        "supported": {
-          "type": "array",
-          "maxItems": 64,
-          "items": {
-            "type": "object",
-            "required": [
-              "id"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "id": {
-                "description": "Distribution id from /etc/os-release, such as rhel or ubuntu.",
-                "type": "string",
-                "pattern": "^[a-z0-9._-]{1,32}$"
-              },
-              "versions": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "maxLength": 32
-                }
-              }
-            }
-          }
-        },
-        "arch": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "enum": [
-              "x86_64",
-              "aarch64",
-              "amd64",
-              "arm64"
-            ]
-          }
-        },
-        "fips": {
-          "enum": [
-            "forbid",
-            "require",
-            "any"
-          ],
-          "default": "any"
-        },
-        "windows_min_build": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 4294967295
-        }
-      }
-    },
-    "NetEgressParams": {
-      "required": [
-        "endpoints"
-      ],
-      "properties": {
-        "endpoints": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 64,
-          "items": {
-            "oneOf": [
-              {
-                "$ref": "#/$defs/Target"
-              },
-              {
-                "type": "object",
-                "required": [
-                  "target"
-                ],
-                "additionalProperties": false,
-                "properties": {
-                  "target": {
-                    "$ref": "#/$defs/Target"
-                  },
-                  "optional": {
-                    "description": "Unreachable gives warn instead of block.",
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "expect_status": {
-                    "description": "URL targets only.",
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 16,
-                    "uniqueItems": true,
-                    "items": {
-                      "type": "integer",
-                      "minimum": 100,
-                      "maximum": 599
-                    }
-                  },
-                  "method": {
-                    "description": "URL targets only.",
-                    "enum": [
-                      "HEAD",
-                      "GET"
-                    ],
-                    "default": "HEAD"
-                  },
-                  "via_proxy": {
-                    "enum": [
-                      "auto",
-                      "direct",
-                      "proxy_only"
-                    ]
-                  },
-                  "tls": {
-                    "description": "false probes plain TCP only. Default true for port 443 and https URLs.",
-                    "type": "boolean"
-                  }
-                }
-              }
-            ]
-          },
-          "description": "At most 64 endpoints in one check. A spec names at most 64 distinct hosts and 256 distinct host and port pairs across all its checks."
-        },
-        "via_proxy": {
-          "description": "auto: try what the product would do and say if the other path works. direct: no proxy. proxy_only: only through the proxy.",
-          "enum": [
-            "auto",
-            "direct",
-            "proxy_only"
-          ],
-          "default": "auto"
-        },
-        "trust": {
-          "enum": [
-            "system",
-            "bundled"
-          ],
-          "default": "system"
-        },
-        "max_latency": {
-          "description": "Connect slower than this: warn. Default 2s.",
-          "$ref": "#/$defs/Duration"
-        }
-      }
-    },
-    "NetProxyParams": {
-      "properties": {
-        "required_no_proxy": {
-          "description": "Entries NO_PROXY must cover, such as .svc or 10.0.0.0/8.",
-          "$ref": "#/$defs/StringList"
-        },
-        "daemons_need_proxy": {
-          "type": "boolean",
-          "default": false
-        }
-      }
-    },
-    "NetTlsInterceptParams": {
-      "properties": {
-        "hosts": {
-          "description": "Default: the hosts of every net.egress endpoint in this spec.",
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 64,
-          "items": {
-            "type": "string",
-            "maxLength": 259,
-            "pattern": "^[A-Za-z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
-          }
-        },
-        "expected_issuer": {
-          "$ref": "#/$defs/Regex"
-        },
-        "pin_sha256": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 16,
-          "items": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
-          }
-        },
-        "forbid_interception": {
-          "type": "boolean",
-          "default": false
-        }
-      }
-    },
-    "NetDnsParams": {
-      "required": [
-        "names"
-      ],
-      "properties": {
-        "names": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 64,
-          "items": {
-            "oneOf": [
-              {
-                "$ref": "#/$defs/DnsName"
-              },
-              {
-                "type": "object",
-                "required": [
-                  "name"
-                ],
-                "additionalProperties": false,
-                "properties": {
-                  "name": {
-                    "$ref": "#/$defs/DnsName"
-                  },
-                  "expect_in": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 16,
-                    "items": {
-                      "$ref": "#/$defs/Cidr"
-                    }
-                  },
-                  "expect_public": {
-                    "type": "boolean"
-                  }
-                }
-              }
-            ]
-          }
-        },
-        "max_latency": {
-          "description": "Lookup slower than this: warn. Default 500ms.",
-          "$ref": "#/$defs/Duration"
         }
       }
     },
@@ -983,110 +762,8 @@
         }
       }
     },
-    "K8sStorageClassParams": {
-      "properties": {
-        "class": {
-          "description": "A storage class that must exist. Default: the cluster's default class.",
-          "$ref": "#/$defs/K8sName"
-        },
-        "access_modes": {
-          "$ref": "#/$defs/AccessModes"
-        },
-        "binding": {
-          "enum": [
-            "WaitForFirstConsumer",
-            "Immediate",
-            "any"
-          ],
-          "default": "any"
-        },
-        "expansion": {
-          "type": "boolean"
-        },
-        "reclaim_policy": {
-          "description": "Mismatch gives warn.",
-          "enum": [
-            "Retain",
-            "Delete"
-          ]
-        }
-      }
-    },
-    "AccessModes": {
-      "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "enum": [
-          "ReadWriteOnce",
-          "ReadOnlyMany",
-          "ReadWriteMany",
-          "ReadWriteOncePod"
-        ]
-      }
-    },
-    "K8sRbacParams": {
-      "required": [
-        "can"
-      ],
-      "properties": {
-        "can": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 100,
-          "items": {
-            "oneOf": [
-              {
-                "description": "verb resource[.group][/subresource], as in kubectl auth can-i.",
-                "type": "string",
-                "pattern": "^[a-z*]{1,63} [a-z0-9*-]{1,253}(\\.[a-z0-9.-]{1,253})?(/[a-z]{1,63})?$"
-              },
-              {
-                "type": "object",
-                "required": [
-                  "verb",
-                  "resource"
-                ],
-                "additionalProperties": false,
-                "properties": {
-                  "verb": {
-                    "type": "string",
-                    "pattern": "^[a-z*]+$",
-                    "maxLength": 63
-                  },
-                  "group": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9.-]*$",
-                    "maxLength": 253
-                  },
-                  "resource": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9*-]+$",
-                    "maxLength": 253
-                  },
-                  "subresource": {
-                    "type": "string",
-                    "pattern": "^[a-z]+$",
-                    "maxLength": 63
-                  },
-                  "namespace": {
-                    "$ref": "#/$defs/K8sName"
-                  },
-                  "name": {
-                    "$ref": "#/$defs/K8sName"
-                  }
-                }
-              }
-            ]
-          }
-        },
-        "namespace": {
-          "description": "Namespace for string items. Default: cluster scope.",
-          "$ref": "#/$defs/K8sName"
-        }
-      }
-    },
     "K8sAdmissionParams": {
+      "description": "Dry-run checks are not supported yet.",
       "properties": {
         "pod_security": {
           "description": "The Pod Security level the product's pods need.",
@@ -1117,8 +794,24 @@
             ]
           }
         }
-      },
-      "description": "Dry-run checks are not supported yet."
+      }
+    },
+    "K8sLabelKey": {
+      "description": "A Kubernetes label or taint key: a name, or prefix/name with a lowercase DNS-style prefix.",
+      "type": "string",
+      "maxLength": 317,
+      "pattern": "^(?![^/]{254,}/)([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*/)?[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$"
+    },
+    "K8sLabelValue": {
+      "description": "A Kubernetes label or taint value: empty, or up to 63 letters, digits, -, _ and ., starting and ending with a letter or digit.",
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^([A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?)?$"
+    },
+    "K8sName": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$"
     },
     "K8sNodesParams": {
       "properties": {
@@ -1167,7 +860,6 @@
           "items": {
             "description": "Without a key the operator must be Exists. With Exists there is no value.",
             "type": "object",
-            "additionalProperties": false,
             "properties": {
               "key": {
                 "$ref": "#/$defs/K8sLabelKey"
@@ -1189,15 +881,16 @@
                 ]
               }
             },
+            "additionalProperties": false,
             "if": {
-              "required": [
-                "operator"
-              ],
               "properties": {
                 "operator": {
                   "const": "Exists"
                 }
-              }
+              },
+              "required": [
+                "operator"
+              ]
             },
             "then": {
               "properties": {
@@ -1232,9 +925,69 @@
         }
       ]
     },
+    "K8sRbacParams": {
+      "properties": {
+        "can": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "oneOf": [
+              {
+                "description": "verb resource[.group][/subresource], as in kubectl auth can-i.",
+                "type": "string",
+                "pattern": "^[a-z*]{1,63} [a-z0-9*-]{1,253}(\\.[a-z0-9.-]{1,253})?(/[a-z]{1,63})?$"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "verb": {
+                    "type": "string",
+                    "pattern": "^[a-z*]+$",
+                    "maxLength": 63
+                  },
+                  "group": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9.-]*$",
+                    "maxLength": 253
+                  },
+                  "resource": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9*-]+$",
+                    "maxLength": 253
+                  },
+                  "subresource": {
+                    "type": "string",
+                    "pattern": "^[a-z]+$",
+                    "maxLength": 63
+                  },
+                  "namespace": {
+                    "$ref": "#/$defs/K8sName"
+                  },
+                  "name": {
+                    "$ref": "#/$defs/K8sName"
+                  }
+                },
+                "required": [
+                  "verb",
+                  "resource"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "namespace": {
+          "description": "Namespace for string items. Default: cluster scope.",
+          "$ref": "#/$defs/K8sName"
+        }
+      },
+      "required": [
+        "can"
+      ]
+    },
     "K8sResources": {
       "type": "object",
-      "additionalProperties": false,
       "properties": {
         "cpu": {
           "description": "Cores as a number from 0.001 to 1000000 with at most three decimals, or a string of whole cores (\"4\") or millicores (\"500m\"), up to 1000000 cores.",
@@ -1262,7 +1015,37 @@
           "$ref": "#/$defs/Quantity"
         }
       },
+      "additionalProperties": false,
       "minProperties": 1
+    },
+    "K8sStorageClassParams": {
+      "properties": {
+        "class": {
+          "description": "A storage class that must exist. Default: the cluster's default class.",
+          "$ref": "#/$defs/K8sName"
+        },
+        "access_modes": {
+          "$ref": "#/$defs/AccessModes"
+        },
+        "binding": {
+          "enum": [
+            "WaitForFirstConsumer",
+            "Immediate",
+            "any"
+          ],
+          "default": "any"
+        },
+        "expansion": {
+          "type": "boolean"
+        },
+        "reclaim_policy": {
+          "description": "Mismatch gives warn.",
+          "enum": [
+            "Retain",
+            "Delete"
+          ]
+        }
+      }
     },
     "K8sVersionParams": {
       "properties": {
@@ -1319,90 +1102,353 @@
         }
       ]
     },
-    "Bundle": {
-      "description": "What rdy bundle collects and how it redacts. Unknown keys are an error. rdy run never collects anything.",
+    "Kind": {
+      "description": "The `kind` of a spec document.",
+      "oneOf": [
+        {
+          "description": "A readiness spec. The only kind in `rdy/v1`.",
+          "type": "string",
+          "const": "Readiness"
+        }
+      ]
+    },
+    "Metadata": {
+      "description": "The `metadata` block: who the spec is for, which revision it is and when it stops being valid.\n\nUnknown keys are refused.",
       "type": "object",
-      "additionalProperties": false,
       "properties": {
-        "collect": {
-          "description": "Collectors: journal:<duration>, k8s:events, file:<absolute path or glob>.",
+        "product": {
+          "description": "Product name: lowercase letters, digits and hyphens. Ties the signature to a trusted key and names the report directory and files.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        },
+        "version": {
+          "description": "Product versions this spec is for, such as `>=4.2`, at most 64 characters. Shown in the report and never evaluated, because rdy cannot know the product version.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "contact": {
+          "description": "Where the customer asks questions, at most 256 characters. Shown as plain text, never as a link.",
+          "type": "string",
+          "maxLength": 256
+        },
+        "serial": {
+          "description": "Spec revision number, 0 to 9007199254740991. Should go up by at least one on every signed release of this spec. Shown as \"Spec revision 7\".",
+          "type": "integer",
+          "maximum": 9007199254740991,
+          "minimum": 0
+        },
+        "expires": {
+          "description": "The UTC time after which rdy refuses to run this spec, in the full form `YYYY-MM-DDTHH:MM:SSZ`, for example `2027-01-31T00:00:00Z`. Kept as text here. The shape and the comparison with the clock are checked when the spec is validated.",
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        },
+        "annotations": {
+          "description": "Up to 32 free-form labels for vendor tooling and the portal. rdy never changes behaviour because of them and copies them into the result. Keys are lowercase, 1 to 63 characters, and values are at most 256 characters.",
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": {
+            "pattern": "^[a-z0-9][a-z0-9._/-]{0,62}$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "product"
+      ]
+    },
+    "NetDnsParams": {
+      "properties": {
+        "names": {
           "type": "array",
+          "minItems": 1,
           "maxItems": 64,
           "items": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9_]{0,15}:.{1,1024}$",
-            "allOf": [
+            "oneOf": [
               {
-                "pattern": "^(journal:|k8s:|file:)"
+                "$ref": "#/$defs/DnsName"
               },
               {
-                "if": {
-                  "pattern": "^journal:"
-                },
-                "then": {
-                  "pattern": "^journal:[1-9][0-9]{0,8}(ms|s|m|h|d)$"
-                }
-              },
-              {
-                "if": {
-                  "pattern": "^k8s:"
-                },
-                "then": {
-                  "enum": [
-                    "k8s:events"
-                  ]
-                }
-              },
-              {
-                "if": {
-                  "pattern": "^file:"
-                },
-                "then": {
-                  "pattern": "^file:/[^\\\\\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]{0,1023}$",
-                  "not": {
-                    "pattern": "(^file:|/)\\.\\.(/|$)"
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "$ref": "#/$defs/DnsName"
+                  },
+                  "expect_in": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {
+                      "$ref": "#/$defs/Cidr"
+                    }
+                  },
+                  "expect_public": {
+                    "type": "boolean"
                   }
-                }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
               }
             ]
           }
         },
-        "redact": {
-          "description": "Redactor groups to add: aws_keys, bearer_tokens, emails. rdy always applies its built-in rules as well.",
+        "max_latency": {
+          "description": "Lookup slower than this: warn. Default 500ms.",
+          "$ref": "#/$defs/Duration"
+        }
+      },
+      "required": [
+        "names"
+      ]
+    },
+    "NetEgressParams": {
+      "properties": {
+        "endpoints": {
+          "description": "At most 64 endpoints in one check. A spec names at most 64 distinct hosts and 256 distinct host and port pairs across all its checks.",
           "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Target"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "$ref": "#/$defs/Target"
+                  },
+                  "optional": {
+                    "description": "Unreachable gives warn instead of block.",
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "expect_status": {
+                    "description": "URL targets only.",
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 100,
+                      "maximum": 599
+                    }
+                  },
+                  "method": {
+                    "description": "URL targets only.",
+                    "enum": [
+                      "HEAD",
+                      "GET"
+                    ],
+                    "default": "HEAD"
+                  },
+                  "via_proxy": {
+                    "enum": [
+                      "auto",
+                      "direct",
+                      "proxy_only"
+                    ]
+                  },
+                  "tls": {
+                    "description": "false probes plain TCP only. Default true for port 443 and https URLs.",
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "via_proxy": {
+          "description": "auto: try what the product would do and say if the other path works. direct: no proxy. proxy_only: only through the proxy.",
+          "enum": [
+            "auto",
+            "direct",
+            "proxy_only"
+          ],
+          "default": "auto"
+        },
+        "trust": {
+          "enum": [
+            "system",
+            "bundled"
+          ],
+          "default": "system"
+        },
+        "max_latency": {
+          "description": "Connect slower than this: warn. Default 2s.",
+          "$ref": "#/$defs/Duration"
+        }
+      },
+      "required": [
+        "endpoints"
+      ]
+    },
+    "NetProxyParams": {
+      "properties": {
+        "required_no_proxy": {
+          "description": "Entries NO_PROXY must cover, such as .svc or 10.0.0.0/8.",
+          "$ref": "#/$defs/StringList"
+        },
+        "daemons_need_proxy": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "NetTlsInterceptParams": {
+      "properties": {
+        "hosts": {
+          "description": "Default: the hosts of every net.egress endpoint in this spec.",
+          "type": "array",
+          "minItems": 1,
           "maxItems": 64,
           "items": {
             "type": "string",
-            "pattern": "^[a-z][a-z0-9_]{0,31}$"
+            "maxLength": 259,
+            "pattern": "^[A-Za-z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
           }
         },
-        "redact_patterns": {
-          "description": "Your own patterns, at most 32. A match is replaced with a custom.<name> placeholder. A pattern can only add redaction: where it overlaps a built-in match, the whole overlapping region is redacted. A pattern that matches the empty string is an error.",
+        "expected_issuer": {
+          "$ref": "#/$defs/Regex"
+        },
+        "pin_sha256": {
           "type": "array",
-          "maxItems": 32,
+          "minItems": 1,
+          "maxItems": 16,
           "items": {
-            "type": "object",
-            "required": [
-              "name",
-              "regex"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "name": {
-                "type": "string",
-                "pattern": "^[a-z][a-z0-9_]{0,31}$"
-              },
-              "regex": {
-                "$ref": "#/$defs/Regex"
-              }
-            }
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
           }
         },
-        "max_size": {
-          "description": "Bundle size cap. Lowers rdy's own cap, never raises it.",
-          "$ref": "#/$defs/Quantity"
+        "forbid_interception": {
+          "type": "boolean",
+          "default": false
         }
       }
+    },
+    "OsFamily": {
+      "description": "An operating system family a check can be limited to.",
+      "oneOf": [
+        {
+          "description": "Linux.",
+          "type": "string",
+          "const": "linux"
+        },
+        {
+          "description": "macOS.",
+          "type": "string",
+          "const": "macos"
+        },
+        {
+          "description": "Windows.",
+          "type": "string",
+          "const": "windows"
+        }
+      ]
+    },
+    "Port": {
+      "description": "1 to 65535.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "Quantity": {
+      "description": "Bytes. A whole number with an optional binary suffix Ki, Mi, Gi, Ti, Pi. Decimal suffixes (G, GB) are rejected to avoid ambiguity.",
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 999999999999999
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9]{1,15}(Ki|Mi|Gi|Ti|Pi)?$"
+        }
+      ]
+    },
+    "RedactPattern": {
+      "description": "A vendor redaction pattern in the `bundle` block.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The rule name. A match is replaced with a `custom.<name>` placeholder.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$"
+        },
+        "regex": {
+          "description": "The pattern, in Rust `regex` syntax (linear time, no backreferences), 1 to 256 characters. Not compiled here.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "regex"
+      ]
+    },
+    "Regex": {
+      "description": "A regular expression in Rust regex syntax (linear time, no backreferences).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "Severity": {
+      "description": "How bad a failed check is.\n\n`block` means required: a failure makes the run NOT READY. `warn` means optional: a failure gives READY with warnings. The default is `block`.",
+      "oneOf": [
+        {
+          "description": "Required. A failure makes the run NOT READY. This is the default.",
+          "type": "string",
+          "const": "block"
+        },
+        {
+          "description": "Optional. A failure gives READY with warnings.",
+          "type": "string",
+          "const": "warn"
+        }
+      ],
+      "default": "block"
+    },
+    "StringList": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "Target": {
+      "description": "host:port, [ipv6]:port, or an http or https URL. Never user:password in a URL; specs carry no credentials.",
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^(https?://[^/@\\s#]+(/[^\\s#]*)?|[A-Za-z0-9.-]+:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])|\\[[0-9A-Fa-f:]+\\]:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))$"
+    },
+    "Version": {
+      "description": "A dotted version such as 1.28 or 5.10, as a quoted string. A bare integer (14) is accepted. An unquoted decimal (1.30) is rejected because YAML reads it as the number 1.3.",
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^v?[0-9]{1,9}(\\.[0-9]{1,9}){0,3}$"
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        }
+      ]
     }
   }
 }

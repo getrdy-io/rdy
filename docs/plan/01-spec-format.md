@@ -5,9 +5,9 @@ Owner: rust-architect. Status: draft 2, revised after the security-reviewer and 
 
 This is the `rdy/v1` contract. `rdy-cloud` consumes it from crates.io through `rdy-spec` (ADR 0012), so
 every change follows section 3. The schema files are `crates/rdy-spec/schema/spec.v1.schema.json` and
-`crates/rdy-spec/schema/result.v1.schema.json` (JSON Schema 2020-12, hand-written until the schemars
-generator exists; see the README next to them). Where this text and a schema file disagree, the schema
-file wins and this text gets a fix. Wording a user sees follows cli-ux; security rules follow
+`crates/rdy-spec/schema/result.v1.schema.json` (JSON Schema 2020-12, generated from the `rdy-spec` types
+by `cargo xtask schema` since M1-022; see the README next to them and ADR 0019). Where this text and a
+schema file disagree, the schema file wins and this text gets a fix. Wording a user sees follows cli-ux; security rules follow
 security-reviewer.
 
 **ADRs this doc relies on:** 0001 (YAML, parser limits, version scalars), 0002 (minisign, trusted comment,

@@ -27,8 +27,10 @@ did it do" and "what spec ran, signed by whom", so the result must carry its own
    Its scheduler sits behind the default `runtime` feature; `rdy-cloud` can use
    `default-features = false, features = ["html"]`.
 5. Rust types are the source of truth. `schemars` (1.x, JSON Schema 2020-12) derives the schemas.
-   `cargo xtask schema` writes `crates/rdy-spec/schema/rdy-v1-spec.schema.json` and
-   `rdy-v1-result.schema.json`, committed. CI regenerates them and fails on any diff.
+   `cargo xtask schema` writes `crates/rdy-spec/schema/spec.v1.schema.json` and
+   `result.v1.schema.json`, committed. CI regenerates them and fails on any diff. (Amended 2026-10-28,
+   M1-022: the files are named as in 01-spec-format.md, which the docs site also uses. ADR 0019 says how
+   the parts without a type yet are covered.)
 6. Doc comments become schema descriptions, which feed the docs site reference pages.
 7. The binary does not validate against the JSON schema at runtime. Typed parsing plus
    `rdy_spec::validate` (ids unique, thresholds parse, `metadata.product` slug rule) do it, with better

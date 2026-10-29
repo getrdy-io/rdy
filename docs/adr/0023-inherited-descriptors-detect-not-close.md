@@ -1,4 +1,4 @@
-# ADR 0019: Descriptors inherited by `rdy` are listed and reported in M1, not closed
+# ADR 0023: Descriptors inherited by `rdy` are listed and reported in M1, not closed
 
 - Status: Accepted (2026-10-28, M1-039; security review follows the PR)
 - Date: 2026-10-28

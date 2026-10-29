@@ -295,7 +295,7 @@ tests policy.
   change loading or name resolution (`LOCPATH`, `NLSPATH`, `HOSTALIASES`, `BASH_ENV`, `IFS` and similar)
   are refused too. Code: `rdy_engine::exec::policy`.
 - Descriptors above 2 that `rdy` inherited reach children in M1. `exec::inherited_fds()` lists them
-  for a start-up warning; closing them needs `unsafe` (ADR 0019).
+  for a start-up warning; closing them needs `unsafe` (ADR 0023).
 - Each child gets its own process group, recorded in a lock-free list until reaped, and the group is
   killed on timeout. A child not reaped within 1 s of SIGKILL returns `Hung { pid }`; a detached task
   reaps it later.
