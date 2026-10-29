@@ -246,6 +246,73 @@ jobs:
       - name: Doc tests
         if: matrix.name == 'linux-x64'
         run: cargo test --doc --workspace --locked
+      # Root tests are named `root_*` and the `ci` profile skips them (.config/nextest.toml). This proves
+      # the normal run lists none, so a root test can never run, or fail, on a user-level runner.
+      - name: The normal run lists no root_* test
+        if: matrix.name == 'linux-x64'
+        run: |
+          list="$(cargo nextest list --workspace --locked --target "$TARGET" --profile ci --message-format oneline)"
+          test -n "$list"
+          if printf '%s\n' "$list" | grep -E '(^|[ :])root_[^: ]*$'; then
+            echo "::error::the ci profile lists a root_* test; check default-filter in .config/nextest.toml"
+            exit 1
+          fi
+
+  # Tests that need uid 0 (docs/plan/08-testing.md, section 6). Convention: the test name starts with
+  # `root_`. The default and `ci` nextest profiles skip them; the `root` profile runs only them.
+  # The build runs as the runner user, so `target/` and the cache stay user-owned. Only the finished
+  # nextest archive runs under `sudo`. It needs no cargo and no rustup, so root never touches ~/.cargo.
+  # The runner is a fresh VM with passwordless sudo, so a PR's test code gets nothing here that it
+  # did not already have in the `test` job.
+  root:
+    name: root
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      TARGET: x86_64-unknown-linux-musl
+      # Makes a `root_*` test fail, not skip, when it does not run as uid 0.
+      RDY_REQUIRE_ROOT: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # strace is for the root tests that watch syscalls (trust lookup, no phone home). musl-tools is
+      # the same C compiler the `test` job uses.
+      - name: Install strace and musl-tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends strace musl-tools
+          echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
+          strace -V
+      - name: Install the pinned toolchain and the target
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add "$TARGET"
+      # Same key as the linux-x64 test leg, so this job reuses its build. It never saves.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: test-linux-x64
+          save-if: false
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cargo-nextest@0.9.149
+      - name: Build the nextest archive (as the runner user)
+        run: >
+          cargo nextest archive --workspace --locked --target "$TARGET"
+          --archive-file "$RUNNER_TEMP/rdy-tests.tar.zst"
+      - name: Run the root_* tests under sudo
+        run: |
+          nextest="$(command -v cargo-nextest)"
+          echo "uid under sudo: $(sudo id -u)"
+          test "$(sudo id -u)" = 0
+          sudo --preserve-env=RUST_BACKTRACE,CARGO_TERM_COLOR,RDY_REQUIRE_ROOT \
+            "$nextest" nextest run \
+            --archive-file "$RUNNER_TEMP/rdy-tests.tar.zst" \
+            --workspace-remap "$PWD" \
+            --profile root --no-tests=fail
 
   # release.yml is dist's output plus scripts/harden-release-workflow.py (ADR 0020). dist's own drift
   # check is off (`allow-dirty`), so this job is the drift check: it regenerates the file from a
@@ -275,7 +342,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, zizmor, deny, dco, test, release-workflow]
+    needs: [lint, zizmor, deny, dco, test, root, release-workflow]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
