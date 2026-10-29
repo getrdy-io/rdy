@@ -65,7 +65,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-027 | todo | | Property tests for rdy_spec::parse
 
-- M1-028 | todo | | linux-x64 root job: nextest archive under sudo, root_* filter, strace installed
+- M1-028 | [#57](https://github.com/getrdy-io/rdy/pull/57) | 2026-10-29 | none. CI run 40795966306 proved the exit test (root job: strace -V 6.8, uid under sudo 0, root_whoami_is_zero passed; the normal leg skipped it). Note for M1-121, M1-122 and M1-128: sudo resets HOME and XDG_CONFIG_HOME, so root tests set them on the child they spawn.
 
 - M1-029 | [#12](https://github.com/getrdy-io/rdy/pull/12) | 2026-10-28 | `spec init` is M3 (07 section 1) so it is not in the tree; `version --json` waits for the Version schema and exits 70; usage errors print generic text with no flag names or did-you-mean until M1-030; `--help` puts each option text on the line below the flag (clap layout), see 07 Appendix A note
 
