@@ -190,6 +190,8 @@ disallowed-methods = [
     { path = "rdy_engine::probe::ProbeHub::run_probe", reason = "the run builds the probe hub and hands each check its Probe; a check never makes its own", allow-invalid = true },
     # First-party escapes: the spec (PC-48).
     { path = "rdy_spec::load", reason = "a check never loads or verifies a spec; the run does", allow-invalid = true },
+    # First-party escapes: the kube action-log entry (INV-14).
+    { path = "rdy_engine::probe::Probe::kube_call", reason = "writes the kube entry of the action log; only the read-only guard in rdy-checks-k8s src/client/ calls it, so a check cannot forge a kube entry (INV-14)", allow-invalid = true },
 ]
 
 disallowed-macros = [

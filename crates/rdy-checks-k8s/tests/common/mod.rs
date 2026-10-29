@@ -10,6 +10,15 @@
     clippy::disallowed_types
 )]
 
+use rdy_engine::check::Os;
+use rdy_engine::probe::Probe;
+use rdy_engine::testing::{Replay, TestRun};
+
+/// A run-level probe over an empty replay. `connect` logs its `GET /version` to it.
+pub fn run_probe() -> Probe {
+    TestRun::new(Replay::new()).run_probe(Os::Linux)
+}
+
 // ---- child processes ---------------------------------------------------------------------------------
 //
 // Some rules depend on the process environment (HTTPS_PROXY, RDY_TOKEN) or on stdin and stderr not being

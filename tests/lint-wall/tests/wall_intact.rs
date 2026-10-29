@@ -127,6 +127,7 @@ const FLOOR: &[(Kind, &str)] = &[
     (Kind::Method, "std::io::stderr"),
     (Kind::Method, "std::io::stdin"),
     (Kind::Method, "rdy_engine::live_backend"),
+    (Kind::Method, "rdy_engine::probe::Probe::kube_call"),
     (Kind::Method, "rdy_engine::exec::table::run"),
     (Kind::Method, "rdy_engine::exec::run"),
     (Kind::Method, "rdy_engine::exec::ExecSpec::new"),

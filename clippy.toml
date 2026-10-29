@@ -29,4 +29,5 @@ disallowed-methods = [
     { path = "rdy_engine::exec::table::run", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration", allow-invalid = true },
     { path = "rdy_engine::exec::run", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
     { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
+    { path = "rdy_engine::probe::Probe::kube_call", reason = "writes the kube entry of the action log; only the read-only guard in rdy-checks-k8s src/client/ calls it, so a check cannot forge a kube entry (INV-14)", allow-invalid = true },
 ]

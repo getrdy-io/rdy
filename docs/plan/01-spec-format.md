@@ -721,7 +721,7 @@ Threat model R1 and INV-07: every side effect goes through the probe facade, whi
 | `env` | `name` (never the value) |
 | `lookup`, `dns` | `host`, `answers`; or `server`, `name`, `rtype` |
 | `connect`, `tls` | `host`, `port`, `addr`, `via_proxy`; or `host`, `sni` |
-| `http`, `kube` | `method`, `url` (no query string) or `path`, `status` |
+| `http`, `kube` | `method`, `url` (no query string) or `path`, `status`; a `kube` entry refused for a request header also has `header` (the name, never the value) |
 | `native` | `api`, `path` |
 | `coalesced` | `of` (the kind), `under` (the directory of a file call, or the program, host or path of another denied call, or `*` for the calls past 100 targets), `count`; with `rule` or `error` when the calls were `denied` or `failed`, and with neither when they were `ok` |
 

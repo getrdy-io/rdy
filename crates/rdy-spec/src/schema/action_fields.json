@@ -97,6 +97,11 @@
       "description": "tls",
       "maxLength": 4096
     },
+    "header": {
+      "type": "string",
+      "description": "kube: name of the refused request header, never its value",
+      "maxLength": 4096
+    },
     "method": {
       "type": "string",
       "description": "http, kube",

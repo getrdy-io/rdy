@@ -137,6 +137,11 @@
           "type": "string",
           "maxLength": 4096
         },
+        "header": {
+          "description": "kube: name of the refused request header, never its value",
+          "type": "string",
+          "maxLength": 4096
+        },
         "method": {
           "description": "http, kube",
           "type": "string",

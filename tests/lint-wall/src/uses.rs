@@ -458,3 +458,6 @@ fn probe_hub_new() {
 fn probe_hub_run_probe() {
     let _ = rdy_engine::probe::ProbeHub::run_probe;
 }
+fn probe_kube_call() {
+    let _ = rdy_engine::probe::Probe::kube_call;
+}

@@ -196,7 +196,10 @@ async fn a_path_prefix_in_the_server_reaches_the_server() {
     let loaded = load_text(dir.path(), &server, &token("t"), TIMEOUT).await;
     assert!(loaded.line().server().ends_with("/k8s/clusters/c-m-1"));
 
-    loaded.connect(|_| {}).await.expect("connect");
+    loaded
+        .connect(&common::run_probe(), |_| {})
+        .await
+        .expect("connect");
 
     let requests = api.requests();
     assert!(
@@ -229,7 +232,7 @@ async fn https_proxy_in_the_environment_is_ignored_even_when_malformed() {
         .await
         .expect("a malformed HTTPS_PROXY must not fail the load");
     loaded
-        .connect(|_| {})
+        .connect(&common::run_probe(), |_| {})
         .await
         .expect("the request must go to the cluster, not to the proxy");
 
@@ -243,7 +246,10 @@ async fn connects_sends_a_bearer_token_and_reads_the_version() {
     let dir = tempfile::tempdir().expect("tempdir");
     let loaded = load_text(dir.path(), &api.url(), &token("TOKEN-CANARY-1"), TIMEOUT).await;
 
-    let connected = loaded.connect(|_| {}).await.expect("connect");
+    let connected = loaded
+        .connect(&common::run_probe(), |_| {})
+        .await
+        .expect("connect");
 
     let version = connected.server_version();
     assert_eq!(version.git_version, "v1.29.4-eks-abc123");
@@ -281,7 +287,7 @@ async fn the_cluster_is_announced_before_the_first_connection() {
 
     let (log, shown) = (Arc::clone(&events), Arc::clone(&announced));
     loaded
-        .connect(move |line| {
+        .connect(&common::run_probe(), move |line| {
             log.lock().expect("events").push("announce");
             *shown.lock().expect("shown") = line.to_string();
         })
@@ -300,7 +306,10 @@ async fn a_401_and_a_403_are_their_own_errors() {
         let api = MockApi::start(Mode::Status(code)).await;
         let dir = tempfile::tempdir().expect("tempdir");
         let loaded = load_text(dir.path(), &api.url(), &token("t"), TIMEOUT).await;
-        let error = loaded.connect(|_| {}).await.expect_err("refused");
+        let error = loaded
+            .connect(&common::run_probe(), |_| {})
+            .await
+            .expect_err("refused");
         if want_unauthorized {
             assert!(matches!(error, KubeError::Unauthorized { .. }), "{error:?}");
         } else {
@@ -316,7 +325,10 @@ async fn another_status_keeps_the_code_and_reason() {
     let api = MockApi::start(Mode::Status(500)).await;
     let dir = tempfile::tempdir().expect("tempdir");
     let loaded = load_text(dir.path(), &api.url(), &token("t"), TIMEOUT).await;
-    let error = loaded.connect(|_| {}).await.expect_err("500");
+    let error = loaded
+        .connect(&common::run_probe(), |_| {})
+        .await
+        .expect_err("500");
     assert!(
         matches!(&error, KubeError::Api { code: 500, reason, .. } if reason == "Denied"),
         "{error:?}"
@@ -329,7 +341,10 @@ async fn an_answer_that_is_not_a_version_document_is_a_bad_answer() {
     let api = MockApi::start(Mode::NotJson).await;
     let dir = tempfile::tempdir().expect("tempdir");
     let loaded = load_text(dir.path(), &api.url(), &token("t"), TIMEOUT).await;
-    let error = loaded.connect(|_| {}).await.expect_err("not json");
+    let error = loaded
+        .connect(&common::run_probe(), |_| {})
+        .await
+        .expect_err("not json");
     assert!(
         matches!(&error, KubeError::BadAnswer { server } if *server == api.url()),
         "{error:?}"
@@ -349,7 +364,10 @@ async fn a_server_that_never_answers_times_out() {
         Duration::from_millis(300),
     )
     .await;
-    let error = loaded.connect(|_| {}).await.expect_err("timeout");
+    let error = loaded
+        .connect(&common::run_probe(), |_| {})
+        .await
+        .expect_err("timeout");
     assert!(matches!(error, KubeError::Timeout { .. }), "{error:?}");
     assert!(error.hint().contains("VPN"), "{}", error.hint());
 }
@@ -361,7 +379,10 @@ async fn a_closed_port_is_unreachable() {
     drop(listener);
     let dir = tempfile::tempdir().expect("tempdir");
     let loaded = load_text(dir.path(), &format!("http://{addr}"), &token("t"), TIMEOUT).await;
-    let error = loaded.connect(|_| {}).await.expect_err("refused");
+    let error = loaded
+        .connect(&common::run_probe(), |_| {})
+        .await
+        .expect_err("refused");
     assert!(
         matches!(&error, KubeError::Unreachable { cause, .. } if *cause == "the connection was refused"),
         "{error:?}"
@@ -454,7 +475,10 @@ mod plugin {
         let loaded = load(&KubeOptions::new(TIMEOUT).kubeconfig(path), &env)
             .await
             .expect("load");
-        loaded.connect(|_| {}).await.expect("connect");
+        loaded
+            .connect(&common::run_probe(), |_| {})
+            .await
+            .expect("connect");
 
         let seen = std::fs::read_to_string(&dump).expect("env dump");
         for name in [
@@ -489,7 +513,10 @@ mod plugin {
         let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT).await;
         assert_eq!(loaded.line().plugin(), Some("get-token"));
 
-        loaded.connect(|_| {}).await.expect("connect");
+        loaded
+            .connect(&common::run_probe(), |_| {})
+            .await
+            .expect("connect");
 
         let requests = api.requests();
         assert!(
@@ -524,7 +551,7 @@ mod plugin {
         let seen = marker.clone();
 
         loaded
-            .connect(move |line| {
+            .connect(&common::run_probe(), move |line| {
                 assert!(
                     !seen.exists(),
                     "the plugin ran before the cluster was announced"
@@ -552,7 +579,10 @@ mod plugin {
         );
         let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT).await;
 
-        let error = loaded.connect(|_| {}).await.expect_err("plugin fails");
+        let error = loaded
+            .connect(&common::run_probe(), |_| {})
+            .await
+            .expect_err("plugin fails");
 
         assert!(
             matches!(&error, KubeError::PluginFailed { plugin, exit_code: Some(3) } if plugin == "get-token"),
@@ -578,7 +608,10 @@ mod plugin {
         let plugin = script(dir.path(), "get-token", "echo 'STDOUT-CANARY: [not json'\n");
         let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT).await;
 
-        let error = loaded.connect(|_| {}).await.expect_err("bad output");
+        let error = loaded
+            .connect(&common::run_probe(), |_| {})
+            .await
+            .expect_err("bad output");
 
         assert!(
             matches!(error, KubeError::PluginOutputInvalid { .. }),
@@ -602,7 +635,10 @@ mod plugin {
             TIMEOUT,
         )
         .await;
-        let error = loaded.connect(|_| {}).await.expect_err("no plugin");
+        let error = loaded
+            .connect(&common::run_probe(), |_| {})
+            .await
+            .expect_err("no plugin");
         assert!(
             matches!(&error, KubeError::PluginNotStarted { reason, .. } if *reason == "no such command"),
             "{error:?}"
@@ -628,7 +664,10 @@ mod plugin {
         );
         let loaded = load_text(dir.path(), &api.url(), &exec_user(&plugin), TIMEOUT).await;
 
-        let error = loaded.connect(|_| {}).await.expect_err("refresh fails");
+        let error = loaded
+            .connect(&common::run_probe(), |_| {})
+            .await
+            .expect_err("refresh fails");
 
         assert!(
             matches!(
@@ -680,7 +719,8 @@ mod plugin {
             tokio::task::yield_now().await;
             std::fs::write(&flag, "go").expect("write flag");
         };
-        let (connected, ()) = tokio::join!(loaded.connect(|_| {}), release);
+        let probe = common::run_probe();
+        let (connected, ()) = tokio::join!(loaded.connect(&probe, |_| {}), release);
 
         connected.expect("the client was built while the runtime thread stayed free");
     }
