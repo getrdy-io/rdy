@@ -6,7 +6,8 @@
 //!   `tests/fixtures/minisign-c/` (see its README). This test always runs.
 //! - C minisign opens a key rdy made and verifies a signature rdy made, and rdy reads a signature
 //!   made with that key. This test needs a `minisign` program on the PATH. Without one it says so
-//!   and passes, unless `RDY_REQUIRE_C_MINISIGN` is set, which makes a missing program a failure.
+//!   and passes, unless `RDY_REQUIRE_C_MINISIGN` is set and not empty, which makes a missing program a
+//!   failure. The linux-x64 CI leg installs minisign and sets it.
 //!
 //! Both derive a key at the real cost (1 GiB), so the `real-kdf` test group in
 //! .config/nextest.toml lists this binary, and a lock keeps the two apart under `cargo test`.
@@ -199,7 +200,7 @@ fn c_minisign(dir: &Path, args: &[&str], stdin: &str) -> Output {
 fn c_minisign_opens_a_key_rdy_made_and_verifies_what_rdy_signed() {
     if !c_minisign_available() {
         assert!(
-            std::env::var_os("RDY_REQUIRE_C_MINISIGN").is_none(),
+            std::env::var_os("RDY_REQUIRE_C_MINISIGN").is_none_or(|v| v.is_empty()),
             "RDY_REQUIRE_C_MINISIGN is set and there is no minisign on the PATH"
         );
         eprintln!("skipped: no C minisign on the PATH (set RDY_REQUIRE_C_MINISIGN to require it)");

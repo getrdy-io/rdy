@@ -220,6 +220,8 @@ jobs:
         run: |
           sh scripts/test-musl-pie-linker.sh
           sh scripts/test-check-static.sh
+          # The release workflow runs this script on the real artifacts (M1-007).
+          sh scripts/test-check-release-artifacts.sh
           scripts/check-static.sh "target/$TARGET/debug/rdy"
       # `scratch` is not a pullable image, so import an empty one. It has no shell and no libc, so
       # the binary only runs if it is truly static. Non-root, no network, read-only root, no capabilities.
@@ -233,19 +235,50 @@ jobs:
           out=$(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 65534:65534 -v "$dir:/rdy:ro" rdy-scratch /rdy/rdy version)
           echo "$out"
           echo "$out" | grep -q '^rdy '
+      # The C minisign program is the other end of the interop test (M1-125, ADR 0022). It is installed
+      # on this leg only, and the variable below makes a missing program fail the test, never skip it.
+      - name: Install C minisign
+        if: matrix.name == 'linux-x64'
+        run: sudo apt-get install -y --no-install-recommends minisign
       - name: Test (nextest, no retries)
         if: ${{ !matrix.compile_only }}
+        env:
+          RDY_REQUIRE_C_MINISIGN: ${{ matrix.name == 'linux-x64' && '1' || '' }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
       # nextest does not run doc tests. They build for the host, so they run on one leg only.
       - name: Doc tests
         if: matrix.name == 'linux-x64'
         run: cargo test --doc --workspace --locked
 
+  # release.yml is dist's output plus scripts/harden-release-workflow.py (ADR 0020). dist's own drift
+  # check is off (`allow-dirty`), so this job is the drift check: it regenerates the file from a
+  # hash-checked dist and fails on any difference. It also runs the tests of the release scripts.
+  release-workflow:
+    name: release-workflow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --no-self-update
+      - name: Install dist (pinned file, sha256 checked)
+        run: sh scripts/install-release-tool.sh dist
+      - name: Script tests
+        run: |
+          sh scripts/test-install-release-tool.sh
+          sh scripts/test-harden-release-workflow.sh
+      - name: release.yml matches dist and the hardening script
+        run: sh scripts/gen-release-workflow.sh --check
+
   # The only required check. Keep `needs:` equal to the list of gating jobs.
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, zizmor, deny, dco, test]
+    needs: [lint, zizmor, deny, dco, test, release-workflow]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

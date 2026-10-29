@@ -450,6 +450,11 @@ fn scrypt_params(opslimit: u64, memlimit: u64) -> Result<scrypt::Params, KeyErro
     // Stock minisign and the `minisign` crate always write p = 1. A file with a larger p (a big
     // opslimit with a tiny memlimit gives one) would make the key derivation run for hours at
     // little memory, so it is refused like any other file that asks for too much.
+    if p == 0 {
+        return Err(KeyError::Malformed(
+            "the key derivation settings are not valid",
+        ));
+    }
     if p != 1 {
         return Err(KeyError::TooCostly);
     }

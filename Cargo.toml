@@ -77,6 +77,15 @@ opt-level = 3
 [profile.dev.package.hmac]
 opt-level = 3
 
+# The profile `dist` builds release archives with (dist-workspace.toml). Keep unwinding: the
+# scheduler isolates a panicking check with catch_unwind (docs/plan/02-engine-design.md). Symbols
+# are stripped. The cargo-auditable data stays: scripts/check-release-artifacts.sh proves it.
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

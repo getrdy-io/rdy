@@ -56,7 +56,8 @@ M1-125 found three problems.
    N = 2^20, a published test password) and a signature with the 01 section 4.2 trusted comment, both made
    once by C minisign, and a test checks that rdy opens the key and verifies the signature. A second test
    runs C `minisign -V` on rdy's signature and C `minisign -S` with rdy's key when a `minisign` is on the
-   PATH. It is skipped with a message when there is none, unless `RDY_REQUIRE_C_MINISIGN` is set.
+   PATH. It is skipped with a message when there is none, unless `RDY_REQUIRE_C_MINISIGN` is set. The
+   linux-x64 CI leg installs `minisign` from apt and sets the variable, so it cannot skip there.
 7. **New runtime dependencies of `rdy`:** `scrypt` 0.11 (and RustCrypto crates it uses), `ct-codecs` (constant
    time base64 for secret bytes), `getrandom` 0.4, and `blake2` and `ed25519-dalek`, which `rdy-spec` already
    pins. All were already in the tree through the dev-dependency. `scrypt` and its hash crates are built with

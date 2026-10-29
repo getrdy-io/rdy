@@ -197,9 +197,9 @@ fn a_key_file_may_not_ask_for_more_than_the_standard_cost() {
         KeyError::TooCostly
     );
     // The limits themselves are fine, and so is the cost of the `minisign` crate's own keys
-    // (32 MiB, N = 2^15, p = 1).
+    // (opslimit 1,048,576 and memlimit 33,554,432: 32 MiB, N = 2^15, p = 1).
     assert!(StoredKey::parse(&with(MAX_OPSLIMIT, MAX_MEMLIMIT)).is_ok());
-    assert!(StoredKey::parse(&with(524_288, 33_554_432)).is_ok());
+    assert!(StoredKey::parse(&with(1_048_576, 33_554_432)).is_ok());
 }
 
 #[test]
