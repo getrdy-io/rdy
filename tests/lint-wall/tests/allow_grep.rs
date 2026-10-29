@@ -106,18 +106,30 @@ const ALLOWED: &[(&str, &str)] = &[
 
 /// Check-crate files that embed a data file with `include_str!` or `include_bytes!`. Data only: the file
 /// is text, never Rust. `include!` and `#[path]` are never allowed in a check crate.
-const INCLUDE_DATA_ALLOWED: &[(&str, &str)] = &[
+///
+/// Each entry is `(file, required_prefix, reason)`. Every include literal in the file must start with the
+/// prefix, so a later `include_str!` of some other path in the same file fails the test. The file must
+/// be a test module: it, or a module above it, is declared under `#[cfg(test)]`.
+const INCLUDE_DATA_ALLOWED: &[(&str, &str, &str)] = &[
     (
         "crates/rdy-checks-host/src/family/tests.rs",
+        "../../../../examples/specs/acme-platform.yaml",
         "embeds examples/specs/acme-platform.yaml for a test",
     ),
     (
         "crates/rdy-checks-host/src/firewall/tests.rs",
+        "../../../../tests/fixtures/checks/host.firewall/",
         "embeds the synthetic cases of tests/fixtures/checks/host.firewall until the Replay loader (M1-049) reads them",
     ),
     (
         "crates/rdy-checks-host/src/firewall/unit_tests.rs",
+        "../../../../tests/fixtures/checks/host.firewall/",
         "embeds recorded text from tests/fixtures/checks/host.firewall for the parser tests",
+    ),
+    (
+        "crates/rdy-checks-k8s/src/client/guard/tests/parser.rs",
+        "../../../../../../docs/plan/03-check-catalog.md",
+        "embeds docs/plan/03-check-catalog.md so a test can check the check ids that ALLOWED cites",
     ),
 ];
 
@@ -489,7 +501,7 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
             if found.path_attribute || found.include_code {
                 bad.push(format!("{rel}: #[path] or include!"));
             }
-            if found.include_data && !INCLUDE_DATA_ALLOWED.iter().any(|(p, _)| *p == rel) {
+            if found.include_data && !INCLUDE_DATA_ALLOWED.iter().any(|(p, _, _)| *p == rel) {
                 bad.push(format!("{rel}: include_str! or include_bytes!"));
             }
         }
@@ -498,13 +510,103 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
         bad.is_empty(),
         "a check crate may not reach other files this way (add a data include to INCLUDE_DATA_ALLOWED in tests/lint-wall/tests/allow_grep.rs with a reason): {bad:#?}"
     );
-    for (path, why) in INCLUDE_DATA_ALLOWED {
-        let found = findings_of(&std::fs::read_to_string(base.join(path)).expect("read source"));
+    for (path, prefix, why) in INCLUDE_DATA_ALLOWED {
+        let source = std::fs::read_to_string(base.join(path)).expect("read source");
+        let found = findings_of(&source);
         assert!(
             found.include_data,
             "{path} is on INCLUDE_DATA_ALLOWED but embeds nothing now ({why})"
         );
+        let literals = include_literals(&source);
+        assert!(
+            !literals.is_empty(),
+            "{path}: found include_str! but could not read its path literal ({why})"
+        );
+        for literal in literals {
+            assert!(
+                literal.starts_with(prefix),
+                "{path}: an include path `{literal}` does not start with `{prefix}`. The entry allows only that data ({why})"
+            );
+        }
+        assert!(
+            test_only(&base, path),
+            "{path} embeds data but is not a #[cfg(test)] module: declare it, or the module above it, under #[cfg(test)] ({why})"
+        );
     }
+}
+
+/// The first string literal of every `include_str!(..)` and `include_bytes!(..)` in the source, looking
+/// through a `concat!(`. A path that is not a literal (a macro variable, say) reads as the empty string,
+/// which no prefix matches. Whole-line `//` comments are ignored.
+fn include_literals(source: &str) -> Vec<String> {
+    let code: String = source
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut out = Vec::new();
+    for name in ["include_str!(", "include_bytes!("] {
+        let mut rest = code.as_str();
+        while let Some(at) = rest.find(name) {
+            rest = &rest[at + name.len()..];
+            let mut arg = rest.trim_start();
+            if let Some(inner) = arg.strip_prefix("concat!(") {
+                arg = inner.trim_start();
+            }
+            let literal = arg.strip_prefix('"').map(|body| {
+                let mut text = String::new();
+                let mut chars = body.chars();
+                while let Some(c) = chars.next() {
+                    match c {
+                        '"' => break,
+                        '\\' => text.extend(chars.next()),
+                        c => text.push(c),
+                    }
+                }
+                text
+            });
+            out.push(literal.unwrap_or_default());
+        }
+    }
+    out
+}
+
+/// Whether the module in `module` is compiled only for tests: it is declared under `#[cfg(test)]` in
+/// its parent file, or its parent file is itself test-only.
+fn test_only(base: &Path, module: &str) -> bool {
+    let file = base.join(module);
+    let Some(stem) = file.file_stem().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    let Some(dir) = file.parent() else {
+        return false;
+    };
+    let sibling = {
+        let mut name = dir.as_os_str().to_owned();
+        name.push(".rs");
+        std::path::PathBuf::from(name)
+    };
+    let parents = [
+        sibling,
+        dir.join("mod.rs"),
+        dir.join("lib.rs"),
+        dir.join("main.rs"),
+    ];
+    let declared = format!("#[cfg(test)]mod{stem};");
+    for parent in parents.iter().filter(|p| p.is_file() && **p != file) {
+        let text: String = std::fs::read_to_string(parent)
+            .expect("read parent source")
+            .split_whitespace()
+            .collect();
+        if text.contains(&declared) {
+            return true;
+        }
+        if text.contains(&format!("mod{stem};")) {
+            let parent_relative = relative(base, parent);
+            return test_only(base, &parent_relative);
+        }
+    }
+    false
 }
 
 #[test]
@@ -819,4 +921,20 @@ fn the_repo_walk_starts_at_the_root_and_skips_only_build_output() {
             "scripts/x.rs"
         ]
     );
+}
+
+#[test]
+fn the_include_reader_sees_every_literal_and_refuses_what_it_cannot_read() {
+    assert_eq!(
+        include_literals("const A: &str = include_str!(\"../a/b.txt\");"),
+        ["../a/b.txt"]
+    );
+    assert_eq!(
+        include_literals(
+            "macro_rules! fx { () => { include_bytes!(concat!(\n \"../x/\", $c)) }; }"
+        ),
+        ["../x/"]
+    );
+    assert_eq!(include_literals("let a = include_str!($path);"), [""]);
+    assert!(include_literals("// include_str!(\"../a\")\nfn f() {}").is_empty());
 }

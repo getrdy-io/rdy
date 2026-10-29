@@ -12,7 +12,8 @@
 //! probe ([`Connected::read_only`](super::Connected::read_only)).
 //!
 //! A request header outside `accept`, `content-type` and `content-length` is refused, and the entry
-//! names the header and never its value. A redirect (3xx) is logged as `failed`: redirects are not
+//! names the header and never its value. The one exception is `Impersonate-User` with the spec's `as:`
+//! value on the two access review POSTs ([`guarded_service_as`]). A redirect (3xx) is logged as `failed`: redirects are not
 //! followed. A `failed` entry always has a fixed `error` field.
 //!
 //! The refusal is a [`GuardError`] with a fixed text: the rule sentence and a fix hint. It holds no
@@ -21,6 +22,7 @@
 use std::fmt;
 use std::future::{Future, ready};
 use std::pin::{Pin, pin};
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
 use http::{Request, Response};
@@ -35,12 +37,12 @@ mod rules;
 mod tests;
 
 pub use rules::{
-    ALLOWED, Access, Allowed, FieldSelector, Only, RULE_BODY, RULE_GET_BODY, RULE_HEADER,
-    RULE_IMPERSONATE, RULE_METHOD, RULE_NOT_ALLOWED, RULE_PATH_SHAPE, RULE_POST_QUERY,
-    RULE_POST_TARGET, RULE_QUERY, RULE_REVIEW_BODY, RULE_SECRETS, RULE_SELECTOR, RULE_UPGRADE,
-    SELF_SUBJECT_REVIEW_BODY,
+    ALLOWED, Access, Allowed, FieldSelector, ImpersonateAs, ImpersonateError, Only, RULE_BODY,
+    RULE_GET_BODY, RULE_HEADER, RULE_IMPERSONATE, RULE_METHOD, RULE_NOT_ALLOWED, RULE_PATH_SHAPE,
+    RULE_POST_QUERY, RULE_POST_TARGET, RULE_QUERY, RULE_REVIEW_BODY, RULE_SECRETS, RULE_SELECTOR,
+    RULE_SUBRESOURCE, RULE_UPGRADE, SELF_SUBJECT_REVIEW_BODY,
 };
-use rules::{BodyView, bad_header, judge, log_path};
+use rules::{BodyView, bad_header, impersonation_allowed, judge, log_path};
 
 use super::text::escape_capped;
 
@@ -89,6 +91,20 @@ fn fix_text(rule: &str) -> &'static str {
 pub fn guarded_service<S>(inner: S, probe: &Probe) -> Guarded<S> {
     GuardLayer {
         probe: probe.clone(),
+        impersonate: None,
+    }
+    .layer(inner)
+}
+
+/// Like [`guarded_service`], and the two access review POSTs may carry `Impersonate-User: <user>`.
+///
+/// `user` is the spec's `as:` value, already checked by [`ImpersonateAs::new`]. The header passes only on
+/// `selfsubjectaccessreviews` and `selfsubjectrulesreviews`, only once and only with exactly this value.
+/// On any other request it is refused, as is every other `Impersonate-*` header (02 Appendix B rule 8).
+pub fn guarded_service_as<S>(inner: S, probe: &Probe, user: ImpersonateAs) -> Guarded<S> {
+    GuardLayer {
+        probe: probe.clone(),
+        impersonate: Some(Arc::new(user)),
     }
     .layer(inner)
 }
@@ -97,6 +113,7 @@ pub fn guarded_service<S>(inner: S, probe: &Probe) -> Guarded<S> {
 #[derive(Clone)]
 pub struct GuardLayer {
     probe: Probe,
+    impersonate: Option<Arc<ImpersonateAs>>,
 }
 
 impl fmt::Debug for GuardLayer {
@@ -112,6 +129,7 @@ impl<S> Layer<S> for GuardLayer {
         Guarded {
             inner,
             probe: self.probe.clone(),
+            impersonate: self.impersonate.clone(),
         }
     }
 }
@@ -121,6 +139,7 @@ impl<S> Layer<S> for GuardLayer {
 pub struct Guarded<S> {
     inner: S,
     probe: Probe,
+    impersonate: Option<Arc<ImpersonateAs>>,
 }
 
 impl<S> fmt::Debug for Guarded<S> {
@@ -167,9 +186,17 @@ where
             Some(bytes) => BodyView::Bytes(bytes),
             None => BodyView::Opaque,
         };
-        if let Err(rule) = judge(request.method(), request.uri(), request.headers(), view) {
+        let configured = self.impersonate.as_deref();
+        if let Err(rule) = judge(
+            request.method(),
+            request.uri(),
+            request.headers(),
+            view,
+            configured,
+        ) {
             // A refused header is named in the log, never its value.
-            match bad_header(request.headers()) {
+            let allowed = impersonation_allowed(request.method(), request.uri(), configured);
+            match bad_header(request.headers(), allowed) {
                 Some((header_rule, name)) if header_rule == rule => {
                     call.refused_header(rule, &escape_capped(name, 64));
                 }

@@ -24,8 +24,11 @@ const MAX_XML: usize = 64 * 1024;
 const MAX_TAGS: usize = 2000;
 /// The most service files read in one run (zone services, rich rule services and includes).
 const MAX_SERVICES: usize = 32;
-/// The deepest chain of `<include>` that is followed.
+/// The deepest chain of `<include>` that is followed. A service at that depth that includes more is
+/// "unknown".
 const MAX_DEPTH: usize = 4;
+/// The most distinct `<include>` elements read from one service file. More makes the file "unknown".
+const MAX_INCLUDES: usize = 16;
 /// The longest service name that is looked up.
 const MAX_NAME: usize = 64;
 
@@ -36,6 +39,9 @@ pub(super) struct ServiceDef {
     includes: Vec<String>,
     /// The service has a `<destination>`, so it opens ports only toward some addresses.
     limited: bool,
+    /// Why the file was not read to its end: a limit was hit or the text was not in the form rdy reads.
+    /// What it says then cannot be trusted either way, so the service is "unknown".
+    doubt: Option<&'static str>,
 }
 
 /// What reading one service name gave.
@@ -72,48 +78,78 @@ impl Services {
 
     /// Whether the service `name` opens TCP `port`, following includes.
     pub(super) fn covers(&self, name: &str, port: u16) -> Cover {
-        self.walk(name, port, &mut Vec::new())
+        self.search(name, port).0
     }
 
-    fn walk<'a>(&'a self, name: &'a str, port: u16, path: &mut Vec<&'a str>) -> Cover {
-        if path.len() >= MAX_DEPTH || path.contains(&name) {
-            return Cover::No;
-        }
-        let def = match self.0.get(name) {
-            None => return Cover::Unknown(format!("service {name} was not read")),
-            Some(Svc::Missing) => {
-                return Cover::Unknown(format!("service {name} has no definition file"));
-            }
-            Some(Svc::Unreadable(why)) => {
-                return Cover::Unknown(format!("service {name} could not be read ({why})"));
-            }
-            Some(Svc::Found(def)) => def,
-        };
-        if def.tcp.iter().any(|range| range.covers(port)) {
-            return if def.limited {
-                Cover::Limited
-            } else {
-                Cover::Yes
+    /// The walk behind [`Services::covers`], and how many services it visited.
+    ///
+    /// Breadth first, with one visited set for the whole walk, so a service is looked at once however
+    /// many files include it and a cycle ends by itself. The services read are at most [`MAX_SERVICES`]
+    /// and each names at most [`MAX_INCLUDES`] includes, so a walk visits at most
+    /// `1 + MAX_SERVICES * MAX_INCLUDES` names, whatever the files say. The answer is "yes" over
+    /// "limited" over "unknown" over "no", so it does not depend on the order of the includes.
+    fn search<'a>(&'a self, root: &'a str, port: u16) -> (Cover, usize) {
+        let mut seen: Vec<&str> = vec![root];
+        let mut queue: VecDeque<(&str, usize)> = VecDeque::from([(root, 0)]);
+        let mut visited = 0;
+        let mut limited = false;
+        let mut unknown: Option<String> = None;
+        while let Some((name, depth)) = queue.pop_front() {
+            visited += 1;
+            let def = match self.0.get(name) {
+                None => {
+                    unknown.get_or_insert(format!("service {name} was not read"));
+                    continue;
+                }
+                Some(Svc::Missing) => {
+                    unknown.get_or_insert(format!("service {name} has no definition file"));
+                    continue;
+                }
+                Some(Svc::Unreadable(why)) => {
+                    unknown.get_or_insert(format!("service {name} could not be read ({why})"));
+                    continue;
+                }
+                Some(Svc::Found(def)) => def,
             };
-        }
-        path.push(name);
-        let mut unknown = None;
-        for include in &def.includes {
-            match self.walk(include, port, path) {
-                Cover::Yes => {
-                    path.pop();
-                    return Cover::Yes;
+            if let Some(why) = def.doubt {
+                unknown.get_or_insert(format!("service {name} {why}"));
+                continue;
+            }
+            if def.tcp.iter().any(|range| range.covers(port)) {
+                if def.limited {
+                    limited = true;
+                    continue;
                 }
-                Cover::Limited => {
-                    path.pop();
-                    return Cover::Limited;
+                return (Cover::Yes, visited);
+            }
+            if def.includes.is_empty() {
+                continue;
+            }
+            if depth >= MAX_DEPTH {
+                unknown.get_or_insert(format!(
+                    "service {name} includes services nested deeper than rdy follows"
+                ));
+                continue;
+            }
+            for include in &def.includes {
+                if !seen.contains(&include.as_str()) {
+                    seen.push(include);
+                    queue.push_back((include, depth + 1));
                 }
-                Cover::Unknown(why) => unknown = Some(why),
-                Cover::No => {}
             }
         }
-        path.pop();
-        unknown.map_or(Cover::No, Cover::Unknown)
+        let cover = if limited {
+            Cover::Limited
+        } else {
+            unknown.map_or(Cover::No, Cover::Unknown)
+        };
+        (cover, visited)
+    }
+
+    /// How many services a walk from `name` visits.
+    #[cfg(test)]
+    pub(super) fn visits(&self, name: &str, port: u16) -> usize {
+        self.search(name, port).1
     }
 }
 
@@ -171,7 +207,7 @@ async fn read_one(probe: &Probe, name: &str) -> Result<Svc, ProbeError> {
             ) => {
                 return Err(error);
             }
-            Err(other) => return Ok(Svc::Unreadable(other.to_string())),
+            Err(other) => return Ok(Svc::Unreadable(super::short(&other))),
         }
     }
     Ok(Svc::Missing)
@@ -192,7 +228,14 @@ impl Tag<'_> {
 /// Reads the TCP ports, includes and destination limit from a service file.
 pub(super) fn parse(xml: &str) -> ServiceDef {
     let mut def = ServiceDef::default();
-    for tag in tags(cut(xml, MAX_XML)) {
+    if xml.len() > MAX_XML {
+        def.doubt = Some("is longer than rdy reads");
+    }
+    let (found, doubt) = tags(cut(xml, MAX_XML));
+    if def.doubt.is_none() {
+        def.doubt = doubt;
+    }
+    for tag in found {
         match tag.name {
             "port" => {
                 let tcp = tag
@@ -205,8 +248,15 @@ pub(super) fn parse(xml: &str) -> ServiceDef {
                 }
             }
             "include" => {
-                if let Some(service) = tag.attr("service") {
-                    def.includes.push(service.to_owned());
+                if let Some(service) = tag.attr("service")
+                    && !def.includes.iter().any(|i| i == service)
+                {
+                    if def.includes.len() < MAX_INCLUDES {
+                        def.includes.push(service.to_owned());
+                    } else {
+                        def.doubt
+                            .get_or_insert("includes more services than rdy follows");
+                    }
                 }
             }
             "destination" => def.limited = true,
@@ -214,6 +264,20 @@ pub(super) fn parse(xml: &str) -> ServiceDef {
         }
     }
     def
+}
+
+/// Whether the file has a start tag called `name`. `Err` says why the file could not be read to its
+/// end without finding one, so the answer is not known.
+pub(super) fn has_tag(xml: &str, name: &str) -> Result<bool, &'static str> {
+    let (found, doubt) = tags(cut(xml, MAX_XML));
+    if found.iter().any(|t| t.name == name) {
+        return Ok(true);
+    }
+    match (xml.len() > MAX_XML, doubt) {
+        (true, _) => Err("is longer than rdy reads"),
+        (_, Some(why)) => Err(why),
+        _ => Ok(false),
+    }
 }
 
 /// The first `max` bytes of `text`, cut on a character boundary.
@@ -225,35 +289,59 @@ fn cut(text: &str, max: usize) -> &str {
     &text[..end]
 }
 
-/// The start tags of `xml`, in order. Comments, declarations, processing instructions and end tags are
-/// skipped. Text between tags is ignored. A tag that is cut off ends the scan.
-fn tags(xml: &str) -> Vec<Tag<'_>> {
+/// The start tags of `xml`, in order, and why the scan stopped early if it did. Comments, CDATA
+/// sections, processing instructions and end tags are skipped. Text between tags is ignored. A
+/// DOCTYPE, a tag that is cut off or cannot be read, an unfinished comment or section, and more than
+/// [`MAX_TAGS`] tags all end the scan with a reason, because the tags after that point are not known.
+fn tags(xml: &str) -> (Vec<Tag<'_>>, Option<&'static str>) {
     let mut out = Vec::new();
     let mut rest = xml;
-    while out.len() < MAX_TAGS {
-        let Some(open) = rest.find('<') else { break };
+    while let Some(open) = rest.find('<') {
         rest = &rest[open..];
-        if let Some(after) = rest.strip_prefix("<!--") {
-            match after.find("-->") {
-                Some(end) => rest = &after[end + 3..],
-                None => break,
-            }
-            continue;
-        }
-        if rest.starts_with("<?") || rest.starts_with("<!") || rest.starts_with("</") {
-            match rest.find('>') {
-                Some(end) => rest = &rest[end + 1..],
-                None => break,
-            }
-            continue;
-        }
-        let Some((tag, after)) = start_tag(&rest[1..]) else {
-            break;
+        let skip = |marker: &str, from: usize, rest: &str| {
+            rest[from..]
+                .find(marker)
+                .map(|end| from + end + marker.len())
         };
-        out.push(tag);
-        rest = after;
+        if rest.starts_with("<!--") {
+            let Some(next) = skip("-->", 4, rest) else {
+                return (out, Some("has a comment that does not end"));
+            };
+            rest = &rest[next..];
+        } else if rest.starts_with("<![CDATA[") {
+            let Some(next) = skip("]]>", 9, rest) else {
+                return (out, Some("has a CDATA section that does not end"));
+            };
+            rest = &rest[next..];
+        } else if rest
+            .get(..9)
+            .is_some_and(|w| w.eq_ignore_ascii_case("<!DOCTYPE"))
+        {
+            return (out, Some("has a DOCTYPE, which rdy does not read"));
+        } else if rest.starts_with("<?") {
+            let Some(next) = skip("?>", 2, rest) else {
+                return (out, Some("has an instruction that does not end"));
+            };
+            rest = &rest[next..];
+        } else if rest.starts_with("<!") {
+            return (out, Some("has a declaration rdy does not read"));
+        } else if rest.starts_with("</") {
+            let Some(next) = skip(">", 2, rest) else {
+                return (out, Some("has an end tag that does not end"));
+            };
+            rest = &rest[next..];
+        } else {
+            if out.len() >= MAX_TAGS {
+                return (out, Some("has more tags than rdy reads"));
+            }
+            let Some((tag, after)) = start_tag(&rest[1..]) else {
+                return (out, Some("has a tag rdy cannot read"));
+            };
+            out.push(tag);
+            rest = after;
+        }
     }
-    out
+    (out, None)
 }
 
 /// Reads `name attr="v" attr='v' ...>` and returns the tag and the text after the `>`.

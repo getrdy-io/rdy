@@ -115,6 +115,28 @@ const FIREWALLD_RICH_RULE: Case = Case {
     ..EMPTY
 };
 
+const FIREWALLD_SOURCE_ZONE: Case = Case {
+    base: Some(&BASE_FIREWALLD),
+    commands: &[
+        fx!("firewalld-source-zone", "commands/active-zones.json"),
+        fx!("firewalld-source-zone", "commands/list-all-public.json"),
+    ],
+    ..EMPTY
+};
+
+const FIREWALLD_DIRECT_RULE: Case = Case {
+    base: Some(&BASE_FIREWALLD),
+    files: &[(
+        "/etc/firewalld/direct.xml",
+        fx!("firewalld-direct-rule", "root/etc/firewalld/direct.xml"),
+    )],
+    commands: &[fx!(
+        "firewalld-direct-rule",
+        "commands/list-all-public.json"
+    )],
+    ..EMPTY
+};
+
 const FIREWALLD_NOT_RUNNING: Case = Case {
     base: Some(&BASE_FIREWALLD),
     commands: &[fx!("firewalld-not-running", "commands/state.json")],
@@ -167,6 +189,24 @@ const UFW_LIMITED_SOURCE: Case = Case {
     ..EMPTY
 };
 
+const UFW_COMMENT_AND_LOG: Case = Case {
+    base: Some(&BASE_UFW),
+    files: &[(
+        "/etc/ufw/user.rules",
+        fx!("ufw-comment-and-log", "root/etc/ufw/user.rules"),
+    )],
+    ..EMPTY
+};
+
+const UFW_UNREAD_RULE: Case = Case {
+    base: Some(&BASE_UFW),
+    files: &[(
+        "/etc/ufw/user.rules",
+        fx!("ufw-unread-rule", "root/etc/ufw/user.rules"),
+    )],
+    ..EMPTY
+};
+
 const UFW_ROOT_LESS: Case = Case {
     base: Some(&BASE_UFW),
     root: false,
@@ -194,9 +234,13 @@ const ALL: &[(&str, &Case)] = &[
     ("firewalld-service-open", &FIREWALLD_SERVICE_OPEN),
     ("firewalld-closed", &FIREWALLD_CLOSED),
     ("firewalld-rich-rule", &FIREWALLD_RICH_RULE),
+    ("firewalld-source-zone", &FIREWALLD_SOURCE_ZONE),
+    ("firewalld-direct-rule", &FIREWALLD_DIRECT_RULE),
     ("firewalld-not-running", &FIREWALLD_NOT_RUNNING),
     ("firewalld-root-less", &FIREWALLD_ROOT_LESS),
     ("ufw-allowed", &UFW_ALLOWED),
+    ("ufw-comment-and-log", &UFW_COMMENT_AND_LOG),
+    ("ufw-unread-rule", &UFW_UNREAD_RULE),
     ("ufw-closed", &UFW_CLOSED),
     ("ufw-limited-source", &UFW_LIMITED_SOURCE),
     ("ufw-root-less", &UFW_ROOT_LESS),
@@ -381,16 +425,114 @@ fn a_rich_rule_that_touches_the_port_gives_a_warning_not_a_block() {
     assert_eq!(f.level, Level::Warn, "{f:?}");
     assert!(
         f.message
-            .starts_with("Cannot confirm 6443/tcp in firewalld zone public")
+            .starts_with("Cannot confirm 6443/tcp and 10250/tcp in firewalld zone public")
     );
     assert!(f.message.contains("rich rule"), "{}", f.message);
-    // 10250 is plainly open and is not dragged into the warning.
-    assert_eq!(f.observed["active"][0]["ports"]["10250"]["verdict"], "open");
+    // Any rich rule in the zone is a warning for every port (03: "any rich rule present: warn").
+    assert_eq!(
+        f.observed["active"][0]["ports"]["10250"]["verdict"],
+        "unknown"
+    );
     assert!(
         f.fix
             .as_deref()
             .is_some_and(|t| t.contains("--list-all --zone=public"))
     );
+    // The message describes the rule from its parts. The source network and the rule text are not in it.
+    let everything = format!("{} {}", f.message, f.observed);
+    assert!(everything.contains("ipv4, source address, port 6443/tcp, drop"));
+    assert!(!everything.contains("192.0.2"), "{everything}");
+}
+
+#[test]
+fn a_direct_rule_file_with_a_rule_gives_a_warning_even_for_open_ports() {
+    let ran = run_case(&FIREWALLD_DIRECT_RULE, PORTS);
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert!(f.message.contains("direct rules"), "{}", f.message);
+    assert_eq!(
+        f.observed["active"][0]["ports"]["6443"]["verdict"],
+        "unknown"
+    );
+    // The same listing with no direct.xml passes.
+    let plain = run_case(&FIREWALLD_PORT_OPEN, PORTS);
+    assert_eq!(plain.finding().level, Level::Pass);
+}
+
+#[test]
+fn a_direct_rule_file_that_is_cut_off_is_unknown_not_clear() {
+    for xml in [
+        "<direct><rule ipv=\"ipv4\"",
+        "<direct><!-- ",
+        "<!DOCTYPE direct>",
+    ] {
+        let replay =
+            load(&FIREWALLD_PORT_OPEN, Replay::new()).file("/etc/firewalld/direct.xml", xml);
+        let ran = execute(replay, true, Os::Linux, PORTS);
+        assert_eq!(ran.finding().level, Level::Warn, "{xml}");
+    }
+    let empty = load(&FIREWALLD_PORT_OPEN, Replay::new()).file(
+        "/etc/firewalld/direct.xml",
+        "<?xml version='1.0'?><direct/>",
+    );
+    assert_eq!(
+        execute(empty, true, Os::Linux, PORTS).finding().level,
+        Level::Pass
+    );
+}
+
+#[test]
+fn a_closed_port_is_unknown_when_another_active_zone_is_bound_to_a_source_network() {
+    let ran = run_case(&FIREWALLD_SOURCE_ZONE, PORTS);
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert_eq!(
+        f.observed["active"][0]["ports"]["6443"]["verdict"],
+        "unknown"
+    );
+    assert_eq!(f.observed["active"][0]["ports"]["10250"]["verdict"], "open");
+    assert!(
+        f.notes
+            .iter()
+            .any(|n| n.contains("trusted") && n.contains("bound to source addresses")),
+        "{:?}",
+        f.notes
+    );
+    // Without the source-bound zone the same listing blocks.
+    let plain = run_case(&FIREWALLD_CLOSED, PORTS);
+    assert_eq!(plain.finding().level, Level::Fail);
+}
+
+#[test]
+fn a_zone_that_opens_all_tcp_by_protocol_passes() {
+    let replay = firewalld_machine().command(
+        "firewall-cmd",
+        &["--list-all", "--zone=public"],
+        0,
+        "public (active)\n  target: default\n  ports: \n  protocols: tcp\n",
+    );
+    let ran = execute(replay, true, Os::Linux, PORTS);
+    assert_eq!(ran.finding().level, Level::Pass, "{:?}", ran.finding());
+    assert_eq!(
+        ran.finding().observed["active"][0]["ports"]["6443"]["detail"],
+        "protocols: tcp"
+    );
+}
+
+#[test]
+fn a_zone_listing_cut_by_a_limit_warns_and_does_not_block() {
+    let listing = format!(
+        "public (active)\n  target: default\n{}",
+        "  masquerade: no\n".repeat(700)
+    );
+    let replay = firewalld_machine().command(
+        "firewall-cmd",
+        &["--list-all", "--zone=public"],
+        0,
+        &listing,
+    );
+    let ran = execute(replay, true, Os::Linux, PORTS);
+    assert_eq!(ran.finding().level, Level::Warn, "{:?}", ran.finding());
 }
 
 #[test]
@@ -453,6 +595,39 @@ fn ufw_blocks_a_port_that_no_rule_allows_under_a_drop_policy() {
         .as_str()
         .unwrap_or_default();
     assert!(detail.contains("default input policy is DROP"), "{detail}");
+}
+
+#[test]
+fn ufw_rules_with_log_actions_and_comments_pass() {
+    let ran = run_case(&UFW_COMMENT_AND_LOG, PORTS);
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Pass, "{f:?}");
+    assert_eq!(f.message, "ufw allows 6443/tcp and 10250/tcp inbound.");
+}
+
+#[test]
+fn a_ufw_rule_line_rdy_cannot_read_warns_and_does_not_block() {
+    let ran = run_case(&UFW_UNREAD_RULE, PORTS);
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert!(
+        f.message.contains("not in the form rdy reads"),
+        "{}",
+        f.message
+    );
+}
+
+#[test]
+fn an_unreadable_rules_file_read_as_root_does_not_ask_for_root_again() {
+    let found = super::ufw_rules_unreadable(&[6443], "permission denied");
+    assert!(found.missing.is_empty());
+    let Verdict::Unknown(why) = &found.verdicts[0].1 else {
+        panic!("expected unknown");
+    };
+    assert!(
+        why.contains("could not be read as root (permission denied)"),
+        "{why}"
+    );
 }
 
 #[test]

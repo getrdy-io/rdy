@@ -2,7 +2,8 @@
 //! judgement of one inbound TCP port against a zone.
 //!
 //! The parsers read text that the tool wrote for people, so they take only what they know and drop the
-//! rest. Every list has a limit. Nothing here panics on any input.
+//! rest. Every list has a limit, and a limit that cuts the text is recorded: a cut listing gives
+//! "unknown", never "closed". Nothing here panics on any input.
 
 use super::Verdict;
 use super::ports::PortRange;
@@ -18,39 +19,77 @@ const MAX_ZONES: usize = 64;
 const MAX_RULES: usize = 100;
 /// The longest rich rule kept, in characters.
 const MAX_RULE: usize = 1024;
-/// The longest rich rule quoted in a message, in characters.
-pub(super) const QUOTE_RULE: usize = 160;
 
 /// One zone from `--get-active-zones`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(super) struct ActiveZone {
     pub(super) name: String,
     pub(super) interfaces: Vec<String>,
+    /// The addresses, networks and address sets bound to the zone. Traffic from them is handled by this
+    /// zone before the zone of the interface is looked at.
+    pub(super) sources: Vec<String>,
+}
+
+/// Every active zone, and whether the listing was longer than rdy reads.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(super) struct ActiveZones {
+    pub(super) zones: Vec<ActiveZone>,
+    /// A limit cut the listing, so a zone or a source may be missing from `zones`.
+    pub(super) truncated: bool,
+}
+
+impl ActiveZones {
+    /// The names of the active zones other than `picked` that have sources.
+    pub(super) fn source_bound_besides(&self, picked: &str) -> Vec<&str> {
+        self.zones
+            .iter()
+            .filter(|z| z.name != picked && !z.sources.is_empty())
+            .map(|z| z.name.as_str())
+            .collect()
+    }
+}
+
+/// The first [`MAX_WORDS`] words of a list line, and whether there were more.
+fn words(value: &str) -> (Vec<&str>, bool) {
+    let mut list: Vec<&str> = value.split_whitespace().take(MAX_WORDS + 1).collect();
+    let more = list.len() > MAX_WORDS;
+    list.truncate(MAX_WORDS);
+    (list, more)
 }
 
 /// Reads `--get-active-zones`: an unindented zone name, then indented `interfaces:` and `sources:`.
-pub(super) fn parse_active_zones(text: &str) -> Vec<ActiveZone> {
-    let mut zones: Vec<ActiveZone> = Vec::new();
-    for line in text.lines().take(MAX_LINES) {
+pub(super) fn parse_active_zones(text: &str) -> ActiveZones {
+    let mut out = ActiveZones::default();
+    let mut lines = text.lines();
+    for line in lines.by_ref().take(MAX_LINES) {
         if line.trim().is_empty() {
             continue;
         }
         if line.starts_with(char::is_whitespace) {
-            if let (Some(zone), Some(("interfaces", list))) = (
-                zones.last_mut(),
-                line.trim().split_once(':').map(|(k, v)| (k.trim(), v)),
-            ) {
-                zone.interfaces
-                    .extend(list.split_whitespace().take(MAX_WORDS).map(str::to_owned));
+            let Some(zone) = out.zones.last_mut() else {
+                continue;
+            };
+            let Some((key, list)) = line.trim().split_once(':') else {
+                continue;
+            };
+            let (list, more) = words(list);
+            out.truncated |= more;
+            match key.trim() {
+                "interfaces" => zone.interfaces.extend(list.into_iter().map(str::to_owned)),
+                "sources" => zone.sources.extend(list.into_iter().map(str::to_owned)),
+                _ => {}
             }
-        } else if zones.len() < MAX_ZONES {
-            zones.push(ActiveZone {
+        } else if out.zones.len() < MAX_ZONES {
+            out.zones.push(ActiveZone {
                 name: line.trim().to_owned(),
-                interfaces: Vec::new(),
+                ..ActiveZone::default()
             });
+        } else {
+            out.truncated = true;
         }
     }
-    zones
+    out.truncated |= lines.next().is_some();
+    out
 }
 
 /// What a zone does with traffic that no rule in it matches.
@@ -82,16 +121,24 @@ pub(super) struct Zone {
     pub(super) target: Target,
     pub(super) services: Vec<String>,
     pub(super) tcp: Vec<PortRange>,
+    /// `protocols: tcp` opens every TCP port.
+    pub(super) all_tcp: bool,
     pub(super) rich_rules: Vec<String>,
     /// The zone has sources that are address sets (`ipset:name`). Traffic from those addresses may be
     /// handled by this zone and not by the interface's zone, and the listing cannot say which.
     pub(super) ipset_sources: bool,
+    /// Why the listing was not read to its end: a limit cut it. What is missing might change the
+    /// answer, so every port is "unknown".
+    pub(super) incomplete: Option<&'static str>,
 }
 
 /// Reads one zone listing. `None` when the first line is not a zone header.
 pub(super) fn parse_zone(text: &str) -> Option<Zone> {
-    let mut lines = text.lines().take(MAX_LINES);
-    let header = lines.find(|l| !l.trim().is_empty())?;
+    let mut lines = text.lines();
+    let header = lines
+        .by_ref()
+        .take(MAX_LINES)
+        .find(|l| !l.trim().is_empty())?;
     if header.starts_with(char::is_whitespace) {
         return None;
     }
@@ -100,20 +147,25 @@ pub(super) fn parse_zone(text: &str) -> Option<Zone> {
         name: name.to_owned(),
         ..Zone::default()
     };
-    for line in lines {
+    let mut cut = false;
+    for line in lines.by_ref().take(MAX_LINES) {
         let trimmed = line.trim();
         // A rich rule is printed on its own line after `rich rules:`. It can hold colons (IPv6), so it
         // is recognised by its first word and never split at a colon.
         if trimmed.starts_with("rule ") || trimmed == "rule" {
             if zone.rich_rules.len() < MAX_RULES {
+                cut |= trimmed.chars().nth(MAX_RULE).is_some();
                 zone.rich_rules.push(cut_chars(trimmed, MAX_RULE));
+            } else {
+                cut = true;
             }
             continue;
         }
         let Some((key, value)) = trimmed.split_once(':') else {
             continue;
         };
-        let words = || value.split_whitespace().take(MAX_WORDS);
+        let (list, more) = words(value);
+        cut |= more;
         match key.trim() {
             "target" => {
                 zone.target = match value.trim() {
@@ -123,16 +175,28 @@ pub(super) fn parse_zone(text: &str) -> Option<Zone> {
                     _ => Target::Default,
                 };
             }
-            "services" => zone.services = words().map(str::to_owned).collect(),
+            "services" => {
+                zone.services.clear();
+                for word in list {
+                    if !zone.services.iter().any(|s| s == word) {
+                        zone.services.push(word.to_owned());
+                    }
+                }
+            }
             "ports" => {
-                zone.tcp = words()
+                zone.tcp = list
+                    .into_iter()
                     .filter_map(|w| w.strip_suffix("/tcp"))
                     .filter_map(|w| PortRange::parse(w, '-'))
                     .collect();
             }
-            "sources" => zone.ipset_sources = words().any(|w| w.starts_with("ipset:")),
+            "protocols" => zone.all_tcp = list.iter().any(|w| matches!(*w, "tcp" | "6")),
+            "sources" => zone.ipset_sources = list.iter().any(|w| w.starts_with("ipset:")),
             _ => {}
         }
+    }
+    if cut || lines.next().is_some() {
+        zone.incomplete = Some("is longer than rdy reads");
     }
     Some(zone)
 }
@@ -230,7 +294,8 @@ fn port_element_covers(element: &Element, port: u16) -> bool {
 ///
 /// A rule is left out only when it names a port or a service that does not cover the port, or a
 /// kind of rule that has nothing to do with inbound TCP (ICMP, masquerade, source ports). A rule with
-/// no such element applies to all traffic from or to some address, so it counts.
+/// no such element applies to all traffic from or to some address, so it counts. The verdict does not
+/// depend on this (any rich rule gives "unknown"); it picks which rule the message describes.
 fn rich_rule_applies(rule: &str, services: &Services, port: u16) -> bool {
     let elems = elements(rule);
     let find = |name: &str| elems.iter().find(|e| e.name == name);
@@ -247,13 +312,79 @@ fn rich_rule_applies(rule: &str, services: &Services, port: u16) -> bool {
     !elems.iter().any(|e| unrelated.contains(&e.name.as_str()))
 }
 
+/// What a rich rule says, from its parsed parts only: the family, whether it has a source or a
+/// destination, what it names (a port or a service), and the action. The values of `source`,
+/// `destination`, `log` and `audit` are never repeated, because they can hold addresses, set names and
+/// free text.
+fn describe(rule: &str) -> String {
+    let elems = elements(rule);
+    let find = |name: &str| elems.iter().find(|e| e.name == name);
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(family) = find("rule").and_then(|e| e.attr("family"))
+        && matches!(family, "ipv4" | "ipv6")
+    {
+        parts.push(family.to_owned());
+    }
+    for word in ["source", "destination"] {
+        if let Some(element) = find(word) {
+            parts.push(if element.attr("address").is_some() {
+                format!("{word} address")
+            } else {
+                word.to_owned()
+            });
+        }
+    }
+    if let Some(element) = find("port") {
+        let port = element
+            .attr("port")
+            .filter(|p| PortRange::parse(p, '-').is_some());
+        let proto = element
+            .attr("protocol")
+            .filter(|p| p.eq_ignore_ascii_case("tcp") || p.eq_ignore_ascii_case("udp"));
+        parts.push(match (port, proto) {
+            (Some(port), Some(proto)) => format!("port {port}/{}", proto.to_ascii_lowercase()),
+            (Some(port), None) => format!("port {port}"),
+            _ => "port".to_owned(),
+        });
+    } else if let Some(element) = find("service") {
+        parts.push(match element.attr("name") {
+            Some(name) if super::service::valid_name(name) => format!("service {name}"),
+            _ => "service".to_owned(),
+        });
+    } else if find("forward-port").is_some() {
+        parts.push("forward-port".to_owned());
+    } else if find("protocol").is_some() {
+        parts.push("protocol".to_owned());
+    }
+    if let Some(action) = ["accept", "reject", "drop", "mark"]
+        .into_iter()
+        .find(|a| find(a).is_some())
+    {
+        parts.push(action.to_owned());
+    }
+    if parts.is_empty() {
+        "rule".to_owned()
+    } else {
+        parts.join(", ")
+    }
+}
+
 /// Judges inbound TCP `port` against `zone`.
+///
+/// The work is bounded: at most [`MAX_WORDS`] distinct service names in the zone, each looked up in a
+/// map of at most 32 services and walked in at most 513 steps (see `Services::search`).
 pub(super) fn judge(zone: &Zone, services: &Services, port: u16) -> Verdict {
+    if let Some(why) = zone.incomplete {
+        return Verdict::Unknown(format!("the zone listing {why}"));
+    }
     let mut unresolved: Option<String> = None;
     let mut limited: Option<String> = None;
     let mut open: Option<String> = None;
     if zone.tcp.iter().any(|range| range.covers(port)) {
         open = Some(format!("ports: {port}/tcp"));
+    }
+    if open.is_none() && zone.all_tcp {
+        open = Some("protocols: tcp".to_owned());
     }
     if open.is_none() {
         for name in &zone.services {
@@ -272,15 +403,18 @@ pub(super) fn judge(zone: &Zone, services: &Services, port: u16) -> Verdict {
         open = Some("zone target ACCEPT".to_owned());
     }
 
-    let applying: Vec<&String> = zone
+    // Any rich rule makes the answer unknown: rdy does not evaluate them. The one described is the
+    // first that touches the port, or else the first.
+    let named = zone
         .rich_rules
         .iter()
-        .filter(|rule| rich_rule_applies(rule, services, port))
-        .collect();
-    if let Some(rule) = applying.first() {
-        let shown = cut_chars(rule, QUOTE_RULE);
+        .find(|rule| rich_rule_applies(rule, services, port))
+        .or_else(|| zone.rich_rules.first());
+    if let Some(rule) = named {
         return Verdict::Unknown(format!(
-            "a rich rule applies and firewalld rich rules are not evaluated: {shown}"
+            "the zone has {} rich rule(s) and firewalld rich rules are not evaluated (for example: {})",
+            zone.rich_rules.len(),
+            describe(rule)
         ));
     }
     if zone.ipset_sources {

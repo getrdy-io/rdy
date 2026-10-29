@@ -42,6 +42,8 @@ const RUN_FIREWALLD: &str = "/run/firewalld";
 const UFW_CONF: &str = "/etc/ufw/ufw.conf";
 const UFW_DEFAULTS: &str = "/etc/default/ufw";
 const UFW_RULES: &str = "/etc/ufw/user.rules";
+/// Direct rules (raw iptables or nftables rules handed to firewalld) that survive a reload.
+const DIRECT_XML: &str = "/etc/firewalld/direct.xml";
 const ROUTE_V4: &str = "/proc/net/route";
 const ROUTE_V6: &str = "/proc/net/ipv6_route";
 
@@ -67,6 +69,7 @@ static INFO: CheckInfo = CheckInfo {
         RUN_FIREWALLD,
         "/etc/firewalld/services",
         "/usr/lib/firewalld/services",
+        DIRECT_XML,
         UFW_CONF,
         UFW_DEFAULTS,
         UFW_RULES,
@@ -253,7 +256,7 @@ impl Firewall {
             ));
         }
         let found = Inspection::new("firewalld").with_note(
-            "firewalld policies, direct rules and rules written outside firewalld are not read",
+            "firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read",
         );
         Ok(Some(self.firewalld_rules(ctx, found).await?))
     }
@@ -279,7 +282,7 @@ impl Firewall {
             _ => return Ok(self.cannot("firewall-cmd --get-active-zones gave no zones")),
         };
         let iface = default_interface(ctx).await?;
-        let zone = match pick_zone(&zones, iface.as_deref()) {
+        let zone = match pick_zone(&zones.zones, iface.as_deref()) {
             Ok(picked) => picked,
             Err(why) => return Ok(self.cannot(&why)),
         };
@@ -312,6 +315,12 @@ impl Firewall {
             .iter()
             .map(|p| (*p, firewalld::judge(&parsed, &services, *p)))
             .collect();
+        if let Some(why) = self.direct_rules(ctx).await? {
+            for (_, verdict) in &mut found.verdicts {
+                *verdict = Verdict::Unknown(why.clone());
+            }
+        }
+        demote_closed(&mut found, &zones, &name);
         if !parsed.rich_rules.is_empty() {
             found.notes.push(format!(
                 "zone {name} has {} rich rule(s)",
@@ -319,6 +328,22 @@ impl Firewall {
             ));
         }
         Ok(found)
+    }
+
+    /// Why direct rules make every answer unknown: `/etc/firewalld/direct.xml` holds a rule, or could
+    /// not be read to the end. `None` when it is absent or holds no rule.
+    async fn direct_rules(&self, ctx: &CheckContext) -> Result<Option<String>, CheckError> {
+        Ok(match read_text(ctx, DIRECT_XML).await? {
+            Read::Absent => None,
+            Read::Text(xml) => match service::has_tag(&xml, "rule") {
+                Ok(true) => Some(format!(
+                    "{DIRECT_XML} holds direct rules, which rdy does not evaluate"
+                )),
+                Ok(false) => None,
+                Err(why) => Some(format!("{DIRECT_XML} {why}")),
+            },
+            Read::Unreadable(why) => Some(format!("{DIRECT_XML} could not be read ({why})")),
+        })
     }
 
     /// ufw, or `None` when it is not enabled.
@@ -362,13 +387,7 @@ impl Firewall {
             Read::Absent => Vec::new(),
             Read::Unreadable(why) => {
                 return Ok(Some(
-                    Inspection::cannot(
-                        "ufw",
-                        &self.ports,
-                        &format!("/etc/ufw/user.rules could not be read ({why})"),
-                        vec![Need::Root],
-                    )
-                    .with_note(note),
+                    ufw_rules_unreadable(&self.ports, &why).with_note(note),
                 ));
             }
         };
@@ -487,6 +506,47 @@ async fn firewall_cmd(ctx: &CheckContext, form: &str, params: &[&str]) -> Result
     match entry.form(form).and_then(|f| f.classify(code)) {
         Some(class) => Ok(Ran::Exit(class, out.stdout)),
         None => Ok(Ran::Odd(format!("it exited with code {code}"))),
+    }
+}
+
+/// Every port is unknown because `user.rules` could not be read. This runs only as root, so the answer
+/// does not ask for root again: a security module or a user namespace is the more likely cause.
+fn ufw_rules_unreadable(ports: &[u16], why: &str) -> Inspection {
+    Inspection::cannot(
+        "ufw",
+        ports,
+        &format!("{UFW_RULES} could not be read as root ({why})"),
+        Vec::new(),
+    )
+}
+
+/// A zone with sources takes the traffic from those addresses before the zone of the interface does.
+/// When another active zone has sources (or the zone list was cut), a "closed" answer for the picked
+/// zone is not proven, so it becomes "unknown" with a note.
+fn demote_closed(found: &mut Inspection, zones: &firewalld::ActiveZones, picked: &str) {
+    let others = zones.source_bound_besides(picked);
+    if others.is_empty() && !zones.truncated {
+        return;
+    }
+    let why = if others.is_empty() {
+        "the list of active zones is longer than rdy reads, so a zone with sources may be missing"
+            .to_owned()
+    } else {
+        let shown: Vec<&str> = others.iter().copied().take(3).collect();
+        format!(
+            "active zone {} is bound to source addresses and takes traffic from them before zone {picked}",
+            shown.join(", ")
+        )
+    };
+    let mut changed = false;
+    for (_, verdict) in &mut found.verdicts {
+        if matches!(verdict, Verdict::Closed(_)) {
+            *verdict = Verdict::Unknown(why.clone());
+            changed = true;
+        }
+    }
+    if changed {
+        found.notes.push(why);
     }
 }
 

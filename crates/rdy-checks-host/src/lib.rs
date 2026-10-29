@@ -4,8 +4,8 @@
 //!
 //! So far this crate holds the OS support table and a stub for each host check (M1-067). The real
 //! checks replace the stubs one ticket at a time (M1-068 and later). [`Firewall`] (`host.firewall`,
-//! M1-147) is real but not in the family yet, because `rdy-spec` has no parameter struct for it. Every check compiles on every
-//! target. Where a data source is not built, the check is `NotYet` on that OS, and the planner skips
+//! M1-147) is real but not in the family yet, because `rdy-spec` has no parameter struct for it. M1-172
+//! (added by correction-17, PR #99) registers it. Every check compiles on every target. Where a data source is not built, the check is `NotYet` on that OS, and the planner skips
 //! it with `skip_kind: not_yet_on_os` before it runs.
 //!
 //! Rule: do not register [`HostFamily`] in the CLI while [`HostFamily::stub_ids`] is not empty. On Linux
