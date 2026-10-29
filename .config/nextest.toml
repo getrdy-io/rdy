@@ -2,7 +2,7 @@
 # CI runs `cargo nextest run --profile ci`. Locally the default profile applies.
 
 # Oldest nextest that reads these settings. CI pins an exact version in .github/workflows/ci.yml.
-nextest-version = "0.9.100"
+nextest-version = "0.9.145"
 
 # trybuild compile-fail tests run a nested `cargo build` of their own. That takes minutes on a slow
 # runner (the Intel macOS runner needs about 90 seconds). Convention: the test binary of a trybuild

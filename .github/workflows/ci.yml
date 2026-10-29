@@ -246,6 +246,7 @@ jobs:
         if: matrix.name == 'linux-x64'
         run: |
           list="$(cargo nextest list --workspace --locked --target "$TARGET" --profile ci --message-format oneline)"
+          test -n "$list"
           if printf '%s\n' "$list" | grep -E '(^|[ :])root_[^: ]*$'; then
             echo "::error::the ci profile lists a root_* test; check default-filter in .config/nextest.toml"
             exit 1
