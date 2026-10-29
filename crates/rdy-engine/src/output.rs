@@ -17,8 +17,15 @@
 //!   it is resolved by `cap-std`, which cannot leave the folder.
 //! - **Owner and mode (Unix).** The opened handle must be a folder owned by the effective user.
 //!   rdy then sets it to 0700 with `fchmod`, which also clears a setgid bit that the parent passed
-//!   on, and reads the mode back. Nothing depends on the umask. The Windows checks are M1-037; until
-//!   then Windows only gets the no-follow open and the checks of the next point.
+//!   on, and reads the mode back. Nothing depends on the umask.
+//! - **Windows (M1-037).** The default parent is `%USERPROFILE%\rdy-reports`
+//!   ([`default_report_parent`]). It is made if it is missing and opened without following a link, and
+//!   its handle is checked like the run folder. `USERPROFILE` must be a local drive path, never a
+//!   network share. The run folder's handle must be a folder and no reparse point (a symlink, a
+//!   junction or any other), and its final path must equal the expected one. Otherwise
+//!   [`OutputDir::create_new_in`] fails before the first check. rdy sets and reads no ACL in M1 (that
+//!   needs FFI, SEC-58 and M2-105), so the folder keeps the ACL it inherits. That is a named residual
+//!   (ADR 0016 decision 7), not a silent pass.
 //! - **Files.** Each file is made with `create_new` at 0600 (and `fchmod`, so the umask does not
 //!   matter) as `.<name>.tmp`, written, flushed to disk, and then given its final name without
 //!   replacing anything. A run that is killed leaves at most `.tmp` files, never a half-written file
@@ -126,6 +133,22 @@ pub enum ReportError {
         /// The mode the OS reports, in the low twelve bits.
         mode: u32,
     },
+    /// Something redirects the folder or is not a plain folder: a symlink, a junction, another
+    /// reparse point (Windows), a file, or a path that leads somewhere else.
+    #[error(
+        "the report folder {path} is a link, a junction, a cloud-sync folder or another redirect, or is not a folder. \
+         Fix: use --out-dir <an ordinary folder you own on a local disk>, not a link, junction or cloud-sync folder"
+    )]
+    NotPlainFolder {
+        /// The folder.
+        path: PathBuf,
+    },
+    /// The default folder cannot be named because `USERPROFILE` is not a usable path. Windows only.
+    #[error(
+        "the default report folder is unknown because USERPROFILE is not set to a path on a local drive. \
+         Fix: set USERPROFILE, or use --out-dir <a folder you can write to>, or --no-report to skip the files"
+    )]
+    NoDefaultFolder,
     /// A file with this final name is already in the folder. rdy never replaces it.
     #[error("the report file {path} already exists. Fix: this is a bug in rdy; run again")]
     FileExists {
@@ -153,6 +176,39 @@ impl ReportError {
     }
 }
 
+/// The folder that will hold the report folder, opened once and held until the report folder is made.
+///
+/// [`ReportParent::open`] follows links, because the operator chose the path. [`default_report_parent`]
+/// opens the Windows default without following one.
+#[derive(Debug)]
+pub struct ReportParent {
+    dir: Dir,
+    /// The folder as named to the operator, for messages only.
+    path: PathBuf,
+}
+
+impl ReportParent {
+    /// Opens `path`, which must exist, following symlinks.
+    ///
+    /// # Errors
+    ///
+    /// [`ReportError::Io`] with the action [`OPEN_PARENT`] when it cannot be opened.
+    pub fn open(path: &Path) -> Result<Self, ReportError> {
+        let dir = Dir::open_ambient_dir(path, ambient_authority())
+            .map_err(|e| ReportError::io(OPEN_PARENT, path, e))?;
+        Ok(Self {
+            dir,
+            path: path.to_path_buf(),
+        })
+    }
+
+    /// The folder as the operator would type it. For messages only.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 /// A report folder that rdy made and holds open (see the module docs).
 #[derive(Debug)]
 pub struct OutputDir {
@@ -172,17 +228,32 @@ impl OutputDir {
     ///
     /// # Errors
     ///
+    /// The same as [`OutputDir::create_new_in`], and [`ReportError::Io`] when `parent` cannot be opened.
+    pub fn create_new(parent: &Path, product: &str, ts: &str) -> Result<Self, ReportError> {
+        check_names(product, ts)?;
+        Self::create_new_in(&ReportParent::open(parent)?, product, ts)
+    }
+
+    /// Like [`OutputDir::create_new`], in a parent that is already open, such as the one from
+    /// [`default_report_parent`]. The open of the new folder is relative to the held parent handle. On
+    /// Windows `cap-std` turns the handle back into a path to make the folder, so a race between the
+    /// make and the open is possible, and it fails closed: the open and the checks refuse a swapped
+    /// link.
+    ///
+    /// # Errors
+    ///
     /// [`ReportError::BadProduct`] and [`ReportError::BadTimestamp`] for names that do not fit,
     /// [`ReportError::NameTaken`] when `-9` is taken too, [`ReportError::NotOwner`] and
-    /// [`ReportError::NotPrivate`] when the new folder is not ours and private, and
-    /// [`ReportError::Io`] for anything the OS refuses.
-    pub fn create_new(parent: &Path, product: &str, ts: &str) -> Result<Self, ReportError> {
-        let product = ProductSlug::new(product).map_err(|_| ReportError::BadProduct)?;
-        if !is_timestamp(ts) {
-            return Err(ReportError::BadTimestamp);
-        }
-        let parent_dir = Dir::open_ambient_dir(parent, ambient_authority())
-            .map_err(|e| ReportError::io(OPEN_PARENT, parent, e))?;
+    /// [`ReportError::NotPrivate`] when the new folder is not ours and private,
+    /// [`ReportError::NotPlainFolder`] when the new folder was swapped for a link or is a reparse
+    /// point (Windows), and [`ReportError::Io`] for anything the OS refuses.
+    pub fn create_new_in(
+        parent: &ReportParent,
+        product: &str,
+        ts: &str,
+    ) -> Result<Self, ReportError> {
+        let product = check_names(product, ts)?;
+        let parent_dir = &parent.dir;
         let base = report_folder_name(product.as_ref(), ts);
         for attempt in 1..=MAX_NAME_TRIES {
             let name = if attempt == 1 {
@@ -190,8 +261,8 @@ impl OutputDir {
             } else {
                 format!("{base}-{attempt}")
             };
-            let path = parent.join(&name);
-            match make_dir(&parent_dir, &name) {
+            let path = parent.path.join(&name);
+            match make_dir(parent_dir, &name) {
                 Ok(()) => {}
                 // A folder, a file or a symlink is there already. A symlink is not followed: mkdir
                 // reports the name as taken without looking at the target.
@@ -199,9 +270,9 @@ impl OutputDir {
                 Err(e) => return Err(ReportError::io("create the report folder", &path, e)),
             }
             #[cfg(test)]
-            tests::after_make_dir(parent, &name);
-            let opened = open_new_dir(&parent_dir, &name)
-                .map_err(|e| ReportError::io("open the report folder", &path, e))
+            tests::after_make_dir(&parent.path, &name);
+            let opened = open_new_dir(parent_dir, &name)
+                .map_err(|e| open_error("open the report folder", parent_dir, &name, &path, e))
                 .and_then(|dir| harden(&dir, &path).map(|()| dir));
             return match opened {
                 Ok(dir) => Ok(Self { dir, name, path }),
@@ -214,7 +285,7 @@ impl OutputDir {
             };
         }
         Err(ReportError::NameTaken {
-            parent: parent.to_path_buf(),
+            parent: parent.path.clone(),
         })
     }
 
@@ -415,13 +486,164 @@ fn no_hard_links(_err: &io::Error) -> bool {
     true
 }
 
-/// The default parent folder when `--out-dir` is not given.
+/// The folder that holds the report folder when `--out-dir` is not given (ADR 0016 decision 1).
 ///
-/// Unix: `.`. Windows will use `%USERPROFILE%\rdy-reports` (ADR 0016 decision 1); that default and
-/// its reparse-point checks are M1-037, and until then it is `.` there too, with `harden` failing open.
-#[must_use]
-pub fn default_parent() -> PathBuf {
-    PathBuf::from(".")
+/// Unix: `.`, and nothing is touched. Windows: `%USERPROFILE%\rdy-reports`, made if it is missing and
+/// opened without following a link. The handle is checked like the run folder's: a folder, no reparse
+/// point of any kind, and the expected final path. `.` is used on Windows only when `--out-dir .` is
+/// given.
+///
+/// `USERPROFILE` must be a full path on a local drive. A network share is refused, so a default run
+/// never sends a report over SMB.
+///
+/// # Errors
+///
+/// [`ReportError::NoDefaultFolder`] when `USERPROFILE` is unset, empty, relative or on a network share
+/// (Windows), [`ReportError::NotPlainFolder`] for a redirect or a file in the way, and
+/// [`ReportError::Io`] when the folder cannot be made or opened.
+pub fn default_report_parent() -> Result<ReportParent, ReportError> {
+    #[cfg(windows)]
+    {
+        let profile = std::env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute() && is_local_drive(p))
+            .ok_or(ReportError::NoDefaultFolder)?;
+        // A mapped drive that points at a share resolves to a network path, and is refused. The
+        // profile is opened by its resolved local path, and the result keeps the path as given, so
+        // messages show the familiar `C:\Users\...` and not the `\\?\` form. std has no safe way to
+        // read the final path of a handle, so the profile is resolved again after the open, and a
+        // different answer (a swap in between) is refused.
+        let io = |e| ReportError::io("resolve the user profile folder", &profile, e);
+        let real = std::fs::canonicalize(&profile).map_err(io)?;
+        if !is_local_drive(&real) {
+            return Err(ReportError::NoDefaultFolder);
+        }
+        let parent = open_default_in(&real, &profile)?;
+        if std::fs::canonicalize(&profile).map_err(io)? != real {
+            return Err(ReportError::NotPlainFolder { path: parent.path });
+        }
+        Ok(parent)
+    }
+    #[cfg(not(windows))]
+    ReportParent::open(Path::new("."))
+}
+
+/// True when the path starts with a drive letter, `C:` or `\\?\C:`, and not with a network share.
+#[cfg(windows)]
+fn is_local_drive(path: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    matches!(
+        path.components().next(),
+        Some(Component::Prefix(p)) if matches!(p.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+    )
+}
+
+/// The name of the default folder under the user profile.
+#[cfg(any(windows, test))]
+const DEFAULT_FOLDER: &str = "rdy-reports";
+
+/// Makes `<profile>/rdy-reports` if it is missing, opens it without following a link and refuses it if
+/// it is not a plain folder.
+///
+/// `profile` must exist. `shown` is the same folder as the operator knows it, for messages and for
+/// the path check, and is `profile` itself unless the caller opened a resolved form. It is held open, and the default folder is opened as a name below that
+/// handle, so a link swapped in for it after the make is refused by the open and not followed. A new
+/// folder inherits the profile ACL (owner, SYSTEM and Administrators by default).
+#[cfg(any(windows, test))]
+fn open_default_in(profile: &Path, shown: &Path) -> Result<ReportParent, ReportError> {
+    let path = shown.join(DEFAULT_FOLDER);
+    let profile_dir = Dir::open_ambient_dir(profile, ambient_authority())
+        .map_err(|e| ReportError::io("open the user profile folder", profile, e))?;
+    match make_dir(&profile_dir, DEFAULT_FOLDER) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(e) => {
+            return Err(ReportError::io(
+                "create the default report folder",
+                &path,
+                e,
+            ));
+        }
+    }
+    let dir = open_new_dir(&profile_dir, DEFAULT_FOLDER).map_err(|e| {
+        open_error(
+            "open the default report folder",
+            &profile_dir,
+            DEFAULT_FOLDER,
+            &path,
+            e,
+        )
+    })?;
+    #[cfg(windows)]
+    check_plain_folder(&dir, &path)?;
+    Ok(ReportParent { dir, path })
+}
+
+/// Names the error of a failed no-follow open. When `name` below `parent` is no longer a plain
+/// folder, because it is a link, a junction or a file, the answer is [`ReportError::NotPlainFolder`].
+/// Anything else is an I/O error with `action`.
+fn open_error(
+    action: &'static str,
+    parent: &Dir,
+    name: &str,
+    path: &Path,
+    err: io::Error,
+) -> ReportError {
+    // ERROR_STOPPED_ON_SYMLINK, which `cap-std` gives for a link on Windows.
+    const STOPPED_ON_SYMLINK: i32 = 681;
+    let redirected = err.raw_os_error() == Some(STOPPED_ON_SYMLINK)
+        || parent
+            .symlink_metadata(name)
+            .is_ok_and(|m| m.file_type().is_symlink() || !m.is_dir());
+    if redirected {
+        ReportError::NotPlainFolder {
+            path: path.to_path_buf(),
+        }
+    } else {
+        ReportError::io(action, path, err)
+    }
+}
+
+/// Checks the product and the time stamp, and returns the product as a slug.
+fn check_names(product: &str, ts: &str) -> Result<ProductSlug, ReportError> {
+    let product = ProductSlug::new(product).map_err(|_| ReportError::BadProduct)?;
+    if !is_timestamp(ts) {
+        return Err(ReportError::BadTimestamp);
+    }
+    Ok(product)
+}
+
+/// `FILE_ATTRIBUTE_DIRECTORY`.
+#[cfg(any(windows, test))]
+const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+
+/// `FILE_ATTRIBUTE_REPARSE_POINT`. Set for symlinks, junctions, and the other reparse tags, such as
+/// cloud placeholders and mount points.
+#[cfg(any(windows, test))]
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+/// A folder, and no reparse point of any kind. The attribute bits are the ones Windows reports.
+#[cfg(any(windows, test))]
+fn plain_folder_attributes(attributes: u32) -> bool {
+    attributes & FILE_ATTRIBUTE_DIRECTORY != 0 && attributes & FILE_ATTRIBUTE_REPARSE_POINT == 0
+}
+
+/// True when `path` leads to the folder it names: the final path of `path` is the final path of its
+/// parent plus its own name. A junction or a symlink leads to its target, so the two differ.
+///
+/// This resolves by name, so it is a second check beside the handle checks and not a replacement.
+#[cfg(any(windows, test))]
+fn final_path_is_expected(path: &Path) -> io::Result<bool> {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Ok(false);
+    };
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    let expected = std::fs::canonicalize(parent)?.join(name);
+    Ok(std::fs::canonicalize(path)? == expected)
 }
 
 /// The folder name before any `-2` to `-9`: `rdy-report-<product>-<ts>`. For messages and for
@@ -585,12 +807,51 @@ fn harden(dir: &Dir, path: &Path) -> Result<(), ReportError> {
     Ok(())
 }
 
-/// Windows: not a reparse point, final path equals the expected one, ACL checks. M1-037 builds it.
+/// Windows: a folder, not a reparse point of any kind, and its final path is the expected one.
 ///
-/// This stub FAILS OPEN: it checks nothing and always returns `Ok`. Until M1-037 lands, a Windows
-/// run relies on `open_dir_nofollow` alone, and the default parent is `.` and not a private folder.
-/// M1-057 (wiring `rdy run`) depends on M1-037 for this reason.
-#[cfg(not(unix))]
-fn harden(_dir: &Dir, _path: &Path) -> Result<(), ReportError> {
+/// No ACL is read or set. That needs FFI (`forbid(unsafe_code)` holds), so it waits for M2-085 and
+/// M2-105. The folder keeps the ACL it inherits. M1-057 adds the ADR 0016 decision 7 note to the
+/// report, and tells the user to keep the default folder.
+#[cfg(windows)]
+fn harden(dir: &Dir, path: &Path) -> Result<(), ReportError> {
+    check_plain_folder(dir, path)
+}
+
+/// Windows: the checks that make a folder handle safe to write through, for the run folder and for
+/// the default parent.
+///
+/// The attributes are read from the open handle, which `open_new_dir` opened on the name without
+/// following a link, so a junction or symlink swapped in after the `mkdir` shows the reparse bit
+/// (and the open already refuses the symlink kinds). The final path is then read by name as well.
+/// Any failure is an error: the check fails closed.
+#[cfg(windows)]
+fn check_plain_folder(dir: &Dir, path: &Path) -> Result<(), ReportError> {
+    use std::os::windows::fs::MetadataExt as _;
+
+    let read = |e| ReportError::io("read the attributes of", path, e);
+    let handle = dir.try_clone().map_err(read)?.into_std_file();
+    let attributes = handle.metadata().map_err(read)?.file_attributes();
+    let redirected = || ReportError::NotPlainFolder {
+        path: path.to_path_buf(),
+    };
+    if !plain_folder_attributes(attributes) {
+        return Err(redirected());
+    }
+    let expected = final_path_is_expected(path)
+        .map_err(|e| ReportError::io("resolve the path of", path, e))?;
+    if !expected {
+        return Err(redirected());
+    }
     Ok(())
+}
+
+/// A target with neither Unix modes nor the Windows checks refuses every folder, so it can never
+/// pass as private. rdy has five release targets and none of them is this one.
+#[cfg(not(any(unix, windows)))]
+fn harden(_dir: &Dir, path: &Path) -> Result<(), ReportError> {
+    Err(ReportError::io(
+        "check the privacy of",
+        path,
+        io::Error::from(io::ErrorKind::Unsupported),
+    ))
 }

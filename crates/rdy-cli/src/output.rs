@@ -3,21 +3,35 @@
 //! [`open_report_dir`] is the one call `rdy run` makes right after the spec is verified and before the
 //! first check. It returns `None` for `--no-report`, which creates nothing and does not look at
 //! `--out-dir`. Otherwise it makes `rdy-report-<product>-<time>/` under `--out-dir` (default `.` on
-//! Unix) and returns the open handle, or the exit-70 error of 07 section 9 row 6.
+//! Unix, `%USERPROFILE%\rdy-reports` on Windows) and returns the open handle, or the exit-70 error of 07 section 9 row 6.
 //!
 //! The M1-057 ticket wires this into `run`: call it with the parsed [`RunArgs`], the verified
 //! `metadata.product` and `SystemTime::now()`, hold the handle for the whole run, and write the report
 //! files through it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use rdy_engine::output::{
-    OPEN_PARENT, OutputDir, ReportError, default_parent, report_folder_name, report_timestamp,
+    OPEN_PARENT, OutputDir, ReportError, default_report_parent, report_folder_name,
+    report_timestamp,
 };
 
 use crate::cli::RunArgs;
 use crate::error::{CliError, IoReason, ReportReason, ReportStep};
+
+/// The default folder as 07 names it, for an error where the real path is not known.
+const DEFAULT_LABEL: &str = r"%USERPROFILE%\rdy-reports";
+
+/// How an error names the default folder when its real path is not known: `%USERPROFILE%\rdy-reports`
+/// on Windows, and the report folder in the working folder (`unix_folder`) elsewhere.
+fn default_label(windows: bool, unix_folder: PathBuf) -> PathBuf {
+    if windows {
+        PathBuf::from(DEFAULT_LABEL)
+    } else {
+        unix_folder
+    }
+}
 
 /// Makes the report folder for this run, or `None` when `--no-report` was given.
 ///
@@ -33,14 +47,23 @@ pub fn open_report_dir(
     if args.no_report {
         return Ok(None);
     }
-    let parent = args.out_dir.clone().unwrap_or_else(default_parent);
     let ts = report_timestamp(now);
-    OutputDir::create_new(&parent, product, &ts)
-        .map(Some)
-        .map_err(|err| {
-            let shown = parent.join(report_folder_name(product, &ts));
-            report_error(ReportStep::CreateFolder, &shown, err)
-        })
+    let shown = |parent: &Path| parent.join(report_folder_name(product, &ts));
+    let made = match &args.out_dir {
+        Some(dir) => OutputDir::create_new(dir, product, &ts)
+            .map_err(|err| report_error(ReportStep::CreateFolder, &shown(dir), err)),
+        // Windows: opens `%USERPROFILE%\rdy-reports` without following a link and refuses a
+        // redirect there. On Unix it opens `.`, which fails for a working folder that cannot be
+        // read, so both OSes name the folder in the error.
+        None => {
+            let label = default_label(cfg!(windows), shown(Path::new(".")));
+            let parent = default_report_parent()
+                .map_err(|err| report_error(ReportStep::CreateFolder, &label, err))?;
+            OutputDir::create_new_in(&parent, product, &ts)
+                .map_err(|err| report_error(ReportStep::CreateFolder, &shown(parent.path()), err))
+        }
+    };
+    made.map(Some)
 }
 
 /// Maps an output directory error to the CLI error. `shown` is the folder as rdy names it, the
@@ -66,6 +89,8 @@ pub fn report_error(step: ReportStep, shown: &Path, err: ReportError) -> CliErro
         }
         ReportError::NotOwner { path, .. } => (path, ReportReason::NotOwner),
         ReportError::NotPrivate { path, .. } => (path, ReportReason::NotPrivate),
+        ReportError::NotPlainFolder { path } => (path, ReportReason::NotPlainFolder),
+        ReportError::NoDefaultFolder => (shown.to_path_buf(), ReportReason::NoDefaultFolder),
         ReportError::NameTaken { parent } => (parent, ReportReason::NameTaken),
         ReportError::FileExists { path } => (path, ReportReason::FileExists),
         _ => return CliError::bug(),
