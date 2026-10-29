@@ -222,15 +222,15 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-104 | todo | | Kube guard path parser, resource allowlist and pending log entries
 
-- M1-105 | todo | | Kube mock harness (tower service replaying api/ JSON, paging and 410, selectors, legacy discovery, review table) | backlog corrected 2026-10-29 (correction-15): after every fixture run the harness asserts the mock saw only allowlisted requests (INV-14; PR #92 reviews)
+- M1-105 | todo | | Kube mock harness (tower service replaying api/ JSON, paging and 410, selectors, legacy discovery, review table) | backlog corrected 2026-10-29 (correction-15): builds the `ReadOnlyClient` discovery and raw `SelfSubjectReview` routes (4 h); after every fixture run the harness checks each recorded request against `ALLOWED` (INV-14; PR #92 reviews)
 
-- M1-106 | todo | | k8s.version (gitVersion parse, distribution, discovery API availability) | backlog corrected 2026-10-29 (correction-15): `ReadOnlyClient` gains the discovery routes (PR #92 review)
+- M1-106 | todo | | k8s.version (gitVersion parse, distribution, discovery API availability)
 
 - M1-107 | todo | | Family probe hook and lazy KubeContext probe | backlog corrected 2026-10-29 (correction-11): with no kubeconfig every k8s check is SKIP with the hint, the cluster line prints to stderr before the first request, and a timed-out exec plugin does not keep rdy from exiting (ADR 0031 residual), and each kube entry from M1-102's use file fails clippy in tests/lint-wall; depends on M1-044 too; 2.5 h | backlog corrected 2026-10-29 (correction-12): a Windows `.cmd` exec plugin test, PATH resolution of a bare plugin name for the exec action-log entry, and with no CA in the kubeconfig the client trusts the facade SystemRoots (ADR 0031 decision 9); depends on M1-092 too; 3 h (PR #76 reviews)
 
 - M1-108 | todo | | kind integration job with a restricted PSA namespace and review round trips | backlog corrected 2026-10-29 (correction-11): depends on M1-106 and runs `tests/live_cluster.rs`, the ignored kind test from M1-102; backlog corrected 2026-10-29 (correction-15): depends on M1-103; applies `examples/rbac/rdy-readonly.yaml` and passes the read-only live test with that service account (SEC-24; PR #92 reviews)
 
-- M1-109 | todo | | k8s.access (kubeconfig, version, SelfSubjectReview, anonymous warn, exec classes, proxy resolution) | backlog corrected 2026-10-29 (correction-15): sends the fixed `SelfSubjectReview` bytes through a raw `ReadOnlyClient` route (PR #92 review)
+- M1-109 | todo | | k8s.access (kubeconfig, version, SelfSubjectReview, anonymous warn, exec classes, proxy resolution) | backlog corrected 2026-10-29 (correction-15): uses M1-105's raw `SelfSubjectReview` route (PR #92 review)
 
 - M1-110 | todo | | k8s.storageclass (normalised provisioners, CSINode evidence, default rules, provisioner table)
 
@@ -308,7 +308,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-147 | todo | | host.firewall (firewalld zone and service XML, ufw) (M1-late)
 
-- M1-148 | todo | | host.time_sync (adjtimex, timedatectl, chronyc, SNTP client) (M1-late) | backlog corrected 2026-10-29 (correction-15): depends on M1-091; `ntp_servers` is the only UDP host source, counted toward INV-11; link-local server falls back to `chronyc` (PR #91 reviews)
+- M1-148 | todo | | host.time_sync (adjtimex, timedatectl, chronyc, SNTP client) (M1-late) | backlog corrected 2026-10-29 (correction-15): depends on M1-094; `ntp_servers` is the only UDP host source, counted toward INV-11; a server in a refused range falls back to `chronyc` (PR #91 reviews)
 
 - M1-149 | todo | | host.sysctl (live and persisted values, precedence, systemd limits) (M1-late)
 
