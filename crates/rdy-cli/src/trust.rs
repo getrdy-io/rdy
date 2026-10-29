@@ -29,7 +29,12 @@
 //! M1-122). So any trust file that exists is refused as unverifiable, a missing file is an empty store,
 //! and saving says it is not supported. This is the conservative reading of "refuse what you cannot
 //! verify". `--key` runs are not affected, because they read no store. Extended ACLs on macOS are not in
-//! the mode bits and are not checked yet (M1-122).
+//! the mode bits and are not checked. Reading them needs FFI, so this is a documented residual risk
+//! (threat model 05, Surface 2, and ADR 0021), not a gap to close in this crate.
+//!
+//! **Test of the root rule.** `tests/root_trust_strace.rs` runs the load under `strace -f` as root with
+//! `HOME`, `XDG_CONFIG_HOME` and `SUDO_USER` set to a fixture user, and fails on any call that mentions
+//! that user's home.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

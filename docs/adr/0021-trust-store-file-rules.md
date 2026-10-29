@@ -51,7 +51,9 @@ is unreadable or not valid gets. M1-121 has to pick. Each choice below is the on
   run that reads the system store exit 64. This blocks verification and does not make a planted store
   trusted. M1-122 replaces it with the ACL checks.
 - Extended ACLs on macOS are not in the mode bits, so a file with a write ACL for another account passes
-  the mode check. This is a residual risk (threat model 05, Surface 2). M1-122 owns the macOS ACL check.
+  the mode check. This is a residual risk (threat model 05, Surface 2). M1-122 decided not to read them:
+  it needs FFI, and `#![forbid(unsafe_code)]` holds in `rdy-cli`. The system store folder `/etc/rdy` is
+  made by root, which limits who can plant an ACL there.
 - M1-122 replaces decision 5 for Windows with the ACL checks of 01 section 4.3.
 
 ## Alternatives considered
