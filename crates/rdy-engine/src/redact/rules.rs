@@ -100,12 +100,10 @@ const NOT_SECRET_WORDS: &[&str] = &[
 const NAME_SUFFIXES: &[&str] = &["name", "ref", "file", "path", "namespace"];
 
 /// A key whose last word is one of these holds a number about a secret, not the secret: `token_ttl_ms`,
-/// `password_len`, `api_key_count`. The report walk keeps a number under such a key.
-const UNIT_WORDS: &[&str] = &["ms", "seconds", "ttl", "count", "bytes", "size", "len"];
-
-/// What the size caps leave at the end of a cut string, without its leading space. A cut right after
-/// `password=` puts it in the value position, so it is exempt: a second pass must change nothing.
-pub(crate) const TRUNCATED_WORD: &str = "[truncated]";
+/// `password_len`, `api_key_count`. The report walk keeps a number directly under such a key, never a list
+/// or object. `bytes` is not here: `private_key_bytes` is key material, not a size. `length`, `secs` and
+/// `sec` are missing too and fail closed; M1-060 tunes the list on the corpus.
+const UNIT_WORDS: &[&str] = &["ms", "seconds", "ttl", "count", "size", "len"];
 
 /// Values that are not secrets, compared case-insensitively.
 const PLAIN_VALUES: &[&str] = &["null", "true", "false", "none", "required"];
@@ -214,16 +212,22 @@ fn value_span(
     let value_end = value_start + value.len();
     let stripped = value.strip_suffix([',', ';']).unwrap_or(value);
     let is_simple = !stripped.is_empty() && stripped.bytes().all(is_simple_byte);
-    let is_exempt = !stripped.is_empty() && is_exempt_value(stripped);
+    // `password="[REDACTED:..]"` is what a first pass leaves, so the quoted placeholder is exempt too and
+    // a second pass changes nothing.
+    let quoted = match stripped.as_bytes() {
+        [first, .., last] if first == last && matches!(first, b'"' | b'\'') => {
+            Some(&stripped[1..stripped.len() - 1])
+        }
+        _ => None,
+    };
+    let is_exempt = !stripped.is_empty()
+        && (is_exempt_value(stripped) || quoted.is_some_and(is_single_placeholder));
     visit(raw.len());
 
     // What to redact if nothing below the value is taken.
     let own = if is_simple {
         value_start..value_start + stripped.len()
-    } else if let [first, .., last] = stripped.as_bytes()
-        && first == last
-        && matches!(first, b'"' | b'\'')
-    {
+    } else if quoted.is_some() {
         value_start + 1..value_start + stripped.len() - 1
     } else {
         value_start..value_end
@@ -430,8 +434,7 @@ pub(crate) fn is_secret_key(key: &str) -> bool {
     })
 }
 
-/// True if the last word of the key is a unit or a count (`ms`, `seconds`, `ttl`, `count`, `bytes`,
-/// `size`, `len`). Words split as in [`is_secret_key`].
+/// True if the last word of the key is a unit or a count (`ms`, `seconds`, `ttl`, `count`, `size`, `len`). Words split as in [`is_secret_key`].
 pub(crate) fn last_word_is_unit(key: &str) -> bool {
     let (norm, boundary) = normalize_key(key);
     let start = boundary.iter().rposition(|&b| b).unwrap_or(0);
@@ -444,27 +447,31 @@ pub(crate) fn last_word_is_unit(key: &str) -> bool {
 /// `api|key`. Keys can come from any JSON, so a multibyte character gets one entry per byte, with only the
 /// first one set, and `boundary` always has the same length as the returned string.
 fn normalize_key(key: &str) -> (String, Vec<bool>) {
-    let chars: Vec<char> = key.chars().collect();
+    // A character that is not ASCII counts as a lowercase letter, so `ñPassed` is judged like `xPassed`.
+    let is_lower = |c: char| c.is_ascii_lowercase() || !c.is_ascii();
     let mut norm = String::with_capacity(key.len());
     let mut boundary = Vec::with_capacity(key.len());
     let mut at_word_start = true;
-    for (i, &c) in chars.iter().enumerate() {
+    let mut prev: Option<char> = None;
+    let mut chars = key.chars().peekable();
+    while let Some(c) = chars.next() {
         if matches!(c, '-' | '_' | '.') {
             at_word_start = true;
+            prev = Some(c);
             continue;
         }
-        let prev = i.checked_sub(1).map(|p| chars[p]);
-        let next = chars.get(i + 1).copied();
+        let next = chars.peek().copied();
         let camel = c.is_ascii_uppercase()
             && prev.is_some_and(|p| {
-                p.is_ascii_lowercase()
+                is_lower(p)
                     || p.is_ascii_digit()
-                    || (p.is_ascii_uppercase() && next.is_some_and(|n| n.is_ascii_lowercase()))
+                    || (p.is_ascii_uppercase() && next.is_some_and(is_lower))
             });
         boundary.push(at_word_start || camel);
         boundary.extend(std::iter::repeat_n(false, c.len_utf8() - 1));
         norm.push(c.to_ascii_lowercase());
         at_word_start = false;
+        prev = Some(c);
     }
     (norm, boundary)
 }
@@ -524,7 +531,6 @@ pub(crate) fn is_exempt_value(value: &str) -> bool {
         || is_cat_reference(value)
         || is_template_reference(value)
         || is_single_placeholder(value)
-        || value == TRUNCATED_WORD
 }
 
 fn is_path_char(b: u8) -> bool {
@@ -641,18 +647,25 @@ mod tests {
             let _ = is_secret_key(key);
             let _ = last_word_is_unit(key);
         }
-        // A multibyte character is judged like one ASCII letter. There is no word boundary after it, so
-        // `日本日本passed` is `xxxxpassed`, which fails closed as a secret.
+        // A multibyte character is judged like one lowercase ASCII letter, in the word boundaries too.
         for (key, ascii) in [
             ("ññññname", "xxxxname"),
             ("日本path", "xxpath"),
             ("日本日本passed", "xxxxpassed"),
+            ("ñPassed", "xPassed"),
+            ("token日Path", "tokenxPath"),
+            ("日Passed", "xPassed"),
+            ("Ñ日Passed", "xxPassed"),
         ] {
             assert_eq!(is_secret_key(key), is_secret_key(ascii), "{key}");
         }
         assert!(!is_secret_key("ññññname"));
         assert!(!is_secret_key("日本path"));
-        // The boundary is still right after multibyte text: `名前` then a camelCase word.
+        // `ñPassed` is the word `passed`, not a stem hit, exactly like `xPassed`.
+        assert!(!is_secret_key("ñPassed"));
+        assert!(!is_secret_key("xPassed"));
+        assert!(!is_secret_key("token日Path"));
+        // The boundary is still right after multibyte text: `日本` then a camelCase word.
         assert!(is_secret_key("日本Password"));
         assert!(is_secret_key("ñññ_password"));
         assert!(!is_secret_key("ñññ_tokenName"));
@@ -665,9 +678,11 @@ mod tests {
             let (norm, boundary) = normalize_key(&key);
             proptest::prop_assert_eq!(norm.len(), boundary.len());
             let _ = last_word_is_unit(&key);
-            // Any non-ASCII character counts like one ASCII letter that is not a separator.
+            // Only the safe direction: if the key with every non-ASCII character read as `x` is a
+            // secret, the key is one too. The other direction is not claimed, so a change that makes a
+            // key more secret never fails here and a change that hides one does.
             let ascii: String = key.chars().map(|c| if c.is_ascii() { c } else { 'x' }).collect();
-            proptest::prop_assert_eq!(is_secret_key(&key), is_secret_key(&ascii));
+            proptest::prop_assert!(!is_secret_key(&ascii) || is_secret_key(&key));
         }
 
         #[test]
@@ -687,13 +702,14 @@ mod tests {
             "password_len",
             "api-key-count",
             "secretSize",
-            "db.password.bytes",
             "ttl",
         ] {
             assert!(last_word_is_unit(key), "{key}");
         }
         for key in [
             "password",
+            "db.password.bytes",
+            "private_key_bytes",
             "token_length",
             "msToken",
             "api_key",
@@ -705,16 +721,33 @@ mod tests {
     }
 
     #[test]
-    fn the_cut_marker_is_an_exempt_value_and_nothing_longer_is() {
-        assert!(is_exempt_value("[truncated]"));
+    fn the_cut_marker_is_not_an_exempt_value() {
+        // The report walk strips a trailing marker before the key rule. The rule itself knows no marker,
+        // so a bare `[truncated]` is a value like any other and a line after it is still taken.
+        assert!(!is_exempt_value("[truncated]"));
         assert!(!is_exempt_value("[truncated] hunter2"));
-        assert!(!is_exempt_value("hunter2 [truncated]"));
-        assert!(found("password= [truncated]").is_empty());
-        assert!(found("password: [truncated]").is_empty());
+        assert_eq!(found("password= [truncated]"), ["[truncated]"]);
+        assert_eq!(found("password: [truncated]"), ["[truncated]"]);
+        assert_covered("password: [truncated]\n  hunter2\nnext: ok", "hunter2");
         assert_eq!(
             found("password= [truncated] hunter2"),
             ["[truncated] hunter2"]
         );
+    }
+
+    #[test]
+    fn a_quoted_single_placeholder_is_left_alone_and_nothing_longer_is() {
+        let ph = "[REDACTED:secret_by_key:1a2b3c4d]";
+        for text in [
+            format!("password=\"{ph}\""),
+            format!("password='{ph}'"),
+            format!("\"password\":\"{ph}\","),
+            format!("\\\"password\\\":\"{ph}\""),
+        ] {
+            assert!(found(&text).is_empty(), "{text}");
+        }
+        assert_eq!(found(&format!("password=\"{ph}x\"")), [format!("{ph}x")]);
+        assert_eq!(found(&format!("password=\"{ph}")), [format!("\"{ph}")]);
     }
 
     #[test]

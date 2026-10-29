@@ -6,8 +6,10 @@
 //! first and is capped second, so a secret that straddles a cap is gone before the cap can cut it. The
 //! result comes back as a [`Redacted`] value, which is the only thing the writers and renderers accept.
 //!
-//! The caps, in bytes, cut on a character boundary and never inside a placeholder. A cut string ends with
-//! ` [truncated]`, and the check's `truncated` flag is set.
+//! The caps, in bytes, cut on a character boundary and never inside a placeholder or between a key and the
+//! opening quote of its placeholder. A cut string ends with ` [truncated]`, and the check's `truncated`
+//! flag is set. A trailing marker is set aside while a string is redacted and put back after, so a second
+//! pass over a cut string changes nothing and counts nothing.
 //!
 //! | Where | Cap |
 //! | --- | --- |
@@ -19,9 +21,11 @@
 //! get the whole-member rule: the strings and numbers under a member whose key names a secret
 //! (`password`, `api_token`) and the `value` of a `{name, value}` (or `{key, value}`) pair whose name
 //! does are replaced whole. Numbers stay only when the key's last word is a unit or a count
-//! (`token_ttl_ms`, `password_len`). Booleans and `null` stay. A list of strings in free-form data is read
-//! as a command line, so `["--password", "hunter2"]` loses its second item. The rule never touches a
-//! schema-defined field, so `summary.pass` and a key such as `passed` survive.
+//! (`token_ttl_ms`, `password_len`), and only for a number directly under the key: a list or object under
+//! it is replaced whole, so key material written as a byte array does not stay. Booleans and `null` stay.
+//! Every list in free-form data is read as a command line, so `["--password", "hunter2", 5432]` loses its
+//! second item. The rule never touches a schema-defined field, so `summary.pass` and a key such as
+//! `passed` survive.
 //!
 //! `redaction.total` and `by_rule` count every replacement the walk made, including in text that a later
 //! cap or cut dropped (a list past 200 items, notes past 20, keys dropped to fit 64 KiB). They are never
@@ -144,7 +148,7 @@ fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, RedactError> {
     serde_json::from_value(value).map_err(|_| RedactError::ReportShape)
 }
 
-/// Room kept in a key for the `~2` suffix of a collision.
+/// Room kept in a key for the suffix of a collision: `~` and a `u32` counter, at most 11 bytes, so 12.
 const SUFFIX_ROOM: usize = 12;
 
 /// One walk: the redactor, the tally it adds to, and whether any cap cut something since the flag was
@@ -164,9 +168,13 @@ impl<'a> Walk<'a> {
         }
     }
 
-    /// Redacts one string.
+    /// Redacts one string. A trailing [`CUT_MARKER`] is set aside first and put back after, so the key
+    /// rule never reads it as part of a value and a second pass over a cut string finds nothing new.
     fn text(&mut self, text: &str) -> String {
-        self.redactor.redact_str_counted(text, self.counts).0
+        let (head, marker) = split_marker(text);
+        let mut out = self.redactor.redact_str_counted(head, self.counts).0;
+        out.push_str(marker);
+        out
     }
 
     /// Caps a redacted string and remembers whether it was cut.
@@ -296,15 +304,10 @@ impl<'a> Walk<'a> {
         match value {
             Value::String(s) => *s = self.text(s),
             Value::Array(items) => {
-                // A list of strings may be a command line: `["--password", "hunter2"]`.
-                if !items.is_empty() && items.iter().all(Value::is_string) {
-                    self.argv(items, false);
-                } else {
-                    // Redact first and cut second, so what is dropped has been counted like the rest.
-                    for item in items.iter_mut() {
-                        self.free(item);
-                    }
-                }
+                // Any list may hold a command line, with or without a number in it:
+                // `["--password", "hunter2", 5432]`. Redact first and cut second, so what is dropped
+                // has been counted like the rest.
+                self.argv(items, false);
                 if items.len() > MAX_LIST_ITEMS {
                     items.truncate(MAX_LIST_ITEMS);
                     self.cut = true;
@@ -332,15 +335,20 @@ impl<'a> Walk<'a> {
 
     /// Replaces every string and number under a secret-named member with a placeholder of its text.
     ///
-    /// `keep_numbers` is true when the key's last word is a unit or a count (`token_ttl_ms`), so its
-    /// numbers stay. Empty strings and the forms the key rule leaves alone (`${NAME}`, `null`, a
-    /// `/run/secrets/` path, a placeholder, the cut marker) stay, so the two rules agree. Booleans and
-    /// `null` stay.
+    /// `keep_numbers` is true when the key's last word is a unit or a count (`token_ttl_ms`). It keeps a
+    /// number that sits directly under the key. A list or object under the key is replaced whole, because
+    /// key material is often a number array (`private_key_bytes: [48, 130]`). Empty strings and the forms
+    /// the key rule leaves alone (`${NAME}`, `null`, a `/run/secrets/` path, a placeholder) stay, so the
+    /// two rules agree. A trailing cut marker is set aside and put back, so a cut placeholder stays one.
+    /// Booleans and `null` stay.
     fn blank(&mut self, value: &mut Value, keep_numbers: bool) {
         match value {
             Value::String(s) => {
-                if !s.is_empty() && !is_exempt_value(s) {
-                    *s = self.redactor.placeholder(SECRET_BY_KEY, s.as_bytes());
+                let (head, marker) = split_marker(s);
+                if !head.is_empty() && !is_exempt_value(head) {
+                    let mut out = self.redactor.placeholder(SECRET_BY_KEY, head.as_bytes());
+                    out.push_str(marker);
+                    *s = out;
                     self.counts.add(SECRET_BY_KEY);
                 }
             }
@@ -351,12 +359,12 @@ impl<'a> Walk<'a> {
             }
             Value::Array(items) => {
                 for item in items {
-                    self.blank(item, keep_numbers);
+                    self.blank(item, false);
                 }
             }
             Value::Object(map) => {
                 for (_, item) in map.iter_mut() {
-                    self.blank(item, keep_numbers);
+                    self.blank(item, false);
                 }
                 self.rekey(map);
             }
@@ -364,22 +372,27 @@ impl<'a> Walk<'a> {
         }
     }
 
-    /// Arguments of a command. Each is redacted as a string. An argument that is a flag naming a secret
-    /// (`--password`, with no `=`) takes the next argument whole. `capped` cuts each string at
-    /// [`STRING_CAP`]; inside `observed` the 64 KiB cap does that job.
+    /// Arguments of a command, or any list. Each string is redacted as a string. An argument that is a
+    /// flag naming a secret (`--password`, with no `=`) takes the next item whole, whatever its type. The
+    /// other items that are not strings are walked as plain fields (`capped`) or as free-form data, and
+    /// they do not end the state: `["--password", "hunter2", 5432]` is still read as a command line.
+    /// `capped` cuts each string at [`STRING_CAP`]; inside `observed` the 64 KiB cap does that job.
     fn argv(&mut self, args: &mut [Value], capped: bool) {
         let mut next_is_secret = false;
         for arg in args {
-            let Value::String(s) = arg else {
-                next_is_secret = false;
-                self.generic(arg);
-                continue;
-            };
             if next_is_secret {
                 self.blank(arg, false);
                 next_is_secret = false;
                 continue;
             }
+            let Value::String(s) = arg else {
+                if capped {
+                    self.generic(arg);
+                } else {
+                    self.free(arg);
+                }
+                continue;
+            };
             next_is_secret =
                 s.starts_with('-') && !s.contains('=') && is_secret_key(s.trim_start_matches('-'));
             if capped {
@@ -450,18 +463,30 @@ fn cap(text: String, max: usize) -> (String, bool) {
     }
 }
 
+/// Splits a trailing [`CUT_MARKER`] off a string. The second part is empty if there is none.
+fn split_marker(text: &str) -> (&str, &str) {
+    text.strip_suffix(CUT_MARKER)
+        .map_or((text, ""), |head| (head, CUT_MARKER))
+}
+
 fn cut_str(text: &str, max: usize) -> Option<String> {
     if text.len() <= max {
         return None;
     }
     let room = max.saturating_sub(CUT_MARKER.len());
     let mut at = text.floor_char_boundary(room);
-    // A placeholder is never cut. Back up to where it starts.
+    // A placeholder is never cut, and a cut never ends right behind one or in front of one's quote. Back
+    // up to where it starts, and over the quote (and escapes) that open it, so `password="` or
+    // `password="[REDACTED:..]` is not left as an open quote for a later pass to read as a value.
     if let Some(inside) = placeholder_spans(text)
         .into_iter()
-        .find(|span| span.start < at && at < span.end)
+        .find(|span| span.start <= at && at <= span.end)
     {
-        at = inside.start;
+        at = text
+            .get(..inside.start)
+            .unwrap_or_default()
+            .trim_end_matches(['"', '\\', '\''])
+            .len();
     }
     let mut out = String::with_capacity(at + CUT_MARKER.len());
     out.push_str(text.get(..at).unwrap_or_default());

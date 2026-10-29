@@ -280,6 +280,9 @@ fn a_command_line_inside_observed_is_read_as_argv() {
         "cmdline": ["/usr/bin/tool", "--password", "hunter2-x", "--user", "ada"],
         "nested": {"args": ["--api-token", "hunter2-y"]},
         "mixed": ["--password", 5],
+        "mixed_tail": ["--password", "hunter2-m", 5432],
+        "mixed_head": [1, "--api-token", "hunter2-n", {"port": 5432}, "--user", "ada"],
+        "mixed_object": ["--token", {"v": "hunter2-o"}, true],
     })));
     let out = redactor()
         .redact_check(result, &mut RuleCounts::default())
@@ -290,6 +293,62 @@ fn a_command_line_inside_observed_is_read_as_argv() {
     assert_eq!(seen["cmdline"][0], "/usr/bin/tool");
     assert_eq!(seen["cmdline"][3], "--user");
     assert_eq!(seen["cmdline"][4], "ada");
+    // A list with a number in it is still a command line: the flag takes the next item whole.
+    let hidden = |v: &Value| v.as_str().is_some_and(|s| s.starts_with("[REDACTED:"));
+    assert_eq!(seen["mixed"][0], "--password");
+    assert!(hidden(&seen["mixed"][1]), "{}", seen["mixed"][1]);
+    assert!(hidden(&seen["mixed_tail"][1]));
+    assert_eq!(seen["mixed_tail"][2], 5432);
+    assert_eq!(seen["mixed_head"][0], 1);
+    assert!(hidden(&seen["mixed_head"][2]));
+    assert_eq!(seen["mixed_head"][3], json!({"port": 5432}));
+    assert_eq!(seen["mixed_head"][5], "ada");
+    assert!(hidden(&seen["mixed_object"][1]["v"]));
+    assert_eq!(seen["mixed_object"][2], true);
+}
+
+#[test]
+fn a_list_or_object_under_a_secret_key_is_replaced_whole_even_with_a_unit_word() {
+    let mut result = check("host.cpu");
+    result.observed = Some(observed(json!({
+        "private_key_bytes": [48, 130, 1, 2],
+        "secret_bytes": 48130,
+        "token_ttl_ms": 3600,
+        "token_ttl_seconds": [3600, 7200],
+        "password_len": {"min": 8, "max": 12},
+        "env": [
+            {"name": "PRIVATE_KEY_BYTES", "value": [48, 130, 1, 3]},
+            {"name": "TOKEN_TTL_MS", "value": [3600, 7200]},
+            {"name": "TOKEN_TTL_MS", "value": 3600},
+        ],
+    })));
+    let out = redactor()
+        .redact_check(result, &mut RuleCounts::default())
+        .expect("redacts");
+    let text = serde_json::to_string(&*out).expect("json");
+    for leaked in ["48130", "130", "7200", "\"min\":8"] {
+        assert!(!text.contains(leaked), "{leaked} in {text}");
+    }
+    let seen = out.observed.as_ref().expect("observed");
+    // A number directly under a unit key stays, and only that.
+    assert_eq!(seen["token_ttl_ms"], 3600);
+    assert_eq!(seen["env"][2]["value"], 3600);
+    for list in [
+        &seen["private_key_bytes"],
+        &seen["token_ttl_seconds"],
+        &seen["env"][0]["value"],
+        &seen["env"][1]["value"],
+    ] {
+        assert!(
+            list.as_array().is_some_and(|a| a
+                .iter()
+                .all(|v| v.as_str().is_some_and(|s| s.starts_with("[REDACTED:")))),
+            "{list}"
+        );
+    }
+    assert!(seen["secret_bytes"].is_string(), "{}", seen["secret_bytes"]);
+    assert!(seen["password_len"]["min"].is_string());
+    assert!(seen["password_len"]["max"].is_string());
 }
 
 #[test]
@@ -418,6 +477,28 @@ fn argv_redacts_a_secret_flag_and_its_argument() {
 }
 
 #[test]
+fn an_action_argv_with_a_number_after_a_secret_flag_loses_it() {
+    let mut action = Action::new(
+        1,
+        None,
+        1,
+        1,
+        ActionKind::Unknown("exec".to_owned()),
+        ActionOutcome::Unknown("ok".to_owned()),
+    );
+    action.fields.insert(
+        "argv".to_owned(),
+        json!(["tool", "--password", 987_654_321, "--port", 5432]),
+    );
+    let out = redactor()
+        .redact_action(action, &mut RuleCounts::default())
+        .expect("redacts");
+    let text = serde_json::to_string(&*out).expect("json");
+    assert!(!text.contains("987654321"), "{text}");
+    assert_eq!(out.fields["argv"][4], 5432);
+}
+
+#[test]
 fn a_real_key_collision_keeps_both_values_and_the_suffixed_key_fits() {
     // Two keys of 5001 bytes share their first 5000. Both are cut to the same 4 KiB text, so they collide.
     let mut result = check("host.cpu");
@@ -512,52 +593,145 @@ fn a_cut_in_name_partial_or_unsupported_fields_sets_truncated() {
     }
 }
 
-/// A secret that sits across a cap is redacted first and the cut then lands after `password=`. The
-/// marker then stands where the value was, and a second pass must read it as a value that is not a
-/// secret: nothing changes and nothing is counted.
+/// A secret that sits across a cap is redacted first and the cut then lands after `password=`, inside
+/// the placeholder or just behind it. A second pass must change nothing and count nothing, in the bare
+/// form and in every quoted form the key rule reads.
 #[test]
 fn a_second_pass_changes_nothing_when_a_cut_lands_after_the_key() {
     let secret = "S3cr3tValueThatMustNotLeak";
-    let mut hit_marker_in_value_position = false;
-    for offset in 1..=64 {
-        // `password=` starts `offset` bytes before the cap, so the cut lands inside the placeholder for
-        // some offsets and right after the `=` for one of them.
-        let lead = MESSAGE_CAP - offset;
-        let mut result = check("host.cpu");
-        result.message = format!("{}password={secret} tail", "x".repeat(lead));
-        let mut counts = RuleCounts::default();
-        let first = redactor()
-            .redact_check(result, &mut counts)
-            .expect("redacts");
-        assert!(!first.message.contains("S3cr3t"), "{offset}");
-        hit_marker_in_value_position |= first.message.ends_with("password= [truncated]");
+    // `{secret}` is where the value goes. Every form is followed by text, so the cap can cut inside it.
+    let forms = [
+        "password={secret} tail",
+        "password=\"{secret}\" tail",
+        "password='{secret}' tail",
+        "\\\"password\\\":\\\"{secret}\\\" tail",
+        "\"password\":\"{secret}\", \"user\":\"ada\"",
+        "password: {secret}\nnext: ok",
+        "password: \"{secret}\"\nnext: ok",
+    ];
+    let mut cut_after_key = false;
+    for form in forms {
+        let tail = form.replace("{secret}", secret);
+        for offset in 1..=90 {
+            // The text starts `offset` bytes before the cap, so the cut walks across the key, its quote
+            // and the placeholder.
+            let mut result = check("host.cpu");
+            result.message = format!("{}{tail}", "x".repeat(MESSAGE_CAP - offset));
+            let mut counts = RuleCounts::default();
+            let first = redactor()
+                .redact_check(result, &mut counts)
+                .expect("redacts");
+            assert!(!first.message.contains("S3cr3t"), "{form} {offset}");
+            cut_after_key |= first.message.ends_with("password= [truncated]");
 
-        let mut r = report(vec![(*first).clone()]);
-        r.refresh_verdict();
-        let before = counts.clone();
-        let second = redactor()
-            .redact_report_counted(r, counts)
-            .expect("redacts");
-        assert_eq!(second.checks[0], *first, "offset {offset} changed");
-        assert_eq!(second.redaction.total, before.total(), "offset {offset}");
-        assert_eq!(
-            second.redaction.by_rule.get("secret_by_key"),
-            Some(&before.get("secret_by_key")),
-            "offset {offset}"
-        );
+            let mut r = report(vec![(*first).clone()]);
+            r.refresh_verdict();
+            let before = counts.clone();
+            let second = redactor()
+                .redact_report_counted(r, counts)
+                .expect("redacts");
+            assert_eq!(second.checks[0], *first, "{form} offset {offset} changed");
+            assert_eq!(
+                second.redaction.total,
+                before.total(),
+                "{form} offset {offset}"
+            );
+            assert_eq!(
+                second.redaction.by_rule.get("secret_by_key"),
+                Some(&before.get("secret_by_key")),
+                "{form} offset {offset}"
+            );
+        }
     }
-    assert!(
-        hit_marker_in_value_position,
-        "no offset put the marker right after `password=`"
+    assert!(cut_after_key, "no offset cut right after the key");
+}
+
+/// The same with the cut made by the 64 KiB cap, where `shorten` does the cutting, in a text, under a
+/// secret key and in a pair.
+#[test]
+fn a_second_pass_changes_nothing_after_the_free_form_cap() {
+    let secret = "S3cr3tValueThatMustNotLeak";
+    let mut result = check("host.cpu");
+    result.observed = Some(observed(json!({
+        "log": format!("{}password=\"{secret}\" tail", "x".repeat(FREE_FORM_CAP - 20)),
+        "password": format!("{secret} {}", "y".repeat(FREE_FORM_CAP)),
+        "env": [{"name": "DB_PASSWORD", "value": format!("{secret}{}", "z".repeat(FREE_FORM_CAP))}],
+    })));
+    let mut counts = RuleCounts::default();
+    let first = redactor()
+        .redact_check(result, &mut counts)
+        .expect("redacts");
+    assert!(first.truncated);
+    let text = serde_json::to_string(&*first).expect("json");
+    assert!(!text.contains("S3cr3t"));
+    let before = counts.clone();
+    let again = redactor()
+        .redact_check((*first).clone(), &mut counts)
+        .expect("redacts");
+    assert_eq!(*again, *first);
+    assert_eq!(counts, before);
+}
+
+/// A value that is only the cut marker, or a placeholder and the marker, is not a secret. Anything else
+/// before the marker is, and keeps the marker after its placeholder.
+#[test]
+fn a_cut_marker_under_a_secret_key_is_set_aside_and_never_exempts_text() {
+    let mut result = check("host.cpu");
+    result.observed = Some(observed(json!({
+        "password": CUT_MARKER,
+        "token": format!("[REDACTED:secret_by_key:1a2b3c4d]{CUT_MARKER}"),
+        "api_key": format!("hunter2{CUT_MARKER}"),
+        "secret": "[truncated]",
+    })));
+    let mut counts = RuleCounts::default();
+    let out = redactor()
+        .redact_check(result, &mut counts)
+        .expect("redacts");
+    let seen = out.observed.as_ref().expect("observed");
+    assert_eq!(seen["password"], CUT_MARKER);
+    assert_eq!(
+        seen["token"],
+        format!("[REDACTED:secret_by_key:1a2b3c4d]{CUT_MARKER}")
     );
+    let key = seen["api_key"].as_str().expect("string");
+    assert!(
+        key.starts_with("[REDACTED:secret_by_key:") && key.ends_with(&format!("]{CUT_MARKER}")),
+        "{key}"
+    );
+    // The bare word without the leading space is just a value.
+    assert!(
+        seen["secret"]
+            .as_str()
+            .is_some_and(|s| s.starts_with("[REDACTED:"))
+    );
+    assert_eq!(counts.get("secret_by_key"), 2);
+}
+
+/// The marker is not an exemption for the next line: `password: [truncated]` is an open value like any
+/// other, so the key rule still takes the lines below it.
+#[test]
+fn text_after_a_marker_like_value_is_still_redacted() {
+    let mut result = check("host.cpu");
+    result.observed = Some(observed(json!({
+        "log": "password: [truncated]\n  hunter2-log\nnext: ok",
+    })));
+    let out = redactor()
+        .redact_check(result, &mut RuleCounts::default())
+        .expect("redacts");
+    let text = serde_json::to_string(&*out).expect("json");
+    assert!(!text.contains("hunter2-log"), "{text}");
+    assert!(text.contains("next: ok"), "{text}");
 }
 
 #[test]
-fn the_cut_marker_matches_the_exempt_word() {
-    assert_eq!(
-        CUT_MARKER.trim_start(),
-        crate::redact::rules::TRUNCATED_WORD
-    );
+fn a_cut_backs_over_the_quote_that_opens_a_placeholder() {
+    let ph = "[REDACTED:secret_by_key:1a2b3c4d]";
+    let text = format!("{}password=\"{ph}\" tail", "x".repeat(40));
+    // Cut at the quote, at the start of the placeholder and inside it.
+    for max in [40 + 9 + 1, 40 + 10 + 1, 40 + 15] {
+        let cut = cut_str(&text, max + CUT_MARKER.len()).expect("cut");
+        assert!(cut.ends_with("password= [truncated]"), "{max}: {cut}");
+    }
 }
 
 #[test]

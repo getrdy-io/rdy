@@ -127,7 +127,10 @@ impl Redactor {
   `RUST_LOG` unset and at `trace`. `redaction.total` and `by_rule` count every replacement the walk made,
   including in text that a later cap dropped (a list past 200 items, notes past 20, keys dropped to fit
   64 KiB), so they are never lower than what was hidden. The final pass of `redact_report_counted` finds
-  nothing new in results redacted earlier, because the cut marker is an exempt value.
+  nothing new in results redacted earlier. A trailing ` [truncated]` is set aside while a string is redacted
+  and put back after. A cut never ends inside a placeholder, right behind one, or between a key and the
+  quote that opens its placeholder, and a quoted single placeholder (`password="[REDACTED:..]"`) is exempt
+  like a bare one, so `password=" [truncated]` is never produced and a second pass changes nothing.
 - **`redact_report` is schema-aware.** It serializes the report to a `serde_json::Value` and walks it. Typed
   fields keep their names and non-string values; only string leaves go through `redact_str`. The whole-member
   rule (replace the value of a member whose key matches a secret stem, and the `value` of a `{name, value}`
@@ -135,10 +138,13 @@ impl Redactor {
   env pairs and action `argv` (a flag such as `--password` takes the next argument whole). It never touches a
   schema-defined field, so `summary.pass`, `by_rule` keys and check keys such as `passed` survive. Numbers under a secret key are
   replaced too (`db_password: 12345678`), unless the key's last word is a unit or a count (`ms`, `seconds`,
-  `ttl`, `count`, `bytes`, `size`, `len`), so `token_ttl_ms: 3600` survives. Booleans and `null` stay, and so
-  do the forms the key rule leaves alone (`${NAME}`, a `/run/secrets/` path, `null`, a placeholder, the cut
-  marker). A list of strings in a free-form subtree is read as a command line, and `{key, value}` and
-  `Name`/`Value` pairs match like `{name, value}`. The walk deserializes
+  `ttl`, `count`, `size`, `len`) and the number sits directly under the key, so `token_ttl_ms: 3600`
+  survives. A list or object under the key is replaced whole, so `private_key_bytes: [48, 130]` does not
+  stay (`bytes` is not a unit word for the same reason). Booleans and `null` stay, and so do the forms the
+  key rule leaves alone (`${NAME}`, a `/run/secrets/` path, `null`, a placeholder). Every list in a
+  free-form subtree is read as a command line, numbers and objects included, so
+  `["--password", "hunter2", 5432]` loses its second item. `{key, value}` and `Name`/`Value` pairs match
+  like `{name, value}`. The walk deserializes
   back into `Report` and applies the 02 caps, which never cut inside a placeholder. A cut string ends with
   ` [truncated]` and sets the result's `truncated` flag. On any error no report is written and rdy exits 70.
   The watchdog snapshot uses the same function. `redact_check` and `redact_action` run the same walk on one
