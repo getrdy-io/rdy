@@ -26,7 +26,7 @@ use std::process::Command;
 
 /// Entries whose item does not exist yet, so no use can name it. Each has a ticket that adds the use.
 /// `pending_entries_still_do_not_exist` fails when the item appears, so this list cannot go stale.
-const PENDING: &[(&str, &str)] = &[("rdy_engine::live_backend", "M1-045")];
+const PENDING: &[(&str, &str)] = &[];
 
 /// The three runners and the test helper the exit test names. Every check crate must list them.
 const ENGINE_ENTRIES: &[&str] = &[

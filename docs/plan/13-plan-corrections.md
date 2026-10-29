@@ -307,8 +307,8 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   `watchdog::Effects::{exit, kill_groups, notice}`, `Watchdog::start`, `WriteState::{claim,
   claim_or_park, finish}`), `probe::ProbeHub::{new, run_probe}`, `rdy_spec::load`, `std::env::args` and `args_os`, the terminal
   (`std::io::{stdout, stderr, stdin}`, the print macros) and `TestRun::context`. `privilege_gate` and `gate_then`
-  (M1-042) are in `rdy-cli`, which no check crate may depend on. M1-045 adds `live_backend` the same way
-  when it merges. The direct dependency
+  (M1-042) are in `rdy-cli`, which no check crate may depend on. `rdy_engine::live_backend` (M1-045) is
+  on the list, in `uses.rs` and in the floor. The direct dependency
   allowlist (`ci/check-crate-deps.toml`) is built in M1-044, because old M1-065 was merged into it.
 
 ADR amendments in the ticket title:

@@ -924,8 +924,8 @@ one clippy rule.
   `std::env::args_os`. (`set_var` and `remove_var`
   are `unsafe` in edition 2024, so `forbid(unsafe_code)` also stops them.)
 - Leaks: `Box::leak`, `String::leak`, `Vec::leak`.
-- Engine: `rdy_engine::live_backend` (the item arrives with M1-045; until then the entry is
-  `allow-invalid`), `rdy_engine::exec::table::run`, `rdy_engine::exec::run`,
+- Engine: `rdy_engine::live_backend` (feature `runtime`, so the entry is `allow-invalid` in a crate that
+  builds the engine without it), `rdy_engine::exec::table::run`, `rdy_engine::exec::run`,
   `rdy_engine::exec::ExecSpec::new` and `rdy_engine::testing::TestRun::context` (check tests use
   `context_for`, which applies the check's declaration).
 - First-party escapes (PC-48): the run owns the output folder, the process-wide effects and the spec, and
@@ -936,7 +936,7 @@ one clippy rule.
   the watchdog (type `rdy_engine::watchdog::ProcessEffects`, `watchdog::Effects::exit`, `kill_groups` and
   `notice`, `Watchdog::start`, `WriteState::claim`, `claim_or_park` and `finish`), `rdy_engine::probe::ProbeHub::new` and
   `ProbeHub::run_probe` (a check gets its `Probe` from the run and never makes a hub) and `rdy_spec::load`.
-  `privilege_gate` and `gate_then` (M1-042) are in `rdy-cli`, which no check crate may depend on, so they need no entry. M1-045 adds `live_backend` when it merges.
+  `privilege_gate` and `gate_then` (M1-042) are in `rdy-cli`, which no check crate may depend on, so they need no entry.
 - Terminal (macros in `disallowed-macros`): `std::io::stdout`, `std::io::stderr`, `std::io::stdin`,
   `std::print`, `std::println`, `std::eprint`, `std::eprintln`.
 - Kube, outside the `rdy-checks-k8s` client module: types `kube::Client`, `kube::Config`,

@@ -11,9 +11,6 @@
 //! The kube entries are not here. `crates/rdy-checks-k8s/lint-wall/kube-use.rs.txt` holds them and
 //! M1-107 carries their proof (backlog correction-11), because `kube` may only be a dependency of
 //! `rdy-checks-k8s`.
-//!
-//! `rdy_engine::live_backend` does not exist yet (M1-045 builds it). Its use is added there, and until
-//! then `tests/clippy_wall.rs` lists it as pending.
 
 #![allow(dead_code, unused, deprecated)]
 
@@ -387,6 +384,9 @@ fn engine_exec_run() {
     let _ = rdy_engine::exec::run;
 }
 // `impl Trait` arguments cannot take a turbofish, so these two are calls. Nothing calls the functions.
+fn engine_live_backend() {
+    let _ = rdy_engine::live_backend;
+}
 fn engine_exec_spec_new() {
     let _ = rdy_engine::exec::ExecSpec::new("x", std::time::Duration::ZERO);
 }
