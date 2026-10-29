@@ -121,7 +121,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-054 | todo | | Summary line grammar and nothing-verified last line
 
-- M1-055 | todo | | HTML-safe deterministic JSON writer with size caps
+- M1-055 | todo | | HTML-safe deterministic JSON writer with size caps | backlog corrected 2026-10-29 (correction-14): the writer truncates lists past their schema caps, `observed` and `expected` past three levels and past 64 keys, and sets `truncated`; depends on M1-041 too (PR #83 review, PR #90 review)
 
 - M1-056 | [#55](https://github.com/getrdy-io/rdy/pull/55) | 2026-10-29 | The proxy URL canary moves to M1-060 (PC-43): until the URL userinfo rule exists only the `secret_by_key` rule runs, so `tests/log_redaction.rs` holds it as `#[ignore = "M1-060"]` and M1-060 enables it and adds bare-token canaries. The exit test's JSON and HTML parts have no report to test before M1-062, so M1-062 proves them. Carry note for M1-061: the run-scoped known secrets must be shared through an `Arc`, so the log writer and the CLI error text see them (today the process redactor holds only the key and the built-in rules). `CliError::from_anyhow` still drops unknown error text on purpose, for the same reason; every printed CLI error string is redacted now, so M1-060 can show the redacted chain in that one function. A panic prints nothing from the hook (a panic inside a hook aborts, so the hook cannot redact); a panic inside a check is only an `ERROR` result (`PanicText`), and a panic outside a check makes `rdy_cli::entry::guarded` print the standard two lines (the `ErrorOutput` too with `--json`) and exit 70. The panic text goes to the log, redacted and then escaped (the key-name rule reads raw tabs, so redaction runs on the raw text first, in the log writer and in the CLI error text). No real-binary panic test, because a test-only trigger flag or env var is banned (02): `guarded` is tested in process and the hook in a child test process. The redactor has a `testing`-feature panic seam (`PANIC_TRIGGER`), a dev-dependency feature of rdy-cli only. With `RUST_LOG` unset, empty or invalid the filter is `off` (07 D.6, PC-43); a valid `RUST_LOG` is the operator's filter, but hyper, h2, rustls, tower and kube (and `hyper_*`, `tower_*`, `kube_*`) stay capped at warn whatever it says. Log lines have no time stamp, are redacted and then escaped per line, and the `log` bridge is off (rustls `log` records are dropped). A bare span field value runs to the end of its line and swallows the event message (M1-060 tunes the over-redaction). A PEM block split over several events is the known M1 gap. Carry notes: M1-060 accepts `\\+t` as a blank in `ASSIGNMENT` (a `&str` field is written with `Debug`, so a tab in a field value arrives as a literal backslash and `t`; `tests/log_redaction.rs` holds the case as `#[ignore = "M1-060"]`). M3: `CAPPED_TARGETS` needs `reqwest`, `aws_smithy_*` and `aws_config` when the cloud checks land.
 
@@ -156,7 +156,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-071 | todo | | host.cpu (cores with quota, arch, flags through std macros, levels, Rosetta)
 
-- M1-072 | todo | | host.ports (Linux /proc/net TCP and UDP, lazy owner lookup, ephemeral overlap)
+- M1-072 | todo | | host.ports (Linux /proc/net TCP and UDP, lazy owner lookup, ephemeral overlap) | backlog corrected 2026-10-29 (correction-14): depends on M1-169 (facade `read_link`) too and runs in week 19, not week 14 (PR #88 review)
 
 - M1-073 | todo | | host.os (os-release, uname, FIPS, container and WSL detection, match rules) | backlog corrected 2026-10-29 (correction-13): runs in week 18, not week 14, to make room for M1-074's extra 0.5 h
 
@@ -349,6 +349,8 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-167 | todo | | Time the quickstart with two design-partner SEs | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
 - M1-168 | [#74](https://github.com/getrdy-io/rdy/pull/74) | 2026-10-29 | none; CLI start-up hardening: call `harden_umask()` and warn on inherited descriptors
+
+- M1-169 | todo | | Facade `read_link` with an action-log kind and the /proc fd walk rule | backlog corrected 2026-10-29 (correction-14): new ticket, runs in week 14; only `socket:[N]` targets come back from the fd walk and security-reviewer signs off (PR #88 review, PR #90 review)
 
 ## Summary
 
