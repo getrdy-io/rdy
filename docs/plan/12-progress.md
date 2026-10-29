@@ -111,9 +111,9 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-049 | [#100](https://github.com/getrdy-io/rdy/pull/100) | 2026-10-29 | Built: `ProbeError::NotRecorded`, the 08 loader `testing::Fixture` (`base` one level under `envs/`, `remove`, `answers`, `[caps]`, `root.manifest.json` symlinks, `unreadable`, `modes`, `dirs`, `commands/`, `native/`, `api/`, `net.json`, `env.json`), `TestRun::for_fixture`, `matches_placeholders` (`<sha256>`, `<serial>`), and the cases `checks/host.memory/pass`, `checks/_policy/symlink-to-shadow` and `checks/_loader/manifest-entries`. Replay follows manifest links and gives the real path to `ReadGuard::admit_real`, so a link to `/etc/shadow` is Denied and a link out of `reads` is refused; a link whose target is `socket:[N]` is a special file. `delay_ms` and `blackhole` (`Replay::dial`) use the tokio clock and no thread; a command delay that reaches the command's limit gives `Timeout` after the limit. `toml` is an optional dependency under `testing`; the release tree has neither (checked with the CI `cargo tree` command). Deferred: the exit test clause "a recorded link-local lookup is refused by the address rule" moves to M1-094. Neither the facade lookup nor `is_forbidden` exists (M1-091 and M1-094 build them), so this ticket loads the recorded forbidden answer (`NetScript::dns`) and M1-094 proves the refusal. The backlog rows carry the move (correction-18). Also deferred: `read_link` serving the manifest `symlinks` is M1-169 (the map is loaded and followed by file calls already); `serve` factories are M1-090; `modes` has no facade reader (`Replay::mode` only); the fixture lint (M1-050) owns `\r`, name, size and public-host rules, the loader is only strict about shape. Fix round 1: a recording answers only where the live runner would find the program (fixed search directories, then the check's declared ones; Windows: `whoami.exe` only), with the full path kept in the key; `{"argv":["chronyc"],"missing":true}` models a machine without a tool and fails as the live runner does; `caps.json` is refused; `unreadable` on a directory hides what is below it; `process_ids` with none recorded is `NotRecorded`; a `proc/self` manifest link is refused for now; repeated JSON keys and keys that are equal once normalised fail the load; a base must match `os` and `arch`; `Replay::for_os` replaces `with_os`; `testing::fixtures_dir()` added; the case moved to `checks/_loader/`. A replay test of a Linux check now runs on the Windows leg, but this build was not run on Windows here.
 
-- M1-050 | todo | | Fixture lint as a nextest test
+- M1-050 | todo | | Fixture lint as a nextest test | backlog corrected 2026-10-29 (correction-18): the host.disk Timeout clause moves to M1-068 (PR #100 review)
 
-- M1-051 | todo | | Engine test helpers FakeCheck, run_fixture and normalize
+- M1-051 | todo | | Engine test helpers FakeCheck, run_fixture and normalize | backlog corrected 2026-10-29 (correction-18): `run_fixture` calls `ensure_answers` (PR #100 review)
 
 - M1-052 | todo | | Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check
 
@@ -148,7 +148,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-067 | [#49](https://github.com/getrdy-io/rdy/pull/49) | 2026-10-28 | The seven host ids are stubs. On Linux a stub that is run returns a check error, not a finding, until M1-068 and later replace it. Rule: `HostFamily` must not be registered in the CLI while `HostFamily::stub_ids()` is not empty, because a Linux stub reports `error` `check_failed`. M1-057 (wire `rdy run`) must either drop the stubs or have the engine add a `not_in_build` skip first. The facade backend does not exist yet, so the OS comes from the plan and from `CheckContext::os`, and no `probe.native` closure exists to gate.
 
-- M1-068 | todo | | host.disk (Linux: statvfs flags, mountinfo with escapes, whole-component match, hung-mount timeout) | backlog corrected 2026-10-29 (correction-16): depends on M1-171 (`statfs` prefixes, PR #94 review)
+- M1-068 | todo | | host.disk (Linux: statvfs flags, mountinfo with escapes, whole-component match, hung-mount timeout) | backlog corrected 2026-10-29 (correction-16): depends on M1-171 (`statfs` prefixes, PR #94 review); backlog corrected 2026-10-29 (correction-18): depends on M1-050; deleting its Timeout case fails the fixture lint (PR #100 review)
 
 - M1-069 | todo | | host.memory (meminfo, swap, cgroup limit, nominal band)
 
@@ -194,13 +194,13 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case)
 
-- M1-091 | todo | | Facade TCP attempts, proxy CONNECT and per-check host sets | backlog corrected 2026-10-29 (correction-12): one action-log entry per tcp call, proxy CONNECT included, moved from M1-040; backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers the proxy password raw and percent-decoded, exit 70 if refused (PR #96 reviews)
+- M1-091 | todo | | Facade TCP attempts, proxy CONNECT and per-check host sets | backlog corrected 2026-10-29 (correction-12): one action-log entry per tcp call, proxy CONNECT included, moved from M1-040; backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers the proxy password raw and percent-decoded, exit 70 if refused (PR #96 reviews); backlog corrected 2026-10-29 (correction-18): connects the stream a Replay `dial` names (PR #100 review)
 
 - M1-092 | todo | | Facade TLS with system roots and the recording chain probe | backlog corrected 2026-10-29 (correction-12): one action-log entry per tls call, moved from M1-040 (02 line 272); backlog corrected 2026-10-29 (correction-16): `SystemRoots` caps (PR #94 review)
 
 - M1-093 | todo | | Facade HTTP/1.1 probe with 64 KiB discard and no redirects | backlog corrected 2026-10-29 (correction-12): one action-log entry per http call, moved from M1-040
 
-- M1-094 | todo | | SEC-21 Egress address policy, no redirects, no bodies | backlog corrected 2026-10-29 (correction-15): refuses the GCP IPv6 metadata address `fd20:ce::254` too (PR #91 review)
+- M1-094 | todo | | SEC-21 Egress address policy, no redirects, no bodies | backlog corrected 2026-10-29 (correction-15): refuses the GCP IPv6 metadata address `fd20:ce::254` too (PR #91 review); backlog corrected 2026-10-29 (correction-18): refuses a recorded link-local answer from the Replay lookup (PR #100 reviews)
 
 - M1-095 | todo | | net.egress staged connector (lookup, dual-stack connect, TLS, ALPN)
 
