@@ -27,16 +27,22 @@
 //! recorded output. A probe built with no `CheckInfo` (run-level work, or a test context from
 //! `TestRun::context`) skips the declaration step and still gets the table.
 //!
-//! **What is here, and what is not.** This ticket (M1-040) builds the handle, the log and the read
-//! denylist, with `read`, `read_dir`, `stat` and `exec`. Still to come, each in its own ticket:
+//! **Files and environment.** `read`, `read_tail`, `read_dir` and `stat` pass the read policy
+//! ([`ReadGuard`], see the `policy` module): the path as written, then the real path after links, which the
+//! live backend checks while it opens the file (M1-045). A read returns at most [`MAX_READ`] bytes and
+//! says when it cut. `env` reads a variable the check declared in `CheckInfo::env`, and the log records
+//! the name and never the value.
 //!
-//! - the real path check, the `reads` prefixes, the size caps, `read_tail` and `env`: M1-045;
+//! **What is here, and what is not.** The handle, the log, the read policy, `read`, `read_tail`,
+//! `read_dir`, `stat`, `env` and `exec`, and the live file backend (`live_backend`, feature
+//! `runtime`). Still to come, each in its own ticket:
+//!
 //! - names, TCP, TLS, HTTP and native calls: the network and native tickets. They open their entries
-//!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp and http call
-//!   writes exactly one entry (M1-091, M1-093). A kube request writes one through [`Probe::kube_call`],
-//!   which the read-only guard of `rdy-checks-k8s` calls (M1-103);
-//! - the live backend for files, which only these tickets can make safe to ship. Only the replay
-//!   backend (feature `testing`) exists today, so nothing in a release build reaches the machine yet.
+//!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp, http and kube
+//!   call writes exactly one entry (M1-091, M1-103). A kube request writes its entry through
+//!   [`Probe::kube_call`], which the read-only guard of `rdy-checks-k8s` calls;
+//! - `read_link`: `host.ports` (M1-072) needs it for `/proc/self/ns/net` and `/proc/<pid>/fd`, and the
+//!   action log has no kind for it yet. M1-169 adds both (plan correction 14).
 
 use std::fmt;
 use std::future::Future;
@@ -56,12 +62,17 @@ use crate::exec::{ExecError, ExecOutput, policy::CommandError};
 use crate::privilege::ProcessIds;
 use crate::redact::Redactor;
 
+#[cfg(feature = "runtime")]
+pub use live::live_backend;
 pub use log::{
     ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, COALESCE_OK_AFTER, DENIED_TARGETS, MAX_ENTRIES,
 };
+pub use policy::{ReadGuard, Refused};
 
 use log::{ActionLog, Limits, Pending};
 
+#[cfg(feature = "runtime")]
+mod live;
 mod log;
 mod policy;
 #[cfg(any(test, feature = "testing"))]
@@ -75,11 +86,23 @@ pub const RULE_CHECK_FINISHED: &str = "check finished";
 /// The rule of a call on a context that has no probe hub.
 pub const RULE_NO_PROBE: &str = "no probe in this context";
 
+/// The most bytes one file read returns. A longer file is cut and the result says so.
+pub const MAX_READ: usize = 1 << 20;
+
+/// The most entries one directory listing returns. A longer directory is an error, not a short list.
+pub const MAX_DIR_ENTRIES: usize = 65_536;
+
 /// The rule of a command the check did not declare in `CheckInfo::commands`.
 pub const RULE_COMMAND_UNDECLARED: &str = "command not declared by the check";
 
 /// The rule of an environment name the check did not declare for that command.
 pub const RULE_ENV_UNDECLARED: &str = "environment name not declared by the check";
+
+/// The rule of an environment variable name the check did not declare in `CheckInfo::env`.
+pub const RULE_ENV_NOT_DECLARED: &str = "environment variable not declared by the check";
+
+/// The rule of a string that cannot be an environment variable name.
+pub const RULE_ENV_BAD_NAME: &str = "not a valid environment variable name";
 
 /// Why a probe call did not give a value.
 ///
@@ -143,6 +166,15 @@ impl ProbeError {
         }
     }
 
+    /// The error for a failed file call. A refusal from the live backend (a link to a denied file, a
+    /// FIFO) becomes `Denied`, with `what` as the log shows the path.
+    fn from_file_io(error: &io::Error, what: &str) -> Self {
+        match Refused::from_io(error) {
+            Some(refused) => Self::denied(refused.rule, what),
+            None => Self::from_io(error),
+        }
+    }
+
     /// Maps what `table::run` returns.
     #[cfg(feature = "runtime")]
     fn from_command(error: CommandError) -> Self {
@@ -181,9 +213,9 @@ impl ProbeError {
 pub struct FileBytes {
     /// The bytes. Raw: redact before they are shown.
     pub bytes: Vec<u8>,
-    /// `true` when the start of the file was left out (`read_tail`, M1-045).
+    /// `true` when the start of the file was left out (`read_tail`).
     pub truncated_head: bool,
-    /// `true` when the end of the file was left out (the size cap, M1-045).
+    /// `true` when the end of the file was left out (the size cap).
     pub truncated_tail: bool,
 }
 
@@ -202,6 +234,47 @@ impl FileBytes {
     #[must_use]
     pub fn truncated(&self) -> bool {
         self.truncated_head || self.truncated_tail
+    }
+}
+
+/// Which part of a file a read wants. The backend never returns more than the limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReadRange {
+    /// The first `n` bytes. A longer file sets `truncated_tail`.
+    Head(usize),
+    /// The last `n` bytes. A longer file sets `truncated_head`.
+    Tail(usize),
+}
+
+impl ReadRange {
+    /// Cuts `bytes`, a whole file, to this range. Used by the replay backend.
+    #[must_use]
+    #[cfg_attr(
+        not(any(test, feature = "testing")),
+        expect(dead_code, reason = "only the replay backend cuts a whole file")
+    )]
+    pub(crate) fn cut(self, mut bytes: Vec<u8>) -> FileBytes {
+        match self {
+            Self::Head(max) => {
+                let truncated_tail = bytes.len() > max;
+                bytes.truncate(max);
+                FileBytes {
+                    bytes,
+                    truncated_head: false,
+                    truncated_tail,
+                }
+            }
+            Self::Tail(max) => {
+                let truncated_head = bytes.len() > max;
+                let start = bytes.len().saturating_sub(max);
+                FileBytes {
+                    bytes: bytes.split_off(start),
+                    truncated_head,
+                    truncated_tail: false,
+                }
+            }
+        }
     }
 }
 
@@ -306,19 +379,40 @@ mod sealed {
     pub trait Sealed {}
 }
 
-/// The raw I/O under the facade. The file calls enforce no policy and write no log: the probe has
-/// already done both. The provided `spawn` is the exception: it runs `exec::table::run`, which applies
+/// The raw I/O under the facade. The file calls write no log, and the policy they enforce is the
+/// [`ReadGuard`] the probe passes in. The probe has already applied it to the path as written. A backend
+/// that resolves links applies [`ReadGuard::admit_real`] to the real path before it opens anything and
+/// reports a refusal as [`Refused`] inside an `io::Error` of kind `PermissionDenied`; the replay backend
+/// has no links and ignores the guard. The provided `spawn` is the exception: it runs `exec::table::run`, which applies
 /// the command table and the command policy again before anything starts.
 ///
 /// Sealed: the live backend and the replay backend are the only implementations. A check cannot
 /// supply its own, so it cannot route around the facade's policy.
 pub trait Backend: sealed::Sealed + Send + Sync + 'static {
-    /// Reads a file.
-    fn open_read<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<FileBytes>>;
-    /// Lists a directory.
-    fn read_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>>;
+    /// Reads the part of a regular file that `range` names, at most `MAX_READ` bytes.
+    fn open_read<'a>(
+        &'a self,
+        path: &'a Path,
+        range: ReadRange,
+        guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<FileBytes>>;
+    /// Lists a directory, at most `MAX_DIR_ENTRIES` entries.
+    fn read_dir<'a>(
+        &'a self,
+        path: &'a Path,
+        guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Vec<DirEntry>>>;
     /// Inspects a path. `Ok(None)` means it does not exist.
-    fn stat<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
+    fn stat<'a>(
+        &'a self,
+        path: &'a Path,
+        guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
+    /// The value of one environment variable of this process, or `None` when it is not set. The probe
+    /// has already checked the name: a check's probe reads only names it declared (`Probe::env`), and
+    /// the run-level probe reads the few the engine needs (`Probe::run_env`). The live backend reads the
+    /// process environment and a fixture backend answers from its record.
+    fn env(&self, name: &str) -> Option<String>;
     /// Runs a command that the probe already checked against the command table. Unlike the file
     /// calls this returns a [`ProbeError`], because a start failure, a timeout and a command that would
     /// not die are not `io::Error` kinds.
@@ -353,12 +447,6 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
                 ))
             })
         }
-    }
-
-    /// The value of one environment variable of this process, for the run-level probe only. The live
-    /// body reads the process environment. A fixture backend overrides it.
-    fn env(&self, name: &str) -> Option<String> {
-        std::env::var(name).ok()
     }
 
     /// The process's real and effective user and group ids, for the privilege snapshot on macOS.
@@ -489,7 +577,7 @@ struct Scope {
     check: Option<String>,
     /// The OS the command table is read for.
     os: Os,
-    /// The check's manifest. Only commands read it so far (M1-045 adds files and env).
+    /// The check's manifest: commands, `reads` and `env`.
     info: Option<&'static CheckInfo>,
     ended: AtomicBool,
     /// Tells calls in flight that the check ended.
@@ -586,6 +674,8 @@ struct Gate<'a> {
     entry: Pending,
     /// The path as the log shows it. This, never the raw path, goes into an error.
     what: String,
+    /// What the backend enforces on the real path.
+    guard: ReadGuard,
 }
 
 impl Probe {
@@ -703,7 +793,7 @@ impl Probe {
 
     /// One environment variable, for run-level work (the Windows snapshot reads `SystemRoot`). The
     /// entry names the variable and never holds the value. A check's probe is refused: a check reads
-    /// the names it declares, which M1-045 builds.
+    /// the names it declares, through `Probe::env`.
     ///
     /// # Errors
     ///
@@ -720,20 +810,41 @@ impl Probe {
         Ok(value)
     }
 
-    /// Reads a whole file.
+    /// Reads a regular file, up to [`MAX_READ`] bytes.
     ///
     /// # Errors
     ///
-    /// [`ProbeError::Denied`] for a path on the denylist, a relative path, a `..` path, or a call after
-    /// the check ended; the other variants when the backend fails.
+    /// [`ProbeError::Denied`] for a path on the denylist, outside the check's `reads`, a relative path,
+    /// a `..` path, a link that leads to any of those, a file that is not a regular file (a FIFO, a
+    /// device), or a call after the check ended; the other variants when the backend fails.
     pub async fn read(&self, path: &Path) -> Result<FileBytes, ProbeError> {
-        let Gate { hub, entry, what } = self.gate_file(ActionKind::Read, path)?;
+        self.read_range(path, ReadRange::Head(MAX_READ)).await
+    }
+
+    /// Reads the last `max` bytes of a regular file (at most [`MAX_READ`]). `truncated_head` says the
+    /// start was left out.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Probe::read`].
+    pub async fn read_tail(&self, path: &Path, max: usize) -> Result<FileBytes, ProbeError> {
+        self.read_range(path, ReadRange::Tail(max.min(MAX_READ)))
+            .await
+    }
+
+    async fn read_range(&self, path: &Path, range: ReadRange) -> Result<FileBytes, ProbeError> {
+        let Gate {
+            hub,
+            entry,
+            what,
+            guard,
+        } = self.gate_file(ActionKind::Read, path)?;
         let result = self
             .unless_ended(&what, async {
                 hub.backend
-                    .open_read(path)
+                    .open_read(path, range, &guard)
                     .await
-                    .map_err(|e| ProbeError::from_io(&e))
+                    .map_err(|e| ProbeError::from_file_io(&e, &what))
             })
             .await;
         settle(entry, result, |file, entry| {
@@ -746,15 +857,21 @@ impl Probe {
     ///
     /// # Errors
     ///
-    /// The same as [`Probe::read`].
+    /// The same as [`Probe::read`], and `Io` for a directory with more than [`MAX_DIR_ENTRIES`]
+    /// entries.
     pub async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ProbeError> {
-        let Gate { hub, entry, what } = self.gate_file(ActionKind::ReadDir, path)?;
+        let Gate {
+            hub,
+            entry,
+            what,
+            guard,
+        } = self.gate_file(ActionKind::ReadDir, path)?;
         let result = self
             .unless_ended(&what, async {
                 hub.backend
-                    .read_dir(path)
+                    .read_dir(path, &guard)
                     .await
-                    .map_err(|e| ProbeError::from_io(&e))
+                    .map_err(|e| ProbeError::from_file_io(&e, &what))
             })
             .await;
         settle(entry, result, |entries, entry| {
@@ -768,13 +885,18 @@ impl Probe {
     ///
     /// The same as [`Probe::read`].
     pub async fn stat(&self, path: &Path) -> Result<Option<FileMeta>, ProbeError> {
-        let Gate { hub, entry, what } = self.gate_file(ActionKind::Stat, path)?;
+        let Gate {
+            hub,
+            entry,
+            what,
+            guard,
+        } = self.gate_file(ActionKind::Stat, path)?;
         let result = self
             .unless_ended(&what, async {
                 hub.backend
-                    .stat(path)
+                    .stat(path, &guard)
                     .await
-                    .map_err(|e| ProbeError::from_io(&e))
+                    .map_err(|e| ProbeError::from_file_io(&e, &what))
             })
             .await;
         settle(entry, result, |meta, entry| {
@@ -782,6 +904,31 @@ impl Probe {
                 entry.set("bytes", meta.len);
             }
         })
+    }
+
+    /// Reads an environment variable the check declared in `CheckInfo::env`. `Ok(None)` means it is
+    /// not set. The log records the name and never the value.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] for a name the check did not declare, a string that cannot be a variable
+    /// name, or a call after the check ended.
+    pub fn env(&self, name: &str) -> Result<Option<String>, ProbeError> {
+        let mut fields = Map::new();
+        fields.insert("name".to_owned(), name.into());
+        let (hub, entry) = self.begin(ActionKind::Env, fields, name)?;
+        if name.is_empty() || name.contains(['=', '\0']) {
+            return Err(refuse(entry, RULE_ENV_BAD_NAME, name));
+        }
+        if self
+            .scope
+            .info
+            .is_some_and(|info| !info.env.contains(&name))
+        {
+            return Err(refuse(entry, RULE_ENV_NOT_DECLARED, name));
+        }
+        let value = hub.backend.env(name);
+        settle(entry, Ok(value), |_, _| {})
     }
 
     /// Runs a command.
@@ -853,7 +1000,7 @@ impl Probe {
         Ok((cmd, listed.form.id))
     }
 
-    /// The common start of a file call: the handle checks, then the read denylist.
+    /// The common start of a file call: the handle checks, then the read policy on the path as written.
     fn gate_file(&self, kind: ActionKind, path: &Path) -> Result<Gate<'_>, ProbeError> {
         // The path as the log shows it. The error carries this text, and an error becomes a result
         // message, so a home directory name must not be in it.
@@ -864,8 +1011,14 @@ impl Probe {
         let mut fields = Map::new();
         fields.insert("path".to_owned(), what.clone().into());
         let (hub, entry) = self.begin(kind, fields, &what)?;
-        match policy::check_read(path) {
-            Ok(()) => Ok(Gate { hub, entry, what }),
+        let guard = ReadGuard::new(self.scope.os, self.scope.info.map(|info| info.reads));
+        match guard.admit(path) {
+            Ok(()) => Ok(Gate {
+                hub,
+                entry,
+                what,
+                guard,
+            }),
             Err(rule) => Err(refuse(entry, rule, &what)),
         }
     }

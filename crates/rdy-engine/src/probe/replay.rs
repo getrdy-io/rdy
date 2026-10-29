@@ -12,7 +12,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::sealed::Sealed;
-use super::{Backend, DirEntry, FileBytes, FileMeta, Output, ProbeError};
+use super::{Backend, DirEntry, FileBytes, FileMeta, Output, ProbeError, ReadGuard, ReadRange};
 use crate::check::BoxFuture;
 use crate::exec::policy::Cmd;
 use crate::privilege::ProcessIds;
@@ -22,9 +22,9 @@ use crate::privilege::ProcessIds;
 pub struct Replay {
     files: HashMap<PathBuf, Vec<u8>>,
     dirs: HashMap<PathBuf, Vec<DirEntry>>,
+    env: HashMap<String, String>,
     commands: HashMap<(String, Vec<String>), Output>,
     ids: Option<ProcessIds>,
-    env: HashMap<String, String>,
 }
 
 impl Replay {
@@ -38,6 +38,14 @@ impl Replay {
     #[must_use]
     pub fn file(mut self, path: impl Into<PathBuf>, bytes: impl Into<Vec<u8>>) -> Self {
         self.files.insert(path.into(), bytes.into());
+        self
+    }
+
+    /// Sets an environment variable. A check's probe still has to declare the name; the run-level probe
+    /// reads the few names the engine needs.
+    #[must_use]
+    pub fn env(mut self, name: &str, value: &str) -> Self {
+        self.env.insert(name.to_owned(), value.to_owned());
         self
     }
 
@@ -63,13 +71,6 @@ impl Replay {
         self
     }
 
-    /// Sets an environment variable the run-level probe can read. Others are unset.
-    #[must_use]
-    pub fn env(mut self, name: &str, value: &str) -> Self {
-        self.env.insert(name.to_owned(), value.to_owned());
-        self
-    }
-
     /// Sets the real, effective, saved and filesystem ids that `process_ids` answers with (the macOS
     /// snapshot). A backend with none set answers "not found".
     #[must_use]
@@ -89,20 +90,33 @@ fn not_found(what: &Path) -> io::Error {
 }
 
 impl Backend for Replay {
-    fn open_read<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<FileBytes>> {
+    fn open_read<'a>(
+        &'a self,
+        path: &'a Path,
+        range: ReadRange,
+        _guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<FileBytes>> {
         Box::pin(async move {
             self.files
                 .get(path)
-                .map(|bytes| FileBytes::new(bytes.clone()))
+                .map(|bytes| range.cut(bytes.clone()))
                 .ok_or_else(|| not_found(path))
         })
     }
 
-    fn read_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
+    fn read_dir<'a>(
+        &'a self,
+        path: &'a Path,
+        _guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
         Box::pin(async move { self.dirs.get(path).cloned().ok_or_else(|| not_found(path)) })
     }
 
-    fn stat<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
+    fn stat<'a>(
+        &'a self,
+        path: &'a Path,
+        _guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
         Box::pin(async move {
             let meta = if let Some(bytes) = self.files.get(path) {
                 Some(FileMeta::file(
@@ -113,6 +127,10 @@ impl Backend for Replay {
             };
             Ok(meta)
         })
+    }
+
+    fn env(&self, name: &str) -> Option<String> {
+        self.env.get(name).cloned()
     }
 
     fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
@@ -127,10 +145,6 @@ impl Backend for Replay {
                 .cloned()
                 .ok_or(ProbeError::NotFound)
         })
-    }
-
-    fn env(&self, name: &str) -> Option<String> {
-        self.env.get(name).cloned()
     }
 
     fn process_ids(&self) -> BoxFuture<'_, Result<ProcessIds, ProbeError>> {
