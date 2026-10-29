@@ -726,6 +726,55 @@ mod commands {
     }
 
     #[tokio::test]
+    async fn a_thousand_and_one_denied_execs_fold_and_none_is_dropped() {
+        let hub = hub(Replay::new());
+        let probe = hub.check_probe("net.dns", Os::Linux, Some(&GETENT_ONLY));
+        let undeclared = |program: &str, form: &str| {
+            table::entry(program)
+                .expect("entry")
+                .cmd_for(Os::Linux, form, &[])
+                .expect("a table command")
+        };
+        for _ in 0..=CHECK_QUOTA {
+            let error = probe
+                .exec(undeclared("timedatectl", "status"))
+                .await
+                .expect_err("undeclared");
+            assert!(matches!(
+                error,
+                ProbeError::Denied {
+                    rule: RULE_COMMAND_UNDECLARED,
+                    ..
+                }
+            ));
+        }
+        // A different program is its own key.
+        probe
+            .exec(undeclared("crio", "version"))
+            .await
+            .expect_err("undeclared");
+
+        let log = hub.action_log();
+        assert_eq!(log.last_resort_drops, 0);
+        assert!(!log.truncated, "nothing was dropped: {:?}", log.dropped);
+        // 20 written, one coalesced entry, and the other program.
+        assert_eq!(log.actions.len(), COALESCE_AFTER + 1 + 1);
+        let folded: Vec<_> = log
+            .actions
+            .iter()
+            .filter(|a| a.kind == ActionKind::Coalesced)
+            .collect();
+        assert_eq!(folded.len(), 1);
+        assert_eq!(field(folded[0], "of"), Some(&json!("exec")));
+        assert_eq!(field(folded[0], "under"), Some(&json!("timedatectl")));
+        assert_eq!(
+            field(folded[0], "count"),
+            Some(&json!(CHECK_QUOTA + 1 - COALESCE_AFTER))
+        );
+        assert_eq!(folded[0].outcome, ActionOutcome::Denied);
+    }
+
+    #[tokio::test]
     async fn the_provided_spawn_runs_commands_through_the_table_runner() {
         // `table::run` refuses an unlisted program before anything starts, so this proves the live
         // path goes through the table without starting a process.
@@ -1195,44 +1244,80 @@ fn six_thousand_failed_reads_then_a_denied_read_keeps_the_denied_entry() {
     assert_eq!(log.dropped.get("read"), Some(&(6001 - CHECK_QUOTA as u64)));
 }
 
-#[test]
-fn a_thousand_and_one_denied_execs_fold_and_none_is_dropped() {
-    let hub = hub(Replay::new());
-    let probe = hub.check_probe("host.flood", Os::Linux, None);
-    let deny = |kind: ActionKind, field: &str, target: &str| {
-        let (_, mut entry) = probe
-            .begin(kind, Map::new(), "fixture")
-            .expect("probe is live");
-        entry.set(field, target);
-        entry.set("rule", "command not declared by the check");
-        entry.finish(ActionOutcome::Denied);
-    };
-    for _ in 0..=CHECK_QUOTA {
-        deny(ActionKind::Exec, "program", "timedatectl");
-    }
-    // A different target is its own key, and so is a different kind.
-    deny(ActionKind::Exec, "program", "chronyc");
-    deny(ActionKind::Connect, "host", "registry.acme.example");
+/// Writes one `denied` entry of `kind` that names `target` in `field`, straight into the log.
+fn deny(probe: &Probe, kind: ActionKind, field: &str, target: &str) {
+    let (_, mut entry) = probe
+        .begin(kind, Map::new(), "fixture")
+        .expect("probe is live");
+    entry.set(field, target);
+    entry.set("rule", "refused for the test");
+    entry.finish(ActionOutcome::Denied);
+}
 
+#[test]
+fn denied_calls_past_the_target_cap_share_one_entry_under_a_star() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("net.flood", Os::Linux, None);
+    for i in 0..DENIED_TARGETS + 50 {
+        deny(
+            &probe,
+            ActionKind::Connect,
+            "host",
+            &format!("h{i}.acme.example"),
+        );
+    }
     let log = hub.action_log();
     assert_eq!(log.last_resort_drops, 0);
-    assert!(!log.truncated, "nothing was dropped: {:?}", log.dropped);
-    // 20 written, one coalesced entry, and the two other targets.
-    assert_eq!(log.actions.len(), COALESCE_AFTER + 1 + 2);
+    assert!(!log.truncated, "{:?}", log.dropped);
+    // 100 targets kept apart, then 20 written under the star key and the rest folded into one entry.
+    assert_eq!(log.actions.len(), DENIED_TARGETS + COALESCE_AFTER + 1);
     let folded: Vec<_> = log
         .actions
         .iter()
         .filter(|a| a.kind == ActionKind::Coalesced)
         .collect();
     assert_eq!(folded.len(), 1);
-    assert_eq!(field(folded[0], "of"), Some(&json!("exec")));
-    assert_eq!(field(folded[0], "under"), Some(&json!("timedatectl")));
+    assert_eq!(field(folded[0], "under"), Some(&json!("*")));
+    assert_eq!(field(folded[0], "of"), Some(&json!("connect")));
+    assert_eq!(field(folded[0], "count"), Some(&json!(30)));
+    // Another kind has its own targets.
+    deny(&probe, ActionKind::Exec, "program", "timedatectl");
     assert_eq!(
-        field(folded[0], "count"),
-        Some(&json!(CHECK_QUOTA + 1 - COALESCE_AFTER))
+        hub.action_log().actions.len(),
+        DENIED_TARGETS + COALESCE_AFTER + 2
     );
-    assert_eq!(folded[0].outcome, ActionOutcome::Denied);
-    assert_eq!(count_of(&log, "connect", ActionOutcome::Denied), 1);
+}
+
+#[test]
+fn one_checks_flood_of_denials_does_not_evict_another_checks_entries() {
+    let hub = hub(Replay::new()).with_limits(40, 1000);
+    let quiet = hub.check_probe("host.quiet", Os::Linux, None);
+    let noisy = hub.check_probe("net.noisy", Os::Linux, None);
+    for _ in 0..5 {
+        put(&quiet, ActionKind::Exec, ActionOutcome::Ok);
+        put(&quiet, ActionKind::Connect, ActionOutcome::Ok);
+    }
+    for i in 0..90 {
+        deny(
+            &noisy,
+            ActionKind::Connect,
+            "host",
+            &format!("h{i}.acme.example"),
+        );
+    }
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 40, "the log cap holds");
+    let kept = |check: &str, kind: &str| {
+        log.actions
+            .iter()
+            .filter(|a| a.check.as_deref() == Some(check) && a.kind.as_str() == kind)
+            .count()
+    };
+    assert_eq!(kept("host.quiet", "exec"), 5);
+    assert_eq!(kept("host.quiet", "connect"), 5);
+    // The flood was dropped, counted and warned about, and the first denials are still there.
+    assert_eq!(kept("net.noisy", "connect"), 30);
+    assert_eq!(log.last_resort_drops, 60);
 }
 
 #[test]

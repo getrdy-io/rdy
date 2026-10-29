@@ -559,7 +559,7 @@ pub(crate) fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
     );
     #[allow(
         clippy::disallowed_methods,
-        reason = "the policy is the one place that builds the raw spec, after its checks"
+        reason = "the policy is the one place that builds the raw spec, after its checks. `allow`, not `expect`: the lint path exists only in builds with the `testing` feature"
     )]
     let spec = ExecSpec::new(path, cmd.timeout);
     Ok(spec
@@ -603,7 +603,7 @@ pub(crate) async fn run(cmd: Cmd) -> Result<ExecOutput, CommandError> {
     let spec = prepare(&cmd)?;
     #[allow(
         clippy::disallowed_methods,
-        reason = "the policy runner is the one caller of the raw runner, after the policy checks"
+        reason = "the policy runner is the one caller of the raw runner, after the policy checks. `allow`, not `expect`: the lint path exists only in builds with the `testing` feature"
     )]
     let running = super::runner::run(spec);
     Ok(running.await?)

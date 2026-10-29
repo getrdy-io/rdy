@@ -202,7 +202,9 @@ const PID_ALLOWED: &[&str] = &[
 /// Whether `tail`, the part of the path after `/proc/<pid>`, is on the allowlist. `pid` is the name
 /// of the process directory. `auxv` is allowed for `self` only: the privilege snapshot (M1-042) reads
 /// `AT_SECURE` from the running process's own `/proc/self/auxv`. Another process's auxv holds its
-/// load addresses and is not on the list.
+/// load addresses and is not on the list. This match is on the name. When M1-045 matches the real
+/// path, `/proc/self` resolves to `/proc/<pid>`: compare that pid with `std::process::id()`, never
+/// accept any pid.
 fn pid_entry_allowed(pid: &str, tail: &[&str]) -> bool {
     match tail {
         [] | ["task"] => true,

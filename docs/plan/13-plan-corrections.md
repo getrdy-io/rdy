@@ -262,7 +262,8 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   and the five dependency caps hold whatever a valid `RUST_LOG` says. The proxy URL canary moved to
   M1-060 and the JSON and HTML parts of the M1-056 exit test to M1-062.
 - PC-44 (found by the M1-040 review, PR #58): applied in 01 section 5.4, 02 (the Files deny list and the
-  `Backend` sketch), 05 I5, 11 and ADR 0014. Four changes. (1) One `Cmd` type, the one in
+  `Backend` sketch) and 05 I5. The backlog row and the ADR 0014 and 02 ticket lines keep their old exit
+  test until correction-12 (PR #82) changes them. Four changes. (1) One `Cmd` type, the one in
   `exec::policy`, built with `CommandEntry::cmd` (ADR 0028). `Probe::exec` applies the check's
   `CommandSpec` (extra directories, environment names, stdout cap), then checks the command with
   `table::validate_for(os, ..)` for the check's OS, then calls
@@ -278,8 +279,8 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   and the fields already existed). A check holds 1000 entries. Drop order: `ok` file entries, then
   `failed` ones, then (last resort, with a `tracing` warning and a counter) other kept entries. (3) The
   M1-040 exit test says "retention drops ok read, read_dir and stat entries first, then failed ones, and
-  never a denied entry" in place of "truncation drops only ok read, read_dir and stat entries" (11, 02,
-  ADR 0014). (4) The deny list in 02 and 05 I5 gains the any-depth `etc` rules, the credential files,
+  never a denied entry" in place of "truncation drops only ok read, read_dir and stat entries" (the
+  rows in 11, 02 and ADR 0014 change in correction-12, PR #82). (4) The deny list in 02 and 05 I5 gains the any-depth `etc` rules, the credential files,
   the cluster credential paths, the `/proc/<pid>/` allowlist, the kernel files and `/dev` for `stat` and
   `read_dir`. Carried: M1-091 and M1-103 inherit "every tcp, http and kube call writes one entry"; M1-102
   settles how the engine's own kubeconfig read gets past the `.kube` rule; M4 adds a closed stat-only

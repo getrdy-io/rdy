@@ -25,10 +25,14 @@
 //!   `ok` ones already held, then `failed` ones (`read`, `read_dir`, `stat` and `coalesced`).
 //!   `actions_dropped` counts them by kind.
 //! - *Last resort.* A `denied` entry is never dropped to make room for another kind of entry, and
-//!   repeated denials fold, so the log holds one per distinct (check, kind, rule, target). Only a check
-//!   with more than [`CHECK_QUOTA`] such distinct denials, or a log past [`MAX_ENTRIES`] of them, can
-//!   lose one; the log then drops the newest other kept entry (`exec`, `connect`, `tls`, `http`, `kube`,
-//!   a timed out read) first, and only if there is none the new entry. Each of these is counted in
+//!   repeated denials fold, so the log holds one per distinct (check, kind, rule, target). A check keeps
+//!   at most [`DENIED_TARGETS`] distinct targets apart per (check, kind, rule); the calls to any more
+//!   fold into one `coalesced` entry whose `under` is `*`. `denied` keys have a budget of their own
+//!   (2000), apart from the 20 000 keys of `failed` file calls; past either, a call is written without
+//!   folding. When a `denied` entry still finds a check at [`CHECK_QUOTA`] or the log at [`MAX_ENTRIES`],
+//!   it displaces `ok` and `failed` file entries, then a spare entry of its own check only (the newest
+//!   `exec`, `connect`, `tls`, `http`, `kube` or timed out read), never another check's. If there is
+//!   none, the new entry is dropped. Each drop of a kept entry is counted in
 //!   [`ActionLogOutput::last_resort_drops`] and warned about with `tracing`. The kinds other than
 //!   `denied` are bounded by the spec (hosts, ports) and by the fixed command set, so this should not
 //!   happen.
@@ -55,9 +59,17 @@ pub const CHECK_QUOTA: usize = 1000;
 /// How many `denied` or `failed` file calls for one key are written one by one before they fold.
 pub const COALESCE_AFTER: usize = 20;
 
-/// The most distinct coalescing keys the log tracks. Past it a new key is not folded, only subject to
-/// the quotas, so memory stays bounded.
+/// The most distinct keys of `failed` file calls the log tracks. Past it a new key is not folded, only
+/// subject to the quotas, so memory stays bounded.
 const MAX_COALESCE_KEYS: usize = 20_000;
+
+/// The most distinct keys of `denied` calls the log tracks, a budget of its own so a flood of failed
+/// reads cannot use it up.
+const MAX_DENIED_KEYS: usize = 2_000;
+
+/// How many distinct targets one (check, kind, rule) of `denied` calls keeps apart. The calls to any
+/// further target fold into one `coalesced` entry whose `under` is `*`.
+pub const DENIED_TARGETS: usize = 100;
 
 /// The limits of one log.
 #[derive(Debug, Clone, Copy)]
@@ -166,6 +178,11 @@ struct State {
     all: Tiers,
     checks: HashMap<Option<String>, CheckSlots>,
     folds: HashMap<FoldKey, Folded>,
+    /// How many `denied` keys each (check, kind, rule) has, for the cap of [`DENIED_TARGETS`].
+    spread: HashMap<(Option<String>, String, String), usize>,
+    /// Keys in `folds` by sort: `denied` ones and `failed` ones, each with its own budget.
+    denied_keys: usize,
+    failed_keys: usize,
     dropped: BTreeMap<String, u64>,
     truncated: bool,
     last_resort: u64,
@@ -470,13 +487,38 @@ fn folded_entry(key: &FoldKey, first: &Action) -> Action {
 
 /// Adds a closed entry to the log: folds it if it repeats, then places it under the limits.
 fn record(state: &mut State, action: Action, limits: Limits) {
-    let Some(key) = fold_key(&action) else {
+    let Some(mut key) = fold_key(&action) else {
         place(state, action, limits);
         return;
     };
-    if !state.folds.contains_key(&key) && state.folds.len() >= MAX_COALESCE_KEYS {
+    if key.denied && !state.folds.contains_key(&key) {
+        // Past DENIED_TARGETS distinct targets for this (check, kind, rule), more targets share one key.
+        let group = (key.check.clone(), key.kind.clone(), key.reason.clone());
+        let spread = state.spread.entry(group.clone()).or_insert(0);
+        if *spread >= DENIED_TARGETS {
+            key.dir = "*".to_owned();
+        }
+        if !state.folds.contains_key(&key) {
+            *state.spread.entry(group).or_insert(0) += 1;
+        }
+    }
+    let is_new = !state.folds.contains_key(&key);
+    let budget_full = is_new
+        && if key.denied {
+            state.denied_keys >= MAX_DENIED_KEYS
+        } else {
+            state.failed_keys >= MAX_COALESCE_KEYS
+        };
+    if budget_full {
         place(state, action, limits);
         return;
+    }
+    if is_new {
+        if key.denied {
+            state.denied_keys += 1;
+        } else {
+            state.failed_keys += 1;
+        }
     }
     let slot = state.folds.entry(key.clone()).or_default();
     slot.seen += 1;
@@ -549,7 +591,7 @@ enum Scope<'a> {
 
 /// Frees one slot in `scope` for an entry of `incoming` tier. `false` means the new entry itself is
 /// the one to drop. Nothing here ever drops a `Denied` entry that is already held.
-fn make_room(state: &mut State, scope: Scope<'_>, incoming: Tier) -> bool {
+fn make_room(state: &mut State, scope: Scope<'_>, incoming: Tier, own: &Option<String>) -> bool {
     let victim = match (scope, incoming) {
         // A new `ok` file entry never displaces an older one: the early evidence stays.
         (_, Tier::Ok) => return false,
@@ -559,12 +601,17 @@ fn make_room(state: &mut State, scope: Scope<'_>, incoming: Tier) -> bool {
             .checks
             .get(check)
             .and_then(|slots| slots.tiers.victim(Tier::Ok)),
-        // Anything else displaces `ok`, then `failed`, then (last resort) a spare entry.
-        (Scope::Log, Tier::Spare | Tier::Denied) => state.all.victim(if incoming == Tier::Denied {
-            Tier::Spare
-        } else {
-            Tier::Failed
+        // A `denied` entry displaces `ok` and `failed` file entries of any check, and a spare entry
+        // (`exec`, `connect`, `http`) only of its own check, so one check's flood of denials cannot
+        // push out another check's evidence.
+        (Scope::Log, Tier::Denied) => state.all.victim(Tier::Failed).or_else(|| {
+            state
+                .checks
+                .get(own)
+                .and_then(|slots| slots.tiers.victim(Tier::Spare))
         }),
+        // Anything else displaces `ok`, then `failed`, then (last resort) a spare entry.
+        (Scope::Log, Tier::Spare) => state.all.victim(Tier::Failed),
         (Scope::Check(check), Tier::Spare | Tier::Denied) => {
             state.checks.get(check).and_then(|slots| {
                 slots.tiers.victim(if incoming == Tier::Denied {
@@ -589,8 +636,10 @@ fn place(state: &mut State, action: Action, limits: Limits) {
     let tier = tier(&action);
     let check = action.check.clone();
     let held = state.checks.get(&check).map_or(0, |slots| slots.count);
-    let full = (held >= limits.check_quota && !make_room(state, Scope::Check(&check), tier))
-        || (state.entries.len() >= limits.max_entries && !make_room(state, Scope::Log, tier));
+    let full = (held >= limits.check_quota
+        && !make_room(state, Scope::Check(&check), tier, &check))
+        || (state.entries.len() >= limits.max_entries
+            && !make_room(state, Scope::Log, tier, &check));
     if full {
         count_drop(state, &action.kind);
         if matches!(tier, Tier::Spare | Tier::Denied) {

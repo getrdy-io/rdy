@@ -174,12 +174,12 @@
           "maxLength": 4096
         },
         "under": {
-          "description": "coalesced: the directory the file calls were under, or the program, host or path the other denied calls named",
+          "description": "coalesced: the parent directory the file calls were under, or the program, host or path the other denied calls named, or * for denied calls past 100 targets",
           "type": "string",
           "maxLength": 4096
         },
         "count": {
-          "description": "coalesced: how many calls the entry stands for. Reads past 200 per directory, or denied calls and failed file calls past 20 per target and reason.",
+          "description": "coalesced: how many calls the entry stands for. Reads past 200 per directory, or denied calls and failed file calls past 20 per parent directory (file calls) or target (other denied calls) and reason.",
           "type": "integer",
           "minimum": 0
         },
@@ -1305,7 +1305,7 @@
           "maxItems": 5000
         },
         "actions_truncated": {
-          "description": "`true` when the log dropped an entry: at the 5000 entry cap or a check's 1000 entry quota. `ok` then `failed` `read`, `read_dir` and `stat` entries go first. A `denied` entry is never dropped for another kind of entry, and repeated denials fold into one `coalesced` entry per target.",
+          "description": "`true` when the log dropped an entry: at the 5000 entry cap or a check's 1000 entry quota. `ok` then `failed` `read`, `read_dir` and `stat` entries go first. A `denied` entry is never dropped for another kind of entry, and repeated denials fold into one `coalesced` entry per parent directory (file calls) or per target (other calls).",
           "type": "boolean"
         },
         "actions_dropped": {

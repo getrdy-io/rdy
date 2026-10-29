@@ -61,6 +61,9 @@ jobs:
       # (replay) builds rdy-engine alone, so lint and document that build too (ADR 0028).
       - name: cargo clippy rdy-engine without default features
         run: cargo clippy --locked -p rdy-engine --no-default-features -- -D warnings
+      # The replay backend is behind `testing`, so the probe gate without a runtime needs this build too.
+      - name: cargo clippy rdy-engine without default features, with testing
+        run: cargo clippy --locked -p rdy-engine --no-default-features --features testing -- -D warnings
       - name: cargo doc rdy-engine without default features
         env:
           RUSTDOCFLAGS: -D warnings
