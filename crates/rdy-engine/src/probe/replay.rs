@@ -30,7 +30,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::time::Duration;
 
@@ -38,6 +38,7 @@ use serde_json::Value;
 
 use super::policy::{RULE_NOT_DIR, RULE_NOT_FILE_OR_DIR, RULE_NOT_REGULAR};
 use super::sealed::Sealed;
+use super::sock::{UdpReply, UnixResponse};
 use super::{
     Backend, DirEntry, FileBytes, FileMeta, NativeCall, NativeValue, Output, ProbeError, ReadGuard,
     ReadRange, Refused,
@@ -146,7 +147,10 @@ pub struct Replay {
     commands: HashMap<(String, Vec<String>), CommandAnswer>,
     ids: Option<ProcessIds>,
     native: HashMap<NativeCall, NativeAnswer>,
-    net: NetScript,
+    /// The scripted names and connections of `net.json` (M1-049).
+    script: NetScript,
+    /// Names, datagram servers and unix socket replies (M1-144). Its builders are in `sock::replay`.
+    pub(super) net: super::sock::replay::ReplayNet,
     api: HashMap<(String, String, String), ApiRecord>,
     reviews: Option<Value>,
 }
@@ -172,7 +176,8 @@ impl Replay {
             commands: HashMap::new(),
             ids: None,
             native: HashMap::new(),
-            net: NetScript::default(),
+            script: NetScript::default(),
+            net: super::sock::replay::ReplayNet::default(),
             api: HashMap::new(),
             reviews: None,
         }
@@ -292,7 +297,7 @@ impl Replay {
     /// The scripted names and connections of `net.json`.
     #[must_use]
     pub fn net(&self) -> &NetScript {
-        &self.net
+        &self.script
     }
 
     /// The recorded API response for a request, or `None`. The method is compared in upper case.
@@ -331,7 +336,7 @@ impl Replay {
     /// An `io::Error` of kind `ConnectionRefused` or `ConnectionReset`, or the not-recorded marker.
     pub fn dial(&self, addr: SocketAddr) -> BoxFuture<'_, io::Result<String>> {
         Box::pin(async move {
-            match self.net.tcp(addr) {
+            match self.script.tcp(addr) {
                 Some(TcpScript::Serve(name)) => Ok(name.clone()),
                 Some(TcpScript::Refused) => Err(io::ErrorKind::ConnectionRefused.into()),
                 Some(TcpScript::Reset) => Err(io::ErrorKind::ConnectionReset.into()),
@@ -601,6 +606,34 @@ impl Backend for Replay {
             }
             Ok(output)
         })
+    }
+
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        _port: u16,
+        _timeout: Duration,
+    ) -> BoxFuture<'a, io::Result<Vec<IpAddr>>> {
+        Box::pin(async move { self.net.resolve(host) })
+    }
+
+    fn udp_exchange<'a>(
+        &'a self,
+        to: SocketAddr,
+        payload: &'a [u8],
+        max_reply: usize,
+        _timeout: Duration,
+    ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
+        Box::pin(async move { self.net.udp(to, payload, max_reply) })
+    }
+
+    fn unix_get<'a>(
+        &'a self,
+        socket: &'a Path,
+        path: &'a str,
+        _timeout: Duration,
+    ) -> BoxFuture<'a, Result<UnixResponse, ProbeError>> {
+        Box::pin(async move { self.net.unix(socket, path) })
     }
 
     fn process_ids(&self) -> BoxFuture<'_, Result<ProcessIds, ProbeError>> {

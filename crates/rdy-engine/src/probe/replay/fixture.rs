@@ -911,7 +911,7 @@ fn build(
                 replay.api.insert(key, record);
             }
         } else if path == "net.json" {
-            replay.net = net(&ctx, bytes)?;
+            replay.script = net(&ctx, bytes)?;
         } else if path == "env.json" {
             replay.env = env(&ctx, bytes)?;
         }

@@ -22,6 +22,11 @@
 //! file with the device and inode of a password or sudo file, whatever its name. Windows has no file
 //! reads in M1: every file call fails with a typed error.
 //!
+//! **Sockets (M1-144).** `resolve`, `udp_exchange` and `unix_get` do the socket work and nothing else:
+//! the probe has already applied the peer, address and path policy. A datagram is read into a
+//! 65535-byte buffer and cut to the cap here. A unix socket reply is read by a small HTTP/1.x client
+//! (`dockerhttp`) that sends one fixed `GET`. The unix socket is not built on Windows.
+//!
 //! **Native calls.** `Backend::native` runs the closed `NativeCall` list in the `native` module (Unix;
 //! Windows reports `Unsupported` for every call until its sources land). A `Statvfs` call takes the same
 //! steps as a file call. Linux asks `fstatvfs` on the judged `O_PATH` descriptor. macOS opens the real
@@ -35,19 +40,26 @@
 //! that read cannot wait on a writer. A file on a hung network mount can still stall a thread.
 
 use std::io;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::sealed::Sealed;
+use super::sock::{UdpReply, UnixResponse};
 use super::{
-    Backend, DirEntry, FileBytes, FileMeta, NativeCall, NativeValue, ReadGuard, ReadRange,
+    Backend, DirEntry, FileBytes, FileMeta, NativeCall, NativeValue, ProbeError, ReadGuard,
+    ReadRange,
 };
 use crate::check::BoxFuture;
 
 #[cfg(unix)]
+mod dockerhttp;
+#[cfg(unix)]
 mod files;
 #[cfg(unix)]
 mod native;
+mod netio;
 
 /// The backend that reads the real machine.
 ///
@@ -186,6 +198,46 @@ impl Backend for Live {
     fn env(&self, name: &str) -> Option<String> {
         // The probe checked the name: declared, not empty, no `=` and no NUL.
         std::env::var_os(name).map(|value| value.to_string_lossy().into_owned())
+    }
+
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+        timeout: Duration,
+    ) -> BoxFuture<'a, io::Result<Vec<IpAddr>>> {
+        Box::pin(netio::resolve(host, port, timeout))
+    }
+
+    fn udp_exchange<'a>(
+        &'a self,
+        to: SocketAddr,
+        payload: &'a [u8],
+        max_reply: usize,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
+        Box::pin(netio::udp(to, payload, max_reply, timeout))
+    }
+
+    fn unix_get<'a>(
+        &'a self,
+        socket: &'a Path,
+        path: &'a str,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UnixResponse, ProbeError>> {
+        #[cfg(unix)]
+        {
+            Box::pin(netio::unix_get(socket, path, timeout))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (socket, path, timeout);
+            Box::pin(async {
+                Err(ProbeError::Io(
+                    "this build of rdy cannot open unix sockets on this platform".to_owned(),
+                ))
+            })
+        }
     }
 }
 

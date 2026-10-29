@@ -39,8 +39,8 @@
 //! `native` module, ADR 0014).
 //!
 //! **What is here, and what is not.** The handle, the log, the read policy, `read`, `read_tail`,
-//! `read_dir`, `stat`, `env`, `exec` and `native`, and the live backend (`live_backend`, feature
-//! `runtime`). Still to come, each in its own ticket:
+//! `read_dir`, `stat`, `env`, `exec`, `native`, `udp_exchange` and `unix_get` (M1-144, policy in `sock`),
+//! and the live backend (`live_backend`, feature `runtime`). Still to come, each in its own ticket:
 //!
 //! - names, TCP, TLS and HTTP: the network tickets. They open their entries
 //!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp, http and kube
@@ -52,9 +52,11 @@
 use std::fmt;
 use std::future::Future;
 use std::io;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use rdy_spec::result::{ActionKind, ActionOutcome};
 use serde_json::{Map, Value};
@@ -66,6 +68,7 @@ use crate::exec::table::{self, TableError};
 use crate::exec::{ExecError, ExecOutput, policy::CommandError};
 use crate::privilege::ProcessIds;
 use crate::redact::Redactor;
+use sock::{UdpReply, UnixResponse};
 
 #[cfg(feature = "runtime")]
 pub use live::live_backend;
@@ -80,6 +83,7 @@ pub use policy::{ReadGuard, Refused};
 
 use log::{ActionLog, Limits, Pending};
 
+mod addr;
 #[cfg(feature = "runtime")]
 mod live;
 mod log;
@@ -87,6 +91,7 @@ mod native;
 mod policy;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) mod replay;
+pub mod sock;
 #[cfg(test)]
 mod tests;
 
@@ -414,6 +419,13 @@ impl From<ExecOutput> for Output {
     }
 }
 
+/// Why the provided socket methods of [`Backend`] fail.
+const NO_SOCKETS: &str = "this backend cannot open sockets";
+
+fn no_sockets_io() -> io::Error {
+    io::Error::new(io::ErrorKind::Unsupported, NO_SOCKETS)
+}
+
 mod sealed {
     /// Keeps [`super::Backend`] closed: only this crate can implement it (ADR 0014 decision 1).
     pub trait Sealed {}
@@ -498,6 +510,47 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
                 ))
             })
         }
+    }
+
+    /// Resolves a spec host name to addresses through the system resolver, for `udp_exchange` only.
+    /// The probe has already checked that the name is one of the check's spec hosts. It judges the
+    /// answers itself. The live backend uses the system resolver and a fixture backend answers from its
+    /// record. The provided body refuses: no backend reaches a socket by default.
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+        timeout: Duration,
+    ) -> BoxFuture<'a, io::Result<Vec<IpAddr>>> {
+        let _ = (host, port, timeout);
+        Box::pin(async { Err(no_sockets_io()) })
+    }
+
+    /// Sends one datagram to `to` from a socket connected to it and reads one reply of at most
+    /// `max_reply` bytes within `timeout`. The probe has already applied the peer and address policy.
+    /// The provided body refuses.
+    fn udp_exchange<'a>(
+        &'a self,
+        to: SocketAddr,
+        payload: &'a [u8],
+        max_reply: usize,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
+        let _ = (to, payload, max_reply, timeout);
+        Box::pin(async { Err(ProbeError::Io(NO_SOCKETS.to_owned())) })
+    }
+
+    /// Sends `GET path` over the unix socket at `socket` and reads the reply within `timeout`. The
+    /// probe has already checked the socket, the method and the path against the policy. The provided
+    /// body refuses.
+    fn unix_get<'a>(
+        &'a self,
+        socket: &'a Path,
+        path: &'a str,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UnixResponse, ProbeError>> {
+        let _ = (socket, path, timeout);
+        Box::pin(async { Err(ProbeError::Io(NO_SOCKETS.to_owned())) })
     }
 
     /// The process's real and effective user and group ids, for the privilege snapshot on macOS.
@@ -628,9 +681,11 @@ struct Scope {
     check: Option<String>,
     /// The OS the command table is read for.
     os: Os,
-    /// The check's manifest: commands, `reads` and `env`.
+    /// The check's manifest: commands, `reads`, `env` and `peers`.
     info: Option<&'static CheckInfo>,
     ended: AtomicBool,
+    /// The spec hosts and timeouts of the socket calls (M1-144).
+    peers: sock::Peers,
     /// Tells calls in flight that the check ended.
     #[cfg(feature = "runtime")]
     ended_signal: tokio::sync::watch::Sender<bool>,
@@ -643,6 +698,7 @@ impl Scope {
             os,
             info,
             ended: AtomicBool::new(false),
+            peers: sock::Peers::default(),
             #[cfg(feature = "runtime")]
             ended_signal: tokio::sync::watch::channel(false).0,
         }

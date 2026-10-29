@@ -28,7 +28,7 @@ serde = { workspace = true, features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "signal", "sync", "time"], optional = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "signal", "sync", "time"], optional = true }
 toml = { workspace = true, features = ["parse", "serde", "std"], optional = true }
 
 # Windows opens the report folder without following a reparse point (M1-036, M1-037).
