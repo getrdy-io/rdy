@@ -297,7 +297,7 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   `clippy.toml` `disallowed-methods` list now, so a check crate that calls the table runner without a
   `Probe` fails clippy. The one call in `probe.rs` carries `#[expect(clippy::disallowed_methods)]`.
 
-- PC-47 (found by the security review of PR #85, applied in M1-044): applied in 02 Appendix A, in the
+- PC-48 (found by the security review of PR #85, applied in M1-044): applied in 02 Appendix A, in the
   `clippy.toml` of every check crate and in `tests/lint-wall/src/uses.rs`. The wall list gains the
   first-party items a check must not call, because clippy bans only what is listed: the output folder
   (`rdy_engine::output::{ReportParent::open, OutputDir::create_new, create_new_in, write_atomic,

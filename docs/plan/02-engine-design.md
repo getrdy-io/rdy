@@ -440,14 +440,23 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
   the arm of the macro takes `#[$meta:meta]` as written (bound per arm). A check crate may use neither `#[path]` nor `include!`
   (`include_str!` only for the data files listed in the test). Its list also holds the engine, spec and
   xtask files that call a root entry on purpose.
+- The compiler is the first layer, the grep the second. A token grep cannot model `macro_rules!` (a macro
+  can take the `#` of an attribute as a `tt`, or rewrite a matcher), so every check crate has
+  `#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]` at the
+  root of `lib.rs` and of each `tests/`, `benches/` and `examples/` root. Any `allow`, `expect` or
+  `warn` of those lints, built by a macro or not, is then error E0453 under clippy. `rdy-checks-k8s` cannot
+  forbid at the root, because the `client` module allows the kube APIs it wraps (and so do its integration
+  tests, which are exempt). Its `lib.rs` holds only `mod` and `use` items, and every module but `client`
+  has `#[forbid(..)]` on it. `wall_intact.rs` requires all of this and rejects `[[bin]]`, `[[test]]`,
+  `[[bench]]`, `[[example]]` and `[lib] path` in a check crate manifest.
 - The wall cannot be turned down quietly (`tests/lint-wall/tests/wall_intact.rs`): a hardcoded floor of the
   Appendix A entries, no `.clippy.toml` anywhere, no `CLIPPY_CONF_DIR`, `rustflags`, compiler wrapper or
   `clippy` alias in a Cargo config, no `RUSTFLAGS` in a workflow, the clippy commands of CI are exactly the three pinned in the test, no workflow carries
-  `continue-on-error` or a flags variable (any case), no `[patch]`, `[replace]`, `paths` or `[source]`
+  `continue-on-error`, `--config`, `GITHUB_PATH` or a flags variable (any case), no workflow sets or reads a `CARGO_` name except `CARGO_TERM_COLOR`, `CARGO_INCREMENTAL`, `CARGO_NET_RETRY` and `CARGO_PROFILE_*`, a `- run:` clippy line counts as a command, any other clippy line is refused, no `[patch]`, `[replace]`, `paths` or `[source]`
   anywhere, nothing under `.claude/worktrees/` is tracked, no `disallowed_*`, `all`, `style` or `warnings` set to `allow` in the root
   `[workspace.lints]`, a check crate's `lints` is exactly `workspace = true` (manifests are read as TOML,
   so the spelling of a key does not matter), and every check crate says
-  `#![deny(clippy::print_stdout, clippy::print_stderr)]`.
+  `#![deny(clippy::print_stdout, clippy::print_stderr)]` and the `forbid` above.
 - **Direct dependency allowlist** (M1-044, `ci/check-crate-deps.toml`):
   - every check crate: `rdy-engine`, `rdy-spec`, `serde`, `serde_json`, `thiserror`, `futures-util`;
   - `rdy-checks-k8s` adds `kube` and `k8s-openapi` (and `secrecy` for kubeconfig token values), and is the
@@ -894,7 +903,7 @@ one clippy rule.
   `allow-invalid`), `rdy_engine::exec::table::run`, `rdy_engine::exec::run`,
   `rdy_engine::exec::ExecSpec::new` and `rdy_engine::testing::TestRun::context` (check tests use
   `context_for`, which applies the check's declaration).
-- First-party escapes (PC-47): the run owns the output folder, the process-wide effects and the spec, and
+- First-party escapes (PC-48): the run owns the output folder, the process-wide effects and the spec, and
   a check owns none of them. `rdy_engine::output::ReportParent::open`,
   `rdy_engine::output::OutputDir::create_new`, `OutputDir::create_new_in`, `OutputDir::write_atomic`,
   `OutputDir::write_spec`, `rdy_engine::output::default_report_parent`, `rdy_engine::exec::kill_all_groups`,

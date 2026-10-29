@@ -394,7 +394,7 @@ fn engine_test_run_context(run: &rdy_engine::testing::TestRun, os: rdy_engine::c
     let _ = run.context("x", os, Vec::<rdy_engine::check::Need>::new());
 }
 
-// ---- First-party escapes (PC-47) ----------------------------------------------------------------
+// ---- First-party escapes (PC-48) ----------------------------------------------------------------
 // The run owns the output folder, the process-wide effects and the spec. A check owns none of them.
 
 fn output_report_parent_open() {

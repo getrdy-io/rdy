@@ -13,7 +13,7 @@ mod common;
 use common::{Kind, check_crates, entries, name, root};
 use std::path::{Path, PathBuf};
 
-/// The floor: every non-kube entry of 02 Appendix A, as of M1-044 and PC-47. A check crate's clippy.toml may
+/// The floor: every non-kube entry of 02 Appendix A, as of M1-044 and PC-48. A check crate's clippy.toml may
 /// have more. It may not have fewer.
 const FLOOR: &[(Kind, &str)] = &[
     (Kind::Type, "std::process::Command"),
@@ -462,8 +462,9 @@ const CLIPPY_COMMANDS: &[&str] = &[
     "cargo clippy --locked -p rdy-engine --no-default-features --features testing --all-targets -- -D warnings",
 ];
 
-/// Names a workflow may not carry: flags and wrappers that change how clippy judges, and
-/// `continue-on-error`, which lets a red step pass. Compared in lower case.
+/// Names a workflow may not carry: flags and wrappers that change how clippy judges, `continue-on-error`,
+/// which lets a red step pass, `--config`, which sets a Cargo alias or flags on the command line, and
+/// `GITHUB_PATH`, which puts another `cargo` or `clippy-driver` first. Compared in lower case.
 const WORKFLOW_BANNED: &[&str] = &[
     "RUSTFLAGS",
     "CARGO_ENCODED_RUSTFLAGS",
@@ -473,10 +474,24 @@ const WORKFLOW_BANNED: &[&str] = &[
     "CLIPPY_CONF_DIR",
     "CLIPPY_ARGS",
     "continue-on-error",
+    "GITHUB_PATH",
+    "--config",
 ];
 
-/// What is wrong with one workflow: banned names (any case) and, appended to `commands`, every clippy
-/// command in it.
+/// The `CARGO_` environment names a workflow may set: output and speed knobs, the profile's debug level
+/// (any `CARGO_PROFILE_*`) and the network retry count. These are the ones `.github/` uses today
+/// (`CARGO_TERM_COLOR`, `CARGO_INCREMENTAL`, `CARGO_PROFILE_DEV_DEBUG`, `CARGO_NET_RETRY`). Every other
+/// `CARGO_` name can change what `cargo clippy` runs: `CARGO_ALIAS_CLIPPY`, `CARGO_HOME` (another
+/// config), `CARGO_SOURCE_*` and `CARGO_PATCH_*` (other code), `CARGO_BUILD_*`, `CARGO_TARGET_*`.
+const CARGO_ENV_ALLOWED: &[&str] = &["CARGO_TERM_COLOR", "CARGO_INCREMENTAL", "CARGO_NET_RETRY"];
+
+fn cargo_env_allowed(name: &str) -> bool {
+    CARGO_ENV_ALLOWED.contains(&name) || name.starts_with("CARGO_PROFILE_")
+}
+
+/// What is wrong with one workflow: banned names (any case), `CARGO_` names off the allowlist and a
+/// clippy run that is not a `cargo clippy` command; and, appended to `commands`, every clippy command in
+/// it (`run: cargo clippy ..` and `- run: cargo clippy ..`).
 fn workflow_problems(text: &str, commands: &mut Vec<String>) -> Vec<String> {
     let mut problems = Vec::new();
     for line in workflow_lines(text) {
@@ -486,11 +501,24 @@ fn workflow_problems(text: &str, commands: &mut Vec<String>) -> Vec<String> {
                 problems.push(format!("`{line}` carries {banned}"));
             }
         }
-        // A command: `run: cargo clippy ..` or a line of a script that starts with it. A step name that
-        // mentions clippy is not one.
-        let command = line.trim_start().trim_start_matches("run: ");
+        // A word is a run of letters, digits and `_`. `RDY_REQUIRE_CARGO_DENY` is one word that does not
+        // start with `CARGO_`.
+        for word in line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+            let upper = word.to_uppercase();
+            if upper.starts_with("CARGO_") && !cargo_env_allowed(&upper) {
+                problems.push(format!("`{line}` sets or reads {word}"));
+            }
+        }
+        // A command: `run: cargo clippy ..`, `- run: cargo clippy ..` or a line of a script that starts
+        // with it. A step name that mentions clippy is not one. Any other line that runs clippy is not
+        // one of the pinned commands, so it is a problem.
+        let trimmed = line.trim_start();
+        let item = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+        let command = item.strip_prefix("run: ").unwrap_or(item);
         if command.starts_with("cargo clippy") {
             commands.push(command.trim_end().to_owned());
+        } else if lower.contains("clippy") && !item.starts_with("name:") {
+            problems.push(format!("`{line}` runs clippy in a way the pin cannot see"));
         }
     }
     problems
@@ -544,6 +572,43 @@ fn the_workflow_reader_sees_what_it_must() {
             "    CONTINUE-ON-ERROR: true\n",
         ),
         ("CLIPPY_CONF_DIR", "      CLIPPY_CONF_DIR: /tmp\n"),
+        (
+            "a Cargo alias",
+            "      CARGO_ALIAS_CLIPPY: clippy -A warnings\n",
+        ),
+        ("an alias in lower case", "      cargo_alias_clippy: x\n"),
+        ("CARGO_HOME", "      CARGO_HOME: /tmp/evil\n"),
+        (
+            "CARGO_SOURCE",
+            "      CARGO_SOURCE_CRATES_IO_REPLACE_WITH: x\n",
+        ),
+        ("CARGO_PATCH", "      CARGO_PATCH_CRATES_IO: x\n"),
+        ("CARGO_BUILD_RUSTC", "      CARGO_BUILD_RUSTC: x\n"),
+        (
+            "CARGO_HOME in a script",
+            "        run: CARGO_HOME=/tmp cargo test\n",
+        ),
+        (
+            "CARGO_HOME read in a script",
+            "        run: ls \"${CARGO_HOME}\"\n",
+        ),
+        (
+            "a write to GITHUB_PATH",
+            "          echo /tmp/bin >> \"$GITHUB_PATH\"\n",
+        ),
+        (
+            "a write to GITHUB_PATH, lower case",
+            "          echo x >> $github_path\n",
+        ),
+        (
+            "--config",
+            "        run: cargo --config alias.clippy=\"x\" test\n",
+        ),
+        (
+            "clippy run by another command",
+            "        run: sh -c 'cargo clippy'\n",
+        ),
+        ("clippy-driver", "        run: clippy-driver --version\n"),
     ] {
         assert!(!check(text).0.is_empty(), "missed: {what}");
     }
@@ -557,8 +622,27 @@ fn the_workflow_reader_sees_what_it_must() {
         check("        run: cargo clippy --workspace --exclude rdy -- -D warnings\n");
     assert_eq!(commands.len(), 1);
     assert!(!CLIPPY_COMMANDS.contains(&commands[0].as_str()));
-    let (_, commands) = check("      - name: cargo clippy\n");
-    assert!(commands.is_empty());
+    let (problems, commands) = check("      - name: cargo clippy\n");
+    assert!(commands.is_empty() && problems.is_empty());
+    // A list item with `run:` is a command too.
+    let (_, commands) = check("      - run: cargo clippy --workspace -- -D warnings\n");
+    assert_eq!(commands, ["cargo clippy --workspace -- -D warnings"]);
+    let (_, commands) =
+        check("      - run: cargo clippy --workspace --exclude rdy -- -D warnings\n");
+    assert!(!CLIPPY_COMMANDS.contains(&commands[0].as_str()));
+    // What `.github/` sets today passes, and so does a variable that only contains the word.
+    for ok in [
+        "  CARGO_TERM_COLOR: always\n",
+        "  CARGO_INCREMENTAL: \"0\"\n",
+        "  CARGO_PROFILE_DEV_DEBUG: line-tables-only\n",
+        "  CARGO_PROFILE_TEST_DEBUG: 0\n",
+        "  CARGO_NET_RETRY: \"3\"\n",
+        "          RDY_REQUIRE_CARGO_DENY: \"1\"\n",
+        "          sudo --preserve-env=RUST_BACKTRACE,CARGO_TERM_COLOR,RDY_REQUIRE_ROOT \\\n",
+        "          echo \"CC_x=musl-gcc\" >> \"$GITHUB_ENV\"\n",
+    ] {
+        assert!(check(ok).0.is_empty(), "flagged: {ok}");
+    }
 }
 
 #[test]
@@ -760,6 +844,245 @@ fn a_check_crate_denies_the_print_lints() {
             stripped.contains("#![deny(clippy::print_stdout,clippy::print_stderr)]"),
             "{}/src/lib.rs must say `#![deny(clippy::print_stdout, clippy::print_stderr)]`",
             name(&dir)
+        );
+    }
+}
+
+/// The three lints of the wall. A check crate forbids them, so the compiler refuses an `allow`,
+/// `expect` or `warn` of any of them, however a macro builds it (E0453 under clippy). The grep of
+/// `allow_grep.rs` is the second layer: it reads tokens and cannot model `macro_rules!`.
+const WALL_LINTS: [&str; 3] = [
+    "clippy::disallowed_methods",
+    "clippy::disallowed_types",
+    "clippy::disallowed_macros",
+];
+
+/// The check crates whose `lib.rs` cannot carry the forbid at the root, with the modules that hold the
+/// exception. A forbid at the root makes an `allow` in a child an error, so the root has none and every
+/// other module has it. `rdy-checks-k8s::client` builds the one guarded kube client (ADR 0010, 0031).
+const MODULE_WISE: &[(&str, &[&str])] = &[("rdy-checks-k8s", &["client"])];
+
+/// Integration test roots that are not forbidden: the k8s client tests, which start mock API servers and
+/// plugin scripts. They are on the allowlist of `allow_grep.rs` for the same reason.
+const TEST_ROOTS_EXEMPT: &[&str] = &[
+    "rdy-checks-k8s/tests/client.rs",
+    "rdy-checks-k8s/tests/live_cluster.rs",
+    "rdy-checks-k8s/tests/tls.rs",
+];
+
+/// Whether one of the attributes is `forbid(..)` of all three wall lints. An attribute inside `cfg_attr`
+/// does not count: it can be switched off.
+fn forbids_the_wall(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("forbid") {
+            return false;
+        }
+        let Ok(paths) = attr.parse_args_with(
+            syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+        ) else {
+            return false;
+        };
+        let named: Vec<String> = paths
+            .iter()
+            .map(|p| {
+                p.segments
+                    .iter()
+                    .map(|s| s.ident.to_string().replace("r#", ""))
+                    .collect::<Vec<_>>()
+                    .join("::")
+            })
+            .collect();
+        WALL_LINTS.iter().all(|l| named.iter().any(|n| n == l))
+    })
+}
+
+/// What is wrong with the root file of a crate that forbids at the root.
+fn root_problem(source: &str) -> Option<String> {
+    match syn::parse_file(source) {
+        Ok(file) if forbids_the_wall(&file.attrs) => None,
+        Ok(_) => Some(
+            "no `#![forbid(clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros)]`"
+                .to_owned(),
+        ),
+        Err(e) => Some(format!("does not parse: {e}")),
+    }
+}
+
+/// What is wrong with a `lib.rs` that forbids module by module: an item that is not a `mod` or a `use`
+/// (it would sit at the root with no forbid) and a module outside `exempt` with no forbid on it.
+fn module_problems(source: &str, exempt: &[&str]) -> Vec<String> {
+    let file = match syn::parse_file(source) {
+        Ok(f) => f,
+        Err(e) => return vec![format!("does not parse: {e}")],
+    };
+    let mut problems = Vec::new();
+    for item in &file.items {
+        match item {
+            syn::Item::Mod(m) => {
+                let name = m.ident.to_string().replace("r#", "");
+                if !exempt.contains(&name.as_str()) && !forbids_the_wall(&m.attrs) {
+                    problems.push(format!("module `{name}` has no forbid"));
+                }
+            }
+            syn::Item::Use(_) => {}
+            _ => problems.push(
+                "an item other than `mod` or `use` at the root, where the forbid cannot reach it"
+                    .to_owned(),
+            ),
+        }
+    }
+    problems
+}
+
+/// Every Rust file that is the root of a target of a check crate: `src/lib.rs`, `src/main.rs`,
+/// `src/bin/`, `build.rs`, and the `.rs` files (and `main.rs` of a folder) under `tests/`, `benches/`
+/// and `examples/`.
+fn target_roots(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for fixed in ["src/lib.rs", "src/main.rs", "build.rs"] {
+        if dir.join(fixed).is_file() {
+            found.push(dir.join(fixed));
+        }
+    }
+    for sub in ["src/bin", "tests", "benches", "examples"] {
+        let Ok(read_dir) = std::fs::read_dir(dir.join(sub)) else {
+            continue;
+        };
+        for entry in read_dir {
+            let path = entry.expect("entry").path();
+            if path.extension().is_some_and(|x| x == "rs") && path.is_file() {
+                found.push(path);
+            } else if path.join("main.rs").is_file() {
+                found.push(path.join("main.rs"));
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn a_check_crate_forbids_the_disallowed_lints_so_no_macro_can_allow_them() {
+    for dir in check_crates() {
+        let crate_name = name(&dir);
+        let manifest = toml_of(&dir.join("Cargo.toml"));
+        for table in ["bin", "test", "bench", "example"] {
+            assert!(
+                manifest.get(table).is_none(),
+                "{crate_name}: a [[{table}]] target can name any file as a root. Use the default layout"
+            );
+        }
+        assert!(
+            manifest
+                .get("lib")
+                .and_then(|l| l.as_table())
+                .is_none_or(|l| l.get("path").is_none()),
+            "{crate_name}: [lib] path moves the root of the crate"
+        );
+        let module_wise = MODULE_WISE.iter().find(|(c, _)| *c == crate_name);
+        for root_file in target_roots(&dir) {
+            let relative = root_file
+                .strip_prefix(dir.parent().expect("crates/"))
+                .expect("under crates/")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let source = read(&root_file);
+            if relative.ends_with("/src/lib.rs")
+                && let Some((_, exempt)) = module_wise
+            {
+                assert!(
+                    root_problem(&source).is_some(),
+                    "{relative}: forbids at the root, so remove {crate_name} from MODULE_WISE"
+                );
+                let problems = module_problems(&source, exempt);
+                assert!(problems.is_empty(), "{relative}: {problems:?}");
+            } else if TEST_ROOTS_EXEMPT.contains(&relative.as_str()) {
+                continue;
+            } else if let Some(problem) = root_problem(&source) {
+                panic!(
+                    "{relative}: {problem}. The compiler must refuse an allow of the wall, \
+                     including one a macro builds (M1-044, 02 \"Lint wall\")"
+                );
+            }
+        }
+    }
+    for exempt in TEST_ROOTS_EXEMPT {
+        assert!(
+            root().join("crates").join(exempt).is_file(),
+            "{exempt} is exempt but missing: remove it from TEST_ROOTS_EXEMPT"
+        );
+    }
+}
+
+#[test]
+fn the_forbid_reader_sees_what_it_must() {
+    let all = "clippy::disallowed_methods, clippy::disallowed_types, clippy::disallowed_macros";
+    for (what, source) in [
+        ("all three", format!("#![forbid({all})]")),
+        (
+            "other lints around them",
+            format!("#![forbid(unsafe_code, {all})]"),
+        ),
+        (
+            "spaces and a newline",
+            "#![forbid(clippy :: disallowed_methods,\n clippy::disallowed_types, clippy::r#disallowed_macros)]"
+                .to_owned(),
+        ),
+        (
+            "two attributes",
+            format!("#![forbid({all})]\n#![forbid(unsafe_code)]"),
+        ),
+    ] {
+        assert!(root_problem(&source).is_none(), "refused: {what}");
+    }
+    for (what, source) in [
+        ("nothing", String::new()),
+        ("deny", format!("#![deny({all})]")),
+        (
+            "two of three",
+            "#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]".to_owned(),
+        ),
+        ("in a comment", format!("// #![forbid({all})]\nfn f() {{}}")),
+        ("in cfg_attr", format!("#![cfg_attr(test, forbid({all}))]")),
+        (
+            "on a function, not the crate",
+            format!("#[forbid({all})] fn f() {{}}"),
+        ),
+        (
+            "the print lints only",
+            "#![deny(clippy::print_stdout, clippy::print_stderr)]".to_owned(),
+        ),
+        ("a file that does not parse", "#![forbid(".to_owned()),
+    ] {
+        assert!(root_problem(&source).is_some(), "accepted: {what}");
+    }
+
+    // Module by module.
+    let ok = format!("//! doc\nuse std::fmt;\n#[forbid({all})]\nmod a;\npub mod client;\n");
+    assert!(module_problems(&ok, &["client"]).is_empty());
+    for (what, source) in [
+        (
+            "a module with no forbid",
+            "mod a;\npub mod client;\n".to_owned(),
+        ),
+        ("a module with a deny", format!("#[deny({all})]\nmod a;\n")),
+        (
+            "a function at the root",
+            "pub mod client;\nfn f() {}\n".to_owned(),
+        ),
+        (
+            "a macro at the root",
+            "pub mod client;\nmacro_rules! m { () => {}; }\n".to_owned(),
+        ),
+        (
+            "an inline module with no forbid",
+            "mod a { pub fn f() {} }\n".to_owned(),
+        ),
+        ("a file that does not parse", "mod a".to_owned()),
+    ] {
+        assert!(
+            !module_problems(&source, &["client"]).is_empty(),
+            "accepted: {what}"
         );
     }
 }

@@ -251,7 +251,26 @@ fn scan_with(
                     note_macro_name(findings, &id.to_string().replace("r#", ""));
                 }
             }
+            // `$h [$a]`: the hash of an attribute is a `tt` the caller passes. Nothing in the source
+            // of the macro says what the attribute is, so it is refused.
+            TokenTree::Punct(p) if p.as_char() == '$' => {
+                if matches!(trees.get(i + 1), Some(TokenTree::Ident(_)))
+                    && let Some(TokenTree::Group(g)) = trees.get(i + 2)
+                    && g.delimiter() == Delimiter::Bracket
+                    && g.stream().to_string().trim_start().starts_with('$')
+                {
+                    findings.relaxes = true;
+                }
+            }
             TokenTree::Punct(p) if p.as_char() == '#' => {
+                // `m!(# allow(clippy::disallowed_methods))`: the hash alone, the attribute after it,
+                // for a macro that puts a `$h` in front of `[$a]`.
+                if let (Some(TokenTree::Ident(name)), Some(TokenTree::Group(args))) =
+                    (trees.get(i + 1), trees.get(i + 2))
+                    && attribute_relaxes(&strip(&format!("{name}{args}")))
+                {
+                    findings.relaxes = true;
+                }
                 let mut j = i + 1;
                 if matches!(trees.get(j), Some(TokenTree::Punct(p)) if p.as_char() == '!') {
                     j += 1;
@@ -574,6 +593,22 @@ fn the_grep_sees_every_form_it_must() {
         (
             "in a file that does not parse",
             "fn f( { #[allow(clippy::disallowed_methods)]",
+        ),
+        (
+            "the hash passed as a tt (the body and the call)",
+            "macro_rules! m { ($h:tt $a:meta) => { $h [$a] mod e { pub fn f() {} } }; } m!(# allow(clippy::disallowed_methods));",
+        ),
+        (
+            "the hash passed as a tt (the call only)",
+            "m!(# allow(clippy::disallowed_methods));",
+        ),
+        (
+            "the hash passed as a tt (the body only)",
+            "macro_rules! m { ($h:tt $a:meta) => { $h [$a] mod e {} }; }",
+        ),
+        (
+            "a def! call that rewrites a matcher",
+            "def!((#[$a:meta]) => { $h [$a] mod e {} });",
         ),
         (
             "a doc-style arm and a bare-meta arm in one macro",

@@ -54,7 +54,7 @@ disallowed-types = [
     { path = "socket2::Socket", reason = "a check reaches the network only through the probe tcp, tls and http methods (ADR 0014)", allow-invalid = true },
     # Threads and tasks.
     { path = "std::thread::Builder", reason = "a check never starts a thread or task of its own; use rdy_engine::blocking (ADR 0014)" },
-    # First-party escapes: the watchdog and the live process count (PC-47).
+    # First-party escapes: the watchdog and the live process count (PC-48).
     { path = "rdy_engine::watchdog::ProcessEffects", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
 ]
 
@@ -198,18 +198,18 @@ disallowed-methods = [
     { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
     # Engine: test helper.
     { path = "rdy_engine::testing::TestRun::context", reason = "TestRun::context skips the declaration step; a check test uses TestRun::context_for", allow-invalid = true },
-    # First-party escapes: the run's own files (M1-044 fix round, PC-47).
+    # First-party escapes: the run's own files (M1-044 fix round, PC-48).
     { path = "rdy_engine::output::ReportParent::open", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::output::OutputDir::create_new", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::output::OutputDir::create_new_in", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::output::OutputDir::write_atomic", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::output::OutputDir::write_spec", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::output::default_report_parent", reason = "a check never writes a report or opens a folder; the run owns the output (ADR 0016)", allow-invalid = true },
-    # First-party escapes: process-wide effects (PC-47).
+    # First-party escapes: process-wide effects (PC-48).
     { path = "rdy_engine::exec::kill_all_groups", reason = "a check never signals processes or changes the process umask; the run owns those (ADR 0016, ADR 0023)", allow-invalid = true },
     { path = "rdy_engine::exec::harden_umask", reason = "a check never signals processes or changes the process umask; the run owns those (ADR 0016, ADR 0023)", allow-invalid = true },
     { path = "rdy_engine::exec::inherited_fds", reason = "a check never signals processes or changes the process umask; the run owns those (ADR 0016, ADR 0023)", allow-invalid = true },
-    # First-party escapes: the watchdog and the live process count (PC-47).
+    # First-party escapes: the watchdog and the live process count (PC-48).
     { path = "rdy_engine::watchdog::Effects::exit", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::watchdog::Effects::kill_groups", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::watchdog::Effects::notice", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
@@ -218,10 +218,10 @@ disallowed-methods = [
     { path = "rdy_engine::watchdog::WriteState::claim_or_park", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::watchdog::WriteState::finish", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
     { path = "rdy_engine::exec::live_groups", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
-    # First-party escapes: the probe hub (PC-47).
+    # First-party escapes: the probe hub (PC-48).
     { path = "rdy_engine::probe::ProbeHub::new", reason = "the run builds the probe hub and hands each check its Probe; a check never makes its own", allow-invalid = true },
     { path = "rdy_engine::probe::ProbeHub::run_probe", reason = "the run builds the probe hub and hands each check its Probe; a check never makes its own", allow-invalid = true },
-    # First-party escapes: the spec (PC-47).
+    # First-party escapes: the spec (PC-48).
     { path = "rdy_spec::load", reason = "a check never loads or verifies a spec; the run does", allow-invalid = true },
 ]
 
