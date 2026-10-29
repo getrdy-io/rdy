@@ -60,10 +60,10 @@ jobs:
       # The workspace build turns `runtime` on through the other crates. A probe gate without a runtime
       # (replay) builds rdy-engine alone, so lint and document that build too (ADR 0028).
       - name: cargo clippy rdy-engine without default features
-        run: cargo clippy --locked -p rdy-engine --no-default-features -- -D warnings
+        run: cargo clippy --locked -p rdy-engine --no-default-features --all-targets -- -D warnings
       # The replay backend is behind `testing`, so the probe gate without a runtime needs this build too.
       - name: cargo clippy rdy-engine without default features, with testing
-        run: cargo clippy --locked -p rdy-engine --no-default-features --features testing -- -D warnings
+        run: cargo clippy --locked -p rdy-engine --no-default-features --features testing --all-targets -- -D warnings
       - name: cargo doc rdy-engine without default features
         env:
           RUSTDOCFLAGS: -D warnings
@@ -144,6 +144,13 @@ jobs:
           tool: cargo-deny@0.20.2
       - name: cargo deny
         run: cargo deny --locked check
+      # The wall around check crates (M1-044): a throwaway workspace with the names of the real crates runs
+      # the real deny.toml, and a check crate that depends on socket2 or walkdir must fail. The variable makes
+      # a missing cargo-deny fail the test, never skip it. The `test` legs have no cargo-deny and skip it.
+      - name: A check crate cannot depend on a walled crate
+        env:
+          RDY_REQUIRE_CARGO_DENY: "1"
+        run: cargo test --locked -p rdy-lint-wall --test deny_wrappers
 
   dco:
     name: dco

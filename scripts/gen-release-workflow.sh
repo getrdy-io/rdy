@@ -53,6 +53,9 @@ trap 'rm -rf "$work"' EXIT INT TERM
 mkdir -p "$work/.github/workflows"
 cp "$root/Cargo.toml" "$root/Cargo.lock" "$root/rust-toolchain.toml" "$work/"
 cp -R "$root/crates" "$work/crates"
+# The workspace has a member outside crates/ (the lint wall test crate, M1-044). dist reads every member.
+mkdir -p "$work/tests"
+cp -R "$root/tests/lint-wall" "$work/tests/lint-wall"
 cp "$root/.github/build-setup.yml" "$work/.github/"
 # The reusable workflows that release.yml calls (publish-jobs in dist-workspace.toml).
 cp "$root/.github/workflows/check-release-artifacts.yml" "$root/.github/workflows/sign-release.yml" "$work/.github/workflows/"

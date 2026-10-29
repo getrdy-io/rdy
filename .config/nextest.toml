@@ -52,6 +52,13 @@ filter = 'binary(/_guarantee$/)'
 test-group = 'trybuild'
 slow-timeout = { period = "60s", terminate-after = 10 }
 
+# The lint wall test (tests/lint-wall/tests/clippy_wall.rs, M1-044) runs `cargo clippy` over a fixture crate
+# four times, once per clippy.toml. The first run checks rdy-engine, tokio and the rest in check mode, which
+# takes a minute or two on a cold runner. The later three take a few seconds. It is killed at five minutes.
+[[profile.ci.overrides]]
+filter = 'binary(clippy_wall)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
 # The spec parser's property tests (crates/rdy-spec/tests/parse_properties.rs, 08 section 4) run 10,000
 # cases in five of their tests, about 5 to 20 seconds each in a debug build on a laptop. A slow runner can
 # pass 30 seconds. The warning period stays 30 seconds, so creep shows as SLOW. They are killed at 180
