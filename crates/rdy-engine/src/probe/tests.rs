@@ -90,7 +90,8 @@ mod denylist {
     use super::*;
     use crate::probe::policy::{
         RULE_CREDENTIALS, RULE_DEVICE, RULE_DOT_DOT, RULE_KERNEL, RULE_KUBECONFIG,
-        RULE_PRIVATE_KEY, RULE_PROC, RULE_RELATIVE, RULE_SSH, RULE_SYSTEM_SECRET, check_names,
+        RULE_MACHINE_ID_FILE, RULE_PRIVATE_KEY, RULE_PROC, RULE_RELATIVE, RULE_SSH,
+        RULE_SYSTEM_SECRET, check_names,
     };
 
     fn verdict(path: &str) -> Result<(), &'static str> {
@@ -111,6 +112,16 @@ mod denylist {
             (
                 "/var/db/dslocal/nodes/Default/users/root.plist",
                 RULE_SYSTEM_SECRET,
+            ),
+            // The machine id: stable per host, so only the engine's salted `host_id` may leave it.
+            ("/etc/machine-id", RULE_MACHINE_ID_FILE),
+            ("/var/lib/dbus/machine-id", RULE_MACHINE_ID_FILE),
+            ("/etc/machine-id.bak", RULE_MACHINE_ID_FILE),
+            ("/host/etc/machine-id", RULE_MACHINE_ID_FILE),
+            ("/host/var/lib/dbus/machine-id", RULE_MACHINE_ID_FILE),
+            (
+                "/var/lib/docker/overlay2/ab12/diff/etc/machine-id",
+                RULE_MACHINE_ID_FILE,
             ),
             // The same files under a mount, a container layer and a data volume.
             ("/host/etc/shadow", RULE_SYSTEM_SECRET),
@@ -292,6 +303,35 @@ mod denylist {
             "/usr/share/ca-certificates/site.crt",
         ] {
             assert_eq!(verdict(path), Ok(()), "{path}");
+        }
+    }
+
+    #[test]
+    fn the_machine_id_guard_admits_the_two_files_and_nothing_else() {
+        let guard = ReadGuard::machine_id_files();
+        for file in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+            assert!(guard.admit_real(Path::new(file)).is_ok(), "{file}");
+        }
+        for other in [
+            "/etc/shadow",
+            "/etc/hostname",
+            "/etc/machine-id.bak",
+            "/host/etc/machine-id",
+            "/var/lib/dbus",
+            "/",
+            "etc/machine-id",
+        ] {
+            assert!(guard.admit_real(Path::new(other)).is_err(), "{other}");
+        }
+        // The same two files are refused to a guard that is not this one, with or without prefixes.
+        for guard in [
+            ReadGuard::new(Os::Linux, None),
+            ReadGuard::new(Os::Linux, Some(&["/"])),
+        ] {
+            for file in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+                let refused = guard.admit_real(Path::new(file)).expect_err("refused");
+                assert_eq!(refused.rule, RULE_MACHINE_ID_FILE);
+            }
         }
     }
 

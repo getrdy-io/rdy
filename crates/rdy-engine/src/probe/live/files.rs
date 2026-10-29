@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use rustix::fs::{self, AtFlags, CWD, FileType, Mode, OFlags, Stat};
 
 use crate::probe::policy::{
-    RULE_CHANGED, RULE_NOT_DIR, RULE_NOT_REGULAR, RULE_SYSTEM_SECRET, ReadGuard, Refused,
+    RULE_CHANGED, RULE_NOT_DIR, RULE_NOT_FILE_OR_DIR, RULE_NOT_REGULAR, RULE_SYSTEM_SECRET,
+    ReadGuard, Refused,
 };
 use crate::probe::{DirEntry, FileBytes, FileMeta, MAX_DIR_ENTRIES, MAX_READ, ReadRange};
 
@@ -73,6 +74,10 @@ impl Secrets {
 pub(super) enum Want {
     File,
     Dir,
+    /// A file or a directory: what `statvfs` measures. Linux asks through the `O_PATH` descriptor and
+    /// does not open the target, so only the portable path names this.
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    Either,
 }
 
 impl Want {
@@ -81,6 +86,7 @@ impl Want {
         match self {
             Self::File => kind == FileType::RegularFile,
             Self::Dir => kind == FileType::Directory,
+            Self::Either => matches!(kind, FileType::RegularFile | FileType::Directory),
         }
     }
 
@@ -88,6 +94,7 @@ impl Want {
         match self {
             Self::File => RULE_NOT_REGULAR,
             Self::Dir => RULE_NOT_DIR,
+            Self::Either => RULE_NOT_FILE_OR_DIR,
         }
     }
 }
@@ -170,22 +177,26 @@ pub(super) fn stat(
 }
 
 /// The size and mount flags of the file system that holds `path`. The path is resolved and judged
-/// like a read, so a link to a denied place is refused. Linux asks through the `O_PATH` descriptor
-/// that was judged, so the answer is for the file system of the inode that passed the rules.
+/// like a read, so a link to a denied place is refused. The answer comes from a descriptor of the
+/// inode that passed the rules, never from the path a second time. Linux uses the judged `O_PATH`
+/// descriptor. The portable path opens the real path with no link followed (macOS: `O_NOFOLLOW_ANY`
+/// and `F_GETPATH`, judged again) and asks that descriptor, so a parent swapped after the judgment
+/// cannot give the numbers of another file system.
 pub(super) fn statvfs(
     path: &Path,
     guard: &ReadGuard,
     secrets: &Secrets,
 ) -> io::Result<fs::StatVfs> {
     let target = locate(path, guard, secrets)?;
-    target.confirm(path)?;
     #[cfg(target_os = "linux")]
     {
+        target.confirm(path)?;
         Ok(fs::fstatvfs(&target.anchor)?)
     }
     #[cfg(not(target_os = "linux"))]
     {
-        Ok(fs::statvfs(&target.real)?)
+        let (fd, _) = target.open(path, guard, Want::Either)?;
+        Ok(fs::fstatvfs(&fd)?)
     }
 }
 

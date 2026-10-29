@@ -216,12 +216,17 @@ async fn the_machine_id_is_run_level_and_never_in_the_log() {
     let raw = ["/etc/machine-id", "/var/lib/dbus/machine-id"]
         .iter()
         .find_map(|file| std::fs::read_to_string(file).ok())
-        .map(|text| text.trim().to_owned())
-        .filter(|text| parse_machine_id(text).is_some());
+        .and_then(|text| parse_machine_id(&text));
     let mut shown = serde_json::to_string(&sandbox.hub.action_log().actions).expect("log");
     shown.push_str(&format!("{answer:?}"));
     if let Some(raw) = raw {
         assert!(!shown.contains(&raw), "the raw id leaked");
+        // The read itself works through the guard that admits only the two files.
+        #[cfg(target_os = "linux")]
+        match answer {
+            Ok(NativeValue::MachineId(id)) => assert_eq!(id.expose(), raw),
+            other => panic!("the id file holds an id, but the call gave {other:?}"),
+        }
     }
 }
 

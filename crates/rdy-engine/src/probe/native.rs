@@ -2,8 +2,9 @@
 //!
 //! A check never passes code to run. It passes a [`NativeCall`], a plain value, and the backend runs
 //! the matching call itself. Each variant has one policy row, found by the exhaustive `match` in
-//! `NativeCall::policy`. Adding a variant does not compile until its row exists, and the snapshot
-//! test in `tests` fails until `variants.snap` and the threat model row change in the same PR.
+//! `NativeCall::policy`, and `NativeCall::expects` has no wildcard either. Adding a variant does not
+//! compile until its row exists, and the snapshot test in `tests` fails until `variants.snap` and the
+//! threat model table (05, INV-07) change in the same PR.
 //!
 //! | Variant | Who may ask | What the policy checks | What the log holds |
 //! | --- | --- | --- | --- |
@@ -120,17 +121,17 @@ impl NativeCall {
         }
     }
 
-    /// Whether `value` is the kind of answer this call expects.
+    /// Whether `value` is the kind of answer this call expects. No wildcard: a new variant must name
+    /// its answer here.
     fn expects(&self, value: &NativeValue) -> bool {
-        matches!(
-            (self, value),
-            (Self::Statvfs { .. }, NativeValue::Statvfs(_))
-                | (Self::Uname, NativeValue::Uname(_))
-                | (Self::Rlimit(_), NativeValue::Rlimit(_))
-                | (Self::Hostname, NativeValue::Hostname(_))
-                | (Self::MachineId, NativeValue::MachineId(_))
-                | (Self::SystemRoots, NativeValue::SystemRoots(_))
-        )
+        match self {
+            Self::Statvfs { .. } => matches!(value, NativeValue::Statvfs(_)),
+            Self::Uname => matches!(value, NativeValue::Uname(_)),
+            Self::Rlimit(_) => matches!(value, NativeValue::Rlimit(_)),
+            Self::Hostname => matches!(value, NativeValue::Hostname(_)),
+            Self::MachineId => matches!(value, NativeValue::MachineId(_)),
+            Self::SystemRoots => matches!(value, NativeValue::SystemRoots(_)),
+        }
     }
 }
 
@@ -170,8 +171,9 @@ pub struct StatvfsInfo {
     pub files_free: u64,
     /// Mounted read only (`ST_RDONLY`).
     pub read_only: bool,
-    /// Mounted with no program execution (`ST_NOEXEC`).
-    pub no_exec: bool,
+    /// Mounted with no program execution (`ST_NOEXEC`). `None` where the OS does not report it (macOS
+    /// and the BSDs): unknown, which a check must not read as "not set".
+    pub no_exec: Option<bool>,
     /// Mounted with set-user-id bits ignored (`ST_NOSUID`).
     pub no_suid: bool,
 }
@@ -209,11 +211,7 @@ pub struct MachineId(String);
 impl MachineId {
     /// Wraps a raw id. The live backend and the fixture loader call this.
     #[cfg_attr(
-        not(any(
-            test,
-            feature = "testing",
-            all(feature = "runtime", target_os = "linux")
-        )),
+        not(any(test, all(feature = "runtime", target_os = "linux"))),
         expect(dead_code, reason = "only a backend makes a machine id")
     )]
     pub(crate) fn new(raw: impl Into<String>) -> Self {

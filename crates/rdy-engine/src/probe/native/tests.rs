@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::check::{BoxFuture, CheckInfo, CheckMeta, Os, OsSupport, Support};
-use crate::probe::policy::{RULE_OUTSIDE_READS, RULE_SYSTEM_SECRET};
+use crate::probe::policy::{RULE_MACHINE_ID_FILE, RULE_OUTSIDE_READS, RULE_SYSTEM_SECRET};
 use crate::probe::replay::Replay;
 use crate::probe::sealed::Sealed;
 use crate::probe::{
@@ -49,6 +49,29 @@ static DISK_CHECK: CheckInfo = CheckInfo {
     peers: &[],
 };
 
+/// A check that declared `/` as a read prefix, as a disk check must to `statvfs` any spec path.
+static BROAD_CHECK: CheckInfo = CheckInfo {
+    id: "host.fixture",
+    family: "host",
+    summary: "Asks for free space on any path.",
+    meta: CheckMeta {
+        title: "Fixture check",
+        remediation: "Nothing to fix. This check is a test double.",
+    },
+    needs: &[],
+    wants: &[],
+    default_timeout: None,
+    os: OsSupport {
+        linux: Support::Full,
+        macos: Support::Full,
+        windows: Support::NotYet,
+    },
+    reads: &["/"],
+    env: &[],
+    commands: &[],
+    peers: &[],
+};
+
 fn hub(replay: Replay) -> ProbeHub {
     ProbeHub::new(Arc::new(replay), Redactor::new(TagKey::fixed([3; 32])))
 }
@@ -65,7 +88,7 @@ fn disk() -> StatvfsInfo {
         blocks_available: 300,
         files: 5000,
         files_free: 4000,
-        no_exec: true,
+        no_exec: Some(true),
         ..StatvfsInfo::default()
     }
 }
@@ -377,6 +400,26 @@ async fn a_check_cannot_ask_for_the_machine_id_even_when_the_fixture_has_one() {
 }
 
 #[tokio::test]
+async fn a_check_with_broad_reads_cannot_read_the_machine_id_files() {
+    let replay = Replay::new()
+        .file("/etc/machine-id", format!("{RAW_ID}\n"))
+        .file("/var/lib/dbus/machine-id", format!("{RAW_ID}\n"));
+    let hub = hub(replay);
+    let probe = hub.check_probe("host.fixture", Os::Linux, Some(&BROAD_CHECK));
+    for file in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+        let error = probe.read(Path::new(file)).await.expect_err("denied");
+        assert_eq!(rule_of(&error), RULE_MACHINE_ID_FILE, "{file}");
+        let error = probe.stat(Path::new(file)).await.expect_err("denied");
+        assert_eq!(rule_of(&error), RULE_MACHINE_ID_FILE, "{file}");
+        // The same file through `Statvfs` is judged by the same rules.
+        let error = probe.native(statvfs(file)).await.expect_err("denied");
+        assert_eq!(rule_of(&error), RULE_MACHINE_ID_FILE, "{file}");
+    }
+    let log = serde_json::to_string(&hub.action_log().actions).expect("log");
+    assert!(!log.contains(RAW_ID), "{log}");
+}
+
+#[tokio::test]
 async fn the_raw_machine_id_appears_nowhere_in_the_log_or_in_any_debug_text() {
     let hub = hub(answers());
     let run = hub.run_probe_for(Os::Linux);
@@ -471,12 +514,27 @@ fn snapshot_of_file() -> String {
         .join("\n")
 }
 
+/// The variant rows of the snapshot file: every line before `# Resources`, comments left out.
+fn snapshot_rows() -> Vec<String> {
+    snapshot_of_file()
+        .lines()
+        .take_while(|line| !line.starts_with('#'))
+        .map(str::to_owned)
+        .collect()
+}
+
 #[test]
 fn the_variant_snapshot_fails_on_a_new_variant() {
-    // `all_calls` lists every variant once, in order. A new variant breaks `index` first (it does not
-    // compile); a variant left out of `all_calls` fails here.
+    // The real guard is the compile error: `policy`, `expects` and `index` have no wildcard arm, so a
+    // new variant does not build until each names it. This test catches what the compiler cannot: a
+    // variant that was added to those matches but not to `all_calls` or to `variants.snap`.
     let indexes: Vec<usize> = all_calls().iter().map(index).collect();
     assert_eq!(indexes, [0, 1, 2, 3, 4, 5]);
+    assert_eq!(
+        snapshot_rows().len(),
+        all_calls().len(),
+        "variants.snap and all_calls list a different number of variants"
+    );
     let resources = [
         Resource::Nofile,
         Resource::Nproc,
@@ -503,4 +561,35 @@ fn every_api_name_is_distinct_and_fits_the_log() {
     names.dedup();
     assert_eq!(names.len(), all_calls().len());
     assert!(names.iter().all(|n| n.len() < 32 && n.is_ascii()));
+}
+
+/// The threat model has one row per variant (ADR 0014 decision 5), named by its `api` in backticks.
+#[test]
+fn the_threat_model_has_a_row_for_every_variant() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/plan/05-threat-model.md");
+    let doc = std::fs::read_to_string(&path)
+        .expect("docs/plan/05-threat-model.md is in the repository")
+        .replace("\r\n", "\n");
+    let start = doc
+        .find("### Native calls")
+        .expect("05 has a Native calls table");
+    let section = &doc[start..];
+    let end = section[3..].find("\n#").map_or(section.len(), |i| i + 3);
+    let rows: Vec<&str> = section[..end]
+        .lines()
+        .filter(|line| line.starts_with("| `") && !line.starts_with("| `api` |"))
+        .collect();
+    assert_eq!(
+        rows.len(),
+        all_calls().len(),
+        "one row per variant: {rows:#?}"
+    );
+    for call in all_calls() {
+        let api = call.policy().api;
+        assert!(
+            rows.iter()
+                .any(|row| row.starts_with(&format!("| `{api}` |"))),
+            "05 has no row for {api}"
+        );
+    }
 }

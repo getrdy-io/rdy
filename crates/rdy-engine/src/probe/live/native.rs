@@ -73,22 +73,33 @@ fn statvfs_info(raw: &rustix::fs::StatVfs) -> StatvfsInfo {
         files: raw.f_files,
         files_free: raw.f_ffree,
         read_only: raw.f_flag.contains(Flags::RDONLY),
-        no_exec: raw.f_flag.contains(Flags::NOEXEC),
+        no_exec: no_exec(raw.f_flag),
         no_suid: raw.f_flag.contains(Flags::NOSUID),
     }
 }
 
-/// The places systemd and D-Bus keep the id, in order.
-#[cfg(target_os = "linux")]
-const MACHINE_ID_FILES: &[&str] = &["/etc/machine-id", "/var/lib/dbus/machine-id"];
+/// `ST_NOEXEC` where the OS has it. rustix defines the flag on Linux and Android only, and the macOS
+/// `statvfs` flags carry no equivalent, so there the answer is unknown (`None`), never "not set": a
+/// check that forbids `noexec` must not pass on a guess.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn no_exec(flags: rustix::fs::StatVfsMountFlags) -> Option<bool> {
+    Some(flags.contains(rustix::fs::StatVfsMountFlags::NOEXEC))
+}
 
-/// Linux reads the id as a file, with the read rules of a run-level probe (the denylist, no prefixes)
-/// and a 128 byte cap. macOS has none in M1, so its `host_id` is null.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn no_exec(flags: rustix::fs::StatVfsMountFlags) -> Option<bool> {
+    let _ = flags;
+    None
+}
+
+/// Linux reads the id as a file, through a guard that admits only [`MACHINE_ID_FILES`] (the denylist
+/// refuses both names to every other reader) and with a 128 byte cap. macOS has none in M1, so its
+/// `host_id` is null.
 #[cfg(target_os = "linux")]
 fn machine_id(secrets: &Secrets) -> io::Result<NativeValue> {
-    use crate::check::Os;
+    use crate::probe::policy::MACHINE_ID_FILES;
     use crate::probe::{MachineId, ReadRange};
-    let guard = ReadGuard::new(Os::Linux, None);
+    let guard = ReadGuard::machine_id_files();
     let mut last = io::Error::from(io::ErrorKind::NotFound);
     for file in MACHINE_ID_FILES {
         match files::read(
@@ -121,8 +132,11 @@ fn machine_id(secrets: &Secrets) -> io::Result<NativeValue> {
 /// The id in the text of a machine id file: 32 hex digits and a newline. Anything else (the word
 /// `uninitialized` on a first boot, an empty file) is not an id.
 #[cfg_attr(
-    not(target_os = "linux"),
-    expect(dead_code, reason = "Linux reads the file")
+    all(not(target_os = "linux"), not(test)),
+    expect(
+        dead_code,
+        reason = "Linux reads the file; the tests run it everywhere"
+    )
 )]
 fn parse_machine_id(raw: &str) -> Option<String> {
     let id = raw.trim();

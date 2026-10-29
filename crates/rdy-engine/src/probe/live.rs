@@ -22,6 +22,13 @@
 //! file with the device and inode of a password or sudo file, whatever its name. Windows has no file
 //! reads in M1: every file call fails with a typed error.
 //!
+//! **Native calls.** `Backend::native` runs the closed `NativeCall` list in the `native` module (Unix;
+//! Windows reports `Unsupported` for every call until its sources land). A `Statvfs` call takes the same
+//! steps as a file call. Linux asks `fstatvfs` on the judged `O_PATH` descriptor. macOS opens the real
+//! path as above and asks that descriptor, so the numbers are for the inode that passed the rules.
+//! `MachineId` is the one read of the machine id files: it uses a guard that admits those two paths only,
+//! because the denylist refuses them to everyone else. The answer is never logged.
+//!
 //! **Bounds.** A read returns at most `MAX_READ` bytes. A directory listing holds at most
 //! `MAX_DIR_ENTRIES` entries. The work runs on the blocking pool; a call that outlives its check's
 //! timeout leaves a thread that ends when the read does, and only regular files are ever opened, so
