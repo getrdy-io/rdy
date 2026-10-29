@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-include = ["src/**", "Cargo.toml", "LICENSE"]
+include = ["src/**", "Cargo.toml", "LICENSE", "clippy.toml"]
 
 [dependencies]
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }

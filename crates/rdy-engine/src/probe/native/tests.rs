@@ -5,7 +5,7 @@
 //! - `every_variant_is_logged_as_native_and_never_with_its_answer`;
 //! - `the_raw_machine_id_appears_nowhere_in_the_log_or_in_any_debug_text`;
 //! - `the_variant_snapshot_fails_on_a_new_variant`;
-//! - the lint wall half (check crates cannot call `live_backend`) is `tests/live_backend_wall.rs`.
+//! - the lint wall half (check crates cannot call `live_backend`) is `tests/lint-wall` (M1-044: `wall_intact` floor and `uses.rs`).
 
 use std::io;
 use std::path::{Path, PathBuf};

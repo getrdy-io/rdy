@@ -5,6 +5,10 @@
 //! something rdy never reads. Both directions are tested.
 
 #![allow(clippy::expect_used)]
+// This test reads the example role file from the repository, which the lint wall bans in the rest of
+// this crate (INV-07). This file is on the allowlist of tests/lint-wall/tests/allow_grep.rs. A test of a
+// check does not belong here: use the probe.
+#![allow(clippy::disallowed_methods)]
 
 use std::collections::BTreeSet;
 use std::path::Path;
