@@ -489,6 +489,7 @@ fn spec_error_code(err: &SpecError) -> ErrorCode {
         | SpecError::NonFiniteNumber { .. }
         | SpecError::UnquotedDecimal { .. } => ErrorCode::SpecParse,
         SpecError::Signature(error) => signature_error_code(error),
+        SpecError::Expired { .. } => ErrorCode::SpecExpired,
         _ => ErrorCode::SpecInvalid,
     }
 }
@@ -503,8 +504,6 @@ fn spec_error_code(err: &SpecError) -> ErrorCode {
 ///   anything, and the fix is to get the key again.
 /// - A variant this build does not know is `spec_signature_invalid`. It fails closed and never becomes
 ///   `spec_invalid`.
-///
-/// `spec_expired` has no source yet: `rdy-spec` does not check `metadata.expires`.
 fn signature_error_code(err: &SignatureError) -> ErrorCode {
     match err {
         SignatureError::Missing => ErrorCode::SpecUnsigned,

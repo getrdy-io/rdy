@@ -254,7 +254,7 @@ fn parse_comment(comment: &str) -> Result<(ProductSlug, String), SignatureError>
 }
 
 /// True for `YYYY-MM-DDTHH:MM:SSZ` with a real date and time of day. Nothing else, not even `+00:00`.
-fn valid_timestamp(text: &str) -> bool {
+pub(crate) fn valid_timestamp(text: &str) -> bool {
     let b = text.as_bytes();
     if b.len() != 20 {
         return false;

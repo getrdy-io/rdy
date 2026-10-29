@@ -16,16 +16,20 @@
 //! read changes nothing.
 //!
 //! - The system file: not a symlink, a regular file, owned by root, not writable by group or others. Its
-//!   folder (`/etc/rdy`): not a symlink, owned by root, not writable by group or others.
+//!   folder (`/etc/rdy`): not a symlink, owned by root, not writable by group or others. The folders
+//!   above it (`/etc` and `/`) are not checked.
 //! - The user file: not a symlink, a regular file, owned by the current user or by root, not writable by
-//!   group or others. (This is stricter than 01 section 4.3, which only names the mode: a file that
-//!   another user owns can be changed by that user.)
+//!   group or others. Its folder (`~/.config/rdy`): the same rules as for the file, and not a symlink.
+//!   The folders above it are not checked, so a dotfile manager may link `~/.config`. (This is stricter
+//!   than 01 section 4.3, which only names the mode of the file: a file or a folder that another user
+//!   owns can be changed by that user.)
 //! - Reads stop one byte past 256 KiB (INV-02). A FIFO or a device is refused without being read.
 //!
 //! **Windows and other systems.** rdy cannot yet check who may change a file there (the ACL rules are
 //! M1-122). So any trust file that exists is refused as unverifiable, a missing file is an empty store,
 //! and saving says it is not supported. This is the conservative reading of "refuse what you cannot
-//! verify". `--key` runs are not affected, because they read no store.
+//! verify". `--key` runs are not affected, because they read no store. Extended ACLs on macOS are not in
+//! the mode bits and are not checked yet (M1-122).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -105,8 +109,10 @@ impl Vars {
 pub struct Layout {
     system_file: Option<PathBuf>,
     user_file: Option<PathBuf>,
-    /// The uid that must own the system store and its folder. Always 0 outside tests.
-    system_owner: u32,
+    /// The uid that must own the folder of the system store. Always 0 outside tests.
+    system_dir_owner: u32,
+    /// The uid that must own the system store. Always 0 outside tests.
+    system_file_owner: u32,
     /// The effective uid of this process.
     euid: u32,
 }
@@ -148,7 +154,8 @@ impl Layout {
         Self {
             system_file: Some(PathBuf::from(SYSTEM_STORE)),
             user_file,
-            system_owner: 0,
+            system_dir_owner: 0,
+            system_file_owner: 0,
             euid,
         }
     }
@@ -159,7 +166,8 @@ impl Layout {
         Self {
             system_file: under(vars.program_data.as_ref()),
             user_file: under(vars.appdata.as_ref()),
-            system_owner: 0,
+            system_dir_owner: 0,
+            system_file_owner: 0,
             euid: u32::MAX,
         }
     }
@@ -184,12 +192,21 @@ impl Layout {
         }
     }
 
-    /// The same layout with the system store somewhere else, owned by `owner`. Tests only: a test cannot
-    /// write `/etc/rdy` or make a file that root owns.
+    /// The same layout with the system store somewhere else, and its folder and file owned by `owner`.
+    /// Tests only: a test cannot write `/etc/rdy` or make a file that root owns.
     #[cfg(all(test, unix))]
     pub(crate) fn with_system_file(mut self, path: PathBuf, owner: u32) -> Self {
         self.system_file = Some(path);
-        self.system_owner = owner;
+        self.system_dir_owner = owner;
+        self.system_file_owner = owner;
+        self
+    }
+
+    /// The same layout with a different owner required for the system file only, so that the folder
+    /// can pass while the file fails. Tests only.
+    #[cfg(all(test, unix))]
+    pub(crate) fn with_system_file_owner(mut self, owner: u32) -> Self {
+        self.system_file_owner = owner;
         self
     }
 }
@@ -275,9 +292,10 @@ pub enum Insecurity {
     DirSymlink,
     /// The folder of the store is not a folder.
     DirNotDirectory,
-    /// The system store's folder is not owned by root.
+    /// The folder of the store has the wrong owner: not root for the system store, not the current user
+    /// or root for the user store.
     DirNotOwned,
-    /// Group or others can write the folder of the system store.
+    /// Group or others can write the folder of the store.
     DirWritable,
     /// rdy cannot check who may change the file on this system.
     Unverifiable,
@@ -344,7 +362,10 @@ fn insecure_message(path: &Path, scope: Scope, why: Insecurity) -> String {
         Insecurity::Writable => format!("{file} is writable by other users"),
         Insecurity::DirSymlink => format!("{dir} is a symbolic link"),
         Insecurity::DirNotDirectory => format!("{dir} is not a folder"),
-        Insecurity::DirNotOwned => format!("{dir} is not owned by root"),
+        Insecurity::DirNotOwned => match scope {
+            Scope::System => format!("{dir} is not owned by root"),
+            Scope::User => format!("{dir} is owned by another user"),
+        },
         Insecurity::DirWritable => format!("{dir} is writable by other users"),
         Insecurity::Unverifiable => {
             format!("rdy cannot check who can change {file} on this system yet")
@@ -395,9 +416,14 @@ impl TrustStoreError {
                 let file = shell_word(&path.to_string_lossy());
                 let dir = shell_word(&path.parent().unwrap_or(path).to_string_lossy());
                 match why {
-                    Insecurity::Symlink => {
-                        format!("replace the link with a regular file that you own: {file}")
-                    }
+                    Insecurity::Symlink => match scope {
+                        Scope::System => {
+                            format!("replace the link with a regular file that root owns: {file}")
+                        }
+                        Scope::User => {
+                            format!("replace the link with a regular file that you own: {file}")
+                        }
+                    },
                     Insecurity::NotRegular => {
                         format!("remove {file}, then pin your keys again with rdy trust add")
                     }
@@ -411,16 +437,25 @@ impl TrustStoreError {
                         Scope::System => format!("chmod 644 {file}"),
                         Scope::User => format!("chmod 600 {file}"),
                     },
-                    Insecurity::DirSymlink => {
-                        format!("replace {dir} with a real folder that root owns")
-                    }
+                    Insecurity::DirSymlink => match scope {
+                        Scope::System => format!("replace {dir} with a real folder that root owns"),
+                        Scope::User => format!("replace {dir} with a real folder that you own"),
+                    },
                     Insecurity::DirNotDirectory => {
                         format!("remove {dir}, then pin your keys again with rdy trust add")
                     }
-                    Insecurity::DirNotOwned => format!("chown root {dir}"),
-                    Insecurity::DirWritable => format!("chmod 755 {dir}"),
+                    Insecurity::DirNotOwned => match scope {
+                        Scope::System => format!("chown root {dir}"),
+                        Scope::User => format!(
+                            "check who put {dir} there, then replace it with a folder that you own"
+                        ),
+                    },
+                    Insecurity::DirWritable => match scope {
+                        Scope::System => format!("chmod 755 {dir}"),
+                        Scope::User => format!("chmod 700 {dir}"),
+                    },
                     Insecurity::Unverifiable => {
-                        "move the file away for now. rdy checks who can change a trust store on Linux and macOS, and Windows support comes in a later release".to_owned()
+                        "move the file away for now. rdy checks who can change a trust store on Linux and macOS, and Windows support comes in a later release.".to_owned()
                     }
                 }
             }
@@ -452,7 +487,7 @@ impl TrustStoreError {
                 "set HOME to your home folder, or XDG_CONFIG_HOME to your config folder".to_owned()
             }
             Self::Unsupported => {
-                "pin keys on a Linux or macOS host. Windows support comes in a later release"
+                "pin keys on a Linux or macOS host. Windows support comes in a later release."
                     .to_owned()
             }
         }

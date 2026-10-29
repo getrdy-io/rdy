@@ -321,7 +321,7 @@ SELinux and AppArmor, security agents and the rest are 03's M1-late tier: still 
 macOS and Windows data sources are M2, on demand; until then live host checks there report not yet on
 this OS.
 Reads `/proc` and `/sys` only through `HostFs`, so fixtures are directories, and runs commands only
-through `Exec`. Uses `sysinfo`, `nix` on Unix, `windows-sys` on Windows. Refuses to run setuid. No
+through `Exec`. Uses `sysinfo`, `rustix` on Unix, `windows-sys` on Windows. Refuses to run setuid. No
 stability promise.
 
 ```rust
@@ -415,7 +415,7 @@ The line shown is the major line this plan expects.
 | uuid | 1 | rdy-engine | run ids | |
 | semver | 1 | rdy-spec | `metadata.version` ranges | Kernel and CUDA versions are not semver; own lenient compare. |
 | sysinfo | current | rdy-checks-host | CPU, memory, disk | Frequent breaking releases. Pin and update on purpose. |
-| nix | current | rdy-checks-host, rdy-engine | Unix syscalls (euid, statvfs, process groups) | |
+| rustix | 1 | rdy-checks-host, rdy-engine, rdy-cli | Unix syscalls (euid, statvfs, process groups, waitid), all safe wrappers | Chosen over `nix`; `forbid(unsafe_code)` holds. |
 | windows-sys | current | rdy-checks-host, rdy-engine | Windows APIs, job objects | |
 | reqwest | | none in M1 | named in ADR 0009 | Banned in `deny.toml` by ADR 0014. The probe facade does HTTP with hyper. The M2 upload stack is an open item (13). |
 | hyper | 1 | rdy-engine (`runtime` feature) | facade HTTP/1.1 HEAD and GET (ADR 0014) | Client connection API only. |

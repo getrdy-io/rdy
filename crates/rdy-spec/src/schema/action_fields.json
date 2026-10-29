@@ -1,0 +1,151 @@
+{
+  "properties": {
+    "rule": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 4096
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 4096
+    },
+    "program": {
+      "type": "string",
+      "description": "exec",
+      "maxLength": 4096
+    },
+    "argv": {
+      "description": "exec, after redaction",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 4096
+      }
+    },
+    "exit": {
+      "description": "exec",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "stdout_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "exec"
+    },
+    "path": {
+      "type": "string",
+      "description": "read, read_dir, stat, native, kube. Paths under a home directory start with ~.",
+      "maxLength": 4096
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "read"
+    },
+    "entries": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "read_dir"
+    },
+    "name": {
+      "type": "string",
+      "description": "env (the name only, never the value), dns",
+      "maxLength": 4096
+    },
+    "host": {
+      "type": "string",
+      "description": "lookup, connect, tls",
+      "maxLength": 4096
+    },
+    "answers": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "lookup"
+    },
+    "port": {
+      "description": "connect",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "addr": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "connect: the IP address used.",
+      "maxLength": 4096
+    },
+    "via_proxy": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "connect, user info stripped",
+      "maxLength": 4096
+    },
+    "sni": {
+      "type": "string",
+      "description": "tls",
+      "maxLength": 4096
+    },
+    "method": {
+      "type": "string",
+      "description": "http, kube",
+      "maxLength": 4096
+    },
+    "url": {
+      "type": "string",
+      "description": "http, without query string",
+      "maxLength": 4096
+    },
+    "status": {
+      "description": "http, kube",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "server": {
+      "type": "string",
+      "description": "dns: the nameserver's IP address.",
+      "maxLength": 4096
+    },
+    "rtype": {
+      "type": "string",
+      "description": "dns",
+      "maxLength": 4096
+    },
+    "api": {
+      "type": "string",
+      "description": "native, for example statvfs",
+      "maxLength": 4096
+    },
+    "of": {
+      "type": "string",
+      "description": "coalesced: the kind that was coalesced",
+      "maxLength": 4096
+    },
+    "under": {
+      "type": "string",
+      "description": "coalesced",
+      "maxLength": 4096
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "coalesced"
+    },
+    "truncated": {
+      "description": "exec, read",
+      "type": "boolean"
+    }
+  }
+}

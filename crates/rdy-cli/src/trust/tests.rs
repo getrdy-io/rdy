@@ -21,6 +21,22 @@ fn os(text: &str) -> Option<OsString> {
     Some(OsString::from(text))
 }
 
+/// A path that is absolute on this platform: `/home/alice` on Unix, `C:/home/alice` on Windows.
+fn abs(path: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{path}")
+    } else {
+        path.to_owned()
+    }
+}
+
+/// `abs(base)` joined with the parts, the way the layout joins them.
+fn under(base: &str, parts: &[&str]) -> PathBuf {
+    let mut path = PathBuf::from(abs(base));
+    path.extend(parts);
+    path
+}
+
 fn vars(home: Option<&str>, xdg: Option<&str>) -> Vars {
     Vars {
         home: home.and_then(os),
@@ -44,13 +60,14 @@ fn trust_text(product: &str, key: &str, note: Option<&str>) -> String {
 #[test]
 fn a_root_run_has_no_user_path_whatever_the_environment_says() {
     // INV-04. HOME, XDG_CONFIG_HOME and (not even read) SUDO_USER cannot add a path under a home.
+    // `Layout::unix` is what a Unix euid 0 gets. It is compiled on every platform, so this runs on all.
     for v in [
-        vars(Some("/home/alice"), Some("/home/alice/.config")),
-        vars(Some("/root"), None),
-        vars(None, Some("/home/alice/.config")),
+        vars(Some(&abs("/home/alice")), Some(&abs("/home/alice/.config"))),
+        vars(Some(&abs("/root")), None),
+        vars(None, Some(&abs("/home/alice/.config"))),
         vars(None, None),
     ] {
-        let layout = Layout::from_env(&v, 0);
+        let layout = Layout::unix(&v, 0);
         assert_eq!(layout.path(Scope::User), None, "{v:?}");
         assert_eq!(layout.path(Scope::System), Some(Path::new(SYSTEM_STORE)));
         assert_eq!(layout.write_scope(), Scope::System);
@@ -59,15 +76,16 @@ fn a_root_run_has_no_user_path_whatever_the_environment_says() {
 
 #[test]
 fn a_user_run_reads_xdg_then_home_config_then_the_system_store() {
-    let layout = Layout::from_env(&vars(Some("/home/alice"), Some("/xdg")), 1000);
+    let home = abs("/home/alice");
+    let layout = Layout::unix(&vars(Some(&home), Some(&abs("/xdg"))), 1000);
     assert_eq!(
         layout.path(Scope::User),
-        Some(Path::new("/xdg/rdy/trust.yaml"))
+        Some(under("/xdg", &["rdy", "trust.yaml"]).as_path())
     );
-    let layout = Layout::from_env(&vars(Some("/home/alice"), None), 1000);
+    let layout = Layout::unix(&vars(Some(&home), None), 1000);
     assert_eq!(
         layout.path(Scope::User),
-        Some(Path::new("/home/alice/.config/rdy/trust.yaml"))
+        Some(under("/home/alice", &[".config", "rdy", "trust.yaml"]).as_path())
     );
     assert_eq!(layout.path(Scope::System), Some(Path::new(SYSTEM_STORE)));
     assert_eq!(layout.write_scope(), Scope::User);
@@ -81,32 +99,32 @@ fn a_relative_or_empty_home_gives_no_user_store() {
         vars(Some("home"), Some("relative/xdg")),
         vars(None, None),
     ] {
-        let layout = Layout::from_env(&v, 1000);
+        let layout = Layout::unix(&v, 1000);
         assert_eq!(layout.path(Scope::User), None, "{v:?}");
     }
     // An empty or relative XDG value is ignored, as the XDG spec says, and HOME is used.
-    let layout = Layout::from_env(&vars(Some("/home/alice"), Some("relative")), 1000);
+    let layout = Layout::unix(&vars(Some(&abs("/home/alice")), Some("relative")), 1000);
     assert_eq!(
         layout.path(Scope::User),
-        Some(Path::new("/home/alice/.config/rdy/trust.yaml"))
+        Some(under("/home/alice", &[".config", "rdy", "trust.yaml"]).as_path())
     );
 }
 
 #[test]
 fn the_windows_layout_uses_appdata_and_programdata() {
     let v = Vars {
-        appdata: os("/appdata"),
-        program_data: os("/programdata"),
+        appdata: os(&abs("/appdata")),
+        program_data: os(&abs("/programdata")),
         ..Vars::default()
     };
     let layout = Layout::windows(&v);
     assert_eq!(
         layout.path(Scope::User),
-        Some(Path::new("/appdata/rdy/trust.yaml"))
+        Some(under("/appdata", &["rdy", "trust.yaml"]).as_path())
     );
     assert_eq!(
         layout.path(Scope::System),
-        Some(Path::new("/programdata/rdy/trust.yaml"))
+        Some(under("/programdata", &["rdy", "trust.yaml"]).as_path())
     );
     // Elevation cannot be told here, so a Windows run writes the user store.
     assert_eq!(layout.write_scope(), Scope::User);
@@ -250,8 +268,13 @@ mod unix {
         }
 
         fn layout_owned_by(&self, owner: u32) -> Layout {
-            let v = vars(self.home().to_str(), None);
-            Layout::from_env(&v, self.euid).with_system_file(self.sys_file(), owner)
+            Layout::from_env(&self.vars(), self.euid).with_system_file(self.sys_file(), owner)
+        }
+
+        /// HOME and XDG_CONFIG_HOME both point at the user's folders, as in a login shell.
+        fn vars(&self) -> Vars {
+            let xdg = self.home().join(".config");
+            vars(self.home().to_str(), xdg.to_str())
         }
 
         /// A well-formed system store: folder 0755, file 0644.
@@ -264,7 +287,9 @@ mod unix {
 
         fn write_user(&self, text: &str) {
             let file = self.user_file();
-            fs::create_dir_all(file.parent().expect("parent")).expect("mkdir");
+            let dir = file.parent().expect("parent");
+            fs::create_dir_all(dir).expect("mkdir");
+            mode(dir, 0o700);
             fs::write(&file, text).expect("write");
             mode(&file, 0o600);
         }
@@ -377,21 +402,22 @@ mod unix {
 
     #[test]
     fn a_system_store_owned_by_someone_other_than_root_is_refused() {
-        // Giving a file to another user needs root, so this runs only when the tests run as root. The
-        // folder stays root's, so the file is the one that fails.
-        if me() != 0 {
-            return;
-        }
+        // The folder passes (its owner is the current user) and the file fails (its owner is any other
+        // uid), so the file rule is the one that is tested. No root is needed.
         let f = Fixture::new(1000);
         f.write_system(&trust_text("acme-platform", KEY_A, None));
-        std::os::unix::fs::chown(f.sys_file(), Some(4242), None).expect("chown");
-        let error = load(&f.layout()).expect_err("refused");
+        let layout = f.layout().with_system_file_owner(me().wrapping_add(1));
+        let error = load(&layout).expect_err("refused");
         assert_eq!(insecure(&error), Insecurity::NotOwned);
         assert!(error.to_string().contains("not owned by root"), "{error}");
+        assert_eq!(
+            error.fix(),
+            format!("chown root {}", f.sys_file().display())
+        );
     }
 
     #[test]
-    fn a_user_store_owned_by_another_user_is_refused() {
+    fn a_user_store_folder_owned_by_another_user_is_refused() {
         // Root may own a user store, so there is nothing to refuse when the tests run as root.
         if me() == 0 {
             return;
@@ -399,8 +425,71 @@ mod unix {
         let f = Fixture::new(me().wrapping_add(1));
         f.write_user(&trust_text("acme-platform", KEY_A, None));
         let error = load(&f.layout()).expect_err("refused");
+        assert_eq!(insecure(&error), Insecurity::DirNotOwned);
+        assert!(
+            error.to_string().contains("owned by another user"),
+            "{error}"
+        );
+        assert!(error.fix().contains("check who put"), "{}", error.fix());
+    }
+
+    #[test]
+    fn a_user_store_owned_by_another_user_is_refused() {
+        // Giving a file to another user needs root, so this runs only when the tests run as root. The
+        // folder stays root's, which a user layout accepts, so the file is the one that fails.
+        if me() != 0 {
+            return;
+        }
+        let f = Fixture::new(1000);
+        f.write_user(&trust_text("acme-platform", KEY_A, None));
+        std::os::unix::fs::chown(f.user_file(), Some(4242), None).expect("chown");
+        let error = load(&f.layout()).expect_err("refused");
         assert_eq!(insecure(&error), Insecurity::NotOwned);
         assert!(error.to_string().contains("another user"), "{error}");
+    }
+
+    #[test]
+    fn a_user_store_folder_that_is_a_symlink_is_refused() {
+        let f = Fixture::new(user_euid());
+        f.write_user(&trust_text("acme-platform", KEY_A, None));
+        let dir = f.user_file().parent().expect("parent").to_path_buf();
+        let real = dir.with_file_name("real");
+        fs::rename(&dir, &real).expect("rename");
+        symlink(&real, &dir).expect("symlink");
+        let error = load(&f.layout()).expect_err("refused");
+        assert_eq!(insecure(&error), Insecurity::DirSymlink);
+        assert_eq!(
+            error.fix(),
+            format!("replace {} with a real folder that you own", dir.display())
+        );
+        // Saving does not follow the link either.
+        let error = save(&f.layout(), &TrustStore::new()).expect_err("refused");
+        assert_eq!(insecure(&error), Insecurity::DirSymlink);
+    }
+
+    #[test]
+    fn a_user_store_folder_that_others_can_write_is_refused() {
+        for bad in [0o775, 0o757, 0o777] {
+            let f = Fixture::new(user_euid());
+            f.write_user(&trust_text("acme-platform", KEY_A, None));
+            let dir = f.user_file().parent().expect("parent").to_path_buf();
+            mode(&dir, bad);
+            let error = load(&f.layout()).expect_err("refused");
+            assert_eq!(insecure(&error), Insecurity::DirWritable, "{bad:o}");
+            assert_eq!(error.fix(), format!("chmod 700 {}", dir.display()));
+            let error = save(&f.layout(), &TrustStore::new()).expect_err("refused");
+            assert_eq!(insecure(&error), Insecurity::DirWritable, "{bad:o}");
+        }
+    }
+
+    #[test]
+    fn a_user_store_folder_that_is_a_file_is_refused() {
+        let f = Fixture::new(user_euid());
+        let dir = f.user_file().parent().expect("parent").to_path_buf();
+        fs::create_dir_all(dir.parent().expect("parent")).expect("mkdir");
+        fs::write(&dir, "x").expect("write");
+        let error = load(&f.layout()).expect_err("refused");
+        assert_eq!(insecure(&error), Insecurity::DirNotDirectory);
     }
 
     #[test]
@@ -490,7 +579,21 @@ mod unix {
             insecure(&load(&f.layout()).expect_err("fifo")),
             Insecurity::NotRegular
         );
-        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_device_is_not_a_store_and_is_not_read() {
+        // INV-02. `/dev/zero` never ends, so a read would run until memory is gone. Its folder is
+        // `/dev`, which root owns, so the folder passes and the type check is what refuses it.
+        let f = Fixture::new(1000);
+        let layout = f.layout().with_system_file(PathBuf::from("/dev/zero"), 0);
+        let started = std::time::Instant::now();
+        assert_eq!(
+            insecure(&load(&layout).expect_err("device")),
+            Insecurity::NotRegular
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
     }
 
     #[test]

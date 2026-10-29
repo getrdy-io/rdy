@@ -352,7 +352,7 @@ rdy 0.1.0 (4c1e9a2 2027-03-07)
 
 `rdy --version` prints the same line. Alpha builds read `rdy 0.1.0-alpha.3 (abc1234 2026-12-01)` (ADR 0011).
 `rdy version --json` prints `name`, `version`, `commit`, `date`, `target`, `rdy_spec`, `api_version`
-(C.11), and only grows. The schema has no `Version` definition yet; it lands before 0.1.0 (Plan corrections).
+(C.11), and only grows. The result schema has a `Version` definition for it (M1-022).
 
 ## 5. Exit codes
 

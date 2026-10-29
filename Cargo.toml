@@ -29,11 +29,16 @@ homepage = "https://getrdy.io"
 anyhow = { version = "1", default-features = false }
 clap = { version = "4.6", default-features = false }
 jsonschema = { version = "0.60", default-features = false }
+schemars = { version = "1", default-features = false }
 serde = { version = "1", default-features = false }
 serde-saphyr = { version = "~2.0", default-features = false }
 serde_json = { version = "1", default-features = false }
 trybuild = "1"
 thiserror = { version = "2", default-features = false }
+# HMAC-SHA256 tags and the per-run key for the redactor (ADR 0009, ADR 0015). No aws-lc.
+ring = { version = "0.17", default-features = false }
+# Linear-time matching for the redaction rules (04 section 3.4).
+regex = { version = "1", default-features = false }
 # The scheduler (M1-034). Each crate names the features it uses.
 tokio = { version = "1", default-features = false }
 rpassword = { version = "7.5", default-features = false }

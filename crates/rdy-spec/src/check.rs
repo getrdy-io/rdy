@@ -152,6 +152,15 @@ macro_rules! known_checks {
             }
         }
 
+        /// The keys the parameter struct of `id` accepts, for the test that keeps the schema equal to them.
+        #[cfg(all(test, feature = "schema"))]
+        pub(crate) fn param_fields(id: &str) -> Option<&'static [&'static str]> {
+            match id {
+                $($id => Some(<$ty as ParamSet>::FIELDS),)*
+                _ => None,
+            }
+        }
+
         /// Every check id that this build implements.
         pub const KNOWN_IDS: &[&str] = &[$($id),*];
     };
@@ -280,7 +289,12 @@ impl fmt::Display for UnsupportedReason {
 fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReason> {
     // Naming the field needs a list, because a serde message cannot be taken apart safely when the
     // key is attacker text. The list is checked first and `deny_unknown_fields` stays as a backstop.
-    if let Some(field) = fields.keys().find(|k| !P::FIELDS.contains(&k.as_str())) {
+    // The first unknown key in sorted order is named, whatever order the map keeps its keys in.
+    if let Some(field) = fields
+        .keys()
+        .filter(|k| !P::FIELDS.contains(&k.as_str()))
+        .min()
+    {
         return Err(UnsupportedReason::UnknownField {
             field: echo_safe(field),
         });
@@ -344,7 +358,10 @@ fn missing_field_name<'m, P: ParamSet>(
 
 /// The key whose value alone makes `P` fail. A required key that is absent is not a culprit.
 fn culprit<P: ParamSet>(fields: &Map<String, Value>) -> Option<String> {
-    fields.iter().find_map(|(key, value)| {
+    // Sorted, so the key named does not depend on the order the map keeps.
+    let mut entries: Vec<(&String, &Value)> = fields.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    entries.into_iter().find_map(|(key, value)| {
         let mut one = Map::new();
         one.insert(key.clone(), value.clone());
         match serde_json::from_value::<P>(Value::Object(one.clone())) {

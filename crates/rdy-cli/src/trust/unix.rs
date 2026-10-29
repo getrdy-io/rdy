@@ -1,8 +1,9 @@
 //! Reading and writing a trust store on Unix, with every check on an open handle.
 //!
-//! The folder is opened first. For the system store it is opened with `O_NOFOLLOW`, so `/etc/rdy` as a
-//! symlink is refused. The file is then opened inside that folder with `openat`, with `O_NOFOLLOW` and
-//! `O_NONBLOCK`, so a symlink is refused and a FIFO cannot hang the read. The owner and the mode come
+//! The folder is opened first, with `O_NOFOLLOW`, so `/etc/rdy` or `~/.config/rdy` as a symlink is
+//! refused, and its owner and mode are checked. The file is then opened inside that folder with `openat`,
+//! with `O_NOFOLLOW`, `O_NONBLOCK` and `O_NOCTTY`, so a symlink is refused and a FIFO cannot hang the
+//! read. The owner and the mode come
 //! from the open handle. The path is never looked at again for a decision. A failed open looks at the
 //! path once, only to name the reason.
 
@@ -70,21 +71,16 @@ fn split(path: &Path) -> Result<(&Path, &OsStr), TrustStoreError> {
 /// Opens the folder of a store. `None` when it does not exist.
 fn open_dir(path: &Path, scope: Scope, layout: &Layout) -> Result<Option<File>, TrustStoreError> {
     let (dir_path, _) = split(path)?;
-    let mut flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
-    if scope == Scope::System {
-        flags |= OFlags::NOFOLLOW;
-    }
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     match rustix::fs::open(dir_path, flags, Mode::empty()) {
         Ok(fd) => {
             let dir = File::from(fd);
-            if scope == Scope::System {
-                check_dir(&dir, path, layout)?;
-            }
+            check_dir(&dir, path, scope, layout)?;
             Ok(Some(dir))
         }
         Err(Errno::NOENT) => Ok(None),
         Err(errno) => {
-            if scope == Scope::System && is_symlink(dir_path) {
+            if is_symlink(dir_path) {
                 Err(insecure(path, scope, Insecurity::DirSymlink))
             } else if errno == Errno::NOTDIR {
                 Err(insecure(path, scope, Insecurity::DirNotDirectory))
@@ -95,14 +91,23 @@ fn open_dir(path: &Path, scope: Scope, layout: &Layout) -> Result<Option<File>, 
     }
 }
 
-/// The folder of the system store: owned by root, and group and others cannot write in it.
-fn check_dir(dir: &File, path: &Path, layout: &Layout) -> Result<(), TrustStoreError> {
+/// The folder of a store: owned by the right user, and group and others cannot write in it.
+fn check_dir(
+    dir: &File,
+    path: &Path,
+    scope: Scope,
+    layout: &Layout,
+) -> Result<(), TrustStoreError> {
     let meta = dir.metadata().map_err(|e| unreadable(path, errno_of(&e)))?;
-    if meta.uid() != layout.system_owner {
-        return Err(insecure(path, Scope::System, Insecurity::DirNotOwned));
+    let owned = match scope {
+        Scope::System => meta.uid() == layout.system_dir_owner,
+        Scope::User => meta.uid() == layout.euid || meta.uid() == 0,
+    };
+    if !owned {
+        return Err(insecure(path, scope, Insecurity::DirNotOwned));
     }
     if meta.mode() & GROUP_OTHER_WRITE != 0 {
-        return Err(insecure(path, Scope::System, Insecurity::DirWritable));
+        return Err(insecure(path, scope, Insecurity::DirWritable));
     }
     Ok(())
 }
@@ -120,7 +125,8 @@ fn open_file(
     layout: &Layout,
 ) -> Result<Option<Vec<u8>>, TrustStoreError> {
     let (_, name) = split(path)?;
-    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let flags =
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::NOCTTY | OFlags::CLOEXEC;
     let fd = match rustix::fs::openat(dir, name, flags, Mode::empty()) {
         Ok(fd) => fd,
         Err(Errno::NOENT) => return Ok(None),
@@ -140,7 +146,7 @@ fn open_file(
         return Err(insecure(path, scope, Insecurity::NotRegular));
     }
     let owned = match scope {
-        Scope::System => meta.uid() == layout.system_owner,
+        Scope::System => meta.uid() == layout.system_file_owner,
         Scope::User => meta.uid() == layout.euid || meta.uid() == 0,
     };
     if !owned {
@@ -203,7 +209,7 @@ pub(super) fn write(
             if scope == Scope::System {
                 let mode = Mode::RWXU | Mode::RGRP | Mode::XGRP | Mode::ROTH | Mode::XOTH;
                 rustix::fs::fchmod(&dir, mode).map_err(|e| write_error(path, scope, &e.into()))?;
-                check_dir(&dir, path, layout)?;
+                check_dir(&dir, path, scope, layout)?;
             }
             dir
         }
@@ -212,14 +218,12 @@ pub(super) fn write(
     open_file(&dir, path, scope, layout)?;
     let (_, name) = split(path)?;
     let temp = format!(".{}.{}.tmp", name.to_string_lossy(), std::process::id());
-    let result = write_temp_and_rename(&dir, &temp, name, scope, bytes);
-    if result.is_err() {
-        // Best effort. The temporary file may not exist.
-        let _ = rustix::fs::unlinkat(&dir, temp.as_str(), AtFlags::empty());
-    }
-    result.map_err(|e| write_error(path, scope, &e))
+    write_temp_and_rename(&dir, &temp, name, scope, bytes).map_err(|e| write_error(path, scope, &e))
 }
 
+/// Creates the temporary file, fills it and renames it over the store. Once this run has created the
+/// temporary file, any later failure removes it. A failure to create it removes nothing, because with
+/// `O_EXCL` a file that is already there is not ours.
 fn write_temp_and_rename(
     dir: &File,
     temp: &str,
@@ -233,7 +237,23 @@ fn write_temp_and_rename(
     };
     let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let fd = rustix::fs::openat(dir, temp, flags, mode)?;
-    let mut file = File::from(fd);
+    let file = File::from(fd);
+    let result = fill_and_rename(dir, temp, name, file, mode, bytes);
+    if result.is_err() {
+        // Best effort. The file is ours: this run created it.
+        let _ = rustix::fs::unlinkat(dir, temp, AtFlags::empty());
+    }
+    result
+}
+
+fn fill_and_rename(
+    dir: &File,
+    temp: &str,
+    name: &OsStr,
+    mut file: File,
+    mode: Mode,
+    bytes: &[u8],
+) -> std::io::Result<()> {
     // The mode given to `open` is cut by the umask. Set it exactly.
     rustix::fs::fchmod(&file, mode)?;
     file.write_all(bytes)?;

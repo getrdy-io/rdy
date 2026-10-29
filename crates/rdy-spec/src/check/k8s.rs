@@ -29,8 +29,8 @@ fn bad<E: serde::de::Error>(message: impl std::fmt::Display) -> E {
     E::custom(message)
 }
 
-/// A Kubernetes object name: 1 to 253 characters of `a-z`, `0-9`, `-` and `.`, starting and ending with
-/// a letter or digit.
+/// A Kubernetes object name: a DNS subdomain of 1 to 253 characters. It has dot-separated labels of 1 to
+/// 63 characters from `a-z`, `0-9` and `-`, and each label starts and ends with a letter or digit.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct K8sName(String);
 
@@ -50,7 +50,7 @@ impl<'de> Deserialize<'de> for K8sName {
         } else {
             Err(bad(format!(
                 "'{}' is not a Kubernetes name: use 1 to 253 characters from a-z, 0-9, - and ., \
-                 starting and ending with a letter or digit",
+                 in dot-separated parts of up to 63 characters that start and end with a letter or digit",
                 echo_safe(&text)
             )))
         }
@@ -59,12 +59,17 @@ impl<'de> Deserialize<'de> for K8sName {
 
 /// The rule of [`K8sName`]. It is also the rule for the prefix of a label key.
 fn is_k8s_name(text: &str) -> bool {
-    let inner = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.';
+    let inner = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-';
     let edge = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+    // A DNS subdomain: dot-separated labels, each 1 to 63 characters, each starting and ending with a
+    // letter or digit. So `a..b`, `a-.b` and `.a` are refused.
     (1..=253).contains(&text.chars().count())
-        && text.chars().all(inner)
-        && text.chars().next().is_some_and(edge)
-        && text.chars().next_back().is_some_and(edge)
+        && text.split('.').all(|label| {
+            (1..=63).contains(&label.chars().count())
+                && label.chars().all(inner)
+                && label.chars().next().is_some_and(edge)
+                && label.chars().next_back().is_some_and(edge)
+        })
 }
 
 /// The name part of a label key, or a non-empty label value: 1 to 63 characters of letters, digits, `-`,
