@@ -1,21 +1,37 @@
 # A read-only identity for rdy. You do not need cluster-admin to run it.
 #
 # rdy only reads. It lists a few resources and makes three self-review requests (who am I, may I do
-# this, what may I do). It never changes a cluster and never reads Secrets. A guard inside rdy refuses
-# anything else before it is sent. This file is the second line: even if the guard had a bug, this
-# identity could not write or read Secrets.
+# this, what may I do). It never changes a cluster. A guard inside rdy refuses anything else before it
+# is sent. This file is the second line: even if the guard had a bug, this identity could not write,
+# and it cannot read Secret objects.
+#
+# What this identity can still see: Pod and Deployment specs. Listing pods, events and deployments
+# returns literal environment variable values, and those often hold credentials. rdy keeps only
+# resources, node name and phase, and drops the rest. The token is still a credential, so keep it short
+# lived (the command below asks for one hour) and delete the namespace when you are done.
 #
 # The rules below are the list in crates/rdy-checks-k8s/src/client/guard/rules.rs (ALLOWED). A test
 # keeps the two in step.
 #
 # Use it:
 #   kubectl apply -f rdy-readonly.yaml
-#   kubectl -n rdy-system create token rdy-readonly --duration 1h
-# Put that token in a kubeconfig user and run rdy with it. Delete the namespace and the roles when you
-# are done: kubectl delete -f rdy-readonly.yaml
+#   TOKEN=$(kubectl -n rdy-system create token rdy-readonly --duration 1h)
+#   SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+#   kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
+#     | base64 -d > ca.crt
+#   kubectl config --kubeconfig=ro.kubeconfig set-cluster c --server="$SERVER" \
+#     --certificate-authority=ca.crt --embed-certs
+#   kubectl config --kubeconfig=ro.kubeconfig set-credentials rdy --token="$TOKEN"
+#   kubectl config --kubeconfig=ro.kubeconfig set-context c --cluster=c --user=rdy
+#   kubectl config --kubeconfig=ro.kubeconfig use-context c
+#   rdy run <spec> --kubeconfig ro.kubeconfig
+# If a public CA signed the API server certificate, leave out the ca.crt command and the flags
+# --certificate-authority and --embed-certs. Delete the kubeconfig and the roles when you are done:
+# kubectl delete -f rdy-readonly.yaml
 #
-# Discovery (/version, /api, /apis) and the self reviews are open to every signed-in user in a standard
-# cluster. The self review rules are listed anyway, so a cluster that removed them still works.
+# Discovery (/version, /api, /apis) relies on the system:discovery role, and the self reviews on
+# system:basic-user. Every signed-in user has both in a standard cluster. The self review rules are
+# listed below anyway, so a cluster that removed them still works.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -54,6 +70,7 @@ rules:
     verbs: ["list"]
   - apiGroups: ["config.openshift.io"]
     resources: ["clusterversions"]
+    resourceNames: ["version"]
     verbs: ["get"]
   # k8s.access, k8s.rbac: who am I, may I do this, what may I do. Nothing is stored.
   - apiGroups: ["authentication.k8s.io"]
@@ -76,8 +93,11 @@ subjects:
     name: rdy-readonly
     namespace: rdy-system
 ---
-# k8s.nodes looks for the cluster-autoscaler deployment by name, in kube-system only. A Role keeps
-# that to one namespace instead of every namespace.
+# OPTIONAL: this Role and RoleBinding (the last two documents). k8s.nodes looks for the
+# cluster-autoscaler deployment in kube-system only, and a Role keeps that to one namespace. Without
+# them, k8s.nodes reports "autoscaler not detected" and a node shortfall is not softened. Delete the
+# last two documents if your platform manages kube-system and refuses the apply (GKE Autopilot's
+# managed namespace) or runs the autoscaler elsewhere (OpenShift: openshift-machine-api).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

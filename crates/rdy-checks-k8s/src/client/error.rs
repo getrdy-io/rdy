@@ -194,6 +194,16 @@ pub enum KubeError {
     #[error("the run was cancelled while the cluster client was being set up")]
     Cancelled,
 
+    /// The read-only guard refused a request. It was not sent. This is a bug in rdy or in a check, and
+    /// it repeats every time, so the hint is to report it, not to run again.
+    #[error("the read-only guard refused a request ({rule})")]
+    Refused {
+        /// The fixed sentence of the rule.
+        rule: &'static str,
+        /// The request came after its check ended (a check that ran past its time limit).
+        late: bool,
+    },
+
     /// Something else went wrong. The text is fixed.
     #[error("the cluster client failed: {what}")]
     Internal {
@@ -290,6 +300,14 @@ impl KubeError {
                 with_proxy_note(base, *proxy_env_set)
             }
             Self::Cancelled => "Run the command again.".to_owned(),
+            Self::Refused { late: true, .. } => {
+                "A check made a request after it ended, so it ran past its time limit. The request was not sent. Report this to the vendor with the action log in the JSON report."
+                    .to_owned()
+            }
+            Self::Refused { late: false, .. } => {
+                "This is a bug in rdy or in a check, and running again will not help. The request was not sent. Report it to the vendor with the action log in the JSON report."
+                    .to_owned()
+            }
             Self::Internal { .. } => "Run the command again, and tell the vendor if it repeats.".to_owned(),
         }
     }
@@ -427,9 +445,10 @@ pub(crate) fn from_kube_error(
         return from_auth_error(auth, plugin);
     }
     // The read-only guard refused the request. That is not a network failure.
-    if find_guard(error) {
-        return KubeError::Internal {
-            what: "the read-only guard refused the request",
+    if let Some(refusal) = find_guard(error) {
+        return KubeError::Refused {
+            rule: refusal.rule(),
+            late: refusal.is_late(),
         };
     }
     match error {
@@ -579,21 +598,21 @@ pub(crate) fn proxy_display(raw: &str) -> String {
     escape_capped(&format!("{scheme}://{host_port}"), CAUSE_CAP)
 }
 
-/// True when the read-only guard refused the request, whatever the wrapping.
-fn find_guard(error: &kube::Error) -> bool {
+/// The refusal of the read-only guard in `error`, whatever the wrapping.
+fn find_guard(error: &kube::Error) -> Option<&super::GuardError> {
     if let kube::Error::Service(inner) = error
-        && inner.downcast_ref::<super::GuardError>().is_some()
+        && let Some(refusal) = inner.downcast_ref::<super::GuardError>()
     {
-        return true;
+        return Some(refusal);
     }
     let mut current: Option<&(dyn std::error::Error + 'static)> = error.source();
     while let Some(err) = current {
-        if err.downcast_ref::<super::GuardError>().is_some() {
-            return true;
+        if let Some(refusal) = err.downcast_ref::<super::GuardError>() {
+            return Some(refusal);
         }
         current = err.source();
     }
-    false
+    None
 }
 
 /// Looks for an auth error in `error` and its sources.

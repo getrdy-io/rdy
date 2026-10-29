@@ -532,15 +532,28 @@ impl KubeCall {
         self.entry.finish(ActionOutcome::Denied);
     }
 
-    /// The server answered with `status`. A status below 400 is `ok`, any other is `failed`.
+    /// The guard refused the request because of one request header. As [`KubeCall::refused`], and the
+    /// entry also names the header. Pass the name, never the value (02 Appendix B, rule 8).
+    pub fn refused_header(mut self, rule: &'static str, header: &str) {
+        self.entry.set("header", header);
+        self.refused(rule);
+    }
+
+    /// The server answered with `status`. A status below 300 is `ok`. Any other is `failed` with a fixed
+    /// `error` (01 section 5.4): a redirect is not followed, so a 3xx is a failure too.
     pub fn answered(mut self, status: u16) {
         self.entry.set("status", status);
-        let outcome = if status < 400 {
-            ActionOutcome::Ok
+        if status < 300 {
+            self.entry.finish(ActionOutcome::Ok);
+            return;
+        }
+        let error = if status < 400 {
+            "the server answered with a redirect, which rdy does not follow"
         } else {
-            ActionOutcome::Failed
+            "the server answered with an error status"
         };
-        self.entry.finish(outcome);
+        self.entry.set("error", error);
+        self.entry.finish(ActionOutcome::Failed);
     }
 
     /// The request got no answer. `error` is a fixed phrase, never text from the client or the server.

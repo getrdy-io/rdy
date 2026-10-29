@@ -35,10 +35,22 @@ fn grants(docs: &[Value], kind: &str) -> BTreeSet<(Option<String>, String)> {
                     .map(|v| v.as_str().expect("string").to_owned())
                     .collect()
             };
+            let names: Vec<String> = if rule["resourceNames"].is_null() {
+                Vec::new()
+            } else {
+                strings("resourceNames")
+            };
             for group in strings("apiGroups") {
                 for resource in strings("resources") {
                     for verb in strings("verbs") {
-                        out.insert((namespace.clone(), format!("{group}/{resource} {verb}")));
+                        let base = format!("{group}/{resource} {verb}");
+                        if names.is_empty() {
+                            out.insert((namespace.clone(), base));
+                        } else {
+                            for name in &names {
+                                out.insert((namespace.clone(), format!("{base} name={name}")));
+                            }
+                        }
                     }
                 }
             }
@@ -52,15 +64,19 @@ fn needed() -> BTreeSet<(Option<String>, String)> {
     let mut out = BTreeSet::new();
     for entry in ALLOWED {
         for access in entry.access {
-            let (verb, namespace) = match access {
-                Access::List => ("list", None),
-                Access::Get(_) => ("get", None),
-                Access::ListInNamespace(Only::Any) => ("list", None),
-                Access::ListInNamespace(Only::Name(ns)) => ("list", Some((*ns).to_owned())),
+            let (verb, namespace, name) = match access {
+                Access::List => ("list", None, String::new()),
+                Access::Get(Only::Any) => ("get", None, String::new()),
+                // A get of one name is granted by name, so the role cannot read any other object.
+                Access::Get(Only::Name(name)) => ("get", None, format!(" name={name}")),
+                Access::ListInNamespace(Only::Any) => ("list", None, String::new()),
+                Access::ListInNamespace(Only::Name(ns)) => {
+                    ("list", Some((*ns).to_owned()), String::new())
+                }
             };
             out.insert((
                 namespace,
-                format!("{}/{} {verb}", entry.group, entry.resource),
+                format!("{}/{} {verb}{name}", entry.group, entry.resource),
             ));
         }
     }
@@ -98,7 +114,7 @@ fn the_role_never_writes_reads_secrets_or_uses_a_wildcard() {
     assert!(!text.contains('*'), "the role must not use a wildcard");
     for kind in ["ClusterRole", "Role"] {
         for (_, grant) in grants(&docs, kind) {
-            let verb = grant.rsplit(' ').next().expect("verb");
+            let verb = grant.split(' ').nth(1).expect("verb");
             assert!(matches!(verb, "get" | "list" | "create"), "{grant}");
             if verb == "create" {
                 assert!(

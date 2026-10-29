@@ -3,6 +3,9 @@
 //!
 //! The fixture run at the bottom is the exit test of M1-040.
 
+// `Probe::kube_call` is on the lint wall for check crates. The engine tests exercise it directly.
+#![allow(clippy::disallowed_methods)]
+
 use std::path::Path;
 use std::sync::Arc;
 #[cfg(feature = "runtime")]
@@ -949,6 +952,58 @@ async fn a_call_after_the_check_ended_is_denied_and_logged() {
     assert_eq!(late.check.as_deref(), Some("host.cpu"));
     assert_eq!(field(late, "rule"), Some(&json!(RULE_CHECK_FINISHED)));
     assert_eq!(field(late, "path"), Some(&json!("/proc/cpuinfo")));
+}
+
+#[test]
+fn a_failed_kube_status_carries_a_fixed_error_and_a_redirect_is_not_ok() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("k8s.nodes", Os::Linux, None);
+    for status in [200_u16, 204, 302, 403, 503] {
+        probe
+            .kube_call("GET", "/api/v1/nodes")
+            .expect("open")
+            .answered(status);
+    }
+    probe
+        .kube_call("GET", "/api/v1/nodes")
+        .expect("open")
+        .refused_header("a header rule", "authorization");
+    let log = hub.action_log();
+    let outcomes: Vec<_> = log.actions.iter().map(|a| a.outcome.clone()).collect();
+    assert_eq!(
+        outcomes,
+        [
+            ActionOutcome::Ok,
+            ActionOutcome::Ok,
+            ActionOutcome::Failed,
+            ActionOutcome::Failed,
+            ActionOutcome::Failed,
+            ActionOutcome::Denied,
+        ]
+    );
+    assert_eq!(field(&log.actions[0], "error"), None);
+    assert_eq!(field(&log.actions[1], "error"), None);
+    for entry in &log.actions[2..5] {
+        let error = field(entry, "error")
+            .and_then(|v| v.as_str())
+            .expect("error");
+        assert!(error.starts_with("the server answered"), "{error}");
+    }
+    assert!(
+        field(&log.actions[2], "error")
+            .and_then(|v| v.as_str())
+            .is_some_and(|e| e.contains("redirect"))
+    );
+    // A refused header is named, with the rule, and has no value and no error.
+    assert_eq!(
+        field(&log.actions[5], "header"),
+        Some(&json!("authorization"))
+    );
+    assert_eq!(
+        field(&log.actions[5], "rule"),
+        Some(&json!("a header rule"))
+    );
+    assert_eq!(field(&log.actions[5], "error"), None);
 }
 
 #[test]

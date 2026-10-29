@@ -4,21 +4,41 @@
 //! environment points at (`KUBECONFIG` or `~/.kube/config`), as `rdy run` does.
 //!
 //! - `the_default_kubeconfig_reaches_the_cluster` sends one request, `GET /version`.
-//! - `the_readonly_role_serves_every_allowed_read_and_nothing_else` is the guard test of M1-103 (SEC-24).
-//!   Point `KUBECONFIG` at a kubeconfig whose user is the `rdy-readonly` service account, and nothing
-//!   else:
+//! - `the_readonly_role_serves_every_allowed_read_and_nothing_else` is the guard test of M1-103
+//!   (SEC-24). It reads `RDY_READONLY_KUBECONFIG`, the path of a kubeconfig whose only user is the
+//!   `rdy-readonly` service account. When the variable is not set, the test prints why and skips. It
+//!   does not use `KUBECONFIG`, because under an admin kubeconfig the server would allow the writes it
+//!   checks for. M1-108 sets the variable and runs it.
 //!
 //!   ```text
 //!   kubectl apply -f examples/rbac/rdy-readonly.yaml
 //!   TOKEN=$(kubectl -n rdy-system create token rdy-readonly --duration 1h)
-//!   # write a kubeconfig with the cluster of your kind context and `token: $TOKEN` as the only user
-//!   KUBECONFIG=/path/to/readonly.kubeconfig cargo test -p rdy-checks-k8s --test live_cluster \
+//!   SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+//!   kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
+//!       | base64 -d > ca.crt
+//!   kubectl config --kubeconfig=ro.kubeconfig set-cluster c --server="$SERVER" \
+//!       --certificate-authority=ca.crt --embed-certs
+//!   kubectl config --kubeconfig=ro.kubeconfig set-credentials rdy --token="$TOKEN"
+//!   kubectl config --kubeconfig=ro.kubeconfig set-context c --cluster=c --user=rdy
+//!   kubectl config --kubeconfig=ro.kubeconfig use-context c
+//!   RDY_READONLY_KUBECONFIG=$PWD/ro.kubeconfig cargo test -p rdy-checks-k8s --test live_cluster \
 //!       -- --ignored --nocapture
 //!   ```
 //!
-//!   It proves two things on a real API server. The role covers every read the guard allows (no 403),
-//!   and the same role, asked through the server's own access review, may not write or read Secrets. The
+//!   It proves two things on a real API server. Every read the guard allows is served to the role
+//!   (each must return `Ok`; only a 404 is tolerated, for an API a distribution may not serve), and the
+//!   same role, asked through the server's own access review, may not write or read Secrets. The
 //!   guard's refusals need no cluster and are tested without one.
+//!
+//! Not covered here, and carried (12-progress, M1-105 and M1-108):
+//! - The discovery routes (`/api`, `/apis`, `/apis/<group>/<version>`) and the raw
+//!   `SelfSubjectReview` POST. `ReadOnlyClient` has no route for either yet. M1-105 adds both, and
+//!   M1-108 runs them.
+//! - The OpenShift reads (`securitycontextconstraints` list, `clusterversions/version` get). A kind
+//!   cluster does not serve them, so the test asks the server's access review whether the role allows
+//!   them. That catches a typo in the rule, not a missing API.
+//! - The optional `kube-system` Role: the deployments list runs, and a 403 there means the optional
+//!   Role was not applied.
 //!
 //! They have not run in CI yet: the kind job is M1-108, which runs this file.
 
@@ -28,6 +48,7 @@ use std::time::Duration;
 
 use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
+    SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
 use k8s_openapi::api::core::v1::{Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret};
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
@@ -36,13 +57,10 @@ use rdy_checks_k8s::client::{Connected, Env, GuardError, KubeOptions, load};
 use rdy_engine::check::Os;
 use rdy_engine::testing::{Replay, TestRun};
 
-async fn connect(run: &TestRun) -> Connected {
-    let loaded = load(
-        &KubeOptions::new(Duration::from_secs(10)),
-        &Env::from_process(),
-    )
-    .await
-    .expect("a kubeconfig that kubectl accepts");
+async fn connect_with(run: &TestRun, options: KubeOptions) -> Connected {
+    let loaded = load(&options, &Env::from_process())
+        .await
+        .expect("a kubeconfig that kubectl accepts");
     loaded
         .connect(&run.run_probe(Os::Linux), |line| {
             eprintln!("cluster {line}")
@@ -55,7 +73,7 @@ async fn connect(run: &TestRun) -> Connected {
 #[ignore = "needs a cluster; the kind job runs it (M1-108)"]
 async fn the_default_kubeconfig_reaches_the_cluster() {
     let run = TestRun::new(Replay::new());
-    let connected = connect(&run).await;
+    let connected = connect_with(&run, KubeOptions::new(Duration::from_secs(10))).await;
 
     let version = connected.server_version();
     eprintln!("server {} {}", version.git_version, version.platform);
@@ -66,9 +84,17 @@ async fn the_default_kubeconfig_reaches_the_cluster() {
     );
 }
 
-/// True when the error is the server saying 403.
-fn forbidden(error: &kube::Error) -> bool {
-    matches!(error, kube::Error::Api(status) if status.code == 403)
+/// What a read must do on a real cluster: succeed. A 404 is tolerated only for an API that a
+/// distribution may not serve (`optional`). Anything else, including a guard refusal, a 403 or a 500,
+/// fails the test.
+fn assert_served<T>(name: &str, optional: bool, result: &Result<T, kube::Error>) {
+    match result {
+        Ok(_) => {}
+        Err(kube::Error::Api(status)) if status.code == 404 && optional => {
+            eprintln!("{name}: 404, the API is not served here");
+        }
+        Err(error) => panic!("{name}: an allowed read did not succeed: {error:?}"),
+    }
 }
 
 fn review(
@@ -76,6 +102,7 @@ fn review(
     group: &str,
     resource: &str,
     namespace: Option<&str>,
+    name: Option<&str>,
 ) -> SelfSubjectAccessReview {
     SelfSubjectAccessReview {
         spec: SelfSubjectAccessReviewSpec {
@@ -84,6 +111,7 @@ fn review(
                 group: Some(group.to_owned()),
                 resource: Some(resource.to_owned()),
                 namespace: namespace.map(str::to_owned),
+                name: name.map(str::to_owned),
                 ..ResourceAttributes::default()
             }),
             ..SelfSubjectAccessReviewSpec::default()
@@ -92,92 +120,164 @@ fn review(
     }
 }
 
+/// What one access review asks: `(verb, group, resource, namespace, name)`.
+type Ask = (
+    &'static str,
+    &'static str,
+    &'static str,
+    Option<&'static str>,
+    Option<&'static str>,
+);
+
+/// Asks the server whether the identity may do `ask`.
+async fn is_allowed(reviews: &kube::Api<SelfSubjectAccessReview>, ask: Ask) -> bool {
+    let (verb, group, resource, namespace, name) = ask;
+    reviews
+        .create(
+            &PostParams::default(),
+            &review(verb, group, resource, namespace, name),
+        )
+        .await
+        .expect("access review")
+        .status
+        .is_some_and(|status| status.allowed)
+}
+
 #[tokio::test]
 #[ignore = "needs a cluster and the rdy-readonly kubeconfig; the kind job runs it (M1-108)"]
 async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
+    let Some(kubeconfig) = std::env::var_os("RDY_READONLY_KUBECONFIG") else {
+        eprintln!(
+            "skipped: RDY_READONLY_KUBECONFIG is not set. Point it at a kubeconfig of the \
+             rdy-readonly service account (see the header of this file); M1-108 runs this test with it"
+        );
+        return;
+    };
     let run = TestRun::new(Replay::new());
-    let connected = connect(&run).await;
+    let options = KubeOptions::new(Duration::from_secs(10)).kubeconfig(kubeconfig);
+    let connected = connect_with(&run, options).await;
     let check = run.context("k8s.nodes", Os::Linux, []);
     let client = connected.read_only(check.probe());
     let all = ListParams::default().limit(50);
+    // The selectors the guard requires on these two lists (02 Appendix B, section 4).
+    let pods = all
+        .clone()
+        .fields("status.phase!=Succeeded,status.phase!=Failed");
+    let events = all
+        .clone()
+        .fields("involvedObject.kind=PersistentVolumeClaim");
 
-    // 1. Every read the guard allows works with the role. A 404 (the resource is not served, as on
-    //    a cluster that is not OpenShift) is fine. A 403 is not.
-    let reads = [
-        ("nodes", client.all::<Node>().list(&all).await.err()),
-        ("pods", client.all::<Pod>().list(&all).await.err()),
-        (
-            "pvc",
-            client
-                .namespaced::<PersistentVolumeClaim>("default")
-                .list(&all)
-                .await
-                .err(),
-        ),
-        (
-            "events",
-            client.namespaced::<Event>("default").list(&all).await.err(),
-        ),
-        (
-            "storageclasses",
-            client.all::<StorageClass>().list(&all).await.err(),
-        ),
-        ("csinodes", client.all::<CSINode>().list(&all).await.err()),
-        (
-            "csidrivers",
-            client.all::<CSIDriver>().list(&all).await.err(),
-        ),
-        (
-            "namespace",
-            client.all::<Namespace>().get("kube-system").await.err(),
-        ),
-        (
-            "deployments",
-            client
-                .namespaced::<k8s_openapi::api::apps::v1::Deployment>("kube-system")
-                .list(&all)
-                .await
-                .err(),
-        ),
-    ];
-    for (name, error) in reads {
-        assert!(
-            error.as_ref().is_none_or(|e| !forbidden(e)),
-            "{name}: the role does not cover a read the guard allows: {error:?}"
-        );
-    }
+    // 1. Every read the guard allows is served to the role. Each must return Ok. A 404 is tolerated
+    //    only where a distribution may not serve the API (CSI, the rules review), and for the get of
+    //    a storage class that does not exist (the point is that it is not a 403).
+    assert_served("nodes", false, &client.all::<Node>().list(&all).await);
+    assert_served("pods", false, &client.all::<Pod>().list(&pods).await);
+    assert_served(
+        "pvc",
+        false,
+        &client
+            .namespaced::<PersistentVolumeClaim>("default")
+            .list(&all)
+            .await,
+    );
+    assert_served(
+        "events",
+        false,
+        &client.namespaced::<Event>("default").list(&events).await,
+    );
+    assert_served(
+        "storageclasses",
+        false,
+        &client.all::<StorageClass>().list(&all).await,
+    );
+    assert_served(
+        "storageclass by name",
+        true,
+        &client.all::<StorageClass>().get("no-such-class").await,
+    );
+    assert_served("csinodes", true, &client.all::<CSINode>().list(&all).await);
+    assert_served(
+        "csidrivers",
+        true,
+        &client.all::<CSIDriver>().list(&all).await,
+    );
+    assert_served(
+        "namespace",
+        false,
+        &client.all::<Namespace>().get("kube-system").await,
+    );
+    assert_served(
+        "deployments (needs the optional kube-system Role)",
+        false,
+        &client
+            .namespaced::<k8s_openapi::api::apps::v1::Deployment>("kube-system")
+            .list(&all)
+            .await,
+    );
+    // The rules review is a POST the guard allows. The server answers 201, or 404 if it is not served.
+    let rules = SelfSubjectRulesReview {
+        spec: SelfSubjectRulesReviewSpec {
+            namespace: Some("default".to_owned()),
+        },
+        ..SelfSubjectRulesReview::default()
+    };
+    assert_served(
+        "selfsubjectrulesreviews",
+        true,
+        &client
+            .all::<SelfSubjectRulesReview>()
+            .create(&PostParams::default(), &rules)
+            .await,
+    );
 
-    // 2. The server itself says the role cannot write or read Secrets. These are the allowed
+    // 2. The server itself says what the role can and cannot do. These are the allowed
     //    SelfSubjectAccessReview POSTs, so they pass the guard.
     let reviews = client.all::<SelfSubjectAccessReview>();
-    let allowed = |verb: &'static str,
-                   group: &'static str,
-                   resource: &'static str,
-                   ns: Option<&'static str>| {
-        let reviews = reviews.clone();
-        async move {
-            reviews
-                .create(&PostParams::default(), &review(verb, group, resource, ns))
-                .await
-                .expect("access review")
-                .status
-                .is_some_and(|status| status.allowed)
-        }
-    };
-    assert!(allowed("list", "", "nodes", None).await, "list nodes");
-    for (verb, group, resource, ns) in [
-        ("get", "", "secrets", Some("kube-system")),
-        ("list", "", "secrets", None),
-        ("create", "", "pods", Some("default")),
-        ("delete", "", "pods", Some("default")),
-        ("patch", "", "nodes", None),
-        ("update", "storage.k8s.io", "storageclasses", None),
-        ("delete", "storage.k8s.io", "storageclasses", None),
-        ("create", "", "namespaces", None),
+    for ask in [
+        ("list", "", "nodes", None, None),
+        // The OpenShift rules cannot be exercised on kind (404), so the server's review stands in. A
+        // typo in either rule fails here.
+        (
+            "list",
+            "security.openshift.io",
+            "securitycontextconstraints",
+            None,
+            None,
+        ),
+        (
+            "get",
+            "config.openshift.io",
+            "clusterversions",
+            None,
+            Some("version"),
+        ),
     ] {
         assert!(
-            !allowed(verb, group, resource, ns).await,
-            "the role must not allow {verb} {resource}"
+            is_allowed(&reviews, ask).await,
+            "the role must allow {ask:?}"
+        );
+    }
+    for ask in [
+        ("get", "", "secrets", Some("kube-system"), None),
+        ("list", "", "secrets", None, None),
+        ("create", "", "pods", Some("default"), None),
+        ("delete", "", "pods", Some("default"), None),
+        ("patch", "", "nodes", None, None),
+        ("update", "storage.k8s.io", "storageclasses", None, None),
+        ("delete", "storage.k8s.io", "storageclasses", None, None),
+        ("create", "", "namespaces", None, None),
+        // The ClusterVersion rule is by name only.
+        (
+            "get",
+            "config.openshift.io",
+            "clusterversions",
+            None,
+            Some("other"),
+        ),
+    ] {
+        assert!(
+            !is_allowed(&reviews, ask).await,
+            "the role must not allow {ask:?}"
         );
     }
 
@@ -201,7 +301,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, the nine reads, nine reviews, two refusals.
+    // 4. One log entry per call: /version, 11 reads and posts, 12 reviews, two refusals.
     let log = run.action_log().actions;
-    assert_eq!(log.len(), 1 + 9 + 9 + 2, "{log:#?}");
+    assert_eq!(log.len(), 1 + 11 + 12 + 2, "{log:#?}");
 }

@@ -139,12 +139,17 @@ async fn a_check_gets_only_a_guarded_client_and_a_refused_request_never_reaches_
         .list(&ListParams::default())
         .await
         .expect("storageclass list");
-    assert_eq!(api.lines().len(), 3, "{:?}", api.lines());
+    // The exact request lines on the wire: what the guard judged is what was sent.
+    let allowed_lines = [
+        "GET /version HTTP/1.1",
+        "GET /api/v1/nodes?&limit=500 HTTP/1.1",
+        "GET /apis/storage.k8s.io/v1/storageclasses? HTTP/1.1",
+    ];
+    assert_eq!(api.lines(), allowed_lines);
     let head = api.requests.lock().expect("requests")[1].to_lowercase();
     assert!(head.contains("authorization: bearer t0ken"), "{head}");
 
     // Writes, pods and Secrets are refused with the guard's own error, and nothing is sent.
-    let before = api.lines().len();
     let pods = client.namespaced::<Pod>("app");
     let secrets = client.namespaced::<Secret>("app");
     let refused = [
@@ -168,7 +173,7 @@ async fn a_check_gets_only_a_guarded_client_and_a_refused_request_never_reaches_
         let error = result.expect_err("refused");
         assert!(rule_of(&error).is_some(), "{error:?}");
     }
-    assert_eq!(api.lines().len(), before, "{:?}", api.lines());
+    assert_eq!(api.lines(), allowed_lines);
 
     // The log has one entry per call, the first from the run and the rest from the check.
     let log = run.action_log().actions;
@@ -243,5 +248,12 @@ async fn two_checks_log_under_their_own_ids_over_one_connection() {
             Some("k8s.storageclass".to_owned())
         ]
     );
-    assert_eq!(api.lines().len(), 3);
+    assert_eq!(
+        api.lines(),
+        [
+            "GET /version HTTP/1.1",
+            "GET /apis/storage.k8s.io/v1/storageclasses? HTTP/1.1",
+            "GET /api/v1/nodes? HTTP/1.1",
+        ]
+    );
 }

@@ -898,10 +898,12 @@ one clippy rule.
 Global rules, because `call` runs on kube's buffer worker without a check id.
 
 1. **Path pre-filter.** (M1-103 builds the frame: method, POST rules, the fixed body, a conservative
-   secrets rule, this pre-filter, the query keys and the table in section 4. M1-104 adds the full
-   request-info parser, the `namespaces/secrets` exception, the `Impersonate-*` value rule and the
-   citation test. kube writes `?&k=v`, with a `&` before the first parameter and a bare `?` for none, so
-   both are accepted.) Refuse a path containing `%`, `..`, `//`, `;`, an empty segment, a trailing `/`
+   secrets rule, this pre-filter, the query keys, the field selectors that `pods` and `events` lists
+   must carry, the request header allow list of rule 8 and the table in section 4. M1-104 adds the full
+   request-info parser, the `namespaces/secrets` exception, the `Impersonate-*` value rule, the citation
+   test and validation of the other decoded selector values. kube writes `?&k=v`, with a `&` before the
+   first parameter and a bare `?` for none, so both are accepted. `resourceVersion`, so
+   `ListParams::match_any()`, is refused as a query key.) Refuse a path containing `%`, `..`, `//`, `;`, an empty segment, a trailing `/`
    or a non-ASCII byte. The `%` rule applies to the path only. Query values are decoded once, then
    validated (kube-rs percent-encodes `fieldSelector`). Refuse `Upgrade` and `Connection: upgrade`.
    Allowed query keys: `limit`, `continue`, `labelSelector`, `fieldSelector`. Anything else, including
@@ -957,6 +959,12 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
    must equal the validated spec `as:` value: `system:serviceaccount:<dns1123>:<dns1123>`, or a user
    string with no control characters, at most 253 bytes. Otherwise only values the operator's kubeconfig
    sets are allowed. The header name is logged, never a token.
+
+   M1-103 builds the allow list under this rule. The guard sees the request as the caller built it, above
+   kube's layers, so it refuses every header except `accept`, `content-type` and `content-length`
+   (kube's request builders set the first two). A check-set `Authorization`, `X-Remote-User`,
+   `X-Remote-Group`, `X-HTTP-Method-Override` or `Host` is refused as a header, and the log entry names
+   the header and never its value. `Impersonate-*` is refused outright until M1-104 adds the value rule.
 9. **Data.** Response bodies are capped at 32 MiB. Spec `namespace` and `name` values are DNS-1123
    (rdy-spec).
 10. **Refusals.** Every refusal is a `kube` entry with outcome `denied` and the rule name. The request

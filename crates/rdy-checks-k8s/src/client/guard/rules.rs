@@ -10,8 +10,14 @@
 //! `Impersonate-*`, and the resource table. M1-104 replaces the segment matching with the full
 //! request-info parser (so `/api/v1/namespaces/secrets` becomes allowed again), adds the citation test
 //! against the checks' `CheckInfo`, and relaxes `Impersonate-*` on the two access review POSTs.
+//!
+//! For check authors: a list takes `limit`, `continue`, `labelSelector` and `fieldSelector` and nothing
+//! else. `resourceVersion` (so `ListParams::match_any()` too), `timeoutSeconds`, `watch` and the rest are
+//! refused as [`RULE_QUERY`]. A list of `pods` or `events` must also carry the field selector its
+//! [`ALLOWED`] entry names, or it is refused as [`RULE_SELECTOR`]. A request carries only the headers
+//! `accept`, `content-type` and `content-length`; any other is refused as [`RULE_HEADER`].
 
-use http::header::{CONNECTION, UPGRADE};
+use http::header::{ACCEPT, CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, UPGRADE};
 use http::{HeaderMap, Method, Uri};
 
 /// The rule of a method other than GET and POST.
@@ -38,11 +44,17 @@ pub const RULE_QUERY: &str = "this query string is not allowed";
 pub const RULE_UPGRADE: &str = "connection upgrades are not allowed";
 /// The rule of an `Impersonate-*` header.
 pub const RULE_IMPERSONATE: &str = "Impersonate headers are not allowed";
+/// The rule of a request header that is not on the short list (`accept`, `content-type`,
+/// `content-length`). It covers a check-set `Authorization`, `X-Remote-User`, `X-HTTP-Method-Override`
+/// and `Host`.
+pub const RULE_HEADER: &str = "this request header is not allowed";
+/// The rule of a list that lacks the field selector its [`ALLOWED`] entry requires.
+pub const RULE_SELECTOR: &str = "this list needs the field selector rdy uses for it";
 
 /// The exact body of a `SelfSubjectReview` POST, compared byte for byte (ADR 0010 decision 2).
 ///
 /// A typed `SelfSubjectReview` from `k8s-openapi` serializes with a `metadata` member, so it does not
-/// match: send these bytes. The caller is M1-109.
+/// match: send these bytes. The caller is M1-105 (it adds the raw send route).
 pub const SELF_SUBJECT_REVIEW_BODY: &[u8] =
     br#"{"apiVersion":"authentication.k8s.io/v1","kind":"SelfSubjectReview"}"#;
 
@@ -85,6 +97,50 @@ pub enum Access {
     Get(Only),
 }
 
+/// The field selector a list of a resource must carry. The value is decoded once and split on `,`. A
+/// selector with a backslash is refused, so a term cannot hide an escaped comma.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldSelector {
+    /// No requirement.
+    NotRequired,
+    /// Some term on this key, with `=`, `==` or `!=` (`status.phase!=Succeeded`).
+    Key(&'static str),
+    /// This exact term, with `=` or `==` (`involvedObject.kind=PersistentVolumeClaim`).
+    Equals(&'static str, &'static str),
+}
+
+impl FieldSelector {
+    /// True when `decoded` (the value of the `fieldSelector` key) meets the requirement.
+    fn met_by(self, decoded: Option<&str>) -> bool {
+        let mut terms = decoded
+            .into_iter()
+            .flat_map(|text| text.split(','))
+            .filter_map(split_term);
+        match self {
+            Self::NotRequired => true,
+            Self::Key(key) => terms.any(|(k, _, _)| k == key),
+            Self::Equals(key, value) => {
+                terms.any(|(k, op, v)| k == key && matches!(op, "=" | "==") && v == value)
+            }
+        }
+    }
+}
+
+/// Splits `key op value` at the first operator: `!=`, `==` or `=`.
+fn split_term(term: &str) -> Option<(&str, &str, &str)> {
+    let at = term.find(['=', '!'])?;
+    let (key, rest) = term.split_at(at);
+    let op_len = if rest.starts_with("!=") || rest.starts_with("==") {
+        2
+    } else if rest.starts_with('=') {
+        1
+    } else {
+        return None;
+    };
+    let (op, value) = rest.split_at(op_len);
+    Some((key, op, value))
+}
+
 /// One resource the M1 checks read (02 Appendix B, section 4). There is no `secrets` entry, and a test
 /// keeps it that way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +157,8 @@ pub struct Allowed {
     pub checks: &'static [&'static str],
     /// What the checks read from it.
     pub reads: &'static str,
+    /// The field selector a list must carry. A get by name needs none.
+    pub field_selector: FieldSelector,
 }
 
 /// Every resource a GET may name, in the order of 02 Appendix B. Discovery paths are separate.
@@ -112,6 +170,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::Get(Only::Any)],
         checks: &["k8s.admission", "k8s.storageclass", "k8s.rbac"],
         reads: "Pod Security labels; whether the target namespace exists",
+        field_selector: FieldSelector::NotRequired,
     },
     Allowed {
         group: "",
@@ -120,6 +179,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::List],
         checks: &["k8s.nodes", "k8s.version"],
         reads: "allocatable, conditions, taints, labels; providerID and kubeletVersion",
+        field_selector: FieldSelector::NotRequired,
     },
     Allowed {
         group: "",
@@ -128,6 +188,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::List],
         checks: &["k8s.nodes"],
         reads: "requests, nodeName and phase only, with a status.phase field selector",
+        field_selector: FieldSelector::Key("status.phase"),
     },
     Allowed {
         group: "",
@@ -136,6 +197,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::ListInNamespace(Only::Any)],
         checks: &["k8s.storageclass"],
         reads: "Pending claims older than 5 minutes in the target namespace",
+        field_selector: FieldSelector::NotRequired,
     },
     Allowed {
         group: "",
@@ -144,6 +206,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::ListInNamespace(Only::Any)],
         checks: &["k8s.storageclass"],
         reads: "ProvisioningFailed and WaitForFirstConsumer reasons for claims",
+        field_selector: FieldSelector::Equals("involvedObject.kind", "PersistentVolumeClaim"),
     },
     Allowed {
         group: "storage.k8s.io",
@@ -152,6 +215,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::List, Access::Get(Only::Any)],
         checks: &["k8s.storageclass"],
         reads: "classes, the default marker, the provisioner",
+        field_selector: FieldSelector::NotRequired,
     },
     Allowed {
         group: "storage.k8s.io",
@@ -160,6 +224,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::List],
         checks: &["k8s.storageclass"],
         reads: "spec.drivers[].name",
+        field_selector: FieldSelector::NotRequired,
     },
     Allowed {
         group: "storage.k8s.io",
@@ -168,6 +233,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::List],
         checks: &["k8s.storageclass"],
         reads: "driver objects",
+        field_selector: FieldSelector::NotRequired,
     },
     Allowed {
         group: "apps",
@@ -176,6 +242,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::ListInNamespace(Only::Name("kube-system"))],
         checks: &["k8s.nodes"],
         reads: "the cluster-autoscaler deployment by name",
+        field_selector: FieldSelector::NotRequired,
     },
     Allowed {
         group: "security.openshift.io",
@@ -184,6 +251,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::List],
         checks: &["k8s.admission"],
         reads: "the OpenShift SCCs",
+        field_selector: FieldSelector::NotRequired,
     },
     Allowed {
         group: "config.openshift.io",
@@ -192,6 +260,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::Get(Only::Name("version"))],
         checks: &["k8s.version"],
         reads: "the OpenShift version",
+        field_selector: FieldSelector::NotRequired,
     },
 ];
 
@@ -229,8 +298,8 @@ pub(crate) fn judge(
         if !matches!(body, BodyView::Empty) {
             return Err(RULE_GET_BODY);
         }
-        check_query(uri.query())?;
-        check_get(&segments)
+        let field_selector = check_query(uri.query())?;
+        check_get(&segments, field_selector.as_deref())
     } else {
         check_post(&segments, uri.query(), body)
     }
@@ -242,29 +311,43 @@ pub(crate) fn log_path(uri: &Uri) -> String {
 }
 
 fn check_headers(headers: &HeaderMap) -> Result<(), &'static str> {
+    bad_header(headers).map_or(Ok(()), |(rule, _)| Err(rule))
+}
+
+/// The rule and the name of the first request header the guard refuses, if any. Only the name is ever
+/// logged, never the value (02 Appendix B, rule 8).
+///
+/// The guard sits above kube's own layers (the exec plugin and the token are added below it), so it
+/// sees the headers the caller set. kube's request builders set `accept` and `content-type`
+/// (`kube-core` 4.2.0, `request.rs`) and nothing else; hyper adds `content-length`, `host` and
+/// `user-agent` later. Anything else here was set by check code, so it is refused: an `Authorization`
+/// from a client-certificate kubeconfig, `X-Remote-User` and `X-Remote-Group` (front-proxy
+/// authentication), `X-HTTP-Method-Override`, `Host`, and every `Impersonate-*`.
+pub(crate) fn bad_header(headers: &HeaderMap) -> Option<(&'static str, &str)> {
     if headers.contains_key(UPGRADE) {
-        return Err(RULE_UPGRADE);
+        return Some((RULE_UPGRADE, UPGRADE.as_str()));
     }
     for value in headers.get_all(CONNECTION) {
-        let Ok(text) = value.to_str() else {
-            return Err(RULE_UPGRADE);
-        };
-        if text
-            .split(',')
-            .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
-        {
-            return Err(RULE_UPGRADE);
+        let upgrade = value.to_str().map_or(true, |text| {
+            text.split(',')
+                .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
+        });
+        if upgrade {
+            return Some((RULE_UPGRADE, CONNECTION.as_str()));
         }
     }
     // Header names are lower case in `http`. This covers `Impersonate-User`, `-Group`, `-Uid` and
     // `-Extra-*`. Headers that the kubeconfig sets are added below the guard and are not seen here.
-    if headers
+    if let Some(name) = headers
         .keys()
-        .any(|name| name.as_str().starts_with("impersonate-"))
+        .find(|name| name.as_str().starts_with("impersonate-"))
     {
-        return Err(RULE_IMPERSONATE);
+        return Some((RULE_IMPERSONATE, name.as_str()));
     }
-    Ok(())
+    headers
+        .keys()
+        .find(|name| ![ACCEPT, CONTENT_TYPE, CONTENT_LENGTH].contains(name))
+        .map(|name| (RULE_HEADER, name.as_str()))
 }
 
 /// Splits the path of a request kube built. kube sends a path with no scheme or host at this layer.
@@ -295,19 +378,21 @@ fn path_segments(uri: &Uri) -> Result<Vec<&str>, &'static str> {
     Ok(segments)
 }
 
-/// Allows the keys `limit`, `continue`, `labelSelector` and `fieldSelector`, with plain values. M1-104
-/// decodes the selector values once and validates them.
-fn check_query(query: Option<&str>) -> Result<(), &'static str> {
+/// Allows the keys `limit`, `continue`, `labelSelector` and `fieldSelector`, with plain values. Returns
+/// the `fieldSelector` value, decoded once, for the selector rule of the resource. M1-104 validates the
+/// other selector values after decoding.
+fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
     // kube writes a bare `?` when there are no parameters, and a `&` before the first one (`?&limit=5`).
     let Some(query) = query
         .map(|query| query.strip_prefix('&').unwrap_or(query))
         .filter(|query| !query.is_empty())
     else {
-        return Ok(());
+        return Ok(None);
     };
     if query.len() > MAX_QUERY {
         return Err(RULE_QUERY);
     }
+    let mut field_selector = None;
     for pair in query.split('&') {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         match key {
@@ -317,11 +402,49 @@ fn check_query(query: Option<&str>) -> Result<(), &'static str> {
                     return Err(RULE_QUERY);
                 }
             }
-            "continue" | "labelSelector" | "fieldSelector" => check_query_value(value)?,
+            "continue" | "labelSelector" => check_query_value(value)?,
+            "fieldSelector" => {
+                check_query_value(value)?;
+                // A second `fieldSelector` is ambiguous: the server reads the first, a proxy may read
+                // the last.
+                if field_selector.replace(decode_query_value(value)?).is_some() {
+                    return Err(RULE_QUERY);
+                }
+            }
             _ => return Err(RULE_QUERY),
         }
     }
-    Ok(())
+    Ok(field_selector)
+}
+
+/// Decodes a query value once, as the API server does: `%XX` is a byte and `+` is a space. A backslash
+/// or bytes that are not UTF-8 are refused.
+fn decode_query_value(value: &str) -> Result<String, &'static str> {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while let Some(&byte) = bytes.get(index) {
+        match byte {
+            b'%' => {
+                let hex = value.get(index + 1..index + 3).ok_or(RULE_QUERY)?;
+                out.push(u8::from_str_radix(hex, 16).map_err(|_| RULE_QUERY)?);
+                index += 3;
+            }
+            b'+' => {
+                out.push(b' ');
+                index += 1;
+            }
+            _ => {
+                out.push(byte);
+                index += 1;
+            }
+        }
+    }
+    let text = String::from_utf8(out).map_err(|_| RULE_QUERY)?;
+    if text.contains('\\') {
+        return Err(RULE_QUERY);
+    }
+    Ok(text)
 }
 
 /// A query value is printable ASCII, and a `%` starts two hex digits.
@@ -345,7 +468,7 @@ fn check_query_value(value: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn check_get(segments: &[&str]) -> Result<(), &'static str> {
+fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'static str> {
     if is_discovery(segments) {
         return Ok(());
     }
@@ -378,11 +501,14 @@ fn check_get(segments: &[&str]) -> Result<(), &'static str> {
             (Access::Get(only), None, Some(name)) => only.admits(name),
             _ => false,
         });
-    if allowed {
-        Ok(())
-    } else {
-        Err(RULE_NOT_ALLOWED)
+    if !allowed {
+        return Err(RULE_NOT_ALLOWED);
     }
+    // A list (no name) must carry the field selector its entry names. A get by name needs none.
+    if name.is_none() && !entry.field_selector.met_by(field_selector) {
+        return Err(RULE_SELECTOR);
+    }
+    Ok(())
 }
 
 /// `/version`, `/api`, `/apis`, `/api/v1`, `/apis/<group>` and `/apis/<group>/<version>`.

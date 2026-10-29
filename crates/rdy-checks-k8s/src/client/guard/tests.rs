@@ -209,9 +209,24 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
     for entry in ALLOWED {
         for access in entry.access {
             let path = path_for(entry, access);
-            assert_eq!(judge_get(&path), Ok(()), "{path}");
-            assert_eq!(judge_get(&format!("{path}?limit=500")), Ok(()), "{path}");
-            assert_eq!(judge_get(&format!("{path}?")), Ok(()), "{path}");
+            if matches!(access, Access::Get(_))
+                || entry.field_selector == FieldSelector::NotRequired
+            {
+                assert_eq!(judge_get(&path), Ok(()), "{path}");
+                assert_eq!(judge_get(&format!("{path}?limit=500")), Ok(()), "{path}");
+                assert_eq!(judge_get(&format!("{path}?")), Ok(()), "{path}");
+            } else {
+                // A list whose entry names a field selector is refused without it.
+                assert_eq!(judge_get(&path), Err(RULE_SELECTOR), "{path}");
+                assert_eq!(judge_get(&format!("{path}?")), Err(RULE_SELECTOR), "{path}");
+                let selector = match entry.field_selector {
+                    FieldSelector::Key(key) => format!("{key}%21%3Dx"),
+                    FieldSelector::Equals(key, value) => format!("{key}%3D{value}"),
+                    FieldSelector::NotRequired => unreachable!("handled above"),
+                };
+                let ok = format!("{path}?&fieldSelector={selector}&limit=500");
+                assert_eq!(judge_get(&ok), Ok(()), "{ok}");
+            }
         }
         // A shape the entry does not list is refused: a list where only a get is allowed, and the
         // other way round.
@@ -230,6 +245,95 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
                 assert_eq!(judge_get(&path), Err(RULE_NOT_ALLOWED), "{path}");
             }
         }
+    }
+}
+
+#[test]
+fn a_pod_list_needs_the_phase_field_selector() {
+    let pods = "/api/v1/pods";
+    for query in [
+        "&fieldSelector=status.phase%21%3DSucceeded%2Cstatus.phase%21%3DFailed&limit=500",
+        "fieldSelector=status.phase%3DRunning",
+        "fieldSelector=status.phase%3D%3DRunning",
+        "fieldSelector=spec.nodeName%3Dn1%2Cstatus.phase%21%3DFailed",
+        "fieldSelector=status.phase%21%3DFailed%2Cspec.nodeName%3Dn1&limit=100",
+    ] {
+        assert_eq!(judge_get(&format!("{pods}?{query}")), Ok(()), "{query}");
+    }
+    // Missing, or a selector on another key.
+    for query in [
+        "",
+        "?",
+        "?&limit=500",
+        "?labelSelector=status.phase%3DRunning",
+        "?fieldSelector=spec.nodeName%3Dn1",
+        "?fieldSelector=",
+        "?fieldSelector=metadata.name%3Dstatus.phase",
+        "?fieldSelector=xstatus.phase%3DRunning",
+        "?fieldSelector=status.phasex%3DRunning",
+        "?fieldSelector=status.phase",
+        "?fieldSelector=status.phase%2Cspec.nodeName%3Dn1",
+    ] {
+        assert_eq!(
+            judge_get(&format!("{pods}{query}")),
+            Err(RULE_SELECTOR),
+            "{query}"
+        );
+    }
+    // A selector the guard cannot read is a query error, not a pass.
+    for query in [
+        "fieldSelector=status.phase%21%3DFailed&fieldSelector=status.phase%21%3DRunning",
+        "fieldSelector=spec.nodeName%3Da%5C%2Cstatus.phase%3Dx",
+        "fieldSelector=status.phase%3D%ff",
+    ] {
+        assert_eq!(
+            judge_get(&format!("{pods}?{query}")),
+            Err(RULE_QUERY),
+            "{query}"
+        );
+    }
+}
+
+#[test]
+fn an_event_list_needs_the_pvc_field_selector() {
+    let events = "/api/v1/namespaces/app/events";
+    for query in [
+        "&fieldSelector=involvedObject.kind%3DPersistentVolumeClaim&limit=500",
+        "fieldSelector=involvedObject.kind%3D%3DPersistentVolumeClaim",
+        "fieldSelector=involvedObject.name%3Dc%2CinvolvedObject.kind%3DPersistentVolumeClaim",
+    ] {
+        assert_eq!(judge_get(&format!("{events}?{query}")), Ok(()), "{query}");
+    }
+    for query in [
+        "",
+        "?",
+        "?&limit=500",
+        "?fieldSelector=involvedObject.kind%3DPod",
+        "?fieldSelector=involvedObject.kind%3DPersistentVolumeClaims",
+        "?fieldSelector=involvedObject.kind%21%3DPersistentVolumeClaim",
+        "?fieldSelector=involvedObject.name%3DPersistentVolumeClaim",
+        "?fieldSelector=reason%3DProvisioningFailed",
+        "?labelSelector=involvedObject.kind%3DPersistentVolumeClaim",
+    ] {
+        assert_eq!(
+            judge_get(&format!("{events}{query}")),
+            Err(RULE_SELECTOR),
+            "{query}"
+        );
+    }
+}
+
+#[test]
+fn lists_without_a_required_selector_and_gets_are_not_affected() {
+    for path in [
+        "/api/v1/nodes",
+        "/api/v1/namespaces/app/persistentvolumeclaims",
+        "/apis/storage.k8s.io/v1/storageclasses",
+        "/apis/storage.k8s.io/v1/storageclasses/gp2",
+        "/apis/apps/v1/namespaces/kube-system/deployments",
+        "/api/v1/namespaces/app",
+    ] {
+        assert_eq!(judge_get(path), Ok(()), "{path}");
     }
 }
 
@@ -386,10 +490,101 @@ fn upgrade_and_impersonate_headers_are_refused() {
         let verdict = judge(&Method::GET, &uri, &headers, BodyView::Empty);
         assert_eq!(verdict, Err(rule), "{name}");
     }
+    // The three headers kube sets (and the length) pass.
     let mut headers = http::HeaderMap::new();
-    headers.insert("connection", "keep-alive".parse().expect("value"));
     headers.insert("accept", "application/json".parse().expect("value"));
+    headers.insert("content-type", "application/json".parse().expect("value"));
+    headers.insert("content-length", "0".parse().expect("value"));
     assert_eq!(judge(&Method::GET, &uri, &headers, BodyView::Empty), Ok(()));
+}
+
+/// One test per refused header, through the real layer: the request is refused with `rule`, never
+/// reaches the server, and the log names the header and holds no value.
+macro_rules! refused_header {
+    ($test:ident, $name:expr, $rule:expr) => {
+        #[tokio::test]
+        async fn $test() {
+            let rig = Rig::new();
+            let sent = request(
+                Method::GET,
+                "/api/v1/nodes",
+                &[($name, "canary-header-value")],
+                Vec::new(),
+            );
+            assert_eq!(rig.send(sent).await, Err($rule));
+            assert_eq!(rig.mock.seen(), Vec::<String>::new());
+            let log = rig.log();
+            assert_eq!(log.len(), 1);
+            assert_eq!(log[0].outcome, ActionOutcome::Denied);
+            assert_eq!(field(&log[0], "rule"), Some($rule));
+            assert_eq!(
+                field(&log[0], "header"),
+                Some($name.to_ascii_lowercase().as_str())
+            );
+            let all = serde_json::to_string(&log).expect("json");
+            assert!(!all.contains("canary-header-value"), "{all}");
+        }
+    };
+}
+
+refused_header!(authorization_is_refused, "Authorization", RULE_HEADER);
+refused_header!(x_remote_user_is_refused, "X-Remote-User", RULE_HEADER);
+refused_header!(x_remote_group_is_refused, "X-Remote-Group", RULE_HEADER);
+refused_header!(
+    x_http_method_override_is_refused,
+    "X-HTTP-Method-Override",
+    RULE_HEADER
+);
+refused_header!(host_is_refused, "Host", RULE_HEADER);
+refused_header!(a_made_up_header_is_refused, "X-Anything", RULE_HEADER);
+refused_header!(connection_keep_alive_is_refused, "Connection", RULE_HEADER);
+refused_header!(
+    impersonate_user_is_refused,
+    "Impersonate-User",
+    RULE_IMPERSONATE
+);
+refused_header!(
+    impersonate_group_is_refused,
+    "Impersonate-Group",
+    RULE_IMPERSONATE
+);
+refused_header!(
+    impersonate_uid_is_refused,
+    "Impersonate-Uid",
+    RULE_IMPERSONATE
+);
+refused_header!(
+    impersonate_extra_is_refused,
+    "Impersonate-Extra-Scopes",
+    RULE_IMPERSONATE
+);
+refused_header!(upgrade_header_is_refused, "Upgrade", RULE_UPGRADE);
+
+#[tokio::test]
+async fn the_headers_kube_sets_pass_the_guard() {
+    // kube sets `accept` (a metadata or discovery list) and `content-type` (every POST). Ask kube to
+    // build requests with both and send them through the layer.
+    let rig = Rig::new();
+    let api = kube::Api::<k8s_openapi::api::core::v1::Node>::all(rig.client.clone());
+    rig.mock
+        .reply(json!({"apiVersion":"v1","kind":"NodeList","metadata":{},"items":[]}));
+    api.list(&ListParams::default()).await.expect("list");
+    rig.mock.reply(json!({"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectAccessReview","metadata":{},"spec":{},"status":{"allowed":true}}));
+    let review = SelfSubjectAccessReview::default();
+    let sent = kube::Api::<SelfSubjectAccessReview>::all(rig.client.clone())
+        .create(&PostParams::default(), &review)
+        .await;
+    assert!(sent.is_ok(), "{sent:?}");
+    let discovery = request(
+        Method::GET,
+        "/apis/autoscaling/v2",
+        &[(
+            "accept",
+            "application/json;g=apidiscovery.k8s.io;v=v2;as=APIGroupDiscoveryList",
+        )],
+        Vec::new(),
+    );
+    assert_eq!(rig.send(discovery).await, Ok(StatusCode::OK));
 }
 
 #[test]
@@ -677,7 +872,7 @@ async fn a_post_goes_only_to_the_three_reviews_with_no_query_and_the_fixed_body(
 #[tokio::test]
 async fn a_typed_self_subject_review_does_not_match_the_fixed_body() {
     // k8s-openapi writes `metadata` into a default review, so it is not the fixed body. The identity
-    // call (M1-109) must send SELF_SUBJECT_REVIEW_BODY, not a typed value.
+    // call (M1-105) must send SELF_SUBJECT_REVIEW_BODY, not a typed value.
     let rig = Rig::new();
     let api = kube::Api::<SelfSubjectReview>::all(rig.client.clone());
     let result = api
@@ -839,12 +1034,50 @@ async fn a_refusal_is_a_fixed_error_that_holds_no_request_text() {
     for canary in ["canary-ns", "canary-name", "canary-value"] {
         assert!(!shown.contains(canary), "{shown}");
     }
-    // The error maps to a fixed internal error, not to "unreachable".
+    // The error maps to a refusal whose hint says to report it. A refusal repeats, so "run again" is wrong.
     let mapped = crate::client::error::from_kube_error(&error, "https://s", None, false, true);
     assert!(
-        matches!(mapped, crate::client::KubeError::Internal { .. }),
+        matches!(
+            mapped,
+            crate::client::KubeError::Refused { late: false, .. }
+        ),
         "{mapped:?}"
     );
+    let hint = mapped.hint();
+    assert!(
+        hint.contains("bug") && hint.contains("action log"),
+        "{hint}"
+    );
+    assert!(
+        !hint.contains("again") || hint.contains("will not help"),
+        "{hint}"
+    );
+}
+
+#[test]
+fn a_call_after_its_check_ended_has_its_own_text_and_hint() {
+    for rule in [RULE_CHECK_FINISHED, RULE_NO_PROBE] {
+        let late = GuardError { rule };
+        assert!(late.is_late(), "{rule}");
+        let text = late.to_string();
+        assert!(
+            text.contains(rule) && text.contains("after its check ended"),
+            "{text}"
+        );
+        assert!(!text.contains("Secrets"), "{text}");
+        let error = kube::Error::Service(Box::new(late));
+        let mapped = crate::client::error::from_kube_error(&error, "https://s", None, false, true);
+        assert!(
+            matches!(mapped, crate::client::KubeError::Refused { late: true, .. }),
+            "{mapped:?}"
+        );
+        let hint = mapped.hint();
+        assert!(
+            hint.contains("after it ended") && hint.contains("action log"),
+            "{hint}"
+        );
+    }
+    assert!(!GuardError { rule: RULE_SECRETS }.is_late());
 }
 
 // ---- the fixture run (INV-14) -----------------------------------------------------------------------------
@@ -1048,29 +1281,10 @@ async fn a_full_fixture_run_reaches_the_server_with_only_allowlisted_requests() 
         ));
     }
 
-    // The server saw the allowed calls and nothing else.
+    // The server saw the allowed calls and nothing else, in order. Every allowed call was sent and
+    // answered above, and every hostile call was refused with its own rule, so this equality is the
+    // proof that only allowlisted requests reached the socket.
     assert_eq!(mock.seen(), expected_seen);
-    // Every request the server saw passes the rules on its own (the allowlist, not a coincidence).
-    for line in mock.seen() {
-        let (method, uri) = line.split_once(' ').expect("line");
-        let uri: http::Uri = uri.parse().expect("uri");
-        let method = Method::from_bytes(method.as_bytes()).expect("method");
-        let body = if method == Method::POST {
-            BodyView::Bytes(SSAR_BODY)
-        } else {
-            BodyView::Empty
-        };
-        let body = if uri.path().ends_with("selfsubjectreviews") {
-            BodyView::Bytes(SELF_SUBJECT_REVIEW_BODY)
-        } else {
-            body
-        };
-        assert_eq!(
-            judge(&method, &uri, &http::HeaderMap::new(), body),
-            Ok(()),
-            "{line}"
-        );
-    }
 
     // One log entry per call, in order, under the right check, with no query string in any path.
     let log = run.action_log().actions;
@@ -1162,6 +1376,30 @@ async fn a_server_error_is_logged_as_failed_with_its_status() {
     assert_eq!(log[0].outcome, ActionOutcome::Failed);
     assert_eq!(log[0].fields["status"], 403);
     assert_eq!(log[0].check.as_deref(), Some("k8s.version"));
+    // A failed entry always has a fixed `error` (01 section 5.4).
+    assert_eq!(
+        field(&log[0], "error"),
+        Some("the server answered with an error status")
+    );
+}
+
+#[tokio::test]
+async fn a_redirect_is_logged_as_failed_because_it_is_not_followed() {
+    let run = TestRun::new(Replay::new());
+    let mock = Mock {
+        status: StatusCode::FOUND,
+        ..Mock::default()
+    };
+    let rig = Rig::for_check(&run, &mock, Some("k8s.version"));
+    assert_eq!(rig.get("/version").await, Ok(StatusCode::FOUND));
+    let log = run.action_log().actions;
+    assert_eq!(log[0].outcome, ActionOutcome::Failed);
+    assert_eq!(log[0].fields["status"], 302);
+    assert!(
+        field(&log[0], "error").is_some_and(|error| error.contains("redirect")),
+        "{:?}",
+        log[0].fields
+    );
 }
 
 #[tokio::test]

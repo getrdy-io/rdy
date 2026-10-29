@@ -11,6 +11,10 @@
 //! The entry names the check whose probe built the guard, so a check derives its client from its own
 //! probe ([`Connected::read_only`](super::Connected::read_only)).
 //!
+//! A request header outside `accept`, `content-type` and `content-length` is refused, and the entry
+//! names the header and never its value. A redirect (3xx) is logged as `failed`: redirects are not
+//! followed. A `failed` entry always has a fixed `error` field.
+//!
 //! The refusal is a [`GuardError`] with a fixed text: the rule sentence and a fix hint. It holds no
 //! path, no query and no body, and the guard logs none of them to `tracing` either.
 
@@ -22,7 +26,7 @@ use std::task::{Context, Poll, Waker};
 use http::{Request, Response};
 use http_body::Body as _;
 use kube::client::Body;
-use rdy_engine::probe::{Probe, ProbeError, RULE_NO_PROBE};
+use rdy_engine::probe::{Probe, ProbeError, RULE_CHECK_FINISHED, RULE_NO_PROBE};
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -31,11 +35,12 @@ mod rules;
 mod tests;
 
 pub use rules::{
-    ALLOWED, Access, Allowed, Only, RULE_BODY, RULE_GET_BODY, RULE_IMPERSONATE, RULE_METHOD,
-    RULE_NOT_ALLOWED, RULE_PATH_SHAPE, RULE_POST_QUERY, RULE_POST_TARGET, RULE_QUERY,
-    RULE_REVIEW_BODY, RULE_SECRETS, RULE_UPGRADE, SELF_SUBJECT_REVIEW_BODY,
+    ALLOWED, Access, Allowed, FieldSelector, Only, RULE_BODY, RULE_GET_BODY, RULE_HEADER,
+    RULE_IMPERSONATE, RULE_METHOD, RULE_NOT_ALLOWED, RULE_PATH_SHAPE, RULE_POST_QUERY,
+    RULE_POST_TARGET, RULE_QUERY, RULE_REVIEW_BODY, RULE_SECRETS, RULE_SELECTOR, RULE_UPGRADE,
+    SELF_SUBJECT_REVIEW_BODY,
 };
-use rules::{BodyView, judge, log_path};
+use rules::{BodyView, bad_header, judge, log_path};
 
 use super::text::escape_capped;
 
@@ -46,10 +51,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// It reaches a caller inside `kube::Error::Service`. The text is fixed: the rule sentence and a hint,
 /// never the path, the query or the body. The path is in the action log, redacted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "the read-only guard refused this request ({rule}). Fix: rdy only reads, and never reads Secrets. This is a bug in rdy or in a check; report it with the action log of the run"
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GuardError {
     rule: &'static str,
 }
@@ -60,7 +62,31 @@ impl GuardError {
     pub fn rule(&self) -> &'static str {
         self.rule
     }
+
+    /// True when the request came after its check ended, or from a probe that is closed. That is a
+    /// check that ran past its timeout, not a request the rules refuse.
+    #[must_use]
+    pub fn is_late(&self) -> bool {
+        self.rule == RULE_CHECK_FINISHED || self.rule == RULE_NO_PROBE
+    }
 }
+
+impl fmt::Display for GuardError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let fix = if self.is_late() {
+            "this request came after its check ended. The check ran past its time limit. The request was not sent; report it with the action log of the run"
+        } else {
+            "rdy only reads, and never reads Secrets. This is a bug in rdy or in a check; report it with the action log of the run"
+        };
+        write!(
+            f,
+            "the read-only guard refused this request ({}). Fix: {fix}",
+            self.rule
+        )
+    }
+}
+
+impl std::error::Error for GuardError {}
 
 /// Wraps `inner` in the read-only guard, logging through `probe`.
 ///
@@ -148,7 +174,13 @@ where
             None => BodyView::Opaque,
         };
         if let Err(rule) = judge(request.method(), request.uri(), request.headers(), view) {
-            call.refused(rule);
+            // A refused header is named in the log, never its value.
+            match bad_header(request.headers()) {
+                Some((header_rule, name)) if header_rule == rule => {
+                    call.refused_header(rule, &escape_capped(name, 64));
+                }
+                _ => call.refused(rule),
+            }
             return Box::pin(ready(Err(GuardError { rule }.into())));
         }
 
