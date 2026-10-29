@@ -5,10 +5,5 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let code = rdy_cli::run(
-        std::env::args_os(),
-        &mut std::io::stdout(),
-        &mut std::io::stderr(),
-    );
-    ExitCode::from(code)
+    ExitCode::from(rdy_cli::entry::main_code())
 }

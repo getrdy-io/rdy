@@ -324,9 +324,10 @@ fetch() {
 
 # SEAM FOR M1-015. Called after SHA256SUMS is downloaded and before anything is trusted.
 # Contract: return 0 only when the signature of the file $1 (SHA256SUMS) was verified for release
-# $2 with cosign and the exact signer identity from docs/plan/06. In every other case it exits 1 with
-# the documented message. M1-015 downloads SHA256SUMS.sigstore.json in main, replaces the body of
-# this function with the cosign check, and keeps RDY_INSECURE_SKIP_SIGNATURE=1 as the only override.
+# $2 with cosign, the exact signer identity and the three caller claims (contract table in
+# docs/plan/06). In every other case it exits 1 with the documented message. M1-015 downloads
+# SHA256SUMS.sigstore.json in main, replaces the body of this function with the cosign check, and
+# keeps RDY_INSECURE_SKIP_SIGNATURE=1 as the only override.
 # Until then this copy cannot check a signature, so it behaves as if cosign were missing: it stops,
 # unless the override is set. The override never skips the sha256 check.
 verify_signature() {

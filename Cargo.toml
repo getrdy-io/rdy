@@ -70,6 +70,10 @@ minisign = { version = "=0.10.0", default-features = false }
 # 1.5 is the first release with a fixed seed (docs/plan/08-testing.md section 4).
 proptest = { version = "1.5", default-features = false }
 
+# The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field
+# name and `=` would hide `password=hunter2` from the key-name rule (04 section 3.4).
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3.20", default-features = false }
 # The key derivation of a secret key file (ADR 0022) takes a second or so with optimizations. An
 # unoptimized debug build would take minutes, so these crates are optimized in every profile.
 [profile.dev.package.scrypt]

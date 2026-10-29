@@ -43,11 +43,15 @@ github-release = "announce"
 msvc-crt-static = true
 # Steps run before each build: the pinned toolchain and the target (.github/build-setup.yml).
 github-build-setup = "../build-setup.yml"
-# Runs after the builds and before the release exists: scripts/check-release-artifacts.sh on the
-# artifacts. Includes scripts/check-static.sh on both Linux binaries (ADR 0006, decision 2).
-# It is a publish job on purpose: in dist 0.33.0 only publish jobs hold back the announce job when
-# they fail. A host job that fails does not stop the release.
-publish-jobs = ["./check-release-artifacts"]
+# Publish jobs run after the builds and before the release exists. Only a failed publish job holds
+# back the announce job in dist 0.33.0, a failed host job does not (ADR 0020).
+#  - ./check-release-artifacts runs scripts/check-release-artifacts.sh on the artifacts, including
+#    scripts/check-static.sh on both Linux binaries (ADR 0006, decision 2).
+#  - ./sign-release (M1-010) writes SHA256SUMS over every asset, signs it with cosign keyless in the
+#    GitHub environment `release` (a required reviewer approves each release), verifies the signature
+#    with the exact identity, and hands SHA256SUMS, its bundle and install.sh to announce. The
+#    harden script makes it wait for the check job, so a build that failed the check is never signed.
+publish-jobs = ["./check-release-artifacts", "./sign-release"]
 # Every alpha tag is a prerelease. Without this, dist skips publish jobs for prereleases, and a
 # skipped check counts as passed.
 publish-prereleases = true
@@ -73,7 +77,14 @@ x86_64-pc-windows-msvc = "windows-2022"
 "actions/upload-artifact" = "cf430e030ddbb5b0abf93d22962f4752f3646cd9"
 "actions/download-artifact" = "9000827ccba6bdab643e8b6fd33ac0654aef8333"
 
-# Custom jobs get id-token and packages write by default. The check reads files and needs neither.
-# Naming a job here replaces the defaults. M1-010 adds sign-release here with contents and id-token.
+# Custom jobs get id-token and packages write by default. Naming a job here replaces the defaults, so
+# each job lists exactly what it needs.
+#  - The check reads files and needs nothing else.
+#  - sign-release needs `id-token: write` to ask Sigstore for a certificate, and `contents: read` to
+#    check out the tag for install.sh. It does not need `contents: write`: with github-release =
+#    "announce" there is no release to upload to. The signing job hands its three files to the
+#    announce job as a workflow artifact. Only announce can write contents (ADR 0020, decision 5).
+#    The sign-release job is the only job with id-token (06, contract table).
 [dist.github-custom-job-permissions]
 check-release-artifacts = { contents = "read" }
+sign-release = { contents = "read", id-token = "write" }
