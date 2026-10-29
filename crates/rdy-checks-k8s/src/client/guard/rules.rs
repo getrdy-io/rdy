@@ -392,6 +392,11 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
     if query.len() > MAX_QUERY {
         return Err(RULE_QUERY);
     }
+    // Go's `URL.Query()` drops every pair that holds a raw `;`. The server would then see no selector
+    // while this guard saw one. `%3B` is fine: it is decoded once, after the split.
+    if query.contains(';') {
+        return Err(RULE_QUERY);
+    }
     let mut field_selector = None;
     for pair in query.split('&') {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));

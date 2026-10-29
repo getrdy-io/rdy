@@ -6,9 +6,10 @@
 //! - `the_default_kubeconfig_reaches_the_cluster` sends one request, `GET /version`.
 //! - `the_readonly_role_serves_every_allowed_read_and_nothing_else` is the guard test of M1-103
 //!   (SEC-24). It reads `RDY_READONLY_KUBECONFIG`, the path of a kubeconfig whose only user is the
-//!   `rdy-readonly` service account. When the variable is not set, the test prints why and skips. It
-//!   does not use `KUBECONFIG`, because under an admin kubeconfig the server would allow the writes it
-//!   checks for. M1-108 sets the variable and runs it.
+//!   `rdy-readonly` service account. When the variable is not set, the test panics with a message that
+//!   says so, so an explicit `--ignored` run can never pass without proving SEC-24. It does not use
+//!   `KUBECONFIG`, because under an admin kubeconfig the server would allow the writes it checks for.
+//!   M1-108 sets the variable and runs it.
 //!
 //!   ```text
 //!   kubectl apply -f examples/rbac/rdy-readonly.yaml
@@ -26,7 +27,8 @@
 //!   ```
 //!
 //!   It proves two things on a real API server. Every read the guard allows is served to the role
-//!   (each must return `Ok`; only a 404 is tolerated, for an API a distribution may not serve), and the
+//!   (each must return `Ok`; a 404 is tolerated only for the get of a storage class that does not
+//!   exist, where the point is that the answer is not a 403), and the
 //!   same role, asked through the server's own access review, may not write or read Secrets. The
 //!   guard's refusals need no cluster and are tested without one.
 //!
@@ -84,14 +86,14 @@ async fn the_default_kubeconfig_reaches_the_cluster() {
     );
 }
 
-/// What a read must do on a real cluster: succeed. A 404 is tolerated only for an API that a
-/// distribution may not serve (`optional`). Anything else, including a guard refusal, a 403 or a 500,
-/// fails the test.
+/// What a read must do on a real cluster: succeed. A 404 is tolerated only where `optional` is set,
+/// for the get of a storage class that does not exist. Anything else, including a guard refusal, a 403
+/// or a 500, fails the test.
 fn assert_served<T>(name: &str, optional: bool, result: &Result<T, kube::Error>) {
     match result {
         Ok(_) => {}
         Err(kube::Error::Api(status)) if status.code == 404 && optional => {
-            eprintln!("{name}: 404, the API is not served here");
+            eprintln!("{name}: 404, as expected for a name that does not exist");
         }
         Err(error) => panic!("{name}: an allowed read did not succeed: {error:?}"),
     }
@@ -146,13 +148,11 @@ async fn is_allowed(reviews: &kube::Api<SelfSubjectAccessReview>, ask: Ask) -> b
 #[tokio::test]
 #[ignore = "needs a cluster and the rdy-readonly kubeconfig; the kind job runs it (M1-108)"]
 async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
-    let Some(kubeconfig) = std::env::var_os("RDY_READONLY_KUBECONFIG") else {
-        eprintln!(
-            "skipped: RDY_READONLY_KUBECONFIG is not set. Point it at a kubeconfig of the \
-             rdy-readonly service account (see the header of this file); M1-108 runs this test with it"
-        );
-        return;
-    };
+    let kubeconfig = std::env::var_os("RDY_READONLY_KUBECONFIG").expect(
+        "RDY_READONLY_KUBECONFIG is not set. Point it at a kubeconfig of the rdy-readonly service \
+         account (see the header of this file); M1-108 sets it. The test never falls back to KUBECONFIG, \
+         and it must not pass without proving SEC-24",
+    );
     let run = TestRun::new(Replay::new());
     let options = KubeOptions::new(Duration::from_secs(10)).kubeconfig(kubeconfig);
     let connected = connect_with(&run, options).await;
@@ -167,9 +167,9 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         .clone()
         .fields("involvedObject.kind=PersistentVolumeClaim");
 
-    // 1. Every read the guard allows is served to the role. Each must return Ok. A 404 is tolerated
-    //    only where a distribution may not serve the API (CSI, the rules review), and for the get of
-    //    a storage class that does not exist (the point is that it is not a 403).
+    // 1. Every read the guard allows is served to the role. Each must return Ok. CSINode, CSIDriver and
+    //    the rules review are GA on every supported minor, so a 404 there fails too. The one tolerated
+    //    404 is the get of a storage class that does not exist (the point is that it is not a 403).
     assert_served("nodes", false, &client.all::<Node>().list(&all).await);
     assert_served("pods", false, &client.all::<Pod>().list(&pods).await);
     assert_served(
@@ -195,10 +195,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         true,
         &client.all::<StorageClass>().get("no-such-class").await,
     );
-    assert_served("csinodes", true, &client.all::<CSINode>().list(&all).await);
+    assert_served("csinodes", false, &client.all::<CSINode>().list(&all).await);
     assert_served(
         "csidrivers",
-        true,
+        false,
         &client.all::<CSIDriver>().list(&all).await,
     );
     assert_served(
@@ -214,7 +214,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             .list(&all)
             .await,
     );
-    // The rules review is a POST the guard allows. The server answers 201, or 404 if it is not served.
+    // The rules review is a POST the guard allows. The server answers 201.
     let rules = SelfSubjectRulesReview {
         spec: SelfSubjectRulesReviewSpec {
             namespace: Some("default".to_owned()),
@@ -223,7 +223,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     };
     assert_served(
         "selfsubjectrulesreviews",
-        true,
+        false,
         &client
             .all::<SelfSubjectRulesReview>()
             .create(&PostParams::default(), &rules)

@@ -324,6 +324,26 @@ fn an_event_list_needs_the_pvc_field_selector() {
 }
 
 #[test]
+fn a_raw_semicolon_in_the_query_is_refused() {
+    // Go's `URL.Query()` drops a pair that holds a raw `;`, so the server would list without the
+    // selector that the guard saw.
+    for uri in [
+        "/api/v1/pods?&fieldSelector=status.phase%21%3DFailed;&limit=500",
+        "/api/v1/pods?fieldSelector=status.phase%21%3DFailed;",
+        "/api/v1/pods?fieldSelector=status.phase%21%3DFailed&limit=5;00",
+        "/api/v1/namespaces/app/events?&fieldSelector=involvedObject.kind%3DPersistentVolumeClaim;&limit=500",
+        "/api/v1/namespaces/app/events?fieldSelector=involvedObject.kind%3DPersistentVolumeClaim;x",
+        "/api/v1/nodes?labelSelector=a;",
+        "/api/v1/nodes?labelSelector=a%3Db;limit=5",
+        "/api/v1/nodes?;",
+    ] {
+        assert_eq!(judge_get(uri), Err(RULE_QUERY), "{uri}");
+    }
+    // An encoded `;` is a byte in the value, decoded once after the split.
+    assert_eq!(judge_get("/api/v1/nodes?labelSelector=a%3Bb"), Ok(()));
+}
+
+#[test]
 fn lists_without_a_required_selector_and_gets_are_not_affected() {
     for path in [
         "/api/v1/nodes",
@@ -1056,7 +1076,7 @@ async fn a_refusal_is_a_fixed_error_that_holds_no_request_text() {
 
 #[test]
 fn a_call_after_its_check_ended_has_its_own_text_and_hint() {
-    for rule in [RULE_CHECK_FINISHED, RULE_NO_PROBE] {
+    for rule in [RULE_CHECK_FINISHED] {
         let late = GuardError { rule };
         assert!(late.is_late(), "{rule}");
         let text = late.to_string();
@@ -1078,6 +1098,12 @@ fn a_call_after_its_check_ended_has_its_own_text_and_hint() {
         );
     }
     assert!(!GuardError { rule: RULE_SECRETS }.is_late());
+    // A closed probe is not a late call: it is a client built without a probe.
+    let closed = GuardError {
+        rule: RULE_NO_PROBE,
+    };
+    assert!(!closed.is_late());
+    assert!(!closed.to_string().contains("after its check ended"));
 }
 
 // ---- the fixture run (INV-14) -----------------------------------------------------------------------------

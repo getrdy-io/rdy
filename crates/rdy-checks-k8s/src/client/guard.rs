@@ -51,7 +51,8 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// It reaches a caller inside `kube::Error::Service`. The text is fixed: the rule sentence and a hint,
 /// never the path, the query or the body. The path is in the action log, redacted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the read-only guard refused this request ({rule}). Fix: {}", fix_text(.rule))]
 pub struct GuardError {
     rule: &'static str,
 }
@@ -63,30 +64,23 @@ impl GuardError {
         self.rule
     }
 
-    /// True when the request came after its check ended, or from a probe that is closed. That is a
-    /// check that ran past its timeout, not a request the rules refuse.
+    /// True when the request came after its check ended. That is a check that ran past its timeout,
+    /// not a request the rules refuse. A request from a closed probe ([`RULE_NO_PROBE`]) is a bug in
+    /// how the client was built, so it is not late.
     #[must_use]
     pub fn is_late(&self) -> bool {
-        self.rule == RULE_CHECK_FINISHED || self.rule == RULE_NO_PROBE
+        self.rule == RULE_CHECK_FINISHED
     }
 }
 
-impl fmt::Display for GuardError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let fix = if self.is_late() {
-            "this request came after its check ended. The check ran past its time limit. The request was not sent; report it with the action log of the run"
-        } else {
-            "rdy only reads, and never reads Secrets. This is a bug in rdy or in a check; report it with the action log of the run"
-        };
-        write!(
-            f,
-            "the read-only guard refused this request ({}). Fix: {fix}",
-            self.rule
-        )
+/// The fixed fix hint of a refusal. A late call gets its own text.
+fn fix_text(rule: &str) -> &'static str {
+    if rule == RULE_CHECK_FINISHED {
+        "this request came after its check ended. The check ran past its time limit. The request was not sent; report it with the action log of the run"
+    } else {
+        "rdy only reads, and never reads Secrets. This is a bug in rdy or in a check; report it with the action log of the run"
     }
 }
-
-impl std::error::Error for GuardError {}
 
 /// Wraps `inner` in the read-only guard, logging through `probe`.
 ///
