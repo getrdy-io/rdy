@@ -37,7 +37,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-013 | [#11](https://github.com/getrdy-io/rdy/pull/11) | 2026-10-28 | `schema` writes no file yet (M1-022 adds the schemars output). `docs` writes one placeholder page under `docs/src/content/docs/reference/spec/`, and M1-076 replaces it. The page is not published yet because the Starlight scaffold is not in the repo. `docs --check` and `docs-lint` are not in `ci.yml`. 09 section 10 puts the docs-gen job in M1, but the backlog has it only at M3-002, so the coordinator should file a correction. The banned-token list holds the coordinator's hash list, with the synthetic test hash. The lint applies NFKC normalization before it matches tokens, and it lints every tracked file with no NUL byte, replacing invalid UTF-8 bytes. A UTF-16 file has NUL bytes, so the lint skips it. A generator path that climbs out of its root or is absolute is refused. The check does not yet find stale generated files that no generator emits
 
-- M1-014 | todo | | install.sh core with root refusal, truncation guard, sha256 and shell tests (SEC-08)
+- M1-014 | [#65](https://github.com/getrdy-io/rdy/pull/65) | 2026-10-29 | busybox (Alpine container) and macOS /bin/sh legs run only in CI (the local busybox is Ubuntu busybox-static, which the harness now rejects); verify_signature is the seam and stops unless the override is set until M1-015; sign-release (M1-010) must stamp RDY_STAMPED_VERSION (ADR 0025); carry to M1-015: the fake rdy touches a canary file and the bad-hash and bad-signature cases assert it is absent, and `fetch NAME WHAT CAUSE FIX` takes the 404 message so the bundle gets 06's "this release looks incomplete"
 
 - M1-015 | todo | | install.sh signature check, fail closed, with tamper tests (SEC-09, SEC-10)
 
@@ -125,7 +125,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-056 | [#55](https://github.com/getrdy-io/rdy/pull/55) | 2026-10-29 | The proxy URL canary moves to M1-060 (PC-43): until the URL userinfo rule exists only the `secret_by_key` rule runs, so `tests/log_redaction.rs` holds it as `#[ignore = "M1-060"]` and M1-060 enables it and adds bare-token canaries. The exit test's JSON and HTML parts have no report to test before M1-062, so M1-062 proves them. Carry note for M1-061: the run-scoped known secrets must be shared through an `Arc`, so the log writer and the CLI error text see them (today the process redactor holds only the key and the built-in rules). `CliError::from_anyhow` still drops unknown error text on purpose, for the same reason; every printed CLI error string is redacted now, so M1-060 can show the redacted chain in that one function. A panic prints nothing from the hook (a panic inside a hook aborts, so the hook cannot redact); a panic inside a check is only an `ERROR` result (`PanicText`), and a panic outside a check makes `rdy_cli::entry::guarded` print the standard two lines (the `ErrorOutput` too with `--json`) and exit 70. The panic text goes to the log, redacted and then escaped (the key-name rule reads raw tabs, so redaction runs on the raw text first, in the log writer and in the CLI error text). No real-binary panic test, because a test-only trigger flag or env var is banned (02): `guarded` is tested in process and the hook in a child test process. The redactor has a `testing`-feature panic seam (`PANIC_TRIGGER`), a dev-dependency feature of rdy-cli only. With `RUST_LOG` unset, empty or invalid the filter is `off` (07 D.6, PC-43); a valid `RUST_LOG` is the operator's filter, but hyper, h2, rustls, tower and kube (and `hyper_*`, `tower_*`, `kube_*`) stay capped at warn whatever it says. Log lines have no time stamp, are redacted and then escaped per line, and the `log` bridge is off (rustls `log` records are dropped). A bare span field value runs to the end of its line and swallows the event message (M1-060 tunes the over-redaction). A PEM block split over several events is the known M1 gap. Carry notes: M1-060 accepts `\\+t` as a blank in `ASSIGNMENT` (a `&str` field is written with `Debug`, so a tab in a field value arrives as a literal backslash and `t`; `tests/log_redaction.rs` holds the case as `#[ignore = "M1-060"]`). M3: `CAPPED_TARGETS` needs `reqwest`, `aws_smithy_*` and `aws_config` when the cloud checks land.
 
-- M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code
+- M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code | backlog corrected 2026-10-29 (correction-09): a result with no fix of its own shows the check's `CheckMeta.remediation`, and `cargo xtask checks` reads the same family list as `rdy run`
 
 - M1-058 | todo | | Ctrl-C in M1: abort, remove the empty report folder, exit 70
 
@@ -190,7 +190,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-088 | todo | | --json stdout hygiene on every exit path and the static TTY line
 
-- M1-089 | todo | | CheckMeta in the check registry, read by xtask
+- M1-089 | [#62](https://github.com/getrdy-io/rdy/pull/62) | 2026-10-29 | ADR 0026 (Accepted after the cli-ux review on PR #62). The family list lives in `xtask::checks::registry` until M1-057 moves it into `rdy_cli` (correction-09). `HostFamily` is not registered in the CLI (M1-067 rule stands). `xtask checks` lists the seven host stubs, so M1-116 must skip ids in `HostFamily::stub_ids()` (correction-09). The report does not fall back to `meta.remediation` yet: correction-09 adds it to M1-057. `docs-lint` runs the same validation, but neither command is in `ci.yml` yet; a unit test runs it in `cargo test`.
 
 - M1-090 | todo | | Loopback network test support (TLS server with generated CA, CONNECT proxy modes, closed port, never-accepting listener, reset after ClientHello, 302 server, dual-stack case)
 
@@ -244,7 +244,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-115 | todo | | Review k8s checks and fixtures (semantics, API groups, RBAC degrade, per-distro sets)
 
-- M1-116 | todo | | Check family renderer and the host, network and Kubernetes pages with hand-written intros
+- M1-116 | todo | | Check family renderer and the host, network and Kubernetes pages with hand-written intros | backlog corrected 2026-10-29 (correction-09): ids still in `HostFamily::stub_ids()` get no section, and reads are listed without an OS split until the manifest is keyed by OS
 
 - M1-117 | todo | | Fixture env all-pass
 
@@ -262,7 +262,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-124 | todo | | Review CONTRIBUTING.md on a fresh clone
 
-- M1-125 | todo | | rdy spec keygen and rdy spec sign
+- M1-125 | [#52](https://github.com/getrdy-io/rdy/pull/52) | 2026-10-28 | ADR 0022: rdy writes the minisign key file itself (scrypt N=2^20, 1 GiB, the stock cost and the most a file may ask for, with p = 1 only) instead of the `minisign` crate, whose key cost is fixed at N=2^15; the crate stays as a dev-dependency interop check, and a key and signature made by C minisign 0.11 are committed in tests/fixtures/minisign-c/. Lint findings print as `file: level: message` with no line and column until `spec lint` (M1-031) maps checks to lines. Windows checks the file type only and a new key gets its folder's access list (named in the success message); owner-only ACLs on key files joined SEC-58 (M2-085); the Windows tests compile here and run on the Windows leg. Ctrl-C during the 2 to 4 second key derivation is the M1 Ctrl-C ticket's. CI: the linux-x64 leg installs C minisign and sets RDY_REQUIRE_C_MINISIGN, so the `minisign -V` and `minisign -S` test cannot skip there; the other legs skip it (the committed C-made fixtures run everywhere); the `real-kdf` nextest group holds the 1 GiB tests to one at a time.
 
 - M1-126 | todo | | rdy verify command and refuse-unsigned behaviour with --allow-unsigned banner
 

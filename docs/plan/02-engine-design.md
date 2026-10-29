@@ -656,11 +656,13 @@ revision.
 // check.rs
 pub struct CheckInfo {
     pub id: &'static str, pub family: &'static str, pub summary: &'static str,
+    pub meta: CheckMeta, // ADR 0026 (M1-089)
     pub needs: &'static [Need], pub wants: &'static [Want],
     pub default_timeout: Option<Duration>, pub os: OsSupport,
     pub reads: &'static [&'static str], pub env: &'static [&'static str],
     pub commands: &'static [CommandSpec], pub peers: &'static [PeerClass],
 }
+pub struct CheckMeta { pub title: &'static str, pub remediation: &'static str }
 pub struct Want { pub need: Need, pub evidence_only: bool }
 pub struct CommandSpec { pub program: &'static str, pub extra_dirs: &'static [&'static str],
                          pub max_stdout: usize, pub env: &'static [&'static str] }
