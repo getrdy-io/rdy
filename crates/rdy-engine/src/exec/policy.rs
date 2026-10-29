@@ -557,7 +557,7 @@ pub(crate) fn prepare(cmd: &Cmd) -> Result<ExecSpec, PolicyError> {
             .iter()
             .map(|(name, value)| (OsString::from(*name), value.clone())),
     );
-    #[expect(
+    #[allow(
         clippy::disallowed_methods,
         reason = "the policy is the one place that builds the raw spec, after its checks"
     )]
@@ -601,7 +601,7 @@ fn base_env() -> Vec<(OsString, OsString)> {
 /// read failures.
 pub(crate) async fn run(cmd: Cmd) -> Result<ExecOutput, CommandError> {
     let spec = prepare(&cmd)?;
-    #[expect(
+    #[allow(
         clippy::disallowed_methods,
         reason = "the policy runner is the one caller of the raw runner, after the policy checks"
     )]
