@@ -300,7 +300,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-143 | todo | | Quiet and verbose output modes
 
-- M1-144 | todo | | Facade methods for UDP exchanges and unix sockets with a GET-only Docker API guard
+- M1-144 | PR #TBD | | scheduler wiring of Built::hosts into the probe (Probe::permit_hosts) lands with M1-091, until then a real run refuses every datagram; DNS to system nameservers (PeerClass::SystemResolver) not built, no M1 check needs it; Windows named pipe is M2
 
 - M1-145 | todo | | host.lsm (SELinux, AppArmor, audit log denials) (M1-late)
 

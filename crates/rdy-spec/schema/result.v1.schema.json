@@ -123,6 +123,11 @@
           ],
           "maxLength": 4096
         },
+        "proto": {
+          "description": "connect: udp for a datagram exchange. Absent for a TCP connection.",
+          "type": "string",
+          "maxLength": 16
+        },
         "via_proxy": {
           "description": "connect, user info stripped",
           "type": [

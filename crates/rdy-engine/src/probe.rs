@@ -34,15 +34,19 @@
 //! - names, TCP, TLS, HTTP and native calls: the network and native tickets. They open their entries
 //!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp, http and kube
 //!   call writes exactly one entry (M1-091, M1-103);
+//! - datagrams and unix sockets, which are built (M1-144): [`Probe::udp_exchange`] and
+//!   [`Probe::unix_get`], with their policy in `sock`;
 //! - the live backend for files, which only these tickets can make safe to ship. Only the replay
 //!   backend (feature `testing`) exists today, so nothing in a release build reaches the machine yet.
 
 use std::fmt;
 use std::future::Future;
 use std::io;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use rdy_spec::result::{ActionKind, ActionOutcome};
 use serde_json::{Map, Value};
@@ -54,15 +58,21 @@ use crate::exec::table::{self, TableError};
 use crate::exec::{ExecError, ExecOutput, policy::CommandError};
 use crate::privilege::ProcessIds;
 use crate::redact::Redactor;
+use sock::{UdpReply, UnixResponse};
 
 pub use log::{ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, DENIED_TARGETS, MAX_ENTRIES};
 
 use log::{ActionLog, Limits, Pending};
 
+mod addr;
+#[cfg(all(feature = "runtime", unix))]
+mod dockerhttp;
 mod log;
+mod netio;
 mod policy;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) mod replay;
+pub mod sock;
 #[cfg(test)]
 mod tests;
 
@@ -358,6 +368,43 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
         std::env::var(name).ok()
     }
 
+    /// Resolves a spec host name to addresses through the system resolver, for `udp_exchange` only.
+    /// The probe has already checked that the name is one of the check's spec hosts. It judges the
+    /// answers itself. A fixture backend overrides this.
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+        timeout: Duration,
+    ) -> BoxFuture<'a, io::Result<Vec<IpAddr>>> {
+        Box::pin(netio::resolve(host, port, timeout))
+    }
+
+    /// Sends one datagram to `to` from a socket connected to it and reads one reply of at most
+    /// `max_reply` bytes within `timeout`. The probe has already applied the peer and address policy.
+    /// A fixture backend overrides this.
+    fn udp_exchange<'a>(
+        &'a self,
+        to: SocketAddr,
+        payload: &'a [u8],
+        max_reply: usize,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
+        Box::pin(netio::udp(to, payload, max_reply, timeout))
+    }
+
+    /// Sends `GET path` over the unix socket at `socket` and reads the reply within `timeout`. The
+    /// probe has already checked the socket, the method and the path against the policy. A fixture
+    /// backend overrides this.
+    fn unix_get<'a>(
+        &'a self,
+        socket: &'a Path,
+        path: &'a str,
+        timeout: Duration,
+    ) -> BoxFuture<'a, Result<UnixResponse, ProbeError>> {
+        Box::pin(netio::unix_get(socket, path, timeout))
+    }
+
     /// The process's real and effective user and group ids, for the privilege snapshot on macOS.
     ///
     /// Linux reads all four of each from `/proc/self/status` through `read`, and Windows has none. The
@@ -489,6 +536,8 @@ struct Scope {
     /// The check's manifest. Only commands read it so far (M1-045 adds files and env).
     info: Option<&'static CheckInfo>,
     ended: AtomicBool,
+    /// The spec hosts and timeouts of the socket calls (M1-144).
+    peers: sock::Peers,
     /// Tells calls in flight that the check ended.
     #[cfg(feature = "runtime")]
     ended_signal: tokio::sync::watch::Sender<bool>,
@@ -501,6 +550,7 @@ impl Scope {
             os,
             info,
             ended: AtomicBool::new(false),
+            peers: sock::Peers::default(),
             #[cfg(feature = "runtime")]
             ended_signal: tokio::sync::watch::channel(false).0,
         }

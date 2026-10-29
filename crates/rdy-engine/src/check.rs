@@ -142,6 +142,13 @@ pub enum PeerClass {
     SystemResolver,
     /// The Kubernetes API server of the chosen context.
     KubeApi,
+    /// The NTP servers the check's spec entry names, over UDP, through `Probe::udp_exchange`. The
+    /// servers must also be among the check's spec hosts.
+    NtpServers,
+    /// A unix socket the check may send a read-only `GET` to, through `Probe::unix_get`. The text is an
+    /// absolute path. A segment `{uid}` matches one run of digits, so `/run/user/{uid}/docker.sock`
+    /// names a rootless socket.
+    UnixSocket(&'static str),
 }
 
 /// How well a check works on one OS.

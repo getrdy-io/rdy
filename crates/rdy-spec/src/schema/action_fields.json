@@ -83,6 +83,11 @@
       "description": "connect: the IP address used.",
       "maxLength": 4096
     },
+    "proto": {
+      "type": "string",
+      "description": "connect: udp for a datagram exchange. Absent for a TCP connection.",
+      "maxLength": 16
+    },
     "via_proxy": {
       "type": [
         "string",
