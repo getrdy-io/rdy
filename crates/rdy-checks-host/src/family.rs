@@ -7,6 +7,7 @@ use rdy_engine::check::{
     OsSupport, Support, Want,
 };
 use rdy_engine::family::{BuildError, Built, Family};
+use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
@@ -67,7 +68,7 @@ static DISK: CheckInfo = info(
     "Free space, inodes, mount flags per path",
     CheckMeta {
         title: "Disk space and mount flags",
-        remediation: "Run `df -h` on the install path to see what is free. Grow the volume or point the install at a larger disk. If the path is on a `noexec` mount, remount it with `exec` and remove `noexec` from `/etc/fstab`, or move the install path.",
+        remediation: "Free up space on the volume that holds the install path, grow the volume, or point the install at a larger disk. On Linux, run `df -h` on the install path to see what is free. If the path is on a `noexec` mount, remount it with `exec` and remove `noexec` from `/etc/fstab`, or move the install path.",
     },
     5,
     &[],
@@ -77,7 +78,7 @@ static MEMORY: CheckInfo = info(
     "RAM, swap, cgroup limit",
     CheckMeta {
         title: "Memory",
-        remediation: "Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number. If the spec forbids swap, run `swapoff -a` and comment out the swap lines in `/etc/fstab`.",
+        remediation: "Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number. On Linux, if the spec forbids swap, run `swapoff -a` and comment out the swap lines in `/etc/fstab`.",
     },
     2,
     &[],
@@ -87,7 +88,7 @@ static PORTS: CheckInfo = info(
     "Required ports free",
     CheckMeta {
         title: "Free ports",
-        remediation: "Stop the process that holds the port, or change the product's port setting. If a required port is in the ephemeral range, reserve it with `net.ipv4.ip_local_reserved_ports` in a file under `/etc/sysctl.d/`, then run `sysctl --system`.",
+        remediation: "Stop the process that holds the port, or change the product's port setting. If the port is in the ephemeral range, reserve it with `net.ipv4.ip_local_reserved_ports` in a file under `/etc/sysctl.d/` as root, then run `sysctl --system`.",
     },
     5,
     ROOT,
@@ -97,7 +98,7 @@ static LSM: CheckInfo = info(
     "SELinux and AppArmor state, recent denials",
     CheckMeta {
         title: "SELinux and AppArmor",
-        remediation: "Read recent denials with `ausearch -m avc -ts recent`. Install the vendor's policy module, or label the volume with `chcon -Rt container_file_t` or the `:Z` mount option. As a last resort, run `setenforce 0` and set `SELINUX=permissive` in `/etc/selinux/config`.",
+        remediation: "On SELinux, read recent denials with `ausearch -m avc -ts recent`. Install the vendor's policy module, or label the volume with `chcon -Rt container_file_t` or the `:Z` mount option. As a last resort, run `setenforce 0` and set `SELINUX=permissive` in `/etc/selinux/config`. This turns SELinux protection off, so ask the security team first. On AppArmor, read denials with `journalctl -k` and ask the vendor for a profile.",
     },
     3,
     ROOT,
@@ -107,7 +108,7 @@ static SECURITY_AGENTS: CheckInfo = info(
     "Security software processes that inspect file and process activity",
     CheckMeta {
         title: "Security software",
-        remediation: "Software in this category often inspects file opens and process launches. If the install is slow or fails, ask the security team to review exclusions for the product's paths, then run rdy again.",
+        remediation: "Security software often inspects file opens and process launches. If the install is slow or fails, ask the security team to review exclusions for the product's paths, then run rdy again.",
     },
     5,
     ROOT,
@@ -213,8 +214,7 @@ impl Check for Stub {
             Support::NotYet => Err(CheckError::Unsupported(NO_SOURCE)),
             Support::Full | Support::Partial(_) => Err(CheckError::Failed {
                 message: format!("{} {NOT_BUILT}", self.0.id),
-                hint: "Install a newer rdy. If there is none yet, ask the vendor what to do next."
-                    .to_owned(),
+                hint: NEWER_RDY.to_owned(),
             }),
         };
         Box::pin(async move { outcome })

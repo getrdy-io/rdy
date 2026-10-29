@@ -1,7 +1,7 @@
 # ADR 0026: CheckMeta holds a check's title and remediation and lives in its static CheckInfo
 
-- Status: Proposed (M1-089). Accept once cli-ux has reviewed the remediation wording and the
-  `xtask checks` output in the PR.
+- Status: Accepted (2026-10-29, M1-089). cli-ux approved the remediation wording and the
+  `xtask checks` output in its review of PR #62.
 - Date: 2026-10-29
 
 ## Context
@@ -29,8 +29,9 @@ registered in the CLI while its checks are stubs.
    `&'static str`. It is the `meta` field of `CheckInfo`, so each check has it exactly once and the
    compiler refuses a check without it.
 2. Every other field of 09 section 6 has one home: id, family, `summary` (what it measures), needs and
-   wants (the privilege), `os` and `reads` stay in `CheckInfo`. Thresholds stay in the typed spec
-   parameters. The sort order is the order of `Family::checks`. `Registry::families()` returns the
+   wants (the privilege), `os` and `reads` stay in `CheckInfo`. `reads` is one list for every OS, so
+   until the manifest is keyed by OS, readers list the reads without an OS split. Thresholds stay in the
+   typed spec parameters. The sort order is the order of `Family::checks`. `Registry::families()` returns the
    families in registration order, so a reader walks families, then checks, in catalog order.
 3. A title is a short heading. A remediation is the general fix in plain sentences, on one line, with no
    measured value and no placeholder to fill. A finding's own `fix` stays the specific advice, and a spec
@@ -68,6 +69,9 @@ registered in the CLI while its checks are stubs.
 
 ## Tickets implied
 
-- [M1] Report shows the registry remediation when a check gives no fix | owner: rust-engineer | est: 1h | depends on: CheckMeta in the check registry, read by xtask | exit test: a warn result whose finding has no fix and whose spec entry has no fix shows the check's `meta.remediation` with `fix_source: rdy`, not the "no advice" text.
-- Correction to M1-057 (wire `rdy run`): add "the family list moves from `xtask` into `rdy_cli`, and `cargo xtask checks` reads that registry" to its exit test.
-- Correction to M1-116 (family renderer): add "no id in `HostFamily::stub_ids()` gets a section" to its exit test.
+None new. Backlog correction-09 (2026-10-29) adds the rest to existing rows:
+
+- M1-057: a result with no fix of its own shows the check's `CheckMeta.remediation`, not the generic
+  no-advice text. Decision 5 (the family list moves into `rdy_cli`) also lands there.
+- M1-116: ids still in `HostFamily::stub_ids()` get no section, and reads are listed without an OS split
+  until the manifest is keyed by OS.
