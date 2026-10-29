@@ -541,7 +541,7 @@ Top level (`$defs/Report`). ADR 0012 decision 3 fixes the provenance fields; thi
 | `summary` | `total`, `pass`, `warn`, `block`, `skipped`, `timeout`, `error`, `not_applicable`, `required_not_run`, `optional_not_run` |
 | `checks` | one result per spec entry, in spec order (5.2) |
 | `actions`, `actions_truncated`, `actions_dropped` | the action log (5.4) |
-| `redaction` | `ruleset` (`report`), `total`, `by_rule`: counts only, never matched text (04) |
+| `redaction` | `ruleset` (`report`), `total`, `by_rule`: counts only, never matched text (04). They count every replacement the walk made, including in text a later cap dropped, so they are never lower than what was hidden |
 | `complete`, `interrupted` | `complete: false` when rdy could not finish or write the report (exit 70); `interrupted: true` after Ctrl-C |
 
 `signature.trust_note` is the local note from the trust store, never text from the spec (threat model
@@ -560,7 +560,7 @@ test asserts both identities, and that bucket counts match the summary.
 
 **Size caps in the schema.** `message` 1 KiB; `fix` and `builtin_fix` 4 KiB; `notes` 20 items of 1 KiB;
 `actions` 5000 items; every other string 4 KiB; `observed` and `expected` 64 KiB each (prose, checked by
-the writer). The whole document is at most 2 MiB, which the portal checks before it parses.
+the writer). A string cut by a cap ends with ` [truncated]`, and the check's `truncated` flag is set. The whole document is at most 2 MiB, which the portal checks before it parses.
 
 ### 5.1 Host identity
 
