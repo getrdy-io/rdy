@@ -78,6 +78,13 @@ k8s-openapi = { version = "=0.28.0", default-features = false }
 # Token and key values of a kubeconfig, read only to hand them to the known-secret set (M1-102, M1-061).
 # Already in the tree through kube; the version is the one kube-client uses.
 secrecy = { version = "0.10", default-features = false }
+# The read-only guard is a tower layer on the kube client's service (M1-103, ADR 0010). These four are
+# the types it names: requests and bodies (`http`, `http-body`) and the service traits. All are in the
+# tree already through kube; the versions are the ones kube-client uses.
+http = { version = "1", default-features = false }
+http-body = { version = "1", default-features = false }
+tower-layer = { version = "0.3", default-features = false }
+tower-service = { version = "0.3", default-features = false }
 # Test-only: a TLS server with a throwaway CA for the client tests (M1-102). Both on ring, never aws-lc.
 rcgen = { version = "0.14", default-features = false }
 tokio-rustls = { version = "0.26", default-features = false }
