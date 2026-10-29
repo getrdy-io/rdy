@@ -12,7 +12,7 @@
 //!
 //! The hook does not redact. A panic inside a panic hook aborts the process, so a redactor bug in the
 //! hook could not be contained. The hook keeps only the source location of the panic, which is a
-//! compile-time constant and holds no input. The payload is read, escaped and redacted where the panic
+//! compile-time constant and holds no input. The payload is read, redacted and escaped where the panic
 //! is caught.
 
 use std::any::Any;
@@ -48,7 +48,7 @@ pub fn take_location() -> Option<String> {
         .flatten()
 }
 
-/// The raw text of a panic payload. Escape and redact it before it goes anywhere.
+/// The raw text of a panic payload. Redact it, then escape it, before it goes anywhere.
 #[must_use]
 pub fn payload_text(payload: &(dyn Any + Send)) -> String {
     payload

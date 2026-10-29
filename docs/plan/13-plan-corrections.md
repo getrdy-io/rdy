@@ -29,7 +29,6 @@ below.
 | --- | --- | --- | --- | --- | --- |
 | PC-35 | Plan, lines 9, 28, 218 and 288 ("the incumbent Kubernetes-only preflight tool") and evidence point 3 (remote host collectors) | The incumbent tool also has host collectors and preflights. Its remote-node limit is no rdy advantage while rdy also runs only where it is started. | Say "Kubernetes-first". Keep any multi-node claim out of public copy until rdy can run against remote hosts. Changing the descriptor is a repo-wide sweep, and the common brief that prescribes it needs the same edit. | cosmetic | 10 |
 | PC-37 | Plan, Milestones table, M3 | The M3 exit test ("First 10 paying vendors") can only be measured after the launch that M3 contains. | Launch when M3 scope is done; measure the exit test over the next eight weeks. The 12-month star and install targets start on launch day. | cosmetic | 10 |
-| PC-38 | 02 line 249, 04 section 3.4 and its M1-056 row, 05 INV-15 proof column, 11 rows M1-056 and M1-060 | (1) 02 and 04 say that with `RUST_LOG` unset hyper, h2, rustls, tower and kube are capped at warn, so something is logged. 07 D.6 says "Unset means no log output". (2) The M1-056 exit test names a proxy URL canary, but until M1-060 adds the URL userinfo rule only the key-name rule exists, so the canary cannot pass. The JSON and HTML parts have no report to test before M1-062. | (1) 07 wins: unset, empty or invalid `RUST_LOG` means `off`. A valid `RUST_LOG` is the operator's filter, and the five dependency caps (hyper, h2, rustls, tower, kube at warn) hold whatever it says. Applied in 02 and 04. (2) The proxy URL canary moves to M1-060's exit test and to the INV-15 proof column. `tests/log_redaction.rs` holds it now as `#[ignore = "M1-060"]`. The JSON and HTML parts move to M1-062. Applied in 04, 05 and 11. | should fix before M1 | 13 (PR #55 reviews) |
 
 ## Decisions made
 
@@ -259,6 +258,9 @@ Plan corrections. "Applied" names the file edited; "C-n" is a `CLAUDE.md` edit f
   founder's call when M3 is planned.
 - PC-40: applied to the plan (investor and angel names dropped). The optional "$16.5M" change moved to
   founder decisions (decision 2).
+- PC-43: applied in 02, 04, 05, 11. Unset, empty or invalid `RUST_LOG` means no log output (07 D.6),
+  and the five dependency caps hold whatever a valid `RUST_LOG` says. The proxy URL canary moved to
+  M1-060 and the JSON and HTML parts of the M1-056 exit test to M1-062.
 
 ADR amendments in the ticket title:
 

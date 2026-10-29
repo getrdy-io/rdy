@@ -433,11 +433,12 @@ impl CliError {
     }
 }
 
-/// The text as it is printed: control characters escaped, then secrets removed (ADR 0015 decision 6).
+/// The text as it is printed: secrets removed, then control characters escaped (ADR 0015 decision 6).
 ///
-/// Redaction runs on the escaped text, which is what reaches the terminal and the JSON document.
+/// Redaction runs on the raw text, because the key-name rule reads raw tabs and spaces. The escaped
+/// result is what reaches the terminal and the JSON document.
 fn clean(text: &str) -> String {
-    crate::redaction::redact_text(&escape_untrusted(text))
+    crate::redaction::redact_text_then(text, escape_untrusted)
 }
 
 /// The code of a prompt error: Ctrl-C is `interrupted`, a terminal failure is `internal`, and the rest

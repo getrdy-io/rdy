@@ -12,8 +12,9 @@
 //!   named `hyper_*`, `tower_*`, `kube_*`) log at `warn` at most ([`CAPPED_TARGETS`], threat model I2).
 //!   Those crates can log headers and secrets at debug and trace. `RUST_LOG=hyper=trace` does not lift
 //!   the cap.
-//! - **Escaped.** Each line is escaped for the terminal (control and invisible characters become
-//!   `\xNN` and `\u{..}`) and then redacted, so a field value cannot move the cursor or hide a line.
+//! - **Redacted, then escaped.** The raw event is redacted first, because the key-name rule reads raw
+//!   tabs and spaces. Then each line is escaped for the terminal (control and invisible characters
+//!   become `\xNN` and `\u{..}`), so a field value cannot move the cursor or hide a line.
 //! - **A redactor bug drops the event.** If the redactor panics, the event is replaced by a fixed
 //!   placeholder. The raw text is never written.
 //! - **No `log` bridge.** Records from crates that use the `log` facade (rustls, for one) are dropped,
@@ -33,7 +34,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
 use crate::error::escape_untrusted;
-use crate::redaction::{DROPPED, try_redact};
+use crate::redaction::{DROPPED, try_redact_then};
 
 /// The filter used when `RUST_LOG` is unset: no log output (07 appendix D.6).
 pub const DEFAULT_FILTER: &str = "off";
@@ -155,10 +156,11 @@ impl<W: Write> Drop for RedactingWriter<W> {
         }
         // Bytes that are not UTF-8 become U+FFFD first, so the redactor always sees text.
         let text = String::from_utf8_lossy(&self.held);
-        // Escape first: this is the text that reaches the terminal. Then redact it. A redactor panic
-        // is caught (this drop can run while another panic unwinds, and a second one would abort) and
-        // the whole event is replaced.
-        let out = try_redact(&self.redactor, &escape_lines(&text))
+        // Redact the raw text first: the key-name rule reads raw tabs and spaces, and an escaped tab
+        // (`\x09`) would hide `password<TAB>= x` from it. Then escape the redacted text, which is what
+        // reaches the terminal. A panic in either step is caught (this drop can run while another panic
+        // unwinds, and a second one would abort) and the whole event is replaced.
+        let out = try_redact_then(&self.redactor, &text, escape_lines)
             .unwrap_or_else(|| format!("{DROPPED}\n"));
         // A closed stderr has nowhere to report to.
         let _ = self.inner.write_all(out.as_bytes());

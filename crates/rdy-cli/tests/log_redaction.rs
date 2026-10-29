@@ -284,6 +284,37 @@ fn control_and_invisible_characters_in_a_field_are_escaped_and_line_ends_stay() 
 }
 
 #[test]
+fn a_tab_before_the_equals_sign_does_not_hide_a_secret_from_the_log() {
+    // The key-name rule reads raw tabs. Redaction must run before the tab is escaped to `\x09`.
+    let out = captured(Some("trace"), || {
+        tracing::info!("password\t= canary-tab-1");
+    });
+    assert!(!out.contains("canary-tab-1"), "{out:?}");
+    assert!(!out.contains('\t'), "{out:?}");
+}
+
+#[test]
+fn a_tab_indented_continuation_line_is_redacted_and_no_raw_tab_is_written() {
+    let out = captured(Some("trace"), || {
+        tracing::info!("password: a\n\tcanary-tab-2");
+    });
+    assert!(!out.contains("canary-tab-2"), "{out:?}");
+    assert!(!out.contains('\t'), "{out:?}");
+}
+
+/// A `&str` field is written with `Debug`, so a tab in the value reaches the redactor as the two
+/// characters backslash and `t`, which the key-name rule does not treat as a blank. M1-060 teaches
+/// `ASSIGNMENT` to accept `\\+t` as a blank.
+#[test]
+#[ignore = "M1-060"]
+fn a_tab_inside_a_str_field_value_does_not_hide_a_secret() {
+    let out = captured(Some("trace"), || {
+        tracing::info!(note = "password\t= canary-tab-3", "field with a tab");
+    });
+    assert!(!out.contains("canary-tab-3"), "{out:?}");
+}
+
+#[test]
 fn a_crlf_line_end_is_escaped_not_passed_on() {
     let sink = Sink::default();
     let make = RedactingMakeWriter::new(sink.clone(), redactor());

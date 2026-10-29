@@ -57,11 +57,14 @@ where
         Ok(code) => code,
         Err(payload) => {
             let location = panic_hook::take_location();
-            tracing::error!(
-                location = location.as_deref().unwrap_or("unknown"),
-                panic_message = %panic_hook::payload_text(&*payload),
-                "panic outside a check"
-            );
+            // A formatter or writer panic while logging must not turn exit 70 into an abort or 101.
+            let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+                tracing::error!(
+                    location = location.as_deref().unwrap_or("unknown"),
+                    panic_message = %panic_hook::payload_text(&*payload),
+                    "panic outside a check"
+                );
+            }));
             emit(&CliError::bug(), json, stdout, stderr)
         }
     }

@@ -756,6 +756,19 @@ fn rendered_text_and_json_pass_through_the_redactor() {
 }
 
 #[test]
+fn a_tab_before_the_equals_sign_does_not_hide_a_secret_from_error_text() {
+    // The key-name rule reads raw tabs. Redaction must run before the tab is escaped to `\x09`.
+    let cli = CliError::usage("password\t= canary-tab-1", "password: a\n\tcanary-tab-2");
+    let shown = cli.render();
+    for part in [&shown.message, &shown.fix] {
+        assert!(!part.contains("canary-tab-"), "{part:?}");
+        assert!(!part.contains('\t'), "{part:?}");
+    }
+    let all = format!("{}{}", shown.text(), shown.json());
+    assert!(!all.contains("canary-tab-"), "{all}");
+}
+
+#[test]
 fn fixed_error_text_is_not_changed_by_the_redactor() {
     for cli in [CliError::Interrupted, CliError::bug()] {
         let shown = cli.render();

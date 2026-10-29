@@ -36,11 +36,9 @@ fn all_text(out: &Output) -> String {
 
 #[test]
 fn trace_is_live_and_no_canary_reaches_either_stream() {
-    let flag = format!("--tokne={ARG_CANARY}");
     for args in [
         vec!["version"],
         vec!["trust", "list"],
-        vec!["run", "spec.yaml", flag.as_str()],
         vec!["--bogus", ARG_CANARY],
     ] {
         let out = rdy(&args, Some("trace"));

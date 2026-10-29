@@ -68,7 +68,18 @@ jobs:
             echo "::error::the rdy binary would build the schema generator or serde_json/preserve_order"
             exit 1
           fi
-      # A --workspace build turns the feature on through xtask. This runs the binary's own feature set.
+      # rdy-cli's tests turn on the rdy-engine `testing` feature (the panicking-redactor seam) through a
+      # dev-dependency. It must never reach the shipped binary, so check the normal build graph.
+      - name: The binary does not build the rdy-engine testing feature
+        run: |
+          tree="$(cargo tree --locked -p rdy -e normal,features --target x86_64-unknown-linux-gnu)"
+          if printf '%s\n' "$tree" | grep -E 'rdy-engine feature "testing"'; then
+            echo "::error::the rdy binary would build the rdy-engine testing feature"
+            exit 1
+          fi
+      # A --workspace build turns the schema feature on through xtask. This runs the binary's own feature
+      # set for the normal dependencies. Tests of rdy still see the dev-dependency `testing` feature of
+      # rdy-engine, which the guard above keeps out of the shipped binary.
       - name: Test the binary's feature set
         run: cargo test --locked -p rdy -p rdy-engine
 
