@@ -608,6 +608,11 @@ fn a_second_pass_changes_nothing_when_a_cut_lands_after_the_key() {
         "\"password\":\"{secret}\", \"user\":\"ada\"",
         "password: {secret}\nnext: ok",
         "password: \"{secret}\"\nnext: ok",
+        // References are left alone by the key rule, so a cut inside one must not leave a stub.
+        "password=${DB_PASSWORD}\nnext: ok",
+        "password=/run/secrets/db\nnext: ok",
+        "password=\"${DB_PASSWORD}\"\nnext: ok",
+        "password: null\nnext: ok",
     ];
     let mut cut_after_key = false;
     for form in forms {
@@ -637,8 +642,13 @@ fn a_second_pass_changes_nothing_when_a_cut_lands_after_the_key() {
                 "{form} offset {offset}"
             );
             assert_eq!(
-                second.redaction.by_rule.get("secret_by_key"),
-                Some(&before.get("secret_by_key")),
+                second
+                    .redaction
+                    .by_rule
+                    .get("secret_by_key")
+                    .copied()
+                    .unwrap_or(0),
+                before.get("secret_by_key"),
                 "{form} offset {offset}"
             );
         }
@@ -713,7 +723,7 @@ fn a_cut_marker_under_a_secret_key_is_set_aside_and_never_exempts_text() {
 fn text_after_a_marker_like_value_is_still_redacted() {
     let mut result = check("host.cpu");
     result.observed = Some(observed(json!({
-        "log": "password: [truncated]\n  hunter2-log\nnext: ok",
+        "log": "password: [truncated]\nhunter2-log\nnext: ok",
     })));
     let out = redactor()
         .redact_check(result, &mut RuleCounts::default())
@@ -721,6 +731,43 @@ fn text_after_a_marker_like_value_is_still_redacted() {
     let text = serde_json::to_string(&*out).expect("json");
     assert!(!text.contains("hunter2-log"), "{text}");
     assert!(text.contains("next: ok"), "{text}");
+}
+
+#[test]
+fn an_escaped_json_value_becomes_one_bare_placeholder_and_stays_that_way() {
+    let raw = r#"{\"password\":\"S3cr3t\"}"#;
+    let first = redactor().redact_str(raw).0;
+    assert!(!first.contains("S3cr3t"), "{first}");
+    assert!(
+        first.starts_with(r#"{\"password\":[REDACTED:secret_by_key:"#),
+        "{first}"
+    );
+    assert_eq!(redactor().redact_str(&first).0, first);
+}
+
+#[test]
+fn a_cut_inside_an_exempt_value_backs_up_to_where_the_value_starts() {
+    for value in ["${DB_PASSWORD}", "/run/secrets/db", "null"] {
+        for quote in ["", "\""] {
+            let text = format!(
+                "{}password={quote}{value}{quote}\nnext: ok and some more text",
+                "x".repeat(40)
+            );
+            let start = 40 + "password=".len() + quote.len();
+            for at in start + 1..start + value.len() {
+                let cut = cut_str(&text, at + CUT_MARKER.len()).expect("cut");
+                let want = format!("{}password={CUT_MARKER}", "x".repeat(40));
+                assert_eq!(cut, want, "{value} {quote} at {at}");
+            }
+        }
+    }
+    // A value that is not exempt is cut where it falls.
+    let text = format!(
+        "{}password=hunter2-hunter2\nnext: ok and some more text",
+        "x".repeat(40)
+    );
+    let cut = cut_str(&text, 40 + 9 + 4 + CUT_MARKER.len()).expect("cut");
+    assert!(cut.ends_with("password=hunt [truncated]"), "{cut}");
 }
 
 #[test]

@@ -128,8 +128,9 @@ impl Redactor {
   including in text that a later cap dropped (a list past 200 items, notes past 20, keys dropped to fit
   64 KiB), so they are never lower than what was hidden. The final pass of `redact_report_counted` finds
   nothing new in results redacted earlier. A trailing ` [truncated]` is set aside while a string is redacted
-  and put back after. A cut never ends inside a placeholder, right behind one, or between a key and the
-  quote that opens its placeholder, and a quoted single placeholder (`password="[REDACTED:..]"`) is exempt
+  and put back after. A cut never ends inside a placeholder or a reference the key rule leaves alone
+  (`${NAME}`, a `/run/secrets/` path, `null`), right behind a placeholder, or between a key and the quote
+  that opens either; it backs up to where the token starts (tokens up to 512 bytes), and a quoted single placeholder (`password="[REDACTED:..]"`) is exempt
   like a bare one, so `password=" [truncated]` is never produced and a second pass changes nothing.
 - **`redact_report` is schema-aware.** It serializes the report to a `serde_json::Value` and walks it. Typed
   fields keep their names and non-string values; only string leaves go through `redact_str`. The whole-member
@@ -145,7 +146,7 @@ impl Redactor {
   free-form subtree is read as a command line, numbers and objects included, so
   `["--password", "hunter2", 5432]` loses its second item. `{key, value}` and `Name`/`Value` pairs match
   like `{name, value}`. The walk deserializes
-  back into `Report` and applies the 02 caps, which never cut inside a placeholder. A cut string ends with
+  back into `Report` and applies the 02 caps, which never cut inside a placeholder or a reference. A cut string ends with
   ` [truncated]` and sets the result's `truncated` flag. On any error no report is written and rdy exits 70.
   The watchdog snapshot uses the same function. `redact_check` and `redact_action` run the same walk on one
   entry as it completes. The final pass finds nothing new in them, so the caller keeps one `RuleCounts` across

@@ -6,8 +6,9 @@
 //! first and is capped second, so a secret that straddles a cap is gone before the cap can cut it. The
 //! result comes back as a [`Redacted`] value, which is the only thing the writers and renderers accept.
 //!
-//! The caps, in bytes, cut on a character boundary and never inside a placeholder or between a key and the
-//! opening quote of its placeholder. A cut string ends with ` [truncated]`, and the check's `truncated`
+//! The caps, in bytes, cut on a character boundary and never inside a placeholder or a reference the key
+//! rule leaves alone (`${NAME}`, a `/run/secrets/` path, `null`), and never between a key and the opening
+//! quote of either. A cut inside such a token backs up to where the token starts. A cut string ends with ` [truncated]`, and the check's `truncated`
 //! flag is set. A trailing marker is set aside while a string is redacted and put back after, so a second
 //! pass over a cut string changes nothing and counts nothing.
 //!
@@ -455,7 +456,7 @@ fn pair_name_is_secret(map: &Map<String, Value>) -> Option<bool> {
 }
 
 /// Cuts `text` to at most `max` bytes, with the marker at the end, if it is longer. The flag says whether
-/// it was cut. The cut falls on a character boundary and never inside a placeholder.
+/// it was cut. The cut falls on a character boundary and never inside a placeholder or a reference.
 fn cap(text: String, max: usize) -> (String, bool) {
     match cut_str(&text, max) {
         Some(cut) => (cut, true),
@@ -469,6 +470,30 @@ fn split_marker(text: &str) -> (&str, &str) {
         .map_or((text, ""), |head| (head, CUT_MARKER))
 }
 
+/// How far [`exempt_token_start`] looks to each side of the cut. A longer token is not one the key rule
+/// leaves alone in practice, and the cut then stays where it fell, which fails closed.
+const TOKEN_WINDOW: usize = 512;
+
+/// If `at` falls inside a token that the key rule leaves alone, where that token starts. A token runs
+/// between blanks, quotes, `=`, `:`, `,` and `;`.
+fn exempt_token_start(text: &str, at: usize) -> Option<usize> {
+    const DELIMS: [char; 11] = [' ', '\t', '\n', '\r', '=', ':', '"', '\'', ',', ';', '\\'];
+    let from = text.floor_char_boundary(at.saturating_sub(TOKEN_WINDOW));
+    let to = text.ceil_char_boundary((at + TOKEN_WINDOW).min(text.len()));
+    let start = match text.get(from..at)?.rfind(DELIMS) {
+        Some(i) => from + i + 1,
+        None if from == 0 => 0,
+        None => return None,
+    };
+    let end = match text.get(at..to)?.find(DELIMS) {
+        Some(i) => at + i,
+        None if to == text.len() => to,
+        None => return None,
+    };
+    let token = text.get(start..end)?;
+    (start < at && at < end && is_exempt_value(token)).then_some(start)
+}
+
 fn cut_str(text: &str, max: usize) -> Option<String> {
     if text.len() <= max {
         return None;
@@ -478,12 +503,16 @@ fn cut_str(text: &str, max: usize) -> Option<String> {
     // A placeholder is never cut, and a cut never ends right behind one or in front of one's quote. Back
     // up to where it starts, and over the quote (and escapes) that open it, so `password="` or
     // `password="[REDACTED:..]` is not left as an open quote for a later pass to read as a value.
-    if let Some(inside) = placeholder_spans(text)
+    // The same goes for a value the key rule leaves alone (`${NAME}`, a `/run/secrets/` path, `null`):
+    // a cut inside it would leave a stub that a later pass reads as a secret.
+    let back_to = placeholder_spans(text)
         .into_iter()
         .find(|span| span.start <= at && at <= span.end)
-    {
+        .map(|span| span.start)
+        .or_else(|| exempt_token_start(text, at));
+    if let Some(start) = back_to {
         at = text
-            .get(..inside.start)
+            .get(..start)
             .unwrap_or_default()
             .trim_end_matches(['"', '\\', '\''])
             .len();

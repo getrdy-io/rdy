@@ -728,7 +728,7 @@ mod tests {
         assert!(!is_exempt_value("[truncated] hunter2"));
         assert_eq!(found("password= [truncated]"), ["[truncated]"]);
         assert_eq!(found("password: [truncated]"), ["[truncated]"]);
-        assert_covered("password: [truncated]\n  hunter2\nnext: ok", "hunter2");
+        assert_covered("password: [truncated]\nhunter2\nnext: ok", "hunter2");
         assert_eq!(
             found("password= [truncated] hunter2"),
             ["[truncated] hunter2"]
@@ -742,10 +742,18 @@ mod tests {
             format!("password=\"{ph}\""),
             format!("password='{ph}'"),
             format!("\"password\":\"{ph}\","),
-            format!("\\\"password\\\":\"{ph}\""),
+            // What a first pass leaves of an escaped JSON string: the whole value is one placeholder.
+            format!("\\\"password\\\":{ph}"),
         ] {
             assert!(found(&text).is_empty(), "{text}");
         }
+        // The real escaped form, with escaped quotes around the value. It is not a quoted pair, so the
+        // rule takes the whole value, quotes and all: a first pass leaves a bare placeholder, never this.
+        assert_eq!(found(r#"\"password\":\"hunter2\""#), [r#"\"hunter2\""#]);
+        assert_eq!(
+            found(&format!("\\\"password\\\":\\\"{ph}\\\"")),
+            [format!("\\\"{ph}\\\"")]
+        );
         assert_eq!(found(&format!("password=\"{ph}x\"")), [format!("{ph}x")]);
         assert_eq!(found(&format!("password=\"{ph}")), [format!("\"{ph}")]);
     }
