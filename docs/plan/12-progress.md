@@ -63,9 +63,9 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-026 | [#43](https://github.com/getrdy-io/rdy/pull/43) | 2026-10-28 | regex compile of redact_patterns (M1-031), did-you-mean in the unknown-key fix line (M1-031), Windows paths in file: collectors (schema allows `/` only; M2); the CLI prints the `expired on` line with no `:` after the file name, and CLI exit 64 on an expired spec (M1-126)
 
-- M1-027 | todo | | Property tests for rdy_spec::parse
+- M1-027 | [#59](https://github.com/getrdy-io/rdy/pull/59) | 2026-10-29 | The "verify before parse" row stays in src/sig/tests.rs (the parser spy is private to the crate), now on the fixed seed. Rules about the whole spec (no checks, too many hosts) carry no line, only YAML failures do. Nightly random-seed job is M2 (PROPTEST_RNG_SEED is the hook). Found and fixed: a tab ending the file was reported at column 0. nextest has a longer slow-timeout for the parse_properties binary; CI numbers: linux-x64 job 123200616321, longest test depth_64_passes_and_65_fails 15.3 s, nextest summary 39.4 s
 
-- M1-028 | todo | | linux-x64 root job: nextest archive under sudo, root_* filter, strace installed
+- M1-028 | [#57](https://github.com/getrdy-io/rdy/pull/57) | 2026-10-29 | none. CI run 40795966306 proved the exit test (root job: strace -V 6.8, uid under sudo 0, root_whoami_is_zero passed; the normal leg skipped it). Note for M1-121, M1-122 and M1-128: sudo resets HOME and XDG_CONFIG_HOME, so root tests set them on the child they spawn.
 
 - M1-029 | [#12](https://github.com/getrdy-io/rdy/pull/12) | 2026-10-28 | `spec init` is M3 (07 section 1) so it is not in the tree; `version --json` waits for the Version schema and exits 70; usage errors print generic text with no flag names or did-you-mean until M1-030; `--help` puts each option text on the line below the flag (clap layout), see 07 Appendix A note
 
@@ -254,7 +254,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-120 | [#27](https://github.com/getrdy-io/rdy/pull/27) | 2026-10-28 | The verifier is ed25519-dalek verify_strict over our own minisign envelope reader, not minisign-verify (ADR 0018). The Windows autocrlf case is covered by tests (`-text` and `eol=lf` rules in .gitattributes and a CR-free fixture test); the Windows CI leg arrives with M1-006 (#21) and M1-047. Deferred: signed_at future-date warning and expiry check (need a clock, M1-026), trust.yaml I/O (M1-121), key text files for --key (M1-121), CLI wiring and error codes (M1-126), the CRLF note on every error kind (today only `Tampered` carries it, M1-126) and reading the .minisig exactly once (M1-126)
 
-- M1-121 | todo | | Trust store load and save in user and system locations
+- M1-121 | [#51](https://github.com/getrdy-io/rdy/pull/51) | 2026-10-28 | Trust file I/O is split: format in rdy-spec (`TrustStore::from_yaml`, `to_yaml`, `PublicKey::from_key_file_text`), file rules in rdy-cli `trust` (ADR 0021). Stricter than 01 4.3 on purpose: user file symlink and foreign owner are refused, and on Windows any existing store is refused until M1-122. Invalid or unreadable stores use code `usage`, not a new code. The user store folder gets the folder checks too. Deferred: opening a `--key` file with its size cap (M1-126 and M1-131 own the commands), the root no-match hint (M1-126), the `sudo` CI leg and strace test (M1-122), `trust add/list/remove` (M1-131). Carried to M1-122: an elevated Windows run would read `%APPDATA%`, so M1-122 detects elevation; macOS extended ACLs; a Windows ProgramData pre-created by a non-admin blocks verification until then (ADR 0021 consequences); the `root` CI job (M1-028) runs the root-only tests, which are named `root_*` (`root_real_process_has_no_user_path`, `root_user_store_owned_by_another_user_is_refused`) and fail when `RDY_REQUIRE_ROOT` is set and the process is not root. INV-04 is covered by unit tests with a pretend euid 0 and by the `root_real_process_has_no_user_path` test, which runs only when the tests run as root
 
 - M1-122 | todo | | SEC-60 Root trust lookup touches no user path, Windows store ACL rules
 

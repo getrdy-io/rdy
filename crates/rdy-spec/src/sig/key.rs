@@ -14,6 +14,9 @@ const PUBLIC_KEY_BYTES: usize = 42;
 /// The algorithm bytes of every minisign public key. Prehashed signing uses the same key bytes.
 const KEY_ALGORITHM: [u8; 2] = *b"Ed";
 
+/// The most bytes of a key file that rdy reads. A real `.pub` file is about 100 bytes.
+pub const MAX_KEY_FILE_BYTES: usize = 1024;
+
 /// The 8-byte id that a minisign key writes into its signatures.
 ///
 /// It is chosen at random when the key is made, so anyone can make a key with a given id. It only
@@ -92,6 +95,45 @@ impl PublicKey {
         })
     }
 
+    /// Reads a key from the text of a key file: either a minisign `.pub` file (the `untrusted comment:`
+    /// line, then the key line) or the bare base64 line. One final line ending is allowed, LF or CR LF.
+    ///
+    /// The comment line is checked for its label only and never read. This is for `rdy trust add --key`
+    /// and `rdy run --key`. Callers read at most [`MAX_KEY_FILE_BYTES`] bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`SignatureError::BadKey`] if the text is longer than that, has the wrong number of lines or is
+    /// not a minisign ed25519 public key, and [`SignatureError::WeakKey`] if the key has small order.
+    pub fn from_key_file_text(text: &str) -> Result<Self, SignatureError> {
+        let bad = |reason| SignatureError::BadKey { reason };
+        if text.len() > MAX_KEY_FILE_BYTES {
+            return Err(bad("the key file is too long"));
+        }
+        let text = text.strip_suffix('\n').unwrap_or(text);
+        let text = text.strip_suffix('\r').unwrap_or(text);
+        let mut lines = text
+            .split('\n')
+            .map(|line| line.strip_suffix('\r').unwrap_or(line));
+        match (lines.next(), lines.next(), lines.next()) {
+            (Some(key), None, _) => Self::from_base64(key),
+            (Some(comment), Some(key), None) if comment.starts_with("untrusted comment:") => {
+                Self::from_base64(key)
+            }
+            _ => Err(bad("it is not a minisign public key file")),
+        }
+    }
+
+    /// The key as the base64 line of a minisign `.pub` file. [`PublicKey::from_base64`] reads it back.
+    #[must_use]
+    pub fn to_base64(&self) -> String {
+        let mut bytes = Vec::with_capacity(PUBLIC_KEY_BYTES);
+        bytes.extend_from_slice(&KEY_ALGORITHM);
+        bytes.extend_from_slice(&self.key_id.0);
+        bytes.extend_from_slice(self.key.as_bytes());
+        base64::encode(&bytes)
+    }
+
     /// The id that signatures by this key carry.
     #[must_use]
     pub fn key_id(&self) -> KeyId {
@@ -152,6 +194,55 @@ mod tests {
         let raw = base64::decode(STOCK_KEY).expect("base64");
         assert_eq!(key.fingerprint(), hex(&Sha256::digest(&raw[10..])));
         assert_eq!(key.fingerprint().len(), 64);
+    }
+
+    #[test]
+    fn a_key_file_is_a_pub_file_or_a_bare_key() {
+        let comment = "untrusted comment: minisign public key: E7620F1842B4E81F";
+        let want = PublicKey::from_base64(STOCK_KEY).expect("stock key");
+        for text in [
+            format!("{comment}\n{STOCK_KEY}\n"),
+            format!("{comment}\n{STOCK_KEY}"),
+            format!("{comment}\r\n{STOCK_KEY}\r\n"),
+            format!("{STOCK_KEY}\n"),
+            STOCK_KEY.to_owned(),
+            // The comment is never read, only its label.
+            format!("untrusted comment:\u{1b}[2J\n{STOCK_KEY}\n"),
+        ] {
+            assert_eq!(
+                PublicKey::from_key_file_text(&text).expect("reads"),
+                want,
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_key_file_with_anything_else_is_refused() {
+        let comment = "untrusted comment: x";
+        let mut too_long = format!("{comment}\n{STOCK_KEY}\n");
+        too_long.push_str(&"#".repeat(MAX_KEY_FILE_BYTES));
+        for text in [
+            String::new(),
+            "\n".to_owned(),
+            format!("{comment}\n"),
+            format!("{comment}\n\n{STOCK_KEY}\n"),
+            format!("{comment}\n{STOCK_KEY}\nextra\n"),
+            format!("{comment}\n{STOCK_KEY}\n\n"),
+            format!("comment\n{STOCK_KEY}\n"),
+            format!("{STOCK_KEY}\n{STOCK_KEY}\n"),
+            format!(" {STOCK_KEY}\n"),
+            format!("{comment}\n{STOCK_KEY} \n"),
+            too_long,
+        ] {
+            assert!(
+                matches!(
+                    PublicKey::from_key_file_text(&text),
+                    Err(SignatureError::BadKey { .. })
+                ),
+                "{text:?}"
+            );
+        }
     }
 
     #[test]

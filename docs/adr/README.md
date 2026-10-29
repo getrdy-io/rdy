@@ -28,7 +28,8 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0018](0018-verify-minisign-envelope-with-strict-ed25519.md) | rdy-spec checks the minisign envelope itself, over strict ed25519 and BLAKE2b | Accepted |
 | [0019](0019-schema-generation-derive-and-fragments.md) | Schemas are derived from the types where they are typed, and from fragments where they are not yet | Accepted |
 | [0020](0020-dist-release-workflow-settings.md) | Releases are built by a generated and hardened dist workflow, published last, and gated by an artifact check | Accepted |
-| [0026](0026-checkmeta-in-checkinfo.md) | CheckMeta holds a check's title and remediation and lives in its static CheckInfo | Proposed |
+| [0021](0021-trust-store-file-rules.md) | Trust store file rules where the design is silent are the strict ones (user symlink and owner, Windows refuses until M1-122) | Accepted |
+| [0026](0026-checkmeta-in-checkinfo.md) | CheckMeta holds a check's title and remediation and lives in its static CheckInfo | Accepted |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.

@@ -32,6 +32,7 @@ use serde::Serialize;
 
 use crate::password::PasswordError;
 use crate::prompt::{Cancel, PromptError};
+use crate::trust::TrustStoreError;
 
 mod skip;
 mod text;
@@ -65,7 +66,7 @@ pub enum ErrorCode {
     SpecKeyUnknown,
     /// The spec's `expires` has passed. Exit 64.
     SpecExpired,
-    /// The trust store can be changed by other users. Exit 64.
+    /// The trust store can be changed by other users, or rdy cannot check who can. Exit 64.
     TrustStoreInsecure,
     /// The report folder or the report files could not be written. Exit 70.
     ReportWrite,
@@ -244,6 +245,9 @@ pub enum CliError {
     /// A prompt could not be shown or answered.
     #[error("{0}")]
     Prompt(#[from] PromptError),
+    /// A trust store is unsafe, cannot be read, is not valid or cannot be written.
+    #[error("{0}")]
+    TrustStore(#[from] TrustStoreError),
     /// The report folder or the report files could not be written.
     #[error("{}", report_write_message(*step, path, *reason))]
     ReportWrite {
@@ -318,8 +322,9 @@ impl CliError {
     /// Picks the error out of an `anyhow::Error` (ADR 0008 decision 5).
     ///
     /// Looks through `.context(..)` layers for a [`CliError`], a [`PasswordError`], a [`PromptError`], a
-    /// [`SpecError`] or a [`ScalarError`]. Anything else is a bug. The text of an unknown error is dropped
-    /// on purpose: it may hold a path, a URL or a secret, and it has not been through the redactor.
+    /// [`TrustStoreError`], a [`SpecError`] or a [`ScalarError`]. Anything else is a bug. The text of an
+    /// unknown error is dropped on purpose: it may hold a path, a URL or a secret, and it has not been
+    /// through the redactor.
     #[must_use]
     pub fn from_anyhow(err: anyhow::Error) -> Self {
         let err = match err.downcast::<Self>() {
@@ -332,6 +337,10 @@ impl CliError {
         };
         let err = match err.downcast::<PromptError>() {
             Ok(found) => return Self::Prompt(found),
+            Err(err) => err,
+        };
+        let err = match err.downcast::<TrustStoreError>() {
+            Ok(found) => return Self::TrustStore(found),
             Err(err) => err,
         };
         let err = match err.downcast::<SpecError>() {
@@ -353,6 +362,7 @@ impl CliError {
             Self::Spec { source, .. } => spec_error_code(source),
             Self::Scalar { .. } => ErrorCode::SpecInvalid,
             Self::Prompt(err) => prompt_code(err),
+            Self::TrustStore(err) => err.code(),
             Self::ReportWrite { .. } => ErrorCode::ReportWrite,
             Self::Interrupted => ErrorCode::Interrupted,
             Self::Internal(_) => ErrorCode::Internal,
@@ -385,6 +395,7 @@ impl CliError {
             Self::Scalar { source, .. } => source.hint().to_owned(),
             Self::Password(err) => err.fix(),
             Self::Prompt(err) => err.fix().to_owned(),
+            Self::TrustStore(err) => err.fix(),
             Self::ReportWrite { step, .. } => match step {
                 ReportStep::CreateFolder => {
                     "use --out-dir <a folder you can write to>, or --no-report to skip the files"
@@ -414,9 +425,18 @@ impl CliError {
             Self::Prompt(err) => return render_prompt(err),
             _ => {}
         }
+        // Only a store that is not valid has a place in the file. The other trust store messages name the
+        // path themselves, so the file is not repeated in front of them.
+        let trust_file = match self {
+            Self::TrustStore(err @ TrustStoreError::Invalid { .. }) => {
+                err.file().map(|path| path.to_string_lossy().into_owned())
+            }
+            _ => None,
+        };
         let (file, location) = match self {
             Self::Spec { file, source } => (file.as_deref(), source.location()),
             Self::Scalar { file, .. } => (file.as_deref(), None),
+            Self::TrustStore(err) => (trust_file.as_deref(), err.location()),
             _ => (None, None),
         };
         Rendered {
