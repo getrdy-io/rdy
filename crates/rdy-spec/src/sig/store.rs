@@ -392,7 +392,7 @@ pub enum TrustAddError {
         /// arrange, so the fingerprints must be compared.
         same_key: bool,
     },
-    /// The source is not a trust file. A key given with `--key` is for one run and is never kept.
+    /// The source is not a trust file. A key with [`TrustSource::Flag`] is for one run and is never kept.
     #[error("only a key pinned in the system or user store can be kept in a trust file")]
     NotAStore,
     /// `added_at` is not a time like `2026-11-30T16:20:00Z`.

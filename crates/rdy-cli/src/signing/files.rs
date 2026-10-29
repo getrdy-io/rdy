@@ -93,8 +93,10 @@ pub fn read_private(path: &Path, cap: usize) -> Result<Zeroizing<Vec<u8>>, FileE
 /// Opening some devices has side effects (a watchdog arms, a tape rewinds), and a person may run this
 /// under `sudo`. So the path is checked with `stat` first, which follows a symlink, and a target that is
 /// not a regular file is refused before it is opened. On Unix the open handle is then compared with what
-/// `stat` saw (device and inode), so a path swapped in between is refused too. The open does not block,
-/// so a named pipe that appears in that window cannot hang the command.
+/// `stat` saw (device and inode), so a path swapped in between is refused too. That second check
+/// refuses the read, but the open has already happened, so it does not keep a device that was swapped in
+/// during the gap from seeing its open. The open does not block, so a named pipe that appears in that
+/// window cannot hang the command.
 ///
 /// # Errors
 ///

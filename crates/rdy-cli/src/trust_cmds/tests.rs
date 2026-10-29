@@ -1208,6 +1208,46 @@ fn a_user_who_tries_to_remove_a_system_key_by_id_is_told_the_id_in_the_sudo_line
 }
 
 #[test]
+fn an_id_that_only_the_system_store_has_gets_the_sudo_line_next_to_the_users_own_ids() {
+    let env = Env::new();
+    let (mine, theirs) = (new_key(), new_key());
+    env.put_store(&env.user_store(), &[("acme-platform", &mine, None)]);
+    set_mode(&env.user_store(), 0o600);
+    set_mode(env.user_store().parent().expect("dir"), 0o700);
+    env.put_store(&env.system_store(), &[("acme-platform", &theirs, None)]);
+    let (my_id, their_id) = (
+        public(&mine).key_id().to_string(),
+        public(&theirs).key_id().to_string(),
+    );
+    let mut out = Vec::new();
+    let err = remove(
+        &remove_args("acme-platform", Some(&their_id)),
+        &env.user(),
+        &mut out,
+    )
+    .expect_err("not in the user store");
+    let hint = err.hint();
+    assert!(
+        hint.contains(&format!("pick one of these key ids: {my_id}")),
+        "{hint}"
+    );
+    assert!(
+        hint.contains(&format!(
+            "sudo rdy trust remove acme-platform --key-id {their_id}"
+        )),
+        "{hint}"
+    );
+    // An id that is in neither store gets the list and no sudo line.
+    let err = remove(
+        &remove_args("acme-platform", Some("0000000000000000")),
+        &env.user(),
+        &mut out,
+    )
+    .expect_err("nowhere");
+    assert!(!err.hint().contains("sudo"), "{}", err.hint());
+}
+
+#[test]
 fn remove_refuses_an_unsafe_store_and_a_bad_product() {
     let env = Env::new();
     let key = new_key();

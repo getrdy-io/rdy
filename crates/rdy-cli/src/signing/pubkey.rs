@@ -14,8 +14,9 @@
 //! says so, and the caller words the refusal.
 //!
 //! Nothing here echoes key text. An error names the file the user gave, or says "that" for key text.
-//! The secret key test runs first, on the trimmed argument, so a secret key with a stray space or
-//! carriage return is still key text and never becomes a file name that an error would print.
+//! The secret key test runs first, on the trimmed argument, and again with everything that is not base64
+//! cut off both ends of each line. So a secret key with a stray space, a carriage return, smart quotes
+//! or a trailing comma is still key text and never becomes a file name that an error would print.
 
 use std::path::{Path, PathBuf};
 
@@ -97,8 +98,9 @@ pub fn is_key_text(arg: &str) -> bool {
 /// that rdy may trust (not a minisign ed25519 key, not a canonical point, or of small order).
 pub fn resolve(arg: &str) -> Result<GivenKey, GivenKeyError> {
     let trimmed = arg.trim();
-    // A secret key is found first, so that no later step can take it for a file name and print it.
-    if looks_like_secret_key(trimmed) {
+    // A secret key is found first, so that no later step can take it for a file name and print it. Junk
+    // around it (smart quotes, a trailing comma or full stop from a paste) does not hide it.
+    if looks_like_secret_key(trimmed) || secret_key_inside_junk(trimmed) {
         return Err(GivenKeyError::SecretKey {
             origin: Origin::Text,
         });
@@ -118,6 +120,16 @@ pub fn resolve(arg: &str) -> Result<GivenKey, GivenKeyError> {
         return Err(GivenKeyError::NotText { origin });
     };
     parse(text, origin)
+}
+
+/// True when a line of `text` is a secret key once the characters that cannot be in base64 are cut off
+/// both ends of it. That is how a key looks after it was pasted with quotes or punctuation around it.
+fn secret_key_inside_junk(text: &str) -> bool {
+    let is_base64 = |c: char| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=');
+    text.lines().any(|line| {
+        let core = line.trim_matches(|c: char| !is_base64(c));
+        !core.is_empty() && looks_like_secret_key(core)
+    })
 }
 
 fn parse(text: &str, origin: Origin) -> Result<GivenKey, GivenKeyError> {

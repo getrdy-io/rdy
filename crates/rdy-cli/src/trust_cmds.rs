@@ -495,26 +495,30 @@ fn no_such_key(
         Some(_) => format!("{product} has no trusted key with that id in {file}"),
         None => format!("{product} has no trusted key in {file}"),
     };
-    let fix = match asked {
-        Some((_, ids)) if !ids.is_empty() => {
-            format!("pick one of these key ids: {}", id_list(ids))
-        }
-        _ if in_other_store(layout, scope, product, asked.map(|(wanted, _)| wanted)) => {
-            // `--key-id` is repeated only when it is 16 hex digits. Other text is never echoed.
-            let key_id = asked
-                .map(|(wanted, _)| wanted)
-                .filter(|wanted| is_key_id_text(wanted))
-                .map_or_else(String::new, |wanted| {
-                    format!(" --key-id {}", wanted.to_ascii_uppercase())
-                });
-            format!(
-                "the key is in the system store, {}. To remove it, run as root: sudo rdy trust remove {product}{key_id}",
-                layout
-                    .path(Scope::System)
-                    .map_or_else(String::new, |path| shell_word(&path.to_string_lossy()))
-            )
-        }
-        _ => "run rdy trust list to see which keys are trusted".to_owned(),
+    // The ids this store has, when the person asked for one it does not have.
+    let pick = asked
+        .filter(|(_, ids)| !ids.is_empty())
+        .map(|(_, ids)| format!("pick one of these key ids: {}", id_list(ids)));
+    // A normal user cannot change the system store. Say so when the key is only there.
+    let sudo = in_other_store(layout, scope, product, asked.map(|(wanted, _)| wanted)).then(|| {
+        // `--key-id` is repeated only when it is 16 hex digits. Other text is never echoed.
+        let key_id = asked
+            .map(|(wanted, _)| wanted)
+            .filter(|wanted| is_key_id_text(wanted))
+            .map_or_else(String::new, |wanted| {
+                format!(" --key-id {}", wanted.to_ascii_uppercase())
+            });
+        format!(
+            "the key is in the system store, {}. To remove it, run as root: sudo rdy trust remove {product}{key_id}",
+            layout
+                .path(Scope::System)
+                .map_or_else(String::new, |path| shell_word(&path.to_string_lossy()))
+        )
+    });
+    let fix = match (pick, sudo) {
+        (Some(pick), Some(sudo)) => format!("{pick}. Or, {sudo}"),
+        (Some(text), None) | (None, Some(text)) => text,
+        (None, None) => "run rdy trust list to see which keys are trusted".to_owned(),
     };
     CliError::usage(message, fix)
 }

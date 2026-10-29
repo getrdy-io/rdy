@@ -97,6 +97,47 @@ fn secret_key_text_with_stray_white_space_is_still_text_and_never_echoed() {
 }
 
 #[test]
+fn secret_key_text_with_quotes_or_punctuation_around_it_is_still_refused_and_never_echoed() {
+    let (_, _, secret) = pair();
+    let line = secret.lines().nth(1).expect("key line").to_owned();
+    for (what, arg) in [
+        ("smart quotes", format!("\u{201c}{line}\u{201d}")),
+        ("single quotes", format!("'{line}'")),
+        ("ellipsis", format!("\u{2026}{line}\u{2026}")),
+        ("trailing comma", format!("{line},")),
+        ("trailing full stop", format!("{line}.")),
+        ("quotes and a space", format!(" \"{line}\" ")),
+        (
+            "the comment line in quotes",
+            "\u{201c}untrusted comment: rdy secret key\u{201d}".to_owned(),
+        ),
+    ] {
+        let err = resolve(&arg).expect_err(what);
+        assert!(
+            matches!(
+                err,
+                GivenKeyError::SecretKey {
+                    origin: Origin::Text
+                }
+            ),
+            "{what}: {err:?}"
+        );
+        let shown = format!("{err} {err:?}");
+        assert!(!shown.contains(&line), "{what}: {shown}");
+    }
+}
+
+#[test]
+fn a_file_name_with_dots_and_slashes_is_not_taken_for_a_secret_key() {
+    let d = dir();
+    let missing = d.path().join("acme.key.pub");
+    assert!(matches!(
+        resolve(missing.to_str().expect("utf8")),
+        Err(GivenKeyError::File { .. })
+    ));
+}
+
+#[test]
 fn a_public_key_with_stray_white_space_is_text() {
     let (key, _, _) = pair();
     let line = key.public_key_base64();

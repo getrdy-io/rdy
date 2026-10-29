@@ -249,6 +249,20 @@ fn a_device_is_refused_by_stat_and_a_link_to_one_too() {
 
 #[cfg(unix)]
 #[test]
+fn a_unix_socket_is_refused_by_stat_not_by_a_failed_open() {
+    // Opening a socket fails with ENXIO, so code that opens first reports it as unreadable. Only a
+    // `stat` before the open can say it is not a regular file.
+    let d = dir();
+    let path = d.path().join("sock");
+    let _listener = std::os::unix::net::UnixListener::bind(&path).expect("bind");
+    assert!(matches!(
+        read_public(&path, 64).unwrap_err(),
+        FileError::NotRegular
+    ));
+}
+
+#[cfg(unix)]
+#[test]
 fn a_handle_that_is_not_the_file_stat_saw_is_refused() {
     let d = dir();
     let (a, b) = (d.path().join("a"), d.path().join("b"));
