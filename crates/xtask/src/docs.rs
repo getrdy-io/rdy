@@ -83,12 +83,12 @@ mod tests {
     }
 
     #[test]
-    fn the_spec_page_is_the_golden_page() -> Result<()> {
-        let pages = pages(&repo_root())?;
-        let spec = pages.iter().find(|page| page.path == SPEC_PAGE);
-        assert_eq!(
-            spec.map(|page| page.contents.as_str()),
-            Some(include_str!("../tests/golden/spec-reference.md"))
+    fn the_committed_spec_page_matches_the_render() -> Result<()> {
+        // This is the drift check in CI: the page on disk must be what the schema renders to.
+        let root = repo_root();
+        assert!(
+            generate::check_all(&root, &pages(&root)?, "docs")?,
+            "the spec reference page is stale. Run `cargo xtask docs` and commit the result."
         );
         Ok(())
     }

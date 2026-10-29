@@ -1,11 +1,11 @@
 //! The spec reference page, rendered from the committed readiness schema
 //! (docs/plan/09-docs-site.md, section 5).
 //!
-//! This renderer covers objects and scalars (ticket M1-076). The root object and each object that a
-//! property names get one table, with one row per property. A row gives the name, the type, whether
-//! the field is required, the default and the description. A scalar shows its JSON type. An object
-//! shows `object` and gets a section of its own. An array shows `array`. A field with a fixed set of
-//! values or shapes (`oneOf`, `anyOf` or `enum`) shows `choice`. Arrays and choices are not expanded
+//! The root object and each object with fields that a property names get one table, with one row per
+//! property. An array of objects gets a section too, for its items. A row gives the name, the type,
+//! whether the field is required, the default and the description. A scalar shows its JSON type, and
+//! an array shows `array of` and the type of its items. An object shows `object`. A field with a fixed
+//! set of values or shapes (`oneOf`, `anyOf` or `enum`) shows `choice`, and its values are not listed
 //! yet. A shape that none of these covers fails the run and names the property path.
 //!
 //! The page depends only on the schema text, so its output is the same on every checkout.
@@ -25,7 +25,7 @@ description: Look up each rdy/v1 spec field, its type, whether it is required an
 
 const INTRO: &str = "You can use this page to look up each field of a `rdy/v1` spec. Each table shows the type, whether the field is required, its default and what the field does.\n\n";
 
-const CHOICE_NOTE: &str = "Each table has one row per property. A field whose type is `array` or `choice` shows only its type for now. Its items and choices are added to this page later. `choice` means the field takes one of a fixed set of values or shapes.\n\n";
+const CHOICE_NOTE: &str = "Each table has one row per property. A `choice` field takes one of a fixed set of values or shapes. This page shows only its type for now, and its values are added later.\n\n";
 
 const TABLE_HEAD: &str =
     "| Property | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n";
@@ -43,17 +43,40 @@ pub fn page(schema_text: &str) -> Result<String> {
     }
     out.push_str(CHOICE_NOTE);
     out.push_str("## Top-level fields\n\n");
-    write_table(&schema, &schema, "", &mut out)?;
+    write_table(&schema, &schema, "", &[], &mut out)?;
     Ok(out)
 }
 
-/// Writes one table for `object`, then one section for each property that is an object with
-/// fields. Sections follow in property order, depth first. `path` is the dotted name of `object`,
-/// empty for the root.
-fn write_table<'a>(root: &'a Value, object: &'a Value, path: &str, out: &mut String) -> Result<()> {
+/// An object with fields that gets its own section. `path` names it in errors and sections, and
+/// `chain` holds the defs entered on the way to it.
+struct Section<'a> {
+    path: String,
+    object: &'a Value,
+    chain: Vec<&'a str>,
+}
+
+/// What a property shows in its row, and the section it adds, if any.
+struct Shape<'a> {
+    label: String,
+    /// The schema the property points at, after every `$ref` is followed. Its default and its
+    /// description are the fallbacks when the property has none of its own.
+    node: &'a Value,
+    section: Option<Section<'a>>,
+}
+
+/// Writes one table for `object`, then one section for each object with fields that a property
+/// names, directly or as array items. Sections follow in property order, depth first. `path` is the
+/// dotted name of `object`, empty for the root. `chain` holds the defs that `object` came from.
+fn write_table<'a>(
+    root: &'a Value,
+    object: &'a Value,
+    path: &str,
+    chain: &[&'a str],
+    out: &mut String,
+) -> Result<()> {
     let required = required_names(object);
     let mut rows = String::new();
-    let mut sections: Vec<(String, &'a Value)> = Vec::new();
+    let mut sections: Vec<Section<'a>> = Vec::new();
     let properties: Option<&'a Map<String, Value>> =
         object.get("properties").and_then(Value::as_object);
     for (name, schema) in properties.into_iter().flatten() {
@@ -62,66 +85,60 @@ fn write_table<'a>(root: &'a Value, object: &'a Value, path: &str, out: &mut Str
         } else {
             format!("{path}.{name}")
         };
-        let target = resolve(root, schema, &here)?;
-        let (label, has_fields) = label(target, &here)?;
+        let shape = shape(root, schema, &here, chain)?;
         let is_required = if required.contains(&name.as_str()) {
             "yes"
         } else {
             "no"
         };
-        let default = schema.get("default").or_else(|| target.get("default"));
+        let default = schema.get("default").or_else(|| shape.node.get("default"));
         let description = text(schema, "description")
-            .or_else(|| text(target, "description"))
+            .or_else(|| text(shape.node, "description"))
             .unwrap_or("");
         rows.push_str(&format!(
-            "| `{name}` | {label} | {is_required} | {} | {} |\n",
+            "| `{name}` | {} | {is_required} | {} | {} |\n",
+            shape.label,
             default_cell(default),
             cell(description)
         ));
-        if has_fields {
-            sections.push((here, target));
-        }
+        sections.extend(shape.section);
     }
     out.push_str(TABLE_HEAD);
     out.push_str(&rows);
-    for (here, target) in sections {
-        out.push_str(&format!("\n## {here}\n\n"));
-        if let Some(text) = text(target, "description") {
+    for section in sections {
+        out.push_str(&format!(
+            "\n## {}\n\n",
+            section.path.replace("[]", " entries")
+        ));
+        if let Some(text) = text(section.object, "description") {
             out.push_str(text.trim_end());
             out.push_str("\n\n");
         }
-        write_table(root, target, &here, out)?;
+        write_table(root, section.object, &section.path, &section.chain, out)?;
     }
     Ok(())
 }
 
-/// Follows a `#/$defs/Name` reference. Any other schema comes back unchanged.
-fn resolve<'a>(root: &'a Value, schema: &'a Value, here: &str) -> Result<&'a Value> {
-    let Some(reference) = schema.get("$ref") else {
-        return Ok(schema);
-    };
-    let Some(pointer) = reference.as_str() else {
-        bail!("{here} has a $ref that is not text. Fix the schema that rdy-spec generates.");
-    };
-    let Some(name) = pointer.strip_prefix("#/$defs/") else {
-        bail!(
-            "{here} refers to {pointer}. The spec reference reads only `#/$defs/` names. Fix the reference in rdy-spec."
-        );
-    };
-    root.get("$defs")
-        .and_then(|defs| defs.get(name))
-        .with_context(|| {
-            format!("{here} refers to {pointer}, which is not defined in the schema. Fix the reference in rdy-spec.")
-        })
-}
-
-/// The type label for a property, and whether it is an object with fields that gets a section.
-fn label(node: &Value, here: &str) -> Result<(&'static str, bool)> {
+/// Works out a property's label and the section it adds. `chain` holds the defs already entered, so
+/// a schema that holds itself fails with the path instead of recursing forever.
+fn shape<'a>(
+    root: &'a Value,
+    schema: &'a Value,
+    here: &str,
+    chain: &[&'a str],
+) -> Result<Shape<'a>> {
+    let (names, node) = resolve(root, schema, here, chain)?;
+    let mut inside: Vec<&'a str> = chain.to_vec();
+    inside.extend(names);
     if ["oneOf", "anyOf", "enum"]
         .iter()
         .any(|key| node.get(key).is_some())
     {
-        return Ok(("choice", false));
+        return Ok(Shape {
+            label: "choice".to_owned(),
+            node,
+            section: None,
+        });
     }
     let Some(kind) = node.get("type").and_then(Value::as_str) else {
         bail!(
@@ -129,13 +146,80 @@ fn label(node: &Value, here: &str) -> Result<(&'static str, bool)> {
         );
     };
     match kind {
-        "string" => Ok(("string", false)),
-        "integer" => Ok(("integer", false)),
-        "number" => Ok(("number", false)),
-        "boolean" => Ok(("boolean", false)),
-        "array" => Ok(("array", false)),
-        "object" => Ok(("object", has_fields(node))),
-        other => bail!("{here} has the type {other}, which the spec reference does not read yet."),
+        "string" | "integer" | "number" | "boolean" => Ok(Shape {
+            label: kind.to_owned(),
+            node,
+            section: None,
+        }),
+        "array" => {
+            let Some(items) = node.get("items") else {
+                bail!("{here} is an array with no `items`. Give it `items` in rdy-spec.");
+            };
+            let inner = shape(root, items, &format!("{here}[]"), &inside)?;
+            Ok(Shape {
+                label: format!("array of {}", inner.label),
+                node,
+                section: inner.section,
+            })
+        }
+        "object" => {
+            let section = has_fields(node).then(|| Section {
+                path: here.to_owned(),
+                object: node,
+                chain: inside.clone(),
+            });
+            Ok(Shape {
+                label: "object".to_owned(),
+                node,
+                section,
+            })
+        }
+        other => bail!(
+            "{here} has the type {other}, which the spec reference does not read yet. Add the type to `shape` in crates/xtask/src/spec_reference.rs, or change the schema in rdy-spec."
+        ),
+    }
+}
+
+/// Follows `$ref` links, possibly several, to the schema they end at. Returns the names of the defs
+/// passed, in order. A name that is in `chain`, or that the links pass twice, is a cycle and fails
+/// with the path.
+fn resolve<'a>(
+    root: &'a Value,
+    schema: &'a Value,
+    here: &str,
+    chain: &[&'a str],
+) -> Result<(Vec<&'a str>, &'a Value)> {
+    let mut node = schema;
+    let mut names: Vec<&'a str> = Vec::new();
+    loop {
+        let Some(reference) = node.get("$ref") else {
+            return Ok((names, node));
+        };
+        let Some(pointer) = reference.as_str() else {
+            bail!("{here} has a $ref that is not text. Fix the schema that rdy-spec generates.");
+        };
+        let Some(name) = pointer.strip_prefix("#/$defs/") else {
+            bail!(
+                "{here} refers to {pointer}. The spec reference reads only `#/$defs/` names. Fix the reference in rdy-spec."
+            );
+        };
+        if chain.contains(&name) {
+            bail!(
+                "{here} refers to {name}, which already encloses it. A table cannot hold a cycle. Break the cycle in rdy-spec."
+            );
+        }
+        if names.contains(&name) {
+            bail!("{here} has a $ref cycle through {name}. Break the cycle in rdy-spec.");
+        }
+        node = root
+            .get("$defs")
+            .and_then(|defs| defs.get(name))
+            .with_context(|| {
+                format!(
+                    "{here} refers to {pointer}, which is not defined in the schema. Fix the reference in rdy-spec."
+                )
+            })?;
+        names.push(name);
     }
 }
 
@@ -190,40 +274,57 @@ mod tests {
         page.lines().filter(|line| line.starts_with("| `")).count()
     }
 
-    /// Properties of `object` and of every object under it, the number of rows the page must hold.
+    /// The number of rows the page must hold: the properties of `object`, and of every object with
+    /// fields under them, reached directly or through array items.
     fn expected_rows(root: &Value, object: &Value) -> Result<usize> {
         let Some(properties) = object.get("properties").and_then(Value::as_object) else {
             return Ok(0);
         };
         let mut total = properties.len();
         for schema in properties.values() {
-            let target = resolve(root, schema, "test")?;
-            if has_fields(target) {
-                total += expected_rows(root, target)?;
+            let mut node = resolve(root, schema, "test", &[])?.1;
+            while node.get("type").and_then(Value::as_str) == Some("array") {
+                let Some(items) = node.get("items") else {
+                    break;
+                };
+                node = resolve(root, items, "test", &[])?.1;
+            }
+            if has_fields(node) {
+                total += expected_rows(root, node)?;
             }
         }
         Ok(total)
     }
 
-    #[test]
-    fn the_readiness_schema_renders_to_the_golden_page() -> Result<()> {
-        let page = page(&committed_schema()?)?;
-        assert_eq!(
-            page,
-            include_str!("../tests/golden/spec-reference.md"),
-            "the golden page is stale. Run `cargo xtask docs` and copy docs/src/content/docs/reference/spec/index.md to crates/xtask/tests/golden/spec-reference.md."
+    /// Asserts that rendering `schema` fails with a message that starts with `path`.
+    fn fails_at(schema: &str, path: &str) {
+        let err = page(schema).err().map(|e| format!("{e:#}"));
+        let message = err.unwrap_or_else(|| "no error".to_owned());
+        assert!(
+            message.starts_with(path),
+            "expected an error that names {path:?}, got {message:?}"
         );
-        Ok(())
     }
 
     #[test]
     fn the_readiness_schema_has_one_table_row_per_property() -> Result<()> {
-        let schema: Value = serde_json::from_str(&committed_schema()?)?;
-        let page = page(&committed_schema()?)?;
+        let schema_text = committed_schema()?;
+        let schema: Value = serde_json::from_str(&schema_text)?;
+        let page = page(&schema_text)?;
         let expected = expected_rows(&schema, &schema)?;
         assert_eq!(table_rows(&page), expected);
-        // Five top-level properties, six in metadata and four in bundle.
-        assert_eq!(expected, 15);
+        // Five top-level properties, six in metadata, four in bundle, six in each checks entry and
+        // two in each redact_patterns entry.
+        assert_eq!(expected, 23);
+        assert!(page.contains("\n## checks entries\n\n"), "{page}");
+        assert!(
+            page.contains("\n## bundle.redact_patterns entries\n\n"),
+            "{page}"
+        );
+        assert!(
+            page.contains("| `checks` | array of object | yes |"),
+            "{page}"
+        );
         Ok(())
     }
 
@@ -254,7 +355,7 @@ mod tests {
         let rows = [
             "| `b` | string | yes | `x` | Second key first in file. It wraps. |",
             "| `a` | integer | no |  | A \\| pipe. |",
-            "| `list` | array | no |  |  |",
+            "| `list` | array of string | no |  |  |",
             "| `pick` | choice | no |  |  |",
             "| `inner` | object | yes |  | The inner object. |",
             "| `map` | object | no |  |  |",
@@ -271,30 +372,112 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_definition_fails_and_names_the_property() -> Result<()> {
-        let schema = r##"{"type": "object", "properties": {"x": {"$ref": "#/$defs/Missing"}}}"##;
-        let err = page(schema).err().map(|e| format!("{e:#}"));
-        assert!(err.is_some_and(|text| text.starts_with("x refers to #/$defs/Missing")));
+    fn an_array_of_objects_gets_a_section_for_its_items() -> Result<()> {
+        let schema = r##"{"type": "object", "properties": {
+            "xs": {"description": "Items.", "type": "array", "items": {"$ref": "#/$defs/Item"}}},
+            "$defs": {"Item": {"description": "One item.", "type": "object",
+              "properties": {"id": {"type": "string"},
+                             "tags": {"type": "array", "items": {"type": "string"}}},
+              "required": ["id"]}}}"##;
+        let page = page(schema)?;
+        assert!(
+            page.contains("| `xs` | array of object | no |  | Items. |"),
+            "{page}"
+        );
+        assert!(page.contains("\n## xs entries\n\nOne item.\n\n"), "{page}");
+        assert!(page.contains("| `id` | string | yes |  |  |"), "{page}");
+        assert!(
+            page.contains("| `tags` | array of string | no |  |  |"),
+            "{page}"
+        );
+        assert_eq!(table_rows(&page), 3);
         Ok(())
     }
 
     #[test]
-    fn a_reference_outside_defs_fails() {
-        let schema = r##"{"type": "object", "properties": {"x": {"$ref": "#/properties/y"}}}"##;
-        assert!(page(schema).is_err());
+    fn a_missing_definition_fails_and_names_the_property() {
+        fails_at(
+            r##"{"type": "object", "properties": {"x": {"$ref": "#/$defs/Missing"}}}"##,
+            "x refers to #/$defs/Missing",
+        );
+    }
+
+    #[test]
+    fn a_reference_outside_defs_fails_and_names_the_property() {
+        fails_at(
+            r##"{"type": "object", "properties": {"x": {"$ref": "#/properties/y"}}}"##,
+            "x refers to #/properties/y",
+        );
     }
 
     #[test]
     fn a_property_with_no_type_or_choice_fails_and_names_the_path() {
-        let schema = r#"{"type": "object", "properties": {"x": {"description": "No type."}}}"#;
-        let err = page(schema).err().map(|e| format!("{e:#}"));
-        assert!(err.is_some_and(|text| text.starts_with("x has no single type")));
+        fails_at(
+            r#"{"type": "object", "properties": {"x": {"description": "No type."}}}"#,
+            "x has no single type",
+        );
     }
 
     #[test]
-    fn a_type_list_fails_because_the_page_reads_one_type() {
-        let schema = r#"{"type": "object", "properties": {"x": {"type": ["string", "null"]}}}"#;
-        assert!(page(schema).is_err());
+    fn a_type_list_fails_and_names_the_property() {
+        fails_at(
+            r#"{"type": "object", "properties": {"x": {"type": ["string", "null"]}}}"#,
+            "x has no single type",
+        );
+    }
+
+    #[test]
+    fn an_unknown_type_fails_with_a_fix_hint_and_names_the_property() {
+        let schema = r#"{"type": "object", "properties": {"x": {"type": "null"}}}"#;
+        fails_at(schema, "x has the type null");
+        let text = page(schema)
+            .err()
+            .map(|e| format!("{e:#}"))
+            .unwrap_or_default();
+        assert!(text.contains("Add the type to `shape`"), "{text}");
+    }
+
+    #[test]
+    fn an_array_with_no_items_fails_and_names_the_property() {
+        fails_at(
+            r#"{"type": "object", "properties": {"xs": {"type": "array"}}}"#,
+            "xs is an array with no `items`",
+        );
+    }
+
+    #[test]
+    fn a_definition_that_holds_itself_fails_and_names_the_path() {
+        fails_at(
+            r##"{"type": "object", "properties": {"a": {"$ref": "#/$defs/A"}},
+                 "$defs": {"A": {"type": "object", "properties": {"next": {"$ref": "#/$defs/A"}}}}}"##,
+            "a.next refers to A, which already encloses it",
+        );
+    }
+
+    #[test]
+    fn an_array_that_holds_itself_fails_and_names_the_path() {
+        fails_at(
+            r##"{"type": "object", "properties": {"xs": {"type": "array", "items": {"$ref": "#/$defs/L"}}},
+                 "$defs": {"L": {"type": "array", "items": {"$ref": "#/$defs/L"}}}}"##,
+            "xs[][] refers to L, which already encloses it",
+        );
+    }
+
+    #[test]
+    fn a_chain_of_references_that_loops_fails_and_names_the_path() {
+        fails_at(
+            r##"{"type": "object", "properties": {"x": {"$ref": "#/$defs/B"}},
+                 "$defs": {"B": {"$ref": "#/$defs/C"}, "C": {"$ref": "#/$defs/B"}}}"##,
+            "x has a $ref cycle through B",
+        );
+    }
+
+    #[test]
+    fn a_chain_of_references_that_ends_is_followed() -> Result<()> {
+        let schema = r##"{"type": "object", "properties": {"x": {"$ref": "#/$defs/B"}},
+                 "$defs": {"B": {"$ref": "#/$defs/C"}, "C": {"type": "integer", "description": "Deep."}}}"##;
+        assert!(page(schema)?.contains("| `x` | integer | no |  | Deep. |"));
+        Ok(())
     }
 
     #[test]

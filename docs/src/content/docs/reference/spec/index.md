@@ -11,7 +11,7 @@ A vendor's readiness requirements (`apiVersion: rdy/v1`, `kind: Readiness`).
 
 Check ids this schema does not know are allowed and reported as not run. Every other unknown key is an error, so a newer spec fails loudly on an older rdy.
 
-Each table has one row per property. A field whose type is `array` or `choice` shows only its type for now. Its items and choices are added to this page later. `choice` means the field takes one of a fixed set of values or shapes.
+Each table has one row per property. A `choice` field takes one of a fixed set of values or shapes. This page shows only its type for now, and its values are added later.
 
 ## Top-level fields
 
@@ -20,7 +20,7 @@ Each table has one row per property. A field whose type is `array` or `choice` s
 | `apiVersion` | string | yes |  | Format version. Must be `rdy/v1`. Kept as text so the message for a wrong version can quote what the file said. |
 | `kind` | choice | yes |  | Document kind. Only `Readiness` exists in v1. |
 | `metadata` | object | yes |  | Who the spec is for and how fresh it is. |
-| `checks` | array | yes |  | The checks to run, in report order. Entries are keyed by id plus optional name, and keys must be unique. A valid spec has 1 to 256 entries. |
+| `checks` | array of object | yes |  | The checks to run, in report order. Entries are keyed by id plus optional name, and keys must be unique. A valid spec has 1 to 256 entries. |
 | `bundle` | object | no |  | What `rdy bundle` collects. It parses today so specs written now keep working, and `rdy run` never collects anything. |
 
 ## metadata
@@ -38,6 +38,19 @@ Unknown keys are refused.
 | `expires` | string | no |  | The UTC time after which rdy refuses to run this spec, in the full form `YYYY-MM-DDTHH:MM:SSZ`, for example `2027-01-31T00:00:00Z`. Kept as text here. The shape and the comparison with the clock are checked when the spec is validated. |
 | `annotations` | object | no |  | Up to 32 free-form labels for vendor tooling and the portal. rdy never changes behaviour because of them and copies them into the result. Keys are lowercase, 1 to 63 characters, and values are at most 256 characters. |
 
+## checks entries
+
+One check to run: an id, the common fields below, and the parameters of that check id. Parameters of ids this schema does not know are not checked here.
+
+| Property | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `id` | string | yes |  | Which check to run: family.name in lowercase, for example host.memory. |
+| `name` | string | no |  | Short label, shown next to the id. Needed when the same id appears twice. |
+| `severity` | choice | no | `block` | block (the default) makes a failure NOT READY. warn makes it READY with warnings. |
+| `fix` | string | no |  | What the customer should do when this check fails. Plain text. Shown instead of rdy's own advice, which stays available below it. |
+| `timeout` | string | no |  | How long this check may run, 1s to 60s. Replaces the check's own default. Outside that range the check is not run and lint reports an error. |
+| `os` | array of choice | no |  | Run only on these operating systems. On others the check is reported as not applicable and does not count. |
+
 ## bundle
 
 The `bundle` block: what `rdy bundle` collects and how it redacts.
@@ -46,7 +59,16 @@ It parses in v1 and nothing acts on it yet. `rdy run` never collects anything, w
 
 | Property | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `collect` | array | no |  | Collectors: `journal:<duration>`, `k8s:events`, `file:<absolute path or glob>`. At most 64. |
-| `redact` | array | no |  | Redactor groups to add, such as `aws_keys`, `bearer_tokens` or `emails`. At most 64. The built-in rules always run, so a spec can add redaction and can never remove it. |
-| `redact_patterns` | array | no |  | Your own patterns, at most 32. A match is replaced with a `custom.<name>` placeholder. A pattern can only add redaction: where it overlaps a built-in match, the whole overlapping region is redacted. A pattern that matches the empty string is an error. |
+| `collect` | array of string | no |  | Collectors: `journal:<duration>`, `k8s:events`, `file:<absolute path or glob>`. At most 64. |
+| `redact` | array of string | no |  | Redactor groups to add, such as `aws_keys`, `bearer_tokens` or `emails`. At most 64. The built-in rules always run, so a spec can add redaction and can never remove it. |
+| `redact_patterns` | array of object | no |  | Your own patterns, at most 32. A match is replaced with a `custom.<name>` placeholder. A pattern can only add redaction: where it overlaps a built-in match, the whole overlapping region is redacted. A pattern that matches the empty string is an error. |
 | `max_size` | choice | no |  | Bundle size cap, such as `200Mi`. It lowers rdy's own cap and never raises it. |
+
+## bundle.redact_patterns entries
+
+A vendor redaction pattern in the `bundle` block.
+
+| Property | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `name` | string | yes |  | The rule name. A match is replaced with a `custom.<name>` placeholder. |
+| `regex` | string | yes |  | The pattern, in Rust `regex` syntax (linear time, no backreferences), 1 to 256 characters. Not compiled here. |
