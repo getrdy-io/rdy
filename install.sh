@@ -14,7 +14,8 @@
 # - Installs one file, <dir>/rdy. The dir is $HOME/.local/bin, or RDY_INSTALL_DIR. Root needs
 #   --allow-root and gets /usr/local/bin. It never runs sudo, never edits a shell profile and never
 #   sets a setuid bit.
-# - Downloads over https only, from the one release URL below. No variable changes the host.
+# - Asks for https only, from the one release URL below. No variable changes the host. curl refuses
+#   plain http, also in a redirect. GNU wget cannot (see pick_downloader).
 # - Allowed variables: RDY_VERSION, RDY_INSTALL_DIR, RDY_INSECURE_SKIP_SIGNATURE. HOME, TMPDIR and
 #   the proxy variables are read by the tools themselves.
 # - Order: download, check the signature of SHA256SUMS (seam: verify_signature, M1-015), check the
@@ -86,8 +87,7 @@ Usage: install.sh [--allow-root] [--help]
   --help         Show this text.
 
 Installs to $HOME/.local/bin, or to RDY_INSTALL_DIR if you set it.
-RDY_VERSION picks a release. RDY_INSECURE_SKIP_SIGNATURE=1 skips the
-signature check only. It does not skip the sha256 check.
+RDY_VERSION picks a release.
 When you pipe the script into sh, pass flags after "-s --":
   curl --proto '=https' --tlsv1.2 -sSf <url> | sh -s -- --allow-root
 EOF
@@ -111,12 +111,13 @@ parse_args() {
         case $arg in
             "$END_MARK") ;;
             --allow-root) ALLOW_ROOT=1 ;;
-            --help | -h)
+            --help)
                 usage
                 exit 0
                 ;;
             *)
-                say "error: unknown option: $arg"
+                # Print the name only. An argument such as --x=secret must not reach the log.
+                say "error: unknown option: ${arg%%=*}"
                 say "  fix: use --allow-root or --help. With a pipe: curl ... | sh -s -- --allow-root"
                 exit 64
                 ;;
@@ -245,11 +246,23 @@ pick_hash_tool() {
     fi
 }
 
-# Prefer curl. wget counts only if it can refuse plain http (GNU wget); busybox wget cannot.
+# Prefer curl. wget counts only if it is GNU wget: it must list --https-only and --no-config. Busybox
+# wget lists neither. --https-only limits recursive mode only, so it does not stop a redirect to plain
+# http for a single file. With wget, integrity rests on the signature check (M1-015) and the sha256
+# check, not on the transport. ADR 0025, decision 5.
+wget_is_gnu() {
+    command -v wget > /dev/null 2>&1 || return 1
+    help=$(wget --help 2>&1 < /dev/null) || help=''
+    case $help in
+        *--https-only*--no-config* | *--no-config*--https-only*) return 0 ;;
+    esac
+    return 1
+}
+
 pick_downloader() {
     if command -v curl > /dev/null 2>&1; then
         DL=curl
-    elif command -v wget > /dev/null 2>&1 && wget --help 2>&1 | grep -q -e '--https-only'; then
+    elif wget_is_gnu; then
         DL=wget
         # wget reads the lower case name only.
         if [ -z "${https_proxy:-}" ] && [ -n "${HTTPS_PROXY:-}" ]; then
@@ -258,22 +271,30 @@ pick_downloader() {
         fi
     else
         die "no download tool was found." \
-            "neither curl nor a wget with --https-only is on PATH." \
+            "neither curl nor GNU wget (with --https-only and --no-config) is on PATH." \
             "install curl, then run the script again."
     fi
 }
 
-# fetch <name>: download one release asset into the work folder. Both tools honor HTTPS_PROXY.
+# fetch <name> [<what> <cause> <fix>]: download one release asset into the work folder. Both tools
+# honor HTTPS_PROXY. Neither reads a user config file: curl gets -q as its first argument and wget gets
+# --no-config, so a ~/.curlrc or wgetrc cannot turn off certificate checks. A stalled transfer ends:
+# curl gives up under 1 KiB/s for 60 s, wget after 60 s without data.
+# When the release has no such file (HTTP 404), the caller can pass its own three-part message. Without
+# one, a generic "no file named" message is used. M1-015 uses this for the signature bundle, whose
+# message is the one in docs/plan/06 ("this release looks incomplete").
 fetch() {
     url="$RELEASE_BASE/v$VERSION/$1"
     rc=0
     case $DL in
         curl)
-            curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL \
-                --connect-timeout 20 --retry 2 -o "$WORK/$1" "$url" < /dev/null || rc=$?
+            curl -q --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL \
+                --connect-timeout 20 --speed-limit 1024 --speed-time 60 --retry 2 \
+                -o "$WORK/$1" "$url" < /dev/null || rc=$?
             ;;
         wget)
-            wget --https-only --secure-protocol=TLSv1_2 -q -O "$WORK/$1" "$url" < /dev/null || rc=$?
+            wget --no-config --https-only --secure-protocol=TLSv1_2 --timeout=30 --read-timeout=60 --tries=3 \
+                -q -O "$WORK/$1" "$url" < /dev/null || rc=$?
             ;;
     esac
     if [ "$rc" = 0 ]; then
@@ -286,6 +307,9 @@ fetch() {
                 "point SSL_CERT_FILE or CURL_CA_BUNDLE at your CA bundle, or download the files by hand and check them (see the docs)."
             ;;
         curl:22 | wget:8)
+            if [ -n "${2:-}" ]; then
+                die "$2" "${3:-}" "${4:-}"
+            fi
             die "the release has no file named $1 for version $VERSION." \
                 "the version does not exist, the release is not finished, or this platform has no build." \
                 "check RDY_VERSION and the release page. Nothing was installed."
@@ -314,7 +338,7 @@ verify_signature() {
     fi
     die "this copy of install.sh cannot check the release signature yet." \
         "the cosign check is not built into this version of the script." \
-        "use an install.sh from a later release, or set RDY_INSECURE_SKIP_SIGNATURE=1 to check the sha256 only."
+        "verify the release by hand with scripts/verify-release.sh (see the install docs), or use an install.sh from a later release. Nothing was installed."
 }
 
 sha256_of() {
@@ -336,6 +360,14 @@ is_sha256() {
 # No such line, or two, or a hash that is not 64 lowercase hex digits, stops the install.
 verify_archive_hash() {
     sums="$WORK/SHA256SUMS"
+    # A carriage return anywhere stops the install. Awks differ on whether \r is part of a field, so
+    # no rule here may depend on it. The release workflow writes LF only.
+    crlf=$(awk 'index($0, "\r") { print "x"; exit }' "$sums") || crlf=x
+    if [ -n "$crlf" ]; then
+        die "SHA256SUMS has a carriage return (a Windows line end)." \
+            "the list was changed on the way, or saved by a tool that converts line ends." \
+            "do not use this download. Download again, and tell your vendor if it repeats."
+    fi
     wanted=$(awk -v f="$ARCHIVE" '
         { n = $2; if (substr(n, 1, 1) == "*") n = substr(n, 2) }
         NF == 2 && n == f { print $1 }
@@ -477,7 +509,10 @@ main() {
         "TMPDIR (or /tmp) is missing or not writable." \
         "set TMPDIR to a folder you can write to."
     fetch "$ARCHIVE"
-    fetch SHA256SUMS
+    fetch SHA256SUMS \
+        "this release looks incomplete: it has no SHA256SUMS." \
+        "the release is still being published, or the version is wrong." \
+        "check RDY_VERSION and the release page, and try again later. Nothing was installed."
     verify_signature "$WORK/SHA256SUMS" "$VERSION"
     verify_archive_hash
     extract_binary

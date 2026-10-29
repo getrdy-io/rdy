@@ -1,16 +1,22 @@
 #!/bin/sh
 # test-install-sh.sh: shell tests for install.sh (M1-014, SEC-08, INV-19). Exit 0 when all pass.
 #
-# Usage: sh scripts/test-install-sh.sh [dash] [busybox]
-# With no argument it runs install.sh under every shell it finds: dash and busybox sh.
+# Usage: sh scripts/test-install-sh.sh [dash] [busybox] [sh]
+# With no argument it runs install.sh under dash and busybox sh. `sh` runs it under /bin/sh with the
+# host tools (CI uses it on macOS, where /bin/sh is bash in POSIX mode and the tools are BSD).
 # A missing shell is a SKIP on a developer machine and a failure in CI ($CI set), so a runner image
 # change cannot turn the tests into a silent pass.
 #
 # Nothing touches the network or the real machine. Each case runs in a clean environment (env -i) with
 # a PATH folder made of symlinks to the few tools install.sh needs, plus stubs for curl, wget, id,
-# uname and sysctl. A stub curl maps the release URL to a synthetic release folder. In the busybox run
-# the tools are busybox applets too, so the script is tried against busybox tar, awk, mktemp and the
-# rest, as on Alpine.
+# uname, sysctl and mktemp. A stub curl maps the release URL to a synthetic release folder. In the
+# busybox run the tools are busybox applets too, so the script is tried against busybox tar, awk,
+# mktemp and the rest, as on Alpine.
+#
+# The busybox run needs a busybox that looks up applets on PATH. Alpine's does. The Debian and Ubuntu
+# busybox-static prefers its own built-in id, uname and sha256sum, so the stubs never run. Before the
+# suite, each shell must prove that a stub id and uname win (check_stubs). If not, the run fails with a
+# message and does not pretend to test. CI runs the busybox leg in a pinned Alpine container.
 #
 # Needs on the host: tar, gzip, sha256sum or shasum, head, wc, sed, grep, awk, mktemp.
 
@@ -34,11 +40,15 @@ for tool in tar gzip head wc sed grep awk mktemp; do
         exit 1
     fi
 done
+# The hash tool the cases use unless they pick one. macOS has shasum and no sha256sum.
 if command -v sha256sum > /dev/null 2>&1; then
+    DEFHASH=sha256sum
     host_hash() { sha256sum "$1" | awk '{ print $1 }'; }
 else
+    DEFHASH=shasum
     host_hash() { shasum -a 256 "$1" | awk '{ print $1 }'; }
 fi
+CR=$(printf '\r')
 
 # ---------------------------------------------------------------------------------------------
 # Stubs
@@ -57,7 +67,7 @@ url=''
 while [ "$#" -gt 0 ]; do
     case $1 in
         -o) out=$2; shift 2 ;;
-        --proto | --proto-redir | --connect-timeout | --retry) shift 2 ;;
+        --proto | --proto-redir | --connect-timeout | --retry | --speed-limit | --speed-time) shift 2 ;;
         -*) shift ;;
         *) url=$1; shift ;;
     esac
@@ -71,12 +81,14 @@ esac
 cp "$STUB_REL/$name" "$out"
 EOF
 
-# A wget that supports --https-only (GNU wget) and one that does not (busybox wget).
+# A wget that supports --https-only and --no-config (GNU wget), one with only --https-only, and one
+# with neither (busybox wget).
 cat > "$tmp/stubs/wget" << 'EOF'
 #!/bin/sh
 if [ "${1:-}" = "--help" ]; then
     echo "GNU Wget stub"
-    echo "      --https-only    follow only secure HTTPS links"
+    echo "      --https-only    follow only secure HTTPS links in recursive mode"
+    echo "      --no-config     do not read any config file"
     exit 0
 fi
 printf 'wget %s\n' "$*" >> "$STUB_LOG"
@@ -96,6 +108,16 @@ case $url in
 esac
 [ -f "$STUB_REL/$name" ] || exit 8
 cp "$STUB_REL/$name" "$out"
+EOF
+cat > "$tmp/stubs/wget-noconfig" << 'EOF'
+#!/bin/sh
+if [ "${1:-}" = "--help" ]; then
+    echo "GNU Wget stub, old"
+    echo "      --https-only    follow only secure HTTPS links in recursive mode"
+    exit 0
+fi
+printf 'wget-noconfig %s\n' "$*" >> "$STUB_LOG"
+exit 1
 EOF
 cat > "$tmp/stubs/wget-old" << 'EOF'
 #!/bin/sh
@@ -119,6 +141,18 @@ case ${1:-} in
     *) exit 1 ;;
 esac
 EOF
+# mktemp passes through to the real one, except for a file in /usr/local/bin. That one is logged and
+# refused, so a test can see where install.sh meant to write without touching the real folder.
+cat > "$tmp/stubs/mktemp" << 'EOF'
+#!/bin/sh
+case ${1:-} in
+    /usr/local/bin/*)
+        printf 'mktemp %s\n' "$1" >> "$STUB_LOG.mktemp"
+        exit 1
+        ;;
+esac
+exec $STUB_REAL_MKTEMP "$@"
+EOF
 cat > "$tmp/stubs/sysctl" << 'EOF'
 #!/bin/sh
 if [ -n "${STUB_TRANSLATED:-}" ]; then echo "$STUB_TRANSLATED"; exit 0; fi
@@ -130,9 +164,9 @@ chmod +x "$tmp/stubs/"*
 # ---------------------------------------------------------------------------------------------
 # PATH folders
 # ---------------------------------------------------------------------------------------------
-base_tools="cat chmod cp grep gzip mkdir mktemp mv rm tar awk"
+base_tools="cat chmod cp grep gzip mkdir mv rm tar awk"
 
-# build_path <dir> <mode: real|busybox> <hash: sha256sum|shasum|openssl|none> <dl: curl|wget|wget-old|none>
+# build_path <dir> <mode: real|busybox> <hash: sha256sum|shasum|openssl|none> <dl: curl|wget|wget-noconfig|wget-old|none>
 build_path() {
     d=$1
     mkdir -p "$d"
@@ -150,8 +184,9 @@ build_path() {
         shasum | openssl) ln -s "$(command -v "$3")" "$d/$3" ;;
     esac
     case $4 in
-        curl | wget | wget-old) ln -s "$tmp/stubs/$4" "$d/${4%-old}" ;;
+        curl | wget | wget-noconfig | wget-old) ln -s "$tmp/stubs/$4" "$d/${4%%-*}" ;;
     esac
+    ln -s "$tmp/stubs/mktemp" "$d/mktemp"
     ln -s "$tmp/stubs/id" "$d/id"
     ln -s "$tmp/stubs/uname" "$d/uname"
     ln -s "$tmp/stubs/sysctl" "$d/sysctl"
@@ -178,7 +213,7 @@ begin() {
     : > "$LOG"
     BIN_D="$HOME_D/.local/bin"
     E="STUB_UID=1000 STUB_OS=Linux STUB_ARCH=x86_64 RDY_VERSION=$VER"
-    HASH=sha256sum
+    HASH=$DEFHASH
     DL=curl
     PATH_SUFFIX=''
     STDIN=''
@@ -218,13 +253,24 @@ mkrel() {
 # defrel: the release for the default case.
 defrel() { mkrel "$VER" "$TRIPLE" "$VER"; }
 
-# Run $SHELL_CMD with the given arguments in a clean environment. Sets CODE.
+# The clean environment for one run. $pd is the PATH folder.
 # shellcheck disable=SC2086 # $E and $SHELL_CMD are lists of words on purpose
+in_env() {
+    env -i PATH="$pd$PATH_SUFFIX" HOME="$HOME_D" TMPDIR="$TMP_D" STUB_LOG="$LOG" STUB_REL="$REL" \
+        STUB_VERSION="$VER" STUB_REAL_MKTEMP="$REAL_MKTEMP" $E $SHELL_CMD "$@"
+}
+
+# Run $SHELL_CMD with the given arguments in a clean environment. Sets CODE. When $STDIN names a file,
+# it is fed through a real pipe (cat file | sh -s), as in `curl ... | sh`. Otherwise stdin is /dev/null.
 sh_run() {
     pd="$tmp/path/$SHELL_LABEL-$HASH-$DL"
     if [ ! -d "$pd" ]; then build_path "$pd" "$SHELL_MODE" "$HASH" "$DL"; fi
-    env -i PATH="$pd$PATH_SUFFIX" HOME="$HOME_D" TMPDIR="$TMP_D" STUB_LOG="$LOG" STUB_REL="$REL" \
-        STUB_VERSION="$VER" $E $SHELL_CMD "$@" > "$OUT" 2> "$ERR" < "${STDIN:-/dev/null}"
+    if [ -n "$STDIN" ]; then
+        # shellcheck disable=SC2002 # a real pipe on purpose, not a redirect
+        cat "$STDIN" 2> /dev/null | in_env "$@" > "$OUT" 2> "$ERR"
+    else
+        in_env "$@" > "$OUT" 2> "$ERR" < /dev/null
+    fi
     CODE=$?
 }
 
@@ -286,7 +332,7 @@ suite() {
     want_err 'sha256 ok'
     out=$("$BIN_D/rdy" version)
     [ "$out" = "rdy $VER" ] || casebad "installed binary prints: $out"
-    want_log "--proto =https --proto-redir =https --tlsv1.2 -fsSL"
+    want_log "curl -q --proto =https --proto-redir =https --tlsv1.2 -fsSL --connect-timeout 20 --speed-limit 1024 --speed-time 60"
     want_log "/v$VER/rdy-$LINUX.tar.gz"
     want_log "/v$VER/SHA256SUMS"
     endcase
@@ -378,12 +424,16 @@ suite() {
     endcase
 
     begin "uid 0 with --allow-root defaults to /usr/local/bin"
-    # The stub curl fails, so the script stops before it writes anything.
+    # The stub mktemp refuses a file in /usr/local/bin and logs the name, so the real folder is not
+    # touched. The script gets as far as the point where it would write there.
+    defrel
+    skipsig
     addenv STUB_UID=0
-    addenv STUB_CURL_RC=22
     run --allow-root
     want_code 1
-    want_err 'to /usr/local/bin'
+    want_err 'could not write into /usr/local/bin'
+    grep -F -q 'mktemp /usr/local/bin/.rdy.new.' "$LOG.mktemp" 2> /dev/null ||
+        casebad "install.sh did not try to write into /usr/local/bin"
     want_nothing_installed
     endcase
 
@@ -405,6 +455,25 @@ suite() {
     want_err 'fix:'
     want_no_net
     want_nothing_installed
+    endcase
+
+    begin "-h is not an option (06 lists --allow-root and --help only)"
+    defrel
+    run -h
+    want_code 64
+    want_err 'unknown option: -h'
+    want_out_empty
+    want_no_net
+    want_nothing_installed
+    endcase
+
+    begin "an unknown option echoes its name, not its value"
+    defrel
+    run --token=hunter2
+    want_code 64
+    want_err 'unknown option: --token'
+    want_no_err 'hunter2'
+    want_no_net
     endcase
 
     begin "--help prints usage on stdout, exits 0, installs nothing"
@@ -540,13 +609,15 @@ suite() {
     want_tmp_clean
     endcase
 
-    begin "a missing SHA256SUMS stops"
+    begin "a missing SHA256SUMS says the release looks incomplete"
     defrel
     skipsig
     rm -f "$REL/SHA256SUMS"
     run
     want_code 1
-    want_err 'no file named SHA256SUMS'
+    want_err 'this release looks incomplete'
+    want_err 'SHA256SUMS'
+    want_err 'fix:'
     want_nothing_installed
     want_tmp_clean
     endcase
@@ -572,14 +643,24 @@ suite() {
     want_nothing_installed
     endcase
 
-    begin "wget with --https-only is used when curl is missing"
+    begin "GNU wget is used when curl is missing, with no config file and timeouts"
     defrel
     skipsig
     DL=wget
     run
     want_code 0
     want_installed
-    want_log 'wget --https-only --secure-protocol=TLSv1_2 -q -O'
+    want_log 'wget --no-config --https-only --secure-protocol=TLSv1_2 --timeout=30 --read-timeout=60 --tries=3 -q -O'
+    endcase
+
+    begin "a wget without --no-config does not count"
+    defrel
+    skipsig
+    DL=wget-noconfig
+    run
+    want_code 1
+    want_err 'no download tool'
+    want_no_net
     endcase
 
     begin "a wget without --https-only does not count"
@@ -608,7 +689,10 @@ suite() {
     run
     want_code 1
     want_err 'cannot check the release signature yet'
-    want_err 'RDY_INSECURE_SKIP_SIGNATURE=1'
+    want_err 'scripts/verify-release.sh'
+    want_err 'fix:'
+    # 06 and ADR 0025 document the override. The stop message does not name it.
+    want_no_err 'RDY_INSECURE_SKIP_SIGNATURE'
     want_nothing_installed
     want_tmp_clean
     endcase
@@ -700,13 +784,26 @@ suite() {
     want_nothing_installed
     endcase
 
-    begin "CRLF line ends in SHA256SUMS fail closed"
+    begin "CRLF line ends in SHA256SUMS stop the install"
     defrel
     skipsig
-    sed 's/$/\r/' "$REL/SHA256SUMS" > "$REL/new"
+    sed "s/\$/$CR/" "$REL/SHA256SUMS" > "$REL/new"
     mv "$REL/new" "$REL/SHA256SUMS"
     run
     want_code 1
+    want_err 'carriage return'
+    want_err 'fix:'
+    want_nothing_installed
+    want_tmp_clean
+    endcase
+
+    begin "a carriage return on any one line stops the install, even a decoy line"
+    defrel
+    skipsig
+    printf '%s  elsewhere.txt%s\n' "$A64" "$CR" >> "$REL/SHA256SUMS"
+    run
+    want_code 1
+    want_err 'carriage return'
     want_nothing_installed
     endcase
 
@@ -854,7 +951,7 @@ sh_run_bad_version() {
     if [ ! -d "$pd" ]; then build_path "$pd" "$SHELL_MODE" "$HASH" "$DL"; fi
     # shellcheck disable=SC2086 # $SHELL_CMD is a list of words on purpose
     env -i PATH="$pd" HOME="$HOME_D" TMPDIR="$TMP_D" STUB_LOG="$LOG" STUB_REL="$REL" STUB_VERSION="$VER" \
-        STUB_UID=1000 STUB_OS=Linux STUB_ARCH=x86_64 RDY_INSECURE_SKIP_SIGNATURE=1 RDY_VERSION="$1" \
+        STUB_REAL_MKTEMP="$REAL_MKTEMP" STUB_UID=1000 STUB_OS=Linux STUB_ARCH=x86_64 RDY_INSECURE_SKIP_SIGNATURE=1 RDY_VERSION="$1" \
         $SHELL_CMD "$script" > "$OUT" 2> "$ERR" < /dev/null
     CODE=$?
 }
@@ -959,6 +1056,26 @@ trunc_suite() {
 # ---------------------------------------------------------------------------------------------
 # Pick the shells and run
 # ---------------------------------------------------------------------------------------------
+# check_stubs: in a clean environment, `id -u` and `uname -s` must come from the stubs. A busybox
+# that runs its own applets first (Debian, Ubuntu) fails this, and every case after it would test the
+# host, not the script. Returns 1 and says why.
+check_stubs() {
+    pd="$tmp/path/$SHELL_LABEL-$DEFHASH-curl"
+    if [ ! -d "$pd" ]; then build_path "$pd" "$SHELL_MODE" "$DEFHASH" curl; fi
+    # shellcheck disable=SC2086 # $SHELL_CMD is a list of words on purpose
+    got=$(env -i PATH="$pd" STUB_UID=4242 STUB_OS=StubOS $SHELL_CMD -c 'id -u; uname -s' 2>&1 < /dev/null) || got=''
+    want_stub="4242
+StubOS"
+    if [ "$got" != "$want_stub" ]; then
+        echo "FAIL $SHELL_LABEL: stubs bypassed (id -u and uname -s printed: $(echo "$got" | tr '\n' ' '))"
+        echo "  The shell ran its own id or uname instead of the stubs on PATH, so the tests would not test"
+        echo "  install.sh. Use a busybox that looks up applets on PATH, such as Alpine's (CI runs it in a"
+        echo "  pinned Alpine container). Debian and Ubuntu busybox-static does not."
+        return 1
+    fi
+    return 0
+}
+
 want=${*:-dash busybox}
 for name in $want; do
     case $name in
@@ -975,9 +1092,14 @@ for name in $want; do
             SHELL_CMD=$DASH
             SHELL_MODE=real
             ;;
+        sh)
+            SHELL_LABEL="sh"
+            SHELL_CMD=/bin/sh
+            SHELL_MODE=real
+            ;;
         busybox)
             if ! BUSYBOX=$(command -v busybox); then
-                echo "SKIP busybox is not installed (apt-get install busybox-static)"
+                echo "SKIP busybox is not installed (apk add busybox on Alpine)"
                 [ -z "${CI:-}" ] || {
                     echo "FAIL busybox is missing in CI"
                     fail=1
@@ -989,10 +1111,18 @@ for name in $want; do
             SHELL_MODE=busybox
             ;;
         *)
-            echo "usage: sh scripts/test-install-sh.sh [dash] [busybox]" >&2
+            echo "usage: sh scripts/test-install-sh.sh [dash] [busybox] [sh]" >&2
             exit 64
             ;;
     esac
+    case $SHELL_MODE in
+        busybox) REAL_MKTEMP="$BUSYBOX mktemp" ;;
+        *) REAL_MKTEMP=$(command -v mktemp) ;;
+    esac
+    if ! check_stubs; then
+        fail=1
+        continue
+    fi
     suite
 done
 
