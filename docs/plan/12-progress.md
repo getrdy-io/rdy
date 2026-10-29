@@ -298,7 +298,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-142 | todo | | Progress line with indicatif, TTY only
 
-- M1-143 | todo | | Quiet and verbose output modes
+- M1-143 | todo | | Quiet and verbose output modes | backlog corrected 2026-10-29 (correction-17): moved from week 26 to week 30
 
 - M1-144 | todo | | Facade methods for UDP exchanges and unix sockets with a GET-only Docker API guard
 
@@ -306,7 +306,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-146 | todo | | host.security_agents (process names, agents.toml format, seed list) (M1-late)
 
-- M1-147 | todo | | host.firewall (firewalld zone and service XML, ufw) (M1-late)
+- M1-147 | todo | | host.firewall (firewalld zone and service XML, ufw) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172, which registers the built check in `HostFamily` (PR #98 review)
 
 - M1-148 | todo | | host.time_sync (adjtimex, timedatectl, chronyc, SNTP client) (M1-late) | backlog corrected 2026-10-29 (correction-15): depends on M1-094; `ntp_servers` is the only UDP host source, counted toward INV-11; a server in a refused range falls back to `chronyc` (PR #91 reviews); backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
