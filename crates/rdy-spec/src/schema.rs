@@ -31,8 +31,8 @@ mod rules;
 mod tidy;
 
 pub(crate) use rules::{
-    action_fields, check_result_rules, check_rules, exit_code_schema, host_rules, identity_rules,
-    report_rules, signature_rules, version_rules,
+    EXTRA, action_fields, check_result_rules, check_rules, exit_code_schema, extra_definition,
+    host_rules, identity_rules, report_rules, signature_rules, version_rules,
 };
 
 use crate::lint::LintReport;
@@ -126,6 +126,7 @@ pub fn result_schema_json() -> String {
     generator.subschema_for::<LintReport>();
     let mut defs = generator.take_definitions(false);
     merge_defs(&mut defs, Some(Value::Object(fragment(COMMAND_OUTPUT))));
+    defs.insert(EXTRA.into(), extra_definition());
 
     let mut root = Map::new();
     root.insert("title".into(), "rdy/v1 run result".into());
