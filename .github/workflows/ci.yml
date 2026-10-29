@@ -65,16 +65,27 @@ jobs:
       # serde_json/preserve_order, which must stay out of the shipped binary (ADR 0019).
       - name: The binary does not build the schema generator
         run: |
-          tree="$(cargo tree --locked -p rdy -e features --target x86_64-unknown-linux-gnu)"
+          tree="$(cargo tree --locked -p rdy -e normal,build,features --target x86_64-unknown-linux-gnu)"
           if printf '%s\n' "$tree" | grep -E 'preserve_order|rdy-spec feature "schema"|rdy-engine feature "testing"'; then
             echo "::error::the rdy binary would build the schema generator, serde_json/preserve_order or the rdy-engine testing feature"
+            exit 1
+          fi
+      # rdy-cli's tests turn on the rdy-engine `testing` feature (the panicking-redactor seam) through a
+      # dev-dependency. It must never reach the shipped binary, so check the normal build graph.
+      - name: The binary does not build the rdy-engine testing feature
+        run: |
+          tree="$(cargo tree --locked -p rdy -e normal,features --target x86_64-unknown-linux-gnu)"
+          if printf '%s\n' "$tree" | grep -E 'rdy-engine feature "testing"'; then
+            echo "::error::the rdy binary would build the rdy-engine testing feature"
             exit 1
           fi
       # exec::run and ExecSpec::new are pub(crate) without the `testing` feature. A normal build, with no
       # dev-dependencies, must compile with that narrower surface.
       - name: The binary builds without the testing feature
         run: cargo check --locked -p rdy
-      # A --workspace build turns the feature on through xtask. This runs the binary's own feature set.
+      # A --workspace build turns the schema feature on through xtask. This runs the binary's own feature
+      # set for the normal dependencies. Tests of rdy still see the dev-dependency `testing` feature of
+      # rdy-engine, which the guard above keeps out of the shipped binary.
       - name: Test the binary's feature set
         run: cargo test --locked -p rdy -p rdy-engine
 
@@ -253,6 +264,8 @@ jobs:
         uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest@0.9.149
+          # A missing prebuilt binary fails the step. It never falls back to `cargo install`.
+          fallback: none
       - name: Build the rdy binary
         if: ${{ !matrix.compile_only }}
         run: cargo build --locked --target "$TARGET" --package rdy
@@ -387,14 +400,34 @@ jobs:
         run: |
           sh scripts/test-install-release-tool.sh
           sh scripts/test-harden-release-workflow.sh
+          sh scripts/test-sign-release.sh
       - name: release.yml matches dist and the hardening script
         run: sh scripts/gen-release-workflow.sh --check
+
+  # M1-010: the real cosign verify-blob forms from 06 against real keyless signatures: cosign's own
+  # v3.1.4 release (identity and issuer) and goreleaser v2.19.0 (a GitHub Actions run: identity, issuer,
+  # repository, ref and trigger), each also after a change that must fail. It needs the network (GitHub
+  # and Sigstore's TUF mirror) and cosign, which the pinned installer provides. It is in ci-ok (ADR 0024).
+  cosign-roundtrip:
+    name: cosign-roundtrip
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install cosign (pinned file, sha256 checked)
+        run: sh scripts/install-release-tool.sh cosign
+      - name: verify-blob passes with the exact identity and claims, and fails on every change
+        run: sh scripts/test-cosign-roundtrip.sh
 
   # The only required check. Keep `needs:` equal to the list of gating jobs.
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, zizmor, deny, dco, install-sh, test, root, release-workflow]
+    needs: [lint, zizmor, deny, dco, install-sh, test, root, release-workflow, cosign-roundtrip]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
