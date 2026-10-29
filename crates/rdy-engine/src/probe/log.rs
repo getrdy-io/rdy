@@ -485,7 +485,7 @@ fn fold_key(action: &Action) -> Option<FoldKey> {
         };
         split.map_or(String::new(), |(dir, _)| dir.to_owned())
     } else {
-        ["program", "host", "url", "api", "path"]
+        ["program", "host", "url", "api", "path", "name"]
             .iter()
             .find_map(|name| text(name))
             .unwrap_or_default()
