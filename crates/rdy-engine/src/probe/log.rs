@@ -11,7 +11,7 @@
 //! follows a secret flag is redacted too: `["--password", "hunter2"]` leaks nothing, not only
 //! `["--password=hunter2"]`.
 //!
-//! **Retention.** Three limits keep the log bounded and the entries that matter in it.
+//! **Retention.** These limits keep the log bounded and the entries that matter in it.
 //!
 //! - *Coalescing.* A `denied` or `failed` `read`, `read_dir` or `stat` is written as it happens, up to
 //!   [`COALESCE_AFTER`] times for one (check, kind, rule or error, parent directory). A `denied` call of
@@ -20,6 +20,9 @@
 //!   that carries a `count`. It takes the `seq` of the first call it folded, and the folded calls leave
 //!   a gap in `seq`. The limit is per key, so a flood of calls at one target costs 21 entries, and the
 //!   first denied calls are in the log.
+//! - *Ok reads.* An `ok` `read`, `read_dir` or `stat` folds the same way per (check, kind, parent
+//!   directory), but only after [`COALESCE_OK_AFTER`] calls. The `coalesced` entry has outcome `ok`, no
+//!   `rule` or `error`, and counts as an `ok` file entry when retention picks what to drop.
 //! - *Quota.* A check may hold [`CHECK_QUOTA`] entries, and the log [`MAX_ENTRIES`]. At either limit
 //!   the log drops, in this order: a new `ok` `read`, `read_dir` or `stat` (the oldest are kept), then
 //!   `ok` ones already held, then `failed` ones (`read`, `read_dir`, `stat` and `coalesced`).
@@ -28,7 +31,7 @@
 //!   repeated denials fold, so the log holds one per distinct (check, kind, rule, target). A check keeps
 //!   at most [`DENIED_TARGETS`] distinct targets apart per (check, kind, rule); the calls to any more
 //!   fold into one `coalesced` entry whose `under` is `*`. `denied` keys have a budget of their own
-//!   (2000), apart from the 20 000 keys of `failed` file calls; past either, a call is written without
+//!   (2000), apart from the 20 000 keys of `failed` file calls and the 20 000 of `ok` ones; past any, a call is written without
 //!   folding. When a `denied` entry still finds a check at [`CHECK_QUOTA`] or the log at [`MAX_ENTRIES`],
 //!   it displaces `ok` and `failed` file entries, then a spare entry of its own check only (the newest
 //!   `exec`, `connect`, `tls`, `http`, `kube` or timed out read), never another check's. If there is
@@ -37,8 +40,7 @@
 //!   `denied` are bounded by the spec (hosts, ports) and by the fixed command set, so this should not
 //!   happen.
 //!
-//! Size-based truncation of the whole document (2 MiB) and the coalescing of `ok` reads past 200 per
-//! directory belong to the report writer and to M1-041.
+//! Size-based truncation of the whole document (2 MiB) belongs to the report writer.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -59,9 +61,16 @@ pub const CHECK_QUOTA: usize = 1000;
 /// How many `denied` or `failed` file calls for one key are written one by one before they fold.
 pub const COALESCE_AFTER: usize = 20;
 
+/// How many `ok` file calls for one (check, kind, directory) are written one by one before they fold.
+pub const COALESCE_OK_AFTER: usize = 200;
+
 /// The most distinct keys of `failed` file calls the log tracks. Past it a new key is not folded, only
 /// subject to the quotas, so memory stays bounded.
 const MAX_COALESCE_KEYS: usize = 20_000;
+
+/// The most distinct keys of `ok` file calls the log tracks, a budget of its own so a walk of many
+/// directories cannot use up the keys of `failed` calls.
+const MAX_OK_KEYS: usize = 20_000;
 
 /// The most distinct keys of `denied` calls the log tracks, a budget of its own so a flood of failed
 /// reads cannot use it up.
@@ -104,7 +113,7 @@ struct Shared {
 /// How retention ranks an entry. The lower the number, the sooner it goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tier {
-    /// `ok` `read`, `read_dir` and `stat`.
+    /// `ok` `read`, `read_dir` and `stat`, and the `coalesced` entry that stands for more of them.
     Ok = 0,
     /// `failed` `read`, `read_dir`, `stat` and `coalesced`.
     Failed = 1,
@@ -158,9 +167,28 @@ struct CheckSlots {
 struct FoldKey {
     check: Option<String>,
     kind: String,
-    denied: bool,
+    /// The outcome of the calls folded.
+    class: Class,
     reason: String,
     dir: String,
+}
+
+/// The outcome of the calls under one [`FoldKey`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Class {
+    Denied,
+    Failed,
+    Ok,
+}
+
+impl Class {
+    /// How many calls are written one by one before the rest fold.
+    fn written(self) -> usize {
+        match self {
+            Self::Ok => COALESCE_OK_AFTER,
+            Self::Denied | Self::Failed => COALESCE_AFTER,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -180,9 +208,10 @@ struct State {
     folds: HashMap<FoldKey, Folded>,
     /// How many `denied` keys each (check, kind, rule) has, for the cap of [`DENIED_TARGETS`].
     spread: HashMap<(Option<String>, String, String), usize>,
-    /// Keys in `folds` by sort: `denied` ones and `failed` ones, each with its own budget.
+    /// Keys in `folds` by sort: `denied`, `failed` and `ok` ones, each with its own budget.
     denied_keys: usize,
     failed_keys: usize,
+    ok_keys: usize,
     dropped: BTreeMap<String, u64>,
     truncated: bool,
     last_resort: u64,
@@ -416,23 +445,24 @@ fn tier(action: &Action) -> Tier {
     );
     match action.outcome {
         ActionOutcome::Denied => Tier::Denied,
-        ActionOutcome::Ok if files && action.kind != ActionKind::Coalesced => Tier::Ok,
+        ActionOutcome::Ok if files => Tier::Ok,
         ActionOutcome::Failed if files => Tier::Failed,
         _ => Tier::Spare,
     }
 }
 
-/// The key a repeated call folds under, or `None` for an entry that never folds. A `denied` or `failed`
-/// file call folds per parent directory. A `denied` call of any other kind (`exec`, `connect`, `tls`,
+/// The key a repeated call folds under, or `None` for an entry that never folds. A `denied`, `failed` or
+/// `ok` file call folds per parent directory. A `denied` call of any other kind (`exec`, `connect`, `tls`,
 /// `http`, `kube`, a late call) folds per target: the program, host, URL, API or path it named.
 fn fold_key(action: &Action) -> Option<FoldKey> {
     let files = matches!(
         action.kind,
         ActionKind::Read | ActionKind::ReadDir | ActionKind::Stat
     );
-    let (denied, reason_field) = match action.outcome {
-        ActionOutcome::Denied if action.kind != ActionKind::Coalesced => (true, "rule"),
-        ActionOutcome::Failed if files => (false, "error"),
+    let (class, reason_field) = match action.outcome {
+        ActionOutcome::Denied if action.kind != ActionKind::Coalesced => (Class::Denied, "rule"),
+        ActionOutcome::Failed if files => (Class::Failed, "error"),
+        ActionOutcome::Ok if files => (Class::Ok, ""),
         _ => return None,
     };
     let text = |name: &str| {
@@ -444,8 +474,16 @@ fn fold_key(action: &Action) -> Option<FoldKey> {
     };
     let dir = if files {
         let path = text("path").unwrap_or_default();
-        path.rsplit_once('/')
-            .map_or(String::new(), |(dir, _)| dir.to_owned())
+        // A backslash ends a directory only in a Windows path (`C:\Windows\f` or `\\host\share\f`).
+        // On Unix it is a character of a name, and splitting there would let `x1\f` defeat the fold.
+        let windows = path.starts_with("\\\\")
+            || matches!(path.as_bytes(), [drive, b':', b'\\' | b'/', ..] if drive.is_ascii_alphabetic());
+        let split = if windows {
+            path.rsplit_once(['/', '\\'])
+        } else {
+            path.rsplit_once('/')
+        };
+        split.map_or(String::new(), |(dir, _)| dir.to_owned())
     } else {
         ["program", "host", "url", "api", "path"]
             .iter()
@@ -455,7 +493,7 @@ fn fold_key(action: &Action) -> Option<FoldKey> {
     Some(FoldKey {
         check: action.check.clone(),
         kind: action.kind.as_str().to_owned(),
-        denied,
+        class,
         reason: text(reason_field).unwrap_or_default(),
         dir,
     })
@@ -477,10 +515,15 @@ fn folded_entry(key: &FoldKey, first: &Action) -> Action {
     entry
         .fields
         .insert("under".to_owned(), key.dir.clone().into());
-    let reason = if key.denied { "rule" } else { "error" };
-    entry
-        .fields
-        .insert(reason.to_owned(), key.reason.clone().into());
+    match key.class {
+        Class::Denied => entry
+            .fields
+            .insert("rule".to_owned(), key.reason.clone().into()),
+        Class::Failed => entry
+            .fields
+            .insert("error".to_owned(), key.reason.clone().into()),
+        Class::Ok => None,
+    };
     entry.fields.insert("count".to_owned(), 1.into());
     entry
 }
@@ -491,7 +534,8 @@ fn record(state: &mut State, action: Action, limits: Limits) {
         place(state, action, limits);
         return;
     };
-    if key.denied && !state.folds.contains_key(&key) {
+    let denied = key.class == Class::Denied;
+    if denied && !state.folds.contains_key(&key) {
         // Past DENIED_TARGETS distinct targets for this (check, kind, rule), more targets share one key.
         let group = (key.check.clone(), key.kind.clone(), key.reason.clone());
         let spread = state.spread.entry(group.clone()).or_insert(0);
@@ -504,25 +548,25 @@ fn record(state: &mut State, action: Action, limits: Limits) {
     }
     let is_new = !state.folds.contains_key(&key);
     let budget_full = is_new
-        && if key.denied {
-            state.denied_keys >= MAX_DENIED_KEYS
-        } else {
-            state.failed_keys >= MAX_COALESCE_KEYS
+        && match key.class {
+            Class::Denied => state.denied_keys >= MAX_DENIED_KEYS,
+            Class::Failed => state.failed_keys >= MAX_COALESCE_KEYS,
+            Class::Ok => state.ok_keys >= MAX_OK_KEYS,
         };
     if budget_full {
         place(state, action, limits);
         return;
     }
     if is_new {
-        if key.denied {
-            state.denied_keys += 1;
-        } else {
-            state.failed_keys += 1;
+        match key.class {
+            Class::Denied => state.denied_keys += 1,
+            Class::Failed => state.failed_keys += 1,
+            Class::Ok => state.ok_keys += 1,
         }
     }
     let slot = state.folds.entry(key.clone()).or_default();
     slot.seen += 1;
-    if slot.seen <= COALESCE_AFTER {
+    if slot.seen <= key.class.written() {
         place(state, action, limits);
         return;
     }
@@ -546,8 +590,20 @@ fn record(state: &mut State, action: Action, limits: Limits) {
     place(state, entry, limits);
 }
 
-fn count_drop(state: &mut State, kind: &ActionKind) {
-    *state.dropped.entry(kind.as_str().to_owned()).or_insert(0) += 1;
+/// Counts a dropped entry. A `coalesced` entry stands for `count` calls of the kind in `of`, so it adds
+/// that many to that kind, not one to `coalesced`.
+fn count_drop(state: &mut State, action: &Action) {
+    let (kind, calls) = if action.kind == ActionKind::Coalesced {
+        let of = action.fields.get("of").and_then(Value::as_str);
+        let count = action.fields.get("count").and_then(Value::as_u64);
+        (
+            of.unwrap_or(ActionKind::Coalesced.as_str()).to_owned(),
+            count.unwrap_or(1),
+        )
+    } else {
+        (action.kind.as_str().to_owned(), 1)
+    };
+    *state.dropped.entry(kind).or_insert(0) += calls;
     state.truncated = true;
 }
 
@@ -574,7 +630,7 @@ fn evict(state: &mut State, seq: u64, tier: Tier) {
         slots.count = slots.count.saturating_sub(1);
         slots.tiers.remove(tier, seq);
     }
-    count_drop(state, &removed.kind);
+    count_drop(state, &removed);
     if tier == Tier::Spare {
         count_last_resort(state, &removed.kind);
     }
@@ -641,7 +697,7 @@ fn place(state: &mut State, action: Action, limits: Limits) {
         || (state.entries.len() >= limits.max_entries
             && !make_room(state, Scope::Log, tier, &check));
     if full {
-        count_drop(state, &action.kind);
+        count_drop(state, &action);
         if matches!(tier, Tier::Spare | Tier::Denied) {
             count_last_resort(state, &action.kind);
         }

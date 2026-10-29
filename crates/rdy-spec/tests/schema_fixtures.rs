@@ -238,6 +238,49 @@ fn the_golden_results_and_command_objects_of_the_cli_plan_validate() -> TestResu
     Ok(())
 }
 
+/// A credential plugin named in `identity.kube.exec_plugin` is valid, survives the typed model and
+/// shows in the JSON the model writes (SEC-63; the named exception of the threat model, row E5).
+#[test]
+fn an_exec_plugin_is_valid_and_shows_in_the_json_the_model_writes() -> TestResult {
+    let v = result_validator()?;
+    let mut doc = report("### 7.2 ")?;
+    assert_eq!(doc["identity"]["kube"]["exec_plugin"], Value::Null);
+    doc["identity"]["kube"]["exec_plugin"] = json!("aws");
+    assert_valid(&v, &doc, "7.2 with an exec plugin");
+
+    let typed: rdy_spec::result::Report = serde_json::from_value(doc.clone())?;
+    let plugin = typed
+        .identity
+        .kube
+        .as_ref()
+        .and_then(|kube| kube.exec_plugin.as_deref());
+    assert_eq!(plugin, Some("aws"));
+
+    // Written back, the field is still there and still valid.
+    let written = serde_json::to_value(&typed)?;
+    assert_eq!(written["identity"]["kube"]["exec_plugin"], json!("aws"));
+    assert_valid(&v, &written, "the written report");
+
+    // The text is a bare name of at most 255 characters (no path, no arguments), and only a string or null.
+    for bad in [
+        "aws --token=x",
+        "/usr/bin/aws",
+        "C:\\bin\\aws.exe",
+        "aws\n",
+        "aws\u{7f}",
+        "",
+        "p".repeat(256).as_str(),
+    ] {
+        doc["identity"]["kube"]["exec_plugin"] = json!(bad);
+        assert!(!errors(&v, &doc).is_empty(), "plugin name {bad:?}");
+    }
+    doc["identity"]["kube"]["exec_plugin"] = json!("p".repeat(255));
+    assert_valid(&v, &doc, "a 255 character plugin name");
+    doc["identity"]["kube"]["exec_plugin"] = json!(["aws"]);
+    assert!(!errors(&v, &doc).is_empty(), "a plugin name that is a list");
+    Ok(())
+}
+
 /// Every golden result file under `tests/fixtures/results/` validates. The directory does not exist
 /// yet, so this holds until the first golden is added, and then it checks that one and every later one.
 #[test]
@@ -484,6 +527,93 @@ fn hostile_result_fixtures_give_the_documented_answer() -> TestResult {
                 d["actions"] = Value::Array(vec![one; 5001]);
             }),
             false,
+        ),
+        (
+            "a 5 MiB text inside observed",
+            edited(&|d| d["checks"][0]["observed"]["note"] = json!("a".repeat(5 * 1024 * 1024))),
+            false,
+        ),
+        (
+            "a 5 MiB text in a list inside observed",
+            edited(&|d| {
+                d["checks"][0]["observed"]["list"] = json!(["a".repeat(5 * 1024 * 1024)]);
+            }),
+            false,
+        ),
+        (
+            "a 5 MiB text under an unknown top-level key",
+            edited(&|d| d["junk"] = json!("a".repeat(5 * 1024 * 1024))),
+            false,
+        ),
+        (
+            "a 5 MiB text under an unknown key of a check result",
+            edited(&|d| d["checks"][0]["junk"] = json!("a".repeat(5 * 1024 * 1024))),
+            false,
+        ),
+        (
+            "a 5 MiB text under an unknown key of the kube identity",
+            edited(&|d| d["identity"]["kube"]["junk"] = json!("a".repeat(5 * 1024 * 1024))),
+            false,
+        ),
+        (
+            "an unknown key nested four levels deep",
+            edited(&|d| d["added_later"] = json!({"a": {"b": {"c": {"d": 1}}}})),
+            false,
+        ),
+        (
+            "an unknown key with a small nested value",
+            edited(&|d| d["checks"][0]["added_later"] = json!({"a": [1, "x"]})),
+            true,
+        ),
+        (
+            "65 keys in observed",
+            edited(&|d| {
+                let many: serde_json::Map<String, Value> =
+                    (0..65).map(|i| (format!("k{i}"), json!(i))).collect();
+                d["checks"][0]["observed"] = Value::Object(many);
+            }),
+            false,
+        ),
+        (
+            "257 checks",
+            edited(&|d| {
+                let one = d["checks"][0].clone();
+                d["checks"] = Value::Array(vec![one; 257]);
+            }),
+            false,
+        ),
+        (
+            "33 needs in one check",
+            edited(&|d| {
+                let need = json!({"need": "root", "name": null, "hard": true, "met": true});
+                d["checks"][0]["needs"] = Value::Array(vec![need; 33]);
+            }),
+            false,
+        ),
+        (
+            "33 spec annotations",
+            edited(&|d| {
+                let many: serde_json::Map<String, Value> =
+                    (0..33).map(|i| (format!("k{i}"), json!("v"))).collect();
+                d["spec"]["annotations"] = Value::Object(many);
+            }),
+            false,
+        ),
+        (
+            "33 kinds in actions_dropped",
+            edited(&|d| {
+                let many: serde_json::Map<String, Value> =
+                    (0..33).map(|i| (format!("k{i}"), json!(1))).collect();
+                d["actions_dropped"] = Value::Object(many);
+            }),
+            false,
+        ),
+        (
+            "a small observed object is accepted",
+            edited(&|d| {
+                d["checks"][0]["observed"]["mounts"] = json!([{"path": "/", "free_bytes": 5}])
+            }),
+            true,
         ),
         (
             "21 notes",

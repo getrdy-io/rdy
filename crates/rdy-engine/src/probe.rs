@@ -55,7 +55,9 @@ use crate::exec::{ExecError, ExecOutput, policy::CommandError};
 use crate::privilege::ProcessIds;
 use crate::redact::Redactor;
 
-pub use log::{ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, DENIED_TARGETS, MAX_ENTRIES};
+pub use log::{
+    ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, COALESCE_OK_AFTER, DENIED_TARGETS, MAX_ENTRIES,
+};
 
 use log::{ActionLog, Limits, Pending};
 
