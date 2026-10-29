@@ -81,7 +81,7 @@ fn each_parameter_definition_lists_the_fields_of_its_struct() {
         .remove("$defs")
         .expect("the fragment has definitions");
     for (id, def) in check_param_defs() {
-        let Some(fields) = crate::check::param_fields(&id) else {
+        let Some(fields) = crate::check::fields_of(&id) else {
             panic!("{id} has no parameter struct");
         };
         let properties = defs[def.as_str()]["properties"]

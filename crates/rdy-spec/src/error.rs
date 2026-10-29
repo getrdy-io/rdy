@@ -5,6 +5,8 @@ use std::fmt;
 use thiserror::Error;
 
 use crate::sig::SignatureError;
+use crate::spec::{BUNDLE_KEYS, METADATA_KEYS, REDACT_PATTERN_KEYS, SPEC_KEYS};
+use crate::suggest::did_you_mean;
 
 /// The most characters of a refused value that an error keeps.
 const MAX_ECHO_CHARS: usize = 64;
@@ -318,6 +320,19 @@ fn bad_api_version_message(found: Option<&str>) -> String {
     }
 }
 
+/// The fix line for an unknown key. With a near match it asks "did you mean", and in all cases it says the
+/// spec may need a newer rdy.
+fn unknown_key_fix(key: &str, known: &[&str]) -> String {
+    match did_you_mean(key, known) {
+        Some(near) => format!(
+            "check the spelling (did you mean '{near}'?). If it is right, this spec needs a newer rdy. Install the latest and run again."
+        ),
+        None => SpecError::UnknownKey { key: String::new() }
+            .hint()
+            .to_owned(),
+    }
+}
+
 impl SpecError {
     /// Where in the file the problem is, when the parser could tell.
     #[must_use]
@@ -352,6 +367,17 @@ impl SpecError {
         match self {
             Self::Signature(error) => error.fix(),
             Self::Located { error, .. } => error.fix(),
+            Self::UnknownKey { key } => unknown_key_fix(key, SPEC_KEYS),
+            Self::UnknownKeyIn { key, section } => unknown_key_fix(
+                key,
+                match *section {
+                    "metadata" => METADATA_KEYS,
+                    "bundle" => BUNDLE_KEYS,
+                    "a redact pattern" => REDACT_PATTERN_KEYS,
+                    // A section this version does not know has no list of keys to suggest from.
+                    _ => &[],
+                },
+            ),
             other => other.hint().to_owned(),
         }
     }
@@ -702,6 +728,45 @@ mod tests {
             SpecError::BadApiVersion { found: None }.hint(),
             "add 'apiVersion: rdy/v1' as the first line."
         );
+    }
+
+    #[test]
+    fn an_unknown_key_fix_offers_the_near_key_of_its_own_block() {
+        let top = SpecError::UnknownKey {
+            key: "metdata".into(),
+        };
+        assert_eq!(
+            top.fix(),
+            "check the spelling (did you mean 'metadata'?). If it is right, this spec needs a newer rdy. Install the latest and run again."
+        );
+        for (section, key, near) in [
+            ("metadata", "prodcut", "product"),
+            ("bundle", "colect", "collect"),
+            ("a redact pattern", "regx", "regex"),
+        ] {
+            let e = SpecError::UnknownKeyIn {
+                key: key.into(),
+                section,
+            };
+            assert!(
+                e.fix().contains(&format!("did you mean '{near}'?")),
+                "{section}: {}",
+                e.fix()
+            );
+            // The wrapper does not change the advice.
+            assert_eq!(e.clone().at(Location::new(2, 3)).fix(), e.fix());
+        }
+        // A key that is not near any key gets the plain hint.
+        let far = SpecError::UnknownKey {
+            key: "zzzzzz".into(),
+        };
+        assert_eq!(far.fix(), far.hint());
+        assert!(!far.fix().contains("did you mean"));
+        // A near key of another block is not offered: `product` is a metadata key, not a top-level one.
+        let other = SpecError::UnknownKey {
+            key: "produt".into(),
+        };
+        assert!(!other.fix().contains("did you mean"), "{}", other.fix());
     }
 
     #[test]
