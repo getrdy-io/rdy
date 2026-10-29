@@ -80,13 +80,13 @@
     "HostCpuParams": {
       "properties": {
         "min": {
-          "description": "Minimum CPU cores rdy can use (container limits count).",
+          "description": "Fewer cores than this: the check fails. Container limits count.",
           "type": "integer",
           "minimum": 1,
           "maximum": 4096
         },
         "recommended": {
-          "description": "Below this many cores: warn.",
+          "description": "Fewer cores than this: the check warns.",
           "type": "integer",
           "minimum": 1,
           "maximum": 4096
@@ -102,7 +102,8 @@
               "amd64",
               "arm64"
             ]
-          }
+          },
+          "description": "The host must have one of these architectures. `amd64` is `x86_64` and `arm64` is `aarch64`."
         },
         "flags": {
           "type": "array",
@@ -111,7 +112,8 @@
           "items": {
             "type": "string",
             "pattern": "^[a-z0-9_-]{1,32}$"
-          }
+          },
+          "description": "CPU flags the host must have, such as `avx2` or `x86-64-v3`. At most 64."
         }
       },
       "anyOf": [
@@ -130,20 +132,27 @@
             "flags"
           ]
         }
+      ],
+      "examples": [
+        {
+          "id": "host.cpu",
+          "min": 4,
+          "recommended": 8
+        }
       ]
     },
     "HostMemoryParams": {
       "properties": {
         "min": {
-          "description": "Minimum total RAM.",
+          "description": "Less total RAM than this: the check fails, after the tolerance.",
           "$ref": "#/$defs/Quantity"
         },
         "min_available": {
-          "description": "Below this much free RAM: warn. Default half of min.",
+          "description": "Less available RAM than this: the check warns. The default, half of `min`, is the check's.",
           "$ref": "#/$defs/Quantity"
         },
         "swap": {
-          "description": "forbid: swap must be off.",
+          "description": "What to do when swap is on. The default is `any`.",
           "enum": [
             "forbid",
             "any"
@@ -151,13 +160,13 @@
           "default": "any"
         },
         "tolerance_percent": {
-          "description": "How far below min still passes, in percent, because a 32 GiB machine shows a little less. Default 5, at least 256 MiB. 0 turns it off.",
+          "description": "How far below `min` the total may be and still pass, in percent. A 32 GiB machine shows a little less. The default is 5. The check applies it with a floor of 256 MiB. 0 turns it off.",
           "type": "number",
           "minimum": 0,
           "maximum": 20
         },
         "tolerance_result": {
-          "description": "What a value inside the tolerance counts as.",
+          "description": "What a total inside the tolerance counts as. The default is `pass`.",
           "enum": [
             "pass",
             "warn"
@@ -167,6 +176,12 @@
       },
       "required": [
         "min"
+      ],
+      "examples": [
+        {
+          "id": "host.memory",
+          "min": "16Gi"
+        }
       ]
     },
     "HostDiskParams": {
@@ -176,20 +191,21 @@
       ],
       "properties": {
         "path": {
-          "description": "Install path. If it does not exist yet, the nearest existing parent is measured.",
+          "description": "The install path. When it does not exist yet, the nearest existing parent is measured.",
           "$ref": "#/$defs/AbsPath"
         },
         "min": {
-          "description": "Minimum free space.",
+          "description": "Less free space than this: the check fails.",
           "$ref": "#/$defs/Quantity"
         },
         "recommended": {
-          "description": "Below this much free space: warn. Default min plus 20%.",
+          "description": "Less free space than this: the check warns. The default, `min` plus 20%, is the check's.",
           "$ref": "#/$defs/Quantity"
         },
         "min_inodes": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Fewer free inodes than this: the check fails."
         },
         "forbid_options": {
           "type": "array",
@@ -201,7 +217,8 @@
               "nodev",
               "ro"
             ]
-          }
+          },
+          "description": "Mount options that make the check fail."
         },
         "forbid_fstypes": {
           "type": "array",
@@ -209,9 +226,18 @@
           "items": {
             "type": "string",
             "pattern": "^[a-z0-9_.]{1,32}$"
-          }
+          },
+          "description": "Filesystem types that make the check fail, such as `nfs`. At most 32."
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "host.disk",
+          "path": "/var/lib/acme",
+          "min": "50Gi",
+          "recommended": "60Gi"
+        }
+      ]
     },
     "HostPortsParams": {
       "properties": {
@@ -239,12 +265,14 @@
                       "public",
                       "loopback"
                     ],
-                    "default": "public"
+                    "default": "public",
+                    "description": "How the product binds it. `public` is the default and means every address. `loopback` means loopback only."
                   }
                 }
               }
             ]
-          }
+          },
+          "description": "TCP ports that must be free. At most 256."
         },
         "udp_free": {
           "type": "array",
@@ -253,7 +281,8 @@
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/Port"
-          }
+          },
+          "description": "UDP ports that must be free. At most 256, none twice."
         },
         "allow_owner": {
           "description": "Process names that may already hold a port, such as an earlier install of the product.",
@@ -269,6 +298,17 @@
         {
           "required": [
             "udp_free"
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "host.ports",
+          "free": [
+            80,
+            443,
+            6443,
+            10250
           ]
         }
       ]
@@ -288,20 +328,25 @@
                   "permissive",
                   "disabled"
                 ]
-              }
+              },
+              "description": "The modes that are fine. Any other mode makes the check fail. Without it every mode is fine."
             },
             "denials_max": {
               "type": "integer",
               "minimum": 0,
-              "maximum": 4294967295
+              "maximum": 4294967295,
+              "description": "More recent denials than this: the check warns. It fails when the context is in `watch`."
             },
             "denials_window": {
-              "$ref": "#/$defs/Duration"
+              "$ref": "#/$defs/Duration",
+              "description": "How far back denials count, such as `24h`."
             },
             "watch": {
-              "$ref": "#/$defs/StringList"
+              "$ref": "#/$defs/StringList",
+              "description": "Security contexts or programs whose denials make the check fail."
             }
-          }
+          },
+          "description": "What to expect of SELinux."
         },
         "apparmor": {
           "type": "object",
@@ -315,26 +360,48 @@
                   "enabled",
                   "disabled"
                 ]
-              }
+              },
+              "description": "The states that are fine. Any other state makes the check fail."
             },
             "require_profiles": {
-              "$ref": "#/$defs/StringList"
+              "$ref": "#/$defs/StringList",
+              "description": "Profiles that must be loaded."
             }
+          },
+          "description": "What to expect of AppArmor."
+        }
+      },
+      "examples": [
+        {
+          "id": "host.lsm",
+          "selinux": {
+            "allow": [
+              "enforcing"
+            ],
+            "denials_max": 0
           }
         }
-      }
+      ]
     },
     "HostSecurityAgentsParams": {
       "properties": {
         "forbid": {
-          "description": "Agent ids that block. Run rdy spec lint to see the known ids.",
+          "description": "Agent ids that make the check fail when detected. `rdy spec lint` lists the known ids.",
           "$ref": "#/$defs/StringList"
         },
         "allow": {
-          "description": "Agent ids that are fine. Run rdy spec lint to see the known ids.",
+          "description": "Agent ids that are fine when detected.",
           "$ref": "#/$defs/StringList"
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "host.security_agents",
+          "forbid": [
+            "example-agent"
+          ]
+        }
+      ]
     },
     "HostOsParams": {
       "properties": {
@@ -349,7 +416,7 @@
             "additionalProperties": false,
             "properties": {
               "id": {
-                "description": "Distribution id from /etc/os-release, such as rhel or ubuntu.",
+                "description": "The distribution id from `/etc/os-release`, such as `rhel`.",
                 "type": "string",
                 "pattern": "^[a-z0-9._-]{1,32}$"
               },
@@ -358,10 +425,12 @@
                 "items": {
                   "type": "string",
                   "maxLength": 32
-                }
+                },
+                "description": "The versions that are supported. `\"8\"` matches a major version and `\"22.04\"` an exact one. Without it every version is."
               }
             }
-          }
+          },
+          "description": "The distributions the product supports. At most 64."
         },
         "arch": {
           "type": "array",
@@ -373,7 +442,8 @@
               "amd64",
               "arm64"
             ]
-          }
+          },
+          "description": "The host must have one of these architectures."
         },
         "fips": {
           "enum": [
@@ -381,14 +451,30 @@
             "require",
             "any"
           ],
-          "default": "any"
+          "default": "any",
+          "description": "What to expect of FIPS mode. The default is `any`."
         },
         "windows_min_build": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 4294967295
+          "maximum": 4294967295,
+          "description": "The lowest Windows build number that is supported."
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "host.os",
+          "supported": [
+            {
+              "id": "ubuntu",
+              "versions": [
+                "22.04"
+              ]
+            }
+          ],
+          "fips": "any"
+        }
+      ]
     },
     "NetEgressParams": {
       "required": [
@@ -412,15 +498,16 @@
                 "additionalProperties": false,
                 "properties": {
                   "target": {
-                    "$ref": "#/$defs/Target"
+                    "$ref": "#/$defs/Target",
+                    "description": "Where to connect."
                   },
                   "optional": {
-                    "description": "Unreachable gives warn instead of block.",
+                    "description": "Unreachable gives a warning and not a block. The default is false.",
                     "type": "boolean",
                     "default": false
                   },
                   "expect_status": {
-                    "description": "URL targets only.",
+                    "description": "The statuses that count as reachable, for a URL target. At most 16.",
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 16,
@@ -432,7 +519,7 @@
                     }
                   },
                   "method": {
-                    "description": "URL targets only.",
+                    "description": "The request method, for a URL target. The default is `HEAD`.",
                     "enum": [
                       "HEAD",
                       "GET"
@@ -444,20 +531,21 @@
                       "auto",
                       "direct",
                       "proxy_only"
-                    ]
+                    ],
+                    "description": "Overrides the `via_proxy` of the entry for this endpoint."
                   },
                   "tls": {
-                    "description": "false probes plain TCP only. Default true for port 443 and https URLs.",
+                    "description": "`false` probes plain TCP only. Without it TLS is tried for port 443 and `https` URLs.",
                     "type": "boolean"
                   }
                 }
               }
             ]
           },
-          "description": "At most 64 endpoints in one check. A spec names at most 64 distinct hosts and 256 distinct host and port pairs across all its checks."
+          "description": "The endpoints, 1 to 64."
         },
         "via_proxy": {
-          "description": "auto: try what the product would do and say if the other path works. direct: no proxy. proxy_only: only through the proxy.",
+          "description": "Which path to try. The default is `auto`. `auto` tries what the product would do, and says if the other path works. `direct` uses no proxy. `proxy_only` goes only through the proxy.",
           "enum": [
             "auto",
             "direct",
@@ -470,30 +558,49 @@
             "system",
             "bundled"
           ],
-          "default": "system"
+          "default": "system",
+          "description": "Which certificates to trust. The default is `system`. `system` is the operating system's store, with the bundled public roots as a fallback. `bundled` is the bundled public roots only."
         },
         "max_latency": {
-          "description": "Connect slower than this: warn. Default 2s.",
+          "description": "A connect slower than this: the check warns. The default, 2s, is the check's.",
           "$ref": "#/$defs/Duration"
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "net.egress",
+          "endpoints": [
+            "https://registry.acme.test/"
+          ]
+        }
+      ]
     },
     "NetProxyParams": {
       "properties": {
         "required_no_proxy": {
-          "description": "Entries NO_PROXY must cover, such as .svc or 10.0.0.0/8.",
+          "description": "Entries that `NO_PROXY` must cover, such as `.svc` or `10.0.0.0/8`.",
           "$ref": "#/$defs/StringList"
         },
         "daemons_need_proxy": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "The container runtime and kubelet must have the proxy too. The default is false."
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "net.proxy",
+          "required_no_proxy": [
+            ".svc",
+            ".cluster.local"
+          ]
+        }
+      ]
     },
     "NetTlsInterceptParams": {
       "properties": {
         "hosts": {
-          "description": "Default: the hosts of every net.egress endpoint in this spec.",
+          "description": "The hosts to test, 1 to 64. The default is every `net.egress` host in the spec.",
           "type": "array",
           "minItems": 1,
           "maxItems": 64,
@@ -504,7 +611,8 @@
           }
         },
         "expected_issuer": {
-          "$ref": "#/$defs/Regex"
+          "$ref": "#/$defs/Regex",
+          "description": "A pattern the issuer of the chain must match. A chain from another issuer blocks."
         },
         "pin_sha256": {
           "type": "array",
@@ -513,13 +621,24 @@
           "items": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
-          }
+          },
+          "description": "SHA-256 digests of certificates, 1 to 16, each 64 lowercase hex digits."
         },
         "forbid_interception": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "A chain that only this machine trusts blocks instead of warning. The default is false."
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "net.tls_intercept",
+          "hosts": [
+            "registry.acme.test"
+          ],
+          "forbid_interception": true
+        }
+      ]
     },
     "NetDnsParams": {
       "required": [
@@ -543,7 +662,8 @@
                 "additionalProperties": false,
                 "properties": {
                   "name": {
-                    "$ref": "#/$defs/DnsName"
+                    "$ref": "#/$defs/DnsName",
+                    "description": "The name to look up."
                   },
                   "expect_in": {
                     "type": "array",
@@ -551,45 +671,64 @@
                     "maxItems": 16,
                     "items": {
                       "$ref": "#/$defs/Cidr"
-                    }
+                    },
+                    "description": "Every answer must be inside one of these ranges, 1 to 16."
                   },
                   "expect_public": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "The answers must be public addresses (`true`) or private ones (`false`)."
                   }
                 }
               }
             ]
-          }
+          },
+          "description": "The names to look up, 1 to 64."
         },
         "max_latency": {
-          "description": "Lookup slower than this: warn. Default 500ms.",
+          "description": "A lookup slower than this: the check warns. The default, 500ms, is the check's.",
           "$ref": "#/$defs/Duration"
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "net.dns",
+          "names": [
+            "registry.acme.test"
+          ]
+        }
+      ]
     },
     "K8sAccessParams": {
       "properties": {
         "context_pattern": {
-          "description": "The current kube context must match, a guard against the wrong cluster.",
+          "description": "The current kube context must match this pattern, a guard against the wrong cluster.",
           "$ref": "#/$defs/Regex"
         },
         "max_latency": {
-          "$ref": "#/$defs/Duration"
+          "$ref": "#/$defs/Duration",
+          "description": "A reply slower than this: the check warns. The default, 2s, is the check's."
         },
         "server_pattern": {
-          "description": "The API server URL must match.",
+          "description": "The API server URL must match this pattern.",
           "$ref": "#/$defs/Regex"
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "k8s.access",
+          "context_pattern": "^acme-"
+        }
+      ]
     },
     "K8sStorageClassParams": {
       "properties": {
         "class": {
-          "description": "A storage class that must exist. Default: the cluster's default class.",
+          "description": "A class that must exist. The default is the cluster's default class.",
           "$ref": "#/$defs/K8sName"
         },
         "access_modes": {
-          "$ref": "#/$defs/AccessModes"
+          "$ref": "#/$defs/AccessModes",
+          "description": "Access modes the class must serve, 1 to 4."
         },
         "binding": {
           "enum": [
@@ -597,19 +736,30 @@
             "Immediate",
             "any"
           ],
-          "default": "any"
+          "default": "any",
+          "description": "The binding mode the class must have. The default is `any`."
         },
         "expansion": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "The class must allow expansion."
         },
         "reclaim_policy": {
-          "description": "Mismatch gives warn.",
+          "description": "The reclaim policy the class should have. A mismatch warns.",
           "enum": [
             "Retain",
             "Delete"
           ]
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "k8s.storageclass",
+          "class": "standard",
+          "access_modes": [
+            "ReadWriteOnce"
+          ]
+        }
+      ]
     },
     "AccessModes": {
       "type": "array",
@@ -651,39 +801,54 @@
                   "verb": {
                     "type": "string",
                     "pattern": "^[a-z*]+$",
-                    "maxLength": 63
+                    "maxLength": 63,
+                    "description": "The verb. An RBAC verb such as `create`. `*` means all verbs."
                   },
                   "group": {
                     "type": "string",
                     "pattern": "^[a-z0-9.-]*$",
-                    "maxLength": 253
+                    "maxLength": 253,
+                    "description": "The API group. Empty, which is the default, is the core group."
                   },
                   "resource": {
                     "type": "string",
                     "pattern": "^[a-z0-9*-]+$",
-                    "maxLength": 253
+                    "maxLength": 253,
+                    "description": "The resource. An RBAC resource such as `namespaces`. `*` means all resources."
                   },
                   "subresource": {
                     "type": "string",
                     "pattern": "^[a-z]+$",
-                    "maxLength": 63
+                    "maxLength": 63,
+                    "description": "The subresource, such as `log`."
                   },
                   "namespace": {
-                    "$ref": "#/$defs/K8sName"
+                    "$ref": "#/$defs/K8sName",
+                    "description": "The namespace of the object. For a string item this is the `namespace` of the entry."
                   },
                   "name": {
-                    "$ref": "#/$defs/K8sName"
+                    "$ref": "#/$defs/K8sName",
+                    "description": "The name of the object. Leave it out to mean all names."
                   }
                 }
               }
             ]
-          }
+          },
+          "description": "The permissions to test, 1 to 100. Each one is an entry in the audit log of the cluster."
         },
         "namespace": {
-          "description": "Namespace for string items. Default: cluster scope.",
+          "description": "The namespace for the string items. The default is cluster scope.",
           "$ref": "#/$defs/K8sName"
         }
-      }
+      },
+      "examples": [
+        {
+          "id": "k8s.rbac",
+          "can": [
+            "create namespaces"
+          ]
+        }
+      ]
     },
     "K8sAdmissionParams": {
       "properties": {
@@ -696,14 +861,15 @@
           ]
         },
         "namespace": {
-          "$ref": "#/$defs/K8sName"
+          "$ref": "#/$defs/K8sName",
+          "description": "The namespace the product installs into."
         },
         "scc": {
           "description": "The OpenShift security context constraint the product documents.",
           "$ref": "#/$defs/K8sName"
         },
         "uses": {
-          "description": "Pod features the product needs; the check derives the minimum Pod Security level.",
+          "description": "Pod features the product needs. The check derives the lowest level from them.",
           "type": "array",
           "uniqueItems": true,
           "items": {
@@ -717,25 +883,36 @@
           }
         }
       },
-      "description": "Dry-run checks are not supported yet."
+      "description": "Dry-run checks are not supported yet.",
+      "examples": [
+        {
+          "id": "k8s.admission",
+          "pod_security": "baseline",
+          "namespace": "acme"
+        }
+      ]
     },
     "K8sNodesParams": {
       "properties": {
         "min_ready": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 4294967295
+          "maximum": 4294967295,
+          "description": "Fewer ready nodes than this: the check fails."
         },
         "min_zones": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 4294967295
+          "maximum": 4294967295,
+          "description": "Fewer zones than this: the check fails. Without zone labels it is not evaluated."
         },
         "per_node": {
-          "$ref": "#/$defs/K8sResources"
+          "$ref": "#/$defs/K8sResources",
+          "description": "Each counted node must have at least this much allocatable. These are allocatable amounts, not the size of the instance."
         },
         "free": {
-          "$ref": "#/$defs/K8sResources"
+          "$ref": "#/$defs/K8sResources",
+          "description": "The counted nodes together must have at least this much left after the pods' requests."
         },
         "arch": {
           "type": "array",
@@ -748,7 +925,8 @@
               "x86_64",
               "aarch64"
             ]
-          }
+          },
+          "description": "The architectures the counted nodes may have, 1 to 4. `amd64` is `x86_64`."
         },
         "selector": {
           "type": "object",
@@ -758,7 +936,8 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/K8sLabelValue"
-          }
+          },
+          "description": "Only nodes with these labels are counted."
         },
         "tolerations": {
           "type": "array",
@@ -769,23 +948,27 @@
             "additionalProperties": false,
             "properties": {
               "key": {
-                "$ref": "#/$defs/K8sLabelKey"
+                "$ref": "#/$defs/K8sLabelKey",
+                "description": "The taint key. Without it the operator is `Exists` and every taint matches."
               },
               "operator": {
                 "enum": [
                   "Equal",
                   "Exists"
-                ]
+                ],
+                "description": "How the value is compared. Kubernetes treats a missing operator as `Equal`."
               },
               "value": {
-                "$ref": "#/$defs/K8sLabelValue"
+                "$ref": "#/$defs/K8sLabelValue",
+                "description": "The taint value. Not with `Exists`."
               },
               "effect": {
                 "enum": [
                   "NoSchedule",
                   "PreferNoSchedule",
                   "NoExecute"
-                ]
+                ],
+                "description": "The effect to tolerate. Without it every effect matches."
               }
             },
             "if": {
@@ -810,7 +993,8 @@
                 "key"
               ]
             }
-          }
+          },
+          "description": "Tolerations that make tainted nodes count, at most 16."
         }
       },
       "anyOf": [
@@ -828,6 +1012,16 @@
           "required": [
             "free"
           ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "k8s.nodes",
+          "min_ready": 3,
+          "per_node": {
+            "cpu": 7,
+            "memory": "28Gi"
+          }
         }
       ]
     },
@@ -850,15 +1044,18 @@
           ]
         },
         "memory": {
-          "$ref": "#/$defs/Quantity"
+          "$ref": "#/$defs/Quantity",
+          "description": "Memory."
         },
         "pods": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 4294967295
+          "maximum": 4294967295,
+          "description": "Pod slots."
         },
         "ephemeral": {
-          "$ref": "#/$defs/Quantity"
+          "$ref": "#/$defs/Quantity",
+          "description": "Ephemeral storage."
         }
       },
       "minProperties": 1
@@ -866,13 +1063,15 @@
     "K8sVersionParams": {
       "properties": {
         "min": {
-          "$ref": "#/$defs/Version"
+          "$ref": "#/$defs/Version",
+          "description": "An older server blocks."
         },
         "max": {
-          "$ref": "#/$defs/Version"
+          "$ref": "#/$defs/Version",
+          "description": "A newer server warns, or blocks with `over_max: block`."
         },
         "apis": {
-          "description": "group/version Kind, for example networking.k8s.io/v1 Ingress.",
+          "description": "APIs the server must serve, 1 to 64. Each one is written `group/version Kind`, or `version Kind` for the core group.",
           "type": "array",
           "minItems": 1,
           "maxItems": 64,
@@ -883,11 +1082,11 @@
           }
         },
         "openshift_min": {
-          "description": "Minimum OpenShift version, used when the cluster is OpenShift.",
+          "description": "The lowest OpenShift version, used when the cluster is OpenShift.",
           "$ref": "#/$defs/Version"
         },
         "over_max": {
-          "description": "What a server newer than max counts as. Default warn.",
+          "description": "What a server newer than `max` counts as. The default is `warn`.",
           "enum": [
             "warn",
             "block"
@@ -915,6 +1114,12 @@
           "required": [
             "openshift_min"
           ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "k8s.version",
+          "min": "1.28"
         }
       ]
     }
