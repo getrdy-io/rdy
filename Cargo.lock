@@ -2222,11 +2222,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a253edfdea34032da21af84e16fcc94f4c7a6ba237f9f3bc2dbf43cea8535c44"
 dependencies = [
  "annotate-snippets",
+ "base64 0.22.1",
  "encoding_rs_io",
  "granit-parser 2.0.0",
+ "nohash-hasher",
  "num-traits",
  "serde_core",
  "smallvec",
+ "zmij",
 ]
 
 [[package]]
@@ -3090,9 +3093,11 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "jsonschema",
  "rdy-checks-host",
  "rdy-engine",
  "rdy-spec",
+ "serde-saphyr 2.0.0",
  "serde_json",
  "sha2",
  "tempfile",

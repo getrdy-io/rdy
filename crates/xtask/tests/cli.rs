@@ -364,3 +364,29 @@ fn checks_lists_each_registered_check_with_id_family_title_and_remediation() -> 
     }
     Ok(())
 }
+
+#[test]
+fn docs_exits_70_and_names_the_path_of_a_property_without_a_description() -> Result<()> {
+    // The exit test of docs/plan/09-docs-site.md, section 5: a property with no description fails the
+    // docs build with its path. The repo has the schema the types write, and one description is removed.
+    let repo = repo_with_schema()?;
+    let schema_path = repo
+        .path()
+        .join("crates/rdy-spec/schema/spec.v1.schema.json");
+    let mut schema: serde_json::Value = serde_json::from_str(&fs::read_to_string(&schema_path)?)?;
+    let arch = schema["$defs"]["HostCpuParams"]["properties"]["arch"]
+        .as_object_mut()
+        .context("the host.cpu arch property is missing from the schema")?;
+    arch.remove("description")
+        .context("the host.cpu arch property has no description to remove")?;
+    fs::write(&schema_path, serde_json::to_string_pretty(&schema)?)?;
+
+    let out = xtask(repo.path(), &["docs", "--check"])?;
+    assert_eq!(code(&out), Some(70), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("checks[id=host.cpu].arch has no description"),
+        "{}",
+        stderr(&out)
+    );
+    Ok(())
+}

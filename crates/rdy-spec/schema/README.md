@@ -22,10 +22,14 @@ shows up as a diff of these files, and CI fails until the files are regenerated.
 fails when a description names an ADR, a milestone, a plan document or a section of one, because the text
 reaches customers.
 
-Three parts of the contract have no Rust type yet. They are JSON fragments in
+Three parts of the contract do not derive the schema yet. They are JSON fragments in
 `crates/rdy-spec/src/schema/` that the generator merges in as they are: the parameters of the 17 check ids,
 the kind-specific fields of an action, and the `Verification` and `ErrorOutput` objects. Edit
 the fragment, then regenerate. Each goes away when its type derives the schema.
+
+Each check parameter needs a `description` in the fragment. The fragment also holds one `examples` entry per
+check id. `cargo xtask docs` shows each example as YAML, and it fails with the path of any property that has
+no description. The test suite checks each example against the schema (ADR 0034).
 
 Editors can use the spec schema today, for example with yaml-language-server:
 
