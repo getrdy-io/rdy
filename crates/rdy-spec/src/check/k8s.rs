@@ -520,7 +520,7 @@ pub struct K8sResources {
     pub cpu: Option<CpuAmount>,
     /// Memory.
     pub memory: Option<Quantity>,
-    /// Pods a node can run.
+    /// Pod slots.
     pub pods: Option<NonZeroU32>,
     /// Ephemeral storage.
     pub ephemeral: Option<Quantity>,
