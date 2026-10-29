@@ -83,7 +83,6 @@ fn a_declared_program_matches_the_way_the_table_does() {
 
 // ---- the read denylist -------------------------------------------------------------------------
 
-#[cfg(unix)]
 mod denylist {
     use super::*;
     use crate::probe::policy::{
@@ -197,6 +196,32 @@ mod denylist {
             ("/dev", RULE_DEVICE),
             // Private keys by name.
             ("/etc/ssl/private/site.pem", RULE_PRIVATE_KEY),
+            // Key files in PEM form, by name and by directory.
+            ("/srv/app/tls/privkey.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/privkey1.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/server-key.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/server_key.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/key.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/server.key.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/tls-privkey.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/my.privkey.pem", RULE_PRIVATE_KEY),
+            ("/srv/app/tls/private-ca.pem", RULE_PRIVATE_KEY),
+            (
+                "/etc/letsencrypt/live/example.test/cert.pem",
+                RULE_PRIVATE_KEY,
+            ),
+            (
+                "/etc/letsencrypt/archive/example.test/chain1.pem",
+                RULE_PRIVATE_KEY,
+            ),
+            (
+                "/var/lib/kubelet/pki/kubelet-client-current.pem",
+                RULE_KUBECONFIG,
+            ),
+            ("/run/secrets/db_password", RULE_CREDENTIALS),
+            ("/var/run/secrets/db_password", RULE_CREDENTIALS),
+            // `auxv` is ours only under the real /proc, not under a mount of another one.
+            ("/host/proc/self/auxv", RULE_PROC),
             ("/etc/pki/tls/private/site.pem", RULE_PRIVATE_KEY),
             ("/srv/app/server.key", RULE_PRIVATE_KEY),
             ("/srv/app/SERVER.KEY", RULE_PRIVATE_KEY),
@@ -254,6 +279,10 @@ mod denylist {
             "/etc/kubernetes/pki/ca.crt",
             "/var/lib/kubelet/config.yaml",
             "/var/run/secrets/kubernetes.io",
+            "/etc/letsencrypt/renewal/example.test.conf",
+            "/srv/app/tls/fullchain.pem",
+            "/srv/app/tls/cert.pem",
+            "/run/secrets",
             "/home/ada/.docker",
             "/home/ada/.config/helm/repositories.yaml",
             "/home/ada/id_rsa.pub",
@@ -418,12 +447,15 @@ mod denylist {
     }
 }
 
-#[cfg(windows)]
 #[tokio::test]
-async fn windows_refuses_every_file_read() {
-    let hub = hub(Replay::new().file("C:\\x", "y"));
-    let probe = hub.check_probe("host.cpu", Os::Linux, None);
-    let error = probe.read(Path::new("C:\\x")).await.expect_err("refused");
+async fn a_windows_check_reads_no_files_on_any_host() {
+    // The policy follows the check's OS, not the machine rdy runs on.
+    let hub = hub(Replay::new().file("/proc/cpuinfo", "y"));
+    let probe = hub.check_probe("host.cpu", Os::Windows, None);
+    let error = probe
+        .read(Path::new("/proc/cpuinfo"))
+        .await
+        .expect_err("refused");
     assert!(matches!(
         error,
         ProbeError::Denied {
@@ -431,6 +463,210 @@ async fn windows_refuses_every_file_read() {
             ..
         }
     ));
+}
+
+// ---- the reads prefixes, size caps and env (M1-045) -------------------------------------------
+
+/// These run on every host, the Windows leg included: the policy follows the check's OS, and the replay
+/// backend is a map.
+mod reads {
+    use super::*;
+    use crate::check::{CheckInfo, CheckMeta, OsSupport, Support};
+    use crate::probe::policy::{RULE_OUTSIDE_READS, RULE_PROC, ReadGuard};
+
+    static READER: CheckInfo = CheckInfo {
+        id: "host.fixture",
+        family: "host",
+        summary: "Reads a few files and one variable.",
+        meta: CheckMeta {
+            title: "Fixture check",
+            remediation: "Nothing to fix. This check is a test double.",
+        },
+        needs: &[],
+        wants: &[],
+        default_timeout: None,
+        os: OsSupport {
+            linux: Support::Full,
+            macos: Support::Full,
+            windows: Support::NotYet,
+        },
+        reads: &["/proc", "/etc/os-release"],
+        env: &["HTTPS_PROXY"],
+        commands: &[],
+        peers: &[],
+    };
+
+    fn rule_of(error: &ProbeError) -> &'static str {
+        match error {
+            ProbeError::Denied { rule, .. } => rule,
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_outside_the_declared_prefixes_is_refused_and_logged() {
+        let hub = hub(Replay::new()
+            .file("/proc/cpuinfo", "cpu")
+            .file("/etc/os-release", "ID=fixture")
+            .file("/var/log/syslog", "boot")
+            .file("/procfoo/x", "no")
+            .file("/etc/os-release.d/x", "no"));
+        let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READER));
+
+        assert!(probe.read(Path::new("/proc/cpuinfo")).await.is_ok());
+        assert!(probe.read(Path::new("/etc/os-release")).await.is_ok());
+        for path in ["/var/log/syslog", "/procfoo/x", "/etc/os-release.d/x"] {
+            let error = probe.read(Path::new(path)).await.expect_err("refused");
+            assert_eq!(rule_of(&error), RULE_OUTSIDE_READS, "{path}");
+        }
+        assert!(probe.stat(Path::new("/var/log")).await.is_err());
+        assert!(probe.read_dir(Path::new("/var/log")).await.is_err());
+        assert!(
+            probe
+                .read_tail(Path::new("/var/log/syslog"), 4)
+                .await
+                .is_err()
+        );
+
+        let log = hub.action_log();
+        let denied: Vec<_> = log
+            .actions
+            .iter()
+            .filter(|a| a.outcome == ActionOutcome::Denied)
+            .collect();
+        assert_eq!(denied.len(), 6, "every refusal is logged");
+        for action in denied {
+            assert_eq!(field(action, "rule"), Some(&json!(RULE_OUTSIDE_READS)));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_denylist_wins_inside_a_declared_prefix() {
+        let hub = hub(Replay::new().file("/proc/1/environ", "SECRET=1"));
+        let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READER));
+        let error = probe
+            .read(Path::new("/proc/1/environ"))
+            .await
+            .expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_PROC);
+    }
+
+    #[tokio::test]
+    async fn a_probe_with_no_manifest_keeps_the_denylist_and_has_no_prefixes() {
+        let hub = hub(Replay::new().file("/var/log/syslog", "boot"));
+        let probe = hub.check_probe("host.fixture", Os::Linux, None);
+        assert!(probe.read(Path::new("/var/log/syslog")).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_two_mib_file_returns_one_mib_with_truncated_true() {
+        let mut big = vec![b'a'; MAX_READ];
+        big.extend(vec![b'b'; MAX_READ]);
+        let hub = hub(Replay::new().file("/proc/big", big));
+        let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READER));
+
+        let file = probe.read(Path::new("/proc/big")).await.expect("read");
+        assert_eq!(file.bytes.len(), MAX_READ);
+        assert!(file.truncated_tail && file.truncated());
+        let tail = probe
+            .read_tail(Path::new("/proc/big"), 8)
+            .await
+            .expect("tail");
+        assert_eq!(tail.bytes, b"bbbbbbbb");
+        assert!(tail.truncated_head && !tail.truncated_tail);
+
+        let log = hub.action_log();
+        assert_eq!(field(&log.actions[0], "bytes"), Some(&json!(MAX_READ)));
+        assert_eq!(field(&log.actions[0], "truncated"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn only_our_own_pid_reads_auxv_on_a_real_path() {
+        let guard = ReadGuard::new(Os::Linux, None);
+        let own = std::process::id();
+        let path = |pid: u32| format!("/proc/{pid}/auxv");
+        assert_eq!(guard.admit_real(Path::new(&path(own))), Ok(()));
+        // Never "any pid".
+        let other = path(own.wrapping_add(1));
+        let error = guard
+            .admit_real(Path::new(&other))
+            .expect_err("another pid");
+        assert_eq!(error.rule, RULE_PROC);
+        assert!(guard.admit_real(Path::new("/proc/1/environ")).is_err());
+        // As written, only `self` passes; a pid in the text does not.
+        assert!(guard.admit(Path::new("/proc/self/auxv")).is_ok());
+        assert!(guard.admit(Path::new(&path(own))).is_err());
+    }
+
+    #[test]
+    fn our_pid_in_a_path_as_written_does_not_depend_on_the_host() {
+        let guard = ReadGuard::new(Os::Linux, Some(&["/proc/self/mountinfo"]));
+        let own = format!("/proc/{}/mountinfo", std::process::id());
+        // As written, a pid is just a pid: a replay run decides the same on every host.
+        assert_eq!(
+            guard.admit(Path::new(&own)),
+            Err(RULE_OUTSIDE_READS),
+            "{own}"
+        );
+        // On a real path `/proc/self` has become our pid, and the same declaration covers it.
+        assert_eq!(guard.admit_real(Path::new(&own)), Ok(()));
+        assert!(guard.admit(Path::new("/proc/self/mountinfo")).is_ok());
+    }
+
+    #[test]
+    fn the_decision_follows_the_checks_os_and_not_the_host() {
+        let linux = ReadGuard::new(Os::Linux, Some(&["/proc"]));
+        assert_eq!(linux.admit(Path::new("/proc/cpuinfo")), Ok(()));
+        let windows = ReadGuard::new(Os::Windows, None);
+        assert_eq!(
+            windows.admit(Path::new("/proc/cpuinfo")),
+            Err(policy::RULE_WINDOWS)
+        );
+        // Names compare without case only for a macOS check.
+        let mac = ReadGuard::new(Os::Macos, Some(&["/Library"]));
+        assert_eq!(mac.admit(Path::new("/library/x")), Ok(()));
+        assert!(linux.admit(Path::new("/PROC/cpuinfo")).is_err());
+    }
+
+    #[tokio::test]
+    async fn an_undeclared_env_name_is_refused_and_logged_without_a_value() {
+        let hub = hub(Replay::new()
+            .env("HTTPS_PROXY", "http://proxy.example:3128")
+            .env("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI-secret"));
+        let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READER));
+
+        let value = probe.env("HTTPS_PROXY").expect("declared");
+        assert_eq!(value.as_deref(), Some("http://proxy.example:3128"));
+        let error = probe.env("AWS_SECRET_ACCESS_KEY").expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_ENV_NOT_DECLARED);
+        for bad in ["", "A=B", "A\0B"] {
+            let error = probe.env(bad).expect_err("not a name");
+            assert_eq!(rule_of(&error), RULE_ENV_BAD_NAME, "{bad:?}");
+        }
+
+        let log = hub.action_log();
+        assert!(log.actions.iter().all(|a| a.kind.to_string() == "env"));
+        assert_eq!(log.actions[0].outcome, ActionOutcome::Ok);
+        assert_eq!(field(&log.actions[0], "name"), Some(&json!("HTTPS_PROXY")));
+        assert!(
+            log.actions[1..]
+                .iter()
+                .all(|a| a.outcome == ActionOutcome::Denied)
+        );
+        let text = serde_json::to_string(&log.actions).expect("json");
+        assert!(!text.contains("proxy.example"), "the value is never logged");
+        assert!(!text.contains("wJalrXUtnFEMI"));
+    }
+
+    #[tokio::test]
+    async fn an_env_call_after_the_check_ended_is_refused() {
+        let hub = hub(Replay::new().env("HTTPS_PROXY", "x"));
+        let probe = hub.check_probe("host.fixture", Os::Linux, Some(&READER));
+        probe.end();
+        let error = probe.env("HTTPS_PROXY").expect_err("ended");
+        assert_eq!(rule_of(&error), RULE_CHECK_FINISHED);
+        assert!(Probe::closed().env("HTTPS_PROXY").is_err());
+    }
 }
 
 // ---- exec --------------------------------------------------------------------------------------
@@ -508,14 +744,30 @@ mod commands {
     impl Sealed for Recorder {}
 
     impl Backend for Recorder {
-        fn open_read<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<FileBytes>> {
+        fn open_read<'a>(
+            &'a self,
+            _: &'a Path,
+            _: ReadRange,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<FileBytes>> {
             Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
         }
-        fn read_dir<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
+        fn read_dir<'a>(
+            &'a self,
+            _: &'a Path,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
             Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
         }
-        fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
+        fn stat<'a>(
+            &'a self,
+            _: &'a Path,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
             Box::pin(async { Ok(None) })
+        }
+        fn env(&self, _: &str) -> Option<String> {
+            None
         }
         fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
             Box::pin(async move {
@@ -540,14 +792,30 @@ mod commands {
     impl Sealed for Live {}
 
     impl Backend for Live {
-        fn open_read<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<FileBytes>> {
+        fn open_read<'a>(
+            &'a self,
+            _: &'a Path,
+            _: ReadRange,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<FileBytes>> {
             Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
         }
-        fn read_dir<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
+        fn read_dir<'a>(
+            &'a self,
+            _: &'a Path,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
             Box::pin(async { Err(io::ErrorKind::NotFound.into()) })
         }
-        fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
+        fn stat<'a>(
+            &'a self,
+            _: &'a Path,
+            _: &'a ReadGuard,
+        ) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
             Box::pin(async { Ok(None) })
+        }
+        fn env(&self, _: &str) -> Option<String> {
+            None
         }
     }
 
@@ -916,7 +1184,6 @@ async fn a_closed_probe_refuses_everything() {
     assert!(ctx.probe().stat(Path::new("/proc")).await.is_err());
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn a_call_after_the_check_ended_is_denied_and_logged() {
     let hub = hub(Replay::new().file("/proc/cpuinfo", "x"));
@@ -957,14 +1224,30 @@ struct Hanging;
 impl Sealed for Hanging {}
 
 impl Backend for Hanging {
-    fn open_read<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<FileBytes>> {
+    fn open_read<'a>(
+        &'a self,
+        _: &'a Path,
+        _: ReadRange,
+        _: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<FileBytes>> {
         Box::pin(std::future::pending())
     }
-    fn read_dir<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
+    fn read_dir<'a>(
+        &'a self,
+        _: &'a Path,
+        _: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
         Box::pin(std::future::pending())
     }
-    fn stat<'a>(&'a self, _: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
+    fn stat<'a>(
+        &'a self,
+        _: &'a Path,
+        _: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
         Box::pin(std::future::pending())
+    }
+    fn env(&self, _: &str) -> Option<String> {
+        None
     }
     fn spawn<'a>(&'a self, _: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> {
         Box::pin(std::future::pending())
@@ -1021,7 +1304,6 @@ async fn the_provided_process_ids_are_real_and_effective_with_the_rest_copied() 
     assert_eq!(ids.gid[1], ids.gid[3]);
 }
 
-#[cfg(unix)]
 #[tokio::test(start_paused = true)]
 async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {
     let hub = ProbeHub::new(Arc::new(Hanging), redactor());
@@ -1042,7 +1324,7 @@ async fn a_call_dropped_before_it_finished_is_logged_as_a_timeout() {
     );
 }
 
-#[cfg(all(unix, feature = "runtime"))]
+#[cfg(feature = "runtime")]
 #[tokio::test]
 async fn a_call_still_running_when_the_check_ends_is_cut_off_and_logged_denied() {
     let hub = ProbeHub::new(Arc::new(Hanging), redactor());
@@ -1896,7 +2178,7 @@ mod scheduled {
             macos: Support::Full,
             windows: Support::Full,
         },
-        reads: &[],
+        reads: &["/proc", "/home/tester"],
         env: &[],
         commands: &[CommandSpec {
             program: "getent",

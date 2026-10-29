@@ -345,19 +345,38 @@ tests policy.
   truncation flags for the redactor.
 
 **Files.**
-- Absolute paths only, and no `..` component; matched before any open.
+- Absolute paths only, and no `..` component; matched before any open. The path must also sit under
+  one of the check's declared `reads` prefixes (a probe built with no `CheckInfo` has none to enforce).
+  The check runs on the path as written and again on the real path, so a link out of the prefixes, or
+  to a denied file, is refused. A check that reads a path which is a link on some systems declares the
+  link and its target.
+- The decision follows the check's `Os`, not the machine rdy runs on, so a replay test of a Linux
+  check runs on the Windows leg too. The path is read as text, split on `/`.
 - Linux: open with `O_PATH` (no side effect, no device open), read the real path from
   `/proc/self/fd/<n>`, `fstat`, and check prefix and deny list against that real path. Then reopen
-  through the descriptor with `O_RDONLY | O_NONBLOCK`. Only regular files pass, except under `/proc`
-  and `/sys`.
-- macOS: `realpath`, open with `O_NOFOLLOW | O_NONBLOCK`, and recheck with `F_GETPATH`.
+  through the descriptor with `O_RDONLY | O_NONBLOCK` and require the same device and inode. Only
+  regular files are read (procfs and sysfs files are regular); a FIFO, socket, device or directory is
+  refused before anything opens it. On the real path `/proc/<pid>/auxv` passes for rdy's own pid
+  only (`std::process::id()`), never for any pid, and only when `proc` is the first component. A file
+  with `st_nlink` of 0 (unlinked after the open, whose path reads `... (deleted)`) is refused. Before the
+  prefix match `/proc/<our pid>` and `/proc/net` are put in the `/proc/self` form, on the path and on
+  the declared prefixes alike, so `reads: ["/proc/net"]` reads `/proc/net/tcp`. The device and inode of
+  each password and sudo file is recorded when the live backend is made, and a hard link or a bind
+  mount with that identity is refused whatever its name.
+- macOS: `realpath`, the checks, then open with `O_NOFOLLOW_ANY | O_NONBLOCK` (no link anywhere along
+  the path, so a directory swapped for a link after the check cannot redirect the open). The type comes
+  from `fstat` of the descriptor, the descriptor must have the same device and inode as the first
+  look, and `F_GETPATH` gives the path that is judged again.
+- Every Unix: a tail streams to the end of the file through a buffer of the last `max` bytes (a file in
+  `/proc` reports size 0) and sets `truncated_tail` when a 16 MiB scan budget ran out before the end.
 - Windows: no M1 check reads files, so the facade refuses them.
 - Deny list, matched on components at any depth (`/host/etc/shadow`, an overlay `diff/etc/shadow`, a
   macOS data volume): `etc/shadow*`, `etc/gshadow*`, `etc/sudoers*`, `etc/master.passwd`,
   `etc/security/opasswd`, `var/db/dslocal`; `.ssh`, `.kube`, `.aws`, `.azure`, `.config/gcloud`, `.gnupg`, `.docker/config.json`, `.netrc`,
   `.git-credentials`, `.pgpass`, `.vault-token`; private key files by name and extension (`*.key`,
-  `*.p12`, `*.keytab`, `*.keychain`, `*.keychain-db`, `id_*`, `ssh_host_*_key`), `etc/ssl/private`,
-  `etc/pki/tls/private`; cluster credentials (`etc/kubernetes/*.conf`, `etc/rancher/{k3s,rke2}/*.yaml`,
+  `*.p12`, `*.keytab`, `*.keychain`, `*.keychain-db`, `id_*`, `ssh_host_*_key`, and PEM keys `key.pem`, `*-key.pem`,
+  `*_key.pem`, `*.key.pem`, `*privkey*.pem` and `private*.pem`), `etc/ssl/private`, `etc/pki/tls/private`,
+  `etc/letsencrypt/{live,archive}`, `var/lib/kubelet/pki`, `run/secrets`; cluster credentials (`etc/kubernetes/*.conf`, `etc/rancher/{k3s,rke2}/*.yaml`,
   `var/lib/kubelet/kubeconfig`, `var/lib/etcd`, `var/lib/rancher/*/server/{token,node-token,cred}`,
   `secrets/kubernetes.io/*`). `/proc/<pid>/` is an allowlist (`status`, `stat`, `statm`, `comm`,
   `cgroup`, `mountinfo`, `mounts`, `limits`, `net`, and the same under `task/<tid>/`, plus `auxv` for
@@ -370,8 +389,11 @@ tests policy.
   `rdy-checks-k8s` client module reads the file the operator chose (`--kubeconfig`, `KUBECONFIG` or
   `~/.kube/config`), and the probe hook logs it as a `read` entry with no check id from
   `Loaded::files()` (ADR 0031, M1-102).
-- 1 MiB cap; `read_tail` sets `truncated_head`. Reads run on `spawn_blocking`.
-- Env names must be declared; values matching the secret-name rule join the known-secret set.
+- 1 MiB cap (`MAX_READ`); a longer file sets `truncated_tail`, and `read_tail` sets `truncated_head`.
+  A directory listing holds at most 65,536 entries and a longer one is an error. Reads run on
+  `spawn_blocking`.
+- Env names must be declared in `CheckInfo::env`; the log holds the name and never the value. Values
+  matching the secret-name rule join the known-secret set (M1-061).
 
 **Network** (ADR 0014; ADR 0009 decisions 4, 6 and 7 stay).
 - The host must be in the calling check's own host set. The spec may name at most 64 distinct hosts
@@ -804,7 +826,8 @@ impl Probe {
     pub async fn read(&self, path: &Path) -> Result<FileBytes, ProbeError>;
     pub async fn read_tail(&self, path: &Path, max: usize) -> Result<FileBytes, ProbeError>;
     pub async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ProbeError>;
-    pub async fn read_link(&self, path: &Path) -> Result<PathBuf, ProbeError>;
+    // read_link: M1-169 (plan correction 14). host.ports needs it for /proc/self/ns/net and /proc/<pid>/fd,
+    // and the action log needs a kind for it.
     pub async fn stat(&self, path: &Path) -> Result<Option<FileMeta>, ProbeError>;
     pub fn env(&self, name: &str) -> Result<Option<String>, ProbeError>;
     pub async fn exec(&self, cmd: Cmd) -> Result<Output, ProbeError>;
@@ -831,10 +854,12 @@ pub enum ProbeError { Denied { rule: &'static str, what: String }, Policy(Policy
                       NotFound, PermissionDenied, Timeout, Hung { pid: u32 }, Net(NetFailure), Io(String),
                       NotRecorded(String) }   // Clone + PartialEq + Eq; every message ends with a Fix: hint
 pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay only; raw I/O, no policy
-    fn open_read<'a>(&'a self, path: &'a Path, range: ReadRange) -> BoxFuture<'a, io::Result<FileBytes>>;
-    fn read_dir<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Vec<DirEntry>>>;
-    fn read_link<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<PathBuf>>;
-    fn stat<'a>(&'a self, path: &'a Path) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
+    // The ReadGuard is the check's os and `reads`. A backend that resolves links applies
+    // `guard.admit_real(real)` to the real path before it opens anything and reports a refusal as
+    // `Refused` inside an `io::Error` of kind PermissionDenied (M1-045).
+    fn open_read<'a>(&'a self, path: &'a Path, range: ReadRange, guard: &'a ReadGuard) -> BoxFuture<'a, io::Result<FileBytes>>;
+    fn read_dir<'a>(&'a self, path: &'a Path, guard: &'a ReadGuard) -> BoxFuture<'a, io::Result<Vec<DirEntry>>>;
+    fn stat<'a>(&'a self, path: &'a Path, guard: &'a ReadGuard) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
     fn env(&self, name: &str) -> Option<String>;
     // Provided: the live path, exec::table::run (the only public runner). Replay overrides it. (PC-44)
     fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> { /* table::run */ }
