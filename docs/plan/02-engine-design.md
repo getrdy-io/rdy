@@ -286,7 +286,7 @@ tests policy.
 - The program resolves to an absolute path from the fixed search path (`/usr/sbin:/usr/bin:/sbin:/bin`)
   always, then the check's declared extra directories (absolute constants, for operator-managed GPU
   tools). Windows: in M1 only `C:\Windows\System32\whoami.exe`, until job objects land.
-- Refused outright: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`, `powershell`, `pwsh`), the privilege
+- Refused outright: shells (`sh`, `bash`, `zsh`, `dash`, `cmd`, `powershell`, `pwsh`, and the busybox shell applets `hush`, `msh`, `mksh`, `yash`, `rbash`, `posh`, `oksh`, `loksh`), the privilege
   family (`sudo`, `su`, `doas`, `pkexec`, `runas`, `run0`, `sudoedit`, `runuser`, `setpriv`, `sg`,
   `newgrp`, `ksu`, `machinectl`, `systemd-run`) and the programs that run another program from their
   arguments (`env`, `xargs`, `nice`, `nohup`, `timeout`, `setsid`, `chroot`, `nsenter`, `unshare`,
