@@ -31,7 +31,9 @@ use serde_saphyr::{Budget, NonFiniteFloatPolicy};
 use crate::check::find_duplicate;
 use crate::error::echo_reason;
 use crate::error::echo_safe;
-use crate::limits::{self, MAX_CHECKS, PLACED_COLLECT_ITEMS, PLACED_METADATA_KEYS, Places};
+use crate::limits::{
+    self, MAX_CHECKS, PLACED_COLLECT_ITEMS, PLACED_METADATA_KEYS, PLACED_REGEX_ITEMS, Places,
+};
 use crate::spec::Spec;
 use crate::{API_VERSION, Location, SpecError};
 
@@ -122,7 +124,7 @@ pub(crate) fn parse_bytes(bytes: &[u8]) -> Result<Spec, SpecError> {
     Ok(spec)
 }
 
-fn location_of(marker: &Marker) -> Location {
+pub(crate) fn location_of(marker: &Marker) -> Location {
     let to_u32 = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
     // The reader counts columns from 0 and lines from 1.
     Location::new(
@@ -529,7 +531,7 @@ impl Guard {
         )
     }
 
-    /// Remembers where a metadata value or a `bundle.collect` item starts. The reader sees a node before
+    /// Remembers where a metadata value, a `bundle.collect` item or a redact pattern's regex starts. The reader sees a node before
     /// it knows whether it is a key, so this runs first and looks at the frames.
     fn note_place(&mut self, at: Location) {
         match self.frames.as_slice() {
@@ -556,6 +558,24 @@ impl Guard {
                 && self.places.collect.len() < PLACED_COLLECT_ITEMS =>
             {
                 self.places.collect.push(at);
+            }
+            [
+                Frame::Map { key: Some(top), .. },
+                Frame::Map {
+                    key: Some(inner), ..
+                },
+                Frame::Seq,
+                Frame::Map {
+                    expecting_key: false,
+                    key: Some(k),
+                    ..
+                },
+            ] if top == "bundle"
+                && inner == "redact_patterns"
+                && k == "regex"
+                && self.places.regex.len() < PLACED_REGEX_ITEMS =>
+            {
+                self.places.regex.push(at);
             }
             _ => {}
         }

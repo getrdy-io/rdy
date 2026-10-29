@@ -297,6 +297,7 @@ impl ParamSet for NetTlsIntercept {
         "pin_sha256",
         "forbid_interception",
     ];
+    const REGEX_FIELDS: &'static [&'static str] = &["expected_issuer"];
 }
 
 /// A name to look up, by the host-name grammar of [`Target`] (01 section 2.6).

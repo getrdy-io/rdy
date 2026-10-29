@@ -119,6 +119,7 @@ pub struct K8sAccess {
 
 impl ParamSet for K8sAccess {
     const FIELDS: &'static [&'static str] = &["context_pattern", "server_pattern", "max_latency"];
+    const REGEX_FIELDS: &'static [&'static str] = &["context_pattern", "server_pattern"];
 }
 
 /// A volume access mode.

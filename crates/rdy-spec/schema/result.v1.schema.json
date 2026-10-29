@@ -665,6 +665,75 @@
         "complete"
       ]
     },
+    "Finding": {
+      "description": "One finding of a `LintReport`.",
+      "type": "object",
+      "properties": {
+        "level": {
+          "description": "Warning or error.",
+          "$ref": "#/$defs/Level"
+        },
+        "code": {
+          "description": "The code: `unknown_key`, `unknown_check`, `unsupported_field`, `bad_value`, `not_in_build`, `no_threshold` or `structure`. The set only grows.",
+          "anyOf": [
+            {
+              "enum": [
+                "unknown_key",
+                "unknown_check",
+                "unsupported_field",
+                "bad_value",
+                "not_in_build",
+                "no_threshold",
+                "structure"
+              ]
+            },
+            {
+              "$ref": "#/$defs/OpenCode"
+            }
+          ]
+        },
+        "line": {
+          "description": "The line in the file, from 1, when it is known.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "column": {
+          "description": "The column in the file, from 1, when it is known.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "key": {
+          "description": "The key of the check the finding is about (`host.disk` or `host.disk/data`). Null for a finding about the file as a whole.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "message": {
+          "description": "What is wrong. Safe to print: text from the file is cut and escaped.",
+          "type": "string",
+          "maxLength": 4096
+        },
+        "fix": {
+          "description": "What to do about it. Never empty.",
+          "type": "string",
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "level",
+        "code",
+        "message",
+        "fix"
+      ]
+    },
     "FixSource": {
       "description": "Whose fix text a result carries. Open: a newer producer may send other snake_case values.",
       "anyOf": [
@@ -883,94 +952,54 @@
         "user_verified"
       ]
     },
+    "Level": {
+      "description": "How serious a finding is.",
+      "oneOf": [
+        {
+          "description": "Lint exits 1 and sign goes on.",
+          "type": "string",
+          "const": "warning"
+        },
+        {
+          "description": "Lint exits 2 and sign refuses.",
+          "type": "string",
+          "const": "error"
+        }
+      ]
+    },
     "LintReport": {
-      "description": "Not a report. What rdy spec lint prints with --json.",
+      "description": "Not a `Report`. What `rdy spec lint` prints with `--json`.\n\nThe counts equal the number of findings of each level.",
       "type": "object",
       "properties": {
         "api_version": {
+          "description": "Always `rdy/v1`.",
+          "type": "string",
           "const": "rdy/v1"
         },
         "kind": {
+          "description": "Always `Lint`.",
+          "type": "string",
           "const": "Lint"
         },
         "file": {
+          "description": "The file as the caller named it.",
           "type": "string",
           "maxLength": 4096
         },
         "findings": {
+          "description": "Every finding, in file order. Empty when the spec is clean.",
           "type": "array",
           "items": {
-            "type": "object",
-            "properties": {
-              "level": {
-                "enum": [
-                  "error",
-                  "warning"
-                ]
-              },
-              "code": {
-                "description": "Known: unknown_key, unknown_check, unsupported_field, bad_value, not_in_build, no_threshold, structure. Open.",
-                "anyOf": [
-                  {
-                    "enum": [
-                      "unknown_key",
-                      "unknown_check",
-                      "unsupported_field",
-                      "bad_value",
-                      "not_in_build",
-                      "no_threshold",
-                      "structure"
-                    ]
-                  },
-                  {
-                    "$ref": "#/$defs/OpenCode"
-                  }
-                ]
-              },
-              "line": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "minimum": 1
-              },
-              "column": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "minimum": 1
-              },
-              "key": {
-                "description": "Check key, or null for top-level findings.",
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "maxLength": 4096
-              },
-              "message": {
-                "type": "string",
-                "maxLength": 4096
-              },
-              "fix": {
-                "type": "string",
-                "maxLength": 4096
-              }
-            },
-            "required": [
-              "level",
-              "code",
-              "message",
-              "fix"
-            ]
+            "$ref": "#/$defs/Finding"
           }
         },
         "errors": {
+          "description": "How many findings are errors.",
           "type": "integer",
           "minimum": 0
         },
         "warnings": {
+          "description": "How many findings are warnings.",
           "type": "integer",
           "minimum": 0
         }
