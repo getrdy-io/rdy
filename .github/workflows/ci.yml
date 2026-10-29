@@ -264,6 +264,8 @@ jobs:
         uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest@0.9.149
+          # A missing prebuilt binary fails the step. It never falls back to `cargo install`.
+          fallback: none
       - name: Build the rdy binary
         if: ${{ !matrix.compile_only }}
         run: cargo build --locked --target "$TARGET" --package rdy
@@ -398,14 +400,34 @@ jobs:
         run: |
           sh scripts/test-install-release-tool.sh
           sh scripts/test-harden-release-workflow.sh
+          sh scripts/test-sign-release.sh
       - name: release.yml matches dist and the hardening script
         run: sh scripts/gen-release-workflow.sh --check
+
+  # M1-010: the real cosign verify-blob forms from 06 against real keyless signatures: cosign's own
+  # v3.1.4 release (identity and issuer) and goreleaser v2.19.0 (a GitHub Actions run: identity, issuer,
+  # repository, ref and trigger), each also after a change that must fail. It needs the network (GitHub
+  # and Sigstore's TUF mirror) and cosign, which the pinned installer provides. It is in ci-ok (ADR 0024).
+  cosign-roundtrip:
+    name: cosign-roundtrip
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install cosign (pinned file, sha256 checked)
+        run: sh scripts/install-release-tool.sh cosign
+      - name: verify-blob passes with the exact identity and claims, and fails on every change
+        run: sh scripts/test-cosign-roundtrip.sh
 
   # The only required check. Keep `needs:` equal to the list of gating jobs.
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, zizmor, deny, dco, install-sh, test, root, release-workflow]
+    needs: [lint, zizmor, deny, dco, install-sh, test, root, release-workflow, cosign-roundtrip]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

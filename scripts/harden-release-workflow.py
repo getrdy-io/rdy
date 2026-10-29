@@ -17,7 +17,9 @@ script rewrites those parts and nothing else:
      The musl packages are installed by a fixed step, not by text from the build matrix. Container
      builds are removed: we configure none, and dist's fallback installs Rust with `curl | sh`.
   6. The SBOM upload uses `outputs`, not the misspelt `output` that dist writes.
-  7. `announce` checks the exact file list again just before it publishes.
+  7. `announce` checks the exact file list again just before it publishes, and that SHA256SUMS and its
+     bundle are there and list exactly those files (--files-only --signed).
+  8. The signing job waits for the artifact check, and neither publish workflow inherits secrets.
 
 Every edit must match exactly once. If dist changes its output, the script stops with the text it
 could not find. Then read the new output, update this script and ADR 0020, and re-run
@@ -210,8 +212,25 @@ def harden(text: str) -> str:
         "",
     )
 
-    # 5c. The check workflow reads no secret, so it gets none.
-    sub("      plan: ${{ needs.plan.outputs.val }}\n    secrets: inherit\n", "      plan: ${{ needs.plan.outputs.val }}\n")
+    # 5c. The two publish workflows read no secret, so they get none. (The signing job gets its
+    # certificate from the OIDC token, not from a secret.)
+    for wf in ("check-release-artifacts", "sign-release"):
+        sub(
+            f"    uses: ./.github/workflows/{wf}.yml\n"
+            "    with:\n"
+            "      plan: ${{ needs.plan.outputs.val }}\n"
+            "    secrets: inherit\n",
+            f"    uses: ./.github/workflows/{wf}.yml\n"
+            "    with:\n"
+            "      plan: ${{ needs.plan.outputs.val }}\n",
+        )
+
+    # 5e. Sign only what passed the artifact check. Publish jobs otherwise run side by side, and a
+    # signature on a build that failed the check would sit in the public Sigstore log for ever.
+    sub(
+        "  custom-sign-release:\n    needs:\n      - plan\n      - host\n",
+        "  custom-sign-release:\n    needs:\n      - plan\n      - host\n      - custom-check-release-artifacts\n",
+    )
 
     # 5d. Dependency build scripts run in the build jobs, so those jobs get no GH_TOKEN variable.
     sub(
@@ -231,9 +250,34 @@ def harden(text: str) -> str:
         "          rm -f artifacts/*-dist-manifest.json\n      - name: Create GitHub Release\n",
         "          rm -f artifacts/*-dist-manifest.json\n"
         "      - name: Check the files to publish\n"
-        "        # Only the expected names, regular files only (ADR 0020).\n"
-        "        run: sh scripts/check-release-artifacts.sh --files-only artifacts\n"
+        "        # Only the expected names, regular files only, all listed in the signed SHA256SUMS (ADR 0020).\n"
+        "        run: sh scripts/check-release-artifacts.sh --files-only --signed artifacts\n"
+        "      - name: Verify the release signature\n"
+        "        # The same exact identity and caller claims as sign-release.sh, install.sh and the docs\n"
+        "        # (06, trust roots). The hashes above prove the files match SHA256SUMS. This proves SHA256SUMS\n"
+        "        # was signed by sign-release.yml of this repository at this tag. The job token is not passed\n"
+        "        # to the downloaded tool.\n"
+        "        env:\n"
+        "          TAG: ${{ needs.plan.outputs.tag }}\n"
+        "          REPO: ${{ github.repository }}\n"
+        "        run: |\n"
+        "          env -u GH_TOKEN sh scripts/install-release-tool.sh cosign\n"
+        '          cd artifacts && env -u GH_TOKEN "$HOME/.cargo/bin/cosign" verify-blob \\\n'
+        "            --bundle SHA256SUMS.sigstore.json \\\n"
+        '            --certificate-identity "https://github.com/$REPO/.github/workflows/sign-release.yml@refs/tags/$TAG" \\\n'
+        "            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\\n"
+        '            --certificate-github-workflow-repository "$REPO" \\\n'
+        '            --certificate-github-workflow-ref "refs/tags/$TAG" \\\n'
+        "            --certificate-github-workflow-trigger push \\\n"
+        "            SHA256SUMS\n"
         "      - name: Create GitHub Release\n",
+    )
+
+    # 7b. Publish only after the signing job succeeded. A skipped signing job must not publish
+    # unsigned files. (publish-prereleases is on, so the job runs for alpha tags too.)
+    sub(
+        "(needs.custom-sign-release.result == 'skipped' || needs.custom-sign-release.result == 'success')",
+        "needs.custom-sign-release.result == 'success'",
     )
 
     return text

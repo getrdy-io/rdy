@@ -346,7 +346,7 @@ runs to the end of the line or YAML block, because a cap would leave the tail of
 | # | Threat | Example | L | I | Mitigation | Ticket |
 |---|---|---|---|---|---|---|
 | S1 | Typosquat crate or domain | `cargo install rdy-cli` installs a squatter | M | H | `[M1]` Reserve names, including an `rdy-cli` placeholder (ADR review SF-12). | 06 reserve names |
-| S2 | Wrong signer identity | A fork's workflow signs a build | M | H | `[M1]` Exact identity and issuer per 06. | SEC-06 and SEC-07 (M1-010) |
+| S2 | Wrong signer identity | A fork's workflow signs a build | M | H | `[M1]` Exact identity and issuer per 06, and caller claims (repository, ref, trigger). | SEC-06 and SEC-07 (M1-010) |
 | T1 | getrdy.io serves a bad script | Registrar or Cloudflare takeover, DNS hijack | L | H | `[M1]` Hardware key or passkey MFA, registrar lock, DNSSEC, CAA. `install.sh` is in `SHA256SUMS`. Verify-first docs. `[M2]` HSTS, needed before M2-019 serves `getrdy.io/install`. M1 installs use the pinned GitHub release URL, not getrdy.io, and curl does not apply HSTS by default, so in M1 HSTS would protect only browser visitors. Deferral accepted by security-reviewer in revision 3. | SEC-05 (M1-008), M2-019, SEC-31 (M3-008) |
 | T2 | Truncated script runs | Connection drops | L | M | `[M1]` `main()` guard (06). | SEC-08 (M1-014) |
 | T3 | Asset swapped after publish | Stolen token re-uploads | L | H | `[M1]` Signature check; immutable releases if the sandbox proof passes. | SEC-06 and SEC-07 (M1-010), SEC-09 and SEC-10 (M1-015) |
@@ -355,7 +355,7 @@ runs to the end of the line or YAML block, because a cap would leave the tail of
 | R1 | Unattributable release | "Who published this?" | L | M | `[M1]` Rekor entry, tag rulesets, audit log. | SEC-06 and SEC-07 (M1-010) |
 | I1 | Long-lived secrets leak | Token in a CI log | L | M | `[M1]` Keyless signing. `[M2+]` crates.io trusted publishing. | 06 |
 | E1 | Installer as root | `sudo sh` | M | M | `[M1]` Refuses uid 0 without `--allow-root`; never sudo (06). | SEC-08 (M1-014) |
-| E2 | Maintainer takeover | Attacker pushes a tag | L | H | `[M1]` MFA, tag ruleset, manual approval on `release`. | SEC-04 (M1-011), 06 rulesets |
+| E2 | Maintainer takeover | Attacker pushes a tag | L | H | `[M1]` MFA, tag ruleset, manual approval on `release`. With one founder and self-review off, the approval does not stop a stolen founder session or token: it stops a tag pushed by anything else. MFA and the tag ruleset carry that case. | SEC-04 (M1-011), 06 rulesets |
 
 ## Appendix D: Surface 4 STRIDE (M2)
 

@@ -280,6 +280,9 @@ cosign verify-blob \
   --bundle SHA256SUMS.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity "https://github.com/getrdy-io/rdy/.github/workflows/sign-release.yml@refs/tags/$TAG" \
+  --certificate-github-workflow-repository getrdy-io/rdy \
+  --certificate-github-workflow-ref "refs/tags/$TAG" \
+  --certificate-github-workflow-trigger push \
   SHA256SUMS
 sha256sum --ignore-missing -c SHA256SUMS      # macOS: shasum -a 256 -c on the matching line
 tar xzf "$F" && ./rdy-x86_64-unknown-linux-musl/rdy version
