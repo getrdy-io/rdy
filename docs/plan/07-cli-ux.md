@@ -2165,6 +2165,8 @@ error: acme-platform has 2 trusted keys
 fix: say which one to remove with --key-id: 9F3A6C21D4E87B05, 51B0C4D7E2A93F68
 ```
 
+Build details: ADR 0033.
+
 ### C.11 JSON objects other than the Report
 
 stdout. Each validates against its definition in `result.v1.schema.json`. Exit 64 for a spec that is
