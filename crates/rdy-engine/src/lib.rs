@@ -12,6 +12,8 @@
 //! - `sched` (feature `runtime`, on by default): runs checks with a concurrency limit, a timeout each
 //!   and panic isolation.
 //! - `blocking` (feature `runtime`): runs blocking work off the async workers.
+//! - `output` (feature `runtime`): [`output::OutputDir`], the one new folder that reports are written
+//!   to, with safe names, no symlinks and private modes (ADR 0016).
 //! - `exec` (feature `runtime`): runs a command in its own process group and kills the group on
 //!   timeout, on drop and at exit.
 //!
@@ -27,6 +29,8 @@ pub mod check;
 pub mod exec;
 pub mod family;
 pub mod outcome;
+#[cfg(feature = "runtime")]
+pub mod output;
 pub mod plan;
 pub mod redact;
 #[cfg(feature = "runtime")]

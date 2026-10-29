@@ -1,0 +1,5 @@
+error[E0599]: no associated function or constant named `default` found for struct `VerifiedSpecBytes` in the current scope
+ --> tests/compile_fail/verified_bytes_default.rs:4:32
+  |
+4 |     let _ = VerifiedSpecBytes::default();
+  |                                ^^^^^^^ associated function or constant not found in `VerifiedSpecBytes`

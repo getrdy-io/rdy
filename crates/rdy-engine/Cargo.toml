@@ -16,19 +16,24 @@ testing = []
 
 default = ["runtime"]
 # The scheduler, the blocking helper, the process runner and their dependencies (02, "Crate layout").
-runtime = ["dep:tokio", "dep:rustix"]
+runtime = ["dep:tokio", "dep:rustix", "dep:cap-std", "dep:cap-primitives"]
 
 [dependencies]
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
+cap-std = { workspace = true, optional = true }
 regex = { workspace = true, features = ["std", "perf", "unicode"] }
 ring = { workspace = true, features = ["alloc"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "signal", "sync", "time"], optional = true }
 
+# Windows opens the report folder without following a reparse point (M1-036, M1-037).
+[target.'cfg(not(unix))'.dependencies]
+cap-primitives = { workspace = true, optional = true }
+
 # Process group kill on Unix (M1-038). Safe wrappers, so the crate keeps `forbid(unsafe_code)`.
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["std", "process"], optional = true }
+rustix = { workspace = true, features = ["std", "process", "fs"], optional = true }
 
 [dev-dependencies]
 serde = { workspace = true, features = ["std"] }

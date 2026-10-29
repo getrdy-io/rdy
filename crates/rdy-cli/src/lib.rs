@@ -23,6 +23,8 @@ pub mod cli;
 #[doc(hidden)]
 pub mod error;
 #[doc(hidden)]
+pub mod output;
+#[doc(hidden)]
 pub mod password;
 
 #[doc(hidden)]

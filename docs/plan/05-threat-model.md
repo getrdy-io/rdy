@@ -285,7 +285,7 @@ runs to the end of the line or YAML block, because a cap would leave the tail of
   Wildcards denied, with `allow-wildcard-paths = true`.
 - Check crates: only the direct dependencies listed in `ci/check-crate-deps.toml` (ADR 0014 decision 7).
   `deny.toml` wrappers keep I/O crates out of them as a second line.
-- Licenses allowed: Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, BSL-1.0,
+- Licenses allowed: Apache-2.0, Apache-2.0 WITH LLVM-exception (winx, via cap-primitives, M1-036), MIT, BSD-2-Clause, BSD-3-Clause, ISC, Zlib, Unicode-3.0, CC0-1.0, BSL-1.0,
   CDLA-Permissive-2.0. MPL-2.0 only as a reviewed per-crate exception. Never GPL, LGPL, AGPL, SSPL, BUSL
   or unknown.
 - Advisories: the PR gate uses `unmaintained = "workspace"`. The daily audit uses `"all"` and opens an

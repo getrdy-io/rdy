@@ -51,6 +51,21 @@ no Windows meaning, and that the watchdog could race the normal write.
 - Windows users find reports in one place by default, with an owner-only profile ACL.
 - One more dependency, `cap-std` (with `rustix`, already used for ids and statvfs).
 
+## Build notes (M1-036)
+
+Two details the build settled. Neither changes a decision above.
+
+- **Version.** The pin is `cap-std` and `cap-primitives` 4.0.3, the newest release when this was built.
+  It is above the 3.4.1 floor of decision 8.
+- **The open step is `openat`.** `cap-std` opens a directory with `O_PATH` on Linux, and `fchmod` and
+  `fsync` fail on such a descriptor (`EBADF`). So on Unix the new directory is opened with
+  `openat(O_RDONLY | O_DIRECTORY | O_NOFOLLOW)` on the held parent, through `rustix`. The name is one
+  path component that `OutputDir` built, so it cannot leave the parent. Every file operation inside
+  still goes through `cap-std`. Windows uses `cap_primitives::fs::open_dir_nofollow`.
+- **No replace.** The final name is given with a hard link from the temp file, which fails if the name
+  exists. On a file system without hard links it falls back to a check and a rename.
+- **File names.** The files in a `-2` folder are named after the folder (`rdy-report-<product>-<ts>-2.json`).
+
 ## Alternatives considered
 
 | Option | Why it lost |
