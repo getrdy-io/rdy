@@ -352,6 +352,12 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
         }
     }
 
+    /// The value of one environment variable of this process, for the run-level probe only. The live
+    /// body reads the process environment. A fixture backend overrides it.
+    fn env(&self, name: &str) -> Option<String> {
+        std::env::var(name).ok()
+    }
+
     /// The process's real and effective user and group ids, for the privilege snapshot on macOS.
     ///
     /// Linux reads all four of each from `/proc/self/status` through `read`, and Windows has none. The
@@ -455,9 +461,10 @@ impl ProbeHub {
     }
 
     /// Like [`ProbeHub::run_probe`], for an explicit OS. The command table and the privilege snapshot
-    /// read it, so a test can run the Windows path on any machine.
-    #[must_use]
-    pub fn run_probe_for(&self, os: Os) -> Probe {
+    /// read it, so a test can run the Windows path on any machine. It is crate-private: a caller
+    /// outside the crate must not be able to pick an OS whose snapshot skips the INV-10 sources
+    /// (`TestRun::run_probe` is the test door).
+    pub(crate) fn run_probe_for(&self, os: Os) -> Probe {
         self.probe(None, os, None)
     }
 
@@ -613,6 +620,25 @@ impl Probe {
             .unless_ended("process ids", hub.backend.process_ids())
             .await;
         settle(entry, result, |_, _| {})
+    }
+
+    /// One environment variable, for run-level work (the Windows snapshot reads `SystemRoot`). The
+    /// entry names the variable and never holds the value. A check's probe is refused: a check reads
+    /// the names it declares, which M1-045 builds.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] for a check's probe, or after the probe ended.
+    pub(crate) fn run_env(&self, name: &'static str) -> Result<Option<String>, ProbeError> {
+        let mut fields = Map::new();
+        fields.insert("name".to_owned(), name.into());
+        let (hub, entry) = self.begin(ActionKind::Env, fields, name)?;
+        if self.scope.check.is_some() {
+            return Err(refuse(entry, RULE_ENV_UNDECLARED, name));
+        }
+        let value = hub.backend.env(name);
+        entry.finish(ActionOutcome::Ok);
+        Ok(value)
     }
 
     /// Reads a whole file.

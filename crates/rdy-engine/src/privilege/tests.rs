@@ -216,7 +216,7 @@ mod linux_snapshot {
         assert!(matches!(
             missing_status,
             Err(PrivilegeError::Unreadable(Unreadable {
-                source: Source::ProcStatus,
+                what: Source::ProcStatus,
                 ..
             }))
         ));
@@ -225,7 +225,7 @@ mod linux_snapshot {
         assert!(matches!(
             missing_auxv,
             Err(PrivilegeError::Unreadable(Unreadable {
-                source: Source::ProcAuxv,
+                what: Source::ProcAuxv,
                 ..
             }))
         ));
@@ -450,13 +450,55 @@ fn status_with_extra_or_missing_fields_is_rejected() {
 }
 
 #[test]
-fn the_first_status_line_wins() {
-    // The kernel writes each line once. A second one is not a way to change the answer.
-    let text = format!("{}Uid:\t0\t0\t0\t0\n", status(USER, USER, 0, Some(0)));
-    assert_eq!(
-        parse_status(&text).expect("parses").ids,
-        ProcessIds::new(USER, USER)
-    );
+fn a_repeated_status_line_is_malformed() {
+    // The kernel writes each line once. A repeat is not a way to change the answer, whichever comes first.
+    let base = status(USER, USER, 0, Some(0));
+    for extra in [
+        "Uid:\t0\t0\t0\t0\n",
+        "Gid:\t0\t0\t0\t0\n",
+        "CapEff:\t0000000000000000\n",
+        "CapAmb:\t0000000000000000\n",
+    ] {
+        assert!(parse_status(&format!("{base}{extra}")).is_none(), "{extra}");
+        assert!(parse_status(&format!("{extra}{base}")).is_none(), "{extra}");
+    }
+}
+
+#[test]
+fn a_repeated_at_secure_is_ored() {
+    let pairs = |values: &[u64]| {
+        let mut bytes = Vec::new();
+        for value in values {
+            bytes.extend(word(AT_SECURE));
+            bytes.extend(word(*value));
+        }
+        bytes.extend(word(AT_NULL));
+        bytes.extend(word(0));
+        bytes
+    };
+    assert_eq!(parse_at_secure(&pairs(&[0, 1])), Some(true));
+    assert_eq!(parse_at_secure(&pairs(&[1, 0])), Some(true));
+    assert_eq!(parse_at_secure(&pairs(&[0, 0])), Some(false));
+}
+
+#[test]
+fn an_unreadable_error_keeps_the_probe_error_as_its_source_and_hints_by_source() {
+    use std::error::Error as _;
+    let proc = PrivilegeError::Unreadable(Unreadable {
+        what: Source::ProcStatus,
+        cause: ProbeError::NotFound,
+    });
+    let ids = PrivilegeError::Unreadable(Unreadable {
+        what: Source::ProcessIds,
+        cause: ProbeError::NotFound,
+    });
+    assert!(proc.to_string().contains("check that /proc is mounted"));
+    assert!(!ids.to_string().contains("/proc"), "{ids}");
+    assert_ne!(proc.hint(), ids.hint());
+    // transparent: the source of the wrapped error is the probe error.
+    let source = proc.source().expect("source");
+    assert_eq!(source.to_string(), ProbeError::NotFound.to_string());
+    assert_eq!(proc.message(), "rdy could not read /proc/self/status");
 }
 
 // macOS.
@@ -505,7 +547,7 @@ async fn macos_without_ids_is_an_error() {
     assert!(matches!(
         error,
         PrivilegeError::Unreadable(Unreadable {
-            source: Source::ProcessIds,
+            what: Source::ProcessIds,
             ..
         })
     ));
@@ -525,9 +567,10 @@ fn whoami_output(label_name: &str, sid: &str) -> String {
 }
 
 async fn windows(output: Option<(i32, &str)>) -> (Privilege, TestRun) {
+    let base = Replay::new().env("SystemRoot", r"C:\Windows");
     let replay = match output {
-        Some((exit, text)) => Replay::new().command("whoami.exe", &WHOAMI_ARGS, exit, text),
-        None => Replay::new(),
+        Some((exit, text)) => base.command("whoami.exe", &WHOAMI_ARGS, exit, text),
+        None => base,
     };
     let run = TestRun::new(replay);
     let privilege = Privilege::snapshot(&run.run_probe(Os::Windows))
@@ -613,8 +656,16 @@ async fn windows_runs_whoami_from_the_table_through_the_probe() {
     let output = whoami_output("Mandatory Label\\High Mandatory Level", "S-1-16-12288");
     let (_, run) = windows(Some((0, &output))).await;
     let log = run.action_log();
-    assert_eq!(log.actions.len(), 1);
-    let entry = &log.actions[0];
+    assert_eq!(log.actions.len(), 2);
+    // First the environment name, never its value, then the command.
+    assert_eq!(log.actions[0].kind.as_str(), "env");
+    assert!(log.actions[0].check.is_none());
+    assert_eq!(
+        log.actions[0].fields.get("name"),
+        Some(&json!("SystemRoot"))
+    );
+    assert!(!log.actions[0].fields.contains_key("value"));
+    let entry = &log.actions[1];
     assert_eq!(entry.kind.as_str(), "exec");
     assert!(entry.check.is_none());
     assert_eq!(entry.fields.get("program"), Some(&json!("whoami.exe")));
@@ -626,6 +677,72 @@ async fn windows_runs_whoami_from_the_table_through_the_probe() {
     // The group names and SIDs of the user are not in the log.
     let text = serde_json::to_string(&log.actions).expect("log");
     assert!(!text.contains("S-1-5-32-544"), "{text}");
+}
+
+/// A High integrity answer that would map to elevated, if whoami were run.
+fn high() -> String {
+    whoami_output("Mandatory Label\\High Mandatory Level", "S-1-16-12288")
+}
+
+#[tokio::test]
+async fn whoami_is_not_run_when_system_root_is_not_c_windows() {
+    // A Windows on another drive or folder: the constant C:\Windows\System32\whoami.exe could be a file
+    // a standard user planted, so rdy does not run it.
+    for root in [
+        Some(r"D:\Windows"),
+        Some(r"C:\Windows.old"),
+        Some(r"C:\Temp"),
+        Some(""),
+        None,
+    ] {
+        let mut replay = Replay::new().command("whoami.exe", &WHOAMI_ARGS, 0, &high());
+        if let Some(root) = root {
+            replay = replay.env("SystemRoot", root);
+        }
+        let run = TestRun::new(replay);
+        let privilege = Privilege::snapshot(&run.run_probe(Os::Windows))
+            .await
+            .expect("snapshot");
+        assert_eq!(privilege.elevation, Elevation::Unknown, "{root:?}");
+        assert!(!privilege.identity().elevated);
+        let kinds: Vec<String> = run
+            .action_log()
+            .actions
+            .iter()
+            .map(|a| a.kind.as_str().to_owned())
+            .collect();
+        assert_eq!(kinds, ["env"], "whoami ran for {root:?}");
+    }
+}
+
+#[tokio::test]
+async fn system_root_is_compared_without_regard_to_case() {
+    for root in [r"C:\Windows", r"c:\windows", r"C:\WINDOWS\"] {
+        let replay =
+            Replay::new()
+                .env("SystemRoot", root)
+                .command("whoami.exe", &WHOAMI_ARGS, 0, &high());
+        let run = TestRun::new(replay);
+        let privilege = Privilege::snapshot(&run.run_probe(Os::Windows))
+            .await
+            .expect("snapshot");
+        assert_eq!(privilege.elevation, Elevation::High, "{root}");
+    }
+}
+
+#[test]
+fn only_the_sid_column_of_a_four_field_row_is_read() {
+    // A group named like a High label, in the name and in the attributes column, on a Medium token.
+    let text = "\"Group Name\",\"Type\",\"SID\",\"Attributes\"\r\n\
+        \"S-1-16-12288\",\"Group\",\"S-1-5-21-1-2-3-1001\",\"S-1-16-16384\"\r\n\
+        \"Mandatory Label\\Medium Mandatory Level\",\"Label\",\"S-1-16-8192\",\"Mandatory group\"\r\n";
+    assert_eq!(parse_integrity(text), Elevation::NotElevated);
+    // A row with five fields (an unquoted comma) is skipped, not read.
+    let text = "\"a\",\"b\",\"S-1-16-12288\",\"c\",\"d\"\r\n";
+    assert_eq!(parse_integrity(text), Elevation::Unknown);
+    // A label SID in the name column alone is not a label.
+    let text = "\"S-1-16-12288\",\"Label\",\"S-1-1-0\",\"x\"\r\n";
+    assert_eq!(parse_integrity(text), Elevation::Unknown);
 }
 
 #[test]
@@ -786,7 +903,7 @@ fn every_error_has_a_message_and_a_hint() {
     for error in [
         PrivilegeError::Refused(vec![Refusal::AtSecure]),
         PrivilegeError::Unreadable(Unreadable {
-            source: Source::ProcStatus,
+            what: Source::ProcStatus,
             cause: ProbeError::NotFound,
         }),
         PrivilegeError::Malformed(Source::ProcAuxv),

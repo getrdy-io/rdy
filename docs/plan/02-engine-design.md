@@ -141,7 +141,8 @@ run-level facade (`check: null`):
   a non-root uid, or `AT_SECURE` is set (INV-10). The hint names `chmod u-s,g-s`, `setcap -r`, or
   ambient capabilities.
 - Windows: `C:\Windows\System32\whoami.exe /groups /fo csv`, from a constant path, never from
-  `%SystemRoot%`. Integrity SID `S-1-16-12288` (High) or `S-1-16-16384` (System) means elevated. If
+  `%SystemRoot%`, and only when `%SystemRoot%` is `C:\Windows` (read through the run-level probe, compared
+  without regard to case; any other value skips `whoami`, so the answer is unknown). Integrity SID `S-1-16-12288` (High) or `S-1-16-16384` (System) means elevated. If
   `whoami` fails, `root` is unknown for checks and `identity.elevated` is unset. In M1 `whoami` feeds only
   the `root` need and `identity.elevated`, never trust. M2-105 owns elevation detection for the trust path.
 

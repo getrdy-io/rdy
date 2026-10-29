@@ -23,7 +23,7 @@
 //!   drop and at exit. `exec::table::run` is the only public way to run a command.
 //! - [`privilege`]: the privilege snapshot, the refusal of a setuid or capability-carrying binary
 //!   (INV-10) and the capability probes.
-//! - [`redact`]: the redactor.[`redact::Redactor::redact_report`] redacts and then caps every string of a
+//! - [`redact`]: the redactor. [`redact::Redactor::redact_report`] redacts and then caps every string of a
 //!   report and returns a [`redact::RedactedReport`], the only type the writers and renderers accept.
 //!
 //! - `watchdog` (feature `runtime`): the run watchdog, a plain thread that writes an incomplete report

@@ -6,13 +6,19 @@ use std::cell::Cell;
 use rdy_engine::check::Os;
 use rdy_engine::privilege::{Privilege, PrivilegeError};
 use rdy_engine::testing::{Replay, TestRun};
+#[cfg(not(windows))]
 use serde_json::Value;
 
-use super::{gate_then, privilege_gate};
+use super::gate_then;
+#[cfg(not(windows))]
+use super::privilege_gate;
+#[cfg(not(windows))]
 use crate::error::{CliError, ErrorCode};
 
+#[cfg(not(windows))]
 const USER: [u32; 4] = [1000; 4];
 
+#[cfg(not(windows))]
 fn status(uid: [u32; 4], gid: [u32; 4], cap_eff: u64, cap_amb: u64) -> String {
     format!(
         "Name:\trdy\nUid:\t{}\t{}\t{}\t{}\nGid:\t{}\t{}\t{}\t{}\nCapEff:\t{cap_eff:016x}\nCapAmb:\t{cap_amb:016x}\n",
@@ -21,6 +27,7 @@ fn status(uid: [u32; 4], gid: [u32; 4], cap_eff: u64, cap_amb: u64) -> String {
 }
 
 /// An auxv with `AT_PHDR`, `AT_SECURE`, `AT_NULL`, in native-endian words.
+#[cfg(not(windows))]
 fn auxv(secure: usize) -> Vec<u8> {
     let mut bytes = Vec::new();
     for (key, value) in [(3_usize, 0x5555_0000_usize), (23, secure), (0, 0)] {
@@ -30,6 +37,7 @@ fn auxv(secure: usize) -> Vec<u8> {
     bytes
 }
 
+#[cfg(not(windows))]
 async fn snapshot(
     uid: [u32; 4],
     gid: [u32; 4],
@@ -63,7 +71,7 @@ fn gated(snapshot: Result<Privilege, PrivilegeError>, json: bool) -> (u8, String
 }
 
 #[cfg(not(windows))]
-mod linux {
+mod proc_snapshot {
     use super::*;
 
     #[tokio::test]

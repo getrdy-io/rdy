@@ -24,6 +24,7 @@ pub struct Replay {
     dirs: HashMap<PathBuf, Vec<DirEntry>>,
     commands: HashMap<(String, Vec<String>), Output>,
     ids: Option<ProcessIds>,
+    env: HashMap<String, String>,
 }
 
 impl Replay {
@@ -59,6 +60,13 @@ impl Replay {
             ),
             output,
         );
+        self
+    }
+
+    /// Sets an environment variable the run-level probe can read. Others are unset.
+    #[must_use]
+    pub fn env(mut self, name: &str, value: &str) -> Self {
+        self.env.insert(name.to_owned(), value.to_owned());
         self
     }
 
@@ -119,6 +127,10 @@ impl Backend for Replay {
                 .cloned()
                 .ok_or(ProbeError::NotFound)
         })
+    }
+
+    fn env(&self, name: &str) -> Option<String> {
+        self.env.get(name).cloned()
     }
 
     fn process_ids(&self) -> BoxFuture<'_, Result<ProcessIds, ProbeError>> {

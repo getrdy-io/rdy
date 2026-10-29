@@ -136,33 +136,40 @@ impl Refusal {
             Self::UidMismatch => "a user id (real, effective, saved or filesystem) differs",
             Self::GidMismatch => "a group id (real, effective, saved or filesystem) differs",
             Self::Capabilities => "it holds Linux capabilities",
-            Self::AtSecure => "the kernel started it as setuid, setgid or with file capabilities",
+            Self::AtSecure => {
+                "the kernel started it as setuid, setgid, with file capabilities or through a security module domain change"
+            }
         }
     }
+}
+
+/// The reasons as one sentence part.
+fn join_reasons(reasons: &[Refusal]) -> String {
+    let why: Vec<&str> = reasons.iter().map(|r| r.reason()).collect();
+    why.join("; ")
 }
 
 /// Why the privilege snapshot did not give a clean answer. Every variant means exit 70.
 ///
 /// The text is `message. Fix: hint`, the shape of every other rdy error. [`PrivilegeError::message`]
 /// and [`PrivilegeError::hint`] give the two parts for the CLI, which prints them on two lines.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum PrivilegeError {
     /// rdy carries more privilege than the user who started it (INV-10).
+    #[error(
+        "rdy will not run with more privilege than the user who started it: {}. Fix: {}",
+        join_reasons(.0),
+        PrivilegeError::HINT_REFUSED
+    )]
     Refused(Vec<Refusal>),
-    /// A source of the snapshot could not be read.
+    /// A source of the snapshot could not be read. The probe's error is the `source()`.
+    #[error(transparent)]
     Unreadable(Unreadable),
     /// A source was read and does not have the expected shape.
+    #[error("rdy could not understand {}. Fix: {}", .0.name(), PrivilegeError::HINT_MALFORMED)]
     Malformed(Source),
 }
-
-impl std::fmt::Display for PrivilegeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}. Fix: {}", self.message(), self.hint())
-    }
-}
-
-impl std::error::Error for PrivilegeError {}
 
 /// A source of the snapshot, named in an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,25 +194,34 @@ impl Source {
 }
 
 /// A read of a snapshot source that failed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+#[error("rdy could not read {}. Fix: {}", .what.name(), .what.unreadable_hint())]
 pub struct Unreadable {
     /// What was being read.
-    pub source: Source,
-    /// Why, from the probe.
+    pub what: Source,
+    /// Why, from the probe. It is the error's `source()`, and its text is not printed.
+    #[source]
     pub cause: ProbeError,
 }
 
-impl Unreadable {
-    fn message(&self) -> String {
-        format!("rdy could not read {}", self.source.name())
+impl Source {
+    /// The fix for a source that could not be read.
+    fn unreadable_hint(self) -> &'static str {
+        match self {
+            Self::ProcStatus | Self::ProcAuxv => PrivilegeError::HINT_UNREADABLE,
+            Self::ProcessIds => PrivilegeError::HINT_UNREADABLE_IDS,
+        }
     }
 }
 
 impl PrivilegeError {
-    /// The fix for a refusal. It names the three ways a binary gets privilege.
-    pub const HINT_REFUSED: &'static str = "run rdy without the setuid or setgid bit (`chmod u-s,g-s <path to rdy>`), without file capabilities (`setcap -r <path to rdy>`) and without ambient capabilities, as the user who should run it, then run rdy again";
-    /// The fix for a source that could not be read.
+    /// The fix for a refusal. It names the ways a binary gets privilege.
+    pub const HINT_REFUSED: &'static str = "run rdy without the setuid or setgid bit (`chmod u-s,g-s <path to rdy>`), without file capabilities (`setcap -r <path to rdy>`), without ambient capabilities and without an SELinux or AppArmor domain change on exec, as the user who should run it, then run rdy again";
+    /// The fix for a /proc source that could not be read.
     pub const HINT_UNREADABLE: &'static str = "check that /proc is mounted and readable by this user (rdy needs it to prove it is not running with extra privilege), then run rdy again";
+    /// The fix for process ids the OS did not give (macOS).
+    pub const HINT_UNREADABLE_IDS: &'static str = "this is a bug in rdy or the OS: rdy could not ask for its user and group ids, so it cannot prove it has no extra privilege. Please report it at https://github.com/getrdy-io/rdy/issues and include the output of rdy version";
     /// The fix for a source with an unexpected shape.
     pub const HINT_MALFORMED: &'static str = "this is a bug in rdy or in the kernel's /proc output. Please report it at https://github.com/getrdy-io/rdy/issues and include the output of rdy version";
 
@@ -213,14 +229,11 @@ impl PrivilegeError {
     #[must_use]
     pub fn message(&self) -> String {
         match self {
-            Self::Refused(reasons) => {
-                let why: Vec<&str> = reasons.iter().map(|r| r.reason()).collect();
-                format!(
-                    "rdy will not run with more privilege than the user who started it: {}",
-                    why.join("; ")
-                )
-            }
-            Self::Unreadable(u) => u.message(),
+            Self::Refused(reasons) => format!(
+                "rdy will not run with more privilege than the user who started it: {}",
+                join_reasons(reasons)
+            ),
+            Self::Unreadable(u) => format!("rdy could not read {}", u.what.name()),
             Self::Malformed(source) => format!("rdy could not understand {}", source.name()),
         }
     }
@@ -230,7 +243,7 @@ impl PrivilegeError {
     pub fn hint(&self) -> &'static str {
         match self {
             Self::Refused(_) => Self::HINT_REFUSED,
-            Self::Unreadable(_) => Self::HINT_UNREADABLE,
+            Self::Unreadable(u) => u.what.unreadable_hint(),
             Self::Malformed(_) => Self::HINT_MALFORMED,
         }
     }
@@ -290,9 +303,17 @@ impl Privilege {
     }
 
     async fn windows(probe: &Probe) -> Self {
-        let elevation = match whoami_groups(probe).await {
-            Some(text) => parse_integrity(&text),
-            None => Elevation::Unknown,
+        // The command table runs `whoami.exe` from the constant `C:\Windows\System32`. If this
+        // machine's Windows lives elsewhere (or `SystemRoot` is unset or unreadable), a standard user
+        // could have planted that file, so rdy does not run it and says "unknown". M2-105 replaces
+        // the check with GetSystemDirectoryW.
+        let elevation = if system_root_is_standard(probe) {
+            match whoami_groups(probe).await {
+                Some(text) => parse_integrity(&text),
+                None => Elevation::Unknown,
+            }
+        } else {
+            Elevation::Unknown
         };
         Self {
             ids: None,
@@ -364,7 +385,10 @@ impl Privilege {
 }
 
 fn unreadable(source: Source, cause: ProbeError) -> PrivilegeError {
-    PrivilegeError::Unreadable(Unreadable { source, cause })
+    PrivilegeError::Unreadable(Unreadable {
+        what: source,
+        cause,
+    })
 }
 
 fn elevation_of(ids: Option<ProcessIds>) -> Elevation {
@@ -373,6 +397,19 @@ fn elevation_of(ids: Option<ProcessIds>) -> Elevation {
         Some(_) => Elevation::NotElevated,
         None => Elevation::Unknown,
     }
+}
+
+/// `true` when `%SystemRoot%` is `C:\Windows`, compared without regard to case. A trailing backslash
+/// is accepted. Anything else, an unset variable or a refused read is `false`.
+fn system_root_is_standard(probe: &Probe) -> bool {
+    probe
+        .run_env("SystemRoot")
+        .ok()
+        .flatten()
+        .is_some_and(|root| {
+            root.trim_end_matches('\\')
+                .eq_ignore_ascii_case(r"C:\Windows")
+        })
 }
 
 /// What the `status` file gives the snapshot.
@@ -386,7 +423,8 @@ struct Status {
 ///
 /// `Uid`, `Gid` and `CapEff` must be there and well formed. `CapAmb` is missing on a kernel before
 /// 4.3, which has no ambient capabilities, so a missing line is zero. A line that is there and does
-/// not parse is `None`.
+/// not parse is `None`. The kernel writes each line once, so a repeated line is not a status file
+/// rdy trusts: it is `None` too.
 fn parse_status(text: &str) -> Option<Status> {
     let mut uid = None;
     let mut gid = None;
@@ -394,13 +432,13 @@ fn parse_status(text: &str) -> Option<Status> {
     let mut cap_amb = None;
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("Uid:") {
-            uid = uid.or(Some(four_ids(rest)?));
+            set_once(&mut uid, four_ids(rest)?)?;
         } else if let Some(rest) = line.strip_prefix("Gid:") {
-            gid = gid.or(Some(four_ids(rest)?));
+            set_once(&mut gid, four_ids(rest)?)?;
         } else if let Some(rest) = line.strip_prefix("CapEff:") {
-            cap_eff = cap_eff.or(Some(hex_mask(rest)?));
+            set_once(&mut cap_eff, hex_mask(rest)?)?;
         } else if let Some(rest) = line.strip_prefix("CapAmb:") {
-            cap_amb = cap_amb.or(Some(hex_mask(rest)?));
+            set_once(&mut cap_amb, hex_mask(rest)?)?;
         }
     }
     Some(Status {
@@ -408,6 +446,15 @@ fn parse_status(text: &str) -> Option<Status> {
         cap_eff: cap_eff?,
         cap_amb: cap_amb.unwrap_or(0),
     })
+}
+
+/// Stores `value`, or `None` when the slot is already set.
+fn set_once<T>(slot: &mut Option<T>, value: T) -> Option<()> {
+    if slot.is_some() {
+        return None;
+    }
+    *slot = Some(value);
+    Some(())
 }
 
 /// Exactly four decimal ids.
@@ -436,7 +483,8 @@ fn hex_mask(rest: &str) -> Option<u64> {
 /// pair whose type is 23 is kept, as a flag. Every other value (load addresses, the random bytes
 /// pointer, the program name pointer) is dropped here, so it cannot reach a report. `None` when the
 /// vector has no `AT_SECURE` before its end or is cut in the middle of a pair: the Linux kernel
-/// always writes it, so a vector without it is not one rdy can trust.
+/// always writes it, so a vector without it is not one rdy can trust. If `AT_SECURE` appears more
+/// than once the values are ORed, so a repeat can only add a refusal, never hide one.
 fn parse_at_secure(bytes: &[u8]) -> Option<bool> {
     const WORD: usize = std::mem::size_of::<usize>();
     let mut at_secure = None;
@@ -447,7 +495,7 @@ fn parse_at_secure(bytes: &[u8]) -> Option<bool> {
             return at_secure;
         }
         if key == AT_SECURE {
-            at_secure = Some(word(value)? != 0);
+            at_secure = Some(at_secure.unwrap_or(false) || word(value)? != 0);
         }
     }
     // No AT_NULL: cut short.
@@ -476,23 +524,27 @@ async fn whoami_groups(probe: &Probe) -> Option<String> {
 
 /// Maps the mandatory label row of `whoami /groups /fo csv` to an [`Elevation`].
 ///
-/// The SID column does not depend on the language of Windows, so the parser looks for a field of the
-/// form `S-1-16-<rid>` and ignores every name. High and System are elevated, Untrusted to Medium Plus
-/// are not. No label, two different labels or a level that is not listed are [`Elevation::Unknown`].
+/// The SID column does not depend on the language of Windows, so the parser reads only that column
+/// (index 2) of the rows that have exactly four fields, and ignores every name and attribute. A group
+/// name is chosen by whoever creates the group, so an `S-1-16-` text in another column is never read.
+/// High and System are elevated, Untrusted to Medium Plus are not. No label, two different labels or a
+/// level that is not listed are [`Elevation::Unknown`].
 fn parse_integrity(csv: &str) -> Elevation {
     let mut found: Option<u32> = None;
     for line in csv.lines() {
-        for field in csv_fields(line) {
-            let Some(rid) = field.strip_prefix("S-1-16-") else {
-                continue;
-            };
-            let Ok(rid) = rid.parse::<u32>() else {
-                return Elevation::Unknown;
-            };
-            match found {
-                Some(seen) if seen != rid => return Elevation::Unknown,
-                _ => found = Some(rid),
-            }
+        let fields = csv_fields(line);
+        let [_, _, sid, _] = fields.as_slice() else {
+            continue;
+        };
+        let Some(rid) = sid.strip_prefix("S-1-16-") else {
+            continue;
+        };
+        let Ok(rid) = rid.parse::<u32>() else {
+            return Elevation::Unknown;
+        };
+        match found {
+            Some(seen) if seen != rid => return Elevation::Unknown,
+            _ => found = Some(rid),
         }
     }
     match found {
