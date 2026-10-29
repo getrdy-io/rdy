@@ -69,6 +69,35 @@ Four details the build settled. None changes a decision above.
   missing. Windows tries the hard link first and falls back on any error but "exists".
 - **File names.** The files in a `-2` folder are named after the folder (`rdy-report-<product>-<ts>-2.json`).
 
+## Build notes (M1-037)
+
+What the Windows build does. None changes a decision above.
+
+- **Default folder.** `default_parent()` returns `%USERPROFILE%\rdy-reports` and makes it with
+  `create_dir` if it is missing (the profile folder must exist). It is refused when it is a symlink, a
+  junction or any other reparse point, or is not a folder. `USERPROFILE` unset, empty or not a full
+  path is the error `NoDefaultFolder`, with the fix `set USERPROFILE or use --out-dir`. `--out-dir`
+  is never checked this way, because the operator chose it and it may be a link on purpose; only the
+  new run folder inside it is checked.
+- **Post-open checks (decision 3).** `harden` reads the attributes of the open handle: the folder
+  bit must be set and `FILE_ATTRIBUTE_REPARSE_POINT` clear, which catches every reparse tag and not
+  only symlinks and junctions. It then compares `canonicalize(path)` with `canonicalize(parent)` plus
+  the folder name. That second step reads the final path by name, with no FFI, so it is a second
+  check beside the handle and not a replacement for it. A failure of any step is an error, so the
+  check fails closed. Both give `NotPlainFolder` (exit 70, `report_write`).
+- **A link with the target name.** As on Unix, a junction or symlink that already has the folder
+  name makes `mkdir` report the name as taken, and the report goes to `-2`. The link is not followed,
+  opened or removed. A link swapped in after the `mkdir` is the case that stops the run.
+- **ACLs stay a residual.** Reading or setting an ACL needs the Win32 security API, which needs
+  `unsafe`. rdy keeps `forbid(unsafe_code)`, so M1 sets no ACL on Windows and reports no ACL
+  guarantee. The folder keeps the ACL it inherits. For the default folder that is the profile ACL
+  (owner, SYSTEM and Administrators by default). For `--out-dir` elsewhere it is whatever that
+  folder passes on. This is the residual of decision 7 and it is named in the report notes until
+  SEC-58 (M2-085) and the `rdy-winacl` crate (M2-105). Refusing every Windows run for lack of an ACL
+  check was considered and not taken: it would remove Windows reports from M1, and the reparse and
+  final path checks close the redirect attack that this ticket is about.
+- **Other targets.** A target with neither Unix modes nor these checks refuses every folder.
+
 ## Alternatives considered
 
 | Option | Why it lost |

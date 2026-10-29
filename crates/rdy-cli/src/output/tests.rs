@@ -173,8 +173,57 @@ fn a_product_that_would_escape_is_a_bug_message_with_no_echo() {
     assert!(entries(parent.path()).is_empty());
 }
 
+#[cfg(not(windows))]
 #[test]
 fn the_default_parent_is_the_current_folder() {
     assert!(args(&[]).out_dir.is_none());
-    assert_eq!(default_parent(), Path::new("."));
+    assert_eq!(default_parent().expect("default"), Path::new("."));
+}
+
+/// The exit test of M1-037 through the real entry point: with no `--out-dir`, the report folder is
+/// made under `%USERPROFILE%\rdy-reports`.
+#[cfg(windows)]
+#[test]
+fn the_default_lands_under_userprofile_rdy_reports() {
+    assert!(args(&[]).out_dir.is_none());
+    let profile = std::path::PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE"));
+    let out = open_report_dir(&args(&[]), "acme-m1-037-test", now())
+        .expect("open")
+        .expect("a folder");
+    let expected_parent = profile.join("rdy-reports");
+    assert_eq!(out.path().parent(), Some(expected_parent.as_path()));
+    assert!(out.path().is_dir());
+    let path = out.path().to_path_buf();
+    drop(out);
+    // Take away only the folder this test made.
+    fs::remove_dir(&path).expect("remove the test folder");
+}
+
+#[test]
+fn a_redirect_error_maps_to_a_report_write_error_with_a_fix() {
+    let shown = Path::new("/out/rdy-report-acme-20270309T143005Z");
+    let err = report_error(
+        ReportStep::CreateFolder,
+        shown,
+        ReportError::NotPlainFolder {
+            path: shown.to_path_buf(),
+        },
+    );
+    assert_eq!(err.code(), ErrorCode::ReportWrite);
+    assert_eq!(err.exit_code().code(), 70);
+    assert!(
+        err.to_string()
+            .contains("a link, junction or other redirect")
+    );
+    assert!(err.hint().contains("Remove the link or junction"));
+    let err = report_error(
+        ReportStep::CreateFolder,
+        Path::new(DEFAULT_LABEL),
+        ReportError::NoDefaultFolder,
+    );
+    assert_eq!(err.code(), ErrorCode::ReportWrite);
+    assert_eq!(
+        err.to_string(),
+        r"cannot create the report folder %USERPROFILE%\rdy-reports (USERPROFILE is not set to a full path)"
+    );
 }

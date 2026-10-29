@@ -220,9 +220,14 @@ fn unsafe_file_names_are_refused() {
     );
 }
 
+#[cfg(not(windows))]
 #[test]
-fn the_default_parent_is_the_current_folder_and_the_timestamp_has_the_documented_form() {
-    assert_eq!(default_parent(), Path::new("."));
+fn the_default_parent_is_the_current_folder_off_windows() {
+    assert_eq!(default_parent().expect("default"), Path::new("."));
+}
+
+#[test]
+fn the_timestamp_has_the_documented_form() {
     let at = |secs: u64| UNIX_EPOCH + std::time::Duration::from_secs(secs);
     assert_eq!(report_timestamp(at(0)), "19700101T000000Z");
     assert_eq!(report_timestamp(at(1_709_999_999)), "20240309T155959Z");
@@ -244,6 +249,179 @@ fn the_default_parent_is_the_current_folder_and_the_timestamp_has_the_documented
         "a clock past year 9999 still gives a valid stamp"
     );
     assert!(is_timestamp(&report_timestamp(SystemTime::now())));
+}
+
+/// Runs `create_new` with `swap` between the `mkdir` and the open, and removes the hook after.
+fn create_new_with_swap(
+    parent: &Path,
+    swap: impl Fn(&Path, &str) + 'static,
+) -> Result<OutputDir, ReportError> {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            AFTER_MAKE_DIR.with(|hook| *hook.borrow_mut() = None);
+        }
+    }
+    AFTER_MAKE_DIR.with(|hook| *hook.borrow_mut() = Some(Box::new(swap)));
+    let _reset = Reset;
+    OutputDir::create_new(parent, "acme", TS)
+}
+
+/// Makes `link` lead to `target` the way an attacker would: a symlink on Unix and a junction on
+/// Windows (`mklink /J` needs no admin rights).
+fn plant_redirect(link: &Path, target: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).expect("symlink");
+    #[cfg(windows)]
+    windows::junction(link, target);
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (link, target);
+        unreachable!("no redirect on this OS");
+    }
+}
+
+#[test]
+fn the_attribute_bits_tell_a_plain_folder_from_a_reparse_point() {
+    const DIR: u32 = 0x10;
+    const REPARSE: u32 = 0x400;
+    const OTHER: u32 = 0x1 | 0x2 | 0x20 | 0x2000;
+    assert!(plain_folder_attributes(DIR));
+    assert!(
+        plain_folder_attributes(DIR | OTHER),
+        "hidden or archive is fine"
+    );
+    // A junction or a directory symlink: directory and reparse point.
+    assert!(!plain_folder_attributes(DIR | REPARSE));
+    // Any other reparse tag, such as a cloud placeholder, is refused too.
+    assert!(!plain_folder_attributes(DIR | REPARSE | OTHER));
+    // A file, or a file symlink.
+    assert!(!plain_folder_attributes(0x80));
+    assert!(!plain_folder_attributes(REPARSE));
+    assert!(!plain_folder_attributes(0));
+}
+
+#[test]
+fn the_default_folder_is_made_when_it_is_missing_and_reused_when_it_is_there() {
+    let profile = tempfile::tempdir().expect("temp dir");
+    let want = profile.path().join("rdy-reports");
+    assert_eq!(prepare_default_parent(profile.path()).expect("make"), want);
+    assert!(want.is_dir());
+    fs::write(want.join("keep"), b"old").expect("plant");
+    assert_eq!(prepare_default_parent(profile.path()).expect("reuse"), want);
+    assert_eq!(names(&want), ["keep"], "nothing was removed or added");
+    // The run folder goes under it like under any parent.
+    let out = OutputDir::create_new(&want, "acme", TS).expect("create");
+    assert_eq!(out.path().parent(), Some(want.as_path()));
+}
+
+#[test]
+fn the_default_folder_is_not_made_when_the_profile_is_missing() {
+    let profile = tempfile::tempdir().expect("temp dir");
+    let missing = profile.path().join("no-profile");
+    let err = prepare_default_parent(&missing).expect_err("no profile");
+    assert!(matches!(err, ReportError::Io { .. }), "{err}");
+    assert!(!missing.exists(), "the profile folder is never made");
+}
+
+#[test]
+fn a_default_folder_that_is_a_link_or_a_junction_is_refused_and_not_followed() {
+    let profile = tempfile::tempdir().expect("temp dir");
+    let elsewhere = tempfile::tempdir().expect("temp dir");
+    let link = profile.path().join("rdy-reports");
+    plant_redirect(&link, elsewhere.path());
+    let err = prepare_default_parent(profile.path()).expect_err("a redirect must be refused");
+    assert!(
+        matches!(&err, ReportError::NotPlainFolder { path } if *path == link),
+        "{err}"
+    );
+    assert!(names(elsewhere.path()).is_empty(), "nothing was made there");
+}
+
+#[test]
+fn a_default_folder_that_is_a_file_is_refused() {
+    let profile = tempfile::tempdir().expect("temp dir");
+    fs::write(profile.path().join("rdy-reports"), b"a file").expect("plant");
+    let err = prepare_default_parent(profile.path()).expect_err("a file");
+    assert!(matches!(err, ReportError::NotPlainFolder { .. }), "{err}");
+}
+
+#[test]
+fn the_final_path_check_accepts_a_real_folder_and_refuses_a_redirect() {
+    let parent = tempfile::tempdir().expect("temp dir");
+    let elsewhere = tempfile::tempdir().expect("temp dir");
+    let real = parent.path().join("real");
+    fs::create_dir(&real).expect("mkdir");
+    assert!(final_path_is_expected(&real).expect("real"));
+    let link = parent.path().join("linked");
+    plant_redirect(&link, elsewhere.path());
+    assert!(!final_path_is_expected(&link).expect("link"));
+    // A name that is not there is an error, not a pass.
+    assert!(final_path_is_expected(&parent.path().join("gone")).is_err());
+    // A path with no parent or no name cannot be the expected one.
+    assert!(!final_path_is_expected(Path::new("/")).expect("root"));
+}
+
+/// The exit test of M1-037, redirect at the target name: a junction (Windows) or symlink (Unix)
+/// with the folder name is never followed. The name counts as taken and the report goes to `-2`.
+#[test]
+fn a_redirect_with_the_target_name_is_not_followed_and_the_name_moves_on() {
+    let parent = tempfile::tempdir().expect("temp dir");
+    let elsewhere = tempfile::tempdir().expect("temp dir");
+    let base = "rdy-report-acme-20270309T143005Z";
+    let link = parent.path().join(base);
+    plant_redirect(&link, elsewhere.path());
+    let out = OutputDir::create_new(parent.path(), "acme", TS).expect("create");
+    assert_eq!(out.name(), format!("{base}-2"));
+    out.write_atomic("report.json", &redacted("x"))
+        .expect("write");
+    assert!(
+        names(elsewhere.path()).is_empty(),
+        "nothing went through the redirect"
+    );
+    assert!(
+        fs::symlink_metadata(&link).expect("stat").is_symlink(),
+        "the planted redirect is untouched"
+    );
+}
+
+/// The exit test of M1-037, redirect swapped in after the `mkdir`: refused before the first check,
+/// and nothing is written or changed behind it.
+#[test]
+fn a_folder_swapped_for_a_redirect_after_mkdir_is_refused_and_nothing_is_written() {
+    let parent = tempfile::tempdir().expect("temp dir");
+    let elsewhere = tempfile::tempdir().expect("temp dir");
+    let target = elsewhere.path().to_path_buf();
+    let err = create_new_with_swap(parent.path(), move |dir, name| {
+        fs::remove_dir(dir.join(name)).expect("rmdir");
+        plant_redirect(&dir.join(name), &target);
+    })
+    .expect_err("a redirect must be refused");
+    assert!(
+        matches!(
+            &err,
+            ReportError::NotPlainFolder { .. }
+                | ReportError::Io {
+                    action: "open the report folder",
+                    ..
+                }
+        ),
+        "{err}"
+    );
+    assert!(
+        names(elsewhere.path()).is_empty(),
+        "nothing was written there"
+    );
+    // The best-effort cleanup may remove the planted link (Windows does, Unix cannot). A real folder
+    // under the name would be wrong either way.
+    for left in names(parent.path()) {
+        assert!(
+            fs::symlink_metadata(parent.path().join(left))
+                .expect("stat")
+                .is_symlink(),
+            "only the planted redirect may be left"
+        );
+    }
 }
 
 /// Runs this test binary again for one named test, with `envs` set. A child that dies by a signal or
@@ -379,22 +557,6 @@ mod unix {
             "the root job must run under sudo"
         );
         true
-    }
-
-    /// Runs `create_new` with `swap` between the `mkdir` and the open, and removes the hook after.
-    fn create_new_with_swap(
-        parent: &Path,
-        swap: impl Fn(&Path, &str) + 'static,
-    ) -> Result<OutputDir, ReportError> {
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                AFTER_MAKE_DIR.with(|hook| *hook.borrow_mut() = None);
-            }
-        }
-        AFTER_MAKE_DIR.with(|hook| *hook.borrow_mut() = Some(Box::new(swap)));
-        let _reset = Reset;
-        OutputDir::create_new(parent, "acme", TS)
     }
 
     #[test]
@@ -700,4 +862,162 @@ fn the_spec_copy_is_the_verified_bytes_under_fixed_names() {
         out.write_spec(&spec),
         Err(ReportError::FileExists { .. })
     ));
+}
+
+/// The Windows half of the M1-037 exit test. These run on the windows-x64 CI leg only.
+#[cfg(windows)]
+mod windows {
+    use std::process::Command;
+
+    use super::*;
+
+    /// Makes a junction with `mklink /J`, which needs no admin rights.
+    pub(super) fn junction(link: &Path, target: &Path) {
+        let out = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .expect("run cmd");
+        assert!(
+            out.status.success(),
+            "mklink /J failed: {} {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// `ERROR_PRIVILEGE_NOT_HELD`: a plain user without Developer Mode cannot make a symlink.
+    const NO_SYMLINK_PRIVILEGE: i32 = 1314;
+
+    /// Makes a directory symlink. Without the privilege this fails the test with the fix, and does
+    /// not skip: the symlink half of the exit test must run on the CI leg.
+    fn symlink_dir(link: &Path, target: &Path) {
+        if let Err(e) = std::os::windows::fs::symlink_dir(target, link) {
+            assert_ne!(
+                e.raw_os_error(),
+                Some(NO_SYMLINK_PRIVILEGE),
+                "this user cannot create symlinks. Fix: turn on Developer Mode (Settings, For \
+                 developers) or run the tests from an elevated shell. The CI runner is an \
+                 administrator, so this test must run there"
+            );
+            panic!("symlink_dir failed: {e}");
+        }
+    }
+
+    fn is_reparse_point(path: &Path) -> bool {
+        use std::os::windows::fs::MetadataExt as _;
+        fs::symlink_metadata(path).expect("stat").file_attributes() & 0x400 != 0
+    }
+
+    #[test]
+    fn the_default_parent_is_under_userprofile() {
+        let profile = PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE"));
+        let got = default_parent().expect("default");
+        assert_eq!(got, profile.join("rdy-reports"));
+        assert!(got.is_dir());
+        assert!(!is_reparse_point(&got));
+    }
+
+    #[test]
+    fn a_report_folder_under_the_default_is_a_plain_folder_with_its_files() {
+        let parent = default_parent().expect("default");
+        let out = OutputDir::create_new(&parent, "acme-m1-037-engine", TS).expect("create");
+        assert_eq!(out.path().parent(), Some(parent.as_path()));
+        out.write_atomic("report.json", &redacted("x"))
+            .expect("write");
+        assert!(!is_reparse_point(out.path()));
+        let path = out.path().to_path_buf();
+        drop(out);
+        fs::remove_dir_all(&path).expect("remove the test folder");
+    }
+
+    #[test]
+    fn a_junction_with_the_target_name_is_not_followed_and_is_a_reparse_point() {
+        let parent = tempfile::tempdir().expect("temp dir");
+        let elsewhere = tempfile::tempdir().expect("temp dir");
+        let link = parent.path().join("rdy-report-acme-20270309T143005Z");
+        junction(&link, elsewhere.path());
+        assert!(
+            is_reparse_point(&link),
+            "the planted junction is a reparse point"
+        );
+        let out = OutputDir::create_new(parent.path(), "acme", TS).expect("create");
+        assert_eq!(out.name(), "rdy-report-acme-20270309T143005Z-2");
+        out.write_atomic("report.json", &redacted("x"))
+            .expect("write");
+        assert!(names(elsewhere.path()).is_empty());
+        assert!(is_reparse_point(&link));
+    }
+
+    #[test]
+    fn a_symlink_with_the_target_name_is_not_followed() {
+        let parent = tempfile::tempdir().expect("temp dir");
+        let elsewhere = tempfile::tempdir().expect("temp dir");
+        let link = parent.path().join("rdy-report-acme-20270309T143005Z");
+        symlink_dir(&link, elsewhere.path());
+        let out = OutputDir::create_new(parent.path(), "acme", TS).expect("create");
+        assert_eq!(out.name(), "rdy-report-acme-20270309T143005Z-2");
+        out.write_atomic("report.json", &redacted("x"))
+            .expect("write");
+        assert!(names(elsewhere.path()).is_empty());
+        assert!(is_reparse_point(&link));
+    }
+
+    #[test]
+    fn a_folder_swapped_for_a_symlink_after_mkdir_is_refused() {
+        let parent = tempfile::tempdir().expect("temp dir");
+        let elsewhere = tempfile::tempdir().expect("temp dir");
+        let target = elsewhere.path().to_path_buf();
+        let err = create_new_with_swap(parent.path(), move |dir, name| {
+            fs::remove_dir(dir.join(name)).expect("rmdir");
+            symlink_dir(&dir.join(name), &target);
+        })
+        .expect_err("a symlink must be refused");
+        assert!(
+            matches!(
+                &err,
+                ReportError::NotPlainFolder { .. }
+                    | ReportError::Io {
+                        action: "open the report folder",
+                        ..
+                    }
+            ),
+            "{err}"
+        );
+        assert!(names(elsewhere.path()).is_empty());
+    }
+
+    /// `harden` on its own: a handle that followed a junction is a plain folder by attributes, so
+    /// only the final path check can refuse it. A real folder passes.
+    #[test]
+    fn harden_refuses_a_handle_that_followed_a_junction_and_passes_a_real_folder() {
+        let parent = tempfile::tempdir().expect("temp dir");
+        let elsewhere = tempfile::tempdir().expect("temp dir");
+        let real = parent.path().join("real");
+        fs::create_dir(&real).expect("mkdir");
+        let dir = Dir::open_ambient_dir(&real, ambient_authority()).expect("open");
+        harden(&dir, &real).expect("a real folder passes");
+
+        let link = parent.path().join("linked");
+        junction(&link, elsewhere.path());
+        let followed = Dir::open_ambient_dir(&link, ambient_authority()).expect("open");
+        let err = harden(&followed, &link).expect_err("a junction must be refused");
+        assert!(matches!(err, ReportError::NotPlainFolder { .. }), "{err}");
+    }
+
+    /// `open_new_dir` on a junction must not hand back a handle to the target's contents. Either
+    /// the open fails, or harden refuses the handle it returned.
+    #[test]
+    fn a_junction_opened_by_name_is_refused_by_open_or_by_harden() {
+        let parent = tempfile::tempdir().expect("temp dir");
+        let elsewhere = tempfile::tempdir().expect("temp dir");
+        let link = parent.path().join("linked");
+        junction(&link, elsewhere.path());
+        let dir = Dir::open_ambient_dir(parent.path(), ambient_authority()).expect("open");
+        if let Ok(opened) = open_new_dir(&dir, "linked") {
+            let err = harden(&opened, &link).expect_err("harden must refuse the junction");
+            assert!(matches!(err, ReportError::NotPlainFolder { .. }), "{err}");
+        }
+    }
 }

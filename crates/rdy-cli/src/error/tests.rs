@@ -460,6 +460,24 @@ fn every_report_folder_reason_has_its_own_message_and_fix() {
          fix: use --out-dir <a folder on a disk that keeps Unix permissions>, or --no-report to skip the files\n"
     );
     assert_eq!(
+        text_of(&write(
+            folder,
+            r"C:\Users\jdoe\rdy-reports\rdy-report-x",
+            ReportReason::NotPlainFolder
+        )),
+        "error: cannot create the report folder C:\\Users\\jdoe\\rdy-reports\\rdy-report-x (a link, junction or other redirect is in the way)\n\
+         fix: use --out-dir <an ordinary folder you own>, or --no-report to skip the files. Remove the link or junction at that path\n"
+    );
+    assert_eq!(
+        text_of(&write(
+            folder,
+            r"%USERPROFILE%\rdy-reports",
+            ReportReason::NoDefaultFolder
+        )),
+        "error: cannot create the report folder %USERPROFILE%\\rdy-reports (USERPROFILE is not set to a full path)\n\
+         fix: set USERPROFILE, or use --out-dir <a folder you can write to>, or --no-report to skip the files\n"
+    );
+    assert_eq!(
         text_of(&write(folder, "/tmp/out", ReportReason::NameTaken)),
         "error: cannot create the report folder in /tmp/out (all the folder names are taken)\n\
          fix: wait a second and run again, or use --out-dir <another folder>\n"

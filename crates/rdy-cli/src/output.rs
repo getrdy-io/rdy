@@ -3,7 +3,7 @@
 //! [`open_report_dir`] is the one call `rdy run` makes right after the spec is verified and before the
 //! first check. It returns `None` for `--no-report`, which creates nothing and does not look at
 //! `--out-dir`. Otherwise it makes `rdy-report-<product>-<time>/` under `--out-dir` (default `.` on
-//! Unix) and returns the open handle, or the exit-70 error of 07 section 9 row 6.
+//! Unix, `%USERPROFILE%\rdy-reports` on Windows) and returns the open handle, or the exit-70 error of 07 section 9 row 6.
 //!
 //! The M1-057 ticket wires this into `run`: call it with the parsed [`RunArgs`], the verified
 //! `metadata.product` and `SystemTime::now()`, hold the handle for the whole run, and write the report
@@ -19,6 +19,9 @@ use rdy_engine::output::{
 use crate::cli::RunArgs;
 use crate::error::{CliError, IoReason, ReportReason, ReportStep};
 
+/// The default folder as 07 names it, for an error where the real path is not known.
+const DEFAULT_LABEL: &str = r"%USERPROFILE%\rdy-reports";
+
 /// Makes the report folder for this run, or `None` when `--no-report` was given.
 ///
 /// # Errors
@@ -33,7 +36,13 @@ pub fn open_report_dir(
     if args.no_report {
         return Ok(None);
     }
-    let parent = args.out_dir.clone().unwrap_or_else(default_parent);
+    let parent = match &args.out_dir {
+        Some(dir) => dir.clone(),
+        // Windows only: this makes `%USERPROFILE%\rdy-reports` and refuses a redirect there. On
+        // Unix it is `.` and cannot fail.
+        None => default_parent()
+            .map_err(|err| report_error(ReportStep::CreateFolder, Path::new(DEFAULT_LABEL), err))?,
+    };
     let ts = report_timestamp(now);
     OutputDir::create_new(&parent, product, &ts)
         .map(Some)
@@ -66,6 +75,8 @@ pub fn report_error(step: ReportStep, shown: &Path, err: ReportError) -> CliErro
         }
         ReportError::NotOwner { path, .. } => (path, ReportReason::NotOwner),
         ReportError::NotPrivate { path, .. } => (path, ReportReason::NotPrivate),
+        ReportError::NotPlainFolder { path } => (path, ReportReason::NotPlainFolder),
+        ReportError::NoDefaultFolder => (shown.to_path_buf(), ReportReason::NoDefaultFolder),
         ReportError::NameTaken { parent } => (parent, ReportReason::NameTaken),
         ReportError::FileExists { path } => (path, ReportReason::FileExists),
         _ => return CliError::bug(),
