@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "/usr/bin/firewall-cmd",
+    "--get-active-zones"
+  ],
+  "stdout": "public\n  interfaces: eth0\ndocker\n  interfaces: docker0\n",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 0
+}

@@ -1,0 +1,13 @@
+schema = 1
+name = "firewalld-service-open"
+summary = "6443 is open by a packaged service and 10250 by an administrator override of a service"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-firewalld"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false

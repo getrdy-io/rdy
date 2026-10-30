@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <short>Acme kubelet</short>
+  <description>Synthetic service for tests.</description>
+  <!-- <port protocol="tcp" port="1"/> -->
+  <port protocol="tcp" port="10249"/>
+</service>

@@ -1,0 +1,16 @@
+*filter
+:ufw-user-input - [0:0]
+
+### RULES ###
+
+### tuple ### allow tcp 22 0.0.0.0/0 any 0.0.0.0/0 in comment=73736820616363657373
+-A ufw-user-input -p tcp --dport 22 -j ACCEPT
+
+### tuple ### allow_log-all tcp 6443 0.0.0.0/0 any 0.0.0.0/0 in
+-A ufw-user-input -p tcp --dport 6443 -j ACCEPT
+
+### tuple ### allow_log tcp 10250 0.0.0.0/0 any 0.0.0.0/0 in comment=6b75626c6574
+-A ufw-user-input -p tcp --dport 10250 -j ACCEPT
+
+### END RULES ###
+COMMIT

@@ -1,0 +1,13 @@
+schema = 1
+name = "ufw-disabled"
+summary = "ufw is installed and switched off"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-ufw"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false

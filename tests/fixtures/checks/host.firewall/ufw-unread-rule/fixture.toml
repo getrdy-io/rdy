@@ -1,0 +1,13 @@
+schema = 1
+name = "ufw-unread-rule"
+summary = "ufw has a rule line in a form rdy does not read, ahead of the ports"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-ufw"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false

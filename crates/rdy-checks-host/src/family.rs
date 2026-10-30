@@ -19,7 +19,7 @@ mod tests;
 /// Linux is `Full`. macOS and Windows are `NotYet`: the `sysinfo` subset is declined for M1 (MF-02)
 /// and arrives with M2-005, which makes four of these `Partial`. A concept that does not exist on an
 /// OS is not a state here either (ADR 0013): the vendor scopes such a check with `os: [linux]`.
-const OS: OsSupport = OsSupport {
+pub(crate) const OS: OsSupport = OsSupport {
     linux: Support::Full,
     macos: Support::NotYet,
     windows: Support::NotYet,
@@ -31,7 +31,7 @@ const NOT_BUILT: &str = "is not built into this rdy yet";
 /// What a stub says on an OS where the check is `NotYet`.
 const NO_SOURCE: &str = "this check has no data source on this OS yet";
 
-const ROOT: &[Want] = &[Want {
+pub(crate) const ROOT: &[Want] = &[Want {
     need: Need::Root,
     evidence_only: false,
 }];
