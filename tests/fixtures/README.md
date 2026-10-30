@@ -65,7 +65,9 @@ What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canar
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
-`apis-unreadable-vanilla`), all `generated` by `scripts/gen-k8s-version-fixtures.py` (`--check` fails on drift). The rest
+`apis-unreadable-vanilla`), all `generated` by `scripts/gen-k8s-version-fixtures.py` (`--check` fails on drift).
+`checks/k8s.storageclass/` holds 30 clusters, all `generated` by `scripts/gen-k8s-storageclass-fixtures.py`
+(`--check` fails on drift and on a file the script did not write). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |

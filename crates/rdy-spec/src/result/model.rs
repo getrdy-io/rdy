@@ -877,6 +877,10 @@ impl NeedState {
 pub struct Partial {
     /// The needs that were missing.
     pub missing: Vec<Need>,
+    /// Permissions the check lacked, one short text each, such as `list nodes` or `list csinodes
+    /// (storage.k8s.io)`. Empty when the partial result has no such cause. Older reports omit it.
+    #[serde(default)]
+    pub missing_grants: Vec<String>,
     /// What is missing, or the OS note for a `Partial` OS.
     pub note: String,
 }
@@ -887,8 +891,16 @@ impl Partial {
     pub fn new(missing: Vec<Need>, note: impl Into<String>) -> Self {
         Self {
             missing,
+            missing_grants: Vec::new(),
             note: note.into(),
         }
+    }
+
+    /// Adds the permissions the check lacked.
+    #[must_use]
+    pub fn with_missing_grants(mut self, grants: Vec<String>) -> Self {
+        self.missing_grants = grants;
+        self
     }
 }
 

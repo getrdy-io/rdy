@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-secret-params"
+summary = "A class whose parameters, annotations and events hold a KMS key ARN and secret names"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

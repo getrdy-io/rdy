@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "Namespace",
+    "metadata": {
+      "name": "acme-system",
+      "creationTimestamp": "2026-01-01T00:00:00Z"
+    },
+    "status": {
+      "phase": "Active"
+    }
+  }
+}

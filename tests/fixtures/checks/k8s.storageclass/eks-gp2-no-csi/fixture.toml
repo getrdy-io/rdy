@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-eks-gp2-no-csi"
+summary = "EKS default gp2 on the in-tree EBS name with no CSI add-on: no node lists the driver"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true
