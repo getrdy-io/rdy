@@ -396,10 +396,17 @@ tests policy.
   the declared prefixes alike, so `reads: ["/proc/net"]` reads `/proc/net/tcp`. The device and inode of
   each password and sudo file is recorded when the live backend is made, and a hard link or a bind
   mount with that identity is refused whatever its name.
-- The machine id files (`etc/machine-id*`, `var/lib/dbus/machine-id*`) are on the deny list at any depth,
-  for every reader. A check that declares `/` still cannot read them, so the raw id cannot reach
-  `observed` or the report. The `MachineId` call reads them through a guard that admits those two real
-  paths and nothing else (M1-046).
+- The machine identity files are on the deny list at any depth, for every reader: `etc/machine-id*`,
+  `var/lib/dbus/machine-id*`, `run/machine-id*` (the transient copy systemd keeps when `/etc` is read
+  only; `/var/run` is the same place), and the DMI files `product_serial`, `product_uuid`,
+  `board_serial` and `chassis_serial` under `dmi/id/` (so `/sys/class/dmi/id/` and
+  `/sys/devices/virtual/dmi/id/`, and a copy under a host mount or a container layer). A check that
+  declares `/` still cannot read them, so neither the raw id nor a hardware serial can reach `observed`
+  or the report. The `MachineId` call reads the three id files through a guard that admits those real
+  paths and nothing else (M1-046, M1-170); nothing reads the DMI files. The device and inode of each id
+  file is recorded with the password files, and a hard link or bind mount with that identity is refused
+  whatever its name. The inode check is skipped for the `MachineId` guard only (it must read the file
+  under its own name, which that guard already admits by real path), never for a password file.
 - macOS: `realpath`, the checks, then open with `O_NOFOLLOW_ANY | O_NONBLOCK` (no link anywhere along
   the path, so a directory swapped for a link after the check cannot redirect the open). The type comes
   from `fstat` of the descriptor, the descriptor must have the same device and inode as the first
@@ -468,8 +475,8 @@ tests policy.
   - `Statvfs { path }`: the path passes the read rules; logged as `native`, `api: statvfs`, with
     `path`.
   - `Uname`, `Rlimit(resource)`, `Hostname`, `SystemRoots`.
-  - `MachineId`: Windows `MachineGuid`; Linux reads `/etc/machine-id` as a file; macOS has none in M1,
-    so its `host_id` is null. The raw value never enters the log or the report; only 01's salted
+  - `MachineId`: Windows `MachineGuid`; Linux reads `/etc/machine-id`, then `/var/lib/dbus/machine-id`,
+    then `/run/machine-id` as a file; macOS has none in M1, so its `host_id` is null. The raw value never enters the log or the report; only 01's salted
     `host_id` does. The probe refuses it from a check's probe (run-level only), and its type,
     `MachineId`, has no `Display`, `Serialize` or public getter and a `Debug` that shows nothing (M1-046).
   - As built in M1-046: Linux has all of them except `SystemRoots`, which M1-092 builds with the TLS

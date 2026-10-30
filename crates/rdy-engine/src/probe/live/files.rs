@@ -8,16 +8,20 @@ use std::path::{Path, PathBuf};
 use rustix::fs::{self, AtFlags, CWD, FileType, Mode, OFlags, Stat};
 
 use crate::probe::policy::{
-    RULE_CHANGED, RULE_NOT_DIR, RULE_NOT_FILE_OR_DIR, RULE_NOT_REGULAR, RULE_SYSTEM_SECRET,
-    ReadGuard, Refused,
+    MACHINE_ID_FILES, RULE_CHANGED, RULE_MACHINE_ID_FILE, RULE_NOT_DIR, RULE_NOT_FILE_OR_DIR,
+    RULE_NOT_REGULAR, RULE_SYSTEM_SECRET, ReadGuard, Refused,
 };
 use crate::probe::{DirEntry, FileBytes, FileMeta, MAX_DIR_ENTRIES, MAX_READ, ReadRange};
 
-/// The password and sudo files that exist on this machine, known by device and inode. A hard link or
-/// a bind mount of one has another name and the same inode, so the name rules cannot see it.
-/// Residual (05, I5): a copy at another inode, such as a backup or a snapshot, is not known.
+/// The password and sudo files and the machine id files that exist on this machine, known by device and
+/// inode. A hard link or a bind mount of one has another name and the same inode, so the name rules
+/// cannot see it. Residual (05, I5): a copy at another inode, such as a backup or a snapshot, is not
+/// known.
 #[derive(Debug, Clone, Default)]
-pub(super) struct Secrets(Vec<(u64, u64)>);
+pub(super) struct Secrets {
+    passwords: Vec<(u64, u64)>,
+    machine_ids: Vec<(u64, u64)>,
+}
 
 /// The files whose inodes are remembered.
 const SECRET_FILES: &[&str] = &[
@@ -40,32 +44,45 @@ fn identity(stat: &Stat) -> (u64, u64) {
     (wide(stat.st_dev), wide(stat.st_ino))
 }
 
+/// The identities of the files at these paths. A path that is not there is skipped.
+fn identities<P: AsRef<Path>>(paths: impl IntoIterator<Item = P>) -> Vec<(u64, u64)> {
+    paths
+        .into_iter()
+        .filter_map(|path| fs::stat(path.as_ref()).ok())
+        .map(|stat| identity(&stat))
+        .collect()
+}
+
 impl Secrets {
     /// Looks the files up once, when the backend is made. A file that is not there is skipped.
     pub(super) fn collect() -> Self {
-        Self(
-            SECRET_FILES
-                .iter()
-                .filter_map(|path| fs::stat(*path).ok())
-                .map(|stat| identity(&stat))
-                .collect(),
-        )
+        Self {
+            passwords: identities(SECRET_FILES),
+            machine_ids: identities(MACHINE_ID_FILES),
+        }
     }
 
     /// The inodes of these paths. For tests, which cannot put a file at `/etc/shadow`.
     #[cfg(test)]
-    pub(super) fn from_paths(paths: &[&Path]) -> Self {
-        Self(
-            paths
-                .iter()
-                .filter_map(|path| fs::stat(*path).ok())
-                .map(|stat| identity(&stat))
-                .collect(),
-        )
+    pub(super) fn from_paths(passwords: &[&Path], machine_ids: &[&Path]) -> Self {
+        Self {
+            passwords: identities(passwords),
+            machine_ids: identities(machine_ids),
+        }
     }
 
-    fn holds(&self, stat: &Stat) -> bool {
-        self.0.contains(&identity(stat))
+    /// The rule that refuses `stat`, if its inode is a known file. The machine id files are skipped for
+    /// the `MachineId` guard, which must read them under their own names and which admits only those
+    /// real paths. A password file is never skipped.
+    pub(super) fn refuses(&self, stat: &Stat, guard: &ReadGuard) -> Option<&'static str> {
+        let id = identity(stat);
+        if self.passwords.contains(&id) {
+            Some(RULE_SYSTEM_SECRET)
+        } else if !guard.reads_machine_id() && self.machine_ids.contains(&id) {
+            Some(RULE_MACHINE_ID_FILE)
+        } else {
+            None
+        }
     }
 }
 
@@ -291,8 +308,8 @@ fn locate(path: &Path, guard: &ReadGuard, secrets: &Secrets) -> io::Result<Targe
         return Err(refused(RULE_CHANGED));
     }
     guard.admit_real(&real).map_err(Refused::into_io)?;
-    if secrets.holds(&stat) {
-        return Err(refused(RULE_SYSTEM_SECRET));
+    if let Some(rule) = secrets.refuses(&stat, guard) {
+        return Err(refused(rule));
     }
     Ok(Target { stat, real, anchor })
 }
@@ -333,8 +350,8 @@ pub(super) fn locate_by_path(
     if stat.st_nlink == 0 {
         return Err(refused(RULE_CHANGED));
     }
-    if secrets.holds(&stat) {
-        return Err(refused(RULE_SYSTEM_SECRET));
+    if let Some(rule) = secrets.refuses(&stat, guard) {
+        return Err(refused(rule));
     }
     Ok((real, stat))
 }
