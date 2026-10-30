@@ -1,0 +1,163 @@
+{
+  "actions": [
+    {
+      "at_ms": 0,
+      "bytes": 192,
+      "check": null,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/etc/os-release",
+      "seq": 1,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 442,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/meminfo",
+      "seq": 2,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.memory",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/proc/self/cgroup",
+      "seq": 3
+    }
+  ],
+  "actions_dropped": {},
+  "actions_truncated": false,
+  "api_version": "rdy/v1",
+  "capabilities": [],
+  "checks": [
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
+        "band_bytes": 858993459,
+        "min_available_bytes": 8589934592,
+        "min_bytes": 17179869184,
+        "swap": "any"
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.memory",
+      "key": "host.memory",
+      "message": "31.3 GiB found, 16 GiB needed",
+      "name": null,
+      "needs": [],
+      "notes": [],
+      "observed": {
+        "available_bytes": 30562426880,
+        "available_effective_bytes": 30562426880,
+        "available_estimated": false,
+        "cgroup_hierarchy": null,
+        "cgroup_limit_at": null,
+        "cgroup_limit_bytes": null,
+        "cgroup_swap_limit_bytes": null,
+        "effective_bytes": 33608118272,
+        "swap_total_bytes": 0,
+        "swap_used_bytes": 0,
+        "total_bytes": 33608118272
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": false
+    }
+  ],
+  "complete": true,
+  "exit_code": 0,
+  "host": {
+    "arch": "x86_64",
+    "container": false,
+    "host_id": null,
+    "hostname": "host-min.example",
+    "kernel": null,
+    "os": {
+      "family": "linux",
+      "id": "rhel",
+      "pretty_name": "Red Hat Enterprise Linux 9.2 (Plow)",
+      "version": "9.2"
+    }
+  },
+  "identity": {
+    "elevated": false,
+    "euid": 1000,
+    "kube": null,
+    "user": null
+  },
+  "interrupted": false,
+  "kind": "Report",
+  "producer": {
+    "commit": "<commit>",
+    "name": "rdy",
+    "rdy_spec": "<rdy_spec>",
+    "target": "<target>",
+    "version": "<version>"
+  },
+  "proxy": null,
+  "redaction": {
+    "by_rule": {},
+    "ruleset": "report",
+    "total": 0
+  },
+  "run": {
+    "duration_ms": 0,
+    "finished_at": "2026-11-02T09:00:00.000Z",
+    "id": "00000000-0000-4000-8000-000000000001",
+    "options": {
+      "allow_unsigned": true,
+      "deadline_ms": 20000,
+      "jobs": 1,
+      "kube_context": null,
+      "network": false
+    },
+    "started_at": "2026-11-02T09:00:00.000Z"
+  },
+  "signature": {
+    "key_fingerprint": null,
+    "key_id": null,
+    "product": null,
+    "reason": null,
+    "signed_at": null,
+    "state": "unsigned",
+    "trust_note": null,
+    "trust_source": null
+  },
+  "spec": {
+    "annotations": {},
+    "contact": null,
+    "expires": null,
+    "file_name": "spec.yaml",
+    "product": "acme-min",
+    "serial": null,
+    "sha256": "25b50f27f6d3c7fdc81cedb264d7befd1c4494a44d8be77f636f9b01e0cf41e6",
+    "size_bytes": 271,
+    "version": ">=1.0"
+  },
+  "summary": {
+    "block": 0,
+    "error": 0,
+    "not_applicable": 0,
+    "optional_not_run": 0,
+    "pass": 1,
+    "required_not_run": 0,
+    "skipped": 0,
+    "timeout": 0,
+    "total": 1,
+    "warn": 0
+  },
+  "verdict": "ready",
+  "verdict_reason": null
+}
