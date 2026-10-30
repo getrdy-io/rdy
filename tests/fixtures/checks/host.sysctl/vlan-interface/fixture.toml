@@ -1,0 +1,12 @@
+schema = 1
+name = "vlan-interface"
+summary = "The spec uses slashes and the file uses dots for eth0.100"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

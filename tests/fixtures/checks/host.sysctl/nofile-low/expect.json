@@ -1,0 +1,38 @@
+{
+  "entry": {
+    "id": "host.sysctl",
+    "limits": {
+      "nofile": ">=65536"
+    }
+  },
+  "result": {
+    "expected": {
+      "limits": {
+        "nofile": ">=65536"
+      }
+    },
+    "fix": "Set `LimitNOFILE=65536` in the service unit, or for every service set `DefaultLimitNOFILE=65536` under `[Manager]` in a file in `/etc/systemd/system.conf.d/` and run `systemctl daemon-reexec`.",
+    "level": "fail",
+    "message": "`DefaultLimitNOFILE=1024:524288` in `/etc/systemd/system.conf.d/10-defaults.conf` gives services an open files limit of 1024, need at least 65536.",
+    "notes": [
+      "rdy's own open files limit is 1024 (soft) and 524288 (hard). That is a shell limit and does not apply to services."
+    ],
+    "observed": {
+      "limits": {
+        "nofile": {
+          "default_limit_nofile": "1024:524288",
+          "file": "/etc/systemd/system.conf.d/10-defaults.conf",
+          "file_max": 9223372036854775807,
+          "hard": 524288,
+          "nr_open": 1048576,
+          "shell_limit": {
+            "hard": 524288,
+            "soft": 1024
+          },
+          "soft": 1024
+        }
+      }
+    },
+    "partial": null
+  }
+}

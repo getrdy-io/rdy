@@ -1,0 +1,12 @@
+schema = 1
+name = "etc-wins-same-name"
+summary = "The /etc file of the same name replaces the one in /usr/lib"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false
