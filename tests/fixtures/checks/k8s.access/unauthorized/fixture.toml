@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-access-unauthorized"
+summary = "The version call itself answers 401"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.access"]
+
+[caps]
+root = false
+network = true
+kube = true

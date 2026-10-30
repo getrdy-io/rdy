@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-access-route-missing"
+summary = "Kubernetes 1.29: the identity review answers 404 (group disabled or filtered), one access review is accepted"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.access"]
+
+[caps]
+root = false
+network = true
+kube = true

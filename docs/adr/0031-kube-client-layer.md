@@ -73,7 +73,7 @@ kubeconfig read needed a settled path.
    valid placeholder takes the `proxy_url` slot of the chosen cluster before the build, and the slot is
    cleared after it. The cluster is contacted directly. When the variable is set, a timeout or unreachable
    error adds "HTTPS_PROXY is set; rdy does not use it for the cluster yet", because kubectl would use it.
-   Proxy support is M1-109, with its own feature decision. Proved in a child process that is started with
+   Proxy support is M1-109, with its own feature decision. **Amended by ADR 0037**: a proxy-url is no longer refused, and rdy picks the proxy itself the way kubectl does; kube still never reads the variable. Proved in a child process that is started with
    a malformed value.
 7. **Limits.** The connect, read and write timeouts are the check timeout, at most 60 s. Retries are off.
    The build runs on the blocking pool, so a plugin never holds a worker. A plugin that waits for a login
