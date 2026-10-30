@@ -19,8 +19,12 @@
 //! [`Chain::unreadable`], and the check says the answer may be incomplete. [`Chain::hidden_above`] says
 //! the mount shows only a subtree, so a parent limit above it could not be seen.
 //!
-//! **Hybrid layouts.** With a v2 mount and v1 mounts, the helper uses v2 for a controller when v2 has
-//! its files, and the v1 hierarchy otherwise.
+//! **Hybrid layouts.** With a v2 mount and v1 mounts, the helper uses v2 for a controller when v2
+//! answered at some level, and the v1 hierarchy otherwise. An unreadable v2 level does not hide a v1
+//! limit; it is reported only when v1 has nothing either.
+//!
+//! **Which mounts count.** Only mounts at `/sys/fs/cgroup` or under it, because the probe may read
+//! nothing else. Of those, the mount that shows the most of the hierarchy wins.
 //!
 //! **Reads.** The probe only allows what the calling check declares in `CheckInfo::reads`. Every check
 //! that calls this helper lists [`READS`].
@@ -299,10 +303,7 @@ impl Cgroups {
             file: "/proc/self/cgroup",
             reason,
         })?;
-        let mounts = read_text(probe, READS[1])
-            .await?
-            .map(|text| parse::parse_mountinfo(&text))
-            .unwrap_or_default();
+        let mounts = read_mountinfo(probe).await?;
         let (has_v2, has_v1) = (mounts.iter().any(|m| m.v2), mounts.iter().any(|m| !m.v2));
         let layout = match (has_v2, has_v1) {
             (true, true) => Layout::Hybrid,
@@ -315,15 +316,21 @@ impl Cgroups {
             if comps.len() > MAX_DEPTH {
                 return None;
             }
-            mounts.iter().filter(|m| wanted(m)).find_map(|mount| {
-                let root = components(&mount.root)?;
-                comps.starts_with(&root).then(|| Placement {
-                    point: mount.point.trim_end_matches('/').to_owned(),
-                    skip: root.len(),
-                    comps: comps.iter().map(|c| (*c).to_owned()).collect(),
-                    hidden_above: !root.is_empty(),
+            // Only mounts the probe may read count: a private mount elsewhere would make every read
+            // Denied. Of those, the one that shows the most of the hierarchy (the shortest root) wins.
+            mounts
+                .iter()
+                .filter(|m| wanted(m) && under_reads(&m.point))
+                .filter_map(|mount| {
+                    let root = components(&mount.root)?;
+                    comps.starts_with(&root).then(|| Placement {
+                        point: mount.point.trim_end_matches('/').to_owned(),
+                        skip: root.len(),
+                        comps: comps.iter().map(|c| (*c).to_owned()).collect(),
+                        hidden_above: !root.is_empty(),
+                    })
                 })
-            })
+                .min_by_key(|place| place.skip)
         };
         let v2 = lines
             .iter()
@@ -335,7 +342,7 @@ impl Cgroups {
             .map(|line| V1Hierarchy {
                 controllers: line.controllers.clone(),
                 placement: place(line, &|m| {
-                    !m.v2 && m.super_opts.iter().any(|o| line.controllers.contains(o))
+                    !m.v2 && line.controllers.iter().all(|c| m.super_opts.contains(c))
                 }),
             })
             .collect();
@@ -363,6 +370,10 @@ impl Cgroups {
     /// [`CgroupError::Probe`] when the probe refuses or fails. A file that is missing, unreadable or
     /// not understood is counted in the answer instead.
     pub async fn memory(&self, probe: &Probe) -> Result<Memory, CgroupError> {
+        // v2 wins only when it answered. A hierarchy that answered nowhere has no controller files, and
+        // an unreadable level in it must not hide the v1 limit. Its unreadable count is kept only when
+        // v1 has nothing either.
+        let mut fallback = None;
         if let Some(place) = &self.v2 {
             let limit = walk(probe, place, "memory.max", parse::parse_bytes, u64_less).await?;
             let swap = walk(
@@ -373,16 +384,16 @@ impl Cgroups {
                 u64_less,
             )
             .await?;
-            if limit.is_present()
-                || swap.is_present()
-                || !limit.is_complete()
-                || !swap.is_complete()
-            {
-                return Ok(Memory {
-                    hierarchy: Some(Hierarchy::V2),
-                    limit,
-                    swap,
-                });
+            let memory = Memory {
+                hierarchy: Some(Hierarchy::V2),
+                limit,
+                swap,
+            };
+            if memory.limit.is_present() || memory.swap.is_present() {
+                return Ok(memory);
+            }
+            if !memory.limit.is_complete() || !memory.swap.is_complete() {
+                fallback = Some(memory);
             }
         }
         if let Some(place) = self.v1_for("memory") {
@@ -402,6 +413,9 @@ impl Cgroups {
                 });
             }
         }
+        if let Some(memory) = fallback {
+            return Ok(memory);
+        }
         let hidden = self.v2.as_ref().is_some_and(|p| p.hidden_above);
         Ok(Memory {
             hierarchy: None,
@@ -416,13 +430,18 @@ impl Cgroups {
     ///
     /// The same as [`Cgroups::memory`].
     pub async fn cpu(&self, probe: &Probe) -> Result<Cpu, CgroupError> {
+        let mut fallback = None;
         if let Some(place) = &self.v2 {
             let quota = walk(probe, place, "cpu.max", parse::parse_cpu_max, quota_less).await?;
-            if quota.is_present() || !quota.is_complete() {
-                return Ok(Cpu {
-                    hierarchy: Some(Hierarchy::V2),
-                    quota,
-                });
+            let cpu = Cpu {
+                hierarchy: Some(Hierarchy::V2),
+                quota,
+            };
+            if cpu.quota.is_present() {
+                return Ok(cpu);
+            }
+            if !cpu.quota.is_complete() {
+                fallback = Some(cpu);
             }
         }
         if let Some(place) = self.v1_for("cpu") {
@@ -433,6 +452,9 @@ impl Cgroups {
                     quota,
                 });
             }
+        }
+        if let Some(cpu) = fallback {
+            return Ok(cpu);
         }
         Ok(Cpu {
             hierarchy: None,
@@ -494,6 +516,37 @@ async fn read_file(probe: &Probe, dir: &str, name: &str) -> Result<Raw, CgroupEr
         Err(ProbeError::NotFound) => Ok(Raw::Absent),
         Err(ProbeError::PermissionDenied | ProbeError::Io(_)) => Ok(Raw::Unreadable),
         Err(other) => Err(other.into()),
+    }
+}
+
+/// `true` when a mount point is `/sys/fs/cgroup` or under it, the only place the probe may read.
+fn under_reads(point: &str) -> bool {
+    let point = point.trim_end_matches('/');
+    point == READS[2]
+        || point
+            .strip_prefix(READS[2])
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// The cgroup mounts in `/proc/self/mountinfo`. When the read was cut, the last line may be cut too and
+/// is dropped.
+async fn read_mountinfo(probe: &Probe) -> Result<Vec<parse::Mount>, CgroupError> {
+    match probe.read(Path::new(READS[1])).await {
+        Ok(file) => {
+            let text = String::from_utf8_lossy(&file.bytes);
+            Ok(parse::parse_mountinfo(whole_lines(&text, file.truncated())))
+        }
+        Err(ProbeError::NotFound) => Ok(Vec::new()),
+        Err(other) => Err(other.into()),
+    }
+}
+
+/// `text` without its last line when `cut` says the read ended early.
+fn whole_lines(text: &str, cut: bool) -> &str {
+    if cut {
+        text.rfind('\n').map_or("", |end| &text[..=end])
+    } else {
+        text
     }
 }
 

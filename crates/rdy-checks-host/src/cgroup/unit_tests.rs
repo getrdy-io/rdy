@@ -379,3 +379,163 @@ fn a_path_with_a_backslash_in_a_unit_name_is_read_as_written() {
         Some("/sys/fs/cgroup")
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_unit_name_with_an_escaped_dash_is_read_through_the_probe() {
+    // A Windows checkout cannot hold a backslash in a file name, so this runs on unix only.
+    let (cgroups, ctx, _) = discover(machine(
+        "0::/system.slice/acme\\x2dapi.service\n",
+        V2_AT_ROOT,
+        &[(
+            "/sys/fs/cgroup/system.slice/acme\\x2dapi.service/memory.max",
+            "1048576\n",
+        )],
+    ));
+    let memory = block_on(cgroups.memory(ctx.probe())).expect("memory");
+    let min = memory.limit.min.expect("limit");
+    assert_eq!(min.at, "/system.slice/acme\\x2dapi.service");
+    assert_eq!(min.value, 1_048_576);
+}
+
+#[test]
+fn a_mount_outside_the_readable_prefix_is_ignored() {
+    // A runtime's private cgroup2 mount comes first. Reading under it would be denied for every level.
+    let mountinfo = "\
+30 22 0:30 / /run/private/cgroup rw - cgroup2 cgroup2 rw
+31 22 0:31 / /sys/fs/cgroupx rw - cgroup2 cgroup2 rw
+23 22 0:22 / /sys/fs/cgroup rw - cgroup2 cgroup2 rw
+";
+    let (cgroups, ctx, _) = discover(machine(
+        "0::/a\n",
+        mountinfo,
+        &[("/sys/fs/cgroup/a/memory.max", "1048576\n")],
+    ));
+    let memory = block_on(cgroups.memory(ctx.probe())).expect("no Denied error");
+    assert_eq!(memory.hierarchy, Some(Hierarchy::V2));
+    assert_eq!(memory.limit.min.expect("limit").at, "/a");
+}
+
+#[test]
+fn only_mounts_outside_the_prefix_means_no_answer_and_no_read() {
+    let (cgroups, ctx, run) = discover(machine(
+        "0::/a\n",
+        "30 22 0:30 / /cgroup rw - cgroup2 cgroup2 rw\n",
+        &[("/cgroup/a/memory.max", "1048576\n")],
+    ));
+    let memory = block_on(cgroups.memory(ctx.probe())).expect("memory");
+    assert_eq!(memory.hierarchy, None);
+    assert_eq!(cgroups.layout(), Layout::V2);
+    assert!(
+        run.action_log()
+            .actions
+            .iter()
+            .all(|a| a.fields.get("path").and_then(|p| p.as_str()) != Some("/cgroup/a/memory.max"))
+    );
+}
+
+#[test]
+fn of_two_visible_cgroup2_mounts_the_one_with_the_shortest_root_wins() {
+    let mountinfo = "\
+23 22 0:22 /docker/abc /sys/fs/cgroup/sub rw - cgroup2 cgroup2 rw
+24 22 0:23 / /sys/fs/cgroup rw - cgroup2 cgroup2 rw
+";
+    let (cgroups, ctx, _) = discover(machine(
+        "0::/docker/abc/app\n",
+        mountinfo,
+        &[
+            ("/sys/fs/cgroup/docker/abc/memory.max", "2097152\n"),
+            ("/sys/fs/cgroup/memory.max", "1048576\n"),
+            ("/sys/fs/cgroup/sub/memory.max", "4194304\n"),
+        ],
+    ));
+    let memory = block_on(cgroups.memory(ctx.probe())).expect("memory");
+    let min = memory.limit.min.expect("limit");
+    assert_eq!((min.value, min.at.as_str()), (1_048_576, "/"));
+    assert!(!memory.limit.hidden_above);
+}
+
+const HYBRID_MOUNTS: &str = "\
+24 23 0:21 / /sys/fs/cgroup/unified rw - cgroup2 cgroup2 rw
+26 23 0:23 / /sys/fs/cgroup/cpu,cpuacct rw - cgroup cgroup rw,cpu,cpuacct
+27 23 0:24 / /sys/fs/cgroup/memory rw - cgroup cgroup rw,memory
+";
+
+#[test]
+fn an_unreadable_level_in_the_unified_tree_does_not_hide_the_v1_limit() {
+    let replay = machine(
+        "0::/a\n3:cpu,cpuacct:/a\n2:memory:/a\n",
+        HYBRID_MOUNTS,
+        &[
+            ("/sys/fs/cgroup/memory/a/memory.limit_in_bytes", "1048576\n"),
+            ("/sys/fs/cgroup/cpu,cpuacct/a/cpu.cfs_quota_us", "50000\n"),
+            ("/sys/fs/cgroup/cpu,cpuacct/a/cpu.cfs_period_us", "100000\n"),
+        ],
+    )
+    .unreadable("/sys/fs/cgroup/unified/a/memory.max")
+    .unreadable("/sys/fs/cgroup/unified/a/cpu.max");
+    let (cgroups, ctx, _) = discover(replay);
+    let memory = block_on(cgroups.memory(ctx.probe())).expect("memory");
+    assert_eq!(memory.hierarchy, Some(Hierarchy::V1));
+    assert_eq!(memory.limit.min.as_ref().expect("limit").value, 1_048_576);
+    assert!(memory.limit.is_complete());
+    let cpu = block_on(cgroups.cpu(ctx.probe())).expect("cpu");
+    assert_eq!(cpu.hierarchy, Some(Hierarchy::V1));
+    assert!(cpu.quota.min.is_some());
+}
+
+#[test]
+fn the_unified_trees_unreadable_count_is_kept_when_v1_has_nothing() {
+    let replay = machine("0::/a\n2:memory:/a\n3:cpu,cpuacct:/a\n", HYBRID_MOUNTS, &[])
+        .unreadable("/sys/fs/cgroup/unified/a/memory.max")
+        .unreadable("/sys/fs/cgroup/unified/a/cpu.max");
+    let (cgroups, ctx, _) = discover(replay);
+    let memory = block_on(cgroups.memory(ctx.probe())).expect("memory");
+    assert_eq!(memory.hierarchy, Some(Hierarchy::V2));
+    assert_eq!(memory.limit.unreadable, 1);
+    assert!(!memory.limit.is_complete());
+    let cpu = block_on(cgroups.cpu(ctx.probe())).expect("cpu");
+    assert_eq!(cpu.hierarchy, Some(Hierarchy::V2));
+    assert_eq!(cpu.quota.unreadable, 1);
+}
+
+#[test]
+fn a_v1_mount_must_show_every_controller_of_the_line() {
+    // The line names cpu and cpuacct. A mount of cpu alone does not show the whole hierarchy.
+    let (cgroups, ctx, _) = discover(machine(
+        "3:cpu,cpuacct:/a\n",
+        "26 23 0:23 / /sys/fs/cgroup/cpu rw - cgroup cgroup rw,cpu\n",
+        &[("/sys/fs/cgroup/cpu/a/cpu.cfs_quota_us", "50000\n")],
+    ));
+    let cpu = block_on(cgroups.cpu(ctx.probe())).expect("cpu");
+    assert_eq!(cpu.hierarchy, None);
+    let found = block_on(cgroups.controllers(ctx.probe())).expect("controllers");
+    assert!(found.v1.is_empty());
+}
+
+#[test]
+fn a_cut_last_line_of_mountinfo_is_dropped() {
+    use super::whole_lines;
+    assert_eq!(whole_lines("a\nb\nc", true), "a\nb\n");
+    assert_eq!(whole_lines("a\nb\n", true), "a\nb\n");
+    assert_eq!(whole_lines("a\nb\nc", false), "a\nb\nc");
+    assert_eq!(whole_lines("abc", true), "");
+
+    // Through the probe: the read stops inside the options of the last line, so the cut text reads as
+    // a mount of `cpu` alone. With that line dropped there is no mount.
+    let last = "26 23 0:23 / /sys/fs/cgroup/cpu rw - cgroup cgroup rw,cpu,cpuacct\n";
+    let head_len = last.find("rw,cpu,cpuacct").expect("options") + "rw,cpu".len();
+    let prefix_len = rdy_engine::probe::MAX_READ - head_len;
+    let filler = "21 28 0:5 / /proc rw - proc proc rw\n";
+    let count = prefix_len / filler.len() - 1;
+    let mut mountinfo = filler.repeat(count);
+    let pad = prefix_len - mountinfo.len();
+    mountinfo.push_str(&"#".repeat(pad - 1));
+    mountinfo.push('\n');
+    mountinfo.push_str(last);
+    assert_eq!(mountinfo.len() - last.len(), prefix_len);
+    let (cgroups, ctx, _) = discover(machine("3:cpu:/a\n", &mountinfo, &[]));
+    assert_eq!(cgroups.layout(), Layout::Unmounted);
+    let found = block_on(cgroups.controllers(ctx.probe())).expect("controllers");
+    assert!(found.v1.is_empty(), "{:?}", found.v1);
+}
