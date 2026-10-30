@@ -74,7 +74,7 @@ crates/rdy-engine/src/
 
 Features: `default = ["runtime", "html"]`. `runtime`: scheduler, privilege, needs, probe, output
 (tokio, tokio-util, cap-std, rustix, http, tower-layer, tower-service, hyper, tokio-rustls, rustls with
-ring only, webpki-roots). `html`: askama. `redact` and `units` need no feature, so `rdy-cloud`
+ring only, webpki-roots, and on macOS and Windows rustls-native-certs). `html`: askama. `redact` and `units` need no feature, so `rdy-cloud`
 (`default-features = false, features = ["html"]`) and `rdy report` can use them. `testing` is never in
 the release binary; CI asserts `cargo tree -p rdy -e features` lacks it. `loopback` implies `testing`, adds
 the loopback network servers (`rdy_engine::testing::loopback`, `rcgen`, `tokio-rustls`, `socket2`; ADR 0035)
@@ -478,6 +478,27 @@ tests policy.
   URL with no port means port 80. NO_PROXY matching is not built yet (M1-098).
 - `tls_chain` runs the recording verifier, private to the facade, and returns the presented chain and
   whether it validates against the system roots and the bundled roots. It never sends application data.
+  As built in M1-092: `Probe::tls_chain(&Target, Route) -> Result<TlsChain, ProbeError>` in
+  `rdy_engine::probe::net` (feature `runtime` or `loopback`, like `tcp`). It takes the policy and the
+  attempts of `tcp` (same declared peer classes, host set, address rule and proxy `CONNECT`; the
+  `dial` helper opens the stream), then runs one handshake with TLS 1.2 and 1.3 on ring, an ALPN offer of
+  `h2` and `http/1.1`, no session resumption and a 5 s limit. A `TlsChain` holds the DER chain as sent
+  (leaf first, no root), the `sni`, one `TrustVerdict` for the system roots and one for the bundled
+  roots (`Valid`, `Rejected(UnknownIssuer | Expired | NotYetValid | NameMismatch | BadSignature |
+  Policy)` or `Unavailable` when the set is empty or the OS gave none), the number of system roots used,
+  the protocol, the chosen ALPN protocol, the handshake time and the `TcpReport` of the connection.
+  `Expired` and `NotYetValid` are the `clock_or_expiry` class (`TrustFailure::is_clock_or_expiry`). A
+  chain that fails to validate is data, not an error. The call fails with `NetFailure::NotConnected`
+  (no stream), `TlsReset` (reset before a certificate), `TlsAlert` (the alert's name), `TlsFailed`
+  (not TLS, no shared version or a name TLS cannot carry), `ProbeError::Timeout`, or the errors of `tcp`.
+  The server name comes from the spec host alone: a name host sends it as SNI, an address host sends none
+  and its entry has no `sni`. After the handshake the facade sends `close_notify` and nothing else. The
+  system roots are asked once per run through the run-level probe (one `native` entry with `check: null`),
+  after the connection opened, so an unreachable host never reads the store; they are kept in the hub.
+  One `tls` entry per call: `host`, `port`, `via_proxy`, `addr`, and `sni` for a name. The verifier that
+  accepts every chain is `probe/net/tls/record.rs`, with no `pub` item, and no stream leaves the call.
+  `REVOCATION_NOTE` is the "no revocation check" wording. M1-093 verifies strictly with its own
+  configuration over the same `dial` and the same roots.
 - `http` sends HTTP/1.1 HEAD or GET over a verified stream. It returns status, a fixed header list,
   stage timings and the `Location` host. It reads at most 64 KiB of body and discards it, and never
   follows a redirect. Failures are typed: `dns`, `refused`, `blackhole`, `tls_unknown_issuer`,
@@ -512,6 +533,15 @@ tests policy.
     Windows has none yet, so each reports `Unsupported`, which a check maps to skipped, not yet
     on this OS; the Windows `MachineGuid` read goes with `host_id` in M2-002. The log entry holds
     `api` and `path` or `resource`, never the answer.
+  - As built in M1-092: `SystemRoots` answers on Linux and the other Unix systems (PEM files: the
+    `SSL_CERT_FILE` file; the `SSL_CERT_DIR` directories; with neither set, the first standard bundle
+    that reads, else the standard directories; read through the file rules, so the denylist judges the real
+    path), on macOS (`rustls-native-certs`, the keychains) and on Windows (`rustls-native-certs`, the
+    root store; it is the one native call Windows answers). The answer is capped in count and size by
+    `MAX_SYSTEM_ROOTS` (1024) and `MAX_ROOT_BYTES` (16 KiB), by the live reader and again by `Probe::native`
+    for every backend; a certificate over the size is dropped, one past the count is cut, and a warning with
+    the counts (no certificate) is logged. An empty store is an answer, not an error. A store that only an
+    NSS database or a Java keystore holds is invisible (05).
   - `StatvfsInfo::no_exec` is an `Option<bool>`. Linux and Android set it from `ST_NOEXEC`. macOS has no
     such flag in `statvfs`, so it is `None`: unknown. A check that forbids `noexec` reports "not
     verified" for `None`, never a pass. Reading `MNT_NOEXEC` from `statfs` is a later ticket.
@@ -956,7 +986,8 @@ impl Probe {
     // As built in M1-091: `target` is the spec `rdy_spec::Target` (host and port), `route` is `Route::Direct | ViaProxy`.
     // An address that refuses, resets or stays silent is data in `TcpReport.attempts`, not an error.
     pub async fn tcp(&self, target: &Target, route: Route) -> Result<TcpReport, ProbeError>;
-    pub async fn tls_chain(&self, target: &Target) -> Result<TlsChain, ProbeError>;
+    // As built in M1-092: `route` as for `tcp`. A chain that does not validate is data in `TlsChain`.
+    pub async fn tls_chain(&self, target: &Target, route: Route) -> Result<TlsChain, ProbeError>;
     pub async fn http(&self, req: HttpProbe) -> Result<HttpOutcome, ProbeError>;
     pub async fn native(&self, call: NativeCall) -> Result<NativeValue, ProbeError>;
     pub fn kube_call(&self, method: &str, path: &str) -> Result<KubeCall, ProbeError>;  // M1-103; the guard's door to the log

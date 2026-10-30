@@ -9,6 +9,7 @@ use std::io;
 use rustix::process::{self, Resource as Limit};
 
 use super::files::{self, Secrets};
+use super::roots;
 use crate::probe::{
     NativeCall, NativeValue, ReadGuard, Resource, RlimitInfo, StatvfsInfo, UnameInfo,
 };
@@ -44,9 +45,21 @@ pub(super) fn call(
             rustix::system::uname().nodename(),
         ))),
         NativeCall::MachineId => machine_id(secrets),
-        // The OS store is read by M1-092, which owns the TLS facade and the root handling.
-        NativeCall::SystemRoots => Err(io::Error::from(io::ErrorKind::Unsupported)),
+        NativeCall::SystemRoots => system_roots(secrets),
     }
+}
+
+/// The trust roots: PEM bundles through the file rules on Linux and the other Unix systems, the OS
+/// keychains on macOS (see `roots`). Capped by the module and again by the probe.
+#[cfg(not(target_os = "macos"))]
+fn system_roots(secrets: &Secrets) -> io::Result<NativeValue> {
+    roots::load(&roots::Sources::from_env(), secrets).map(NativeValue::SystemRoots)
+}
+
+#[cfg(target_os = "macos")]
+fn system_roots(secrets: &Secrets) -> io::Result<NativeValue> {
+    let _ = secrets;
+    roots::load().map(NativeValue::SystemRoots)
 }
 
 fn text(raw: &std::ffi::CStr) -> String {

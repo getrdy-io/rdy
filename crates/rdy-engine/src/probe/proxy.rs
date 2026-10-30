@@ -401,6 +401,46 @@ pub enum NetFailure {
         "no proxy is set for this run. Fix: set HTTPS_PROXY or HTTP_PROXY before running rdy, or route the check direct"
     )]
     NoProxy,
+    /// A TLS call could not open a connection to the host (and, through a proxy, a tunnel). The
+    /// attempts are in the log of a `tcp` call; here only the last outcome is kept.
+    #[error(
+        "no connection to {target} could be made ({reason}). Fix: check the host and port in the spec, and that a firewall or proxy lets this machine reach them"
+    )]
+    NotConnected {
+        /// The `host:port` that was asked for.
+        target: String,
+        /// A fixed phrase for the last attempt's outcome.
+        reason: &'static str,
+    },
+    /// The connection was reset during the TLS handshake, before the server sent a certificate.
+    #[error(
+        "{target} reset the connection during the TLS handshake. Fix: a firewall or the server drops this client right after its first message, which SNI filtering and very old TLS servers do; ask the network team whether {target} is allowed"
+    )]
+    TlsReset {
+        /// The `host:port` that was asked for.
+        target: String,
+    },
+    /// The server ended the handshake with a TLS alert.
+    #[error(
+        "{target} answered the TLS handshake with the alert {alert}. Fix: the server refused this client's TLS settings; ask its owner what the alert means for {target}"
+    )]
+    TlsAlert {
+        /// The `host:port` that was asked for.
+        target: String,
+        /// The alert's name, from rustls's fixed list of alerts.
+        alert: String,
+    },
+    /// The handshake failed for another reason: the peer is not a TLS server, no TLS version or
+    /// signature was shared, or the name is not one TLS can carry.
+    #[error(
+        "the TLS handshake with {target} failed ({reason}). Fix: check that {target} serves TLS 1.2 or 1.3 on that port and not plain HTTP"
+    )]
+    TlsFailed {
+        /// The `host:port` that was asked for.
+        target: String,
+        /// A fixed phrase for what was wrong.
+        reason: &'static str,
+    },
 }
 
 impl NetFailure {
@@ -414,6 +454,10 @@ impl NetFailure {
             Self::ProxyRefused { status, .. } => format!("the proxy refused CONNECT ({status})"),
             Self::ProxyBadReply { reason } => format!("the proxy reply was not readable: {reason}"),
             Self::NoProxy => "no proxy is set for this run".to_owned(),
+            Self::NotConnected { reason, .. } => format!("no connection: {reason}"),
+            Self::TlsReset { .. } => "the connection was reset during the TLS handshake".to_owned(),
+            Self::TlsAlert { .. } => "the server ended the TLS handshake with an alert".to_owned(),
+            Self::TlsFailed { reason, .. } => format!("the TLS handshake failed: {reason}"),
         }
     }
 }

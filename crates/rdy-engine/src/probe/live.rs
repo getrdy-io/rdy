@@ -28,7 +28,9 @@
 //! (`dockerhttp`) that sends one fixed `GET`. The unix socket is not built on Windows.
 //!
 //! **Native calls.** `Backend::native` runs the closed `NativeCall` list in the `native` module (Unix;
-//! Windows reports `Unsupported` for every call until its sources land). A `Statvfs` call takes the same
+//! Windows answers `SystemRoots` only and reports `Unsupported` for the rest until their sources land).
+//! `SystemRoots` is the `roots` module: PEM bundles through the file rules on Linux, the OS store through
+//! `rustls-native-certs` on macOS and Windows, capped in count and size (M1-092). A `Statvfs` call takes the same
 //! steps as a file call. Linux asks `fstatvfs` on the judged `O_PATH` descriptor. macOS opens the real
 //! path as above and asks that descriptor, so the numbers are for the inode that passed the rules.
 //! `MachineId` is the one read of the machine id files: it uses a guard that admits those two paths only,
@@ -60,6 +62,7 @@ mod files;
 #[cfg(unix)]
 mod native;
 mod netio;
+mod roots;
 
 /// The backend that reads the real machine.
 ///
@@ -91,7 +94,7 @@ fn unsupported<T>() -> io::Result<T> {
 }
 
 /// Runs `work` on the blocking pool. A panic in it is resumed in the caller, like `blocking`.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 async fn on_pool<T: Send + 'static>(
     work: impl FnOnce() -> io::Result<T> + Send + 'static,
 ) -> io::Result<T> {
@@ -186,8 +189,18 @@ impl Backend for Live {
             {
                 on_pool(move || native::call(&call, &guard, &secrets)).await
             }
-            // Windows has no native calls in M1: its checks report "not yet on this OS".
-            #[cfg(not(unix))]
+            // Windows has no native call but the trust roots in M1: the rest report "not yet on this OS".
+            #[cfg(windows)]
+            {
+                let _ = guard;
+                match call {
+                    NativeCall::SystemRoots => {
+                        on_pool(|| roots::load().map(NativeValue::SystemRoots)).await
+                    }
+                    _ => unsupported(),
+                }
+            }
+            #[cfg(not(any(unix, windows)))]
             {
                 let _ = (call, guard);
                 unsupported()

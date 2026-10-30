@@ -33,6 +33,9 @@
 //! attempted. `Proxy-Authorization` is never logged, and the password is in the known-secret set
 //! before the proxy can be used.
 //!
+//! **TLS.** [`Probe::tls_chain`] takes the same policy and the same stream and runs one handshake that
+//! sends no application data (the `tls` module, M1-092).
+//!
 //! **The log.** One `connect` entry per call, proxy `CONNECT` included: `host`, `port`, `via_proxy` (the
 //! proxy without its userinfo, or `null`) and `addr` (the connected address, `null` through a proxy or
 //! when nothing connected). There is no `proto`, which marks a datagram. A failure has a fixed `error`
@@ -64,6 +67,12 @@ use crate::check::PeerClass;
 pub(super) mod replay;
 #[cfg(test)]
 mod tests;
+mod tls;
+
+pub(super) use tls::TlsState;
+pub use tls::{
+    ALPN_PROTOCOLS, HANDSHAKE_TIMEOUT, REVOCATION_NOTE, Roots, TlsChain, TrustFailure, TrustVerdict,
+};
 
 /// The longest one connection attempt waits.
 pub const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -217,10 +226,6 @@ impl TcpReport {
 /// A report and the stream behind it. The TLS and HTTP calls take the stream; `tcp` drops it.
 struct Dialed {
     report: TcpReport,
-    #[expect(
-        dead_code,
-        reason = "M1-092 and M1-093 read the stream; `tcp` only reports"
-    )]
     stream: Option<BoxedStream>,
 }
 
@@ -250,15 +255,9 @@ impl Probe {
         if let Err(rule) = self.admit_tcp(target, route) {
             return Err(refuse(entry, rule, &what));
         }
-        let proxy = match route {
-            Route::Direct => None,
-            Route::ViaProxy => {
-                let Some(proxy) = hub.proxy.get() else {
-                    return Err(fail_net(entry, NetFailure::NoProxy));
-                };
-                entry.set("via_proxy", proxy.origin());
-                Some(proxy)
-            }
+        let proxy = match proxy_for(hub, route, &mut entry) {
+            Ok(proxy) => proxy,
+            Err(failure) => return Err(fail_net(entry, failure)),
         };
 
         let result = self
@@ -418,6 +417,23 @@ impl Probe {
             return Err(ProbeError::denied(rule, what));
         }
         Ok(order(&answers))
+    }
+}
+
+/// The proxy a call takes, for `route`, and the `via_proxy` field of its entry. A call that wants the
+/// proxy when the run has none is [`NetFailure::NoProxy`].
+fn proxy_for<'h>(
+    hub: &'h ProbeHub,
+    route: Route,
+    entry: &mut Pending,
+) -> Result<Option<&'h ProxyUrl>, NetFailure> {
+    match route {
+        Route::Direct => Ok(None),
+        Route::ViaProxy => {
+            let proxy = hub.proxy.get().ok_or(NetFailure::NoProxy)?;
+            entry.set("via_proxy", proxy.origin());
+            Ok(Some(proxy))
+        }
     }
 }
 

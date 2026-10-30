@@ -323,6 +323,22 @@ impl Replay {
         self
     }
 
+    /// Records that a native call fails as it does on an OS with no source for it (`Unsupported`), as a
+    /// `native/*.json` file with `"error": "unsupported"` does. For the tests of a caller that maps it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn native_unsupported(mut self, call: NativeCall) -> Self {
+        let call = self.normal_call(&call);
+        self.native.insert(
+            call,
+            NativeAnswer {
+                result: Err(NativeFailure::Unsupported),
+                delay: Duration::ZERO,
+            },
+        );
+        self
+    }
+
     /// Sets the real, effective, saved and filesystem ids that `process_ids` answers with (the macOS
     /// snapshot). A backend with none set answers "not recorded".
     #[must_use]

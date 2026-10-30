@@ -79,8 +79,8 @@ pub use log::{
     ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, COALESCE_OK_AFTER, DENIED_TARGETS, MAX_ENTRIES,
 };
 pub use native::{
-    MachineId, NativeCall, NativeValue, RULE_MACHINE_ID, Resource, RlimitInfo, StatvfsInfo,
-    UnameInfo,
+    MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, MachineId, NativeCall, NativeValue, RULE_MACHINE_ID,
+    Resource, RlimitInfo, StatvfsInfo, UnameInfo,
 };
 #[cfg(feature = "testing")]
 pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS};
@@ -640,6 +640,9 @@ pub struct ProbeHub {
     proxy: Arc<OnceLock<ProxyUrl>>,
     /// Set when a check's probe is opened. After that the proxy can no longer be set.
     checks_started: Arc<AtomicBool>,
+    /// The trust stores of the TLS calls, built once per run.
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    tls: Arc<net::TlsState>,
 }
 
 impl fmt::Debug for ProbeHub {
@@ -657,6 +660,8 @@ impl ProbeHub {
             log: ActionLog::new(redactor, None, Limits::default()),
             proxy: Arc::new(OnceLock::new()),
             checks_started: Arc::new(AtomicBool::new(false)),
+            #[cfg(any(feature = "runtime", feature = "loopback"))]
+            tls: Arc::default(),
         }
     }
 

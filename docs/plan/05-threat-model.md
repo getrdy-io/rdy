@@ -299,7 +299,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 | `rlimit` | `Rlimit(resource)` | any probe | Reads one limit of this process. | `Resource` is a closed list of five. | `api`, `resource` |
 | `hostname` | `Hostname` | any probe | A customer host name, which the redactor treats as personal data. | None to check. The answer is raw and is redacted before it is shown. | `api` |
 | `machine_id` | `MachineId` | run-level probes only | The id is stable per host. Anyone who holds it can recognise the host across runs and reports. | A check's probe is refused before the backend. `MachineId` has no `Display`, `Serialize` or getter, and its `Debug` shows nothing. `/etc/machine-id` and `/var/lib/dbus/machine-id` are on the deny list for every other reader; the backend reads them through a guard that admits only those two files (SEC-94-1). | `api` |
-| `system_roots` | `SystemRoots` | any probe | The OS trust roots. Public data, but an unbounded list. | None to check. M1-092 caps the count and the size of each certificate. | `api` |
+| `system_roots` | `SystemRoots` | any probe | The OS trust roots. Public data, but an unbounded list. | None to check. The answer is capped at 1024 certificates of 16 KiB each, by the live reader and again by the probe for every backend (M1-092). Linux reads PEM files through the file rules, so a bundle path is judged on its real path. | `api` |
 
 ## Dependency policy
 
