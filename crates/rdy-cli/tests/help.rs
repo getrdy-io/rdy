@@ -5,6 +5,8 @@
 //! with the path of an `.actual` file to compare. `UPDATE_GOLDENS=1` rewrites the snapshots, and
 //! is refused when `CI` is set.
 
+mod common;
+
 use std::path::PathBuf;
 
 /// Every command with its snapshot name and its words on the command line.
@@ -28,7 +30,7 @@ fn rdy(args: &[&str]) -> (u8, String, String) {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let argv = std::iter::once("rdy").chain(args.iter().copied());
-    let code = rdy_cli::run(argv, &mut out, &mut err);
+    let code = common::run_in_process(argv, &mut out, &mut err);
     let text = |bytes: Vec<u8>| {
         String::from_utf8(bytes).unwrap_or_else(|e| panic!("output is not UTF-8: {e}"))
     };
@@ -230,7 +232,7 @@ fn the_binary_name_is_rdy_whatever_argv0_is() {
                 let argv = std::iter::once(name)
                     .chain(path.iter().copied())
                     .chain([flag]);
-                assert_eq!(rdy_cli::run(argv, &mut out, &mut err), 0);
+                assert_eq!(common::run_in_process(argv, &mut out, &mut err), 0);
                 let out = String::from_utf8(out).unwrap_or_default();
                 assert_eq!(out, help(path, flag), "argv[0] = {name}");
                 assert!(!out.contains(".exe"), "{name}: {out}");
@@ -238,7 +240,7 @@ fn the_binary_name_is_rdy_whatever_argv0_is() {
         }
         let mut out = Vec::new();
         let mut err = Vec::new();
-        let code = rdy_cli::run([name, "run"], &mut out, &mut err);
+        let code = common::run_in_process([name, "run"], &mut out, &mut err);
         let err = String::from_utf8(err).unwrap_or_default();
         assert_eq!(code, 64);
         assert!(err.contains("fix: see 'rdy run --help'"), "{name}: {err}");

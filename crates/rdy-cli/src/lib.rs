@@ -15,6 +15,7 @@
 
 use std::ffi::OsString;
 use std::io::Write;
+use std::sync::Arc;
 
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::{Arg, ArgAction, CommandFactory, FromArgMatches};
@@ -25,6 +26,7 @@ pub mod cli;
 pub mod entry;
 #[doc(hidden)]
 pub mod error;
+mod hooks;
 #[doc(hidden)]
 pub mod lint;
 #[doc(hidden)]
@@ -55,7 +57,11 @@ mod trust_cmds;
 
 use cli::{Cli, Commands, SpecCommand, TrustCommand, VERSION};
 use error::{CliError, InternalKind, emit};
+use rdy_engine::privilege::Privilege;
+use rdy_engine::probe::{Backend, ProbeHub};
 use rdy_spec::result::{ExitCode, VersionInfo};
+
+pub use hooks::RunHooks;
 
 /// Exit code for success.
 pub const EXIT_OK: u8 = ExitCode::Ready.code();
@@ -86,15 +92,45 @@ pub fn command() -> clap::Command {
 
 /// Parse `args` (the first item is the program name), run the command and return the exit code.
 ///
-/// This does what `Parser::try_parse_from` does, so that [`command`] can add the `-V` flag.
+/// This is the one entry point (ADR 0011 decision 4 as amended). The binary calls it with the live
+/// backend and [`RunHooks::default`], and nothing else. A test calls it with a replay backend, its own
+/// hooks and capture buffers, and reads the exit code, stdout and stderr back.
 ///
 /// Output goes to `stdout` and `stderr`, never to the process streams directly. If a stream cannot
 /// be written, the exit code is 70.
 ///
-/// This is the one entry point (ADR 0011 decision 4). It returns the exit code as a `u8` for now.
-/// M1-074 gives it the `Backend` and `RunHooks` parameters and an `ExitCode` result.
+/// **The privilege gate (M1-042, INV-10).** Every command except help and version takes the privilege
+/// snapshot through `backend` first, and runs only if the snapshot is clean. A setuid or
+/// file-capability `rdy`, or a snapshot that cannot be read, exits 70 before any command reads a spec
+/// or writes `trust.yaml` ([`startup::gate_then`]). Help, version and usage errors read nothing, so
+/// they come before the gate.
+///
+/// Process-global work stays out of this function: the redacting log layer, the panic hook, the umask
+/// and the process exit are in [`entry::main_code`] (ADR 0011 decision 4).
 #[doc(hidden)]
-pub fn run<I, T>(args: I, stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8
+pub async fn run<I, T>(
+    args: I,
+    backend: Arc<dyn Backend>,
+    hooks: RunHooks,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> ExitCode
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let code = run_code(args, backend, hooks, stdout, stderr).await;
+    exit_code_of(code)
+}
+
+/// The exit code as the number the commands return. See [`run`].
+async fn run_code<I, T>(
+    args: I,
+    backend: Arc<dyn Backend>,
+    _hooks: RunHooks,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> u8
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
@@ -113,10 +149,48 @@ where
     match parsed {
         Ok(cli) => {
             tracing::debug!(command = %command_path(&args), json, "command parsed");
-            dispatch(&cli.command, json, stdout, stderr)
+            if !reads_the_machine(&cli.command) {
+                return dispatch(&cli.command, json, stdout, stderr);
+            }
+            let Ok(redactor) = redaction::init() else {
+                return emit(
+                    &CliError::Internal(InternalKind::NoRandomness),
+                    json,
+                    stdout,
+                    stderr,
+                );
+            };
+            let hub = ProbeHub::new(backend, redactor.clone());
+            let snapshot = Privilege::snapshot(&hub.run_probe()).await;
+            startup::gate_then(
+                snapshot,
+                json,
+                stdout,
+                stderr,
+                |_privilege, stdout, stderr| dispatch(&cli.command, json, stdout, stderr),
+            )
         }
         Err(err) => report_parse_error(&err, &args, json, stdout, stderr),
     }
+}
+
+/// Maps a command's exit number to [`ExitCode`]. Every number the commands return is one of the five
+/// (ADR 0008); any other would be a bug, so it reads as an internal error.
+fn exit_code_of(code: u8) -> ExitCode {
+    match code {
+        c if c == EXIT_OK => ExitCode::Ready,
+        c if c == ExitCode::Warnings.code() => ExitCode::Warnings,
+        c if c == ExitCode::Blockers.code() => ExitCode::Blockers,
+        c if c == EXIT_USAGE => ExitCode::Usage,
+        _ => ExitCode::Internal,
+    }
+}
+
+/// True for every command that can read a spec, a key, a password file or the trust store, or write
+/// one: all but `help` and `version`. Those two read nothing from the machine, so they run without
+/// the privilege snapshot.
+fn reads_the_machine(command: &Commands) -> bool {
+    !matches!(command, Commands::Help { .. } | Commands::Version(_))
 }
 
 /// True for the commands that read a key password: `spec sign` and `spec keygen`.
