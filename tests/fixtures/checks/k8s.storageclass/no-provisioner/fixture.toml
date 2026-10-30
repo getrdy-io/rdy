@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-no-provisioner"
+summary = "A default class on kubernetes.io/no-provisioner"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

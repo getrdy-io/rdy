@@ -91,8 +91,8 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 173 | 380.5 |
-| M1, core | 143 | 318 |
+| M1, all | 173 | 381 |
+| M1, core | 143 | 318.5 |
 | M1, `core: no` (the cut list) | 30 | 62.5 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
@@ -122,7 +122,7 @@ and Dec 28 run at half capacity.
 | 14 | Feb 22 to Feb 28, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-070, M1-071, M1-074 to M1-076, M1-169, M1-170 | `v0.1.0-alpha.13`: host.cpu on Linux; facade `read_link`; machine identity files denied; terminal styling; in-process env harness |
 | 15 | Mar 1 to Mar 7, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-077 to M1-085 | `v0.1.0-alpha.14`: HTML report next to the JSON, with golden reports; generated spec reference |
 | 16 | Mar 8 to Mar 14, 2027 | 13 | 12.5 | 3 Host checks, HTML report; 4 Network checks | M1-086 to M1-090, M1-168 | `v0.1.0-alpha.15`: the demo: bucket-sorted terminal output with fix lines and the verdict last; umask 077 and an inherited-descriptor warning at start-up |
-| 17 | Mar 15 to Mar 21, 2027 | 13 | 12.5 | 4 Network checks | M1-091 to M1-095 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy |
+| 17 | Mar 15 to Mar 21, 2027 | 13 | 13 | 4 Network checks | M1-091 to M1-095 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy |
 | 18 | Mar 22 to Mar 28, 2027 | 13 | 13 | 3 Host checks, HTML report; 4 Network checks | M1-096 to M1-101, M1-073 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept; host.os on Linux |
 | 19 | Mar 29 to Apr 4, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-102 to M1-104, M1-072 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard with path parser and resource allowlist; host.ports on Linux |
 | 20 | Apr 5 to Apr 11, 2027 | 13 | 14 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |

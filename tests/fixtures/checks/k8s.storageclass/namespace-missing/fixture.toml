@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-namespace-missing"
+summary = "The target namespace does not exist, so the claim list is not asked for"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

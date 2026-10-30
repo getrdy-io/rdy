@@ -630,7 +630,9 @@ use it.
 
 `observed` holds measured values, `expected` the thresholds after defaults. Keys are snake_case per check
 id with the unit in the name (`total_bytes`, `connect_ms`, `tolerance_percent`). `needs` lists each
-declared need as `{need, name, hard, met}`. `partial` is `null` or `{missing: [needs], note}`; a partial
+declared need as `{need, name, hard, met}`. `partial` is `null` or `{missing: [needs], missing_grants: [text], note}`; `missing_grants` lists the
+permissions the check lacked, such as `list nodes`, and is empty when there is no such cause (a report written
+before the field existed reads as empty); a partial
 check never blocks on data it could not read (02, needs rule 4). Known needs: `root`, `kube_context`,
 `network`, `command` (with `name`), `cloud_credentials` (provider as `name`, M3).
 

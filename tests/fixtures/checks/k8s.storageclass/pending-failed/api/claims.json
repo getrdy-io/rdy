@@ -1,0 +1,98 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system/persistentvolumeclaims",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaimList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "data-db-0",
+          "namespace": "acme-system",
+          "creationTimestamp": "2026-06-01T11:40:00Z"
+        },
+        "spec": {
+          "accessModes": [
+            "ReadWriteOnce"
+          ],
+          "resources": {
+            "requests": {
+              "storage": "10Gi"
+            }
+          }
+        },
+        "status": {
+          "phase": "Pending"
+        }
+      },
+      {
+        "metadata": {
+          "name": "data-db-1",
+          "namespace": "acme-system",
+          "creationTimestamp": "2026-06-01T11:58:00Z"
+        },
+        "spec": {
+          "accessModes": [
+            "ReadWriteOnce"
+          ],
+          "resources": {
+            "requests": {
+              "storage": "10Gi"
+            }
+          }
+        },
+        "status": {
+          "phase": "Pending"
+        }
+      },
+      {
+        "metadata": {
+          "name": "data-web-0",
+          "namespace": "acme-system",
+          "creationTimestamp": "2026-06-01T10:00:00Z"
+        },
+        "spec": {
+          "accessModes": [
+            "ReadWriteOnce"
+          ],
+          "resources": {
+            "requests": {
+              "storage": "10Gi"
+            }
+          }
+        },
+        "status": {
+          "phase": "Bound"
+        }
+      },
+      {
+        "metadata": {
+          "name": "scratch-0",
+          "namespace": "acme-system",
+          "creationTimestamp": "2026-06-01T11:00:00Z"
+        },
+        "spec": {
+          "accessModes": [
+            "ReadWriteOnce"
+          ],
+          "resources": {
+            "requests": {
+              "storage": "10Gi"
+            }
+          },
+          "storageClassName": "other"
+        },
+        "status": {
+          "phase": "Pending"
+        }
+      }
+    ]
+  }
+}
