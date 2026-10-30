@@ -14,6 +14,11 @@ include = ["src/**", "Cargo.toml", "LICENSE"]
 # build with this feature does not compile (see `rdy_engine::redact`). CI also keeps it out of the release
 # binary (04 section 3.3). `toml` reads `fixture.toml` and is in no other engine build.
 testing = ["dep:toml"]
+# Loopback servers for the network tests (M1-090, ADR 0035): a TLS server with a generated CA, CONNECT
+# proxy modes, a closed port, a listener that never accepts, a reset after the ClientHello, a 302 server
+# and a dual-stack case. Test-only like `testing`, which it implies. It needs tokio for sockets but not
+# the `runtime` feature, so the build without default features still compiles and lints it.
+loopback = ["testing", "dep:tokio", "dep:rcgen", "dep:socket2", "dep:tokio-rustls"]
 
 default = ["runtime"]
 # The scheduler, the blocking helper, the process runner and their dependencies (02, "Crate layout").
@@ -30,6 +35,11 @@ thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "signal", "sync", "time"], optional = true }
 toml = { workspace = true, features = ["parse", "serde", "std"], optional = true }
+# Feature `loopback` only. Certificates are made with rcgen on ring and served with tokio-rustls on ring,
+# so aws-lc stays out of the tree (ADR 0009). socket2 sets a zero linger for the reset server.
+rcgen = { workspace = true, features = ["crypto", "pem", "ring"], optional = true }
+socket2 = { workspace = true, features = [], optional = true }
+tokio-rustls = { workspace = true, features = ["ring", "tls12"], optional = true }
 
 # Windows opens the report folder without following a reparse point (M1-036, M1-037).
 [target.'cfg(not(unix))'.dependencies]
@@ -43,7 +53,7 @@ rustix = { workspace = true, features = ["std", "process", "fs", "system"], opti
 # The integration tests start commands through the raw runner (`exec::run`, `ExecSpec::new`), which
 # is public only under `testing` (M1-039). A dev-dependency on the crate itself turns the feature on
 # for test builds only. A normal or release build never sees dev-dependencies.
-rdy-engine = { path = ".", features = ["testing"] }
+rdy-engine = { path = ".", features = ["testing", "loopback"] }
 jsonschema = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tempfile = { workspace = true }
