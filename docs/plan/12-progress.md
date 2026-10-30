@@ -7,6 +7,9 @@ that each touch one line do not conflict.
 Start: the founder approved the planning pass and started M1 on 2026-10-28, ahead of the Nov 20, 2026
 go or no-go in the plan. This is recorded as decision 2 under "Decisions made" in `13-plan-corrections.md`.
 
+PR numbers restarted when the repository was recreated on 2026-10-30; ADR 0041 says which repository a
+PR number refers to.
+
 The build process, the implementer brief and the state at each pause are in `m1-build-runbook.md`.
 
 ## Tickets
