@@ -101,6 +101,12 @@ deny = [
     # apart: it fails if either is anything but a dev-dependency of rdy-checks-k8s.
     { crate = "tempfile", wrappers = ["rdy", "rdy-checks-k8s", "rdy-engine", "rexpect", "xtask"], reason = "02 lint wall: file creation is not a check's; rdy-checks-k8s uses it in tests only" },
     { crate = "tokio-rustls", wrappers = ["hyper-rustls", "rdy-checks-k8s", "rdy-engine"], reason = "02 lint wall: TLS goes through the probe or kube; rdy-checks-k8s uses it in its test server only; rdy-engine uses it for the facade's TLS (M1-092) and in its `loopback` test servers (ADR 0035)" },
+    # askama builds the HTML report (M1-077, 05 dependency record, SEC-149-2). Only the engine renders a
+    # report. A check crate never needs a template engine, so it stays off every check crate.
+    { crate = "askama", wrappers = ["rdy-engine"], reason = "05 dependency record: only rdy-engine renders the HTML report; no check crate" },
+    { crate = "askama_macros", wrappers = ["askama"], reason = "05 dependency record: reached through askama only" },
+    { crate = "askama_derive", wrappers = ["askama_macros"], reason = "05 dependency record: reached through askama only" },
+    { crate = "askama_parser", wrappers = ["askama_derive"], reason = "05 dependency record: reached through askama only" },
 ]
 
 [sources]

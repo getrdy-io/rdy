@@ -455,12 +455,13 @@ fn files_named_ext(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The three clippy commands of CI, exactly. A fourth, or a change to one (`--config`, `--exclude`,
+/// The four clippy commands of CI, exactly. A fifth, or a change to one (`--config`, `--exclude`,
 /// `--cap-lints`, a dropped `--all-targets`), is a change to this list, which is in CODEOWNERS.
 const CLIPPY_COMMANDS: &[&str] = &[
     "cargo clippy --workspace --all-targets --locked -- -D warnings",
     "cargo clippy --locked -p rdy-engine --no-default-features --all-targets -- -D warnings",
     "cargo clippy --locked -p rdy-engine --no-default-features --features testing --all-targets -- -D warnings",
+    "cargo clippy --locked -p rdy-engine --no-default-features --features html --all-targets -- -D warnings",
 ];
 
 /// Names a workflow may not carry: flags and wrappers that change how clippy judges, `continue-on-error`,
@@ -526,7 +527,7 @@ fn workflow_problems(text: &str, commands: &mut Vec<String>) -> Vec<String> {
 }
 
 #[test]
-fn no_workflow_sets_flags_and_the_clippy_steps_are_the_three_pinned_ones() {
+fn no_workflow_sets_flags_and_the_clippy_steps_are_the_four_pinned_ones() {
     let files = workflow_files();
     assert!(files.len() >= 4, "found only {files:?}");
     let mut commands = Vec::new();
