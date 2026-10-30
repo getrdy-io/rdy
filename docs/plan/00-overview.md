@@ -343,7 +343,7 @@ pub struct NetFamily { /* policy client, endpoint allowlist from the spec, Actio
 impl NetFamily { pub fn new(proxy: ProxyConfig, endpoints: Vec<Endpoint>, actions: ActionLog) -> Result<Self, NetError>; }
 pub struct ProxyConfig { pub https: Option<ProxyUrl>, pub http: Option<ProxyUrl>, pub no_proxy: Vec<String> }
 impl ProxyConfig { pub fn from_env() -> Self; }
-pub struct ProxyUrl(/* private */);                          // Debug and Display mask userinfo
+pub struct ProxyUrl(/* private */);                          // Debug and Display mask userinfo; built in rdy_engine::probe (M1-091)
 ```
 
 **rdy-checks-k8s (M1).** Access and identity, server version, storage classes, RBAC through
