@@ -249,3 +249,114 @@ fn collector_reasons_are_escaped() {
     let reason = check_collector(&format!("x{}", "y".repeat(5000))).unwrap_err();
     assert!(reason.len() < 400, "{} bytes", reason.len());
 }
+
+/// Each of these fields names one host. Together with `others` egress endpoints they make `others + 1`
+/// distinct hosts, typed (the check decodes) or raw (it carries a key it does not have, so it does not).
+fn one_host_fields() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        (
+            "host.time_sync",
+            json!({"ntp_servers": ["ntp.field.example"]}),
+        ),
+        (
+            "host.time_sync",
+            json!({"ntp_servers": ["fd00:ec2::123", "ntp.field.example"]}),
+        ),
+        (
+            "net.registry",
+            json!({"registries": ["registry.field.example"]}),
+        ),
+        (
+            "net.registry",
+            json!({"registries": [{"host": "registry.field.example:5000"}]}),
+        ),
+        (
+            "net.registry",
+            json!({"registries": [{"host": "r0.field.example", "hosts": ["token.field.example"]}]}),
+        ),
+        (
+            "net.bandwidth",
+            json!({"url": "https://mirror.field.example/sample.bin"}),
+        ),
+    ]
+}
+
+#[test]
+fn ntp_registry_and_bandwidth_hosts_count_toward_the_sixty_four_host_limit() {
+    for (id, params) in one_host_fields() {
+        let mut raw = params.clone();
+        raw["unknown_key"] = json!(1);
+        for (kind, params) in [("typed", params.clone()), ("raw", raw)] {
+            let with = |others: usize| {
+                spec_of(vec![
+                    many("net.egress", "endpoints", 0, others, ":443"),
+                    check(id, params.clone()),
+                ])
+            };
+            // How many hosts the field names by itself, so the egress list can fill the rest.
+            let room = 64 - named_endpoints(&with(0)).hosts.len();
+            assert_eq!(
+                validate(&with(room), &Places::default()),
+                Ok(()),
+                "{id} {kind}: 64 pass"
+            );
+            assert_eq!(
+                validate(&with(room + 1), &Places::default()),
+                Err(SpecError::TooManyHosts {
+                    count: 65,
+                    limit: 64
+                }),
+                "{id} {kind}: 65 fail"
+            );
+        }
+    }
+}
+
+#[test]
+fn registry_hosts_count_with_their_ports_as_pairs() {
+    let registry = check(
+        "net.registry",
+        json!({"registries": [{"host": "r.example", "hosts": ["r.example:8443", "t.example"]}]}),
+    );
+    let named = named_endpoints(&spec_of(vec![registry]));
+    assert_eq!(named.hosts.len(), 2);
+    assert_eq!(named.pairs.len(), 3);
+    let ntp = check(
+        "host.time_sync",
+        json!({"ntp_servers": ["ntp.acme.example", "ntp.acme.example:1123", "fd00::1"]}),
+    );
+    let named = named_endpoints(&spec_of(vec![ntp]));
+    assert_eq!(named.hosts.len(), 2);
+    assert_eq!(named.pairs.len(), 3);
+    assert!(named.pairs.contains(&("ntp.acme.example".to_owned(), 123)));
+}
+
+#[test]
+fn a_host_named_by_two_checks_counts_once() {
+    let egress = check(
+        "net.egress",
+        json!({"endpoints": ["shared.acme.example:443"]}),
+    );
+    let registry = check(
+        "net.registry",
+        json!({"registries": ["Shared.Acme.Example"]}),
+    );
+    let ntp = check(
+        "host.time_sync",
+        json!({"ntp_servers": ["shared.acme.example"]}),
+    );
+    let bandwidth = check(
+        "net.bandwidth",
+        json!({"url": "https://shared.acme.example/sample.bin"}),
+    );
+    assert_eq!(hosts(vec![egress, registry, ntp, bandwidth]), 1);
+}
+
+#[test]
+fn the_raw_registry_reading_survives_odd_items() {
+    let odd = check(
+        "net.registry",
+        json!({"registries": [1, null, {"hosts": "x"}, {"host": 5}, ["a"]], "unknown_key": 1}),
+    );
+    assert_eq!(hosts(vec![odd]), 0);
+}

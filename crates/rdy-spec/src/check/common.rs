@@ -4,7 +4,7 @@
 //! or a small piece of one. A value that is out of range is refused while it is read, with a message
 //! that says what the range is. Messages echo refused text escaped and cut, because a spec is untrusted.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::hash::Hash;
 use std::ops::Deref;
@@ -13,10 +13,37 @@ use serde::de::{self, DeserializeOwned};
 use serde::{Deserialize, Deserializer};
 
 use crate::error::echo_safe;
+use crate::scalar::Target;
 
 /// Builds a deserialize error from a message.
 fn bad<E: de::Error>(message: impl fmt::Display) -> E {
     E::custom(message)
+}
+
+/// The longest host with an optional port, in characters: a 253 character name, a colon and a 5 digit
+/// port.
+pub(crate) const MAX_HOST_PORT_CHARS: usize = 259;
+
+/// Reads the text of a host that may carry a port, for a check with a default port.
+///
+/// Returns the text to give [`Target::parse`], with the default port added when the text has none, and
+/// whether the port was written. A bare IPv6 address (`fd00::1`), a bracketed one (`[fd00::1]`) and
+/// either with a port (`[fd00::1]:123`) are all read. Returns `None` for a character a host never
+/// holds, so a URL, user info and a space are refused before [`Target::parse`] sees them.
+pub(crate) fn host_with_default_port(text: &str, default_port: u16) -> Option<(String, bool)> {
+    let fits = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']');
+    if text.is_empty() || text.chars().count() > MAX_HOST_PORT_CHARS || !text.chars().all(fits) {
+        return None;
+    }
+    Some(if text.parse::<std::net::Ipv6Addr>().is_ok() {
+        (format!("[{text}]:{default_port}"), false)
+    } else if text.starts_with('[') && text.ends_with(']') {
+        (format!("{text}:{default_port}"), false)
+    } else if text.contains(':') {
+        (text.to_owned(), true)
+    } else {
+        (format!("{text}:{default_port}"), false)
+    })
 }
 
 /// A TCP or UDP port, 1 to 65535.
@@ -167,7 +194,7 @@ impl<'de> Deserialize<'de> for TolerancePercent {
 macro_rules! restricted_text {
     ($(#[$meta:meta])* $name:ident, max $max:literal, $alphabet:literal, $allowed:expr) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name(String);
 
         impl $name {
@@ -210,6 +237,21 @@ restricted_text!(
 restricted_text!(
     /// A distribution id from `/etc/os-release`, such as `rhel` or `ubuntu`.
     DistroId, max 32, "a-z, 0-9, _, . and -", |c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.' | '-')
+);
+
+restricted_text!(
+    /// A container storage driver name such as `overlay2` or `fuse-overlayfs`.
+    StorageDriver, max 32, "a-z, 0-9, _, . and -", |c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.' | '-')
+);
+
+restricted_text!(
+    /// A cgroup controller name such as `cpu`, `memory`, `io` or `pids`.
+    CgroupController, max 32, "a-z, 0-9 and _", |c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'
+);
+
+restricted_text!(
+    /// A kernel module name such as `overlay`, `br_netfilter` or `xt_TCPMSS`.
+    ModuleName, max 64, "letters, 0-9, _ and -", |c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-')
 );
 
 /// A distribution version such as `9` or `22.04`, at most 32 characters.
@@ -355,6 +397,84 @@ where
             }
         }
         Ok(Self(items))
+    }
+}
+
+/// A map of `MIN` to `MAX` entries. `MIN` is 0 unless set, and 1 where an empty map would be a threshold
+/// that measures nothing. The entries are kept sorted by key.
+///
+/// It reads as a plain YAML mapping and derefs to a `BTreeMap`. A key or a value that does not fit is
+/// refused with the message of its own reader.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BoundedMap<K, V, const MAX: usize, const MIN: usize = 0>(BTreeMap<K, V>);
+
+impl<K, V, const MAX: usize, const MIN: usize> Deref for BoundedMap<K, V, MAX, MIN> {
+    type Target = BTreeMap<K, V>;
+
+    fn deref(&self) -> &BTreeMap<K, V> {
+        &self.0
+    }
+}
+
+impl<'a, K, V, const MAX: usize, const MIN: usize> IntoIterator for &'a BoundedMap<K, V, MAX, MIN> {
+    type Item = (&'a K, &'a V);
+    type IntoIter = std::collections::btree_map::Iter<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'de, K, V, const MAX: usize, const MIN: usize> Deserialize<'de> for BoundedMap<K, V, MAX, MIN>
+where
+    K: Deserialize<'de> + Ord,
+    V: Deserialize<'de>,
+{
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let entries = BTreeMap::<K, V>::deserialize(deserializer)?;
+        if entries.len() < MIN {
+            return Err(bad(format!(
+                "a map has {} entries, at least {MIN} needed",
+                entries.len()
+            )));
+        }
+        if entries.len() > MAX {
+            return Err(bad(format!(
+                "a map has at most {MAX} entries, this one has {}",
+                entries.len()
+            )));
+        }
+        Ok(Self(entries))
+    }
+}
+
+/// A `host:port` that a check or the product connects to: a name, an IPv4 address or a bracketed IPv6
+/// address, and a port. A URL is refused.
+///
+/// It is read with the grammar of [`Target`]. Parsing does not classify an address: a check that
+/// connects applies the egress policy of ADR 0009 first.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HostPort(Target);
+
+impl HostPort {
+    /// The host and port.
+    #[must_use]
+    pub fn target(&self) -> &Target {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for HostPort {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        let target = Target::parse(&text).map_err(bad)?;
+        if target.is_url() {
+            return Err(bad(format!(
+                "'{}' is a URL: write host:port",
+                echo_safe(&crate::scalar::redact_for_echo(&text))
+            )));
+        }
+        Ok(Self(target))
     }
 }
 

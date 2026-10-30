@@ -259,6 +259,78 @@
           "if": {
             "properties": {
               "id": {
+                "const": "host.firewall"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/HostFirewallParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "host.time_sync"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/HostTimeSyncParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "host.sysctl"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/HostSysctlParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "host.container_runtime"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/HostContainerRuntimeParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "host.cgroups"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/HostCgroupsParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "host.kernel"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/HostKernelParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
                 "const": "net.egress"
               }
             }
@@ -301,6 +373,42 @@
           },
           "then": {
             "$ref": "#/$defs/NetDnsParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "net.registry"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/NetRegistryParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "net.mtu"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/NetMtuParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "net.bandwidth"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/NetBandwidthParams"
           }
         },
         {
@@ -376,6 +484,66 @@
           }
         },
         {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "k8s.namespace"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/K8sNamespaceParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "k8s.dns"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/K8sDnsParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "k8s.ingress"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/K8sIngressParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "k8s.crds"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/K8sCrdsParams"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "id": {
+                "const": "k8s.cni"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/K8sCniParams"
+          }
+        },
+        {
           "description": "Check ids this schema does not know. Their parameters are not checked here; rdy reports the check as not run.",
           "if": {
             "properties": {
@@ -389,16 +557,30 @@
                     "host.lsm",
                     "host.security_agents",
                     "host.os",
+                    "host.firewall",
+                    "host.time_sync",
+                    "host.sysctl",
+                    "host.container_runtime",
+                    "host.cgroups",
+                    "host.kernel",
                     "net.egress",
                     "net.proxy",
                     "net.tls_intercept",
                     "net.dns",
+                    "net.registry",
+                    "net.mtu",
+                    "net.bandwidth",
                     "k8s.access",
                     "k8s.storageclass",
                     "k8s.rbac",
                     "k8s.admission",
                     "k8s.nodes",
-                    "k8s.version"
+                    "k8s.version",
+                    "k8s.namespace",
+                    "k8s.dns",
+                    "k8s.ingress",
+                    "k8s.crds",
+                    "k8s.cni"
                   ]
                 }
               }
@@ -433,6 +615,100 @@
       "description": "A whole number and one unit: ms, s, m, h or d. Examples: 500ms, 10s, 7d.",
       "type": "string",
       "pattern": "^[1-9][0-9]{0,8}(ms|s|m|h|d)$"
+    },
+    "HostCgroupsParams": {
+      "properties": {
+        "version": {
+          "description": "The cgroup version the host must have. The default is `any`.",
+          "enum": [
+            "v2",
+            "v1",
+            "any"
+          ],
+          "default": "any"
+        },
+        "controllers": {
+          "description": "Controllers that must be available, such as `cpu`, `memory`, `io` and `pids`. 1 to 32, none twice.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9_]{1,32}$"
+          }
+        }
+      },
+      "examples": [
+        {
+          "id": "host.cgroups",
+          "version": "v2",
+          "controllers": [
+            "cpu",
+            "memory",
+            "io",
+            "pids"
+          ]
+        }
+      ]
+    },
+    "HostContainerRuntimeParams": {
+      "properties": {
+        "runtime": {
+          "description": "Runtimes of which one must be present, 1 to 4.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "docker",
+              "containerd",
+              "podman",
+              "crio"
+            ]
+          }
+        },
+        "min_version": {
+          "description": "An older runtime blocks. Needs `runtime` with exactly one entry, because one number means nothing across several runtimes.",
+          "$ref": "#/$defs/Version"
+        },
+        "cgroup_driver": {
+          "description": "The cgroup driver the runtime must use. A runtime that differs from the kubelet blocks too.",
+          "enum": [
+            "systemd",
+            "cgroupfs"
+          ]
+        },
+        "storage_driver": {
+          "description": "The storage driver the runtime must use, such as `overlay2`.",
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]{1,32}$"
+        }
+      },
+      "dependentSchemas": {
+        "min_version": {
+          "properties": {
+            "runtime": {
+              "minItems": 1,
+              "maxItems": 1
+            }
+          },
+          "required": [
+            "runtime"
+          ]
+        }
+      },
+      "examples": [
+        {
+          "id": "host.container_runtime",
+          "runtime": [
+            "docker",
+            "containerd"
+          ],
+          "cgroup_driver": "systemd"
+        }
+      ]
     },
     "HostCpuParams": {
       "properties": {
@@ -550,6 +826,106 @@
           "path": "/var/lib/acme",
           "min": "50Gi",
           "recommended": "60Gi"
+        }
+      ]
+    },
+    "HostFirewallParams": {
+      "properties": {
+        "open_inbound": {
+          "description": "TCP ports that must be open for inbound traffic, 1 to 256, none twice.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Port"
+          }
+        }
+      },
+      "examples": [
+        {
+          "id": "host.firewall",
+          "open_inbound": [
+            6443,
+            10250
+          ]
+        }
+      ]
+    },
+    "HostKernelParams": {
+      "properties": {
+        "min": {
+          "description": "An older kernel blocks.",
+          "$ref": "#/$defs/KernelVersion"
+        },
+        "distro_min": {
+          "description": "A minimum for one distribution, by its os-release id, 1 to 16. It replaces `min` on that distribution, because a vendor kernel carries fixes under an older number.",
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 16,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-z0-9_.-]{1,32}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/KernelVersion"
+          }
+        },
+        "modules": {
+          "description": "Modules that must be available, 1 to 64, none twice. One that is absent blocks and one that is not loaded warns.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          }
+        },
+        "btf": {
+          "description": "The kernel must expose BTF type information. The default is false. Only true counts as a threshold.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "min"
+          ]
+        },
+        {
+          "required": [
+            "distro_min"
+          ]
+        },
+        {
+          "required": [
+            "modules"
+          ]
+        },
+        {
+          "properties": {
+            "btf": {
+              "const": true
+            }
+          },
+          "required": [
+            "btf"
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "host.kernel",
+          "min": "5.4",
+          "distro_min": {
+            "rhel": "4.18.0-305"
+          },
+          "modules": [
+            "overlay",
+            "br_netfilter"
+          ]
         }
       ]
     },
@@ -739,6 +1115,12 @@
         }
       ]
     },
+    "HostPort": {
+      "description": "host:port or [ipv6]:port. A URL is refused.",
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^([A-Za-z0-9.-]+|\\[[0-9A-Fa-f:]+\\]):([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$"
+    },
     "HostPortsParams": {
       "properties": {
         "free": {
@@ -833,6 +1215,108 @@
         }
       ]
     },
+    "HostSysctlParams": {
+      "properties": {
+        "expect": {
+          "description": "Kernel parameters and what each must be, 1 to 64. A live value that differs blocks. A right value that no file in a sysctl.d directory sets warns. The same parameter written twice, as vm.max_map_count and vm/max_map_count, is refused.",
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 64,
+          "propertyNames": {
+            "$ref": "#/$defs/SysctlName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/ValueRule"
+          }
+        },
+        "limits": {
+          "description": "File limits and what each must be.",
+          "type": "object",
+          "properties": {
+            "nofile": {
+              "description": "The open files limit that services get, DefaultLimitNOFILE of systemd.",
+              "$ref": "#/$defs/ValueRule"
+            }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "expect"
+          ]
+        },
+        {
+          "required": [
+            "limits"
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "host.sysctl",
+          "expect": {
+            "vm.max_map_count": ">=262144",
+            "net.ipv4.ip_forward": 1
+          },
+          "limits": {
+            "nofile": ">=65536"
+          }
+        }
+      ]
+    },
+    "HostTimeSyncParams": {
+      "properties": {
+        "max_skew": {
+          "description": "The offset from the time servers above which the check blocks. The default is 300s, because AWS signing, Kerberos and TLS validity fail near five minutes. The warning level is `recommended_skew`.",
+          "$ref": "#/$defs/Duration"
+        },
+        "recommended_skew": {
+          "description": "The offset above which the check warns. The default is 5s. Set `max_skew` as well to move the block level. When both are set, this must not be greater than `max_skew`.",
+          "$ref": "#/$defs/Duration"
+        },
+        "require_sync": {
+          "description": "A clock that is not synchronized blocks. The default is false.",
+          "type": "boolean",
+          "default": false
+        },
+        "ntp_servers": {
+          "description": "Servers to measure the offset against, 1 to 8, none twice. There are no default servers: without this list the offset is not measured and rdy sends no time packet.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/NtpServer"
+          }
+        }
+      },
+      "examples": [
+        {
+          "id": "host.time_sync",
+          "recommended_skew": "5s",
+          "max_skew": "300s",
+          "require_sync": true,
+          "ntp_servers": [
+            "ntp.acme.test"
+          ]
+        }
+      ]
+    },
+    "HttpUrl": {
+      "description": "An http or https URL. Never user:password in a URL; specs carry no credentials.",
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^https?://[^/@\\s#]+(/[^\\s#]*)?$"
+    },
+    "ImageRef": {
+      "description": "An image as repository:tag, such as acme/agent:1.4. The repository is lowercase, in parts separated by slashes. The tag is required and a digest is not accepted. The registry host is not part of it.",
+      "type": "string",
+      "maxLength": 384,
+      "pattern": "^[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*(/[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*)*:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$"
+    },
     "K8sAccessParams": {
       "properties": {
         "context_pattern": {
@@ -897,6 +1381,187 @@
         }
       ]
     },
+    "K8sCniParams": {
+      "properties": {
+        "network_policy": {
+          "description": "What the network plugin must do with network policies. `enforced` blocks when it does not enforce them.",
+          "enum": [
+            "enforced"
+          ]
+        },
+        "needs_egress": {
+          "description": "Destinations the product's pods need to reach, as host:port, 1 to 64, none twice. A default-deny policy in the namespace that does not allow them warns. Nothing is connected to.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/HostPort"
+          }
+        },
+        "avoid_cidrs": {
+          "description": "Address ranges that the pod and service networks must not overlap, 1 to 32, none twice.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Cidr"
+          }
+        }
+      },
+      "examples": [
+        {
+          "id": "k8s.cni",
+          "network_policy": "enforced",
+          "avoid_cidrs": [
+            "10.0.0.0/8"
+          ]
+        }
+      ]
+    },
+    "K8sCrdsParams": {
+      "properties": {
+        "crds": {
+          "description": "Custom resource definitions that must be installed, 1 to 64.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "description": "The name of the definition, such as `certificates.cert-manager.io`.",
+                "$ref": "#/$defs/K8sName"
+              },
+              "versions": {
+                "description": "Versions the definition must serve, 1 to 16, none twice. Without it any version counts.",
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^v[a-z0-9]{1,62}$"
+                }
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "operators": {
+          "description": "Operators whose deployment must run, 1 to 16.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "properties": {
+              "namespace": {
+                "description": "The namespace of the deployment.",
+                "$ref": "#/$defs/K8sName"
+              },
+              "deployment": {
+                "description": "The name of the deployment.",
+                "$ref": "#/$defs/K8sName"
+              },
+              "min_version": {
+                "description": "An older operator blocks. It is read from the image tag or the version label of the deployment.",
+                "$ref": "#/$defs/Version"
+              }
+            },
+            "required": [
+              "namespace",
+              "deployment"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "crds"
+          ]
+        },
+        {
+          "required": [
+            "operators"
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "k8s.crds",
+          "crds": [
+            {
+              "name": "certificates.cert-manager.io",
+              "versions": [
+                "v1"
+              ]
+            }
+          ],
+          "operators": [
+            {
+              "namespace": "cert-manager",
+              "deployment": "cert-manager",
+              "min_version": "1.13"
+            }
+          ]
+        }
+      ]
+    },
+    "K8sDnsParams": {
+      "properties": {
+        "cluster_domain": {
+          "description": "The cluster domain. The default is `cluster.local`.",
+          "$ref": "#/$defs/K8sName"
+        }
+      },
+      "examples": [
+        {
+          "id": "k8s.dns",
+          "cluster_domain": "cluster.local"
+        }
+      ]
+    },
+    "K8sIngressParams": {
+      "properties": {
+        "controller": {
+          "description": "The controller of an IngressClass that must exist, such as `k8s.io/ingress-nginx`, or `any` for any class. It is the controller of the class, not its name.",
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^[A-Za-z0-9._/-]+$"
+        },
+        "gateway_api": {
+          "description": "Whether the Gateway API must be installed. `required` blocks when it is missing, except where the platform has its own ingress.",
+          "enum": [
+            "required",
+            "optional"
+          ]
+        },
+        "route": {
+          "description": "The product needs an OpenShift Route. The default is false.",
+          "type": "boolean",
+          "default": false
+        },
+        "loadbalancer": {
+          "description": "The product needs a LoadBalancer service, so one that stays pending warns. The default is false.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "examples": [
+        {
+          "id": "k8s.ingress",
+          "controller": "any",
+          "loadbalancer": true
+        }
+      ]
+    },
     "K8sLabelKey": {
       "description": "A Kubernetes label or taint key: a name, or prefix/name with a lowercase DNS-style prefix.",
       "type": "string",
@@ -913,6 +1578,59 @@
       "type": "string",
       "maxLength": 253,
       "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*$"
+    },
+    "K8sNamespaceParams": {
+      "properties": {
+        "namespace": {
+          "description": "The namespace the product installs into.",
+          "$ref": "#/$defs/K8sName"
+        },
+        "quota_needs": {
+          "description": "What the product needs from the quota of the namespace, by quota resource, 1 to 32. A quota with less left blocks. An amount of memory, storage, ephemeral storage or huge pages is a size in bytes with an optional binary suffix such as 64Gi (64G and 500m are refused). Other resources keep the Kubernetes form, such as 500m of requests.cpu.",
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 32,
+          "propertyNames": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^[A-Za-z0-9._/-]+$"
+          },
+          "patternProperties": {
+            "(^|[./])(memory|storage|ephemeral-storage|hugepages-[A-Za-z0-9]+)$": {
+              "$ref": "#/$defs/Quantity"
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/K8sQuantity"
+          }
+        },
+        "limit_needs": {
+          "description": "What the product needs from the limit range of the namespace.",
+          "type": "object",
+          "properties": {
+            "container_max_memory": {
+              "description": "The memory of the largest container the product runs. A limit range maximum below it blocks.",
+              "$ref": "#/$defs/Quantity"
+            }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        }
+      },
+      "examples": [
+        {
+          "id": "k8s.namespace",
+          "namespace": "acme-system",
+          "quota_needs": {
+            "requests.cpu": 16,
+            "requests.memory": "64Gi",
+            "pods": 100
+          },
+          "limit_needs": {
+            "container_max_memory": "16Gi"
+          }
+        }
+      ]
     },
     "K8sNodesParams": {
       "properties": {
@@ -1044,6 +1762,21 @@
             "cpu": 7,
             "memory": "28Gi"
           }
+        }
+      ]
+    },
+    "K8sQuantity": {
+      "description": "A Kubernetes amount: a number with an optional suffix m, k, M, G, T, P, E, Ki, Mi, Gi, Ti, Pi or Ei, such as 16, 500m, 0.5 or 64Gi. A bare number is accepted.",
+      "oneOf": [
+        {
+          "type": "string",
+          "maxLength": 20,
+          "pattern": "^([0-9]+(\\.[0-9]+)?|\\.[0-9]+)(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+        },
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000000000000
         }
       ]
     },
@@ -1262,6 +1995,20 @@
         }
       ]
     },
+    "KernelVersion": {
+      "description": "A kernel version such as 5.4, 5.14.0 or 4.18.0-305: up to four whole numbers joined by dots, then optionally a dash and up to four more. Write it quoted. A bare integer is accepted. An unquoted decimal (5.10) is rejected because YAML reads it as the number 5.1.",
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9]{1,9}(\\.[0-9]{1,9}){0,3}(-[0-9]{1,9}(\\.[0-9]{1,9}){0,3})?$"
+        },
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 999999999
+        }
+      ]
+    },
     "Kind": {
       "description": "The `kind` of a spec document.",
       "oneOf": [
@@ -1319,6 +2066,40 @@
       "additionalProperties": false,
       "required": [
         "product"
+      ]
+    },
+    "NetBandwidthParams": {
+      "properties": {
+        "url": {
+          "description": "Where to download from. There is no default URL.",
+          "$ref": "#/$defs/HttpUrl"
+        },
+        "bytes": {
+          "description": "How much to download, 1Mi to 100Mi. The default is 10Mi.",
+          "$ref": "#/$defs/Quantity"
+        },
+        "min_mbps": {
+          "description": "A slower single stream blocks. In megabits per second, above 0 and at most 100000.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        },
+        "recommended_mbps": {
+          "description": "A slower single stream warns. In megabits per second, above 0 and at most 100000.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "examples": [
+        {
+          "id": "net.bandwidth",
+          "url": "https://mirror.acme.test/sample.bin",
+          "min_mbps": 50
+        }
       ]
     },
     "NetDnsParams": {
@@ -1478,6 +2259,40 @@
         }
       ]
     },
+    "NetMtuParams": {
+      "properties": {
+        "min_mtu": {
+          "description": "The pod network needs this MTU. An interface MTU, less the overlay header, below it blocks.",
+          "type": "integer",
+          "minimum": 68,
+          "maximum": 65535
+        },
+        "overlay": {
+          "description": "The overlay the pod network will use.",
+          "enum": [
+            "vxlan",
+            "geneve",
+            "wireguard",
+            "ipip"
+          ]
+        },
+        "underlay": {
+          "description": "The IP version under the overlay. The default is `ipv4`.",
+          "enum": [
+            "ipv4",
+            "ipv6"
+          ],
+          "default": "ipv4"
+        }
+      },
+      "examples": [
+        {
+          "id": "net.mtu",
+          "min_mtu": 1400,
+          "overlay": "vxlan"
+        }
+      ]
+    },
     "NetProxyParams": {
       "properties": {
         "required_no_proxy": {
@@ -1500,6 +2315,80 @@
         }
       ]
     },
+    "NetRegistryParams": {
+      "properties": {
+        "registries": {
+          "description": "The registries, 1 to 16. Each one is a host, or an object with `host` and the options. Two entries with the same host are refused.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/OptionalPortHost"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "host": {
+                    "description": "The registry host, with a port when it is not 443.",
+                    "$ref": "#/$defs/OptionalPortHost"
+                  },
+                  "hosts": {
+                    "description": "The other hosts the registry uses: the token service and the blob store. At most 8, none twice. A host the check finds that is not listed is not contacted, and the result names it.",
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "uniqueItems": true,
+                    "items": {
+                      "$ref": "#/$defs/OptionalPortHost"
+                    }
+                  },
+                  "images": {
+                    "description": "Public images to resolve to a manifest, 1 to 16, none twice.",
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {
+                      "$ref": "#/$defs/ImageRef"
+                    }
+                  },
+                  "optional": {
+                    "description": "An unreachable registry warns and does not block. The default is false.",
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "host"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "registries"
+      ],
+      "examples": [
+        {
+          "id": "net.registry",
+          "registries": [
+            {
+              "host": "registry.acme.test",
+              "hosts": [
+                "blobs.acme.test"
+              ],
+              "images": [
+                "acme/agent:1.4"
+              ]
+            }
+          ]
+        }
+      ]
+    },
     "NetTlsInterceptParams": {
       "properties": {
         "hosts": {
@@ -1508,9 +2397,7 @@
           "minItems": 1,
           "maxItems": 64,
           "items": {
-            "type": "string",
-            "maxLength": 259,
-            "pattern": "^[A-Za-z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
+            "$ref": "#/$defs/OptionalPortHost"
           }
         },
         "expected_issuer": {
@@ -1542,6 +2429,18 @@
           "forbid_interception": true
         }
       ]
+    },
+    "NtpServer": {
+      "description": "A time server: a name or address, with an optional port (default 123). An IPv6 address may be bare (fd00:ec2::123) or in square brackets with a port ([fd00:ec2::123]:123). A URL is refused.",
+      "type": "string",
+      "maxLength": 259,
+      "pattern": "^(\\[[0-9A-Fa-f:]+\\](:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?|[0-9A-Fa-f]*:[0-9A-Fa-f]*:[0-9A-Fa-f:]*|[A-Za-z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?)$"
+    },
+    "OptionalPortHost": {
+      "description": "A host name or address, with an optional port. Without a port, 443 applies. An IPv6 address may be bare (fd00::1) or in square brackets with a port ([fd00::1]:8443).",
+      "type": "string",
+      "maxLength": 259,
+      "pattern": "^(\\[[0-9A-Fa-f:]+\\](:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?|[0-9A-Fa-f]*:[0-9A-Fa-f]*:[0-9A-Fa-f:]*|[A-Za-z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?)$"
     },
     "OsFamily": {
       "description": "An operating system family a check can be limited to.",
@@ -1636,11 +2535,29 @@
         "maxLength": 256
       }
     },
+    "SysctlName": {
+      "description": "A kernel parameter name such as vm.max_map_count. Parts are separated by dots, or by slashes when a part has a dot, as in net/ipv4/conf/eth0.100/rp_filter.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^([A-Za-z0-9_][A-Za-z0-9_-]*(\\.[A-Za-z0-9_][A-Za-z0-9_-]*)*|[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)+)$"
+    },
     "Target": {
       "description": "host:port, [ipv6]:port, or an http or https URL. Never user:password in a URL; specs carry no credentials.",
       "type": "string",
       "maxLength": 512,
       "pattern": "^(https?://[^/@\\s#]+(/[^\\s#]*)?|[A-Za-z0-9.-]+:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])|\\[[0-9A-Fa-f:]+\\]:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))$"
+    },
+    "ValueRule": {
+      "description": "What a value must be. A bare whole number or any text means equal to it. \">=N\" and \"<=N\" compare whole numbers, with one optional space after the sign. Text does not start with an operator character (< > = ! ~ or the signs for greater, less or not equal). At most 128 characters, with no control character and no space at either end.",
+      "oneOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "string",
+          "pattern": "^((>=|<=) ?-?[0-9]{1,18}|[^<>=!~≠≤≥\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]{0,126}[^\\s\\u0000-\\u001f\\u007f-\\u009f])?)$"
+        }
+      ]
     },
     "Version": {
       "description": "A dotted version such as 1.28 or 5.10, as a quoted string. A bare integer (14) is accepted. An unquoted decimal (1.30) is rejected because YAML reads it as the number 1.3.",

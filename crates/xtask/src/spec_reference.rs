@@ -727,9 +727,9 @@ mod tests {
         let expected = expected_rows(&schema, &schema)?;
         assert_eq!(table_rows(&page), expected);
         // Five top-level properties, six in metadata, four in bundle, six in each checks entry and
-        // two in each redact_patterns entry. The parameters of the 17 check ids come on top, as their
+        // two in each redact_patterns entry. The parameters of the 31 check ids come on top, as their
         // own tables under each checks entry.
-        assert_eq!(expected, 124);
+        assert_eq!(expected, 173);
         assert!(page.contains("\n## checks entries\n\n"), "{page}");
         // `bundle` is a section, so its own sections sit one level below it.
         assert!(page.contains("\n### redact_patterns entries\n\n"), "{page}");
@@ -751,21 +751,35 @@ mod tests {
             "host.lsm",
             "host.security_agents",
             "host.os",
+            "host.firewall",
+            "host.time_sync",
+            "host.sysctl",
+            "host.container_runtime",
+            "host.cgroups",
+            "host.kernel",
             "net.egress",
             "net.proxy",
             "net.tls_intercept",
             "net.dns",
+            "net.registry",
+            "net.mtu",
+            "net.bandwidth",
             "k8s.access",
             "k8s.storageclass",
             "k8s.rbac",
             "k8s.admission",
             "k8s.nodes",
             "k8s.version",
+            "k8s.namespace",
+            "k8s.dns",
+            "k8s.ingress",
+            "k8s.crds",
+            "k8s.cni",
         ];
         for id in ids {
             assert!(page.contains(&format!("\n### {id}\n\n")), "{id}\n{page}");
         }
-        assert_eq!(page.matches("```yaml\n").count(), 17, "{page}");
+        assert_eq!(page.matches("```yaml\n").count(), 31, "{page}");
         assert!(
             page.contains("```yaml\nid: host.cpu\nmin: 4\nrecommended: 8\n```"),
             "{page}"
@@ -793,7 +807,7 @@ mod tests {
         let schema: Value = serde_json::from_str(&schema_text)?;
         let mut examples = Vec::new();
         all_examples(&schema, "", &mut examples);
-        assert_eq!(examples.len(), 17, "every check id has one example");
+        assert_eq!(examples.len(), 31, "every check id has one example");
         // Each variant's examples sit under `Check`, the object whose `allOf` names the variant.
         let validator = check_validator(&schema)?;
         for (at, example) in &examples {
