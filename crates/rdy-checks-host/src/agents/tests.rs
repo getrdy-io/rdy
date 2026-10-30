@@ -294,7 +294,7 @@ fn the_parser_refuses_a_second_use_of_an_id_or_a_process_name() {
         GOOD.replace("schema = 1\n", "")
             .replace("acme-guard\"", "acme-other\"")
     );
-    assert!(refused(&other_id).contains("used by another entry"));
+    assert!(refused(&other_id).contains("used by another name"));
 }
 
 /// A catalog of two entries whose process names are `first` and `second`.

@@ -393,6 +393,30 @@ fn root_with_an_unreadable_process_cannot_confirm_absence() {
 }
 
 #[test]
+fn root_with_a_gap_and_a_cut_list_says_both() {
+    // Both can be true at once. The reason and the fix name each, so fixing one does not hide the other.
+    let fixture = fixture("unreadable-comm-no-agent");
+    let ran = execute(
+        fixture.replay().clone(),
+        vec![Need::Root],
+        Os::Linux,
+        &check(&["clamav"], &[]),
+        3,
+    );
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert_eq!(f.observed["list_cut"], true);
+    assert_eq!(f.observed["processes_unreadable"], 1);
+    let partial = f.partial.as_ref().expect("a partial");
+    assert!(partial.missing.is_empty());
+    assert!(partial.note.contains("even as root"), "{partial:?}");
+    assert!(partial.note.contains("cut short"), "{partial:?}");
+    let fix = f.fix.as_deref().expect("a fix");
+    assert!(fix.contains("even as root"), "{fix}");
+    assert!(fix.contains("more processes than rdy reads"), "{fix}");
+}
+
+#[test]
 fn root_with_an_unreadable_process_and_no_forbid_still_passes() {
     // Nothing is forbidden, so there is nothing to confirm absent. The view is still reported as limited.
     let fixture = fixture("unreadable-comm-no-agent");

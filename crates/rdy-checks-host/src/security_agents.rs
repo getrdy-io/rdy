@@ -325,14 +325,18 @@ fn fix(blocked: &[&Hit<'_>], flagged: &[&Hit<'_>], unknown_forbid: &[&str], scan
                 .to_owned(),
         );
     }
+    // `limited` (not root) cannot be true with `gap` (root), so it comes first. `gap` and `cut` can both
+    // be true, and each has its own fix, so both are said.
     if scan.limited {
         sentences.push("Run rdy as root so it can see every process.".to_owned());
-    } else if scan.gap {
+    }
+    if scan.gap {
         sentences.push(
             "Some processes could not be read even as root. Check for a security module that limits /proc reads (for example SELinux or AppArmor denials in the audit log), then run rdy again."
                 .to_owned(),
         );
-    } else if scan.cut {
+    }
+    if scan.cut {
         sentences.push(
             "The host has more processes than rdy reads in one run, so some were not looked at."
                 .to_owned(),
@@ -370,18 +374,19 @@ impl Scan {
                 vec![Need::Root],
                 "Other users' processes may be hidden from rdy, so absence is not proven.",
             ))
-        } else if self.gap {
-            Some(Partial::new(
-                Vec::new(),
-                "Some process names could not be read even as root, so absence is not proven.",
-            ))
-        } else if self.cut {
-            Some(Partial::new(
-                Vec::new(),
-                "The process list was cut short, so absence is not proven.",
-            ))
         } else {
-            None
+            // `gap` and `cut` can both be true: say both.
+            let reason = match (self.gap, self.cut) {
+                (true, true) => {
+                    "Some process names could not be read even as root and the process list was cut short, so absence is not proven."
+                }
+                (true, false) => {
+                    "Some process names could not be read even as root, so absence is not proven."
+                }
+                (false, true) => "The process list was cut short, so absence is not proven.",
+                (false, false) => return None,
+            };
+            Some(Partial::new(Vec::new(), reason))
         }
     }
 

@@ -200,7 +200,7 @@ impl Catalog {
                 let cut = &name[..name.len().min(COMM_MAX)];
                 if !names.insert(cut.to_owned()) {
                     return Err(bad(format!(
-                        "process name {name} is used by another entry, or has the same first {COMM_MAX} bytes as one"
+                        "process name {name} is used by another name, or has the same first {COMM_MAX} bytes as one"
                     )));
                 }
             }
