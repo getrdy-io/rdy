@@ -1,7 +1,7 @@
 //! `host.cpu`: how many CPUs rdy can use, on which architecture, and with which CPU features.
 //!
-//! Linux only in M1. macOS and Windows are `NotYet` until M2-005, which also brings Rosetta detection
-//! (`sysctl.proc_translated`) with the macOS sources.
+//! Linux only in M1. macOS and Windows are `NotYet` until M2-005. Rosetta detection
+//! (`sysctl.proc_translated`) arrives with the macOS sources in M2-007.
 //!
 //! **Cores.** The count is what the product can use, not what the hardware has. It starts from the
 //! online CPUs (`/sys/devices/system/cpu/online`, else the processor blocks of `/proc/cpuinfo`), keeps
@@ -21,10 +21,14 @@
 //! name and vendor, and `/sys/hypervisor/type`. It only picks the fix text.
 //!
 //! **Not built yet.** The catalog also asks for the flags through `std::is_x86_feature_detected!`
-//! behind a native call. The closed `NativeCall` list has no such variant, so `/proc/cpuinfo` is the
-//! only feature source for now. The topology files under `/sys/devices/system/cpu/cpu*/topology` are
+//! behind a native call. The closed `NativeCall` list has no such variant (it comes with M2-004), so
+//! `/proc/cpuinfo` is the only feature source for now. The topology files under `/sys/devices/system/cpu/cpu*/topology` are
 //! not read either: `physical_cores` comes from the `physical id` and `core id` lines of `cpuinfo`, and
 //! is empty on Arm.
+//!
+//! **Not verified.** A cgroup CPU file or `/proc/self/status` that cannot be read could hide a limit
+//! that lowers the count. With a `min` or `recommended` set, the check then never passes: it warns
+//! "not verified" and sets `partial`.
 //!
 //! Nothing here needs a privilege. Every file is world-readable on a normal kernel.
 
@@ -34,15 +38,15 @@ use std::time::Duration;
 
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Level,
-    Os,
+    Os, Partial,
 };
 use rdy_engine::probe::{NativeCall, NativeValue, ProbeError};
-use rdy_spec::check::HostCpu;
+use rdy_spec::check::{Arch, HostCpu};
 use serde_json::{Map, Value, json};
 
 use crate::cgroup::{Bound, CgroupError, Cgroups, CpuQuota};
 use crate::family::OS;
-use crate::firewall::{short, soft};
+use crate::probe_err::{short, soft};
 
 mod parse;
 
@@ -123,6 +127,35 @@ enum Limit {
     Quota,
 }
 
+/// Something that could lower the CPU count and could not be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Gap {
+    /// A cgroup CPU limit file.
+    Cgroup,
+    /// The affinity mask in `/proc/self/status`.
+    Affinity,
+}
+
+impl Gap {
+    fn said(self) -> &'static str {
+        match self {
+            Self::Cgroup => "a cgroup CPU limit could not be read",
+            Self::Affinity => "the CPU affinity mask could not be read",
+        }
+    }
+
+    fn fix(self, need: u16) -> String {
+        match self {
+            Self::Cgroup => format!(
+                "Read /sys/fs/cgroup/cpu.max (cgroup v2) or cpu.cfs_quota_us (v1) by hand and confirm the limit allows {need} CPUs or more, or run rdy where the cgroup files are readable."
+            ),
+            Self::Affinity => format!(
+                "Read Cpus_allowed_list in /proc/self/status by hand and confirm it lists {need} CPUs or more, or run rdy where /proc is readable."
+            ),
+        }
+    }
+}
+
 /// Everything the check learned about the machine.
 struct Facts {
     /// The CPUs online on the host.
@@ -137,6 +170,8 @@ struct Facts {
     arch: Option<String>,
     virt: Virt,
     flags: Option<BTreeSet<String>>,
+    /// What could have lowered the count and could not be read.
+    gaps: Vec<Gap>,
 }
 
 /// `host.cpu`.
@@ -162,7 +197,7 @@ impl CpuCheck {
                 .arch
                 .iter()
                 .flat_map(|list| list.iter())
-                .map(|arch| format!("{arch:?}")),
+                .map(|arch| arch_name(*arch).to_owned()),
             params
                 .flags
                 .iter()
@@ -206,16 +241,16 @@ impl CpuCheck {
         }
         let mut notes = Vec::new();
         let cpuinfo = read_cpuinfo(ctx, &mut notes).await?;
+        let mut gaps = Vec::new();
         let online = match read_list(ctx, ONLINE).await? {
             Some(list) => Some(list),
+            // A cut cpuinfo undercounts the processors, so it is not a source for the count.
             None => cpuinfo
                 .as_ref()
+                .filter(|info| !info.cut)
                 .and_then(|info| CpuList::first(info.processors)),
         };
-        let allowed = match read(ctx, STATUS).await? {
-            Got::Text { text, .. } => parse::allowed_list(&text),
-            Got::Absent | Got::Unreadable(_) => None,
-        };
+        let allowed = read_allowed(ctx, &mut notes, &mut gaps).await?;
         let usable = match (&online, &allowed) {
             (Some(online), Some(allowed)) => match allowed.common(online) {
                 0 => allowed.count(),
@@ -229,7 +264,10 @@ impl CpuCheck {
                 });
             }
         };
-        let quota = read_quota(ctx, &mut notes).await?;
+        let (quota, quota_gap) = read_quota(ctx, &mut notes).await?;
+        if quota_gap {
+            gaps.push(Gap::Cgroup);
+        }
         let quota_milli = quota.as_ref().map(|q| quota_milli(&q.value));
         let effective_milli = quota_milli.map_or(usable.saturating_mul(1000), |q| {
             q.min(usable.saturating_mul(1000))
@@ -260,6 +298,7 @@ impl CpuCheck {
             arch,
             virt,
             flags,
+            gaps,
         };
         Ok(self.judge(&facts, x86, notes))
     }
@@ -269,6 +308,7 @@ impl CpuCheck {
         let mut level = Level::Pass;
         let mut clauses: Vec<String> = Vec::new();
         let mut fixes: Vec<String> = Vec::new();
+        let mut unseen: Vec<&str> = Vec::new();
 
         // Cores.
         let have = facts.effective_milli;
@@ -301,6 +341,18 @@ impl CpuCheck {
             };
             fixes.push(cores_fix(facts, need, have));
         }
+        // The count is an upper bound when a limit file could not be read. If the minimum is met on
+        // that count, it may not be met in fact, so the check cannot pass (03, degrade rule).
+        if let Some(need) = self.min.or(self.recommended)
+            && below_min.is_none()
+            && !facts.gaps.is_empty()
+        {
+            level = raise(level, Level::Warn);
+            let said: Vec<&str> = facts.gaps.iter().map(|g| g.said()).collect();
+            clauses.push(format!("not verified: {}", said.join(" and ")));
+            fixes.extend(facts.gaps.iter().map(|g| g.fix(need)));
+            unseen.push("A CPU limit that could lower the count was not read.");
+        }
 
         // Architecture.
         if !self.arch.is_empty() {
@@ -316,6 +368,7 @@ impl CpuCheck {
                 }
                 None => {
                     level = raise(level, Level::Warn);
+                    unseen.push("The architecture was not read.");
                     clauses.push(format!(
                         "could not read the architecture, the spec allows {allowed}"
                     ));
@@ -336,6 +389,7 @@ impl CpuCheck {
                 fixes.push(flags_fix(facts, &missing));
             } else if unknown {
                 level = raise(level, Level::Warn);
+                unseen.push("The CPU flags were not read.");
                 clauses.push("could not read the CPU flags".to_owned());
                 fixes.push(
                     "Check the flags line of /proc/cpuinfo by hand, or run rdy where /proc/cpuinfo is readable."
@@ -363,6 +417,9 @@ impl CpuCheck {
         }
         for note in notes {
             finding = finding.with_note(note);
+        }
+        if !unseen.is_empty() {
+            finding = finding.with_partial(Partial::new(Vec::new(), unseen.join(" ")));
         }
         finding
     }
@@ -465,6 +522,17 @@ impl Check for CpuCheck {
 
     fn run<'a>(&'a self, ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome> {
         Box::pin(self.inspect(ctx))
+    }
+}
+
+/// The name `uname` uses for an architecture in the spec.
+fn arch_name(arch: Arch) -> &'static str {
+    match arch {
+        Arch::X86_64 | Arch::Amd64 => "x86_64",
+        Arch::Aarch64 | Arch::Arm64 => "aarch64",
+        // `Arch` can grow. A name this build does not know matches no host, so the check blocks and
+        // names it, rather than letting an unreadable spec entry pass.
+        _ => "unknown",
     }
 }
 
@@ -597,20 +665,59 @@ async fn read_cpuinfo(
     })
 }
 
-/// The smallest CPU quota on the cgroup chain. A problem reading it is a note, not a failure.
+/// The CPUs `Cpus_allowed_list` in `/proc/self/status` allows. When the file is missing, unreadable
+/// or has no such line, a note says so and the count cannot be called verified.
+async fn read_allowed(
+    ctx: &CheckContext,
+    notes: &mut Vec<String>,
+    gaps: &mut Vec<Gap>,
+) -> Result<Option<CpuList>, CheckError> {
+    let allowed = match read(ctx, STATUS).await? {
+        Got::Text { text, .. } => {
+            let list = parse::allowed_list(&text);
+            if list.is_none() {
+                notes.push(format!(
+                    "{STATUS} has no usable Cpus_allowed_list line, so a CPU affinity mask is not counted."
+                ));
+            }
+            list
+        }
+        Got::Absent => {
+            notes.push(format!(
+                "{STATUS} does not exist here, so a CPU affinity mask is not counted."
+            ));
+            None
+        }
+        Got::Unreadable(why) => {
+            notes.push(format!(
+                "{STATUS} could not be read ({why}), so a CPU affinity mask is not counted."
+            ));
+            None
+        }
+    };
+    if allowed.is_none() {
+        gaps.push(Gap::Affinity);
+    }
+    Ok(allowed)
+}
+
+/// The smallest CPU quota on the cgroup chain, and whether a limit file could not be read (then the
+/// quota may be missing or too high). A problem reading it is a note and a flag, not a failure.
 async fn read_quota(
     ctx: &CheckContext,
     notes: &mut Vec<String>,
-) -> Result<Option<Bound<CpuQuota>>, CheckError> {
+) -> Result<(Option<Bound<CpuQuota>>, bool), CheckError> {
     let probe = ctx.probe();
     let found = match Cgroups::discover(probe).await {
         Ok(Some(cgroups)) => cgroups.cpu(probe).await,
-        Ok(None) => return Ok(None),
+        Ok(None) => return Ok((None, false)),
         Err(error) => Err(error),
     };
     match found {
         Ok(cpu) => {
+            let mut unverified = false;
             if !cpu.quota.is_complete() {
+                unverified = true;
                 notes.push(
                     "Some cgroup CPU limit files could not be read, so a CPU limit may be missing."
                         .to_owned(),
@@ -621,13 +728,13 @@ async fn read_quota(
                         .to_owned(),
                 );
             }
-            Ok(cpu.quota.min)
+            Ok((cpu.quota.min, unverified))
         }
         Err(CgroupError::Malformed { file, reason }) => {
             notes.push(format!(
                 "{file} is not in the expected form ({reason}), so cgroup CPU limits were not counted."
             ));
-            Ok(None)
+            Ok((None, true))
         }
         Err(CgroupError::Probe(error)) => {
             let other = soft(error)?;
@@ -635,7 +742,7 @@ async fn read_quota(
                 "The cgroup CPU limits could not be read ({}).",
                 short(&other)
             ));
-            Ok(None)
+            Ok((None, true))
         }
     }
 }

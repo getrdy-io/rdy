@@ -71,7 +71,7 @@ fn flags(list: &[&str]) -> CpuCheck {
     CpuCheck::new(None, None, [], names(list))
 }
 
-const CASES: [&str; 9] = [
+const CASES: [&str; 12] = [
     "pass",
     "no-avx2",
     "quota-2",
@@ -81,6 +81,9 @@ const CASES: [&str; 9] = [
     "cgroup-unreadable",
     "bare-metal",
     "arm64",
+    "status-missing",
+    "cgroup-malformed",
+    "cgroup-self-malformed",
 ];
 
 #[test]
@@ -358,17 +361,106 @@ fn a_machine_with_no_cpuinfo_still_counts_cpus_and_warns_about_flags() {
 }
 
 #[test]
-fn an_unreadable_cgroup_file_is_a_note_and_the_count_stays_the_hardware_count() {
+fn an_unreadable_cgroup_file_warns_not_verified_and_never_passes() {
     let ran = run_case("cgroup-unreadable", &min(8));
     let f = ran.finding();
-    assert_eq!(f.level, Level::Pass, "{f:?}");
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert_eq!(
+        f.message,
+        "8 vCPUs found, 8 needed; not verified: a cgroup CPU limit could not be read"
+    );
     assert_eq!(f.observed["effective_cores"], 8.0);
+    assert!(f.partial.is_some(), "{f:?}");
+    assert!(
+        f.fix.as_deref().is_some_and(|fix| fix.contains("cpu.max")),
+        "{:?}",
+        f.fix
+    );
     assert!(
         f.notes
             .iter()
             .any(|n| n.contains("cgroup CPU limit files could not be read")),
         "{:?}",
         f.notes
+    );
+    // With no threshold there is nothing to judge, so the check only reports.
+    let ran = run_case("cgroup-unreadable", &CpuCheck::default());
+    assert_eq!(ran.finding().level, Level::Pass);
+    // A count already below the minimum stays a block.
+    let ran = run_case("cgroup-unreadable", &min(16));
+    assert_eq!(ran.finding().level, Level::Fail);
+}
+
+#[test]
+fn a_malformed_cgroup_file_warns_not_verified() {
+    // A bad `cpu.max` is a limit file that cannot be used. A bad `/proc/self/cgroup` stops the walk.
+    for (case, note) in [
+        (
+            "cgroup-malformed",
+            "cgroup CPU limit files could not be read",
+        ),
+        ("cgroup-self-malformed", "not in the expected form"),
+    ] {
+        let ran = run_case(case, &min(4));
+        let f = ran.finding();
+        assert_eq!(f.level, Level::Warn, "{case}: {f:?}");
+        assert!(
+            f.message
+                .contains("not verified: a cgroup CPU limit could not be read"),
+            "{case}: {}",
+            f.message
+        );
+        assert!(f.partial.is_some(), "{case}");
+        assert!(
+            f.notes.iter().any(|n| n.contains(note)),
+            "{case}: {:?}",
+            f.notes
+        );
+    }
+}
+
+#[test]
+fn a_recommended_core_count_alone_is_also_not_passed_on_unread_limits() {
+    let check = CpuCheck::new(None, Some(4), [], []);
+    let ran = run_case("cgroup-unreadable", &check);
+    assert_eq!(ran.finding().level, Level::Warn);
+}
+
+#[test]
+fn a_missing_status_file_is_a_note_and_not_verified() {
+    let ran = run_case("status-missing", &min(8));
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert_eq!(
+        f.message,
+        "8 vCPUs found, 8 needed; not verified: the CPU affinity mask could not be read"
+    );
+    assert!(f.partial.is_some());
+    assert!(
+        f.notes
+            .iter()
+            .any(|n| n.contains("/proc/self/status does not exist")),
+        "{:?}",
+        f.notes
+    );
+    assert!(
+        f.fix
+            .as_deref()
+            .is_some_and(|fix| fix.contains("Cpus_allowed_list"))
+    );
+    let ran = run_case("status-missing", &CpuCheck::default());
+    assert_eq!(ran.finding().level, Level::Pass);
+}
+
+#[test]
+fn an_unknown_arch_or_unreadable_flags_warn_with_partial() {
+    let ran = run_case("no-cpuinfo", &flags(&["avx2"]));
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Warn);
+    assert!(f.partial.is_some(), "{f:?}");
+    assert!(
+        !run_case("pass", &min(2)).finding().partial.is_some(),
+        "a clean pass has no partial"
     );
 }
 

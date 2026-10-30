@@ -60,13 +60,14 @@ tests/fixtures/
 ```
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
-`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (9 cases), `host.firewall/` (18 cases), `_policy/symlink-to-shadow`,
-`_loader/manifest-entries`, the `_cgroup` cases and the `_kube` cases (`cluster`, `denied`). The rest
+`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (12 cases), `host.firewall/` (18 cases), the twelve machines of
+`host.os/`, `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup` cases and the `_kube` cases
+(`cluster`, `denied`). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
 | --- | --- | --- |
-| `allow.toml` | Lint exceptions: the CRLF canary, a reference link in the third-party vectors. The metadata address `169.254.169.254` gets its entry with the first test that uses it. The format is in the file header | By hand, with a reason per entry |
+| `allow.toml` | Lint exceptions: the CRLF canary, a reference link in the third-party vectors, the four-part WSL kernel version. The metadata address `169.254.169.254` gets its entry with the first test that uses it. The format is in the file header | By hand, with a reason per entry |
 | `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command or opens a socket | By hand, with the check ticket |
 | `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied`. The expectation of a policy or loader case lives in its Rust test until the fixture lint has a format for it | By hand |
 | `checks/_cgroup/<case>/` | Machines for the cgroup helper that `host.memory`, `host.cpu` and `host.cgroups` share: `/proc/self/cgroup`, `/proc/self/mountinfo` and a `/sys/fs/cgroup` tree. Cases: `v2-nested`, `v2-unlimited`, `v2-memory-off`, `v1-tree`, `v1-unlimited`, `hybrid`. A check's own cases carry their own trees | By hand |
@@ -84,7 +85,15 @@ arrives with the tickets that need it. The names above are fixed now so nobody i
 
 A check case and an environment use the same format. A case is a small environment. One loader reads both:
 `rdy_engine::testing::Fixture::load(fixtures_root, "checks/host.memory/pass")`. A test then builds a run with
-`TestRun::for_fixture(&fixture)`. The loader is behind the `testing` feature of `rdy-engine`, which a release
+`TestRun::for_fixture(&fixture)`. To run a whole check against a case, call
+`rdy_engine::testing::run_fixture(&check, "checks/host.memory/pass").await`. It loads the case, calls
+`ensure_answers` for the check (a case that does not list the check fails with the check named, before
+the check runs), binds the probe to the check's `CheckInfo` and returns the outcome and the action log.
+`FixtureRun::assert_within_manifest()` then fails if the check tried a read, command, variable or peer
+that its `CheckInfo` does not declare, even when the check swallowed the refusal. That includes a
+read that the deny list (`/etc/shadow`, `~/.ssh`, `/dev`), the relative path rule or the `..` rule refused
+first: if no declared `reads` prefix covers the path, it counts. `run_fixture` has no timer, so a check
+that hangs outside the probe hangs the test. The loader is behind the `testing` feature of `rdy-engine`, which a release
 build never turns on.
 
 ## An environment or case

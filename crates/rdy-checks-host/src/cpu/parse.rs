@@ -114,12 +114,17 @@ pub(super) struct CpuInfo {
     pub flags: Option<BTreeSet<String>>,
     /// Distinct `(physical id, core id)` pairs, when the file has them. Arm kernels do not print them.
     pub physical_cores: Option<u32>,
+    /// Whether the read ended early. Then `processors` undercounts.
+    pub cut: bool,
 }
 
 /// Parses `/proc/cpuinfo`. When `cut` is true the read ended early and the last block may be cut, so
 /// it is dropped.
 pub(super) fn parse_cpuinfo(text: &str, cut: bool) -> CpuInfo {
-    let mut info = CpuInfo::default();
+    let mut info = CpuInfo {
+        cut,
+        ..CpuInfo::default()
+    };
     let mut cores: BTreeSet<(String, String)> = BTreeSet::new();
     let mut have_cores = false;
     let blocks: Vec<&str> = text.split("\n\n").collect();
@@ -265,6 +270,8 @@ pub(super) fn looks_virtual(product: &str) -> bool {
         "bochs",
         "openstack",
         "google compute engine",
+        // Also the product name of an Arm bare-metal instance (`.metal`), which is not a VM. The text
+        // only picks the fix wording, and DMI is read only on Arm hosts that show no `hypervisor`.
         "amazon ec2",
         "bhyve",
         "parallels",

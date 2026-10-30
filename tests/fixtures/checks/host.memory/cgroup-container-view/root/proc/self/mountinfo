@@ -1,0 +1,2 @@
+21 28 0:5 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
+23 22 0:22 /system.slice/acme-api.service /sys/fs/cgroup ro,nosuid,nodev,noexec,relatime - cgroup2 cgroup2 rw

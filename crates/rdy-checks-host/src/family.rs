@@ -13,6 +13,8 @@ use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::cpu::{self, CpuCheck};
 use crate::firewall::{self, Firewall};
+use crate::memory::{self, Memory};
+use crate::os::{self, OsCheck};
 
 #[cfg(test)]
 mod tests;
@@ -77,16 +79,6 @@ static DISK: CheckInfo = info(
     5,
     &[],
 );
-static MEMORY: CheckInfo = info(
-    "host.memory",
-    "RAM, swap, cgroup limit",
-    CheckMeta {
-        title: "Memory",
-        remediation: "Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number. On Linux, if the spec forbids swap, run `swapoff -a` and comment out the swap lines in `/etc/fstab`.",
-    },
-    2,
-    &[],
-);
 static PORTS: CheckInfo = info(
     "host.ports",
     "Required ports free",
@@ -127,17 +119,6 @@ static TIME_SYNC: CheckInfo = info(
     5,
     &[],
 );
-static HOST_OS: CheckInfo = info(
-    "host.os",
-    "Distro, version, arch, FIPS",
-    CheckMeta {
-        title: "Operating system",
-        remediation: "Use an OS image the vendor supports, or ask the vendor about the one you have.",
-    },
-    2,
-    &[],
-);
-
 static SYSCTL: CheckInfo = info(
     "host.sysctl",
     "Kernel parameters and limits",
@@ -183,7 +164,7 @@ static KERNEL: CheckInfo = info(
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 13] = [
     &DISK,
-    &MEMORY,
+    &memory::INFO,
     &PORTS,
     &LSM,
     &SECURITY_AGENTS,
@@ -193,7 +174,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &SYSCTL,
     &CONTAINER_RUNTIME,
     &CGROUPS,
-    &HOST_OS,
+    &os::INFO,
     &KERNEL,
 ];
 
@@ -201,7 +182,8 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.firewall` ([`Firewall`]) and `host.cpu` ([`CpuCheck`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.firewall` ([`Firewall`]), `host.memory` ([`Memory`]), `host.cpu` ([`CpuCheck`]) and `host.os`
+/// ([`OsCheck`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -222,9 +204,8 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 11] = [
+static STUBS: [&str; 9] = [
     "host.disk",
-    "host.memory",
     "host.ports",
     "host.lsm",
     "host.security_agents",
@@ -232,7 +213,6 @@ static STUBS: [&str; 11] = [
     "host.sysctl",
     "host.container_runtime",
     "host.cgroups",
-    "host.os",
     "host.kernel",
 ];
 
@@ -254,8 +234,14 @@ impl Family for HostFamily {
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
         }
-        if let CheckParams::HostCpu(cpu) = params {
-            return Ok(Built::new(Box::new(CpuCheck::from_params(&cpu))));
+        if let CheckParams::HostCpu(cpu) = &params {
+            return Ok(Built::new(Box::new(CpuCheck::from_params(cpu))));
+        }
+        if let CheckParams::HostMemory(memory) = params {
+            return Ok(Built::new(Box::new(Memory::from_params(&memory))));
+        }
+        if let CheckParams::HostOs(os) = &params {
+            return Ok(Built::new(Box::new(OsCheck::from_params(os))));
         }
         let info = CHECKS
             .iter()

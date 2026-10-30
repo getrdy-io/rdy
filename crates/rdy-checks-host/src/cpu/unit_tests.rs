@@ -99,6 +99,8 @@ fn a_cut_read_drops_the_last_block() {
     );
     // The same text read whole is judged whole.
     assert_eq!(parse_cpuinfo(cut, false).processors, 2);
+    // The count of a cut read is marked, so it is never used as the number of CPUs.
+    assert!(info.cut && !parse_cpuinfo(cut, false).cut);
 }
 
 #[test]
