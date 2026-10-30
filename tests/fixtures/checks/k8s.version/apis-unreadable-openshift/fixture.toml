@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-apis-unreadable-openshift"
+summary = "OpenShift 4.14.9 where the identity may not read /apis, so the ClusterVersion says what it is"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true

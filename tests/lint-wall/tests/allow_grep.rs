@@ -75,6 +75,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "the live socket tests build the live backend to run the real UDP and unix socket bodies (M1-144)",
     ),
     (
+        "crates/rdy-engine/src/probe/net/tests.rs",
+        "the live TCP tests build the live backend to connect real loopback sockets and a real CONNECT proxy (M1-091)",
+    ),
+    (
         "crates/rdy-engine/src/exec/policy.rs",
         "the tests of the policy call the raw runner",
     ),

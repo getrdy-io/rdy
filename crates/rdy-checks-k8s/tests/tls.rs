@@ -375,7 +375,7 @@ async fn a_kubeconfig_proxy_url_carries_the_tls_session_through_a_connect_tunnel
     let server = serve(pki.server.clone()).await;
     let (proxy_addr, heads) = proxy(ProxyMode::Tunnel(server)).await;
     let dir = tempfile::tempdir().expect("tempdir");
-    let extra = format!("    proxy-url: http://svc:PROXY-CANARY-2@{proxy_addr}\n");
+    let extra = format!("    proxy-url: http://svc:PROXY%2BCANARY-2@{proxy_addr}\n");
 
     let loaded = loaded_for_name(dir.path(), &pki.ca_pem, &extra, &Env::empty())
         .await
@@ -384,11 +384,10 @@ async fn a_kubeconfig_proxy_url_carries_the_tls_session_through_a_connect_tunnel
         loaded.proxy().rule(),
         &rdy_checks_k8s::client::ProxyRule::KubeconfigProxyUrl
     );
-    assert!(
-        loaded
-            .known_secrets()
-            .contains(&"PROXY-CANARY-2".to_owned())
-    );
+    // The password was written with %2B. Both the written and the decoded form are known secrets.
+    for form in ["PROXY%2BCANARY-2", "PROXY+CANARY-2"] {
+        assert!(loaded.known_secrets().contains(&form.to_owned()), "{form}");
+    }
     let connected = loaded
         .connect(&common::run_probe(), |_| {})
         .await
@@ -402,9 +401,9 @@ async fn a_kubeconfig_proxy_url_carries_the_tls_session_through_a_connect_tunnel
         "{}",
         heads[0]
     );
-    // The user info of the proxy URL is sent as Basic credentials.
+    // The user info of the proxy URL is sent as Basic credentials, percent-decoded as the facade does.
     assert!(
-        heads[0].contains("c3ZjOlBST1hZLUNBTkFSWS0y"),
+        heads[0].contains("c3ZjOlBST1hZK0NBTkFSWS0y"),
         "{}",
         heads[0]
     );
@@ -417,7 +416,7 @@ async fn a_kubeconfig_proxy_url_carries_the_tls_session_through_a_connect_tunnel
     );
     // The proxy password is in no text rdy can show.
     let shown = format!("{connected:?} {:?}", connected.facts());
-    assert!(!shown.contains("PROXY-CANARY"), "{shown}");
+    assert!(!shown.contains("CANARY"), "{shown}");
     assert!(connected.facts().proxy().is_proxied());
 }
 

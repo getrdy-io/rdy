@@ -15,18 +15,20 @@ Reading kube 4.2.0 (the pinned version) for that decision:
   already (`base64`, `ipnet`, `percent-encoding`). The `socks5` feature is the same dependency.
 - An `https://` proxy is checked with the cluster's TLS settings (its CA), not with the proxy's own
   certificate. A corporate proxy would fail with an unknown issuer that has nothing to do with the cluster.
-- The `Proxy-Authorization` header is built from the raw user info of the proxy URL. It is not
-  percent-decoded, so a password with `%` is sent as written.
+- The `Proxy-Authorization` header is built from the user info of the proxy URL as it stands, cut at the
+  first `@`. It is not percent-decoded, and an `@` in the text ends the user info early.
 - Only the scheme `socks5` exists. `socks5h`, which `kubectl` also takes, is refused by kube.
 
 ## Decision
 
 1. **Feature.** `kube` gets `http-proxy`. `socks5` stays off.
-2. **Only `http://`.** The proxy is a `CONNECT` tunnel. `https://`, `socks5://`, `socks5h://` and any other
-   scheme, a path or a query, and a value that is not a URL, are refused as `KubeError::ProxyUnsupported`.
-   The error names where the value came from (the kubeconfig `proxy-url` or the variable) and shows the
-   proxy as scheme, host and port. The hint says which of the two to change. `https://` and `socks5://` are
-   follow-ups if a design partner needs them.
+2. **Only `http://`, judged by the facade's parser.** The proxy is a `CONNECT` tunnel. The text goes
+   through `rdy_engine::probe::ProxyUrl::parse` (M1-091), so what is a usable proxy is decided once for
+   every check: `https://`, `socks5://`, `socks5h://`, any other scheme, a path or query, a bad host or port
+   and a bad user name are refused as `KubeError::ProxyUnsupported`. The error names where the value came
+   from (the kubeconfig `proxy-url` or the variable) and shows the proxy as scheme, host and port. The hint
+   says which of the two to change. `https://` and `socks5://` are follow-ups if a design partner needs
+   them.
 3. **Order, as `kubectl`.** (a) The chosen cluster's `proxy-url`. It applies whatever `NO_PROXY` says.
    (b) `HTTPS_PROXY`, else `https_proxy`, for an `https` API server, unless `NO_PROXY` (else `no_proxy`)
    covers the API host or the host is `localhost` or a loopback address. `HTTP_PROXY` is not read, and an
@@ -39,10 +41,15 @@ Reading kube 4.2.0 (the pinned version) for that decision:
 5. **kube still never reads the environment.** The placeholder of ADR 0031 decision 6 stays. After the
    build, `client::proxy::resolve` writes the chosen proxy to the config. The function is pure, and its
    tests pin each rule.
-6. **The proxy password is a known secret.** The user info and its password join `Loaded::known_secrets()`
-   (the caller registers them before anything is printed, ADR 0015 decision 3). The user info is never in
-   an error, a log line, `Debug` output or a report: `Env` hides the variable in `Debug`, and the route is
-   shown as `scheme://host:port`.
+6. **User info is decoded as the facade decodes it, and every form is a known secret.** The facade
+   percent-decodes the user name and password, as Go does. kube does not, so the decoded text goes into the
+   URL kube gets, and its header carries the same password the facade would send. kube cuts the user info
+   at the first `@`, so a decoded `@` is refused (`KubeError::ProxyUserInfo`) rather than sent wrong, and so
+   is a decoded `/`, `?`, `#` or a character a URL cannot hold, because the authority would end early and
+   could name another host (the URL must read back exactly as built). The user info and password, as
+   written and as decoded, join `Loaded::known_secrets()` (the caller registers them before anything is
+   printed, ADR 0015 decision 3). The user info is never in an error, a log line, `Debug` output or a
+   report: `Env` hides the variable in `Debug`, and the route is shown as `scheme://host:port`.
 7. **The route is reported.** `ConnectionFacts` (kinds of credential, the proxy route, the CA state, the
    source and the cluster line) is taken from `Loaded` before `connect`, so a failed connection can still
    say which rule applied. A network error carries `proxied`, and the hint then says to check that the
@@ -69,7 +76,8 @@ Reading kube 4.2.0 (the pinned version) for that decision:
 - Proven on the real client stack: a `CONNECT` tunnel carries a TLS session for `proxy-url` and for
   `HTTPS_PROXY`, the Basic header carries the user info, a 403, 407 and 502 from the proxy and a dead
   proxy map to their own causes. `tests/tls.rs`.
-- A password with `%` in a proxy URL is sent undecoded (kube, decision list above). It is a known limit.
+- A proxy password that contains `@` once decoded cannot be sent through kube and is refused with its own
+  hint. The facade (`net.*` checks) can send it. It is a known limit of kube 4.2.0.
 - DNS for the API host happens at the proxy, as with `kubectl`. `net.proxy` (M1-098) and `net.egress`
   (M1-097) build their own CONNECT through the probe facade; the two share the rule text, not code.
 

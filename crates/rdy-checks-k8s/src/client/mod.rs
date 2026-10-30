@@ -682,6 +682,19 @@ impl Connected {
         self.latency
     }
 
+    /// Sorts an error of a request on this connection, the way `connect` sorted its own: the hint can name
+    /// the server, the credential plugin, whether a proxy is in the path and the CA setting.
+    #[must_use]
+    pub fn map_error(&self, error: &kube::Error) -> KubeError {
+        from_kube_error(
+            error,
+            self.facts.line.server(),
+            self.facts.line.plugin(),
+            self.facts.proxy.is_proxied(),
+            self.facts.ca_set,
+        )
+    }
+
     /// The read-only client for one check. `probe` is the check's own probe
     /// (`CheckContext::probe`): every request the client sends writes one `kube` entry to the action
     /// log under that check's id, and a request made after the check ended is refused. The guard

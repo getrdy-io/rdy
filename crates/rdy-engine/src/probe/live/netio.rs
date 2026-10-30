@@ -28,6 +28,14 @@ pub(super) async fn resolve(host: &str, port: u16, timeout: Duration) -> io::Res
     }
 }
 
+/// Opens a TCP stream. The probe has vetted the address and bounds the wait.
+pub(super) async fn connect(addr: SocketAddr) -> io::Result<crate::probe::net::BoxedStream> {
+    let stream = tokio::net::TcpStream::connect(addr).await?;
+    // Small writes (a `CONNECT`, a TLS record) should not wait for more. A failure here is harmless.
+    let _ = stream.set_nodelay(true);
+    Ok(Box::new(stream))
+}
+
 /// The largest UDP payload. A buffer of this size never loses bytes on any OS: Windows fails a `recv`
 /// into a smaller buffer with `WSAEMSGSIZE`, and Unix cuts silently. So the cut to the cap is made
 /// here in user space, the same way on every OS.

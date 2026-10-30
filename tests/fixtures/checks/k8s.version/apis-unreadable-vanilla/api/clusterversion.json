@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/config.openshift.io/v1/clusterversions/version"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "the server could not find the requested resource",
+    "reason": "NotFound",
+    "details": {},
+    "code": 404
+  }
+}

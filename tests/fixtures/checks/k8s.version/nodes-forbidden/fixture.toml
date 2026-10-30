@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-nodes-forbidden"
+summary = "EKS 1.29 where the identity may not list nodes"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true

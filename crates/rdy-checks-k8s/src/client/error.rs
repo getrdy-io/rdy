@@ -87,6 +87,16 @@ pub enum KubeError {
         origin: &'static str,
     },
 
+    /// The proxy's user name or password cannot be sent: a bad percent escape, or an `@` in the decoded
+    /// text, which kube's header builder would cut at.
+    #[error("{origin} names the proxy {proxy} with a user name or password that rdy cannot send")]
+    ProxyUserInfo {
+        /// The proxy as scheme, host and port. Never user info. Escaped.
+        proxy: String,
+        /// Where the proxy came from, as for [`KubeError::ProxyUnsupported`].
+        origin: &'static str,
+    },
+
     /// rdy runs in a pod, and the service account files or variables are not usable.
     #[error("the pod's service account cannot be used: {what}")]
     InClusterUnusable {
@@ -254,6 +264,10 @@ impl KubeError {
                     "Set it to an http:// URL (host:port is read as http), or unset it for this run, or list the API host in NO_PROXY."
                 };
                 format!("rdy uses an http:// proxy through a CONNECT tunnel. https:// and socks5:// proxies are not supported yet. {fix}")
+            }
+            Self::ProxyUserInfo { .. } => {
+                "Write the proxy user name and password with valid percent escapes, and without an @ once decoded: kube builds the Proxy-Authorization header from the text before the first @. Ask for a proxy account that avoids it, or run rdy from a host that reaches the API server directly."
+                    .to_owned()
             }
             Self::InClusterUnusable { .. } => {
                 "Mount the service account token (automountServiceAccountToken: true) or pass --kubeconfig <file>."

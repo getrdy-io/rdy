@@ -23,6 +23,7 @@ use std::net::IpAddr;
 use std::str::FromStr;
 
 use http::Uri;
+use rdy_engine::probe::ProxyUrl;
 
 use super::Env;
 use super::error::KubeError;
@@ -207,39 +208,102 @@ fn use_proxy(
         proxy: proxy_display(written),
         origin,
     };
-    let uri = Uri::from_str(raw).map_err(|_| unusable())?;
-    let usable = uri
-        .scheme_str()
-        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("http"))
-        && uri.host().is_some_and(|host| !host.is_empty())
-        && uri.query().is_none()
-        && matches!(uri.path(), "" | "/");
-    if !usable {
-        return Err(unusable());
-    }
-    let secrets = uri
-        .authority()
-        .and_then(|authority| authority.as_str().rsplit_once('@'))
-        .map(|(userinfo, _)| userinfo)
-        .filter(|userinfo| !userinfo.is_empty())
-        .map(|userinfo| {
-            let mut secrets = vec![userinfo.to_owned()];
-            if let Some((_, password)) = userinfo.split_once(':')
-                && !password.is_empty()
-            {
-                secrets.push(password.to_owned());
-            }
-            secrets
+    // The facade parses the same text for the other checks, so what counts as a usable proxy is decided in
+    // one place: plain `http://`, no path, a valid host and port, a user name without a colon.
+    let url = ProxyUrl::parse(raw).map_err(|_| unusable())?;
+    // The facade percent-decodes the user info, as Go does, and so must the header kube builds. kube takes
+    // the user info of the URL as it stands and does not decode it, so the decoded text goes into the URL.
+    let after_scheme = raw
+        .strip_prefix("http://")
+        .unwrap_or(raw)
+        .trim_end_matches('/');
+    let (userinfo, hostport) = match after_scheme.rsplit_once('@') {
+        Some((userinfo, hostport)) => (Some(userinfo), hostport),
+        None => (None, after_scheme),
+    };
+    let bad_userinfo = || KubeError::ProxyUserInfo {
+        proxy: proxy_display(written),
+        origin,
+    };
+    // kube cuts the user info at the first `@`, so an `@` in the decoded text would send the wrong
+    // password. It is refused rather than sent wrong.
+    let decoded = userinfo
+        .map(|text| {
+            percent_decode(text)
+                .filter(|decoded| !decoded.contains('@'))
+                .ok_or_else(bad_userinfo)
         })
-        .unwrap_or_default();
+        .transpose()?;
+    let rebuilt = match &decoded {
+        Some(decoded) => format!("http://{decoded}@{hostport}"),
+        None => format!("http://{hostport}"),
+    };
+    let uri = Uri::from_str(&rebuilt).map_err(|_| {
+        if userinfo.is_some() {
+            bad_userinfo()
+        } else {
+            unusable()
+        }
+    })?;
+    // A decoded `/`, `?` or `#` in the user info would end the authority early and could name another
+    // host. The URL must read back as exactly what was built.
+    let intact = uri.authority().map(http::uri::Authority::as_str)
+        == rebuilt.strip_prefix("http://")
+        && uri.path() == "/"
+        && uri.query().is_none();
+    if !intact {
+        return Err(bad_userinfo());
+    }
+    // The user info with no password is a secret too: `http://TOKEN@proxy` is a common form.
+    let mut secrets: Vec<String> = Vec::new();
+    for text in userinfo.into_iter().chain(decoded.as_deref()) {
+        for part in [
+            Some(text),
+            text.split_once(':').map(|(_, password)| password),
+        ] {
+            if let Some(part) = part.filter(|part| !part.is_empty())
+                && !secrets.iter().any(|known| known == part)
+            {
+                secrets.push(part.to_owned());
+            }
+        }
+    }
     Ok(Resolved {
         used: ProxyUse {
             rule,
-            proxy: Some(proxy_display(raw)),
+            proxy: Some(url.origin()),
         },
         uri: Some(uri),
         secrets,
     })
+}
+
+/// Decodes `%XX`. `None` for a bad escape or a result that is not UTF-8.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        if byte == b'%' {
+            let high = hex(*bytes.get(at + 1)?)?;
+            let low = hex(*bytes.get(at + 2)?)?;
+            out.push(high << 4 | low);
+            at += 3;
+        } else {
+            out.push(byte);
+            at += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+fn hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 /// The host of `server` in lower case, without the brackets of an IPv6 literal.

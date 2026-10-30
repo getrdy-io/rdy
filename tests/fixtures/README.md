@@ -62,9 +62,13 @@ tests/fixtures/
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), the twelve machines of
 `host.os/`, `host.security_agents/` (18 cases), `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
-cases, the `_kube` cases (`cluster`, `denied`) and the eleven `k8s.access` cases (`good`, `anonymous`, `unauthorized`,
-`forbidden-review`, `old-server`, `discovery-denied`, `review-error`, `review-silent`, `many-groups`, `hostile-names`,
-and `none`, which has no `api/` because the attempt never reached a cluster). The rest
+cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
+`openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
+`nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
+`apis-unreadable-vanilla`), all `generated` by `scripts/gen-k8s-version-fixtures.py` (`--check` fails on drift).
+`checks/k8s.access/` holds eleven cases (`good`, `anonymous`, `unauthorized`, `forbidden-review`, `old-server`,
+`discovery-denied`, `review-error`, `review-silent`, `many-groups`, `hostile-names`, and `none`, which has no `api/`
+because the attempt never reached a cluster). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |

@@ -11,6 +11,8 @@ include = ["src/**", "Cargo.toml", "LICENSE", "clippy.toml"]
 
 [dependencies]
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
+# The typed parameters of the checks (`K8sVersion`, `K8sAccess` and their scalars) and the pattern compiler.
+rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 # Only `client` and `rustls-tls`, plus `ring` so rustls has a crypto provider and `aws-lc-rs` stays out
 # (ADR 0009, ADR 0031). `webpki-roots` makes the bundled roots the only system roots: without it kube
 # defers to rustls-platform-verifier when a kubeconfig has no CA, which ADR 0014 decision 3 bans. The
@@ -27,9 +29,8 @@ http-body = { workspace = true, features = [] }
 tower-layer = { workspace = true, features = [] }
 tower-service = { workspace = true, features = [] }
 thiserror = { workspace = true, features = ["std"] }
-# `k8s.access` reads its spec parameters and compiles its patterns with the spec crate (M1-109). The JWT
-# `exp` claim of a static token is read with `serde_json`; nothing else is.
-rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
+# A finding's `observed` and `expected` are JSON values, and the `exp` claim of a static JWT token is read
+# with it; nothing else of the token is.
 serde_json = { workspace = true, features = ["std"] }
 
 [dev-dependencies]

@@ -294,6 +294,81 @@ fn proxy_credentials_become_known_secrets_and_never_show() {
 }
 
 #[test]
+fn percent_escapes_in_the_user_info_are_decoded_for_the_header_and_every_form_is_a_secret() {
+    // The facade decodes the user info, as Go does. kube builds the Basic header from the URL as it
+    // stands, so the decoded text goes into the URL it gets.
+    let resolved = resolve_api(
+        Some("http://svc:p%3AWORD%2B9@proxy.acme.example:3128"),
+        &Env::empty(),
+    )
+    .expect("ok");
+    let uri = resolved.uri.expect("a proxy");
+    let authority = uri.authority().expect("an authority").as_str().to_owned();
+    assert_eq!(authority, "svc:p:WORD+9@proxy.acme.example:3128");
+    assert_eq!(uri.host(), Some("proxy.acme.example"));
+    assert_eq!(uri.port_u16(), Some(3128));
+    for form in [
+        "svc:p%3AWORD%2B9",
+        "svc:p:WORD+9",
+        "p%3AWORD%2B9",
+        "p:WORD+9",
+    ] {
+        assert!(
+            resolved.secrets.iter().any(|secret| secret == form),
+            "{form}: {:?}",
+            resolved.secrets
+        );
+    }
+    assert_eq!(
+        resolved.used.proxy(),
+        Some("http://proxy.acme.example:3128")
+    );
+}
+
+#[test]
+fn a_user_info_the_facade_refuses_is_refused_here_too() {
+    // The same parse as the other checks: a bad escape, text that is not UTF-8 and an empty user name.
+    for raw in [
+        "http://svc:p%zz@proxy.acme.example:3128",
+        "http://svc:p%4@proxy.acme.example:3128",
+        "http://svc:%ff@proxy.acme.example:3128",
+        "http://:pw@proxy.acme.example:3128",
+    ] {
+        let error = resolve_api(Some(raw), &Env::empty()).expect_err(raw);
+        assert!(
+            matches!(error, KubeError::ProxyUnsupported { .. }),
+            "{raw}: {error:?}"
+        );
+        assert!(!format!("{error}").contains("zz"), "{error}");
+    }
+}
+
+#[test]
+fn a_user_info_rdy_cannot_send_exactly_is_refused_and_never_shown() {
+    // An @ once decoded (kube cuts the header at the first @), and a decoded / ? or # that would end the
+    // authority early and could name another host, or a line break.
+    for raw in [
+        "http://svc:p%40ss-CANARY@proxy.acme.example:3128",
+        "http://svc:1%2Fx-CANARY@proxy.acme.example:3128",
+        "http://svc:x%3Fy-CANARY@proxy.acme.example:3128",
+        "http://svc:x%23y-CANARY@proxy.acme.example:3128",
+        "http://svc:x%0D%0Ay-CANARY@proxy.acme.example:3128",
+        "http://svc:x%20y-CANARY@proxy.acme.example:3128",
+    ] {
+        let error = resolve_api(Some(raw), &Env::empty()).expect_err(raw);
+        assert!(
+            matches!(&error, KubeError::ProxyUserInfo { proxy, .. } if proxy == "http://proxy.acme.example:3128"),
+            "{raw}: {error:?}"
+        );
+        let shown = format!("{error} {error:?} {}", error.hint());
+        assert!(
+            !shown.contains("CANARY") && !shown.contains("svc"),
+            "{shown}"
+        );
+    }
+}
+
+#[test]
 fn a_proxy_without_user_info_has_no_secrets() {
     let resolved = resolve_api(Some("http://proxy.acme.example:3128"), &Env::empty()).expect("ok");
     assert!(resolved.secrets.is_empty());
