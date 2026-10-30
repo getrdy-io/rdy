@@ -1,0 +1,6 @@
+{
+  "symlinks": {
+    "run/containerd/containerd.sock": "socket:[1000]",
+    "var/run/docker.sock": "socket:[1001]"
+  }
+}

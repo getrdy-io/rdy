@@ -20,8 +20,8 @@
     "notes": [],
     "observed": {
       "kubelet": {
-        "cgroup_driver": "systemd",
-        "config_present": true
+        "cgroup_driver": null,
+        "config_present": false
       },
       "runtimes": [
         {

@@ -15,6 +15,14 @@
 //!   `/var/lib/kubelet/config.yaml`. Proxy settings come from the `Environment=` lines of the systemd
 //!   drop-ins of `docker` and `containerd`.
 //!
+//! The runtimes are asked together, and each request to a daemon has its own limit ([`API_CALL`]), so one
+//! daemon that hangs is reported as not answering and the others still count. The rootless sockets
+//! (`$XDG_RUNTIME_DIR`) are not stat-ed, because the read rules would then cover every user's
+//! `/run/user/<uid>`; the request is limited to the user's own `{uid}` socket by the facade, and a missing
+//! socket is the answer of the request.
+//!
+//! Root is an evidence-only want ([`WANTS`]). The check says itself when a missing root mattered.
+//!
 //! Every file is read as redacted text (`Probe::file_text`), so a registry password in a config file
 //! cannot reach a note or the evidence.
 //!
@@ -27,11 +35,15 @@
 //! `--cgroup-driver` flag, and containerd files named in `imports`. Each leaves the value unknown, and an
 //! unknown value is a warning, never a pass. The Windows named pipe is M2-052.
 
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
+use std::task::Poll;
+use std::time::Duration;
 
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, CommandSpec,
-    Need, Os, PeerClass,
+    Need, Os, PeerClass, Want,
 };
 use rdy_engine::exec::policy::PolicyError;
 use rdy_engine::exec::table;
@@ -39,7 +51,7 @@ use rdy_engine::probe::ProbeError;
 use rdy_spec::check::{CgroupDriver, ContainerRuntime, HostContainerRuntime};
 use rdy_spec::scalar::Version;
 
-use crate::family::{OS, ROOT};
+use crate::family::OS;
 use crate::reads::Read;
 use crate::text::{short, soft};
 
@@ -74,6 +86,21 @@ const MAX_DROPINS: usize = 16;
 /// The longest evidence string kept.
 const MAX_TEXT: usize = 200;
 
+/// Root only adds detail: it opens a socket the user may not, and it reads the kubelet's directory. The
+/// check says in its own findings when either was missing and mattered (a warning with a partial result),
+/// so a non-root run that read everything it needed passes as it is (a user in the `docker` group, rootless
+/// Docker). The shared `ROOT` want would turn that pass into "not verified".
+const WANTS: &[Want] = &[Want {
+    need: Need::Root,
+    evidence_only: true,
+}];
+
+/// The longest one request to a daemon may take. The facade allows 5 s, which is the whole check budget,
+/// so one daemon that hangs would end the check with no result. Each runtime is asked in turn at most
+/// twice (`/version`, `/info`), and the runtimes are asked together, so the slowest source costs about
+/// 3 s and the others still report.
+const API_CALL: Duration = Duration::from_millis(1500);
+
 /// The static facts about `host.container_runtime` (03 section 2).
 pub(crate) static INFO: CheckInfo = CheckInfo {
     id: "host.container_runtime",
@@ -81,10 +108,10 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
     summary: "Docker, containerd, Podman, CRI-O",
     meta: CheckMeta {
         title: "Container runtime",
-        remediation: "Install a container runtime the vendor supports, and make its socket readable by adding the user to the `docker` group or by running as root. The runtime and the kubelet must use the same cgroup driver. For containerd, set `SystemdCgroup = true` in `/etc/containerd/config.toml`, then run `systemctl restart containerd`.",
+        remediation: "Install a container runtime the vendor supports. To let rdy read its socket, run rdy as root. Membership of the docker group is the same as root on this host; running rdy as root once is the smaller grant. The runtime and the kubelet must use the same cgroup driver. For containerd, set `SystemdCgroup = true` in `/etc/containerd/config.toml`, then run `systemctl restart containerd`.",
     },
     needs: &[],
-    wants: ROOT,
+    wants: WANTS,
     default_timeout: Some(std::time::Duration::from_secs(5)),
     os: OS,
     reads: &[
@@ -92,7 +119,6 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
         SOCK_CONTAINERD,
         SOCK_PODMAN,
         SOCK_CRIO,
-        "/run/user",
         DAEMON_JSON,
         CONTAINERD_CONFIG,
         KUBELET_CONFIG,
@@ -173,26 +199,50 @@ impl ContainerRuntimeCheck {
         }
         let kubelet = kubelet(ctx).await?;
         let user_dir = user_runtime_dir(ctx)?;
-        let mut seen = Vec::new();
+        let mut asked: Vec<BoxFuture<'_, Result<Seen, CheckError>>> = Vec::new();
         if self.asks(ContainerRuntime::Docker) {
-            seen.push(engine(ctx, ContainerRuntime::Docker, SOCK_DOCKER, false).await?);
+            asked.push(Box::pin(engine(
+                ctx,
+                ContainerRuntime::Docker,
+                SOCK_DOCKER.to_owned(),
+                false,
+            )));
             if let Some(dir) = &user_dir {
-                let socket = format!("{dir}/docker.sock");
-                seen.push(engine(ctx, ContainerRuntime::Docker, &socket, true).await?);
+                asked.push(Box::pin(engine(
+                    ctx,
+                    ContainerRuntime::Docker,
+                    format!("{dir}/docker.sock"),
+                    true,
+                )));
             }
         }
         if self.asks(ContainerRuntime::Containerd) {
-            seen.push(containerd(ctx).await?);
+            asked.push(Box::pin(containerd(ctx)));
         }
         if self.asks(ContainerRuntime::Podman) {
-            seen.push(engine(ctx, ContainerRuntime::Podman, SOCK_PODMAN, false).await?);
+            asked.push(Box::pin(engine(
+                ctx,
+                ContainerRuntime::Podman,
+                SOCK_PODMAN.to_owned(),
+                false,
+            )));
             if let Some(dir) = &user_dir {
-                let socket = format!("{dir}/podman/podman.sock");
-                seen.push(engine(ctx, ContainerRuntime::Podman, &socket, true).await?);
+                asked.push(Box::pin(engine(
+                    ctx,
+                    ContainerRuntime::Podman,
+                    format!("{dir}/podman/podman.sock"),
+                    true,
+                )));
             }
         }
         if self.asks(ContainerRuntime::Crio) {
-            seen.push(crio(ctx).await?);
+            asked.push(Box::pin(crio(ctx)));
+        }
+        // The runtimes are independent, so they are asked together. The results come back in the order
+        // above.
+        let mut seen = Vec::new();
+        for one in join_all(asked).await {
+            seen.push(one?);
         }
         Ok(judge::judge(self, &seen, &kubelet, ctx.has(&Need::Root)))
     }
@@ -214,6 +264,30 @@ pub(crate) fn clip(text: &str) -> String {
         .take(MAX_TEXT)
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect()
+}
+
+/// Polls every future until all are done, and returns the outputs in order. No runtime and no extra
+/// crate: the futures only wait on the probe, which the scheduler drives.
+async fn join_all<T>(mut futures: Vec<BoxFuture<'_, T>>) -> Vec<T> {
+    let mut done: Vec<Option<T>> = futures.iter().map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        let mut waiting = false;
+        for (future, slot) in futures.iter_mut().zip(done.iter_mut()) {
+            if slot.is_none() {
+                match Pin::new(future).poll(cx) {
+                    Poll::Ready(value) => *slot = Some(value),
+                    Poll::Pending => waiting = true,
+                }
+            }
+        }
+        if waiting {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
+    })
+    .await;
+    done.into_iter().flatten().collect()
 }
 
 /// The rootless socket directory: `XDG_RUNTIME_DIR` when it is `/run/user/<digits>`, which is the only
@@ -266,11 +340,11 @@ async fn kubelet(ctx: &CheckContext) -> Result<Kubelet, CheckError> {
 fn api_failure(error: ProbeError, rootless: bool) -> Result<Api, CheckError> {
     match error {
         ProbeError::PermissionDenied => Ok(Api::Denied),
-        ProbeError::NotFound => Ok(Api::NotListening),
-        ProbeError::Timeout => Ok(Api::Odd("it did not answer in time".to_owned())),
-        ProbeError::Io(message) if message.to_ascii_lowercase().contains("refused") => {
-            Ok(Api::NotListening)
-        }
+        // The system socket was seen by `stat`, so a missing one is a daemon that went away. A rootless
+        // socket is not looked at first (the read rules do not cover `/run/user`), so missing means absent.
+        ProbeError::NotFound if rootless => Ok(Api::Missing),
+        ProbeError::NotFound | ProbeError::ConnectionRefused => Ok(Api::NotListening),
+        ProbeError::Timeout => Ok(Api::Silent),
         ProbeError::Denied { .. } if rootless => Ok(Api::Odd(
             "the socket belongs to another user than the one running rdy".to_owned(),
         )),
@@ -286,7 +360,10 @@ async fn get(
     rootless: bool,
 ) -> Result<Result<String, Api>, CheckError> {
     let probe = ctx.probe();
-    match probe.unix_get(Path::new(socket), path).await {
+    match probe
+        .unix_get_within(Path::new(socket), path, API_CALL)
+        .await
+    {
         Err(error) => Ok(Err(api_failure(error, rootless)?)),
         Ok(reply) if reply.status != 200 => Ok(Err(Api::Odd(format!(
             "{path} answered with status {}",
@@ -304,17 +381,25 @@ async fn get(
 async fn engine(
     ctx: &CheckContext,
     kind: ContainerRuntime,
-    socket: &str,
+    socket: String,
     rootless: bool,
 ) -> Result<Seen, CheckError> {
+    let socket = socket.as_str();
     let mut seen = Seen::new(kind, rootless, socket);
-    match ctx.probe().stat(Path::new(socket)).await {
-        Ok(Some(_)) => seen.socket_present = true,
-        Ok(None) | Err(ProbeError::NotFound) => return Ok(seen),
-        Err(error) => {
-            seen.socket_present = true;
-            seen.api = api_failure(error, rootless)?;
-            return fall_back(ctx, seen).await;
+    // A rootless socket is not stat-ed: `reads` would have to cover every user's `/run/user/<uid>`. The
+    // facade's `{uid}` rule already limits the request to the user rdy runs as, so a missing socket is
+    // the answer of the request itself.
+    if rootless {
+        seen.socket_present = true;
+    } else {
+        match ctx.probe().stat(Path::new(socket)).await {
+            Ok(Some(_)) => seen.socket_present = true,
+            Ok(None) | Err(ProbeError::NotFound) => return Ok(seen),
+            Err(error) => {
+                seen.socket_present = true;
+                seen.api = api_failure(error, rootless)?;
+                return fall_back(ctx, seen).await;
+            }
         }
     }
     let source = if kind == ContainerRuntime::Podman {
@@ -323,6 +408,10 @@ async fn engine(
         "docker info"
     };
     let version = match get(ctx, socket, "/version", rootless).await? {
+        Err(Api::Missing) => {
+            seen.socket_present = false;
+            return Ok(seen);
+        }
         Err(api) => {
             seen.api = api;
             return fall_back(ctx, seen).await;

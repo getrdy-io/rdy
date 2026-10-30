@@ -19,7 +19,7 @@ use super::clip;
 
 pub(super) const TABLE_V2: &str = "io.containerd.grpc.v1.cri";
 pub(super) const TABLE_V3_RUNTIME: &str = "io.containerd.cri.v1.runtime";
-const TABLE_V3_IMAGES: &str = "io.containerd.cri.v1.images";
+pub(super) const TABLE_V3_IMAGES: &str = "io.containerd.cri.v1.images";
 const TABLE_V1: &str = "cri";
 
 /// What the file (or the built-in default) says.

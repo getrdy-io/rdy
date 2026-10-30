@@ -1,0 +1,50 @@
+{
+  "entry": {
+    "cgroup_driver": "systemd",
+    "id": "host.container_runtime",
+    "runtime": [
+      "docker"
+    ],
+    "storage_driver": "overlay2"
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": "systemd",
+      "min_version": null,
+      "runtime": [
+        "docker"
+      ],
+      "storage_driver": "overlay2"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "docker 24.0.7 is running (cgroup driver systemd, storage driver overlay2).",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": null,
+        "config_present": false
+      },
+      "runtimes": [
+        {
+          "api": "read",
+          "cgroup_driver": "systemd",
+          "cgroup_driver_source": "docker info",
+          "config_version": null,
+          "d_type": true,
+          "installed": false,
+          "proxy": null,
+          "rootless": false,
+          "rootless_socket": false,
+          "runtime": "docker",
+          "socket": "/var/run/docker.sock",
+          "socket_present": true,
+          "storage_driver": "overlay2",
+          "storage_driver_source": "docker info",
+          "version": "24.0.7"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

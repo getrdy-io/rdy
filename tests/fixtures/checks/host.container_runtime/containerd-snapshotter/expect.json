@@ -15,7 +15,7 @@
       ],
       "storage_driver": "overlay2"
     },
-    "fix": "Set `snapshotter = \"overlayfs\"` in the CRI table of /etc/containerd/config.toml (the io.containerd.grpc.v1.cri table for a version 2 file), then run `systemctl restart containerd`. Existing images are not moved.",
+    "fix": "Set `snapshotter = \"overlayfs\"` under `[plugins.\"io.containerd.grpc.v1.cri\".containerd]` in /etc/containerd/config.toml, then run `systemctl restart containerd`. Existing images are not moved.",
     "level": "fail",
     "message": "containerd 1.7.13 uses the native storage driver, the spec needs overlay2.",
     "notes": [],

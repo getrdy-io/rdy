@@ -541,17 +541,25 @@ fn socket_failures_map_to_the_states_the_check_reports() {
     let state = |error| api_failure(error, false).expect("a state");
     assert_eq!(state(ProbeError::PermissionDenied), Api::Denied);
     assert_eq!(state(ProbeError::NotFound), Api::NotListening);
-    assert_eq!(
+    // A refused connection is its own error kind, not text to be searched.
+    assert_eq!(state(ProbeError::ConnectionRefused), Api::NotListening);
+    assert!(matches!(
         state(ProbeError::Io(
             "Connection refused (os error 111)".to_owned()
         )),
-        Api::NotListening
+        Api::Odd(_)
+    ));
+    assert_eq!(
+        api_failure(ProbeError::NotFound, true).expect("a state"),
+        Api::Missing,
+        "a rootless socket is not stat-ed first, so not found means absent"
     );
     assert!(matches!(
         state(ProbeError::Io("Broken pipe".to_owned())),
         Api::Odd(_)
     ));
-    assert!(matches!(state(ProbeError::Timeout), Api::Odd(_)));
+    // The request limit of the check ended the call: the arm is reached, and it names the limit.
+    assert_eq!(state(ProbeError::Timeout), Api::Silent);
     // The facade's refusal of a rootless socket of another user is a state; for any other socket it is a
     // fault of the check.
     let refused = || ProbeError::Denied {

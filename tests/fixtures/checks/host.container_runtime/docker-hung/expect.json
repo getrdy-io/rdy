@@ -3,9 +3,10 @@
     "id": "host.container_runtime",
     "runtime": [
       "docker"
-    ]
+    ],
+    "timeout": "1s"
   },
   "result": {
-    "timed_out_ms": 5000
+    "timed_out_ms": 1000
   }
 }

@@ -1,12 +1,12 @@
 schema = 1
 name = "docker-rootless"
-summary = "Rootless Docker for user 1000; no system socket"
+summary = "Rootless Docker for user 1000, not root; no system socket and no kubelet"
 origin = "hand"
 os = "linux"
 arch = "x86_64"
 answers = ["host.container_runtime"]
 
 [caps]
-root = true
+root = false
 network = false
 kube = false

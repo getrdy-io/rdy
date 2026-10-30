@@ -11,13 +11,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rdy_engine::check::{CheckError, Level, Need, Os};
+use rdy_engine::check::{CheckContext, CheckError, Level, Need, Os};
+use rdy_engine::outcome::map_outcome;
 use rdy_engine::probe::ActionLogOutput;
 use rdy_engine::sched::{End, Planned};
 use rdy_engine::testing::golden::assert_golden;
 use rdy_engine::testing::{Fixture, Replay, TestRun, assert_within_manifest, fixtures_dir};
 use rdy_spec::check::CheckParams;
-use rdy_spec::result::{Action, ActionKind, ActionOutcome};
+use rdy_spec::result::{Action, ActionKind, ActionOutcome, CheckResult, Status};
 use rdy_spec::spec::CheckSpec;
 use serde_json::{Value, json};
 
@@ -39,7 +40,9 @@ macro_rules! expect {
 /// Every case, with its golden.
 const CASES: &[(&str, &str)] = &[
     expect!("docker-ok"),
+    expect!("docker-slow"),
     expect!("docker-hung"),
+    expect!("docker-group-user"),
     expect!("docker-no-dtype"),
     expect!("docker-old-version"),
     expect!("docker-cgroupfs"),
@@ -52,6 +55,7 @@ const CASES: &[(&str, &str)] = &[
     expect!("docker-rootless"),
     expect!("docker-podman-shim"),
     expect!("podman-ok"),
+    expect!("podman-no-dtype"),
     expect!("containerd-ok"),
     expect!("containerd-v2-cgroupfs"),
     expect!("containerd-v3-cgroupfs"),
@@ -63,12 +67,19 @@ const CASES: &[(&str, &str)] = &[
     expect!("containerd-bad-config"),
     expect!("containerd-snapshotter"),
     expect!("containerd-no-access"),
+    expect!("containerd-v3-snapshotter"),
+    expect!("containerd-registry-auth"),
     expect!("docker-and-containerd"),
+    expect!("docker-dtype-and-containerd"),
+    expect!("docker-slow-containerd-ok"),
     expect!("crio-ok"),
     expect!("crio-cgroup-spec"),
     expect!("none"),
     expect!("none-spec-lists-docker"),
 ];
+
+/// Cases that end in a timeout and so have no finding.
+const HUNG: &[&str] = &["docker-hung"];
 
 /// The secret that sits in two of the cases, in a Docker `/info` body and in `daemon.json`.
 const SECRET: &str = "REDACTED-TEST-TOKEN";
@@ -134,6 +145,8 @@ const DOCKER_SOCKET: &str = SOCK_DOCKER;
 struct Run {
     end: End,
     log: ActionLogOutput,
+    ctx: CheckContext,
+    entry: CheckSpec,
 }
 
 impl Run {
@@ -143,13 +156,41 @@ impl Run {
         };
         done.as_ref().as_ref().expect("a finding")
     }
+
+    /// The result entry the engine writes for this run: the level after the severity cap and the
+    /// partial rule, which is what the report shows.
+    fn result(&self) -> CheckResult {
+        let End::Done(done) = &self.end else {
+            panic!("the check did not finish: {:?}", self.end);
+        };
+        map_outcome(&INFO, &self.entry, &self.ctx, done.as_ref().clone(), 0, 0)
+    }
+}
+
+/// A spec `timeout` in the entry, as the scheduler gets it.
+fn spec_timeout(entry: &Value) -> Option<Duration> {
+    match entry.get("timeout").and_then(Value::as_str) {
+        Some("1s") => Some(Duration::from_secs(1)),
+        Some(other) => panic!("the tests know only a 1s timeout, not {other}"),
+        None => None,
+    }
 }
 
 fn run_on(case: &str, entry: &Value, os: Os) -> Run {
     let fixture = load(case);
     let test_run = TestRun::new(machine(case, &fixture));
     let scheduler = test_run.scheduler(1, os, fixture.available_needs());
-    let planned = Planned::new(Arc::new(check(entry)), "host.container_runtime");
+    let mut planned = Planned::new(Arc::new(check(entry)), "host.container_runtime");
+    if let Some(timeout) = spec_timeout(entry) {
+        planned = planned.with_timeout(timeout);
+    }
+    let ctx = test_run.context_for(
+        &INFO,
+        "host.container_runtime",
+        os,
+        fixture.available_needs(),
+    );
+    let spec: CheckSpec = serde_json::from_value(entry.clone()).expect("a check entry");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .start_paused(true)
@@ -159,6 +200,8 @@ fn run_on(case: &str, entry: &Value, os: Os) -> Run {
     Run {
         end: ran.remove(0).end,
         log: test_run.action_log(),
+        ctx,
+        entry: spec,
     }
 }
 
@@ -259,6 +302,8 @@ fn the_case_list_has_no_repeat_and_names_the_exit_test_cases() {
 fn the_levels_are_what_the_catalog_says() {
     let expected = [
         ("docker-ok", Level::Pass),
+        ("docker-slow", Level::Warn),
+        ("docker-group-user", Level::Pass),
         ("docker-no-dtype", Level::Fail),
         ("docker-old-version", Level::Fail),
         ("docker-cgroupfs", Level::Fail),
@@ -271,6 +316,7 @@ fn the_levels_are_what_the_catalog_says() {
         ("docker-rootless", Level::Pass),
         ("docker-podman-shim", Level::Fail),
         ("podman-ok", Level::Pass),
+        ("podman-no-dtype", Level::Fail),
         ("containerd-ok", Level::Pass),
         ("containerd-v2-cgroupfs", Level::Fail),
         ("containerd-v3-cgroupfs", Level::Fail),
@@ -282,16 +328,56 @@ fn the_levels_are_what_the_catalog_says() {
         ("containerd-bad-config", Level::Warn),
         ("containerd-snapshotter", Level::Fail),
         ("containerd-no-access", Level::Warn),
+        ("containerd-v3-snapshotter", Level::Fail),
+        ("containerd-registry-auth", Level::Pass),
         ("docker-and-containerd", Level::Pass),
+        ("docker-dtype-and-containerd", Level::Fail),
+        ("docker-slow-containerd-ok", Level::Pass),
         ("crio-ok", Level::Pass),
         ("crio-cgroup-spec", Level::Warn),
         ("none", Level::Fail),
         ("none-spec-lists-docker", Level::Fail),
     ];
-    // `docker-hung` ends in a timeout and has no level; its own test checks it.
-    assert_eq!(expected.len() + 1, CASES.len(), "a case has no level here");
+    // A case that ends in a timeout has no level; its own test checks it.
+    assert_eq!(
+        expected.len() + HUNG.len(),
+        CASES.len(),
+        "a case has no level here"
+    );
     for (case, level) in expected {
-        assert_eq!(run(case).finding().level, level, "{case}");
+        let result = run(case);
+        assert_eq!(result.finding().level, level, "{case}");
+        // The report shows the mapped status, with the partial rule applied. A run without root passes
+        // when it read what it needed: root is evidence only.
+        let status = match level {
+            Level::Pass => Status::Pass,
+            Level::Warn => Status::Warn,
+            Level::Fail => Status::Block,
+        };
+        assert_eq!(result.result().status, status, "{case}: the mapped status");
+    }
+}
+
+#[test]
+fn a_pass_without_root_stays_a_pass_in_the_report() {
+    for case in ["docker-group-user", "docker-rootless"] {
+        let result = run(case);
+        let mapped = result.result();
+        assert_eq!(mapped.status, Status::Pass, "{case}: {:?}", mapped.message);
+        assert!(
+            !mapped.message.starts_with("not verified"),
+            "{case}: {}",
+            mapped.message
+        );
+        // The missing root is still on the record.
+        assert!(
+            mapped
+                .partial
+                .as_ref()
+                .is_some_and(|p| !p.missing.is_empty()),
+            "{case}: {:?}",
+            mapped.partial
+        );
     }
 }
 
@@ -429,9 +515,10 @@ fn a_user_outside_the_docker_group_gets_a_partial_result_not_a_failure() {
     let partial = finding.partial.as_ref().expect("partial");
     assert_eq!(partial.missing, [Need::Root]);
     assert!(
-        partial
-            .note
-            .contains("add the user to the docker group or run as root"),
+        partial.note.contains("run rdy as root")
+            && partial
+                .note
+                .contains("Membership of the docker group is the same as root"),
         "{}",
         partial.note
     );
@@ -450,11 +537,15 @@ fn a_user_outside_the_docker_group_gets_a_partial_result_not_a_failure() {
         "{:?}",
         finding.notes
     );
+    // The kubelet directory is root only, and the drivers are compared, so that is a warning of the
+    // runtime and not a note (root is evidence only, so the engine would not catch it).
     assert!(
-        finding.notes.iter().any(|n| n.contains("kubelet config")),
-        "{:?}",
-        finding.notes
+        finding.message.contains("kubelet config"),
+        "{}",
+        finding.message
     );
+    let fix = finding.fix.clone().expect("a fix");
+    assert!(fix.contains("Run rdy as root"), "{fix}");
 }
 
 #[test]
@@ -546,7 +637,7 @@ fn every_request_is_a_get_to_a_declared_socket_and_the_log_says_so() {
 #[test]
 fn a_run_stays_inside_the_manifest() {
     for (case, _) in CASES {
-        if *case == "docker-hung" {
+        if HUNG.contains(case) {
             continue;
         }
         let result = run(case);
@@ -573,7 +664,7 @@ fn a_daemon_that_never_answers_ends_in_the_check_timeout() {
     assert_eq!(
         result.end,
         End::TimedOut {
-            after: Duration::from_secs(5)
+            after: Duration::from_secs(1)
         }
     );
     // One request went out and never came back. Nothing else was asked of the daemon.
@@ -607,6 +698,13 @@ fn the_manifest_names_exactly_the_sockets_and_programs_the_check_uses() {
     assert!(INFO.needs.is_empty());
     assert_eq!(INFO.wants.len(), 1);
     assert_eq!(INFO.wants[0].need, Need::Root);
+    assert!(INFO.wants[0].evidence_only);
+    // No prefix grant to every user's session files: the rootless sockets are not read or stat-ed.
+    assert!(
+        INFO.reads.iter().all(|r| !r.starts_with("/run/user")),
+        "{:?}",
+        INFO.reads
+    );
     assert_eq!(
         INFO.default_timeout,
         Some(std::time::Duration::from_secs(5))
@@ -680,7 +778,7 @@ fn every_fix_passes_the_fix_text_audit() {
         panic!("the remediation is not on the lists: {error}");
     }
     for (case, _) in CASES {
-        if *case == "docker-hung" {
+        if HUNG.contains(case) {
             continue;
         }
         let result = run(case);
@@ -695,4 +793,151 @@ fn every_fix_passes_the_fix_text_audit() {
             }
         }
     }
+}
+
+#[test]
+fn a_docker_d_type_failure_is_not_hidden_by_a_good_containerd() {
+    let result = run("docker-dtype-and-containerd");
+    let finding = result.finding();
+    assert_eq!(finding.level, Level::Fail);
+    assert!(finding.message.contains("d_type"), "{}", finding.message);
+    assert!(
+        finding.message.starts_with("docker 24.0.7"),
+        "{}",
+        finding.message
+    );
+    assert_eq!(result.result().status, Status::Block);
+}
+
+#[test]
+fn podman_d_type_names_graphroot() {
+    let result = run("podman-no-dtype");
+    let fix = result.finding().fix.clone().expect("a fix");
+    assert!(
+        fix.contains("graphroot") && fix.contains("/etc/containers/storage.conf"),
+        "{fix}"
+    );
+    assert!(!fix.contains("data-root"), "{fix}");
+}
+
+#[test]
+fn a_hung_daemon_does_not_cost_the_other_runtimes_their_result() {
+    // The request limit (1.5 s) is under the check budget (5 s), so docker is reported as not answering
+    // and containerd decides.
+    let result = run("docker-slow-containerd-ok");
+    let finding = result.finding();
+    assert_eq!(finding.level, Level::Pass);
+    assert!(
+        finding.message.starts_with("containerd 1.7.13"),
+        "{}",
+        finding.message
+    );
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.starts_with("docker:") && n.contains("within 1500 ms")),
+        "{:?}",
+        finding.notes
+    );
+    let alone = run("docker-slow");
+    assert_eq!(alone.finding().level, Level::Warn);
+    assert!(
+        alone.finding().message.contains("within 1500 ms"),
+        "{}",
+        alone.finding().message
+    );
+    // The timed-out request is in the log as a timeout.
+    assert!(
+        alone
+            .log
+            .actions
+            .iter()
+            .any(|a| a.kind == ActionKind::Http && a.outcome == ActionOutcome::Timeout),
+        "{:?}",
+        alone.log.actions
+    );
+}
+
+#[test]
+fn the_snapshotter_fix_names_the_table_of_the_config_version_and_the_value_of_the_spec() {
+    let v3 = run("containerd-v3-snapshotter");
+    let fix = v3.finding().fix.clone().expect("a fix");
+    assert!(
+        fix.contains(
+            "`snapshotter = \"overlayfs\"` under `[plugins.\"io.containerd.cri.v1.images\"]`"
+        ),
+        "{fix}"
+    );
+    assert!(!fix.contains("grpc.v1.cri"), "{fix}");
+    let v2 = run("containerd-snapshotter");
+    let fix = v2.finding().fix.clone().expect("a fix");
+    assert!(
+        fix.contains("`snapshotter = \"overlayfs\"` under `[plugins.\"io.containerd.grpc.v1.cri\".containerd]`"),
+        "{fix}"
+    );
+}
+
+#[test]
+fn any_fix_that_names_usermod_carries_the_docker_group_warning() {
+    let mut seen_usermod = false;
+    for (case, _) in CASES {
+        if HUNG.contains(case) {
+            continue;
+        }
+        let result = run(case);
+        let finding = result.finding();
+        let texts = finding
+            .fix
+            .iter()
+            .chain(finding.notes.iter())
+            .chain(finding.partial.iter().map(|p| &p.note));
+        for text in texts {
+            if text.contains("usermod") {
+                seen_usermod = true;
+                assert!(text.contains(judge::DOCKER_GROUP_WARNING), "{case}: {text}");
+                assert!(
+                    text.find("Run rdy as root").is_some_and(|root| {
+                        text.find("usermod").is_some_and(|user| root < user)
+                    }),
+                    "{case}: root comes first: {text}"
+                );
+            }
+        }
+    }
+    assert!(seen_usermod, "no case showed the docker group fix");
+    assert!(
+        judge::DOCKER_GROUP_WARNING.starts_with("Membership of the docker group is the same as root on this host; running rdy as root once is the smaller grant."),
+    );
+    assert!(INFO.meta.remediation.contains(judge::DOCKER_GROUP_WARNING));
+}
+
+#[test]
+fn the_whole_result_is_searched_for_secrets() {
+    // The registry password of a containerd config and the proxy password of Docker never reach any
+    // part of the result: the finding, its notes and fix, the mapped result entry, or the log.
+    for case in [
+        "containerd-registry-auth",
+        "docker-proxy",
+        "docker-no-access",
+        "docker-dropin-proxy",
+    ] {
+        let result = run(case);
+        let everything = format!("{:?} {:?} {:?}", result.end, result.result(), result.log);
+        assert!(
+            !everything.contains(SECRET),
+            "{case}: the secret reached the result"
+        );
+        assert!(
+            !everything.contains("acme-svc:"),
+            "{case}: user and password reached the result"
+        );
+    }
+    // The config with the password still parses, so the case is judged on its cgroup driver.
+    let result = run("containerd-registry-auth");
+    assert_eq!(result.finding().level, Level::Pass);
+    assert_eq!(
+        result.finding().observed["runtimes"][0]["cgroup_driver"],
+        "systemd"
+    );
 }

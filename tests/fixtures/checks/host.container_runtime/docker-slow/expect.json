@@ -1,0 +1,48 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "docker"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "docker"
+      ],
+      "storage_driver": null
+    },
+    "fix": "Check the daemon with `systemctl status docker`, and restart it if it is stuck.",
+    "level": "warn",
+    "message": "docker did not answer on /var/run/docker.sock within 1500 ms.",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "no answer in time",
+          "cgroup_driver": null,
+          "cgroup_driver_source": null,
+          "config_version": null,
+          "d_type": null,
+          "installed": false,
+          "proxy": null,
+          "rootless": null,
+          "rootless_socket": false,
+          "runtime": "docker",
+          "socket": "/var/run/docker.sock",
+          "socket_present": true,
+          "storage_driver": null,
+          "storage_driver_source": null,
+          "version": null
+        }
+      ]
+    },
+    "partial": null
+  }
+}

@@ -1,6 +1,6 @@
 schema = 1
 name = "docker-hung"
-summary = "docker.sock accepts the connection and the daemon never answers"
+summary = "The same hung daemon, with a spec timeout of 1s that ends the check before the request limit"
 origin = "hand"
 os = "linux"
 arch = "x86_64"

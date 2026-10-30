@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use super::containerd;
 use super::files::{Proxy, leading_number};
-use super::{ContainerRuntimeCheck, KUBELET_CONFIG, Kubelet};
+use super::{API_CALL, ContainerRuntimeCheck, KUBELET_CONFIG, Kubelet};
 
 /// How the API (or the socket) of one runtime answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +26,10 @@ pub(super) enum Api {
     Denied,
     /// The socket exists and nothing answers.
     NotListening,
+    /// The daemon did not answer within the request limit.
+    Silent,
+    /// A rootless socket that is not there. It is not stat-ed first, so the request says so.
+    Missing,
     /// It answered with something rdy could not use. The text says what.
     Odd(String),
 }
@@ -117,6 +121,9 @@ impl Seen {
     }
 }
 
+/// Said wherever a fix tells the reader to add a user to the `docker` group.
+pub(super) const DOCKER_GROUP_WARNING: &str = "Membership of the docker group is the same as root on this host; running rdy as root once is the smaller grant.";
+
 /// The spec word and the name used in sentences.
 pub(super) fn word(kind: ContainerRuntime) -> &'static str {
     match kind {
@@ -140,6 +147,9 @@ struct Issue {
     level: Level,
     text: String,
     fix: Option<String>,
+    /// Blocks the whole check even when another allowed runtime is fine. `d_type` unsupported is one:
+    /// the daemon that has it is the one that would run the workload.
+    hard: bool,
 }
 
 impl Issue {
@@ -148,7 +158,13 @@ impl Issue {
             level,
             text,
             fix: fix.into(),
+            hard: false,
         }
+    }
+
+    fn hard(mut self) -> Self {
+        self.hard = true;
+        self
     }
 }
 
@@ -190,7 +206,7 @@ fn runtime_cgroup_fix(seen: &Seen, target: CgroupDriver) -> String {
             "Set `cgroup_manager = \"{to}\"` under [engine] in /etc/containers/containers.conf."
         ),
         ContainerRuntime::Crio => format!(
-            "Set `cgroup_manager = \"{to}\"` in a file under /etc/crio/crio.conf.d/, then run `systemctl restart crio`."
+            "Set `cgroup_manager = \"{to}\"` under [crio.runtime] in a file in /etc/crio/crio.conf.d/, then run `systemctl restart crio`."
         ),
         _ => format!("Set the {to} cgroup driver in the runtime's configuration."),
     }
@@ -241,6 +257,15 @@ fn read_fix(seen: &Seen, what: &str) -> String {
     }
 }
 
+/// What to do about a file system without d_type, by runtime.
+fn d_type_fix(seen: &Seen) -> String {
+    if seen.kind == ContainerRuntime::Podman {
+        "Move `graphroot` under [storage] in /etc/containers/storage.conf (default /var/lib/containers/storage) to an ext4 volume, or to an XFS volume made with ftype=1. Containers made in the old place are not moved.".to_owned()
+    } else {
+        "Move `data-root` in /etc/docker/daemon.json (default /var/lib/docker) to an ext4 volume, or to an XFS volume made with ftype=1, then run `systemctl restart docker`. The output of docker info must show Supports d_type true.".to_owned()
+    }
+}
+
 fn kubelet_fix(target: CgroupDriver) -> String {
     format!(
         "Set `cgroupDriver: {}` in {KUBELET_CONFIG}, then run `systemctl restart kubelet`.",
@@ -268,23 +293,34 @@ fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet) -> Vec<
             Level::Warn,
             format!("{name} is present, but this user may not open its socket {}, so rdy could not read its settings.", seen.socket),
             if seen.kind == ContainerRuntime::Docker {
-                "Add the user to the docker group with `usermod -aG docker USER` and log in again, or run rdy as root."
+                format!("Run rdy as root. Adding the user to the docker group with `usermod -aG docker USER` also works. {DOCKER_GROUP_WARNING}")
             } else {
-                "Run rdy as root, or as a user who may open the socket."
-            }
-            .to_owned(),
+                "Run rdy as root, or as a user who may open the socket.".to_owned()
+            },
         )),
         Api::NotListening => out.push(Issue::new(
             Level::Warn,
             format!("{name} has a socket at {} but nothing answers on it.", seen.socket),
             format!("Run `systemctl restart {}` and check `systemctl status {}`.", seen.unit(), seen.unit()),
         )),
+        Api::Silent => out.push(Issue::new(
+            Level::Warn,
+            format!(
+                "{name} did not answer on {} within {} ms.",
+                seen.socket,
+                API_CALL.as_millis()
+            ),
+            format!(
+                "Check the daemon with `systemctl status {}`, and restart it if it is stuck.",
+                seen.unit()
+            ),
+        )),
         Api::Odd(why) => out.push(Issue::new(
             Level::Warn,
             format!("{name} answered on {} with something rdy could not read ({}).", seen.socket, escape_untrusted(why)),
             format!("Check the daemon with `systemctl status {}`.", seen.unit()),
         )),
-        Api::Read => {}
+        Api::Read | Api::Missing => {}
     }
     let state_issue = !out.is_empty();
 
@@ -316,13 +352,16 @@ fn issues(check: &ContainerRuntimeCheck, seen: &Seen, kubelet: &Kubelet) -> Vec<
     out.extend(storage_issues(check, seen, state_issue));
 
     if seen.d_type == Some(false) {
-        out.push(Issue::new(
-            Level::Fail,
-            format!(
-                "{name} keeps its images on a file system without d_type support, which overlay storage needs."
-            ),
-            "Move `data-root` in /etc/docker/daemon.json (default /var/lib/docker) to an ext4 volume, or to an XFS volume made with ftype=1, then run `systemctl restart docker`. The output of docker info must show Supports d_type true.".to_owned(),
-        ));
+        out.push(
+            Issue::new(
+                Level::Fail,
+                format!(
+                    "{name} keeps its images on a file system without d_type support, which overlay storage needs."
+                ),
+                d_type_fix(seen),
+            )
+            .hard(),
+        );
     }
     out
 }
@@ -354,6 +393,24 @@ fn cgroup_issues(
     };
     let mut out = Vec::new();
     let mut steps = Vec::new();
+    if let Some(why) = &kubelet.unreadable {
+        // The drivers are compared with the kubelet's, and the kubelet's file cannot be read.
+        return vec![Issue::new(
+            Level::Warn,
+            format!(
+                "The kubelet config {KUBELET_CONFIG} could not be read ({}), so the cgroup driver of {} was not compared with the kubelet's.",
+                escape_untrusted(why),
+                seen.name()
+            ),
+            format!(
+                "Run rdy as root, or check by hand that cgroupDriver in {KUBELET_CONFIG} is {}.",
+                driver_text(have)
+            ),
+        )]
+        .into_iter()
+        .chain(spec_cgroup_issue(check, seen, have))
+        .collect();
+    }
     if let Some(want) = check.cgroup_driver
         && have != want
     {
@@ -398,6 +455,52 @@ fn cgroup_issues(
     issues
 }
 
+/// The issue when the spec names a cgroup driver the runtime does not use, without the kubelet side.
+fn spec_cgroup_issue(
+    check: &ContainerRuntimeCheck,
+    seen: &Seen,
+    have: CgroupDriver,
+) -> Option<Issue> {
+    let want = check.cgroup_driver.filter(|w| *w != have)?;
+    Some(Issue::new(
+        Level::Fail,
+        format!(
+            "{} uses the {} cgroup driver, the spec needs {}.",
+            seen.named(),
+            driver_text(have),
+            driver_text(want)
+        ),
+        runtime_cgroup_fix(seen, want),
+    ))
+}
+
+/// The snapshotter fix for containerd: the table that holds `snapshotter` depends on the config version,
+/// and the value is the spec's (containerd calls overlay2 `overlayfs`).
+fn snapshotter_fix(seen: &Seen, want: &str) -> String {
+    let fallback = containerd::built_in(None);
+    let config = seen.config.as_ref().unwrap_or(&fallback);
+    let table = match config.version {
+        3.. => format!("[plugins.\"{}\"]", containerd::TABLE_V3_IMAGES),
+        2 => format!("[plugins.\"{}\".containerd]", containerd::TABLE_V2),
+        _ => "[plugins.cri.containerd]".to_owned(),
+    };
+    let value = if same_storage(want, "overlayfs") {
+        "overlayfs".to_owned()
+    } else {
+        escape_untrusted(want)
+    };
+    let mut text = String::new();
+    if !config.from_file {
+        text.push_str(
+            "Run `containerd config default | sudo tee /etc/containerd/config.toml` to write the default file. ",
+        );
+    }
+    text.push_str(&format!(
+        "Set `snapshotter = \"{value}\"` under `{table}` in /etc/containerd/config.toml, then run `systemctl restart containerd`. Existing images are not moved."
+    ));
+    text
+}
+
 fn storage_issues(check: &ContainerRuntimeCheck, seen: &Seen, state_issue: bool) -> Vec<Issue> {
     let Some(want) = check.storage_driver.as_deref() else {
         return Vec::new();
@@ -406,15 +509,7 @@ fn storage_issues(check: &ContainerRuntimeCheck, seen: &Seen, state_issue: bool)
         Some((have, _)) if same_storage(have, want) => Vec::new(),
         Some((have, _)) => {
             let fix = match seen.kind {
-                ContainerRuntime::Containerd => format!(
-                    "Set `snapshotter = \"overlayfs\"` in the CRI table of /etc/containerd/config.toml (the {} table for a version {} file), then run `systemctl restart containerd`. Existing images are not moved.",
-                    seen.config
-                        .as_ref()
-                        .map_or("io.containerd.grpc.v1.cri", |c| containerd::table_name(
-                            c.version
-                        )),
-                    seen.config.as_ref().map_or(2, |c| c.version)
-                ),
+                ContainerRuntime::Containerd => snapshotter_fix(seen, want),
                 _ => format!(
                     "Set `\"storage-driver\": \"{}\"` in /etc/docker/daemon.json, then run `systemctl restart docker`. Existing images are not moved.",
                     escape_untrusted(want)
@@ -498,6 +593,8 @@ fn observed(seen: &[Seen], kubelet: &Kubelet) -> Value {
                     Api::Read => "read",
                     Api::Denied => "permission denied",
                     Api::NotListening => "not listening",
+                    Api::Missing => "missing",
+                    Api::Silent => "no answer in time",
                     Api::Odd(_) => "unreadable reply",
                 },
                 "version": s.version,
@@ -584,9 +681,12 @@ pub(super) fn judge(
             ));
         }
     }
-    if let Some(why) = &kubelet.unreadable {
+    // When a runtime's driver is known, an unreadable kubelet config is a warning of that runtime. Without
+    // one, it is only a note.
+    let kubelet_compared = allowed.iter().any(|s| s.cgroup.is_some());
+    if let Some(why) = kubelet.unreadable.as_ref().filter(|_| !kubelet_compared) {
         notes.push(format!(
-            "The kubelet config {KUBELET_CONFIG} could not be read ({}), so the runtime's cgroup driver was not compared with the kubelet's.",
+            "The kubelet config {KUBELET_CONFIG} could not be read ({}), so no cgroup driver was compared with the kubelet's.",
             escape_untrusted(why)
         ));
     }
@@ -598,12 +698,19 @@ pub(super) fn judge(
             .iter()
             .map(|s| (*s, issues(check, s, kubelet)))
             .collect();
-        // The first runtime with the least severe worst issue. `min_by_key` keeps the first of equals.
+        // A hard issue (d_type) decides: the runtime that has it is not hidden by a good one. Otherwise the
+        // first runtime with the least severe worst issue; `min_by_key` keeps the first of equals.
         let best = results
             .iter()
-            .enumerate()
-            .min_by_key(|(_, (_, list))| severity(worst(list)))
-            .map_or(0, |(i, _)| i);
+            .position(|(_, list)| list.iter().any(|i| i.hard))
+            .or_else(|| {
+                results
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, (_, list))| severity(worst(list)))
+                    .map(|(i, _)| i)
+            })
+            .unwrap_or(0);
         for (i, (s, list)) in results.iter().enumerate() {
             if i != best && !list.is_empty() {
                 notes.push(format!("{}: {}", s.name(), sentences(list)));
@@ -630,13 +737,13 @@ pub(super) fn judge(
     }
 
     let denied = allowed.iter().any(|s| s.api == Api::Denied);
-    if !root && (denied || kubelet.unreadable.is_some()) {
+    if !root && (denied || (kubelet.unreadable.is_some() && kubelet_compared)) {
         let engine_api = allowed.iter().any(|s| {
             s.api == Api::Denied
                 && matches!(s.kind, ContainerRuntime::Docker | ContainerRuntime::Podman)
         });
         let note = if engine_api {
-            "Runtime present, API not readable; add the user to the docker group or run as root."
+            "Runtime present, API not readable; run rdy as root. Membership of the docker group is the same as root on this host."
         } else if denied {
             "Runtime present, socket not readable; run as root."
         } else {

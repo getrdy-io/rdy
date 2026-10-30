@@ -846,7 +846,7 @@ impl Backend for Replay {
         &'a self,
         socket: &'a Path,
         path: &'a str,
-        _timeout: Duration,
+        timeout: Duration,
     ) -> BoxFuture<'a, Result<UnixResponse, ProbeError>> {
         Box::pin(async move {
             // A socket the fixture marks unreadable (`root.manifest.json`), or one below an unreadable
@@ -856,6 +856,11 @@ impl Backend for Replay {
                 return Err(ProbeError::PermissionDenied);
             }
             let (reply, delay) = self.net.unix(socket, path)?;
+            // A server that answers after the limit is a timeout at the limit, as the live backend has it.
+            if delay >= timeout {
+                pause(timeout).await.map_err(|e| ProbeError::from_io(&e))?;
+                return Err(ProbeError::Timeout);
+            }
             pause(delay).await.map_err(|e| ProbeError::from_io(&e))?;
             Ok(reply)
         })

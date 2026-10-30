@@ -15,13 +15,12 @@
       ],
       "storage_driver": null
     },
-    "fix": "Add the user to the docker group with `usermod -aG docker USER` and log in again, or run rdy as root.",
+    "fix": "Run rdy as root. Adding the user to the docker group with `usermod -aG docker USER` also works. Membership of the docker group is the same as root on this host; running rdy as root once is the smaller grant. Run rdy as root, or check by hand that cgroupDriver in /var/lib/kubelet/config.yaml is systemd.",
     "level": "warn",
-    "message": "docker is present, but this user may not open its socket /var/run/docker.sock, so rdy could not read its settings.",
+    "message": "docker is present, but this user may not open its socket /var/run/docker.sock, so rdy could not read its settings. The kubelet config /var/lib/kubelet/config.yaml could not be read (permission denied), so the cgroup driver of docker was not compared with the kubelet's.",
     "notes": [
       "docker: values come from /etc/docker/daemon.json, not from the running daemon",
-      "docker has a proxy set in /etc/docker/daemon.json. Image pulls go through it, so check that it can reach the registry and that no_proxy lists the cluster addresses.",
-      "The kubelet config /var/lib/kubelet/config.yaml could not be read (permission denied), so the runtime's cgroup driver was not compared with the kubelet's."
+      "docker has a proxy set in /etc/docker/daemon.json. Image pulls go through it, so check that it can reach the registry and that no_proxy lists the cluster addresses."
     ],
     "observed": {
       "kubelet": {
@@ -57,7 +56,7 @@
       "missing": [
         "Root"
       ],
-      "note": "Runtime present, API not readable; add the user to the docker group or run as root."
+      "note": "Runtime present, API not readable; run rdy as root. Membership of the docker group is the same as root on this host."
     }
   }
 }

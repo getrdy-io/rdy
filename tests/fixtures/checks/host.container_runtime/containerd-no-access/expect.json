@@ -14,12 +14,10 @@
       ],
       "storage_driver": null
     },
-    "fix": "Run rdy as root, or as a user who may open the socket.",
+    "fix": "Run rdy as root, or as a user who may open the socket. Run rdy as root, or check by hand that cgroupDriver in /var/lib/kubelet/config.yaml is systemd.",
     "level": "warn",
-    "message": "containerd 1.7.13 is present, but this user may not open its socket /run/containerd/containerd.sock, so rdy could not read its settings.",
-    "notes": [
-      "The kubelet config /var/lib/kubelet/config.yaml could not be read (permission denied), so the runtime's cgroup driver was not compared with the kubelet's."
-    ],
+    "message": "containerd 1.7.13 is present, but this user may not open its socket /run/containerd/containerd.sock, so rdy could not read its settings. The kubelet config /var/lib/kubelet/config.yaml could not be read (permission denied), so the cgroup driver of containerd was not compared with the kubelet's.",
+    "notes": [],
     "observed": {
       "kubelet": {
         "cgroup_driver": null,
