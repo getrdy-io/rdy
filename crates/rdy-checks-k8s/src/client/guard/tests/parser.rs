@@ -1118,8 +1118,9 @@ fn the_citation_check_bites() {
     let both = [info("k8s.nodes")];
     let missing = uncited(all.iter().copied().chain(both));
     assert!(missing.is_empty());
-    let pending: BTreeSet<&str> = NOT_BUILT_YET.iter().copied().collect();
-    assert_ne!(missing, pending);
+    // With `k8s.nodes` both registered and pending, the missing set is empty and the pending set is not.
+    let synthetic_pending = BTreeSet::from(["k8s.nodes"]);
+    assert_ne!(missing, synthetic_pending);
     // An info for a check that ALLOWED does not cite is not an error.
     let extra = [info("k8s.access")];
     assert_eq!(uncited(extra), cited);

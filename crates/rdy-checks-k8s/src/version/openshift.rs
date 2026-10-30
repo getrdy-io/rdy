@@ -21,12 +21,34 @@ pub(super) struct ClusterVersion {
     newest: Option<String>,
     /// `status.history[0].state`: `Completed` once the update finished, `Partial` while it runs.
     state: Option<String>,
+    /// The version of the newest history entry whose state is `Completed`: what the cluster runs while an
+    /// update is moving it elsewhere.
+    completed: Option<String>,
 }
 
 impl ClusterVersion {
-    /// The version to judge: `desired.version`, or the newest history entry when `desired` is missing.
+    /// The version to judge. While an update runs, `desired.version` is where the cluster is going, not
+    /// what it runs, so the newest `Completed` history entry is judged. Otherwise `desired.version`, or the
+    /// newest history entry when `desired` is missing.
     pub(super) fn version(&self) -> Option<&str> {
+        if self.updating()
+            && let Some(done) = self.completed.as_deref()
+        {
+            return Some(done);
+        }
+        self.target()
+    }
+
+    /// The version the cluster is moving to or has reached: `desired.version`, else the newest entry.
+    pub(super) fn target(&self) -> Option<&str> {
         self.desired.as_deref().or(self.newest.as_deref())
+    }
+
+    /// While an update runs, the newest completed version: what the cluster runs now.
+    pub(super) fn updating_from(&self) -> Option<&str> {
+        self.updating()
+            .then_some(self.completed.as_deref())
+            .flatten()
     }
 
     /// True while an update is running (`Partial`), so the cluster may not yet run `desired`.
@@ -58,6 +80,15 @@ impl<'de> Deserialize<'de> for ClusterVersion {
             ),
             newest: text(newest.and_then(|entry| entry.get("version"))),
             state: text(newest.and_then(|entry| entry.get("state"))),
+            completed: status
+                .and_then(|status| status.get("history"))
+                .and_then(Value::as_array)
+                .and_then(|history| {
+                    history
+                        .iter()
+                        .find(|entry| entry.get("state").and_then(Value::as_str) == Some("Completed"))
+                })
+                .and_then(|entry| text(entry.get("version"))),
         })
     }
 }

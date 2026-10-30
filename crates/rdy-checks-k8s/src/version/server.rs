@@ -195,17 +195,23 @@ impl NodeFacts {
 
 /// Which distribution this is.
 ///
-/// Strongest evidence first: the OpenShift API group, then the suffix of `gitVersion`, then the labels
-/// that only one managed service sets, then the `kind` provider scheme. AKS has no suffix, so its label is
+/// Strongest evidence first: the OpenShift API group, then the suffix of `gitVersion` (`-eks-` needs a hex
+/// hash after it, `-gke.` needs a Google Cloud node), then the labels that only one managed service sets,
+/// then the `kind` provider scheme. AKS has no suffix, so its label is
 /// the only evidence. A plain version with an `aws://` provider is a self-managed cluster on AWS, not EKS.
 pub(super) fn detect(server: &Reported, openshift_group: bool, nodes: &[NodeFacts]) -> Distro {
     let suffix = server.suffix();
     let any = |test: fn(&NodeFacts) -> bool| nodes.iter().any(test);
+    // `-gke.` is also the suffix of other Google distributions (GKE on bare metal or VMware). With a node
+    // list, it counts only when a node says Google Cloud. With none (the list was not readable), the suffix
+    // is all there is.
+    let gke_suffix = suffix.starts_with("-gke.")
+        && (nodes.is_empty() || any(|node| node.cloud == Some("gcp") || node.gke_label));
     if openshift_group {
         Distro::OpenShift
-    } else if suffix.starts_with("-eks-") {
+    } else if is_eks_suffix(suffix) {
         Distro::Eks
-    } else if suffix.starts_with("-gke.") {
+    } else if gke_suffix {
         Distro::Gke
     } else if suffix.starts_with("+k3s") {
         Distro::K3s
@@ -222,6 +228,14 @@ pub(super) fn detect(server: &Reported, openshift_group: bool, nodes: &[NodeFact
     } else {
         Distro::Vanilla
     }
+}
+
+/// True for `-eks-` and a build hash (`-eks-c417bb3`). The distribution for machines you run yourself
+/// writes `-eks-1-29-5`, which is not Amazon EKS and gets no `aws eks` command.
+fn is_eks_suffix(suffix: &str) -> bool {
+    suffix.strip_prefix("-eks-").is_some_and(|hash| {
+        (6..=40).contains(&hash.len()) && hash.bytes().all(|b| b.is_ascii_hexdigit())
+    })
 }
 
 /// The cloud the nodes say they run on, if they agree on one rdy knows.

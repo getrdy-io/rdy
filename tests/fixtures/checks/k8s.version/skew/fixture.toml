@@ -1,7 +1,7 @@
 schema = 1
 name = "k8s-version-skew"
 summary = "1.29 with a kubelet five minors behind, one newer, one a minor behind and a virtual kubelet"
-origin = "hand"
+origin = "generated"
 os = "linux"
 arch = "x86_64"
 answers = ["k8s.version"]

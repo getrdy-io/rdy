@@ -1,7 +1,7 @@
 schema = 1
 name = "k8s-version-gke"
 summary = "GKE 1.26 with nodes that carry the node pool label"
-origin = "hand"
+origin = "generated"
 os = "linux"
 arch = "x86_64"
 answers = ["k8s.version"]

@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/config.openshift.io/v1/clusterversions/version"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "config.openshift.io/v1",
+    "kind": "ClusterVersion",
+    "metadata": {
+      "name": "version"
+    },
+    "status": {
+      "desired": {
+        "version": "4.15.2"
+      },
+      "history": [
+        {
+          "state": "Partial",
+          "version": "4.15.2",
+          "startedTime": "2026-01-02T00:00:00Z"
+        },
+        {
+          "state": "Completed",
+          "version": "4.14.9",
+          "startedTime": "2026-01-01T00:00:00Z",
+          "completionTime": "2026-01-01T01:00:00Z"
+        }
+      ]
+    }
+  }
+}

@@ -1,7 +1,7 @@
 schema = 1
 name = "k8s-version-unreadable-version"
 summary = "A server whose version text is not a Kubernetes version"
-origin = "hand"
+origin = "generated"
 os = "linux"
 arch = "x86_64"
 answers = ["k8s.version"]

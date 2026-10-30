@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use rdy_engine::probe::Probe;
 
-use crate::client::{Connected, ReadOnlyClient, ServerVersion};
+use crate::client::{Connected, KubeError, ReadOnlyClient, ServerVersion, from_kube_error};
 
 /// The connected cluster, as a k8s check sees it.
 ///
@@ -21,6 +21,14 @@ pub trait Cluster: Send + Sync + 'static {
     /// The read-only client for one check. `probe` is the check's own probe (`CheckContext::probe`): every
     /// request the client sends is logged under that check's id and goes through the guard (INV-14).
     fn read_only(&self, probe: &Probe) -> ReadOnlyClient;
+
+    /// Sorts an error of a request of this cluster, with what the connection knows: the server, the
+    /// credential plugin, a proxy variable and a CA setting, so the fix hint can name them (02, "Errors").
+    ///
+    /// The default knows none of that. A test double may keep it.
+    fn map_error(&self, error: &kube::Error) -> KubeError {
+        from_kube_error(error, "the API server", None, false, false)
+    }
 }
 
 impl Cluster for Connected {
@@ -31,6 +39,10 @@ impl Cluster for Connected {
     fn read_only(&self, probe: &Probe) -> ReadOnlyClient {
         Connected::read_only(self, probe)
     }
+
+    fn map_error(&self, error: &kube::Error) -> KubeError {
+        Connected::map_error(self, error)
+    }
 }
 
 impl<T: Cluster + ?Sized> Cluster for Arc<T> {
@@ -40,5 +52,9 @@ impl<T: Cluster + ?Sized> Cluster for Arc<T> {
 
     fn read_only(&self, probe: &Probe) -> ReadOnlyClient {
         (**self).read_only(probe)
+    }
+
+    fn map_error(&self, error: &kube::Error) -> KubeError {
+        (**self).map_error(error)
     }
 }

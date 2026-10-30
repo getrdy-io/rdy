@@ -1,7 +1,7 @@
 schema = 1
 name = "k8s-version-eks"
 summary = "EKS 1.29 with the APIs a product needs served and one kubelet a minor behind"
-origin = "hand"
+origin = "generated"
 os = "linux"
 arch = "x86_64"
 answers = ["k8s.version"]

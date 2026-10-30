@@ -1,7 +1,7 @@
 schema = 1
 name = "k8s-version-aks"
 summary = "AKS 1.29: the version has no suffix and the nodes carry the AKS cluster label"
-origin = "hand"
+origin = "generated"
 os = "linux"
 arch = "x86_64"
 answers = ["k8s.version"]

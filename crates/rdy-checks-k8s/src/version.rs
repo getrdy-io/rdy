@@ -21,9 +21,15 @@
 //!   parts they share, so `max: "1.31"` accepts every 1.31 patch.
 //! - On an OpenShift cluster with `openshift_min` set, the OpenShift version is judged against it and `min`
 //!   is not applied: `min` is a Kubernetes version, and OpenShift 4.14 reports Kubernetes 1.27. `max` still
-//!   applies to the Kubernetes version. Off OpenShift, `openshift_min` does not apply.
+//!   applies to the Kubernetes version. Off OpenShift, `openshift_min` does not apply. When the group list
+//!   cannot be read, the `ClusterVersion` settles it: an object means OpenShift, a 404 means not. When that
+//!   cannot be read either, `openshift_min` is unverified (partial) and `min` is still not applied.
+//! - During an OpenShift update the version judged is the newest completed one, not the one it moves to.
+//! - A `min` or `openshift_min` with a patch needs the patch to be known: a server that reports only
+//!   `major` and `minor` leaves it unverified (partial).
 //! - Every API in `apis` must be served, or the result blocks.
-//! - A kubelet more than three minors behind the API server, or newer than it, warns.
+//! - A kubelet more than three minors behind the API server (two, for a kubelet older than 1.25), or newer
+//!   than it, warns.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -40,7 +46,6 @@ use rdy_engine::text::escape_untrusted;
 use rdy_spec::check::{ApiRef, K8sVersion, OverMax};
 use serde_json::{Map, Value, json};
 
-use crate::client::from_kube_error;
 use crate::client::guard::RULE_PATH_SHAPE;
 use crate::client::{KubeError, ReadOnlyClient};
 use crate::cluster::Cluster;
@@ -66,9 +71,6 @@ const SHOWN: usize = 64;
 
 /// How many nodes or APIs a sentence lists before it counts the rest.
 const LISTED: usize = 3;
-
-/// What the check says about the server in an error from the API.
-const SERVER: &str = "the API server";
 
 /// The static facts about `k8s.version` (03 section 4).
 pub(crate) static INFO: CheckInfo = CheckInfo {
@@ -168,20 +170,45 @@ impl<T> Read<T> {
     }
 }
 
+/// How a failed request becomes a [`KubeError`]: `Cluster::map_error`, which knows the connection.
+type Mapper<'a> = &'a (dyn Fn(&kube::Error) -> KubeError + Sync);
+
 /// Sorts the error of one request. A refusal by the server for this identity or a missing object is an
 /// answer. Anything else (the network, the credentials, the guard) fails the check.
 fn read<T, U>(
+    mapper: Mapper<'_>,
     result: Result<T, kube::Error>,
     map: impl FnOnce(T) -> U,
 ) -> Result<Read<U>, CheckError> {
+    sort(mapper, result, map, false)
+}
+
+/// [`read`] for a discovery document of a group version. A group or version that cannot be one (the guard
+/// refuses its path shape before sending) is not served, so it reads as missing. Only these two routes get
+/// that reading: a shape refusal of any other request is a bug of rdy and fails the check.
+fn read_discovery<T, U>(
+    mapper: Mapper<'_>,
+    result: Result<T, kube::Error>,
+    map: impl FnOnce(T) -> U,
+) -> Result<Read<U>, CheckError> {
+    sort(mapper, result, map, true)
+}
+
+fn sort<T, U>(
+    mapper: Mapper<'_>,
+    result: Result<T, kube::Error>,
+    map: impl FnOnce(T) -> U,
+    shape_is_missing: bool,
+) -> Result<Read<U>, CheckError> {
     match result {
         Ok(value) => Ok(Read::Ok(map(value))),
-        Err(error) => match from_kube_error(&error, SERVER, None, false, false) {
+        Err(error) => match mapper(&error) {
             KubeError::Forbidden { .. } => Ok(Read::Forbidden),
             KubeError::Api { code: 404, .. } => Ok(Read::Missing),
             KubeError::Api { code, .. } => Ok(Read::Unreadable(code)),
-            // A group or version that cannot be one: it is not served.
-            KubeError::Refused { rule, .. } if rule == RULE_PATH_SHAPE => Ok(Read::Missing),
+            KubeError::Refused { rule, .. } if shape_is_missing && rule == RULE_PATH_SHAPE => {
+                Ok(Read::Missing)
+            }
             other => Err(CheckError::Failed {
                 message: other.to_string(),
                 hint: other.hint(),
@@ -207,7 +234,9 @@ struct Gathered {
     server: Option<Reported>,
     /// The groups and their versions from `/apis`.
     groups: Read<Vec<(String, Vec<String>)>>,
-    /// The `ClusterVersion`, read only where the OpenShift group exists.
+    /// Whether this is OpenShift.
+    openshift: Openshift,
+    /// The `ClusterVersion`, read only when the spec has `openshift_min` and this may be OpenShift.
     cluster_version: Option<Read<ClusterVersion>>,
     /// The first page of nodes, and whether there were more.
     nodes: Read<(Vec<NodeFacts>, bool)>,
@@ -215,53 +244,75 @@ struct Gathered {
     apis: Vec<(ApiRef, Served)>,
 }
 
-impl Gathered {
-    fn openshift_group(&self) -> bool {
-        self.groups
-            .ok()
-            .is_some_and(|groups| groups.iter().any(|(name, _)| name == "config.openshift.io"))
-    }
+/// Whether the cluster is OpenShift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Openshift {
+    Yes,
+    No,
+    /// The group list could not be read, and the `ClusterVersion` either was not asked for or could not
+    /// be read.
+    Unknown,
 }
 
 impl VersionCheck {
     async fn gather(&self, ctx: &CheckContext) -> Result<Gathered, CheckError> {
         let client = self.cluster.read_only(ctx.probe());
+        let mapper = |error: &kube::Error| self.cluster.map_error(error);
         let reported = self.cluster.server_version();
         let server = Reported::parse(&reported.git_version)
             .or_else(|| Reported::from_major_minor(&reported.major, &reported.minor));
         if server.is_none() {
-            // Nothing can be compared with the spec, so nothing more is asked of the cluster.
+            // The version cannot be compared with the spec. An API that is not served still blocks, so the
+            // APIs are asked for. Nothing else is.
+            let (groups, apis) = match &self.params.apis {
+                Some(wanted) => {
+                    let groups = read_groups(&mapper, &client).await?;
+                    let apis = served(&mapper, &client, ctx, &groups, wanted).await?;
+                    (groups, apis)
+                }
+                None => (Read::Missing, Vec::new()),
+            };
             return Ok(Gathered {
                 reported: reported.git_version.clone(),
                 server,
-                groups: Read::Missing,
+                groups,
+                openshift: Openshift::Unknown,
                 cluster_version: None,
                 nodes: Read::Missing,
-                apis: Vec::new(),
+                apis,
             });
         }
 
-        let groups = read(client.api_groups().await, |list| {
-            list.groups
-                .into_iter()
-                .map(|group| {
-                    let versions = group.versions.into_iter().map(|v| v.version).collect();
-                    (group.name, versions)
-                })
-                .collect::<Vec<(String, Vec<String>)>>()
-        })?;
-        let openshift = groups
-            .ok()
-            .is_some_and(|groups| groups.iter().any(|(name, _)| name == "config.openshift.io"));
-        let cluster_version = if openshift {
-            Some(read(
+        let groups = read_groups(&mapper, &client).await?;
+        let mut openshift = match groups.ok() {
+            Some(groups) if groups.iter().any(|(name, _)| name == "config.openshift.io") => {
+                Openshift::Yes
+            }
+            Some(_) => Openshift::No,
+            None => Openshift::Unknown,
+        };
+        // The ClusterVersion is read only for `openshift_min`. When the group list could not be read, it
+        // also settles whether this is OpenShift: an object says yes and a 404 says no.
+        let cluster_version = if self.params.openshift_min.is_some() && openshift != Openshift::No
+        {
+            let version = read(
+                &mapper,
                 client.all::<ClusterVersion>().get("version").await,
                 |version| version,
-            )?)
+            )?;
+            if openshift == Openshift::Unknown {
+                openshift = match version {
+                    Read::Ok(_) => Openshift::Yes,
+                    Read::Missing => Openshift::No,
+                    _ => Openshift::Unknown,
+                };
+            }
+            Some(version)
         } else {
             None
         };
         let nodes = read(
+            &mapper,
             client
                 .all::<Node>()
                 .list(&ListParams::default().limit(NODE_PAGE))
@@ -276,13 +327,14 @@ impl VersionCheck {
             },
         )?;
         let apis = match &self.params.apis {
-            Some(wanted) => served(&client, ctx, &groups, wanted).await?,
+            Some(wanted) => served(&mapper, &client, ctx, &groups, wanted).await?,
             None => Vec::new(),
         };
         Ok(Gathered {
             reported: reported.git_version.clone(),
             server,
             groups,
+            openshift,
             cluster_version,
             nodes,
             apis,
@@ -290,8 +342,25 @@ impl VersionCheck {
     }
 }
 
+/// `GET /apis`: the group names and their versions.
+async fn read_groups(
+    mapper: Mapper<'_>,
+    client: &ReadOnlyClient,
+) -> Result<Read<Vec<(String, Vec<String>)>>, CheckError> {
+    read(mapper, client.api_groups().await, |list| {
+        list.groups
+            .into_iter()
+            .map(|group| {
+                let versions = group.versions.into_iter().map(|v| v.version).collect();
+                (group.name, versions)
+            })
+            .collect::<Vec<(String, Vec<String>)>>()
+    })
+}
+
 /// Asks discovery about each API, once per group version.
 async fn served(
+    mapper: Mapper<'_>,
     client: &ReadOnlyClient,
     ctx: &CheckContext,
     groups: &Read<Vec<(String, Vec<String>)>>,
@@ -311,10 +380,14 @@ async fn served(
         }
         if !kinds.contains_key(&key) {
             let listed = match &key.0 {
-                None => read(client.core_resources(&key.1).await, resource_kinds)?,
+                None => read_discovery(mapper, client.core_resources(&key.1).await, resource_kinds)?,
                 // `/apis` already says the group version does not exist: no request needed.
                 Some(group) if absent(groups, group, &key.1) => Read::Missing,
-                Some(group) => read(client.group_resources(group, &key.1).await, resource_kinds)?,
+                Some(group) => read_discovery(
+                    mapper,
+                    client.group_resources(group, &key.1).await,
+                    resource_kinds,
+                )?,
             };
             kinds.insert(key.clone(), listed);
         }
@@ -374,7 +447,8 @@ fn rank(level: Level) -> u8 {
 fn shown(text: &str) -> String {
     let mut chars = text.chars();
     let head: String = chars.by_ref().take(SHOWN).collect();
-    let mut out = escape_untrusted(&head);
+    // A backtick would let the text open a command span in the sentence around it.
+    let mut out = escape_untrusted(&head).replace('`', "'");
     if chars.next().is_some() {
         out.push_str("...");
     }
@@ -402,7 +476,7 @@ fn judge(params: &K8sVersion, facts: &Gathered) -> Finding {
     };
     let distro = detect(
         server,
-        facts.openshift_group(),
+        facts.openshift == Openshift::Yes,
         facts
             .nodes
             .ok()
@@ -413,27 +487,31 @@ fn judge(params: &K8sVersion, facts: &Gathered) -> Finding {
     let mut unverified: Vec<String> = Vec::new();
     let mut grants: Vec<String> = Vec::new();
 
-    // OpenShift: the OpenShift version against `openshift_min`, and `min` is left to non-OpenShift clusters.
-    let on_openshift = distro == Distro::OpenShift;
+    // OpenShift: the OpenShift version against `openshift_min`, and `min` is left to clusters that are not
+    // OpenShift. When rdy cannot tell, `min` is not applied either: it could block on a Kubernetes version
+    // that is not the one the vendor means.
     let openshift_version = facts
         .cluster_version
         .as_ref()
         .and_then(Read::ok)
         .and_then(|version| version.version())
         .map(str::to_owned);
-    let judged_on_openshift = on_openshift && params.openshift_min.is_some();
+    let judged_on_openshift = params.openshift_min.is_some() && facts.openshift != Openshift::No;
     if judged_on_openshift && params.min.is_some() {
-        notes.push(
+        notes.push(if facts.openshift == Openshift::Yes {
             "min is a Kubernetes version and is not applied here: this cluster is OpenShift, judged on openshift_min."
-                .to_owned(),
-        );
+                .to_owned()
+        } else {
+            "min is a Kubernetes version and is not applied here: rdy could not tell whether this cluster is OpenShift, and openshift_min is judged instead."
+                .to_owned()
+        });
     }
-    if let (true, Some(need)) = (on_openshift, &params.openshift_min) {
+    if let (true, Some(need)) = (judged_on_openshift, &params.openshift_min) {
         match (&facts.cluster_version, &openshift_version) {
             (Some(Read::Ok(version)), Some(have)) => {
                 match parse_openshift(have) {
-                    Some(parts) if compare(&parts, need.components()) == Ordering::Less => {
-                        problems.push(Problem {
+                    Some(parts) => match compare(&parts, need.components()) {
+                        Ordering::Less => problems.push(Problem {
                             level: Level::Fail,
                             text: format!(
                                 "OpenShift {} is older than the {} minimum (Kubernetes {})",
@@ -441,25 +519,44 @@ fn judge(params: &K8sVersion, facts: &Gathered) -> Finding {
                                 need.as_str(),
                                 shown(&facts.reported)
                             ),
-                            fix: fix::below_openshift_min(&shown(have), need.components()),
-                        });
-                    }
-                    Some(_) => {}
+                            // The numbers rdy parsed, never the text the server sent.
+                            fix: fix::below_openshift_min(&dotted(&parts), need.components()),
+                        }),
+                        Ordering::Equal if parts.len() < need.components().len() => {
+                            unverified.push(format!(
+                                "openshift_min {} was not checked to the patch: OpenShift reports only {}",
+                                need.as_str(),
+                                dotted(&parts)
+                            ));
+                        }
+                        _ => {}
+                    },
                     None => unverified.push(format!(
-                        "OpenShift reports the version `{}`, which rdy cannot read",
+                        "OpenShift reports the version '{}', which rdy cannot read",
                         shown(have)
                     )),
                 }
                 if version.updating() {
-                    notes.push(
-                        "An OpenShift update is running. The version is the one it is moving to."
+                    notes.push(match (version.updating_from(), version.target()) {
+                        (Some(from), Some(to)) => format!(
+                            "An OpenShift update is running, from {} to {}. The version judged is {}, the last completed one.",
+                            shown(from),
+                            shown(to),
+                            shown(from)
+                        ),
+                        _ => "An OpenShift update is running and no completed version is recorded. The version is the one it is moving to."
                             .to_owned(),
-                    );
+                    });
                 }
             }
             (Some(other), _) => {
+                let unknown = if facts.openshift == Openshift::Unknown {
+                    ", and the group list could not be read, so rdy cannot tell whether this is OpenShift"
+                } else {
+                    ""
+                };
                 unverified.push(format!(
-                    "openshift_min was not checked: the ClusterVersion could not be read ({})",
+                    "openshift_min was not checked: the ClusterVersion could not be read ({}){unknown}",
                     match other {
                         Read::Ok(_) => "it names no version".to_owned(),
                         other => other.why(),
@@ -471,18 +568,28 @@ fn judge(params: &K8sVersion, facts: &Gathered) -> Finding {
             }
             (None, _) => {}
         }
-    } else if let Some(min) = &params.min
-        && compare(server.parts(), min.components()) == Ordering::Less
-    {
-        problems.push(Problem {
-            level: Level::Fail,
-            text: format!(
-                "Server {} is older than the {} minimum",
-                shown(&facts.reported),
-                min.as_str()
-            ),
-            fix: fix::below_min(distro, server, min.components()),
-        });
+    } else if let Some(min) = &params.min {
+        match compare(server.parts(), min.components()) {
+            Ordering::Less => problems.push(Problem {
+                level: Level::Fail,
+                text: format!(
+                    "Server {} is older than the {} minimum",
+                    shown(&facts.reported),
+                    min.as_str()
+                ),
+                fix: fix::below_min(distro, server, min.components()),
+            }),
+            // `max` accepts a server whose patch is unknown (it compares the parts both have). `min` does
+            // not: a bound with a patch needs the patch to be known.
+            Ordering::Equal if server.parts().len() < min.components().len() => {
+                unverified.push(format!(
+                    "min {} was not checked to the patch: the server reported only {}",
+                    min.as_str(),
+                    server.dotted()
+                ));
+            }
+            _ => {}
+        }
     }
 
     if let Some(max) = &params.max
@@ -522,40 +629,8 @@ fn judge(params: &K8sVersion, facts: &Gathered) -> Finding {
     }
 
     // APIs.
-    let missing: Vec<&ApiRef> = facts
-        .apis
-        .iter()
-        .filter(|(_, state)| *state == Served::No)
-        .map(|(api, _)| api)
-        .collect();
-    if !missing.is_empty() {
-        let names: Vec<String> = missing.iter().map(|api| apis::show(api)).collect();
-        let text = if let [only] = names.as_slice() {
-            format!("{only} is not served")
-        } else {
-            format!(
-                "{} required APIs are not served: {}",
-                names.len(),
-                listed(&names)
-            )
-        };
-        let fix = missing
-            .iter()
-            .take(LISTED)
-            .map(|api| apis::why_missing(api, Some(server.minor())))
-            .collect::<Vec<_>>()
-            .join(" ");
-        problems.push(Problem {
-            level: Level::Fail,
-            text,
-            fix,
-        });
-    }
-    for (api, state) in &facts.apis {
-        if let Served::Unknown(why) = state {
-            unverified.push(format!("{} was not checked: {why}", apis::show(api)));
-        }
-    }
+    problems.extend(api_problem(facts, Some(server.minor())));
+    unverified.extend(api_unverified(facts));
     if !matches!(facts.groups, Read::Ok(_)) && !facts.apis.is_empty() {
         notes.push(format!(
             "The group list could not be read ({}), so every API was asked for one by one.",
@@ -606,6 +681,52 @@ fn judge(params: &K8sVersion, facts: &Gathered) -> Finding {
     finding.with_observed(observed).with_expected(expected)
 }
 
+/// The problem of the spec's APIs that the server does not serve, if any. `minor` is the server's.
+fn api_problem(facts: &Gathered, minor: Option<u32>) -> Option<Problem> {
+    let missing: Vec<&ApiRef> = facts
+        .apis
+        .iter()
+        .filter(|(_, state)| *state == Served::No)
+        .map(|(api, _)| api)
+        .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let names: Vec<String> = missing.iter().map(|api| apis::show(api)).collect();
+    let text = if let [only] = names.as_slice() {
+        format!("{only} is not served")
+    } else {
+        format!(
+            "{} required APIs are not served: {}",
+            names.len(),
+            listed(&names)
+        )
+    };
+    let fix = missing
+        .iter()
+        .take(LISTED)
+        .map(|api| apis::why_missing(api, minor))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(Problem {
+        level: Level::Fail,
+        text,
+        fix,
+    })
+}
+
+/// One phrase for each API that discovery could not judge.
+fn api_unverified(facts: &Gathered) -> Vec<String> {
+    facts
+        .apis
+        .iter()
+        .filter_map(|(api, state)| match state {
+            Served::Unknown(why) => Some(format!("{} was not checked: {why}", apis::show(api))),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The finding when nothing is wrong.
 fn pass_message(
     params: &K8sVersion,
@@ -613,10 +734,9 @@ fn pass_message(
     judged_on_openshift: bool,
     openshift_version: Option<&str>,
 ) -> Finding {
-    let on_openshift = facts.openshift_group();
     // The spec holds only `openshift_min` and this is not OpenShift: nothing applies.
     if params.openshift_min.is_some()
-        && !on_openshift
+        && facts.openshift == Openshift::No
         && params.min.is_none()
         && params.max.is_none()
         && params.apis.is_none()
@@ -659,7 +779,12 @@ fn pass_message(
     Finding::pass(message)
 }
 
-/// Kubelets more than three minors behind the API server, or newer than it.
+/// How many minors a kubelet may be behind the API server: three, and two for a kubelet older than 1.25.
+fn skew_limit(kubelet: &Reported) -> u32 {
+    if kubelet.minor() < 25 { 2 } else { 3 }
+}
+
+/// Kubelets further behind the API server than Kubernetes supports, or newer than it.
 fn skew(server: &Reported, nodes: &[NodeFacts]) -> Option<Problem> {
     let mut behind: Vec<String> = Vec::new();
     let mut ahead: Vec<String> = Vec::new();
@@ -673,14 +798,16 @@ fn skew(server: &Reported, nodes: &[NodeFacts]) -> Option<Problem> {
         let label = format!("{} ({})", shown(&node.name), kubelet.dotted());
         match server.minor().cmp(&kubelet.minor()) {
             Ordering::Less => ahead.push(label),
-            Ordering::Greater if server.minor() - kubelet.minor() > 3 => behind.push(label),
+            Ordering::Greater if server.minor() - kubelet.minor() > skew_limit(kubelet) => {
+                behind.push(label);
+            }
             _ => {}
         }
     }
     let mut texts = Vec::new();
     if !behind.is_empty() {
         texts.push(format!(
-            "{} {} more than three minors behind the API server: {}",
+            "{} {} too far behind the API server: {}",
             behind.len(),
             if behind.len() == 1 {
                 "kubelet is"
@@ -710,18 +837,35 @@ fn skew(server: &Reported, nodes: &[NodeFacts]) -> Option<Problem> {
 }
 
 /// The result when the server's version text cannot be read as a Kubernetes version.
+///
+/// Nothing can be compared with `min`, `max` or `openshift_min`, so the result is a partial warning. An API
+/// that the server does not serve is still known, and still blocks.
 fn unreadable(params: &K8sVersion, facts: &Gathered) -> Finding {
-    Finding::warn(format!(
+    let said = format!(
         "The server reported the version `{}`, which rdy cannot read as a Kubernetes version",
         shown(&facts.reported)
-    ))
-    .with_partial(Partial::new(
-        Vec::new(),
-        "the server version could not be compared with the spec",
-    ))
-    .with_observed(json!({"git_version": shown(&facts.reported)}))
-    .with_expected(expected(params))
-    .with_fix("Run `kubectl version` and check that it shows a version such as v1.29.4. Tell the vendor which distribution this is.")
+    );
+    let fix = "Run `kubectl version` and check that it shows a version such as v1.29.4. Tell the vendor which distribution this is.";
+    let mut note = "the server version could not be compared with the spec".to_owned();
+    for unverified in api_unverified(facts) {
+        note.push_str("; ");
+        note.push_str(&unverified);
+    }
+    let mut observed = Map::new();
+    observed.insert("git_version".into(), json!(shown(&facts.reported)));
+    if let Some(apis) = observed_apis(facts) {
+        observed.insert("apis".into(), apis);
+    }
+    let finding = match api_problem(facts, None) {
+        Some(problem) => Finding::new(Level::Fail, problem.text)
+            .with_note(said)
+            .with_fix(format!("{} {fix}", problem.fix)),
+        None => Finding::warn(said).with_fix(fix),
+    };
+    finding
+        .with_partial(Partial::new(Vec::new(), note))
+        .with_observed(Value::Object(observed))
+        .with_expected(expected(params))
 }
 
 fn observed(
@@ -750,22 +894,30 @@ fn observed(
     if let Some(version) = openshift_version {
         map.insert("openshift_version".into(), json!(shown(version)));
     }
-    if !facts.apis.is_empty() {
-        let apis: Vec<Value> = facts
-            .apis
-            .iter()
-            .map(|(api, state)| {
-                let served = match state {
-                    Served::Yes => Value::Bool(true),
-                    Served::No => Value::Bool(false),
-                    Served::Unknown(_) => Value::Null,
-                };
-                json!({"api": apis::show(api), "served": served})
-            })
-            .collect();
-        map.insert("apis".into(), Value::Array(apis));
+    if let Some(apis) = observed_apis(facts) {
+        map.insert("apis".into(), apis);
     }
     Value::Object(map)
+}
+
+/// The spec's APIs and whether each is served (`null` when discovery could not say), in the spec's order.
+fn observed_apis(facts: &Gathered) -> Option<Value> {
+    if facts.apis.is_empty() {
+        return None;
+    }
+    let apis: Vec<Value> = facts
+        .apis
+        .iter()
+        .map(|(api, state)| {
+            let served = match state {
+                Served::Yes => Value::Bool(true),
+                Served::No => Value::Bool(false),
+                Served::Unknown(_) => Value::Null,
+            };
+            json!({"api": apis::show(api), "served": served})
+        })
+        .collect();
+    Some(Value::Array(apis))
 }
 
 /// The effective thresholds: what the spec set, and `over_max` only where `max` is set.

@@ -229,10 +229,20 @@ async fn on_openshift_openshift_min_replaces_min_and_min_alone_still_applies() {
         "{:?}",
         both.notes
     );
-    // With no openshift_min, min is a Kubernetes bound and blocks.
-    let only_min = rig.finding(json!({"min": "1.28"})).await;
+    // With no openshift_min, min is a Kubernetes bound and blocks. The ClusterVersion is not asked for.
+    let alone = self::rig("openshift");
+    let only_min = alone.finding(json!({"min": "1.28"})).await;
     assert_eq!(only_min.level, Level::Fail);
     assert!(only_min.fix.expect("fix").contains("oc adm upgrade"));
+    assert!(
+        !alone
+            .paths()
+            .iter()
+            .any(|path| path.contains("clusterversions")),
+        "{:?}",
+        alone.paths()
+    );
+    alone.audit();
     // max still applies to the Kubernetes version.
     let max = rig
         .finding(json!({"openshift_min": "4.14", "max": "1.26"}))
@@ -342,6 +352,114 @@ async fn missing_apis_say_why() {
     rig.audit();
 }
 
+#[tokio::test]
+async fn an_openshift_update_in_progress_is_judged_on_the_last_completed_version() {
+    let rig = rig("openshift-updating");
+    // The cluster runs 4.14.9 and is moving to 4.15.2: a 4.15 minimum is not met yet.
+    let finding = rig.finding(json!({"openshift_min": "4.15"})).await;
+    assert_eq!(finding.level, Level::Fail);
+    assert_eq!(
+        finding.message,
+        "OpenShift 4.14.9 is older than the 4.15 minimum (Kubernetes v1.28.5+3f8e0c1)"
+    );
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|note| note.contains("An OpenShift update is running, from 4.14.9 to 4.15.2")),
+        "{:?}",
+        finding.notes
+    );
+    let pass = rig.finding(json!({"openshift_min": "4.14"})).await;
+    assert_eq!(pass.level, Level::Pass);
+    assert_eq!(pass.observed["openshift_version"], "4.14.9");
+    rig.audit();
+}
+
+// ---- a group list the identity may not read -------------------------------------------------------------------
+
+#[tokio::test]
+async fn an_unreadable_group_list_still_finds_openshift_through_the_cluster_version() {
+    let rig = rig("apis-unreadable-openshift");
+    // Kubernetes 1.27 is below min 1.28, but this is OpenShift 4.14, so only openshift_min applies.
+    let finding = rig
+        .finding(json!({"min": "1.28", "openshift_min": "4.14"}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert_eq!(finding.observed["distribution"], "openshift");
+    assert_eq!(finding.observed["openshift_version"], "4.14.9");
+    assert!(
+        finding.notes.iter().any(|note| note.contains("not applied")),
+        "{:?}",
+        finding.notes
+    );
+    let old = rig.finding(json!({"openshift_min": "4.15"})).await;
+    assert_eq!(old.level, Level::Fail);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn an_unreadable_group_list_and_cluster_version_leave_min_unapplied_and_partial() {
+    let rig = rig("apis-unreadable-forbidden");
+    // 1.27 is below min 1.28. rdy cannot tell whether this is OpenShift, so it does not block on min.
+    let finding = rig
+        .finding(json!({"min": "1.28", "openshift_min": "4.14"}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "nothing was measured as failing");
+    let partial = finding.partial.as_ref().expect("partial");
+    assert!(
+        partial.note.contains("openshift_min was not checked")
+            && partial.note.contains("cannot tell whether this is OpenShift"),
+        "{}",
+        partial.note
+    );
+    assert_eq!(
+        partial.missing_grants,
+        ["get clusterversions.config.openshift.io/version"]
+    );
+    let result = map_outcome(
+        &INFO,
+        &CheckSpec::new("k8s.version"),
+        &rig.ctx,
+        Ok(finding),
+        0,
+        0,
+    );
+    assert_eq!(result.status, Status::Warn);
+    // The requests: the group list, the ClusterVersion, the nodes.
+    assert_eq!(
+        rig.paths(),
+        [
+            "/apis",
+            "/apis/config.openshift.io/v1/clusterversions/version",
+            "/api/v1/nodes"
+        ]
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn an_unreadable_group_list_and_no_cluster_version_is_not_openshift_and_min_applies() {
+    let rig = rig("apis-unreadable-vanilla");
+    let finding = rig
+        .finding(json!({"min": "1.28", "openshift_min": "4.14"}))
+        .await;
+    assert_eq!(finding.level, Level::Fail);
+    assert_eq!(
+        finding.message,
+        "Server v1.27.4 is older than the 1.28 minimum"
+    );
+    assert_eq!(finding.observed["distribution"], "vanilla");
+    assert!(finding.partial.is_none(), "{:?}", finding.partial);
+    // Without openshift_min the ClusterVersion is not asked for at all.
+    let plain = self::rig("apis-unreadable-vanilla");
+    let finding = plain.finding(json!({"min": "1.28"})).await;
+    assert_eq!(finding.level, Level::Fail);
+    assert_eq!(plain.paths(), ["/apis", "/api/v1/nodes"]);
+    plain.audit();
+    rig.audit();
+}
+
 // ---- the nodes ------------------------------------------------------------------------------------------------
 
 #[tokio::test]
@@ -374,9 +492,11 @@ async fn a_kubelet_far_behind_or_ahead_warns_and_a_virtual_kubelet_is_left_out()
     assert_eq!(finding.level, Level::Warn);
     assert_eq!(
         finding.message,
-        "1 kubelet is more than three minors behind the API server: acme-old-1 (1.24.3); 1 kubelet is newer than the API server: acme-new-1 (1.30.0)"
+        "1 kubelet is too far behind the API server: acme-old-1 (1.24.3); 1 kubelet is newer than the API server: acme-new-1 (1.30.0)"
     );
-    assert!(finding.fix.expect("fix").contains("never newer"));
+    let fix = finding.fix.expect("fix");
+    assert!(fix.contains("never newer"), "{fix}");
+    assert!(fix.contains("several API servers"), "{fix}");
     // 1.26 is three minors behind 1.29: allowed. The virtual kubelet does not count.
     assert!(!finding.message.contains("acme-edge-1"));
     assert!(!finding.message.contains("acme-virtual-1"));
@@ -444,7 +564,7 @@ async fn gke_below_min_gets_the_gke_command() {
     assert_eq!(
         finding.fix.as_deref(),
         Some(
-            "Cluster is 1.26.9, product needs 1.28 or newer. Run `gcloud container clusters upgrade <cluster> --master --cluster-version 1.28`, then upgrade the node pools."
+            "Cluster is 1.26.9, product needs 1.28 or newer. GKE moves the control plane one minor at a time. Find the 1.27 version with `gcloud container get-server-config --location=<location>`, then run `gcloud container clusters upgrade <cluster> --master --location=<location> --cluster-version <the 1.27 version>`, wait for it to finish, then repeat for 1.28. Then upgrade the node pools."
         )
     );
     rig.audit();
@@ -457,7 +577,9 @@ async fn eks_below_min_lists_the_minors_one_at_a_time() {
     assert_eq!(finding.level, Level::Fail);
     let fix = finding.fix.expect("fix");
     assert!(
-        fix.contains("`aws eks update-cluster-version --name <cluster> --kubernetes-version 1.30`"),
+        fix.contains(
+            "`aws eks update-cluster-version --region <region> --name <cluster> --kubernetes-version 1.30`"
+        ),
         "{fix}"
     );
     assert!(fix.contains("then repeat for 1.31"), "{fix}");
@@ -534,6 +656,46 @@ async fn a_version_text_that_is_not_kubernetes_warns_and_is_partial() {
     assert_eq!(finding.observed, json!({"git_version": "acme-build-7"}));
     // Nothing can be compared, so the cluster is not asked for anything more.
     assert!(rig.paths().is_empty());
+    rig.audit();
+}
+
+#[tokio::test]
+async fn an_unreadable_version_still_blocks_on_an_api_the_server_does_not_serve() {
+    let rig = rig("unreadable-version");
+    // `/apis` lists autoscaling v2 and v1, so v2beta2 is not served: a block that needs no version.
+    let finding = rig
+        .finding(json!({"min": "1.28", "apis": [
+            "autoscaling/v2beta2 HorizontalPodAutoscaler"
+        ]}))
+        .await;
+    assert_eq!(finding.level, Level::Fail);
+    assert_eq!(
+        finding.message,
+        "autoscaling/v2beta2 HorizontalPodAutoscaler is not served"
+    );
+    assert!(finding.partial.is_some(), "the version was not compared");
+    assert!(
+        finding.notes.iter().any(|note| note.contains("acme-build-7")),
+        "{:?}",
+        finding.notes
+    );
+    let fix = finding.fix.clone().expect("fix");
+    assert!(
+        fix.contains("\"autoscaling/v2beta2 HorizontalPodAutoscaler\" is not served"),
+        "the server minor is unknown, so no removal is claimed: {fix}"
+    );
+    assert!(fix.contains("kubectl version"), "{fix}");
+    // The group list is read, the nodes are not, and `/apis` already says the group version is absent.
+    assert_eq!(rig.paths(), ["/apis"]);
+    let result = map_outcome(
+        &INFO,
+        &CheckSpec::new("k8s.version"),
+        &rig.ctx,
+        Ok(finding),
+        0,
+        0,
+    );
+    assert_eq!(result.status, Status::Block);
     rig.audit();
 }
 

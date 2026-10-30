@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/version"
+  },
+  "status": 200,
+  "body": {
+    "major": "1",
+    "minor": "27",
+    "gitVersion": "v1.27.4",
+    "gitCommit": "0000000000000000000000000000000000000000",
+    "gitTreeState": "clean",
+    "buildDate": "2026-01-01T00:00:00Z",
+    "goVersion": "go1.21.9",
+    "compiler": "gc",
+    "platform": "linux/amd64"
+  }
+}

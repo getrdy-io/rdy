@@ -6,16 +6,25 @@
 
 use rdy_spec::check::ApiRef;
 
-/// One removed group version. `kind` is set when the group version was removed per kind, at different
-/// times.
+/// What replaces a removed group version.
+enum Instead {
+    /// Use this group version.
+    Use(&'static str),
+    /// Use the first group version, or the second from the given Kubernetes minor on.
+    UseOrFrom(&'static str, &'static str, u32),
+    /// There is no replacement API. The text says what to do instead.
+    Nothing(&'static str),
+}
+
+/// One removed group version. `kind` is set when the group version was removed per kind, or the kinds
+/// have different replacements.
 struct Removed {
     group: &'static str,
     version: &'static str,
     kind: Option<&'static str>,
     /// The Kubernetes minor that stopped serving it (the `29` of 1.29).
     minor: u32,
-    /// The group version to use instead.
-    instead: &'static str,
+    instead: Instead,
 }
 
 const fn removed(
@@ -29,17 +38,77 @@ const fn removed(
         version,
         kind: None,
         minor,
+        instead: Instead::Use(instead),
+    }
+}
+
+const fn removed_kind(
+    group: &'static str,
+    version: &'static str,
+    kind: &'static str,
+    minor: u32,
+    instead: Instead,
+) -> Removed {
+    Removed {
+        group,
+        version,
+        kind: Some(kind),
+        minor,
         instead,
     }
 }
 
-/// Every row is a group version served as a beta, then removed.
+/// What to say about a PodSecurityPolicy that is gone.
+const PSP_TEXT: &str = "Kubernetes has no replacement API for PodSecurityPolicy. Pod Security Admission does its job, and the product or its spec must stop asking for it.";
+
+/// Every row is a group version served as a beta, then removed. A row with a kind comes before the row
+/// for the whole group version, because the first match wins.
 const REMOVED: &[Removed] = &[
-    removed(
+    // Removed in 1.16.
+    removed_kind(
         "extensions",
         "v1beta1",
+        "Deployment",
+        16,
+        Instead::Use("apps/v1"),
+    ),
+    removed_kind(
+        "extensions",
+        "v1beta1",
+        "DaemonSet",
+        16,
+        Instead::Use("apps/v1"),
+    ),
+    removed_kind(
+        "extensions",
+        "v1beta1",
+        "ReplicaSet",
+        16,
+        Instead::Use("apps/v1"),
+    ),
+    removed_kind(
+        "extensions",
+        "v1beta1",
+        "NetworkPolicy",
+        16,
+        Instead::Use("networking.k8s.io/v1"),
+    ),
+    removed_kind(
+        "extensions",
+        "v1beta1",
+        "PodSecurityPolicy",
+        16,
+        Instead::Nothing(PSP_TEXT),
+    ),
+    removed("apps", "v1beta1", 16, "apps/v1"),
+    removed("apps", "v1beta2", 16, "apps/v1"),
+    // Removed in 1.22.
+    removed_kind(
+        "extensions",
+        "v1beta1",
+        "Ingress",
         22,
-        "networking.k8s.io/v1 or apps/v1",
+        Instead::Use("networking.k8s.io/v1"),
     ),
     removed("networking.k8s.io", "v1beta1", 22, "networking.k8s.io/v1"),
     removed(
@@ -79,27 +148,55 @@ const REMOVED: &[Removed] = &[
         22,
         "apiregistration.k8s.io/v1",
     ),
-    Removed {
-        group: "storage.k8s.io",
-        version: "v1beta1",
-        kind: Some("CSIStorageCapacity"),
-        minor: 27,
-        instead: "storage.k8s.io/v1",
-    },
+    // TokenReview.
+    removed(
+        "authentication.k8s.io",
+        "v1beta1",
+        22,
+        "authentication.k8s.io/v1",
+    ),
+    // SubjectAccessReview, LocalSubjectAccessReview, SelfSubjectAccessReview, SelfSubjectRulesReview.
+    removed(
+        "authorization.k8s.io",
+        "v1beta1",
+        22,
+        "authorization.k8s.io/v1",
+    ),
+    removed_kind(
+        "storage.k8s.io",
+        "v1beta1",
+        "CSIStorageCapacity",
+        27,
+        Instead::Use("storage.k8s.io/v1"),
+    ),
     removed("storage.k8s.io", "v1beta1", 22, "storage.k8s.io/v1"),
+    // Removed in 1.25 and later.
     removed("batch", "v1beta1", 25, "batch/v1"),
     removed("discovery.k8s.io", "v1beta1", 25, "discovery.k8s.io/v1"),
     removed("events.k8s.io", "v1beta1", 25, "events.k8s.io/v1"),
     removed("node.k8s.io", "v1beta1", 25, "node.k8s.io/v1"),
+    removed_kind(
+        "policy",
+        "v1beta1",
+        "PodSecurityPolicy",
+        25,
+        Instead::Nothing(PSP_TEXT),
+    ),
     removed("policy", "v1beta1", 25, "policy/v1"),
     removed("autoscaling", "v2beta1", 25, "autoscaling/v2"),
     removed("autoscaling", "v2beta2", 26, "autoscaling/v2"),
-    removed(
-        "flowcontrol.apiserver.k8s.io",
-        "v1beta1",
-        26,
-        "flowcontrol.apiserver.k8s.io/v1",
-    ),
+    Removed {
+        group: "flowcontrol.apiserver.k8s.io",
+        version: "v1beta1",
+        kind: None,
+        minor: 26,
+        // v1beta3 is served from 1.26, v1 only from 1.29.
+        instead: Instead::UseOrFrom(
+            "flowcontrol.apiserver.k8s.io/v1beta3",
+            "flowcontrol.apiserver.k8s.io/v1",
+            29,
+        ),
+    },
     removed(
         "flowcontrol.apiserver.k8s.io",
         "v1beta2",
@@ -143,10 +240,18 @@ pub(super) fn why_missing(api: &ApiRef, server_minor: Option<u32>) -> String {
     if let (Some(row), Some(minor)) = (row, server_minor)
         && minor >= row.minor
     {
+        let removed = row.minor;
+        let what = match &row.instead {
+            Instead::Use(instead) => {
+                format!("Ask the vendor for a build that uses \"{instead}\".")
+            }
+            Instead::UseOrFrom(first, later, from) => format!(
+                "Ask the vendor for a build that uses \"{first}\", or \"{later}\" from Kubernetes 1.{from}."
+            ),
+            Instead::Nothing(text) => (*text).to_owned(),
+        };
         return format!(
-            "\"{shown}\" was removed in Kubernetes 1.{removed}. This cluster is 1.{minor}, so this product build is older than the cluster. Ask the vendor for a build that uses \"{instead}\".",
-            removed = row.minor,
-            instead = row.instead,
+            "\"{shown}\" was removed in Kubernetes 1.{removed}. This cluster is 1.{minor}, so the product or its spec is older than the cluster. {what}"
         );
     }
     match api.group() {

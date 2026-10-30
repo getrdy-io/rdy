@@ -1,7 +1,7 @@
 schema = 1
 name = "k8s-version-vanilla"
 summary = "A self-managed 1.29 cluster on AWS machines: no suffix, aws provider ids, no managed labels"
-origin = "hand"
+origin = "generated"
 os = "linux"
 arch = "x86_64"
 answers = ["k8s.version"]

