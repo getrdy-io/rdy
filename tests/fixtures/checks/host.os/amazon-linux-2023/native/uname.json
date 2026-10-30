@@ -1,0 +1,9 @@
+{
+  "call": "uname",
+  "value": {
+    "sysname": "Linux",
+    "release": "6.1.72-96.166.amzn2023.aarch64",
+    "version": "#1 SMP",
+    "machine": "aarch64"
+  }
+}
