@@ -1,0 +1,64 @@
+{
+  "entry": {
+    "free": [
+      {
+        "bind": "loopback",
+        "port": 9100
+      },
+      9102
+    ],
+    "id": "host.ports"
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "loopback",
+          "port": 9100
+        },
+        {
+          "bind": "public",
+          "port": 9102
+        }
+      ],
+      "udp_free": []
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "9100/tcp and 9102/tcp are free.",
+    "notes": [],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 0,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "loopback",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 9100,
+          "state": "free",
+          "unverified": null
+        },
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 9102,
+          "state": "free",
+          "unverified": null
+        }
+      ],
+      "udp": []
+    },
+    "partial": null
+  }
+}

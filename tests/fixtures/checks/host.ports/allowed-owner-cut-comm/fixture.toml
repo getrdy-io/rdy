@@ -1,0 +1,12 @@
+schema = 1
+name = "allowed-owner-cut-comm"
+summary = "A previous install holds 6443; its name is cut to 15 bytes and the spec allows the long name"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.ports"]
+
+[caps]
+root = true
+network = false
+kube = false

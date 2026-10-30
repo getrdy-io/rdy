@@ -1229,8 +1229,11 @@ mod proc_links {
         ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])))
     }
 
+    /// The test process must see the procfs of its own PID namespace, as it does on a CI runner and on a
+    /// laptop. A run in a container that mounts the host's `/proc` fails here, and that is a fact about
+    /// the test machine, not about the code.
     #[test]
-    fn this_machines_proc_self_is_rdys_own_process() {
+    fn a_test_run_sees_the_proc_of_its_own_pid_namespace() {
         assert!(files::proc_self_is_own());
     }
 

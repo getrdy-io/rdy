@@ -1,0 +1,66 @@
+{
+  "entry": {
+    "allow_owner": [
+      "acme-controller-manager"
+    ],
+    "free": [
+      6443
+    ],
+    "id": "host.ports"
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [
+        "acme-controller-manager"
+      ],
+      "free": [
+        {
+          "bind": "public",
+          "port": 6443
+        }
+      ],
+      "udp_free": []
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "6443/tcp is free or held by a process the spec allows.",
+    "notes": [
+      "Held by a process the spec allows: 6443/tcp by `acme-controller` (pid 1500)."
+    ],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 3,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [
+            {
+              "address": "0.0.0.0",
+              "allowed": true,
+              "family": "ipv4",
+              "owner": {
+                "name": "acme-controller",
+                "pid": 1500,
+                "unit": "acme.service"
+              },
+              "owner_unknown": null
+            }
+          ],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "in_use",
+          "unverified": null
+        }
+      ],
+      "udp": []
+    },
+    "partial": null
+  }
+}

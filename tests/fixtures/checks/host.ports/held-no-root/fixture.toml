@@ -1,0 +1,12 @@
+schema = 1
+name = "held-no-root"
+summary = "A non-root run: 6443 is held by a root-owned socket, so the owner is unknown and the result is partial"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.ports"]
+
+[caps]
+root = false
+network = false
+kube = false

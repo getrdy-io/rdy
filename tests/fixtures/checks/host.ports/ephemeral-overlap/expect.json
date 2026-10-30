@@ -1,0 +1,76 @@
+{
+  "entry": {
+    "free": [
+      6443,
+      32800
+    ],
+    "id": "host.ports",
+    "udp_free": [
+      40000
+    ]
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 6443
+        },
+        {
+          "bind": "public",
+          "port": 32800
+        }
+      ],
+      "udp_free": [
+        40000
+      ]
+    },
+    "fix": "Reserve the port for the product: `echo 'net.ipv4.ip_local_reserved_ports = 8000-8010,32800,40000' | sudo tee /etc/sysctl.d/90-reserved-ports.conf && sudo sysctl --system`. The value keeps the ports that are reserved now.",
+    "level": "warn",
+    "message": "32800/tcp is inside the ephemeral port range 32768-60999, so an outgoing connection can take it.",
+    "notes": [],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 0,
+      "reserved_ports": "8000-8010,40000",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "free",
+          "unverified": null
+        },
+        {
+          "bind": "public",
+          "ephemeral": true,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 32800,
+          "state": "free",
+          "unverified": null
+        }
+      ],
+      "udp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 40000,
+          "state": "free",
+          "unverified": null
+        }
+      ]
+    },
+    "partial": null
+  }
+}
