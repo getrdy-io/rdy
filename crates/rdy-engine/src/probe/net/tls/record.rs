@@ -24,6 +24,7 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{CertificateError, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 
 use super::{ALPN_PROTOCOLS, NoRoots, TrustFailure, TrustVerdict};
+use crate::probe::{StoreSource, SystemRoots};
 
 /// A set of trust anchors and the verifier built on it. A set with no anchor cannot verify anything
 /// (`webpki` refuses to build one), so `verifier` is `None` and the verdict is [`TrustVerdict::Unavailable`].
@@ -34,6 +35,10 @@ pub(super) struct Trust {
     missing: NoRoots,
     /// The number of anchors in the set.
     roots: usize,
+    /// Where the OS roots were read from. Empty for the bundled set and for a store that was not read.
+    sources: Vec<StoreSource>,
+    /// The SHA-256 of the DER of each anchor of an OS store, in store order. Empty for the bundled set.
+    hashes: Vec<[u8; 32]>,
 }
 
 impl Trust {
@@ -44,16 +49,25 @@ impl Trust {
             verifier: None,
             missing,
             roots: 0,
+            sources: Vec::new(),
+            hashes: Vec::new(),
         }
     }
 
-    /// The OS roots, as DER. A certificate that does not parse is left out; the count is of those used.
-    pub(super) fn from_der(certs: &[Vec<u8>], provider: &Arc<CryptoProvider>) -> Self {
+    /// The OS roots, as DER. A certificate that does not parse is left out; the count and the hashes are
+    /// of those used.
+    pub(super) fn from_der(found: &SystemRoots, provider: &Arc<CryptoProvider>) -> Self {
         let mut store = RootCertStore::empty();
-        let _ = store.add_parsable_certificates(
-            certs.iter().map(|der| CertificateDer::from(der.as_slice())),
-        );
-        Self::from_store(store, provider)
+        let mut hashes = Vec::with_capacity(found.certs.len());
+        for der in &found.certs {
+            if store.add(CertificateDer::from(der.as_slice())).is_ok() {
+                hashes.push(sha256(der));
+            }
+        }
+        let mut trust = Self::from_store(store, provider);
+        trust.sources.clone_from(&found.sources);
+        trust.hashes = hashes;
+        trust
     }
 
     /// The Mozilla roots that `webpki-roots` bundles.
@@ -78,12 +92,29 @@ impl Trust {
             // A store that parsed into nothing is an empty store.
             missing: NoRoots::Empty,
             roots,
+            sources: Vec::new(),
+            hashes: Vec::new(),
         }
     }
 
     /// The number of trust anchors.
     pub(super) fn roots(&self) -> usize {
         self.roots
+    }
+
+    /// Why there is no verifier, for a set that has none.
+    pub(super) fn missing(&self) -> NoRoots {
+        self.missing
+    }
+
+    /// Where the roots were read from.
+    pub(super) fn sources(&self) -> &[StoreSource] {
+        &self.sources
+    }
+
+    /// The SHA-256 of each root.
+    pub(super) fn hashes(&self) -> &[[u8; 32]] {
+        &self.hashes
     }
 
     fn judge(
@@ -101,6 +132,14 @@ impl Trust {
             Err(error) => TrustVerdict::Rejected(failure_of(&error)),
         }
     }
+}
+
+/// The SHA-256 of `der`.
+pub(super) fn sha256(der: &[u8]) -> [u8; 32] {
+    let digest = ring::digest::digest(&ring::digest::SHA256, der);
+    let mut out = [0_u8; 32];
+    out.copy_from_slice(digest.as_ref());
+    out
 }
 
 /// The class of a verifier error. Everything that is not one of the named classes is `Policy`: rustls
