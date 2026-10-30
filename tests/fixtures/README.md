@@ -59,7 +59,7 @@ tests/fixtures/
 ```
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
-`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), `_policy/symlink-to-shadow`,
+`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), `host.security_agents/` (18 cases), `_policy/symlink-to-shadow`,
 `_loader/manifest-entries` and the `_cgroup` cases. The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 

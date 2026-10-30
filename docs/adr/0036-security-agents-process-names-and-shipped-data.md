@@ -1,6 +1,6 @@
 # ADR 0036: host.security_agents matches the kernel's cut process name, and a check crate may embed its own shipped data
 
-- Status: Proposed, needs security-review (it adds an entry to the lint wall and one dependency to a check crate)
+- Status: Accepted, security-reviewed (PR #119)
 - Date: 2026-10-30
 
 ## Context
@@ -59,6 +59,8 @@ text.
   Linux there. The same catalog serves all three; `process_names` is one list.
 - A future check that ships data adds one entry to the new list and needs security-review.
 - `toml` is now in the release binary. It was already in the lock file through the engine's `testing` feature.
+- The result is advisory and not tamper-proof. Any local user can give a process the name `wdavdaemon` and cause a Warn or a forbid Fail. A real agent can rename itself and hide. The portal must never show a Pass as proof that an agent is absent.
+- Two catalog names that share their first 15 bytes are rejected at parse time, so one cut `comm` never matches two entries.
 
 ## Tickets implied
 

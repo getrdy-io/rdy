@@ -212,13 +212,18 @@ struct Findings {
     include_code: bool,
     /// `include_str!` or `include_bytes!`.
     include_data: bool,
+    /// How many `include_str!` and `include_bytes!` calls, with any delimiter: `(..)`, `[..]` or `{..}`.
+    include_data_calls: usize,
 }
 
 /// The macro names that read a file at build time.
 fn note_macro_name(findings: &mut Findings, name: &str) {
     match name {
         "include" => findings.include_code = true,
-        "include_str" | "include_bytes" => findings.include_data = true,
+        "include_str" | "include_bytes" => {
+            findings.include_data = true;
+            findings.include_data_calls += 1;
+        }
         _ => {}
     }
 }
@@ -420,6 +425,8 @@ fn findings_of(source: &str) -> Findings {
                 include_code: stripped.contains("include!"),
                 include_data: stripped.contains("include_str!")
                     || stripped.contains("include_bytes!"),
+                include_data_calls: stripped.matches("include_str!").count()
+                    + stripped.matches("include_bytes!").count(),
             }
         }
     }
@@ -549,6 +556,13 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
             !literals.is_empty(),
             "{path}: found include_str! but could not read its path literal ({why})"
         );
+        // The text readers above see only the `(..)` form. The syn count sees every delimiter, so a call
+        // written `include_bytes!["/abs/path"]` makes the counts differ and fails here.
+        assert_eq!(
+            found.include_data_calls,
+            literals.len(),
+            "{path}: an include_str! or include_bytes! call is not written with parentheses, so its path was not checked ({why})"
+        );
         for literal in literals {
             assert!(
                 literal.starts_with(prefix),
@@ -587,9 +601,14 @@ fn shipped_data_is_embedded_only_from_the_crates_own_data_directory() {
         let source = std::fs::read_to_string(base.join(path)).expect("read source");
         let calls = include_calls(&source);
         assert_eq!(
+            findings_of(&source).include_data_calls,
+            1,
+            "{path} must hold exactly one include_str! or include_bytes! call, in any delimiter ({why})"
+        );
+        assert_eq!(
             calls.len(),
             1,
-            "{path} must hold exactly one include call ({why})"
+            "{path} must hold exactly one include call written with parentheses ({why})"
         );
         assert_eq!(
             calls[0],
@@ -1027,6 +1046,40 @@ fn the_reach_scan_sees_path_and_include() {
             "flagged: {what}"
         );
     }
+}
+
+#[test]
+fn an_include_in_any_delimiter_is_counted() {
+    // The text readers (`include_calls`, `include_literals`) find only the `(..)` form. The syn count must
+    // see `[..]`, `{..}` and a space before the delimiter, so an include that the readers miss still fails
+    // the count checks of both include lists.
+    for (what, source) in [
+        ("parentheses", "const A: &str = include_str!(\"x\");"),
+        ("brackets", "const A: &str = include_str![\"/etc/x\"];"),
+        ("braces", "const A: &[u8] = include_bytes!{\"/etc/x\"};"),
+        ("a space", "const A: &str = include_str! (\"x\");"),
+        ("nested", "const A: &str = concat!(include_str![\"x\"]);"),
+        (
+            "a macro body",
+            "macro_rules! m { () => { include_str![\"x\"] }; }",
+        ),
+    ] {
+        assert_eq!(findings_of(source).include_data_calls, 1, "{what}");
+    }
+    assert_eq!(
+        findings_of("fn f() { include_str!(\"a\"); include_bytes![\"b\"]; }").include_data_calls,
+        2
+    );
+    // A bracket call hides from the readers, which is what the count catches.
+    let hidden = "const A: &[u8] = include_bytes![\"/abs/path\"];";
+    assert!(include_calls(hidden).is_empty());
+    assert!(include_literals(hidden).is_empty());
+    assert_eq!(findings_of(hidden).include_data_calls, 1);
+    // A file that does not parse is counted by its text.
+    assert_eq!(
+        findings_of("fn ( include_str![\"x\"]").include_data_calls,
+        1
+    );
 }
 
 #[test]

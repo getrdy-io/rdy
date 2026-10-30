@@ -279,10 +279,7 @@ fn a_name_the_kernel_cut_to_fifteen_bytes_still_matches() {
     let ran = run_case("comm-truncation", &bare());
     let mut got = ran.detected();
     got.sort();
-    assert_eq!(
-        got,
-        ["elastic-defend", "sophos-protection-linux", "wazuh-agent"]
-    );
+    assert_eq!(got, ["elastic-defend", "sophos-protection-linux"]);
     let f = ran.finding();
     let seen = |id: &str| -> Vec<String> {
         f.observed["detected"]
@@ -297,10 +294,11 @@ fn a_name_the_kernel_cut_to_fifteen_bytes_still_matches() {
             .map(|p| p.as_str().expect("name").to_owned())
             .collect()
     };
-    // The near misses (`elastic-endpoix`, `sophos_threat`, `clam`, `wdavdaemon-x`) are not in any list.
+    // The near misses (`elastic-endpoix`, `sophos_threat`, `clam`, `wdavdaemon-x`) are not in any list. Two
+    // daemons that a Wazuh manager runs too (`wazuh-syscheckd`, `wazuh-logcollec`) are not in the catalog,
+    // so a manager is not reported as an agent.
     assert_eq!(seen("elastic-defend"), ["elastic-endpoin"]);
     assert_eq!(seen("sophos-protection-linux"), ["sophos_threat_d"]);
-    assert_eq!(seen("wazuh-agent"), ["wazuh-logcollec", "wazuh-syscheckd"]);
 }
 
 #[test]
@@ -366,9 +364,10 @@ fn a_detection_in_a_limited_view_is_still_a_detection() {
 }
 
 #[test]
-fn root_with_an_unreadable_process_is_not_called_limited() {
-    // A process that ends between the listing and the read, or a namespace oddity, is not a reason to
-    // distrust a root run's view.
+fn root_with_an_unreadable_process_cannot_confirm_absence() {
+    // Root should read everything. A name that still cannot be read (a security module denies it, or the
+    // read timed out) is a gap, and a forbidden agent could sit in it. A process that merely ended is
+    // NotFound and is not counted here.
     let fixture = fixture("unreadable-comm-no-agent");
     let ran = execute(
         fixture.replay().clone(),
@@ -378,9 +377,35 @@ fn root_with_an_unreadable_process_is_not_called_limited() {
         MAX_PIDS,
     );
     let f = ran.finding();
-    assert_eq!(f.level, Level::Pass, "{f:?}");
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert!(
+        f.message
+            .contains("Cannot confirm that the forbidden software is absent."),
+        "{f:?}"
+    );
     assert_eq!(f.observed["processes_unreadable"], 1);
-    assert_eq!(f.observed["limited_view"], false);
+    assert_eq!(f.observed["limited_view"], true);
+    let partial = f.partial.as_ref().expect("a partial");
+    assert!(partial.missing.is_empty(), "root is not what is missing");
+    let fix = f.fix.as_deref().expect("a fix");
+    assert!(fix.contains("even as root"), "{fix}");
+    assert!(!fix.contains("Run rdy as root"), "{fix}");
+}
+
+#[test]
+fn root_with_an_unreadable_process_and_no_forbid_still_passes() {
+    // Nothing is forbidden, so there is nothing to confirm absent. The view is still reported as limited.
+    let fixture = fixture("unreadable-comm-no-agent");
+    let ran = execute(
+        fixture.replay().clone(),
+        vec![Need::Root],
+        Os::Linux,
+        &bare(),
+        MAX_PIDS,
+    );
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Pass, "{f:?}");
+    assert_eq!(f.observed["limited_view"], true);
 }
 
 #[test]

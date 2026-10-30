@@ -195,8 +195,13 @@ impl Catalog {
                 return Err(bad("the id is used twice".to_owned()));
             }
             for name in &agent.process_names {
-                if !names.insert(name.clone()) {
-                    return Err(bad(format!("process name {name} is used by another entry")));
+                // Matching sees only the first 15 bytes of a name, so that is what must be unique: two
+                // names with the same cut would both match one `comm`.
+                let cut = &name[..name.len().min(COMM_MAX)];
+                if !names.insert(cut.to_owned()) {
+                    return Err(bad(format!(
+                        "process name {name} is used by another entry, or has the same first {COMM_MAX} bytes as one"
+                    )));
                 }
             }
         }

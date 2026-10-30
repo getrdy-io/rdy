@@ -41,7 +41,9 @@ checked_on = "2026-10-30"
 id = "wazuh-agent"
 display_name = "Wazuh agent"
 category = "edr"
-process_names = ["wazuh-agentd", "wazuh-execd", "wazuh-logcollector", "wazuh-syscheckd", "wazuh-modulesd"]
+# Only the daemon that runs on an agent and never on a manager. The other four agent daemons also run on a
+# Wazuh manager, which would then be reported as an agent.
+process_names = ["wazuh-agentd"]
 source = "https://documentation.wazuh.com/current/user-manual/reference/daemons/index.html"
 checked_on = "2026-10-30"
 
@@ -58,7 +60,7 @@ id = "falco"
 display_name = "Falco"
 category = "edr"
 process_names = ["falco"]
-source = "https://v0-41.falco.org/docs/getting-started/falco-linux-quickstart/"
+source = "https://falco.org/docs/getting-started/falco-linux-quickstart/"
 checked_on = "2026-10-30"
 
 [[agent]]
@@ -89,8 +91,10 @@ checked_on = "2026-10-30"
 id = "symantec-endpoint-protection-linux"
 display_name = "Symantec Endpoint Protection for Linux"
 category = "av"
-process_names = ["smcd", "rtvscand"]
-source = "https://knowledge.broadcom.com/external/article/151271"
+# The agent of 14.3 RU1 and later. The ps listing is on the source page. The older client ran smcd and
+# rtvscand (article 151271), which are not listed: that client is out of support.
+process_names = ["sisamddaemon", "sisidsdaemon", "sisipsdaemon"]
+source = "https://knowledge.broadcom.com/external/article/240470/symantec-endpoint-protection-processes.html"
 checked_on = "2026-10-30"
 
 [[agent]]

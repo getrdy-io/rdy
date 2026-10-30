@@ -327,6 +327,11 @@ fn fix(blocked: &[&Hit<'_>], flagged: &[&Hit<'_>], unknown_forbid: &[&str], scan
     }
     if scan.limited {
         sentences.push("Run rdy as root so it can see every process.".to_owned());
+    } else if scan.gap {
+        sentences.push(
+            "Some processes could not be read even as root. Check for a security module that limits /proc reads (for example SELinux or AppArmor denials in the audit log), then run rdy again."
+                .to_owned(),
+        );
     } else if scan.cut {
         sentences.push(
             "The host has more processes than rdy reads in one run, so some were not looked at."
@@ -349,12 +354,14 @@ struct Scan {
     limited: bool,
     /// The list was longer than the cap, or time ran short.
     cut: bool,
+    /// Root, and some names still could not be read (denied by a security module, or a read timed out).
+    gap: bool,
 }
 
 impl Scan {
     /// Whether absence proves little: a hidden or cut process list.
     fn incomplete(&self) -> bool {
-        self.limited || self.cut
+        self.limited || self.cut || self.gap
     }
 
     fn partial(&self) -> Option<Partial> {
@@ -362,6 +369,11 @@ impl Scan {
             Some(Partial::new(
                 vec![Need::Root],
                 "Other users' processes may be hidden from rdy, so absence is not proven.",
+            ))
+        } else if self.gap {
+            Some(Partial::new(
+                Vec::new(),
+                "Some process names could not be read even as root, so absence is not proven.",
             ))
         } else if self.cut {
             Some(Partial::new(
@@ -417,7 +429,11 @@ impl Scan {
                 },
             }
         }
-        if !root {
+        if root {
+            // Root sees every process, so a name that cannot be read is a gap in the view, not a reason to
+            // pass: a forbidden agent could sit in it.
+            scan.gap = scan.unreadable > 0;
+        } else {
             scan.limited = scan.unreadable > 0 || hides_processes(ctx).await?;
         }
         Ok(scan)

@@ -297,6 +297,33 @@ fn the_parser_refuses_a_second_use_of_an_id_or_a_process_name() {
     assert!(refused(&other_id).contains("used by another entry"));
 }
 
+/// A catalog of two entries whose process names are `first` and `second`.
+fn two_entries(first: &str, second: &str) -> String {
+    let entry = |id: &str, name: &str| {
+        format!(
+            "[[agent]]\nid = \"{id}\"\ndisplay_name = \"Acme\"\ncategory = \"edr\"\nprocess_names = [\"{name}\"]\nsource = \"https://docs.example/guard\"\nchecked_on = \"2026-10-30\"\n"
+        )
+    };
+    format!(
+        "schema = 1\n\n{}\n{}",
+        entry("acme-one", first),
+        entry("acme-two", second)
+    )
+}
+
+#[test]
+fn the_parser_refuses_names_that_share_their_first_15_bytes() {
+    // `comm` keeps 15 bytes, so these would both match one process.
+    let (a, b) = ("acme-guard-daemon-a", "acme-guard-daemon-b");
+    assert_eq!(a[..15], b[..15]);
+    let message = refused(&two_entries(a, b));
+    assert!(message.contains("same first 15 bytes"), "{message}");
+    // A name that is itself the 15 byte cut of another collides too.
+    assert!(refused(&two_entries(a, &a[..15])).contains("same first 15 bytes"));
+    // Names that differ inside the first 15 bytes are fine.
+    assert!(Catalog::parse(&two_entries(a, "acme-other-daemon")).is_ok());
+}
+
 #[test]
 fn a_leap_day_is_a_date_and_other_february_29ths_are_not() {
     assert!(days("2028-02-29").is_some());
