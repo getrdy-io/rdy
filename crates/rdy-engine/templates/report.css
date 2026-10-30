@@ -110,14 +110,14 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 @media (max-width: 40rem) {
   dl.details { grid-template-columns: 1fr; }
 }
+/* Print is black on white whatever the screen theme: this block comes after the dark palette and replaces
+   every variable it sets. No backgrounds, so a printer spends no ink on them. */
 @media print {
-  /* Black on white whatever the screen theme: this block comes after the dark palette and replaces every
-     variable it sets. No backgrounds, so a printer spends no ink on them. */
   :root {
     color-scheme: light;
     --bg: #ffffff;
     --text: #000000;
-    --muted: #333333;
+    --muted: #59636e;
     --rule: #6b6b6b;
     --panel: #ffffff;
     --block: #b3261e;

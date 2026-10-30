@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use rdy_engine::redact::{Redactor, TagKey};
 use rdy_engine::report::render_html;
+use rdy_engine::testing::{fixtures_dir, golden::assert_golden};
 use rdy_spec::result::Report;
 use serde_json::Value;
 
@@ -103,8 +104,11 @@ fn print_is_black_on_white_and_replaces_the_dark_palette() -> TestResult {
     let print_head = "@media print {";
     let dark = block(css, dark_head)?;
     let print = block(css, print_head)?;
-    // The print block comes after the dark one, so at equal weight it wins.
-    assert!(css.find(dark_head) < css.find(print_head));
+    // The print block comes after the dark one, so at equal weight it wins. Both set the variables on
+    // `:root`, which is what makes the weights equal.
+    assert!(css.rfind(dark_head) < css.find(print_head));
+    assert!(dark.trim_start().starts_with(":root {"), "{dark}");
+    assert!(print.trim_start().starts_with(":root {"), "{print}");
 
     assert_eq!(property(print, "--text"), Some("#000000"));
     assert_eq!(property(print, "--bg"), Some("#ffffff"));
@@ -117,7 +121,7 @@ fn print_is_black_on_white_and_replaces_the_dark_palette() -> TestResult {
     );
     assert_eq!(property(print, "--banner-bg"), Some("#ffffff"));
 
-    // Every variable the dark palette sets is set again for print, to a different value.
+    // Every variable the dark palette sets is set again for print, and the text and page colours differ.
     let dark_names = property_names(dark);
     assert!(!dark_names.is_empty());
     let print_names = property_names(print);
@@ -143,7 +147,10 @@ fn visible_text(template: &str) -> String {
         } else if rest.starts_with('<') {
             ">"
         } else {
-            let next = rest[1..].find(['<', '{']).map_or(rest.len(), |at| at + 1);
+            let first = rest.chars().next().map_or(1, char::len_utf8);
+            let next = rest[first..]
+                .find(['<', '{'])
+                .map_or(rest.len(), |at| at + first);
             out.push_str(&rest[..next]);
             rest = &rest[next..];
             continue;
@@ -204,6 +211,40 @@ fn no_raw_json_key_is_visible_text_in_the_template() -> TestResult {
     Ok(())
 }
 
+/// `html` with every `<bdi>...</bdi>` (text from the machine or the spec) removed, then as visible text.
+fn rendered_text(html: &str) -> String {
+    let mut without = String::new();
+    let mut rest = html;
+    while let Some(open) = rest.find("<bdi>") {
+        without.push_str(&rest[..open]);
+        let after = &rest[open..];
+        rest = after
+            .find("</bdi>")
+            .map_or("", |end| &after[end + "</bdi>".len()..]);
+    }
+    without.push_str(rest);
+    visible_text(&without)
+}
+
+/// Most of the words on the page are made in `view.rs`, not in the template, so the scan also runs over
+/// what the renderer wrote. Text inside `<bdi>` is data and is left out.
+#[test]
+fn no_raw_json_key_is_visible_text_in_the_goldens() -> TestResult {
+    for name in [
+        "not-ready-7.2.html",
+        "five-sections-exec-plugin.html",
+        "not-ready-no-blocks.html",
+    ] {
+        let path = fixtures_dir().join("reports/golden").join(name);
+        let html = std::fs::read_to_string(&path)?;
+        let text = rendered_text(&html);
+        assert!(text.contains("Run and spec details"), "{name}: {text}");
+        assert!(text.contains("Fix:"), "{name}");
+        assert_eq!(raw_keys(&text), Vec::<String>::new(), "{name}");
+    }
+    Ok(())
+}
+
 #[test]
 fn the_scan_finds_a_raw_key_when_there_is_one() {
     let bad = "<p class=\"skip_kind\">Found {{ x_bytes }} skip_kind and <b>severity</b></p><style>a_b{}</style>";
@@ -211,6 +252,9 @@ fn the_scan_finds_a_raw_key_when_there_is_one() {
     assert_eq!(raw_keys(&text), ["skip_kind", "severity"]);
     // Attributes, askama tags and the style block are not text.
     assert!(!text.contains("x_bytes") && !text.contains("a_b"));
+    // Data inside <bdi> is not ours to judge.
+    let page = "<p>Fix: <bdi>skip_kind</bdi> then bucket</p>";
+    assert_eq!(raw_keys(&rendered_text(page)), ["bucket"]);
 }
 
 #[test]
@@ -245,5 +289,15 @@ fn nothing_blocking_says_no_blocks_and_a_block_does_not() -> TestResult {
     assert!(summary < note && note < header_end);
     // The note is about blocks only: required checks that did not run still make it NOT READY.
     assert!(html.contains("<title>rdy report: NOT READY"));
+    Ok(())
+}
+
+/// The page of a report with no block, byte for byte, so the "No blocks." note shows in review.
+#[test]
+fn a_report_with_no_blocks_matches_its_golden() -> TestResult {
+    assert_golden(
+        fixtures_dir().join("reports/golden/not-ready-no-blocks.html"),
+        html_of(no_blocks_doc()?)?.as_bytes(),
+    );
     Ok(())
 }

@@ -12,8 +12,8 @@ use rdy_spec::result::{
 
 use crate::summary::{summary_line, verdict_line};
 
-/// What the three status words mean (01 section 6 item 2, 07 D.7). `rdy run --help` carries the same
-/// sentences.
+/// What the three status words mean (01 section 6 item 2, 07 D.7). 07 D.7 requires the same sentences
+/// in `rdy run --help`; not yet.
 pub(super) const LEGEND: &str =
     "BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it.";
 
