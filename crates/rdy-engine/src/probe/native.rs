@@ -13,7 +13,7 @@
 //! | `Rlimit(resource)` | any probe | the resource is in a closed list | `api`, `resource` |
 //! | `Hostname` | any probe | nothing to check | `api` |
 //! | `MachineId` | run-level probes only | a check's probe is refused | `api` |
-//! | `SystemRoots` | any probe | nothing to check | `api` |
+//! | `SystemRoots` | any probe | nothing to check; the answer is capped at [`MAX_SYSTEM_ROOTS`] certificates of [`MAX_ROOT_BYTES`] each | `api` |
 //!
 //! The log holds the call, never the answer. The machine id has a type of its own, [`MachineId`], that
 //! cannot be printed, serialized or read by a check, so the raw value cannot reach a log, an error
@@ -29,6 +29,15 @@ use super::{Probe, ProbeError, ReadGuard, refuse, settle};
 
 /// The rule of a `MachineId` call from a check's probe.
 pub const RULE_MACHINE_ID: &str = "the machine id is read by the engine only";
+
+/// The most certificates a [`NativeCall::SystemRoots`] answer holds. The OS stores of the five targets
+/// hold 150 to 300 roots, and an enterprise store a few hundred more. A longer list is cut here, so a
+/// store (or a directory full of files) cannot make the facade hold an unbounded list (05, `system_roots`).
+pub const MAX_SYSTEM_ROOTS: usize = 1024;
+
+/// The largest certificate a [`NativeCall::SystemRoots`] answer holds, in DER bytes. A real root is 1 to
+/// 3 KiB; one over this is dropped, not truncated.
+pub const MAX_ROOT_BYTES: usize = 16 * 1024;
 
 /// An OS call a check may ask for. The list is closed, and a new variant needs a policy row, a snapshot
 /// change and a threat model row in the same PR.
@@ -50,7 +59,9 @@ pub enum NativeCall {
     Hostname,
     /// The OS machine id, for run-level work. The value is opaque: see [`MachineId`].
     MachineId,
-    /// The trust roots of the OS store, as DER certificates. macOS and Windows only.
+    /// The trust roots of the OS store, as DER certificates, at most [`MAX_SYSTEM_ROOTS`] of at most
+    /// [`MAX_ROOT_BYTES`] each. Linux reads the PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the
+    /// standard paths) through the file rules; macOS and Windows ask the OS.
     SystemRoots,
 }
 
@@ -152,6 +163,56 @@ pub enum NativeValue {
     MachineId(MachineId),
     /// The answer to [`NativeCall::SystemRoots`]: one DER certificate per entry.
     SystemRoots(Vec<Vec<u8>>),
+}
+
+/// The OS store is replaced by `SSL_CERT_FILE` or `SSL_CERT_DIR` and this OS may not read what they
+/// name (Windows, which has no file reads in M1). It rides inside an `io::Error` and the probe turns it
+/// back into [`ProbeError::StoreOverridden`], so the check can say how to fix it.
+#[derive(Debug)]
+pub(crate) struct RootsOverridden;
+
+impl fmt::Display for RootsOverridden {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SSL_CERT_FILE or SSL_CERT_DIR is set")
+    }
+}
+
+impl std::error::Error for RootsOverridden {}
+
+impl RootsOverridden {
+    /// The error a backend returns.
+    #[cfg(any(windows, test))]
+    pub(crate) fn error() -> std::io::Error {
+        std::io::Error::other(Self)
+    }
+
+    /// Whether `error` carries the marker.
+    pub(crate) fn is_in(error: &std::io::Error) -> bool {
+        error
+            .get_ref()
+            .is_some_and(|inner| inner.downcast_ref::<Self>().is_some())
+    }
+}
+
+/// Applies the caps of [`NativeCall::SystemRoots`]: an empty certificate or one over [`MAX_ROOT_BYTES`]
+/// is dropped, and the list is cut at [`MAX_SYSTEM_ROOTS`]. The probe applies it to every backend's
+/// answer, so a replayed fixture and a live store are held to the same bound. A cut logs a warning with
+/// the counts and no certificate.
+pub(crate) fn cap_system_roots(certs: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+    let total = certs.len();
+    let kept: Vec<Vec<u8>> = certs
+        .into_iter()
+        .filter(|der| !der.is_empty() && der.len() <= MAX_ROOT_BYTES)
+        .take(MAX_SYSTEM_ROOTS)
+        .collect();
+    if kept.len() < total {
+        tracing::warn!(
+            offered = total,
+            kept = kept.len(),
+            "the OS trust store was cut to the cap on certificates (count or size), so a root may be missing from the TLS verdict"
+        );
+    }
+    kept
 }
 
 /// File system numbers from `statvfs(2)`. Block counts are in units of `fragment_size` bytes.
@@ -290,7 +351,12 @@ impl Probe {
                     .await
                     .map_err(|e| ProbeError::from_native_io(&e, &what, policy.api))?;
                 if call.expects(&value) {
-                    Ok(value)
+                    Ok(match value {
+                        NativeValue::SystemRoots(certs) => {
+                            NativeValue::SystemRoots(cap_system_roots(certs))
+                        }
+                        other => other,
+                    })
                 } else {
                     Err(ProbeError::Io(
                         "the backend answered a native call with the wrong kind of value"

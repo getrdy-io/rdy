@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cpu-status-missing"
+summary = "RHEL 9 KVM guest with 8 vCPUs whose /proc/self/status is not there"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false

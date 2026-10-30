@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cpu-arm64"
+summary = "Arm64 KVM guest with 4 vCPUs and no CPU limit"
+origin = "hand"
+os = "linux"
+arch = "aarch64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false

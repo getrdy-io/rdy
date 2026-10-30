@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cpu-cgroup-self-malformed"
+summary = "RHEL 9 KVM guest with 8 vCPUs and a /proc/self/cgroup that is not in the kernel format"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false
