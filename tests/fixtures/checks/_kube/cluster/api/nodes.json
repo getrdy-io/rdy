@@ -1,0 +1,92 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/nodes",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "NodeList",
+    "metadata": {
+      "resourceVersion": "1000",
+      "continue": "tok-page-2"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "node-a",
+          "labels": {
+            "topology.kubernetes.io/zone": "us-east-1a",
+            "kubernetes.io/os": "linux"
+          }
+        },
+        "spec": {
+          "providerID": "aws:///us-east-1a/i-0123456789abcdefa"
+        },
+        "status": {
+          "allocatable": {
+            "cpu": "4",
+            "memory": "16Gi",
+            "pods": "110"
+          },
+          "conditions": [
+            {
+              "type": "Ready",
+              "status": "True"
+            }
+          ],
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "",
+            "osImage": "",
+            "containerRuntimeVersion": "",
+            "kubeletVersion": "v1.29.4-eks-abc123",
+            "kubeProxyVersion": "v1.29.4-eks-abc123",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "node-b",
+          "labels": {
+            "topology.kubernetes.io/zone": "us-east-1b",
+            "kubernetes.io/os": "linux"
+          }
+        },
+        "spec": {
+          "providerID": "aws:///us-east-1b/i-0123456789abcdefb"
+        },
+        "status": {
+          "allocatable": {
+            "cpu": "4",
+            "memory": "16Gi",
+            "pods": "110"
+          },
+          "conditions": [
+            {
+              "type": "Ready",
+              "status": "True"
+            }
+          ],
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "",
+            "osImage": "",
+            "containerRuntimeVersion": "",
+            "kubeletVersion": "v1.29.4-eks-abc123",
+            "kubeProxyVersion": "v1.29.4-eks-abc123",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+schema = 1
+name = "kube-cluster"
+summary = "A small synthetic cluster for the kube mock harness: paged nodes, a stale continue token, selectors, legacy discovery and a review table"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = []
+
+[caps]
+root = false
+network = true
+kube = true
