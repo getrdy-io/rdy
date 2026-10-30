@@ -235,6 +235,38 @@ async fn paths_that_the_earlier_read_rules_refuse_are_violations_when_not_declar
     }
 }
 
+#[test]
+fn the_prefix_matcher_reads_linux_paths_as_text_on_every_host() {
+    use super::fixture_run::covers;
+    // Covered: the prefix itself, a child, repeated and dotted separators, a trailing slash.
+    for (prefix, path) in [
+        ("/etc", "/etc/hostname"),
+        ("/proc/meminfo", "/proc/meminfo"),
+        ("/proc", "/proc//meminfo"),
+        ("/proc", "/proc/./meminfo"),
+        ("/proc/net", "/proc/net/"),
+        ("/", "/etc/shadow"),
+    ] {
+        assert!(covers(prefix, path), "{prefix} should cover {path}");
+    }
+    // Not covered: another name, a partial component, `..`, a relative path, a home shorthand, a
+    // Windows-style path, a path shorter than the prefix.
+    for (prefix, path) in [
+        ("/etc", "/etcetera"),
+        ("/etc", "/proc/meminfo"),
+        ("/etc", "/etc/../etc/shadow"),
+        ("/etc", "etc/hostname"),
+        ("/etc", "~/etc"),
+        ("/etc", "C:\\etc\\hostname"),
+        ("/etc", "\\etc\\hostname"),
+        ("/proc/meminfo", "/proc"),
+        ("etc", "/etc/hostname"),
+        ("/etc/..", "/etc/hostname"),
+    ] {
+        assert!(!covers(prefix, path), "{prefix} should not cover {path}");
+    }
+}
+
 // ---- normalize -----------------------------------------------------------------------------------
 
 fn base_report(jobs: u32, version: &str, checks: Vec<CheckResult>) -> Report {

@@ -11,7 +11,7 @@
 //! the test runner kills it. Wrap the call in `tokio::time::timeout` if the check could do that. In a
 //! real run the scheduler's timeout ends such a check.
 
-use std::path::{Component, Path};
+use std::path::Path;
 
 use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use serde_json::Value;
@@ -219,12 +219,35 @@ fn undeclared_file(info: &CheckInfo, action: &Action) -> bool {
     let Some(path) = action.fields.get("path").and_then(Value::as_str) else {
         return false;
     };
-    let path = Path::new(path);
-    // Compared as written, by whole components. A relative path, `..` or the `~` the log shows for a
-    // home directory is never inside an absolute prefix, so `/etc/../etc/shadow` does not pass for
-    // `/etc`.
-    let plain = path.is_absolute() && path.components().all(|c| c != Component::ParentDir);
-    !(plain && declared.iter().any(|prefix| path.starts_with(prefix)))
+    !declared.iter().any(|prefix| covers(prefix, path))
+}
+
+/// Whether the declared `prefix` covers `path`. Both are Linux paths, so both are read as `/`-separated
+/// text on every host (`Path` would call `/etc/shadow` relative on Windows).
+///
+/// A path is covered only when it starts with `/`, has no `..` and holds the prefix's names as whole
+/// leading components. A relative path, `..` or the `~` the log shows for a home directory is never
+/// inside an absolute prefix, so `/etc/../etc/shadow` does not pass for `/etc`, and `/etcetera` does
+/// not either.
+pub(super) fn covers(prefix: &str, path: &str) -> bool {
+    match (text_names(prefix), text_names(path)) {
+        (Some(prefix), Some(names)) => names.starts_with(&prefix),
+        _ => false,
+    }
+}
+
+/// The names of an absolute `/`-separated path, or `None` for a relative path or one with `..`.
+fn text_names(text: &str) -> Option<Vec<&str>> {
+    let rest = text.strip_prefix('/')?;
+    let mut names = Vec::new();
+    for part in rest.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => return None,
+            name => names.push(name),
+        }
+    }
+    Some(names)
 }
 
 /// Fails the test if the check in `log` went beyond what `info` declares.
