@@ -2,6 +2,8 @@
 
 use std::ffi::OsString;
 
+use proptest::prelude::*;
+
 use super::*;
 
 /// A `StyleEnv` from `NAME=value` pairs, without touching the process environment.
@@ -111,11 +113,11 @@ fn colour_rules_first_match_wins() {
             true,
         ),
         (
-            "3 empty force is not set",
+            "3 empty force is on",
             Auto,
             &[("CLICOLOR_FORCE", "")],
             false,
-            false,
+            true,
         ),
         (
             "3 force beats CLICOLOR=0",
@@ -315,5 +317,22 @@ fn the_style_codes_and_the_cut_marker_are_ascii() {
     assert!(CUT_MARKER.is_ascii());
     for role in Role::ALL {
         assert!(Styler::new(true).paint(role, "X").is_ascii(), "{role:?}");
+    }
+}
+
+proptest! {
+    /// `str::width` is context-aware (variation selectors, joiners), so a sum of single characters
+    /// can differ from the width of the whole. The cut must still fit.
+    #[test]
+    fn cut_fits_the_width_it_was_given(text in ".{0,60}", max in 0usize..40) {
+        prop_assert!(display_width(&cut(&text, max)) <= max);
+    }
+
+    #[test]
+    fn cut_fits_with_joiners_selectors_and_marks(
+        text in "[a-z\u{4e2d}\u{301}\u{200d}\u{fe0e}\u{fe0f}\u{1f468}\u{1f469}\u{1b}\u{202e} ]{0,40}",
+        max in 0usize..30,
+    ) {
+        prop_assert!(display_width(&cut(&text, max)) <= max);
     }
 }

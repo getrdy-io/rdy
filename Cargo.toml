@@ -115,8 +115,9 @@ proc-macro2 = { version = "1", default-features = false }
 # agents.toml catalog with it (M1-146).
 toml = { version = "1", default-features = false }
 
-# Display width of text for padding and cutting (M1-070, 07 section 6). Already in the tree through clap's
-# error rendering. No default features: the `cjk` feature would widen ambiguous characters to two cells.
+# Display width of text for padding and cutting (M1-070, 07 section 6). Already in the tree through
+# annotate-snippets (ADR 0001). No default features: the `cjk` feature only adds `width_cjk()` and does not
+# change `width()`.
 unicode-width = { version = "0.2", default-features = false }
 
 # The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field

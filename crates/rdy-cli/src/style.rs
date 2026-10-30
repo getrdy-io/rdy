@@ -40,13 +40,13 @@ pub const CUT_MARKER: &str = "...";
 
 /// The environment variables that decide colour and width (07 D.6), read once.
 ///
-/// A variable that is set but empty counts as not set for `CLICOLOR_FORCE` as well as `NO_COLOR`:
-/// when the text is unclear the safe error is too little colour.
+/// `NO_COLOR` counts only when it is non-empty. `CLICOLOR_FORCE` counts when it is set to anything
+/// but `0`, an empty value included (07 section 6 rule 3), as the anstream writer of M1-086 reads it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleEnv {
     /// `NO_COLOR` is set to a non-empty value.
     no_color: bool,
-    /// `CLICOLOR_FORCE` is set to a non-empty value other than `0`.
+    /// `CLICOLOR_FORCE` is set to anything but `0`, empty included.
     clicolor_force: bool,
     /// `CLICOLOR` is `0`.
     clicolor_off: bool,
@@ -62,7 +62,7 @@ impl StyleEnv {
         let non_empty = |name: &str| get(name).filter(|v| !v.is_empty());
         Self {
             no_color: non_empty("NO_COLOR").is_some(),
-            clicolor_force: non_empty("CLICOLOR_FORCE").is_some_and(|v| v != "0"),
+            clicolor_force: get("CLICOLOR_FORCE").is_some_and(|v| v != "0"),
             clicolor_off: get("CLICOLOR").is_some_and(|v| v == "0"),
             term_dumb: get("TERM").is_some_and(|v| v == "dumb"),
             columns: get("COLUMNS")
@@ -119,8 +119,8 @@ pub fn wrap_width(terminal_columns: Option<usize>, env: &StyleEnv) -> usize {
 }
 
 /// The width of the terminal on stderr, or `None` when stderr is not a terminal or the size is not
-/// known. Unix asks the terminal; the other platforms return `None` until M2 (Windows then uses
-/// `COLUMNS` or 100).
+/// known. Unix asks the terminal. Windows returns `None`, so it uses `COLUMNS` or 100 until M1-142
+/// asks the console through the `console` crate that indicatif brings (backlog correction-27).
 #[must_use]
 pub fn stderr_columns() -> Option<usize> {
     stderr_columns_impl()
@@ -236,6 +236,9 @@ impl Styler {
     /// `word` is `&'static str` so that only text written in rdy's source can be styled. Text from the
     /// machine or the spec goes through [`untrusted`] and is never styled (07 section 6). Style the
     /// parts of a line separately, and put the untrusted part between them.
+    ///
+    /// Text that rdy builds at run time, such as a verdict line with a count in it, cannot go through
+    /// here yet. M1-086 adds a trusted-dynamic path for it (backlog correction-27).
     #[must_use]
     pub fn paint(self, role: Role, word: &'static str) -> String {
         if self.enabled && !word.is_empty() {
