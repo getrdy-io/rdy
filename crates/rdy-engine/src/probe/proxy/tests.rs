@@ -100,10 +100,22 @@ fn a_user_without_a_password_sends_an_empty_one_and_the_user_is_the_secret() {
     let p = url("http://svc@proxy.acme.test:3128");
     assert!(p.has_credentials());
     assert_eq!(p.authorization().as_deref(), Some("Basic c3ZjOg=="));
+    let p = url("http://svc-user@proxy.acme.test:3128");
     // The token-as-user pattern: the user name and the base64 of `user:` both reach output.
-    assert_eq!(p.secrets(), ["svc", "c3ZjOg=="]);
-    let empty = url("http://svc:@proxy.acme.test:3128");
-    assert_eq!(empty.secrets(), ["svc", "c3ZjOg=="]);
+    assert_eq!(p.secrets(), ["svc-user", "c3ZjLXVzZXI6"]);
+    let empty = url("http://svc-user:@proxy.acme.test:3128");
+    assert_eq!(empty.secrets(), ["svc-user", "c3ZjLXVzZXI6"]);
+    // A user name under 6 bytes is not a token: nothing is registered.
+    assert!(url("http://tok@proxy.acme.test:3128").secrets().is_empty());
+    assert!(
+        url("http://admin:@proxy.acme.test:3128")
+            .secrets()
+            .is_empty()
+    );
+    assert_eq!(
+        url("http://admin1@proxy.acme.test:3128").secrets(),
+        ["admin1", "YWRtaW4xOg=="]
+    );
     // A URL with no user has nothing to hide.
     assert!(url("http://proxy.acme.test:3128").secrets().is_empty());
 }

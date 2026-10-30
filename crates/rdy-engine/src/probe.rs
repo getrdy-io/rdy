@@ -724,7 +724,10 @@ impl ProbeHub {
     /// as the base64 `Proxy-Authorization` pair, so no later string can carry it into the log or the
     /// report. If the set refuses any of them, the proxy is not set and the call fails: the run cannot
     /// promise to hide the password, and the caller ends it with exit code 70 (PR #96 reviews). Call it
-    /// before the first probe call and before anything is printed or written. The log redacts an entry
+    /// after [`ProbeHub::new`] and before `Privilege::snapshot` (the first probe read), and before
+    /// anything is printed or written. A URL with a user and no password registers the user name and
+    /// the base64 of `user:` when the user name is 6 bytes or more, and a shorter user name registers
+    /// nothing and is not refused. The log redacts an entry
     /// when it is written, so an entry that exists before the password is known could hold it: the call
     /// fails with [`ProxyError::TooLate`] once the action log has an entry or a check's probe was opened.
     ///

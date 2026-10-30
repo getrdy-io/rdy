@@ -12,6 +12,7 @@
 
 use std::fmt;
 
+use crate::redact::KNOWN_SECRET_MIN_LEN;
 use rdy_spec::Target;
 use rdy_spec::scalar::Host;
 
@@ -155,8 +156,10 @@ impl ProxyUrl {
     /// Every form of the secret and the credential pair that can reach output. With a password: the
     /// password as written and percent-decoded, and the base64 of `user:password` that goes into
     /// `Proxy-Authorization`. With a user and no password (or an empty one), the user name is the
-    /// secret, as in `http://TOKEN@proxy`: the user name and the base64 of `user:`. A caller adds all of
-    /// them to the known-secret set. Empty when the URL has no user.
+    /// secret, as in `http://TOKEN@proxy`: the user name and the base64 of `user:`, but only when the
+    /// user name is at least [`KNOWN_SECRET_MIN_LEN`] bytes. A shorter user name is not a token, so
+    /// nothing is registered and nothing is refused. A caller adds all of them to the known-secret set.
+    /// Empty when the URL has no user.
     pub(crate) fn secrets(&self) -> Vec<String> {
         let Some(Credentials {
             user,
@@ -173,7 +176,10 @@ impl ProxyUrl {
                 forms.push(base64(format!("{user}:{password}").as_bytes()));
                 forms
             }
-            None => vec![user.clone(), base64(format!("{user}:").as_bytes())],
+            None if user.len() >= KNOWN_SECRET_MIN_LEN => {
+                vec![user.clone(), base64(format!("{user}:").as_bytes())]
+            }
+            None => Vec::new(),
         }
     }
 
@@ -298,7 +304,7 @@ pub enum ProxyError {
     /// The run-scoped known-secret set refused the proxy password, so rdy could not promise to keep it
     /// out of the output. The caller ends the run with exit code 70.
     #[error(
-        "rdy could not add the proxy password to its redaction list, so it cannot promise to keep it out of the report. Fix: use a proxy password of at least 6 bytes (or, with no password, a user name of at least 6 bytes), or take the credentials out of the proxy URL"
+        "rdy could not add the proxy password to its redaction list, so it cannot promise to keep it out of the report. Fix: use a proxy password of at least 6 bytes, or take the credentials out of the proxy URL"
     )]
     SecretRefused,
     /// A proxy was already set for this run.

@@ -462,9 +462,11 @@ tests policy.
   written, percent-decoded and as the base64 `Proxy-Authorization` pair, to the known-secret set. A
   refusal is `ProxyError::SecretRefused` and the caller ends the run with exit 70 (the CLI wiring is
   M1-097, which reads `HTTPS_PROXY` and `HTTP_PROXY`; a bad URL is exit 64). A proxy with a user and no
-  password registers the user name and the base64 of `user:` instead. `set_proxy` fails with
+  password registers the user name and the base64 of `user:` instead when the user name is 6 bytes or
+  more (a shorter one registers nothing and refuses nothing). `set_proxy` fails with
   `ProxyError::TooLate` once the action log has an entry or a check probe was opened, because the log
-  redacts when an entry is written. The call checks, in order: the declared peer classes (`SpecHosts`, and `Proxy` for a proxied
+  redacts when an entry is written. Call it after `ProbeHub::new` and before `Privilege::snapshot` (the
+  first probe read). The call checks, in order: the declared peer classes (`SpecHosts`, and `Proxy` for a proxied
   call), the check's own host set (`Planned::with_hosts`, from `Built::hosts`; M1-095 feeds it from `PlanEntry::hosts()`), a forbidden literal
   (before the proxy is even called), then the resolved answers (any forbidden answer refuses the whole
   call). Attempts run IPv6 first with families alternating, at most 4, 250 ms apart or at once after a

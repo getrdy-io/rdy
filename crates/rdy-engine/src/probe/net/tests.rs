@@ -1150,15 +1150,22 @@ async fn a_user_with_no_password_is_the_secret() {
         let pair = show("Proxy-Authorization: Basic dG9rLWNhbmFyeS03Og==");
         assert!(!pair.contains("dG9rLWNhbmFyeS03Og"), "{text}: {pair}");
     }
-    // A user name the set cannot hold is a refusal, as a short password is.
-    let hub = hub_over(Replay::new());
-    let error = hub
-        .set_proxy_text("http://tok@proxy.acme.test:3128")
-        .expect_err("refused");
-    assert_eq!(error, ProxyError::SecretRefused);
-    assert!(!error.to_string().contains("tok@"));
-    // Only the user name was refused. Its pair with the empty password (`tok:`) is long enough.
-    assert_eq!(hub.action_log().redaction.get("known_secret_refused"), 1);
+    // A user name under 6 bytes is not a token: the proxy is set, nothing is registered and nothing is
+    // refused. A short password is still a refusal (see the test above).
+    for text in [
+        "http://tok@proxy.acme.test:3128",
+        "http://admin@proxy.acme.test:3128",
+        "http://admin:@proxy.acme.test:3128",
+    ] {
+        let hub = hub_over(Replay::new());
+        hub.set_proxy_text(text).expect("proxy");
+        assert_eq!(hub.action_log().redaction.get("known_secret_refused"), 0);
+        assert_eq!(
+            hub.set_proxy_text("http://other.acme.test:3128"),
+            Err(ProxyError::AlreadySet),
+            "{text}"
+        );
+    }
 }
 
 #[tokio::test]
