@@ -5,7 +5,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>rdy report: ⁨acme-platform⁩, NOT READY</title>
+<title>rdy report: NOT READY, ⁨acme-platform⁩</title>
 <style>:root {
   color-scheme: light dark;
   --bg: #ffffff;
@@ -157,7 +157,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p class="text"><bdi>1 of 2 endpoints unreachable: license.acme.example:443 (proxy refused CONNECT, 403)</bdi></p>
 <p class="text"><span class="label">Fix:</span> <bdi>Ask your network team to allow these endpoints through the proxy.</bdi></p>
 <p class="text"><span class="label">More from rdy:</span> <bdi>The proxy refused CONNECT to license.acme.example:443. Ask the proxy team to add it to the allow list.</bdi></p>
-<p>Requires: <bdi>network access (available)</bdi></p>
+<p>Requires: network access (available)</p>
 <p class="muted">Took 212 ms</p>
 </article>
 </section>
@@ -166,13 +166,13 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <article class="check status-skip" id="check-6">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>gpu.cuda</bdi></span></h3>
 <p class="text"><bdi>Not run. This version of rdy has no gpu checks yet.</bdi></p>
-<p><bdi>Not in this version of rdy</bdi></p>
+<p>Not in this version of rdy</p>
 <p class="text"><span class="label">Fix:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
 </article>
 <article class="check status-skip" id="check-7">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>aws.iam</bdi></span></h3>
 <p class="text"><bdi>Not run. This version of rdy has no aws checks yet.</bdi></p>
-<p><bdi>Not in this version of rdy</bdi></p>
+<p>Not in this version of rdy</p>
 <p class="text"><span class="label">Fix:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
 </article>
 </section>
@@ -196,13 +196,13 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <article class="check status-pass" id="check-4">
 <h3><span class="status">PASS</span> <span class="id"><bdi>k8s.version</bdi></span></h3>
 <p class="text"><bdi>Server v1.29.4, 1.28 or newer needed</bdi></p>
-<p>Requires: <bdi>a Kubernetes context (available)</bdi></p>
+<p>Requires: a Kubernetes context (available)</p>
 <p class="muted">Took 48 ms</p>
 </article>
 <article class="check status-pass" id="check-5">
 <h3><span class="status">PASS</span> <span class="id"><bdi>k8s.storageclass</bdi></span></h3>
 <p class="text"><bdi>Default class gp3 (ebs.csi.aws.com) supports ReadWriteOnce</bdi></p>
-<p>Requires: <bdi>a Kubernetes context (available)</bdi></p>
+<p>Requires: a Kubernetes context (available)</p>
 <p class="muted">Took 95 ms</p>
 </article>
 </section>
@@ -211,7 +211,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <article class="check status-skip" id="check-8">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>win.defender</bdi></span></h3>
 <p class="text"><bdi>Does not apply on Linux.</bdi></p>
-<p><bdi>Does not apply here</bdi></p>
+<p>Does not apply here</p>
 </article>
 </section>
 <section aria-labelledby="capabilities">

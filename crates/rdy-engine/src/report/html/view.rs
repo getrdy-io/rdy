@@ -25,11 +25,17 @@ pub(super) struct Line {
     pub spans: Vec<Span>,
 }
 
-/// A piece of a banner line. `untrusted` text is shown in `<bdi>`, so a file name with a bidi control in
-/// it cannot reorder the warning around it.
+/// A piece of a line. `untrusted` text is shown in `<bdi>`, which limits how far a bidi control in it can
+/// reorder the words around it. A U+2069 inside the text can still close the isolate early, so M1-141
+/// escapes the controls (SEC-149-11). Our own words stay outside the `<bdi>`.
 pub(super) struct Span {
     pub text: String,
     pub untrusted: bool,
+}
+
+/// The text of `spans` with the pieces joined, as a reader without markup would see it.
+pub(super) fn plain(spans: &[Span]) -> String {
+    spans.iter().map(|span| span.text.as_str()).collect()
 }
 
 impl Line {
@@ -71,8 +77,8 @@ pub(super) struct Section {
 
 /// How a check that ran in part says so.
 pub(super) struct PartialView {
-    /// "Checked in part. Could not read: ..."
-    pub summary: String,
+    /// "Checked in part. Could not read: ...", with the names that came from the report marked.
+    pub summary: Vec<Span>,
     /// The check's own note, which can be empty.
     pub note: String,
 }
@@ -89,11 +95,11 @@ pub(super) struct CheckView {
     pub name: Option<String>,
     pub message: String,
     /// Why a check that did not run did not run.
-    pub not_run_reason: Option<String>,
+    pub not_run_reason: Option<Vec<Span>>,
     pub fix: Option<String>,
     pub builtin_fix: Option<String>,
-    /// `root (not available)` and so on.
-    pub requires: Vec<String>,
+    /// `root (not available)` and so on, one list of spans per need.
+    pub requires: Vec<Vec<Span>>,
     pub partial: Option<PartialView>,
     pub notes: Vec<String>,
     /// How long the check took. Left out for a check that did not run, where it is always zero.
@@ -316,27 +322,30 @@ fn check_view(report: &Report, check: &CheckResult) -> CheckView {
             .needs
             .iter()
             .map(|need| {
-                format!(
-                    "{} ({})",
-                    need_label(&need.need, need.name.as_deref()),
-                    available_word(need.met)
-                )
+                let mut spans = need_spans(&need.need, need.name.as_deref());
+                spans.push(Span::own(&format!(" ({})", available_word(need.met))));
+                spans
             })
             .collect(),
         partial: check.partial.as_ref().map(|partial| {
-            let mut missing: Vec<String> = partial
+            let mut missing: Vec<Vec<Span>> = partial
                 .missing
                 .iter()
-                .map(|need| need_label(need, None))
+                .map(|need| need_spans(need, None))
                 .collect();
-            missing.extend(partial.missing_grants.iter().cloned());
+            missing.extend(
+                partial
+                    .missing_grants
+                    .iter()
+                    .map(|grant| vec![Span::untrusted(grant)]),
+            );
             let summary = if missing.is_empty() {
-                "Checked in part. The result may be incomplete.".to_owned()
+                vec![Span::own("Checked in part. The result may be incomplete.")]
             } else {
-                format!(
-                    "Checked in part. Could not read: {}. The result may be incomplete.",
-                    missing.join(", ")
-                )
+                let mut spans = vec![Span::own("Checked in part. Could not read: ")];
+                spans.extend(join_spans(missing));
+                spans.push(Span::own(". The result may be incomplete."));
+                spans
             };
             PartialView {
                 summary,
@@ -359,59 +368,85 @@ fn index_of(report: &Report, check: &CheckResult) -> usize {
 }
 
 /// Why a check that did not run did not run, in the words of 01 section 6.
-pub(super) fn not_run_reason(check: &CheckResult) -> Option<String> {
+pub(super) fn not_run_reason(check: &CheckResult) -> Option<Vec<Span>> {
     match check.status {
         Status::Skipped => Some(skip_text(check)),
-        Status::Timeout => Some(match check.timeout_after_ms {
+        Status::Timeout => Some(vec![Span::own(&match check.timeout_after_ms {
             Some(ms) => format!("Stopped after {ms} ms."),
             None => "Run time limit reached.".to_owned(),
-        }),
+        })]),
         _ => None,
     }
 }
 
-fn skip_text(check: &CheckResult) -> String {
+/// `lists` with ", " between them, in our own words.
+fn join_spans(lists: Vec<Vec<Span>>) -> Vec<Span> {
+    let mut out = Vec::new();
+    for (i, list) in lists.into_iter().enumerate() {
+        if i > 0 {
+            out.push(Span::own(", "));
+        }
+        out.extend(list);
+    }
+    out
+}
+
+fn skip_text(check: &CheckResult) -> Vec<Span> {
     match &check.skip_kind {
         Some(SkipKind::MissingNeed) => {
-            let missing: Vec<String> = check
+            let missing: Vec<Vec<Span>> = check
                 .needs
                 .iter()
                 .filter(|need: &&NeedState| !need.met)
-                .map(|need| need_label(&need.need, need.name.as_deref()))
+                .map(|need| need_spans(&need.need, need.name.as_deref()))
                 .collect();
             if missing.is_empty() {
-                "Missing something this check needs.".to_owned()
+                vec![Span::own("Missing something this check needs.")]
             } else {
-                format!("Missing: {}", missing.join(", "))
+                let mut spans = vec![Span::own("Missing: ")];
+                spans.extend(join_spans(missing));
+                spans
             }
         }
         Some(SkipKind::NotInBuild | SkipKind::UnknownCheck) => {
-            "Not in this version of rdy".to_owned()
+            vec![Span::own("Not in this version of rdy")]
         }
-        Some(SkipKind::UnsupportedSpec) => "rdy cannot read this check".to_owned(),
-        Some(SkipKind::NotYetOnOs) => "Not available on this OS yet".to_owned(),
-        Some(SkipKind::NotApplicable) => "Does not apply here".to_owned(),
-        Some(SkipKind::RunDeadline) => "Run time limit reached".to_owned(),
-        Some(SkipKind::Cancelled) => "Run was interrupted".to_owned(),
+        Some(SkipKind::UnsupportedSpec) => vec![Span::own("rdy cannot read this check")],
+        Some(SkipKind::NotYetOnOs) => vec![Span::own("Not available on this OS yet")],
+        Some(SkipKind::NotApplicable) => vec![Span::own("Does not apply here")],
+        Some(SkipKind::RunDeadline) => vec![Span::own("Run time limit reached")],
+        Some(SkipKind::Cancelled) => vec![Span::own("Run was interrupted")],
         // A kind this version does not know, or none at all.
-        _ => "rdy did not run this check".to_owned(),
+        _ => vec![Span::own("rdy did not run this check")],
     }
 }
 
-/// What a need is called on the page.
+/// What a need is called on the page, as plain text.
 pub(super) fn need_label(need: &Need, name: Option<&str>) -> String {
+    plain(&need_spans(need, name))
+}
+
+/// What a need is called on the page. The name that came from the report is the untrusted piece.
+pub(super) fn need_spans(need: &Need, name: Option<&str>) -> Vec<Span> {
     let with_name = |what: &str| match name {
-        Some(name) => format!("{what} {name}"),
-        None => what.to_owned(),
+        Some(name) => vec![Span::own(&format!("{what} ")), Span::untrusted(name)],
+        None => vec![Span::own(what)],
     };
     match need {
-        Need::Root => "root".to_owned(),
-        Need::KubeContext => "a Kubernetes context".to_owned(),
-        Need::Network => "network access".to_owned(),
+        Need::Root => vec![Span::own("root")],
+        Need::KubeContext => vec![Span::own("a Kubernetes context")],
+        Need::Network => vec![Span::own("network access")],
         Need::Command => with_name("the command"),
         Need::CloudCredentials => with_name("cloud credentials for"),
-        // A need this version does not know is shown as written.
-        other => with_name(other.as_str()),
+        // A need this version does not know is shown as written, so it is not our word.
+        other => match name {
+            Some(name) => vec![
+                Span::untrusted(other.as_str()),
+                Span::own(" "),
+                Span::untrusted(name),
+            ],
+            None => vec![Span::untrusted(other.as_str())],
+        },
     }
 }
 

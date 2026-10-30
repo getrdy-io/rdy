@@ -7,15 +7,26 @@
 # It uses the Java that is on PATH (the GitHub runners ship one). It downloads the pinned release of the
 # checker, checks its sha256, and only then runs it. A hash that does not match runs nothing.
 # `--Werror` makes warnings fail the run too. The checker also checks the inline CSS.
-# CI runs it on the linux-x64 test leg only. The five-leg smoke test is `well_formed` in
-# crates/rdy-engine/tests/html_report.rs.
+# CI runs it in the `html-validator` job (checkout and Java only, no cargo, no cache). The five-leg smoke
+# test is `well_formed` in crates/rdy-engine/tests/html_report.rs.
 # Exit: 0 valid, 1 invalid or failed, 64 usage error.
 #
 # The pin. The checker is published as the npm package `vnu-jar` by the validator project, built by its own
-# workflow with an npm provenance attestation. To bump it: choose a release, download the tarball, check
-# that its sha512 matches both `dist.integrity` in the registry metadata and the subject digest of the
-# provenance attestation (https://registry.npmjs.org/-/npm/v1/attestations/vnu-jar@<version>), then
-# write the sha256 of the tarball below. Pin both lines together.
+# workflow and published with an npm provenance attestation (SLSA v1, signed with Sigstore). Nothing in the
+# registry is trusted by itself, because it serves both the tarball and its attestation. To bump the pin:
+#   1. Choose a release. Download the tarball vnu-jar-<version>.tgz and the attestation bundle from
+#      https://registry.npmjs.org/-/npm/v1/attestations/vnu-jar@<version> (the SLSA provenance one).
+#   2. Check that the tarball sha512 equals `dist.integrity` in the registry metadata.
+#   3. Verify the signed chain with cosign (3.1.3 or newer):
+#        cosign verify-blob-attestation --bundle <slsa-bundle.json> \
+#          --type https://slsa.dev/provenance/v1 \
+#          --certificate-identity https://github.com/validator/validator/.github/workflows/build.yml@refs/heads/main \
+#          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#          vnu-jar-<version>.tgz
+#   4. Write the sha256 of the tarball and the new version below. Pin both lines together.
+# Pinned 26.10.12: built from validator/validator commit 973e40b16d1c653cf52523b126ef92aec8bf9e0e
+# (the jar's manifest says 26.10.12 (973e40b)), Rekor log index 3228121956 (2026-10-12), verified by the
+# security review of PR #149 (SEC-149-8). The jar runs in CI only and is never shipped.
 
 set -eu
 
@@ -46,12 +57,29 @@ if ! command -v java >/dev/null 2>&1; then
     exit 1
 fi
 
+if command -v sha256sum >/dev/null 2>&1; then
+    hash_file() { sha256sum "$1" | cut -d ' ' -f 1; }
+elif command -v shasum >/dev/null 2>&1; then
+    hash_file() { shasum -a 256 "$1" | cut -d ' ' -f 1; }
+else
+    echo "error: neither sha256sum nor shasum is on PATH" >&2
+    echo "fix: install coreutils (sha256sum) or perl's shasum, then run again" >&2
+    exit 1
+fi
+
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT HUP INT TERM
+trap 'rm -rf "$work"' EXIT
+trap 'exit 1' HUP INT TERM
 
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 \
+    --connect-timeout 20 --max-time 300 \
     --output "$work/vnu-jar.tgz" "$VNU_URL"
-got=$(sha256sum "$work/vnu-jar.tgz" | cut -d ' ' -f 1)
+got=$(hash_file "$work/vnu-jar.tgz")
+if [ -z "$got" ]; then
+    echo "error: could not compute the sha256 of the download" >&2
+    echo "fix: check that sha256sum or shasum works on this machine" >&2
+    exit 1
+fi
 if [ "$got" != "$VNU_SHA256" ]; then
     echo "error: vnu-jar ${VNU_VERSION} has sha256 $got, expected $VNU_SHA256" >&2
     echo "fix: the download changed. Do not bump the pin without the checks in this script's header" >&2

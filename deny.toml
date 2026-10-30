@@ -104,6 +104,9 @@ deny = [
     # askama builds the HTML report (M1-077, 05 dependency record, SEC-149-2). Only the engine renders a
     # report. A check crate never needs a template engine, so it stays off every check crate.
     { crate = "askama", wrappers = ["rdy-engine"], reason = "05 dependency record: only rdy-engine renders the HTML report; no check crate" },
+    { crate = "askama_macros", wrappers = ["askama"], reason = "05 dependency record: reached through askama only" },
+    { crate = "askama_derive", wrappers = ["askama_macros"], reason = "05 dependency record: reached through askama only" },
+    { crate = "askama_parser", wrappers = ["askama_derive"], reason = "05 dependency record: reached through askama only" },
 ]
 
 [sources]

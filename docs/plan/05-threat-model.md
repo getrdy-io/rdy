@@ -328,7 +328,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 
 - `askama` 0.16.1, with its build-time crates `askama_macros`, `askama_derive` and `askama_parser` (M1-077, ADR 0003
   decision 5; D.5 of 07). **Approved by security-reviewer, PR #149 (SEC-149-2).** A direct dependency of `rdy-engine` behind the `html`
-  feature, which is on by default. The check crates may depend on none of them: `deny.toml` bans `askama` with `wrappers = ["rdy-engine"]`. Pinned with `=` in the
+  feature, which is on by default. The check crates may depend on none of them: `deny.toml` bans `askama` with `wrappers = ["rdy-engine"]`, and bans the three build-time crates except through their parent (the kube pattern). Pinned with `=` in the
   workspace `Cargo.toml`: a template engine decides what is escaped, so every bump is reviewed by hand.
   - Purpose: compile the HTML report templates (`crates/rdy-engine/templates/`) into Rust at build time, with
     HTML escaping on for `.html` files. No template is read at run time, and no template engine runs on a
@@ -338,7 +338,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     `askama_macros`: GuillaumeGomez alone, a single owner, which is accepted because the crate is
     build-time only and every version bump is reviewed by hand. 0.16.1 is the latest release (published
     2026-09-04) and is not yanked. No RustSec advisory names any askama crate or `rustc-hash`.
-  - `unsafe`: yes, and not forbidden. `askama` (the runtime crate) uses `unsafe` in two places: four
+  - `unsafe`: yes, and not forbidden. `askama` (the runtime crate) uses `unsafe` in two files: four
     `transmute` calls in `ascii_str.rs` (lines 35, 42, 92 and 102), read and sound (`AsciiStr` and
     `AsciiChar` are `repr(transparent)`, `AsciiChar::new` panics on a non-ASCII value, the field is private
     and there is no `DerefMut`), and one `from_utf8_unchecked` in the `json` filter, which is behind the
@@ -357,6 +357,14 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     that may be printed unescaped is `HtmlSafeJson`, and M1-077 does not print it); askama escapes `<`, `>`,
     `&`, `"` and `'` as numeric references; the Content-Security-Policy `<meta>` is the second line of
     defence (ADR 0003 decision 3).
+- `vnu-jar` 26.10.12 (M1-077, SEC-149-8). The Nu HTML Checker, an npm package that holds a Java jar. **CI only,
+  never shipped:** it runs in the `html-validator` job through `scripts/validate-html.sh` and is not a Cargo
+  dependency, so no `deny.toml` or lock file entry exists. The script pins the tarball sha256 and checks it
+  before the jar runs. The pin was checked against the registry digest and the SLSA v1 provenance (signed with
+  Sigstore; identity `https://github.com/validator/validator/.github/workflows/build.yml@refs/heads/main`,
+  workflow commit 973e40b16d1c653cf52523b126ef92aec8bf9e0e, Rekor log index 3228121956). The script header
+  lists the `cosign verify-blob-attestation` command that every bump must run. The job has a read-only token,
+  no cargo and no cache, so the jar sits beside nothing a PR could poison.
 - `rustls` 0.23.46, `webpki-roots` 1.0.11 and `rustls-native-certs` 0.8.5 (M1-092, ADR 0009, ADR 0035).
   Direct dependencies of `rdy-engine` for the probe facade's TLS. Recorded from security-reviewer's review
   of PR #133 (SEC-133-3). The check crates may depend on none of them (the `NEVER` list of the dependency

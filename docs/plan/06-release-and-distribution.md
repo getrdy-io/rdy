@@ -91,6 +91,7 @@ Rules:
 | `test` (5 legs) | yes | build, `cargo nextest run --locked`. Linux legs also prove the binary is static (below) |
 | `root` | yes | linux-x64 only. Installs `strace`, builds a nextest archive as the runner user, runs the `root_*` tests from it under `sudo` with the nextest `root` profile (`docs/plan/08-testing.md`, section 6) |
 | `install-sh` | yes | `shellcheck`, then the shell test suite with a stub `curl` and stub cosign |
+| `html-validator` | yes | M1-077: `scripts/validate-html.sh` runs the pinned Nu HTML Checker over the HTML goldens with `--Werror`. Checkout and Java only, no cargo, no cache, read-only token |
 | `ci-ok` | the only required check | `needs:` exactly the gating jobs above; fails on any result other than `success` |
 
 `ci-ok` lists only gating jobs. A job skipped on PRs must never sit in its `needs:`. A renamed matrix leg would otherwise block every PR.

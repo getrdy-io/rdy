@@ -5,7 +5,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>rdy report: {{ title_product }}, {{ verdict_word }}</title>
+<title>rdy report: {{ verdict_word }}, {{ title_product }}</title>
 <style>
 {%- include "report.css" %}
 </style>
@@ -47,7 +47,7 @@
 <h3><span class="status">{{ check.status_word }}</span> <span class="id"><bdi>{{ check.id }}</bdi></span>{% if let Some(name) = check.name %} (<bdi>{{ name }}</bdi>){% endif %}</h3>
 <p class="text"><bdi>{{ check.message }}</bdi></p>
 {%- if let Some(why) = check.not_run_reason %}
-<p><bdi>{{ why }}</bdi></p>
+<p>{% for part in why %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
 {%- endif %}
 {%- if let Some(fix) = check.fix %}
 <p class="text"><span class="label">Fix:</span> <bdi>{{ fix }}</bdi></p>
@@ -56,10 +56,10 @@
 <p class="text"><span class="label">More from rdy:</span> <bdi>{{ more }}</bdi></p>
 {%- endif %}
 {%- for need in check.requires %}
-<p>Requires: <bdi>{{ need }}</bdi></p>
+<p>Requires: {% for part in need %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
 {%- endfor %}
 {%- if let Some(partial) = check.partial %}
-<p><bdi>{{ partial.summary }}</bdi></p>
+<p>{% for part in partial.summary %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
 {%- if !partial.note.is_empty() %}
 <p class="text"><bdi>{{ partial.note }}</bdi></p>
 {%- endif %}

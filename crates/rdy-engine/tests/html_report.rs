@@ -5,7 +5,7 @@
 //! the 01 section 7.2 sample at `tests/fixtures/reports/not-ready-7.2.json`.
 //!
 //! The exit test says the page passes an HTML validator. The CI job `html-validator` runs the Nu HTML
-//! Checker over the two goldens on the linux-x64 leg (`scripts/validate-html.sh`). `well_formed` below is
+//! Checker over the two goldens (`scripts/validate-html.sh`). `well_formed` below is
 //! the smoke test that runs on all five legs: the doctype, `lang`, `color-scheme`, balanced tags, void
 //! elements and unique ids. The structure test (M1-082) goes further.
 
@@ -200,7 +200,7 @@ fn the_page_sets_the_csp_lang_color_scheme_and_loads_nothing() -> TestResult {
 #[test]
 fn the_verdict_and_the_blocks_come_first() -> TestResult {
     let html = html_of(sample()?)?;
-    assert!(html.contains("<title>rdy report: \u{2068}acme-platform\u{2069}, NOT READY</title>"));
+    assert!(html.contains("<title>rdy report: NOT READY, \u{2068}acme-platform\u{2069}</title>"));
     let h1 = at(&html, "<h1>")?;
     let blocks = at(&html, "<h2 id=\"blocks\">")?;
     let required = at(&html, "<h2 id=\"required-not-run\">")?;
@@ -223,7 +223,7 @@ fn the_verdict_is_worked_out_from_the_checks_and_not_read_from_the_file() -> Tes
     doc["verdict"] = json!("ready");
     doc["exit_code"] = json!(0);
     let html = html_of(doc)?;
-    assert!(html.contains("<title>rdy report: \u{2068}acme-platform\u{2069}, NOT READY</title>"));
+    assert!(html.contains("<title>rdy report: NOT READY, \u{2068}acme-platform\u{2069}</title>"));
     assert!(html.contains("1 warning"));
     Ok(())
 }
@@ -473,6 +473,29 @@ fn an_unfinished_run_shows_the_incomplete_banner() -> TestResult {
     Ok(())
 }
 
+/// Code 3 of PR #149: the not-run reason, the partial summary and `Requires:` keep our own words outside
+/// `<bdi>`, so a bidi control in a grant or a need name stays inside its own isolate.
+#[test]
+fn only_the_untrusted_words_of_a_reason_and_a_summary_are_isolated() -> TestResult {
+    let mut doc = sample()?;
+    doc["checks"][2]["partial"] = json!({
+        "missing": ["root"],
+        "missing_grants": ["list nodes\u{202e}"],
+        "note": "",
+    });
+    doc["checks"][7]["skip_kind"] = json!("missing_need");
+    doc["checks"][7]["needs"] = json!([
+        { "need": "command", "name": "ss\u{202e}", "hard": true, "met": false }
+    ]);
+    let html = html_of(doc)?;
+    assert!(html.contains(
+        "<p>Checked in part. Could not read: root, <bdi>list nodes\u{202e}</bdi>. The result may be incomplete.</p>"
+    ));
+    assert!(html.contains("<p>Missing: the command <bdi>ss\u{202e}</bdi></p>"));
+    assert!(html.contains("<p>Requires: the command <bdi>ss\u{202e}</bdi> (not available)</p>"));
+    Ok(())
+}
+
 #[test]
 fn the_same_report_gives_the_same_bytes() -> TestResult {
     let report = redact(five_buckets_doc()?)?;
@@ -483,8 +506,8 @@ fn the_same_report_gives_the_same_bytes() -> TestResult {
 #[test]
 fn not_run_checks_say_why_and_what_they_needed() -> TestResult {
     let html = html_of(sample()?)?;
-    assert!(html.contains("<p><bdi>Not in this version of rdy</bdi></p>"));
-    assert!(html.contains("<p>Requires: <bdi>network access (available)</bdi></p>"));
+    assert!(html.contains("<p>Not in this version of rdy</p>"));
+    assert!(html.contains("<p>Requires: network access (available)</p>"));
     Ok(())
 }
 

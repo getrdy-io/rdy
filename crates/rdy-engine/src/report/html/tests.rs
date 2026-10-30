@@ -3,7 +3,7 @@
 
 use rdy_spec::result::{CheckResult, Need, NeedState, Severity, SkipKind, Status};
 
-use super::view::{need_label, not_run_reason, short_fingerprint, utc_text};
+use super::view::{need_label, need_spans, not_run_reason, plain, short_fingerprint, utc_text};
 
 #[test]
 fn a_timestamp_is_shown_as_utc_and_anything_else_as_written() {
@@ -61,15 +61,33 @@ fn a_skip_says_why_in_the_words_of_01_section_6() {
     ];
     for (kind, text) in cases {
         check.skip_kind = Some(SkipKind::from(kind));
-        assert_eq!(not_run_reason(&check).as_deref(), Some(text), "{kind}");
+        let spans = not_run_reason(&check).expect("a skip has a reason");
+        assert_eq!(plain(&spans), text, "{kind}");
+        assert!(spans.iter().all(|span| !span.untrusted), "{kind}");
     }
     check.skip_kind = Some(SkipKind::MissingNeed);
     check.needs = vec![NeedState::new(Need::Root, true, false)];
-    assert_eq!(not_run_reason(&check).as_deref(), Some("Missing: root"));
+    let spans = not_run_reason(&check).expect("a skip has a reason");
+    assert_eq!(plain(&spans), "Missing: root");
+    assert!(spans.iter().all(|span| !span.untrusted));
 }
 
 #[test]
 fn a_check_that_ran_has_no_not_run_reason() {
     let check = CheckResult::new("host.cpu", "host", Severity::Block, Status::Pass);
-    assert_eq!(not_run_reason(&check), None);
+    assert!(not_run_reason(&check).is_none());
+}
+
+/// SEC-149-4, code 3: only the name that came from the report is untrusted. Our words around it are not.
+#[test]
+fn a_need_name_is_the_only_untrusted_piece_of_its_label() {
+    let spans = need_spans(&Need::Command, Some("ss\u{202e}"));
+    let untrusted: Vec<&str> = spans
+        .iter()
+        .filter(|span| span.untrusted)
+        .map(|span| span.text.as_str())
+        .collect();
+    assert_eq!(untrusted, ["ss\u{202e}"]);
+    assert_eq!(plain(&spans), "the command ss\u{202e}");
+    assert!(need_spans(&Need::Root, None).iter().all(|s| !s.untrusted));
 }
