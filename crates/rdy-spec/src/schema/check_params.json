@@ -843,14 +843,46 @@
                     "description": "The name of the object. Leave it out to mean all names."
                   }
                 }
+              },
+              {
+                "description": "verb /path, for a URL that is not a resource, such as get /healthz.",
+                "type": "string",
+                "pattern": "^[a-z*]{1,63} (?!.*(//|\\.\\.))/[A-Za-z0-9._~/-]{0,251}\\*?$"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "verb",
+                  "path"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "verb": {
+                    "type": "string",
+                    "pattern": "^[a-z*]+$",
+                    "maxLength": 63,
+                    "description": "The verb, usually `get`."
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^(?!.*(//|\\.\\.))/[A-Za-z0-9._~/-]{0,251}\\*?$",
+                    "maxLength": 253,
+                    "description": "The URL path, such as `/healthz`. A trailing `*` makes it a prefix."
+                  }
+                }
               }
             ]
           },
           "description": "The permissions to test, 1 to 100. Each one is an entry in the audit log of the cluster."
         },
         "namespace": {
-          "description": "The namespace for the string items. The default is cluster scope.",
+          "description": "The namespace for the items that name none (a string item cannot name one). The default is cluster scope.",
           "$ref": "#/$defs/K8sName"
+        },
+        "as": {
+          "description": "The user to test as, for example `system:serviceaccount:acme-system:installer`. The reviews are sent with `Impersonate-User` when the identity in the kubeconfig may impersonate it. It is refused when the kubeconfig already impersonates.",
+          "type": "string",
+          "pattern": "^[\\u0020-\\u007e]{1,253}$"
         }
       },
       "examples": [

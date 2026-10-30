@@ -40,6 +40,7 @@ mod rules;
 mod tests;
 
 use rules::SELF_SUBJECT_REVIEW_PATH;
+pub(super) use rules::impersonation_allowed;
 #[cfg(not(test))]
 use rules::log_path;
 pub use rules::{
@@ -49,11 +50,12 @@ pub use rules::{
     RULE_SUBRESOURCE, RULE_UPGRADE, SELF_SUBJECT_REVIEW_BODY,
 };
 pub(super) use rules::{BodyView, judge};
-use rules::{bad_header, impersonation_allowed, is_group, is_version};
+use rules::{bad_header, is_group, is_version};
 // What the mock harness (`client::mock`) needs to judge the requests it recorded the way the guard does.
 #[cfg(test)]
 pub(super) use rules::{Target, decode_query_value, log_path, target_of};
 
+use super::impersonate::AddImpersonation;
 use super::text::escape_capped;
 
 /// The error type tower services share.
@@ -215,6 +217,12 @@ where
             return Box::pin(ready(Err(GuardError { rule }.into())));
         }
 
+        // The header passed `judge`, so it is the spec's user, once. The entry says so, never the name.
+        let call = if request.headers().contains_key("impersonate-user") {
+            call.impersonated()
+        } else {
+            call
+        };
         let future = self.inner.call(request);
         Box::pin(async move {
             match future.await {
@@ -292,6 +300,12 @@ impl ReadOnlyClient {
         Self::over(RawService(raw.clone()), probe)
     }
 
+    /// Like [`ReadOnlyClient::new`], and the two access review POSTs carry `Impersonate-User: <user>`
+    /// (see [`impersonate`](super::impersonate)). Needs a running tokio runtime.
+    pub(super) fn new_as(raw: &kube::Client, probe: &Probe, user: ImpersonateAs) -> Self {
+        Self::over_as(RawService(raw.clone()), probe, user)
+    }
+
     /// Puts the guard in front of `inner`: the one place a client is built. Production passes the raw
     /// kube client, and the mock harness (`client::mock`) passes its replaying service, so a fixture run
     /// goes through the same layers a real run does.
@@ -303,6 +317,20 @@ impl ReadOnlyClient {
     {
         // The namespace of a kubeconfig is not used (ADR 0031 decision 12).
         let client = kube::Client::new(guarded_service(inner, probe), "");
+        Self { client }
+    }
+
+    /// [`ReadOnlyClient::over`] with the spec's `as:` user: the guard allows `Impersonate-User` with that
+    /// value on the two access review POSTs, and a thin layer above it adds the header there. Production
+    /// ([`ReadOnlyClient::new_as`]) and the mock harness both call it, so the wire order is under test.
+    pub(super) fn over_as<S>(inner: S, probe: &Probe, user: ImpersonateAs) -> Self
+    where
+        S: Service<Request<Body>, Response = Response<Body>> + Send + 'static,
+        S::Future: Send + 'static,
+        S::Error: Into<BoxError>,
+    {
+        let guarded = guarded_service_as(inner, probe, user.clone());
+        let client = kube::Client::new(AddImpersonation::new(guarded, user), "");
         Self { client }
     }
 

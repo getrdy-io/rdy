@@ -276,6 +276,7 @@ One side effect, recorded as it happened. Fields beyond the required ones depend
 | `via_proxy` | string or null | no |  | connect, user info stripped |  |
 | `sni` | string | no |  | tls |  |
 | `header` | string | no |  | kube: name of the refused request header, never its value |  |
+| `impersonated` | boolean | no |  | kube: true when the request was sent with Impersonate-User, as the spec's `as` user. Absent otherwise. Never the user name. |  |
 | `method` | string | no |  | http, kube |  |
 | `url` | string | no |  | http, without query string |  |
 | `status` | integer or null | no |  | http, kube |  |

@@ -55,8 +55,9 @@ fn cases() -> Vec<Case> {
             full: json!({"can": ["create namespaces", "get pods/log",
                 "create clusterroles.rbac.authorization.k8s.io",
                 {"verb": "get", "group": "apps", "resource": "deployments",
-                 "subresource": "status", "namespace": "acme", "name": "web"}],
-                "namespace": "acme"}),
+                 "subresource": "status", "namespace": "acme", "name": "web"},
+                "get /healthz", {"verb": "get", "path": "/metrics"}],
+                "namespace": "acme", "as": "system:serviceaccount:acme:installer"}),
             bad: vec![
                 ("can", json!([])),
                 ("can", json!("create namespaces")),
@@ -68,6 +69,10 @@ fn cases() -> Vec<Case> {
                 ("can", json!(["create namespaces."])),
                 ("can", json!(["get pods/"])),
                 ("can", json!(["get pods/Log"])),
+                ("can", json!(["get /a//b"])),
+                ("as", json!("")),
+                ("as", json!("caf\u{e9}")),
+                ("as", json!(7)),
                 ("can", json!([" create namespaces"])),
                 ("can", json!([7])),
                 ("can", json!([["create", "namespaces"]])),
@@ -449,12 +454,78 @@ fn a_permission_string_and_the_same_object_read_the_same_way() {
     for pair in r.can.chunks(2) {
         assert_eq!(pair[0], pair[1]);
     }
-    assert_eq!(r.can[0].group.as_str(), "");
-    assert_eq!(r.can[4].group.as_str(), "rbac.authorization.k8s.io");
+    let rule = |i: usize| r.can[i].as_resource().expect("a resource item");
+    assert_eq!(rule(0).group.as_str(), "");
+    assert_eq!(rule(4).group.as_str(), "rbac.authorization.k8s.io");
     assert_eq!(
-        r.can[2].subresource.as_ref().map(RbacSubresource::as_str),
+        rule(2).subresource.as_ref().map(RbacSubresource::as_str),
         Some("log")
     );
+}
+
+#[test]
+fn a_non_resource_string_and_the_same_object_read_the_same_way() {
+    let CheckParams::K8sRbac(r) = typed(
+        "k8s.rbac",
+        &json!({"can": [
+            "get /healthz",
+            {"verb": "get", "path": "/healthz"},
+            "get /logs/*",
+            {"verb": "get", "path": "/logs/*"}
+        ], "as": "system:serviceaccount:acme-system:installer"}),
+    ) else {
+        panic!("not K8sRbac");
+    };
+    for pair in r.can.chunks(2) {
+        assert_eq!(pair[0], pair[1]);
+    }
+    let RbacItem::NonResource(rule) = &r.can[2] else {
+        panic!("not a non-resource item");
+    };
+    assert_eq!((rule.verb.as_str(), rule.path.as_str()), ("get", "/logs/*"));
+    assert!(r.can[0].as_resource().is_none());
+    assert_eq!(
+        r.as_user.as_ref().map(ImpersonatedUser::as_str),
+        Some("system:serviceaccount:acme-system:installer")
+    );
+}
+
+#[test]
+fn a_non_resource_object_refuses_resource_keys() {
+    for item in [
+        json!({"verb": "get", "path": "/x", "resource": "pods"}),
+        json!({"verb": "get", "path": "/x", "namespace": "a"}),
+    ] {
+        let reason = why("k8s.rbac", &json!({"can": [item]}));
+        assert!(
+            matches!(reason, UnsupportedReason::UnknownNestedField { .. }),
+            "{reason:?}"
+        );
+    }
+}
+
+#[test]
+fn a_bad_non_resource_item_or_as_value_is_a_bad_value() {
+    for (params, field) in [
+        (json!({"can": ["get /a//b"]}), "can"),
+        (json!({"can": ["get /a/../b"]}), "can"),
+        (json!({"can": ["get /a b"]}), "can"),
+        (json!({"can": ["get /a*b"]}), "can"),
+        (json!({"can": [{"verb": "get", "path": "healthz"}]}), "can"),
+        (json!({"can": [{"verb": "Get", "path": "/x"}]}), "can"),
+        (json!({"can": ["get /x"], "as": ""}), "as"),
+        (json!({"can": ["get /x"], "as": "a\u{1b}[2J"}), "as"),
+        (json!({"can": ["get /x"], "as": "caf\u{e9}"}), "as"),
+        (json!({"can": ["get /x"], "as": 7}), "as"),
+        (json!({"can": ["get /x"], "as": "x".repeat(254)}), "as"),
+    ] {
+        let reason = why("k8s.rbac", &params);
+        assert!(
+            matches!(&reason, UnsupportedReason::BadValue { field: Some(f), .. } if f == field),
+            "{params}: {reason:?}"
+        );
+        assert_printable(&reason);
+    }
 }
 
 #[test]

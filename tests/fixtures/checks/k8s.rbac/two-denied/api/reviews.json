@@ -1,0 +1,102 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "namespaces"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": ""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "deployments",
+          "group": "apps",
+          "namespace": "acme-system"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "list",
+          "resource": "pods",
+          "namespace": "acme-system"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "denied": true,
+        "reason": "denied by the admission webhook acme-guard"
+      }
+    },
+    {
+      "spec": {
+        "nonResourceAttributes": {
+          "verb": "get",
+          "path": "/healthz"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    }
+  ],
+  "rules": [
+    {
+      "spec": {
+        "namespace": "acme-system"
+      },
+      "status": {
+        "resourceRules": [
+          {
+            "verbs": [
+              "get",
+              "list"
+            ],
+            "apiGroups": [
+              ""
+            ],
+            "resources": [
+              "configmaps"
+            ]
+          },
+          {
+            "verbs": [
+              "create"
+            ],
+            "apiGroups": [
+              "apps"
+            ],
+            "resources": [
+              "deployments"
+            ]
+          }
+        ],
+        "nonResourceRules": [
+          {
+            "verbs": [
+              "get"
+            ],
+            "nonResourceURLs": [
+              "/healthz",
+              "/version"
+            ]
+          }
+        ],
+        "incomplete": false
+      }
+    }
+  ]
+}

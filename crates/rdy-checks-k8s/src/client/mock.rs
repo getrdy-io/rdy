@@ -21,8 +21,11 @@
 //!   recorded.
 //! - `SelfSubjectAccessReview` is answered from the table in `api/reviews.json`:
 //!   `{"access": [{"spec": {...}, "status": {...}}]}`. A row matches when its `spec` equals the posted
-//!   `spec`, ignoring empty strings and nulls, and the row's `status` is the answer. Any other POST (the
-//!   `SelfSubjectReview`) is a plain recorded request.
+//!   `spec`, ignoring empty strings and nulls, and the row's `status` is the answer. The `rules` list of
+//!   the same file answers `SelfSubjectRulesReview` the same way (`spec` is `{"namespace": ...}`, `status`
+//!   needs a boolean `incomplete`). A review with no row falls back to a recorded `POST` of that path, so
+//!   a fixture can answer every review with one `403`. Any other POST (the `SelfSubjectReview`) is a plain
+//!   recorded request.
 //! - Anything the fixture does not hold fails: a `501` that names the request, and a line in
 //!   [`Mock::unrecorded`]. A fixture never falls through to a default (02).
 //!
@@ -37,7 +40,10 @@
 //!    id that the entry cites in `checks` (a `None` check id cites nothing);
 //! 3. each recorded request pairs with one sent log entry of the same method and path (a multiset), so no
 //!    request reached the mock without the guard, and no sent entry is left without a request;
-//! 4. the fixture answered every request.
+//! 4. the fixture answered every request;
+//! 5. a request that carried `Impersonate-User` pairs with an entry marked `impersonated: true`, and no
+//!    other request does (the run's `as:` user is the one value the guard accepts, see
+//!    [`Harness::client_as`]).
 //!
 //! The harness runs the audit when it is dropped, so no fixture test can forget it. A test that expects a
 //! failing audit calls [`Harness::audit`] itself, and a failing audit turns the drop audit off.
@@ -63,15 +69,21 @@ use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use serde_json::{Value, json};
 use tower_service::Service;
 
+use super::ImpersonateAs;
 use super::ReadOnlyClient;
 use super::guard::{BodyView, Target, decode_query_value, judge, log_path, target_of};
 use super::text::escape_capped;
 
 #[cfg(test)]
+mod rbac_tests;
+#[cfg(test)]
 mod tests;
 
 /// The path of the access review the mock answers from its table.
 const ACCESS_REVIEW_PATH: &str = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews";
+
+/// The path of the rules review the mock answers from its table.
+const RULES_REVIEW_PATH: &str = "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews";
 
 /// Why a mock could not be built from a fixture.
 #[derive(Debug, thiserror::Error)]
@@ -143,6 +155,7 @@ struct Inner {
     /// `(METHOD, path, canonical query)` to the answer.
     records: BTreeMap<(String, String, String), Record>,
     reviews: Vec<ReviewRow>,
+    rules: Vec<ReviewRow>,
     state: Mutex<State>,
 }
 
@@ -200,17 +213,33 @@ fn without_empty(value: &Value) -> Value {
 }
 
 fn parse_reviews(table: &Value) -> Result<Vec<ReviewRow>, MockError> {
+    parse_rows(table, "access", "allowed")
+}
+
+/// The `rules` list of the table: rows for `SelfSubjectRulesReview`. A table without the list has none.
+fn parse_rules(table: &Value) -> Result<Vec<ReviewRow>, MockError> {
+    if table.get("rules").is_none() {
+        return Ok(Vec::new());
+    }
+    parse_rows(table, "rules", "incomplete")
+}
+
+/// Reads the rows of `list` (`access` or `rules`). `flag` is the boolean every `status` must have.
+fn parse_rows(table: &Value, list: &str, flag: &str) -> Result<Vec<ReviewRow>, MockError> {
     let bad = |reason: &str| MockError::BadReviews(reason.to_owned());
     let object = table
         .as_object()
         .ok_or_else(|| bad("must be an object with an `access` list"))?;
-    if let Some(key) = object.keys().find(|key| key.as_str() != "access") {
+    if let Some(key) = object
+        .keys()
+        .find(|key| !matches!(key.as_str(), "access" | "rules"))
+    {
         return Err(MockError::BadReviews(format!("unknown key `{key}`")));
     }
     let rows = object
-        .get("access")
+        .get(list)
         .and_then(Value::as_array)
-        .ok_or_else(|| bad("`access` must be a list"))?;
+        .ok_or_else(|| MockError::BadReviews(format!("`{list}` must be a list")))?;
     let mut parsed: Vec<ReviewRow> = Vec::new();
     for row in rows {
         let row = row
@@ -228,8 +257,12 @@ fn parse_reviews(table: &Value) -> Result<Vec<ReviewRow>, MockError> {
             .ok_or_else(|| bad("a row needs a `spec` object"))?;
         let status = row
             .get("status")
-            .filter(|status| status.get("allowed").is_some_and(Value::is_boolean))
-            .ok_or_else(|| bad("a row needs a `status` object with a boolean `allowed`"))?;
+            .filter(|status| status.get(flag).is_some_and(Value::is_boolean))
+            .ok_or_else(|| {
+                MockError::BadReviews(format!(
+                    "a row needs a `status` object with a boolean `{flag}`"
+                ))
+            })?;
         let spec = without_empty(spec);
         if parsed.iter().any(|earlier| earlier.spec == spec) {
             return Err(MockError::BadReviews(format!(
@@ -270,10 +303,12 @@ impl Mock {
             }
         }
         let reviews = replay.reviews().map(parse_reviews).transpose()?;
+        let rules = replay.reviews().map(parse_rules).transpose()?;
         Ok(Self {
             inner: Arc::new(Inner {
                 records,
                 reviews: reviews.unwrap_or_default(),
+                rules: rules.unwrap_or_default(),
                 state: Mutex::new(State::default()),
             }),
         })
@@ -351,8 +386,12 @@ impl Mock {
             );
         }
 
-        if parts.method == Method::POST && path == ACCESS_REVIEW_PATH {
-            return self.access_review(&seen.body, &line);
+        // A review with a row in the table is answered from it. One without falls through to a recorded
+        // `POST` of the path, and then to the 501.
+        if parts.method == Method::POST
+            && let Some(response) = self.review_row(&path, &seen.body)
+        {
+            return response;
         }
 
         let key = (parts.method.as_str().to_owned(), path, query);
@@ -365,24 +404,32 @@ impl Mock {
         respond_bytes(record.status, record.body.clone())
     }
 
-    fn access_review(&self, body: &[u8], line: &str) -> Response<Body> {
+    /// The answer from the review table for a POST to `path`, or `None` when the path is not a review
+    /// with a table or no row matches.
+    fn review_row(&self, path: &str, body: &[u8]) -> Option<Response<Body>> {
+        let (rows, kind) = match path {
+            ACCESS_REVIEW_PATH => (&self.inner.reviews, "SelfSubjectAccessReview"),
+            RULES_REVIEW_PATH => (&self.inner.rules, "SelfSubjectRulesReview"),
+            _ => return None,
+        };
         let Ok(posted) = serde_json::from_slice::<Value>(body) else {
-            return respond(400, &status_body(400, "BadRequest", "the body is not JSON"));
+            return Some(respond(
+                400,
+                &status_body(400, "BadRequest", "the body is not JSON"),
+            ));
         };
         let spec = posted.get("spec").map(without_empty).unwrap_or(Value::Null);
-        let Some(row) = self.inner.reviews.iter().find(|row| row.spec == spec) else {
-            return self.not_recorded(line);
-        };
-        respond(
+        let row = rows.iter().find(|row| row.spec == spec)?;
+        Some(respond(
             201,
             &json!({
                 "apiVersion": "authorization.k8s.io/v1",
-                "kind": "SelfSubjectAccessReview",
+                "kind": kind,
                 "metadata": { "creationTimestamp": null },
                 "spec": posted.get("spec").cloned().unwrap_or(Value::Null),
                 "status": row.status,
             }),
-        )
+        ))
     }
 
     fn not_recorded(&self, line: &str) -> Response<Body> {
@@ -442,8 +489,16 @@ impl Service<Request<Body>> for Mock {
 /// Checks a fixture run against `ALLOWED` (INV-14). Returns one sentence per violation; empty is clean.
 ///
 /// `seen` is what reached the mock, `log` is the run's action log and `unrecorded` is what the fixture
-/// had no answer for. See the module docs for the four rules.
-pub(crate) fn audit(seen: &[Seen], log: &[Action], unrecorded: &[String]) -> Vec<String> {
+/// had no answer for. See the module docs for the five rules.
+///
+/// `as_user` is the `as:` user of a run whose guard was built with one: the user's header is the one
+/// `Impersonate-*` header `judge` accepts, on the two access review paths only.
+pub(crate) fn audit(
+    seen: &[Seen],
+    log: &[Action],
+    unrecorded: &[String],
+    as_user: Option<&ImpersonateAs>,
+) -> Vec<String> {
     let mut violations = Vec::new();
 
     for request in seen {
@@ -457,7 +512,13 @@ pub(crate) fn audit(seen: &[Seen], log: &[Action], unrecorded: &[String]) -> Vec
         // today: a GET that `judge` passes is discovery, `/version` or an `ALLOWED` entry, and a review
         // POST is exempt. No test makes it happen. It stays so the audit fails closed if `judge` and
         // `target_of` ever drift apart.
-        if let Err(rule) = judge(&request.method, &request.uri, &request.headers, body, None) {
+        if let Err(rule) = judge(
+            &request.method,
+            &request.uri,
+            &request.headers,
+            body,
+            as_user,
+        ) {
             violations.push(format!(
                 "INV-14: the mock recorded `{line}`, which the guard refuses ({rule})"
             ));
@@ -472,7 +533,7 @@ pub(crate) fn audit(seen: &[Seen], log: &[Action], unrecorded: &[String]) -> Vec
     // A count alone would let an unguarded request hide behind a guarded entry that never reached the
     // mock (a timeout before the send). What is left on either side is a violation, and the citation is
     // proven for every pair.
-    let mut sent: Vec<(String, String, Option<&str>)> = log
+    let mut sent: Vec<(String, String, Option<&str>, bool)> = log
         .iter()
         .filter(|entry| entry.kind == ActionKind::Kube && entry.outcome != ActionOutcome::Denied)
         .map(|entry| {
@@ -484,20 +545,36 @@ pub(crate) fn audit(seen: &[Seen], log: &[Action], unrecorded: &[String]) -> Vec
                     .unwrap_or_default()
                     .to_owned()
             };
-            (field("method"), field("path"), entry.check.as_deref())
+            let impersonated =
+                entry.fields.get("impersonated").and_then(Value::as_bool) == Some(true);
+            (
+                field("method"),
+                field("path"),
+                entry.check.as_deref(),
+                impersonated,
+            )
         })
         .collect();
     for request in seen {
         let method = escape_capped(request.method.as_str(), 16);
         let path = log_path(&request.uri);
-        let Some(index) = sent.iter().position(|(m, p, _)| *m == method && *p == path) else {
+        let impersonated = request.headers.contains_key("impersonate-user");
+        let Some(index) = sent
+            .iter()
+            .position(|(m, p, _, i)| *m == method && *p == path && *i == impersonated)
+        else {
+            let reason = if sent.iter().any(|(m, p, _, _)| *m == method && *p == path) {
+                "its log entry disagrees about Impersonate-User: a request with the header must be logged `impersonated: true`, and no other"
+            } else {
+                "the log holds no sent entry for it; a request reached the mock without the guard"
+            };
             violations.push(format!(
-                "INV-14: the mock recorded `{}` but the log holds no sent entry for it; a request reached the mock without the guard",
+                "INV-14: the mock recorded `{}` but {reason}",
                 request.line()
             ));
             continue;
         };
-        let (_, path, check) = sent.swap_remove(index);
+        let (_, path, check, _) = sent.swap_remove(index);
         match target_of(&path) {
             Target::Exempt => {}
             // Not reachable today, for the reason given at the first loop. It keeps the match total and
@@ -517,7 +594,7 @@ pub(crate) fn audit(seen: &[Seen], log: &[Action], unrecorded: &[String]) -> Vec
             }
         }
     }
-    for (method, path, _) in sent {
+    for (method, path, _, _) in sent {
         violations.push(format!(
             "INV-14: the log holds a sent entry `{method} {path}` that the mock never recorded; the request did not reach the mock, or the log and the mock disagree"
         ));
@@ -536,6 +613,8 @@ pub(crate) struct Harness {
     run: TestRun,
     mock: Mock,
     audited: AtomicBool,
+    /// The `as:` user of the clients made by [`Harness::client_as`], for the audit.
+    as_user: Mutex<Option<ImpersonateAs>>,
 }
 
 impl fmt::Debug for Harness {
@@ -566,6 +645,7 @@ impl Harness {
             run,
             mock: Mock::new(replay)?,
             audited: AtomicBool::new(false),
+            as_user: Mutex::new(None),
         })
     }
 
@@ -583,6 +663,25 @@ impl Harness {
     /// the mock, as `Connected::read_only` builds it in front of the real server. Needs a tokio runtime.
     pub(crate) fn client(&self, probe: &Probe) -> ReadOnlyClient {
         ReadOnlyClient::over(self.mock.clone(), probe)
+    }
+
+    /// Like [`Harness::client`], and the two access review POSTs carry `Impersonate-User: <user>`: the
+    /// same constructor production uses ([`ReadOnlyClient::over_as`]), so the guard and the layer above it
+    /// are the real ones. The audit accepts that one header value. A harness serves one `as:` user.
+    ///
+    /// # Panics
+    ///
+    /// When called with a user other than the one it was first called with.
+    pub(crate) fn client_as(&self, probe: &Probe, user: ImpersonateAs) -> ReadOnlyClient {
+        let mut known = self.as_user.lock().expect("as user");
+        match known.as_ref() {
+            Some(first) if first != &user => {
+                panic!("a harness serves one `as:` user, and this is another")
+            }
+            Some(_) => {}
+            None => *known = Some(user.clone()),
+        }
+        ReadOnlyClient::over_as(self.mock.clone(), probe, user)
     }
 
     /// Like [`Harness::client`], for a check called `check` that has the `KubeContext` need.
@@ -607,6 +706,7 @@ impl Harness {
             &self.mock.seen(),
             &self.run.action_log().actions,
             &self.mock.unrecorded(),
+            self.as_user.lock().expect("as user").as_ref(),
         );
         if violations.is_empty() {
             Ok(())

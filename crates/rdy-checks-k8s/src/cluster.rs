@@ -9,7 +9,10 @@ use std::sync::Arc;
 
 use rdy_engine::probe::Probe;
 
-use crate::client::{Connected, KubeError, ReadOnlyClient, ServerVersion, from_kube_error};
+use crate::client::{
+    Connected, ImpersonateAs, ImpersonationConflict, KubeError, ReadOnlyClient, ServerVersion,
+    from_kube_error,
+};
 
 /// The connected cluster, as a k8s check sees it.
 ///
@@ -21,6 +24,21 @@ pub trait Cluster: Send + Sync + 'static {
     /// The read-only client for one check. `probe` is the check's own probe (`CheckContext::probe`): every
     /// request the client sends is logged under that check's id and goes through the guard (INV-14).
     fn read_only(&self, probe: &Probe) -> ReadOnlyClient;
+
+    /// Like [`Cluster::read_only`], and the access review POSTs carry `Impersonate-User: <user>` (the spec's
+    /// `as:` of `k8s.rbac`). Every request of this client is logged as the check's own.
+    ///
+    /// # Errors
+    ///
+    /// [`ImpersonationConflict`] when the kubeconfig user already impersonates. The default refuses, so
+    /// a test double that does not model impersonation can never send an unmarked impersonation.
+    fn read_only_as(
+        &self,
+        _probe: &Probe,
+        _user: ImpersonateAs,
+    ) -> Result<ReadOnlyClient, ImpersonationConflict> {
+        Err(ImpersonationConflict)
+    }
 
     /// Sorts an error of a request of this cluster, with what the connection knows: the server, the
     /// credential plugin, a proxy variable and a CA setting, so the fix hint can name them (02, "Errors").
@@ -40,6 +58,14 @@ impl Cluster for Connected {
         Connected::read_only(self, probe)
     }
 
+    fn read_only_as(
+        &self,
+        probe: &Probe,
+        user: ImpersonateAs,
+    ) -> Result<ReadOnlyClient, ImpersonationConflict> {
+        Connected::read_only_as(self, probe, user)
+    }
+
     fn map_error(&self, error: &kube::Error) -> KubeError {
         Connected::map_error(self, error)
     }
@@ -52,6 +78,14 @@ impl<T: Cluster + ?Sized> Cluster for Arc<T> {
 
     fn read_only(&self, probe: &Probe) -> ReadOnlyClient {
         (**self).read_only(probe)
+    }
+
+    fn read_only_as(
+        &self,
+        probe: &Probe,
+        user: ImpersonateAs,
+    ) -> Result<ReadOnlyClient, ImpersonationConflict> {
+        (**self).read_only_as(probe, user)
     }
 
     fn map_error(&self, error: &kube::Error) -> KubeError {

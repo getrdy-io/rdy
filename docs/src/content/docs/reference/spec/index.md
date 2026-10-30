@@ -512,7 +512,8 @@ access_modes:
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
 | `can` | array of string or object | yes |  | The permissions to test, 1 to 100. Each one is an entry in the audit log of the cluster. | `["create namespaces"]` |
-| `namespace` | string | no |  | The namespace for the string items. The default is cluster scope. |  |
+| `namespace` | string | no |  | The namespace for the items that name none (a string item cannot name one). The default is cluster scope. |  |
+| `as` | string | no |  | The user to test as, for example `system:serviceaccount:acme-system:installer`. The reviews are sent with `Impersonate-User` when the identity in the kubeconfig may impersonate it. It is refused when the kubeconfig already impersonates. |  |
 
 Example:
 
@@ -522,7 +523,7 @@ can:
 - create namespaces
 ```
 
-#### can entries, as an object
+#### can entries, option 2
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
@@ -532,6 +533,13 @@ can:
 | `subresource` | string | no |  | The subresource, such as `log`. |  |
 | `namespace` | string | no |  | The namespace of the object. For a string item this is the `namespace` of the entry. |  |
 | `name` | string | no |  | The name of the object. Leave it out to mean all names. |  |
+
+#### can entries, option 4
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `verb` | string | yes |  | The verb, usually `get`. |  |
+| `path` | string | yes |  | The URL path, such as `/healthz`. A trailing `*` makes it a prefix. |  |
 
 ### k8s.admission
 

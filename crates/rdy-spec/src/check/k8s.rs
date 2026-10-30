@@ -294,6 +294,13 @@ pub struct RbacRule {
 /// text has another shape. The values are checked by their own types afterwards.
 fn rbac_string_to_object(text: &str) -> Option<Map<String, Value>> {
     let (verb, rest) = text.split_once(' ')?;
+    if rest.starts_with('/') {
+        // `get /healthz`: a non-resource URL.
+        let mut map = Map::new();
+        map.insert("verb".to_owned(), Value::from(verb));
+        map.insert("path".to_owned(), Value::from(rest));
+        return Some(map);
+    }
     let (resource_group, subresource) = match rest.split_once('/') {
         Some((head, sub)) => (head, Some(sub)),
         None => (rest, None),
@@ -313,6 +320,110 @@ fn rbac_string_to_object(text: &str) -> Option<Map<String, Value>> {
         map.insert("subresource".to_owned(), Value::from(sub));
     }
     Some(map)
+}
+
+/// A non-resource URL such as `/healthz` or `/metrics`, or a prefix that ends in `*` such as `/logs/*`.
+///
+/// It starts with `/`, has 1 to 253 characters from `A-Z`, `a-z`, `0-9`, `-`, `.`, `_`, `~` and `/`,
+/// may end in one `*`, and has no `//` and no `..`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NonResourcePath(String);
+
+impl NonResourcePath {
+    /// The path as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for NonResourcePath {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        let body = text.strip_suffix('*').unwrap_or(&text);
+        let fits = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~' | '/');
+        if text.starts_with('/')
+            && text.chars().count() <= 253
+            && body.chars().all(fits)
+            && !text.contains("//")
+            && !text.contains("..")
+        {
+            Ok(Self(text))
+        } else {
+            Err(bad(format!(
+                "'{}' is not a non-resource path: start with /, use up to 253 characters from \
+                 letters, digits, - . _ ~ and /, and end with * only for a prefix",
+                echo_safe(&text)
+            )))
+        }
+    }
+}
+
+/// A non-resource URL the install identity must be allowed to reach, such as `get /healthz`.
+///
+/// In a spec it is a string like `get /metrics` or an object `{verb, path}`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct NonResourceRule {
+    /// The verb, usually `get`.
+    pub verb: RbacVerb,
+    /// The URL path.
+    pub path: NonResourcePath,
+}
+
+/// One thing the install identity must be allowed to do: a verb on a resource ([`RbacRule`]) or on a
+/// URL that is not a resource ([`NonResourceRule`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum RbacItem {
+    /// A verb on a resource.
+    Resource(RbacRule),
+    /// A verb on a URL that is not a resource.
+    NonResource(NonResourceRule),
+}
+
+impl RbacItem {
+    /// The resource rule, if this item is one.
+    #[must_use]
+    pub fn as_resource(&self) -> Option<&RbacRule> {
+        match self {
+            Self::Resource(rule) => Some(rule),
+            Self::NonResource(_) => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RbacItem {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct NonResource {
+            verb: RbacVerb,
+            path: NonResourcePath,
+        }
+        let value = Value::deserialize(deserializer)?;
+        let non_resource = match &value {
+            Value::Object(map) => map.contains_key("path"),
+            Value::String(text) => text
+                .split_once(' ')
+                .is_some_and(|(_, rest)| rest.starts_with('/')),
+            _ => false,
+        };
+        if !non_resource {
+            return from_value(value).map(Self::Resource);
+        }
+        let object = match value {
+            Value::String(text) => rbac_string_to_object(&text)
+                .map(Value::Object)
+                .ok_or_else(|| bad("a non-resource permission is written like 'get /healthz'"))?,
+            other => other,
+        };
+        let full: NonResource = from_value(object)?;
+        Ok(Self::NonResource(NonResourceRule {
+            verb: full.verb,
+            path: full.path,
+        }))
+    }
 }
 
 impl<'de> Deserialize<'de> for RbacRule {
@@ -336,7 +447,7 @@ impl<'de> Deserialize<'de> for RbacRule {
                     .ok_or_else(|| {
                         bad(format!(
                             "'{}' is not a permission: write it like 'create namespaces' \
-                     or 'create clusterroles.rbac.authorization.k8s.io'",
+                     or 'create clusterroles.rbac.authorization.k8s.io' or 'get /healthz'",
                             echo_safe(&text)
                         ))
                     })?
@@ -373,14 +484,50 @@ impl<'de> Deserialize<'de> for RbacRule {
 #[non_exhaustive]
 pub struct K8sRbac {
     /// The permissions to test, 1 to 100. Each one is an entry in the audit log of the cluster.
-    pub can: BoundedList<RbacRule, 100, false, 1>,
-    /// The namespace for the string items. The default is cluster scope.
+    pub can: BoundedList<RbacItem, 100, false, 1>,
+    /// The namespace for the items that name none (a string item cannot name one). The default is cluster
+    /// scope.
     pub namespace: Option<K8sName>,
+    /// The user to test as (`as:`), for example `system:serviceaccount:acme-system:installer`. The
+    /// reviews are sent with `Impersonate-User` when the identity in the kubeconfig may impersonate it,
+    /// so the check answers for the install identity before it exists as a kubeconfig.
+    #[serde(rename = "as")]
+    pub as_user: Option<ImpersonatedUser>,
 }
 
 impl ParamSet for K8sRbac {
-    const FIELDS: &'static [&'static str] = &["can", "namespace"];
+    const FIELDS: &'static [&'static str] = &["can", "namespace", "as"];
     const THRESHOLD: &'static [&'static str] = &["can"];
+}
+
+/// The user a `k8s.rbac` entry tests as: 1 to 253 printable ASCII characters.
+///
+/// The check applies the stricter rules of an `Impersonate-User` header (no space at either end, and the
+/// exact form of a service account name).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ImpersonatedUser(String);
+
+impl ImpersonatedUser {
+    /// The user as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for ImpersonatedUser {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        if (1..=253).contains(&text.len()) && text.bytes().all(|b| (0x20..=0x7E).contains(&b)) {
+            Ok(Self(text))
+        } else {
+            Err(bad(format!(
+                "'{}' is not a user name: use 1 to 253 printable ASCII characters, for example \
+                 system:serviceaccount:acme-system:installer",
+                echo_safe(&text)
+            )))
+        }
+    }
 }
 
 /// A Pod Security level.

@@ -250,7 +250,7 @@ means is in 03-check-catalog.md. Bold parameters are required; "one of" means at
 | `net.bandwidth` | **`url`**, `bytes` (1Mi to 100Mi), `min_mbps`, `recommended_mbps` |
 | `k8s.access` | `context_pattern`, `server_pattern`, `max_latency` |
 | `k8s.storageclass` | `class`, `access_modes`, `binding`, `expansion`, `reclaim_policy` |
-| `k8s.rbac` | **`can`** (1 to 100; `"create namespaces"` or `{verb, group, resource, subresource, namespace, name}`), `namespace` |
+| `k8s.rbac` | **`can`** (1 to 100; `"create namespaces"` or `{verb, group, resource, subresource, namespace, name}`; a URL that is not a resource is `"get /healthz"` or `{verb, path}`), `namespace`, `as` (the user to test as, sent as `Impersonate-User` when the kubeconfig identity may impersonate it; refused when the kubeconfig already impersonates; ADR 0038) |
 | `k8s.admission` | `pod_security` (`privileged`, `baseline`, `restricted`), `uses` (`hostPath`, `hostNetwork`, `hostPID`, `privileged`, `runAsRoot`), `namespace`, `scc` |
 | `k8s.nodes` | one of `min_ready`, `per_node: {cpu, memory, ephemeral, pods}`, `free: {...}`; also `min_zones`, `arch`, `selector`, `tolerations` |
 | `k8s.version` | one of `min`, `max`, `openshift_min`, `apis`; also `over_max` (`warn` or `block`, default `warn`). `min` and `max` are Kubernetes versions. On an OpenShift cluster, `openshift_min` replaces `min` when both are set (OpenShift 4.14 reports Kubernetes 1.27), and `max` still applies; off OpenShift, `openshift_min` is ignored |
@@ -740,7 +740,7 @@ Threat model R1 and INV-07: every side effect goes through the probe facade, whi
 | `env` | `name` (never the value) |
 | `lookup`, `dns` | `host`, `answers`; or `server`, `name`, `rtype` |
 | `connect`, `tls` | `host`, `port`, `addr`, `via_proxy`; or `host`, `sni`. A UDP exchange is a `connect` with `proto: udp` and `bytes` (the reply) |
-| `http`, `kube` | `method`, `url` (no query string) or `path`, `status`. A unix socket `GET` is an `http` with `path` (the socket) and `url` (the API path); a `kube` entry refused for a request header also has `header` (the name, never the value) |
+| `http`, `kube` | `method`, `url` (no query string) or `path`, `status`. A unix socket `GET` is an `http` with `path` (the socket) and `url` (the API path); a `kube` entry refused for a request header also has `header` (the name, never the value), and a `kube` entry sent with `Impersonate-User` has `impersonated: true` (never the user name) |
 | `native` | `api`, `path` |
 | `coalesced` | `of` (the kind), `under` (the directory of a file call, or the program, host or path of another denied call, or `*` for the calls past 100 targets), `count`; with `rule` or `error` when the calls were `denied` or `failed`, and with neither when they were `ok` |
 

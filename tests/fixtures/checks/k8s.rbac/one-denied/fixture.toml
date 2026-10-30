@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-one-denied"
+summary = "One cluster-scoped item is not allowed, with an empty reason"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-as-user"
+summary = "The spec tests as a plain user name; the impersonate review is for users"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

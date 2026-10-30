@@ -62,6 +62,7 @@ use secrecy::ExposeSecret;
 mod b64;
 mod error;
 pub mod guard;
+mod impersonate;
 #[cfg(test)]
 pub(crate) mod mock;
 mod text;
@@ -72,7 +73,8 @@ mod tests;
 pub use error::KubeError;
 pub(crate) use error::from_kube_error;
 use error::{from_kubeconfig_error, io_reason, proxy_display};
-pub use guard::{GuardError, ReadOnlyClient, guarded_service};
+pub use guard::{GuardError, ImpersonateAs, ReadOnlyClient, guarded_service};
+pub use impersonate::ImpersonationConflict;
 use text::escape;
 
 /// The largest kubeconfig rdy reads. A real one is a few kilobytes.
@@ -292,6 +294,7 @@ pub struct ClusterLine {
     user: Option<String>,
     plugin: Option<String>,
     tls_verification_off: bool,
+    impersonates: bool,
 }
 
 impl ClusterLine {
@@ -326,6 +329,14 @@ impl ClusterLine {
     pub fn tls_verification_off(&self) -> bool {
         self.tls_verification_off
     }
+
+    /// True when the kubeconfig user sets any of `as`, `as-uid`, `as-groups` or `as-user-extra`. kube then
+    /// adds its own `Impersonate-*` headers to every request, below the guard, where the guard cannot see
+    /// them. `k8s.rbac` refuses a spec `as:` in that case (M1-111).
+    #[must_use]
+    pub fn kubeconfig_impersonates(&self) -> bool {
+        self.impersonates
+    }
 }
 
 impl fmt::Display for ClusterLine {
@@ -341,6 +352,9 @@ impl fmt::Display for ClusterLine {
         }
         if self.tls_verification_off {
             f.write_str(", TLS verification is OFF")?;
+        }
+        if self.impersonates {
+            f.write_str(", the kubeconfig impersonates another user")?;
         }
         Ok(())
     }
@@ -583,6 +597,26 @@ impl Connected {
     pub fn read_only(&self, probe: &Probe) -> ReadOnlyClient {
         ReadOnlyClient::new(&self.client, probe)
     }
+
+    /// Like [`Connected::read_only`], and the two access review POSTs carry `Impersonate-User: <user>`
+    /// (`k8s.rbac` with a spec `as:`, M1-111). Every other request is sent as the kubeconfig user. Each
+    /// review request writes its `kube` entry with `impersonated: true`. Refused when the kubeconfig
+    /// already impersonates: see [`ClusterLine::kubeconfig_impersonates`].
+    ///
+    /// # Errors
+    ///
+    /// [`ImpersonationConflict`] when the kubeconfig user sets any `as` field. Two sources
+    /// would write `Impersonate-User`, and the server would see two values.
+    pub fn read_only_as(
+        &self,
+        probe: &Probe,
+        user: ImpersonateAs,
+    ) -> Result<ReadOnlyClient, ImpersonationConflict> {
+        if self.line.kubeconfig_impersonates() {
+            return Err(ImpersonationConflict);
+        }
+        Ok(ReadOnlyClient::new_as(&self.client, probe, user))
+    }
 }
 
 /// The answer of `GET /version`. The texts come from the server and are not escaped: escape them
@@ -822,6 +856,9 @@ fn from_kubeconfig(
         });
     }
 
+    // kube adds its own `Impersonate-*` headers for these, below the guard (see `impersonate`).
+    let impersonates = auth.is_some_and(sets_impersonation);
+
     // Everything kube reads on its own is checked first: a FIFO would hang the build and a device such
     // as /dev/zero would fill memory. The files are listed for the action log.
     let mut secrets = inline_secrets(auth);
@@ -859,6 +896,7 @@ fn from_kubeconfig(
         user: user_name.as_deref().map(escape),
         plugin: plugin_of(&config),
         tls_verification_off: config.accept_invalid_certs,
+        impersonates,
     };
     let plugin_exec = plugin_exec_of(&config);
     let ca_set = config.root_cert.is_some();
@@ -875,6 +913,15 @@ fn from_kubeconfig(
         proxy_env_set: env.proxy_env_set,
         ca_set,
     })
+}
+
+/// True when the user entry sets any `as` field. Presence counts, even an empty value: kube sends
+/// `Impersonate-User` for any `as` that is set.
+fn sets_impersonation(auth: &AuthInfo) -> bool {
+    auth.impersonate.is_some()
+        || auth.impersonate_uid.is_some()
+        || auth.impersonate_groups.is_some()
+        || auth.impersonate_user_extra.is_some()
 }
 
 /// The plugin's terminal use and environment, set from the process state (ADR 0031 decisions 8 and 10).
@@ -1005,6 +1052,7 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
         user: None,
         plugin: None,
         tls_verification_off: config.accept_invalid_certs,
+        impersonates: false,
     };
     let secrets = files
         .first()

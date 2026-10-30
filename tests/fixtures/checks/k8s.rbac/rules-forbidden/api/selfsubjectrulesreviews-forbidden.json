@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "selfsubjectrulesreviews is forbidden",
+    "reason": "Forbidden",
+    "code": 403
+  }
+}

@@ -145,6 +145,10 @@
           "type": "string",
           "maxLength": 4096
         },
+        "impersonated": {
+          "description": "kube: true when the request was sent with Impersonate-User, as the spec's `as` user. Absent otherwise. Never the user name.",
+          "type": "boolean"
+        },
         "method": {
           "description": "http, kube",
           "type": "string",

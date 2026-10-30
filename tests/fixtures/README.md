@@ -65,7 +65,11 @@ What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canar
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
-`apis-unreadable-vanilla`), all `generated` by `scripts/gen-k8s-version-fixtures.py` (`--check` fails on drift). The rest
+`apis-unreadable-vanilla`), all `generated` by `scripts/gen-k8s-version-fixtures.py` (`--check` fails on drift).
+`checks/k8s.rbac/` holds 18 clusters (`all-allowed`, `two-denied`, `one-denied`, `escalate-denied`, `escalate-allowed`,
+`evaluation-error`, `non-resource`, `reviews-forbidden`, `rules-forbidden`, `old-server`, `identity-forbidden`,
+`as-allowed`, `as-user`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`, `hostile-reasons`),
+`generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on drift). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -253,7 +257,8 @@ How the mock reads a fixture:
 - **A request the fixture does not hold** gets `501` and fails the run. A fixture never falls through to a
   default.
 
-`api/reviews.json` answers `SelfSubjectAccessReview` and holds one list:
+`api/reviews.json` answers `SelfSubjectAccessReview` (the `access` list) and `SelfSubjectRulesReview` (the
+optional `rules` list). The `access` list looks like this:
 
 ```json
 { "access": [
@@ -268,13 +273,17 @@ A row matches when its `spec` equals the posted `spec`, ignoring empty strings a
 leave out `name` and `subresource`). The row's `status` is the answer, and the mock echoes the posted
 `spec`. `status` needs a boolean `allowed`; `reason`, `denied` and `evaluationError` are optional. Two rows
 with the same `spec`, an unknown key or a missing `spec` fail the build of the mock. Attributes with no
-row get `501` and fail the run.
+row fall back to a recorded `POST` of the review path (one file that answers every review, for example a
+`403`), and with none of those they get `501` and fail the run. A `rules` row is
+`{"spec": {"namespace": "acme"}, "status": {"resourceRules": [...], "nonResourceRules": [...], "incomplete": false}}`;
+`status` needs a boolean `incomplete`.
 
 **The audit (INV-14).** The harness records every request that reaches the mock and checks the run when it
 is dropped. Each recorded request must pass the guard's own rules and name an `ALLOWED` entry (or be
 `/version`, discovery or a review). Each sent action-log entry that names an `ALLOWED` entry must be
 logged under a check id that the entry cites in `checks`. The log must hold one sent entry per recorded
-request, and the fixture must have answered all of them. A failing audit panics the test and says which
+request, and the fixture must have answered all of them. A request that carried `Impersonate-User` must pair
+with a log entry marked `impersonated: true`, and no other request may. A failing audit panics the test and says which
 request broke which rule. See the module docs of `client/mock.rs`.
 
 ### `native/*.json`
