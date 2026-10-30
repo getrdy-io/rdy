@@ -44,6 +44,7 @@ static SCRIPT_CHECK: CheckInfo = CheckInfo {
         windows: Support::Full,
     },
     reads: &[],
+    statfs: &[],
     env: &[],
     commands: &[],
     peers: &[],

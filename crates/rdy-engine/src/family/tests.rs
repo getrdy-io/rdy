@@ -33,6 +33,7 @@ const fn info(id: &'static str, family: &'static str, os: OsSupport) -> CheckInf
         default_timeout: None,
         os,
         reads: &[],
+        statfs: &[],
         env: &[],
         commands: &[],
         peers: &[],

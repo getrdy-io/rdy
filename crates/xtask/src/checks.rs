@@ -120,6 +120,7 @@ mod tests {
                 windows: Support::Full,
             },
             reads: &[],
+            statfs: &[],
             env: &[],
             commands: &[],
             peers: &[],

@@ -297,6 +297,7 @@ fn a_family_that_refuses_the_entry_gives_unsupported_spec() {
             windows: Support::Full,
         },
         reads: &[],
+        statfs: &[],
         env: &[],
         commands: &[],
         peers: &[],

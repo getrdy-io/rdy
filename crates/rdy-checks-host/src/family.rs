@@ -56,6 +56,7 @@ const fn info(
         default_timeout: Some(Duration::from_secs(secs)),
         os: OS,
         reads: &[],
+        statfs: &[],
         env: &[],
         commands: &[],
         peers: &[],
