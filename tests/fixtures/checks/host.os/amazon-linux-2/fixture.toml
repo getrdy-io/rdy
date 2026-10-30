@@ -1,0 +1,12 @@
+schema = 1
+name = "amazon-linux-2"
+summary = "Amazon Linux 2 on x86_64, ID_LIKE lists centos and rhel"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.os"]
+
+[caps]
+root = false
+network = false
+kube = false

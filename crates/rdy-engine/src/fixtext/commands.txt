@@ -16,6 +16,7 @@ dnf
 dracut
 echo
 eksctl
+fips-mode-setup
 firewall-cmd
 gcloud
 grubby
@@ -30,6 +31,7 @@ mount
 nvidia-ctk
 nvidia-smi
 oc
+pro
 rdy
 rmmod
 setenforce

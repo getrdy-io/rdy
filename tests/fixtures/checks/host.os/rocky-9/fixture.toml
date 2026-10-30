@@ -1,0 +1,12 @@
+schema = 1
+name = "rocky-9"
+summary = "Rocky Linux 9.3 on x86_64, ID_LIKE lists rhel"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.os"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,12 @@
+schema = 1
+name = "rhel-9"
+summary = "RHEL 9.2 VM on x86_64, FIPS off, systemd"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.os"]
+
+[caps]
+root = false
+network = false
+kube = false

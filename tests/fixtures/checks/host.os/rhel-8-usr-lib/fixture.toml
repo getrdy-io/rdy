@@ -1,0 +1,12 @@
+schema = 1
+name = "rhel-8-usr-lib"
+summary = "RHEL 8.8 where only /usr/lib/os-release exists"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.os"]
+
+[caps]
+root = false
+network = false
+kube = false

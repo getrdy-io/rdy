@@ -58,7 +58,7 @@ tests/fixtures/
 ```
 
 What exists today: `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/`, `reports/`, and under
-`checks/` the cases `host.memory/pass`, `_policy/symlink-to-shadow` and `_loader/manifest-entries`. The rest
+`checks/` the cases `host.memory/pass`, the twelve machines of `host.os/`, `_policy/symlink-to-shadow` and `_loader/manifest-entries`. The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
