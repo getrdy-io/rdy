@@ -69,9 +69,13 @@ pub const RULE_SELECTOR: &str = "this list needs the field selector rdy uses for
 /// The exact body of a `SelfSubjectReview` POST, compared byte for byte (ADR 0010 decision 2).
 ///
 /// A typed `SelfSubjectReview` from `k8s-openapi` serializes with a `metadata` member, so it does not
-/// match: send these bytes. The caller is M1-105 (it adds the raw send route).
+/// match: send these bytes. `ReadOnlyClient::self_subject_review` is the raw send route (M1-105).
 pub const SELF_SUBJECT_REVIEW_BODY: &[u8] =
     br#"{"apiVersion":"authentication.k8s.io/v1","kind":"SelfSubjectReview"}"#;
+
+/// The path of the `SelfSubjectReview` POST.
+pub(crate) const SELF_SUBJECT_REVIEW_PATH: &str =
+    "/apis/authentication.k8s.io/v1/selfsubjectreviews";
 
 /// The largest body of an access review POST. A real one is a few hundred bytes.
 const MAX_REVIEW_BODY: usize = 64 * 1024;
@@ -422,6 +426,48 @@ pub(crate) fn judge(
     }
 }
 
+/// What a request path is, for the audit of a fixture run (`client::mock`).
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Target {
+    /// A path with no [`ALLOWED`] entry by design: `/version`, discovery and the three review POSTs.
+    Exempt,
+    /// A resource path, and the entry that names its group, version and resource.
+    Entry(&'static Allowed),
+    /// Anything else: not a plain path, not a resource path, or a resource with no entry.
+    Unknown,
+}
+
+/// Classifies a path as written in the action log (no query string). Only the path is judged, so this
+/// says which entry a request belongs to, not whether the guard would allow it ([`judge`] does that).
+#[cfg(test)]
+pub(crate) fn target_of(path: &str) -> Target {
+    const REVIEWS: [&str; 3] = [
+        "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
+        "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews",
+        SELF_SUBJECT_REVIEW_PATH,
+    ];
+    if REVIEWS.contains(&path) {
+        return Target::Exempt;
+    }
+    let Ok(uri) = path.parse::<Uri>() else {
+        return Target::Unknown;
+    };
+    let Ok(segments) = path_segments(&uri) else {
+        return Target::Unknown;
+    };
+    if is_discovery(&segments) {
+        return Target::Exempt;
+    }
+    let Ok(info) = request_info(&segments) else {
+        return Target::Unknown;
+    };
+    ALLOWED
+        .iter()
+        .find(|e| e.group == info.group && e.version == info.version && e.resource == info.resource)
+        .map_or(Target::Unknown, Target::Entry)
+}
+
 /// The one path with `secrets` in it that is allowed: a GET of the namespace called `secrets`.
 const NAMESPACE_NAMED_SECRETS: [&str; 4] = ["api", "v1", "namespaces", "secrets"];
 
@@ -623,7 +669,7 @@ fn check_field_selector(selector: &str) -> Result<(), &'static str> {
 
 /// Decodes a query value once, as the API server does: `%XX` is a byte and `+` is a space. A backslash
 /// or bytes that are not UTF-8 are refused.
-fn decode_query_value(value: &str) -> Result<String, &'static str> {
+pub(crate) fn decode_query_value(value: &str) -> Result<String, &'static str> {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -777,7 +823,7 @@ fn is_discovery(segments: &[&str]) -> bool {
 
 /// A DNS-1123 subdomain: labels of lower case letters, digits and `-`, each starting and ending with a
 /// letter or digit, at most 63 characters, at most 253 in all.
-fn is_group(group: &str) -> bool {
+pub(super) fn is_group(group: &str) -> bool {
     group.len() <= 253
         && group.split('.').all(|label| {
             let bytes = label.as_bytes();
@@ -797,7 +843,7 @@ fn is_label(label: &str) -> bool {
 }
 
 /// `^v[0-9]+((alpha|beta)[0-9]+)?$`.
-fn is_version(version: &str) -> bool {
+pub(super) fn is_version(version: &str) -> bool {
     let Some(rest) = version.strip_prefix('v') else {
         return false;
     };

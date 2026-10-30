@@ -62,6 +62,8 @@ use secrecy::ExposeSecret;
 mod b64;
 mod error;
 pub mod guard;
+#[cfg(test)]
+mod mock;
 mod text;
 
 #[cfg(test)]
