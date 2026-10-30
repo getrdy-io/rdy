@@ -26,7 +26,7 @@ use serde_json::json;
 
 use crate::agents::{self, Agent, Catalog};
 use crate::family::{OS, ROOT};
-use crate::reads::soft;
+use crate::text::soft;
 
 #[cfg(test)]
 mod tests;

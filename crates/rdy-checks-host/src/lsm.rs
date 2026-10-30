@@ -27,7 +27,8 @@ use rdy_spec::check::{ApparmorMode, HostLsm, SelinuxMode};
 use serde_json::{Value, json};
 
 use crate::family::{OS, ROOT};
-use crate::reads::{Read, read_text, short, soft};
+use crate::reads::{Read, read_text};
+use crate::text::{short, soft};
 
 mod apparmor;
 mod audit;

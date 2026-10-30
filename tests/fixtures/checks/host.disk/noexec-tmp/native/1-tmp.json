@@ -1,0 +1,16 @@
+{
+  "call": "statvfs",
+  "path": "/tmp",
+  "value": {
+    "fragment_size": 4096,
+    "blocks": 1048576,
+    "blocks_free": 786432,
+    "blocks_available": 786432,
+    "files": 1000000,
+    "files_free": 999000,
+    "read_only": false,
+    "no_exec": true,
+    "no_suid": true,
+    "dev": "0:30"
+  }
+}

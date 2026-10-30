@@ -1,0 +1,12 @@
+schema = 1
+name = "btrfs-link-nodev"
+summary = "The path goes through a link into a nodev btrfs subvolume: the nearest mount by path text is the root, so nodev is not verified"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false

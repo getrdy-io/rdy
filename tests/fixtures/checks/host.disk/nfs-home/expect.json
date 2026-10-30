@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "forbid_fstypes": [
+      "nfs"
+    ],
+    "id": "host.disk",
+    "min": "20Gi",
+    "path": "/home/acme"
+  },
+  "result": {
+    "expected": {
+      "forbid_fstypes": [
+        "nfs"
+      ],
+      "forbid_options": [],
+      "min": 21474836480,
+      "min_inodes": 100000,
+      "recommended": 25769803776
+    },
+    "fix": "Put the install on a local disk such as ext4 or xfs, or ask the vendor whether nfs4 is supported.",
+    "level": "fail",
+    "message": "`/home/acme` is on `/home` (nfs4), a file system type the spec does not allow (nfs).",
+    "notes": [
+      "This file system keeps no inode count, so inodes were not checked."
+    ],
+    "observed": {
+      "device": "0:41",
+      "free_bytes": 536870912000,
+      "free_inodes": null,
+      "fstype": "nfs4",
+      "measured_path": "/home/acme",
+      "mount": "/home",
+      "network": true,
+      "nodev": false,
+      "noexec": false,
+      "nosuid": false,
+      "path": "/home/acme",
+      "read_only": false,
+      "total_bytes": 1073741824000,
+      "total_inodes": null
+    },
+    "partial": null
+  }
+}

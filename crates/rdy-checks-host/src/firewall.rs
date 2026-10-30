@@ -22,7 +22,8 @@ use rdy_engine::probe::ProbeError;
 use serde_json::{Map, Value, json};
 
 use crate::family::{OS, ROOT};
-use crate::reads::{Read, read_text, short, soft};
+use crate::reads::{Read, read_text};
+use crate::text::{short, soft};
 
 mod firewalld;
 mod ports;
