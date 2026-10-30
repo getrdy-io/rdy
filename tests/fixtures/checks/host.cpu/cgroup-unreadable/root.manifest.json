@@ -1,0 +1,5 @@
+{
+  "unreadable": [
+    "sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max"
+  ]
+}
