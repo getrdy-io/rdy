@@ -104,9 +104,27 @@ jobs:
             exit 1
           fi
           # The loopback servers make certificates with rcgen. Nothing in the shipped tree may use it
-          # (ADR 0035). tokio-rustls is not checked here: the runtime feature plans to use it (M1-092).
+          # (ADR 0035). tokio-rustls is in the shipped tree on purpose: the facade's TLS uses it (M1-092).
           if cargo tree --locked -p rdy -e normal --target x86_64-unknown-linux-gnu -i rcgen 2>/dev/null | grep -q '^rcgen v'; then
             echo "::error::the rdy binary would build rcgen"
+            exit 1
+          fi
+      # TLS is rustls on ring everywhere (ADR 0009, CLAUDE.md rule 5). aws-lc-sys must not be anywhere in
+      # the resolved graph, for any target or feature. `cargo tree -i` prints a package only when it is
+      # there, and fails with "did not match any packages" when it is not.
+      - name: No aws-lc in the dependency graph
+        run: |
+          status=0
+          out="$(cargo tree --locked --workspace --all-features --target all -e normal,build,dev -i aws-lc-sys 2>&1)" || status=$?
+          if printf '%s\n' "$out" | grep -q '^aws-lc-sys v'; then
+            printf '%s\n' "$out"
+            echo "::error::aws-lc-sys is in the dependency graph; TLS must stay on ring"
+            exit 1
+          fi
+          # A failure of cargo tree itself (a stale lock file, a network error) is not "absent".
+          if [ "$status" -ne 0 ] && ! printf '%s\n' "$out" | grep -q 'did not match any packages'; then
+            printf '%s\n' "$out"
+            echo "::error::cargo tree failed, so the aws-lc check proved nothing"
             exit 1
           fi
       # exec::run and ExecSpec::new are pub(crate) without the `testing` feature. A normal build, with no
