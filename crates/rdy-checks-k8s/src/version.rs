@@ -11,9 +11,10 @@
 //!   distribution (AKS has no version suffix) and for the kubelet skew;
 //! - `GET /apis/<group>/<version>` (or `/api/v1`) for each API the spec lists.
 //!
-//! Only the version and the APIs are required to answer. A node list or a `ClusterVersion` the identity may
-//! not read leaves a note, and a spec `openshift_min` or `apis` that cannot be judged makes the result
-//! partial. Nothing the identity is not allowed to read ever blocks.
+//! Only the version is required to answer. Anything else the identity may not read, or that is cut short, is
+//! not evaluated and makes the result partial (03, "Degrade rule"): a `ClusterVersion` for `openshift_min`
+//! (grant `get`), an API that discovery cannot judge, the node list (grant `list nodes`) and a node list
+//! longer than one page. A partial result never blocks on what it could not read.
 //!
 //! How the spec's bounds apply:
 //!
@@ -293,8 +294,7 @@ impl VersionCheck {
         };
         // The ClusterVersion is read only for `openshift_min`. When the group list could not be read, it
         // also settles whether this is OpenShift: an object says yes and a 404 says no.
-        let cluster_version = if self.params.openshift_min.is_some() && openshift != Openshift::No
-        {
+        let cluster_version = if self.params.openshift_min.is_some() && openshift != Openshift::No {
             let version = read(
                 &mapper,
                 client.all::<ClusterVersion>().get("version").await,
@@ -380,7 +380,9 @@ async fn served(
         }
         if !kinds.contains_key(&key) {
             let listed = match &key.0 {
-                None => read_discovery(mapper, client.core_resources(&key.1).await, resource_kinds)?,
+                None => {
+                    read_discovery(mapper, client.core_resources(&key.1).await, resource_kinds)?
+                }
                 // `/apis` already says the group version does not exist: no request needed.
                 Some(group) if absent(groups, group, &key.1) => Read::Missing,
                 Some(group) => read_discovery(
@@ -610,22 +612,29 @@ fn judge(params: &K8sVersion, facts: &Gathered) -> Finding {
         });
     }
 
-    // Kubelet skew: evidence from the node list, never a reason to be partial.
+    // Kubelet skew. A node list the identity may not read, or that is cut at one page, is a part that was not
+    // evaluated: partial, as 03 says for every forbidden or capped source. The skew only warns, so nothing
+    // here ever blocks.
     match &facts.nodes {
         Read::Ok((nodes, more)) => {
             if let Some(problem) = skew(server, nodes) {
                 problems.push(problem);
             }
             if *more {
-                notes.push(format!(
-                    "Kubelet skew was judged on the first {NODE_PAGE} nodes only."
+                unverified.push(format!(
+                    "kubelet skew was judged on the first {NODE_PAGE} nodes only, the rest are not evaluated"
                 ));
             }
         }
-        other => notes.push(format!(
-            "Kubelet skew was not checked: the node list could not be read ({}). Grant `list` on `nodes` to check it.",
-            other.why()
-        )),
+        other => {
+            unverified.push(format!(
+                "kubelet skew was not checked: the node list could not be read ({})",
+                other.why()
+            ));
+            if matches!(other, Read::Forbidden) {
+                grants.push("list nodes".to_owned());
+            }
+        }
     }
 
     // APIs.

@@ -84,9 +84,9 @@ impl<'de> Deserialize<'de> for ClusterVersion {
                 .and_then(|status| status.get("history"))
                 .and_then(Value::as_array)
                 .and_then(|history| {
-                    history
-                        .iter()
-                        .find(|entry| entry.get("state").and_then(Value::as_str) == Some("Completed"))
+                    history.iter().find(|entry| {
+                        entry.get("state").and_then(Value::as_str) == Some("Completed")
+                    })
                 })
                 .and_then(|entry| text(entry.get("version"))),
         })

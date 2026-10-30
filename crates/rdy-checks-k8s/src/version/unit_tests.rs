@@ -151,11 +151,7 @@ fn eks_needs_a_hash_after_the_suffix() {
         "v1.29.5-eks-abc",
         "v1.29.5-eks-abcdef-1",
     ] {
-        assert_eq!(
-            detect(&parsed(text), false, &[]),
-            Distro::Vanilla,
-            "{text}"
-        );
+        assert_eq!(detect(&parsed(text), false, &[]), Distro::Vanilla, "{text}");
     }
 }
 
@@ -310,12 +306,7 @@ fn a_removed_beta_names_the_minor_and_the_replacement() {
             16,
             "networking.k8s.io/v1",
         ),
-        (
-            "extensions/v1beta1 Ingress",
-            29,
-            22,
-            "networking.k8s.io/v1",
-        ),
+        ("extensions/v1beta1 Ingress", 29, 22, "networking.k8s.io/v1"),
         ("apps/v1beta1 Deployment", 29, 16, "apps/v1"),
         ("apps/v1beta2 StatefulSet", 29, 16, "apps/v1"),
         ("batch/v1beta1 CronJob", 30, 25, "batch/v1"),
@@ -390,7 +381,10 @@ fn a_removed_pod_security_policy_has_no_replacement_api() {
 #[test]
 fn the_flow_control_beta_names_the_version_that_exists_on_the_server() {
     // v1 only exists from 1.29, so a 1.26 to 1.28 server needs v1beta3.
-    let text = apis::why_missing(&api("flowcontrol.apiserver.k8s.io/v1beta1 FlowSchema"), Some(27));
+    let text = apis::why_missing(
+        &api("flowcontrol.apiserver.k8s.io/v1beta1 FlowSchema"),
+        Some(27),
+    );
     assert!(text.contains("was removed in Kubernetes 1.26"), "{text}");
     assert!(
         text.contains(
@@ -609,11 +603,9 @@ fn the_server_refusing_this_identity_is_an_answer_and_other_failures_fail_the_ch
     );
 
     // A 401 is not an answer: the credentials stopped working, and the hint says so.
-    let Err(CheckError::Failed { message, hint }) = read(
-        &plain,
-        Err::<(), _>(api_error(401, "Unauthorized")),
-        |()| 1,
-    ) else {
+    let Err(CheckError::Failed { message, hint }) =
+        read(&plain, Err::<(), _>(api_error(401, "Unauthorized")), |()| 1)
+    else {
         panic!("a 401 fails the check");
     };
     assert!(hint.contains("Log in again"), "{hint}");
@@ -890,7 +882,10 @@ fn cluster_version(value: Value) -> super::openshift::ClusterVersion {
 fn on_openshift(git: &str, version: Value) -> Gathered {
     let mut facts = gathered(git);
     facts.openshift = Openshift::Yes;
-    facts.groups = Read::Ok(vec![("config.openshift.io".to_owned(), vec!["v1".to_owned()])]);
+    facts.groups = Read::Ok(vec![(
+        "config.openshift.io".to_owned(),
+        vec!["v1".to_owned()],
+    )]);
     facts.cluster_version = Some(Read::Ok(cluster_version(version)));
     facts
 }
@@ -926,7 +921,10 @@ fn a_hostile_openshift_version_cannot_add_a_command_span() {
         ],
         "{fix}"
     );
-    assert!(fix.contains("OpenShift is 4.12.0, product needs 4.14"), "{fix}");
+    assert!(
+        fix.contains("OpenShift is 4.12.0, product needs 4.14"),
+        "{fix}"
+    );
     assert!(!fix.contains("evil"), "{fix}");
 
     // A version rdy cannot read is quoted in the partial note without a backtick too.
@@ -1031,7 +1029,9 @@ fn a_bound_with_a_patch_is_unverified_when_the_server_patch_is_unknown() {
     assert_eq!(unknown.level, Level::Pass);
     let partial = unknown.partial.expect("partial");
     assert!(
-        partial.note.contains("min 1.28.3 was not checked to the patch")
+        partial
+            .note
+            .contains("min 1.28.3 was not checked to the patch")
             && partial.note.contains("only 1.28"),
         "{}",
         partial.note
@@ -1089,7 +1089,9 @@ fn when_the_group_list_and_the_cluster_version_are_both_unreadable_min_is_not_ap
     let partial = finding.partial.expect("partial");
     assert!(
         partial.note.contains("openshift_min was not checked")
-            && partial.note.contains("cannot tell whether this is OpenShift"),
+            && partial
+                .note
+                .contains("cannot tell whether this is OpenShift"),
         "{}",
         partial.note
     );
@@ -1098,7 +1100,10 @@ fn when_the_group_list_and_the_cluster_version_are_both_unreadable_min_is_not_ap
         ["get clusterversions.config.openshift.io/version"]
     );
     assert!(
-        finding.notes.iter().any(|n| n.contains("could not tell whether")),
+        finding
+            .notes
+            .iter()
+            .any(|n| n.contains("could not tell whether")),
         "{:?}",
         finding.notes
     );
@@ -1109,17 +1114,26 @@ fn an_unreadable_version_still_blocks_on_a_missing_api() {
     let mut facts = gathered("acme-build-7");
     facts.server = None;
     facts.apis = vec![
-        (api("autoscaling/v2beta2 HorizontalPodAutoscaler"), Served::No),
+        (
+            api("autoscaling/v2beta2 HorizontalPodAutoscaler"),
+            Served::No,
+        ),
         (api("v1 Pod"), Served::Yes),
     ];
-    let spec = params(json!({"min": "1.28", "apis": ["autoscaling/v2beta2 HorizontalPodAutoscaler", "v1 Pod"]}));
+    let spec = params(
+        json!({"min": "1.28", "apis": ["autoscaling/v2beta2 HorizontalPodAutoscaler", "v1 Pod"]}),
+    );
     let finding = judge(&spec, &facts);
     assert_eq!(finding.level, Level::Fail);
     assert_eq!(
         finding.message,
         "autoscaling/v2beta2 HorizontalPodAutoscaler is not served"
     );
-    assert!(finding.notes[0].contains("acme-build-7"), "{:?}", finding.notes);
+    assert!(
+        finding.notes[0].contains("acme-build-7"),
+        "{:?}",
+        finding.notes
+    );
     assert!(finding.partial.is_some());
     assert_eq!(
         finding.observed["apis"][0],

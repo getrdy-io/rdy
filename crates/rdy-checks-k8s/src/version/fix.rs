@@ -54,10 +54,7 @@ pub(super) fn below_min(distro: Distro, have: &Reported, need: &[u32]) -> String
         have.dotted()
     );
     let (steps, capped) = steps(have, need);
-    let first = steps
-        .first()
-        .cloned()
-        .unwrap_or_else(|| major_minor(need));
+    let first = steps.first().cloned().unwrap_or_else(|| major_minor(need));
     let mut then = String::new();
     if steps.len() > 1 {
         then = format!(", then repeat for {}", steps[1..].join(", then "));

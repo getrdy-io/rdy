@@ -389,7 +389,10 @@ async fn an_unreadable_group_list_still_finds_openshift_through_the_cluster_vers
     assert_eq!(finding.observed["distribution"], "openshift");
     assert_eq!(finding.observed["openshift_version"], "4.14.9");
     assert!(
-        finding.notes.iter().any(|note| note.contains("not applied")),
+        finding
+            .notes
+            .iter()
+            .any(|note| note.contains("not applied")),
         "{:?}",
         finding.notes
     );
@@ -405,11 +408,17 @@ async fn an_unreadable_group_list_and_cluster_version_leave_min_unapplied_and_pa
     let finding = rig
         .finding(json!({"min": "1.28", "openshift_min": "4.14"}))
         .await;
-    assert_eq!(finding.level, Level::Pass, "nothing was measured as failing");
+    assert_eq!(
+        finding.level,
+        Level::Pass,
+        "nothing was measured as failing"
+    );
     let partial = finding.partial.as_ref().expect("partial");
     assert!(
         partial.note.contains("openshift_min was not checked")
-            && partial.note.contains("cannot tell whether this is OpenShift"),
+            && partial
+                .note
+                .contains("cannot tell whether this is OpenShift"),
         "{}",
         partial.note
     );
@@ -463,25 +472,37 @@ async fn an_unreadable_group_list_and_no_cluster_version_is_not_openshift_and_mi
 // ---- the nodes ------------------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn a_forbidden_node_list_leaves_a_note_and_still_passes() {
+async fn a_forbidden_node_list_is_partial_with_the_grant_and_never_blocks() {
     let rig = rig("nodes-forbidden");
     let finding = rig.finding(json!({"min": "1.28"})).await;
-    assert_eq!(finding.level, Level::Pass);
-    assert!(finding.partial.is_none(), "the version itself was read");
-    assert!(
-        finding
-            .notes
-            .iter()
-            .any(|note| note.contains("Kubelet skew was not checked")
-                && note.contains("`list` on `nodes`")),
-        "{:?}",
-        finding.notes
+    assert_eq!(
+        finding.level,
+        Level::Pass,
+        "nothing was measured as failing"
     );
+    let partial = finding.partial.as_ref().expect("partial");
+    assert!(
+        partial.note.contains("kubelet skew was not checked")
+            && partial.note.contains("the identity may not read it"),
+        "{}",
+        partial.note
+    );
+    assert_eq!(partial.missing_grants, ["list nodes"]);
     // The suffix still says EKS.
     assert_eq!(finding.observed["distribution"], "eks");
     assert!(finding.observed.get("nodes_read").is_none());
     let requests = rig.requests();
     assert_eq!(requests[1].2, ActionOutcome::Failed);
+    // A required check with a partial pass is a warning, never a block.
+    let result = map_outcome(
+        &INFO,
+        &CheckSpec::new("k8s.version"),
+        &rig.ctx,
+        Ok(finding),
+        0,
+        0,
+    );
+    assert_eq!(result.status, Status::Warn);
     rig.audit();
 }
 
@@ -508,18 +529,18 @@ async fn a_kubelet_far_behind_or_ahead_warns_and_a_virtual_kubelet_is_left_out()
 }
 
 #[tokio::test]
-async fn a_node_list_with_a_second_page_says_only_the_first_was_read() {
+async fn a_node_list_with_a_second_page_is_partial_and_says_the_rest_is_not_evaluated() {
     let rig = rig("paged");
     let finding = rig.finding(json!({"min": "1.28"})).await;
     assert_eq!(finding.level, Level::Pass);
+    let partial = finding.partial.as_ref().expect("partial");
     assert!(
-        finding
-            .notes
-            .iter()
-            .any(|note| note.contains("first 500 nodes")),
-        "{:?}",
-        finding.notes
+        partial.note.contains("first 500 nodes only")
+            && partial.note.contains("the rest are not evaluated"),
+        "{}",
+        partial.note
     );
+    assert!(partial.missing_grants.is_empty());
     // One page only: no continue request.
     assert_eq!(rig.paths(), ["/apis", "/api/v1/nodes"]);
     rig.audit();
@@ -675,7 +696,10 @@ async fn an_unreadable_version_still_blocks_on_an_api_the_server_does_not_serve(
     );
     assert!(finding.partial.is_some(), "the version was not compared");
     assert!(
-        finding.notes.iter().any(|note| note.contains("acme-build-7")),
+        finding
+            .notes
+            .iter()
+            .any(|note| note.contains("acme-build-7")),
         "{:?}",
         finding.notes
     );
