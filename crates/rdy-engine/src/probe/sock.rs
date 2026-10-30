@@ -167,11 +167,21 @@ impl UnixResponse {
 pub(super) struct Peers {
     hosts: OnceLock<HostSet>,
     #[cfg(test)]
-    timeout: OnceLock<Duration>,
+    pub(super) timeout: OnceLock<Duration>,
 }
 
 impl Peers {
-    fn timeout(&self, normal: Duration) -> Duration {
+    /// Whether `target` (host and port) is one of the check's spec hosts. A probe nobody gave hosts to
+    /// has none.
+    pub(super) fn is_spec_host(&self, target: &Target) -> bool {
+        self.hosts.get().is_some_and(|hosts| {
+            hosts
+                .iter()
+                .any(|t| t.host() == target.host() && t.port() == target.port())
+        })
+    }
+
+    pub(super) fn timeout(&self, normal: Duration) -> Duration {
         #[cfg(test)]
         if let Some(short) = self.timeout.get() {
             return *short;
@@ -184,11 +194,15 @@ impl Probe {
     /// Gives the probe the check's spec hosts: the only servers `udp_exchange` may send to. It can be
     /// set once. A later call changes nothing and returns `false`.
     ///
-    /// The scheduler calls it with `Built::hosts` when it builds the probe of a check (M1-091).
-    /// Until a probe has hosts, every datagram is refused.
+    /// The scheduler calls it with the check's `Built::hosts` when it builds the probe of a check
+    /// (`Planned::with_hosts`, M1-091). Until a probe has hosts, every datagram and every TCP call is
+    /// refused.
     #[cfg_attr(
-        not(any(test, feature = "testing")),
-        expect(dead_code, reason = "the scheduler wiring arrives with M1-091")
+        not(any(test, feature = "testing", feature = "runtime")),
+        expect(
+            dead_code,
+            reason = "only the scheduler and the test helpers set hosts"
+        )
     )]
     pub(crate) fn permit_hosts(&self, hosts: HostSet) -> bool {
         self.scope.peers.hosts.set(hosts).is_ok()
@@ -276,12 +290,7 @@ impl Probe {
         if !declared {
             return Err(ProbeError::denied(RULE_UDP_UNDECLARED, what));
         }
-        let listed = self.scope.peers.hosts.get().is_some_and(|hosts| {
-            hosts
-                .iter()
-                .any(|t| t.host() == server.host() && t.port() == server.port())
-        });
-        if !listed {
+        if !self.scope.peers.is_spec_host(server) {
             return Err(ProbeError::denied(RULE_UDP_HOST, what));
         }
         if payload.is_empty() || payload.len() > MAX_UDP_PAYLOAD || max_reply == 0 {
@@ -400,7 +409,7 @@ impl Probe {
 }
 
 /// `host:port` for messages, with brackets around an IPv6 literal.
-fn host_port(server: &Target) -> String {
+pub(super) fn host_port(server: &Target) -> String {
     match server.host() {
         Host::Ipv6(addr) => format!("[{addr}]:{}", server.port()),
         host => format!("{host}:{}", server.port()),

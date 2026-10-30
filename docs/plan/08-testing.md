@@ -493,7 +493,9 @@ only the allowed ones arrived (ADR 0010, INV-14). Cloud APIs (M3) replay at the 
 factories are `rdy_engine::testing::loopback` (feature `loopback` of `rdy-engine`, ADR 0035), which any
 crate that already uses the engine `testing` feature can turn on, so `rdy-engine` does not depend on a
 check crate and no check crate needs `tokio`, `socket2` or `tokio-rustls`. M1-091 maps a name to a started
-server. Certificate chains are built with `rcgen` at test time.
+server: `Replay::serve` takes a factory, `serve_tcp` connects a loopback server such as `ConnectProxy`, and
+`serve_duplex` runs an in-process task on one end of a pipe; the backend runs the factory when the facade
+connects to the address `net.json` scripts as `serve`. Certificate chains are built with `rcgen` at test time.
 Their serials and digests become placeholders (`<serial>`, `<sha256>`) before comparison. `blackhole` is
 scripted only: a real black hole cannot exist on loopback (03).
 

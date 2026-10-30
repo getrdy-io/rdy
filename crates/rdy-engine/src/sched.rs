@@ -42,6 +42,7 @@ use tokio::task::{AbortHandle, JoinSet};
 use tokio::time::Instant;
 
 use crate::check::{Check, CheckContext, CheckError, CheckOutcome, Need, Os};
+use crate::family::HostSet;
 use crate::probe::{Probe, ProbeHub};
 use crate::redact::{Redacted, Redactor};
 
@@ -86,6 +87,7 @@ pub struct Planned {
     check: Arc<dyn Check>,
     key: String,
     timeout: Option<Duration>,
+    hosts: HostSet,
 }
 
 impl Planned {
@@ -96,6 +98,7 @@ impl Planned {
             check,
             key: key.into(),
             timeout: None,
+            hosts: HostSet::empty(),
         }
     }
 
@@ -103,6 +106,15 @@ impl Planned {
     #[must_use]
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    /// Sets the hosts the check may reach, from `Built::hosts`. The check's probe gets exactly these:
+    /// a host that only another check lists is refused (INV-11). With none, the check can reach no
+    /// host.
+    #[must_use]
+    pub fn with_hosts(mut self, hosts: HostSet) -> Self {
+        self.hosts = hosts;
         self
     }
 }
@@ -428,6 +440,7 @@ async fn drive(item: Planned, run: &RunCtx) -> Ran {
         check,
         key,
         timeout,
+        hosts,
     } = item;
     let id = check.info().id;
     let started = Instant::now();
@@ -444,6 +457,7 @@ async fn drive(item: Planned, run: &RunCtx) -> Ran {
         .as_ref()
         .map(|hub| hub.check_probe(&key, run.os, Some(check.info())));
     if let Some(probe) = &probe {
+        probe.permit_hosts(hosts);
         ctx = ctx.with_probe(probe.clone());
     }
     // Dropped on every way out, including the deadline cut: the probe ends with the check.
