@@ -22,6 +22,7 @@ use rdy_engine::probe::ProbeError;
 use serde_json::{Map, Value, json};
 
 use crate::family::{OS, ROOT};
+use crate::reads::{Read, read_text};
 use crate::text::{short, soft};
 
 mod firewalld;
@@ -415,25 +416,6 @@ impl Check for Firewall {
 
     fn run<'a>(&'a self, ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome> {
         Box::pin(self.inspect(ctx))
-    }
-}
-
-/// What reading a text file gave.
-enum Read {
-    Text(String),
-    Absent,
-    Unreadable(String),
-}
-
-async fn read_text(ctx: &CheckContext, path: &str) -> Result<Read, CheckError> {
-    match ctx.probe().read(Path::new(path)).await {
-        Ok(file) => Ok(Read::Text(
-            String::from_utf8_lossy(&file.bytes).into_owned(),
-        )),
-        Err(error) => match soft(error)? {
-            ProbeError::NotFound => Ok(Read::Absent),
-            other => Ok(Read::Unreadable(short(&other))),
-        },
     }
 }
 

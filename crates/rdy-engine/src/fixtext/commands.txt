@@ -6,6 +6,8 @@
 # `pro` is the Ubuntu Pro client. It is a generic word, so it is listed on purpose and reviewed with the
 # `host.os` FIPS fix text.
 Set-VMProcessor
+aa-status
+apparmor_parser
 ausearch
 aws
 az
@@ -21,6 +23,7 @@ eksctl
 fips-mode-setup
 firewall-cmd
 gcloud
+getenforce
 grubby
 helm
 journalctl
