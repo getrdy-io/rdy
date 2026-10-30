@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cpu-no-cpuinfo"
+summary = "RHEL 9 guest with 8 vCPUs and no /proc/cpuinfo (restricted container)"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false
