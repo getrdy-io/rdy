@@ -763,7 +763,9 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
     run, warnings, passed, not applicable, capabilities, details, action log as one plain table).
   - No `<details>`; vendor fix text is labelled "From <product>". An INCOMPLETE banner shows when
     `complete: false`.
-  - The JSON is embedded with `data-sha256`.
+  - The JSON is embedded with `data-sha256` (M1-078): `render_html` calls `json_bytes` on the same report, so
+    it fails with `HtmlError::Json` when the writer refuses the report. The element text is the file's bytes,
+    printed through the one askama safe marker, which is on a private wrapper of the page (`EmbeddedJson`), not on the public `HtmlSafeJson` (`scripts/check-html-escapes.sh`).
   - The CSP is ADR 0003's.
 - `rdy report` (M2) redacts input it did not produce before rendering.
 
@@ -1125,7 +1127,7 @@ pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<()
 pub fn json_bytes(r: &RedactedReport) -> Result<HtmlSafeJson, JsonError>;  // the same bytes, for the HTML embed
 pub fn read_report_from(r: impl std::io::Read) -> Result<Report, JsonError>;  // reads at most 2 MiB + 1 byte, refuses over 2 MiB before parsing
 pub fn read_report(bytes: &[u8]) -> Result<Report, JsonError>;  // the same check on bytes already in memory
-pub fn render_html(r: &RedactedReport) -> Result<String, HtmlError>;  // M1-077: report::html, feature `html`; HtmlError, not ReportError, for the same reason as JsonError (ReportError needs `runtime`)
+pub fn render_html(r: &RedactedReport) -> Result<String, HtmlError>;  // M1-077: report::html, feature `html`; HtmlError, not ReportError, for the same reason as JsonError (ReportError needs `runtime`); M1-078: HtmlError::Json wraps the JsonError of the embedded copy
 pub struct RedactedReport(/* private */ Report);   // no From<Report>, no Deserialize, no DerefMut
 pub fn live_backend() -> Arc<dyn Backend>;        // disallowed in check crates
 pub struct FileBytes { pub bytes: Vec<u8>, pub truncated_head: bool, pub truncated_tail: bool }

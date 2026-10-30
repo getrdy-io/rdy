@@ -40,4 +40,25 @@ disallowed-methods = [
     { path = "rustls::ConfigBuilder::dangerous", reason = "builds a client that can skip certificate checks; only probe/net/tls/record.rs may, with #[expect]", allow-invalid = true },
     { path = "rustls::client::ClientConfig::dangerous", reason = "swaps the certificate verifier of a built client; only probe/net/tls/record.rs may, with #[expect]", allow-invalid = true },
     { path = "rdy_engine::probe::Probe::kube_call", reason = "writes the kube entry of the action log; only the read-only guard in rdy-checks-k8s src/client/ calls it, so a check cannot forge a kube entry (INV-14)", allow-invalid = true },
+    # The functions behind the `safe`, `escape` and `e` filters. `escape("none")` turns escaping off (M1-078).
+    { path = "askama::filters::safe", reason = "prints a value without escaping it", allow-invalid = true },
+    { path = "askama::filters::escape", reason = "takes an escaper name, and \"none\" turns escaping off", allow-invalid = true },
+    { path = "askama::filters::e", reason = "takes an escaper name, and \"none\" turns escaping off", allow-invalid = true },
+]
+
+# askama escapes every value in an `.html` template. These items print a value without escaping it, or mark
+# a type as needing none. What clippy catches: a single-name `use` of one of the types, the type in any type
+# position, a trait bound, and a call of the lowercase `safe`, `escape` and `e` functions. What it does not:
+# a glob import (`use askama::filters::*`), a tuple-struct constructor such as `Safe(x)`, and the trait in an
+# `impl Trait for Type` header. `scripts/check-html-escapes.sh` covers those: it fails on the word
+# `filters`, `Safe` or `Unsafe` in any Rust file that names askama, and on `::` inside a template tag. The
+# one marker impl, on `EmbeddedJson` in `rdy-engine`'s `report/html/view.rs`, is the one line it allows
+# (M1-078, SEC-64). `allow-invalid` keeps an askama bump that moves an item from breaking a crate that
+# does not use askama.
+disallowed-types = [
+    { path = "askama::filters::Safe", reason = "prints a value without escaping; only the EmbeddedJson marker in report/html/view.rs may switch escaping off", allow-invalid = true },
+    { path = "askama::filters::Unsafe", reason = "wraps a value for the escaper; use askama's default escaping", allow-invalid = true },
+    { path = "askama::filters::MaybeSafe", reason = "marks filter output as maybe unescaped; escaping stays on", allow-invalid = true },
+    { path = "askama::filters::HtmlSafe", reason = "marks a type as printed without escaping; only EmbeddedJson in report/html/view.rs may impl it (held by scripts/check-html-escapes.sh)", allow-invalid = true },
+    { path = "askama::filters::HtmlSafeOutput", reason = "marks filter output as HTML safe; escaping stays on", allow-invalid = true },
 ]

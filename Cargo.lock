@@ -1887,6 +1887,7 @@ dependencies = [
 name = "rdy-lint-wall"
 version = "0.0.0"
 dependencies = [
+ "askama",
  "clap",
  "proc-macro2",
  "rdy-engine",

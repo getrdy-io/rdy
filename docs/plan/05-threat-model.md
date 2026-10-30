@@ -328,7 +328,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 
 - `askama` 0.16.1, with its build-time crates `askama_macros`, `askama_derive` and `askama_parser` (M1-077, ADR 0003
   decision 5; D.5 of 07). **Approved by security-reviewer, PR #149 (SEC-149-2).** A direct dependency of `rdy-engine` behind the `html`
-  feature, which is on by default. The check crates may depend on none of them: `deny.toml` bans `askama` with `wrappers = ["rdy-engine"]`, and bans the three build-time crates except through their parent (the kube pattern). Pinned with `=` in the
+  feature, which is on by default. The check crates may depend on none of them: `deny.toml` bans `askama` with `wrappers = ["rdy-engine", "rdy-lint-wall"]` (the lint wall names its Safe items to prove they are banned, M1-078), and bans the three build-time crates except through their parent (the kube pattern). Pinned with `=` in the
   workspace `Cargo.toml`: a template engine decides what is escaped, so every bump is reviewed by hand.
   - Purpose: compile the HTML report templates (`crates/rdy-engine/templates/`) into Rust at build time, with
     HTML escaping on for `.html` files. No template is read at run time, and no template engine runs on a
@@ -353,8 +353,24 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     `urlencode` and `serde_json` (no `json` filter, so no filter that can print unescaped JSON). New
     packages in the lock file: the four askama crates and `rustc-hash`. `winnow`, `itoa`, `unicode-ident`,
     `memchr`, `proc-macro2` and `quote` were already there.
-  - What the renderer must keep true: no template uses the `safe` filter (a CI grep, M1-078; the one value
-    that may be printed unescaped is `HtmlSafeJson`, and M1-077 does not print it); askama escapes `<`, `>`,
+  - What the renderer must keep true: nothing switches escaping off (M1-078, two layers). The root
+    `clippy.toml` and the three check crates' (the lint wall, whose `tests/lint-wall` uses prove each entry fires; the
+    wall crate is the only other crate `deny.toml` lets name askama) ban the types `askama::filters::Safe`, `Unsafe`, `MaybeSafe`, `HtmlSafe` and
+    `HtmlSafeOutput` and the functions `safe`, `escape` and `e`. A single-name `use`, a type position, a
+    bound and a call of the lowercase functions fail to compile. A glob import, a tuple-struct constructor
+    such as `Safe(x)` and the trait in an `impl` header do not, so
+    `scripts/check-html-escapes.sh` (a lint-job step) is the second layer and the guard for those: it fails on the filters
+    `|safe`, `|unsafe`, `|e(`, `|escape(`, `|json`, `|json_pretty`, `|tojson`, `|urlencode` and `|urlencode_strict`, and unless `{{ json }}` appears exactly once, on the script line. Known limit: a string literal holding `}}` or `%}` inside a tag hides a path call from the `::` rule, and the clippy layer may not see the generated code, so this is a known limit that review covers (a test pins it)
+    (templates are read with their newlines joined), on `{% filter safe %}`, on any `::` inside a tag (a path
+    call works in askama 0.16.1), on `escape =`, on the words `filters`, `Safe` and `Unsafe` in a Rust file
+    that names askama, on a `#[template]` (also inside `cfg_attr`) that is not `path = "*.html"` or has
+    `ext`, `source`, `in_doc`, `config` or `escape`, on an `askama.toml`, and on the askama features
+    `serde_json`, `urlencode`, `full`, `default` and `config` in any manifest or feature list. `deny.toml`
+    pins askama's features with `exact = true` (`alloc`, `derive`, `std`). The one value printed unescaped is
+    the embedded result, held in the private `EmbeddedJson` of `report/html/view.rs`, and its marker
+    (`impl askama::filters::HtmlSafe for EmbeddedJson {}`) is the one line the script allows. The public
+    `HtmlSafeJson` has no marker, because its escapes cover `<`, `>`, `&` and the line separators and not
+    `"`: it is safe only as the text of the script element, never in an attribute (SEC-19-1). askama escapes `<`, `>`,
     `&`, `"` and `'` as numeric references; the Content-Security-Policy `<meta>` is the second line of
     defence (ADR 0003 decision 3).
 - `vnu-jar` 26.10.12 (M1-077, SEC-149-8). The Nu HTML Checker, an npm package that holds a Java jar. **CI only,
