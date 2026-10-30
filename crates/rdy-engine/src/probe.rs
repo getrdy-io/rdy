@@ -82,6 +82,8 @@ pub use native::{
     MachineId, NativeCall, NativeValue, RULE_MACHINE_ID, Resource, RlimitInfo, StatvfsInfo,
     UnameInfo,
 };
+#[cfg(feature = "testing")]
+pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS};
 pub use policy::{ReadGuard, Refused};
 pub use proxy::{
     DEFAULT_PROXY_PORT, MAX_CONNECT_HEAD, NetFailure, ProxyChallenge, ProxyError, ProxyUrl,

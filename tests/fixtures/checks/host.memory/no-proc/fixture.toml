@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-no-proc"
+summary = "A chroot with no /proc/meminfo"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-garbage"
+summary = "A /proc/meminfo that is not in the form rdy reads"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false
