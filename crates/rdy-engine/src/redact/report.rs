@@ -29,7 +29,7 @@
 //! `passed` survive.
 //!
 //! `redaction.total` and `by_rule` count every replacement the walk made, including in text that a later
-//! cap or cut dropped (a list past 200 items, notes past 20, keys dropped to fit 64 KiB). They are never
+//! cap or cut dropped (a list past 200 items, notes past 20, keys dropped to fit 64 KiB, last keys in key order first). They are never
 //! lower than what was hidden.
 //!
 //! The 2 MiB cap on the whole document is measured on the written bytes, so it belongs to the writer.
@@ -457,7 +457,8 @@ fn pair_name_is_secret(map: &Map<String, Value>) -> Option<bool> {
 
 /// Cuts `text` to at most `max` bytes, with the marker at the end, if it is longer. The flag says whether
 /// it was cut. The cut falls on a character boundary and never inside a placeholder or a reference.
-fn cap(text: String, max: usize) -> (String, bool) {
+/// The JSON writer cuts the texts of `observed` and `expected` to the schema's 4 KiB with it.
+pub(crate) fn cap(text: String, max: usize) -> (String, bool) {
     match cut_str(&text, max) {
         Some(cut) => (cut, true),
         None => (text, false),
@@ -589,7 +590,10 @@ fn cap_map(map: &mut Map<String, Value>) -> bool {
         map.values_mut().for_each(|v| shorten(v, lo));
     } else {
         map.values_mut().for_each(|v| shorten(v, floor));
-        let keys: Vec<String> = map.keys().cloned().collect();
+        // Sorted, so the keys that stay do not depend on the order of the map (`preserve_order` is on in
+        // some builds and off in others).
+        let mut keys: Vec<String> = map.keys().cloned().collect();
+        keys.sort();
         let keeps = |n: usize| {
             let probe: Map<String, Value> = keys
                 .iter()

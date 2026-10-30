@@ -77,6 +77,7 @@ tests/fixtures/
   checks/_policy/<case>/         engine policy cases, for example symlink-to-shadow
   envs/<env>/                    one whole environment plus a spec to run against it
   redaction/<category>/<case>.{in,expected,toml}   (05, Appendix F)
+  reports/golden/*.json          goldens of the JSON writer (M1-055), compared on every leg
   results/<rdy-version>/*.json   result files from released versions, append only (ADR 0007)
   specs/{valid,malformed}/       parser corpus
   signed/                        one signed spec, its .minisig and public key, never edited
