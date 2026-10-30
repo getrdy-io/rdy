@@ -6,7 +6,7 @@
 //! `Report::new`). Nothing here reads the real machine: the environment is a `Replay`.
 //!
 //! It stands where `rdy_cli::run` will stand. `rdy run` is not wired yet, so the harness cannot call it.
-//! M1-057 swaps the body of `run_env` for `rdy_cli::run` with the same `Replay`, reads the report from
+//! M1-086 swaps the body of `run_env` for `rdy_cli::run` with the same `Replay`, reads the report from
 //! `--json` stdout and regenerates host-min's golden from it. M1-086 adds `golden/terminal.txt` (backlog
 //! correction-29). The tests in `main` do not change. Until then the mapping below is the engine's, and the
 //! three things it does not map (a panic, a cancel, a per-check `timeout:` in the spec) stop the

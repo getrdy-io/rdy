@@ -9,7 +9,7 @@
 //! that other environments build on and is skipped.
 //!
 //! Not here yet: `terminal.txt` (the human renderer, M1-086), `report.html` (M1-077) and the call to
-//! `rdy_cli::run` itself (M1-057, which also regenerates the golden from `--json` stdout). `driver` says
+//! `rdy_cli::run` itself (M1-086, which also regenerates the golden from `--json` stdout). `driver` says
 //! where they plug in.
 //!
 //! Completeness. `completeness` walks the registered families and fails when an implemented check has no
