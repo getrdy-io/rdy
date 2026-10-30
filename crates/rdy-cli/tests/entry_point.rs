@@ -131,6 +131,7 @@ const GATED: &[&[&str]] = &[
         "/no/such/key",
     ],
     &["spec", "keygen", "no-such-product", "--unencrypted"],
+    &["trust", "add", "acme", "--key", "/no/such/key.pub"],
     &["trust", "list"],
     &["trust", "remove", "acme"],
 ];
@@ -182,28 +183,52 @@ fn with_json_the_refusal_is_the_error_object_on_stdout() {
     assert_eq!(json["error"]["code"], "internal");
 }
 
+/// Makes a FIFO with the system `mkfifo`. `rustix` has no `mknodat` on Apple targets, and `mkfifo` is
+/// on every Unix CI image.
+#[cfg(unix)]
+fn mkfifo(path: &std::path::Path) {
+    let status = std::process::Command::new("mkfifo")
+        .arg(path)
+        .status()
+        .unwrap_or_else(|e| panic!("mkfifo: {e}"));
+    assert!(status.success(), "mkfifo failed: {status}");
+}
+
+/// Runs `rdy spec sign <fifo> --secret-key <fifo>` on its own thread and gives the exit code if the
+/// call returns within `limit`. `spec sign` opens its spec path, so on a FIFO with no writer it blocks
+/// for ever. A call that never returns leaves its thread blocked in `open`; the test process ends it.
+#[cfg(unix)]
+fn sign_a_fifo(machine: Replay, fifo: &str, limit: std::time::Duration) -> Option<ExitCode> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let path = fifo.to_owned();
+    std::thread::spawn(move || {
+        let ran = call(machine, &["spec", "sign", &path, "--secret-key", &path]);
+        let _ = tx.send(ran.code);
+    });
+    rx.recv_timeout(limit).ok()
+}
+
 /// A spec path that is a FIFO with no writer: opening it blocks for ever. The gate must refuse first,
-/// so `run` returns. The call is on its own thread so that a regression fails in 10 s and does not hang.
+/// so `run` returns. The control shows the FIFO does block: with no privilege the same call does not
+/// return. Without it, a command that refused a FIFO before opening it would pass this test for the wrong
+/// reason (`spec lint` does that).
 #[cfg(unix)]
 #[test]
 fn a_refused_run_never_opens_the_spec_path() {
-    use rustix::fs::{CWD, FileType, Mode, mknodat};
-    use std::sync::mpsc;
     use std::time::Duration;
 
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
     let fifo = dir.path().join("spec.yaml");
-    mknodat(CWD, &fifo, FileType::Fifo, Mode::RUSR | Mode::WUSR, 0)
-        .unwrap_or_else(|e| panic!("mkfifo: {e}"));
+    mkfifo(&fifo);
     let path = fifo.to_string_lossy().into_owned();
 
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let ran = call(privileged(), &["spec", "lint", &path]);
-        let _ = tx.send(ran.code);
-    });
-    let code = rx
-        .recv_timeout(Duration::from_secs(10))
-        .unwrap_or_else(|_| panic!("run did not return: the spec path was opened"));
+    let blocked = sign_a_fifo(common::unprivileged(), &path, Duration::from_secs(2));
+    assert_eq!(
+        blocked, None,
+        "the control returned, so `spec sign` does not block on a FIFO and this test proves nothing"
+    );
+
+    let code = sign_a_fifo(privileged(), &path, Duration::from_secs(10))
+        .unwrap_or_else(|| panic!("run did not return: the spec path was opened"));
     assert_eq!(code, ExitCode::Internal);
 }

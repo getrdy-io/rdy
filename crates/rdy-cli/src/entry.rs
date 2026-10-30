@@ -80,11 +80,16 @@ fn run_live(args: Vec<OsString>, json: bool, stdout: &mut dyn Write, stderr: &mu
         Ok(runtime) => runtime,
         Err(_) => return emit(&CliError::bug(), json, stdout, stderr),
     };
-    let code = runtime
-        .block_on(run(args, backend, RunHooks::default(), stdout, stderr))
-        .code();
+    // A panic in `block_on` would drop the runtime on the way out, and dropping waits for its blocking
+    // pool with no limit. Catch it, shut down without waiting, then let `guarded` handle the panic.
+    let ran = panic::catch_unwind(AssertUnwindSafe(|| {
+        runtime.block_on(run(args, backend, RunHooks::default(), stdout, stderr))
+    }));
     runtime.shutdown_background();
-    code
+    match ran {
+        Ok(code) => code.code(),
+        Err(payload) => panic::resume_unwind(payload),
+    }
 }
 
 /// Runs `f` with the two streams. If `f` panics, prints the standard internal error and returns 70.

@@ -54,11 +54,14 @@ fn shipped_code(text: &str) -> Vec<String> {
                 continue;
             }
             let closer = format!("{}}}", " ".repeat(indent));
-            for inner in lines.by_ref() {
-                if inner.trim_end() == closer {
-                    break;
-                }
-            }
+            // An item that never closes would swallow the rest of the file and hide shipped code
+            // from the scan, so it is a failure and not a pass.
+            let closed = lines.by_ref().any(|inner| inner.trim_end() == closer);
+            assert!(
+                closed,
+                "a #[cfg(test)] item (`{}`) has no closing line at its indent",
+                item.trim()
+            );
             continue;
         }
         let code = match line.find("//") {
@@ -133,6 +136,13 @@ fn the_helper_sees_what_it_must() {
     assert!(names("use a::Replay;", "Replay"));
     assert!(!names("use a::ReplayLog;", "Replay"));
     assert!(!names("let testing_mode = 1;", "testing"));
+}
+
+#[test]
+#[should_panic(expected = "no closing line")]
+fn a_cfg_test_item_that_never_closes_fails_the_scan() {
+    // The closer is not at the item's indent, so the item would swallow the rest of the file.
+    let _ = shipped_code("#[cfg(test)]\nmod tests {\n    fn f() {}\n  }\nuse a::Replay;\n");
 }
 
 #[test]

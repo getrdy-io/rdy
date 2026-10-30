@@ -43,6 +43,8 @@ The plan reserves `rdy` on crates.io. Package name, directory and binary name mu
      entry_point_wall.rs` (no `Replay` or `testing` outside `cfg(test)`, one `live_backend` call site,
      no `testing` on the normal engine dependency). The marker-string check on release archives belongs
      to the release workflow and is not built yet (see 12-progress, M1-074).
+     No `RunHooks` field may weaken the privilege gate, the redactor or the output-dir rules. Each new
+     field needs security-reviewer review.
 5. A no-code `rdy-cli` 0.0.1 placeholder is published whose description says "install `rdy`", so
    someone who reads the directory name and runs `cargo install rdy-cli` cannot get a squatter's code.
 6. `rdy version` and `rdy --version` both work and print `rdy 0.1.0-alpha.3 (abc1234 2026-12-01)` on

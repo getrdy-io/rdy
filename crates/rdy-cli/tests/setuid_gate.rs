@@ -2,8 +2,8 @@
 //!
 //! The real binary is copied, and the copy is made setuid root, or given a file capability. The CI
 //! user runs it with a spec path that is a FIFO with no writer. Opening that path blocks for ever, so
-//! an exit 70 within 5 seconds shows the spec was never opened. The refusal text shows the gate is what
-//! ended the run.
+//! an exit 70 within 5 seconds shows the spec was never opened. The refusal text, which every case here
+//! must show in full, proves the gate is what ended the run (and not a read error).
 //!
 //! The setup needs `sudo` for `chown` and `setcap`. The tests run only when `RDY_REQUIRE_SETUID=1`,
 //! which the linux-x64 leg of CI sets after it installs `libcap2-bin`. Without the variable they skip
@@ -17,8 +17,6 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-
-use rustix::fs::{CWD, FileType, Mode, mknodat};
 
 mod common;
 
@@ -59,8 +57,11 @@ fn setup() -> Setup {
         .unwrap_or_else(|e| panic!("copy of the rdy binary: {e}"));
     mode(&binary, 0o755);
     let fifo = dir.path().join("spec.yaml");
-    mknodat(CWD, &fifo, FileType::Fifo, Mode::from_raw_mode(0o666), 0)
+    let made = Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
         .unwrap_or_else(|e| panic!("mkfifo: {e}"));
+    assert!(made.success(), "mkfifo failed: {made}");
     mode(&fifo, 0o666);
     Setup {
         _dir: dir,
@@ -171,13 +172,7 @@ fn assert_the_fifo_blocks(set: &Setup) {
 
 /// The refusal text of INV-10.
 const REFUSED: &str = "error: rdy will not run with more privilege";
-/// A process that the kernel started with file capabilities is not dumpable, so `/proc/self/auxv`
-/// (mode 0400, owned by root for such a process) is not readable by the user. The snapshot then ends in
-/// its fail-closed branch: still exit 70, with the unreadable-source text. See the carry in
-/// docs/plan/12-progress.md (M1-074).
-const AUXV_UNREADABLE: &str = "error: rdy could not read /proc/self/auxv";
-
-fn assert_refused_without_opening_the_spec(set: &Setup, what: &str, texts: &[&str]) {
+fn assert_refused_without_opening_the_spec(set: &Setup, what: &str) {
     for command in COMMANDS {
         let args = with_fifo(command, set);
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -198,7 +193,7 @@ fn assert_refused_without_opening_the_spec(set: &Setup, what: &str, texts: &[&st
             ended.stderr
         );
         assert!(
-            texts.iter().any(|text| ended.stderr.starts_with(text)),
+            ended.stderr.starts_with(REFUSED),
             "{what}: rdy {words:?}: {}",
             ended.stderr
         );
@@ -216,11 +211,13 @@ fn a_setuid_root_rdy_exits_70_and_never_opens_the_spec() {
     let binary = set.binary.to_string_lossy().into_owned();
     sudo(&["chown", "root", &binary]);
     sudo(&["chmod", "u+s", &binary]);
-    assert_refused_without_opening_the_spec(&set, "setuid root", &[REFUSED]);
+    assert_refused_without_opening_the_spec(&set, "setuid root");
 }
 
-#[test]
-fn an_rdy_with_a_file_capability_exits_70_and_never_opens_the_spec() {
+/// A file capability, with the effective bit (`+ep`) and without it (`+p`). The process is not
+/// dumpable, so its own auxv is hidden from the user, but the status file is readable and shows the
+/// capability. The run ends with the capability refusal and not with a read error.
+fn refused_with_file_capability(capability: &str) {
     if !required() {
         eprintln!("skipped: needs sudo and setcap (the linux-x64 leg sets RDY_REQUIRE_SETUID=1)");
         return;
@@ -228,6 +225,16 @@ fn an_rdy_with_a_file_capability_exits_70_and_never_opens_the_spec() {
     let set = setup();
     assert_the_fifo_blocks(&set);
     let binary = set.binary.to_string_lossy().into_owned();
-    sudo(&["setcap", "cap_net_raw+ep", &binary]);
-    assert_refused_without_opening_the_spec(&set, "file capability", &[REFUSED, AUXV_UNREADABLE]);
+    sudo(&["setcap", capability, &binary]);
+    assert_refused_without_opening_the_spec(&set, capability);
+}
+
+#[test]
+fn an_rdy_with_an_effective_file_capability_exits_70_and_never_opens_the_spec() {
+    refused_with_file_capability("cap_net_raw+ep");
+}
+
+#[test]
+fn an_rdy_with_a_permitted_only_file_capability_exits_70_and_never_opens_the_spec() {
+    refused_with_file_capability("cap_net_raw+p");
 }
