@@ -323,6 +323,15 @@ apis("openshift-enforce", OPENSHIFT)
 namespace("openshift-enforce", dict(SYNCED, **{PSA + "enforce": "restricted"}), RANGE)
 scc_list("openshift-enforce", SCCS)
 
+case("openshift-sync-off", "OpenShift where label sync is switched off, so the warn and audit labels are the namespace's own")
+apis("openshift-sync-off", OPENSHIFT)
+namespace(
+    "openshift-sync-off",
+    dict(SYNCED, **{"security.openshift.io/scc.podSecurityLabelSync": "false"}),
+    RANGE,
+)
+scc_list("openshift-sync-off", SCCS)
+
 case("openshift-scc-forbidden", "OpenShift where the identity may not list the SCCs")
 apis("openshift-scc-forbidden", OPENSHIFT)
 namespace("openshift-scc-forbidden", SYNCED, RANGE)
@@ -364,6 +373,12 @@ apis("kyverno-legacy-only", KYVERNO[:1])
 namespace("kyverno-legacy-only", {PSA + "enforce": "baseline"})
 kinds("kyverno-legacy-only", "kyverno.io", "v1", KYVERNO_LEGACY)
 
+case("kyverno-no-legacy", "Kyverno after the legacy kinds are removed: kyverno.io serves only PolicyException")
+apis("kyverno-no-legacy", KYVERNO)
+namespace("kyverno-no-legacy", {PSA + "enforce": "baseline"})
+kinds("kyverno-no-legacy", "kyverno.io", "v1", [("PolicyException", "policyexceptions")])
+kinds("kyverno-no-legacy", "policies.kyverno.io", "v1", KYVERNO_CEL)
+
 case("gatekeeper", "Gatekeeper: templates and two constraint kinds")
 apis("gatekeeper", GATEKEEPER)
 namespace("gatekeeper", {PSA + "enforce": "baseline"})
@@ -395,7 +410,7 @@ MANY = [(f"K8sCheck{n:02d}", f"k8scheck{n:02d}") for n in range(12)]
 HOSTILE = [
     ("Evil\u001b[2JKind", "evil1"),
     ("`rm -rf /`", "evil2"),
-    ("A‮B", "evil3"),
+    ("A\u202eB", "evil3"),
     ("L" * 100, "evil4"),
 ]
 case("many-kinds", "Gatekeeper serving twelve constraint kinds and four with hostile names")

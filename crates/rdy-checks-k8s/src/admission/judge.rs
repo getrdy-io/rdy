@@ -32,6 +32,9 @@ pub(super) struct NsFacts {
     pub(super) labels: Labels,
     /// `openshift.io/sa.scc.uid-range`, when it has the shape of one.
     pub(super) uid_range: Option<String>,
+    /// True when the namespace sets `security.openshift.io/scc.podSecurityLabelSync` to `false`, so
+    /// OpenShift does not write its `warn` and `audit` labels.
+    pub(super) label_sync_off: bool,
 }
 
 /// Whether the cluster is OpenShift.
@@ -222,13 +225,23 @@ pub(super) fn judge(params: &K8sAdmission, need: Option<&Need>, found: &Gathered
                 format!("{} ({})", engine.engine, groups.join(", "))
             })
             .collect();
+        let legacy_policies = found
+            .engines
+            .iter()
+            .flat_map(|engine| &engine.groups)
+            .any(|group| group.group == "kyverno.io" && group.legacy_policies);
+        let possessive = if found.engines.len() == 1 {
+            "Its"
+        } else {
+            "Their"
+        };
         issues.push(Issue {
             level: Level::Warn,
             message: format!(
-                "Policy engine found: {}. Its policies can reject the product's pods",
+                "Policy engine found: {}. {possessive} policies can reject the product's pods",
                 named.join("; ")
             ),
-            fix: fix::engines(&names, &groups, ns),
+            fix: fix::engines(&names, &groups, legacy_policies, ns),
         });
         for engine in &found.engines {
             for group in &engine.groups {
@@ -343,11 +356,11 @@ fn judge_labels(need: &Need, facts: &NsFacts, ns: &str, found: &Gathered, out: &
                     notes.push("On OpenShift the global default enforces `privileged` and warns and audits at `restricted`. The SCCs are the real gate.".to_owned());
                 } else {
                     notes.push(format!(
-                        "Namespace {ns} has no enforce label, so it takes the cluster default from the API server's configuration. rdy cannot read that default (cluster default not readable)."
+                        "Namespace {ns} has no enforce label, so it takes the cluster default from the API server's Pod Security configuration. rdy cannot read that configuration (cluster default not readable). It also holds exemptions (namespaces, usernames and runtime classes), and an exempt namespace ignores its labels."
                     ));
                 }
                 if found.rke2 {
-                    unverified.push("the cluster default was not read: RKE2 with the CIS profile enforces `restricted` everywhere but a few system namespaces".to_owned());
+                    unverified.push("the cluster default was not read: RKE2 enforces `restricted` by default only with the CIS profile, and the profile is not readable".to_owned());
                 }
             }
         }
@@ -383,14 +396,22 @@ fn judge_labels(need: &Need, facts: &NsFacts, ns: &str, found: &Gathered, out: &
         }
     }
     for (mode, label) in [("warn", labels.warn), ("audit", labels.audit)] {
+        if label == Label::Invalid {
+            // The API server reads it as `privileged`: it fails open, so nothing is judged, but the label
+            // does not do what its author meant.
+            notes.push(format!(
+                "The {mode} label of namespace {ns} is not a Pod Security level. The API server reads it as `privileged`, so it never warns. Set it to `privileged`, `baseline` or `restricted`."
+            ));
+        }
         if let Label::Valid(have) = label
             && have > need.level
         {
             // On OpenShift a controller syncs these two labels from the SCCs the service accounts of the
             // namespace may use, so they say what would warn, not what is rejected. The SCC is the gate.
-            if found.openshift == Openshift::Yes {
+            // With the sync switched off the label is the namespace's own, so it is judged like any other.
+            if found.openshift == Openshift::Yes && !facts.label_sync_off {
                 notes.push(format!(
-                    "Namespace {ns} sets {mode} to {}. On OpenShift that label is synced from the SCCs, so pods are not rejected for it.",
+                    "Namespace {ns} sets {mode} to {}. On OpenShift that label is synced from the SCCs, so pods are not rejected for it, if it was not edited by hand.",
                     have.name()
                 ));
                 continue;

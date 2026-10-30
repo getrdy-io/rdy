@@ -272,7 +272,7 @@ async fn openshift_discovery_gives_the_scc_text() {
     assert_eq!(finding.observed["uid_range"], "1000680000/10000");
     // The synced warn and audit labels are notes: the SCC is the gate.
     assert!(
-        notes(&finding).contains("Namespace acme-system sets warn to restricted. On OpenShift that label is synced from the SCCs, so pods are not rejected for it."),
+        notes(&finding).contains("Namespace acme-system sets warn to restricted. On OpenShift that label is synced from the SCCs, so pods are not rejected for it, if it was not edited by hand."),
         "{finding:?}"
     );
     assert!(
@@ -292,7 +292,7 @@ async fn gatekeeper_and_kyverno_discovery_warn_with_names() {
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
     assert_eq!(
         finding.message,
-        "Policy engine found: Kyverno (kyverno.io, policies.kyverno.io); Gatekeeper (templates.gatekeeper.sh, constraints.gatekeeper.sh). Its policies can reject the product's pods"
+        "Policy engine found: Kyverno (kyverno.io, policies.kyverno.io); Gatekeeper (templates.gatekeeper.sh, constraints.gatekeeper.sh). Their policies can reject the product's pods"
     );
     let fix = finding.fix.clone().expect("a fix");
     assert!(
@@ -512,10 +512,15 @@ async fn on_rke2_a_namespace_with_no_label_is_not_verified() {
     assert!(
         partial
             .note
-            .contains("RKE2 with the CIS profile enforces `restricted`"),
+            .contains("RKE2 enforces `restricted` by default only with the CIS profile"),
         "{partial:?}"
     );
     assert!(partial.missing_grants.is_empty());
+    assert!(
+        notes(&finding)
+            .contains("It also holds exemptions (namespaces, usernames and runtime classes)"),
+        "{finding:?}"
+    );
     // A pass that is not verified is a warning in the report.
     let result = engine(&rig, finding, None);
     assert_eq!(result.status, Status::Warn);
@@ -582,6 +587,12 @@ async fn an_invalid_warn_label_is_read_as_privileged_and_never_warns() {
     let finding = rig.finding(json!({"pod_security": "baseline"})).await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
     assert_eq!(finding.observed["pod_security"]["warn"], "invalid");
+    assert!(
+        notes(&finding).contains(
+            "The warn label of namespace acme-system is not a Pod Security level. The API server reads it as `privileged`, so it never warns."
+        ),
+        "{finding:?}"
+    );
     rig.audit();
 }
 
@@ -867,6 +878,38 @@ async fn pod_security_labels_still_block_on_openshift() {
 }
 
 #[tokio::test]
+async fn openshift_with_label_sync_off_judges_the_warn_and_audit_labels() {
+    let rig = rig("openshift-sync-off");
+    let finding = rig
+        .finding(json!({"pod_security": "baseline", "scc": "anyuid"}))
+        .await;
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    assert_eq!(
+        finding.message,
+        "Namespace acme-system sets warn to restricted, and the product needs baseline: pods still start, and the person who installs sees a warning (and 1 more, see the notes)"
+    );
+    assert!(
+        !notes(&finding).contains("synced from the SCCs"),
+        "{finding:?}"
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_synced_label_note_says_it_holds_if_nobody_edited_the_label() {
+    let rig = rig("openshift");
+    let finding = rig
+        .finding(json!({"pod_security": "baseline", "scc": "anyuid"}))
+        .await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        notes(&finding).contains("so pods are not rejected for it, if it was not edited by hand."),
+        "{finding:?}"
+    );
+    rig.audit();
+}
+
+#[tokio::test]
 async fn a_range_annotation_that_is_not_a_range_is_dropped() {
     let rig = rig("openshift-hostile-range");
     let finding = rig.finding(json!({"pod_security": "baseline"})).await;
@@ -904,7 +947,29 @@ async fn kyverno_alone_is_named_with_its_groups() {
     );
     let fix = finding.fix.expect("a fix");
     assert!(fix.contains("which Kyverno policies apply"), "{fix}");
+    assert!(
+        fix.contains("`kubectl get clusterpolicies.kyverno.io,policies.kyverno.io -A`"),
+        "{fix}"
+    );
     assert!(!fix.contains("kubectl get constraints"), "{fix}");
+    rig.audit();
+}
+
+#[tokio::test]
+async fn kyverno_without_the_legacy_kinds_gets_no_command_for_them() {
+    let rig = rig("kyverno-no-legacy");
+    let finding = rig.finding(json!({"pod_security": "baseline"})).await;
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    assert_eq!(
+        finding.message,
+        "Policy engine found: Kyverno (kyverno.io, policies.kyverno.io). Its policies can reject the product's pods"
+    );
+    let fix = finding.fix.expect("a fix");
+    assert!(!fix.contains("clusterpolicies"), "{fix}");
+    assert!(
+        fix.contains("`kubectl get validatingpolicies.policies.kyverno.io`"),
+        "{fix}"
+    );
     rig.audit();
 }
 
@@ -919,6 +984,7 @@ async fn kyverno_with_only_the_legacy_group_reads_one_group() {
     );
     let fix = finding.fix.expect("a fix");
     assert!(!fix.contains("validatingpolicies"), "{fix}");
+    assert!(fix.contains("clusterpolicies.kyverno.io"), "{fix}");
     assert_eq!(rig.paths(), [NAMESPACE, APIS, "/apis/kyverno.io/v1"]);
     rig.audit();
 }
@@ -961,11 +1027,11 @@ async fn an_engine_whose_groups_cannot_be_read_is_still_found() {
 async fn kinds_are_sorted_cut_at_eight_and_counted() {
     let rig = rig("many-kinds");
     let finding = rig.finding(json!({"pod_security": "baseline"})).await;
-    // 16 kinds, byte order: the two hostile names that start with a capital come first, then
-    // `K8sCheck00` and on. The 100-character name and the backtick name sort after them and are counted.
+    // 16 kinds: the names shaped like a kind come first in byte order, so the four hostile names sort
+    // after the twelve real ones and are the ones counted in "more".
     assert!(
         notes(&finding).contains(
-            "Gatekeeper serves these kinds in constraints.gatekeeper.sh: A\\u{202e}B, Evil\\x1b[2JKind, K8sCheck00, K8sCheck01, K8sCheck02, K8sCheck03, K8sCheck04, K8sCheck05 and 8 more."
+            "Gatekeeper serves these kinds in constraints.gatekeeper.sh: K8sCheck00, K8sCheck01, K8sCheck02, K8sCheck03, K8sCheck04, K8sCheck05, K8sCheck06, K8sCheck07 and 8 more."
         ),
         "{}",
         notes(&finding)
@@ -1022,33 +1088,10 @@ async fn a_hostile_kind_name_never_reaches_a_sentence_raw() {
 
 #[tokio::test]
 async fn every_request_is_a_get_and_every_cluster_is_audited() {
-    for case in [
-        "restricted",
-        "baseline",
-        "privileged",
-        "warn-audit",
-        "no-labels",
-        "no-metadata-labels",
-        "invalid-labels",
-        "invalid-warn",
-        "namespace-missing",
-        "namespace-forbidden",
-        "no-namespace",
-        "apis-forbidden",
-        "openshift",
-        "openshift-enforce",
-        "openshift-scc-forbidden",
-        "openshift-scc-cut",
-        "openshift-hostile-range",
-        "kyverno",
-        "kyverno-legacy-only",
-        "gatekeeper",
-        "both-engines",
-        "engine-forbidden",
-        "openshift-and-engine",
-        "many-kinds",
-        "hostile-kinds",
-    ] {
+    // The cases are the directories of the fixture folder, so a new case cannot skip the audit.
+    let cases = crate::client::mock::fixture_cases("k8s.admission");
+    assert!(cases.len() >= 25, "the cases were found: {cases:?}");
+    for case in cases.iter().map(String::as_str) {
         let rig = rig(case);
         let spec = if case == "no-namespace" {
             json!({"pod_security": "baseline"})

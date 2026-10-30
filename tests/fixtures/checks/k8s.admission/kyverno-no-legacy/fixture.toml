@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-kyverno-no-legacy"
+summary = "Kyverno after the legacy kinds are removed: kyverno.io serves only PolicyException"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

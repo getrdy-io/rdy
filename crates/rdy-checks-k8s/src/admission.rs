@@ -324,9 +324,13 @@ impl AdmissionCheck {
                 )?,
                 _ => Read::OutOfTime,
             };
-            let (kinds, more) = match kinds {
-                Read::Ok(kinds) => engines::cut_kinds(kinds),
-                _ => (Vec::new(), 0),
+            let (kinds, more, legacy_policies) = match kinds {
+                Read::Ok(kinds) => {
+                    let legacy = engines::has_legacy_policies(&kinds);
+                    let (kinds, more) = engines::cut_kinds(kinds);
+                    (kinds, more, legacy)
+                }
+                _ => (Vec::new(), 0, false),
             };
             read_groups.push((
                 engine,
@@ -335,6 +339,7 @@ impl AdmissionCheck {
                     version,
                     kinds,
                     more,
+                    legacy_policies,
                 },
             ));
         }
@@ -361,6 +366,9 @@ async fn read_namespace(
                 .and_then(|annotations| annotations.get("openshift.io/sa.scc.uid-range"))
                 .and_then(|range| scc::uid_range(range));
             NsFacts {
+                label_sync_off: labels
+                    .get("security.openshift.io/scc.podSecurityLabelSync")
+                    .is_some_and(|value| value == "false"),
                 labels: Labels::from_map(&labels),
                 uid_range,
             }

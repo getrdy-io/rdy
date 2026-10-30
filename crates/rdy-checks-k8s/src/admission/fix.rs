@@ -83,11 +83,18 @@ pub(super) fn bind_scc(scc: &str, namespace: Option<&str>) -> String {
     )
 }
 
-/// The fix for a policy engine that is installed.
-pub(super) fn engines(names: &[&str], groups: &[&str], namespace: Option<&str>) -> String {
+/// The fix for a policy engine that is installed. `legacy_policies` is true when discovery showed that
+/// `ClusterPolicy` or `Policy` is served: Kyverno is removing them, and `kyverno.io` goes on serving other
+/// kinds, so the group alone does not say the command works.
+pub(super) fn engines(
+    names: &[&str],
+    groups: &[&str],
+    legacy_policies: bool,
+    namespace: Option<&str>,
+) -> String {
     let ns = ns_arg(namespace);
     let mut list: Vec<&str> = Vec::new();
-    if groups.contains(&"kyverno.io") {
+    if legacy_policies {
         list.push("`kubectl get clusterpolicies.kyverno.io,policies.kyverno.io -A`");
     }
     if groups.contains(&"policies.kyverno.io") {

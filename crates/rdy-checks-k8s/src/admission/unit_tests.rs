@@ -49,6 +49,7 @@ fn facts(pairs: &[(&str, &str)]) -> NsFacts {
     NsFacts {
         labels: labels(pairs),
         uid_range: None,
+        label_sync_off: false,
     }
 }
 
@@ -243,6 +244,37 @@ fn kinds_are_sorted_without_repeats_and_cut_at_eight() {
 }
 
 #[test]
+fn names_shaped_like_kinds_sort_ahead_of_hostile_ones() {
+    let mut kinds: Vec<String> = ["A\u{202e}B", "`x`", "\u{1b}[2J", "AKind"]
+        .iter()
+        .map(|kind| (*kind).to_owned())
+        .collect();
+    kinds.extend((0..8).map(|n| format!("K8sCheck{n}")));
+    let (shown_kinds, more) = engines::cut_kinds(kinds);
+    assert_eq!(more, 4);
+    assert!(
+        shown_kinds
+            .iter()
+            .all(|kind| kind.bytes().all(|b| b.is_ascii_alphanumeric())),
+        "{shown_kinds:?}"
+    );
+    assert_eq!(shown_kinds[0], "AKind");
+}
+
+#[test]
+fn the_legacy_kyverno_kinds_are_found_before_the_cut() {
+    assert!(engines::has_legacy_policies(&["Policy".to_owned()]));
+    assert!(engines::has_legacy_policies(&[
+        "PolicyException".to_owned(),
+        "ClusterPolicy".to_owned()
+    ]));
+    assert!(!engines::has_legacy_policies(&[
+        "PolicyException".to_owned(),
+        "CleanupPolicy".to_owned()
+    ]));
+}
+
+#[test]
 fn a_server_text_is_made_safe_before_it_reaches_a_sentence() {
     assert_eq!(shown("ClusterPolicy"), "ClusterPolicy");
     assert_eq!(shown("a`b`"), "a'b'");
@@ -282,6 +314,7 @@ fn the_worst_finding_is_the_message_and_the_rest_are_notes() {
             version: Some("v1".to_owned()),
             kinds: vec!["ClusterPolicy".to_owned()],
             more: 0,
+            legacy_policies: true,
         }],
     }];
     let spec = json!({"uses": ["hostPath"]});

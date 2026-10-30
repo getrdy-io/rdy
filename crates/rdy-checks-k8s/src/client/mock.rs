@@ -881,3 +881,19 @@ where
         }
     }
 }
+
+/// The names of the fixture cases of one check, read from its folder under `tests/fixtures/checks/`, sorted.
+///
+/// A test that runs every case reads the list here, so a new case cannot skip it. Only this module may read
+/// the directory: a check reads files through the probe, and a test is not a check.
+pub(crate) fn fixture_cases(check: &str) -> Vec<String> {
+    let folder = fixtures_dir().join("checks").join(check);
+    let mut cases: Vec<String> = std::fs::read_dir(&folder)
+        .expect("the fixture folder reads")
+        .map(|entry| entry.expect("a directory entry"))
+        .filter(|entry| entry.file_type().expect("a file type").is_dir())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    cases.sort();
+    cases
+}

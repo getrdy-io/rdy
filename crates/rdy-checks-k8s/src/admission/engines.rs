@@ -8,8 +8,12 @@
 //! The categories, from each project's own documentation:
 //!
 //! - **Policy engines that run as admission webhooks and bring their own policy CRDs.** Kyverno serves
-//!   `kyverno.io` (`ClusterPolicy` and `Policy`, deprecated since Kyverno 1.19) and `policies.kyverno.io`
-//!   (the CEL-based `ValidatingPolicy` and its siblings, stable in `v1` since 1.18). Gatekeeper serves
+//!   `kyverno.io` (`ClusterPolicy` and `Policy`, marked for deprecation in Kyverno 1.17, deprecated in 1.19,
+//!   removal planned for 1.20) and `policies.kyverno.io` (the CEL-based `ValidatingPolicy` and its siblings,
+//!   promoted to `v1` in 1.17; the Kyverno policy types page lists them as stable since 1.18). After the
+//!   removal `kyverno.io` still serves other kinds such as `PolicyException`, so a group is not proof that
+//!   the legacy kinds exist: the kinds are read, and the fix text names a command only for a kind that is
+//!   served. Gatekeeper serves
 //!   `templates.gatekeeper.sh` (`ConstraintTemplate`) and `constraints.gatekeeper.sh`, where each template
 //!   creates one constraint kind. A constraint with `enforcementAction: deny` (the default) rejects.
 //! - **What Kubernetes itself ships**: Pod Security admission (the namespace labels, read by this check),
@@ -43,6 +47,8 @@ pub(super) struct FoundGroup {
     pub(super) kinds: Vec<String>,
     /// How many kinds were left out of `kinds` because the list was cut.
     pub(super) more: usize,
+    /// True when the group version serves `ClusterPolicy` or `Policy`, found before the list was cut.
+    pub(super) legacy_policies: bool,
 }
 
 /// An engine that at least one of its groups shows.
@@ -61,10 +67,24 @@ pub(super) fn served(groups: &[(String, Option<String>)]) -> Vec<(&'static str, 
         .collect()
 }
 
-/// A discovery kind list cut to what a sentence lists: sorted, no repeats, no empty name.
+/// True when `kind` has the shape of a real Kubernetes kind: a letter, then letters and digits.
+fn is_kind_shaped(kind: &str) -> bool {
+    kind.starts_with(|c: char| c.is_ascii_alphabetic())
+        && kind.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// True when the kinds name the legacy Kyverno policy kinds.
+pub(super) fn has_legacy_policies(kinds: &[String]) -> bool {
+    kinds
+        .iter()
+        .any(|kind| kind == "ClusterPolicy" || kind == "Policy")
+}
+
+/// A discovery kind list cut to what a sentence lists: no repeats, no empty name, sorted with the names
+/// shaped like a kind first, so a server that serves hostile names cannot push the real kinds out.
 pub(super) fn cut_kinds(mut kinds: Vec<String>) -> (Vec<String>, usize) {
     kinds.retain(|kind| !kind.is_empty());
-    kinds.sort();
+    kinds.sort_by(|a, b| (!is_kind_shaped(a), a).cmp(&(!is_kind_shaped(b), b)));
     kinds.dedup();
     let more = kinds.len().saturating_sub(MAX_KINDS);
     kinds.truncate(MAX_KINDS);
