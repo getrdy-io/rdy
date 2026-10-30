@@ -182,7 +182,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-084 | [#89](https://github.com/getrdy-io/rdy/pull/89) | 2026-10-29 | Enum values, a table per oneOf option and per check id (allOf if/then), the Example column (YAML, read back to the same value) and the missing-description failure. Every check parameter row now has a description, and each of the 17 check ids has an example. Deferred: the render does not validate examples, the test suite does, because a normal `jsonschema` dependency fails the license policy (ADR 0034; 09 section 5 says otherwise). No example on the top-level spec yet. The result reference waits for M1-085 | backlog corrected 2026-10-29 (correction-12): title says oneOf or allOf if/then variants, since check parameters are `allOf` with if/then (PR #80 review)
 
-- M1-085 | todo | | Spec and result reference pages with hand-written intro
+- M1-085 | PR #TBD | | No top-level example on the spec page yet (M1-084 carry): it needs an `examples` entry on the `Spec` root in rdy-spec. The pages stay Markdown, and Starlight builds them in M3 (09 section 9). Reviewer: this ticket adds 14 descriptions to rdy-spec fragments (`result.v1.schema.json` gains 14 description lines and nothing else), and `k8s.nodes` `free` now links to `per_node` instead of repeating its fields
 
 - M1-086 | todo | | Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict | backlog corrected 2026-10-29 (correction-16): depends on M1-060 and M1-061; stderr half of M1-061 (PR #96 review)
 

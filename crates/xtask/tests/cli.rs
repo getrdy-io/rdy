@@ -73,16 +73,53 @@ fn stderr(output: &Output) -> String {
 }
 
 const DOCS_PAGE: &str = "docs/src/content/docs/reference/spec/index.md";
+const RESULT_PAGE: &str = "docs/src/content/docs/reference/result/index.md";
+const SPEC_INTRO: &str = "docs/intro/reference-spec.md";
+const RESULT_INTRO: &str = "docs/intro/reference-result.md";
 
-/// A temporary repo with the schema files written, as `cargo xtask schema` leaves them. The docs
-/// pages render from those files, so every docs test starts here.
+/// The committed text of a file in this repo, read at test time.
+fn committed(relative: &str) -> Result<String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    Ok(fs::read_to_string(root.join(relative))?)
+}
+
+/// A temporary repo with the schema files written, as `cargo xtask schema` leaves them, and the two
+/// hand-written intros copied in. The docs pages render from those files, so every docs test starts here.
 fn repo_with_schema() -> Result<Repo> {
     let repo = Repo::new()?;
     let out = xtask(repo.path(), &["schema"])?;
     if code(&out) != Some(0) {
         bail!("xtask schema failed: {}", stderr(&out));
     }
+    repo.write(SPEC_INTRO, committed(SPEC_INTRO)?)?;
+    repo.write(RESULT_INTRO, committed(RESULT_INTRO)?)?;
     Ok(repo)
+}
+
+#[test]
+fn docs_writes_the_spec_and_result_reference_pages() -> Result<()> {
+    let repo = repo_with_schema()?;
+    assert_eq!(code(&xtask(repo.path(), &["docs"])?), Some(0));
+    assert!(repo.path().join(DOCS_PAGE).is_file());
+    let result = repo.path().join(RESULT_PAGE);
+    assert!(result.is_file());
+    assert!(fs::read_to_string(&result)?.contains("Always `Report`."));
+    Ok(())
+}
+
+#[test]
+fn docs_exits_70_and_names_the_intro_file_when_it_is_missing() -> Result<()> {
+    let repo = repo_with_schema()?;
+    fs::remove_file(repo.path().join(RESULT_INTRO))?;
+    let out = xtask(repo.path(), &["docs"])?;
+    assert_eq!(code(&out), Some(70), "{}", stderr(&out));
+    assert!(stderr(&out).contains(RESULT_INTRO), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("hand-written intro"),
+        "{}",
+        stderr(&out)
+    );
+    Ok(())
 }
 
 #[test]

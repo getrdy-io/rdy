@@ -1,6 +1,7 @@
 {
   "properties": {
     "rule": {
+      "description": "For a denied call, the rule that refused it. Null otherwise.",
       "type": [
         "string",
         "null"
@@ -8,6 +9,7 @@
       "maxLength": 4096
     },
     "error": {
+      "description": "For a failed file call, why it failed. Null otherwise.",
       "type": [
         "string",
         "null"

@@ -128,6 +128,8 @@ The version picker is part of the header, not a page. The site has no pricing, r
 
 **Output.** `reference/spec/index.md` (rdy/v1 spec) and `reference/result/index.md` (JSON result) in M1, plus `checks/<family>.md`. When rdy/v2 ships, its reference goes to `reference/spec/v2/`. The v1 pages stay.
 
+**Hand-written intros (M1-085).** The prose above each reference table is in `docs/intro/` (`reference-spec.md`, `reference-result.md`). That folder sits outside `docs/src/content/docs/`, so it is not published. The renderer puts the intro after the banner. An object that more than one field names gets one section. A later row that names it links to that section, so each field appears once. The result page also has a section for each other JSON object that rdy prints: `Verification`, `ErrorOutput`, `LintReport` and `Version`.
+
 **Renderer rules.**
 
 - Each property gets a row: name, type, required, default, description, example. Descriptions come from doc comments through schemars, so the rule "every public item documented" carries over.
