@@ -10,6 +10,7 @@
 //! - `envs/<env>/golden/<file>`: the reports and terminal text of an environment run;
 //! - `checks/<check-id>/<case>/expect.json`: the reviewed result of a check case;
 //! - `redaction/<category>/<case>.expected`: a redaction expectation;
+//! - `reports/golden/<file>`: a report as the JSON writer emits it (M1-055).
 //! - `summary/<case>.txt`: the summary line and last line of a result set (M1-054).
 //!
 //! A `<file>.actual` is a local failure output, git ignores it, and it is never a golden. Files under
@@ -149,6 +150,7 @@ fn is_golden(path: &str) -> bool {
         ["envs", _env, "golden", file] => !is_sidecar(file),
         ["checks", _id, _case, "expect.json"] => true,
         ["redaction", _category, file] => file.ends_with(".expected") && !is_sidecar(file),
+        ["reports", "golden", file] => !is_sidecar(file),
         ["summary", file] => file.ends_with(".txt") && !is_sidecar(file),
         _ => false,
     }
@@ -170,6 +172,7 @@ mod tests {
             "tests/fixtures/envs/all-block/golden/terminal.txt",
             "tests/fixtures/checks/host.memory/pass/expect.json",
             "tests/fixtures/redaction/url/proxy.expected",
+            "tests/fixtures/reports/golden/not-ready-hostile-host.json",
             "tests/fixtures/summary/all-passed.txt",
         ] {
             assert!(is_golden(yes), "{yes}");
@@ -190,6 +193,7 @@ mod tests {
             "tests/fixtures/redaction/url/proxy.expected.actual",
             "tests/fixtures/results/0.1.0-alpha.1/ready.json",
             "tests/fixtures/reports/not-ready-7.2.json",
+            "tests/fixtures/reports/golden/not-ready-hostile-host.json.actual",
             "docs/golden/x.json",
         ] {
             assert!(!is_golden(no), "{no}");

@@ -30,7 +30,8 @@
 //!   matter) as `.<name>.tmp`, written, flushed to disk, and then given its final name without
 //!   replacing anything. A run that is killed leaves at most `.tmp` files, never a half-written file
 //!   under a final name.
-//! - **Typed input.** Report text comes in as [`Redacted`], and the spec copy as [`VerifiedSpecBytes`],
+//! - **Typed input.** Report text comes in as [`Redacted`] (the JSON report as a [`RedactedReport`],
+//!   through [`OutputDir::write_json`]), and the spec copy as [`VerifiedSpecBytes`],
 //!   the buffers [`rdy_spec::load`] verified. The spec copy uses the fixed names `spec.yaml` and
 //!   `spec.yaml.minisig`, never the operator's file name.
 //!
@@ -48,7 +49,8 @@ use cap_std::fs::{Dir, File, OpenOptions};
 use rdy_spec::VerifiedSpecBytes;
 use rdy_spec::spec::ProductSlug;
 
-use crate::redact::Redacted;
+use crate::redact::{Redacted, RedactedReport};
+use crate::report::{JsonError, json_bytes};
 
 #[cfg(test)]
 mod tests;
@@ -155,6 +157,9 @@ pub enum ReportError {
         /// The file.
         path: PathBuf,
     },
+    /// The report could not be turned into JSON, or is too big even with its action log cut.
+    #[error(transparent)]
+    Json(#[from] JsonError),
 }
 
 impl ReportError {
@@ -327,6 +332,23 @@ impl OutputDir {
     ) -> Result<PathBuf, ReportError> {
         let bytes: &[u8] = (**content).as_ref();
         self.write_with(name, |file| file.write_all(bytes))
+    }
+
+    /// Writes the JSON report as `rdy-report-<product>-<time>.json`, atomically and without replacing a
+    /// file. The bytes are the ones [`crate::report::json_bytes`] makes, so the file, `--json` on stdout
+    /// and the copy in the HTML report are the same.
+    ///
+    /// Returns the path of the new file for the "Report written to" block.
+    ///
+    /// # Errors
+    ///
+    /// [`ReportError::Json`] when the report cannot be written as JSON, and the errors of
+    /// [`OutputDir::write_atomic`].
+    pub fn write_json(&self, report: &RedactedReport) -> Result<PathBuf, ReportError> {
+        let json = json_bytes(report)?;
+        self.write_with(&self.report_file_name("json"), |file| {
+            file.write_all(json.as_bytes())
+        })
     }
 
     /// Writes the verified spec as `spec.yaml` and, for a signed spec, its signature as
