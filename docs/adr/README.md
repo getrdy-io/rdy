@@ -39,6 +39,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0031](0031-kube-client-layer.md) | The kube client layer reads the kubeconfig itself, announces first, and keeps plugin output out of every error | Accepted, security-reviewed (PR #76) |
 | [0033](0033-trust-add-key-argument-and-store-api.md) | `trust add` takes a key as a file or as text, refuses secret keys by form, and edits the store through `rdy-spec` | Accepted, security-reviewed (PR #77) |
 | [0034](0034-spec-examples-checked-in-the-test-suite.md) | Spec reference examples are validated by the test suite, not by the render | Accepted, architect-reviewed (PR #89); narrows 09 section 5 (PC-47) |
+| [0035](0035-loopback-servers-in-rdy-engine-loopback-feature.md) | The loopback test servers live in `rdy-engine` behind the `loopback` feature, not in `rdy-checks-net` | Accepted (M1-090); moves the home 08 gave them |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.

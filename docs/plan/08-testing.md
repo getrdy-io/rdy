@@ -31,7 +31,7 @@ the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixtu
 | Unit | `#[cfg(test)]` in each crate | Pure functions: thresholds, quantity and version parsing, `/proc` and `os-release` parsers, verdict mapping, YAML limits | All five legs |
 | Property | `proptest` in `rdy-spec` and `rdy-engine` | Parser never panics and keeps its limits, round trips, forward compatibility (section 4) | All five legs |
 | Check and engine | `rdy_engine::testing`: `run_fixture`, `FakeCheck`, Replay | One check against one fixture case; scheduler, timeouts, panics, cancellation | All five legs |
-| Loopback network | Servers behind the `test-support` feature of `rdy-checks-net` | Real sockets against a TLS server with a test CA, a CONNECT proxy, a closed port, a reset after ClientHello | All five legs |
+| Loopback network | `rdy_engine::testing::loopback`, behind the `loopback` feature of `rdy-engine` (ADR 0035) | Real sockets against a TLS server with a test CA, a CONNECT proxy, a closed port, a reset after ClientHello | All five legs |
 | Golden | Plain files compared byte for byte | JSON and HTML reports, terminal text, redaction output | All five legs |
 | CLI, in process | `crates/rdy-cli/tests`, calling `rdy_cli::run` | Exit codes, report files and terminal text for each fixture environment | All five legs |
 | CLI, real binary | `assert_cmd`, Live backend only | `rdy --bogus` gives 64, an unwritable `--out-dir` gives 70, the signed spec flow, the real-OS smoke | All five legs |
@@ -474,9 +474,11 @@ only the allowed ones arrived (ADR 0010, INV-14). Cloud APIs (M3) replay at the 
 }
 ```
 
-`serve` names a server factory the test registers with the Replay builder. The factories come from the
-`test-support` feature of `rdy-checks-net`, which `rdy-cli` tests use as a dev-dependency, so
-`rdy-engine` does not depend on a check crate. Certificate chains are built with `rcgen` at test time.
+`serve` names a server factory the test registers with the Replay builder. The servers behind the
+factories are `rdy_engine::testing::loopback` (feature `loopback` of `rdy-engine`, ADR 0035), which any
+crate that already uses the engine `testing` feature can turn on, so `rdy-engine` does not depend on a
+check crate and no check crate needs `tokio`, `socket2` or `tokio-rustls`. M1-091 maps a name to a started
+server. Certificate chains are built with `rcgen` at test time.
 Their serials and digests become placeholders (`<serial>`, `<sha256>`) before comparison. `blackhole` is
 scripted only: a real black hole cannot exist on loopback (03).
 
@@ -655,10 +657,12 @@ over severity (`warn`, `block`, unknown) times status (`pass`, `warn`, `block`, 
 - docs/adr/0007, Tickets implied: "Keep golden result files per released version and parse them in CI" is
   `[M2]`, while 00 lists `[M1]`. Fix: M1. The alphas already write result files and the M2 portal must read
   them. Start the directory at `0.1.0-alpha.1`.
-- docs/plan/03-check-catalog.md, ticket "Loopback network test support": no home is named. Fix: the servers
-  live behind a non-default `test-support` feature of `rdy-checks-net`. No new crate (CLAUDE.md fixes the
-  list). The live loopback list drops "black hole" (scripted only, per 03). Revisit a shared crate through an
-  ADR only if a third crate needs the servers.
+- docs/plan/03-check-catalog.md, ticket "Loopback network test support": no home is named. First fix: the
+  servers live behind a non-default `test-support` feature of `rdy-checks-net`. That cannot work: the lint
+  wall bars `tokio`, `socket2` and `tokio-rustls` from check crates, and the facade tests (M1-091, M1-092)
+  sit in `rdy-engine`, which cannot depend on a check crate. Final fix (M1-090, ADR 0035): the servers are
+  `rdy_engine::testing::loopback`, behind the `loopback` feature of `rdy-engine`. No new crate. The live
+  loopback list drops "black hole" (scripted only, per 03).
 - docs/plan/01-spec-format.md, section 5.3: `complete: false` is tied only to exit 70, so after a Ctrl-C
   that still writes a report its value is not stated. Fix: 01 says it. The cancellation test asserts
   `interrupted: true` and `skip_kind: cancelled` only, until then.
