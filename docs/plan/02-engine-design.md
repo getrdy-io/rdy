@@ -68,7 +68,7 @@ crates/rdy-engine/src/
   redact.rs    M1 rule set (no feature gate)
   units.rs     dotted version compare, quantities, nominal band, severity cap (03 asks for one home)
   output.rs    OutputDir
-  report/      json.rs, html.rs, templates/
+  report/      json.rs, html.rs (feature `html`); the askama templates are in `templates/` at the crate root (ADR 0003)
   testing.rs   Replay backend and helpers (feature "testing")
 ```
 
@@ -675,7 +675,7 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
   `[[bench]]`, `[[example]]` and `[lib] path` in a check crate manifest.
 - The wall cannot be turned down quietly (`tests/lint-wall/tests/wall_intact.rs`): a hardcoded floor of the
   Appendix A entries, no `.clippy.toml` anywhere, no `CLIPPY_CONF_DIR`, `rustflags`, compiler wrapper or
-  `clippy` alias in a Cargo config, no `RUSTFLAGS` in a workflow, the clippy commands of CI are exactly the three pinned in the test, no workflow carries
+  `clippy` alias in a Cargo config, no `RUSTFLAGS` in a workflow, the clippy commands of CI are exactly the four pinned in the test, no workflow carries
   `continue-on-error`, `--config`, `GITHUB_PATH` or a flags variable (any case), no workflow sets or reads a `CARGO_` name except `CARGO_TERM_COLOR`, `CARGO_INCREMENTAL`, `CARGO_NET_RETRY` and `CARGO_PROFILE_*`, a `- run:` clippy line counts as a command, any other clippy line is refused, no `[patch]`, `[replace]`, `paths` or `[source]`
   anywhere, nothing under `.claude/worktrees/` is tracked, no `disallowed_*`, `all`, `style` or `warnings` set to `allow` in the root
   `[workspace.lints]`, a check crate's `lints` is exactly `workspace = true` (manifests are read as TOML,
@@ -1125,7 +1125,7 @@ pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<()
 pub fn json_bytes(r: &RedactedReport) -> Result<HtmlSafeJson, JsonError>;  // the same bytes, for the HTML embed
 pub fn read_report_from(r: impl std::io::Read) -> Result<Report, JsonError>;  // reads at most 2 MiB + 1 byte, refuses over 2 MiB before parsing
 pub fn read_report(bytes: &[u8]) -> Result<Report, JsonError>;  // the same check on bytes already in memory
-pub fn render_html(r: &RedactedReport) -> Result<String, ReportError>;
+pub fn render_html(r: &RedactedReport) -> Result<String, HtmlError>;  // M1-077: report::html, feature `html`; HtmlError, not ReportError, for the same reason as JsonError (ReportError needs `runtime`)
 pub struct RedactedReport(/* private */ Report);   // no From<Report>, no Deserialize, no DerefMut
 pub fn live_backend() -> Arc<dyn Backend>;        // disallowed in check crates
 pub struct FileBytes { pub bytes: Vec<u8>, pub truncated_head: bool, pub truncated_tail: bool }

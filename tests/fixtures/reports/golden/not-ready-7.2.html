@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>rdy report: NOT READY, ⁨acme-platform⁩</title>
+<style>:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --text: #1f2328;
+  --muted: #59636e;
+  --rule: #6b6b6b;
+  --panel: #f6f8fa;
+  --block: #b3261e;
+  --warn: #8a4b00;
+  --pass: #1a7f37;
+  --link: #0b5cad;
+  --banner-fg: #8a1c14;
+  --banner-bg: #fff1f0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --text: #e6edf3;
+    --muted: #9da7b3;
+    --rule: #8c8c8c;
+    --panel: #161b22;
+    --block: #ff8b84;
+    --warn: #e3b341;
+    --pass: #56d364;
+    --link: #79b8ff;
+    --banner-fg: #ffb4ae;
+    --banner-bg: #3b1214;
+  }
+}
+* { box-sizing: border-box; }
+html { font-size: 100%; }
+body {
+  margin: 0;
+  padding: 1rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+}
+header, nav, main, footer, .banner {
+  max-width: 60rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+a { color: var(--link); }
+a:focus-visible { outline: 0.1875rem solid var(--link); outline-offset: 0.125rem; }
+h1, h2, h3 { line-height: 1.25; }
+h1 { font-size: 2rem; margin: 0.5rem 0; }
+h2 { font-size: 1.5rem; margin: 2rem 0 0.75rem; }
+h3 { font-size: 1.125rem; margin: 0 0 0.5rem; }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.banner {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 0.25rem solid var(--block);
+  color: var(--banner-fg);
+  background: var(--banner-bg);
+}
+.banner p { margin: 0.25rem 0; }
+.banner-title { font-weight: 700; }
+.verdict-ready { color: var(--pass); }
+.verdict-warnings { color: var(--warn); }
+.verdict-not-ready { color: var(--block); }
+.summary { font-weight: 600; }
+.privacy { padding: 0.5rem 0.75rem; border: 1px solid var(--rule); background: var(--panel); }
+nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; margin: 1rem auto; padding: 0; }
+.check {
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel);
+  border-left: 1px solid var(--rule);
+  break-inside: avoid;
+}
+.check p { margin: 0.25rem 0; }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.status { font-weight: 700; margin-right: 0.5rem; }
+.id { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.status-block { border-left: 0.5rem solid var(--block); }
+.status-block .status { color: var(--block); }
+.status-timeout, .status-error { border-left: 0.5rem double var(--block); }
+.status-timeout .status, .status-error .status { color: var(--block); }
+.status-skip { border-left: 0.5rem dashed var(--warn); }
+.status-skip .status { color: var(--warn); }
+.status-warn { border-left: 0.25rem dashed var(--warn); }
+.status-warn .status { color: var(--warn); }
+.status-pass { border-left: 1px solid var(--pass); }
+.status-pass .status { color: var(--pass); }
+.label { font-weight: 700; }
+.muted { color: var(--muted); }
+dl { margin: 0; }
+dl.details { display: grid; grid-template-columns: minmax(10rem, 16rem) 1fr; gap: 0.25rem 1rem; }
+dl.details dt { font-weight: 700; }
+dl.details dd { margin: 0; overflow-wrap: anywhere; }
+table { border-collapse: collapse; width: 100%; }
+caption { text-align: left; font-weight: 700; padding: 0.25rem 0; }
+th, td { text-align: left; vertical-align: top; padding: 0.25rem 0.5rem; border: 1px solid var(--rule); overflow-wrap: anywhere; }
+footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); }
+@media (max-width: 40rem) {
+  dl.details { grid-template-columns: 1fr; }
+}
+@media print {
+  .check, tr { break-inside: avoid; }
+  #passed, #capabilities { break-before: page; }
+}
+</style>
+</head>
+<body>
+<header>
+<h1><span class="visually-hidden">Verdict: </span><span class="verdict-not-ready">NOT READY</span></h1>
+<p>For <bdi>acme-platform</bdi> <bdi>&#62;=4.2</bdi>, on <bdi>acme-node-01.corp.example</bdi></p>
+<p class="summary">2 blocks, 1 warning, 3 passed, 2 required checks not run</p>
+<p>Run <bdi>2026-12-01 14:30:05 UTC</bdi> with rdy <bdi>0.1.0</bdi> by <bdi>jdoe</bdi> (not root)</p>
+<p class="privacy">This file lists hostnames and addresses from this machine. Read it before you send it.</p>
+</header>
+<nav aria-label="Sections">
+<p class="label">Jump to:</p>
+<ul>
+<li><a href="#blocks">Blocks (2)</a></li>
+<li><a href="#required-not-run">Required checks not run (2)</a></li>
+<li><a href="#warnings">Warnings and optional checks not run (1)</a></li>
+<li><a href="#passed">Passed (3)</a></li>
+<li><a href="#capabilities">What rdy could use on this machine</a></li>
+<li><a href="#details">Run and spec details</a></li>
+</ul>
+</nav>
+<main>
+<section aria-labelledby="blocks">
+<h2 id="blocks">Blocks</h2>
+<article class="check status-block" id="check-1">
+<h3><span class="status">BLOCK</span> <span class="id"><bdi>host.memory</bdi></span></h3>
+<p class="text"><bdi>15.4 GiB found, 32 GiB needed</bdi></p>
+<p class="text"><span class="label">Fix:</span> <bdi>Add RAM or choose a larger node class.</bdi></p>
+<p class="text"><span class="label">More from rdy:</span> <bdi>15.4 GiB RAM, 32 GiB needed. Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number.</bdi></p>
+<p class="muted">Took 1 ms</p>
+</article>
+<article class="check status-block" id="check-3">
+<h3><span class="status">BLOCK</span> <span class="id"><bdi>net.egress</bdi></span></h3>
+<p class="text"><bdi>1 of 2 endpoints unreachable: license.acme.example:443 (proxy refused CONNECT, 403)</bdi></p>
+<p class="text"><span class="label">Fix:</span> <bdi>Ask your network team to allow these endpoints through the proxy.</bdi></p>
+<p class="text"><span class="label">More from rdy:</span> <bdi>The proxy refused CONNECT to license.acme.example:443. Ask the proxy team to add it to the allow list.</bdi></p>
+<p>Requires: network access (available)</p>
+<p class="muted">Took 212 ms</p>
+</article>
+</section>
+<section aria-labelledby="required-not-run">
+<h2 id="required-not-run">Required checks not run</h2>
+<article class="check status-skip" id="check-6">
+<h3><span class="status">SKIP</span> <span class="id"><bdi>gpu.cuda</bdi></span></h3>
+<p class="text"><bdi>Not run. This version of rdy has no gpu checks yet.</bdi></p>
+<p>Not in this version of rdy</p>
+<p class="text"><span class="label">Fix:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
+</article>
+<article class="check status-skip" id="check-7">
+<h3><span class="status">SKIP</span> <span class="id"><bdi>aws.iam</bdi></span></h3>
+<p class="text"><bdi>Not run. This version of rdy has no aws checks yet.</bdi></p>
+<p>Not in this version of rdy</p>
+<p class="text"><span class="label">Fix:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
+</article>
+</section>
+<section aria-labelledby="warnings">
+<h2 id="warnings">Warnings</h2>
+<article class="check status-warn" id="check-2">
+<h3><span class="status">WARN</span> <span class="id"><bdi>host.disk</bdi></span></h3>
+<p class="text"><bdi>60.0 GiB free on / for /var/lib, 100 GiB needed</bdi></p>
+<p class="text"><span class="label">Fix:</span> <bdi>Mount a larger volume at /var/lib before install.</bdi></p>
+<p class="text"><span class="label">More from rdy:</span> <bdi>/var/lib is on / with 60.0 GiB free, 100 GiB needed. Run df -h /var/lib. Grow the volume or point the install at a larger disk.</bdi></p>
+<p class="muted">Took 3 ms</p>
+</article>
+</section>
+<section aria-labelledby="passed">
+<h2 id="passed">Passed</h2>
+<article class="check status-pass" id="check-0">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.cpu</bdi></span></h3>
+<p class="text"><bdi>8 vCPUs found, 8 needed</bdi></p>
+<p class="muted">Took 2 ms</p>
+</article>
+<article class="check status-pass" id="check-4">
+<h3><span class="status">PASS</span> <span class="id"><bdi>k8s.version</bdi></span></h3>
+<p class="text"><bdi>Server v1.29.4, 1.28 or newer needed</bdi></p>
+<p>Requires: a Kubernetes context (available)</p>
+<p class="muted">Took 48 ms</p>
+</article>
+<article class="check status-pass" id="check-5">
+<h3><span class="status">PASS</span> <span class="id"><bdi>k8s.storageclass</bdi></span></h3>
+<p class="text"><bdi>Default class gp3 (ebs.csi.aws.com) supports ReadWriteOnce</bdi></p>
+<p>Requires: a Kubernetes context (available)</p>
+<p class="muted">Took 95 ms</p>
+</article>
+</section>
+<section aria-labelledby="capabilities">
+<h2 id="capabilities">What rdy could use on this machine</h2>
+<table>
+<caption>Things some checks need, and whether rdy had them</caption>
+<thead>
+<tr><th scope="col">Needs</th><th scope="col">Available</th><th scope="col">Detail</th><th scope="col">What to do</th></tr>
+</thead>
+<tbody>
+<tr><th scope="row"><bdi>a Kubernetes context</bdi></th><td>available</td><td><bdi>context acme-staging at https://api.k8s.acme.example:6443, kubeconfig user acme-installer</bdi></td><td><bdi></bdi></td></tr>
+<tr><th scope="row"><bdi>network access</bdi></th><td>available</td><td><bdi></bdi></td><td><bdi></bdi></td></tr>
+</tbody>
+</table>
+</section>
+<section aria-labelledby="details">
+<h2 id="details">Run and spec details</h2>
+<dl class="details">
+<dt>Run id</dt>
+<dd><bdi>6f8d2c4e-1b3a-4e5f-9a7b-2c1d0e9f8a6b</bdi></dd>
+<dt>Started</dt>
+<dd><bdi>2026-12-01 14:30:05 UTC</bdi></dd>
+<dt>Finished</dt>
+<dd><bdi>2026-12-01 14:30:05 UTC</bdi></dd>
+<dt>Run time</dt>
+<dd><bdi>318 ms</bdi></dd>
+<dt>rdy</dt>
+<dd><bdi>0.1.0 for x86_64-unknown-linux-musl</bdi></dd>
+<dt>Parallel checks</dt>
+<dd><bdi>8</bdi></dd>
+<dt>Run time limit</dt>
+<dd><bdi>300000 ms</bdi></dd>
+<dt>Network checks</dt>
+<dd><bdi>allowed</bdi></dd>
+<dt>Spec file</dt>
+<dd><bdi>acme-platform.yaml</bdi></dd>
+<dt>Spec SHA-256</dt>
+<dd><bdi>231d161afdf97fb9aa5a2ea3cfbd3f4645249d218e9aaefe3f4000dc598d0d4f</bdi></dd>
+<dt>Signature</dt>
+<dd><bdi>Verified</bdi></dd>
+<dt>Signing key</dt>
+<dd><bdi>9F3A6C21D4E87B05</bdi></dd>
+<dt>Fingerprint</dt>
+<dd><bdi>4d2a7c0e9b1f3a5c6e8d0b2f4a6c8e0d1b3f5a7c9e2d4b6f8a0c2e4d6b8f0a1c</bdi></dd>
+<dt>Key source</dt>
+<dd><bdi>System trust file</bdi></dd>
+<dt>Your note about this key</dt>
+<dd><bdi>Acme security page, fingerprint read back by phone</bdi></dd>
+<dt>Signed on</dt>
+<dd><bdi>2026-11-30 16:02:11 UTC</bdi></dd>
+<dt>Hostname</dt>
+<dd><bdi>acme-node-01.corp.example</bdi></dd>
+<dt>Machine ID (hashed, differs per vendor)</dt>
+<dd><bdi>5f1c0a9e3b7d2c41</bdi></dd>
+<dt>Operating system</dt>
+<dd><bdi>Red Hat Enterprise Linux 9.4 (Plow)</bdi></dd>
+<dt>Kernel</dt>
+<dd><bdi>5.14.0-427.13.1.el9_4.x86_64</bdi></dd>
+<dt>Architecture</dt>
+<dd><bdi>x86_64</bdi></dd>
+<dt>User</dt>
+<dd><bdi>jdoe</bdi></dd>
+<dt>Running as</dt>
+<dd><bdi>not root</bdi></dd>
+<dt>Kubernetes context</dt>
+<dd><bdi>acme-staging</bdi></dd>
+<dt>Kubernetes server</dt>
+<dd><bdi>https://api.k8s.acme.example:6443</bdi></dd>
+<dt>Kubernetes user</dt>
+<dd><bdi>acme-installer</bdi></dd>
+<dt>Kubernetes user confirmed by the cluster</dt>
+<dd><bdi>yes</bdi></dd>
+<dt>TLS certificate checks</dt>
+<dd><bdi>on</bdi></dd>
+<dt>HTTPS proxy</dt>
+<dd><bdi>http://proxy.corp.example:3128</bdi></dd>
+<dt>HTTP proxy</dt>
+<dd><bdi>http://proxy.corp.example:3128</bdi></dd>
+<dt>No proxy for</dt>
+<dd><bdi>.corp.example, 10.0.0.0/8</bdi></dd>
+</dl>
+</section>
+</main>
+<footer>
+<p>rdy <bdi>0.1.0</bdi></p>
+</footer>
+</body>
+</html>

@@ -35,7 +35,7 @@ the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixtu
 | Golden | Plain files compared byte for byte | JSON and HTML reports, terminal text, redaction output | All five legs |
 | CLI, in process | `crates/rdy-cli/tests`, calling `rdy_cli::run` | Exit codes, report files and terminal text for each fixture environment | All five legs |
 | CLI, real binary | `assert_cmd`, Live backend only | `rdy --bogus` gives 64, an unwritable `--out-dir` gives 70, the signed spec flow, the real-OS smoke | All five legs |
-| Live CI jobs | `ci.yml` | Kind cluster, `sudo` paths, no phone home under `unshare -n` | linux-x64 |
+| Live CI jobs | `ci.yml`; the kind job is `kind.yml` (M1-108, ADR 0039, not a gate) | Kind cluster, `sudo` paths, no phone home under `unshare -n` | linux-x64 |
 | Doc tests | `cargo test --doc` on the host target | Public examples in `rdy-spec` and `rdy-engine` run | linux-x64 |
 
 Tooling. `cargo nextest` does not run doc tests, so CI also runs `cargo test --doc --workspace --locked`.
@@ -340,7 +340,7 @@ Rules that keep these stable:
 
 | Leg | Runner | Runs |
 | --- | --- | --- |
-| linux-x64 | `ubuntu-24.04`, musl | Everything, plus the Linux-only jobs: `root` (the `root_*` tests as a prebuilt nextest archive run under `sudo`, so `target/` stays user-owned), `kind`, doc tests, 10,000-case parser properties, `cargo xtask goldens check` |
+| linux-x64 | `ubuntu-24.04`, musl | Everything, plus the Linux-only jobs: `root` (the `root_*` tests as a prebuilt nextest archive run under `sudo`, so `target/` stays user-owned), doc tests, 10,000-case parser properties, `cargo xtask goldens check` |
 | linux-arm64 | `ubuntu-24.04-arm`, musl | Unit, property, fixtures, goldens, in-process CLI, real-binary tests |
 | macos-arm64, macos-x64 | `macos-15`, `macos-15-intel` | Same, with the Unix process tests |
 | windows-x64 | `windows-2022` | Same, with `core.autocrlf true`, minus Unix-only tests, plus Windows-only ones |
@@ -568,7 +568,7 @@ Day-one rows, the target for `0.1.0`. Everything else is `none`.
 | OS | macOS 15 arm64 and x86_64 | net | `live` | macos-15 and macos-15-intel legs. Host checks are `not_yet_on_os` |
 | OS | Windows Server 2022 x86_64 | net | `live` | windows-2022 leg. Host checks are `not_yet_on_os` |
 | Container runtime | Docker, containerd, Podman, CRI-O | host.container_runtime (M1-late) | `none` | |
-| Kubernetes | kind, newest upstream minor | k8s | `live` | kind job |
+| Kubernetes | kind, oldest and newest minor upstream still patches (1.35 and 1.37 on 2026-10-30) | k8s | `live` | kind job |
 | Kubernetes | kubeadm vanilla, three newest minors | k8s | `fixture` | env `all-pass`, `version.json` cases (`hand`) |
 | Kubernetes | OpenShift 4, EKS, GKE, AKS, RKE2, k3s | k8s | `none` | Distro set is M2 |
 | Proxy | Direct | net | `fixture` | env `all-pass` |
