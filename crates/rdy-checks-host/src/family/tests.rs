@@ -151,7 +151,7 @@ fn a_stub_that_reaches_the_scheduler_follows_the_run_os_not_the_build() {
     for os in [Os::Macos, Os::Windows] {
         let (scheduler, checks) = built(os);
         let ran = runtime.block_on(scheduler.run(checks));
-        assert_eq!(ran.len(), 12);
+        assert_eq!(ran.len(), HostFamily::stub_ids().len());
         for one in ran {
             let End::Done(done) = one.end else {
                 panic!("{} did not end", one.key);
@@ -213,7 +213,6 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
             "host.lsm",
             "host.security_agents",
             "host.time_sync",
-            "host.cpu",
             "host.sysctl",
             "host.container_runtime",
             "host.cgroups",

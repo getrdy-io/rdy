@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cpu-affinity"
+summary = "RHEL 9 guest with 8 vCPUs where the container cpuset allows CPUs 0 and 1"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false
