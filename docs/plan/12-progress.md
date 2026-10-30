@@ -162,7 +162,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-074 | todo | | In-process CLI entry point rdy_cli::run taking a Backend | backlog corrected 2026-10-29 (correction-13): the entry point calls the privilege gate (`gate_then`, M1-042) before any command reads a spec or writes trust.yaml, and a setuid-root `rdy` and an `rdy` with a file capability each exit 70 within 5 s on linux-x64 with a FIFO spec path that has no writer (gated on `RDY_REQUIRE_SETUID=1`, CI installs `libcap2-bin`); depends on M1-042 too; 2.5 h (PR #84 reviews)
 
-- M1-075 | todo | | Env-level harness, in process
+- M1-075 | todo | | Env-level harness, in process | backlog corrected 2026-10-30 (correction-21): owns the fixture completeness rule (PR #110 review)
 
 - M1-076 | [#80](https://github.com/getrdy-io/rdy/pull/80) | 2026-10-29 | Objects, scalars and arrays get rows. Array items that are objects get their own sections, so the `checks` entry fields and the `redact_patterns` entry fields are listed. `oneOf`, `anyOf` and `enum` fields show `choice` only, and their values, the Example column and the missing-description failure wait for M1-084. Per-id check parameters (`allOf` if/then) wait for M1-084 too. The committed page is the golden: `docs` tests run `check_all` on it, so CI catches a stale page.
 
@@ -246,7 +246,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-116 | todo | | Check family renderer and the host, network and Kubernetes pages with hand-written intros | backlog corrected 2026-10-29 (correction-09): ids still in `HostFamily::stub_ids()` get no section, and reads are listed without an OS split until the manifest is keyed by OS
 
-- M1-117 | todo | | Fixture env all-pass
+- M1-117 | todo | | Fixture env all-pass | backlog corrected 2026-10-30 (correction-21): moves the host.firewall bases under `envs/` (PR #110 review)
 
 - M1-118 | todo | | Fixture envs warnings-only, all-block and no-privileges
 
@@ -288,7 +288,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-137 | todo | | README draft from 10 section 1
 
-- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews)
+- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review)
 
 - M1-139 | todo | | Alpha announcement to design partners | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
@@ -308,7 +308,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-147 | [#98](https://github.com/getrdy-io/rdy/pull/98) | 2026-10-29 | Built as `rdy_checks_host::Firewall` (firewalld zone, service XML, ufw tuples) with synthetic cases in `tests/fixtures/checks/host.firewall/`. NOT registered in `HostFamily`: `rdy-spec` has no `host.firewall` parameter struct (`open_inbound`; the id is reserved but not in `KNOWN_IDS`). M1-172 (added by correction-17, PR #99) adds the struct, the 01 section 2.7 row, the schema fragment and the family entry. Replay loader (M1-049) and `assert_within_manifest` (M1-051) are not built: cases are wired by hand with `include_str!` (entries in `INCLUDE_DATA_ALLOWED` in the lint wall, needs security-review; each entry now holds a required path prefix and the test checks the file is a `#[cfg(test)]` module), there is no `expect.json`, and Replay cannot simulate an unreadable file, so the permission-denied read of `user.rules` is tested only on a pure function. A root-less run on a host with no firewall becomes `warn` through the engine's want rule (`merge_partial`), not through this check. Fix round 2: service paths are built as text with `/` (not `Path::join`) so the Windows leg judges the same Linux path; `<passthrough>` in `direct.xml` also gives warn; the service walk is done once per root with a set and merged port ranges; the lint wall rejects `..` after the required prefix in every include literal and every `fx!` argument. Fix round 1: a parse failure, a cap hit or an ambiguous rule gives unknown, never closed (ufw `comment=` and `_log` tuples, unparsed tuples, other-interface allows, source-bound zones, `protocols: tcp`, include fan-out, CDATA, DOCTYPE, list caps). Any rich rule, ipset source or direct rule gives warn, as 03 says; 03's thresholds line is back to its approved text. Direct rules are read from `/etc/firewalld/direct.xml` only: rules added at runtime with `firewall-cmd --direct` are not visible, and the evidence says so. Carry note: the check makes three `firewall-cmd` calls (state, active zones, list-all) inside the 5 s check budget, so a slow daemon can end in a timeout with no verdict; raise the timeout through a correction if field data shows it; backlog corrected 2026-10-29 (correction-17): depends on M1-172, which registers the built check in `HostFamily` (PR #98 review)
 
-- M1-148 | todo | | host.time_sync (adjtimex, timedatectl, chronyc, SNTP client) (M1-late) | backlog corrected 2026-10-29 (correction-15): depends on M1-094; `ntp_servers` is the only UDP host source, counted toward INV-11; a server in a refused range falls back to `chronyc` (PR #91 reviews); backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
+- M1-148 | todo | | host.time_sync (adjtimex, timedatectl, chronyc, SNTP client) (M1-late) | backlog corrected 2026-10-29 (correction-15): depends on M1-094; `ntp_servers` is the only UDP host source, counted toward INV-11; a server in a refused range falls back to `chronyc` (PR #91 reviews); backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review); backlog corrected 2026-10-30 (correction-21): `recommended_skew` alone above 300 s still blocks at 300 s (PR #108 review)
 
 - M1-149 | todo | | host.sysctl (live and persisted values, precedence, systemd limits) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
