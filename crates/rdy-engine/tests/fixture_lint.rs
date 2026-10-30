@@ -1294,6 +1294,27 @@ fn a_case_directory_without_a_manifest_fails() -> TestResult {
 }
 
 #[test]
+fn any_underscore_helper_directory_under_checks_is_accepted() -> TestResult {
+    // `_policy` and `_loader` are not special; a new helper family such as `_cgroup` needs no lint change.
+    let mut tree = real_copy()?;
+    let manifest = tree.text(&format!("{SHADOW_CASE}/fixture.toml"))?;
+    let dir = "tests/fixtures/checks/_cgroup/v2-nested";
+    tree.put(&format!("{dir}/fixture.toml"), manifest);
+    tree.put(&format!("{dir}/root/sys/fs/cgroup/memory.max"), "max\n");
+    tree.put(
+        &format!("{dir}/root/sys/fs/cgroup/cpu,cpuacct/cpu.max"),
+        "max 100000\n",
+    );
+    let found = lint_tree(&tree)?;
+    assert!(found.is_empty(), "{}", render(&found));
+    // Without its manifest the same directory fails like any other case.
+    tree.files.remove(&format!("{dir}/fixture.toml"));
+    let found = lint_tree(&tree)?;
+    assert_eq!(summary(&found), [(dir, "structure")], "{}", render(&found));
+    Ok(())
+}
+
+#[test]
 fn deleting_a_required_case_fails_with_its_path_named() -> TestResult {
     for dir in [SHADOW_CASE, MEMORY_PASS] {
         let mut tree = real_copy()?;

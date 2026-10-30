@@ -337,7 +337,8 @@ and addresses. It fails on:
   and every other refusal of `Fixture::load`. The lint calls the loader. It has no second parser. The
   `host.firewall` cases are not loaded yet because they name a sibling `base`; the `LOADER_PENDING` row in
   the lint says so and M1-172 removes it;
-- a case or environment directory without a `fixture.toml`;
+- a case or environment directory without a `fixture.toml`. A `checks/_<name>/` helper directory (`_policy`,
+  `_loader`, `_cgroup`) is checked like any other, so a new one needs no change to the lint;
 - a missing required case. The list is `REQUIRED` in the lint: `checks/_policy/symlink-to-shadow` (its
   `root.manifest.json` must link to `/etc/shadow`) and `checks/host.memory/pass`. A ticket that adds a case
   the lint should guard, such as the `Timeout` case of `host.disk` in M1-068, adds a row.
