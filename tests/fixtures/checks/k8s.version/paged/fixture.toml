@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-paged"
+summary = "1.29 where the node list has a second page that the check does not read"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true

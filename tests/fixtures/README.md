@@ -62,7 +62,10 @@ tests/fixtures/
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), the twelve machines of
 `host.os/`, `host.security_agents/` (18 cases), `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
-cases and the `_kube` cases (`cluster`, `denied`). The rest
+cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
+`openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
+`nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
+`apis-unreadable-vanilla`), all `generated` by `scripts/gen-k8s-version-fixtures.py` (`--check` fails on drift). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |

@@ -2,6 +2,8 @@
 # files (crates/rdy-engine/src/fixtext.rs). The text must match the span exactly. One per line,
 # sorted by byte. A line that starts with # is a comment.
 blacklist nouveau
+curl -sfL https://get.k3s.io | sh -
+curl -sfL https://get.rke2.io | sh -
 forward . {upstream}
 invalid peer certificate: UnknownIssuer
 options nouveau modeset=0

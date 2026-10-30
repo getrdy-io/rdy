@@ -25,6 +25,10 @@ const PIB: u64 = 1 << 50;
 ///
 /// The shorter one is padded with zeros, so `1.28` equals `1.28.0` and `535.54.03` is less than
 /// `535.104.05`. A leading `v` and leading zeros do not matter.
+///
+/// `k8s.version` does not use this for a server version. It compares over the parts both sides have, so a
+/// bound written `1.31` accepts every 1.31 patch, and it treats a bound with a patch against a server with
+/// an unknown patch as unverified, where this function would count the missing patch as zero.
 #[must_use]
 pub fn compare_versions(a: &Version, b: &Version) -> Ordering {
     let (a, b) = (a.components(), b.components());

@@ -63,14 +63,15 @@ mod b64;
 mod error;
 pub mod guard;
 #[cfg(test)]
-mod mock;
+pub(crate) mod mock;
 mod text;
 
 #[cfg(test)]
 mod tests;
 
 pub use error::KubeError;
-use error::{from_kube_error, from_kubeconfig_error, io_reason, proxy_display};
+pub(crate) use error::from_kube_error;
+use error::{from_kubeconfig_error, io_reason, proxy_display};
 pub use guard::{GuardError, ReadOnlyClient, guarded_service};
 use text::escape;
 
@@ -503,6 +504,8 @@ impl Loaded {
                 platform: info.platform,
             },
             client,
+            proxy_env_set,
+            ca_set,
         })
     }
 }
@@ -516,6 +519,9 @@ pub struct Connected {
     // The unguarded client. It is private, and the only way to send with it is through the guard
     // (`Connected::read_only`), which wraps it in a service that refuses before it sends.
     client: kube::Client,
+    // What the error hints need to know about the connection (see `Connected::map_error`).
+    proxy_env_set: bool,
+    ca_set: bool,
 }
 
 impl fmt::Debug for Connected {
@@ -551,6 +557,19 @@ impl Connected {
     #[must_use]
     pub fn server_version(&self) -> &ServerVersion {
         &self.version
+    }
+
+    /// Sorts an error of a request on this connection, the way `connect` sorted its own: the hint can name
+    /// the server, the credential plugin, a proxy variable that is set and a CA setting.
+    #[must_use]
+    pub fn map_error(&self, error: &kube::Error) -> KubeError {
+        from_kube_error(
+            error,
+            self.line.server(),
+            self.line.plugin(),
+            self.proxy_env_set,
+            self.ca_set,
+        )
     }
 
     /// The read-only client for one check. `probe` is the check's own probe
