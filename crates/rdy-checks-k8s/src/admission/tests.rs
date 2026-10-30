@@ -315,7 +315,7 @@ async fn gatekeeper_and_kyverno_discovery_warn_with_names() {
     let notes = notes(&finding);
     assert!(
         notes.contains(
-            "Kyverno serves these kinds in kyverno.io: CleanupPolicy, ClusterCleanupPolicy, PolicyException, UpdateRequest."
+            "Kyverno serves these kinds in kyverno.io: CleanupPolicy, ClusterCleanupPolicy, ClusterPolicy, Policy, PolicyException, UpdateRequest."
         ),
         "{notes}"
     );
@@ -965,7 +965,7 @@ async fn kyverno_that_prefers_v2_and_keeps_clusterpolicy_in_v1_gets_the_legacy_c
     // v1 as well.
     let rig = rig("kyverno");
     let finding = rig.finding(json!({"pod_security": "baseline"})).await;
-    let fix = finding.fix.expect("a fix");
+    let fix = finding.fix.clone().expect("a fix");
     assert!(fix.contains("clusterpolicies.kyverno.io"), "{fix}");
     assert!(
         fix.contains("`kubectl get validatingpolicies.policies.kyverno.io`"),
@@ -980,6 +980,17 @@ async fn kyverno_that_prefers_v2_and_keeps_clusterpolicy_in_v1_gets_the_legacy_c
             "/apis/kyverno.io/v1",
             "/apis/policies.kyverno.io/v1",
         ]
+    );
+    // The kinds of v1 are listed with the kinds of v2, in the note and in the evidence.
+    assert!(
+        notes(&finding).contains("kyverno.io: CleanupPolicy, ClusterCleanupPolicy, ClusterPolicy, Policy, PolicyException, UpdateRequest."),
+        "{}",
+        notes(&finding)
+    );
+    let kinds = finding.observed["policy_engines"][0]["kinds"].to_string();
+    assert!(
+        kinds.contains("\"ClusterPolicy\"") && kinds.contains("\"Policy\""),
+        "{kinds}"
     );
     rig.audit();
 }
@@ -1074,6 +1085,16 @@ async fn an_engine_whose_groups_cannot_be_read_is_still_found() {
     );
     // Not being able to name the kinds is not a gap in what the check measures.
     assert!(finding.partial.is_none());
+    // The preferred version was forbidden, so v1 is not asked, and the legacy kinds are unknown.
+    assert_eq!(
+        rig.paths(),
+        [
+            NAMESPACE,
+            APIS,
+            "/apis/kyverno.io/v2",
+            "/apis/policies.kyverno.io/v1"
+        ]
+    );
     // Whether the legacy kinds exist is unknown, so the command stays.
     let fix = finding.fix.clone().expect("a fix");
     assert!(

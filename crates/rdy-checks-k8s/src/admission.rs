@@ -318,18 +318,20 @@ impl AdmissionCheck {
                 }
                 _ => Read::OutOfTime,
             };
-            let (kinds, more, mut legacy_policies) = match kinds {
+            let preferred_forbidden = matches!(kinds, Read::Forbidden);
+            let (mut kinds, mut legacy_policies) = match kinds {
                 Read::Ok(kinds) => {
                     let legacy = engines::has_legacy_policies(&kinds);
-                    let (kinds, more) = engines::cut_kinds(kinds);
-                    (kinds, more, Some(legacy))
+                    (kinds, Some(legacy))
                 }
-                _ => (Vec::new(), 0, None),
+                _ => (Vec::new(), None),
             };
             // The preferred version of `kyverno.io` is `v2` on every Kyverno from 1.12 to 1.19, and the
-            // legacy kinds live in `v1`. Without them in the preferred version, ask `v1` as well. If that
-            // read fails, the state is unknown, not "no".
+            // legacy kinds live in `v1`. Without them in the preferred version, ask `v1` as well, and list
+            // its kinds with the others. If that read fails, the state is unknown, not "no". A preferred
+            // version the identity may not read says the same of `v1`, so it is not asked.
             if legacy_policies != Some(true)
+                && !preferred_forbidden
                 && let Some(other) = entry.and_then(engines::legacy_version)
             {
                 let more_kinds = if out_of_time(ctx) {
@@ -337,12 +339,17 @@ impl AdmissionCheck {
                 } else {
                     read_kinds(mapper, client, group, other).await?
                 };
-                legacy_policies = match more_kinds {
-                    Read::Ok(kinds) if engines::has_legacy_policies(&kinds) => Some(true),
-                    Read::Ok(_) => legacy_policies,
-                    _ => None,
-                };
+                match more_kinds {
+                    Read::Ok(extra) => {
+                        if engines::has_legacy_policies(&extra) {
+                            legacy_policies = Some(true);
+                        }
+                        kinds.extend(extra);
+                    }
+                    _ => legacy_policies = None,
+                }
             }
+            let (kinds, more) = engines::cut_kinds(kinds);
             read_groups.push((
                 engine,
                 FoundGroup {
