@@ -426,7 +426,7 @@ fn a_chain_of_files_that_each_include_the_next_nearly_two_thousand_times_is_walk
     );
     assert_eq!(chain.covers("a", 80), Cover::Yes);
     assert_eq!(chain.covers("a", 81), Cover::No);
-    assert_eq!(chain.visits("a", 81), 5);
+    assert_eq!(chain.visits("a"), 5);
 }
 
 #[test]
@@ -444,7 +444,7 @@ fn a_service_with_many_different_includes_is_unknown_and_the_walk_stays_bounded(
     };
     assert!(why.contains("more services than rdy follows"), "{why}");
     // The walk stops at the root, whose includes are in doubt.
-    assert_eq!(services.visits("root", 80), 1);
+    assert_eq!(services.visits("root"), 1);
 }
 
 #[test]
@@ -460,7 +460,69 @@ fn a_walk_over_a_full_set_of_services_never_exceeds_its_bound() {
             found(&format!("<service>{includes}</service>")),
         );
     }
-    assert!(services.visits("s0", 80) <= 1 + 32 * 16);
+    assert!(services.visits("s0") <= 1 + 32 * 16);
+}
+
+#[test]
+fn a_service_limited_by_destination_still_walks_its_includes() {
+    let services = Services::default()
+        .with(
+            "l",
+            found(
+                "<service><port protocol=\"tcp\" port=\"80\"/><destination ipv4=\"192.0.2.1\"/><include service=\"y\"/></service>",
+            ),
+        )
+        .with(
+            "y",
+            found("<service><port protocol=\"tcp\" port=\"80\"/></service>"),
+        );
+    assert_eq!(services.covers("l", 80), Cover::Yes);
+}
+
+#[test]
+fn the_depth_cap_is_not_hit_when_every_include_was_already_seen() {
+    // s0 -> s1 -> s2 -> s3 -> s4, and s4 includes s0 again. No service is cut off.
+    let mut ring = Services::default();
+    for n in 0..5 {
+        ring = ring.with(
+            &format!("s{n}"),
+            found(&format!(
+                "<service><include service=\"s{}\"/></service>",
+                (n + 1) % 5
+            )),
+        );
+    }
+    assert_eq!(ring.covers("s0", 80), Cover::No);
+}
+
+#[test]
+fn merged_port_ranges_are_searched_by_halving() {
+    let mut ranges = vec![
+        range("100-200"),
+        range("201-300"),
+        range("50"),
+        range("150-160"),
+        range("1000"),
+    ];
+    PortRange::merge(&mut ranges);
+    assert_eq!(ranges.len(), 3);
+    for (port, want) in [
+        (49, false),
+        (50, true),
+        (51, false),
+        (99, false),
+        (100, true),
+        (300, true),
+        (301, false),
+        (1000, true),
+        (1001, false),
+    ] {
+        assert_eq!(PortRange::any_covers(&ranges, port), want, "{port}");
+    }
+    assert!(!PortRange::any_covers(&[], 80));
+    let mut all = vec![PortRange::all(), range("65535")];
+    PortRange::merge(&mut all);
+    assert!(PortRange::any_covers(&all, 65535));
 }
 
 #[test]
@@ -541,15 +603,32 @@ fn a_port_tag_inside_a_cdata_section_is_text_and_not_a_port() {
 #[test]
 fn has_tag_finds_a_tag_and_says_when_it_could_not_look() {
     assert_eq!(
-        service::has_tag("<direct><rule ipv=\"ipv4\"/></direct>", "rule"),
+        service::has_tag("<direct><rule ipv=\"ipv4\"/></direct>", &["rule"]),
         Ok(true)
     );
     assert_eq!(
-        service::has_tag("<?xml version='1.0'?><direct/>", "rule"),
+        service::has_tag("<?xml version='1.0'?><direct/>", &["rule"]),
         Ok(false)
     );
-    assert!(service::has_tag("<direct><rule", "rule").is_err());
-    assert!(service::has_tag("<direct><!-- ", "rule").is_err());
+    assert_eq!(
+        service::has_tag(
+            "<direct><passthrough ipv=\"ipv4\">-A INPUT -j DROP</passthrough></direct>",
+            &["rule", "passthrough"]
+        ),
+        Ok(true)
+    );
+    assert!(service::has_tag("<direct><rule", &["rule"]).is_err());
+    assert!(service::has_tag("<direct><!-- ", &["rule"]).is_err());
+}
+
+#[test]
+fn service_file_paths_use_forward_slashes_on_every_os() {
+    // Built as text, so the Windows leg judges the same Linux path as the Linux leg does.
+    assert_eq!(
+        service::service_path("/etc/firewalld/services", "ssh"),
+        "/etc/firewalld/services/ssh.xml"
+    );
+    assert!(!service::service_path("/usr/lib/firewalld/services", "a-b").contains('\\'));
 }
 
 #[test]

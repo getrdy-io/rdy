@@ -44,6 +44,8 @@ const UFW_DEFAULTS: &str = "/etc/default/ufw";
 const UFW_RULES: &str = "/etc/ufw/user.rules";
 /// Direct rules (raw iptables or nftables rules handed to firewalld) that survive a reload.
 const DIRECT_XML: &str = "/etc/firewalld/direct.xml";
+/// The tags in `direct.xml` that add a rule: a firewalld-form `<rule>` and a raw iptables `<passthrough>`.
+const DIRECT_TAGS: &[&str] = &["rule", "passthrough"];
 const ROUTE_V4: &str = "/proc/net/route";
 const ROUTE_V6: &str = "/proc/net/ipv6_route";
 
@@ -330,12 +332,12 @@ impl Firewall {
         Ok(found)
     }
 
-    /// Why direct rules make every answer unknown: `/etc/firewalld/direct.xml` holds a rule, or could
+    /// Why direct rules make every answer unknown: `/etc/firewalld/direct.xml` holds a rule or a passthrough, or could
     /// not be read to the end. `None` when it is absent or holds no rule.
     async fn direct_rules(&self, ctx: &CheckContext) -> Result<Option<String>, CheckError> {
         Ok(match read_text(ctx, DIRECT_XML).await? {
             Read::Absent => None,
-            Read::Text(xml) => match service::has_tag(&xml, "rule") {
+            Read::Text(xml) => match service::has_tag(&xml, DIRECT_TAGS) {
                 Ok(true) => Some(format!(
                     "{DIRECT_XML} holds direct rules, which rdy does not evaluate"
                 )),

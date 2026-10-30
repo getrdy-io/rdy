@@ -371,8 +371,8 @@ fn describe(rule: &str) -> String {
 
 /// Judges inbound TCP `port` against `zone`.
 ///
-/// The work is bounded: at most [`MAX_WORDS`] distinct service names in the zone, each looked up in a
-/// map of at most 32 services and walked in at most 513 steps (see `Services::search`).
+/// The work is bounded: at most [`MAX_WORDS`] distinct service names in the zone, each answered by two
+/// binary searches over ranges walked once per service (see `Services`).
 pub(super) fn judge(zone: &Zone, services: &Services, port: u16) -> Verdict {
     if let Some(why) = zone.incomplete {
         return Verdict::Unknown(format!("the zone listing {why}"));

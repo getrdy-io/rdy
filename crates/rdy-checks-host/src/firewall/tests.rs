@@ -460,6 +460,18 @@ fn a_direct_rule_file_with_a_rule_gives_a_warning_even_for_open_ports() {
 }
 
 #[test]
+fn a_direct_passthrough_gives_a_warning_even_for_open_ports() {
+    let replay = load(&FIREWALLD_PORT_OPEN, Replay::new()).file(
+        "/etc/firewalld/direct.xml",
+        "<?xml version='1.0'?><direct><passthrough ipv=\"ipv4\">-A INPUT -p tcp --dport 6443 -j DROP</passthrough></direct>",
+    );
+    let ran = execute(replay, true, Os::Linux, PORTS);
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert!(f.message.contains("direct rules"), "{}", f.message);
+}
+
+#[test]
 fn a_direct_rule_file_that_is_cut_off_is_unknown_not_clear() {
     for xml in [
         "<direct><rule ipv=\"ipv4\"",

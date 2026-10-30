@@ -532,6 +532,20 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
                 "{path}: an include path `{literal}` does not start with `{prefix}`. The entry allows only that data ({why})"
             );
         }
+        // Past the required prefix nothing may climb out of it: not in the first literal, not in a later
+        // literal of the call, not in the joined text, and not in an argument of an `fx!` call.
+        for call in include_calls(&source) {
+            assert!(
+                !climbs(&call, prefix),
+                "{path}: an include path {call:?} climbs out of `{prefix}` with `..` ({why})"
+            );
+        }
+        for literal in macro_literals(&source, "fx!(") {
+            assert!(
+                !literal.contains(".."),
+                "{path}: an fx! argument `{literal}` contains `..`, which would leave the fixture directory ({why})"
+            );
+        }
         assert!(
             test_only(&base, path),
             "{path} embeds data but is not a #[cfg(test)] module: declare it, or the module above it, under #[cfg(test)] ({why})"
@@ -539,15 +553,100 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
     }
 }
 
-/// The first string literal of every `include_str!(..)` and `include_bytes!(..)` in the source, looking
-/// through a `concat!(`. A path that is not a literal (a macro variable, say) reads as the empty string,
-/// which no prefix matches. Whole-line `//` comments are ignored.
-fn include_literals(source: &str) -> Vec<String> {
-    let code: String = source
+/// The source without whole-line `//` comments.
+fn without_comments(source: &str) -> String {
+    source
         .lines()
         .filter(|l| !l.trim_start().starts_with("//"))
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n")
+}
+
+/// Whether the literals of one include call climb out of `prefix`: past the prefix, a `..` in the first
+/// literal, in any later literal, or in the text the literals make when joined.
+fn climbs(call: &[String], prefix: &str) -> bool {
+    let first = call.first().map_or("", String::as_str);
+    let mut after: Vec<&str> = vec![first.get(prefix.len()..).unwrap_or_default()];
+    after.extend(call.iter().skip(1).map(String::as_str));
+    after.iter().any(|part| part.contains("..")) || after.concat().contains("..")
+}
+
+/// Reads one string literal. `body` starts just after the opening quote. Returns the text and what is
+/// left after the closing quote.
+fn read_literal(body: &str) -> (String, &str) {
+    let mut text = String::new();
+    let mut chars = body.char_indices();
+    while let Some((at, c)) = chars.next() {
+        match c {
+            '"' => return (text, &body[at + 1..]),
+            '\\' => text.extend(chars.next().map(|(_, c)| c)),
+            c => text.push(c),
+        }
+    }
+    (text, "")
+}
+
+/// Every string literal in the arguments of the macro call that starts at `args` (just after the
+/// opening parenthesis), up to the matching closing one. Nested calls such as `concat!(..)` are read
+/// too.
+fn call_literals(args: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 1_usize;
+    let mut rest = args;
+    while let Some(c) = rest.chars().next() {
+        match c {
+            '"' => {
+                let (text, after) = read_literal(&rest[1..]);
+                out.push(text);
+                rest = after;
+                continue;
+            }
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        rest = &rest[c.len_utf8()..];
+    }
+    out
+}
+
+/// Every string literal in the arguments of every call of the macro `name` (written `fx!(`).
+fn macro_literals(source: &str, name: &str) -> Vec<String> {
+    let code = without_comments(source);
+    let mut out = Vec::new();
+    let mut rest = code.as_str();
+    while let Some(at) = rest.find(name) {
+        rest = &rest[at + name.len()..];
+        out.extend(call_literals(rest));
+    }
+    out
+}
+
+/// All the string literals of every `include_str!(..)` and `include_bytes!(..)` call, one list per call,
+/// looking through a `concat!(`.
+fn include_calls(source: &str) -> Vec<Vec<String>> {
+    let code = without_comments(source);
+    let mut out = Vec::new();
+    for name in ["include_str!(", "include_bytes!("] {
+        let mut rest = code.as_str();
+        while let Some(at) = rest.find(name) {
+            rest = &rest[at + name.len()..];
+            out.push(call_literals(rest));
+        }
+    }
+    out
+}
+
+/// The first string literal of every `include_str!(..)` and `include_bytes!(..)` in the source, looking
+/// through a `concat!(`. A path that does not start with a literal (a macro variable, say) reads as the
+/// empty string, which no prefix matches. Whole-line `//` comments are ignored.
+fn include_literals(source: &str) -> Vec<String> {
+    let code = without_comments(source);
     let mut out = Vec::new();
     for name in ["include_str!(", "include_bytes!("] {
         let mut rest = code.as_str();
@@ -557,18 +656,7 @@ fn include_literals(source: &str) -> Vec<String> {
             if let Some(inner) = arg.strip_prefix("concat!(") {
                 arg = inner.trim_start();
             }
-            let literal = arg.strip_prefix('"').map(|body| {
-                let mut text = String::new();
-                let mut chars = body.chars();
-                while let Some(c) = chars.next() {
-                    match c {
-                        '"' => break,
-                        '\\' => text.extend(chars.next()),
-                        c => text.push(c),
-                    }
-                }
-                text
-            });
+            let literal = arg.strip_prefix('"').map(|body| read_literal(body).0);
             out.push(literal.unwrap_or_default());
         }
     }
@@ -941,4 +1029,31 @@ fn the_include_reader_sees_every_literal_and_refuses_what_it_cannot_read() {
     );
     assert_eq!(include_literals("let a = include_str!($path);"), [""]);
     assert!(include_literals("// include_str!(\"../a\")\nfn f() {}").is_empty());
+}
+
+#[test]
+fn the_include_reader_sees_every_literal_of_a_call_and_of_fx() {
+    let source = "const A: &str = include_str!(concat!(\"../x/\", $c, \"/../../etc\", f(\"y\")));\nlet b = fx!(\"case\", \"a/../b\");";
+    assert_eq!(
+        include_calls(source),
+        [["../x/", "/../../etc", "y"]],
+        "a nested call and a later literal are read"
+    );
+    assert_eq!(macro_literals(source, "fx!("), ["case", "a/../b"]);
+    // The macro definition is not a call.
+    assert!(macro_literals("macro_rules! fx { () => {} }", "fx!(").is_empty());
+    // A closing parenthesis inside a literal does not end the call.
+    assert_eq!(call_literals("\"a)\", \"b\") \"c\""), ["a)", "b"]);
+}
+
+#[test]
+fn a_climb_after_the_prefix_is_found_in_a_later_literal_or_in_the_joined_text() {
+    let lits = |parts: &[&str]| parts.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
+    assert!(!climbs(
+        &lits(&["../../f/", "case", "/", "file"]),
+        "../../f/"
+    ));
+    assert!(climbs(&lits(&["../../f/", "../../x"]), "../../f/"));
+    assert!(climbs(&lits(&["../../f/../x"]), "../../f/"));
+    assert!(climbs(&lits(&["../../f/.", "."]), "../../f/"));
 }

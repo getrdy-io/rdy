@@ -7,7 +7,7 @@
 //! of tags with attributes. The scanner below reads only what it needs, never allocates more than the
 //! input, and stops at fixed limits on any input.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use rdy_engine::probe::{Probe, ProbeError};
 
@@ -65,92 +65,133 @@ pub(super) enum Cover {
     No,
 }
 
-/// The services read for one run, by name.
+/// What a walk from one service found, for any port.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(super) struct Services(BTreeMap<String, Svc>);
+struct Reach {
+    /// The TCP ports opened toward every address, merged.
+    open: Vec<PortRange>,
+    /// The TCP ports opened only toward some addresses, merged.
+    limited: Vec<PortRange>,
+    /// The first reason the walk could not be sure of what it did not see.
+    unknown: Option<String>,
+    /// How many services the walk visited.
+    visited: usize,
+}
+
+/// The services read for one run, by name, and what a walk from each one reaches.
+///
+/// Worst-case work, whatever the files say: each root is walked once, when the set is built, in at most
+/// `1 + MAX_SERVICES * MAX_INCLUDES` = 513 visits with `O(log)` set lookups, so at most
+/// `MAX_SERVICES` * 513 visits in all. A port question then costs two binary searches.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(super) struct Services {
+    defs: BTreeMap<String, Svc>,
+    reach: BTreeMap<String, Reach>,
+}
 
 impl Services {
+    /// The set for these definitions, with every walk done.
+    pub(super) fn new(defs: BTreeMap<String, Svc>) -> Self {
+        let reach = defs
+            .keys()
+            .map(|name| (name.clone(), walk(&defs, name)))
+            .collect();
+        Self { defs, reach }
+    }
+
     #[cfg(test)]
-    pub(super) fn with(mut self, name: &str, svc: Svc) -> Self {
-        self.0.insert(name.to_owned(), svc);
-        self
+    pub(super) fn with(self, name: &str, svc: Svc) -> Self {
+        let mut defs = self.defs;
+        defs.insert(name.to_owned(), svc);
+        Self::new(defs)
     }
 
-    /// Whether the service `name` opens TCP `port`, following includes.
-    pub(super) fn covers(&self, name: &str, port: u16) -> Cover {
-        self.search(name, port).0
-    }
-
-    /// The walk behind [`Services::covers`], and how many services it visited.
-    ///
-    /// Breadth first, with one visited set for the whole walk, so a service is looked at once however
-    /// many files include it and a cycle ends by itself. The services read are at most [`MAX_SERVICES`]
-    /// and each names at most [`MAX_INCLUDES`] includes, so a walk visits at most
-    /// `1 + MAX_SERVICES * MAX_INCLUDES` names, whatever the files say. The answer is "yes" over
+    /// Whether the service `name` opens TCP `port`, following includes. The answer is "yes" over
     /// "limited" over "unknown" over "no", so it does not depend on the order of the includes.
-    fn search<'a>(&'a self, root: &'a str, port: u16) -> (Cover, usize) {
-        let mut seen: Vec<&str> = vec![root];
-        let mut queue: VecDeque<(&str, usize)> = VecDeque::from([(root, 0)]);
-        let mut visited = 0;
-        let mut limited = false;
-        let mut unknown: Option<String> = None;
-        while let Some((name, depth)) = queue.pop_front() {
-            visited += 1;
-            let def = match self.0.get(name) {
-                None => {
-                    unknown.get_or_insert(format!("service {name} was not read"));
-                    continue;
-                }
-                Some(Svc::Missing) => {
-                    unknown.get_or_insert(format!("service {name} has no definition file"));
-                    continue;
-                }
-                Some(Svc::Unreadable(why)) => {
-                    unknown.get_or_insert(format!("service {name} could not be read ({why})"));
-                    continue;
-                }
-                Some(Svc::Found(def)) => def,
-            };
-            if let Some(why) = def.doubt {
-                unknown.get_or_insert(format!("service {name} {why}"));
-                continue;
-            }
-            if def.tcp.iter().any(|range| range.covers(port)) {
-                if def.limited {
-                    limited = true;
-                    continue;
-                }
-                return (Cover::Yes, visited);
-            }
-            if def.includes.is_empty() {
-                continue;
-            }
-            if depth >= MAX_DEPTH {
-                unknown.get_or_insert(format!(
-                    "service {name} includes services nested deeper than rdy follows"
-                ));
-                continue;
-            }
-            for include in &def.includes {
-                if !seen.contains(&include.as_str()) {
-                    seen.push(include);
-                    queue.push_back((include, depth + 1));
-                }
-            }
-        }
-        let cover = if limited {
+    pub(super) fn covers(&self, name: &str, port: u16) -> Cover {
+        let Some(reach) = self.reach.get(name) else {
+            return Cover::Unknown(format!("service {name} was not read"));
+        };
+        if PortRange::any_covers(&reach.open, port) {
+            Cover::Yes
+        } else if PortRange::any_covers(&reach.limited, port) {
             Cover::Limited
         } else {
-            unknown.map_or(Cover::No, Cover::Unknown)
-        };
-        (cover, visited)
+            reach.unknown.clone().map_or(Cover::No, Cover::Unknown)
+        }
     }
 
-    /// How many services a walk from `name` visits.
+    /// How many services the walk from `name` visited.
     #[cfg(test)]
-    pub(super) fn visits(&self, name: &str, port: u16) -> usize {
-        self.search(name, port).1
+    pub(super) fn visits(&self, name: &str) -> usize {
+        self.reach.get(name).map_or(0, |r| r.visited)
     }
+}
+
+/// Walks from `root` breadth first, with one visited set for the whole walk, so a service is looked at
+/// once however many files include it and a cycle ends by itself. The walk does not depend on the port:
+/// a service that covers a port is still walked for its includes.
+fn walk(defs: &BTreeMap<String, Svc>, root: &str) -> Reach {
+    let mut seen: BTreeSet<&str> = BTreeSet::from([root]);
+    let mut queue: VecDeque<(&str, usize)> = VecDeque::from([(root, 0)]);
+    let mut reach = Reach::default();
+    while let Some((name, depth)) = queue.pop_front() {
+        reach.visited += 1;
+        let def = match defs.get(name) {
+            None => {
+                reach
+                    .unknown
+                    .get_or_insert(format!("service {name} was not read"));
+                continue;
+            }
+            Some(Svc::Missing) => {
+                reach
+                    .unknown
+                    .get_or_insert(format!("service {name} has no definition file"));
+                continue;
+            }
+            Some(Svc::Unreadable(why)) => {
+                reach
+                    .unknown
+                    .get_or_insert(format!("service {name} could not be read ({why})"));
+                continue;
+            }
+            Some(Svc::Found(def)) => def,
+        };
+        if let Some(why) = def.doubt {
+            reach.unknown.get_or_insert(format!("service {name} {why}"));
+            continue;
+        }
+        let ranges = if def.limited {
+            &mut reach.limited
+        } else {
+            &mut reach.open
+        };
+        ranges.extend(def.tcp.iter().copied());
+        let fresh: Vec<&str> = def
+            .includes
+            .iter()
+            .map(String::as_str)
+            .filter(|include| !seen.contains(include))
+            .collect();
+        if fresh.is_empty() {
+            continue;
+        }
+        if depth >= MAX_DEPTH {
+            reach.unknown.get_or_insert(format!(
+                "service {name} includes services nested deeper than rdy follows"
+            ));
+            continue;
+        }
+        for include in fresh {
+            if seen.insert(include) {
+                queue.push_back((include, depth + 1));
+            }
+        }
+    }
+    PortRange::merge(&mut reach.open);
+    PortRange::merge(&mut reach.limited);
+    reach
 }
 
 /// A service name rdy looks up: letters, digits, `-` and `_`. No dot, so no `..` and no hidden file,
@@ -193,13 +234,20 @@ pub(super) async fn load(
         }
         out.insert(name, svc);
     }
-    Ok(Services(out))
+    Ok(Services::new(out))
+}
+
+/// The path of a service file. Built as text with `/`, never with `Path::join`: these are Linux paths
+/// whatever OS rdy runs on, and `join` would put `\` in them on Windows, where the probe policy would
+/// then judge a different path than it does on Linux.
+pub(super) fn service_path(dir: &str, name: &str) -> String {
+    format!("{dir}/{name}.xml")
 }
 
 async fn read_one(probe: &Probe, name: &str) -> Result<Svc, ProbeError> {
     for dir in [ADMIN_DIR, PACKAGED_DIR] {
-        let path = std::path::Path::new(dir).join(format!("{name}.xml"));
-        match probe.read(&path).await {
+        let path = service_path(dir, name);
+        match probe.read(std::path::Path::new(&path)).await {
             Ok(file) => return Ok(Svc::Found(parse(&String::from_utf8_lossy(&file.bytes)))),
             Err(ProbeError::NotFound) => {}
             Err(
@@ -266,11 +314,11 @@ pub(super) fn parse(xml: &str) -> ServiceDef {
     def
 }
 
-/// Whether the file has a start tag called `name`. `Err` says why the file could not be read to its
-/// end without finding one, so the answer is not known.
-pub(super) fn has_tag(xml: &str, name: &str) -> Result<bool, &'static str> {
+/// Whether the file has a start tag called one of `names`. `Err` says why the file could not be read
+/// to its end without finding one, so the answer is not known.
+pub(super) fn has_tag(xml: &str, names: &[&str]) -> Result<bool, &'static str> {
     let (found, doubt) = tags(cut(xml, MAX_XML));
-    if found.iter().any(|t| t.name == name) {
+    if found.iter().any(|t| names.contains(&t.name)) {
         return Ok(true);
     }
     match (xml.len() > MAX_XML, doubt) {

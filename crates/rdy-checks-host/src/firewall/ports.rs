@@ -37,4 +37,26 @@ impl PortRange {
     pub(super) fn covers(self, port: u16) -> bool {
         (self.lo..=self.hi).contains(&port)
     }
+
+    /// Sorts `ranges` and joins the ones that overlap or touch, so [`PortRange::any_covers`] can
+    /// search them by halving.
+    pub(super) fn merge(ranges: &mut Vec<Self>) {
+        ranges.sort_by_key(|r| (r.lo, r.hi));
+        let mut out: Vec<Self> = Vec::with_capacity(ranges.len());
+        for range in ranges.drain(..) {
+            match out.last_mut() {
+                Some(last) if u32::from(range.lo) <= u32::from(last.hi) + 1 => {
+                    last.hi = last.hi.max(range.hi);
+                }
+                _ => out.push(range),
+            }
+        }
+        *ranges = out;
+    }
+
+    /// Whether `port` is in any of `ranges`, which [`PortRange::merge`] has prepared.
+    pub(super) fn any_covers(ranges: &[Self], port: u16) -> bool {
+        let after = ranges.partition_point(|r| r.hi < port);
+        ranges.get(after).is_some_and(|r| r.lo <= port)
+    }
 }
