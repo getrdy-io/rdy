@@ -334,9 +334,10 @@ and addresses. It fails on:
   (`amazonaws.com`, `azure.com`, `googleapis.com`) only the bare name, `<service>.<domain>` and
   `<service>.<region>.<domain>` pass, so `acme-backups.s3.amazonaws.com` and
   `ec2-54-1-2-3.compute-1.amazonaws.com` fail. Outside URLs only names whose last label is a real top-level
-  domain are checked. The list is the IANA root zone list, checked in at
-  `crates/rdy-engine/tests/data/iana-tlds.txt`, minus the labels that are also file extensions (`sh`, `py`,
-  `rs`, `md`, `so`, `in`, `zip`, `link` and a few more), so `cpu.max` and `install.sh` pass. A URL host is
+  domain are checked. The list is every country code and the common generic labels, taken from the IANA root zone list and
+  checked in at `crates/rdy-engine/tests/data/iana-tlds.txt`. Brand TLDs are left out on purpose, because they
+  name companies and products. The list leaves out the labels that are also file extensions (`sh`, `py`,
+  `rs`, `md`, `so`, `in`, `link` and a few more), so `cpu.max` and `install.sh` pass. A URL host is
   checked with any label. `README.md` files are not scanned, except inside `checks/` and `envs/`;
 - an IP address that is publicly routable or link-local, unless `allow.toml` allows it. Allowed without an
   entry: the documentation ranges, RFC 1918, `100.64.0.0/10`, `fd00::/8`, loopback, unspecified, multicast

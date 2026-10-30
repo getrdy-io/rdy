@@ -195,10 +195,11 @@ command. It fails on:
   passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a
   `Timeout` case where it runs a command or opens a socket; a missing `checks/_policy/symlink-to-shadow`.
 
-Two deviations, decided in the M1-050 review. The host rule uses the IANA root zone list
-(`crates/rdy-engine/tests/data/iana-tlds.txt`, checked in so the test needs no network), not the public
-suffix list. It leaves out the labels that are also file extensions in the fixtures (`sh`, `py`, `rs`, `md`,
-`so`, `in`, `zip`, `link` and a few more) for dotted names outside URLs. A URL host is checked with any
+Two deviations, decided in the M1-050 review. The host rule uses a short list of country codes and common
+generic labels, not brand TLDs (`crates/rdy-engine/tests/data/iana-tlds.txt`, taken from the IANA root zone
+list and checked in so the test needs no network), not the public suffix list. Brand TLDs are left out on
+purpose because they name companies and products. It leaves out the labels that are also file extensions in the fixtures (`sh`, `py`, `rs`, `md`,
+`so`, `in`, `link` and a few more) for dotted names outside URLs. A URL host is checked with any
 label. On `amazonaws.com`, `azure.com` and `googleapis.com` only the bare name, `<service>.<domain>` and
 `<service>.<region>.<domain>` pass, because anyone can get a name there. The registry rule in the last
 bullet needs the check families, which `rdy-engine` cannot link, so M1-075 (the env harness links the CLI

@@ -666,8 +666,11 @@ fn loader_findings(fixtures_root: &Path, dirs: &[String]) -> Vec<Finding> {
 }
 
 /// Fixture directories (from the repo root) that cannot finish loading yet, with the reason. Only one loader
-/// error is excused for them: the `base` is not found. Every other loader error and every other lint rule
-/// still covers them, so a bad manifest or a duplicate argv in these cases still fails. The `host.firewall`
+/// error is excused for them: the `base` is not found. Every other lint rule still covers them, and a bad
+/// manifest still fails. The loader stops at the missing base before it checks commands, so a duplicate argv
+/// or bad command JSON in these cases is not seen until the base is where the loader looks. The test
+/// `a_pending_case_fails_on_a_duplicate_argv_once_its_base_is_found` proves those checks run on a real
+/// `host.firewall` case with its base under `envs/`. The `host.firewall`
 /// cases were written before the loader (M1-147) and name a `base` that is a sibling directory, while the
 /// loader looks a base up under `envs/`. M1-117 builds the fixture environments under `envs/`. It moves these
 /// bases there and removes this row. A row that matches no fixture is a finding, so the list cannot outlive
@@ -722,12 +725,14 @@ fn scans_text(path: &str) -> bool {
     path != ALLOW_PATH && (in_cases || !path.ends_with("/README.md"))
 }
 
-/// The IANA root zone list of top-level domains, as downloaded from
-/// <https://data.iana.org/TLD/tlds-alpha-by-domain.txt> on 2026-10-30 (its first line holds the version).
-/// It is checked in so the test needs no network. Refresh it by downloading the file again.
+/// Top-level domains the lint treats as real: every country code and common generic labels, taken from the
+/// IANA root zone list (<https://data.iana.org/TLD/tlds-alpha-by-domain.txt>, 2026-10-30). Brand TLDs are left
+/// out on purpose: they name companies and products, and the repo does not name those. The file header says
+/// why. It is checked in so the test needs no network.
 ///
-/// 08 says "a public suffix". This is the deviation: the root zone list, not the public suffix list, because
-/// it is one small file with a stable format, and the lint only needs to know that a last label is a real TLD.
+/// 08 says "a public suffix". This is the deviation: a short list of country codes and common generic
+/// labels, not the public suffix list and not the whole root zone, because the lint only needs to know that a
+/// last label is a real TLD. A host under a brand TLD is still caught inside a URL, where any label counts.
 const IANA_TLDS: &str = include_str!("data/iana-tlds.txt");
 
 /// Labels that are in the list and are also file extensions in the fixtures or in common shell, script and
@@ -735,8 +740,7 @@ const IANA_TLDS: &str = include_str!("data/iana-tlds.txt");
 /// `license.link`). A dotted name that ends in one of them is a file name, not a host. A URL host is still
 /// checked with any label.
 const EXTENSION_LABELS: &[&str] = &[
-    "cc", "in", "link", "md", "ml", "mov", "new", "pid", "pl", "pm", "ps", "pub", "py", "rs",
-    "run", "sh", "so", "target", "zip",
+    "cc", "in", "link", "md", "ml", "pl", "pm", "ps", "pub", "py", "rs", "run", "sh", "so",
 ];
 
 /// Whether `label` ends a host name that is checked outside a URL.
@@ -1150,10 +1154,10 @@ fn a_planted_public_hostname_fails_with_the_file_named() -> TestResult {
 }
 
 #[test]
-fn the_iana_list_is_embedded_and_leaves_out_file_extensions() {
+fn the_tld_list_is_embedded_and_leaves_out_file_extensions() {
     assert!(
-        IANA_TLDS.lines().count() > 1000,
-        "the list is checked in whole"
+        IANA_TLDS.lines().filter(|l| !l.starts_with('#')).count() > 300,
+        "every country code is there"
     );
     for tld in ["com", "dev", "app", "me", "se", "xn--p1ai", "cloud"] {
         assert!(is_tld(tld), "{tld}");
@@ -1713,7 +1717,7 @@ fn a_pending_case_is_excused_only_for_its_missing_base() -> TestResult {
         found[0]
     );
 
-    // Any other loader error in a pending case still fails: a bad origin, a duplicate argv.
+    // A bad manifest in a pending case still fails: the manifest is read before the base.
     write(
         dir.path(),
         &format!("{pending}/fixture.toml"),
@@ -1722,21 +1726,51 @@ fn a_pending_case_is_excused_only_for_its_missing_base() -> TestResult {
     let found = loader_findings(dir.path(), &[pending.to_owned()]);
     assert_eq!(found.len(), 1, "{}", render(&found));
     assert!(found[0].detail.contains("laptop"), "{}", found[0]);
+    Ok(())
+}
 
-    write(dir.path(), &format!("{pending}/fixture.toml"), MANIFEST)?;
+fn copy_dir(from: &Path, to: &Path) -> TestResult {
+    std::fs::create_dir_all(to)?;
+    for item in std::fs::read_dir(from)? {
+        let item = item?;
+        let target = to.join(item.file_name());
+        if item.file_type()?.is_dir() {
+            copy_dir(&item.path(), &target)?;
+        } else {
+            std::fs::copy(item.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_pending_case_fails_on_a_duplicate_argv_once_its_base_is_found() -> TestResult {
+    // A real case that names a `base`, with that sibling base copied to `envs/<base>`, where the loader looks.
+    let real = repo_root().join(FIXTURES).join("checks/host.firewall");
+    let case = "checks/host.firewall/ufw-closed";
+    let dir = tempfile::tempdir()?;
+    copy_dir(&real.join("ufw-closed"), &dir.path().join(case))?;
+    copy_dir(&real.join("base-ufw"), &dir.path().join("envs/base-ufw"))?;
+    assert!(loader_pending(case));
+    let found = loader_findings(dir.path(), &[case.to_owned()]);
+    assert!(found.is_empty(), "{}", render(&found));
+
+    // The same case with a duplicate argv: the finding is not excused, because the base was found.
     write(
         dir.path(),
-        &format!("{pending}/commands/one.json"),
+        &format!("{case}/commands/one.json"),
         &command("one", "a\\n"),
     )?;
     write(
         dir.path(),
-        &format!("{pending}/commands/again.json"),
+        &format!("{case}/commands/again.json"),
         &command("one", "b\\n"),
     )?;
-    let found = loader_findings(dir.path(), &[pending.to_owned()]);
+    let found = loader_findings(dir.path(), &[case.to_owned()]);
     assert_eq!(found.len(), 1, "{}", render(&found));
+    assert_eq!(found[0].rule, "loader");
     assert!(found[0].detail.contains("again.json"), "{}", found[0]);
+    assert!(found[0].detail.contains("one.json"), "{}", found[0]);
     Ok(())
 }
 
