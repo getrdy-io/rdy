@@ -56,7 +56,7 @@ const MAX_PORTS: usize = 256;
 const LIST_PORTS: usize = 8;
 
 /// The static facts about `host.firewall` (03 section 2).
-static INFO: CheckInfo = CheckInfo {
+pub(crate) static INFO: CheckInfo = CheckInfo {
     id: "host.firewall",
     family: "host",
     summary: "Host firewall active, inbound ports allowed",

@@ -35,12 +35,12 @@ fn assert_error_with_fix(finding: &CheckLint, code: LintCode) {
 }
 
 #[test]
-fn host_kernel_lints_as_not_in_build() {
-    let f = one("  - id: host.kernel\n");
+fn host_virtualization_lints_as_not_in_build() {
+    let f = one("  - id: host.virtualization\n");
     assert_eq!(f.code, LintCode::NotInBuild);
     assert_eq!(f.code.as_str(), "not_in_build");
     assert_eq!(f.level, Level::Warning);
-    assert!(f.message.contains("host.kernel"));
+    assert!(f.message.contains("host.virtualization"));
 }
 
 #[test]
@@ -154,10 +154,10 @@ fn not_in_build_follows_the_wording_of_the_cli_design() {
         f.fix,
         "customers will see this check as not run, and NOT READY while it is required. Keep it if that is what you want."
     );
-    let f = one("  - id: host.kernel\n");
+    let f = one("  - id: host.virtualization\n");
     assert_eq!(
         f.message,
-        "host.kernel: this version of rdy does not have the check host.kernel yet"
+        "host.virtualization: this version of rdy does not have the check host.virtualization yet"
     );
 }
 
@@ -202,7 +202,7 @@ fn a_clean_entry_has_no_finding() {
 #[test]
 fn findings_carry_the_entry_index() {
     let spec = pass(
-        "  - id: host.cpu\n    min: 4\n  - id: host.kernel\n  - id: host.cpu\n    min: 4\n    name: b\n  - id: x.y\n",
+        "  - id: host.cpu\n    min: 4\n  - id: host.virtualization\n  - id: host.cpu\n    min: 4\n    name: b\n  - id: x.y\n",
     );
     let indexes: Vec<usize> = spec.lint_checks().iter().map(|f| f.index).collect();
     assert_eq!(indexes, [1, 3]);
@@ -219,7 +219,8 @@ fn hostile_text_is_escaped_in_the_message_and_the_fix() {
 
 #[test]
 fn unknown_kind_follows_the_reserved_list() {
-    let spec = pass("  - id: host.kernel\n  - id: host.memroy\n  - id: host.cpu\n    min: 4\n");
+    let spec =
+        pass("  - id: host.virtualization\n  - id: host.memroy\n  - id: host.cpu\n    min: 4\n");
     let decoded = match spec.decode_checks() {
         Ok(d) => d,
         Err(e) => panic!("{e}"),
@@ -253,4 +254,29 @@ fn acme_platform_has_two_not_in_build_warnings() {
         .filter(|f| (f.code, f.level) == (LintCode::NotInBuild, Level::Warning))
         .count();
     assert_eq!(warnings, 2, "{findings:?}");
+}
+
+/// M1-172: the 14 M1-late ids have parameter types, so they are no longer `not_in_build`. A bare entry
+/// that needs a threshold is a `no_threshold` error with a fix, and a typo in a key is an error too.
+#[test]
+fn the_m1_late_ids_lint_as_known_checks() {
+    for entry in [
+        "  - id: host.firewall\n",
+        "  - id: host.time_sync\n    ntp_servers: [ntp.acme.example]\n",
+        "  - id: host.kernel\n    min: \"5.4\"\n",
+        "  - id: net.registry\n    registries: [registry.acme.example]\n",
+        "  - id: k8s.crds\n    crds:\n      - name: certificates.cert-manager.io\n",
+    ] {
+        assert!(pass(entry).lint_checks().is_empty(), "{entry}");
+    }
+    let f = one("  - id: host.kernel\n");
+    assert_eq!(f.code, LintCode::NoThreshold);
+    assert_eq!(f.fix, "add 'min: \"5.4\"'.");
+    let f = one("  - id: host.sysctl\n");
+    assert_eq!(f.code, LintCode::NoThreshold);
+    assert_eq!(f.fix, "add at least one of 'expect', or 'limits'.");
+    let f = one("  - id: net.registry\n");
+    assert_eq!(f.fix, "add 'registries'.");
+    let f = one("  - id: host.kernel\n    mn: \"5.4\"\n");
+    assert_error_with_fix(&f, LintCode::UnsupportedSpec);
 }
