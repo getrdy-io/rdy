@@ -112,6 +112,20 @@ const ALLOWED: &[(&str, &str)] = &[
     ),
 ];
 
+/// Check-crate files that embed a data file the crate ships, with `include_str!` in code that is not a test
+/// (03 Appendix B: data files are embedded at build time). Data only: a `.toml` file under the crate's own
+/// `data/` directory, never Rust.
+///
+/// Each entry is `(file, literal, reason)`. The file holds exactly one include call, its only literal is
+/// `literal` (no `concat!`), and `literal` is `../data/<name>.toml`, one step out of the crate's `src/` into
+/// its own `data/` directory (`shipped_data_is_embedded_only_from_the_crates_own_data_directory` checks it).
+/// A test module of the same crate is covered by `INCLUDE_DATA_ALLOWED`.
+const INCLUDE_SHIPPED_DATA_ALLOWED: &[(&str, &str, &str)] = &[(
+    "crates/rdy-checks-host/src/agents.rs",
+    "../data/agents.toml",
+    "embeds the security-software catalog that host.security_agents matches against (M1-146)",
+)];
+
 /// Check-crate files that embed a data file with `include_str!` or `include_bytes!`. Data only: the file
 /// is text, never Rust. `include!` and `#[path]` are never allowed in a check crate.
 ///
@@ -509,7 +523,12 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
             if found.path_attribute || found.include_code {
                 bad.push(format!("{rel}: #[path] or include!"));
             }
-            if found.include_data && !INCLUDE_DATA_ALLOWED.iter().any(|(p, _, _)| *p == rel) {
+            if found.include_data
+                && !INCLUDE_DATA_ALLOWED.iter().any(|(p, _, _)| *p == rel)
+                && !INCLUDE_SHIPPED_DATA_ALLOWED
+                    .iter()
+                    .any(|(p, _, _)| *p == rel)
+            {
                 bad.push(format!("{rel}: include_str! or include_bytes!"));
             }
         }
@@ -554,6 +573,50 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
             test_only(&base, path),
             "{path} embeds data but is not a #[cfg(test)] module: declare it, or the module above it, under #[cfg(test)] ({why})"
         );
+    }
+}
+
+#[test]
+fn shipped_data_is_embedded_only_from_the_crates_own_data_directory() {
+    let base = root();
+    let crates: Vec<String> = check_crates()
+        .iter()
+        .map(|dir| format!("{}/", relative(&base, dir)))
+        .collect();
+    for (path, literal, why) in INCLUDE_SHIPPED_DATA_ALLOWED {
+        let source = std::fs::read_to_string(base.join(path)).expect("read source");
+        let calls = include_calls(&source);
+        assert_eq!(
+            calls.len(),
+            1,
+            "{path} must hold exactly one include call ({why})"
+        );
+        assert_eq!(
+            calls[0],
+            [(*literal).to_owned()],
+            "{path}: the include must be the single literal `{literal}` ({why})"
+        );
+        let name = literal
+            .strip_prefix("../data/")
+            .unwrap_or_else(|| panic!("{path}: `{literal}` is not under ../data/ ({why})"));
+        assert!(
+            name.ends_with(".toml")
+                && !name.contains('/')
+                && !name.contains('\\')
+                && !name.contains(".."),
+            "{path}: `{name}` must be a plain .toml file name ({why})"
+        );
+        // The file sits directly in the crate's src/ directory: `<crate>/src/<file>.rs`.
+        let crate_dir = crates
+            .iter()
+            .find(|dir| path.starts_with(&format!("{dir}src/")))
+            .unwrap_or_else(|| panic!("{path} is not in a check crate's src/ ({why})"));
+        assert!(
+            !path[crate_dir.len() + "src/".len()..].contains('/'),
+            "{path} must sit directly in src/ so that `../data/` is the crate's own directory ({why})"
+        );
+        let target = base.join(crate_dir).join("data").join(name);
+        assert!(target.is_file(), "{} is missing ({why})", target.display());
     }
 }
 

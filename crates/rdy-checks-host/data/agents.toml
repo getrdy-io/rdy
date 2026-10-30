@@ -1,0 +1,102 @@
+# The security-software catalog behind host.security_agents (M1-146, docs/plan/03-check-catalog.md Appendix B).
+#
+# A match means "a process with one of these names is running". It does not mean the product is installed
+# or that it is the vendor's own binary. Rdy reads the Linux process name (/proc/<pid>/comm, which the
+# kernel cuts to 15 bytes). Names longer than 15 bytes still match: see docs/adr/0036.
+#
+# Fields of each [[agent]]:
+#   id                  lowercase slug, unique. The spec's `forbid` and `allow` use it.
+#   display_name        the product name as its vendor writes it.
+#   category            edr, av, dlp or backup.
+#   process_names       1 to 8 process names (ASCII letters, digits and . _ + -), unique across the file.
+#   source              https URL of the public page the process names came from.
+#   checked_on          YYYY-MM-DD, the day someone read that page.
+#   exclusion_docs_url  optional. https URL of the vendor's own public page on exclusions.
+#
+# No free-text notes and no risk statements. The check prints fixed neutral text.
+#
+# FOUNDER HAND STEP: this seed list is not approved. The ticket exit test (M1-146) needs the founder to read
+# every entry and its source before the release that ships it. Until then it is a proposal.
+
+schema = 1
+
+[[agent]]
+id = "microsoft-defender-endpoint-linux"
+display_name = "Microsoft Defender for Endpoint on Linux"
+category = "edr"
+process_names = ["wdavdaemon"]
+source = "https://learn.microsoft.com/defender-endpoint/linux-support-install"
+checked_on = "2026-10-30"
+exclusion_docs_url = "https://learn.microsoft.com/defender-endpoint/linux-exclusions"
+
+[[agent]]
+id = "clamav"
+display_name = "ClamAV"
+category = "av"
+process_names = ["clamd", "clamonacc"]
+source = "https://docs.clamav.net/manual/Usage/Scanning.html"
+checked_on = "2026-10-30"
+
+[[agent]]
+id = "wazuh-agent"
+display_name = "Wazuh agent"
+category = "edr"
+process_names = ["wazuh-agentd", "wazuh-execd", "wazuh-logcollector", "wazuh-syscheckd", "wazuh-modulesd"]
+source = "https://documentation.wazuh.com/current/user-manual/reference/daemons/index.html"
+checked_on = "2026-10-30"
+
+[[agent]]
+id = "elastic-defend"
+display_name = "Elastic Defend"
+category = "edr"
+process_names = ["elastic-endpoint"]
+source = "https://elastic.co/docs/reference/security/endpoint-command-reference"
+checked_on = "2026-10-30"
+
+[[agent]]
+id = "falco"
+display_name = "Falco"
+category = "edr"
+process_names = ["falco"]
+source = "https://v0-41.falco.org/docs/getting-started/falco-linux-quickstart/"
+checked_on = "2026-10-30"
+
+[[agent]]
+id = "rapid7-insight-agent"
+display_name = "Rapid7 Insight Agent"
+category = "edr"
+process_names = ["ir_agent"]
+source = "https://docs.rapid7.com/insight-agent/agent-controls"
+checked_on = "2026-10-30"
+
+[[agent]]
+id = "carbon-black-cloud-linux"
+display_name = "Carbon Black Cloud sensor for Linux"
+category = "edr"
+process_names = ["cbagentd"]
+source = "https://knowledge.broadcom.com/external/article/287326"
+checked_on = "2026-10-30"
+
+[[agent]]
+id = "sophos-protection-linux"
+display_name = "Sophos Protection for Linux"
+category = "av"
+process_names = ["sophos_threat_detector"]
+source = "https://docs.sophos.com/esg/spl/en-us/help/ServerProtectionAgentLogs/"
+checked_on = "2026-10-30"
+
+[[agent]]
+id = "symantec-endpoint-protection-linux"
+display_name = "Symantec Endpoint Protection for Linux"
+category = "av"
+process_names = ["smcd", "rtvscand"]
+source = "https://knowledge.broadcom.com/external/article/151271"
+checked_on = "2026-10-30"
+
+[[agent]]
+id = "veeam-agent-linux"
+display_name = "Veeam Agent for Linux"
+category = "backup"
+process_names = ["veeamservice"]
+source = "https://helpcenter.veeam.com/docs/agentforlinux/userguide/architecture.html"
+checked_on = "2026-10-30"

@@ -12,7 +12,7 @@ include = ["src/**", "Cargo.toml", "LICENSE"]
 [features]
 # Test-only helpers (`TagKey::fixed`) and the replay backend with its fixture loader (M1-049). A release
 # build with this feature does not compile (see `rdy_engine::redact`). CI also keeps it out of the release
-# binary (04 section 3.3). `toml` reads `fixture.toml` and is in no other build.
+# binary (04 section 3.3). `toml` reads `fixture.toml` and is in no other engine build.
 testing = ["dep:toml"]
 
 default = ["runtime"]
