@@ -69,6 +69,7 @@ fn every_probe_error_tells_the_user_what_to_do() {
         ProbeError::Timeout,
         ProbeError::Hung { pid: 7 },
         ProbeError::NotRecorded("the command `getent a`".to_owned()),
+        ProbeError::Net(NetFailure::NoProxy),
         ProbeError::Io("broken pipe".to_owned()),
     ];
     for error in errors {
@@ -2432,7 +2433,7 @@ mod scheduled {
 
     use super::*;
     use crate::check::{Check, CheckContext, CheckInfo, CheckOutcome, Finding};
-    use crate::check::{CheckMeta, CommandSpec, Need, Os, OsSupport, Support};
+    use crate::check::{CheckMeta, CommandSpec, Need, Os, OsSupport, PeerClass, Support};
     use crate::sched::{End, Planned, Scheduler};
 
     static WALKER: CheckInfo = CheckInfo {
@@ -2460,7 +2461,7 @@ mod scheduled {
             max_stdout: 4096,
             env: &[],
         }],
-        peers: &[],
+        peers: &[PeerClass::SpecHosts],
     };
 
     /// A check that does every kind of side effect and keeps a clone of its probe.
@@ -2488,16 +2489,15 @@ mod scheduled {
                 );
                 probe.exec(getent("registry.acme.example")).await?;
 
-                // The network and kube tickets open their entries through the same door. Until
-                // their methods exist (M1-091, M1-103), the rows are written by hand here, and those
-                // tickets inherit "every tcp, http and kube call writes exactly one entry".
-                let (_, mut connect) =
-                    probe.begin(ActionKind::Connect, Map::new(), "registry.acme.example")?;
-                connect.set("host", "registry.acme.example");
-                connect.set("port", 443);
-                connect.set("addr", Value::Null);
-                connect.set("via_proxy", Value::Null);
-                connect.finish(ActionOutcome::Ok);
+                // A real tcp call writes its own entry (M1-091). The http and kube rows are still
+                // written by hand through the same door until their methods exist (M1-093, M1-103),
+                // and those tickets inherit "every http and kube call writes exactly one entry".
+                probe
+                    .tcp(
+                        &rdy_spec::Target::parse("registry.acme.example:443").expect("target"),
+                        net::Route::Direct,
+                    )
+                    .await?;
                 let (_, mut kube) = probe.begin(ActionKind::Kube, Map::new(), "/version")?;
                 kube.set("method", "GET");
                 kube.set("path", "/version?access_token=s3cr3t-value-123");
@@ -2551,7 +2551,14 @@ mod scheduled {
                 &getent_args("registry.acme.example"),
                 0,
                 "10.0.0.7 STREAM\n",
-            );
+            )
+            // The endpoint the walker connects to: a name, an address and a server behind it.
+            .host("registry.acme.example", ["10.0.0.7".parse().expect("ip")])
+            .tcp(
+                "10.0.0.7:443".parse().expect("addr"),
+                crate::probe::replay::TcpScript::Serve("registry".to_owned()),
+            )
+            .serve_duplex("registry", |_server| async {});
         let hub = hub(replay).with_home("/home/tester");
 
         // Run-level work: the engine reads the kubeconfig itself and logs it with `check: null`.
@@ -2571,7 +2578,11 @@ mod scheduled {
             leaked: Arc::clone(&leaked),
         };
         let ran = scheduler
-            .run(vec![Planned::new(Arc::new(walker), "host.cpu")])
+            .run(vec![Planned::new(Arc::new(walker), "host.cpu").with_hosts(
+                crate::family::HostSet::new([
+                    rdy_spec::Target::parse("registry.acme.example:443").expect("target"),
+                ]),
+            )])
             .await;
         assert!(
             matches!(&ran[0].end, End::Done(outcome) if outcome.is_ok()),
@@ -2651,6 +2662,7 @@ mod scheduled {
         // An endpoint and a kube request.
         assert_eq!(actions[5]["host"], "registry.acme.example");
         assert_eq!(actions[5]["port"], 443);
+        assert_eq!(actions[5]["addr"], "10.0.0.7");
         assert!(
             actions[6]["path"]
                 .as_str()
