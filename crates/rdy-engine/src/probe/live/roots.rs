@@ -20,7 +20,9 @@
 use std::io;
 
 #[cfg(any(unix, windows))]
-use crate::probe::{MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS};
+use crate::probe::{
+    MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, StoreKind, StoreOrigin, StoreSource, SystemRoots,
+};
 
 /// The most files of a certificate directory that are read.
 #[cfg(unix)]
@@ -57,7 +59,7 @@ fn env_overrides() -> bool {
 
 /// The OS trust roots as DER, on a Unix system. Blocking: the caller puts it on the blocking pool.
 #[cfg(unix)]
-pub(super) fn system_roots(secrets: &super::files::Secrets) -> io::Result<Vec<Vec<u8>>> {
+pub(super) fn system_roots(secrets: &super::files::Secrets) -> io::Result<SystemRoots> {
     // macOS keeps its roots in the keychains. The PEM reader takes over only when a variable names a
     // source, so that the crate never reads a variable itself.
     #[cfg(target_os = "macos")]
@@ -73,7 +75,7 @@ pub(super) fn system_roots(secrets: &super::files::Secrets) -> io::Result<Vec<Ve
 /// `SSL_CERT_DIR` without any rule, so with either set this is a typed error
 /// (`RootsOverridden`) and the verdict is `NoRoots::Overridden`, which carries the "unset it" hint.
 #[cfg(windows)]
-pub(super) fn system_roots() -> io::Result<Vec<Vec<u8>>> {
+pub(super) fn system_roots() -> io::Result<SystemRoots> {
     if env_overrides() {
         return Err(crate::probe::native::RootsOverridden::error());
     }
@@ -93,6 +95,10 @@ fn guarded<T>(read: impl FnOnce() -> io::Result<T> + std::panic::UnwindSafe) -> 
 #[cfg(any(unix, windows))]
 struct Collected {
     certs: Vec<Vec<u8>>,
+    /// The files, directories or OS store that held a certificate, in the order they were read.
+    sources: Vec<StoreSource>,
+    /// What the place being read now is: standard, or named by a variable.
+    origin: StoreOrigin,
     known: std::collections::HashSet<Vec<u8>>,
     /// A certificate or file was left out for a cap.
     dropped: usize,
@@ -106,6 +112,8 @@ impl Collected {
     fn new() -> Self {
         Self {
             certs: Vec::new(),
+            sources: Vec::new(),
+            origin: StoreOrigin::Standard,
             known: std::collections::HashSet::new(),
             dropped: 0,
             #[cfg(unix)]
@@ -135,15 +143,27 @@ impl Collected {
         MAX_TOTAL_BYTES.saturating_sub(self.read)
     }
 
+    /// Notes a place that held a certificate. The same place is noted once.
+    fn source(&mut self, kind: StoreKind, location: String) {
+        if !self
+            .sources
+            .iter()
+            .any(|s| s.kind == kind && s.location == location)
+        {
+            self.sources
+                .push(StoreSource::new(kind, location).origin(self.origin));
+        }
+    }
+
     /// The answer, after a warning in the tracing log if anything was left out.
-    fn finish(self) -> Vec<Vec<u8>> {
+    fn finish(self) -> SystemRoots {
         if self.dropped > 0 {
             tracing::warn!(
                 dropped = self.dropped,
                 "certificates of the OS trust store were dropped by a size, count or byte cap"
             );
         }
-        self.certs
+        SystemRoots::new(self.certs, self.sources)
     }
 }
 
@@ -159,7 +179,7 @@ mod pem {
     use super::{Collected, MAX_FILES};
     use crate::check::current_os;
     use crate::probe::live::files::{self, Secrets};
-    use crate::probe::{MAX_READ, ReadGuard, ReadRange};
+    use crate::probe::{MAX_READ, ReadGuard, ReadRange, StoreKind, StoreOrigin, SystemRoots};
 
     /// The bundle files of the common distributions, in the order they are tried. Debian and Ubuntu,
     /// RHEL and Fedora, SUSE, Alpine and older RHEL, Arch, the BSDs, and the file macOS ships.
@@ -237,7 +257,7 @@ mod pem {
     pub(in crate::probe::live) fn load(
         sources: &Sources,
         secrets: &Secrets,
-    ) -> io::Result<Vec<Vec<u8>>> {
+    ) -> io::Result<SystemRoots> {
         // The denylist applies; no prefix does. `/etc/shadow` is refused on its real path as for any read.
         let guard = ReadGuard::new(current_os(), None);
         let mut found = Collected::new();
@@ -245,12 +265,14 @@ mod pem {
         let mut last_error = None;
         if explicit {
             if let Some(file) = &sources.file {
+                found.origin = StoreOrigin::Env("SSL_CERT_FILE");
                 note(
                     read_bundle(file, &guard, secrets, &mut found),
                     &mut last_error,
                 );
             }
             for dir in &sources.dirs {
+                found.origin = StoreOrigin::Env("SSL_CERT_DIR");
                 note(read_dir(dir, &guard, secrets, &mut found), &mut last_error);
             }
         } else {
@@ -280,6 +302,7 @@ mod pem {
     }
 
     /// Reads one PEM file and adds every certificate in it. Returns how many certificates the file held.
+    /// A file that held one is noted as a source.
     fn read_bundle(
         path: &Path,
         guard: &ReadGuard,
@@ -307,6 +330,9 @@ mod pem {
                 break;
             }
         }
+        if count > 0 {
+            found.source(StoreKind::Bundle, path.to_string_lossy().into_owned());
+        }
         Ok(count)
     }
 
@@ -319,6 +345,9 @@ mod pem {
         found: &mut Collected,
     ) -> io::Result<()> {
         let entries = files::read_dir(dir, guard, secrets)?;
+        // The directory is the source, not each of its (up to 2048) files: drop the notes the files
+        // make and note the directory once if any of them held a certificate.
+        let notes = found.sources.len();
         for entry in entries
             .iter()
             .filter(|e| !e.is_dir && certificate_name(&e.name))
@@ -328,6 +357,10 @@ mod pem {
                 break;
             }
             let _ = read_bundle(&dir.join(&entry.name), guard, secrets, found);
+        }
+        if found.sources.len() > notes {
+            found.sources.truncate(notes);
+            found.source(StoreKind::Directory, dir.to_string_lossy().into_owned());
         }
         Ok(())
     }
@@ -359,21 +392,32 @@ mod native_store {
     use std::io;
 
     use super::Collected;
+    use crate::probe::{StoreKind, SystemRoots};
 
     /// Asks the OS for its trust roots. Blocking: the caller puts it on the blocking pool.
     ///
     /// The caller has checked that neither `SSL_CERT_FILE` nor `SSL_CERT_DIR` is set, so
     /// `rustls-native-certs` goes to the keychains or the root store and reads no file of its own.
     /// An error means the OS gave nothing and said why; a store that is simply empty is an empty list.
-    pub(super) fn load() -> io::Result<Vec<Vec<u8>>> {
+    pub(super) fn load() -> io::Result<SystemRoots> {
         super::guarded(read)
     }
 
-    fn read() -> io::Result<Vec<Vec<u8>>> {
+    /// The fixed name of the store on this OS, for the answer's source.
+    const STORE: &str = if cfg!(windows) {
+        "Windows Root store"
+    } else {
+        "System keychain"
+    };
+
+    fn read() -> io::Result<SystemRoots> {
         let result = rustls_native_certs::load_native_certs();
         let mut found = Collected::new();
         for cert in &result.certs {
             found.add(cert.as_ref());
+        }
+        if !found.is_empty() {
+            found.source(StoreKind::OsStore, STORE.to_owned());
         }
         if found.is_empty() && !result.errors.is_empty() {
             return Err(io::Error::other(

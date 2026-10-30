@@ -5,7 +5,7 @@
 //!
 //! | Server | What a client sees |
 //! | --- | --- |
-//! | [`HttpServer`] with a [`TestCa`] leaf | a TLS handshake that validates only when the test CA is trusted; a 200, a 302 or another status |
+//! | [`HttpServer`] with a [`TestCa`] leaf | a TLS handshake that validates only when the test CA is trusted; a 200, a 302, another status, a body (with a length or chunked), or bytes that are not HTTP |
 //! | [`ConnectProxy`] | `200`, `403`, `407` with Basic or with Negotiate to a `CONNECT` |
 //! | [`closed_port`] | connection refused |
 //! | [`NeverAccepts`] | a connect that succeeds and a read that never returns |
