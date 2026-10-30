@@ -50,8 +50,9 @@ newest minors as fixtures).
    `restricted`, and the read-only test of M1-103 (SEC-24) passes with the service account of
    `examples/rbac/rdy-readonly.yaml`. A test that cannot find its variable panics. It never skips.
 6. **The script refuses a cluster it was not meant for.** It deletes the namespaces `rdy-live` and
-   `rdy-system` and the read-only roles, so it runs only when the current context is named `kind-*`, unless
-   `RDY_LIVE_ALLOW_ANY_CLUSTER=1`.
+   `rdy-system` and the read-only roles, so it runs only when the current context is named `kind-*` and
+   the API server is on the loopback address (`127.0.0.1`, `localhost` or `[::1]`, where kind listens),
+   unless `RDY_LIVE_ALLOW_ANY_CLUSTER=1`.
 
 ## Consequences
 
@@ -59,7 +60,14 @@ newest minors as fixtures).
   not. Serialisation and review semantics have not changed between minors in the paths rdy uses, and the
   fixtures cover the middle one.
 - The job is not a gate, so a regression of the client against a real server can reach main and show only as
-  a red check. The mock-backed tests (the guard, the audit of INV-14) still gate.
+  a red check. The mock-backed tests (the guard, the audit of INV-14) still gate. A release closes that
+  gap: `RELEASING.md` asks for a green `kind` run on the release commit before the tag.
+- A red nightly run notifies only the person who last edited the cron line of the workflow (GitHub's rule
+  for scheduled runs). Nobody else hears of it. The founder watches the Actions tab, or edits the cron
+  line (a new minute is enough) so the notice comes to them.
+- The read-only role is checked on the live server in two ways: the server's access reviews deny writes,
+  Secrets, token minting, exec, impersonation and bind, and the server's rules review for `default` and
+  `kube-system` lists no grant outside the role file (plus the self reviews of `system:basic-user`).
 - Three pins move by hand: the kind version, its hash and the image digests. Dependabot does not read them.
   The nightly run shows a pin that rotted (an image removed from Docker Hub).
 - Not tested: the in-cluster path (a pod's service account), OpenShift, and managed distributions. Those are

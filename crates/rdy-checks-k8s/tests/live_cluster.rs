@@ -30,11 +30,13 @@
 //!   says so, so an explicit `--ignored` run can never pass without proving SEC-24. It does not use
 //!   `KUBECONFIG`, because under an admin kubeconfig the server would allow the writes it checks for.
 //!
-//!   It proves two things on a real API server. Every read the guard allows is served to the role
+//!   It proves three things on a real API server. Every read the guard allows is served to the role
 //!   (each must return `Ok`; a 404 is tolerated only for the get of a storage class that does not
-//!   exist, where the point is that the answer is not a 403), and the
-//!   same role, asked through the server's own access review, may not write or read Secrets. The
-//!   guard's refusals need no cluster and are tested without one.
+//!   exist, where the point is that the answer is not a 403). The same role, asked through the
+//!   server's own access review, may not write, read Secrets, mint tokens, exec, impersonate or bind.
+//!   And the server's rules review of the role, for `default` and `kube-system`, lists only the grants
+//!   of the role file (and `system:basic-user`'s reviews), so nothing else is granted by any binding.
+//!   The guard's refusals need no cluster and are tested without one.
 //!
 //! Not covered here, and carried:
 //! - The OpenShift reads (`securitycontextconstraints` list, `clusterversions/version` get). A kind
@@ -329,12 +331,18 @@ fn review(
     namespace: Option<&str>,
     name: Option<&str>,
 ) -> SelfSubjectAccessReview {
+    // `pods/exec` is the resource `pods` and the subresource `exec`.
+    let (resource, subresource) = match resource.split_once('/') {
+        Some((resource, subresource)) => (resource, Some(subresource.to_owned())),
+        None => (resource, None),
+    };
     SelfSubjectAccessReview {
         spec: SelfSubjectAccessReviewSpec {
             resource_attributes: Some(ResourceAttributes {
                 verb: Some(verb.to_owned()),
                 group: Some(group.to_owned()),
                 resource: Some(resource.to_owned()),
+                subresource,
                 namespace: namespace.map(str::to_owned),
                 name: name.map(str::to_owned),
                 ..ResourceAttributes::default()
@@ -354,10 +362,11 @@ type Ask = (
     Option<&'static str>,
 );
 
-/// Asks the server whether the identity may do `ask`.
+/// Asks the server whether the identity may do `ask`. The answer counts only when the server filled
+/// the status and reported no evaluation error, so a denial can never be a missing answer.
 async fn is_allowed(reviews: &kube::Api<SelfSubjectAccessReview>, ask: Ask) -> bool {
     let (verb, group, resource, namespace, name) = ask;
-    reviews
+    let status = reviews
         .create(
             &PostParams::default(),
             &review(verb, group, resource, namespace, name),
@@ -365,7 +374,96 @@ async fn is_allowed(reviews: &kube::Api<SelfSubjectAccessReview>, ask: Ask) -> b
         .await
         .expect("access review")
         .status
-        .is_some_and(|status| status.allowed)
+        .expect("the server fills the status");
+    assert!(
+        status
+            .evaluation_error
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty(),
+        "{ask:?}: the server could not evaluate the review: {status:?}"
+    );
+    status.allowed
+}
+
+/// One grant of a rules review: `(verb, api group, resource, resource name)`. The name is empty for
+/// every name. A resource with a subresource reads `pods/exec`, as in a role.
+type Grant = (String, String, String, String);
+
+/// What the `rdy-readonly` role grants as resources, from `examples/rbac/rdy-readonly.yaml`. A test keeps
+/// that file and the guard's `ALLOWED` in step; this list keeps the live server in step with the file.
+const GRANTED: &[(&str, &str, &str, &str)] = &[
+    ("get", "", "namespaces", ""),
+    ("list", "", "nodes", ""),
+    ("list", "", "pods", ""),
+    ("list", "", "persistentvolumeclaims", ""),
+    ("list", "", "events", ""),
+    ("get", "storage.k8s.io", "storageclasses", ""),
+    ("list", "storage.k8s.io", "storageclasses", ""),
+    ("list", "storage.k8s.io", "csinodes", ""),
+    ("list", "storage.k8s.io", "csidrivers", ""),
+    (
+        "list",
+        "security.openshift.io",
+        "securitycontextconstraints",
+        "",
+    ),
+    ("get", "config.openshift.io", "clusterversions", "version"),
+    ("create", "authentication.k8s.io", "selfsubjectreviews", ""),
+    (
+        "create",
+        "authorization.k8s.io",
+        "selfsubjectaccessreviews",
+        "",
+    ),
+    (
+        "create",
+        "authorization.k8s.io",
+        "selfsubjectrulesreviews",
+        "",
+    ),
+];
+
+/// What the server grants the identity in `namespace`, one entry per verb, group, resource and name.
+/// The server may merge rules, so the answer is expanded before it is compared.
+fn grants(namespace: &str, answer: &SelfSubjectRulesReview) -> Vec<Grant> {
+    let status = answer
+        .status
+        .as_ref()
+        .expect("the server fills the status of a rules review");
+    assert!(
+        !status.incomplete,
+        "{namespace}: the rules review is incomplete, so it cannot prove the role is read-only: {status:?}"
+    );
+    assert!(
+        status
+            .evaluation_error
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty(),
+        "{namespace}: the server could not evaluate the rules review: {status:?}"
+    );
+    let mut out = Vec::new();
+    for rule in &status.resource_rules {
+        let groups = rule.api_groups.clone().unwrap_or_default();
+        let resources = rule.resources.clone().unwrap_or_default();
+        let names = rule.resource_names.clone().unwrap_or_default();
+        let names = if names.is_empty() {
+            vec![String::new()]
+        } else {
+            names
+        };
+        for verb in &rule.verbs {
+            for group in &groups {
+                for resource in &resources {
+                    for name in &names {
+                        out.push((verb.clone(), group.clone(), resource.clone(), name.clone()));
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 #[tokio::test]
@@ -431,21 +529,24 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             .list(&all)
             .await,
     );
-    // The rules review is a POST the guard allows. The server answers 201.
-    let rules = SelfSubjectRulesReview {
-        spec: SelfSubjectRulesReviewSpec {
-            namespace: Some("default".to_owned()),
-        },
-        ..SelfSubjectRulesReview::default()
-    };
-    assert_served(
-        "selfsubjectrulesreviews",
-        false,
-        &client
+    // The rules review is a POST the guard allows. The server answers 201. It is asked for `default`
+    // (where only the cluster role applies) and for `kube-system` (where the optional Role adds the
+    // deployments list), and the answers are read in step 2.
+    let mut rules_answers = Vec::new();
+    for namespace in ["default", "kube-system"] {
+        let rules = SelfSubjectRulesReview {
+            spec: SelfSubjectRulesReviewSpec {
+                namespace: Some(namespace.to_owned()),
+            },
+            ..SelfSubjectRulesReview::default()
+        };
+        let answer = client
             .all::<SelfSubjectRulesReview>()
             .create(&PostParams::default(), &rules)
-            .await,
-    );
+            .await;
+        assert_served("selfsubjectrulesreviews", false, &answer);
+        rules_answers.push((namespace, answer.expect("served, checked above")));
+    }
 
     // 2. The server itself says what the role can and cannot do. These are the allowed
     //    SelfSubjectAccessReview POSTs, so they pass the guard.
@@ -491,11 +592,52 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             None,
             Some("other"),
         ),
+        // Escalation paths: minting tokens, running commands in pods, acting as someone else and
+        // granting roles.
+        ("create", "", "serviceaccounts/token", Some("default"), None),
+        ("create", "", "pods/exec", Some("default"), None),
+        ("impersonate", "", "users", None, None),
+        (
+            "bind",
+            "rbac.authorization.k8s.io",
+            "clusterroles",
+            None,
+            None,
+        ),
     ] {
         assert!(
             !is_allowed(&reviews, ask).await,
             "the role must not allow {ask:?}"
         );
+    }
+
+    //    "Nothing else" is read from the server, not sampled. Every grant the server reports for the
+    //    identity must be one the role file lists, plus the deployments list in `kube-system`. Another
+    //    binding, an aggregated role or a broad grant to `system:authenticated` shows up here.
+    for (namespace, answer) in &rules_answers {
+        for grant in grants(namespace, answer) {
+            let known = GRANTED.iter().any(|&(verb, group, resource, name)| {
+                grant
+                    == (
+                        verb.to_owned(),
+                        group.to_owned(),
+                        resource.to_owned(),
+                        name.to_owned(),
+                    )
+            });
+            let optional = *namespace == "kube-system"
+                && grant
+                    == (
+                        "list".into(),
+                        "apps".into(),
+                        "deployments".into(),
+                        String::new(),
+                    );
+            assert!(
+                known || optional,
+                "{namespace}: the server grants {grant:?}, which the rdy-readonly role file does not list"
+            );
+        }
     }
 
     // 3. The guard refuses a write and a Secrets read before they reach the server.
@@ -518,7 +660,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, 11 reads and posts, 12 reviews, two refusals.
+    // 4. One log entry per call: /version, 12 reads and posts, 16 reviews, two refusals.
     let log = run.action_log().actions;
-    assert_eq!(log.len(), 1 + 11 + 12 + 2, "{log:#?}");
+    assert_eq!(log.len(), 1 + 12 + 16 + 2, "{log:#?}");
 }

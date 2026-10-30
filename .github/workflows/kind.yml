@@ -59,7 +59,10 @@ jobs:
       # sha256 of kind-linux-amd64 of v0.33.0. It equals the release's kind-linux-amd64.sha256sum.
       KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
       NODE_IMAGE: ${{ matrix.image }}
-      EXPECT_MINOR: ${{ matrix.minor }}
+      # Linux tests run against the musl target, so CI tests what ships (docs/plan/06). C code in a
+      # dependency builds with musl's compiler: set CC only, never the linker (ADR 0006).
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-musl
+      CC_x86_64_unknown_linux_musl: musl-gcc
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -67,14 +70,23 @@ jobs:
       # The runner has an older kind. This one is the pinned file, with its hash checked before it runs.
       - name: Install kind (pinned file, sha256 checked)
         run: |
-          curl --proto '=https' --tlsv1.2 -fsSL -o "$RUNNER_TEMP/kind" \
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --max-time 120 -o "$RUNNER_TEMP/kind-download" \
             "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
-          echo "${KIND_SHA256}  $RUNNER_TEMP/kind" | sha256sum -c -
-          sudo install -m 0755 "$RUNNER_TEMP/kind" /usr/local/bin/kind
-          kind version
-          kind version | grep -F "kind ${KIND_VERSION} "
-      - name: Install the pinned toolchain
-        run: rustup toolchain install --no-self-update
+          echo "${KIND_SHA256}  $RUNNER_TEMP/kind-download" | sha256sum -c -
+          # No sudo: the file goes to a directory of the runner temp that this job puts first on PATH.
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 "$RUNNER_TEMP/kind-download" "$RUNNER_TEMP/bin/kind"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/kind" version
+          "$RUNNER_TEMP/bin/kind" version | grep -F "kind ${KIND_VERSION} "
+      - name: Install musl-tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+      - name: Install the pinned toolchain and the musl target
+        run: |
+          rustup toolchain install --no-self-update
+          rustup target add "$CARGO_BUILD_TARGET"
       # PRs read the cache that main saved. Only main writes it, and only the leg that makes the same
       # build as the other, so two legs do not race to save one key.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
