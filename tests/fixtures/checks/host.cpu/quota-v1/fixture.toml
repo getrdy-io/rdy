@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cpu-quota-v1"
+summary = "RHEL 8 guest on cgroup v1 with 8 vCPUs whose parent slice caps CPU at 1.5 cores"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-access-anonymous"
+summary = "The identity review says system:anonymous, as a kubeconfig with no credentials gets"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.access"]
+
+[caps]
+root = false
+network = true
+kube = true

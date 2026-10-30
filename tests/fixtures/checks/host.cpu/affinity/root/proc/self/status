@@ -1,0 +1,7 @@
+Name:	rdy
+Umask:	0022
+State:	R (running)
+Threads:	1
+Cpus_allowed:	03
+Cpus_allowed_list:	0-1
+Mems_allowed_list:	0

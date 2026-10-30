@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cpu-bare-metal"
+summary = "Two-socket server with 8 logical CPUs on 4 cores, no hypervisor flag, AVX-512"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false
