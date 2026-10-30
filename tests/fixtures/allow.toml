@@ -22,3 +22,15 @@ rule = "host"
 path = "tests/fixtures/wycheproof/ed25519_test.json"
 value = "rfc-editor.org"
 reason = "Third-party test vectors, never edited; a reference link in the vector notes, not a host a test contacts"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/host.os/ubuntu-wsl/native/uname.json"
+value = "5.15.90.1"
+reason = "A WSL2 kernel version with four parts (5.15.90.1-microsoft-standard-WSL2), not an address; host.os parses it"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/host.os/ubuntu-wsl/root/proc/sys/kernel/osrelease"
+value = "5.15.90.1"
+reason = "A WSL2 kernel version with four parts (5.15.90.1-microsoft-standard-WSL2), not an address; host.os parses it"

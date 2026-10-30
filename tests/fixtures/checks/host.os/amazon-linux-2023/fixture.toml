@@ -1,0 +1,12 @@
+schema = 1
+name = "amazon-linux-2023"
+summary = "Amazon Linux 2023 on aarch64, ID_LIKE lists fedora"
+origin = "hand"
+os = "linux"
+arch = "aarch64"
+answers = ["host.os"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,12 @@
+schema = 1
+name = "alpine"
+summary = "Alpine 3.19.1 on x86_64, no systemd, kernel has no FIPS switch"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.os"]
+
+[caps]
+root = false
+network = false
+kube = false
