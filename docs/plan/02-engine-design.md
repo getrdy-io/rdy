@@ -504,6 +504,47 @@ tests policy.
   stage timings and the `Location` host. It reads at most 64 KiB of body and discards it, and never
   follows a redirect. Failures are typed: `dns`, `refused`, `blackhole`, `tls_unknown_issuer`,
   `tls_alert`, `reset_after_hello`, `proxy_403`, `proxy_407`, `http_status`, `blocked_address`.
+  As built in M1-093: `Probe::http(HttpProbe) -> Result<HttpOutcome, ProbeError>` in
+  `rdy_engine::probe::net`. `HttpProbe { target, method, route, roots }` holds a `Target` that is an
+  `http://` or `https://` URL (the sketch below had a `url: String`; a `Target` is already parsed, and the
+  policy compares its host and port with the check's spec hosts), `HttpMethod::{Head, Get}`, `Route`
+  and `Roots::{System, Bundled}` (the spec's `trust`). It takes the policy and the attempts of `tcp`
+  through the same `dial`. An `https` target is wrapped in the **strict** client configuration
+  (`probe/net/tls/strict.rs`): a real `WebPkiServerVerifier` on the OS roots (`NativeCall::SystemRoots`,
+  asked once per run) for `Roots::System`, or on `webpki-roots` for `Roots::Bundled`, with no custom
+  verifier and no `dangerous()` call, ALPN `http/1.1` only, SNI from the spec host, no resumption. A chain
+  the roots do not accept fails the handshake before any request byte, as `NetFailure::TlsUntrusted
+  { failure: TrustFailure }` (`UnknownIssuer`, `Expired`, `NotYetValid`, `NameMismatch`, ...); an empty,
+  unreadable or overridden OS store is `NetFailure::NoTrustRoots { reason: NoRoots }`, and `Bundled`
+  never asks for the OS store. The recording verifier stays private to `record.rs` and is never offered
+  to the HTTP path. hyper's client connection API (`http1`, features `client` and `http1` only) runs the
+  exchange over a small safe `Io` adapter; the request is the method, the path and query, `Host`, a fixed
+  `User-Agent`, `Accept: */*` and `Connection: close`. `HttpOutcome` holds `status`, `headers` (the six of
+  `REPORTED_HEADERS`: `server`, `content-type`, `content-length`, `date`, `via`, `retry-after`; values
+  cut to 256 printable ASCII characters), `location_host` (an absolute `Location`'s host only), `body_bytes`
+  and `body_cut` (the facade counts and drops at most 64 KiB), `tls` (protocol and chosen ALPN), the
+  `TcpReport`, and `HttpTiming { connect, tls, first_byte, total }`. A status is data, never an error.
+  The other failures are `NetFailure::HttpFailed { reason }` (not HTTP/1.1, cut off, reset, or a head over 16 KiB), `Timeout`
+  (10 s for the reply head, 5 s for the discard), `NotConnected` (its `reason` is
+  `AttemptOutcome::Refused.phrase()` for a refused port and `AttemptOutcome::TimedOut.phrase()` for a
+  silent one, which is how a check tells `refused` from `blackhole`), `Dns`, `TlsReset`, `TlsAlert`,
+  `ProxyForbidden`, `ProxyAuthRequired`, and `Denied` for `blocked_address`, a `host:port` target
+  (`RULE_HTTP_NOT_URL`) and a plain `http://` target through the proxy (`RULE_HTTP_PLAIN_VIA_PROXY`: the
+  absolute form is M1-097). One `http` entry per call: `method`, `url` (scheme, host, port and path, never
+  the query), `via_proxy`, `addr` and `status`.
+- `Probe::trust_store() -> Result<TrustStore, ProbeError>` (M1-093, for M1-100) returns what the run
+  found in the OS store: `sources` (the bundle files or directories that held a certificate, or the OS
+  store, as raw `StoreSource { kind, location }`), the SHA-256 of each root in store order (`roots`,
+  with `TrustStore::hash`, `contains` and `hex`), and `missing: Option<NoRoots>` for an empty,
+  unreadable or overridden store. It adds no log entry; the one run-level `native` entry records the
+  question. `NativeValue::SystemRoots` now holds a `SystemRoots { certs, sources }`; a replay fixture
+  writes `value` as a list of base64 certificates (no source) or as `{ "certs": [...], "sources":
+  [{ "kind": "bundle" | "directory" | "os", "location": "..." }] }`.
+- **Test clock (feature `testing`).** `ProbeHub::pin_clock(Duration since the epoch)` and `unpin_clock`
+  set the time that both the recording (`tls_chain`) and the strict (`http`) configurations give
+  rustls as their `time_provider`, so a generated leaf is `Expired` or `NotYetValid` whatever the real date
+  is (M1-099's `clock_or_expiry` case). A build without `testing` has no field and no way to move the
+  clock.
 - System roots: PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the standard paths) are read through the
   facade on Unix; macOS without the two variables, and Windows, use `NativeCall::SystemRoots` over the OS
   store. No revocation check, and the report says so.
@@ -1001,7 +1042,9 @@ impl Probe {
     pub async fn tcp(&self, target: &Target, route: Route) -> Result<TcpReport, ProbeError>;
     // As built in M1-092: `route` as for `tcp`. A chain that does not validate is data in `TlsChain`.
     pub async fn tls_chain(&self, target: &Target, route: Route) -> Result<TlsChain, ProbeError>;
+    // As built in M1-093: see the `http` bullet in "Network". `trust_store` returns the OS store facts.
     pub async fn http(&self, req: HttpProbe) -> Result<HttpOutcome, ProbeError>;
+    pub async fn trust_store(&self) -> Result<TrustStore, ProbeError>;
     pub async fn native(&self, call: NativeCall) -> Result<NativeValue, ProbeError>;
     pub fn kube_call(&self, method: &str, path: &str, via_proxy: Option<&str>) -> Result<KubeCall, ProbeError>;  // M1-103; the guard's door to the log
 }
@@ -1011,7 +1054,8 @@ impl Probe {
 // the table never reaches any backend, replay included (PC-44).
 
 // `Target` is `rdy_spec::Target`. `Route { Direct, ViaProxy }` carries the choice (M1-091).
-pub struct HttpProbe { pub url: String, pub method: Method /* Head | Get */, pub route: Route,
+// As built in M1-093 the URL is a `Target` (an http or https URL) and the method is `HttpMethod`.
+pub struct HttpProbe { pub target: Target, pub method: HttpMethod /* Head | Get */, pub route: Route,
                        pub roots: Roots /* System | Bundled */ }
 #[non_exhaustive]
 pub enum NativeCall { Statvfs { path: PathBuf }, Uname, Rlimit(Resource), Hostname,

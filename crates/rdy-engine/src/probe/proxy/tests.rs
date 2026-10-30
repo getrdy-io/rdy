@@ -361,6 +361,53 @@ fn every_failure_ends_with_a_fix_and_names_no_peer_text() {
             reason: "no HTTP status line",
         },
         NetFailure::NoProxy,
+        NetFailure::NotConnected {
+            target: "registry.acme.test:443".to_owned(),
+            reason: "connection refused",
+        },
+        NetFailure::TlsReset {
+            target: "registry.acme.test:443".to_owned(),
+        },
+        NetFailure::TlsAlert {
+            target: "registry.acme.test:443".to_owned(),
+            alert: "HandshakeFailure".to_owned(),
+        },
+        NetFailure::TlsFailed {
+            target: "registry.acme.test:443".to_owned(),
+            reason: "the server did not speak TLS as expected",
+        },
+        NetFailure::TlsUntrusted {
+            target: "registry.acme.test:443".to_owned(),
+            failure: TrustFailure::UnknownIssuer,
+        },
+        NetFailure::TlsUntrusted {
+            target: "registry.acme.test:443".to_owned(),
+            failure: TrustFailure::Expired,
+        },
+        NetFailure::TlsUntrusted {
+            target: "registry.acme.test:443".to_owned(),
+            failure: TrustFailure::NameMismatch,
+        },
+        NetFailure::TlsUntrusted {
+            target: "registry.acme.test:443".to_owned(),
+            failure: TrustFailure::BadSignature,
+        },
+        NetFailure::NoTrustRoots {
+            target: "registry.acme.test:443".to_owned(),
+            reason: NoRoots::Empty,
+        },
+        NetFailure::NoTrustRoots {
+            target: "registry.acme.test:443".to_owned(),
+            reason: NoRoots::Unreadable,
+        },
+        NetFailure::NoTrustRoots {
+            target: "registry.acme.test:443".to_owned(),
+            reason: NoRoots::Overridden,
+        },
+        NetFailure::HttpFailed {
+            target: "registry.acme.test:443".to_owned(),
+            reason: "the connection was reset",
+        },
     ];
     for failure in failures {
         let text = failure.to_string();
@@ -379,4 +426,34 @@ fn every_failure_ends_with_a_fix_and_names_no_peer_text() {
         sent_credentials: true,
     };
     assert!(negotiate.to_string().contains("does not attempt"));
+}
+
+#[test]
+fn the_log_phrase_of_every_new_failure_is_fixed_text_without_a_host_or_a_fix() {
+    for failure in [
+        NetFailure::TlsUntrusted {
+            target: "secret.acme.test:443".to_owned(),
+            failure: TrustFailure::UnknownIssuer,
+        },
+        NetFailure::NoTrustRoots {
+            target: "secret.acme.test:443".to_owned(),
+            reason: NoRoots::Empty,
+        },
+        NetFailure::HttpFailed {
+            target: "secret.acme.test:443".to_owned(),
+            reason: "the exchange failed",
+        },
+    ] {
+        let phrase = failure.log_phrase();
+        assert!(!phrase.contains("secret.acme.test"), "{phrase}");
+        assert!(!phrase.contains("Fix:"), "{phrase}");
+    }
+    assert_eq!(
+        NetFailure::NoTrustRoots {
+            target: "a:1".to_owned(),
+            reason: NoRoots::Empty,
+        }
+        .log_phrase(),
+        "no roots to verify with: no OS trust store found"
+    );
 }

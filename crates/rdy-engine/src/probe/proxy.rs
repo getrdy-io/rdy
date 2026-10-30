@@ -12,6 +12,7 @@
 
 use std::fmt;
 
+use super::trust::{NoRoots, TrustFailure};
 use crate::redact::KNOWN_SECRET_MIN_LEN;
 use rdy_spec::Target;
 use rdy_spec::scalar::Host;
@@ -443,6 +444,43 @@ pub enum NetFailure {
         /// A fixed phrase for what was wrong.
         reason: &'static str,
     },
+    /// The strict handshake of an HTTP call refused the server's certificate (M1-093): its issuer is
+    /// not in the roots, it has expired, or it is not valid for the name. The chain itself is what
+    /// `Probe::tls_chain` reports.
+    #[error(
+        "the certificate of {target} was not accepted ({}). Fix: {}",
+        .failure.phrase(),
+        .failure.fix()
+    )]
+    TlsUntrusted {
+        /// The `host:port` that was asked for.
+        target: String,
+        /// Why the roots did not accept it.
+        failure: TrustFailure,
+    },
+    /// An HTTP call verifies against the OS roots and there are none to use (M1-093).
+    #[error(
+        "{target} cannot be checked against the OS trust store: {}. Fix: {}",
+        .reason.phrase(),
+        .reason.fix()
+    )]
+    NoTrustRoots {
+        /// The `host:port` that was asked for.
+        target: String,
+        /// Why there are no roots.
+        reason: NoRoots,
+    },
+    /// The HTTP exchange failed after the connection (and the TLS handshake) opened: the reply was not
+    /// HTTP/1.1, was cut off, was reset, or the request could not be written (M1-093).
+    #[error(
+        "the HTTP exchange with {target} failed ({reason}). Fix: check that {target} speaks HTTP/1.1 on that port; a TLS port reached with http:// and a plain port reached with https:// are the usual causes"
+    )]
+    HttpFailed {
+        /// The `host:port` that was asked for.
+        target: String,
+        /// A fixed phrase for what was wrong.
+        reason: &'static str,
+    },
 }
 
 impl NetFailure {
@@ -460,6 +498,13 @@ impl NetFailure {
             Self::TlsReset { .. } => "the connection was reset during the TLS handshake".to_owned(),
             Self::TlsAlert { .. } => "the server ended the TLS handshake with an alert".to_owned(),
             Self::TlsFailed { reason, .. } => format!("the TLS handshake failed: {reason}"),
+            Self::TlsUntrusted { failure, .. } => {
+                format!("the certificate was not accepted: {}", failure.phrase())
+            }
+            Self::NoTrustRoots { reason, .. } => {
+                format!("no roots to verify with: {}", reason.phrase())
+            }
+            Self::HttpFailed { reason, .. } => format!("the HTTP exchange failed: {reason}"),
         }
     }
 }

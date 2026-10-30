@@ -50,6 +50,12 @@ only) and `webpki-roots`, as 02 and ADR 0014 decision 3 planned, so they are in 
 out of it is `loopback`, `testing` and `rcgen`, and the CI guard checks those. The `deny.toml` wrapper for
 `tokio-rustls` is unchanged (`rdy-engine` was already listed) and still keeps it out of check crates.
 
+**Amendment (M1-093).** The HTTP server gained three replies for the HTTP probe's tests: `Reply::Body`
+(a `Content-Length` body), `Reply::Chunked` (a chunked stream with no length, 8 KiB chunks) and
+`Reply::Raw` (exact bytes in place of a reply, for a peer that is not HTTP). A `HEAD` gets the length and
+no body. The `loopback` feature also turns on `hyper`, because the facade's HTTP module is built with it.
+The `rdy` tree has `hyper` on purpose (M1-093); it still has no `loopback`, `testing` or `rcgen`.
+
 ## Alternatives considered
 
 - **A `test-support` feature of `rdy-checks-net` (the plan as written).** Rejected: it needs the wall opened

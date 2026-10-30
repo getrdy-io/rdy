@@ -36,6 +36,10 @@
 //! **TLS.** [`Probe::tls_chain`] takes the same policy and the same stream and runs one handshake that
 //! sends no application data (the `tls` module, M1-092).
 //!
+//! **HTTP.** [`Probe::http`] takes the same policy and the same stream, verifies an `https://` target
+//! strictly, sends one `HEAD` or `GET`, reads at most 64 KiB of body and discards it, and follows no
+//! redirect (the `http` module, M1-093).
+//!
 //! **The log.** One `connect` entry per call, proxy `CONNECT` included: `host`, `port`, `via_proxy` (the
 //! proxy without its userinfo, or `null`) and `addr` (the connected address, `null` through a proxy or
 //! when nothing connected). There is no `proto`, which marks a datagram. A failure has a fixed `error`
@@ -63,16 +67,21 @@ use super::sock::host_port;
 use super::{Backend, NetFailure, Probe, ProbeError, ProbeHub, refuse, settle};
 use crate::check::PeerClass;
 
+mod http;
 #[cfg(any(test, feature = "testing"))]
 pub(super) mod replay;
 #[cfg(test)]
 mod tests;
 mod tls;
 
+pub use http::{
+    BODY_TIMEOUT, HttpMethod, HttpOutcome, HttpProbe, HttpTiming, HttpTls, MAX_BODY,
+    REPORTED_HEADERS, RESPONSE_TIMEOUT, RULE_HTTP_NOT_URL, RULE_HTTP_PLAIN_VIA_PROXY,
+};
 pub(super) use tls::TlsState;
 pub use tls::{
     ALPN_PROTOCOLS, HANDSHAKE_TIMEOUT, NoRoots, REVOCATION_NOTE, Roots, TlsChain, TrustFailure,
-    TrustVerdict,
+    TrustStore, TrustVerdict,
 };
 
 /// The longest one connection attempt waits.
@@ -162,8 +171,10 @@ impl AttemptOutcome {
         }
     }
 
-    /// A fixed phrase for the log.
-    fn phrase(self) -> &'static str {
+    /// A fixed phrase for the log, and for the `reason` of a [`NetFailure::NotConnected`]: a check tells
+    /// a refused port (`Refused.phrase()`) from a silent one (`TimedOut.phrase()`) by comparing it.
+    #[must_use]
+    pub fn phrase(self) -> &'static str {
         match self {
             Self::Connected => "connected",
             Self::Refused => "connection refused",

@@ -1061,6 +1061,77 @@ async fn a_symlink_chain_resolves_and_a_loop_fails() {
 // ---- native, api, env --------------------------------------------------------------------------
 
 #[tokio::test]
+async fn a_system_roots_value_may_name_where_the_roots_were_read_from() {
+    use crate::probe::{StoreKind, StoreSource};
+    let fixture = load(&[(
+        "native/roots.json",
+        r#"{"call":"system_roots","value":{"certs":["AQID","BAUG"],"sources":[
+            {"kind":"bundle","location":"/etc/pki/tls/certs/ca-bundle.crt"},
+            {"kind":"directory","location":"/etc/ssl/certs"},
+            {"kind":"os","location":"the macOS keychains"}]}}"#,
+    )])
+    .expect("loads");
+    let run = TestRun::for_fixture(&fixture);
+    let check = run.context("net.tls_intercept", Os::Linux, []);
+    assert_eq!(
+        check.probe().native(NativeCall::SystemRoots).await,
+        Ok(NativeValue::SystemRoots(crate::probe::SystemRoots::new(
+            vec![vec![1, 2, 3], vec![4, 5, 6]],
+            vec![
+                StoreSource::new(StoreKind::Bundle, "/etc/pki/tls/certs/ca-bundle.crt"),
+                StoreSource::new(StoreKind::Directory, "/etc/ssl/certs"),
+                StoreSource::new(StoreKind::OsStore, "the macOS keychains"),
+            ]
+        )))
+    );
+
+    // The list form has no named source.
+    let fixture = load(&[(
+        "native/roots.json",
+        r#"{"call":"system_roots","value":["AQID"]}"#,
+    )])
+    .expect("loads");
+    let run = TestRun::for_fixture(&fixture);
+    let check = run.context("net.tls_intercept", Os::Linux, []);
+    let Ok(NativeValue::SystemRoots(found)) = check.probe().native(NativeCall::SystemRoots).await
+    else {
+        panic!("a recorded answer");
+    };
+    assert!(found.sources.is_empty());
+
+    for (text, want) in [
+        (
+            r#"{"call":"system_roots","value":{"sources":[]}}"#,
+            "needs `certs`",
+        ),
+        (
+            r#"{"call":"system_roots","value":{"certs":["AQID"],"sources":"x"}}"#,
+            "`sources` must be a list",
+        ),
+        (
+            r#"{"call":"system_roots","value":{"certs":["AQID"],"sources":[{"kind":"file","location":"/x"}]}}"#,
+            "must be bundle, directory or os",
+        ),
+        (
+            r#"{"call":"system_roots","value":{"certs":["AQID"],"sources":[{"kind":"bundle"}]}}"#,
+            "location",
+        ),
+        (
+            r#"{"call":"system_roots","value":{"certs":["AQID"],"extra":1}}"#,
+            "extra",
+        ),
+        (
+            r#"{"call":"system_roots","value":{"certs":"AQID"}}"#,
+            "list of base64",
+        ),
+    ] {
+        let error = load(&[("native/a.json", text)]).expect_err(want);
+        assert_eq!(invalid_path(&error), "native/a.json", "{want}");
+        assert!(error.to_string().contains(want), "{want}: {error}");
+    }
+}
+
+#[tokio::test]
 async fn native_files_answer_each_call_and_unrecorded_calls_fail() {
     let fixture = load(&[
         (
@@ -1135,7 +1206,7 @@ async fn native_files_answer_each_call_and_unrecorded_calls_fail() {
     );
     assert_eq!(
         probe.native(NativeCall::SystemRoots).await,
-        Ok(NativeValue::SystemRoots(vec![vec![1, 2, 3]]))
+        Ok(NativeValue::SystemRoots(vec![vec![1, 2, 3]].into()))
     );
     // The machine id is run-level only, and the fixture caller is what makes one.
     match run

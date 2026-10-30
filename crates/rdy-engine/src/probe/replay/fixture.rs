@@ -43,7 +43,7 @@ use super::{ApiRecord, CommandAnswer, NativeAnswer, NativeFailure, Replay, b64, 
 use crate::check::{Need, Os};
 use crate::probe::{
     DirEntry, MachineId, NativeCall, NativeValue, Output, Resource, RlimitInfo, StatvfsInfo,
-    UnameInfo,
+    StoreKind, StoreSource, SystemRoots, UnameInfo,
 };
 
 /// The largest fixture file the loader reads. The fixture lint (M1-050) is stricter.
@@ -1576,21 +1576,64 @@ fn native_value(
         NativeCall::Hostname => Ok(NativeValue::Hostname(text(value)?)),
         NativeCall::MachineId => Ok(NativeValue::MachineId(MachineId::new(text(value)?))),
         NativeCall::SystemRoots => {
-            let Value::Array(items) = value else {
-                return Err(ctx.err("`value` must be a list of base64 certificates"));
-            };
-            let roots = items
-                .into_iter()
-                .map(|item| {
-                    let Value::String(encoded) = item else {
-                        return Err(ctx.err("`value` must be a list of base64 certificates"));
-                    };
-                    b64::decode(&encoded).map_err(|reason| ctx.err(format!("`value`: {reason}")))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(NativeValue::SystemRoots(roots))
+            // A list of base64 certificates, from no named source, or an object that also names the
+            // places the roots were read from.
+            if let Value::Object(_) = value {
+                let mut obj = Obj::from_value(ctx, value, "value")?;
+                let certs = obj.take("certs").ok_or_else(|| {
+                    ctx.err("`value` needs `certs`, a list of base64 certificates")
+                })?;
+                let certs = root_certs(ctx, certs)?;
+                let sources = match obj.take("sources") {
+                    None => Vec::new(),
+                    Some(Value::Array(items)) => items
+                        .into_iter()
+                        .map(|item| root_source(ctx, item))
+                        .collect::<Result<Vec<_>, _>>()?,
+                    Some(_) => return Err(ctx.err("`sources` must be a list")),
+                };
+                obj.finish()?;
+                return Ok(NativeValue::SystemRoots(SystemRoots::new(certs, sources)));
+            }
+            Ok(NativeValue::SystemRoots(SystemRoots::from(root_certs(
+                ctx, value,
+            )?)))
         }
     }
+}
+
+/// The base64 certificates of a `system_roots` value.
+fn root_certs(ctx: &Ctx<'_>, value: Value) -> Result<Vec<Vec<u8>>, FixtureError> {
+    let Value::Array(items) = value else {
+        return Err(ctx.err("`value` must be a list of base64 certificates"));
+    };
+    items
+        .into_iter()
+        .map(|item| {
+            let Value::String(encoded) = item else {
+                return Err(ctx.err("`value` must be a list of base64 certificates"));
+            };
+            b64::decode(&encoded).map_err(|reason| ctx.err(format!("`value`: {reason}")))
+        })
+        .collect()
+}
+
+/// One `{ "kind": "bundle" | "directory" | "os", "location": "..." }` of a `system_roots` value.
+fn root_source(ctx: &Ctx<'_>, value: Value) -> Result<StoreSource, FixtureError> {
+    let mut obj = Obj::from_value(ctx, value, "sources")?;
+    let kind = match obj.string("kind")?.as_str() {
+        "bundle" => StoreKind::Bundle,
+        "directory" => StoreKind::Directory,
+        "os" => StoreKind::OsStore,
+        other => {
+            return Err(ctx.err(format!(
+                "a source `kind` is `{other}`; it must be bundle, directory or os"
+            )));
+        }
+    };
+    let location = obj.string("location")?;
+    obj.finish()?;
+    Ok(StoreSource::new(kind, location))
 }
 
 /// `api/*.json`.

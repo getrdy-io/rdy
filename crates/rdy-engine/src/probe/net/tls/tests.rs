@@ -26,6 +26,7 @@ use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use super::*;
 use crate::check::{CheckInfo, CheckMeta, Os, OsSupport, PeerClass, Support};
 use crate::family::HostSet;
+use crate::probe::SystemRoots;
 use crate::probe::net::{AttemptOutcome, RULE_PROXY_UNDECLARED, RULE_TCP_ADDRESS, RULE_TCP_HOST};
 use crate::probe::replay::NativeFailure;
 use crate::probe::replay::{Replay, TcpScript};
@@ -141,7 +142,10 @@ fn machine(server: SocketAddr, bundle: Option<Vec<Vec<u8>>>) -> Replay {
         .tcp(server, TcpScript::Serve("web".to_owned()))
         .serve_tcp("web", server);
     match bundle {
-        Some(roots) => replay.native(NativeCall::SystemRoots, NativeValue::SystemRoots(roots)),
+        Some(roots) => replay.native(
+            NativeCall::SystemRoots,
+            NativeValue::SystemRoots(roots.into()),
+        ),
         None => replay,
     }
 }
@@ -291,11 +295,11 @@ fn the_bundled_roots_build_a_verifier_and_an_empty_set_does_not() {
     let bundled = Trust::bundled(&provider);
     assert!(bundled.roots() > 100, "{}", bundled.roots());
     assert!(bundled.verifier.is_some());
-    let none = Trust::from_der(&[], &provider);
+    let none = Trust::from_der(&SystemRoots::default(), &provider);
     assert_eq!(none.roots(), 0);
     assert!(none.verifier.is_none());
     // Bytes that are not a certificate are left out of the count.
-    let junk = Trust::from_der(&[vec![1, 2, 3]], &provider);
+    let junk = Trust::from_der(&vec![vec![1, 2, 3]].into(), &provider);
     assert_eq!(junk.roots(), 0);
 }
 
@@ -385,7 +389,7 @@ async fn sni_is_the_permitted_host_and_nothing_else() {
         .serve_tcp("proxy", proxy.addr())
         .native(
             NativeCall::SystemRoots,
-            NativeValue::SystemRoots(vec![der(&ca)]),
+            NativeValue::SystemRoots(vec![der(&ca)].into()),
         );
     let proxied_hub = hub_over(replay);
     proxied_hub
@@ -409,7 +413,7 @@ async fn sni_is_the_permitted_host_and_nothing_else() {
             .serve_tcp("web", server.addr())
             .native(
                 NativeCall::SystemRoots,
-                NativeValue::SystemRoots(vec![der(&ca)]),
+                NativeValue::SystemRoots(vec![der(&ca)].into()),
             ),
     );
     let by_address = probe(&hub, &[&literal])
@@ -460,7 +464,10 @@ async fn failures_have_their_own_typed_errors() {
         Replay::new()
             .tcp(reset.addr(), TcpScript::Serve("reset".to_owned()))
             .serve_tcp("reset", reset.addr())
-            .native(NativeCall::SystemRoots, NativeValue::SystemRoots(vec![])),
+            .native(
+                NativeCall::SystemRoots,
+                NativeValue::SystemRoots(SystemRoots::default()),
+            ),
     );
     let error = probe(&hub, &[&at])
         .tls_chain(&target(&at), Route::Direct)
@@ -496,7 +503,10 @@ async fn a_server_that_never_answers_the_hello_times_out() {
         Replay::new()
             .tcp(silent.addr(), TcpScript::Serve("silent".to_owned()))
             .serve_tcp("silent", silent.addr())
-            .native(NativeCall::SystemRoots, NativeValue::SystemRoots(vec![])),
+            .native(
+                NativeCall::SystemRoots,
+                NativeValue::SystemRoots(SystemRoots::default()),
+            ),
     );
     let probe = probe(&hub, &[&at]);
     quick(&probe);

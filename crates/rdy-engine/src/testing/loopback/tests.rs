@@ -267,6 +267,54 @@ async fn the_redirect_server_answers_302_with_a_location() {
     );
 }
 
+#[tokio::test]
+async fn the_body_chunked_and_raw_replies_are_what_they_say() {
+    let body = b"canary-body".to_vec();
+
+    let server = HttpServer::start(HttpOptions::plain().reply(Reply::Body(body.clone())))
+        .await
+        .expect("start");
+    let mut tcp = connect(server.addr()).await.expect("connect");
+    tcp.write_all(b"GET / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .expect("write");
+    let reply = read_all(tcp).await;
+    assert!(reply.contains("Content-Length: 11\r\n"), "{reply}");
+    assert!(reply.ends_with("\r\n\r\ncanary-body"), "{reply}");
+
+    // A HEAD gets the length and no body.
+    let mut tcp = connect(server.addr()).await.expect("connect");
+    tcp.write_all(b"HEAD / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .expect("write");
+    let reply = read_all(tcp).await;
+    assert!(reply.contains("Content-Length: 11\r\n"), "{reply}");
+    assert!(!reply.contains("canary-body"), "{reply}");
+
+    let server = HttpServer::start(HttpOptions::plain().reply(Reply::Chunked(vec![b'x'; 20_000])))
+        .await
+        .expect("start");
+    let mut tcp = connect(server.addr()).await.expect("connect");
+    tcp.write_all(b"GET / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .expect("write");
+    let reply = read_all(tcp).await;
+    assert!(reply.contains("Transfer-Encoding: chunked\r\n"), "{reply}");
+    assert!(!reply.contains("Content-Length"), "{reply}");
+    assert!(reply.contains("\r\n2000\r\n"), "{reply}");
+    assert!(reply.ends_with("\r\n0\r\n\r\n"), "{reply}");
+
+    let server =
+        HttpServer::start(HttpOptions::plain().reply(Reply::Raw(b"not http\r\n".to_vec())))
+            .await
+            .expect("start");
+    let mut tcp = connect(server.addr()).await.expect("connect");
+    tcp.write_all(b"GET / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .expect("write");
+    assert_eq!(read_all(tcp).await, "not http\r\n");
+}
+
 /// Sends a CONNECT with a synthetic credential and returns what the proxy answered up to the blank
 /// line, with the stream for a tunnel.
 async fn connect_through(proxy: SocketAddr, target: &str) -> (String, TcpStream) {
