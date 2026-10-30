@@ -14,6 +14,7 @@ use rdy_spec::spec::{CheckSpec, Spec};
 use crate::firewall::{self, Firewall};
 use crate::memory::{self, Memory};
 use crate::os::{self, OsCheck};
+use crate::security_agents::{self, SecurityAgents};
 
 #[cfg(test)]
 mod tests;
@@ -98,16 +99,6 @@ static LSM: CheckInfo = info(
     3,
     ROOT,
 );
-static SECURITY_AGENTS: CheckInfo = info(
-    "host.security_agents",
-    "Security software processes that inspect file and process activity",
-    CheckMeta {
-        title: "Security software",
-        remediation: "Security software often inspects file opens and process launches. If the install is slow or fails, ask the security team to review exclusions for the product's paths, then run rdy again.",
-    },
-    5,
-    ROOT,
-);
 static TIME_SYNC: CheckInfo = info(
     "host.time_sync",
     "Clock sync state and offset",
@@ -176,7 +167,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &memory::INFO,
     &PORTS,
     &LSM,
-    &SECURITY_AGENTS,
+    &security_agents::INFO,
     &firewall::INFO,
     &TIME_SYNC,
     &CPU,
@@ -191,8 +182,9 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.firewall` ([`Firewall`]), `host.memory` ([`Memory`]) and `host.os` ([`OsCheck`]) are real. The
-/// others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.firewall` ([`Firewall`]), `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]) and
+/// `host.security_agents` ([`SecurityAgents`]) are real. The others are stubs for now
+/// ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -213,11 +205,10 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 10] = [
+static STUBS: [&str; 9] = [
     "host.disk",
     "host.ports",
     "host.lsm",
-    "host.security_agents",
     "host.time_sync",
     "host.cpu",
     "host.sysctl",
@@ -249,6 +240,17 @@ impl Family for HostFamily {
         }
         if let CheckParams::HostOs(os) = &params {
             return Ok(Built::new(Box::new(OsCheck::from_params(os))));
+        }
+        if let CheckParams::HostSecurityAgents(agents) = params {
+            let ids = |list: Option<&rdy_spec::check::StringList>| -> Vec<String> {
+                list.into_iter()
+                    .flatten()
+                    .map(|id| id.as_str().to_owned())
+                    .collect()
+            };
+            let check =
+                SecurityAgents::new(ids(agents.forbid.as_ref()), ids(agents.allow.as_ref()));
+            return Ok(Built::new(Box::new(check)));
         }
         let info = CHECKS
             .iter()

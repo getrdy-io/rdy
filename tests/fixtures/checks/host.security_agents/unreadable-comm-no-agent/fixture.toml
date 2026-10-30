@@ -1,0 +1,12 @@
+schema = 1
+name = "unreadable-comm-no-agent"
+summary = "Non-root run, one process directory cannot be read, nothing known is visible"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.security_agents"]
+
+[caps]
+root = false
+network = false
+kube = false

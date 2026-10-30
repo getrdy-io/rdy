@@ -1,0 +1,12 @@
+schema = 1
+name = "agent-clamav"
+summary = "Host running the clamav processes, names as the kernel cuts them"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.security_agents"]
+
+[caps]
+root = true
+network = false
+kube = false
