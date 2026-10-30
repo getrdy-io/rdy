@@ -48,7 +48,7 @@ impl NetScript {
         self.tcp.get(&addr)
     }
 
-    pub(super) fn insert_tcp(&mut self, addr: SocketAddr, script: TcpScript) {
+    pub(crate) fn insert_tcp(&mut self, addr: SocketAddr, script: TcpScript) {
         self.tcp.insert(addr, script);
     }
 }
