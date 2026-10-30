@@ -764,7 +764,9 @@ fn a_zone_name_that_fails_the_command_table_rule_is_not_passed_to_the_tool() {
 
 #[test]
 fn a_missing_firewall_cmd_with_a_run_directory_warns_and_names_the_program() {
-    let replay = Replay::new().dir("/run/firewalld", vec![]);
+    let replay = Replay::new()
+        .dir("/run/firewalld", vec![])
+        .missing("firewall-cmd");
     let ran = execute(replay, true, Os::Linux, PORTS);
     let f = ran.finding();
     assert_eq!(f.level, Level::Warn, "{f:?}");

@@ -96,19 +96,19 @@ pub(crate) const RULE_OUTSIDE_STATFS: &str =
     "path is outside the check's declared statfs prefixes; add the prefix to `statfs`";
 /// The target is not a regular file (a FIFO, a socket, a device, a directory).
 #[cfg_attr(
-    not(all(feature = "runtime", unix)),
+    not(any(test, feature = "testing", all(feature = "runtime", unix))),
     expect(dead_code, reason = "only the Unix live backend refuses a target")
 )]
 pub(crate) const RULE_NOT_REGULAR: &str = "only regular files are read";
 /// The target is not a directory.
 #[cfg_attr(
-    not(all(feature = "runtime", unix)),
+    not(any(test, feature = "testing", all(feature = "runtime", unix))),
     expect(dead_code, reason = "only the Unix live backend refuses a target")
 )]
 pub(crate) const RULE_NOT_DIR: &str = "only directories are listed";
 /// The target is neither a regular file nor a directory.
 #[cfg_attr(
-    not(all(feature = "runtime", unix)),
+    not(any(test, feature = "testing", all(feature = "runtime", unix))),
     expect(dead_code, reason = "only the Unix live backend refuses a target")
 )]
 pub(crate) const RULE_NOT_FILE_OR_DIR: &str = "only files and directories are measured";
@@ -160,7 +160,7 @@ impl Error for Refused {}
 impl Refused {
     /// The `io::Error` that carries this refusal out of a backend.
     #[cfg_attr(
-        not(all(feature = "runtime", unix)),
+        not(any(test, feature = "testing", all(feature = "runtime", unix))),
         expect(dead_code, reason = "only the Unix live backend refuses a target")
     )]
     pub(crate) fn into_io(self) -> std::io::Error {

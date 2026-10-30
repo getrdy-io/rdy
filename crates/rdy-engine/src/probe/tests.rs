@@ -68,6 +68,7 @@ fn every_probe_error_tells_the_user_what_to_do() {
         ProbeError::PermissionDenied,
         ProbeError::Timeout,
         ProbeError::Hung { pid: 7 },
+        ProbeError::NotRecorded("the command `getent a`".to_owned()),
         ProbeError::Io("broken pipe".to_owned()),
     ];
     for error in errors {
@@ -951,7 +952,12 @@ mod commands {
         assert_eq!(output.stdout, b"10.0.0.7 STREAM\n");
 
         let missing = probe.exec(getent("other.acme.example")).await;
-        assert_eq!(missing, Err(ProbeError::NotFound));
+        assert_eq!(
+            missing,
+            Err(ProbeError::NotRecorded(
+                "the command `getent ahosts -- other.acme.example`".to_owned()
+            ))
+        );
 
         let log = hub.action_log();
         let ok = &log.actions[0];
