@@ -40,13 +40,13 @@
 //!
 //! **What is here, and what is not.** The handle, the log, the read policy, `read`, `read_tail`,
 //! `read_dir`, `stat`, `env`, `exec`, `native`, `udp_exchange` and `unix_get` (M1-144, policy in `sock`),
-//! `tcp` with the proxy `CONNECT` (M1-091, policy in `net`, needs feature `runtime` or `loopback`), and
-//! the live backend (`live_backend`, feature `runtime`). Still to come, each in its own ticket:
+//! `tcp` with the proxy `CONNECT` (M1-091), `tls_chain` (M1-092), `http` and `trust_store` (M1-093), all
+//! three in `net` and needing feature `runtime` or `loopback`, and the live backend (`live_backend`,
+//! feature `runtime`). Each tcp, tls and http call writes exactly one entry through the crate-private
+//! `Probe::begin`. Still to come, each in its own ticket:
 //!
-//! - TLS and HTTP: the network tickets (M1-092, M1-093). They open their entries
-//!   with the crate-private `Probe::begin`, the same way the methods here do. Each tls, http and kube
-//!   call writes exactly one entry (M1-092, M1-093, M1-103). A kube request writes its entry through
-//!   [`Probe::kube_call`], which the read-only guard of `rdy-checks-k8s` calls;
+//! - Kube requests (M1-103): a request writes its entry through [`Probe::kube_call`], which the
+//!   read-only guard of `rdy-checks-k8s` calls;
 //! - `read_link`: `host.ports` (M1-072) needs it for `/proc/self/ns/net` and `/proc/<pid>/fd`, and the
 //!   action log has no kind for it yet. M1-169 adds both (plan correction 14).
 
@@ -80,7 +80,7 @@ pub use log::{
 };
 pub use native::{
     MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, MachineId, NativeCall, NativeValue, RULE_MACHINE_ID,
-    Resource, RlimitInfo, StatvfsInfo, UnameInfo,
+    Resource, RlimitInfo, StatvfsInfo, StoreKind, StoreOrigin, StoreSource, SystemRoots, UnameInfo,
 };
 #[cfg(feature = "testing")]
 pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS};
@@ -90,10 +90,14 @@ pub use proxy::{
     ProxyUrlError,
 };
 
+pub use attempt::AttemptOutcome;
+pub use trust::{NoRoots, TrustFailure};
+
 use log::{ActionLog, Limits, Pending};
 pub(crate) use log::{Tier, dropped_calls, tier};
 
 mod addr;
+mod attempt;
 #[cfg(feature = "runtime")]
 mod live;
 mod log;
@@ -107,6 +111,7 @@ pub(crate) mod replay;
 pub mod sock;
 #[cfg(test)]
 mod tests;
+mod trust;
 
 /// The rule of a call made after its check ended.
 pub const RULE_CHECK_FINISHED: &str = "check finished";
@@ -654,6 +659,10 @@ pub struct ProbeHub {
     /// The trust stores of the TLS calls, built once per run.
     #[cfg(any(feature = "runtime", feature = "loopback"))]
     tls: Arc<net::TlsState>,
+    /// The time every TLS verdict sees instead of the real clock, since the Unix epoch. Set by tests
+    /// only (feature `testing`), through `ProbeHub::pin_clock`.
+    #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
+    clock: Arc<std::sync::Mutex<Option<Duration>>>,
 }
 
 impl fmt::Debug for ProbeHub {
@@ -673,6 +682,8 @@ impl ProbeHub {
             checks_started: Arc::new(AtomicBool::new(false)),
             #[cfg(any(feature = "runtime", feature = "loopback"))]
             tls: Arc::default(),
+            #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
+            clock: Arc::default(),
         }
     }
 

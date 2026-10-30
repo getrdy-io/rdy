@@ -307,6 +307,14 @@ fn no_byte_of_a_matched_secret_survives() {
             "PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\n{secret}\n-----END RSA PRIVATE KEY-----"
         ),
         format!("PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----\nMIIBVQ\n{secret}=\n"),
+        // Review of PR 142: a list below an empty value, and a plain value that a later line closes.
+        format!("tokens:\n- id: ci\n  value: {secret}"),
+        format!("tokens:\n- id: ci\n  value: {secret}\n- id: cd\n  value: {secret}"),
+        format!("  tokens:\n  - id: ci\n    value: {secret}"),
+        format!("- tokens:\n  - id: ci\n    value: {secret}"),
+        format!("db.password=first\\\n{secret}"),
+        format!("PASSWORD=abc'def\n{secret}'"),
+        format!("password: abc`def\n{secret}`"),
     ];
     let r = redactor();
     for form in &forms {
@@ -314,7 +322,19 @@ fn no_byte_of_a_matched_secret_survives() {
         for w in &windows {
             assert!(!out.contains(w), "{w} survived in {} from {form}", *out);
         }
-        assert!(out.contains("[REDACTED:secret_by_key:"), "{form}");
+        // A shape or a header rule wins the name of a form that holds one, such as a PEM block.
+        let rule = if form.contains("-----BEGIN ") {
+            "pem_private_key"
+        } else if form.starts_with("Authorization:") {
+            "auth_header"
+        } else {
+            "secret_by_key"
+        };
+        assert!(
+            out.contains(&format!("[REDACTED:{rule}:")),
+            "{form} gave {}",
+            *out
+        );
     }
 }
 
