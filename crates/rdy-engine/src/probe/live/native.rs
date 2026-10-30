@@ -21,8 +21,8 @@ pub(super) fn call(
 ) -> io::Result<NativeValue> {
     match call {
         NativeCall::Statvfs { path } => {
-            let raw = files::statvfs(path, guard, secrets)?;
-            Ok(NativeValue::Statvfs(statvfs_info(&raw)))
+            let (raw, dev) = files::statvfs(path, guard, secrets)?;
+            Ok(NativeValue::Statvfs(statvfs_info(&raw, dev)))
         }
         NativeCall::Uname => {
             let raw = rustix::system::uname();
@@ -63,7 +63,7 @@ fn limit(resource: Resource) -> Limit {
     }
 }
 
-fn statvfs_info(raw: &rustix::fs::StatVfs) -> StatvfsInfo {
+fn statvfs_info(raw: &rustix::fs::StatVfs, dev: rustix::fs::Dev) -> StatvfsInfo {
     use rustix::fs::StatVfsMountFlags as Flags;
     StatvfsInfo {
         fragment_size: raw.f_frsize,
@@ -75,6 +75,7 @@ fn statvfs_info(raw: &rustix::fs::StatVfs) -> StatvfsInfo {
         read_only: raw.f_flag.contains(Flags::RDONLY),
         no_exec: no_exec(raw.f_flag),
         no_suid: raw.f_flag.contains(Flags::NOSUID),
+        dev: Some((rustix::fs::major(dev), rustix::fs::minor(dev))),
     }
 }
 

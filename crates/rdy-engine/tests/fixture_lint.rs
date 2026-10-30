@@ -74,6 +74,11 @@ const REQUIRED: &[Required] = &[
         holds: None,
         why: "host.memory needs a passing case (03)",
     },
+    Required {
+        dir: "tests/fixtures/checks/host.disk/hung-nfs",
+        holds: Some(("native/0-mnt-nfs-data.json", "delay_ms")),
+        why: "host.disk needs a Timeout case: a statvfs on a hung mount that never answers (03)",
+    },
 ];
 
 // ---- findings -----------------------------------------------------------------------------------
@@ -1099,6 +1104,7 @@ fn repo_root() -> PathBuf {
 // ---- tests --------------------------------------------------------------------------------------
 
 const MEMORY_PASS: &str = "tests/fixtures/checks/host.memory/pass";
+const DISK_TIMEOUT: &str = "tests/fixtures/checks/host.disk/hung-nfs";
 const SHADOW_CASE: &str = "tests/fixtures/checks/_policy/symlink-to-shadow";
 const CANARY: &str = "tests/fixtures/canary/netstat-crlf.txt";
 
@@ -1534,7 +1540,7 @@ fn any_underscore_helper_directory_under_checks_is_accepted() -> TestResult {
 
 #[test]
 fn deleting_a_required_case_fails_with_its_path_named() -> TestResult {
-    for dir in [SHADOW_CASE, MEMORY_PASS] {
+    for dir in [SHADOW_CASE, MEMORY_PASS, DISK_TIMEOUT] {
         let mut tree = real_copy()?;
         tree.remove_below(dir);
         let found = lint_tree(&tree)?;
@@ -1545,6 +1551,19 @@ fn deleting_a_required_case_fails_with_its_path_named() -> TestResult {
             render(&found)
         );
     }
+    // The host.disk Timeout case must still hold a delay, or it times out nothing.
+    let mut tree = real_copy()?;
+    let file = format!("{DISK_TIMEOUT}/native/0-mnt-nfs-data.json");
+    let text = tree.text(&file)?;
+    tree.put(&file, text.replace("delay_ms", "note"));
+    let found = lint_tree(&tree)?;
+    assert!(
+        found
+            .iter()
+            .any(|f| f.path == DISK_TIMEOUT && f.rule == "required-case"),
+        "{}",
+        render(&found)
+    );
     // The shadow case must still link to the password file.
     let mut tree = real_copy()?;
     tree.put(
