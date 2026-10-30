@@ -213,7 +213,7 @@ cp "$tmp/macho-x64" "$tmp/nonotice-stage/rdy-x86_64-apple-darwin/rdy"
 for f in LICENSE README.md CHANGELOG.md; do echo "synthetic $f" > "$tmp/nonotice-stage/rdy-x86_64-apple-darwin/$f"; done
 tar -czf "$tmp/nonotice/rdy-x86_64-apple-darwin.tar.gz" -C "$tmp/nonotice-stage" rdy-x86_64-apple-darwin
 hash_all "$tmp/nonotice"
-check "an archive without NOTICE fails" 1 "FAIL rdy-x86_64-apple-darwin.tar.gz holds its files" "$tmp/nonotice"
+check "an archive without NOTICE fails" 1 "missing: NOTICE" "$tmp/nonotice"
 
 # 3. Format and CPU.
 fresh wrongcpu

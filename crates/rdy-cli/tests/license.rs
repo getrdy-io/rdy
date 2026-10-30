@@ -1,5 +1,6 @@
 //! Every crate ships its own copy of the root LICENSE and NOTICE so `cargo package` includes them
-//! (Apache-2.0 section 4(d) asks for NOTICE with every redistribution). The copies must not drift.
+//! (Apache-2.0 section 4(d) asks for NOTICE with every redistribution). The copies must not drift,
+//! and every published crate must list both files in its `include`.
 
 use std::fs;
 use std::path::Path;
@@ -26,4 +27,37 @@ fn every_crate_license_and_notice_match_the_root_files() {
         }
         assert!(checked >= 6, "expected at least 6 crates, found {checked}");
     }
+}
+
+#[test]
+fn every_published_crate_includes_license_and_notice() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut checked = 0;
+    for entry in fs::read_dir(root.join("crates")).expect("crates/ exists") {
+        let dir = entry.expect("readable entry").path();
+        let manifest = dir.join("Cargo.toml");
+        if !manifest.is_file() {
+            continue;
+        }
+        let text = fs::read_to_string(&manifest).expect("readable manifest");
+        if text.lines().any(|l| l.replace(' ', "") == "publish=false") {
+            continue;
+        }
+        let include = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("include"))
+            .unwrap_or_else(|| panic!("{} has no `include` list", manifest.display()));
+        for name in ["LICENSE", "NOTICE"] {
+            assert!(
+                include.contains(&format!("\"{name}\"")),
+                "{} has an `include` list without \"{name}\"; `cargo package` would leave it out",
+                manifest.display()
+            );
+        }
+        checked += 1;
+    }
+    assert!(
+        checked >= 6,
+        "expected at least 6 published crates, found {checked}"
+    );
 }
