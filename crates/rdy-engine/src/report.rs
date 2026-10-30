@@ -5,7 +5,7 @@
 //!   copy embedded in the HTML report all share ([`HtmlSafeJson`]). [`read_report_from`] is the matching
 //!   reader: it refuses a document over [`MAX_REPORT_BYTES`] before it parses a byte.
 //!
-//! - `html` (feature `html`, on by default): [`render_html`] turns a [`crate::redact::RedactedReport`] into
+//! - `html` (feature `html`, on by default): `render_html` turns a [`crate::redact::RedactedReport`] into
 //!   one self-contained HTML page (M1-077). It needs no runtime, so `rdy-cloud` and `rdy report` can use
 //!   it with `default-features = false, features = ["html"]`.
 

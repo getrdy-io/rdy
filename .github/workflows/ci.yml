@@ -68,6 +68,15 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked -p rdy-engine --no-default-features --no-deps
+      # rdy-cloud builds rdy-engine with `default-features = false, features = ["html"]` (02, M1-077). Lint and
+      # document that build. `--all-targets` turns on the dev-dependency features, like the steps above, so
+      # the library alone is not linted without them (a gap carried in backlog correction-31).
+      - name: cargo clippy rdy-engine html feature without the runtime
+        run: cargo clippy --locked -p rdy-engine --no-default-features --features html --all-targets -- -D warnings
+      - name: cargo doc rdy-engine html feature without the runtime
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked -p rdy-engine --no-default-features --features html --no-deps
       # The loopback servers (ADR 0035) are public items behind a feature. Document them with warnings
       # as errors, on the build without the runtime, which is the narrowest one that has them.
       - name: cargo doc rdy-engine loopback feature
@@ -380,6 +389,14 @@ jobs:
       - name: No orphaned golden files
         if: matrix.name == 'linux-x64'
         run: cargo run --locked --quiet --package xtask -- goldens check
+      # The M1-077 exit test says the page passes an HTML validator. The Nu HTML Checker (pinned, sha256
+      # checked in the script) runs over the HTML goldens with --Werror, on this leg only. The runner's own
+      # Java runs it. `well_formed` in rdy-engine's html_report test is the smoke test on all five legs.
+      - name: The HTML goldens pass the Nu HTML Checker
+        if: matrix.name == 'linux-x64'
+        run: |
+          java -version
+          scripts/validate-html.sh
       # nextest does not run doc tests. They build for the host, so they run on one leg only.
       - name: Doc tests
         if: matrix.name == 'linux-x64'

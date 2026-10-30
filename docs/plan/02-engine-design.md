@@ -609,7 +609,7 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
   `[[bench]]`, `[[example]]` and `[lib] path` in a check crate manifest.
 - The wall cannot be turned down quietly (`tests/lint-wall/tests/wall_intact.rs`): a hardcoded floor of the
   Appendix A entries, no `.clippy.toml` anywhere, no `CLIPPY_CONF_DIR`, `rustflags`, compiler wrapper or
-  `clippy` alias in a Cargo config, no `RUSTFLAGS` in a workflow, the clippy commands of CI are exactly the three pinned in the test, no workflow carries
+  `clippy` alias in a Cargo config, no `RUSTFLAGS` in a workflow, the clippy commands of CI are exactly the four pinned in the test, no workflow carries
   `continue-on-error`, `--config`, `GITHUB_PATH` or a flags variable (any case), no workflow sets or reads a `CARGO_` name except `CARGO_TERM_COLOR`, `CARGO_INCREMENTAL`, `CARGO_NET_RETRY` and `CARGO_PROFILE_*`, a `- run:` clippy line counts as a command, any other clippy line is refused, no `[patch]`, `[replace]`, `paths` or `[source]`
   anywhere, nothing under `.claude/worktrees/` is tracked, no `disallowed_*`, `all`, `style` or `warnings` set to `allow` in the root
   `[workspace.lints]`, a check crate's `lints` is exactly `workspace = true` (manifests are read as TOML,

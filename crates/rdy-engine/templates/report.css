@@ -1,26 +1,30 @@
 :root {
   color-scheme: light dark;
   --bg: #ffffff;
-  --text: #1a1a1a;
-  --muted: #4d4d4d;
+  --text: #1f2328;
+  --muted: #59636e;
   --rule: #6b6b6b;
-  --panel: #f3f3f3;
+  --panel: #f6f8fa;
   --block: #b3261e;
-  --warn: #7a4f00;
-  --pass: #1e6b34;
-  --focus: #0b57d0;
+  --warn: #8a4b00;
+  --pass: #1a7f37;
+  --link: #0b5cad;
+  --banner-fg: #8a1c14;
+  --banner-bg: #fff1f0;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #121212;
-    --text: #ececec;
-    --muted: #b8b8b8;
+    --bg: #0d1117;
+    --text: #e6edf3;
+    --muted: #9da7b3;
     --rule: #8c8c8c;
-    --panel: #1e1e1e;
-    --block: #ff8a80;
-    --warn: #ffcc66;
-    --pass: #7ddc96;
-    --focus: #8ab4f8;
+    --panel: #161b22;
+    --block: #ff8b84;
+    --warn: #e3b341;
+    --pass: #56d364;
+    --link: #79b8ff;
+    --banner-fg: #ffb4ae;
+    --banner-bg: #3b1214;
   }
 }
 * { box-sizing: border-box; }
@@ -38,8 +42,8 @@ header, nav, main, footer, .banner {
   margin-left: auto;
   margin-right: auto;
 }
-a { color: inherit; }
-a:focus-visible { outline: 0.1875rem solid var(--focus); outline-offset: 0.125rem; }
+a { color: var(--link); }
+a:focus-visible { outline: 0.1875rem solid var(--link); outline-offset: 0.125rem; }
 h1, h2, h3 { line-height: 1.25; }
 h1 { font-size: 2rem; margin: 0.5rem 0; }
 h2 { font-size: 1.5rem; margin: 2rem 0 0.75rem; }
@@ -59,7 +63,8 @@ h3 { font-size: 1.125rem; margin: 0 0 0.5rem; }
   margin-bottom: 1rem;
   padding: 0.75rem 1rem;
   border: 0.25rem solid var(--block);
-  background: var(--panel);
+  color: var(--banner-fg);
+  background: var(--banner-bg);
 }
 .banner p { margin: 0.25rem 0; }
 .banner-title { font-weight: 700; }

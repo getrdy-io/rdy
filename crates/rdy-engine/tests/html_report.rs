@@ -4,9 +4,10 @@
 //! Every report goes through a real redactor first, because the renderer takes nothing else. The base is
 //! the 01 section 7.2 sample at `tests/fixtures/reports/not-ready-7.2.json`.
 //!
-//! There is no HTML validator on the build machines (the usual one needs a Java runtime), so `well_formed`
-//! below checks what a validator would catch in a page this size: the doctype, `lang`, `color-scheme`,
-//! balanced tags, void elements and unique ids. The structure test (M1-082) goes further.
+//! The exit test says the page passes an HTML validator. The CI job `html-validator` runs the Nu HTML
+//! Checker over the two goldens on the linux-x64 leg (`scripts/validate-html.sh`). `well_formed` below is
+//! the smoke test that runs on all five legs: the doctype, `lang`, `color-scheme`, balanced tags, void
+//! elements and unique ids. The structure test (M1-082) goes further.
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -199,7 +200,7 @@ fn the_page_sets_the_csp_lang_color_scheme_and_loads_nothing() -> TestResult {
 #[test]
 fn the_verdict_and_the_blocks_come_first() -> TestResult {
     let html = html_of(sample()?)?;
-    assert!(html.contains("<title>rdy report: acme-platform, NOT READY</title>"));
+    assert!(html.contains("<title>rdy report: \u{2068}acme-platform\u{2069}, NOT READY</title>"));
     let h1 = at(&html, "<h1>")?;
     let blocks = at(&html, "<h2 id=\"blocks\">")?;
     let required = at(&html, "<h2 id=\"required-not-run\">")?;
@@ -222,7 +223,7 @@ fn the_verdict_is_worked_out_from_the_checks_and_not_read_from_the_file() -> Tes
     doc["verdict"] = json!("ready");
     doc["exit_code"] = json!(0);
     let html = html_of(doc)?;
-    assert!(html.contains("<title>rdy report: acme-platform, NOT READY</title>"));
+    assert!(html.contains("<title>rdy report: \u{2068}acme-platform\u{2069}, NOT READY</title>"));
     assert!(html.contains("1 warning"));
     Ok(())
 }
@@ -394,6 +395,10 @@ fn canaries_never_reach_the_page() -> TestResult {
     // the page left the fields out.
     assert!(html.contains("web-01 password="));
     assert!(html.contains("failed, token="));
+    // The note, the fix and the partial note are shown too, with the secret replaced (SEC-149-5).
+    assert!(html.contains("<bdi>secret="));
+    assert!(html.contains("<bdi>run it with password="));
+    assert!(html.contains("<bdi>token="));
     Ok(())
 }
 
@@ -409,13 +414,51 @@ fn the_unsigned_banner_comes_before_the_header() -> TestResult {
     Ok(())
 }
 
+/// SEC-149-4: a file name with a bidi control must not reorder the security warning around it.
+#[test]
+fn the_banner_shows_the_spec_file_name_in_its_own_isolate() -> TestResult {
+    let mut doc = sample()?;
+    doc["signature"] = json!({ "state": "unsigned" });
+    doc["spec"]["file_name"] = json!("evil\u{202e}.yaml");
+    let html = html_of(doc)?;
+    assert!(html.contains(
+        "<p><bdi>evil\u{202e}.yaml</bdi> has no signature. rdy cannot tell who wrote it or whether it was changed.</p>"
+    ));
+    Ok(())
+}
+
+/// The sentences of 01 section 4.7 for an unsigned spec, as the page prints them.
+#[test]
+fn the_unsigned_banner_uses_the_wording_of_section_4_7() -> TestResult {
+    let mut doc = sample()?;
+    doc["signature"] = json!({ "state": "unsigned" });
+    let html = html_of(doc)?;
+    assert!(
+        html.contains(" has no signature. rdy cannot tell who wrote it or whether it was changed.")
+    );
+    assert!(!html.contains("no verified signature"));
+    Ok(())
+}
+
+/// SEC-149-4: the other untrusted text that sits in a sentence is in `<bdi>` too.
+#[test]
+fn text_from_the_report_inside_a_sentence_is_isolated() -> TestResult {
+    let mut doc = sample()?;
+    doc["producer"]["version"] = json!("1.0\u{202e}x");
+    let html = html_of(doc)?;
+    assert!(html.contains("with rdy <bdi>1.0\u{202e}x</bdi>"));
+    assert!(html.contains("<p>rdy <bdi>1.0\u{202e}x</bdi></p>"));
+    assert!(html.contains("<p>Run <bdi>2026-12-01 14:30:05 UTC</bdi> with rdy"));
+    Ok(())
+}
+
 #[test]
 fn a_key_given_for_one_run_shows_the_not_pinned_banner_with_a_short_fingerprint() -> TestResult {
     let mut doc = sample()?;
     doc["signature"]["trust_source"] = json!("flag");
     let html = html_of(doc)?;
     assert!(at(&html, "WARNING: KEY NOT PINNED")? < at(&html, "<header>")?);
-    assert!(html.contains("(fingerprint 4d2a7c0e...0a1c)"));
+    assert!(html.contains("(fingerprint <bdi>4d2a7c0e...0a1c</bdi>)"));
     assert!(!html.contains("UNSIGNED SPEC"));
     Ok(())
 }
@@ -440,7 +483,7 @@ fn the_same_report_gives_the_same_bytes() -> TestResult {
 #[test]
 fn not_run_checks_say_why_and_what_they_needed() -> TestResult {
     let html = html_of(sample()?)?;
-    assert!(html.contains("<p>Not in this version of rdy</p>"));
+    assert!(html.contains("<p><bdi>Not in this version of rdy</bdi></p>"));
     assert!(html.contains("<p>Requires: <bdi>network access (available)</bdi></p>"));
     Ok(())
 }

@@ -5,7 +5,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>rdy report: {{ product }}, {{ verdict_word }}</title>
+<title>rdy report: {{ title_product }}, {{ verdict_word }}</title>
 <style>
 {%- include "report.css" %}
 </style>
@@ -15,7 +15,7 @@
 <div class="banner">
 <p class="banner-title">{{ banner.title }}</p>
 {%- for line in banner.lines %}
-<p>{{ line }}</p>
+<p>{% for part in line.spans %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
 {%- endfor %}
 </div>
 {%- endfor %}
@@ -23,7 +23,7 @@
 <h1><span class="visually-hidden">Verdict: </span><span class="{{ verdict_class }}">{{ verdict_word }}</span></h1>
 <p>For <bdi>{{ product }}</bdi>{% if let Some(version) = version %} <bdi>{{ version }}</bdi>{% endif %}{% if let Some(serial) = serial %}, revision {{ serial }}{% endif %}, on <bdi>{{ hostname }}</bdi></p>
 <p class="summary">{{ summary_line }}</p>
-<p>Run {{ run_when }} with rdy {{ rdy_version }}{% if let Some(user) = user %} by <bdi>{{ user }}</bdi>{% endif %} ({{ run_as }})</p>
+<p>Run <bdi>{{ run_when }}</bdi> with rdy <bdi>{{ rdy_version }}</bdi>{% if let Some(user) = user %} by <bdi>{{ user }}</bdi>{% endif %} ({{ run_as }})</p>
 <p class="privacy">This file lists hostnames and addresses from this machine. Read it before you send it.</p>
 </header>
 <nav aria-label="Sections">
@@ -47,7 +47,7 @@
 <h3><span class="status">{{ check.status_word }}</span> <span class="id"><bdi>{{ check.id }}</bdi></span>{% if let Some(name) = check.name %} (<bdi>{{ name }}</bdi>){% endif %}</h3>
 <p class="text"><bdi>{{ check.message }}</bdi></p>
 {%- if let Some(why) = check.not_run_reason %}
-<p>{{ why }}</p>
+<p><bdi>{{ why }}</bdi></p>
 {%- endif %}
 {%- if let Some(fix) = check.fix %}
 <p class="text"><span class="label">Fix:</span> <bdi>{{ fix }}</bdi></p>
@@ -59,7 +59,7 @@
 <p>Requires: <bdi>{{ need }}</bdi></p>
 {%- endfor %}
 {%- if let Some(partial) = check.partial %}
-<p>{{ partial.summary }}</p>
+<p><bdi>{{ partial.summary }}</bdi></p>
 {%- if !partial.note.is_empty() %}
 <p class="text"><bdi>{{ partial.note }}</bdi></p>
 {%- endif %}
@@ -101,7 +101,7 @@
 </section>
 </main>
 <footer>
-<p>rdy {{ rdy_version }}</p>
+<p>rdy <bdi>{{ rdy_version }}</bdi></p>
 </footer>
 </body>
 </html>

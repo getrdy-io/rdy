@@ -327,21 +327,25 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 ### Dependency approvals
 
 - `askama` 0.16.1, with its build-time crates `askama_macros`, `askama_derive` and `askama_parser` (M1-077, ADR 0003
-  decision 5; D.5 of 07). **Pending security review.** Recorded by rust-engineer from the crate sources; the
-  security-reviewer's approval replaces this line. A direct dependency of `rdy-engine` behind the `html`
-  feature, which is on by default. The check crates may depend on none of them. Pinned with `=` in the
+  decision 5; D.5 of 07). **Approved by security-reviewer, PR #149 (SEC-149-2).** A direct dependency of `rdy-engine` behind the `html`
+  feature, which is on by default. The check crates may depend on none of them: `deny.toml` bans `askama` with `wrappers = ["rdy-engine"]`. Pinned with `=` in the
   workspace `Cargo.toml`: a template engine decides what is escaped, so every bump is reviewed by hand.
   - Purpose: compile the HTML report templates (`crates/rdy-engine/templates/`) into Rust at build time, with
     HTML escaping on for `.html` files. No template is read at run time, and no template engine runs on a
     customer box (ADR 0003, alternatives considered).
-  - Maintainers: the `askama-rs` organisation on GitHub (`askama-rs/askama`), the continuation of the
-    original askama project. The security-reviewer confirms the maintainer list.
-  - `unsafe`: yes, and not forbidden. `askama` (the runtime crate) uses `unsafe` in two places: two
-    `transmute` calls between `AsciiStr` and `str` or byte arrays (`ascii_str.rs`), and one
-    `from_utf8_unchecked` in the `json` filter, which is behind the `serde_json` feature and is off. The
+  - Maintainers (crates.io owners, confirmed in review): `askama` and `askama_derive`: GuillaumeGomez, djc,
+    Kijewski and the team `askama-rs:maintainer`. `askama_parser`: djc, Kijewski and the team.
+    `askama_macros`: GuillaumeGomez alone, a single owner, which is accepted because the crate is
+    build-time only and every version bump is reviewed by hand. 0.16.1 is the latest release (published
+    2026-09-04) and is not yanked. No RustSec advisory names any askama crate or `rustc-hash`.
+  - `unsafe`: yes, and not forbidden. `askama` (the runtime crate) uses `unsafe` in two places: four
+    `transmute` calls in `ascii_str.rs` (lines 35, 42, 92 and 102), read and sound (`AsciiStr` and
+    `AsciiChar` are `repr(transparent)`, `AsciiChar::new` panics on a non-ASCII value, the field is private
+    and there is no `DerefMut`), and one `from_utf8_unchecked` in the `json` filter, which is behind the
+    `serde_json` feature and is off. The
     derive crates (`askama_derive`, `askama_parser`) use `unsafe` in the code generator and the parser, and
     they run only inside the compiler as proc macros, never in the binary. Our crates keep
-    `#![forbid(unsafe_code)]`. The reviewer reads the two runtime `transmute` sites.
+    `#![forbid(unsafe_code)]`.
   - `build.rs`: none in any of the four crates. The derive runs as a proc macro, reads the template files
     and writes nothing outside `OUT_DIR`.
   - License: MIT OR Apache-2.0 for all four. Allowed in `deny.toml`.

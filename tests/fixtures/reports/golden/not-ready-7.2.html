@@ -5,30 +5,34 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>rdy report: acme-platform, NOT READY</title>
+<title>rdy report: ⁨acme-platform⁩, NOT READY</title>
 <style>:root {
   color-scheme: light dark;
   --bg: #ffffff;
-  --text: #1a1a1a;
-  --muted: #4d4d4d;
+  --text: #1f2328;
+  --muted: #59636e;
   --rule: #6b6b6b;
-  --panel: #f3f3f3;
+  --panel: #f6f8fa;
   --block: #b3261e;
-  --warn: #7a4f00;
-  --pass: #1e6b34;
-  --focus: #0b57d0;
+  --warn: #8a4b00;
+  --pass: #1a7f37;
+  --link: #0b5cad;
+  --banner-fg: #8a1c14;
+  --banner-bg: #fff1f0;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #121212;
-    --text: #ececec;
-    --muted: #b8b8b8;
+    --bg: #0d1117;
+    --text: #e6edf3;
+    --muted: #9da7b3;
     --rule: #8c8c8c;
-    --panel: #1e1e1e;
-    --block: #ff8a80;
-    --warn: #ffcc66;
-    --pass: #7ddc96;
-    --focus: #8ab4f8;
+    --panel: #161b22;
+    --block: #ff8b84;
+    --warn: #e3b341;
+    --pass: #56d364;
+    --link: #79b8ff;
+    --banner-fg: #ffb4ae;
+    --banner-bg: #3b1214;
   }
 }
 * { box-sizing: border-box; }
@@ -46,8 +50,8 @@ header, nav, main, footer, .banner {
   margin-left: auto;
   margin-right: auto;
 }
-a { color: inherit; }
-a:focus-visible { outline: 0.1875rem solid var(--focus); outline-offset: 0.125rem; }
+a { color: var(--link); }
+a:focus-visible { outline: 0.1875rem solid var(--link); outline-offset: 0.125rem; }
 h1, h2, h3 { line-height: 1.25; }
 h1 { font-size: 2rem; margin: 0.5rem 0; }
 h2 { font-size: 1.5rem; margin: 2rem 0 0.75rem; }
@@ -67,7 +71,8 @@ h3 { font-size: 1.125rem; margin: 0 0 0.5rem; }
   margin-bottom: 1rem;
   padding: 0.75rem 1rem;
   border: 0.25rem solid var(--block);
-  background: var(--panel);
+  color: var(--banner-fg);
+  background: var(--banner-bg);
 }
 .banner p { margin: 0.25rem 0; }
 .banner-title { font-weight: 700; }
@@ -122,7 +127,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <h1><span class="visually-hidden">Verdict: </span><span class="verdict-not-ready">NOT READY</span></h1>
 <p>For <bdi>acme-platform</bdi> <bdi>&#62;=4.2</bdi>, on <bdi>acme-node-01.corp.example</bdi></p>
 <p class="summary">2 blocks, 1 warning, 3 passed, 2 required checks not run</p>
-<p>Run 2026-12-01 14:30:05 UTC with rdy 0.1.0 by <bdi>jdoe</bdi> (not root)</p>
+<p>Run <bdi>2026-12-01 14:30:05 UTC</bdi> with rdy <bdi>0.1.0</bdi> by <bdi>jdoe</bdi> (not root)</p>
 <p class="privacy">This file lists hostnames and addresses from this machine. Read it before you send it.</p>
 </header>
 <nav aria-label="Sections">
@@ -160,13 +165,13 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <article class="check status-skip" id="check-6">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>gpu.cuda</bdi></span></h3>
 <p class="text"><bdi>Not run. This version of rdy has no gpu checks yet.</bdi></p>
-<p>Not in this version of rdy</p>
+<p><bdi>Not in this version of rdy</bdi></p>
 <p class="text"><span class="label">Fix:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
 </article>
 <article class="check status-skip" id="check-7">
 <h3><span class="status">SKIP</span> <span class="id"><bdi>aws.iam</bdi></span></h3>
 <p class="text"><bdi>Not run. This version of rdy has no aws checks yet.</bdi></p>
-<p>Not in this version of rdy</p>
+<p><bdi>Not in this version of rdy</bdi></p>
 <p class="text"><span class="label">Fix:</span> <bdi>Install a newer rdy. If there is none yet, ask the vendor how to go on.</bdi></p>
 </article>
 </section>
@@ -282,7 +287,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 </section>
 </main>
 <footer>
-<p>rdy 0.1.0</p>
+<p>rdy <bdi>0.1.0</bdi></p>
 </footer>
 </body>
 </html>

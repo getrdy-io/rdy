@@ -16,8 +16,45 @@ use crate::summary::{summary_line, verdict_line};
 pub(super) struct Banner {
     /// The first line, in capitals.
     pub title: &'static str,
-    /// The sentences below it.
-    pub lines: Vec<String>,
+    /// The lines below it.
+    pub lines: Vec<Line>,
+}
+
+/// One line of a banner: pieces of our own wording and pieces that came from the report.
+pub(super) struct Line {
+    pub spans: Vec<Span>,
+}
+
+/// A piece of a banner line. `untrusted` text is shown in `<bdi>`, so a file name with a bidi control in
+/// it cannot reorder the warning around it.
+pub(super) struct Span {
+    pub text: String,
+    pub untrusted: bool,
+}
+
+impl Line {
+    /// A line made only of our own words.
+    fn text(text: &str) -> Self {
+        Self {
+            spans: vec![Span::own(text)],
+        }
+    }
+}
+
+impl Span {
+    fn own(text: &str) -> Self {
+        Self {
+            text: text.to_owned(),
+            untrusted: false,
+        }
+    }
+
+    fn untrusted(text: &str) -> Self {
+        Self {
+            text: text.to_owned(),
+            untrusted: true,
+        }
+    }
 }
 
 /// One section of checks, from one [`BucketGroup`].
@@ -82,6 +119,8 @@ pub(super) struct Row {
 #[template(path = "report.html")]
 pub(super) struct View {
     pub product: String,
+    /// The product for the `<title>`, which cannot hold `<bdi>`: wrapped in Unicode isolates instead.
+    pub title_product: String,
     pub version: Option<String>,
     pub serial: Option<u64>,
     pub hostname: String,
@@ -112,6 +151,7 @@ impl View {
         };
         Self {
             product: report.spec.product.clone(),
+            title_product: format!("\u{2068}{}\u{2069}", report.spec.product),
             version: report.spec.version.clone(),
             serial: report.spec.serial,
             hostname: report.host.hostname.clone(),
@@ -158,34 +198,40 @@ fn banners(report: &Report) -> Vec<Banner> {
         );
     if !pinned {
         if matches!(sig.state, SignatureState::Verified) {
-            let mut first =
-                String::from("This spec was checked with a key given on the command line");
+            let mut first = vec![Span::own(
+                "This spec was checked with a key given on the command line",
+            )];
             if let Some(fp) = &sig.key_fingerprint {
-                first.push_str(" (fingerprint ");
-                first.push_str(&short_fingerprint(fp));
-                first.push(')');
+                first.push(Span::own(" (fingerprint "));
+                first.push(Span::untrusted(&short_fingerprint(fp)));
+                first.push(Span::own(")"));
             }
-            first.push('.');
+            first.push(Span::own("."));
             out.push(Banner {
                 title: "WARNING: KEY NOT PINNED",
                 lines: vec![
-                    first,
-                    "rdy cannot tell whose key that is.".to_owned(),
-                    "This report is marked KEY NOT PINNED.".to_owned(),
+                    Line { spans: first },
+                    Line::text("rdy cannot tell whose key that is."),
+                    Line::text("This report is marked KEY NOT PINNED."),
                 ],
             });
         } else {
             out.push(Banner {
                 title: "WARNING: UNSIGNED SPEC",
                 lines: vec![
-                    format!(
-                        "{} has no verified signature. rdy cannot tell who wrote it or whether it was changed.",
-                        report.spec.file_name
+                    Line {
+                        spans: vec![
+                            Span::untrusted(&report.spec.file_name),
+                            Span::own(
+                                " has no signature. rdy cannot tell who wrote it or whether it was changed.",
+                            ),
+                        ],
+                    },
+                    Line::text("The spec decides which files rdy reads and which hosts it contacts."),
+                    Line::text(
+                        "Run it only if you wrote it yourself or got it from the vendor in a way you trust.",
                     ),
-                    "The spec decides which files rdy reads and which hosts it contacts.".to_owned(),
-                    "Run it only if you wrote it yourself or got it from the vendor in a way you trust."
-                        .to_owned(),
-                    "This report is marked UNSIGNED SPEC.".to_owned(),
+                    Line::text("This report is marked UNSIGNED SPEC."),
                 ],
             });
         }
@@ -193,9 +239,9 @@ fn banners(report: &Report) -> Vec<Banner> {
     if !report.complete {
         out.push(Banner {
             title: "INCOMPLETE",
-            lines: vec![
-                "This report is incomplete. rdy stopped before every check finished.".to_owned(),
-            ],
+            lines: vec![Line::text(
+                "This report is incomplete. rdy stopped before every check finished.",
+            )],
         });
     }
     out
