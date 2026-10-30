@@ -2634,7 +2634,7 @@ checked by `cargo deny`.
 | `RDY_PROGRESS` | all | `never` equals `--progress never` | M1 |
 | `RUST_LOG` | all | `tracing` filter, such as `RUST_LOG=rdy=debug`. Unset means no log output. Logs go to stderr through the redactor, never include secrets, and turn off the live progress line | M1 |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (and lower case) | `run` | Proxy settings for network checks. Printed without user info | M1 |
-| `SSL_CERT_FILE`, `SSL_CERT_DIR` | `run` | Extra trust roots, where the platform loader reads them (Linux) | M1 |
+| `SSL_CERT_FILE`, `SSL_CERT_DIR` | `run` | Extra trust roots for the TLS probe. Read as PEM on Linux and macOS. Windows reads no files in M1, so a set variable makes the check say to unset it there | M1 |
 | `KUBECONFIG` | `run` | Kubeconfig path list. `--kubeconfig` wins | M1 |
 | `HOME`, `XDG_CONFIG_HOME` | `trust`, `run`, `verify` | The user trust file (Unix only; Windows has no user store and never reads `APPDATA`, ADR 0027). Never read when euid is 0 (ADR 0002). The kube client also reads `HOME` for `~/.kube/config` | M1 |
 | `USERPROFILE` | `run` (Windows) | Default report folder `%USERPROFILE%\rdy-reports` (ADR 0016) | M1 |

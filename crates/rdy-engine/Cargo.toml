@@ -18,11 +18,13 @@ testing = ["dep:toml"]
 # proxy modes, a closed port, a listener that never accepts, a reset after the ClientHello, a 302 server
 # and a dual-stack case. Test-only like `testing`, which it implies. It needs tokio for sockets but not
 # the `runtime` feature, so the build without default features still compiles and lints it.
-loopback = ["testing", "dep:tokio", "dep:rcgen", "dep:socket2", "dep:tokio-rustls"]
+loopback = ["testing", "dep:tokio", "dep:rcgen", "dep:socket2", "dep:tokio-rustls", "dep:rustls", "dep:webpki-roots"]
 
 default = ["runtime"]
 # The scheduler, the blocking helper, the process runner and their dependencies (02, "Crate layout").
-runtime = ["dep:tokio", "dep:rustix", "dep:cap-std", "dep:cap-primitives"]
+# It carries the TLS half of the probe facade (M1-092): rustls on ring, tokio-rustls, the bundled roots and,
+# on macOS and Windows, the OS store reader.
+runtime = ["dep:tokio", "dep:rustix", "dep:cap-std", "dep:cap-primitives", "dep:rustls", "dep:tokio-rustls", "dep:webpki-roots", "dep:rustls-native-certs"]
 
 [dependencies]
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
@@ -35,11 +37,20 @@ thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt", "signal", "sync", "time"], optional = true }
 toml = { workspace = true, features = ["parse", "serde", "std"], optional = true }
-# Feature `loopback` only. Certificates are made with rcgen on ring and served with tokio-rustls on ring,
-# so aws-lc stays out of the tree (ADR 0009). socket2 sets a zero linger for the reset server.
+# The probe facade's TLS (M1-092), in features `runtime` and `loopback`. rustls on ring only, so aws-lc stays
+# out of the tree (ADR 0009).
+rustls = { workspace = true, features = ["ring", "std", "tls12"], optional = true }
+tokio-rustls = { workspace = true, features = ["ring", "tls12"], optional = true }
+webpki-roots = { workspace = true, features = [], optional = true }
+
+# Feature `loopback` only. Certificates are made with rcgen on ring and served with tokio-rustls on ring.
+# socket2 sets a zero linger for the reset server.
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"], optional = true }
 socket2 = { workspace = true, features = [], optional = true }
-tokio-rustls = { workspace = true, features = ["ring", "tls12"], optional = true }
+
+# The macOS and Windows trust stores (M1-092). Linux reads PEM bundles through the facade instead.
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+rustls-native-certs = { workspace = true, features = [], optional = true }
 
 # Windows opens the report folder without following a reparse point (M1-036, M1-037).
 [target.'cfg(not(unix))'.dependencies]
