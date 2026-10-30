@@ -94,6 +94,7 @@ pub use attempt::AttemptOutcome;
 pub use trust::{NoRoots, TrustFailure};
 
 use log::{ActionLog, Limits, Pending};
+pub(crate) use log::{Tier, dropped_calls, tier};
 
 mod addr;
 mod attempt;
