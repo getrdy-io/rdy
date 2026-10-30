@@ -1,0 +1,16 @@
+{
+  "call": "statvfs",
+  "path": "/mnt/acme data/releases",
+  "value": {
+    "fragment_size": 4096,
+    "blocks": 26214400,
+    "blocks_free": 23592960,
+    "blocks_available": 23592960,
+    "files": 1000000,
+    "files_free": 900000,
+    "read_only": false,
+    "no_exec": false,
+    "no_suid": false,
+    "dev": "253:2"
+  }
+}

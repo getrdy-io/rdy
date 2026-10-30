@@ -1,0 +1,12 @@
+schema = 1
+name = "btrfs-flag-mismatch"
+summary = "The btrfs mount found by path text has different flags from statvfs, so it is the wrong line and the mount stays unknown"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-apis-unreadable-forbidden"
+summary = "1.27 where the identity may read neither /apis nor the ClusterVersion"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true

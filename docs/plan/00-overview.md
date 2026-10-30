@@ -91,9 +91,9 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 172 | 379 |
-| M1, core | 143 | 317 |
-| M1, `core: no` (the cut list) | 29 | 62 |
+| M1, all | 173 | 380.5 |
+| M1, core | 143 | 318 |
+| M1, `core: no` (the cut list) | 30 | 62.5 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
 that. The earlier counts here (about 194 hours, then 248 in 02, then 571 in the first draft of 11) were
@@ -125,8 +125,8 @@ and Dec 28 run at half capacity.
 | 17 | Mar 15 to Mar 21, 2027 | 13 | 12.5 | 4 Network checks | M1-091 to M1-095 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy |
 | 18 | Mar 22 to Mar 28, 2027 | 13 | 13 | 3 Host checks, HTML report; 4 Network checks | M1-096 to M1-101, M1-073 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept; host.os on Linux |
 | 19 | Mar 29 to Apr 4, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-102 to M1-104, M1-072 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard with path parser and resource allowlist; host.ports on Linux |
-| 20 | Apr 5 to Apr 11, 2027 | 13 | 13.5 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |
-| 21 | Apr 12 to Apr 18, 2027 | 13 | 12.5 | 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-110 to M1-115 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed |
+| 20 | Apr 5 to Apr 11, 2027 | 13 | 14 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |
+| 21 | Apr 12 to Apr 18, 2027 | 13 | 13 | 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-110 to M1-115 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed |
 | 22 | Apr 19 to Apr 25, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-116 to M1-120 | `v0.1.0-alpha.21`: family pages; fixture envs for every verdict; timeouts env; signatures verified before parsing |
 | 23 | Apr 26 to May 2, 2027 | 13 | 11.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-121 to M1-125 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign` |
 | 24 | May 3 to May 9, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-126 to M1-131 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove` |
@@ -135,7 +135,7 @@ and Dec 28 run at half capacity.
 | 27 | May 24 to May 30, 2027 | 13 | 13.5 | Non-core, step 3 | M1-146 to M1-150 | `v0.1.2`: host.security_agents, host.firewall, host.time_sync, host.sysctl, host.container_runtime |
 | 28 | May 31 to Jun 6, 2027 | 13 | 13 | Non-core, steps 3 and 4 | M1-151 to M1-156 | `v0.1.3`: host.cgroups, host.kernel; net.dns; net.registry |
 | 29 | Jun 7 to Jun 13, 2027 | 13 | 12.5 | Non-core, steps 4 and 5 | M1-157 to M1-163 | `v0.1.4`: net.mtu, net.bandwidth; k8s.nodes free capacity, webhooks, namespace, dns, ingress |
-| 30 | Jun 14 to Jun 20, 2027 | 13 | 10 | Non-core, steps 2, 5 and 6 | M1-143, M1-164 to M1-167 | `v0.1.5`: quiet and verbose modes; k8s.crds, k8s.cni; air-gapped fixture env; quickstart timed; M1 complete |
+| 30 | Jun 14 to Jun 20, 2027 | 13 | 10.5 | Non-core, steps 2, 5 and 6 | M1-143, M1-164 to M1-167, M1-173 | `v0.1.5`: quiet and verbose modes; k8s.crds, k8s.cni; air-gapped fixture env; quickstart timed; agent catalog staleness gate; M1 complete |
 
 Builds before 0.1.0 (weeks 1 to 24) are `0.1.0-alpha.N` and are not handed to design partners for real
 POCs. Until `rdy verify` lands in week 24 they run specs only with `--allow-unsigned`, so rule 3 holds
@@ -158,7 +158,8 @@ These are every M1 ticket marked `core: no` in 11. They all come after the 0.1.0
 - M1-166 Fixture env net-airgapped (1.5 h).
 - M1-167 Time the quickstart with two design-partner SEs (2 h).
 - M1-172 Parameter types for the M1-late check ids (3 h).
-- Total: 29 tickets, 62 h.
+- M1-173 Agent catalog staleness gate and lint-wall include gaps (0.5 h).
+- Total: 30 tickets, 62.5 h.
 
 Never on the cut list: the "0.1.0 gate" security tickets, the root-only system trust store, verify
 before parse, the egress address policy, the kube guard and the facade policies.
@@ -342,7 +343,7 @@ pub struct NetFamily { /* policy client, endpoint allowlist from the spec, Actio
 impl NetFamily { pub fn new(proxy: ProxyConfig, endpoints: Vec<Endpoint>, actions: ActionLog) -> Result<Self, NetError>; }
 pub struct ProxyConfig { pub https: Option<ProxyUrl>, pub http: Option<ProxyUrl>, pub no_proxy: Vec<String> }
 impl ProxyConfig { pub fn from_env() -> Self; }
-pub struct ProxyUrl(/* private */);                          // Debug and Display mask userinfo
+pub struct ProxyUrl(/* private */);                          // Debug and Display mask userinfo; built in rdy_engine::probe (M1-091)
 ```
 
 **rdy-checks-k8s (M1).** Access and identity, server version, storage classes, RBAC through

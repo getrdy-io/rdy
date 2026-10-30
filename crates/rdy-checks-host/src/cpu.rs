@@ -22,9 +22,9 @@
 //!
 //! **Not built yet.** The catalog also asks for the flags through `std::is_x86_feature_detected!`
 //! behind a native call. The closed `NativeCall` list has no such variant (it comes with M2-004), so
-//! `/proc/cpuinfo` is the only feature source for now. The topology files under `/sys/devices/system/cpu/cpu*/topology` are
-//! not read either: `physical_cores` comes from the `physical id` and `core id` lines of `cpuinfo`, and
-//! is empty on Arm.
+//! `/proc/cpuinfo` is the only feature source for now. The topology files under
+//! `/sys/devices/system/cpu/cpu*/topology` are not read either: `physical_cores` comes from the
+//! `physical id` and `core id` lines of `cpuinfo`, and is empty on Arm.
 //!
 //! **Not verified.** A cgroup CPU file or `/proc/self/status` that cannot be read could hide a limit
 //! that lowers the count. With a `min` or `recommended` set, the check then never passes: it warns
@@ -46,7 +46,7 @@ use serde_json::{Map, Value, json};
 
 use crate::cgroup::{Bound, CgroupError, Cgroups, CpuQuota};
 use crate::family::OS;
-use crate::probe_err::{short, soft};
+use crate::text::{short, soft};
 
 mod parse;
 

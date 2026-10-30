@@ -1,0 +1,12 @@
+schema = 1
+name = "container-marker"
+summary = "Container: no mount line for /sys/fs/selinux, but the runtime left /run/.containerenv"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.lsm"]
+
+[caps]
+root = true
+network = false
+kube = false

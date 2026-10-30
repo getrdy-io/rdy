@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-apis-unreadable-vanilla"
+summary = "A self-managed 1.27 cluster where the identity may not read /apis and there is no ClusterVersion"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true

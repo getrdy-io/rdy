@@ -207,10 +207,7 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
     assert_eq!(
         HostFamily::stub_ids(),
         [
-            "host.disk",
             "host.ports",
-            "host.lsm",
-            "host.security_agents",
             "host.time_sync",
             "host.sysctl",
             "host.container_runtime",
@@ -222,6 +219,22 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
     for id in HostFamily::stub_ids() {
         assert!(listed.contains(id), "{id} is not a host check");
     }
+}
+
+#[test]
+fn host_disk_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "host.disk", "path": "/var/lib/acme", "min": "20Gi", "forbid_options": ["noexec"]}),
+    )
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.disk");
+    assert_eq!(built.check.info().statfs, ["/"]);
+    assert_eq!(built.check.info().reads, ["/proc/self/mountinfo"]);
+    assert!(!HostFamily::stub_ids().contains(&"host.disk"));
 }
 
 #[test]
@@ -239,6 +252,23 @@ fn host_firewall_builds_the_real_check_from_a_spec_entry() {
         "Host firewall active, inbound ports allowed"
     );
     assert!(!HostFamily::stub_ids().contains(&"host.firewall"));
+}
+
+#[test]
+fn host_lsm_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec =
+        serde_json::from_value(json!({"id": "host.lsm", "selinux": {"allow": ["enforcing"]}}))
+            .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.lsm");
+    assert_eq!(
+        built.check.info().summary,
+        "SELinux and AppArmor state, recent denials"
+    );
+    assert!(!HostFamily::stub_ids().contains(&"host.lsm"));
 }
 
 #[test]
@@ -308,4 +338,27 @@ fn host_cpu_builds_the_real_check_and_it_gives_a_finding() {
     let finding = outcome.expect("the real check ends in a finding, not an error");
     assert_eq!(finding.level, rdy_engine::check::Level::Pass);
     assert_eq!(finding.message, "8 vCPUs found, 8 needed");
+}
+
+#[test]
+fn host_security_agents_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "host.security_agents", "forbid": ["falco", "clamav"], "allow": ["veeam-agent-linux"]}),
+    )
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.security_agents");
+    assert_eq!(
+        built.check.info().summary,
+        "Security software processes that inspect file and process activity"
+    );
+    assert!(!HostFamily::stub_ids().contains(&"host.security_agents"));
+
+    // The bare entry builds too: any detected product is a warning.
+    let bare: CheckSpec =
+        serde_json::from_value(json!({"id": "host.security_agents"})).expect("an entry");
+    assert!(HostFamily.build(&bare, bare.decode_params(), &spec).is_ok());
 }

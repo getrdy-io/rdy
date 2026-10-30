@@ -1,0 +1,132 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/nodes",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "NodeList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "acme-old-1",
+          "labels": {
+            "kubernetes.io/os": "linux"
+          }
+        },
+        "spec": {},
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.24.3",
+            "kubeProxyVersion": "v1.24.3",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "acme-new-1",
+          "labels": {
+            "kubernetes.io/os": "linux"
+          }
+        },
+        "spec": {},
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.30.0",
+            "kubeProxyVersion": "v1.30.0",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "acme-ok-1",
+          "labels": {
+            "kubernetes.io/os": "linux"
+          }
+        },
+        "spec": {},
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.28.9",
+            "kubeProxyVersion": "v1.28.9",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "acme-edge-1",
+          "labels": {
+            "kubernetes.io/os": "linux"
+          }
+        },
+        "spec": {},
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.26.2",
+            "kubeProxyVersion": "v1.26.2",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      },
+      {
+        "metadata": {
+          "name": "acme-virtual-1",
+          "labels": {
+            "type": "virtual-kubelet"
+          }
+        },
+        "spec": {},
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.14.0-vk-azure-aci-v1.4.1",
+            "kubeProxyVersion": "v1.14.0-vk-azure-aci-v1.4.1",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      }
+    ]
+  }
+}

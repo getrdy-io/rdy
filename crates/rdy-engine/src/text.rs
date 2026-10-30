@@ -31,8 +31,10 @@ pub fn escape_untrusted(text: &str) -> String {
 ///
 /// This is the Unicode Default_Ignorable_Code_Point set, plus the line and paragraph separators, the
 /// interlinear annotation marks and the bidirectional controls. `escape_untrusted` shows them as
-/// `\u{..}` so a reader sees that they are there.
-fn is_invisible(c: char) -> bool {
+/// `\u{..}` so a reader sees that they are there. A check that builds text a customer copies refuses
+/// them.
+#[must_use]
+pub fn is_invisible(c: char) -> bool {
     matches!(
         u32::from(c),
         0x00AD // soft hyphen

@@ -16,9 +16,10 @@
 #   the Probe, not through a crate.
 # - One section, then one `allow = [..]` line, sorted. Nothing else is read.
 
-# rdy-checks-host: the base list of 02.
+# rdy-checks-host: the base list of 02, and toml for the embedded agents.toml catalog (M1-146, 03 Appendix B).
+# toml is a parser. It reads text that include_str! put in the binary and touches no file.
 [rdy-checks-host]
-allow = ["futures-util", "rdy-engine", "rdy-spec", "serde", "serde_json", "thiserror"]
+allow = ["futures-util", "rdy-engine", "rdy-spec", "serde", "serde_json", "thiserror", "toml"]
 
 # rdy-checks-net: the base list, and x509-parser for the TLS interception check (02).
 [rdy-checks-net]

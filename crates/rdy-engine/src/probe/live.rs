@@ -22,7 +22,7 @@
 //! file with the device and inode of a password or sudo file, whatever its name. Windows has no file
 //! reads in M1: every file call fails with a typed error.
 //!
-//! **Sockets (M1-144).** `resolve`, `udp_exchange` and `unix_get` do the socket work and nothing else:
+//! **Sockets (M1-144, M1-091).** `resolve`, `connect`, `udp_exchange` and `unix_get` do the socket work and nothing else:
 //! the probe has already applied the peer, address and path policy. A datagram is read into a
 //! 65535-byte buffer and cut to the cap here. A unix socket reply is read by a small HTTP/1.x client
 //! (`dockerhttp`) that sends one fixed `GET`. The unix socket is not built on Windows.
@@ -207,6 +207,13 @@ impl Backend for Live {
         timeout: Duration,
     ) -> BoxFuture<'a, io::Result<Vec<IpAddr>>> {
         Box::pin(netio::resolve(host, port, timeout))
+    }
+
+    fn connect<'a>(
+        &'a self,
+        addr: SocketAddr,
+    ) -> BoxFuture<'a, io::Result<super::net::BoxedStream>> {
+        Box::pin(netio::connect(addr))
     }
 
     fn udp_exchange<'a>(

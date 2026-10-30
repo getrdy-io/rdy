@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-missing-apis"
+summary = "1.29 where autoscaling/v2beta2 is gone, batch/v1 has no CronJob and autoscaling/v2 is not listed"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true

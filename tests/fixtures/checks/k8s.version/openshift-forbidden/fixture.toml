@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-openshift-forbidden"
+summary = "OpenShift where the identity may not read the ClusterVersion"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true

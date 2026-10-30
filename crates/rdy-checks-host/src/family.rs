@@ -12,9 +12,12 @@ use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::cpu::{self, CpuCheck};
+use crate::disk::{self, Disk};
 use crate::firewall::{self, Firewall};
+use crate::lsm::{self, Lsm};
 use crate::memory::{self, Memory};
 use crate::os::{self, OsCheck};
+use crate::security_agents::{self, SecurityAgents};
 
 #[cfg(test)]
 mod tests;
@@ -69,42 +72,12 @@ const fn info(
 // Titles and remediation follow the Fix lines of 03 section 2, with the measured values taken out.
 // The check that replaces each stub may sharpen its text. Its findings carry the specific fix.
 
-static DISK: CheckInfo = info(
-    "host.disk",
-    "Free space, inodes, mount flags per path",
-    CheckMeta {
-        title: "Disk space and mount flags",
-        remediation: "Free up space on the volume that holds the install path, grow the volume, or point the install at a larger disk. On Linux, run `df -h` on the install path to see what is free. If the path is on a `noexec` mount, remount it with `exec` and remove `noexec` from `/etc/fstab`, or move the install path.",
-    },
-    5,
-    &[],
-);
 static PORTS: CheckInfo = info(
     "host.ports",
     "Required ports free",
     CheckMeta {
         title: "Free ports",
         remediation: "Stop the process that holds the port, or change the product's port setting. If the port is in the ephemeral range, reserve it with `net.ipv4.ip_local_reserved_ports` in a file under `/etc/sysctl.d/` as root, then run `sysctl --system`.",
-    },
-    5,
-    ROOT,
-);
-static LSM: CheckInfo = info(
-    "host.lsm",
-    "SELinux and AppArmor state, recent denials",
-    CheckMeta {
-        title: "SELinux and AppArmor",
-        remediation: "On SELinux, read recent denials with `ausearch -m avc -ts recent`. Install the vendor's policy module, or label the volume with `chcon -Rt container_file_t` or the `:Z` mount option. As a last resort, run `setenforce 0` and set `SELINUX=permissive` in `/etc/selinux/config`. This turns SELinux protection off, so ask the security team first. On AppArmor, read denials with `journalctl -k` and ask the vendor for a profile.",
-    },
-    3,
-    ROOT,
-);
-static SECURITY_AGENTS: CheckInfo = info(
-    "host.security_agents",
-    "Security software processes that inspect file and process activity",
-    CheckMeta {
-        title: "Security software",
-        remediation: "Security software often inspects file opens and process launches. If the install is slow or fails, ask the security team to review exclusions for the product's paths, then run rdy again.",
     },
     5,
     ROOT,
@@ -163,11 +136,11 @@ static KERNEL: CheckInfo = info(
 
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 13] = [
-    &DISK,
+    &disk::INFO,
     &memory::INFO,
     &PORTS,
-    &LSM,
-    &SECURITY_AGENTS,
+    &lsm::INFO,
+    &security_agents::INFO,
     &firewall::INFO,
     &TIME_SYNC,
     &cpu::INFO,
@@ -182,8 +155,9 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.firewall` ([`Firewall`]), `host.memory` ([`Memory`]), `host.cpu` ([`CpuCheck`]) and `host.os`
-/// ([`OsCheck`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
+/// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]) and `host.security_agents` ([`SecurityAgents`]) are
+/// real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -204,11 +178,8 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 9] = [
-    "host.disk",
+static STUBS: [&str; 6] = [
     "host.ports",
-    "host.lsm",
-    "host.security_agents",
     "host.time_sync",
     "host.sysctl",
     "host.container_runtime",
@@ -226,6 +197,9 @@ impl Family for HostFamily {
     }
 
     fn build(&self, entry: &CheckSpec, params: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        if let CheckParams::HostDisk(params) = &params {
+            return Ok(Built::new(Box::new(Disk::new(params))));
+        }
         if let CheckParams::HostFirewall(firewall) = params {
             let ports = firewall
                 .open_inbound
@@ -237,11 +211,25 @@ impl Family for HostFamily {
         if let CheckParams::HostCpu(cpu) = &params {
             return Ok(Built::new(Box::new(CpuCheck::from_params(cpu))));
         }
+        if let CheckParams::HostLsm(lsm) = &params {
+            return Ok(Built::new(Box::new(Lsm::new(lsm))));
+        }
         if let CheckParams::HostMemory(memory) = params {
             return Ok(Built::new(Box::new(Memory::from_params(&memory))));
         }
         if let CheckParams::HostOs(os) = &params {
             return Ok(Built::new(Box::new(OsCheck::from_params(os))));
+        }
+        if let CheckParams::HostSecurityAgents(agents) = params {
+            let ids = |list: Option<&rdy_spec::check::StringList>| -> Vec<String> {
+                list.into_iter()
+                    .flatten()
+                    .map(|id| id.as_str().to_owned())
+                    .collect()
+            };
+            let check =
+                SecurityAgents::new(ids(agents.forbid.as_ref()), ids(agents.allow.as_ref()));
+            return Ok(Built::new(Box::new(check)));
         }
         let info = CHECKS
             .iter()

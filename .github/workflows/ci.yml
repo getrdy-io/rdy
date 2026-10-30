@@ -78,6 +78,10 @@ jobs:
       # without `cargo xtask schema` fails here and names the file to regenerate.
       - name: Generated schemas are current
         run: cargo run --locked --quiet --package xtask -- schema --check
+      # The k8s.version fixtures are written by a script (tests/fixtures/README.md, origin `generated`). A
+      # change to the script or to a fixture without the other fails here.
+      - name: k8s.version fixtures are current
+        run: python3 -I scripts/gen-k8s-version-fixtures.py --check
       # The schema generator is the optional `schema` feature of rdy-spec. It pulls in schemars and
       # serde_json/preserve_order, which must stay out of the shipped binary (ADR 0019).
       - name: The binary does not build the schema generator
@@ -338,12 +342,21 @@ jobs:
       - name: Install libcap2-bin
         if: matrix.name == 'linux-x64'
         run: sudo apt-get install -y --no-install-recommends libcap2-bin
+      # `assert_golden` records each golden it compares in target/goldens-used. A restored cache must not
+      # carry a record from an older run, which could hide an orphan (08 section 3, M1-052).
+      - name: Reset the golden usage record
+        if: matrix.name == 'linux-x64'
+        run: rm -rf target/goldens-used
       - name: Test (nextest, no retries)
         if: ${{ !matrix.compile_only }}
         env:
           RDY_REQUIRE_C_MINISIGN: ${{ matrix.name == 'linux-x64' && '1' || '' }}
           RDY_REQUIRE_SETUID: ${{ matrix.name == 'linux-x64' && '1' || '' }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
+      # A golden file that no test compared is an orphan: its test was renamed or deleted (M1-052).
+      - name: No orphaned golden files
+        if: matrix.name == 'linux-x64'
+        run: cargo run --locked --quiet --package xtask -- goldens check
       # nextest does not run doc tests. They build for the host, so they run on one leg only.
       - name: Doc tests
         if: matrix.name == 'linux-x64'

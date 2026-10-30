@@ -1,0 +1,12 @@
+schema = 1
+name = "agent-rapid7-insight-agent"
+summary = "Host running the rapid7-insight-agent processes, names as the kernel cuts them"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.security_agents"]
+
+[caps]
+root = true
+network = false
+kube = false

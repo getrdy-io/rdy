@@ -1,0 +1,3 @@
+docker-default (enforce)
+/usr/sbin/chronyd (enforce)
+snap.lxd.lxc (complain)
