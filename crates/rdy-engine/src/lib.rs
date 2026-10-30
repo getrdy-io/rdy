@@ -26,6 +26,7 @@
 //!   (INV-10) and the capability probes.
 //! - [`redact`]: the redactor. [`redact::Redactor::redact_report`] redacts and then caps every string of a
 //!   report and returns a [`redact::RedactedReport`], the only type the writers and renderers accept.
+//! - [`summary`]: the summary line and the last line of a run (01 section 5.3, 07 section 2.4).
 //!
 //! - `watchdog` (feature `runtime`): the run watchdog, a plain thread that writes an incomplete report
 //!   and exits 70 when a run hangs, and the run board that holds its snapshot.
@@ -50,6 +51,7 @@ pub mod probe;
 pub mod redact;
 #[cfg(feature = "runtime")]
 pub mod sched;
+pub mod summary;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod text;
