@@ -847,7 +847,7 @@ async fn proxy_403_and_407_return_typed_errors_and_no_credential_reaches_the_log
 }
 
 /// The result schema, as the generator wrote it.
-fn assert_matches_result_schema(report: &Value) {
+pub(super) fn assert_matches_result_schema(report: &Value) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(root.join("../rdy-spec/schema/result.v1.schema.json"))
         .expect("schema file");

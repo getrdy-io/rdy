@@ -93,7 +93,7 @@ deny = [
     { crate = "hickory-client", reason = "02 lint wall: DNS goes through the probe facade" },
     { crate = "hickory-net", reason = "02 lint wall: DNS goes through the probe facade" },
     { crate = "nix", wrappers = ["rexpect"], reason = "02 lint wall: rexpect drives the prompt tests (dev only); no check crate" },
-    { crate = "hyper", wrappers = ["hyper-rustls", "hyper-timeout", "hyper-util", "kube-client"], reason = "02 lint wall: reached through kube-client only" },
+    { crate = "hyper", wrappers = ["hyper-rustls", "hyper-timeout", "hyper-util", "kube-client", "rdy-engine"], reason = "02 lint wall: the kube client stack reaches it; rdy-engine uses it for the facade's HTTP/1.1 probe (M1-093, ADR 0014 decision 4)" },
     { crate = "rustix", wrappers = ["cap-primitives", "cap-std", "fs-set-times", "rdy", "rdy-engine", "rustix-linux-procfs", "tempfile"], reason = "02 lint wall: safe syscall wrappers belong to the engine and the CLI, not to a check" },
     # The k8s check crate has two dev-dependencies that the wall would otherwise ban. Both are test only
     # (a local TLS server and kubeconfig files for the client tests). deny cannot tell a dev-dependency

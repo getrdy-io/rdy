@@ -29,6 +29,21 @@ pub enum Reply {
     Redirect(String),
     /// This status code, with an empty body.
     Status(u16),
+    /// `200 OK` with this body and a matching `Content-Length`. A `HEAD` gets the length and no body.
+    Body(Vec<u8>),
+    /// `200 OK` with this body in `Transfer-Encoding: chunked`, a chunk per 8 KiB, and no
+    /// `Content-Length`: the shape of a streamed reply a client has to cut. A `HEAD` gets no body.
+    Chunked(Vec<u8>),
+    /// These bytes exactly, in place of any HTTP reply, then the connection closes. For a server that
+    /// answers a client with something that is not HTTP.
+    Raw(Vec<u8>),
+    /// These bytes exactly, then the connection is dropped with no goodbye: no TLS `close_notify`, only
+    /// the end of the TCP stream. For a server whose body ends where the connection does, or that dies
+    /// in the middle of a reply.
+    Abrupt(Vec<u8>),
+    /// These bytes exactly, then silence: the connection stays open until the client closes it. For a
+    /// server that sends a head and part of a body and then stalls.
+    Stall(Vec<u8>),
 }
 
 /// One request the server read.
@@ -282,13 +297,38 @@ where
         return;
     };
     let request = parse_head(&head);
+    let head_only = request.method.eq_ignore_ascii_case("HEAD");
     shared
         .requests
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .push(request);
+    if let Reply::Raw(bytes) = reply {
+        let _ = stream.write_all(bytes).await;
+        let _ = stream.shutdown().await;
+        return;
+    }
+    if let Reply::Abrupt(bytes) = reply {
+        let _ = stream.write_all(bytes).await;
+        let _ = stream.flush().await;
+        // Dropped, not shut down: a TLS stream sends no `close_notify`.
+        return;
+    }
+    if let Reply::Stall(bytes) = reply {
+        let _ = stream.write_all(bytes).await;
+        let _ = stream.flush().await;
+        // Hold the connection open. The task ends when the client closes or the server drops.
+        let mut sink = [0u8; 256];
+        while matches!(stream.read(&mut sink).await, Ok(n) if n > 0) {}
+        return;
+    }
     let (code, location) = match reply {
-        Reply::Ok => (200, None),
+        Reply::Ok
+        | Reply::Body(_)
+        | Reply::Chunked(_)
+        | Reply::Raw(_)
+        | Reply::Abrupt(_)
+        | Reply::Stall(_) => (200, None),
         Reply::Redirect(location) => (302, Some(location.as_str())),
         Reply::Status(code) => (*code, None),
     };
@@ -298,8 +338,36 @@ where
         text.push_str(location);
         text.push_str("\r\n");
     }
-    text.push_str("Content-Length: 0\r\nConnection: close\r\n\r\n");
+    let mut body: &[u8] = &[];
+    match reply {
+        Reply::Body(bytes) => {
+            text.push_str(&format!("Content-Length: {}\r\n", bytes.len()));
+            body = bytes;
+        }
+        Reply::Chunked(bytes) => {
+            text.push_str("Transfer-Encoding: chunked\r\n");
+            body = bytes;
+        }
+        _ => text.push_str("Content-Length: 0\r\n"),
+    }
+    text.push_str("Connection: close\r\n\r\n");
     let _ = stream.write_all(text.as_bytes()).await;
+    if !head_only {
+        if let Reply::Chunked(_) = reply {
+            for chunk in body.chunks(8 * 1024) {
+                let framed = format!("{:x}\r\n", chunk.len());
+                if stream.write_all(framed.as_bytes()).await.is_err()
+                    || stream.write_all(chunk).await.is_err()
+                    || stream.write_all(b"\r\n").await.is_err()
+                {
+                    return;
+                }
+            }
+            let _ = stream.write_all(b"0\r\n\r\n").await;
+        } else {
+            let _ = stream.write_all(body).await;
+        }
+    }
     let _ = stream.shutdown().await;
 }
 

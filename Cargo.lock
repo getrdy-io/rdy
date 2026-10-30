@@ -1811,6 +1811,7 @@ version = "0.1.0-alpha.0"
 dependencies = [
  "cap-primitives",
  "cap-std",
+ "hyper",
  "jsonschema",
  "proptest",
  "rcgen",

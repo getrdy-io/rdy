@@ -321,7 +321,12 @@ Every field of a `statvfs`, `uname` or `rlimit` value is required, so a missing 
 `no_exec` is `null` where the OS does not report it, `dev` is the `major:minor` of the file system in
 decimal (field 3 of `/proc/self/mountinfo`) or `null` where the OS has none, and a `null` limit is unlimited. Use `error`
 (`unsupported`, `permission_denied`, `not_found` or `io`) instead of `value` for a call that fails.
-`system_roots` values are base64 DER certificates. `delay_ms` waits on the tokio clock, so a hung
+`system_roots` values are a list of base64 DER certificates, or an object that also names where the
+roots were read from, which is what `Probe::trust_store` reports:
+`{ "certs": ["..."], "sources": [{ "kind": "bundle", "location": "/etc/ssl/certs/ca-certificates.crt" }] }`
+with `kind` one of `bundle` (a PEM file), `directory` or `os` ("System keychain", "Windows Root store").
+A source may add `"env": "SSL_CERT_FILE"` or `"SSL_CERT_DIR"` when the place came from that variable;
+without it the source is a standard one. The list form names no source. `delay_ms` waits on the tokio clock, so a hung
 `statvfs` is a large delay that the check's timeout ends. A call the fixture does not hold fails with
 `NotRecorded`.
 
