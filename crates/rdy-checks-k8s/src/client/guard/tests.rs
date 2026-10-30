@@ -943,7 +943,7 @@ async fn a_post_goes_only_to_the_three_reviews_with_no_query_and_the_fixed_body(
 #[tokio::test]
 async fn a_typed_self_subject_review_does_not_match_the_fixed_body() {
     // k8s-openapi writes `metadata` into a default review, so it is not the fixed body. The identity
-    // call (M1-105) must send SELF_SUBJECT_REVIEW_BODY, not a typed value.
+    // call (`ReadOnlyClient::self_subject_review`, M1-105) sends SELF_SUBJECT_REVIEW_BODY, not a typed value.
     let rig = Rig::new();
     let api = kube::Api::<SelfSubjectReview>::all(rig.client.clone());
     let result = api
@@ -1169,7 +1169,8 @@ const PHASE: &str = "fieldSelector=status.phase%21%3DSucceeded%2Cstatus.phase%21
 
 /// Every API call the M1 checks make, from 03 and 02 Appendix B, one list per check. The checks are not
 /// built yet (M1-106 onward), so these are the calls the design says each one sends, written as the
-/// requests kube builds. M1-105 replaces them with the real checks over the mock harness.
+/// requests kube builds. Each check ticket (M1-106 onward) replaces its list with the real check over the
+/// mock harness (`client::mock`), whose audit then proves INV-14 with real check code.
 fn calls_of(check: &str) -> Vec<Call> {
     let get = |uri| ("GET", uri, &b""[..]);
     match check {
