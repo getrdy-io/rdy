@@ -748,7 +748,7 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
 - **HTML.**
   - `render_html(&RedactedReport)` follows 01 section 6: content in 01's order (blockers, required not
     run, warnings, passed, not applicable, capabilities, details, action log as one plain table).
-  - No `<details>`; vendor fix text is labelled "From <product>". An INCOMPLETE banner shows when
+  - No `<details>`; vendor fix text is labelled "From <product>" only when the key is pinned, else "From the spec file (not verified)" (01 section 2.6, M1-080). An INCOMPLETE banner shows when
     `complete: false`.
   - The JSON is embedded with `data-sha256`.
   - The CSP is ADR 0003's.

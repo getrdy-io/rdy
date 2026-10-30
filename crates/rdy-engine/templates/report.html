@@ -36,6 +36,7 @@
 <li><a href="#capabilities">What rdy could use on this machine</a></li>
 {%- endif %}
 <li><a href="#details">Run and spec details</a></li>
+<li><a href="#actions">What rdy read and contacted</a></li>
 </ul>
 </nav>
 <main>
@@ -50,7 +51,7 @@
 <p>{% for part in why %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
 {%- endif %}
 {%- if let Some(fix) = check.fix %}
-<p class="text"><span class="label">Fix:</span> <bdi>{{ fix }}</bdi></p>
+<p class="text"><span class="label">{% for part in fix.label %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}:</span> <bdi>{{ fix.text }}</bdi></p>
 {%- endif %}
 {%- if let Some(more) = check.builtin_fix %}
 <p class="text"><span class="label">More from rdy:</span> <bdi>{{ more }}</bdi></p>
@@ -98,6 +99,27 @@
 <dd><bdi>{{ row.value }}</bdi></dd>
 {%- endfor %}
 </dl>
+</section>
+<section aria-labelledby="actions">
+<h2 id="actions">What rdy read and contacted</h2>
+{%- if actions.rows.is_empty() %}
+<p>rdy recorded nothing in this run.</p>
+{%- else %}
+<table>
+<caption>Every command, file, host and cluster request rdy used, in order</caption>
+<thead>
+<tr><th scope="col">No.</th><th scope="col">Check</th><th scope="col">What</th><th scope="col">Detail</th><th scope="col">Result</th></tr>
+</thead>
+<tbody>
+{%- for row in actions.rows %}
+<tr><th scope="row">{{ row.number }}</th><td>{% if let Some(check) = row.check %}<bdi>{{ check }}</bdi>{% else %}the run itself{% endif %}</td><td>{% for part in row.what %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</td><td><bdi>{{ row.detail }}</bdi></td><td>{% for part in row.result %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</td></tr>
+{%- endfor %}
+</tbody>
+</table>
+{%- if actions.more > 0 %}
+<p>{{ actions.more }} more entries are in the embedded JSON.</p>
+{%- endif %}
+{%- endif %}
 </section>
 </main>
 <footer>
