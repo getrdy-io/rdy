@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 use super::*;
+use crate::probe::live::roots::MAX_TOTAL_BYTES;
+use crate::probe::{MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, Refused};
 use crate::testing::loopback::TestCa;
 
 fn der(ca: &TestCa) -> Vec<u8> {
@@ -231,4 +233,90 @@ fn certificate_names() {
     ] {
         assert!(!certificate_name(name), "{name}");
     }
+}
+
+#[test]
+fn a_link_to_a_secret_file_is_refused_and_is_not_read_as_a_store() {
+    let (_guard, root) = dir();
+    // A file shaped like the secret, with a certificate in it, so a read that got through would show.
+    let etc = root.join("etc");
+    fs::create_dir(&etc).expect("dir");
+    let shadow = etc.join("shadow");
+    let ca = TestCa::root("Root A");
+    fs::write(&shadow, ca.root_pem()).expect("write");
+    let link = root.join("looks-fine.pem");
+    symlink(&shadow, &link).expect("link");
+
+    for sources in [
+        explicit(Some(&link), &[], &root),
+        explicit(Some(&shadow), &[], &root),
+    ] {
+        let error = load(&sources, &none()).expect_err("refused");
+        assert!(Refused::from_io(&error).is_some(), "{error:?}");
+    }
+
+    // In a directory the link is skipped like any file that does not read: no certificate, and the
+    // directory itself is not a failure.
+    let certs = root.join("certs");
+    fs::create_dir(&certs).expect("dir");
+    symlink(&shadow, certs.join("shadow.pem")).expect("link");
+    let roots = load(&explicit(None, &[&certs], &root), &none()).expect("empty");
+    assert!(roots.is_empty());
+}
+
+#[test]
+fn only_certificate_blocks_are_returned() {
+    let (_guard, root) = dir();
+    let ca = TestCa::root("Root A");
+    // A private key block, in the shapes that exist, around a certificate.
+    let key = b"not a real key but secret-key-bytes-0123456789";
+    let mut text = String::new();
+    for label in [
+        "PRIVATE KEY",
+        "RSA PRIVATE KEY",
+        "EC PRIVATE KEY",
+        "ENCRYPTED PRIVATE KEY",
+    ] {
+        text.push_str(&fake_pem(key).replace("CERTIFICATE", label));
+    }
+    text.push_str(ca.root_pem());
+    text.push_str("password: hunter2\n");
+    let bundle = root.join("mixed.pem");
+    fs::write(&bundle, text).expect("write");
+
+    let roots = load(&explicit(Some(&bundle), &[], &root), &none()).expect("roots");
+    assert_eq!(roots, [der(&ca)]);
+    let flat: Vec<u8> = roots.concat();
+    assert!(!flat.windows(10).any(|w| w == b"secret-key"));
+}
+
+#[test]
+fn a_bundle_with_no_certificate_does_not_end_the_search() {
+    let (_guard, root) = dir();
+    let (empty, good) = (root.join("empty.crt"), root.join("good.crt"));
+    fs::write(&empty, "# a bundle with the certificates removed\n").expect("write");
+    let ca = TestCa::root("Good");
+    fs::write(&good, ca.root_pem()).expect("write");
+    let sources = Sources::new(None, None).with_standard(vec![empty, good], vec![]);
+    assert_eq!(load(&sources, &none()).expect("roots"), [der(&ca)]);
+}
+
+#[test]
+fn the_total_bytes_read_are_capped() {
+    let (_guard, root) = dir();
+    let certs = root.join("certs");
+    fs::create_dir(&certs).expect("dir");
+    // Twelve files a little over the read cap, each with its own certificate first: the load stops at
+    // the byte budget, which is eight reads of the cap.
+    let filler = "# padding\n".repeat(MAX_READ / 10 + 20);
+    for i in 0..12 {
+        let text = format!(
+            "{}{filler}",
+            fake_pem(format!("certificate {i}").as_bytes())
+        );
+        assert!(text.len() > MAX_READ);
+        fs::write(certs.join(format!("c{i:02}.pem")), text).expect("write");
+    }
+    let roots = load(&explicit(None, &[&certs], &root), &none()).expect("roots");
+    assert_eq!(roots.len(), MAX_TOTAL_BYTES / MAX_READ);
 }

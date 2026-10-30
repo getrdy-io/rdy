@@ -32,6 +32,13 @@ const NEVER: &[&str] = &[
     "walkdir",
     "tempfile",
     "tokio-rustls",
+    // TLS and trust roots belong to the probe facade (M1-092). A check never builds a TLS client or reads
+    // an OS trust store itself: the facade hands it the chain and the verdicts. `webpki-roots` is data,
+    // but a check that held it could judge a chain on its own, so it is not allowed either.
+    "rustls",
+    "rustls-native-certs",
+    "rustls-platform-verifier",
+    "webpki-roots",
     "sysinfo",
     "which",
     "ureq",

@@ -485,7 +485,8 @@ tests policy.
   `h2` and `http/1.1`, no session resumption and a 5 s limit. A `TlsChain` holds the DER chain as sent
   (leaf first, no root), the `sni`, one `TrustVerdict` for the system roots and one for the bundled
   roots (`Valid`, `Rejected(UnknownIssuer | Expired | NotYetValid | NameMismatch | BadSignature |
-  Policy)` or `Unavailable` when the set is empty or the OS gave none), the number of system roots used,
+  Policy)` or `Unavailable(Empty | Unreadable)` when the set has no roots: `Empty` for an empty store or an
+  OS with no source, `Unreadable` for a store that did not read), the number of system roots used,
   the protocol, the chosen ALPN protocol, the handshake time and the `TcpReport` of the connection.
   `Expired` and `NotYetValid` are the `clock_or_expiry` class (`TrustFailure::is_clock_or_expiry`). A
   chain that fails to validate is data, not an error. The call fails with `NetFailure::NotConnected`
@@ -503,9 +504,9 @@ tests policy.
   stage timings and the `Location` host. It reads at most 64 KiB of body and discards it, and never
   follows a redirect. Failures are typed: `dns`, `refused`, `blackhole`, `tls_unknown_issuer`,
   `tls_alert`, `reset_after_hello`, `proxy_403`, `proxy_407`, `http_status`, `blocked_address`.
-- System roots: Linux PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the standard paths) are read through
-  the facade; macOS and Windows use `NativeCall::SystemRoots`. No revocation check, and the report says
-  so.
+- System roots: PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the standard paths) are read through the
+  facade on Unix; macOS without the two variables, and Windows, use `NativeCall::SystemRoots` over the OS
+  store. No revocation check, and the report says so.
 - PAC is reported, never fetched, in M1.
 - UDP (`udp_exchange`) and unix sockets (`unix_get`, GET-only Docker API guard) are facade methods built
   in M1-144 (M1-late), before `host.time_sync` and `host.container_runtime`. A check declares
@@ -533,15 +534,21 @@ tests policy.
     Windows has none yet, so each reports `Unsupported`, which a check maps to skipped, not yet
     on this OS; the Windows `MachineGuid` read goes with `host_id` in M2-002. The log entry holds
     `api` and `path` or `resource`, never the answer.
-  - As built in M1-092: `SystemRoots` answers on Linux and the other Unix systems (PEM files: the
-    `SSL_CERT_FILE` file; the `SSL_CERT_DIR` directories; with neither set, the first standard bundle
-    that reads, else the standard directories; read through the file rules, so the denylist judges the real
-    path), on macOS (`rustls-native-certs`, the keychains) and on Windows (`rustls-native-certs`, the
-    root store; it is the one native call Windows answers). The answer is capped in count and size by
-    `MAX_SYSTEM_ROOTS` (1024) and `MAX_ROOT_BYTES` (16 KiB), by the live reader and again by `Probe::native`
-    for every backend; a certificate over the size is dropped, one past the count is cut, and a warning with
-    the counts (no certificate) is logged. An empty store is an answer, not an error. A store that only an
-    NSS database or a Java keystore holds is invisible (05).
+  - As built in M1-092: `SystemRoots` answers on every Unix system from PEM files: the `SSL_CERT_FILE`
+    file; the `SSL_CERT_DIR` directories; with neither set, the first standard bundle that holds a
+    certificate, else the standard directories. They are read through the file rules, so the denylist
+    judges the real path. macOS with neither variable set asks `rustls-native-certs` for the keychains
+    instead, and Windows with neither set asks it for the root store (it is the one native call Windows
+    answers). `rustls-native-certs` reads the two variables with plain `std::fs`, no rules and no caps,
+    and then skips the OS store, so rdy never calls it while either is set: macOS takes the PEM reader,
+    and Windows, which has no file reads in M1, fails the call with a typed error (the verdict is
+    `Unavailable(Unreadable)`). The answer is capped in count and size by `MAX_SYSTEM_ROOTS` (1024) and
+    `MAX_ROOT_BYTES` (16 KiB), by the live reader and again by `Probe::native` for every backend, and the
+    PEM reader reads at most 2048 files of a directory and 8 MiB in all. A certificate over the size is
+    dropped, one past the count is cut, a repeat is kept once, and a warning with the counts (no
+    certificate) is logged. An empty store is an answer, not an error. The run keeps the answer, an
+    empty store and a read error; a timeout or a refusal by policy is asked again on the next call. A
+    store that only an NSS database or a Java keystore holds is invisible (05).
   - `StatvfsInfo::no_exec` is an `Option<bool>`. Linux and Android set it from `ST_NOEXEC`. macOS has no
     such flag in `statvfs`, so it is `None`: unknown. A check that forbids `noexec` reports "not
     verified" for `None`, never a pass. Reading `MNT_NOEXEC` from `statfs` is a later ticket.

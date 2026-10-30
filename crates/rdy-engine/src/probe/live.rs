@@ -29,8 +29,9 @@
 //!
 //! **Native calls.** `Backend::native` runs the closed `NativeCall` list in the `native` module (Unix;
 //! Windows answers `SystemRoots` only and reports `Unsupported` for the rest until their sources land).
-//! `SystemRoots` is the `roots` module: PEM bundles through the file rules on Linux, the OS store through
-//! `rustls-native-certs` on macOS and Windows, capped in count and size (M1-092). A `Statvfs` call takes the same
+//! `SystemRoots` is the `roots` module: PEM bundles through the file rules on Unix, the OS store through
+//! `rustls-native-certs` on macOS and Windows when `SSL_CERT_FILE` and `SSL_CERT_DIR` are unset, capped in
+//! count, size and total bytes (M1-092). A `Statvfs` call takes the same
 //! steps as a file call. Linux asks `fstatvfs` on the judged `O_PATH` descriptor. macOS opens the real
 //! path as above and asks that descriptor, so the numbers are for the inode that passed the rules.
 //! `MachineId` is the one read of the machine id files: it uses a guard that admits those two paths only,
@@ -195,7 +196,7 @@ impl Backend for Live {
                 let _ = guard;
                 match call {
                     NativeCall::SystemRoots => {
-                        on_pool(|| roots::load().map(NativeValue::SystemRoots)).await
+                        on_pool(|| roots::system_roots().map(NativeValue::SystemRoots)).await
                     }
                     _ => unsupported(),
                 }

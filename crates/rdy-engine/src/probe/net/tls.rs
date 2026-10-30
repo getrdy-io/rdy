@@ -21,8 +21,9 @@
 //! probe (the log has one `native` entry with `check: null`, not one per check) and kept in the hub. They
 //! are capped at [`MAX_SYSTEM_ROOTS`](crate::probe::MAX_SYSTEM_ROOTS) certificates of
 //! [`MAX_ROOT_BYTES`](crate::probe::MAX_ROOT_BYTES) each. A store that is empty or that the OS could not
-//! give leaves the system verdict [`TrustVerdict::Unavailable`], which a check reports as "no OS trust
-//! store found". The bundled roots are the `webpki-roots` list. There is **no revocation check**:
+//! give leaves the system verdict [`TrustVerdict::Unavailable`], with [`NoRoots::Empty`] ("no OS trust
+//! store found") or [`NoRoots::Unreadable`] ("the OS trust store could not be read"). The run keeps
+//! an empty store and a read error; it asks again after a timeout or a refusal. The bundled roots are the `webpki-roots` list. There is **no revocation check**:
 //! [`REVOCATION_NOTE`] is the wording a report uses.
 //!
 //! **The log.** One `tls` entry per call: `host`, `port`, `via_proxy`, `addr` and, for a name, `sni`. The
@@ -36,8 +37,6 @@ use std::time::Duration;
 use rdy_spec::Target;
 use rdy_spec::result::ActionKind;
 use rdy_spec::scalar::Host;
-use rustls::ClientConfig;
-use rustls::client::Resumption;
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::ServerName;
 use serde_json::{Map, Value};
@@ -46,7 +45,7 @@ use tokio::sync::OnceCell;
 use tokio::time::{Instant, timeout};
 use tokio_rustls::TlsConnector;
 
-use self::record::{Recording, Seen, Trust};
+use self::record::{Seen, Trust, recording_client};
 use super::{Dialed, NetFailure, Probe, ProbeError, ProbeHub, Route, TcpReport};
 use super::{fail_net, proxy_for, settle};
 use crate::probe::log::Pending;
@@ -118,8 +117,21 @@ pub enum TrustVerdict {
     Valid,
     /// The chain does not validate, for this reason.
     Rejected(TrustFailure),
-    /// The set has no roots to judge against: an empty or unreadable OS store, or an OS with no source.
-    Unavailable,
+    /// The set has no roots to judge against, for this reason.
+    Unavailable(NoRoots),
+}
+
+/// Why there are no OS roots to judge a chain against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NoRoots {
+    /// The OS has no trust store rdy can see, or the store holds no certificate. A check reports "no OS
+    /// trust store found".
+    Empty,
+    /// The OS has a store but it could not be read: a file the operator named with `SSL_CERT_FILE` or
+    /// `SSL_CERT_DIR` was missing or refused, or the OS gave an error. A check reports "the OS trust store
+    /// could not be read" and not "no store found".
+    Unreadable,
 }
 
 /// What one TLS call found.
@@ -244,12 +256,7 @@ impl Probe {
         let (system, bundled) = self.trust(hub, &provider).await?;
 
         let system_roots = system.roots();
-        let recorder = Arc::new(Recording::new(
-            system,
-            bundled,
-            provider.signature_verification_algorithms,
-        ));
-        let config = client_config(Arc::clone(&recorder), provider)
+        let (config, recorder) = recording_client(system, bundled, provider)
             .map_err(|_| failed("rustls could not build a client configuration"))?;
         let connector = TlsConnector::from(Arc::new(config));
 
@@ -292,12 +299,16 @@ impl Probe {
     }
 
     /// The two trust stores, built on first use and kept for the run.
+    ///
+    /// The run keeps what is a fact about the machine: the roots, an empty store, an OS with no source
+    /// and a store that did not read. A timeout, a refusal by policy or any other error is not a fact
+    /// about the store: this call gets an `Unreadable` set and the next call asks again.
     async fn trust(
         &self,
         hub: &ProbeHub,
         provider: &Arc<CryptoProvider>,
     ) -> Result<(Arc<Trust>, Arc<Trust>), ProbeError> {
-        let system = hub
+        let asked = hub
             .tls
             .system
             .get_or_try_init(|| async {
@@ -311,20 +322,34 @@ impl Probe {
                     Ok(NativeValue::SystemRoots(certs)) => {
                         Ok(Arc::new(Trust::from_der(&certs, provider)))
                     }
-                    // A fixture with no answer is a test bug and says so.
-                    Err(error @ ProbeError::NotRecorded(_)) => Err(error),
-                    // No source on this OS, a store the OS would not give, or the wrong kind of value:
-                    // there is nothing to judge against, and the verdict says so.
-                    _ => Ok(Arc::new(Trust::unavailable())),
+                    // No source on this OS.
+                    Err(ProbeError::Unsupported(_)) => {
+                        Ok(Arc::new(Trust::unavailable(NoRoots::Empty)))
+                    }
+                    // The store is there and did not read.
+                    Err(
+                        ProbeError::Io(_) | ProbeError::NotFound | ProbeError::PermissionDenied,
+                    ) => Ok(Arc::new(Trust::unavailable(NoRoots::Unreadable))),
+                    // Anything else says nothing about the store and is not kept. A fixture with no
+                    // answer is a test bug and says so.
+                    Err(error) => Err(error),
+                    Ok(_) => Err(ProbeError::Io(
+                        "the trust roots came back as another kind of value".to_owned(),
+                    )),
                 }
             })
-            .await?;
+            .await;
+        let system = match asked {
+            Ok(system) => Arc::clone(system),
+            Err(error @ ProbeError::NotRecorded(_)) => return Err(error),
+            Err(_) => Arc::new(Trust::unavailable(NoRoots::Unreadable)),
+        };
         let bundled = hub
             .tls
             .bundled
             .get_or_init(|| async { Arc::new(Trust::bundled(provider)) })
             .await;
-        Ok((Arc::clone(system), Arc::clone(bundled)))
+        Ok((system, Arc::clone(bundled)))
     }
 }
 
@@ -355,26 +380,6 @@ fn server_name(target: &Target) -> Option<ServerName<'static>> {
         // `Host` is non-exhaustive: a kind of host this version does not know has no server name.
         _ => None,
     }
-}
-
-/// The client configuration: the recording verifier, TLS 1.2 and 1.3 on ring, the ALPN offer, SNI on,
-/// and no session to resume.
-fn client_config(
-    recorder: Arc<Recording>,
-    provider: Arc<CryptoProvider>,
-) -> Result<ClientConfig, rustls::Error> {
-    let mut config = ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()?
-        .dangerous()
-        .with_custom_certificate_verifier(recorder)
-        .with_no_client_auth();
-    config.alpn_protocols = ALPN_PROTOCOLS
-        .iter()
-        .map(|protocol| protocol.as_bytes().to_vec())
-        .collect();
-    config.enable_sni = true;
-    config.resumption = Resumption::disabled();
-    Ok(config)
 }
 
 fn protocol_name(version: rustls::ProtocolVersion) -> Option<&'static str> {

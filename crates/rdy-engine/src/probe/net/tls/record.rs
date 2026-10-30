@@ -4,8 +4,9 @@
 //! [`Recording`] accepts every chain, so a handshake against a server whose issuer the machine does not
 //! trust still completes and the chain can be read. It never reaches a caller: [`Probe::tls_chain`]
 //! builds it, drives one handshake that sends no application data, and returns the chain and the two
-//! verdicts, never the stream. Nothing here is `pub`, and no other module builds a `ClientConfig`
-//! with it.
+//! verdicts, never the stream. Nothing here is more visible than `pub(super)`, [`recording_client`] is
+//! the only place that builds a `ClientConfig` with it, and it is also the only place that calls
+//! `rustls`'s `dangerous()` builder: clippy bans that method everywhere else (`clippy.toml`).
 //!
 //! Inside `verify_server_cert` it runs two real `WebPkiServerVerifier`s, one on the OS roots and one on
 //! the bundled Mozilla roots, and keeps each verdict. Signature checks go to the provider as they would
@@ -13,35 +14,41 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
+use rustls::ClientConfig;
+use rustls::client::Resumption;
+
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, WebPkiSupportedAlgorithms};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{CertificateError, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
 
-use super::{TrustFailure, TrustVerdict};
+use super::{ALPN_PROTOCOLS, NoRoots, TrustFailure, TrustVerdict};
 
 /// A set of trust anchors and the verifier built on it. A set with no anchor cannot verify anything
 /// (`webpki` refuses to build one), so `verifier` is `None` and the verdict is [`TrustVerdict::Unavailable`].
 #[derive(Debug)]
-pub(crate) struct Trust {
+pub(super) struct Trust {
     pub(super) verifier: Option<Arc<WebPkiServerVerifier>>,
+    /// Why there is no verifier, when there is none.
+    missing: NoRoots,
     /// The number of anchors in the set.
     roots: usize,
 }
 
 impl Trust {
-    /// A set with no anchors: every verdict is `Unavailable`. It stands for an OS with no source and for
-    /// a store that could not be read.
-    pub(crate) fn unavailable() -> Self {
+    /// A set with no anchors: every verdict is `Unavailable`, for this reason. `Empty` stands for an OS
+    /// with no source, `Unreadable` for a store that could not be read.
+    pub(super) fn unavailable(missing: NoRoots) -> Self {
         Self {
             verifier: None,
+            missing,
             roots: 0,
         }
     }
 
     /// The OS roots, as DER. A certificate that does not parse is left out; the count is of those used.
-    pub(crate) fn from_der(certs: &[Vec<u8>], provider: &Arc<CryptoProvider>) -> Self {
+    pub(super) fn from_der(certs: &[Vec<u8>], provider: &Arc<CryptoProvider>) -> Self {
         let mut store = RootCertStore::empty();
         let _ = store.add_parsable_certificates(
             certs.iter().map(|der| CertificateDer::from(der.as_slice())),
@@ -50,7 +57,7 @@ impl Trust {
     }
 
     /// The Mozilla roots that `webpki-roots` bundles.
-    pub(crate) fn bundled(provider: &Arc<CryptoProvider>) -> Self {
+    pub(super) fn bundled(provider: &Arc<CryptoProvider>) -> Self {
         let store = RootCertStore {
             roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
         };
@@ -66,11 +73,16 @@ impl Trust {
                 .build()
                 .ok()
         };
-        Self { verifier, roots }
+        Self {
+            verifier,
+            // A store that parsed into nothing is an empty store.
+            missing: NoRoots::Empty,
+            roots,
+        }
     }
 
     /// The number of trust anchors.
-    pub(crate) fn roots(&self) -> usize {
+    pub(super) fn roots(&self) -> usize {
         self.roots
     }
 
@@ -82,7 +94,7 @@ impl Trust {
         now: UnixTime,
     ) -> TrustVerdict {
         let Some(verifier) = &self.verifier else {
-            return TrustVerdict::Unavailable;
+            return TrustVerdict::Unavailable(self.missing);
         };
         match verifier.verify_server_cert(end_entity, intermediates, name, &[], now) {
             Ok(_) => TrustVerdict::Valid,
@@ -115,16 +127,16 @@ pub(super) fn failure_of(error: &Error) -> TrustFailure {
 
 /// What one handshake showed: the chain as the server sent it, and the two verdicts.
 #[derive(Debug, Clone)]
-pub(crate) struct Seen {
+pub(super) struct Seen {
     /// The DER of each certificate, the server's own first.
-    pub(crate) chain: Vec<Vec<u8>>,
-    pub(crate) system: TrustVerdict,
-    pub(crate) bundled: TrustVerdict,
+    pub(super) chain: Vec<Vec<u8>>,
+    pub(super) system: TrustVerdict,
+    pub(super) bundled: TrustVerdict,
 }
 
 /// The verifier that records the chain and accepts it. See the module docs.
 #[derive(Debug)]
-pub(crate) struct Recording {
+pub(super) struct Recording {
     system: Arc<Trust>,
     bundled: Arc<Trust>,
     algorithms: WebPkiSupportedAlgorithms,
@@ -132,11 +144,7 @@ pub(crate) struct Recording {
 }
 
 impl Recording {
-    pub(crate) fn new(
-        system: Arc<Trust>,
-        bundled: Arc<Trust>,
-        algorithms: WebPkiSupportedAlgorithms,
-    ) -> Self {
+    fn new(system: Arc<Trust>, bundled: Arc<Trust>, algorithms: WebPkiSupportedAlgorithms) -> Self {
         Self {
             system,
             bundled,
@@ -146,12 +154,47 @@ impl Recording {
     }
 
     /// What the handshake showed, once. `None` if the server never presented a certificate.
-    pub(crate) fn take(&self) -> Option<Seen> {
+    pub(super) fn take(&self) -> Option<Seen> {
         self.seen
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
     }
+}
+
+/// The client configuration of a recording handshake and the recorder that holds what it saw: the
+/// recording verifier, TLS 1.2 and 1.3 on ring, the ALPN offer, SNI on, and no session to resume.
+///
+/// This is the one place that builds a `ClientConfig` around [`Recording`].
+pub(super) fn recording_client(
+    system: Arc<Trust>,
+    bundled: Arc<Trust>,
+    provider: Arc<CryptoProvider>,
+) -> Result<(ClientConfig, Arc<Recording>), Error> {
+    let recorder = Arc::new(Recording::new(
+        system,
+        bundled,
+        provider.signature_verification_algorithms,
+    ));
+    let builder =
+        ClientConfig::builder_with_provider(provider).with_safe_default_protocol_versions()?;
+    // The one call of `dangerous()` in the workspace. The verifier it takes accepts every chain, so
+    // it is built here and the stream it protects never leaves `tls_chain`.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the recording verifier is the point of this module; see the module docs"
+    )]
+    let builder = builder.dangerous();
+    let mut config = builder
+        .with_custom_certificate_verifier(Arc::clone(&recorder) as Arc<dyn ServerCertVerifier>)
+        .with_no_client_auth();
+    config.alpn_protocols = ALPN_PROTOCOLS
+        .iter()
+        .map(|protocol| protocol.as_bytes().to_vec())
+        .collect();
+    config.enable_sni = true;
+    config.resumption = Resumption::disabled();
+    Ok((config, recorder))
 }
 
 impl ServerCertVerifier for Recording {

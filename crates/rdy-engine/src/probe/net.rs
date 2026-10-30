@@ -71,7 +71,8 @@ mod tls;
 
 pub(super) use tls::TlsState;
 pub use tls::{
-    ALPN_PROTOCOLS, HANDSHAKE_TIMEOUT, REVOCATION_NOTE, Roots, TlsChain, TrustFailure, TrustVerdict,
+    ALPN_PROTOCOLS, HANDSHAKE_TIMEOUT, NoRoots, REVOCATION_NOTE, Roots, TlsChain, TrustFailure,
+    TrustVerdict,
 };
 
 /// The longest one connection attempt waits.

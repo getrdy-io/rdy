@@ -101,6 +101,9 @@ pub(crate) enum NativeFailure {
     PermissionDenied,
     NotFound,
     Io(String),
+    /// A call that ran out of time. Only the tests of a caller that maps it record this.
+    #[cfg(test)]
+    TimedOut,
 }
 
 impl NativeFailure {
@@ -110,6 +113,8 @@ impl NativeFailure {
             Self::PermissionDenied => io::Error::from(io::ErrorKind::PermissionDenied),
             Self::NotFound => io::Error::from(io::ErrorKind::NotFound),
             Self::Io(text) => io::Error::other(text),
+            #[cfg(test)]
+            Self::TimedOut => io::Error::from(io::ErrorKind::TimedOut),
         }
     }
 }
@@ -327,12 +332,19 @@ impl Replay {
     /// `native/*.json` file with `"error": "unsupported"` does. For the tests of a caller that maps it.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn native_unsupported(mut self, call: NativeCall) -> Self {
+    pub(crate) fn native_unsupported(self, call: NativeCall) -> Self {
+        self.native_failure(call, NativeFailure::Unsupported)
+    }
+
+    /// Records that a native call fails in this way. For the tests of a caller that maps the failure.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn native_failure(mut self, call: NativeCall, failure: NativeFailure) -> Self {
         let call = self.normal_call(&call);
         self.native.insert(
             call,
             NativeAnswer {
-                result: Err(NativeFailure::Unsupported),
+                result: Err(failure),
                 delay: Duration::ZERO,
             },
         );

@@ -1,29 +1,146 @@
 //! The OS trust roots for `NativeCall::SystemRoots` (M1-092, ADR 0014 decision 3).
 //!
-//! - **Linux and the other Unix systems except macOS** read PEM bundles through the facade's file
-//!   rules, so a bundle is judged on its real path like any read and `/etc/shadow` cannot be named
-//!   through a link. The sources are, in order: the file `SSL_CERT_FILE`; the directories in
-//!   `SSL_CERT_DIR` (colon separated). When neither variable is set, the first of the standard bundle
-//!   paths that reads, and if none does, the standard directories. A trust store that only an NSS
-//!   database or a Java keystore holds is invisible here (05, "TLS").
-//! - **macOS and Windows** ask the OS through `rustls-native-certs`, which reads the keychains and the
-//!   Windows root store.
+//! - **Unix (Linux, macOS, the BSDs)** reads PEM bundles through the facade's file rules, so a bundle is
+//!   judged on its real path like any read and `/etc/shadow` cannot be named through a link. The
+//!   sources are, in order: the file `SSL_CERT_FILE`; the directories in `SSL_CERT_DIR` (colon
+//!   separated). When neither variable is set, the first of the standard bundle paths that holds a
+//!   certificate, and if none does, the standard directories. A trust store that only an NSS database or
+//!   a Java keystore holds is invisible here (05, "TLS").
+//! - **macOS and Windows with neither variable set** ask the OS through `rustls-native-certs`, which
+//!   reads the keychains and the Windows root store. That crate reads the two variables with plain
+//!   `std::fs` (no rules, no caps) and skips the OS store when either is set, so this module never calls
+//!   it while one is set: on macOS the PEM reader above takes over, and on Windows, which has no file
+//!   reads in M1, the call fails with a typed error that says to unset the variable.
 //!
 //! Both bound their work with the caps of the native call: at most [`MAX_SYSTEM_ROOTS`] certificates,
-//! each at most [`MAX_ROOT_BYTES`] bytes, and at most [`MAX_FILES`] files of a directory are read. A
-//! certificate that is listed twice (the hashed names of a directory repeat the bundle) is kept once.
+//! each at most [`MAX_ROOT_BYTES`] bytes. The PEM reader also reads at most [`MAX_FILES`] files of a
+//! directory and at most [`MAX_TOTAL_BYTES`] bytes in all. A certificate that is listed twice (the hashed
+//! names of a directory repeat the bundle) is kept once.
 
-#[cfg(all(unix, not(target_os = "macos")))]
-pub(super) use pem::{Sources, load};
+use std::io;
 
-#[cfg(any(target_os = "macos", windows))]
-pub(super) use native_store::load;
+#[cfg(any(unix, windows))]
+use crate::probe::{MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS};
 
 /// The most files of a certificate directory that are read.
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(unix)]
 const MAX_FILES: usize = 2048;
 
-#[cfg(all(unix, not(target_os = "macos")))]
+/// The most bytes all the files of one load add up to: eight times the read cap of one file. A
+/// directory of 2048 files of 1 MiB cannot make the facade read 2 GiB.
+#[cfg(unix)]
+const MAX_TOTAL_BYTES: usize = 8 << 20;
+
+/// The environment variables that `rustls-native-certs` reads with plain `std::fs`.
+#[cfg(any(target_os = "macos", windows))]
+const CERT_FILE_VAR: &str = "SSL_CERT_FILE";
+#[cfg(any(target_os = "macos", windows))]
+const CERT_DIR_VAR: &str = "SSL_CERT_DIR";
+
+/// Whether `rustls-native-certs` would read these values instead of the OS store. It does when
+/// `SSL_CERT_FILE` is set at all (even empty) or `SSL_CERT_DIR` names a directory. This is the rule
+/// of rustls-native-certs 0.8, copied so that the OS store is asked only when the crate would ask it.
+#[cfg(any(target_os = "macos", windows, test))]
+fn overrides(file: Option<&std::ffi::OsStr>, dirs: Option<&std::ffi::OsStr>) -> bool {
+    file.is_some()
+        || dirs.is_some_and(|dirs| std::env::split_paths(dirs).any(|p| !p.as_os_str().is_empty()))
+}
+
+/// [`overrides`] for the values the process has.
+#[cfg(any(target_os = "macos", windows))]
+fn env_overrides() -> bool {
+    overrides(
+        std::env::var_os(CERT_FILE_VAR).as_deref(),
+        std::env::var_os(CERT_DIR_VAR).as_deref(),
+    )
+}
+
+/// The OS trust roots as DER, on a Unix system. Blocking: the caller puts it on the blocking pool.
+#[cfg(unix)]
+pub(super) fn system_roots(secrets: &super::files::Secrets) -> io::Result<Vec<Vec<u8>>> {
+    // macOS keeps its roots in the keychains. The PEM reader takes over only when a variable names a
+    // source, so that the crate never reads a variable itself.
+    #[cfg(target_os = "macos")]
+    if !env_overrides() {
+        return native_store::load();
+    }
+    pem::load(&pem::Sources::from_env(), secrets)
+}
+
+/// The OS trust roots as DER, on Windows. Blocking: the caller puts it on the blocking pool.
+///
+/// Windows has no file reads in M1, and `rustls-native-certs` would read `SSL_CERT_FILE` and
+/// `SSL_CERT_DIR` without any rule, so with either set this is an error and the verdict is
+/// "could not be read".
+#[cfg(windows)]
+pub(super) fn system_roots() -> io::Result<Vec<Vec<u8>>> {
+    if env_overrides() {
+        return Err(io::Error::other(
+            "SSL_CERT_FILE or SSL_CERT_DIR is set, and rdy reads no files on Windows in this version",
+        ));
+    }
+    native_store::load()
+}
+
+/// The certificates collected so far: capped in count and size, and without repeats.
+#[cfg(any(unix, windows))]
+struct Collected {
+    certs: Vec<Vec<u8>>,
+    known: std::collections::HashSet<Vec<u8>>,
+    /// A certificate or file was left out for a cap.
+    dropped: usize,
+    /// The bytes of the files read so far.
+    #[cfg(unix)]
+    read: usize,
+}
+
+#[cfg(any(unix, windows))]
+impl Collected {
+    fn new() -> Self {
+        Self {
+            certs: Vec::new(),
+            known: std::collections::HashSet::new(),
+            dropped: 0,
+            #[cfg(unix)]
+            read: 0,
+        }
+    }
+
+    fn full(&self) -> bool {
+        self.certs.len() >= MAX_SYSTEM_ROOTS
+    }
+
+    fn add(&mut self, der: &[u8]) {
+        if der.is_empty() || der.len() > MAX_ROOT_BYTES || self.full() {
+            self.dropped += 1;
+        } else if self.known.insert(der.to_vec()) {
+            self.certs.push(der.to_vec());
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.certs.is_empty()
+    }
+
+    /// How many more bytes of files may be read.
+    #[cfg(unix)]
+    fn budget(&self) -> usize {
+        MAX_TOTAL_BYTES.saturating_sub(self.read)
+    }
+
+    /// The answer, after a warning in the tracing log if anything was left out.
+    fn finish(self) -> Vec<Vec<u8>> {
+        if self.dropped > 0 {
+            tracing::warn!(
+                dropped = self.dropped,
+                "certificates of the OS trust store were dropped by a size, count or byte cap"
+            );
+        }
+        self.certs
+    }
+}
+
+#[cfg(unix)]
 mod pem {
     use std::ffi::OsString;
     use std::io;
@@ -32,13 +149,13 @@ mod pem {
     use rustls::pki_types::CertificateDer;
     use rustls::pki_types::pem::PemObject;
 
-    use super::MAX_FILES;
+    use super::{Collected, MAX_FILES};
     use crate::check::current_os;
     use crate::probe::live::files::{self, Secrets};
-    use crate::probe::{MAX_READ, MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, ReadGuard, ReadRange};
+    use crate::probe::{MAX_READ, ReadGuard, ReadRange};
 
     /// The bundle files of the common distributions, in the order they are tried. Debian and Ubuntu,
-    /// RHEL and Fedora, SUSE, Alpine and older RHEL, Arch, and the BSDs.
+    /// RHEL and Fedora, SUSE, Alpine and older RHEL, Arch, the BSDs, and the file macOS ships.
     const BUNDLES: &[&str] = &[
         "/etc/ssl/certs/ca-certificates.crt",
         "/etc/pki/tls/certs/ca-bundle.crt",
@@ -102,29 +219,11 @@ mod pem {
         }
     }
 
-    /// The certificates collected so far, capped and without repeats.
-    #[derive(Default)]
-    struct Collected {
-        certs: Vec<Vec<u8>>,
-        /// A certificate was dropped for its size or because the list was full.
-        dropped: usize,
-    }
-
-    impl Collected {
-        fn full(&self) -> bool {
-            self.certs.len() >= MAX_SYSTEM_ROOTS
-        }
-
-        fn add(&mut self, der: &[u8]) {
-            if der.is_empty() || der.len() > MAX_ROOT_BYTES || self.full() {
-                self.dropped += 1;
-            } else if !self.certs.iter().any(|known| known == der) {
-                self.certs.push(der.to_vec());
-            }
-        }
-    }
-
     /// Reads the roots from the PEM sources. Blocking: the caller puts it on the blocking pool.
+    ///
+    /// `SSL_CERT_FILE` and `SSL_CERT_DIR` may name any path the file rules allow, so a probe can read the
+    /// certificates of a file outside the usual trust store paths. Only `CERTIFICATE` blocks are kept;
+    /// every other block of the file (a private key, say) is dropped unread.
     ///
     /// An empty list is an answer (a scratch image with no `ca-certificates`). An error means that a
     /// source the operator named, or the only source there was, could not be read.
@@ -134,7 +233,7 @@ mod pem {
     ) -> io::Result<Vec<Vec<u8>>> {
         // The denylist applies; no prefix does. `/etc/shadow` is refused on its real path as for any read.
         let guard = ReadGuard::new(current_os(), None);
-        let mut found = Collected::default();
+        let mut found = Collected::new();
         let explicit = sources.file.is_some() || !sources.dirs.is_empty();
         let mut last_error = None;
         if explicit {
@@ -148,10 +247,10 @@ mod pem {
                 note(read_dir(dir, &guard, secrets, &mut found), &mut last_error);
             }
         } else {
-            let bundle = sources
-                .bundles
-                .iter()
-                .find(|path| read_bundle(path, &guard, secrets, &mut found).is_ok());
+            // A bundle that reads but holds no certificate does not end the search.
+            let bundle = sources.bundles.iter().find(|path| {
+                matches!(read_bundle(path, &guard, secrets, &mut found), Ok(count) if count > 0)
+            });
             if bundle.is_none() {
                 for dir in &sources.standard_dirs {
                     // A directory that is not there is not a failure: most systems have only one.
@@ -159,45 +258,49 @@ mod pem {
                 }
             }
         }
-        if found.dropped > 0 {
-            tracing::warn!(
-                dropped = found.dropped,
-                "certificates of the OS trust store were dropped by the size or count cap"
-            );
+        if found.is_empty()
+            && let Some(error) = last_error
+        {
+            return Err(error);
         }
-        match (found.certs.is_empty(), last_error) {
-            (true, Some(error)) => Err(error),
-            _ => Ok(found.certs),
-        }
+        Ok(found.finish())
     }
 
-    fn note(result: io::Result<()>, last: &mut Option<io::Error>) {
+    fn note<T>(result: io::Result<T>, last: &mut Option<io::Error>) {
         if let Err(error) = result {
             *last = Some(error);
         }
     }
 
-    /// Reads one PEM file and adds every certificate in it.
+    /// Reads one PEM file and adds every certificate in it. Returns how many certificates the file held.
     fn read_bundle(
         path: &Path,
         guard: &ReadGuard,
         secrets: &Secrets,
         found: &mut Collected,
-    ) -> io::Result<()> {
-        let file = files::read(path, ReadRange::Head(MAX_READ), guard, secrets)?;
+    ) -> io::Result<usize> {
+        let budget = found.budget();
+        if budget == 0 {
+            found.dropped += 1;
+            return Ok(0);
+        }
+        let file = files::read(path, ReadRange::Head(MAX_READ.min(budget)), guard, secrets)?;
+        found.read = found.read.saturating_add(file.bytes.len());
         if file.truncated() {
             tracing::warn!(
                 "a trust store file is longer than the read cap, so its end was not read"
             );
         }
         // A block that does not parse ends the iteration: what came before it is kept.
+        let mut count = 0;
         for cert in CertificateDer::pem_slice_iter(&file.bytes).map_while(Result::ok) {
+            count += 1;
             found.add(cert.as_ref());
             if found.full() {
                 break;
             }
         }
-        Ok(())
+        Ok(count)
     }
 
     /// Reads the certificate files of a directory: `*.pem`, `*.crt`, `*.cer` and the hashed names
@@ -214,7 +317,7 @@ mod pem {
             .filter(|e| !e.is_dir && certificate_name(&e.name))
             .take(MAX_FILES)
         {
-            if found.full() {
+            if found.full() || found.budget() == 0 {
                 break;
             }
             let _ = read_bundle(&dir.join(&entry.name), guard, secrets, found);
@@ -248,29 +351,27 @@ mod pem {
 mod native_store {
     use std::io;
 
-    use crate::probe::{MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS};
+    use super::Collected;
 
     /// Asks the OS for its trust roots. Blocking: the caller puts it on the blocking pool.
     ///
+    /// The caller has checked that neither `SSL_CERT_FILE` nor `SSL_CERT_DIR` is set, so
+    /// `rustls-native-certs` goes to the keychains or the root store and reads no file of its own.
     /// An error means the OS gave nothing and said why; a store that is simply empty is an empty list.
-    pub(in crate::probe::live) fn load() -> io::Result<Vec<Vec<u8>>> {
+    pub(super) fn load() -> io::Result<Vec<Vec<u8>>> {
         let result = rustls_native_certs::load_native_certs();
-        let mut certs: Vec<Vec<u8>> = Vec::new();
+        let mut found = Collected::new();
         for cert in &result.certs {
-            let der: &[u8] = cert.as_ref();
-            if !der.is_empty()
-                && der.len() <= MAX_ROOT_BYTES
-                && certs.len() < MAX_SYSTEM_ROOTS
-                && !certs.iter().any(|known| known == der)
-            {
-                certs.push(der.to_vec());
-            }
+            found.add(cert.as_ref());
         }
-        if certs.is_empty() && !result.errors.is_empty() {
+        if found.is_empty() && !result.errors.is_empty() {
             return Err(io::Error::other(
                 "the OS trust store could not be read".to_owned(),
             ));
         }
-        Ok(certs)
+        Ok(found.finish())
     }
 }
+
+#[cfg(test)]
+mod tests;

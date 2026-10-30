@@ -1833,6 +1833,7 @@ dependencies = [
  "proc-macro2",
  "rdy-engine",
  "rdy-spec",
+ "rustls",
  "serde_json",
  "socket2",
  "syn 2.0.119",

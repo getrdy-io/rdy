@@ -49,17 +49,10 @@ pub(super) fn call(
     }
 }
 
-/// The trust roots: PEM bundles through the file rules on Linux and the other Unix systems, the OS
-/// keychains on macOS (see `roots`). Capped by the module and again by the probe.
-#[cfg(not(target_os = "macos"))]
+/// The trust roots: PEM bundles through the file rules, or on macOS without `SSL_CERT_FILE` and
+/// `SSL_CERT_DIR` the OS keychains (see `roots`). Capped by the module and again by the probe.
 fn system_roots(secrets: &Secrets) -> io::Result<NativeValue> {
-    roots::load(&roots::Sources::from_env(), secrets).map(NativeValue::SystemRoots)
-}
-
-#[cfg(target_os = "macos")]
-fn system_roots(secrets: &Secrets) -> io::Result<NativeValue> {
-    let _ = secrets;
-    roots::load().map(NativeValue::SystemRoots)
+    roots::system_roots(secrets).map(NativeValue::SystemRoots)
 }
 
 fn text(raw: &std::ffi::CStr) -> String {

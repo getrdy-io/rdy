@@ -27,6 +27,7 @@ use super::*;
 use crate::check::{CheckInfo, CheckMeta, Os, OsSupport, PeerClass, Support};
 use crate::family::HostSet;
 use crate::probe::net::{AttemptOutcome, RULE_PROXY_UNDECLARED, RULE_TCP_ADDRESS, RULE_TCP_HOST};
+use crate::probe::replay::NativeFailure;
 use crate::probe::replay::{Replay, TcpScript};
 use crate::probe::{Backend, ProbeHub};
 use crate::redact::{Redactor, TagKey};
@@ -203,7 +204,7 @@ async fn a_chain_validates_only_when_its_ca_is_in_the_system_bundle() {
         .tls_chain(&target(&at), Route::Direct)
         .await
         .expect("a chain");
-    assert_eq!(chain.system, TrustVerdict::Unavailable);
+    assert_eq!(chain.system, TrustVerdict::Unavailable(NoRoots::Empty));
     assert_eq!(chain.system_roots, 0);
     assert_eq!(chain.bundled, rejected(TrustFailure::UnknownIssuer));
 }
@@ -367,6 +368,9 @@ async fn sni_is_the_permitted_host_and_nothing_else() {
         .await
         .expect("a chain");
     assert_eq!(direct.sni.as_deref(), Some("web.acme.test"));
+    // The server records each handshake when it finishes it, so wait before the next call or the order
+    // of `sni_seen` is the server's to choose.
+    handshakes_settle(&server, 1).await;
 
     // Through a proxy: the CONNECT target and the SNI are the spec host, not the proxy's name.
     let proxy = ConnectProxy::start_with_routes(ProxyMode::Ok, &[(&at, server.addr())])
@@ -395,6 +399,7 @@ async fn sni_is_the_permitted_host_and_nothing_else() {
     assert_eq!(via.system, TrustVerdict::Valid);
     assert_eq!(via.connect.proxy_status, Some(200));
     assert_eq!(proxy.requests()[0].target, at);
+    handshakes_settle(&server, 2).await;
 
     // An address host sends no SNI at all.
     let literal = format!("127.0.0.1:{}", server.addr().port());
@@ -413,7 +418,6 @@ async fn sni_is_the_permitted_host_and_nothing_else() {
         .expect("a chain");
     assert_eq!(by_address.sni, None);
     assert_eq!(by_address.system, TrustVerdict::Valid);
-
     handshakes_settle(&server, 3).await;
     assert_eq!(
         server.sni_seen(),
@@ -530,8 +534,49 @@ async fn an_os_with_no_source_for_roots_leaves_the_verdict_unavailable() {
         .tls_chain(&target(&at), Route::Direct)
         .await
         .expect("a chain");
-    assert_eq!(chain.system, TrustVerdict::Unavailable);
+    assert_eq!(chain.system, TrustVerdict::Unavailable(NoRoots::Empty));
     assert_eq!(chain.bundled, rejected(TrustFailure::UnknownIssuer));
+}
+
+#[tokio::test]
+async fn a_store_that_would_not_read_is_unreadable_and_kept_but_a_timeout_is_asked_again() {
+    let ca = TestCa::root("Acme Test Root");
+    let server = tls_server(&ca, &["web.acme.test"], Validity::Always).await;
+    let at = web(&server);
+
+    // A read error is a fact about the machine: the verdict says "could not be read", and the run
+    // asks once.
+    for failure in [
+        NativeFailure::Io("the fixture records an I/O error".to_owned()),
+        NativeFailure::NotFound,
+        NativeFailure::PermissionDenied,
+    ] {
+        let hub =
+            hub_over(machine(server.addr(), None).native_failure(NativeCall::SystemRoots, failure));
+        for _ in 0..2 {
+            let chain = probe(&hub, &[&at])
+                .tls_chain(&target(&at), Route::Direct)
+                .await
+                .expect("a chain");
+            assert_eq!(chain.system, TrustVerdict::Unavailable(NoRoots::Unreadable));
+            assert_eq!(chain.system_roots, 0);
+        }
+        assert_eq!(of_kind(&hub, ActionKind::Native).len(), 1);
+    }
+
+    // A timeout says nothing about the store: this call gets "could not be read", the next one asks.
+    let hub = hub_over(
+        machine(server.addr(), None)
+            .native_failure(NativeCall::SystemRoots, NativeFailure::TimedOut),
+    );
+    for _ in 0..2 {
+        let chain = probe(&hub, &[&at])
+            .tls_chain(&target(&at), Route::Direct)
+            .await
+            .expect("a chain");
+        assert_eq!(chain.system, TrustVerdict::Unavailable(NoRoots::Unreadable));
+    }
+    assert_eq!(of_kind(&hub, ActionKind::Native).len(), 2);
 }
 
 // ---- policy and the log -------------------------------------------------------------------------
@@ -695,19 +740,23 @@ async fn the_live_backend_handshakes_on_loopback_and_reads_the_real_store() {
     assert_eq!(chain.certs.len(), 1);
     assert_eq!(chain.sni, None);
     assert_eq!(chain.bundled, rejected(TrustFailure::UnknownIssuer));
-    // The test CA is in no real store. A machine with no store at all (a bare container) says so.
+    // The test CA is in no real store. A Linux machine with no store at all (a bare container) says so.
     assert!(
         matches!(
             chain.system,
-            TrustVerdict::Rejected(TrustFailure::UnknownIssuer) | TrustVerdict::Unavailable
+            TrustVerdict::Rejected(TrustFailure::UnknownIssuer)
+                | TrustVerdict::Unavailable(NoRoots::Empty)
         ),
         "{:?}",
         chain.system
     );
     assert_eq!(
-        chain.system == TrustVerdict::Unavailable,
+        matches!(chain.system, TrustVerdict::Unavailable(_)),
         chain.system_roots == 0
     );
+    // macOS and Windows always have an OS store, so a reader that gave nothing is a broken reader.
+    #[cfg(any(target_os = "macos", windows))]
+    assert!(chain.system_roots > 0, "the OS store gave no root");
     assert!(chain.system_roots <= crate::probe::MAX_SYSTEM_ROOTS);
     handshakes_settle(&server, 1).await;
     assert_eq!(server.application_bytes(), 0);
