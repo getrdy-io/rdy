@@ -1,7 +1,11 @@
 //! The compiled-in rules (04 Appendix B).
 //!
-//! M1-048 ships the engine and one rule, `secret_by_key`. M1-060 adds the rest and tunes this one against
-//! the corpus. A spec can add rules but never remove or weaken one, so this table is a `static`.
+//! M1-048 ships the engine and the key-name rule, `secret_by_key`. M1-060 adds the other M1 rules and tunes
+//! this one. The shape rules (private keys, key ids, JWTs, share tokens) are in `shapes`, the header rules
+//! in `headers` and the URL rule in `url`. The rules that read `key: value` text (the key-name rule, the
+//! AWS secret and session token keys, the kubeconfig keys and the space-separated flag form) are here,
+//! because they share one reader for the value. A spec can add rules but never remove or weaken one, so
+//! this table is a `static`.
 
 use std::cell::OnceCell;
 use std::ops::Range;
@@ -9,11 +13,24 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-/// Rule priorities. Higher wins when spans merge (04 section 3.2).
+/// Rule priorities. Higher wins when spans merge (04 section 3.2), so it decides the name in the
+/// placeholder.
 ///
-/// The full order, highest first: PEM and Secret blocks, token shapes, headers, URL userinfo, key names,
-/// custom patterns, emails, IPs, entropy. M1-060 adds the other constants.
+/// The full order, highest first: PEM and Secret blocks, token shapes, headers, URL userinfo, specific
+/// key names, key names, custom patterns, emails, IPs, entropy. The cut-buffer guard of a private key
+/// uses [`PEM`] too.
 pub(crate) mod priority {
+    /// `pem_private_key`.
+    pub const PEM: u8 = 90;
+    /// `aws_access_key_id`, `rdy_share_token` and `jwt`.
+    pub const TOKEN_SHAPES: u8 = 80;
+    /// `auth_header` and `api_key_header`.
+    pub const HEADERS: u8 = 70;
+    /// `url_userinfo`.
+    pub const URL: u8 = 65;
+    /// `aws_secret_access_key`, `aws_session_token` and `kubeconfig_credential`: a key name that says
+    /// more than the generic stems do.
+    pub const SPECIFIC_KEYS: u8 = 62;
     /// `secret_by_key`.
     pub const KEY_NAMES: u8 = 60;
 }
@@ -31,12 +48,64 @@ pub(crate) struct Rule {
 /// The name of the key-name rule, also used by the report walk when it replaces a whole member.
 pub(crate) const SECRET_BY_KEY: &str = "secret_by_key";
 
-/// The built-in rule set for the Report ruleset.
-pub(crate) static BUILT_IN: &[Rule] = &[Rule {
-    name: SECRET_BY_KEY,
-    priority: priority::KEY_NAMES,
-    find: find_secret_by_key,
-}];
+/// The built-in rule set for the Report ruleset (04 Appendix B, milestone 1).
+pub(crate) static BUILT_IN: &[Rule] = &[
+    Rule {
+        name: super::shapes::PEM_PRIVATE_KEY,
+        priority: priority::PEM,
+        find: super::shapes::find_pem_private_key,
+    },
+    Rule {
+        name: "aws_access_key_id",
+        priority: priority::TOKEN_SHAPES,
+        find: super::shapes::find_aws_access_key_id,
+    },
+    Rule {
+        name: "rdy_share_token",
+        priority: priority::TOKEN_SHAPES,
+        find: super::shapes::find_rdy_share_token,
+    },
+    Rule {
+        name: "jwt",
+        priority: priority::TOKEN_SHAPES,
+        find: super::shapes::find_jwt,
+    },
+    Rule {
+        name: "auth_header",
+        priority: priority::HEADERS,
+        find: super::headers::find_auth_header,
+    },
+    Rule {
+        name: "api_key_header",
+        priority: priority::HEADERS,
+        find: super::headers::find_api_key_header,
+    },
+    Rule {
+        name: "url_userinfo",
+        priority: priority::URL,
+        find: super::url::find_url_userinfo,
+    },
+    Rule {
+        name: "aws_secret_access_key",
+        priority: priority::SPECIFIC_KEYS,
+        find: find_aws_secret_access_key,
+    },
+    Rule {
+        name: "aws_session_token",
+        priority: priority::SPECIFIC_KEYS,
+        find: find_aws_session_token,
+    },
+    Rule {
+        name: "kubeconfig_credential",
+        priority: priority::SPECIFIC_KEYS,
+        find: find_kubeconfig_credential,
+    },
+    Rule {
+        name: SECRET_BY_KEY,
+        priority: priority::KEY_NAMES,
+        find: find_secret_by_key,
+    },
+];
 
 /// A well-formed placeholder. Keys inside one are not assignments: `secret_by_key:1a2b3c4d]` looks like
 /// `key: value` and must not be redacted again.
@@ -58,8 +127,25 @@ pub(crate) fn placeholder_spans(text: &str) -> Vec<Range<usize>> {
 /// The regex finds the key and the separator. Code reads the value, because the value may be quoted,
 /// escaped-quoted or bare. `Err` means the pattern failed to compile, which is a bug a unit test catches;
 /// the rule then fails closed and removes the whole text.
-static ASSIGNMENT: LazyLock<Result<Regex, regex::Error>> =
-    LazyLock::new(|| Regex::new(r#"([A-Za-z0-9_\-][A-Za-z0-9_.\-]*)(?:\\*["'])?[ \t]*[=:][ \t]*"#));
+///
+/// Three things may sit between the key and the separator, and after it, without hiding the key:
+/// colour codes (`\x1b[0m`), blanks, and a tab that was written as the two characters backslash and `t`
+/// (a `&str` field is written with `Debug`, so a tab inside it arrives that way).
+static ASSIGNMENT: LazyLock<Result<Regex, regex::Error>> = LazyLock::new(|| {
+    Regex::new(
+        r#"([A-Za-z0-9_\-][A-Za-z0-9_.\-]*)(?:\x1b\[[0-9;]*[A-Za-z])*(?:\\*["'])?(?:[ \t]|\\+t|\x1b\[[0-9;]*[A-Za-z])*[=:](?:[ \t]|\x1b\[[0-9;]*[A-Za-z])*"#,
+    )
+});
+
+/// A flag with its value in the next word: `--password hunter2`. The regex finds the flag and the blanks
+/// after it, and code reads the word. Only a flag that starts the text or follows a blank, a quote, a
+/// bracket or a comma counts.
+static FLAG: LazyLock<Result<Regex, regex::Error>> =
+    LazyLock::new(|| Regex::new(r#"(?:^|[\s"'\[(,])(--?[A-Za-z][A-Za-z0-9_.\-]*)[ \t]+"#));
+
+/// A colour code at the end of a value.
+static TRAILING_ANSI: LazyLock<Result<Regex, regex::Error>> =
+    LazyLock::new(|| Regex::new(r"(?:\x1b\[[0-9;]*[A-Za-z])+$"));
 
 /// Key stems (04 Appendix B). Matched on the key with `-`, `_` and `.` removed and lowercased, so
 /// `api_key`, `api-key` and `apiKey` are all `apikey`.
@@ -76,12 +162,18 @@ const STEMS: &[&str] = &[
     "authorization",
     "bearer",
     "dsn",
+    // `client-key-data`, the private key of a kubeconfig user. `certificate-authority-data` and
+    // `client-certificate-data` are public and have no stem.
+    "keydata",
 ];
 
 /// Whole words that contain a stem but are not secrets, such as `passed: 12` and `author: Ada`.
 /// A stem hit is ignored only when it is exactly one of these words, split on `-`, `_`, `.` and
-/// camelCase, so `authorization` and `authProfile` still match. M1-060 tunes this list on the corpus.
+/// camelCase, so `authorization` and `authProfile` still match. A word is excluded only where the stem
+/// starts it (or `un` before it), so `bypass` is not here and stays a secret key (it fails closed).
 const NOT_SECRET_WORDS: &[&str] = &[
+    "passes",
+    "passenger",
     "passed",
     "passing",
     "passage",
@@ -94,16 +186,42 @@ const NOT_SECRET_WORDS: &[&str] = &[
     "authors",
     "authority",
     "authorities",
+    "authored",
+    // `Unauthorized: invalid token` is an HTTP status line.
+    "unauthorized",
+    "unauthorised",
+    "unauthenticated",
+    // `WWW-Authenticate` is the challenge a server sends, not a credential.
+    "authenticate",
+    "tokenizer",
+    "tokenizers",
 ];
 
-/// A key whose last word is one of these names a thing, not a secret: `secretName`, `tokenFile`, `keyRef`.
-const NAME_SUFFIXES: &[&str] = &["name", "ref", "file", "path", "namespace"];
+/// A key whose last word is one of these names a thing, not a secret: `secretName`, `tokenFile`, `keyRef`,
+/// or says how a secret is given or what kind it is: `auth_method`, `tokenType`, `password_stdin`,
+/// `api_key_env`. The value of such a key is a word, and a real secret under it is not what the key says.
+const NAME_SUFFIXES: &[&str] = &[
+    "name",
+    "ref",
+    "file",
+    "path",
+    "namespace",
+    "method",
+    "mode",
+    "type",
+    "kind",
+    "scheme",
+    "provider",
+    "stdin",
+    "env",
+];
 
 /// A key whose last word is one of these holds a number about a secret, not the secret: `token_ttl_ms`,
 /// `password_len`, `api_key_count`. The report walk keeps a number directly under such a key, never a list
-/// or object. `bytes` is not here: `private_key_bytes` is key material, not a size. `length`, `secs` and
-/// `sec` are missing too and fail closed; M1-060 tunes the list on the corpus.
-const UNIT_WORDS: &[&str] = &["ms", "seconds", "ttl", "count", "size", "len"];
+/// or object. `bytes` is not here: `private_key_bytes` is key material, not a size.
+const UNIT_WORDS: &[&str] = &[
+    "ms", "sec", "secs", "seconds", "ttl", "count", "size", "len", "length",
+];
 
 /// Values that are not secrets, compared case-insensitively.
 const PLAIN_VALUES: &[&str] = &["null", "true", "false", "none", "required"];
@@ -130,7 +248,87 @@ fn visit(bytes: usize) {
 #[inline(always)]
 fn visit(_bytes: usize) {}
 
+/// The key-name rule: any key that [`is_secret_key`] says names a secret, and a flag that does.
 fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
+    scan_assignments(text, is_secret_key, out);
+    find_secret_flags(text, out);
+}
+
+/// `aws_secret_access_key`, `SecretAccessKey`: the value of a key with this name (04 Appendix B).
+fn find_aws_secret_access_key(text: &str, out: &mut Vec<Range<usize>>) {
+    scan_assignments(
+        text,
+        |key| is_secret_key(key) && normalize_key(key).0.contains("secretaccesskey"),
+        out,
+    );
+}
+
+/// `aws_session_token`, `SessionToken`, `x-amz-security-token`.
+fn find_aws_session_token(text: &str, out: &mut Vec<Range<usize>>) {
+    scan_assignments(
+        text,
+        |key| {
+            is_secret_key(key) && {
+                let norm = normalize_key(key).0;
+                norm.contains("sessiontoken") || norm.contains("securitytoken")
+            }
+        },
+        out,
+    );
+}
+
+/// Keys that only a kubeconfig, or the OIDC settings in one, spells with hyphens.
+const KUBECONFIG_HYPHEN_KEYS: &[&str] = &[
+    "client-key-data",
+    "client-secret",
+    "access-token",
+    "refresh-token",
+    "id-token",
+];
+
+/// Words that a kubeconfig holds and little else does. `token` and `password` are kubeconfig credentials
+/// only in a text that has one of them.
+const KUBECONFIG_MARKERS: &[&str] = &[
+    "current-context",
+    "certificate-authority",
+    "client-certificate",
+    "clusters:",
+    "contexts:",
+    "users:",
+    "\"clusters\"",
+    "\"contexts\"",
+    "\"users\"",
+    "kind: Config",
+    "\"kind\": \"Config\"",
+    "\"kind\":\"Config\"",
+];
+
+/// `token`, `client-key-data`, `password` and the like in a kubeconfig. Public certificates have no stem.
+fn find_kubeconfig_credential(text: &str, out: &mut Vec<Range<usize>>) {
+    let is_kubeconfig = OnceCell::new();
+    scan_assignments(
+        text,
+        |key| {
+            KUBECONFIG_HYPHEN_KEYS
+                .iter()
+                .any(|k| key.eq_ignore_ascii_case(k))
+                || (["token", "password"]
+                    .iter()
+                    .any(|k| key.eq_ignore_ascii_case(k))
+                    && *is_kubeconfig
+                        .get_or_init(|| KUBECONFIG_MARKERS.iter().any(|m| text.contains(m))))
+        },
+        out,
+    );
+}
+
+/// Runs the assignment reader over `text` and pushes the value of every key `accept` says yes to.
+fn scan_assignments(text: &str, accept: impl Fn(&str) -> bool, out: &mut Vec<Range<usize>>) {
+    // Every assignment has a separator. A byte scan is much cheaper than the regex on a large buffer
+    // that has none, and the rules that read assignments run one after the other.
+    if !text.bytes().any(|b| b == b'=' || b == b':') {
+        return;
+    }
     let (Ok(assignment), Ok(placeholder)) = (ASSIGNMENT.as_ref(), PLACEHOLDER.as_ref()) else {
         out.push(0..text.len());
         return;
@@ -148,14 +346,170 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
         if key.start() < covered_until || inside(&placeholders, key.start()) {
             continue;
         }
-        if !is_secret_key(key.as_str()) {
+        if !accept(key.as_str()) {
             continue;
         }
         let lines = lines.get_or_init(|| Lines::new(text));
         let (span, covered) = value_span(text, lines, key.start(), whole.end());
         covered_until = covered_until.max(covered);
+        let span = if is_authorization_key(key.as_str()) {
+            span.and_then(|s| skip_scheme(text, s))
+        } else {
+            span
+        };
         out.extend(span);
     }
+}
+
+/// True for `Authorization`, `Proxy-Authorization`, `HTTP_AUTHORIZATION` and the like.
+fn is_authorization_key(key: &str) -> bool {
+    normalize_key(key).0.ends_with("authorization")
+}
+
+/// Authentication scheme words that can open an `Authorization` value, lower case. One list for the key
+/// rule and the header rule. A first word that is not one of these is the credential itself
+/// (`Authorization: s3cr3t`), so it is redacted.
+const AUTH_SCHEMES: &[&str] = &[
+    "bearer",
+    "basic",
+    "digest",
+    "negotiate",
+    "ntlm",
+    "token",
+    "bot",
+    "aws4-hmac-sha256",
+];
+
+/// How many bytes of an `Authorization` value are the scheme: a known scheme word (without regard to
+/// case) and the spaces or tabs after it. 0 when the value starts with anything else, or the word has no
+/// blank after it.
+pub(super) fn scheme_len(value: &str) -> usize {
+    let Some(end) = value.find([' ', '\t']) else {
+        return 0;
+    };
+    if !AUTH_SCHEMES
+        .iter()
+        .any(|s| value[..end].eq_ignore_ascii_case(s))
+    {
+        return 0;
+    }
+    let rest = &value[end..];
+    end + rest.len() - rest.trim_start_matches([' ', '\t']).len()
+}
+
+/// The credential of an `Authorization` value: a known scheme word (`Bearer`, `Basic`) and the blanks after
+/// it stay, so `Authorization: Bearer T`, `--token T` and a bare `Bearer T` all hide the same `T` and give
+/// it the same tag (04 Appendix B). Any other first word is the credential. `None` when nothing is left to
+/// redact, or what is left is exempt (a placeholder, `${TOKEN}`, `null`).
+fn skip_scheme(text: &str, span: Range<usize>) -> Option<Range<usize>> {
+    let value = text.get(span.clone())?;
+    let span = span.start + scheme_len(value)..span.end;
+    let credential = text.get(span.clone())?;
+    (!credential.is_empty() && !is_exempt_value(credential)).then_some(span)
+}
+
+/// True if `arg` is a flag that names a secret and has no `=`: `--password`, `-token`. Its value is the
+/// next word (`--password hunter2`) or the next argument of a command line.
+pub(crate) fn is_secret_flag(arg: &str) -> bool {
+    arg.starts_with('-') && !arg.contains('=') && is_secret_key(arg.trim_start_matches('-'))
+}
+
+/// `--password hunter2`: a flag that names a secret, with its value in the next word. The word is the
+/// value, so `--user bob` after it stays. A quoted word runs to its closing quote when that is plain.
+fn find_secret_flags(text: &str, out: &mut Vec<Range<usize>>) {
+    if !text.contains('-') {
+        return;
+    }
+    let Ok(flag) = FLAG.as_ref() else {
+        out.push(0..text.len());
+        return;
+    };
+    let lines = OnceCell::new();
+    // A flag inside a value already taken is skipped, which keeps the work linear.
+    let mut covered_until = 0;
+    let mut at = 0;
+    while let Some(caps) = flag.captures_at(text, at) {
+        let (Some(whole), Some(name)) = (caps.get(0), caps.get(1)) else {
+            break;
+        };
+        // Resume right after the flag name, so the blank that follows can open the next flag.
+        at = name.end();
+        if name.start() < covered_until || !is_secret_flag(name.as_str()) {
+            continue;
+        }
+        let lines = lines.get_or_init(|| Lines::new(text));
+        if let Some(range) = flag_value(text, lines, whole.end()) {
+            covered_until = range.end;
+            out.push(range);
+        }
+    }
+}
+
+/// The value after a flag: the word at `from`, or the quoted string there. `None` when the next word is
+/// another long flag, starts with `=` or `:` (the assignment reader has it), or is a reference.
+fn flag_value(text: &str, lines: &Lines, from: usize) -> Option<Range<usize>> {
+    let line = text.get(from..lines.line_end(from).0.max(from))?;
+    let first = line.chars().next()?;
+    let is_long_flag = line
+        .strip_prefix("--")
+        .is_some_and(|r| r.starts_with(|c: char| c.is_ascii_alphabetic()));
+    if is_long_flag || matches!(first, '=' | ':') {
+        return None;
+    }
+    let range = match first {
+        '"' | '\'' => {
+            let inner = &line[1..];
+            let plain = inner.find(first).filter(|&close| {
+                !inner[..close].contains('\\')
+                    && inner[close + 1..]
+                        .chars()
+                        .next()
+                        .is_none_or(char::is_whitespace)
+            });
+            match plain {
+                Some(close) => from + 1..from + 1 + close,
+                None => from..from + line.trim_end().len(),
+            }
+        }
+        _ => {
+            let word = line.split(char::is_whitespace).next().unwrap_or_default();
+            from..from + word.len()
+        }
+    };
+    let word = text.get(range.clone())?;
+    (!word.is_empty()
+        && !is_exempt_value(word)
+        && !is_shell_variable(word)
+        && !is_angle_placeholder(word))
+    .then_some(range)
+}
+
+/// `<bearer-token>`: a word in angle brackets, which a usage text or a fix writes where the reader puts
+/// their own value. Closing punctuation after it (`` ` ``, `.`, `,`) is fine, anything else is not
+/// (`<a>b` is a value). Only the flag rule leaves it alone. A key rule still redacts `password: <word>`,
+/// which a secret could be.
+fn is_angle_placeholder(word: &str) -> bool {
+    let Some((name, after)) = word.strip_prefix('<').and_then(|w| w.split_once('>')) else {
+        return false;
+    };
+    name.starts_with(|c: char| c.is_ascii_alphabetic())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        && after
+            .chars()
+            .all(|c| matches!(c, '`' | '\'' | '"' | '.' | ',' | ';' | ')'))
+}
+
+/// `$NAME`: a reference to a variable, not a value.
+fn is_shell_variable(word: &str) -> bool {
+    word.strip_prefix('$').is_some_and(|name| {
+        let mut bytes = name.bytes();
+        bytes
+            .next()
+            .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+            && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    })
 }
 
 /// The one rule for what to redact after a secret key. It parses no quotes, brackets or escapes, because
@@ -169,13 +523,19 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
 ///    `{{ .Name }}`, `[REDACTED:..]`, `null`, a `/run/secrets/` path) counts as simple too, but it is left
 ///    alone when nothing is taken below it.
 /// 3. A simple value is redacted in place. It also takes the lines **below it that are indented deeper**
-///    than the key's line (blank lines inside are fine), so `password: a` then `  b` is covered.
+///    than the key's line (blank lines inside are fine), so `password: a` then `  b` is covered. A
+///    **plain** value is read the same way: it starts like a simple one, has spaces in it
+///    (`hunter2 --host db`), has no quote, backtick or backslash anywhere, and opens no bracket. A
+///    quote, a backtick or a backslash in the value could open something the next line closes
+///    (`abc'def` then `ghi'`, `first\` then `second`), so such a value is read by rule 4.
 /// 4. Any other value (empty, quoted, bracketed, tagged, anchored, a block indicator, escaped, or with
-///    spaces) is redacted to the end of the line, and so is every following line up to, but not
-///    including, the first line that **both** starts at or left of the key line's first non-blank column
-///    **and** itself starts with a key (`name:`, `name=`, `"name":`). With no such line it runs to the
-///    end of the text. If the value is one line wrapped in a matching pair of quotes, the two outer
-///    quotes stay. A tab and space mix in the two indents counts as deeper.
+///    spaces and one of those characters) is redacted to the end of the line, and so is every following
+///    line up to, but not including, the first line that **both** starts at or left of the key line's
+///    first non-blank column **and** itself starts with a key (`name:`, `name=`, `"name":`). A `- name:`
+///    line counts only when its dash is left of the key's content column, so `tokens:` then `- id: ci`
+///    at the same indent is a list the secret holds, and `- password:` then `- id: ci` is the next item.
+///    With no such line it runs to the end of the text. If the value is one line wrapped in a matching
+///    pair of quotes, the two outer quotes stay. A tab and space mix in the two indents counts as deeper.
 /// 5. The terminator test in rule 4 is switched off, so the value goes on, while any of these plain counts
 ///    over the text taken so far says it is still open: more `[` and `{` than `]` and `}`; an odd number
 ///    of the value's opening quote character (`"` or `'`); or more `-----BEGIN ` than `-----END `
@@ -185,13 +545,14 @@ fn find_secret_by_key(text: &str, out: &mut Vec<Range<usize>>) {
 /// 6. A line only counts as a key when `name=` is not directly followed by another `=`, a quote or the end
 ///    of the line, so the base64 tail `QUJD==` is not a key. This also keeps `NEXT="1"` inside the
 ///    value, while `NEXT= "1"` still counts as a key.
-/// 7. A key inside a `#` comment line takes only its own value, never the lines below.
+/// 7. A key inside a `#` comment line is read from the text after its `#` and the blanks behind it. It
+///    takes the comment lines below it, by the same rules, and stops at the first line that is not a
+///    comment.
 ///
 /// This over-redacts on purpose: a one-line JSON object after a secret key loses the rest of its line,
 /// a `[INFO]` log line is not a key, so a quoted secret in a log can take every line below it, and a
-/// sibling list item or a stray closing bracket is taken with the value. M1-060 narrows this with
-/// corpus evidence. A line is visited a constant number of times, and keys inside what was taken are
-/// skipped by the caller, so the work is linear.
+/// stray closing bracket is taken with the value. A line is visited a constant number of times, and keys
+/// inside what was taken are skipped by the caller, so the work is linear.
 ///
 /// Returns the range to redact, if any, and the offset up to which the caller can skip keys.
 fn value_span(
@@ -203,11 +564,34 @@ fn value_span(
     let (line_end, next_line) = lines.line_end(from);
     let key_line = &text[lines.line_start(key_start)..line_end];
     let key_text = key_line.trim_start_matches([' ', '\t']);
-    let key_ws = &key_line[..key_line.len() - key_text.len()];
+    let commented = key_text.starts_with('#');
+    // The key's own indent. A commented key sits after its `#` and the blanks behind it, so the lines
+    // of a commented block are compared from there.
+    let key_indent = if commented {
+        comment_indent(key_line).map_or(Indent::Empty, |(indent, _)| indent)
+    } else {
+        Indent::of(&key_line[..key_line.len() - key_text.len()])
+    };
     visit(key_line.len());
+    // Where the key's content starts, after the blanks and any `- ` list markers: `- password:` at indent
+    // 2 has its content at column 4.
+    let content_col = {
+        let (indent, text) = if commented {
+            comment_indent(key_line).map_or((Indent::Empty, key_text), |(i, t)| (i, t))
+        } else {
+            (key_indent, key_text)
+        };
+        indent.width() + (text.len() - strip_list_markers(text).len())
+    };
 
     let raw = &text[from..line_end];
-    let value = raw.trim();
+    // A colour code after the value is not part of it: `password=\x1b[31mhunter2\x1b[0m`.
+    let trimmed = raw.trim();
+    let value = TRAILING_ANSI
+        .as_ref()
+        .ok()
+        .and_then(|re| re.find(trimmed))
+        .map_or(trimmed, |m| trimmed[..m.start()].trim_end());
     let value_start = from + (raw.len() - raw.trim_start().len());
     let value_end = value_start + value.len();
     let stripped = value.strip_suffix([',', ';']).unwrap_or(value);
@@ -233,18 +617,17 @@ fn value_span(
         value_start..value_end
     };
 
-    if key_text.starts_with('#') {
-        let span = (!is_exempt && !own.is_empty()).then_some(own);
-        return (span, line_end);
-    }
-
-    let simple = is_simple || is_exempt;
-    let key_indent = Indent::of(key_ws);
     let quote = value.bytes().next().filter(|b| matches!(b, b'"' | b'\''));
     let mut open = Open::default();
-    if !simple {
-        open.add(value, quote);
-    }
+    open.add(value, quote);
+    // A plain value that starts like a simple one and has spaces in it (`hunter2 --host db`) and opens
+    // nothing is read like a simple one: it takes the deeper lines below it and nothing else. A quote, a
+    // backtick or a backslash anywhere in it may open something the next line closes (`abc'def` then
+    // `ghi'`, `first\` then `second`), so such a value is not plain.
+    let plain = value.bytes().next().is_some_and(is_simple_byte)
+        && !open.is_open()
+        && !value.contains(['"', '\'', '`', '\\']);
+    let simple = is_simple || is_exempt || plain;
     let mut first = None;
     let mut last_end = None;
     let mut pos = next_line;
@@ -253,10 +636,24 @@ fn value_span(
         visit(end - start + 1);
         let line = text[start..end].trim_end();
         if !line.is_empty() {
-            let rest = line.trim_start_matches([' ', '\t']);
-            let at_or_left =
-                key_indent.is_at_or_left_of(&Indent::of(&line[..line.len() - rest.len()]));
-            if at_or_left && (simple || (!open.is_open() && starts_with_key_token(rest))) {
+            // A commented key takes the lines below it that are comments too, and stops at the first
+            // line that is not.
+            let (indent, rest) = if commented {
+                match comment_indent(line) {
+                    Some(found) => found,
+                    None => break,
+                }
+            } else {
+                let rest = line.trim_start_matches([' ', '\t']);
+                (Indent::of(&line[..line.len() - rest.len()]), rest)
+            };
+            let at_or_left = key_indent.is_at_or_left_of(&indent);
+            let ends_value = simple
+                || (!open.is_open()
+                    && starts_with_key_token(rest)
+                    && (!has_list_marker(rest)
+                        || is_sibling_item(key_indent, content_col, indent)));
+            if at_or_left && ends_value {
                 break;
             }
             first.get_or_insert(start);
@@ -336,8 +733,70 @@ impl Indent {
     }
 }
 
-/// True if the line text starts with a key: `name:`, `name=`, `"name":` or `'name':`.
+/// For a comment line (`  #   text`): the indent of its text, counting the `#` as a blank, and the text.
+/// `None` if the line is not a comment.
+fn comment_indent(line: &str) -> Option<(Indent, &str)> {
+    let lead = line.len() - line.trim_start_matches([' ', '\t']).len();
+    let after_hash = line.get(lead..)?.strip_prefix('#')?;
+    let text = after_hash.trim_start_matches([' ', '\t']);
+    let blanks = &line[..line.len() - text.len()];
+    let tabs = blanks.bytes().filter(|&b| b == b'\t').count();
+    // The `#` is a space, so the indent is never all tabs.
+    let indent = if tabs == 0 {
+        Indent::Spaces(blanks.len())
+    } else {
+        Indent::Mixed(blanks.len())
+    };
+    Some((indent, text))
+}
+
+/// True if `rest` is one quoted word and nothing else: it starts and ends with the same quote and has no
+/// other quote of that kind in it. `"v"` is, `"a" "b"` and `"a\"` are not.
+fn is_closed_quoted(rest: &str) -> bool {
+    let bytes = rest.as_bytes();
+    match bytes {
+        [first, .., last] if first == last && matches!(first, b'"' | b'\'') => {
+            bytes.iter().filter(|&&b| b == *first).count() == 2
+        }
+        _ => false,
+    }
+}
+
+/// The text after any `- ` list markers and the blanks behind them.
+fn strip_list_markers(text: &str) -> &str {
+    let mut rest = text;
+    while let Some(after) = rest.strip_prefix("- ").or_else(|| rest.strip_prefix("-\t")) {
+        rest = after.trim_start_matches([' ', '\t']);
+    }
+    rest
+}
+
+/// True if the line text starts with a `- ` list marker.
+fn has_list_marker(rest: &str) -> bool {
+    rest.starts_with("- ") || rest.starts_with("-\t")
+}
+
+/// True if a `- ` line at `dash` is a sibling of the key that read the value: its dash is left of the key's
+/// content column. `password:` with an empty value, then `- id: ci` at the same indent, is a list that the
+/// secret holds (`tokens:` and a compact sequence below it). `- password:` then `- id: ci` at the same
+/// indent is the next item of the list the key sits in. Indents that cannot be compared (tabs against
+/// spaces) count as inside the value, which fails closed.
+fn is_sibling_item(key_indent: Indent, content_col: usize, dash: Indent) -> bool {
+    let comparable = matches!(
+        (key_indent, dash),
+        (Indent::Empty, _)
+            | (_, Indent::Empty)
+            | (Indent::Spaces(_), Indent::Spaces(_))
+            | (Indent::Tabs(_), Indent::Tabs(_))
+    );
+    comparable && dash.width() < content_col
+}
+
+/// True if the line text starts with a key: `name:`, `name=`, `"name":` or `'name':`, after any list
+/// markers (`- name: v`). `name="v"` counts when the line is that one quoted assignment and nothing else,
+/// so an `.env` file with every value quoted ends a secret at its next line.
 fn starts_with_key_token(rest: &str) -> bool {
+    let rest = strip_list_markers(rest);
     let bytes = rest.as_bytes();
     let mut i = 0;
     if let Some(&quote) = bytes.first().filter(|b| matches!(b, b'"' | b'\'')) {
@@ -364,7 +823,11 @@ fn starts_with_key_token(rest: &str) -> bool {
     match bytes.get(i) {
         Some(b':') => true,
         // `AbCd==` and `KEY="v"` and `AbCd=` are not keys here.
-        Some(b'=') => !matches!(bytes.get(i + 1), None | Some(b'=' | b'"' | b'\'')),
+        Some(b'=') => match bytes.get(i + 1) {
+            None | Some(b'=') => false,
+            Some(b'"' | b'\'') => is_closed_quoted(&rest[i + 1..]),
+            Some(_) => true,
+        },
         _ => false,
     }
 }
@@ -424,10 +887,16 @@ pub(crate) fn is_secret_key(key: &str) -> bool {
     }
     STEMS.iter().any(|stem| {
         norm.match_indices(stem).any(|(at, _)| {
-            let is_excluded_word = NOT_SECRET_WORDS.iter().any(|w| {
-                norm[at..].starts_with(w)
-                    && boundary[at]
-                    && boundary.get(at + w.len()).copied().unwrap_or(true)
+            // The word may start up to two bytes before the stem (`un` + `authorized`).
+            let is_excluded_word = (0..=2).any(|back| {
+                let Some(from) = at.checked_sub(back) else {
+                    return false;
+                };
+                NOT_SECRET_WORDS.iter().any(|w| {
+                    norm.get(from..).is_some_and(|rest| rest.starts_with(w))
+                        && boundary[from]
+                        && boundary.get(from + w.len()).copied().unwrap_or(true)
+                })
             });
             !is_excluded_word
         })
@@ -703,6 +1172,9 @@ mod tests {
             "api-key-count",
             "secretSize",
             "ttl",
+            "token_length",
+            "passwordLength",
+            "token_secs",
         ] {
             assert!(last_word_is_unit(key), "{key}");
         }
@@ -710,7 +1182,6 @@ mod tests {
             "password",
             "db.password.bytes",
             "private_key_bytes",
-            "token_length",
             "msToken",
             "api_key",
             "secret_names",
@@ -820,7 +1291,7 @@ mod tests {
             ),
             ("password=\"\"hunter2", "\"\"hunter2"),
             ("password=\"a\"hunter2 more", "\"a\"hunter2 more"),
-            ("Authorization: Basic dXNlcjpwYXNz", "Basic dXNlcjpwYXNz"),
+            ("Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
             // Escaped.
             (r#"{\"apiKey\":\"hunter2\"}"#, r#"\"hunter2\"}"#),
         ] {
@@ -899,6 +1370,11 @@ mod tests {
             ("password={{ hunter2 }}", "hunter2"),
             ("password=/run/secrets/../hunter2", "hunter2"),
             ("Authorization: Basic hunter2", "hunter2"),
+            // Round 8: an opaque credential is not a scheme word.
+            ("authorization: s3cr3tOpaque  # rotated", "s3cr3tOpaque"),
+            ("authorization=s3cr3tOpaque status=200", "s3cr3tOpaque"),
+            ("Authorization: bEaReR s3cr3tOpaque", "s3cr3tOpaque"),
+            ("Authorization: Bearerx s3cr3tOpaque", "Bearerx"),
             ("authProfile: hunter2", "hunter2"),
             (r#"{\\\"password\\\":\\\"hunter2\\\"}"#, "hunter2"),
             (r#"password=\"pa\\\",hunter2\" x"#, "hunter2"),
@@ -1018,7 +1494,16 @@ mod tests {
 
     #[test]
     fn base64_tails_and_quoted_assignments_are_not_keys() {
-        for line in ["QUJD==", "AbCd=", "x=\"v\"", "x='v'", "x=", "x ==y"] {
+        for line in [
+            "QUJD==",
+            "AbCd=",
+            "x=",
+            "x ==y",
+            // More than one quoted word, or an open quote, is value text and not a key.
+            "x=\"a\" \"b\"",
+            "x=\"a",
+            "x='a\"",
+        ] {
             assert!(!starts_with_key_token(line), "{line:?}");
         }
         for line in [
@@ -1029,6 +1514,12 @@ mod tests {
             "'name': v",
             "a.b-c:",
             "x= v",
+            // A line that is one quoted assignment is a key, so an all-quoted .env file ends a secret.
+            "x=\"v\"",
+            "x='v'",
+            "- name: v",
+            "-\tname=v",
+            "- - name: v",
         ] {
             assert!(starts_with_key_token(line), "{line:?}");
         }
@@ -1130,8 +1621,87 @@ mod tests {
     }
 
     #[test]
+    fn a_list_item_ends_a_value_only_as_a_sibling_of_the_key() {
+        // The key has an empty value and the list below it belongs to it, at the same indent or deeper.
+        assert_covered("tokens:\n- id: ci\n  value: s3cr3tAbc", "s3cr3tAbc");
+        assert_covered("  tokens:\n  - id: ci\n    value: s3cr3tAbc", "s3cr3tAbc");
+        assert_covered("- tokens:\n  - id: ci\n    value: s3cr3tAbc", "s3cr3tAbc");
+        assert_covered(
+            "tokens:\n- id: ci\n  value: s3cr3tAbc\n- id: cd\n  value: s3cr3tDef\nname: x",
+            "s3cr3tDef",
+        );
+        // The next item of the list the key sits in, or a list left of it, is a sibling.
+        let text = "- password: |\n    hunter2\n- name: second\n";
+        assert_eq!(found(text), ["|\n    hunter2"]);
+        let text = "  - password: |\n      hunter2\n  - name: second\n";
+        assert_eq!(found(text), ["|\n      hunter2"]);
+        let text = "  tokens:\n    hunter2\n- name: second\n";
+        assert_eq!(found(text), ["    hunter2"]);
+        // A tab against spaces cannot be compared, so the item stays inside the value.
+        assert_covered("tokens:\n\t- id: ci\n  value: s3cr3tAbc", "s3cr3tAbc");
+    }
+
+    #[test]
+    fn a_plain_value_with_a_quote_or_a_backslash_is_not_plain() {
+        assert_covered("db.password=first\\\nsecond", "second");
+        assert_covered("PASSWORD=abc'def\nghi'", "ghi'");
+        assert_covered("password: abc`def\nghi`", "ghi`");
+        assert_covered("password: abc\"def\nghi\"", "ghi\"");
+        // Still plain: spaces only. The next key ends it.
+        assert_eq!(
+            found("password: hunter2 --host db\nnext: 1"),
+            ["hunter2 --host db"]
+        );
+    }
+
+    #[test]
+    fn an_authorization_value_keeps_its_scheme() {
+        assert_eq!(found("Authorization: Bearer abc123xyz"), ["abc123xyz"]);
+        assert_eq!(found("HTTP_AUTHORIZATION=Basic dXNlcg=="), ["dXNlcg=="]);
+        assert_eq!(
+            found("\"authorization\": \"Bearer abc123xyz\""),
+            ["abc123xyz"]
+        );
+        assert_eq!(found("authorization: abc123xyz"), ["abc123xyz"]);
+        // Other keys take the whole value, and a placeholder is left alone.
+        assert_eq!(found("token: Bearer abc123xyz"), ["Bearer abc123xyz"]);
+        assert!(found("Authorization: Bearer [REDACTED:auth_header:1a2b3c4d]").is_empty());
+        // An exempt credential after the scheme stays too.
+        assert!(found("Authorization: Bearer ${TOKEN}").is_empty());
+        assert!(found("Authorization: Bearer null").is_empty());
+    }
+
+    #[test]
+    fn only_a_known_scheme_word_is_kept() {
+        for scheme in [
+            "Bearer",
+            "basic",
+            "DIGEST",
+            "Negotiate",
+            "NTLM",
+            "Token",
+            "Bot",
+            "AWS4-HMAC-SHA256",
+        ] {
+            let text = format!("Authorization: {scheme} abc123xyz");
+            assert_eq!(found(&text), ["abc123xyz"], "{text}");
+        }
+        assert_eq!(
+            found("authorization: s3cr3tOpaque  # rotated"),
+            ["s3cr3tOpaque  # rotated"]
+        );
+        assert_eq!(
+            found("authorization=s3cr3tOpaque status=200"),
+            ["s3cr3tOpaque status=200"]
+        );
+        // A scheme word with no blank after it is not a scheme.
+        assert_eq!(found("authorization: Bearer"), ["Bearer"]);
+        assert_eq!(found("authorization: Bearerx abc"), ["Bearerx abc"]);
+    }
+
+    #[test]
     fn auth_words_are_matched_whole() {
-        assert_eq!(found("authorization: Bearer x"), ["Bearer x"]);
+        assert_eq!(found("authorization: Bearer x"), ["x"]);
         assert_eq!(found("authProfile: hunter2"), ["hunter2"]);
         assert_eq!(found("auth_profile: hunter2"), ["hunter2"]);
         assert_eq!(found("authorizationHeader: hunter2"), ["hunter2"]);
@@ -1155,6 +1725,296 @@ mod tests {
             assert_eq!(found(&text), [format!("a{end}  b")], "{end:?}");
             let text = format!("password:{end}  hunter2{end}next: 1");
             assert_eq!(found(&text), ["  hunter2"], "{end:?}");
+        }
+    }
+
+    /// What a rule other than the key-name rule finds.
+    fn found_by(rule: fn(&str, &mut Vec<Range<usize>>), text: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        rule(text, &mut out);
+        out.into_iter().map(|r| &text[r]).collect()
+    }
+
+    #[test]
+    fn colour_codes_around_a_key_and_its_value_do_not_hide_it() {
+        let esc = "\u{1b}";
+        for (text, want) in [
+            (
+                format!("{esc}[1mpassword{esc}[0m=hunter2{esc}[0m"),
+                "hunter2",
+            ),
+            (
+                format!("{esc}[31mpassword=hunter2{esc}[0m\nnext: 1"),
+                "hunter2",
+            ),
+            (
+                format!("password{esc}[0m: {esc}[32mhunter2{esc}[0m"),
+                "hunter2",
+            ),
+            (
+                format!("\"password\"{esc}[0m: \"hunter2\"{esc}[0m"),
+                "hunter2",
+            ),
+        ] {
+            assert_eq!(found(&text), [want], "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_tab_written_as_backslash_t_is_a_blank_before_the_separator() {
+        assert_eq!(found(r"password\t= hunter2"), ["hunter2"]);
+        assert_eq!(found(r"password\t\t: hunter2"), ["hunter2"]);
+        assert_eq!(found(r#""password"\t: "hunter2""#), ["hunter2"]);
+        // After the separator it is part of the value, so none of the value is left behind.
+        assert_eq!(found(r"password=\thunter2"), [r"\thunter2"]);
+        // A word that merely starts with t is not a blank.
+        assert!(found(r"password\u: x").is_empty());
+    }
+
+    #[test]
+    fn a_flag_with_a_secret_name_takes_the_next_word() {
+        for (text, want) in [
+            ("--password hunter2", vec!["hunter2"]),
+            ("mysql --password hunter2 --host db", vec!["hunter2"]),
+            ("mysql -password hunter2", vec!["hunter2"]),
+            ("--api-key abc --token def", vec!["abc", "def"]),
+            ("cmd --password 'one two' --x", vec!["one two"]),
+            ("cmd --password \"one two\" --x", vec!["one two"]),
+            // An escape or a quote that does not close plainly takes the rest of the line.
+            ("cmd --password 'a\\' b' --x", vec!["'a\\' b' --x"]),
+            ("cmd --password 'open --x", vec!["'open --x"]),
+            ("cmd --password 'a'b --x", vec!["'a'b --x"]),
+            ("[\"cmd\", \"--password\" x", vec![]),
+            ("(--token  spaced)", vec!["spaced)"]),
+            ("cmd --token one\n--token two", vec!["one", "two"]),
+        ] {
+            assert_eq!(found(text), want, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_flag_that_is_not_followed_by_a_value_is_left_alone() {
+        for text in [
+            "--password",
+            "--password\nhunter2",
+            "--password --verbose",
+            "--password=",
+            "--password = x",
+            "--password: x",
+            "--password $DB_PASSWORD",
+            "--password ${DB_PASSWORD}",
+            "--password null",
+            "--password-file /etc/pw",
+            "--password-stdin",
+            "--token-name x",
+            "--auth-method basic",
+            "--auth-provider gcp",
+            "--verbose hunter2",
+            "x--password hunter2",
+            "--password [REDACTED:secret_by_key:1a2b3c4d]",
+        ] {
+            let got = found(text);
+            // `--password = x` and `--password: x` are assignments, and the assignment reader has them.
+            let flag_only: Vec<_> = got.iter().filter(|s| **s != "x").collect();
+            assert!(flag_only.is_empty(), "{text:?}: {got:?}");
+        }
+    }
+
+    #[test]
+    fn is_secret_flag_is_the_argv_rule() {
+        for arg in ["--password", "-token", "--api-key", "--client-secret"] {
+            assert!(is_secret_flag(arg), "{arg}");
+        }
+        for arg in [
+            "--password=x",
+            "--password-file",
+            "--verbose",
+            "password",
+            "-v",
+            "",
+        ] {
+            assert!(!is_secret_flag(arg), "{arg}");
+        }
+    }
+
+    #[test]
+    fn words_that_say_how_a_secret_is_given_are_not_secret_keys() {
+        for key in [
+            "auth_method",
+            "authMode",
+            "auth-type",
+            "tokenKind",
+            "auth_scheme",
+            "auth_provider",
+            "password_stdin",
+            "api_key_env",
+            "WWW-Authenticate",
+            "Unauthorized",
+            "unauthenticated_requests",
+        ] {
+            assert!(!is_secret_key(key), "{key}");
+        }
+        for key in ["auth", "authorization", "authenticationToken", "password"] {
+            assert!(is_secret_key(key), "{key}");
+        }
+    }
+
+    fn aws_secret(text: &str) -> Vec<&str> {
+        found_by(find_aws_secret_access_key, text)
+    }
+
+    fn aws_session(text: &str) -> Vec<&str> {
+        found_by(find_aws_session_token, text)
+    }
+
+    fn kubeconfig(text: &str) -> Vec<&str> {
+        found_by(find_kubeconfig_credential, text)
+    }
+
+    #[test]
+    fn aws_secret_and_session_keys_are_found_by_name_in_every_syntax() {
+        for text in [
+            "AWS_SECRET_ACCESS_KEY=abc/def",
+            "aws_secret_access_key = abc/def",
+            "{\"SecretAccessKey\": \"abc/def\"}",
+            "secretAccessKey: abc/def",
+            "export AWS_SECRET_ACCESS_KEY=abc/def",
+        ] {
+            assert!(
+                aws_secret(text).iter().any(|s| s.contains("abc/def")),
+                "{text}: {:?}",
+                aws_secret(text)
+            );
+            assert!(aws_session(text).is_empty(), "{text}");
+        }
+        for text in [
+            "AWS_SESSION_TOKEN=abc",
+            "SessionToken: abc",
+            "x-amz-security-token: abc",
+            "\"SessionToken\": \"abc\"",
+        ] {
+            assert!(
+                aws_session(text).iter().any(|s| s.contains("abc")),
+                "{text}: {:?}",
+                aws_session(text)
+            );
+        }
+        // Names of things, not secrets.
+        assert!(aws_secret("secret_access_key_name: x").is_empty());
+        assert!(aws_session("session_token_file: /x").is_empty());
+        assert!(aws_secret("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE").is_empty());
+    }
+
+    #[test]
+    fn kubeconfig_credentials_need_a_kubeconfig_for_the_plain_names() {
+        let config = "apiVersion: v1\nkind: Config\nusers:\n- name: a\n  user:\n    token: abc\n    password: def\n    client-key-data: ghi\n    client-certificate-data: public\n";
+        assert_eq!(kubeconfig(config), ["abc", "def", "ghi"]);
+        // The hyphenated names are kubeconfig names wherever they are.
+        assert_eq!(kubeconfig("client-key-data: ghi"), ["ghi"]);
+        assert_eq!(
+            kubeconfig("access-token: x\nrefresh-token: y\nid-token: z"),
+            ["x", "y", "z"]
+        );
+        assert_eq!(kubeconfig("client-secret: s"), ["s"]);
+        // A plain `token` outside a kubeconfig is the key-name rule's.
+        assert!(kubeconfig("token: abc").is_empty());
+        assert!(kubeconfig("DB_PASSWORD=abc").is_empty());
+        assert_eq!(
+            kubeconfig("{\"users\":[{\"user\":{\"token\":\"abc\"}}]}"),
+            ["\"abc\"}}]}"]
+        );
+    }
+
+    #[test]
+    fn the_client_key_stem_does_not_catch_public_data() {
+        assert!(is_secret_key("client-key-data"));
+        assert!(!is_secret_key("client-certificate-data"));
+        assert!(!is_secret_key("certificate-authority-data"));
+    }
+
+    #[test]
+    fn a_commented_block_goes_to_its_last_comment_line() {
+        assert_eq!(
+            found("# token: |\n#   hunter2\n#   more\nkeep: 1"),
+            ["|\n#   hunter2\n#   more"]
+        );
+        assert_eq!(
+            found("  # password: a\n  #   b\n  # c: 1\nnext"),
+            ["a\n  #   b"]
+        );
+        // A comment alone, or a comment followed by code, takes its own value only.
+        assert_eq!(found("# password: hunter2\nplain"), ["hunter2"]);
+        assert_eq!(found("# password: hunter2\n#"), ["hunter2"]);
+        // A commented block that ends at a comment at the key's own column.
+        assert_eq!(found("# password: |\n#   a\n# other: 1\n"), ["|\n#   a"]);
+    }
+
+    #[test]
+    fn a_list_item_ends_a_secret_like_a_sibling_key() {
+        assert_eq!(
+            found("- password: |\n    hunter2\n- name: b"),
+            ["|\n    hunter2"]
+        );
+        assert_eq!(found("items:\n  - password: \"a b\"\n  - name: b"), ["a b"]);
+        assert_eq!(
+            found("- - password: {\n  v: 1\n  }\n- name: b"),
+            ["{\n  v: 1\n  }"]
+        );
+    }
+
+    #[test]
+    fn a_quoted_assignment_line_is_a_key_so_an_env_file_ends_a_secret_per_line() {
+        assert_eq!(found("A=\"1\"\nPASSWORD=\"x y\"\nB=\"2\"\nC=3"), ["x y"]);
+        assert_eq!(found("A='1'\nTOKEN='x'\nB='2'"), ["x"]);
+        // Two quoted words on the next line is not one assignment, so it stays in the value.
+        assert_eq!(
+            found("PASSWORD=\"a\"b\nB=\"1\" \"2\"\nC=3"),
+            ["\"a\"b\nB=\"1\" \"2\""]
+        );
+    }
+
+    #[test]
+    fn a_plain_value_with_spaces_takes_only_the_deeper_lines_below() {
+        assert_eq!(
+            found("mysql --password=hunter2 --host db\nnext line"),
+            ["hunter2 --host db"]
+        );
+        assert_eq!(found("password: a b\n  c d\ne f"), ["a b\n  c d"]);
+        assert_eq!(found("password=hunter2 failed\n"), ["hunter2 failed"]);
+        // A value that opens a bracket is still read to the next key.
+        assert_eq!(
+            found("password=a [b\nplain\nuser: x"),
+            ["a [b\nplain\nuser: x"]
+        );
+    }
+
+    #[test]
+    fn units_include_length_and_seconds() {
+        for key in ["password_length", "tokenSecs", "token_sec", "secret_ttl"] {
+            assert!(last_word_is_unit(key), "{key}");
+        }
+    }
+
+    #[test]
+    fn the_new_readers_cost_linear_time() {
+        let n = 20_000;
+        let inputs: Vec<(&str, String)> = vec![
+            ("flags", "--password --password ".repeat(n)),
+            ("flags with values", "--password a ".repeat(n)),
+            ("commented keys", "# password: |\n#   a\n".repeat(n)),
+            ("list items", "- password: |\n    a\n".repeat(n)),
+            ("env", "A=\"1\"\nPASSWORD=\"x\"\n".repeat(n)),
+            ("ansi", "\u{1b}[1mpassword\u{1b}[0m=a\u{1b}[0m\n".repeat(n)),
+            ("tabs", "password\\t=a\n".repeat(n)),
+        ];
+        for (name, text) in &inputs {
+            let counted = visits(text);
+            let limit = 8 * text.len() + 1000;
+            assert!(
+                counted <= limit,
+                "{name}: {counted} bytes visited for {} bytes of input",
+                text.len()
+            );
         }
     }
 

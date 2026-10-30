@@ -126,9 +126,11 @@ fn the_end_line_of_a_key_must_carry_the_label_of_its_begin_line() {
     let out = red(text, TAIL);
     assert!(out.contains("[REDACTED:pem_private_key:"), "{out}");
     assert!(!out.contains("BBBB"), "{out}");
-    // The same label does.
+    // The same label does: the PEM rule takes the block and the text after it stays.
     let text = "ok\n-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\nkeep\nCC";
-    assert!(!red(text, TAIL).contains("pem_private_key"));
+    let out = red(text, TAIL);
+    assert!(out.contains("]\nkeep\n"), "{out}");
+    assert!(!out.contains("AAAA") && !out.contains("BEGIN"), "{out}");
     // At a cut head, a BEGIN of another label does not make the END matched.
     let text = "cut\n-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\nrest\n";
     let out = red(text, HEAD);
@@ -191,9 +193,9 @@ fn a_quoted_value_with_separators_across_either_window_edge_is_dropped_whole() {
 }
 
 /// URL userinfo may hold `;`, `&`, `,`, `'` and a space (RFC 3986 lets a password carry them). A
-/// boundary at one of them would keep `svc:pa` and drop `ss@h`. Needs the URL userinfo rule of M1-060.
+/// boundary at one of them would keep `svc:pa` and drop `ss@h`. The URL userinfo rule finds the whole
+/// userinfo on the full text, and the boundary moves to its start or end.
 #[test]
-#[ignore = "M1-060"]
 fn a_url_password_with_a_separator_across_either_window_edge_is_dropped_whole() {
     let url = "https://svc:pa;ss@h.example.test/";
     for k in 1..url.len() {

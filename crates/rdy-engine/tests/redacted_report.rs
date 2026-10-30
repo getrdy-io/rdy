@@ -312,10 +312,9 @@ fn canaries_in_env_kubeconfig_output_and_argv_never_reach_the_report() -> TestRe
     Ok(())
 }
 
-/// `client-key-data` is a kubeconfig key (04 Appendix B, `kubeconfig_credential`). The M1 key rule has no
-/// stem for it, so M1-060 adds the stem and removes the `ignore`.
+/// `client-key-data` is a kubeconfig key (04 Appendix B, `kubeconfig_credential`). It has the `keydata`
+/// stem, so the report walk replaces the member and the key rule finds it in text.
 #[test]
-#[ignore = "M1-060"]
 fn a_kubeconfig_client_key_never_reaches_the_report() -> TestResult {
     let mut planted = sample("7.2 ")?;
     planted["checks"][0]["observed"] = json!({

@@ -4,8 +4,7 @@
 //! reach stdout or stderr, and the trace must be live. The live proof is a user-supplied value that
 //! the binary does log at debug (the spec path): it must come out redacted, never raw.
 //!
-//! The proxy URL canary needs the URL userinfo rule, so it waits for M1-060
-//! (`tests/log_redaction.rs`, ignored test).
+//! The proxy URL canary is proved in process, in `tests/log_redaction.rs` (M1-060).
 
 use std::process::{Command, Output};
 
