@@ -235,7 +235,7 @@ M1-057), M1-078 to M1-083 (after M1-077), M1-086 to M1-088, M1-094 to M1-101 (af
 M1-113, M1-115 to M1-119, M1-124, M1-126 to M1-130, M1-132 to M1-139, M1-141, M1-174 to M1-176; then the
 non-core list (M1-140, M1-142, M1-143, M1-148 to M1-167, M1-173).
 
-Next PR number: #159. ADR numbers: 0039 is #147's kind gate, 0040 is #153's `read_link`; the next free is
+Next PR number: #160 (#159 is this pause-state PR). ADR numbers: 0039 is #147's kind gate, 0040 is #153's `read_link`; the next free is
 0041. 0029, 0030 and 0032 were never used. New ticket ids: M1-177 and M2-116 are next (M2-113 is in #144,
 M2-114 in #152, M1-176 and M2-115 in #158).
 
