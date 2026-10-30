@@ -780,8 +780,18 @@ Both slashes and backslashes end a directory, so Windows paths fold per director
 - The writer returns an `HtmlSafeJson` newtype, built only by the writer, which guarantees there is no
   `<`, `>` or `&`. It is the only value templates render unescaped; a CI grep keeps `|safe` out of every
   template. Without it askama would escape `"` and break both the JSON and the hash.
+- Free-form maps (`observed`, `expected`, the own fields of an action, and any object inside them) are
+  written with their keys sorted, so the bytes do not depend on how a map was filled.
 - Size: target under 1 MiB, hard cap 2 MiB, with the action log retention rule of 5.4 and lists inside
-  `observed` cut to 200 items with `truncated: true`.
+  `observed` cut to 200 items with `truncated: true`. The cap is measured on the final bytes, after the
+  escapes. The writer also cuts what the schema caps would refuse (M1-055): in a check, a list past its
+  `maxItems` (`needs` 32, `notes` 20, `missing_grants` 1000), `observed` and `expected` past 64 keys
+  (the first 64 in key order stay), an object past 64 keys or a list past 256 items inside them, a list or
+  object nested deeper than three levels (it becomes the text `[truncated]`) and a text over 4 KiB. Each
+  cut sets the check's `truncated`. Past 5000 entries, or past 2 MiB, it sheds action entries in the
+  order of 5.4 (newest first inside a tier) and sets `actions_truncated` and `actions_dropped`. Results
+  are never cut: more than 256 of them, or a report still over 2 MiB with no action entries, is an
+  error and nothing is written. A reader checks the size before it parses (`read_report`).
 - Location (ADR 0003): a new directory `rdy-report-<product>-<YYYYMMDDTHHMMSSZ>/` holding
   `rdy-report-<product>-<ts>.json`, `.html`, and a copy of the verified spec and its `.minisig` from the
   same buffers (02). The `Report written to` line names all four files.

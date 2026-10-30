@@ -29,8 +29,11 @@
 //!
 //! - `watchdog` (feature `runtime`): the run watchdog, a plain thread that writes an incomplete report
 //!   and exits 70 when a run hangs, and the run board that holds its snapshot.
+//! - [`report`]: [`report::write_json`] writes the one JSON text of a report (HTML safe, in schema order,
+//!   cut to the schema's caps and to 2 MiB), and [`report::read_report`] refuses a document over the cap
+//!   before it parses.
 //!
-//! The renderers arrive in later M1 tickets.
+//! The HTML and terminal renderers arrive in later M1 tickets.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -48,6 +51,7 @@ pub mod plan;
 pub mod privilege;
 pub mod probe;
 pub mod redact;
+pub mod report;
 #[cfg(feature = "runtime")]
 pub mod sched;
 #[cfg(feature = "testing")]

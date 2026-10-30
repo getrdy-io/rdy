@@ -457,7 +457,8 @@ fn pair_name_is_secret(map: &Map<String, Value>) -> Option<bool> {
 
 /// Cuts `text` to at most `max` bytes, with the marker at the end, if it is longer. The flag says whether
 /// it was cut. The cut falls on a character boundary and never inside a placeholder or a reference.
-fn cap(text: String, max: usize) -> (String, bool) {
+/// The JSON writer cuts the texts of `observed` and `expected` to the schema's 4 KiB with it.
+pub(crate) fn cap(text: String, max: usize) -> (String, bool) {
     match cut_str(&text, max) {
         Some(cut) => (cut, true),
         None => (text, false),

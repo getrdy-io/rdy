@@ -1004,9 +1004,11 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
 // output, report, redact
 impl OutputDir { pub fn create_new(parent: &Path, product: &str, ts: &str) -> Result<Self, ReportError>;
                  pub fn write_atomic<T: AsRef<[u8]>>(&self, name: &str, c: &Redacted<T>) -> Result<PathBuf, ReportError>;  // M1-036
-                 pub fn write_report(&self, r: &RedactedReport) -> Result<(), ReportError>;  // M1-062, calls write_atomic
+                 pub fn write_json(&self, r: &RedactedReport) -> Result<PathBuf, ReportError>;  // M1-055 (was write_report)
                  pub fn write_spec(&self, s: &VerifiedSpecBytes) -> Result<Vec<PathBuf>, ReportError>; }  // M1-036
-pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<(), ReportError>;
+pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<(), JsonError>;  // M1-055: report::json, no `runtime` feature needed
+pub fn json_bytes(r: &RedactedReport) -> Result<HtmlSafeJson, JsonError>;  // the same bytes, for the HTML embed
+pub fn read_report(bytes: &[u8]) -> Result<Report, JsonError>;  // refuses over 2 MiB before parsing
 pub fn render_html(r: &RedactedReport) -> Result<String, ReportError>;
 pub struct RedactedReport(/* private */ Report);   // no From<Report>, no Deserialize, no DerefMut
 pub fn live_backend() -> Arc<dyn Backend>;        // disallowed in check crates

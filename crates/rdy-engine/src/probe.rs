@@ -91,6 +91,7 @@ pub use proxy::{
 };
 
 use log::{ActionLog, Limits, Pending};
+pub(crate) use log::{Tier, dropped_calls, tier};
 
 mod addr;
 #[cfg(feature = "runtime")]
