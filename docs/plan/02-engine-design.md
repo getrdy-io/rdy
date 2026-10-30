@@ -318,10 +318,12 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
 - The kube exec credential plugin gets an `exec` entry with the resolved plugin path and redacted args,
   outcome `delegated`, note "run by the kube client, output not captured, may run again on token
   refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01.)
-- Coalescing (past 200 per check, per directory) and the 2 MiB truncation remove only `read`,
-  `read_dir` and `stat` entries with outcome `ok`. `exec`, `connect`, `tls`, `http`, `dns`, `kube`,
-  `native` entries and every `denied` or `failed` entry are always kept; they are bounded (64 hosts, a
-  fixed command list).
+- Coalescing (past 200 per check, per directory) folds only `read`, `read_dir` and `stat` entries with
+  outcome `ok`, `failed` or `denied`. The 2 MiB truncation (the JSON writer, M1-055) sheds `ok` file
+  entries first, then `failed` ones, then `exec`, `connect`, `tls`, `http`, `dns`, `kube` and `native`
+  entries as a last resort (a warning in the log). Every `denied` entry is always kept: the writer never
+  sheds one to make room. If the report is still too big, it clears `observed` and `expected` on the
+  largest checks (01 section 5.5) before it gives up.
 - Completeness is tested, not only conformance: Linux CI runs the live fixture suite under
   `strace -f -e trace=execve,openat,connect,sendto` and asserts every target after spec load is in the
   log (folded into SEC-22).
@@ -1043,9 +1045,12 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
 // output, report, redact
 impl OutputDir { pub fn create_new(parent: &Path, product: &str, ts: &str) -> Result<Self, ReportError>;
                  pub fn write_atomic<T: AsRef<[u8]>>(&self, name: &str, c: &Redacted<T>) -> Result<PathBuf, ReportError>;  // M1-036
-                 pub fn write_report(&self, r: &RedactedReport) -> Result<(), ReportError>;  // M1-062, calls write_atomic
+                 pub fn write_json(&self, r: &RedactedReport) -> Result<PathBuf, ReportError>;  // M1-055 (was write_report)
                  pub fn write_spec(&self, s: &VerifiedSpecBytes) -> Result<Vec<PathBuf>, ReportError>; }  // M1-036
-pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<(), ReportError>;
+pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<(), JsonError>;  // M1-055: report::json, no `runtime` feature needed
+pub fn json_bytes(r: &RedactedReport) -> Result<HtmlSafeJson, JsonError>;  // the same bytes, for the HTML embed
+pub fn read_report_from(r: impl std::io::Read) -> Result<Report, JsonError>;  // reads at most 2 MiB + 1 byte, refuses over 2 MiB before parsing
+pub fn read_report(bytes: &[u8]) -> Result<Report, JsonError>;  // the same check on bytes already in memory
 pub fn render_html(r: &RedactedReport) -> Result<String, ReportError>;
 pub struct RedactedReport(/* private */ Report);   // no From<Report>, no Deserialize, no DerefMut
 pub fn live_backend() -> Arc<dyn Backend>;        // disallowed in check crates

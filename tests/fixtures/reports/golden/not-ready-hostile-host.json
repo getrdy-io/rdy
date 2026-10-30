@@ -1,0 +1,544 @@
+{
+  "api_version": "rdy/v1",
+  "kind": "Report",
+  "producer": {
+    "name": "rdy",
+    "version": "0.1.0",
+    "commit": "4c1e9a2",
+    "rdy_spec": "0.1.0",
+    "target": "x86_64-unknown-linux-musl"
+  },
+  "run": {
+    "id": "6f8d2c4e-1b3a-4e5f-9a7b-2c1d0e9f8a6b",
+    "started_at": "2026-12-01T14:30:05.000Z",
+    "finished_at": "2026-12-01T14:30:05.318Z",
+    "duration_ms": 318,
+    "options": {
+      "jobs": 8,
+      "deadline_ms": 300000,
+      "allow_unsigned": false,
+      "network": true,
+      "kube_context": null
+    }
+  },
+  "spec": {
+    "product": "acme-platform",
+    "version": "\u003e=4.2",
+    "sha256": "231d161afdf97fb9aa5a2ea3cfbd3f4645249d218e9aaefe3f4000dc598d0d4f",
+    "file_name": "acme-platform.yaml",
+    "size_bytes": 1988,
+    "serial": null,
+    "expires": null,
+    "contact": null,
+    "annotations": {}
+  },
+  "signature": {
+    "state": "verified",
+    "key_id": "9F3A6C21D4E87B05",
+    "key_fingerprint": "4d2a7c0e9b1f3a5c6e8d0b2f4a6c8e0d1b3f5a7c9e2d4b6f8a0c2e4d6b8f0a1c",
+    "product": "acme-platform",
+    "signed_at": "2026-11-30T16:02:11Z",
+    "trust_note": "Acme security page, fingerprint read back by phone",
+    "trust_source": "system",
+    "reason": null
+  },
+  "host": {
+    "hostname": "\u003c/script\u003e\u003cimg onerror=x\u003e\u0026amp;\u2028end",
+    "host_id": "5f1c0a9e3b7d2c41",
+    "os": {
+      "family": "linux",
+      "id": "rhel",
+      "version": "9.4",
+      "pretty_name": "Red Hat Enterprise Linux 9.4 (Plow)"
+    },
+    "kernel": "5.14.0-427.13.1.el9_4.x86_64",
+    "arch": "x86_64",
+    "virtualization": "vm",
+    "container": false
+  },
+  "identity": {
+    "euid": 1000,
+    "user": "jdoe",
+    "elevated": false,
+    "kube": {
+      "context": "acme-staging",
+      "server": "https://api.k8s.acme.example:6443",
+      "user": "acme-installer",
+      "user_verified": true,
+      "exec_plugin": null,
+      "insecure_tls": false
+    }
+  },
+  "proxy": {
+    "https": "http://proxy.corp.example:3128",
+    "http": "http://proxy.corp.example:3128",
+    "no_proxy": [
+      ".corp.example",
+      "10.0.0.0/8"
+    ]
+  },
+  "capabilities": [
+    {
+      "need": "kube_context",
+      "name": null,
+      "available": true,
+      "detail": "context acme-staging at https://api.k8s.acme.example:6443, kubeconfig user acme-installer",
+      "hint": null
+    },
+    {
+      "need": "network",
+      "name": null,
+      "available": true,
+      "detail": null,
+      "hint": null
+    }
+  ],
+  "verdict": "not_ready",
+  "verdict_reason": null,
+  "exit_code": 2,
+  "summary": {
+    "total": 8,
+    "pass": 3,
+    "warn": 1,
+    "block": 2,
+    "skipped": 2,
+    "timeout": 0,
+    "error": 0,
+    "not_applicable": 0,
+    "required_not_run": 2,
+    "optional_not_run": 0
+  },
+  "checks": [
+    {
+      "key": "host.cpu",
+      "id": "host.cpu",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "8 vCPUs found, 8 needed",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "cores": 8,
+        "labels": {
+          "x": [
+            3,
+            2,
+            1
+          ],
+          "y": 1
+        },
+        "zone": "b"
+      },
+      "expected": {
+        "min": 8
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 2
+    },
+    {
+      "key": "host.memory",
+      "id": "host.memory",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "block",
+      "bucket": "blocker",
+      "message": "15.4 GiB found, 32 GiB needed",
+      "fix": "Add RAM or choose a larger node class.",
+      "fix_source": "spec",
+      "builtin_fix": "15.4 GiB RAM, 32 GiB needed. Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number.",
+      "observed": null,
+      "expected": {
+        "band_bytes": 1717986918,
+        "min_bytes": 34359738368
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 1
+    },
+    {
+      "key": "host.disk",
+      "id": "host.disk",
+      "name": null,
+      "family": "host",
+      "severity": "warn",
+      "status": "warn",
+      "bucket": "warning",
+      "message": "60.0 GiB free on / for /var/lib, 100 GiB needed",
+      "fix": "Mount a larger volume at /var/lib before install.",
+      "fix_source": "spec",
+      "builtin_fix": "/var/lib is on / with 60.0 GiB free, 100 GiB needed. Run df -h /var/lib. Grow the volume or point the install at a larger disk.",
+      "observed": {
+        "free_bytes": 64424509440,
+        "free_inodes": 31205120,
+        "fstype": "xfs",
+        "mount": "/",
+        "options": [
+          "rw",
+          "relatime"
+        ],
+        "path": "/var/lib"
+      },
+      "expected": {
+        "min_free_bytes": 107374182400,
+        "recommended_free_bytes": 128849018880
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 42,
+      "duration_ms": 3
+    },
+    {
+      "key": "net.egress",
+      "id": "net.egress",
+      "name": null,
+      "family": "net",
+      "severity": "block",
+      "status": "block",
+      "bucket": "blocker",
+      "message": "1 of 2 endpoints unreachable: license.acme.example:443 (proxy refused CONNECT, 403)",
+      "fix": "Ask your network team to allow these endpoints through the proxy.",
+      "fix_source": "spec",
+      "builtin_fix": "The proxy refused CONNECT to license.acme.example:443. Ask the proxy team to add it to the allow list.",
+      "observed": {
+        "endpoints": [
+          {
+            "connect_ms": 38,
+            "outcome": "ok",
+            "target": "registry.acme.example:443",
+            "tls_ms": 61
+          },
+          {
+            "connect_ms": 37,
+            "outcome": "proxy_403",
+            "target": "license.acme.example:443",
+            "tls_ms": null
+          }
+        ],
+        "proxy": "http://proxy.corp.example:3128",
+        "via": "proxy"
+      },
+      "expected": {
+        "reachable": [
+          "registry.acme.example:443",
+          "license.acme.example:443"
+        ],
+        "via_proxy": "auto"
+      },
+      "needs": [
+        {
+          "need": "network",
+          "name": null,
+          "hard": true,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 42,
+      "duration_ms": 212
+    },
+    {
+      "key": "k8s.version",
+      "id": "k8s.version",
+      "name": null,
+      "family": "k8s",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "Server v1.29.4, 1.28 or newer needed",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "distribution": "vanilla",
+        "git_version": "v1.29.4"
+      },
+      "expected": {
+        "min": "1.28"
+      },
+      "needs": [
+        {
+          "need": "kube_context",
+          "name": null,
+          "hard": true,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 43,
+      "duration_ms": 48
+    },
+    {
+      "key": "k8s.storageclass",
+      "id": "k8s.storageclass",
+      "name": null,
+      "family": "k8s",
+      "severity": "warn",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "Default class gp3 (ebs.csi.aws.com) supports ReadWriteOnce",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "access_modes": [
+          "ReadWriteOnce"
+        ],
+        "binding": "WaitForFirstConsumer",
+        "csi_driver_present": true,
+        "default_class": "gp3",
+        "provisioner": "ebs.csi.aws.com"
+      },
+      "expected": {
+        "access_modes": [
+          "ReadWriteOnce"
+        ]
+      },
+      "needs": [
+        {
+          "need": "kube_context",
+          "name": null,
+          "hard": true,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 43,
+      "duration_ms": 95
+    },
+    {
+      "key": "gpu.cuda",
+      "id": "gpu.cuda",
+      "name": null,
+      "family": "gpu",
+      "severity": "block",
+      "status": "skipped",
+      "bucket": "required_not_run",
+      "skip_kind": "not_in_build",
+      "message": "Not run. This version of rdy has no gpu checks yet.",
+      "fix": "Install a newer rdy. If there is none yet, ask the vendor how to go on.",
+      "fix_source": "rdy",
+      "observed": null,
+      "expected": null,
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 0
+    },
+    {
+      "key": "aws.iam",
+      "id": "aws.iam",
+      "name": null,
+      "family": "aws",
+      "severity": "block",
+      "status": "skipped",
+      "bucket": "required_not_run",
+      "skip_kind": "not_in_build",
+      "message": "Not run. This version of rdy has no aws checks yet.",
+      "fix": "Install a newer rdy. If there is none yet, ask the vendor how to go on.",
+      "fix_source": "rdy",
+      "observed": null,
+      "expected": null,
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 0
+    }
+  ],
+  "actions": [
+    {
+      "seq": 1,
+      "check": null,
+      "at_ms": 2,
+      "duration_ms": 1,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 5412,
+      "path": "~/.kube/config",
+      "truncated": false
+    },
+    {
+      "seq": 2,
+      "check": null,
+      "at_ms": 3,
+      "duration_ms": 31,
+      "kind": "kube",
+      "outcome": "ok",
+      "method": "GET",
+      "path": "/version",
+      "status": 200
+    },
+    {
+      "seq": 3,
+      "check": "host.cpu",
+      "at_ms": 41,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 8320,
+      "path": "/proc/cpuinfo",
+      "truncated": false
+    },
+    {
+      "seq": 4,
+      "check": "host.cpu",
+      "at_ms": 41,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 13,
+      "path": "/sys/fs/cgroup/cpu.max",
+      "truncated": false
+    },
+    {
+      "seq": 5,
+      "check": "host.memory",
+      "at_ms": 41,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 1482,
+      "path": "/proc/meminfo",
+      "truncated": false
+    },
+    {
+      "seq": 6,
+      "check": "host.memory",
+      "at_ms": 42,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 4,
+      "path": "/sys/fs/cgroup/memory.max",
+      "truncated": false
+    },
+    {
+      "seq": 7,
+      "check": "host.disk",
+      "at_ms": 42,
+      "duration_ms": 1,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 2870,
+      "path": "/proc/self/mountinfo",
+      "truncated": false
+    },
+    {
+      "seq": 8,
+      "check": "net.egress",
+      "at_ms": 42,
+      "duration_ms": 2,
+      "kind": "lookup",
+      "outcome": "ok",
+      "answers": 1,
+      "host": "proxy.corp.example"
+    },
+    {
+      "seq": 9,
+      "check": "host.disk",
+      "at_ms": 43,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "api": "statvfs",
+      "path": "/var/lib"
+    },
+    {
+      "seq": 10,
+      "check": "k8s.version",
+      "at_ms": 43,
+      "duration_ms": 48,
+      "kind": "kube",
+      "outcome": "ok",
+      "method": "GET",
+      "path": "/version",
+      "status": 200
+    },
+    {
+      "seq": 11,
+      "check": "k8s.storageclass",
+      "at_ms": 44,
+      "duration_ms": 52,
+      "kind": "kube",
+      "outcome": "ok",
+      "method": "GET",
+      "path": "/apis/storage.k8s.io/v1/storageclasses",
+      "status": 200
+    },
+    {
+      "seq": 12,
+      "check": "net.egress",
+      "at_ms": 45,
+      "duration_ms": 36,
+      "kind": "connect",
+      "outcome": "ok",
+      "addr": null,
+      "host": "registry.acme.example",
+      "port": 443,
+      "via_proxy": "http://proxy.corp.example:3128"
+    },
+    {
+      "seq": 13,
+      "check": "net.egress",
+      "at_ms": 82,
+      "duration_ms": 61,
+      "kind": "tls",
+      "outcome": "ok",
+      "host": "registry.acme.example",
+      "sni": "registry.acme.example"
+    },
+    {
+      "seq": 14,
+      "check": "k8s.storageclass",
+      "at_ms": 96,
+      "duration_ms": 43,
+      "kind": "kube",
+      "outcome": "ok",
+      "method": "GET",
+      "path": "/apis/storage.k8s.io/v1/csidrivers",
+      "status": 200
+    },
+    {
+      "seq": 15,
+      "check": "net.egress",
+      "at_ms": 144,
+      "duration_ms": 37,
+      "kind": "connect",
+      "outcome": "failed",
+      "addr": null,
+      "error": "proxy answered 403 to CONNECT",
+      "host": "license.acme.example",
+      "port": 443,
+      "via_proxy": "http://proxy.corp.example:3128"
+    }
+  ],
+  "actions_truncated": false,
+  "actions_dropped": {},
+  "redaction": {
+    "ruleset": "report",
+    "total": 0,
+    "by_rule": {}
+  },
+  "complete": true,
+  "interrupted": false
+}
