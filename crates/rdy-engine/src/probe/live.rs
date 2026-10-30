@@ -22,6 +22,14 @@
 //! file with the device and inode of a password or sudo file, whatever its name. Windows has no file
 //! reads in M1: every file call fails with a typed error.
 //!
+//! **Links (M1-169).** `read_link` resolves the parent directory, judges the link's real path (the real
+//! parent and the link's own name), reads the link without following it, and judges what it read: a
+//! link in `/proc/<pid>/fd` may lead to a socket only. Linux holds the parent through an `O_PATH`
+//! descriptor, and the real path of the parent must lead to that descriptor's inode and, on a procfs,
+//! be `/proc` (a directory from another mount namespace is refused). Windows has no file reads in M1.
+//! The backend reads `/proc/self` once when it is made: if that is not rdy's own process id, the
+//! `auxv` and `ns/net` grants for the own process stay closed.
+//!
 //! **Sockets (M1-144, M1-091).** `resolve`, `connect`, `udp_exchange` and `unix_get` do the socket work and nothing else:
 //! the probe has already applied the peer, address and path policy. A datagram is read into a
 //! 65535-byte buffer and cut to the cap here. A unix socket reply is read by a small HTTP/1.x client
@@ -74,6 +82,8 @@ pub fn live_backend() -> Arc<dyn Backend> {
     Arc::new(Live {
         #[cfg(unix)]
         secrets: files::Secrets::collect(),
+        #[cfg(unix)]
+        own_proc: files::proc_self_is_own(),
     })
 }
 
@@ -82,6 +92,24 @@ struct Live {
     /// The password and sudo files by inode, so a hard link or a bind mount is refused too.
     #[cfg(unix)]
     secrets: files::Secrets,
+    /// Whether `/proc/self` is rdy's own process id, read once when the backend was made. Under the
+    /// procfs of another pid namespace it is not, and the grants for rdy's own process stay closed.
+    #[cfg(unix)]
+    own_proc: bool,
+}
+
+impl Live {
+    /// `guard`, with what this backend knows about its own `/proc` (SEC-153-4).
+    fn guard_for(&self, guard: &ReadGuard) -> ReadGuard {
+        #[cfg(unix)]
+        {
+            guard.with_own_proc(self.own_proc)
+        }
+        #[cfg(not(unix))]
+        {
+            *guard
+        }
+    }
 }
 
 impl Sealed for Live {}
@@ -116,7 +144,7 @@ impl Backend for Live {
         guard: &'a ReadGuard,
     ) -> BoxFuture<'a, io::Result<FileBytes>> {
         let path = path.to_owned();
-        let guard = *guard;
+        let guard = self.guard_for(guard);
         #[cfg(unix)]
         let secrets = self.secrets.clone();
         Box::pin(async move {
@@ -138,7 +166,7 @@ impl Backend for Live {
         guard: &'a ReadGuard,
     ) -> BoxFuture<'a, io::Result<Vec<DirEntry>>> {
         let path = path.to_owned();
-        let guard = *guard;
+        let guard = self.guard_for(guard);
         #[cfg(unix)]
         let secrets = self.secrets.clone();
         Box::pin(async move {
@@ -160,7 +188,7 @@ impl Backend for Live {
         guard: &'a ReadGuard,
     ) -> BoxFuture<'a, io::Result<Option<FileMeta>>> {
         let path = path.to_owned();
-        let guard = *guard;
+        let guard = self.guard_for(guard);
         #[cfg(unix)]
         let secrets = self.secrets.clone();
         Box::pin(async move {
@@ -176,13 +204,33 @@ impl Backend for Live {
         })
     }
 
+    fn read_link<'a>(
+        &'a self,
+        path: &'a Path,
+        guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Vec<u8>>> {
+        let path = path.to_owned();
+        let guard = self.guard_for(guard);
+        Box::pin(async move {
+            #[cfg(unix)]
+            {
+                on_pool(move || files::read_link(&path, &guard)).await
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (path, guard);
+                unsupported()
+            }
+        })
+    }
+
     fn native<'a>(
         &'a self,
         call: &'a NativeCall,
         guard: &'a ReadGuard,
     ) -> BoxFuture<'a, io::Result<NativeValue>> {
         let call = call.clone();
-        let guard = *guard;
+        let guard = self.guard_for(guard);
         #[cfg(unix)]
         let secrets = self.secrets.clone();
         Box::pin(async move {
