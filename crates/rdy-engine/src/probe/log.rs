@@ -330,6 +330,11 @@ impl ActionLog {
         }
     }
 
+    /// Whether any entry was begun, finished or not. `ProbeHub::set_proxy` refuses once this is true.
+    pub(crate) fn has_entries(&self) -> bool {
+        self.state().next_seq > 0
+    }
+
     /// The path as the log shows it: `~/rest` under the home directory, else as given. Use it for every
     /// path that can reach a message, so a home directory name never leaves through an error.
     pub(crate) fn display_path(&self, path: &Path) -> String {
