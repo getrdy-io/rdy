@@ -123,10 +123,18 @@ pub enum JsonError {
 /// cannot close the element, and because it is the same bytes as the `.json` file, a hash of one is a
 /// hash of the other. The text ends with one newline.
 ///
-/// This is the only value a template may print unescaped (an askama safe marker belongs on this type
-/// alone). Any other string can hold `</script>` or `<!--`.
+/// This is the only value a template may print unescaped. With the `html` feature it carries askama's
+/// `HtmlSafe` marker, and no other type does (`scripts/check-html-escapes.sh` fails CI on any other
+/// bypass, M1-078). Any other string can hold `</script>` or `<!--`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HtmlSafeJson(String);
+
+// The one escape bypass in the crate. It is sound because the only constructor is `escape_html`'s
+// caller, which leaves no `<`, `>` or `&` in the text, and the text is printed inside a
+// `<script type="application/json">` element, where it cannot close the element. The check script
+// allows exactly this line.
+#[cfg(feature = "html")]
+impl askama::filters::HtmlSafe for HtmlSafeJson {}
 
 impl HtmlSafeJson {
     /// The JSON text.

@@ -10,6 +10,8 @@ use rdy_spec::result::{
     TrustSource, Verdict, group_by_bucket,
 };
 
+use crate::redact::RedactedReport;
+use crate::report::{HtmlSafeJson, JsonError, json_bytes};
 use crate::summary::{summary_line, verdict_line};
 
 /// A banner at the top of the page.
@@ -141,13 +143,26 @@ pub(super) struct View {
     pub sections: Vec<Section>,
     pub capabilities: Vec<CapabilityView>,
     pub details: Vec<Row>,
+    /// The JSON of the report, the same bytes as the `.json` file. The one value the template prints
+    /// without escaping, because it is an [`HtmlSafeJson`] (M1-078).
+    pub json: HtmlSafeJson,
+    /// The SHA-256 of `json`, in lowercase hex: the `data-sha256` attribute.
+    pub json_sha256: String,
 }
 
 impl View {
     /// Builds the page for `report`. The verdict and the counts come from the check results through the
     /// same rule as the terminal, never from the stored `verdict`; the sections come from
     /// [`group_by_bucket`], so the HTML, the terminal and the portal share one order (01 section 5.2).
-    pub(super) fn new(report: &Report) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`json_bytes`]: the page carries the same JSON as the `.json` file, so a report the
+    /// writer refuses cannot be rendered either.
+    pub(super) fn new(redacted: &RedactedReport) -> Result<Self, JsonError> {
+        let report: &Report = redacted;
+        let json = json_bytes(redacted)?;
+        let json_sha256 = sha256_hex(json.as_bytes());
         let judgement = rdy_spec::result::verdict(&report.checks);
         let verdict_class = match judgement.verdict {
             Verdict::Ready => "verdict-ready",
@@ -155,7 +170,7 @@ impl View {
             // `Verdict` is non_exhaustive. A verdict this version does not know is the worst case.
             _ => "verdict-not-ready",
         };
-        Self {
+        Ok(Self {
             product: report.spec.product.clone(),
             title_product: format!("\u{2068}{}\u{2069}", report.spec.product),
             version: report.spec.version.clone(),
@@ -189,8 +204,22 @@ impl View {
                 })
                 .collect(),
             details: details(report),
-        }
+            json,
+            json_sha256,
+        })
     }
+}
+
+/// The SHA-256 of `bytes` as 64 lowercase hex digits.
+fn sha256_hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
+    let mut out = String::with_capacity(64);
+    for byte in digest.as_ref() {
+        out.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        out.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+    }
+    out
 }
 
 /// The banners, first the signature one and then the incomplete one (01 section 4.7, 07 D.7).

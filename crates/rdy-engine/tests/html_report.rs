@@ -8,13 +8,16 @@
 //! Checker over the two goldens (`scripts/validate-html.sh`). `well_formed` below is
 //! the smoke test that runs on all five legs: the doctype, `lang`, `color-scheme`, balanced tags, void
 //! elements and unique ids. The structure test (M1-082) goes further.
+//!
+//! The embedded result (M1-078, SEC-64) is tested at the end: the text of the `<script>` element is the
+//! bytes of the `.json` file, the hash on it is their SHA-256, and a hostile hostname cannot close it.
 
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use rdy_engine::redact::{RedactedReport, Redactor, TagKey};
-use rdy_engine::report::render_html;
+use rdy_engine::report::{HtmlError, JsonError, json_bytes, read_report, render_html};
 use rdy_engine::testing::{fixtures_dir, golden::assert_golden};
 use rdy_spec::result::{Bucket, Report, group_by_bucket};
 use serde_json::{Value, json};
@@ -187,12 +190,28 @@ fn the_page_sets_the_csp_lang_color_scheme_and_loads_nothing() -> TestResult {
     ] {
         assert!(!head.contains(forbidden), "{forbidden:?} is in the head");
     }
-    for forbidden in ["<link", "<script", " src="] {
+    for forbidden in ["<link", " src="] {
         assert!(!body.contains(forbidden), "{forbidden:?} is in the body");
     }
-    // Every `href` is a link inside the page.
-    for part in html.split(" href=\"").skip(1) {
-        assert!(part.starts_with('#'), "an href leaves the page: {part:.40}");
+    // The only script element is the data block of the embedded result. Its type is not JavaScript, so a
+    // browser never runs it, and the CSP above has no `script-src` anyway.
+    assert_eq!(html.matches("<script").count(), 1);
+    assert!(body.contains(OPEN));
+    // Every link either stays inside the page or says `rel="noopener noreferrer"` (ADR 0003 decision 8).
+    for part in html.split("<a ").skip(1) {
+        let tag = format!(" {}", &part[..part.find('>').unwrap_or(part.len())]);
+        let href = attribute(&tag, "href").ok_or("a link has no href")?;
+        if !href.starts_with('#') {
+            assert_eq!(
+                attribute(&tag, "rel").as_deref(),
+                Some("noopener noreferrer"),
+                "an outside link has no rel: {tag}"
+            );
+        }
+    }
+    // The page has no event handler and no `javascript:` URL.
+    for forbidden in [" onerror=", " onclick=", " onload=", "javascript:"] {
+        assert!(!html.contains(forbidden), "{forbidden:?} is on the page");
     }
     Ok(())
 }
@@ -529,5 +548,191 @@ fn all_five_sections_match_their_golden() -> TestResult {
         fixtures_dir().join("reports/golden/five-sections-exec-plugin.html"),
         html_of(five_buckets_doc()?)?.as_bytes(),
     );
+    Ok(())
+}
+
+// ---- The embedded result (M1-078) ----
+
+const OPEN: &str = "<script type=\"application/json\" id=\"rdy-result\" data-sha256=\"";
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
+    digest.as_ref().iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
+}
+
+/// The `data-sha256` value and the text of the one result element: what an importer would read.
+fn embedded(html: &str) -> TestResult<(String, String)> {
+    let start = at(html, OPEN)? + OPEN.len();
+    let quote = html[start..]
+        .find("\">")
+        .ok_or("the attribute never ends")?;
+    let hash = html[start..start + quote].to_owned();
+    let text_start = start + quote + 2;
+    let end = html[text_start..]
+        .find("</script>")
+        .ok_or("the element never ends")?;
+    Ok((hash, html[text_start..text_start + end].to_owned()))
+}
+
+/// A hostname that tries to close the element, open another and end the line in a script.
+const HOSTILE: &str = "</script><img onerror=x>&amp;\u{2028}end";
+
+/// The ticket's exit test: the hostname comes back unchanged from the embedded JSON, and on the page it is
+/// text.
+#[test]
+fn a_hostname_that_closes_the_script_round_trips_through_the_embedded_json() -> TestResult {
+    let mut doc = sample()?;
+    doc["host"]["hostname"] = json!(HOSTILE);
+    let report = redact(doc)?;
+    let html = render_html(&report)?;
+
+    // One element, and nothing in the text can end it.
+    assert_eq!(html.matches("<script").count(), 1);
+    assert_eq!(html.matches("</script>").count(), 1);
+    let (hash, text) = embedded(&html)?;
+    assert!(!text.contains(['<', '>', '&', '\u{2028}', '\u{2029}']));
+    assert!(
+        text.contains("\\u003c/script\\u003e\\u003cimg onerror=x\\u003e\\u0026amp;\\u2028end"),
+        "{text}"
+    );
+
+    // Read back, the hostname is the one the report holds.
+    let back: Value = serde_json::from_str(&text)?;
+    assert_eq!(back["host"]["hostname"], HOSTILE);
+    assert_eq!(report.host.hostname, HOSTILE);
+
+    // The text is the bytes of the `.json` file, and the attribute is their hash.
+    let json = json_bytes(&report)?;
+    assert_eq!(text, json.as_str());
+    assert_eq!(hash, sha256_hex(json.as_bytes()));
+    assert_eq!(hash.len(), 64);
+    assert!(
+        hash.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    );
+
+    // Outside the element the same hostname is text: no tag came out of it.
+    let before = &html[..at(&html, OPEN)?];
+    let after = &html[at(&html, "</script>")?..];
+    let outside = format!("{before}{after}");
+    assert!(outside.contains("&#60;/script&#62;&#60;img onerror=x&#62;&#38;amp;"));
+    for raw in ["<img", "onerror=x>"] {
+        assert!(!outside.contains(raw), "{raw:?} reached the page as markup");
+    }
+    assert_eq!(well_formed(&html), Vec::<String>::new());
+    Ok(())
+}
+
+/// The escapes reach every field, not only the hostname: text in the message, fix, notes, `observed`
+/// (values and keys), the spec file name and the user cannot end the element or open a comment.
+#[test]
+fn hostile_text_in_any_field_cannot_end_the_element() -> TestResult {
+    let mut doc = five_buckets_doc()?;
+    let evil = "</script><!--<script>alert(1)</script>-->";
+    doc["checks"][1]["message"] = json!(evil);
+    doc["checks"][1]["fix"] = json!(evil);
+    doc["checks"][1]["notes"] = json!([evil]);
+    doc["checks"][0]["observed"] = json!({ "text": evil, "list": [evil], "<key>": 1 });
+    doc["spec"]["file_name"] = json!(evil);
+    doc["identity"]["user"] = json!(evil);
+    let report = redact(doc)?;
+    let html = render_html(&report)?;
+    let (_, text) = embedded(&html)?;
+    assert_eq!(html.matches("<script").count(), 1);
+    assert_eq!(html.matches("</script>").count(), 1);
+    assert!(!html.contains("<!--"));
+    assert!(!text.contains(['<', '>', '&']));
+    let back: Value = serde_json::from_str(&text)?;
+    assert_eq!(back["checks"][1]["message"], evil);
+    assert_eq!(back["checks"][0]["observed"]["<key>"], 1);
+    Ok(())
+}
+
+/// The element holds the bytes of the file and nothing else: no leading newline, and the file's own
+/// trailing newline is the last character before the end tag.
+#[test]
+fn the_element_text_is_the_file_bytes_with_nothing_added() -> TestResult {
+    let report = redact(sample()?)?;
+    let html = render_html(&report)?;
+    let json = json_bytes(&report)?;
+    let element = format!("{OPEN}{}\">{}</script>", sha256_hex(json.as_bytes()), json);
+    assert!(html.contains(&element));
+    assert!(json.as_str().ends_with("}\n"));
+    Ok(())
+}
+
+/// The data block comes after the readable page, so a reader and a screen reader meet the report first.
+#[test]
+fn the_result_element_is_the_last_thing_in_the_body() -> TestResult {
+    let html = html_of(sample()?)?;
+    assert!(at(&html, "</footer>")? < at(&html, OPEN)?);
+    let after = &html[at(&html, "</script>")? + "</script>".len()..];
+    assert_eq!(after.trim(), "</body>\n</html>");
+    Ok(())
+}
+
+/// A report the JSON writer refuses cannot be rendered either, and the error says why.
+#[test]
+fn a_report_the_json_writer_refuses_is_not_rendered() -> TestResult {
+    let mut doc = sample()?;
+    let check = doc["checks"][0].clone();
+    let checks = doc["checks"].as_array_mut().ok_or("checks is not a list")?;
+    while checks.len() < 257 {
+        checks.push(check.clone());
+    }
+    let report = redact(doc)?;
+    let err = render_html(&report).err().ok_or("rendered 257 results")?;
+    assert!(matches!(
+        err,
+        HtmlError::Json(JsonError::TooManyChecks { .. })
+    ));
+    assert!(err.to_string().contains("Fix:"));
+    Ok(())
+}
+
+/// The golden pair of SEC-64: the page of the report that `json_writer` writes as
+/// `not-ready-hostile-host.json`. The hash on the page is the SHA-256 of that golden file, and the element
+/// holds its bytes.
+#[test]
+fn the_golden_page_carries_the_golden_json() -> TestResult {
+    let mut doc = sample()?;
+    doc["host"]["hostname"] = json!(HOSTILE);
+    doc["checks"][0]["observed"] =
+        json!({ "zone": "b", "cores": 8, "labels": { "y": 1, "x": [3, 2, 1] } });
+    doc["checks"][1]["observed"] = Value::Null;
+    let html = html_of(doc)?;
+    let golden_html = fixtures_dir().join("reports/golden/not-ready-hostile-host.html");
+    assert_golden(&golden_html, html.as_bytes());
+
+    // Read the golden pair back from disk, so the comparison is between the two files.
+    let page = std::fs::read_to_string(&golden_html)?;
+    let json = std::fs::read(fixtures_dir().join("reports/golden/not-ready-hostile-host.json"))?;
+    let (hash, text) = embedded(&page)?;
+    assert_eq!(hash, sha256_hex(&json));
+    assert_eq!(text.as_bytes(), json.as_slice());
+    Ok(())
+}
+
+/// Every golden page is consistent with itself: the hash is the hash of the element text, and the text
+/// reads as a report.
+#[test]
+fn every_golden_page_hashes_its_own_element() -> TestResult {
+    let mut seen = 0;
+    for entry in std::fs::read_dir(fixtures_dir().join("reports/golden"))? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("html") {
+            continue;
+        }
+        let page = std::fs::read_to_string(&path)?;
+        let (hash, text) = embedded(&page)?;
+        assert_eq!(hash, sha256_hex(text.as_bytes()), "{}", path.display());
+        read_report(text.as_bytes())?;
+        seen += 1;
+    }
+    assert!(seen >= 3, "only {seen} golden pages");
     Ok(())
 }

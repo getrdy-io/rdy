@@ -96,6 +96,13 @@ jobs:
       # Same for the k8s.storageclass fixtures.
       - name: k8s.storageclass fixtures are current
         run: python3 -I scripts/gen-k8s-storageclass-fixtures.py --check
+      # The HTML report prints untrusted text. askama escapes it unless a template or the code switches
+      # that off. The only raw value is `HtmlSafeJson`, the embedded result (M1-078, SEC-64): the script
+      # fails on `|safe`, `escape = "none"`, a second safe marker and the askama features that add filters.
+      - name: No askama escape bypass
+        run: |
+          sh scripts/test-check-html-escapes.sh
+          sh scripts/check-html-escapes.sh
       # The schema generator is the optional `schema` feature of rdy-spec. It pulls in schemars and
       # serde_json/preserve_order, which must stay out of the shipped binary (ADR 0019).
       - name: The binary does not build the schema generator

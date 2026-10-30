@@ -353,8 +353,13 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     `urlencode` and `serde_json` (no `json` filter, so no filter that can print unescaped JSON). New
     packages in the lock file: the four askama crates and `rustc-hash`. `winnow`, `itoa`, `unicode-ident`,
     `memchr`, `proc-macro2` and `quote` were already there.
-  - What the renderer must keep true: no template uses the `safe` filter (a CI grep, M1-078; the one value
-    that may be printed unescaped is `HtmlSafeJson`, and M1-077 does not print it); askama escapes `<`, `>`,
+  - What the renderer must keep true: no template uses the `safe` filter, and nothing else switches escaping
+    off (`scripts/check-html-escapes.sh`, a lint-job step, M1-078; it also fails on `escape = "none"`, `|e(`
+    and `|escape(`, `filters::Safe`, `MaybeSafe`, a second `HtmlSafe` impl, an `ext` or `source` on a
+    `#[template]`, an `askama.toml`, and the askama features `serde_json`, `urlencode`, `full`, `default`
+    and `config`). The one value printed unescaped is `HtmlSafeJson`, the embedded result, and its marker
+    (`impl askama::filters::HtmlSafe for HtmlSafeJson {}`, `report/json.rs`) is the one line the script
+    allows; askama escapes `<`, `>`,
     `&`, `"` and `'` as numeric references; the Content-Security-Policy `<meta>` is the second line of
     defence (ADR 0003 decision 3).
 - `vnu-jar` 26.10.12 (M1-077, SEC-149-8). The Nu HTML Checker, an npm package that holds a Java jar. **CI only,
