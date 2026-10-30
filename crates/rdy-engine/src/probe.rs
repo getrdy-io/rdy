@@ -35,8 +35,8 @@
 //!
 //! **Native calls.** `Probe::native` takes a [`NativeCall`], a closed enum, never a closure. Each
 //! variant has one policy row and writes one `native` entry that holds the call and never the answer.
-//! A `Statvfs` path passes the read denylist and the check's `statfs` prefixes. The machine id is opaque and run-level only (see the
-//! `native` module, ADR 0014).
+//! A `Statvfs` path passes the read denylist and the check's `statfs` prefixes. The machine id is
+//! opaque and run-level only (see the `native` module, ADR 0014).
 //!
 //! **What is here, and what is not.** The handle, the log, the read policy, `read`, `read_tail`,
 //! `read_dir`, `stat`, `env`, `exec`, `native`, `udp_exchange` and `unix_get` (M1-144, policy in `sock`),

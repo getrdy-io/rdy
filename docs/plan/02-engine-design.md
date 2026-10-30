@@ -476,7 +476,7 @@ tests policy.
   - `Statvfs { path }`: the path passes the read denylist and the check's `statfs` prefixes, as written and
     again on the real path; logged as `native`, `api: statvfs`, with `path`. `reads` does not judge it
     (M1-171): a disk check declares `statfs: ["/"]` to measure any spec path and declares no `reads` over
-    the tree. A check with only `reads` is refused. A probe built with no `CheckInfo` gets the denylist alone.
+    the tree. A check with only `reads` is refused, and the refusal names `statfs` ("add the prefix to `statfs`"), not `reads`. A probe built with no `CheckInfo` gets the denylist alone.
   - `Uname`, `Rlimit(resource)`, `Hostname`, `SystemRoots`.
   - `MachineId`: Windows `MachineGuid`; Linux reads `/etc/machine-id`, then `/var/lib/dbus/machine-id`,
     then `/run/machine-id` as a file; macOS has none in M1, so its `host_id` is null. The raw value never enters the log or the report; only 01's salted
@@ -492,7 +492,7 @@ tests policy.
     verified" for `None`, never a pass. Reading `MNT_NOEXEC` from `statfs` is a later ticket.
   - macOS opens the real path for reading before it asks `fstatvfs`, so a directory the user can search
     but not read fails to open. The live backend then asks the parent directory when the parent is on
-    the same device (the numbers belong to the file system), after the same real-path rules. A mount
+    the same device and, on macOS, the same mount name (the numbers belong to the file system), after the same real-path rules. A mount
     point, a parent the rules refuse and a parent that cannot be opened are not guessed: the call returns
     `ProbeError::PermissionDenied`, and the check reports "not verified" with that reason (M1-171).
     Linux uses `O_PATH`, which needs no read permission, and never gets here.

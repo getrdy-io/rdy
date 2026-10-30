@@ -11,7 +11,7 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::check::{CheckInfo, CheckMeta, Os, OsSupport, Support};
-use crate::probe::policy::RULE_OUTSIDE_READS;
+use crate::probe::policy::RULE_OUTSIDE_STATFS;
 use crate::probe::{Backend, Probe, ProbeError, ProbeHub};
 use crate::redact::{Redactor, TagKey};
 
@@ -108,7 +108,7 @@ async fn statvfs_outside_the_statfs_prefixes_is_refused_before_the_file_system_i
         .await
         .expect_err("outside the statfs prefixes");
     assert!(
-        matches!(&error, ProbeError::Denied { rule, .. } if *rule == RULE_OUTSIDE_READS),
+        matches!(&error, ProbeError::Denied { rule, .. } if *rule == RULE_OUTSIDE_STATFS),
         "{error:?}"
     );
 }
@@ -126,6 +126,43 @@ async fn statvfs_through_a_link_to_a_place_outside_the_prefixes_is_refused() {
     assert!(matches!(error, ProbeError::Denied { .. }), "{error:?}");
     let log = sandbox.hub.action_log().actions;
     assert_eq!(log[0].outcome, ActionOutcome::Denied);
+}
+
+/// A directory the user can enter but not list answers through the probe. On macOS the portable path
+/// meets `EACCES` on the open and measures through the parent. On Linux the `O_PATH` descriptor never
+/// needs read permission. Either way the check gets numbers. Skipped as root, which can list anything
+/// (CI runners are not root).
+#[tokio::test]
+async fn statvfs_of_an_enter_only_directory_answers_through_the_probe() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct Restore(PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    if rustix::process::geteuid().is_root() {
+        eprintln!("skipped: root can list any directory (CI runners are not root)");
+        return;
+    }
+    let sandbox = Sandbox::new();
+    let inner = sandbox.root.join("data/inner");
+    std::fs::create_dir_all(&inner).expect("mkdir");
+    std::fs::set_permissions(&inner, std::fs::Permissions::from_mode(0o311)).expect("chmod");
+    let _restore = Restore(inner.clone());
+    let error = std::fs::File::open(&inner).expect_err("a 0o311 directory cannot be opened");
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    let value = sandbox
+        .check()
+        .native(statvfs(&inner))
+        .await
+        .expect("numbers for a directory that can be entered but not listed");
+    let NativeValue::Statvfs(info) = value else {
+        panic!("not a statvfs answer: {value:?}");
+    };
+    assert!(info.blocks > 0);
 }
 
 #[tokio::test]

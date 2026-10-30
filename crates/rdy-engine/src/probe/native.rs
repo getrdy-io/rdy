@@ -265,7 +265,7 @@ impl Probe {
         // `Statvfs` is judged by the check's `statfs` prefixes, never by `reads`, so a check can be
         // given file system numbers for any path without being given the files. The denylist applies
         // either way. The backend gets this guard and judges the real path with it.
-        let guard = ReadGuard::new(self.scope.os, self.scope.info.map(|info| info.statfs));
+        let guard = ReadGuard::statfs(self.scope.os, self.scope.info.map(|info| info.statfs));
         let refusal = match (&call, policy.who) {
             (_, Who::RunLevel) if self.scope.check.is_some() => Some(RULE_MACHINE_ID),
             (NativeCall::Statvfs { path }, _) => guard.admit(path).err(),

@@ -738,10 +738,10 @@ fn a_rule_refusal_of_the_target_is_final_and_gets_no_parent() {
 }
 
 #[test]
-fn an_unreadable_directory_is_measured_through_a_parent_on_the_same_file_system() {
+fn the_parent_step_measures_through_a_parent_on_the_same_file_system() {
     // `statvfs_through_parent` runs when the open of the target fails with a plain permission error
-    // (macOS opens the directory for reading; Linux uses `O_PATH` and never gets here). A test run as
-    // root cannot make such a directory, so this starts from the step after the failure.
+    // (macOS opens the directory for reading; Linux uses `O_PATH` and never gets here). The real
+    // permission error is driven in `an_unreadable_directory_is_measured_through_its_parent`.
     let sandbox = Sandbox::new();
     sandbox.write("data/inner/file", b"x");
     let guard = ReadGuard::new(Os::Linux, None);
@@ -755,25 +755,116 @@ fn an_unreadable_directory_is_measured_through_a_parent_on_the_same_file_system(
 
     // The check's prefixes cover the target and not its parent: the parent is refused, nothing is
     // guessed, and the caller gets the original error.
-    let prefix: &'static str = Box::leak(real.to_string_lossy().into_owned().into_boxed_str());
-    let prefixes: &'static [&'static str] = Box::leak(vec![prefix].into_boxed_slice());
-    let narrow = ReadGuard::new(Os::Linux, Some(prefixes));
+    let narrow = ReadGuard::new(Os::Linux, Some(leak_prefixes(&[&real])));
     let error = files::statvfs_through_parent(denied(), &real, &stat, &narrow, &none)
         .map(|_| ())
         .expect_err("the parent is outside the prefixes");
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(crate::probe::Refused::from_io(&error).is_none());
+}
+
+fn leak_prefixes(paths: &[&Path]) -> &'static [&'static str] {
+    let list: Vec<&'static str> = paths
+        .iter()
+        .map(|path| &*Box::leak(path.to_string_lossy().into_owned().into_boxed_str()))
+        .collect();
+    Box::leak(list.into_boxed_slice())
+}
+
+/// A directory the user can enter but not list (`0o311`), restored when dropped so the temporary
+/// directory can be removed.
+struct EnterOnly(PathBuf);
+
+impl EnterOnly {
+    /// Makes `data/inner` enter-only. `None` when the test runs as root, which can list anything: that
+    /// run says so on stderr and the test returns. Every other run proves the precondition first: a
+    /// plain open of the directory fails with `EACCES`, so the tests really start from that error.
+    fn make(sandbox: &Sandbox) -> Option<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().is_root() {
+            eprintln!("skipped: root can list any directory (CI runners are not root)");
+            return None;
+        }
+        sandbox.write("data/inner/file", b"x");
+        let inner = sandbox.path("data/inner");
+        std::fs::set_permissions(&inner, std::fs::Permissions::from_mode(0o311)).expect("chmod");
+        let guard = Self(inner);
+        let error = std::fs::File::open(&guard.0).expect_err("a 0o311 directory cannot be opened");
+        assert_eq!(
+            error.kind(),
+            io::ErrorKind::PermissionDenied,
+            "the precondition of the test is EACCES, got {error:?}"
+        );
+        Some(guard)
+    }
+}
+
+impl Drop for EnterOnly {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
 }
 
 #[test]
+fn an_unreadable_directory_is_measured_through_its_parent() {
+    // The real error, not a made-up one: the open of a `0o311` directory fails with `EACCES`, and
+    // `statvfs_by_path` answers with the numbers of the parent, which is on the same file system.
+    let sandbox = Sandbox::new();
+    let Some(inner) = EnterOnly::make(&sandbox) else {
+        return;
+    };
+    let guard = ReadGuard::new(Os::Linux, None);
+    let none = files::Secrets::default();
+    let (real, stat) = files::locate_by_path(&inner.0, &guard, &none).expect("located");
+    let info = files::statvfs_by_path(&inner.0, &real, &stat, &guard, &none)
+        .expect("the parent gives the numbers");
+    let data = sandbox.path("data");
+    let (parent_fd, _) = files::open_by_path(
+        &data,
+        &data,
+        &rustix::fs::stat(&data).expect("stat"),
+        &guard,
+        files::Want::Dir,
+    )
+    .expect("open the parent");
+    let parent = rustix::fs::fstatvfs(&parent_fd).expect("fstatvfs");
+    assert!(info.f_blocks > 0);
+    assert_eq!(info.f_fsid, parent.f_fsid);
+    assert_eq!(info.f_blocks, parent.f_blocks);
+}
+
+#[test]
+fn an_unreadable_directory_whose_parent_is_outside_the_prefixes_is_denied() {
+    // The prefixes cover the directory and not its parent. The rules refuse the parent and the
+    // caller gets the plain `PermissionDenied`, not a refusal and not a guess.
+    let sandbox = Sandbox::new();
+    let Some(inner) = EnterOnly::make(&sandbox) else {
+        return;
+    };
+    let none = files::Secrets::default();
+    let narrow = ReadGuard::new(Os::Linux, Some(leak_prefixes(&[&inner.0])));
+    let (real, stat) = files::locate_by_path(&inner.0, &narrow, &none).expect("located");
+    let error = files::statvfs_by_path(&inner.0, &real, &stat, &narrow, &none)
+        .map(|_| ())
+        .expect_err("the parent is outside the prefixes");
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(
+        crate::probe::Refused::from_io(&error).is_none(),
+        "{error:?}"
+    );
+}
+
+/// `/proc` is its own file system, so the numbers of `/` would be wrong for it. A Linux machine
+/// always has it, so a missing mount fails the test.
+#[cfg(target_os = "linux")]
+#[test]
 fn a_mount_point_is_reported_not_measured_through_its_parent() {
-    // `/proc` is its own file system, so the numbers of `/` would be wrong for it.
     let guard = ReadGuard::new(Os::Linux, None);
     let none = files::Secrets::default();
     let (real, stat) = files::locate_by_path(Path::new("/proc"), &guard, &none).expect("ok");
     let root = rustix::fs::stat("/").expect("stat /");
-    if root.st_dev == stat.st_dev {
-        return; // a sandbox with no separate /proc: nothing to show
-    }
+    assert_ne!(root.st_dev, stat.st_dev, "/proc is not a separate mount");
     let denied = io::Error::from(io::ErrorKind::PermissionDenied);
     let error = files::statvfs_through_parent(denied, &real, &stat, &guard, &none)
         .map(|_| ())

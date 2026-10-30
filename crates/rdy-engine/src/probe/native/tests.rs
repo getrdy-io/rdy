@@ -16,7 +16,9 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::check::{BoxFuture, CheckInfo, CheckMeta, Os, OsSupport, Support};
-use crate::probe::policy::{RULE_MACHINE_ID_FILE, RULE_OUTSIDE_READS, RULE_SYSTEM_SECRET};
+use crate::probe::policy::{
+    RULE_MACHINE_ID_FILE, RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, RULE_SYSTEM_SECRET,
+};
 use crate::probe::replay::Replay;
 use crate::probe::sealed::Sealed;
 use crate::probe::{
@@ -218,7 +220,7 @@ async fn statvfs_outside_the_declared_prefixes_is_refused_and_logged() {
         .native(statvfs("/etc"))
         .await
         .expect_err("outside the declared reads");
-    assert_eq!(rule_of(&error), RULE_OUTSIDE_READS);
+    assert_eq!(rule_of(&error), RULE_OUTSIDE_STATFS);
     // The denylist applies inside a prefix too, and a relative path or `..` is refused.
     for path in ["/var/lib/../../etc", "var/lib"] {
         assert!(matches!(
@@ -245,7 +247,7 @@ async fn statvfs_outside_the_declared_prefixes_is_refused_and_logged() {
     let refused = &log.actions[1];
     assert_eq!(field(refused, "api"), Some(&json!("statvfs")));
     assert_eq!(field(refused, "path"), Some(&json!("/etc")));
-    assert_eq!(field(refused, "rule"), Some(&json!(RULE_OUTSIDE_READS)));
+    assert_eq!(field(refused, "rule"), Some(&json!(RULE_OUTSIDE_STATFS)));
 }
 
 #[tokio::test]
@@ -301,7 +303,7 @@ async fn reads_alone_do_not_judge_statvfs() {
         .native(statvfs("/var/lib"))
         .await
         .expect_err("no statfs prefix");
-    assert_eq!(rule_of(&error), RULE_OUTSIDE_READS);
+    assert_eq!(rule_of(&error), RULE_OUTSIDE_STATFS);
 }
 
 #[tokio::test]
@@ -312,7 +314,7 @@ async fn a_statfs_prefix_matches_whole_components() {
         .native(statvfs("/var/library"))
         .await
         .expect_err("not under /var/lib");
-    assert_eq!(rule_of(&error), RULE_OUTSIDE_READS);
+    assert_eq!(rule_of(&error), RULE_OUTSIDE_STATFS);
 }
 
 #[tokio::test]

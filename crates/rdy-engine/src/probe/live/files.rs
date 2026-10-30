@@ -221,10 +221,11 @@ pub(super) fn statvfs(
 /// The portable `statvfs`: open the real path and ask that descriptor. The open needs read permission,
 /// which Linux's `O_PATH` does not, so a directory the user can search but not read gets one more
 /// step. The numbers belong to the file system, so the parent will do when it is on the same file
-/// system (same device). A mount point is not: its parent is another file system, and its numbers
-/// would be wrong for the path. That case, and a parent that cannot be opened or that the rules
-/// refuse, return the original `PermissionDenied`, which the probe reports as
-/// `ProbeError::PermissionDenied` and the check reports as not verified. It is never a guess.
+/// system (same device, and on macOS the same mount name). A mount point is not: its parent is
+/// another file system, and its numbers would be wrong for the path. That case, and a parent that
+/// cannot be opened or that the rules refuse, return the original `PermissionDenied`, which the probe
+/// reports as `ProbeError::PermissionDenied` and the check reports as not verified. It is never a
+/// guess.
 /// Compiled on every Unix so Linux tests it.
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(super) fn statvfs_by_path(
@@ -259,17 +260,55 @@ pub(super) fn statvfs_through_parent(
         return Err(denied);
     };
     // The parent goes through the same steps as any path: real path, rules, no secret, no link.
-    let Ok((parent_real, parent_stat)) = locate_by_path(parent, guard, secrets) else {
-        return Err(denied);
+    let (parent_real, parent_stat) = match locate_by_path(parent, guard, secrets) {
+        Ok(found) => found,
+        Err(error) => return Err(plain_denied(denied, &error)),
     };
-    let Ok((fd, opened)) = open_by_path(parent, &parent_real, &parent_stat, guard, Want::Dir)
-    else {
-        return Err(denied);
+    let (fd, opened) = match open_by_path(parent, &parent_real, &parent_stat, guard, Want::Dir) {
+        Ok(found) => found,
+        Err(error) => return Err(plain_denied(denied, &error)),
     };
     if opened.st_dev != before.st_dev {
         return Err(denied);
     }
+    // A bind or `nullfs` mount keeps the device number, so `st_dev` alone does not say it is the same
+    // mount, and the mount flags (`f_flag`) could be another mount's. Apple compares the mount name.
+    #[cfg(target_vendor = "apple")]
+    if !same_mount_name(real, &fd) {
+        return Err(denied);
+    }
     Ok(fs::fstatvfs(&fd)?)
+}
+
+/// What the caller gets when the parent could not be used: the original `PermissionDenied`. When a
+/// rule refused the parent, the rule is logged at debug level, with no path, so a check author can
+/// find out why the fallback did not apply.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn plain_denied(denied: io::Error, parent: &io::Error) -> io::Error {
+    if let Some(refusal) = Refused::from_io(parent) {
+        tracing::debug!(
+            rule = refusal.rule,
+            "the parent was refused, so it gives no numbers"
+        );
+    }
+    denied
+}
+
+/// Whether the file system at `target` (asked by path, which needs no read permission) and the one
+/// `parent` is open on have the same mount point name (`f_mntonname`).
+#[cfg(target_vendor = "apple")]
+fn same_mount_name(target: &Path, parent: &OwnedFd) -> bool {
+    let (Ok(target), Ok(parent)) = (fs::statfs(target), fs::fstatfs(parent)) else {
+        return false;
+    };
+    let name = |info: &fs::StatFs| -> Vec<_> {
+        info.f_mntonname
+            .iter()
+            .copied()
+            .take_while(|byte| *byte != 0)
+            .collect()
+    };
+    name(&target) == name(&parent)
 }
 
 fn refused(rule: &'static str) -> io::Error {
