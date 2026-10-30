@@ -1,0 +1,13 @@
+schema = 1
+name = "ufw-closed"
+summary = "ufw allows only 22 and 10250; 6443 is closed by the default policy"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-ufw"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false

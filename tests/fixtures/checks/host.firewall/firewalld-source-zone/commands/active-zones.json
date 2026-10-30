@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "/usr/bin/firewall-cmd",
+    "--get-active-zones"
+  ],
+  "stdout": "public\n  interfaces: eth0\ntrusted\n  sources: 192.0.2.0/24\n",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 0
+}
