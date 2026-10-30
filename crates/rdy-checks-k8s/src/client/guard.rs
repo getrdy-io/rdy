@@ -25,8 +25,11 @@ use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
+use http::header::CONTENT_TYPE;
 use http::{Request, Response};
 use http_body::Body as _;
+use k8s_openapi::api::authentication::v1::SelfSubjectReview;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{APIGroupList, APIResourceList, APIVersions};
 use kube::client::Body;
 use rdy_engine::probe::{Probe, ProbeError, RULE_CHECK_FINISHED, RULE_NO_PROBE};
 use tower_layer::Layer;
@@ -36,13 +39,18 @@ mod rules;
 #[cfg(test)]
 mod tests;
 
+use rules::SELF_SUBJECT_REVIEW_PATH;
 pub use rules::{
     ALLOWED, Access, Allowed, FieldSelector, ImpersonateAs, ImpersonateError, Only, RULE_BODY,
     RULE_GET_BODY, RULE_HEADER, RULE_IMPERSONATE, RULE_METHOD, RULE_NOT_ALLOWED, RULE_PATH_SHAPE,
     RULE_POST_QUERY, RULE_POST_TARGET, RULE_QUERY, RULE_REVIEW_BODY, RULE_SECRETS, RULE_SELECTOR,
     RULE_SUBRESOURCE, RULE_UPGRADE, SELF_SUBJECT_REVIEW_BODY,
 };
-use rules::{BodyView, bad_header, impersonation_allowed, judge, log_path};
+pub(super) use rules::{BodyView, judge};
+use rules::{bad_header, impersonation_allowed, log_path};
+// What the mock harness (`client::mock`) needs to judge the requests it recorded the way the guard does.
+#[cfg(test)]
+pub(super) use rules::{Target, decode_query_value, target_of};
 
 use super::text::escape_capped;
 
@@ -279,8 +287,20 @@ impl ReadOnlyClient {
     /// Puts the guard in front of `raw`. Needs a running tokio runtime, because kube's client starts a
     /// worker task.
     pub(super) fn new(raw: &kube::Client, probe: &Probe) -> Self {
+        Self::over(RawService(raw.clone()), probe)
+    }
+
+    /// Puts the guard in front of `inner`: the one place a client is built. Production passes the raw
+    /// kube client, and the mock harness (`client::mock`) passes its replaying service, so a fixture run
+    /// goes through the same layers a real run does.
+    pub(super) fn over<S>(inner: S, probe: &Probe) -> Self
+    where
+        S: Service<Request<Body>, Response = Response<Body>> + Send + 'static,
+        S::Future: Send + 'static,
+        S::Error: Into<BoxError>,
+    {
         // The namespace of a kubeconfig is not used (ADR 0031 decision 12).
-        let client = kube::Client::new(guarded_service(RawService(raw.clone()), probe), "");
+        let client = kube::Client::new(guarded_service(inner, probe), "");
         Self { client }
     }
 
@@ -302,6 +322,64 @@ impl ReadOnlyClient {
         K::DynamicType: Default,
     {
         kube::Api::namespaced(self.client.clone(), namespace)
+    }
+
+    /// The legacy discovery document of the core group, `GET /api`: the versions it serves.
+    ///
+    /// The plain document, not the aggregated one: no `Accept` is sent that selects it, so an old and a
+    /// new server answer in the same shape (03, "Fixtures for all of them").
+    ///
+    /// # Errors
+    ///
+    /// The `kube::Error` of the request, which can be a [`GuardError`] inside `Service`.
+    pub async fn core_versions(&self) -> Result<APIVersions, kube::Error> {
+        self.client.list_core_api_versions().await
+    }
+
+    /// The legacy discovery document of the named groups, `GET /apis`.
+    ///
+    /// # Errors
+    ///
+    /// The `kube::Error` of the request, which can be a [`GuardError`] inside `Service`.
+    pub async fn api_groups(&self) -> Result<APIGroupList, kube::Error> {
+        self.client.list_api_groups().await
+    }
+
+    /// The resources a group version serves, `GET /apis/<group>/<version>`. A 404 means the server does
+    /// not serve it, and is the answer a check reads as "not installed".
+    ///
+    /// `group` and `version` are put in the path as given. The guard judges the path, so a value that is
+    /// not a DNS-1123 group and a version such as `v2` or `v1beta1` is refused before anything is sent.
+    ///
+    /// # Errors
+    ///
+    /// The `kube::Error` of the request, which can be a [`GuardError`] inside `Service`.
+    pub async fn group_resources(
+        &self,
+        group: &str,
+        version: &str,
+    ) -> Result<APIResourceList, kube::Error> {
+        self.client
+            .list_api_group_resources(&format!("{group}/{version}"))
+            .await
+    }
+
+    /// Who the server says rdy is, `POST /apis/authentication.k8s.io/v1/selfsubjectreviews`.
+    ///
+    /// The body is [`SELF_SUBJECT_REVIEW_BODY`], sent as raw bytes. A typed k8s-openapi
+    /// `SelfSubjectReview` serializes with a `metadata` member, which the guard refuses, so this is the
+    /// only way a check sends one (ADR 0010 decision 2). The request goes through the guard like any other.
+    ///
+    /// # Errors
+    ///
+    /// The `kube::Error` of the request: `Api` for a 401 or 403 (or a 404 on a server older than 1.28),
+    /// or a [`GuardError`] inside `Service`.
+    pub async fn self_subject_review(&self) -> Result<SelfSubjectReview, kube::Error> {
+        let request = Request::post(SELF_SUBJECT_REVIEW_PATH)
+            .header(CONTENT_TYPE, "application/json")
+            .body(SELF_SUBJECT_REVIEW_BODY.to_vec())
+            .map_err(kube::Error::HttpError)?;
+        self.client.request(request).await
     }
 
     /// The server's `GET /version` through the guard.

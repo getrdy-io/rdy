@@ -1,0 +1,56 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "namespaces"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"installer/acme-system\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "group": "rbac.authorization.k8s.io",
+          "resource": "clusterroles"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": "",
+        "evaluationError": "no RBAC policy matched"
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "namespace": "app",
+          "verb": "list",
+          "resource": "pods"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "denied": true,
+        "reason": "denied by the admission webhook acme-guard"
+      }
+    },
+    {
+      "spec": {
+        "nonResourceAttributes": {
+          "path": "/healthz",
+          "verb": "get"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"system:public-info-viewer\""
+      }
+    }
+  ]
+}
