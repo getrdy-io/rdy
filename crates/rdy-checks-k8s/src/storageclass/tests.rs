@@ -193,7 +193,8 @@ async fn eks_gp2_with_no_csi_addon_blocks() {
         ),
         "{fix}"
     );
-    assert!(fix.contains("IRSA or EKS Pod Identity"), "{fix}");
+    assert!(fix.contains("--pod-identity-associations"), "{fix}");
+    assert!(fix.contains("`AmazonEBSCSIDriverPolicyV2`"), "{fix}");
     assert_eq!(finding.observed["provisioner"], "kubernetes.io/aws-ebs");
     assert_eq!(finding.observed["serving_driver"], "ebs.csi.aws.com");
     assert_eq!(finding.observed["driver_evidence"], "none");
@@ -223,6 +224,36 @@ async fn k3s_local_path_passes_with_driver_not_verified() {
     // Nothing but the class list: a driver that is not CSI has nothing to look up.
     assert_eq!(rig.paths(), [CLASSES]);
     assert_eq!(engine(&rig, finding, None).status, Status::Pass);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn eks_auto_mode_passes_with_the_driver_not_verified_and_is_never_looked_up() {
+    let rig = rig("eks-auto-mode");
+    let finding = rig.finding(json!({})).await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert_eq!(
+        finding.message,
+        "Default class auto-ebs-sc (ebs.csi.eks.amazonaws.com): not CSI or unknown, driver not verified"
+    );
+    assert!(finding.partial.is_none());
+    assert_eq!(finding.observed["driver_kind"], "not_csi");
+    // No CSINode or CSIDriver is asked for: nothing says Auto Mode registers there.
+    assert_eq!(rig.paths(), [CLASSES]);
+    // RWO is served, the modes the table does not list are not verified and never refused.
+    let rwo = rig
+        .finding(json!({"access_modes": ["ReadWriteOnce"]}))
+        .await;
+    assert_eq!(rwo.level, Level::Pass, "{rwo:?}");
+    let more = rig
+        .finding(json!({"access_modes": ["ReadWriteOncePod", "ReadWriteMany"]}))
+        .await;
+    assert_eq!(more.level, Level::Warn, "{more:?}");
+    assert_eq!(
+        more.observed["access_modes"],
+        json!({"ReadWriteOncePod": "not verified", "ReadWriteMany": "not verified"})
+    );
+    assert_eq!(engine(&rig, more, None).status, Status::Warn);
     rig.audit();
 }
 
@@ -872,6 +903,59 @@ async fn a_namespace_the_identity_may_not_get_does_not_stop_the_claim_list() {
     rig.audit();
 }
 
+// ---- what never leaves the cluster -------------------------------------------------------------------------------
+
+/// The marker the `secret-params` fixture puts in every value that must stay in the cluster, and the
+/// account number inside the key ARN.
+const SENTINELS: [&str; 2] = ["sentinel-7f3a", "111122223333"];
+
+#[tokio::test]
+async fn class_parameters_annotations_and_event_text_never_reach_the_result() {
+    // The fixture must really serve the values, or the test below proves nothing.
+    let seeded = rig("secret-params");
+    let client = seeded.cluster.harness.client(seeded.ctx.probe());
+    let classes = client
+        .all::<StorageClass>()
+        .list(&first_page())
+        .await
+        .expect("the class list");
+    let held = serde_json::to_string(&classes.items).expect("serializes");
+    assert!(held.matches(SENTINELS[0]).count() >= 6, "{held}");
+    assert!(held.contains(SENTINELS[1]), "{held}");
+    let events = client
+        .namespaced::<Event>("acme-system")
+        .list(&first_page().fields("involvedObject.kind=PersistentVolumeClaim"))
+        .await
+        .expect("the event list");
+    let held = serde_json::to_string(&events.items).expect("serializes");
+    assert!(held.matches(SENTINELS[0]).count() >= 3, "{held}");
+
+    let rig = rig("secret-params");
+    // Waiting claims make the check read the events too, so every server text is in play.
+    let finding = rig.finding_in(json!({}), Some("acme-system")).await;
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    assert_eq!(
+        finding.observed["pending_claims"],
+        json!([{"claim": "data-db-0", "minutes": 20, "provisioning_failed": true}])
+    );
+    assert_eq!(rig.paths(), [CLASSES, CSINODES, NAMESPACE, CLAIMS, EVENTS]);
+    for severity in [None, Some("warn")] {
+        let result = engine(&rig, finding.clone(), severity);
+        let wire = serde_json::to_string(&result).expect("the result serializes");
+        for sentinel in SENTINELS {
+            assert!(
+                !wire.contains(sentinel),
+                "{sentinel} reached the result: {wire}"
+            );
+        }
+        assert!(
+            !wire.contains("kmsKeyId") && !wire.contains("provisioner-secret"),
+            "{wire}"
+        );
+    }
+    rig.audit();
+}
+
 // ---- every case ------------------------------------------------------------------------------------------------
 
 /// Every fixture the sweep runs, with whether it has claims in the target namespace.
@@ -879,6 +963,7 @@ const CASES: &[(&str, bool)] = &[
     ("eks-gp2-no-csi", false),
     ("eks-ebs-csi", false),
     ("eks-gp2-with-addon", false),
+    ("eks-auto-mode", false),
     ("k3s-local-path", false),
     ("gke-immediate", false),
     ("no-provisioner", false),
@@ -902,6 +987,7 @@ const CASES: &[(&str, bool)] = &[
     ("no-waiting", true),
     ("namespace-missing", true),
     ("namespace-forbidden", true),
+    ("secret-params", true),
 ];
 
 #[tokio::test]

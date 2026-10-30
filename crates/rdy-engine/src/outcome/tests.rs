@@ -549,6 +549,38 @@ fn missing_grants_are_a_field_of_the_wire_partial_once_each() {
 }
 
 #[test]
+fn missing_grants_are_cut_at_the_schema_cap_and_the_result_says_so() {
+    let grants: Vec<String> = (0..1005).map(|n| format!("list thing{n}")).collect();
+    let finding = Finding::pass("ok")
+        .with_partial(Partial::new(vec![], "RBAC denied reads").with_missing_grants(grants));
+    let result = map(
+        &PLAIN,
+        &entry("fake.plain"),
+        &ctx("fake.plain", &[]),
+        Ok(finding),
+    );
+    let partial = result.partial.expect("partial");
+    assert_eq!(partial.missing_grants.len(), 1000);
+    assert_eq!(partial.missing_grants[0], "list thing0");
+    assert_eq!(partial.missing_grants[999], "list thing999");
+    assert!(result.truncated);
+
+    // Exactly the cap, and duplicates past it, cut nothing.
+    let mut exact: Vec<String> = (0..1000).map(|n| format!("list thing{n}")).collect();
+    exact.push("list thing0".to_owned());
+    let finding = Finding::pass("ok")
+        .with_partial(Partial::new(vec![], "RBAC denied reads").with_missing_grants(exact));
+    let result = map(
+        &PLAIN,
+        &entry("fake.plain"),
+        &ctx("fake.plain", &[]),
+        Ok(finding),
+    );
+    assert_eq!(result.partial.expect("partial").missing_grants.len(), 1000);
+    assert!(!result.truncated);
+}
+
+#[test]
 fn a_partial_without_grants_has_an_empty_list() {
     let finding = Finding::pass("ok").with_partial(Partial::new(vec![Need::Root], "no root"));
     let result = map(

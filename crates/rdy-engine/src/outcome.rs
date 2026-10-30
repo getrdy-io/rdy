@@ -52,6 +52,9 @@ pub const SPEC_PLACEHOLDER: &str = "<spec>";
 const NO_ADVICE_FIX: &str =
     "rdy has no advice for this result. Tell the vendor which check it was.";
 
+/// The most `missing_grants` a wire partial holds (the result schema's `maxItems`).
+const MAX_GRANTS: usize = 1000;
+
 /// Text for a check that failed and gave an empty hint.
 const FAILED_FIX: &str = "Run again. If it fails again, tell the vendor which check it was.";
 
@@ -121,7 +124,10 @@ fn from_finding(
     let partial = merge_partial(info, ctx, partial);
 
     let level_status = cap_level(level, severity);
-    let wire_partial = partial.as_ref().map(wire_partial);
+    let (wire_partial, grants_cut) = match partial.as_ref().map(wire_partial) {
+        Some((wire, cut)) => (Some(wire), cut),
+        None => (None, false),
+    };
     let os_partial = matches!(info.os.on(ctx.os()), Support::Partial(_));
     let evidence_only = evidence_only_missing(info, partial.as_ref(), os_partial);
     let status = apply_partial_rule(
@@ -136,6 +142,7 @@ fn from_finding(
     result.observed = to_map(observed);
     result.expected = to_map(expected);
     result.partial = wire_partial;
+    result.truncated = grants_cut;
 
     let builtin = fix.filter(|text| !text.is_empty());
     if downgraded {
@@ -296,7 +303,8 @@ fn need_list(needs: &[Need]) -> String {
         .join(", ")
 }
 
-fn wire_partial(partial: &Partial) -> WirePartial {
+/// The wire form of a partial, and whether the list of grants was cut at [`MAX_GRANTS`].
+fn wire_partial(partial: &Partial) -> (WirePartial, bool) {
     let mut wire: Vec<rdy_spec::result::Need> = Vec::new();
     for need in &partial.missing {
         let need = need.wire();
@@ -304,14 +312,23 @@ fn wire_partial(partial: &Partial) -> WirePartial {
             wire.push(need);
         }
     }
-    // The grants keep the order the check gave them, once each.
+    // The grants keep the order the check gave them, once each, and stop at the schema's cap.
     let mut grants: Vec<String> = Vec::new();
+    let mut cut = false;
     for grant in &partial.missing_grants {
-        if !grants.contains(grant) {
-            grants.push(grant.clone());
+        if grants.contains(grant) {
+            continue;
         }
+        if grants.len() == MAX_GRANTS {
+            cut = true;
+            break;
+        }
+        grants.push(grant.clone());
     }
-    WirePartial::new(wire, partial.note.clone()).with_missing_grants(grants)
+    (
+        WirePartial::new(wire, partial.note.clone()).with_missing_grants(grants),
+        cut,
+    )
 }
 
 /// What [`apply_partial_rule`] should treat as evidence only.

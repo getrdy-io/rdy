@@ -7,7 +7,8 @@ Usage: python3 -I scripts/gen-k8s-storageclass-fixtures.py [<repo root>]
 Every case is a small cluster written by hand in this file with `acme` names. No byte came from a real
 cluster. The manifests say `origin = "generated"` because this script builds them
 (tests/fixtures/README.md). `--check` writes nothing and fails when a committed file differs from what the
-script would write, so the files and the script cannot drift.
+script would write, or when the fixture folder holds a file the script did not write (the mock serves every
+`api/*.json` of a case, so a stale file would change a test without a diff in the script).
 """
 
 import json
@@ -19,6 +20,7 @@ CHECK = "--check" in sys.argv[1:]
 ROOT = ARGS[0] if ARGS else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.path.join(ROOT, "tests/fixtures/checks/k8s.storageclass")
 DIFFERENT = []
+WRITTEN = set()
 
 NS = "acme-system"
 DEFAULT = "storageclass.kubernetes.io/is-default-class"
@@ -29,6 +31,7 @@ SUMMARIES = {}
 
 def write(case, name, value, text=False):
     path = os.path.join(BASE, case, name)
+    WRITTEN.add(os.path.normpath(path))
     data = value if text else json.dumps(value, indent=2) + "\n"
     if CHECK:
         try:
@@ -94,7 +97,8 @@ def put(case, file, path, body, code=200, query="", method="GET"):
 
 
 def sc(name, provisioner, default=False, beta=False, binding="WaitForFirstConsumer",
-       expansion=None, reclaim=None, created="2026-01-01T00:00:00Z", annotation=None):
+       expansion=None, reclaim=None, created="2026-01-01T00:00:00Z", annotation=None,
+       parameters=None):
     notes = {}
     if default:
         notes[DEFAULT] = "true"
@@ -112,6 +116,8 @@ def sc(name, provisioner, default=False, beta=False, binding="WaitForFirstConsum
         obj["allowVolumeExpansion"] = expansion
     if reclaim:
         obj["reclaimPolicy"] = reclaim
+    if parameters:
+        obj["parameters"] = parameters
     return obj
 
 
@@ -184,13 +190,13 @@ def claims(case, items, code=200):
     put(case, "claims", path, body, code, "limit=500")
 
 
-def event(claim, reason, n=1):
+def event(claim, reason, n=1, message="synthetic"):
     return {
         "metadata": {"name": f"{claim}.{n:04x}", "namespace": NS},
         "involvedObject": {"kind": "PersistentVolumeClaim", "name": claim, "namespace": NS},
         "reason": reason,
         "type": "Warning" if reason == "ProvisioningFailed" else "Normal",
-        "message": "synthetic",
+        "message": message,
     }
 
 
@@ -220,6 +226,12 @@ ODF = "openshift-storage.rbd.csi.ceph.com"
 ODF_FS = "openshift-storage.cephfs.csi.ceph.com"
 LOCAL = "rancher.io/local-path"
 PD = "pd.csi.storage.gke.io"
+AUTO = "ebs.csi.eks.amazonaws.com"
+# One marker in every value that must never leave the cluster (see the `secret-params` case and its test).
+SENTINEL = "sentinel-7f3a"
+KMS_ARN = f"arn:aws:kms:us-east-1:111122223333:key/{SENTINEL}-kms"
+SECRET_NAME = f"{SENTINEL}-secret"
+SECRET_NS = f"{SENTINEL}-secret-ns"
 
 # ---- EKS -----------------------------------------------------------------------------------------------------
 case("eks-gp2-no-csi", "EKS default gp2 on the in-tree EBS name with no CSI add-on: no node lists the driver")
@@ -233,6 +245,9 @@ classes("eks-ebs-csi", [
     sc("gp3", EBS, default=True, expansion=True, created="2026-02-01T00:00:00Z"),
 ])
 csinodes("eks-ebs-csi", [csinode(n, [EBS]) for n in ("node-a", "node-b", "node-c")])
+
+case("eks-auto-mode", "EKS Auto Mode: the class is on the Auto Mode provisioner and no node lists a driver")
+classes("eks-auto-mode", [sc("auto-ebs-sc", AUTO, default=True)])
 
 case("eks-gp2-with-addon", "EKS gp2 on the in-tree name, served through CSI migration, with the add-on installed")
 classes("eks-gp2-with-addon", [sc("gp2", "kubernetes.io/aws-ebs", default=True)])
@@ -369,10 +384,43 @@ csinodes("namespace-forbidden", [csinode("node-a", [EBS])])
 namespace("namespace-forbidden", code=403)
 claims("namespace-forbidden", [pvc("data-db-0", "Bound", "2026-06-01T10:00:00Z")])
 
+# ---- values that must not leave ------------------------------------------------------------------------------------
+case("secret-params", "A class whose parameters, annotations and events hold a KMS key ARN and secret names")
+LAST_APPLIED = json.dumps({
+    "parameters": {
+        "kmsKeyId": KMS_ARN,
+        "csi.storage.k8s.io/provisioner-secret-name": SECRET_NAME,
+        "csi.storage.k8s.io/provisioner-secret-namespace": SECRET_NS,
+    }
+})
+classes("secret-params", [sc(
+    "gp3", EBS, default=True, expansion=True,
+    parameters={
+        "type": "gp3",
+        "encrypted": "true",
+        "kmsKeyId": KMS_ARN,
+        "csi.storage.k8s.io/provisioner-secret-name": SECRET_NAME,
+        "csi.storage.k8s.io/provisioner-secret-namespace": SECRET_NS,
+    },
+    annotation={"kubectl.kubernetes.io/last-applied-configuration": LAST_APPLIED},
+)])
+csinodes("secret-params", [csinode("node-a", [EBS])])
+namespace("secret-params")
+claims("secret-params", [pvc("data-db-0", "Pending", "2026-06-01T11:40:00Z")])
+events("secret-params", [event(
+    "data-db-0", "ProvisioningFailed",
+    message=f"failed to provision volume with StorageClass \"gp3\": kms key {KMS_ARN} secret {SECRET_NS}/{SECRET_NAME} denied",
+)])
+
 if CHECK:
+    for folder, _, names in os.walk(BASE):
+        for found in names:
+            path = os.path.normpath(os.path.join(folder, found))
+            if path not in WRITTEN:
+                DIFFERENT.append(path + " (the script does not write this file)")
     if DIFFERENT:
         sys.stderr.write("these fixtures differ from what the script writes:\n")
         for path in DIFFERENT:
             sys.stderr.write(f"  {path}\n")
-        sys.stderr.write("Fix: run python3 -I scripts/gen-k8s-storageclass-fixtures.py and commit the result.\n")
+        sys.stderr.write("Fix: delete any file the script does not write, run python3 -I scripts/gen-k8s-storageclass-fixtures.py and commit the result.\n")
         sys.exit(1)

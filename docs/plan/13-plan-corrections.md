@@ -196,17 +196,6 @@ This file is the corrections list.
   rust-architect writes one ADR that picks the upload stack, its verifier and its `deny.toml` entry,
   reviewed by security-reviewer (`reviews/adr-and-00-review-by-security-reviewer.md`, CF-03).
 
-- **`partial.missing_grants` has no wire field and no owner (blocks M1-110).** 02 (engine design review
-  table, row 6, and the 01 edit list) accepts `partial.missing_grants: [string]` as an additive field of
-  01 section 5.2 that the k8s 403 partials need in M1. `rdy_spec::result::Partial` and the result schema
-  do not have it, and no ticket adds it. M1-033 writes the grants into the result `notes` as a stopgap.
-  Proposed owner: M1-110 (k8s.storageclass, "`CSINode` forbidden gives partial"), the earliest ticket
-  that returns a 403 partial. M1-020 is done, so no rdy-spec result ticket is open. M1-110 starts with a
-  small rdy-spec change: the `missing_grants` field on `Partial`, the schema, 01 section 5.2 and the
-  regenerated docs. Then M1-033's `notes` line moves to the field. M1-109 (k8s.access) reports a block
-  with a fix and does not need it. Built in M1-110: the field, the schema, 01 section 5.2 and the notes line
-  moved to the field.
-
 ## CLAUDE.md edits
 
 rust-architect wrote the `CLAUDE.md` halves of the rows above as exact text, C-1 to C-9. The coordinator

@@ -12,7 +12,10 @@
 #                       equals it or ends with a dot and then it (ceph-csi drivers carry a prefix, such as
 #                       the OpenShift Data Foundation one).
 #   match               "exact" or "suffix".
-#   csi                 true for a CSI driver. A provisioner that is not CSI registers nothing on CSINode.
+#   csi                 true for a CSI driver. A provisioner that is not CSI registers nothing on CSINode. An
+#                       entry with csi = false and a name with no "/" is a CSI-style name that rdy cannot
+#                       confirm (EKS Auto Mode): its listed modes are served and any other mode is not
+#                       verified, never refused.
 #   modes               access modes the driver serves, from ReadWriteOnce, ReadOnlyMany, ReadWriteMany,
 #                       ReadWriteOncePod. A shared file system serves ReadWriteOnce and ReadOnlyMany too.
 #   conditional_modes   optional. Modes the driver serves only under `condition` (a class cannot say which).
@@ -57,6 +60,10 @@ to = "cinder.csi.openstack.org"
 from = "kubernetes.io/vsphere-volume"
 to = "csi.vsphere.vmware.com"
 
+[[in_tree]]
+from = "kubernetes.io/portworx-volume"
+to = "pxd.portworx.com"
+
 [[driver]]
 name = "ebs.csi.aws.com"
 match = "exact"
@@ -71,10 +78,13 @@ checked_on = "2026-10-30"
 [[driver]]
 name = "ebs.csi.eks.amazonaws.com"
 match = "exact"
-csi = true
+# EKS Auto Mode runs block storage off the cluster. AWS says it is not the EBS CSI driver, and no source says
+# it registers on CSINode or CSIDriver. So it is not verified as CSI, and a class on it never blocks on
+# driver grounds.
+csi = false
 modes = ["ReadWriteOnce"]
 topology = "zone"
-source = "https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html"
+source = "https://docs.aws.amazon.com/eks/latest/userguide/create-storage-class.html"
 checked_on = "2026-10-30"
 
 [[driver]]
@@ -82,8 +92,10 @@ name = "pd.csi.storage.gke.io"
 match = "exact"
 csi = true
 modes = ["ReadWriteOnce", "ReadOnlyMany"]
+conditional_modes = ["ReadWriteMany"]
+condition = "raw block volumes on Hyperdisk Balanced High Availability"
 topology = "zone"
-source = "https://docs.cloud.google.com/kubernetes-engine/docs/concepts/persistent-volumes"
+source = "https://docs.cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/regional-pd"
 checked_on = "2026-10-30"
 
 [[driver]]
@@ -160,6 +172,28 @@ conditional_modes = ["ReadWriteMany"]
 condition = "raw block volumes"
 topology = "none"
 source = "https://docs.ceph.com/en/squid/rbd/rbd-kubernetes/"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "csi.vsphere.vmware.com"
+match = "exact"
+csi = true
+modes = ["ReadWriteOnce", "ReadOnlyMany"]
+conditional_modes = ["ReadWriteMany"]
+condition = "file volumes on vSAN File Service"
+topology = "none"
+source = "https://docs.vmware.com/en/VMware-vSphere/7.0/com.vmware.vsphere.storage.doc/GUID-AD5AE35E-5209-4775-988C-F86D0E4F0C29.html"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "cinder.csi.openstack.org"
+match = "exact"
+csi = true
+modes = ["ReadWriteOnce"]
+conditional_modes = ["ReadWriteMany"]
+condition = "a volume type with the multiattach property"
+topology = "zone"
+source = "https://github.com/kubernetes/cloud-provider-openstack/blob/master/docs/cinder-csi-plugin/features.md"
 checked_on = "2026-10-30"
 
 [[driver]]

@@ -33,7 +33,7 @@ const ROWS: &[Row] = &[
     Row {
         name: "ebs.csi.eks.amazonaws.com",
         suffix: false,
-        csi: true,
+        csi: false,
         modes: &[ReadWriteOnce],
         conditional: &[],
         condition: None,
@@ -44,8 +44,8 @@ const ROWS: &[Row] = &[
         suffix: false,
         csi: true,
         modes: &[ReadWriteOnce, ReadOnlyMany],
-        conditional: &[],
-        condition: None,
+        conditional: &[ReadWriteMany],
+        condition: Some("raw block volumes on Hyperdisk Balanced High Availability"),
         topology: Topology::Zone,
     },
     Row {
@@ -121,6 +121,24 @@ const ROWS: &[Row] = &[
         topology: Topology::None,
     },
     Row {
+        name: "csi.vsphere.vmware.com",
+        suffix: false,
+        csi: true,
+        modes: &[ReadWriteOnce, ReadOnlyMany],
+        conditional: &[ReadWriteMany],
+        condition: Some("file volumes on vSAN File Service"),
+        topology: Topology::None,
+    },
+    Row {
+        name: "cinder.csi.openstack.org",
+        suffix: false,
+        csi: true,
+        modes: &[ReadWriteOnce],
+        conditional: &[ReadWriteMany],
+        condition: Some("a volume type with the multiattach property"),
+        topology: Topology::Zone,
+    },
+    Row {
         name: "rancher.io/local-path",
         suffix: false,
         csi: false,
@@ -158,7 +176,7 @@ fn every_shipped_driver_says_what_the_table_here_says() {
 }
 
 #[test]
-fn the_in_tree_map_has_the_six_names_of_the_catalog() {
+fn the_in_tree_map_has_the_names_of_the_catalog_and_portworx() {
     let pairs: Vec<(&str, &str)> = shipped().in_tree_pairs().collect();
     assert_eq!(
         pairs,
@@ -169,6 +187,7 @@ fn the_in_tree_map_has_the_six_names_of_the_catalog() {
             ("kubernetes.io/azure-file", "file.csi.azure.com"),
             ("kubernetes.io/cinder", "cinder.csi.openstack.org"),
             ("kubernetes.io/vsphere-volume", "csi.vsphere.vmware.com"),
+            ("kubernetes.io/portworx-volume", "pxd.portworx.com"),
         ]
     );
 }
@@ -225,7 +244,11 @@ fn classify_sorts_a_provisioner_into_one_kind() {
     assert_eq!(normalised.name, "ebs.csi.aws.com");
     assert!(matches!(migrated, Kind::Csi(driver) if driver.name() == "ebs.csi.aws.com"));
     // A migrated name with no entry of its own is still a CSI driver.
-    assert_eq!(kind_of(catalog, "kubernetes.io/vsphere-volume"), "migrated");
+    assert_eq!(
+        kind_of(catalog, "kubernetes.io/portworx-volume"),
+        "migrated"
+    );
+    assert!(matches!(kind("kubernetes.io/vsphere-volume"), Kind::Csi(_)));
     assert!(matches!(kind("csi.acme.example"), Kind::Unknown));
     assert!(matches!(
         kind("openshift-storage.rbd.csi.ceph.com"),

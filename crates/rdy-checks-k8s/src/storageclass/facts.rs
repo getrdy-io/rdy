@@ -37,6 +37,34 @@ pub(super) fn token(text: &str) -> String {
     out
 }
 
+/// A server text for a command in a fix: the text itself when it is an untruncated DNS-1123 subdomain (what a
+/// Kubernetes object name is), else `placeholder`. A name from a server that does not follow the naming rules,
+/// such as `--server` or a name that [`token`] would cut, never becomes a flag or a command that names an
+/// object that does not exist.
+pub(super) fn command_arg(text: &str, placeholder: &str) -> String {
+    if is_object_name(text) {
+        text.to_owned()
+    } else {
+        placeholder.to_owned()
+    }
+}
+
+/// True for a DNS-1123 subdomain that [`token`] shows whole: dot-separated labels of lowercase letters, digits
+/// and `-`, each starting and ending with a letter or digit, at most 64 characters in all.
+fn is_object_name(text: &str) -> bool {
+    if text.is_empty() || text.len() > SHOWN {
+        return false;
+    }
+    text.split('.').all(|label| {
+        let bytes = label.as_bytes();
+        let edge = |b: &u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+        !bytes.is_empty()
+            && bytes.first().is_some_and(edge)
+            && bytes.last().is_some_and(edge)
+            && bytes.iter().all(|b| edge(b) || *b == b'-')
+    })
+}
+
 /// How a read ended. A refusal for this identity and a missing object are answers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Read<T> {

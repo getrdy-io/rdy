@@ -1,0 +1,31 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system/events",
+    "query": "fieldSelector=involvedObject.kind=PersistentVolumeClaim&limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "EventList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "data-db-0.0001",
+          "namespace": "acme-system"
+        },
+        "involvedObject": {
+          "kind": "PersistentVolumeClaim",
+          "name": "data-db-0",
+          "namespace": "acme-system"
+        },
+        "reason": "ProvisioningFailed",
+        "type": "Warning",
+        "message": "failed to provision volume with StorageClass \"gp3\": kms key arn:aws:kms:us-east-1:111122223333:key/sentinel-7f3a-kms secret sentinel-7f3a-secret-ns/sentinel-7f3a-secret denied"
+      }
+    ]
+  }
+}

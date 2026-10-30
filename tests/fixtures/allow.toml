@@ -48,6 +48,11 @@ reason = "A CSI driver name that a StorageClass carries as its provisioner, not 
 
 [[allow]]
 rule = "host"
+value = "ebs.csi.eks.amazonaws.com"
+reason = "The EKS Auto Mode provisioner name that a StorageClass carries, not a host a test contacts (k8s.storageclass)"
+
+[[allow]]
+rule = "host"
 value = "disk.csi.azure.com"
 reason = "A CSI driver name that a StorageClass carries as its provisioner, not a host a test contacts (k8s.storageclass)"
 
@@ -58,5 +63,10 @@ reason = "The prefix of the local-path provisioner name (rancher.io/local-path),
 
 [[allow]]
 rule = "host"
-value = "ceph.com"
-reason = "The suffix of the ceph-csi driver names (openshift-storage.rbd.csi.ceph.com), not a host a test contacts (k8s.storageclass)"
+value = "rbd.csi.ceph.com"
+reason = "The ceph-csi rbd driver name (openshift-storage.rbd.csi.ceph.com), not a host a test contacts (k8s.storageclass)"
+
+[[allow]]
+rule = "host"
+value = "cephfs.csi.ceph.com"
+reason = "The ceph-csi CephFS driver name (openshift-storage.cephfs.csi.ceph.com), not a host a test contacts (k8s.storageclass)"

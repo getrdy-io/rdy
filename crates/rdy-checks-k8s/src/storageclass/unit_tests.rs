@@ -9,7 +9,9 @@ use rdy_spec::check::AccessMode::{ReadOnlyMany, ReadWriteMany, ReadWriteOnce, Re
 use rdy_spec::check::{AccessMode, K8sStorageClass};
 use serde_json::{Value, json};
 
-use super::facts::{Binding, Class, Page, Read, Reclaim, Waiting, pending_claims, token};
+use super::facts::{
+    Binding, Class, Page, Read, Reclaim, Waiting, command_arg, pending_claims, token,
+};
 use super::judge::{
     Chosen, Classes, Evidence, Grant, How, Nodes, Object, Support, Unread, Verdict, judge_driver,
     judge_modes, judge_settings, judge_waiting, mode_support, select,
@@ -70,6 +72,43 @@ fn a_server_text_is_made_safe_before_it_reaches_a_sentence_or_a_command() {
     let shown = token(&long);
     assert_eq!(shown.len(), 67, "64 characters and an ellipsis");
     assert!(shown.ends_with("..."));
+}
+
+#[test]
+fn only_an_untruncated_object_name_goes_into_a_command() {
+    let long = "a".repeat(100);
+    let edge = "a".repeat(64);
+    for good in [
+        "gp3",
+        "managed-csi",
+        "acme.fast-ssd",
+        "a",
+        "0",
+        edge.as_str(),
+    ] {
+        assert_eq!(command_arg(good, "<class>"), good);
+    }
+    for bad in [
+        "--server",
+        "--insecure-skip-tls-verify",
+        "-n",
+        "gp3-",
+        "GP3",
+        "a_b",
+        "a b",
+        "a..b",
+        ".a",
+        "a.",
+        "a/b",
+        "",
+        "x`;rm",
+        long.as_str(),
+        "a\u{e9}",
+    ] {
+        assert_eq!(command_arg(bad, "<class>"), "<class>", "{bad:?}");
+    }
+    // 64 characters is what `token` shows whole; one more is cut, so it never names a real object.
+    assert_eq!(command_arg(&"a".repeat(65), "<claim>"), "<claim>");
 }
 
 #[test]
@@ -245,6 +284,161 @@ fn nothing_chosen_when_the_class_list_could_not_be_read() {
         );
         clean(&finding);
     }
+}
+
+#[test]
+fn a_hostile_class_name_never_becomes_a_flag_or_a_missing_object_in_a_command() {
+    let long = "c".repeat(100);
+    for name in ["--server", "--insecure-skip-tls-verify", long.as_str()] {
+        // Two defaults: the fix unmarks the one that is not kept.
+        let classes = page(
+            vec![
+                class("zz-keep", "csi.acme.example", true, "2026-03-01T00:00:00Z"),
+                class(name, "csi.acme.example", true, "2026-01-01T00:00:00Z"),
+            ],
+            false,
+        );
+        let (_, finding) = selected(&classes, json!({}), Some((1, 30)));
+        let fix = finding.fix.clone().expect("a fix");
+        assert!(
+            fix.contains("kubectl patch storageclass <class> -p"),
+            "{fix}"
+        );
+        assert!(!fix.contains("--server"), "{fix}");
+        assert!(!fix.contains("--insecure"), "{fix}");
+        assert!(!fix.contains(&"c".repeat(65)), "{fix}");
+        clean(&finding);
+
+        // No default: the fix marks a class, and the class is a hostile one.
+        let one = page(
+            vec![class(
+                name,
+                "csi.acme.example",
+                false,
+                "2026-01-01T00:00:00Z",
+            )],
+            false,
+        );
+        let (_, finding) = selected(&one, json!({}), Some((1, 30)));
+        let fix = finding.fix.clone().expect("a fix");
+        assert!(
+            fix.contains("kubectl patch storageclass <class> -p"),
+            "{fix}"
+        );
+        assert!(!fix.contains("--server"), "{fix}");
+    }
+    // A real name still goes through.
+    let one = page(
+        vec![class(
+            "managed-csi",
+            "csi.acme.example",
+            false,
+            "2026-01-01T00:00:00Z",
+        )],
+        false,
+    );
+    let (_, finding) = selected(&one, json!({}), Some((1, 30)));
+    assert!(
+        finding
+            .fix
+            .expect("a fix")
+            .contains("kubectl patch storageclass managed-csi -p")
+    );
+}
+
+#[test]
+fn a_hostile_name_in_the_other_fixes_is_a_placeholder_too() {
+    let long = "d".repeat(100);
+    for name in ["--server", long.as_str()] {
+        let texts = [
+            fix::rebind(name, "WaitForFirstConsumer"),
+            fix::allow_expansion(name),
+            fix::reclaim(name, "Retain"),
+            fix::failing_claims(name, name),
+            fix::unmark_defaults(&[name.to_owned()]),
+            fix::mark_default(name),
+        ];
+        for text in texts {
+            assert!(
+                text.contains("<class>") || text.contains("<claim>"),
+                "{text}"
+            );
+            assert!(
+                !text.contains("--server") && !text.contains(&"d".repeat(65)),
+                "{text}"
+            );
+            rdy_engine::fixtext::check(&text).expect("an allowed text");
+        }
+    }
+    let claim = fix::failing_claims("--server", "--insecure-skip-tls-verify");
+    assert!(
+        claim.contains("`kubectl describe pvc <claim> -n <namespace>`"),
+        "{claim}"
+    );
+    let grant = Grant::namespaced("list", "events", "--server");
+    assert!(
+        grant.can_i().contains("-n <namespace>"),
+        "{}",
+        grant.can_i()
+    );
+    assert!(!grant.can_i().contains("--server"));
+    // The wire text still names what was meant, made safe.
+    assert_eq!(grant.text(), "list events in --server");
+}
+
+#[test]
+fn a_single_default_on_a_cut_list_is_not_a_clean_pass() {
+    let classes = page(
+        vec![class(
+            "gp3",
+            "csi.acme.example",
+            true,
+            "2026-01-01T00:00:00Z",
+        )],
+        true,
+    );
+    let (chosen, finding) = selected(&classes, json!({}), Some((1, 30)));
+    assert_eq!(chosen.expect("chosen").class.name, "gp3");
+    // A second default may sit on a page that was not read.
+    let partial = finding.partial.expect("a partial");
+    assert!(
+        partial
+            .note
+            .contains("the storage classes after the first page"),
+        "{partial:?}"
+    );
+    assert_eq!(finding.observed["classes_complete"], json!(false));
+
+    // On a whole list the same class leaves no partial.
+    let whole = page(
+        vec![class(
+            "gp3",
+            "csi.acme.example",
+            true,
+            "2026-01-01T00:00:00Z",
+        )],
+        false,
+    );
+    let (_, finding) = selected(&whole, json!({}), Some((1, 30)));
+    assert!(finding.partial.is_none());
+}
+
+#[test]
+fn a_name_fetch_without_a_name_in_the_spec_is_not_verified_and_never_a_pass() {
+    // The check never builds this pair; if it did, the answer is a warning, not a silent pass.
+    let (chosen, finding) = selected(&Classes::ByName(Read::Missing), json!({}), Some((1, 30)));
+    assert!(chosen.is_none());
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    assert!(
+        finding.message.starts_with("Not verified:"),
+        "{}",
+        finding.message
+    );
+    let partial = finding.partial.expect("a partial");
+    assert_eq!(
+        partial.missing_grants,
+        ["list storageclasses (storage.k8s.io)"]
+    );
 }
 
 #[test]
@@ -437,6 +631,18 @@ fn a_block_on_a_missing_driver_names_the_fix_for_that_driver() {
             .contains("eksctl create addon --cluster <cluster> --name aws-ebs-csi-driver")
     );
     assert!(fix("efs.csi.aws.com").contains("aws-efs-csi-driver"));
+    let ebs = fix("ebs.csi.aws.com");
+    assert!(
+        ebs.contains(
+            "--pod-identity-associations serviceAccount=ebs-csi-controller-sa,roleArn=<role-arn>"
+        ),
+        "{ebs}"
+    );
+    assert!(ebs.contains("AmazonEBSCSIDriverPolicyV2"), "{ebs}");
+    let auto = fix::install_driver("ebs.csi.eks.amazonaws.com", "auto-ebs-sc");
+    assert!(auto.contains("no add-on to install"), "{auto}");
+    assert!(!auto.contains("eksctl create addon"), "{auto}");
+    assert!(fix("pd.csi.storage.gke.io").contains("GKE Autopilot clusters always have it"));
     assert!(
         fix("pd.csi.storage.gke.io").contains("--update-addons=GcePersistentDiskCsiDriver=ENABLED")
     );
@@ -489,11 +695,15 @@ fn the_access_modes_of_every_driver_in_the_table() {
             "kubernetes.io/aws-ebs",
             ["yes", "unverified", "unverified", "unverified"],
         ),
+        // EKS Auto Mode is not confirmed as CSI: what it lists is served, the rest is not verified.
         (
             "ebs.csi.eks.amazonaws.com",
-            ["yes", "unverified", "no", "unverified"],
+            ["yes", "unverified", "unverified", "unverified"],
         ),
-        ("pd.csi.storage.gke.io", ["yes", "yes", "no", "unverified"]),
+        (
+            "pd.csi.storage.gke.io",
+            ["yes", "yes", "unverified", "unverified"],
+        ),
         (
             "filestore.csi.storage.gke.io",
             ["yes", "yes", "yes", "unverified"],
@@ -518,8 +728,20 @@ fn the_access_modes_of_every_driver_in_the_table() {
             ["yes", "yes", "unverified", "unverified"],
         ),
         ("rancher.io/local-path", ["yes", "no", "no", "no"]),
+        (
+            "csi.vsphere.vmware.com",
+            ["yes", "yes", "unverified", "unverified"],
+        ),
+        (
+            "kubernetes.io/vsphere-volume",
+            ["yes", "yes", "unverified", "unverified"],
+        ),
+        (
+            "cinder.csi.openstack.org",
+            ["yes", "unverified", "unverified", "unverified"],
+        ),
         // Not in the table.
-        ("kubernetes.io/vsphere-volume", ["unverified"; 4]),
+        ("kubernetes.io/portworx-volume", ["unverified"; 4]),
         ("kubernetes.io/no-provisioner", ["unverified"; 4]),
         ("csi.acme.example", ["unverified"; 4]),
     ];
@@ -536,32 +758,40 @@ fn the_access_modes_of_every_driver_in_the_table() {
 
 #[test]
 fn a_mixed_request_blocks_on_any_mode_that_is_refused_and_lists_each_in_observed() {
-    let evidence = Evidence {
-        nodes: Nodes::Found(registered(1, 1)),
-        object: None,
-    };
     let finding = judged(
-        "pd.csi.storage.gke.io",
-        Some(evidence),
+        "rancher.io/local-path",
+        None,
         json!({"access_modes": ["ReadWriteOnce", "ReadWriteMany", "ReadWriteOncePod"], "binding": "WaitForFirstConsumer"}),
     );
     assert_eq!(finding.level, Level::Fail);
     assert_eq!(
         finding.observed["access_modes"],
-        json!({"ReadWriteOnce": "served", "ReadWriteMany": "not served", "ReadWriteOncePod": "not verified"})
+        json!({"ReadWriteOnce": "served", "ReadWriteMany": "not served", "ReadWriteOncePod": "not served"})
     );
     assert_eq!(
         finding.message,
-        "Class gp3 cannot serve ReadWriteMany: pd.csi.storage.gke.io serves ReadWriteOnce, ReadOnlyMany"
+        "Class gp3 cannot serve ReadWriteMany: rancher.io/local-path serves ReadWriteOnce"
     );
-    // The not verified mode is a note, not the message.
+    // The second refused mode is a note, not the message.
     assert!(
         finding
             .notes
             .iter()
-            .any(|note| note.contains("ReadWriteOncePod on class gp3")),
+            .any(|note| note.contains("Class gp3 cannot serve ReadWriteOncePod")),
         "{:?}",
         finding.notes
+    );
+
+    // A mode that is only not verified never fails: EKS Auto Mode is not confirmed as CSI.
+    let auto = judged(
+        "ebs.csi.eks.amazonaws.com",
+        None,
+        json!({"access_modes": ["ReadWriteOnce", "ReadWriteMany", "ReadWriteOncePod"], "binding": "WaitForFirstConsumer"}),
+    );
+    assert_eq!(auto.level, Level::Warn, "{auto:?}");
+    assert_eq!(
+        auto.observed["access_modes"],
+        json!({"ReadWriteOnce": "served", "ReadWriteMany": "not verified", "ReadWriteOncePod": "not verified"})
     );
 }
 
@@ -676,7 +906,7 @@ fn the_finding_orders_fixes_by_severity_drops_duplicates_and_keeps_the_rest_as_n
         object: None,
     };
     // Immediate binding on a zonal driver (a warn), a missing mode (a fail) and an expansion warn.
-    let mut class = chosen("pd.csi.storage.gke.io");
+    let mut class = chosen("rancher.io/local-path");
     class.class.binding = Binding::Immediate;
     let params = params(json!({"access_modes": ["ReadWriteMany"], "expansion": true}));
     let (normalised, kind) = catalog().classify(&class.class.provisioner);
@@ -732,6 +962,7 @@ fn every_fix_text_passes_the_allow_list_and_is_short() {
         fix::by_hand().to_owned(),
         fix::install_driver("ebs.csi.aws.com", "gp2"),
         fix::install_driver("efs.csi.aws.com", "efs"),
+        fix::install_driver("ebs.csi.eks.amazonaws.com", "auto-ebs-sc"),
         fix::install_driver("pd.csi.storage.gke.io", "standard-rwo"),
         fix::install_driver("disk.csi.azure.com", "managed-csi"),
         fix::install_driver("file.csi.azure.com", "azurefile-csi"),

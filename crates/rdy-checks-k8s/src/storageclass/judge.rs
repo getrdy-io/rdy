@@ -18,7 +18,7 @@ use rdy_engine::check::{Finding, Level, Partial};
 use rdy_spec::check::{AccessMode, K8sStorageClass, ReclaimPolicy, VolumeBinding};
 use serde_json::{Map, Value, json};
 
-use super::facts::{Binding, Class, Page, Reclaim, Registered, Waiting, token};
+use super::facts::{Binding, Class, Page, Read, Reclaim, Registered, Waiting, command_arg, token};
 use super::fix;
 use crate::provisioners::{Kind, Normalised, Topology};
 
@@ -120,7 +120,7 @@ impl Grant {
             verb,
             resource,
             group: "",
-            namespace: Some(token(namespace)),
+            namespace: Some(namespace.to_owned()),
         }
     }
 
@@ -131,7 +131,7 @@ impl Grant {
             text.push_str(&format!(" ({})", self.group));
         }
         if let Some(namespace) = &self.namespace {
-            text.push_str(&format!(" in {namespace}"));
+            text.push_str(&format!(" in {}", token(namespace)));
         }
         text
     }
@@ -143,10 +143,9 @@ impl Grant {
         } else {
             format!(".{}", self.group)
         };
-        let namespace = self
-            .namespace
-            .as_ref()
-            .map_or_else(String::new, |ns| format!(" -n {ns}"));
+        let namespace = self.namespace.as_ref().map_or_else(String::new, |ns| {
+            format!(" -n {}", command_arg(ns, "<namespace>"))
+        });
         format!(
             "`kubectl auth can-i {} {}{group}{namespace}`",
             self.verb, self.resource
@@ -366,8 +365,12 @@ pub(super) fn select(
             None
         }
         (Classes::ByName(read), Some(name)) => by_name(verdict, read, name),
-        // The list failed and the spec names no class cannot happen with `ByName`; treat it as unreadable.
-        (Classes::ByName(_), None) => None,
+        // `ByName` follows a refused list and needs a class name in the spec, so this pair is never built.
+        // If it were, say "not verified" with the grant for the list, and never pass.
+        (Classes::ByName(_), None) => {
+            list_unreadable(verdict, &Read::Forbidden);
+            None
+        }
         (Classes::Listed(page), Some(name)) => listed_named(verdict, page, name),
         (Classes::Listed(page), None) => listed_default(verdict, page, server),
     }
@@ -526,7 +529,7 @@ fn listed_default(
                         "No default storage class. The cluster has: {}",
                         list_names(&have)
                     ),
-                    fix::mark_default(&token(&name)),
+                    fix::mark_default(&name),
                 ),
                 None => (
                     "No default storage class. The cluster has no storage class".to_owned(),
@@ -536,13 +539,19 @@ fn listed_default(
             verdict.fail(message, Some(fix_text));
             None
         }
-        [only] => Some(Chosen {
-            class: (*only).clone(),
-            how: How::Default,
-        }),
+        [only] => {
+            if page.more {
+                // A second default may sit on a page that was not read.
+                verdict.unread("the storage classes after the first page", None);
+            }
+            Some(Chosen {
+                class: (*only).clone(),
+                how: How::Default,
+            })
+        }
         [first, rest @ ..] => {
             let all: Vec<String> = defaults.iter().map(|c| c.name.clone()).collect();
-            let others: Vec<String> = rest.iter().map(|c| token(&c.name)).collect();
+            let others: Vec<String> = rest.iter().map(|c| c.name.clone()).collect();
             let list = list_names(&all);
             let fix_text = fix::unmark_defaults(&others);
             match server {
@@ -798,6 +807,12 @@ pub(super) fn mode_support(kind: &Kind<'_>, provisioner: &str, mode: AccessMode)
                 ));
             }
             let serves = |m: &AccessMode| driver.modes().contains(m);
+            if driver.is_unverified_csi() {
+                return Support::Unverified(format!(
+                    "rdy cannot confirm {name} as a CSI driver, so it cannot tell whether it serves {}",
+                    mode_name(mode)
+                ));
+            }
             match mode {
                 AccessMode::ReadWriteOncePod if !driver.is_csi() => Support::No(format!(
                     "{name} is not a CSI driver, and Kubernetes serves ReadWriteOncePod for CSI volumes only"
@@ -866,6 +881,7 @@ pub(super) fn judge_settings(
     kind: &Kind<'_>,
 ) {
     let name = token(&class.name);
+    let raw = class.name.as_str();
     verdict.observe("binding_mode", json!(class.binding.word()));
     verdict.observe("allow_volume_expansion", json!(class.expansion));
     verdict.observe("reclaim_policy", json!(class.reclaim.word()));
@@ -882,7 +898,7 @@ pub(super) fn judge_settings(
                 class.binding.word(),
                 want.word()
             ),
-            Some(fix::rebind(&name, want.word())),
+            Some(fix::rebind(raw, want.word())),
         ),
         // The spec says nothing about binding: warn about the one pairing that goes wrong.
         None if class.binding == Binding::Immediate => {
@@ -899,7 +915,7 @@ pub(super) fn judge_settings(
                     format!(
                         "Class {name} binds with Immediate, and its volumes live in {place}. If the nodes span more than one zone, a pod can land where its volume cannot attach"
                     ),
-                    Some(fix::rebind(&name, "WaitForFirstConsumer")),
+                    Some(fix::rebind(raw, "WaitForFirstConsumer")),
                 );
             }
         }
@@ -909,7 +925,7 @@ pub(super) fn judge_settings(
     if params.expansion == Some(true) && !class.expansion {
         verdict.warn(
             format!("Class {name} does not allow volume expansion"),
-            Some(fix::allow_expansion(&name)),
+            Some(fix::allow_expansion(raw)),
         );
     }
 
@@ -931,7 +947,7 @@ pub(super) fn judge_settings(
                 class.reclaim.word(),
                 want.word()
             ),
-            Some(fix::reclaim(&name, want.word())),
+            Some(fix::reclaim(raw, want.word())),
         );
     }
 }
@@ -971,7 +987,7 @@ pub(super) fn judge_waiting(verdict: &mut Verdict, namespace: &str, waiting: &[W
             if failed.len() == 1 { "has" } else { "have" },
             list_names(&names),
         ),
-        Some(fix::failing_claims(&token(namespace), &token(&first.name))),
+        Some(fix::failing_claims(namespace, &first.name)),
     );
 }
 

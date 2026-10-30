@@ -89,6 +89,13 @@ impl Driver {
         self.csi
     }
 
+    /// True for an entry with `csi = false` and a name that has no `/`: a CSI-style name that rdy cannot
+    /// confirm on `CSINode` (EKS Auto Mode). Its listed modes are served, but a mode it does not list is
+    /// "not verified", never "refused", because rdy does not know the driver.
+    pub(crate) fn is_unverified_csi(&self) -> bool {
+        !self.csi && !self.name.contains('/')
+    }
+
     /// Where a volume of this driver lives.
     pub(crate) fn topology(&self) -> Topology {
         self.topology
