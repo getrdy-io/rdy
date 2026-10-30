@@ -146,10 +146,11 @@ token afterwards. `11-backlog.md` treats it as that hand step before the go, out
 
 ### 5. Trademark search
 
-Still to run: the USPTO export for RDY, READY and REDY, then an intent-to-use filing in classes 9 and 42,
-and the Wisconsin LLC name check. The winget id `RdyLabs.Rdy` and any copy naming "Rdy Labs LLC" wait for
-it (rv06-code). Taken: documents say "Rdy" and "entity pending", and nothing is filed. Filing may cost fees
-and counsel time.
+Still to run: the USPTO export for RDY, READY and REDY, then an intent-to-use filing in classes 9 and 42.
+The legal entity that owns the code, the copyright and the marks is Apostolic Path LLC (founder decision
+2026-10-30). It replaces "Rdy Labs LLC (pending)", so the old Wisconsin name check for that LLC no longer
+applies. The winget publisher id (earlier drafts said `RdyLabs.Rdy`) waits on the founder, who picks it (rv06-code).
+Taken: nothing is filed. Filing may cost fees and counsel time.
 
 ### 6. macOS notarization and Windows signing (M3)
 
