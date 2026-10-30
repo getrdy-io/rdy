@@ -127,7 +127,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code | backlog corrected 2026-10-29 (correction-09): a result with no fix of its own shows the check's `CheckMeta.remediation`, and `cargo xtask checks` reads the same family list as `rdy run` | backlog corrected 2026-10-29 (correction-11): depends on M1-037, because the Windows output-folder harden step fails open until then (PR #71 security review, finding 3) | backlog corrected 2026-10-29 (correction-13): the run report records `identity` from the privilege snapshot; depends on M1-042 too (PR #84 review); backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers declared secret-named env values before the first tracing event and the first check (PR #96 reviews); backlog corrected 2026-10-30 (correction-20): removes `run` from the not-wired sentence in the result reference intro, if present (PR #106 review); backlog corrected 2026-10-30 (correction-27): writer `TooLarge` and I/O errors map to `report_write` (PR #139 review)
 
-- M1-058 | todo | | Ctrl-C in M1: abort, remove the empty report folder, exit 70
+- M1-058 | todo | | Ctrl-C in M1: abort, remove the empty report folder, exit 70 | backlog corrected 2026-10-30 (correction-33): depends on M1-176 (PR #15 review)
 
 - M1-059 | todo | | --no-network and --jobs flags
 
@@ -156,7 +156,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-071 | [#126](https://github.com/getrdy-io/rdy/pull/126) | 2026-10-30 | Built as `rdy_checks_host::CpuCheck` (Linux). Deferrals: (1) flags through `std::is_x86_feature_detected!` and `native/cpu_flags.json`: the closed `NativeCall` list has no CPU variant and adding one touches the engine, the threat model table and the files M1-068 changes, so `/proc/cpuinfo` is the only flag source; filed as backlog correction-23: M1-071 is retitled to drop "flags through std macros" and the CPU feature variant goes to M2-004. (2) Rosetta detection moves to M2-007 and the macOS and Windows counts to M2-005. (3) Physical cores come from `cpuinfo` lines, not the `topology` files (one action-log entry per file per CPU is too noisy). (4) No `REQUIRED` row in `fixture_lint.rs` for `host.cpu/pass`: M1-068 edits that list at the same time and M1-075 owns the completeness rule. (5) `host.cpu` uses the shared `soft` and `short` in `crate::text`; `host.os` keeps its own `short`, whose wording differs.
 
-- M1-072 | todo | | host.ports (Linux /proc/net TCP and UDP, lazy owner lookup, ephemeral overlap) | backlog corrected 2026-10-29 (correction-14): depends on M1-169 (facade `read_link`) too and runs in week 19, not week 14 (PR #88 review)
+- M1-072 | todo | | host.ports (Linux /proc/net TCP and UDP, lazy owner lookup, ephemeral overlap) | backlog corrected 2026-10-29 (correction-14): depends on M1-169 (facade `read_link`) too and runs in week 19, not week 14 (PR #88 review); backlog corrected 2026-10-30 (correction-33): process name from `comm`, early stop of the fd walk (PR #153 reviews)
 
 - M1-073 | [#112](https://github.com/getrdy-io/rdy/pull/112) | 2026-10-30 | Built as `rdy_checks_host::OsCheck`, registered in `HostFamily` through `CheckParams::HostOs` (`host.os` leaves `stub_ids`). Cases are the twelve machines in `tests/fixtures/checks/host.os/`, loaded with `Fixture::load` (M1-049). Linux only: macOS and Windows report skipped, not yet on this OS (M2-005 and M2-008 add the rest). Review round 1 fixes: the FIPS fix text follows `ID` and major version (`fips-mode-setup` on EL 8 and 9 and Amazon Linux 2023, reinstall with `fips=1` on EL 10 and later, `dracut-fips` + `dracut -f` + `grubby` on Amazon Linux 2, `pro disable fips-updates` on Ubuntu, the vendor's procedure elsewhere); `ol` maps to `rhel` by name; a dotted spec version that is a prefix of the host version (`3.19` on `3.19.1`) stays a miss and the check says so in a note; WSL is also seen from the uname release; arch list sorted and deduplicated; both os-release paths named on failure. Deferred: a `bare_metal` key (container or WSL is evidence and a note only; M2-111, 03 reworded, correction-21). A missing `VERSION_ID` against a versioned entry, and an unreadable `os-release`, `uname` or FIPS file, give warn. `fips-mode-setup` and `pro` are in `crates/rdy-engine/src/fixtext/commands.txt` (`dracut` and `grubby` were already there). `windows_min_build` is not read on Linux (M2-008)
 
@@ -172,9 +172,9 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-079 | todo | | HTML print override, labels and legend | backlog corrected 2026-10-30 (correction-31): verdict box rule in plain words and "No blocks" note (PR #149 review)
 
-- M1-080 | todo | | HTML fix source label and action log table | backlog corrected 2026-10-30 (correction-31): asserts planted action canaries render redacted (PR #149 review)
+- M1-080 | todo | | HTML fix source label and action log table | backlog corrected 2026-10-30 (correction-31): asserts planted action canaries render redacted (PR #149 review); backlog corrected 2026-10-30 (correction-34): owns the 5 MiB page cap after M1-078, 1.5 h (PR #19 review)
 
-- M1-081 | todo | | HTML Found and Needed rendering and the footer link (extends HTML print override) | backlog corrected 2026-10-30 (correction-31): asserts planted `observed` canaries render redacted (PR #149 review)
+- M1-081 | todo | | HTML Found and Needed rendering and the footer link (extends HTML print override) | backlog corrected 2026-10-30 (correction-31): asserts planted `observed` canaries render redacted (PR #149 review); backlog corrected 2026-10-30 (correction-34): print banner `position: fixed`, page break before the action log, `required by` on an unrun required check, 2 h (PR #21 and PR #22 reviews)
 
 - M1-082 | todo | | HTML structure test: headings, landmarks, tables and links
 
@@ -186,9 +186,9 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-086 | todo | | Human renderer for run: header, bucket-sorted checks with fix lines, summary, report block and verdict | backlog corrected 2026-10-29 (correction-16): depends on M1-060 and M1-061; stderr half of M1-061 (PR #96 review); backlog corrected 2026-10-30 (correction-27): writes through `anstream` with `Always`/`Never` from `use_color`; styles its run-time text; 4.5 h (PR #140 review); backlog corrected 2026-10-30 (correction-29): env harness calls `rdy_cli::run`; `host-min` `report.json` from `--json` stdout and `terminal.txt`; depends on M1-075; 5 h (PR #145 review)
 
-- M1-087 | todo | | Exit-code golden suite for 0, 1, 2, 64 and 70
+- M1-087 | todo | | Exit-code golden suite for 0, 1, 2, 64 and 70 | backlog corrected 2026-10-30 (correction-34): a 65-host spec run with `rdy run` exits 64 (PR #17 review)
 
-- M1-088 | todo | | --json stdout hygiene on every exit path and the static TTY line
+- M1-088 | todo | | --json stdout hygiene on every exit path and the static TTY line | backlog corrected 2026-10-30 (correction-33): depends on M1-176 (PR #154 reviews)
 
 - M1-089 | [#62](https://github.com/getrdy-io/rdy/pull/62) | 2026-10-29 | ADR 0026 (Accepted after the cli-ux review on PR #62). The family list lives in `xtask::checks::registry` until M1-057 moves it into `rdy_cli` (correction-09). `HostFamily` is not registered in the CLI (M1-067 rule stands). `xtask checks` lists the seven host stubs, so M1-116 must skip ids in `HostFamily::stub_ids()` (correction-09). The report does not fall back to `meta.remediation` yet: correction-09 adds it to M1-057. `docs-lint` runs the same validation, but neither command is in `ci.yml` yet; a unit test runs it in `cargo test`.
 
@@ -200,7 +200,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-093 | [#143](https://github.com/getrdy-io/rdy/pull/143) | 2026-10-30 | Built: `Probe::http(HttpProbe) -> HttpOutcome` in `rdy_engine::probe::net` (`HttpProbe { target, method, route, roots }` with a `Target` URL, not a `String`; `HttpMethod::{Head, Get}`). It takes the policy, the attempts and the proxy `CONNECT` of `tcp` through the crate-private `dial`, wraps `https` in the strict client config (`tls/strict.rs`: `WebPkiServerVerifier` on `NativeCall::SystemRoots`, or on `webpki-roots` only for `Roots::Bundled`, ALPN `http/1.1`, no `dangerous()`; the recording verifier is still private to `record.rs`) and runs hyper `client::conn::http1` over a safe `Io` adapter. No redirect is followed (the `Location` host only comes back); the body is counted and dropped at 64 KiB; six headers are kept (`REPORTED_HEADERS`); one `http` entry per call with the URL minus its query. New `NetFailure` variants `TlsUntrusted { failure: TrustFailure }`, `NoTrustRoots { reason: NoRoots }` and `HttpFailed`; `TrustFailure` and `NoRoots` moved to `probe/trust.rs` (same re-export path). `NetFailure::NotConnected` carries a typed `outcome: AttemptOutcome` so a check tells `refused` from `blackhole` without comparing phrases. `ProbeHub::pin_clock` and `unpin_clock` (feature `testing`) set the `time_provider` of both the recording and the strict config. `Probe::trust_store()` returns `TrustStore { missing, sources, roots }` (path of each bundle or directory, or the OS store; SHA-256 of each root) and writes one `native` entry per call (`api: system_roots`, denied and logged after the check ended); each `StoreSource` has `origin: StoreOrigin::{Standard, Env(var)}`; `NativeValue::SystemRoots` now holds `SystemRoots { certs, sources }` and the fixture `value` may be an object with `sources`. Loopback `Reply::{Body, Chunked, Raw}`. hyper is a new direct dependency of `rdy-engine` (`client`, `http1`; `deny.toml` wrapper; approved by security-reviewer on PR #143 and recorded in 05 with the eight crates it adds to the `rdy` tree). Deferred: a plain `http://` target through the proxy is refused with `RULE_HTTP_PLAIN_VIA_PROXY` until M1-097 writes the absolute form; HTTP/2 is not spoken; the Windows and macOS legs were checked with clippy on `--lib` for both targets (ring C step stubbed), not run. Fix round 1 (PR #143 reviews): a connection error after the head keeps the status (`body_cut`), `Location` host parsed from `scheme://authority` only, strict config and request built before the dial, the logged URL omits a default port and `addr` is set once connected, a complete 64 KiB body is not cut, `HttpProbe` Debug hides the query, loopback `Reply::{Abrupt, Stall}`. Carries: M1-096 maps `refused` and `blackhole` from `NotConnected.outcome` (`AttemptOutcome::{Refused, TimedOut}`); M1-099 pins the clock with `hub.pin_clock`; M1-100 reads `Probe::trust_store` and shows each source by its `origin` (correction-28: a variable's path shows the variable name, `~` for home, no control characters); M1-107 still has to prove kube-client's `rustls-platform-verifier` and hyper-rustls's `rustls-native-certs` are not reached. Backlog corrected 2026-10-29 (correction-12): one action-log entry per http call; backlog corrected 2026-10-30 (correction-25): strict client config, `testing` hub clock, store location and root SHA-256; 2.5 h (PR #133 reviews)
 
-- M1-094 | todo | | SEC-21 Egress address policy, no redirects, no bodies | backlog corrected 2026-10-29 (correction-15): refuses the GCP IPv6 metadata address `fd20:ce::254` too (PR #91 review); backlog corrected 2026-10-29 (correction-18): refuses a recorded link-local answer from the Replay lookup (PR #100 reviews); backlog corrected 2026-10-30 (correction-22): owns `Probe::lookup` and decides on 168.63.129.16 (PR #120 reviews)
+- M1-094 | todo | | SEC-21 Egress address policy, no redirects, no bodies | backlog corrected 2026-10-29 (correction-15): refuses the GCP IPv6 metadata address `fd20:ce::254` too (PR #91 review); backlog corrected 2026-10-29 (correction-18): refuses a recorded link-local answer from the Replay lookup (PR #100 reviews); backlog corrected 2026-10-30 (correction-22): owns `Probe::lookup` and decides on 168.63.129.16 (PR #120 reviews); backlog corrected 2026-10-30 (correction-34): its Done line says "a 65-host spec exits 64 at the `CliError` level" and "Carries: M1-087", and 05's line on the transition forms ends "a translator would have to sit inside that cloud network", not "sits on a link-local address"; both texts are in PR #17, which takes them before it merges (PR #17 review)
 
 - M1-095 | todo | | net.egress staged connector (lookup, dual-stack connect, TLS, ALPN) | backlog corrected 2026-10-30 (correction-22): depends on M1-094 and M1-057; wires plan hosts into `Planned::with_hosts` (PR #120 reviews)
 
@@ -242,11 +242,11 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-114 | todo | | k8s.admission PSA labels, policy engine and SCC discovery
 
-- M1-115 | todo | | Review k8s checks and fixtures (semantics, API groups, RBAC degrade, per-distro sets) | backlog corrected 2026-10-29 (correction-16): `NOT_BUILT_YET` empty, every k8s check in `infos()`, every entry and check pair hit (PR #95 reviews)
+- M1-115 | todo | | Review k8s checks and fixtures (semantics, API groups, RBAC degrade, per-distro sets) | backlog corrected 2026-10-29 (correction-16): `NOT_BUILT_YET` empty, every k8s check in `infos()`, every entry and check pair hit (PR #95 reviews); backlog corrected 2026-10-30 (correction-33): three OpenShift label-sync checks (PR #151 k8s review); backlog corrected 2026-10-30 (correction-34): says three label-sync details; closes the M1-114 nits (PR #7 review)
 
 - M1-116 | todo | | Check family renderer and the host, network and Kubernetes pages with hand-written intros | backlog corrected 2026-10-29 (correction-09): ids still in `HostFamily::stub_ids()` get no section, and reads are listed without an OS split until the manifest is keyed by OS
 
-- M1-117 | todo | | Fixture env all-pass | backlog corrected 2026-10-30 (correction-21): moves the host.firewall bases under `envs/` (PR #110 review)
+- M1-117 | todo | | Fixture env all-pass | backlog corrected 2026-10-30 (correction-21): moves the host.firewall bases under `envs/` (PR #110 review); backlog corrected 2026-10-30 (correction-34): the base move is M1-174's; 08 on bases stays (PR #18 review)
 
 - M1-118 | todo | | Fixture envs warnings-only, all-block and no-privileges | backlog corrected 2026-10-30 (correction-24): renders `partial.missing_grants` in the no-privileges golden; storageclass claim ages on `run.clock`; depends on M1-086 (PR #131 reviews)
 
@@ -288,17 +288,17 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-137 | todo | | README draft from 10 section 1 | interim README landed ([#155](https://github.com/getrdy-io/rdy/pull/155)); M1-137 replaces transcripts with goldens
 
-- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review); backlog corrected 2026-10-30 (correction-29): depends on M1-174 (PR #146 review); backlog corrected 2026-10-30 (correction-31): depends on M1-141 (PR #149 review); backlog corrected 2026-10-30 (correction-30): depends on M1-170; founder decides the kind gate first (PR #146, #147 reviews); backlog corrected 2026-10-30 (correction-32): depends on M1-175 (PR #151 review)
+- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review); backlog corrected 2026-10-30 (correction-29): depends on M1-174 (PR #146 review); backlog corrected 2026-10-30 (correction-31): depends on M1-141 (PR #149 review); backlog corrected 2026-10-30 (correction-30): depends on M1-170; founder decides the kind gate first (PR #146, #147 reviews); backlog corrected 2026-10-30 (correction-32): depends on M1-175 (PR #151 review); backlog corrected 2026-10-30 (correction-34): depends on M1-177 (PR #18 and PR #20 reviews)
 
 - M1-139 | todo | | Alpha announcement to design partners | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
 - M1-140 | todo | | HTML next-step sentences and the nothing-verified wording
 
-- M1-141 | todo | | HTML untrusted strings in bdi with bidi controls shown as escapes | backlog corrected 2026-10-30 (correction-31): now core, week 17; also the title and Cf and zero-width characters (PR #149 review)
+- M1-141 | todo | | HTML untrusted strings in bdi with bidi controls shown as escapes | backlog corrected 2026-10-30 (correction-31): now core, week 17; also the title and Cf and zero-width characters (PR #149 review); backlog corrected 2026-10-30 (correction-33): tests add `"x\u{2069}\u{202e}"` (PR #149 security review); backlog corrected 2026-10-30 (correction-34): `check-html-escapes.sh` counts `json` per whole tag (PR #19 review)
 
 - M1-142 | todo | | Progress line with indicatif, TTY only | backlog corrected 2026-10-30 (correction-27): Windows console width through `console` (PR #140 review)
 
-- M1-143 | todo | | Quiet and verbose output modes | backlog corrected 2026-10-29 (correction-17): moved from week 26 to week 30
+- M1-143 | todo | | Quiet and verbose output modes | backlog corrected 2026-10-29 (correction-17): moved from week 26 to week 30; backlog corrected 2026-10-30 (correction-34): the legend and rule sentences in `rdy run --help`, 2 h (PR #21 review)
 
 - M1-144 | [#91](https://github.com/getrdy-io/rdy/pull/91) | 2026-10-29 | scheduler wiring of Built::hosts into the probe (Probe::permit_hosts) and the `ntp_servers` spec field are backlog (correction-15, PR #93: M1-148 depends on M1-094 and adds `ntp_servers` as the only UDP host source), until then the code is fail-closed and a real run refuses every datagram; fix round 2: a complete chunked reply on an open connection returns at the terminal chunk, chunk sizes allow no spaces except before `;`, the `{uid}` lookup goes through the probe so it is logged; fix round 1: UDP reply read into a 65535-byte buffer and cut in user space (Windows WSAEMSGSIZE), HTTP reader no longer stops early and parses the body once, `{uid}` matches the real uid only, socket bodies moved to probe/live, INV-11 and ADR 0014 amended, INV-28 added; DNS to system nameservers (PeerClass::SystemResolver) not built, no M1 check needs it; Windows named pipe is M2
 
@@ -322,7 +322,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-154 | todo | | musl resolver behaviour fixture for net.dns
 
-- M1-155 | todo | | net.dns direct nameserver lookups, resolv.conf and nsswitch analysis, scripted DNS server (M1-late)
+- M1-155 | todo | | net.dns direct nameserver lookups, resolv.conf and nsswitch analysis, scripted DNS server (M1-late) | backlog corrected 2026-10-30 (correction-34): owns the Azure nameserver door, 3 h, depends on M1-144 (PR #17 reviews)
 
 - M1-156 | todo | | net.registry (v2 ping, token realm, manifest and config blob host, HEAD versus GET) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
@@ -363,6 +363,12 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-174 | todo | | Expected results for the host check fixture cases | added 2026-10-30 (correction-29, PR #145 review)
 
 - M1-175 | todo | | Kubernetes family builds every k8s check from its parameters | added 2026-10-30 (correction-32, PR #151 review)
+
+- M1-176 | todo | | The watchdog in `rdy run` | added 2026-10-30 (correction-33, PR #154 reviews)
+
+- M1-177 | todo | | Host check fixes from the M1-174 and M1-149 reviews | added 2026-10-30 (correction-34, PR #18 and PR #20 reviews)
+
+- M1-178 | todo | | `SysctlName::canonical` by the first separator | added 2026-10-30 (correction-34, PR #20 review)
 
 ## Summary
 
