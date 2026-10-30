@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-access-review-silent"
+summary = "The identity review answers 201 with no user in the status"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.access"]
+
+[caps]
+root = false
+network = true
+kube = true

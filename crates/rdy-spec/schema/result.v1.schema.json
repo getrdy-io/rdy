@@ -128,7 +128,7 @@
           ]
         },
         "via_proxy": {
-          "description": "connect, user info stripped",
+          "description": "connect, kube: the proxy origin with the user info stripped, or null for a direct request",
           "type": [
             "string",
             "null"
