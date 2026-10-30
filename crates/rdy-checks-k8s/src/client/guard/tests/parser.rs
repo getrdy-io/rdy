@@ -1042,13 +1042,7 @@ fn the_selector_a_list_needs_is_still_checked_after_the_value_rules() {
 /// Check ids that `ALLOWED` cites and that no `CheckInfo` exists for yet. A check ticket removes its id
 /// when it registers its info in `crate::registry::infos`; the test fails if an id is in both places or
 /// in neither. M1-115 requires this list to be empty.
-const NOT_BUILT_YET: &[&str] = &[
-    "k8s.admission",
-    "k8s.nodes",
-    "k8s.rbac",
-    "k8s.storageclass",
-    "k8s.version",
-];
+const NOT_BUILT_YET: &[&str] = &["k8s.admission", "k8s.nodes", "k8s.rbac", "k8s.storageclass"];
 
 /// The ids `ALLOWED` cites that no info in `infos` has.
 fn uncited<'a>(
@@ -1107,7 +1101,11 @@ fn the_citation_check_bites() {
             peers: &[],
         }))
     };
-    let all: Vec<&CheckInfo> = NOT_BUILT_YET.iter().map(|id| info(id)).collect();
+    let cited: BTreeSet<&str> = ALLOWED
+        .iter()
+        .flat_map(|entry| entry.checks.iter().copied())
+        .collect();
+    let all: Vec<&CheckInfo> = cited.iter().map(|id| info(id)).collect();
     assert!(uncited(all.iter().copied()).is_empty());
     let without: Vec<&CheckInfo> = all
         .iter()
@@ -1117,14 +1115,15 @@ fn the_citation_check_bites() {
     assert_eq!(uncited(without), BTreeSet::from(["k8s.nodes"]));
     // An id that is both registered and pending leaves the missing set short of the pending list, so the
     // test above fails on it.
-    let both = [info("k8s.version")];
+    let both = [info("k8s.nodes")];
     let missing = uncited(all.iter().copied().chain(both));
     assert!(missing.is_empty());
-    let pending: BTreeSet<&str> = NOT_BUILT_YET.iter().copied().collect();
-    assert_ne!(missing, pending);
+    // With `k8s.nodes` both registered and pending, the missing set is empty and the pending set is not.
+    let synthetic_pending = BTreeSet::from(["k8s.nodes"]);
+    assert_ne!(missing, synthetic_pending);
     // An info for a check that ALLOWED does not cite is not an error.
     let extra = [info("k8s.access")];
-    assert_eq!(uncited(extra).len(), NOT_BUILT_YET.len());
+    assert_eq!(uncited(extra), cited);
 }
 
 #[test]

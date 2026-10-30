@@ -862,11 +862,15 @@ impl<'de> Deserialize<'de> for ApiRef {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct K8sVersion {
-    /// An older server blocks.
+    /// An older server blocks. This is a Kubernetes version. On OpenShift, `openshift_min` replaces it when
+    /// both are set.
     pub min: Option<Version>,
     /// A newer server warns, or blocks with `over_max: block`.
     pub max: Option<Version>,
-    /// The lowest OpenShift version, used when the cluster is OpenShift.
+    /// The lowest OpenShift version, used when the cluster is OpenShift. On an OpenShift cluster it replaces
+    /// `min`: `min` is a Kubernetes version, and OpenShift 4.14 reports Kubernetes 1.27, so `min` is not
+    /// applied there. `max` still applies to the Kubernetes version. On any other cluster `openshift_min` is
+    /// ignored.
     pub openshift_min: Option<Version>,
     /// APIs the server must serve, 1 to 64.
     pub apis: Option<BoundedList<ApiRef, 64, false, 1>>,

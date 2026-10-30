@@ -1,0 +1,43 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/nodes",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "NodeList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "aks-pool-1",
+          "labels": {
+            "kubernetes.io/os": "linux",
+            "kubernetes.azure.com/cluster": "MC_acme-rg_acme_eastus"
+          }
+        },
+        "spec": {
+          "providerID": "azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/acme-rg/providers/Microsoft.Compute/virtualMachineScaleSets/acme-pool/virtualMachines/0"
+        },
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.29.4",
+            "kubeProxyVersion": "v1.29.4",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      }
+    ]
+  }
+}

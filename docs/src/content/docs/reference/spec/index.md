@@ -598,10 +598,10 @@ Without a key the operator must be Exists. With Exists there is no value.
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `min` | string or integer | no |  | An older server blocks. | `"1.28"` |
+| `min` | string or integer | no |  | An older server blocks. This is a Kubernetes version. On OpenShift, `openshift_min` replaces it when both are set. | `"1.28"` |
 | `max` | string or integer | no |  | A newer server warns, or blocks with `over_max: block`. |  |
 | `apis` | array of string | no |  | APIs the server must serve, 1 to 64. Each one is written `group/version Kind`, or `version Kind` for the core group. |  |
-| `openshift_min` | string or integer | no |  | The lowest OpenShift version, used when the cluster is OpenShift. |  |
+| `openshift_min` | string or integer | no |  | The lowest OpenShift version, used when the cluster is OpenShift. On an OpenShift cluster it replaces `min`: `min` is a Kubernetes version, and OpenShift 4.14 reports Kubernetes 1.27, so `min` is not applied there. `max` still applies to the Kubernetes version. On any other cluster `openshift_min` is ignored. |  |
 | `over_max` | one of `warn`, `block` | no | `warn` | What a server newer than `max` counts as. The default is `warn`. |  |
 
 Example:

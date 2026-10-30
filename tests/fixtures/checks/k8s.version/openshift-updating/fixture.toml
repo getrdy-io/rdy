@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-openshift-updating"
+summary = "OpenShift on 4.14.9 with an update to 4.15.2 running"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true
