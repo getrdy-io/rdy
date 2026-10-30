@@ -22,7 +22,10 @@ wildcards clippy cannot match, and nothing stopping a check crate from adding a 
 2. **Network in the facade.** The facade resolves names and refuses, literal or resolved, every address
    for which one `is_forbidden(IpAddr)` holds: 169.254.0.0/16, 100.100.100.200/32, fe80::/10,
    fd00:ec2::/64, and the IPv4-mapped, IPv4-compatible and `64:ff9b::/96` forms of each IPv4 range. A
-   table test backs it. The host must be in the calling check's own host set (at most 64 distinct hosts
+   table test backs it. (Amendment, M1-094: the table also holds `fd20:ce::254/128`, the GCP IPv6
+   metadata address, and `168.63.129.16/32`, the Azure host-services address. The Azure address serves
+   the VM agent's settings and certificates, no check needs it, and the system resolver's own use of it
+   is not a facade connect. The decision and its residual are in 05.) The host must be in the calling check's own host set (at most 64 distinct hosts
    per spec). On the proxied path the facade writes the CONNECT itself (8 KiB response head cap, own
    timeout, Basic auth from the `ProxyUrl` newtype, `Proxy-Authorization` never logged). TLS SNI is
    always the permitted host.

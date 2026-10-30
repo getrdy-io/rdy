@@ -181,6 +181,17 @@ impl Peers {
         })
     }
 
+    /// The first spec host equal to `host`, with its port, whatever the port. A lookup has no port of
+    /// its own, so it takes the port of the entry that names the host.
+    pub(super) fn spec_host(&self, host: &Host) -> Option<(Host, u16)> {
+        self.hosts.get().and_then(|hosts| {
+            hosts
+                .iter()
+                .find(|t| t.host() == host)
+                .map(|t| (t.host().clone(), t.port()))
+        })
+    }
+
     pub(super) fn timeout(&self, normal: Duration) -> Duration {
         #[cfg(test)]
         if let Some(short) = self.timeout.get() {
