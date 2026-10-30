@@ -22,6 +22,9 @@ pub use crate::probe::replay::{
     RunPins, TcpScript,
 };
 
+#[cfg(feature = "loopback")]
+pub mod loopback;
+
 use crate::check::{CheckContext, CheckInfo, Need, Os};
 use crate::family::HostSet;
 use crate::probe::{ActionLogOutput, Probe, ProbeHub};
