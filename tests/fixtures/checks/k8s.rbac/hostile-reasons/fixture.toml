@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-hostile-reasons"
+summary = "Reasons and an identity with control characters, backticks and long text"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

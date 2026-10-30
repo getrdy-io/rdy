@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-identity-forbidden"
+summary = "SelfSubjectReview is refused with a 403; the access reviews work"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

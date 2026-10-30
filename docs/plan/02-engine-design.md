@@ -1232,8 +1232,14 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
    `Impersonate-User` header with exactly that value passes on `selfsubjectaccessreviews` and
    `selfsubjectrulesreviews`. `Impersonate-Group`, `-Uid` and `-Extra-*` never pass, a second value never
    passes, and the identity review (`selfsubjectreviews`) never carries the header, because it shows who
-   rdy really is. Without an `as:` value every `Impersonate-*` header is refused. Nothing builds the
-   guard with a value yet: the check that sends the header (`k8s.rbac`) does, when it lands.
+   rdy really is. Without an `as:` value every `Impersonate-*` header is refused.
+
+   `k8s.rbac` builds the client through `Connected::read_only_as` (M1-111). A thin service above the guard
+   (`AddImpersonation`) adds the one header to the two review POSTs, and the guard below it judges it. The
+   log entry of such a call has `impersonated: true` and never the user name. kube adds the kubeconfig's
+   own `as` and `as-groups` below the guard, where the guard cannot see them, so `read_only_as` refuses
+   when the kubeconfig user sets any `as*` field (ADR 0038). The run-level `GET /version` entry of such a
+   kubeconfig has `kubeconfig_impersonates: true`, so the log says what the guard cannot see.
 
    M1-103 builds the allow list under this rule. The guard sees the request as the caller built it, above
    kube's layers, so it refuses every header except `accept`, `content-type` and `content-length`

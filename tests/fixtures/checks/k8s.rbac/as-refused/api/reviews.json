@@ -1,0 +1,30 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "impersonate",
+          "resource": "serviceaccounts",
+          "namespace": "acme-system",
+          "name": "installer"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": ""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "namespaces"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    }
+  ]
+}
