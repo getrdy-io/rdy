@@ -1248,6 +1248,18 @@ fn api_and_env_files_are_indexed_by_what_is_inside() {
         .expect("recorded");
     assert_eq!(page.delay, Duration::from_millis(250));
     assert!(replay.api("GET", "/api/v1/nodes", "").is_none());
+    // The records come back sorted by method, path and query, with the request they answer.
+    let all: Vec<_> = replay
+        .api_records()
+        .map(|(method, path, query, record)| (method, path, query, record.status))
+        .collect();
+    assert_eq!(
+        all,
+        [
+            ("GET", "/api/v1/nodes", "continue=abc&limit=2", 200),
+            ("GET", "/version", "", 200)
+        ]
+    );
     assert_eq!(
         replay.reviews().expect("table")["create secrets"]["allowed"],
         false
