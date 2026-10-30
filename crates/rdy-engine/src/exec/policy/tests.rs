@@ -355,6 +355,42 @@ fn debug_output_shows_env_names_and_never_values() {
     assert!(!text.contains("hunter2"), "{text}");
 }
 
+/// The text rule reads a directory by the OS it is given, not the runner's, so these run on every leg.
+#[test]
+fn the_text_rule_for_a_declared_directory_follows_the_os_it_is_given() {
+    for os in [Os::Linux, Os::Macos, Os::Windows] {
+        for dir in ["/opt/tools/bin", "/usr/local/cuda/bin"] {
+            assert_eq!(check_dir_text(os, dir), Ok(()), "{os:?} {dir}");
+        }
+        for dir in [
+            "relative/bin",
+            "",
+            ".",
+            "/opt/../etc",
+            "/opt/./bin",
+            "/opt//bin",
+            "/opt/bin/",
+        ] {
+            assert_eq!(
+                check_dir_text(os, dir),
+                Err(PolicyError::InvalidDir { dir }),
+                "{os:?} {dir:?}"
+            );
+        }
+    }
+    // A drive makes a directory absolute on Windows only.
+    assert_eq!(check_dir_text(Os::Windows, "C:/tools/bin"), Ok(()));
+    assert_eq!(check_dir_text(Os::Windows, "C:\\tools\\bin"), Ok(()));
+    for os in [Os::Linux, Os::Macos] {
+        assert_eq!(
+            check_dir_text(os, "C:/tools/bin"),
+            Err(PolicyError::InvalidDir {
+                dir: "C:/tools/bin"
+            })
+        );
+    }
+}
+
 #[cfg(unix)]
 mod unix {
     use std::fs;

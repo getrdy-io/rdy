@@ -1,0 +1,101 @@
+//! Virtual paths of a fixture (08 section 2, "Plan corrections found").
+//!
+//! A `Path` from a check depends on the runner: `Path::new("/proc").join("net")` is `/proc\net` on
+//! Windows. The replay backend therefore works on strings. A key is POSIX text: `/proc/meminfo`. For a
+//! fixture whose `os` is `windows` it is lower case and starts with a drive, `c:/windows/system32`, and
+//! `root/c/Windows/...` in the tree maps to it. Case is kept on Linux and macOS.
+//!
+//! A backslash is a separator in two cases and only two. Stored text (a link target, a path in a
+//! fixture file) is read by the fixture's `os`: a Windows fixture. The path a check asks for
+//! ([`asked_key`]) is also read by the runner: a Windows runner joins with a backslash whatever the
+//! fixture is. So a Windows runner never rewrites a backslash inside a Linux fixture's link target.
+
+use crate::check::Os;
+
+pub(super) use crate::exec::policy::is_drive;
+
+/// The components of stored path text, for a fixture of `os`. Empty parts and `.` are dropped; `..`
+/// stays.
+pub(super) fn components(os: Os, text: &str) -> Vec<String> {
+    let slashed = if os == Os::Windows {
+        text.replace('\\', "/")
+    } else {
+        text.to_owned()
+    };
+    let text = if os == Os::Windows {
+        slashed.to_lowercase()
+    } else {
+        slashed
+    };
+    text.split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The key for these components.
+pub(super) fn join(os: Os, parts: &[String]) -> String {
+    match parts.first() {
+        None => "/".to_owned(),
+        Some(first) if os == Os::Windows && is_drive(first) => {
+            if parts.len() == 1 {
+                format!("{first}/")
+            } else {
+                parts.join("/")
+            }
+        }
+        Some(_) => format!("/{}", parts.join("/")),
+    }
+}
+
+/// The key for path text.
+pub(super) fn key(os: Os, text: &str) -> String {
+    join(os, &components(os, text))
+}
+
+/// The key for a path a check asks for. A Windows runner joins with a backslash whatever the
+/// fixture's `os` is, so that runner reads it as a separator.
+pub(super) fn asked_key(os: Os, text: &str) -> String {
+    if cfg!(windows) {
+        key(os, &text.replace('\\', "/"))
+    } else {
+        key(os, text)
+    }
+}
+
+/// Whether stored path text is absolute.
+///
+/// The one rule is `exec::policy::is_absolute_text`, shared with the declared-directory check.
+pub(super) fn is_absolute(os: Os, target: &str) -> bool {
+    crate::exec::policy::is_absolute_text(os, target)
+}
+
+/// The key of a file in `root/`, from its path below `root/` (`proc/meminfo`, or `c/Windows/x` for a
+/// Windows fixture).
+pub(super) fn tree_key(os: Os, rel: &str) -> String {
+    if os == Os::Windows {
+        let mut parts = rel.split('/');
+        if let Some(first) = parts.next()
+            && first.len() == 1
+            && first.starts_with(|c: char| c.is_ascii_alphabetic())
+        {
+            let rest: Vec<&str> = parts.collect();
+            return key(os, &format!("{first}:/{}", rest.join("/")));
+        }
+    }
+    key(os, &format!("/{rel}"))
+}
+
+/// Whether a link target is not a path: what `/proc/<pid>/fd/<n>` shows for a socket, a pipe or an
+/// anonymous inode (`socket:[8841]`, `pipe:[17]`, `anon_inode:[eventpoll]`).
+pub(super) fn is_special_target(target: &str) -> bool {
+    let Some((kind, rest)) = target.split_once(":[") else {
+        return false;
+    };
+    let Some(inner) = rest.strip_suffix(']') else {
+        return false;
+    };
+    !kind.is_empty()
+        && kind.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        && !inner.contains([']', '/', '\\'])
+}

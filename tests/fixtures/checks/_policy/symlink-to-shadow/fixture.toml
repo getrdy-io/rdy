@@ -1,0 +1,12 @@
+schema = 1
+name = "symlink-to-shadow"
+summary = "A file under a path the check may read is a link to the password file; the policy must refuse it"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = []
+
+[caps]
+root = false
+network = false
+kube = false

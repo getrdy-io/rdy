@@ -1,0 +1,3 @@
+{
+  "symlinks": { "etc/acme/license.link": "/etc/shadow" }
+}

@@ -1,0 +1,12 @@
+schema = 1
+name = "manifest-entries"
+summary = "Every kind of entry in root.manifest.json: a socket link, a relative link, an unreadable log, a mode and an empty directory"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = []
+
+[caps]
+root = false
+network = false
+kube = false
