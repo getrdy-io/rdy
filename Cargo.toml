@@ -121,6 +121,20 @@ opt-level = 3
 [profile.dev.package.hmac]
 opt-level = 3
 
+# The cut-buffer tests (M1-061) redact 1 MiB buffers at 64 offsets for four caps. Unoptimized, the
+# redactor and the regex engine under it took about a minute for that one test binary. With these
+# overrides it takes about 4 seconds. They apply to every dev and test build of the workspace.
+[profile.dev.package.regex-automata]
+opt-level = 2
+[profile.dev.package.regex-syntax]
+opt-level = 2
+[profile.dev.package.regex]
+opt-level = 2
+[profile.dev.package.memchr]
+opt-level = 2
+[profile.dev.package.rdy-engine]
+opt-level = 2
+
 # The profile `dist` builds release archives with (dist-workspace.toml). Keep unwinding: the
 # scheduler isolates a panicking check with catch_unwind (docs/plan/02-engine-design.md). Symbols
 # are stripped. The cargo-auditable data stays: scripts/check-release-artifacts.sh proves it.

@@ -67,7 +67,9 @@ use crate::exec::table::{self, TableError};
 #[cfg(feature = "runtime")]
 use crate::exec::{ExecError, ExecOutput, policy::CommandError};
 use crate::privilege::ProcessIds;
-use crate::redact::Redactor;
+use crate::redact::{
+    Cut, KNOWN_SECRET_REFUSED, Redacted, Redactor, is_secret_name, worth_registering,
+};
 use sock::{UdpReply, UnixResponse};
 
 #[cfg(feature = "runtime")]
@@ -268,6 +270,12 @@ impl FileBytes {
     pub fn truncated(&self) -> bool {
         self.truncated_head || self.truncated_tail
     }
+
+    /// Which ends were cut, in the form the redactor takes (see [`Probe::file_text`]).
+    #[must_use]
+    pub fn cut(&self) -> Cut {
+        Cut::new(self.truncated_head, self.truncated_tail)
+    }
 }
 
 /// Which part of a file a read wants. The backend never returns more than the limit.
@@ -391,6 +399,18 @@ impl Output {
             stdout,
             ..Self::default()
         }
+    }
+
+    /// Which ends of stdout were cut. A command's output is cut at the end only.
+    #[must_use]
+    pub fn stdout_cut(&self) -> Cut {
+        Cut::new(false, self.stdout_truncated)
+    }
+
+    /// Which ends of stderr were cut. A command's output is cut at the end only.
+    #[must_use]
+    pub fn stderr_cut(&self) -> Cut {
+        Cut::new(false, self.stderr_truncated)
     }
 }
 
@@ -633,6 +653,25 @@ impl ProbeHub {
     )]
     pub(crate) fn check_probe(&self, key: &str, os: Os, info: Option<&'static CheckInfo>) -> Probe {
         self.probe(Some(key.to_owned()), os, info)
+    }
+
+    /// Adds a secret to the run-scoped known-secret set (ADR 0015 decision 3). Every string the log, the
+    /// report and the CLI redact from now on has the exact value removed. The kubeconfig token and
+    /// client key data and the proxy password come in through here. Returns `false` if the value was
+    /// refused (see [`Redactor::add_known_secret`]).
+    ///
+    /// A refusal is not silent. It logs a warning with no value and counts `known_secret_refused` in
+    /// the report's `redaction.by_rule`. The caller decides whether it can go on (a refused kubeconfig
+    /// or proxy secret is the caller's to treat as fatal). Never log the value.
+    pub fn add_known_secret(&self, secret: &str) -> bool {
+        let accepted = self.log.redactor().add_known_secret(secret);
+        if !accepted {
+            tracing::warn!(
+                "a secret could not be added to the redaction set (too short, too long or no room), so it may not be removed from output"
+            );
+            self.log.count(KNOWN_SECRET_REFUSED);
+        }
+        accepted
     }
 
     /// The probe for run-level work on this OS, which the log records with `check: null`. The
@@ -1022,7 +1061,68 @@ impl Probe {
             return Err(refuse(entry, RULE_ENV_NOT_DECLARED, name));
         }
         let value = hub.backend.env(name);
+        // The value of a name that looks like a secret joins the run-scoped set before the check sees
+        // it, so it is removed wherever it later shows up (ADR 0015 decision 3). A plain word, a
+        // `${NAME}` reference or a path under /run/secrets/ does not: the key rule leaves those alone
+        // too, and in the set they would be removed from every string. A refusal is counted.
+        if let Some(value) = &value
+            && is_secret_name(name)
+            && worth_registering(value)
+        {
+            let _accepted = hub.add_known_secret(value);
+        }
         settle(entry, Ok(value), |_, _| {})
+    }
+
+    /// The text of a file the facade returned, redacted. The partial edge line of a cut file is dropped
+    /// first, an unterminated private key is removed through the end, and the known secrets are removed
+    /// (see [`Redactor::redact_buffer`]). Use it, never `String::from_utf8`, for any part of the file
+    /// that goes into a finding: `observed`, a note or a message.
+    ///
+    /// Parse numbers from `file.bytes`; take evidence from here.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] on a probe that has no hub, which is one the scheduler did not make.
+    pub fn file_text(&self, file: &FileBytes) -> Result<Redacted<String>, ProbeError> {
+        self.buffer_text(&file.bytes, file.cut())
+    }
+
+    /// The text of a command's stdout, redacted. Stdout is cut at its end when it passed the cap.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Probe::file_text`].
+    pub fn stdout_text(&self, output: &Output) -> Result<Redacted<String>, ProbeError> {
+        self.buffer_text(&output.stdout, output.stdout_cut())
+    }
+
+    /// The text of a command's stderr, redacted. Stderr is cut at its end when it passed its cap.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Probe::file_text`].
+    pub fn stderr_text(&self, output: &Output) -> Result<Redacted<String>, ProbeError> {
+        self.buffer_text(&output.stderr, output.stderr_cut())
+    }
+
+    /// The text of a unix socket reply body, redacted. The body is cut at its end when the server sent
+    /// more than [`sock::BODY_LIMIT`]. `/info` can carry proxy settings with credentials, so use this
+    /// for any part of the body that goes into a finding.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Probe::file_text`].
+    pub fn unix_text(&self, reply: &UnixResponse) -> Result<Redacted<String>, ProbeError> {
+        self.buffer_text(&reply.body, Cut::new(false, reply.truncated))
+    }
+
+    fn buffer_text(&self, bytes: &[u8], cut: Cut) -> Result<Redacted<String>, ProbeError> {
+        let hub = self
+            .hub
+            .as_ref()
+            .ok_or_else(|| ProbeError::denied(RULE_NO_PROBE, "buffer text"))?;
+        Ok(hub.log.redact_buffer(bytes, cut))
     }
 
     /// Runs a command.
