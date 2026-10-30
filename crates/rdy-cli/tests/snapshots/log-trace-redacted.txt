@@ -4,7 +4,7 @@ TRACE log_redaction: kubeconfig:
   users:
   - name: synthetic
     user:
-      token: [REDACTED:secret_by_key:~]
+      token: [REDACTED:kubeconfig_credential:~]
 
-TRACE log_redaction: command output output="Authorization: [REDACTED:secret_by_key:~]
- WARN hyper::proto::h1::io: write headers: authorization: [REDACTED:secret_by_key:~]
+TRACE log_redaction: command output output="Authorization: Bearer [REDACTED:auth_header:~]
+ WARN hyper::proto::h1::io: write headers: authorization: Bearer [REDACTED:auth_header:~]

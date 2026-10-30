@@ -36,6 +36,10 @@
 //! **TLS.** [`Probe::tls_chain`] takes the same policy and the same stream and runs one handshake that
 //! sends no application data (the `tls` module, M1-092).
 //!
+//! **HTTP.** [`Probe::http`] takes the same policy and the same stream, verifies an `https://` target
+//! strictly, sends one `HEAD` or `GET`, reads at most 64 KiB of body and discards it, and follows no
+//! redirect (the `http` module, M1-093).
+//!
 //! **The log.** One `connect` entry per call, proxy `CONNECT` included: `host`, `port`, `via_proxy` (the
 //! proxy without its userinfo, or `null`) and `addr` (the connected address, `null` through a proxy or
 //! when nothing connected). There is no `proto`, which marks a datagram. A failure has a fixed `error`
@@ -63,16 +67,22 @@ use super::sock::host_port;
 use super::{Backend, NetFailure, Probe, ProbeError, ProbeHub, refuse, settle};
 use crate::check::PeerClass;
 
+mod http;
 #[cfg(any(test, feature = "testing"))]
 pub(super) mod replay;
 #[cfg(test)]
 mod tests;
 mod tls;
 
+pub use super::AttemptOutcome;
+pub use http::{
+    BODY_TIMEOUT, HttpMethod, HttpOutcome, HttpProbe, HttpTiming, HttpTls, MAX_BODY,
+    REPORTED_HEADERS, RESPONSE_TIMEOUT, RULE_HTTP_NOT_URL, RULE_HTTP_PLAIN_VIA_PROXY,
+};
 pub(super) use tls::TlsState;
 pub use tls::{
     ALPN_PROTOCOLS, HANDSHAKE_TIMEOUT, NoRoots, REVOCATION_NOTE, Roots, TlsChain, TrustFailure,
-    TrustVerdict,
+    TrustStore, TrustVerdict,
 };
 
 /// The longest one connection attempt waits.
@@ -127,55 +137,6 @@ pub enum Route {
     ViaProxy,
 }
 
-/// What one connection attempt did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum AttemptOutcome {
-    /// The connection opened.
-    Connected,
-    /// The host answered with a refusal (a closed port, or a firewall that rejects).
-    Refused,
-    /// The connection was reset.
-    Reset,
-    /// No answer within [`ATTEMPT_TIMEOUT`]: a firewall that drops packets looks like this.
-    TimedOut,
-    /// No route to the network or the host.
-    Unreachable,
-    /// Another failure.
-    Failed,
-    /// Another address connected first, so this attempt was cut while it was still running.
-    Abandoned,
-}
-
-impl AttemptOutcome {
-    fn of(error: &io::Error) -> Self {
-        match error.kind() {
-            io::ErrorKind::ConnectionRefused => Self::Refused,
-            io::ErrorKind::ConnectionReset
-            | io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::BrokenPipe => Self::Reset,
-            io::ErrorKind::TimedOut => Self::TimedOut,
-            io::ErrorKind::NetworkUnreachable
-            | io::ErrorKind::HostUnreachable
-            | io::ErrorKind::NetworkDown => Self::Unreachable,
-            _ => Self::Failed,
-        }
-    }
-
-    /// A fixed phrase for the log.
-    fn phrase(self) -> &'static str {
-        match self {
-            Self::Connected => "connected",
-            Self::Refused => "connection refused",
-            Self::Reset => "connection reset",
-            Self::TimedOut => "no answer in time",
-            Self::Unreachable => "network or host unreachable",
-            Self::Failed => "connection failed",
-            Self::Abandoned => "cut because another address connected",
-        }
-    }
-}
-
 /// One connection attempt to one address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -208,19 +169,38 @@ pub struct TcpReport {
 }
 
 impl TcpReport {
-    /// The fixed phrase for why nothing connected, from the attempts.
-    fn failure(&self) -> &'static str {
+    /// Why nothing connected, from the attempts: [`AttemptOutcome::TimedOut`] when every attempt was
+    /// silent, else the last attempt's outcome, and [`AttemptOutcome::Failed`] when there was no address
+    /// to try.
+    fn failure_outcome(&self) -> AttemptOutcome {
         let all_silent = !self.attempts.is_empty()
             && self
                 .attempts
                 .iter()
                 .all(|a| a.outcome == AttemptOutcome::TimedOut);
         if all_silent {
-            return AttemptOutcome::TimedOut.phrase();
+            return AttemptOutcome::TimedOut;
         }
         self.attempts
             .last()
-            .map_or("no address to try", |a| a.outcome.phrase())
+            .map_or(AttemptOutcome::Failed, |a| a.outcome)
+    }
+
+    /// The fixed phrase for why nothing connected, from the attempts.
+    fn failure(&self) -> &'static str {
+        if self.attempts.is_empty() {
+            return "no address to try";
+        }
+        self.failure_outcome().phrase()
+    }
+
+    /// The failure of a call that got no connection, typed.
+    fn not_connected(&self, target: &str) -> NetFailure {
+        NetFailure::NotConnected {
+            target: target.to_owned(),
+            outcome: self.failure_outcome(),
+            reason: self.failure(),
+        }
     }
 }
 
@@ -268,7 +248,7 @@ impl Probe {
         match result {
             Ok(report) if !report.connected => {
                 entry.set("error", report.failure());
-                let silent = report.failure() == AttemptOutcome::TimedOut.phrase();
+                let silent = report.failure_outcome() == AttemptOutcome::TimedOut;
                 entry.finish(if silent {
                     ActionOutcome::Timeout
                 } else {

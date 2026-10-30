@@ -1857,6 +1857,7 @@ dependencies = [
  "askama",
  "cap-primitives",
  "cap-std",
+ "hyper",
  "jsonschema",
  "proptest",
  "rcgen",
