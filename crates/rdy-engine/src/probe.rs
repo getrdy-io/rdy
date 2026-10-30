@@ -173,6 +173,12 @@ pub enum ProbeError {
         "{0} is not available on this OS in this version of rdy. Fix: none needed, the result is skipped here; a later version adds it"
     )]
     Unsupported(String),
+    /// The replay fixture holds no answer for this call. Only the replay backend gives it: a fixture
+    /// never falls through to the real machine (08 section 2). The text names the call.
+    #[error(
+        "the replay fixture has no recorded answer for {0}. Fix: record the answer in the fixture (commands/, native/ or the file tree), or correct the test"
+    )]
+    NotRecorded(String),
     /// Any other I/O failure. The text is the OS message.
     #[error("{0}. Fix: check the message above and the state of the machine, then run again")]
     Io(String),
@@ -181,6 +187,10 @@ pub enum ProbeError {
 impl ProbeError {
     /// The error for an I/O failure, using the kinds checks care about.
     pub(crate) fn from_io(error: &io::Error) -> Self {
+        #[cfg(any(test, feature = "testing"))]
+        if let Some(unrecorded) = replay::Unrecorded::from_io(error) {
+            return Self::NotRecorded(unrecorded.to_string());
+        }
         match error.kind() {
             io::ErrorKind::NotFound => Self::NotFound,
             io::ErrorKind::PermissionDenied => Self::PermissionDenied,
@@ -228,9 +238,11 @@ impl ProbeError {
             Self::Denied { .. } => ActionOutcome::Denied,
             Self::Policy(_) | Self::Table(_) => ActionOutcome::Denied,
             Self::Timeout | Self::Hung { .. } => ActionOutcome::Timeout,
-            Self::NotFound | Self::PermissionDenied | Self::Unsupported(_) | Self::Io(_) => {
-                ActionOutcome::Failed
-            }
+            Self::NotFound
+            | Self::PermissionDenied
+            | Self::Unsupported(_)
+            | Self::NotRecorded(_)
+            | Self::Io(_) => ActionOutcome::Failed,
         }
     }
 
@@ -442,9 +454,10 @@ mod sealed {
 /// The raw I/O under the facade. The file calls write no log, and the policy they enforce is the
 /// [`ReadGuard`] the probe passes in. The probe has already applied it to the path as written. A backend
 /// that resolves links applies [`ReadGuard::admit_real`] to the real path before it opens anything and
-/// reports a refusal as [`Refused`] inside an `io::Error` of kind `PermissionDenied`; the replay backend
-/// has no links and ignores the guard. The provided `spawn` is the exception: it runs `exec::table::run`, which applies
-/// the command table and the command policy again before anything starts.
+/// reports a refusal as [`Refused`] inside an `io::Error` of kind `PermissionDenied`. The replay backend
+/// follows the symlinks of its fixture the same way, on its virtual tree. The provided `spawn` is the
+/// exception: it runs `exec::table::run`, which applies the command table and the command policy again
+/// before anything starts.
 ///
 /// Sealed: the live backend and the replay backend are the only implementations. A check cannot
 /// supply its own, so it cannot route around the facade's policy.

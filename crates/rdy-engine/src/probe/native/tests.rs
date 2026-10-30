@@ -390,7 +390,7 @@ async fn a_call_with_no_recorded_answer_fails_and_is_still_logged() {
     let run = hub.run_probe_for(Os::Linux);
     assert_eq!(
         run.native(NativeCall::Uname).await,
-        Err(ProbeError::NotFound)
+        Err(ProbeError::NotRecorded("the native call uname".to_owned()))
     );
     let log = hub.action_log();
     assert_eq!(log.actions.len(), 1);

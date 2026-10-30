@@ -16,6 +16,7 @@ use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, CommandSpec,
     Finding, Level, Need, Os, Partial,
 };
+use rdy_engine::exec::policy::PolicyError;
 use rdy_engine::exec::table::{self, ExitClass, Param};
 use rdy_engine::probe::ProbeError;
 use serde_json::{Map, Value, json};
@@ -497,6 +498,11 @@ async fn firewall_cmd(ctx: &CheckContext, form: &str, params: &[&str]) -> Result
     let out = match ctx.probe().exec(cmd).await {
         Ok(out) => out,
         Err(error) => {
+            // The live runner reports a program that is not on the search path as a policy
+            // `NotFound`, not as a probe `NotFound`. Both mean the program is not installed.
+            if matches!(error, ProbeError::Policy(PolicyError::NotFound { .. })) {
+                return Ok(Ran::Absent);
+            }
             return match soft(error)? {
                 ProbeError::NotFound => Ok(Ran::Absent),
                 other => Ok(Ran::Odd(short(&other))),
