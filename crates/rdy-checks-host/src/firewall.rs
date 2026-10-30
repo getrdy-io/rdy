@@ -78,6 +78,7 @@ static INFO: CheckInfo = CheckInfo {
         ROUTE_V4,
         ROUTE_V6,
     ],
+    statfs: &[],
     env: &[],
     commands: &[CommandSpec {
         program: "firewall-cmd",

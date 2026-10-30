@@ -348,6 +348,7 @@ static BROAD_READS: CheckInfo = CheckInfo {
         windows: Support::NotYet,
     },
     reads: &["/"],
+    statfs: &[],
     env: &[],
     commands: &[],
     peers: &[],

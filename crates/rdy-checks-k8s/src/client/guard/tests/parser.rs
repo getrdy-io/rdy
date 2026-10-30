@@ -1101,6 +1101,7 @@ fn the_citation_check_bites() {
                 windows: Support::Full,
             },
             reads: &[],
+            statfs: &[],
             env: &[],
             commands: &[],
             peers: &[],

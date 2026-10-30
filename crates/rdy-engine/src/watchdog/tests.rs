@@ -361,6 +361,7 @@ fn the_scheduler_and_the_watchdog_share_one_origin() {
             windows: Support::Full,
         },
         reads: &[],
+        statfs: &[],
         env: &[],
         commands: &[],
         peers: &[],

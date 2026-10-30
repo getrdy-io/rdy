@@ -8,7 +8,7 @@
 //!
 //! | Variant | Who may ask | What the policy checks | What the log holds |
 //! | --- | --- | --- | --- |
-//! | `Statvfs { path }` | any probe | the path passes the read rules (denylist and the check's `reads`), as written and again on the real path | `api`, `path` |
+//! | `Statvfs { path }` | any probe | the path passes the read denylist and the check's `statfs` prefixes (not `reads`), as written and again on the real path | `api`, `path` |
 //! | `Uname` | any probe | nothing to check | `api` |
 //! | `Rlimit(resource)` | any probe | the resource is in a closed list | `api`, `resource` |
 //! | `Hostname` | any probe | nothing to check | `api` |
@@ -36,7 +36,8 @@ pub const RULE_MACHINE_ID: &str = "the machine id is read by the engine only";
 #[non_exhaustive]
 pub enum NativeCall {
     /// File system size, free space, inodes and mount flags of the file system that holds `path`. The
-    /// path passes the read rules.
+    /// path passes the read denylist and the check's `CheckInfo::statfs` prefixes. `reads` does not
+    /// count: a check that declares only `reads` is refused here.
     Statvfs {
         /// The path, absolute, with no `..`.
         path: PathBuf,
@@ -261,7 +262,10 @@ impl Probe {
             fields.insert("resource".to_owned(), Value::from(resource.as_str()));
         }
         let (hub, entry) = self.begin(ActionKind::Native, fields, &what)?;
-        let guard = ReadGuard::new(self.scope.os, self.scope.info.map(|info| info.reads));
+        // `Statvfs` is judged by the check's `statfs` prefixes, never by `reads`, so a check can be
+        // given file system numbers for any path without being given the files. The denylist applies
+        // either way. The backend gets this guard and judges the real path with it.
+        let guard = ReadGuard::statfs(self.scope.os, self.scope.info.map(|info| info.statfs));
         let refusal = match (&call, policy.who) {
             (_, Who::RunLevel) if self.scope.check.is_some() => Some(RULE_MACHINE_ID),
             (NativeCall::Statvfs { path }, _) => guard.admit(path).err(),
