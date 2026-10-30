@@ -1,7 +1,8 @@
 //! Display order of the checks of a report (01 section 5.2).
 //!
 //! The terminal, the HTML report and the portal list checks by `bucket`: blocker, required_not_run,
-//! warning, passed, not_applicable, then spec order inside a bucket. They all call the functions here, so
+//! warning, passed, not_applicable, then spec order inside a bucket. A bucket this version does not know
+//! sorts with required_not_run (01 section 3.2). They all call the functions here, so
 //! the order lives in one place. The functions read the stored `bucket` and never recompute it.
 
 use super::codes::Bucket;
@@ -9,8 +10,9 @@ use super::model::CheckResult;
 
 /// Checks in display order: by bucket, then the order they were given (spec order).
 ///
-/// The sort is stable, so spec order holds inside a bucket. An unknown bucket sorts between
-/// `required_not_run` and `warning` ([`Bucket::order_key`]). The result borrows from `checks`.
+/// The sort is stable, so spec order holds inside a bucket. An unknown bucket sorts with
+/// `required_not_run`, in spec order among those checks ([`Bucket::order_key`]). The result borrows from
+/// `checks`.
 #[must_use]
 pub fn sort_by_bucket(checks: &[CheckResult]) -> Vec<&CheckResult> {
     let mut sorted: Vec<&CheckResult> = checks.iter().collect();
@@ -21,8 +23,8 @@ pub fn sort_by_bucket(checks: &[CheckResult]) -> Vec<&CheckResult> {
 /// The checks of one display section.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BucketGroup<'a> {
-    /// The bucket of the section. When the section holds buckets this version does not know, it is the
-    /// first of them in spec order, and all unknown buckets share the one section.
+    /// The bucket of the section. Checks with a bucket this version does not know sit in the
+    /// `required_not_run` section, so a group holding any of them is labelled [`Bucket::RequiredNotRun`].
     pub bucket: Bucket,
     /// The checks of the section, in spec order. Never empty.
     pub checks: Vec<&'a CheckResult>,
@@ -40,12 +42,21 @@ pub fn group_by_bucket(checks: &[CheckResult]) -> Vec<BucketGroup<'_>> {
                 group.checks.push(check);
             }
             _ => groups.push(BucketGroup {
-                bucket: check.bucket.clone(),
+                bucket: section_bucket(&check.bucket),
                 checks: vec![check],
             }),
         }
     }
     groups
+}
+
+/// The bucket a section is labelled with: an unknown bucket is shown as `required_not_run`.
+fn section_bucket(bucket: &Bucket) -> Bucket {
+    if bucket.is_unknown() {
+        Bucket::RequiredNotRun
+    } else {
+        bucket.clone()
+    }
 }
 
 #[cfg(test)]
@@ -85,6 +96,40 @@ mod tests {
             "skipped",
             Some("not_applicable"),
         );
+        // The other skip kinds the engine writes: all of them are not run.
+        add("r4.not_in_build", "block", "skipped", Some("not_in_build"));
+        add(
+            "w4.unsupported_spec",
+            "warn",
+            "skipped",
+            Some("unsupported_spec"),
+        );
+        add(
+            "r5.unknown_check",
+            "block",
+            "skipped",
+            Some("unknown_check"),
+        );
+        add(
+            "r6.not_yet_on_os",
+            "block",
+            "skipped",
+            Some("not_yet_on_os"),
+        );
+        add("w5.run_deadline", "warn", "skipped", Some("run_deadline"));
+        add("r7.cancelled", "block", "skipped", Some("cancelled"));
+        // An optional check that errored.
+        add("w6.optional_error", "warn", "error", None);
+        // A status and a severity this version does not know: unknown status is not run, unknown
+        // severity is required.
+        add("r8.unknown_status", "block", "paused", None);
+        add("p3.unknown_severity_pass", "fatal", "pass", None);
+        add(
+            "r9.unknown_severity_skip",
+            "fatal",
+            "skipped",
+            Some("missing_need"),
+        );
         checks
     }
 
@@ -100,9 +145,9 @@ mod tests {
         let mut expected = Vec::new();
         for (bucket, n) in [
             (Bucket::Blocker, 2),
-            (Bucket::RequiredNotRun, 3),
-            (Bucket::Warning, 3),
-            (Bucket::Passed, 2),
+            (Bucket::RequiredNotRun, 9),
+            (Bucket::Warning, 6),
+            (Bucket::Passed, 3),
             (Bucket::NotApplicable, 2),
         ] {
             expected.extend(std::iter::repeat_n(bucket, n));
@@ -117,11 +162,21 @@ mod tests {
                 "r1.required_skip",
                 "r2.timeout",
                 "r3.error",
+                "r4.not_in_build",
+                "r5.unknown_check",
+                "r6.not_yet_on_os",
+                "r7.cancelled",
+                "r8.unknown_status",
+                "r9.unknown_severity_skip",
                 "w1.optional_skip",
                 "w2.warn",
                 "w3.optional_timeout",
+                "w4.unsupported_spec",
+                "w5.run_deadline",
+                "w6.optional_error",
                 "p1.pass",
                 "p2.pass",
+                "p3.unknown_severity_pass",
                 "n1.not_applicable",
                 "n2.not_applicable",
             ]
@@ -183,18 +238,49 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_bucket_sorts_after_required_and_before_warnings() {
+    fn an_unknown_bucket_sorts_with_required_not_run_in_spec_order() {
         let mut checks = every_outcome();
-        for (id, text) in [("u1", "frozen"), ("u2", "chilled"), ("u3", "frozen")] {
+        let unknown = |id: &str, text: &str| {
             let mut c = CheckResult::new(id, "host", Severity::from("block"), Status::from("pass"));
             c.bucket = Bucket::from(text);
-            checks.push(c);
-        }
+            c
+        };
+        // One in the middle of the list (after r1.required_skip), two at the end.
+        checks.insert(5, unknown("u1", "frozen"));
+        checks.push(unknown("u2", "chilled"));
+        checks.push(unknown("u3", "frozen"));
         let groups = group_by_bucket(&checks);
-        let order: Vec<u8> = groups.iter().map(|g| g.bucket.order_key()).collect();
-        assert_eq!(order, [0, 1, 2, 3, 4, 5]);
-        let unknown = &groups[2];
-        assert!(unknown.bucket.is_unknown());
-        assert_eq!(ids(unknown.checks.iter().copied()), ["u1", "u2", "u3"]);
+        // Still five sections: the unknown ones sit inside the required section.
+        let order: Vec<Bucket> = groups.iter().map(|g| g.bucket.clone()).collect();
+        assert_eq!(
+            order,
+            [
+                Bucket::Blocker,
+                Bucket::RequiredNotRun,
+                Bucket::Warning,
+                Bucket::Passed,
+                Bucket::NotApplicable,
+            ]
+        );
+        assert!(groups.iter().all(|g| !g.bucket.is_unknown()));
+        assert_eq!(
+            ids(groups[1].checks.iter().copied()),
+            [
+                "r1.required_skip",
+                "u1",
+                "r2.timeout",
+                "r3.error",
+                "r4.not_in_build",
+                "r5.unknown_check",
+                "r6.not_yet_on_os",
+                "r7.cancelled",
+                "r8.unknown_status",
+                "r9.unknown_severity_skip",
+                "u2",
+                "u3",
+            ]
+        );
+        // The stored bucket of each check is untouched.
+        assert_eq!(groups[1].checks[1].bucket, Bucket::Unknown("frozen".into()));
     }
 }
