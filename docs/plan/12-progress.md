@@ -238,7 +238,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-112 | [#19](https://github.com/getrdy-io/rdy/pull/19) | 2026-10-28 | The "sign a spec in CI" half of the exit test is proved at the helper level (`RDY_KEY_PASSWORD` and `--password-file -` through `rdy_cli::password`); `spec sign` itself is M1-125, which must call `read_key_password`. `--password` is refused by a raw argv check, not a hidden clap flag, so it wins over missing-argument errors; only `spec sign` and `spec keygen` get the reason. Windows checks the file type and refuses reparse points but not ACLs; its file tests run on the Windows CI leg only (compiled here, not run). `read_key_password` now takes stderr for the env-variable note (tty only); it adds the `rustix` dependency (Unix only) for O_NOFOLLOW and geteuid without unsafe. Follow-up fix PR for macOS test build.
 
-- M1-113 | todo | | k8s.nodes allocatable, node filters, conditions, zones and pod-count limit | backlog corrected 2026-10-30 (correction-24): moves k8s.storageclass's lists onto the paging helper; depends on M1-107 and M1-110 (PR #131 review); backlog corrected 2026-10-30 (correction-26): implements `Cluster::read_only_as` on the lazy connection; depends on M1-111; 3 h (PR #135 review)
+- M1-113 | todo | | k8s.nodes allocatable, node filters, conditions, zones and pod-count limit | backlog corrected 2026-10-30 (correction-24): moves k8s.storageclass's lists onto the paging helper; depends on M1-107 and M1-110 (PR #131 review); backlog corrected 2026-10-30 (correction-26): implements `Cluster::read_only_as` and `Cluster::is_openshift` on the lazy connection; depends on M1-111; 3 h (PR #135 review)
 
 - M1-114 | todo | | k8s.admission PSA labels, policy engine and SCC discovery
 
