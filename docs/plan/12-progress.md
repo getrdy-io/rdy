@@ -212,7 +212,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-099 | todo | | net.tls_intercept recording verifier and classes
 
-- M1-100 | todo | | net.tls_intercept evidence, trust-store report and fix text
+- M1-100 | todo | | net.tls_intercept evidence, trust-store report and fix text | backlog corrected 2026-10-30 (correction-28): env-var trust-store sources shown with `~` and no control characters (PR #143 review)
 
 - M1-101 | todo | | Security review of the TLS recording verifier and 03 Appendix A
 
