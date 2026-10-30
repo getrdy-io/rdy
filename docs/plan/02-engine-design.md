@@ -496,6 +496,11 @@ tests policy.
   - `StatvfsInfo::no_exec` is an `Option<bool>`. Linux and Android set it from `ST_NOEXEC`. macOS has no
     such flag in `statvfs`, so it is `None`: unknown. A check that forbids `noexec` reports "not
     verified" for `None`, never a pass. Reading `MNT_NOEXEC` from `statfs` is a later ticket.
+  - `StatvfsInfo::dev` is the device of the file system as `(major, minor)`, the pair that field 3 of
+    `/proc/self/mountinfo` prints as `major:minor`. The live backend takes it from the `st_dev` of the same
+    descriptor that `fstatvfs` asked, so the numbers and the device describe one inode. It is `None` where
+    the OS has no such number (Windows). A check finds its mount line with it (`host.disk`, M1-068). A
+    fixture value has `"dev": "8:1"` or `null`, and the key is required like every other field.
   - macOS opens the real path for reading before it asks `fstatvfs`, so a directory the user can search
     but not read fails to open. The live backend then asks the parent directory when the parent is on
     the same device and, on macOS, the same mount name (the numbers belong to the file system), after the same real-path rules. A mount

@@ -18,7 +18,7 @@ thiserror = { workspace = true, features = ["std"] }
 [dev-dependencies]
 # The test run (`TestRun`) applies the real read policy and writes the real action log (M1-147).
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing"] }
-tokio = { workspace = true, features = ["rt", "time"] }
+tokio = { workspace = true, features = ["rt", "test-util", "time"] }
 
 [lints]
 workspace = true

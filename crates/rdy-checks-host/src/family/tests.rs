@@ -151,7 +151,7 @@ fn a_stub_that_reaches_the_scheduler_follows_the_run_os_not_the_build() {
     for os in [Os::Macos, Os::Windows] {
         let (scheduler, checks) = built(os);
         let ran = runtime.block_on(scheduler.run(checks));
-        assert_eq!(ran.len(), 11);
+        assert_eq!(ran.len(), 10);
         for one in ran {
             let End::Done(done) = one.end else {
                 panic!("{} did not end", one.key);
@@ -207,7 +207,6 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
     assert_eq!(
         HostFamily::stub_ids(),
         [
-            "host.disk",
             "host.memory",
             "host.ports",
             "host.lsm",
@@ -224,6 +223,22 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
     for id in HostFamily::stub_ids() {
         assert!(listed.contains(id), "{id} is not a host check");
     }
+}
+
+#[test]
+fn host_disk_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "host.disk", "path": "/var/lib/acme", "min": "20Gi", "forbid_options": ["noexec"]}),
+    )
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.disk");
+    assert_eq!(built.check.info().statfs, ["/"]);
+    assert_eq!(built.check.info().reads, ["/proc/self/mountinfo"]);
+    assert!(!HostFamily::stub_ids().contains(&"host.disk"));
 }
 
 #[test]

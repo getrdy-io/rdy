@@ -1,0 +1,29 @@
+{
+  "entry": {
+    "id": "host.disk",
+    "min": "20Gi",
+    "path": "/srv/private/acme"
+  },
+  "result": {
+    "expected": {
+      "forbid_fstypes": [],
+      "forbid_options": [],
+      "min": 21474836480,
+      "min_inodes": 100000,
+      "recommended": 25769803776
+    },
+    "fix": "Run rdy as a user who can enter every directory on the path, or as root.",
+    "level": "warn",
+    "message": "Cannot measure `/srv/private/acme`: cannot open the directory, permission denied.",
+    "notes": [],
+    "observed": {
+      "path": "/srv/private/acme"
+    },
+    "partial": {
+      "missing": [
+        "Root"
+      ],
+      "note": "Not verified: cannot open the directory, permission denied."
+    }
+  }
+}

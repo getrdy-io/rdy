@@ -1,0 +1,17 @@
+{
+  "call": "statvfs",
+  "path": "/mnt/nfs/data",
+  "delay_ms": 3600000,
+  "value": {
+    "fragment_size": 4096,
+    "blocks": 2621440,
+    "blocks_free": 2621440,
+    "blocks_available": 2621440,
+    "files": 1000000,
+    "files_free": 900000,
+    "read_only": false,
+    "no_exec": false,
+    "no_suid": false,
+    "dev": "0:45"
+  }
+}
