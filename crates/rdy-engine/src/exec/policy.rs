@@ -55,6 +55,7 @@ use std::time::Duration;
 use super::DEFAULT_STDOUT_CAP;
 #[cfg(feature = "runtime")]
 use super::{DEFAULT_STDERR_CAP, ExecError, ExecOutput, ExecSpec};
+use crate::check::Os;
 
 #[cfg(test)]
 mod tests;
@@ -678,16 +679,44 @@ fn check_env(vars: &[(&'static str, OsString)]) -> Result<(), PolicyError> {
     Ok(())
 }
 
-/// A declared directory must be absolute and spelled plainly: no `.`, no `..`, no empty segment.
-/// `Path::components` hides `.` and `//`, so the text is checked as well.
-pub(crate) fn check_dir(dir: &'static str) -> Result<PathBuf, PolicyError> {
-    let path = Path::new(dir);
+/// Whether `part` is a drive component such as `c:`.
+pub(crate) fn is_drive(part: &str) -> bool {
+    part.len() == 2 && part.ends_with(':') && part.starts_with(|c: char| c.is_ascii_alphabetic())
+}
+
+/// Whether path text is absolute on a machine of `os`: it starts with `/` or, on Windows, with a drive.
+/// A backslash is a separator on Windows only. It reads text and never asks the runner's `Path`.
+pub(crate) fn is_absolute_text(os: Os, text: &str) -> bool {
+    let slashed = if os == Os::Windows {
+        text.replace('\\', "/")
+    } else {
+        text.to_owned()
+    };
+    slashed.starts_with('/') || (os == Os::Windows && slashed.get(..2).is_some_and(is_drive))
+}
+
+/// The text rule for a declared directory, read as a machine of `os` reads it: absolute, and spelled
+/// plainly, with no `.`, no `..` and no empty segment. It looks at text only, so it gives the same
+/// answer on every runner. The live check passes the runner's OS; the replay backend passes the
+/// fixture's.
+pub(crate) fn check_dir_text(os: Os, dir: &'static str) -> Result<(), PolicyError> {
     let spelled_plainly = dir
         .split(['/', '\\'])
         .skip(1)
         .all(|part| !part.is_empty() && part != "." && part != "..");
+    if spelled_plainly && is_absolute_text(os, dir) {
+        Ok(())
+    } else {
+        Err(PolicyError::InvalidDir { dir })
+    }
+}
+
+/// A declared directory must be absolute and spelled plainly (see [`check_dir_text`], read with the
+/// runner's OS). `Path::components` hides `.` and `//`, so the text is checked as well.
+pub(crate) fn check_dir(dir: &'static str) -> Result<PathBuf, PolicyError> {
+    check_dir_text(crate::check::current_os(), dir)?;
+    let path = Path::new(dir);
     let plain = path.is_absolute()
-        && spelled_plainly
         && path.components().all(|part| {
             matches!(
                 part,

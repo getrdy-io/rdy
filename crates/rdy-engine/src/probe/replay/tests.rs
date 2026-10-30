@@ -1428,14 +1428,20 @@ async fn a_recording_answers_only_where_the_live_runner_would_find_the_program()
         .expect_err("not recorded");
     assert!(!got.to_string().contains("does not search"), "{got}");
 
-    // A declared directory the live runner would refuse is refused here too.
+    // A declared directory the live runner would refuse is refused here too. The fixture is Linux, so
+    // it is judged as Linux text on every runner: `/opt/tools/bin` above is absolute even on a Windows
+    // runner, and a drive path is not absolute here even though a Windows runner would accept it.
     static BAD: &[&str] = &["/opt/../etc"];
-    let bad = Cmd::new("chronyc", Duration::from_secs(5)).extra_dirs(BAD);
-    let got = only.replay().spawn(bad).await;
-    assert!(
-        matches!(got, Err(ProbeError::Policy(PolicyError::InvalidDir { .. }))),
-        "{got:?}"
-    );
+    static DRIVE: &[&str] = &["C:/tools/bin"];
+    static RELATIVE: &[&str] = &["tools/bin"];
+    for dirs in [BAD, DRIVE, RELATIVE] {
+        let bad = Cmd::new("chronyc", Duration::from_secs(5)).extra_dirs(dirs);
+        let got = only.replay().spawn(bad).await;
+        assert!(
+            matches!(got, Err(ProbeError::Policy(PolicyError::InvalidDir { .. }))),
+            "{dirs:?}: {got:?}"
+        );
+    }
 
     // /bin is a search directory.
     let bin = load(&[(

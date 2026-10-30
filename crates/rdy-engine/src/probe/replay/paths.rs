@@ -12,10 +12,7 @@
 
 use crate::check::Os;
 
-/// Whether `part` is a drive component such as `c:`.
-pub(super) fn is_drive(part: &str) -> bool {
-    part.len() == 2 && part.ends_with(':') && part.starts_with(|c: char| c.is_ascii_alphabetic())
-}
+pub(super) use crate::exec::policy::is_drive;
 
 /// The components of stored path text, for a fixture of `os`. Empty parts and `.` are dropped; `..`
 /// stays.
@@ -67,13 +64,10 @@ pub(super) fn asked_key(os: Os, text: &str) -> String {
 }
 
 /// Whether stored path text is absolute.
+///
+/// The one rule is `exec::policy::is_absolute_text`, shared with the declared-directory check.
 pub(super) fn is_absolute(os: Os, target: &str) -> bool {
-    let slashed = if os == Os::Windows {
-        target.replace('\\', "/")
-    } else {
-        target.to_owned()
-    };
-    slashed.starts_with('/') || (os == Os::Windows && slashed.get(..2).is_some_and(is_drive))
+    crate::exec::policy::is_absolute_text(os, target)
 }
 
 /// The key of a file in `root/`, from its path below `root/` (`proc/meminfo`, or `c/Windows/x` for a

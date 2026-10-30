@@ -52,7 +52,7 @@ use super::{
 };
 use crate::check::{BoxFuture, Os};
 use crate::exec::DEFAULT_STDERR_CAP;
-use crate::exec::policy::{Cmd, PolicyError, SEARCH_DIRS, WINDOWS_WHOAMI, check_dir, stem};
+use crate::exec::policy::{Cmd, PolicyError, SEARCH_DIRS, WINDOWS_WHOAMI, check_dir_text, stem};
 use crate::privilege::ProcessIds;
 
 mod b64;
@@ -396,8 +396,9 @@ impl Replay {
     ) -> Result<Option<&HashMap<Vec<String>, CommandAnswer>>, ProbeError> {
         let name = self.program_key(cmd.program());
         // The live runner checks the declared directories before it looks for the program, on every OS.
+        // Replay reads them as text by the fixture's OS, not the runner's.
         for dir in cmd.declared_dirs() {
-            check_dir(dir).map_err(ProbeError::Policy)?;
+            check_dir_text(self.os, dir).map_err(ProbeError::Policy)?;
         }
         let candidates: Vec<String> = if self.os == Os::Windows {
             // Until job objects land (M2-006) only `whoami` runs, from the constant path.
