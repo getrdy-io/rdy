@@ -1,0 +1,12 @@
+schema = 1
+name = "none-spec-lists-docker"
+summary = "No runtime, and the spec names two"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

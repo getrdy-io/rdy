@@ -1,0 +1,25 @@
+{
+  "entry": {
+    "id": "host.container_runtime"
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": null,
+      "storage_driver": null
+    },
+    "fix": "Install a container runtime the vendor supports with your package manager, then start it. For containerd, run `systemctl enable --now containerd`.",
+    "level": "fail",
+    "message": "No container runtime was found. rdy looked for the Docker, containerd, Podman and CRI-O sockets.",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": []
+    },
+    "partial": null
+  }
+}

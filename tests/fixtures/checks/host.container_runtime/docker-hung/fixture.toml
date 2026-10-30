@@ -1,0 +1,12 @@
+schema = 1
+name = "docker-hung"
+summary = "docker.sock accepts the connection and the daemon never answers"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

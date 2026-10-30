@@ -62,7 +62,7 @@ tests/fixtures/
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `summary/` (nine cases), `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (12 cases), `host.firewall/` (18 cases), `host.disk/` (15 cases), the twelve machines of
-`host.os/`, `host.security_agents/` (18 cases), the `host.lsm/` cases, `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
+`host.os/`, `host.security_agents/` (18 cases), the `host.lsm/` cases, `host.container_runtime/` (29 cases), `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
@@ -244,6 +244,12 @@ Any slug for the file name. One request per file:
 ```json
 { "request": { "method": "GET", "path": "/version", "query": "" }, "status": 200, "body": {}, "delay_ms": 0 }
 ```
+
+The Docker and Podman Engine API over a unix socket (`host.container_runtime`) uses the same files: a `GET`
+record with an empty query is the reply of `/var/run/docker.sock`, and `socket=/run/podman/podman.sock` in
+the query names another socket. The socket itself is a manifest link to `socket:[N]`, and listing it in
+`unreadable` makes `unix_get` fail with permission denied, as it does for a user outside the group. The
+check's test serves the records through `Replay::unix_get`; the loader does not.
 
 Paged lists have one file per `continue` token. The key is the upper-cased method, the path and the query
 text; `query` may be left out. A duplicate key fails the load. Access reviews are answered from

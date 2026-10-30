@@ -423,6 +423,65 @@ fn docker_fixture() -> Replay {
 }
 
 #[tokio::test]
+async fn an_unreadable_socket_gives_permission_denied_and_a_failed_entry() {
+    // A socket the fixture marks unreadable stands for one the user may not open (M1-150).
+    let hub = hub(docker_fixture().unreadable(DOCKER));
+    let probe = probe(&hub, runtime(), Os::Linux, &[]);
+    let error = probe
+        .unix_get(Path::new(DOCKER), "/version")
+        .await
+        .expect_err("not in the group");
+    assert_eq!(error, ProbeError::PermissionDenied);
+    assert_eq!(request_entry(&hub).outcome, ActionOutcome::Failed);
+
+    // A directory above it does the same.
+    let hub = self::hub(docker_fixture().unreadable("/var/run"));
+    let probe = self::probe(&hub, runtime(), Os::Linux, &[]);
+    let error = probe
+        .unix_get(Path::new(DOCKER), "/version")
+        .await
+        .expect_err("hidden");
+    assert_eq!(error, ProbeError::PermissionDenied);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_delayed_unix_reply_arrives_after_its_delay_and_a_huge_one_is_a_hang() {
+    use std::time::Duration;
+
+    // M1-150: a fixture `delay_ms` on a Docker reply. Under a paused clock it costs no real time.
+    let hub = hub(Replay::new().unix_get_after(
+        DOCKER,
+        "/version",
+        200,
+        r#"{"Version":"27.0.1"}"#,
+        Duration::from_secs(2),
+    ));
+    let probe = probe(&hub, runtime(), Os::Linux, &[]);
+    let started = tokio::time::Instant::now();
+    let reply = probe
+        .unix_get(Path::new(DOCKER), "/version")
+        .await
+        .expect("answered");
+    assert_eq!(reply.status, 200);
+    assert_eq!(started.elapsed(), Duration::from_secs(2));
+
+    let hub = self::hub(Replay::new().unix_get_after(
+        DOCKER,
+        "/version",
+        200,
+        "{}",
+        Duration::from_secs(3600),
+    ));
+    let probe = self::probe(&hub, runtime(), Os::Linux, &[]);
+    let hung = tokio::time::timeout(
+        Duration::from_secs(5),
+        probe.unix_get(Path::new(DOCKER), "/version"),
+    )
+    .await;
+    assert!(hung.is_err(), "the daemon never answered");
+}
+
+#[tokio::test]
 async fn a_post_on_the_docker_socket_is_refused_and_logged() {
     let hub = hub(docker_fixture());
     let probe = probe(&hub, runtime(), Os::Linux, &[]);

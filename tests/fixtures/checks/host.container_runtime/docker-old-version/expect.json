@@ -1,0 +1,49 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "min_version": "23.0",
+    "runtime": [
+      "docker"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": "23.0",
+      "runtime": [
+        "docker"
+      ],
+      "storage_driver": null
+    },
+    "fix": "Upgrade docker to 23.0 or later with your package manager, then run `systemctl restart docker`.",
+    "level": "fail",
+    "message": "docker 20.10.5 is older than the 23.0 the spec needs.",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "read",
+          "cgroup_driver": "systemd",
+          "cgroup_driver_source": "docker info",
+          "config_version": null,
+          "d_type": true,
+          "installed": false,
+          "proxy": null,
+          "rootless": false,
+          "rootless_socket": false,
+          "runtime": "docker",
+          "socket": "/var/run/docker.sock",
+          "socket_present": true,
+          "storage_driver": "overlay2",
+          "storage_driver_source": "docker info",
+          "version": "20.10.5"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

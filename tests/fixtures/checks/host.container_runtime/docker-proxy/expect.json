@@ -1,0 +1,55 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "docker"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "docker"
+      ],
+      "storage_driver": null
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "docker 24.0.7 is running (cgroup driver systemd, storage driver overlay2).",
+    "notes": [
+      "docker has a proxy set in docker info. Image pulls go through it, so check that it can reach the registry and that no_proxy lists the cluster addresses."
+    ],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "read",
+          "cgroup_driver": "systemd",
+          "cgroup_driver_source": "docker info",
+          "config_version": null,
+          "d_type": true,
+          "installed": false,
+          "proxy": {
+            "http": "http://[REDACTED:url_userinfo:2e238d70]@proxy.acme.example:3128",
+            "https": "http://[REDACTED:url_userinfo:2e238d70]@proxy.acme.example:3128",
+            "no_proxy": "localhost,10.0.0.0/8,.cluster.local",
+            "source": "docker info"
+          },
+          "rootless": false,
+          "rootless_socket": false,
+          "runtime": "docker",
+          "socket": "/var/run/docker.sock",
+          "socket_present": true,
+          "storage_driver": "overlay2",
+          "storage_driver_source": "docker info",
+          "version": "24.0.7"
+        }
+      ]
+    },
+    "partial": null
+  }
+}
