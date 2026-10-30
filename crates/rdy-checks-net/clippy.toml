@@ -42,7 +42,7 @@ disallowed-types = [
     { path = "askama::filters::Safe", reason = "prints a value without escaping; only the EmbeddedJson marker in report/html/view.rs may switch escaping off", allow-invalid = true },
     { path = "askama::filters::Unsafe", reason = "wraps a value for the escaper; use askama's default escaping", allow-invalid = true },
     { path = "askama::filters::MaybeSafe", reason = "marks filter output as maybe unescaped; escaping stays on", allow-invalid = true },
-    { path = "askama::filters::HtmlSafe", reason = "marks a type as printed without escaping; only EmbeddedJson in report/html/view.rs may, with #[expect]", allow-invalid = true },
+    { path = "askama::filters::HtmlSafe", reason = "marks a type as printed without escaping; only EmbeddedJson in report/html/view.rs may impl it (held by scripts/check-html-escapes.sh)", allow-invalid = true },
     { path = "askama::filters::HtmlSafeOutput", reason = "marks filter output as HTML safe; escaping stays on", allow-invalid = true },
 ]
 

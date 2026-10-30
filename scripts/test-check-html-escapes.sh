@@ -19,6 +19,7 @@ bad() {
   fail=1
 }
 
+JSON_LINE='<script type="application/json" id="rdy-result" data-sha256="{{ json_sha256 }}">{{ json }}</script>'
 ALLOWED='impl askama::filters::HtmlSafe for EmbeddedJson {}'
 VIEW=crates/rdy-engine/src/report/html/view.rs
 
@@ -38,7 +39,7 @@ EOF
     '#[derive(Template)]' '#[template(path = "report.html")]' 'struct View;' \
     >"$tmp/repo/$VIEW"
   printf '%s\n' 'pub struct HtmlSafeJson(String);' >"$tmp/repo/crates/rdy-engine/src/report/json.rs"
-  printf '%s\n' '<p>{{ name }}</p>' '<script type="application/json">{{ json }}</script>' \
+  printf '%s\n' '<p>{{ name }}</p>' "$JSON_LINE" \
     >"$tmp/repo/crates/rdy-engine/templates/report.html"
 }
 
@@ -84,11 +85,35 @@ expect "template: a path call to askama::filters::Safe" 1 "a path inside a templ
 fresh
 printf '%s\n' '{% let x = crate::other(name) %}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: any path inside a tag" 1 "a path inside a template"
-for filter in json json_pretty urlencode urlencode_strict; do
+for filter in json json_pretty tojson urlencode urlencode_strict; do
   fresh
   printf '%s\n' "{{ name|$filter }}" >>"$tmp/repo/crates/rdy-engine/templates/report.html"
   expect "template: |$filter" 1 "json or urlencode filter"
 done
+fresh
+printf '%s\n' '{{ "}" ~ askama::filters::Safe(name) }}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a path call after a } in a string" 1 "a path inside a template"
+fresh
+printf '%s\n' '{% if "%" == x %}{{ crate::y }}{% endif %}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: a path call after a % in a string" 1 "a path inside a template"
+fresh
+printf '%s\n' '<a href="{{ json }}">x</a>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: the embedded result in an attribute" 1 "exactly once"
+fresh
+printf '%s\n' "$JSON_LINE" >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: the embedded result twice, on the right line" 1 "exactly once"
+fresh
+printf '%s\n' '<p>{{ json|lower }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: the embedded result with a filter, on another line" 1 "exactly once"
+fresh
+printf '%s\n' '<script type="application/json">{{ json }}</script>' >"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: the embedded result on a looser script line" 1 "exactly once"
+fresh
+printf '%s\n' '<p>{{ name }}</p>' >"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: no embedded result at all" 1 "exactly once"
+fresh
+printf '%s\n' '{{ json_sha256 }} {{ json.len() }}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: json.len() counts as a second use" 1 "exactly once"
 fresh
 printf '%s\n' 'a::b in plain text, and {# askama::filters::Safe in a comment #}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: :: outside a tag and inside a comment passes" 0 "ok:"

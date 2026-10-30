@@ -12,7 +12,7 @@
 #
 #   templates   (each file is read with its newlines joined, so a filter name split over two lines is seen)
 #               a `|safe` or `|unsafe` filter, `|e(...)` or `|escape(...)` (which takes an escaper name, and
-#               `"none"` turns escaping off), `|json`, `|json_pretty`, `|urlencode`, `|urlencode_strict`,
+#               `"none"` turns escaping off), `|json`, `|json_pretty`, `|tojson`, `|urlencode`, `|urlencode_strict`,
 #               `{% filter safe %}` and the like, `escape =`, `autoescape`, and any `::` inside `{{ }}` or
 #               `{% %}` (a path call such as `askama::filters::Safe(x)` works in a template)
 #   Rust        `MaybeSafe`, `HtmlSafeOutput`, `HtmlSafe` anywhere; in a file that names askama also the
@@ -125,12 +125,31 @@ tscan() {
 {
   tscan "the safe filter prints a value without escaping it" "[|][[:space:]]*(safe|unsafe)$word"
   tscan "the e and escape filters take an escaper name, and \"none\" turns escaping off" "[|][[:space:]]*(e|escape)[[:space:]]*\\("
-  tscan "a json or urlencode filter returns output marked safe" "[|][[:space:]]*(json|json_pretty|urlencode|urlencode_strict)$word"
+  tscan "a json or urlencode filter returns output marked safe" "[|][[:space:]]*(json|json_pretty|tojson|urlencode|urlencode_strict)$word"
   tscan "a filter block with safe or escape turns escaping off" "[{]%[-+~]?[[:space:]]*filter[[:space:]]+(safe|unsafe|e|escape)$word"
   tscan "an escape setting in a template" "escape[[:space:]]*="
   tscan "autoescape switches escaping" "autoescape"
-  tscan "a path inside a template can name askama::filters::Safe" "[{][{%][^}]*::"
+  tscan "a path inside a template can name askama::filters::Safe" "[{]([{]([^}]|[}][^}])*|%([^%]|%[^}])*)::"
 } >"$tmp/hits"
+
+# The embedded result is printed raw, so it may be named in a tag exactly once, and only as the text of the
+# data block. `{{ json }}` in an attribute, a second use, or a use with a filter fails.
+JSON_LINE='<script type="application/json" id="rdy-result" data-sha256="{{ json_sha256 }}">{{ json }}</script>'
+json_uses=0
+json_line_found=0
+first_template=""
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  [ -n "$first_template" ] || first_template=$file
+  n=$(tr '\n\r\t' '   ' <"$file" | grep -Eo "[{][{%]([^}]|[}][^}])*(^|[^A-Za-z0-9_])json($word)" | grep -c .)
+  json_uses=$((json_uses + n))
+  if grep -Fxq -- "$JSON_LINE" "$file"; then
+    json_line_found=$((json_line_found + 1))
+  fi
+done <"$tmp/templates"
+if [ "$json_uses" -ne 1 ] || [ "$json_line_found" -ne 1 ]; then
+  printf '%s\t%s\t%s\t%s\n' "${first_template:-$root/crates}" 0 "the embedded result must be named in a template exactly once, on the line: $JSON_LINE" "found $json_uses use(s) of json in tags and $json_line_found copy(ies) of that line" >>"$tmp/hits"
+fi
 
 # Rust sources.
 {

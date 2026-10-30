@@ -328,7 +328,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 
 - `askama` 0.16.1, with its build-time crates `askama_macros`, `askama_derive` and `askama_parser` (M1-077, ADR 0003
   decision 5; D.5 of 07). **Approved by security-reviewer, PR #149 (SEC-149-2).** A direct dependency of `rdy-engine` behind the `html`
-  feature, which is on by default. The check crates may depend on none of them: `deny.toml` bans `askama` with `wrappers = ["rdy-engine"]`, and bans the three build-time crates except through their parent (the kube pattern). Pinned with `=` in the
+  feature, which is on by default. The check crates may depend on none of them: `deny.toml` bans `askama` with `wrappers = ["rdy-engine", "rdy-lint-wall"]` (the lint wall names its Safe items to prove they are banned, M1-078), and bans the three build-time crates except through their parent (the kube pattern). Pinned with `=` in the
   workspace `Cargo.toml`: a template engine decides what is escaped, so every bump is reviewed by hand.
   - Purpose: compile the HTML report templates (`crates/rdy-engine/templates/`) into Rust at build time, with
     HTML escaping on for `.html` files. No template is read at run time, and no template engine runs on a
@@ -359,7 +359,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     `HtmlSafeOutput` and the functions `safe`, `escape` and `e`, so any spelling of them (a glob import, an
     alias, a lowercase call) fails to compile. Clippy does not read the trait in an `impl` header, so
     `scripts/check-html-escapes.sh` (a lint-job step) is the second layer: it fails on the filters
-    `|safe`, `|unsafe`, `|e(`, `|escape(`, `|json`, `|json_pretty`, `|urlencode` and `|urlencode_strict`
+    `|safe`, `|unsafe`, `|e(`, `|escape(`, `|json`, `|json_pretty`, `|tojson`, `|urlencode` and `|urlencode_strict`, and unless `{{ json }}` appears exactly once, on the script line
     (templates are read with their newlines joined), on `{% filter safe %}`, on any `::` inside a tag (a path
     call works in askama 0.16.1), on `escape =`, on the words `filters`, `Safe` and `Unsafe` in a Rust file
     that names askama, on a `#[template]` (also inside `cfg_attr`) that is not `path = "*.html"` or has
