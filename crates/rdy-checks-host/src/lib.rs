@@ -3,8 +3,9 @@
 //! Internal to rdy. No API stability promise.
 //!
 //! So far this crate holds the OS support table, a stub for each host check that is not written yet
-//! (M1-067), [`Firewall`] (`host.firewall`, M1-147) and [`OsCheck`] (`host.os`, M1-073), which the family
-//! builds from their spec entries (M1-172). The real checks replace the stubs one ticket at a time (M1-068 and later). Every check
+//! (M1-067), [`Firewall`] (`host.firewall`, M1-147), [`OsCheck`] (`host.os`, M1-073), which the family
+//! builds from their spec entries (M1-172), and the cgroup helper ([`cgroup`], M1-065) that `host.memory`,
+//! `host.cpu` and `host.cgroups` share. The real checks replace the stubs one ticket at a time (M1-068 and later). Every check
 //! compiles on every target. Where a data source is not built, the check is `NotYet` on that OS, and the
 //! planner skips it with `skip_kind: not_yet_on_os` before it runs.
 //!
@@ -31,6 +32,7 @@
 )]
 #![warn(missing_docs)]
 
+pub mod cgroup;
 mod family;
 mod firewall;
 mod os;
