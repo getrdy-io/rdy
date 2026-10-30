@@ -2169,3 +2169,383 @@ fn a_replay_error_is_cloneable_and_tells_the_user_what_to_do() {
     assert!(error.to_string().contains("Fix:"));
     assert_eq!(error.outcome(), ActionOutcome::Failed);
 }
+
+// ---- read_link (M1-169) ------------------------------------------------------------------------
+
+mod links {
+    use super::*;
+    use crate::check::FD_WALK;
+    use crate::probe::policy::{RULE_FD_TARGET, RULE_PROC};
+
+    /// What host.ports will declare: the namespace link, the fd walk and the files it reads.
+    static PORTS: CheckInfo = reader(
+        "host.ports",
+        &["/proc/self/ns/net", "/proc/net", FD_WALK, "/etc"],
+    );
+    /// A check that reads `/proc` but never declared the walk.
+    static PROC_ONLY: CheckInfo = reader("host.fixture", &["/proc"]);
+    static ETC_ONLY: CheckInfo = reader("host.fixture", &["/etc"]);
+
+    fn fixture() -> Fixture {
+        Fixture::load(&fixtures_dir(), "checks/_policy/fd-walk").expect("the fixture loads")
+    }
+
+    fn text(file: &FileBytes) -> String {
+        String::from_utf8(file.bytes.clone()).expect("utf-8")
+    }
+
+    fn entries(run: &TestRun, kind: ActionKind) -> Vec<rdy_spec::result::Action> {
+        run.action_log()
+            .actions
+            .into_iter()
+            .filter(|action| action.kind == kind)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn the_namespace_and_the_socket_links_are_served_from_the_manifest() {
+        let fixture = fixture();
+        let run = TestRun::for_fixture(&fixture);
+        let ctx = run.context_for(&PORTS, "host.ports", Os::Linux, []);
+        let probe = ctx.probe();
+
+        let ns = probe
+            .read_link(Path::new("/proc/self/ns/net"))
+            .await
+            .expect("the namespace link");
+        assert_eq!(text(&ns), "net:[4026531840]");
+        assert!(!ns.truncated());
+        let socket = probe
+            .read_link(Path::new("/proc/1234/fd/3"))
+            .await
+            .expect("a socket link");
+        assert_eq!(text(&socket), "socket:[8841]");
+
+        // One entry per call, with the link and nothing of where it leads.
+        let log = entries(&run, ActionKind::ReadLink);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].outcome, ActionOutcome::Ok);
+        assert_eq!(log[0].check.as_deref(), Some("host.ports"));
+        let keys: Vec<&str> = log[1].fields.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["path"], "{log:?}");
+        assert_eq!(
+            log[1].fields.get("path").and_then(|v| v.as_str()),
+            Some("/proc/1234/fd/3")
+        );
+        let json = serde_json::to_string(&run.action_log().actions).expect("json");
+        assert!(
+            !json.contains("8841") && !json.contains("4026531840"),
+            "{json}"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_a_socket_comes_back_from_an_fd_directory() {
+        let fixture = fixture();
+        let run = TestRun::for_fixture(&fixture);
+        let ctx = run.context_for(&PORTS, "host.ports", Os::Linux, []);
+        let probe = ctx.probe();
+
+        // A file, a pipe and an anonymous inode are refused. The error and the log never hold what
+        // they pointed to.
+        for fd in ["4", "5", "7"] {
+            let path = format!("/proc/1234/fd/{fd}");
+            let error = probe
+                .read_link(Path::new(&path))
+                .await
+                .expect_err("not a socket");
+            assert_eq!(rule_of(&error), RULE_FD_TARGET, "{error:?}");
+            let text = error.to_string();
+            assert!(text.contains(&path), "{text}");
+            for target in ["state.db", "pipe:", "eventpoll", "/var/lib/acme"] {
+                assert!(!text.contains(target), "{text}");
+            }
+        }
+        let log = entries(&run, ActionKind::ReadLink);
+        assert_eq!(log.len(), 3);
+        for entry in &log {
+            assert_eq!(entry.outcome, ActionOutcome::Denied);
+            assert_eq!(
+                entry.fields.get("rule").and_then(|v| v.as_str()),
+                Some(RULE_FD_TARGET)
+            );
+        }
+        let json = serde_json::to_string(&run.action_log().actions).expect("json");
+        for target in ["state.db", "pipe:", "eventpoll", "/var/lib/acme"] {
+            assert!(!json.contains(target), "{target} is in the log: {json}");
+        }
+
+        // The sockets next to them still come back.
+        for (fd, inode) in [("3", "8841"), ("6", "9012")] {
+            let path = format!("/proc/1234/fd/{fd}");
+            let file = probe.read_link(Path::new(&path)).await.expect("a socket");
+            assert_eq!(text(&file), format!("socket:[{inode}]"));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_fd_directory_lists_under_the_declaration_and_reads_nothing_else() {
+        let fixture = fixture();
+        let run = TestRun::for_fixture(&fixture);
+        let ctx = run.context_for(&PORTS, "host.ports", Os::Linux, []);
+        let probe = ctx.probe();
+
+        let names: Vec<String> = probe
+            .read_dir(Path::new("/proc/1234/fd"))
+            .await
+            .expect("the fd directory")
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        assert_eq!(names, ["3", "4", "5", "6", "7"]);
+
+        // A listing does not give a read. `read` and `stat` of an fd never pass, so the file behind a
+        // link is out of reach.
+        for path in ["/proc/1234/fd/3", "/proc/1234/fd/4", "/proc/1234/fd"] {
+            let error = probe.read(Path::new(path)).await.expect_err("refused");
+            assert_eq!(rule_of(&error), RULE_PROC, "{path}");
+            let error = probe.stat(Path::new(path)).await.expect_err("refused");
+            assert_eq!(rule_of(&error), RULE_PROC, "{path}");
+        }
+        // And the other direction: the directory is listed, not link-read.
+        let error = probe
+            .read_link(Path::new("/proc/1234/fd"))
+            .await
+            .expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_PROC);
+    }
+
+    #[tokio::test]
+    async fn a_check_that_did_not_declare_the_walk_gets_no_fd() {
+        let fixture = fixture();
+        let run = TestRun::for_fixture(&fixture);
+        let ctx = run.context_for(&PROC_ONLY, "host.fixture", Os::Linux, []);
+        let probe = ctx.probe();
+        let error = probe
+            .read_link(Path::new("/proc/1234/fd/3"))
+            .await
+            .expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_PROC, "{error:?}");
+        let error = probe
+            .read_dir(Path::new("/proc/1234/fd"))
+            .await
+            .expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_PROC, "{error:?}");
+        // The namespace link is open to a check whose `reads` cover it.
+        let ns = probe
+            .read_link(Path::new("/proc/self/ns/net"))
+            .await
+            .expect("the namespace link");
+        assert_eq!(text(&ns), "net:[4026531840]");
+        // Another process's namespace link is not.
+        let error = probe
+            .read_link(Path::new("/proc/1234/ns/net"))
+            .await
+            .expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_PROC);
+        let log = run.action_log();
+        assert_eq!(count(&log, ActionOutcome::Denied), 3);
+        assert_eq!(count(&log, ActionOutcome::Ok), 1);
+    }
+
+    fn count(log: &crate::probe::ActionLogOutput, outcome: ActionOutcome) -> usize {
+        log.actions
+            .iter()
+            .filter(|action| action.outcome == outcome)
+            .count()
+    }
+
+    #[tokio::test]
+    async fn a_link_outside_the_declared_prefixes_is_refused_and_logged() {
+        let fixture = fixture();
+        let run = TestRun::for_fixture(&fixture);
+        let ctx = run.context_for(&ETC_ONLY, "host.fixture", Os::Linux, []);
+        let error = ctx
+            .probe()
+            .read_link(Path::new("/proc/self/ns/net"))
+            .await
+            .expect_err("outside reads");
+        assert_eq!(rule_of(&error), RULE_OUTSIDE_READS, "{error:?}");
+        let log = entries(&run, ActionKind::ReadLink);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].outcome, ActionOutcome::Denied);
+        assert_eq!(
+            log[0].fields.get("rule").and_then(|v| v.as_str()),
+            Some(RULE_OUTSIDE_READS)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_non_root_view_cannot_search_another_users_fd_directory() {
+        let fixture = fixture();
+        let run = TestRun::for_fixture(&fixture);
+        let ctx = run.context_for(&PORTS, "host.ports", Os::Linux, []);
+        let probe = ctx.probe();
+        assert_eq!(
+            probe.read_link(Path::new("/proc/5678/fd/3")).await,
+            Err(ProbeError::PermissionDenied)
+        );
+        assert_eq!(
+            probe.read_dir(Path::new("/proc/5678/fd")).await,
+            Err(ProbeError::PermissionDenied)
+        );
+        // A refusal by the OS is `failed`, not `denied`: rdy's policy allowed it.
+        let log = entries(&run, ActionKind::ReadLink);
+        assert_eq!(log[0].outcome, ActionOutcome::Failed);
+    }
+
+    #[tokio::test]
+    async fn a_missing_link_is_not_found_and_a_file_is_not_a_link() {
+        let fixture = fixture();
+        let run = TestRun::for_fixture(&fixture);
+        let ctx = run.context_for(&PORTS, "host.ports", Os::Linux, []);
+        let probe = ctx.probe();
+        assert_eq!(
+            probe.read_link(Path::new("/proc/1234/fd/99")).await,
+            Err(ProbeError::NotFound)
+        );
+        // A process that is gone: the whole directory is not there.
+        assert_eq!(
+            probe.read_link(Path::new("/proc/4321/fd/3")).await,
+            Err(ProbeError::NotFound)
+        );
+        let error = probe
+            .read_link(Path::new("/etc/hostname"))
+            .await
+            .expect_err("not there");
+        assert_eq!(error, ProbeError::NotFound);
+        let replay = Replay::new().file("/etc/hostname", "acme-host\n");
+        let run = TestRun::new(replay);
+        let ctx = run.context_for(&PORTS, "host.ports", Os::Linux, []);
+        match ctx.probe().read_link(Path::new("/etc/hostname")).await {
+            Err(ProbeError::Io(text)) => assert!(text.contains("not a symbolic link"), "{text}"),
+            other => panic!("expected an Io error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn there_is_no_namespace_link_where_there_is_no_proc() {
+        // A macOS machine has no /proc: the call is not found, and rdy does not guess.
+        let run = TestRun::new(Replay::for_os(Os::Macos));
+        let ctx = run.context_for(&PORTS, "host.ports", Os::Macos, []);
+        assert_eq!(
+            ctx.probe().read_link(Path::new("/proc/self/ns/net")).await,
+            Err(ProbeError::NotFound)
+        );
+        let log = entries(&run, ActionKind::ReadLink);
+        assert_eq!(log[0].outcome, ActionOutcome::Failed);
+    }
+
+    #[tokio::test]
+    async fn a_windows_check_reads_no_links() {
+        let run = TestRun::new(Replay::for_os(Os::Windows));
+        let ctx = run.context_for(&PORTS, "host.ports", Os::Windows, []);
+        let error = ctx
+            .probe()
+            .read_link(Path::new("/proc/self/ns/net"))
+            .await
+            .expect_err("refused");
+        assert_eq!(
+            rule_of(&error),
+            crate::probe::policy::RULE_WINDOWS,
+            "{error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_link_is_judged_where_it_sits_and_its_target_is_not_judged() {
+        // The link points at the password file. Reading the link says so and reads nothing.
+        let fixture = Fixture::load(&fixtures_dir(), "checks/_policy/symlink-to-shadow")
+            .expect("the fixture loads");
+        let run = TestRun::for_fixture(&fixture);
+        let ctx = run.context_for(&ACME, "host.fixture", Os::Linux, []);
+        let target = ctx
+            .probe()
+            .read_link(Path::new("/etc/acme/license.link"))
+            .await
+            .expect("the link");
+        assert_eq!(text(&target), "/etc/shadow");
+        let error = ctx
+            .probe()
+            .read(Path::new("/etc/acme/license.link"))
+            .await
+            .expect_err("the file behind it stays closed");
+        assert_eq!(rule_of(&error), RULE_SYSTEM_SECRET);
+
+        // A link that sits on the denylist is refused whatever it points to.
+        let replay = Replay::new()
+            .symlink("/etc/acme/id_rsa", "/usr/share/x")
+            .symlink("/etc/shadow", "/usr/share/y");
+        let run = TestRun::new(replay);
+        let ctx = run.context_for(&ACME, "host.fixture", Os::Linux, []);
+        let error = ctx
+            .probe()
+            .read_link(Path::new("/etc/acme/id_rsa"))
+            .await
+            .expect_err("a key name");
+        assert!(matches!(error, ProbeError::Denied { .. }), "{error:?}");
+        static WIDE: CheckInfo = reader("host.fixture", &["/etc"]);
+        let ctx = run.context_for(&WIDE, "host.fixture", Os::Linux, []);
+        let error = ctx
+            .probe()
+            .read_link(Path::new("/etc/shadow"))
+            .await
+            .expect_err("the password file");
+        assert_eq!(rule_of(&error), RULE_SYSTEM_SECRET);
+    }
+
+    #[tokio::test]
+    async fn a_directory_link_in_the_path_is_followed_and_the_real_link_is_judged() {
+        // `/srv/fds` leads to an fd directory. The path as written is under `/srv`, the real one is
+        // not, and the fd rule decides on the real one: sockets come back, a file is refused.
+        static VIA: CheckInfo = reader("host.ports", &["/srv", FD_WALK]);
+        let replay = Replay::new()
+            .symlink("/srv/fds", "/proc/1234/fd")
+            .symlink("/proc/1234/fd/3", "socket:[8841]")
+            .symlink("/proc/1234/fd/4", "/var/lib/acme/state.db");
+        let run = TestRun::new(replay);
+        let ctx = run.context_for(&VIA, "host.ports", Os::Linux, []);
+        let socket = ctx
+            .probe()
+            .read_link(Path::new("/srv/fds/3"))
+            .await
+            .expect("a socket");
+        assert_eq!(text(&socket), "socket:[8841]");
+        let error = ctx
+            .probe()
+            .read_link(Path::new("/srv/fds/4"))
+            .await
+            .expect_err("a file");
+        assert_eq!(rule_of(&error), RULE_FD_TARGET, "{error:?}");
+
+        // The same through a check that did not declare the walk: the real path is the refusal.
+        static NO_WALK: CheckInfo = reader("host.fixture", &["/srv"]);
+        let ctx = run.context_for(&NO_WALK, "host.fixture", Os::Linux, []);
+        let error = ctx
+            .probe()
+            .read_link(Path::new("/srv/fds/3"))
+            .await
+            .expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_PROC, "{error:?}");
+    }
+
+    #[tokio::test]
+    async fn a_relative_target_comes_back_as_recorded() {
+        let fixture = Fixture::load(&fixtures_dir(), "checks/_loader/manifest-entries")
+            .expect("the fixture loads");
+        let run = TestRun::for_fixture(&fixture);
+        let ctx = run.context_for(&ENTRIES, "host.fixture", Os::Linux, []);
+        let target = ctx
+            .probe()
+            .read_link(Path::new("/etc/os-release"))
+            .await
+            .expect("the link");
+        assert_eq!(text(&target), "../usr/lib/os-release");
+        // The cut flags of a file do not apply to a link.
+        assert!(!target.truncated());
+        assert_eq!(
+            ctx.probe().file_text(&target).expect("text").to_string(),
+            "../usr/lib/os-release"
+        );
+    }
+}

@@ -236,6 +236,93 @@ async fn paths_that_the_earlier_read_rules_refuse_are_violations_when_not_declar
 }
 
 #[test]
+fn the_fd_walk_declaration_covers_a_listing_and_link_reads_of_an_fd_directory_only() {
+    use super::fixture_run::undeclared_file;
+    use crate::check::FD_WALK;
+    static WALKER: CheckInfo = CheckInfo {
+        reads: &["/proc/self/ns/net", FD_WALK],
+        ..info("host.ports", &[])
+    };
+    static PROC_ONLY: CheckInfo = CheckInfo {
+        reads: &["/proc"],
+        ..info("host.ports", &[])
+    };
+    let action = |kind: ActionKind, path: &str| {
+        let mut action = Action::new(
+            1,
+            Some("host.ports".to_owned()),
+            0,
+            0,
+            kind,
+            ActionOutcome::Denied,
+        );
+        action.fields.insert("path".to_owned(), path.into());
+        action
+    };
+    let link = action(ActionKind::ReadLink, "/proc/1234/fd/7");
+    let dir = action(ActionKind::ReadDir, "/proc/1234/fd");
+    assert!(!undeclared_file(&WALKER, &link));
+    assert!(!undeclared_file(&WALKER, &dir));
+    assert!(!undeclared_file(
+        &WALKER,
+        &action(ActionKind::ReadLink, "/proc/self/fd/0")
+    ));
+    // The declaration is no prefix of `/proc`, and no read or `stat` of an fd is declared by it.
+    assert!(undeclared_file(
+        &WALKER,
+        &action(ActionKind::Read, "/proc/1234/fd/7")
+    ));
+    assert!(undeclared_file(
+        &WALKER,
+        &action(ActionKind::Stat, "/proc/1234/fd")
+    ));
+    assert!(undeclared_file(
+        &WALKER,
+        &action(ActionKind::ReadLink, "/proc/1234/comm")
+    ));
+    assert!(undeclared_file(
+        &WALKER,
+        &action(ActionKind::ReadLink, "/proc/1234/fd/7/x")
+    ));
+    assert!(undeclared_file(
+        &WALKER,
+        &action(ActionKind::ReadLink, "/host/proc/1234/fd/7")
+    ));
+    assert!(!undeclared_file(
+        &WALKER,
+        &action(ActionKind::ReadLink, "/proc/self/ns/net")
+    ));
+    // Without the declaration a link read is covered by a prefix like any other call.
+    assert!(!undeclared_file(&PROC_ONLY, &link));
+    assert!(undeclared_file(&MEMORY, &link));
+
+    // The path shape goes with the call: a listing is of the directory, a link read is of a link in it.
+    for path in ["/proc/1234/fd/7", "/proc/self/fd/0"] {
+        assert!(
+            undeclared_file(&WALKER, &action(ActionKind::ReadDir, path)),
+            "read_dir {path}"
+        );
+    }
+    for path in ["/proc/1234/fd", "/proc/self/fd"] {
+        assert!(
+            undeclared_file(&WALKER, &action(ActionKind::ReadLink, path)),
+            "read_link {path}"
+        );
+    }
+    // The declaration text is no prefix: it covers no read of a literal `/proc/<pid>/fd/x`.
+    for kind in [ActionKind::Read, ActionKind::Stat, ActionKind::ReadLink] {
+        assert!(
+            undeclared_file(&WALKER, &action(kind.clone(), "/proc/<pid>/fd/x")),
+            "{kind:?}"
+        );
+    }
+    assert!(undeclared_file(
+        &WALKER,
+        &action(ActionKind::ReadDir, "/proc/<pid>/fd")
+    ));
+}
+
+#[test]
 fn the_prefix_matcher_reads_linux_paths_as_text_on_every_host() {
     use super::fixture_run::covers;
     // Covered: the prefix itself, a child, repeated and dotted separators, a trailing slash.

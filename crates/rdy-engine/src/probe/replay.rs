@@ -16,7 +16,9 @@
 //! follows them on the virtual tree and gives the real path to [`ReadGuard::admit_real`], as the live
 //! backend does, so a link to `/etc/shadow` is refused. A link whose target is not a path
 //! (`socket:[8841]`, what `/proc/<pid>/fd` shows) is a special file: it is not a regular file and not a
-//! directory.
+//! directory. `read_link` (M1-169) serves the same map: it resolves the parent, judges the link's real
+//! path, and returns the target text as recorded, with the same rule that an fd link returns a socket
+//! target only.
 //!
 //! **Time.** A `delay_ms` is a tokio timer and a `blackhole` is a future that never completes. Neither
 //! uses a thread, so under paused time a wait costs nothing. A command whose delay reaches its time
@@ -650,6 +652,53 @@ impl Backend for Replay {
                 Ok(entries.clone())
             } else if self.files.contains_key(&real) {
                 Err(refusal(RULE_NOT_DIR))
+            } else {
+                Err(io::ErrorKind::NotFound.into())
+            }
+        })
+    }
+
+    fn read_link<'a>(
+        &'a self,
+        path: &'a Path,
+        guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Vec<u8>>> {
+        Box::pin(async move {
+            // The parent is resolved and the link is not followed, as the live backend does.
+            let mut parts = paths::components(self.os, &self.key(path));
+            let name = match parts.pop() {
+                Some(name) if name != ".." => name,
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "the path has no link name",
+                    ));
+                }
+            };
+            let parent = match self.resolve(&paths::join(self.os, &parts))? {
+                Resolved::Real { key, .. } => key,
+                Resolved::Special => return Err(io::ErrorKind::NotFound.into()),
+            };
+            let mut real_parts = paths::components(self.os, &parent);
+            real_parts.push(name);
+            let real = paths::join(self.os, &real_parts);
+            guard
+                .admit_real(Path::new(&real))
+                .map_err(Refused::into_io)?;
+            if self.hidden_by_parent(&real) {
+                return Err(io::ErrorKind::PermissionDenied.into());
+            }
+            if let Some(target) = self.links.get(&real) {
+                let target = target.clone().into_bytes();
+                guard
+                    .admit_link(Path::new(&real), &target)
+                    .map_err(Refused::into_io)?;
+                Ok(target)
+            } else if self.files.contains_key(&real) || self.dirs.contains_key(&real) {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "the path is not a symbolic link",
+                ))
             } else {
                 Err(io::ErrorKind::NotFound.into())
             }
