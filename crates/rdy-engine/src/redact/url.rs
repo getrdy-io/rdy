@@ -112,7 +112,6 @@ fn raw_delimiter_password(text: &str, start: usize, end: usize) -> (Option<usize
         return (None, end);
     };
     let is_userinfo = matches!(delimiter, Some('/' | '?' | '#'))
-        && !user.is_empty()
         && !user.starts_with('[')
         && !password.is_empty()
         && !password.bytes().all(|b| b.is_ascii_digit());
@@ -209,6 +208,8 @@ mod tests {
             ("'http://u:p@h'", "u:p"),
             ("\"url\":\"http://u:p@h/\"", "u:p"),
             (r"http:\/\/u:p@h\/x", "u:p"),
+            // An empty user, and a raw `/` in the password.
+            ("redis://:p/w@h", ":p/w"),
         ] {
             assert_eq!(found(text), [want], "{text}");
         }

@@ -18,7 +18,7 @@
 
 use std::ops::Range;
 
-use super::rules::is_exempt_value;
+use super::rules::{is_exempt_value, scheme_len};
 
 /// Header names, lower case. A name matches without regard to case, as headers do. `Proxy-Authorization`
 /// is the `authorization` name with a `proxy-` or `proxy_` in front.
@@ -180,10 +180,9 @@ fn scan_headers(text: &str, authorization: bool, out: &mut Vec<Range<usize>>) {
         covered_until = covered_until.max(region.end);
         let value = &text[region.clone()];
         let credential = if authorization {
-            // The scheme stays: `Authorization: Basic <credential>`. One word is all credential.
-            value
-                .find(char::is_whitespace)
-                .map_or(0, |i| i + value[i..].len() - value[i..].trim_start().len())
+            // A known scheme stays: `Authorization: Basic <credential>`. Any other first word is the
+            // credential.
+            scheme_len(value)
         } else {
             0
         };
@@ -268,8 +267,13 @@ mod tests {
             auth("Authorization: Digest username=\"a\", response=\"b\""),
             ["username=\"a\", response=\"b\""]
         );
-        // One word is all credential.
+        // A first word that is not a scheme is the credential, and so is the text after it.
         assert_eq!(auth("Authorization: abc123xyz"), ["abc123xyz"]);
+        assert_eq!(
+            auth("authorization: s3cr3tOpaque  # rotated"),
+            ["s3cr3tOpaque  # rotated"]
+        );
+        assert_eq!(auth("Authorization: aws4-hmac-sha256 Cred=x"), ["Cred=x"]);
         assert_eq!(auth("HTTP_AUTHORIZATION=Bearer abc123xyz"), ["abc123xyz"]);
     }
 

@@ -366,21 +366,46 @@ fn is_authorization_key(key: &str) -> bool {
     normalize_key(key).0.ends_with("authorization")
 }
 
-/// The credential of an `Authorization` value: the scheme word (`Bearer`, `Basic`) and the blanks after
+/// Authentication scheme words that can open an `Authorization` value, lower case. One list for the key
+/// rule and the header rule. A first word that is not one of these is the credential itself
+/// (`Authorization: s3cr3t`), so it is redacted.
+const AUTH_SCHEMES: &[&str] = &[
+    "bearer",
+    "basic",
+    "digest",
+    "negotiate",
+    "ntlm",
+    "token",
+    "bot",
+    "aws4-hmac-sha256",
+];
+
+/// How many bytes of an `Authorization` value are the scheme: a known scheme word (without regard to
+/// case) and the spaces or tabs after it. 0 when the value starts with anything else, or the word has no
+/// blank after it.
+pub(super) fn scheme_len(value: &str) -> usize {
+    let Some(end) = value.find([' ', '\t']) else {
+        return 0;
+    };
+    if !AUTH_SCHEMES
+        .iter()
+        .any(|s| value[..end].eq_ignore_ascii_case(s))
+    {
+        return 0;
+    }
+    let rest = &value[end..];
+    end + rest.len() - rest.trim_start_matches([' ', '\t']).len()
+}
+
+/// The credential of an `Authorization` value: a known scheme word (`Bearer`, `Basic`) and the blanks after
 /// it stay, so `Authorization: Bearer T`, `--token T` and a bare `Bearer T` all hide the same `T` and give
-/// it the same tag (04 Appendix B). One word is all credential. `None` when nothing is left to redact, or
-/// what is left is a placeholder already.
+/// it the same tag (04 Appendix B). Any other first word is the credential. `None` when nothing is left to
+/// redact, or what is left is exempt (a placeholder, `${TOKEN}`, `null`).
 fn skip_scheme(text: &str, span: Range<usize>) -> Option<Range<usize>> {
     let value = text.get(span.clone())?;
-    let start = value.find(char::is_whitespace).map_or(0, |i| {
-        // Blanks, not a line break: a value that starts on the next line has no scheme word.
-        let rest = &value[i..];
-        let blanks = rest.len() - rest.trim_start_matches([' ', '\t']).len();
-        if blanks == 0 { 0 } else { i + blanks }
-    });
-    let span = span.start + start..span.end;
+    let span = span.start + scheme_len(value)..span.end;
     let credential = text.get(span.clone())?;
-    (!credential.is_empty() && !is_single_placeholder(credential)).then_some(span)
+    (!credential.is_empty() && !is_exempt_value(credential)).then_some(span)
 }
 
 /// True if `arg` is a flag that names a secret and has no `=`: `--password`, `-token`. Its value is the
@@ -1345,6 +1370,11 @@ mod tests {
             ("password={{ hunter2 }}", "hunter2"),
             ("password=/run/secrets/../hunter2", "hunter2"),
             ("Authorization: Basic hunter2", "hunter2"),
+            // Round 8: an opaque credential is not a scheme word.
+            ("authorization: s3cr3tOpaque  # rotated", "s3cr3tOpaque"),
+            ("authorization=s3cr3tOpaque status=200", "s3cr3tOpaque"),
+            ("Authorization: bEaReR s3cr3tOpaque", "s3cr3tOpaque"),
+            ("Authorization: Bearerx s3cr3tOpaque", "Bearerx"),
             ("authProfile: hunter2", "hunter2"),
             (r#"{\\\"password\\\":\\\"hunter2\\\"}"#, "hunter2"),
             (r#"password=\"pa\\\",hunter2\" x"#, "hunter2"),
@@ -1636,6 +1666,37 @@ mod tests {
         // Other keys take the whole value, and a placeholder is left alone.
         assert_eq!(found("token: Bearer abc123xyz"), ["Bearer abc123xyz"]);
         assert!(found("Authorization: Bearer [REDACTED:auth_header:1a2b3c4d]").is_empty());
+        // An exempt credential after the scheme stays too.
+        assert!(found("Authorization: Bearer ${TOKEN}").is_empty());
+        assert!(found("Authorization: Bearer null").is_empty());
+    }
+
+    #[test]
+    fn only_a_known_scheme_word_is_kept() {
+        for scheme in [
+            "Bearer",
+            "basic",
+            "DIGEST",
+            "Negotiate",
+            "NTLM",
+            "Token",
+            "Bot",
+            "AWS4-HMAC-SHA256",
+        ] {
+            let text = format!("Authorization: {scheme} abc123xyz");
+            assert_eq!(found(&text), ["abc123xyz"], "{text}");
+        }
+        assert_eq!(
+            found("authorization: s3cr3tOpaque  # rotated"),
+            ["s3cr3tOpaque  # rotated"]
+        );
+        assert_eq!(
+            found("authorization=s3cr3tOpaque status=200"),
+            ["s3cr3tOpaque status=200"]
+        );
+        // A scheme word with no blank after it is not a scheme.
+        assert_eq!(found("authorization: Bearer"), ["Bearer"]);
+        assert_eq!(found("authorization: Bearerx abc"), ["Bearerx abc"]);
     }
 
     #[test]

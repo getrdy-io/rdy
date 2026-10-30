@@ -63,6 +63,8 @@ pub use key::TagKey;
 pub use known::MIN_LEN as KNOWN_SECRET_MIN_LEN;
 /// The count name of a refused known secret in the report's `redaction.by_rule`.
 pub(crate) use known::REFUSED_RULE as KNOWN_SECRET_REFUSED;
+/// Cuts a redacted text to a byte cap with the ` [truncated]` marker, as the report walk does.
+pub(crate) use report::cap as cap_text;
 pub use url::evidence_url;
 
 use rules::{BUILT_IN, Rule};
