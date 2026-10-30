@@ -232,7 +232,7 @@ pub struct CheckMeta {
     pub remediation: &'static str,
 }
 
-/// The `reads` entry that declares the fd walk (M1-169, ADR 0039): the check may list `/proc/<pid>/fd`
+/// The `reads` entry that declares the fd walk (M1-169, ADR 0040): the check may list `/proc/<pid>/fd`
 /// and read the links in it, and only for the links that lead to a socket (`socket:[8841]`). The text
 /// is not a real path, so it grants no read by itself: `/proc/<pid>/fd` is no process id. Only
 /// `host.ports` declares it, to find which process holds a port. It does not allow `read`, `stat` or

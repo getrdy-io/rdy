@@ -1,4 +1,4 @@
-# ADR 0039: The facade reads links with `read_link`, judges the link where it sits, and opens `/proc/<pid>/fd` to a declared walk that returns sockets only
+# ADR 0040: The facade reads links with `read_link`, judges the link where it sits, and opens `/proc/<pid>/fd` to a declared walk that returns sockets only
 
 - Status: Accepted, pending security review (M1-169)
 - Date: 2026-10-30

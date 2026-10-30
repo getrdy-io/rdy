@@ -443,7 +443,7 @@ tests policy.
   `rdy-checks-k8s` client module reads the file the operator chose (`--kubeconfig`, `KUBECONFIG` or
   `~/.kube/config`), and the probe hook logs it as a `read` entry with no check id from
   `Loaded::files()` (ADR 0031, M1-102).
-- Links (`read_link`, M1-169, ADR 0039): the link is judged where it sits and never followed. The path as
+- Links (`read_link`, M1-169, ADR 0040): the link is judged where it sits and never followed. The path as
   written, and its real path (the real parent plus its own name), must be off the deny list and under
   `reads`. Linux opens the parent with `O_PATH` and calls `readlinkat` on that descriptor. The target is
   returned raw and is not judged or logged: the entry holds `path` only. Two entries of `/proc/<pid>/` are open
@@ -997,7 +997,7 @@ impl Probe {
     pub async fn read(&self, path: &Path) -> Result<FileBytes, ProbeError>;
     pub async fn read_tail(&self, path: &Path, max: usize) -> Result<FileBytes, ProbeError>;
     pub async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ProbeError>;
-    // As built in M1-169 (ADR 0039): returns the raw target, never logged. The link is judged where it sits.
+    // As built in M1-169 (ADR 0040): returns the raw target, never logged. The link is judged where it sits.
     // `check::FD_WALK` in `reads` opens `read_dir` of /proc/<pid>/fd and `read_link` of its links, and only
     // a `socket:[N]` target comes back. /proc/self/ns/net is open when `reads` cover it.
     pub async fn read_link(&self, path: &Path) -> Result<FileBytes, ProbeError>;
