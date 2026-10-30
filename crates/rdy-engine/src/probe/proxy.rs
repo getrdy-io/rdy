@@ -21,7 +21,8 @@ mod tests;
 /// The longest proxy URL accepted, in bytes.
 const MAX_LEN: usize = 2048;
 
-/// The port of a proxy URL that names none. It is the `http` default, as in a browser.
+/// The port of a proxy URL that names none. It is the `http` default, as in a browser. Some tools
+/// assume 1080 instead, so write the port in the proxy URL when it is not 80.
 pub const DEFAULT_PROXY_PORT: u16 = 80;
 
 /// The largest `CONNECT` reply head that is read, in bytes (ADR 0014 decision 2).
@@ -151,26 +152,29 @@ impl ProxyUrl {
         self.credentials.is_some()
     }
 
-    /// Every form of the password and the credential pair that can reach output: the password as
-    /// written and percent-decoded, and the base64 of `user:password` that goes into
-    /// `Proxy-Authorization`. A caller adds all of them to the known-secret set. Empty when the URL has
-    /// no password.
+    /// Every form of the secret and the credential pair that can reach output. With a password: the
+    /// password as written and percent-decoded, and the base64 of `user:password` that goes into
+    /// `Proxy-Authorization`. With a user and no password (or an empty one), the user name is the
+    /// secret, as in `http://TOKEN@proxy`: the user name and the base64 of `user:`. A caller adds all of
+    /// them to the known-secret set. Empty when the URL has no user.
     pub(crate) fn secrets(&self) -> Vec<String> {
         let Some(Credentials {
             user,
-            password: Some(password),
+            password,
             raw_password,
         }) = &self.credentials
         else {
             return Vec::new();
         };
-        if password.is_empty() {
-            return Vec::new();
+        match password.as_deref().filter(|password| !password.is_empty()) {
+            Some(password) => {
+                let mut forms = vec![password.to_owned()];
+                forms.extend(raw_password.clone().filter(|raw| raw != password));
+                forms.push(base64(format!("{user}:{password}").as_bytes()));
+                forms
+            }
+            None => vec![user.clone(), base64(format!("{user}:").as_bytes())],
         }
-        let mut forms = vec![password.clone()];
-        forms.extend(raw_password.clone().filter(|raw| raw != password));
-        forms.push(base64(format!("{user}:{password}").as_bytes()));
-        forms
     }
 
     /// The `Proxy-Authorization` header value, `Basic <base64>`, or `None` when the URL had no user.
@@ -294,12 +298,19 @@ pub enum ProxyError {
     /// The run-scoped known-secret set refused the proxy password, so rdy could not promise to keep it
     /// out of the output. The caller ends the run with exit code 70.
     #[error(
-        "rdy could not add the proxy password to its redaction list, so it cannot promise to keep it out of the report. Fix: use a proxy password of 6 to 65536 characters, or take the password out of the proxy URL"
+        "rdy could not add the proxy password to its redaction list, so it cannot promise to keep it out of the report. Fix: use a proxy password of at least 6 bytes (or, with no password, a user name of at least 6 bytes), or take the credentials out of the proxy URL"
     )]
     SecretRefused,
     /// A proxy was already set for this run.
     #[error("a proxy is already set for this run. Fix: this is a bug in rdy; please report it")]
     AlreadySet,
+    /// The run already started: the action log has an entry or a check's probe was opened. An entry
+    /// written before the password was known could hold it, so the proxy cannot be set now. The caller
+    /// ends the run with exit code 70.
+    #[error(
+        "the proxy was set after the run had started, so rdy cannot promise to keep its password out of the log. Fix: this is a bug in rdy; please report it"
+    )]
+    TooLate,
 }
 
 /// What a proxy asked for in a `Proxy-Authenticate` header.
@@ -386,6 +397,21 @@ pub enum NetFailure {
     NoProxy,
 }
 
+impl NetFailure {
+    /// The fixed phrase the action log records. It names the kind of failure and, for a refused
+    /// `CONNECT`, the status. It holds no host, no fix hint and nothing the peer sent.
+    pub(crate) fn log_phrase(&self) -> String {
+        match self {
+            Self::Dns { .. } => "the name did not resolve".to_owned(),
+            Self::ProxyForbidden { .. } => "the proxy refused CONNECT (403)".to_owned(),
+            Self::ProxyAuthRequired { .. } => "the proxy asked for authentication (407)".to_owned(),
+            Self::ProxyRefused { status, .. } => format!("the proxy refused CONNECT ({status})"),
+            Self::ProxyBadReply { reason } => format!("the proxy reply was not readable: {reason}"),
+            Self::NoProxy => "no proxy is set for this run".to_owned(),
+        }
+    }
+}
+
 fn fix_407(challenge: ProxyChallenge, sent: bool) -> &'static str {
     match (challenge, sent) {
         (ProxyChallenge::Negotiate | ProxyChallenge::Ntlm, _) => {
@@ -426,27 +452,49 @@ pub(crate) fn parse_connect_head(head: &[u8]) -> Result<ConnectReply, &'static s
         .flatten()
         .filter(|status| (100..=599).contains(status))
         .ok_or("no status code")?;
+    // Every header counts, and so does every comma-separated challenge in one. Basic wins when it is
+    // offered, because it is the only scheme rdy can answer; else the first scheme seen is the hint.
     let mut challenge = ProxyChallenge::None;
     for line in lines {
         let Some((name, value)) = line.split_once(':') else {
             continue;
         };
-        if name.trim().eq_ignore_ascii_case("proxy-authenticate")
-            && challenge == ProxyChallenge::None
-        {
-            let scheme = value.split_whitespace().next().unwrap_or_default();
-            challenge = if scheme.eq_ignore_ascii_case("basic") {
+        if !name.trim().eq_ignore_ascii_case("proxy-authenticate") {
+            continue;
+        }
+        let mut offered = false;
+        for part in value.split(',') {
+            let scheme = part.split_whitespace().next().unwrap_or_default();
+            let seen = if scheme.eq_ignore_ascii_case("basic") {
                 ProxyChallenge::Basic
             } else if scheme.eq_ignore_ascii_case("negotiate") {
                 ProxyChallenge::Negotiate
             } else if scheme.eq_ignore_ascii_case("ntlm") {
                 ProxyChallenge::Ntlm
             } else {
-                ProxyChallenge::Other
+                continue;
             };
+            offered = true;
+            challenge = prefer(challenge, seen);
+        }
+        if !offered {
+            challenge = prefer(challenge, ProxyChallenge::Other);
         }
     }
     Ok(ConnectReply { status, challenge })
+}
+
+/// The challenge to report when `seen` joins `have`: Basic beats everything, a known scheme beats
+/// `Other`, and the first of equals stays.
+#[cfg(any(feature = "runtime", feature = "loopback"))]
+fn prefer(have: ProxyChallenge, seen: ProxyChallenge) -> ProxyChallenge {
+    let rank = |challenge| match challenge {
+        ProxyChallenge::Basic => 3,
+        ProxyChallenge::Negotiate | ProxyChallenge::Ntlm => 2,
+        ProxyChallenge::Other => 1,
+        _ => 0,
+    };
+    if rank(seen) > rank(have) { seen } else { have }
 }
 
 #[cfg(any(feature = "runtime", feature = "loopback"))]

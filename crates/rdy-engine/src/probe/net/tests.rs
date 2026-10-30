@@ -8,9 +8,6 @@
 //! The replay tests run on paused time. The loopback tests (`testing::loopback`) use real sockets and
 //! the real clock, with short timeouts where a test waits for one.
 
-// The engine's own tests build the live backend; check crates may not.
-#![allow(clippy::disallowed_methods)]
-
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -246,7 +243,13 @@ async fn a_probe_with_no_hosts_or_no_declaration_can_reach_nothing() {
 
 #[tokio::test]
 async fn a_connect_to_a_literal_metadata_address_sends_no_byte() {
-    let proxy = ConnectProxy::start(ProxyMode::Ok).await.expect("proxy");
+    let server = HttpServer::start(HttpOptions::plain())
+        .await
+        .expect("server");
+    let proxy =
+        ConnectProxy::start_with_routes(ProxyMode::Ok, &[("web.acme.test:443", server.addr())])
+            .await
+            .expect("proxy");
     let hub = hub_over(proxied(proxy.addr()));
     hub.set_proxy_text("http://proxy.acme.test:3128")
         .expect("proxy");
@@ -258,7 +261,9 @@ async fn a_connect_to_a_literal_metadata_address_sends_no_byte() {
         "[fd00:ec2::254]:443",
         "0.0.0.0:443",
     ];
-    let probe = probe(&hub, &literals);
+    let mut hosts = literals.to_vec();
+    hosts.push("web.acme.test:443");
+    let probe = probe(&hub, &hosts);
     for text in literals {
         for route in [Route::ViaProxy, Route::Direct] {
             let error = probe
@@ -279,6 +284,53 @@ async fn a_connect_to_a_literal_metadata_address_sends_no_byte() {
         log.iter()
             .all(|e| field(e, "rule") == Some(&Value::from(RULE_TCP_ADDRESS)))
     );
+
+    // Positive control: an allowed target through the same proxy does reach it, so the zero counts
+    // above are not true of a proxy that nothing can reach.
+    let report = probe
+        .tcp(&target("web.acme.test:443"), Route::ViaProxy)
+        .await
+        .expect("an allowed target");
+    assert!(report.connected);
+    assert_eq!(proxy.accepted(), 1);
+    assert!(proxy.bytes_received() > 0);
+    assert_eq!(proxy.requests().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_proxy_that_resolves_to_a_forbidden_address_is_refused_as_the_proxy() {
+    let opened = Arc::new(AtomicUsize::new(0));
+    let replay = web_script(
+        Replay::new()
+            .host("proxy.acme.test", [ip("169.254.169.254")])
+            .host("mixed.acme.test", [ip("192.0.2.7"), ip("fe80::1")]),
+        "192.0.2.7:3128",
+    )
+    .serve("web", counting(&opened));
+    for text in [
+        "http://proxy.acme.test:3128",
+        "http://mixed.acme.test:3128",
+        "http://169.254.169.254:3128",
+        "http://[fe80::1]:3128",
+    ] {
+        let hub = hub_over(replay.clone());
+        hub.set_proxy_text(text).expect("proxy");
+        let probe = probe(&hub, &["web.acme.test:443"]);
+        let error = probe
+            .tcp(&target("web.acme.test:443"), Route::ViaProxy)
+            .await
+            .expect_err("the proxy address is refused");
+        // The rule names the proxy, not the target the check asked for.
+        assert_eq!(denied_rule(&error), RULE_PROXY_ADDRESS, "{text}");
+        assert_ne!(RULE_PROXY_ADDRESS, RULE_TCP_ADDRESS);
+        assert_eq!(opened.load(Ordering::SeqCst), 0, "{text}");
+        let log = entries(&hub);
+        assert_eq!(log.len(), 1);
+        assert_eq!(
+            field(&log[0], "rule"),
+            Some(&Value::from(RULE_PROXY_ADDRESS))
+        );
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -772,14 +824,83 @@ async fn proxy_403_and_407_return_typed_errors_and_no_credential_reaches_the_log
             field(&log[0], "via_proxy"),
             Some(&Value::from("http://proxy.acme.test:3128"))
         );
+        // The log holds the fixed phrase of the failure, not the user message with its host and fix.
+        let ProbeError::Net(failure) = &error else {
+            panic!("expected a network failure, got {error:?}");
+        };
+        let phrase = field(&log[0], "error")
+            .and_then(Value::as_str)
+            .expect("an error phrase");
+        assert_eq!(phrase, failure.log_phrase(), "{mode:?}");
         assert!(
-            field(&log[0], "error")
-                .and_then(Value::as_str)
-                .is_some_and(|e| e.contains("CONNECT")),
-            "{log:?}"
+            phrase.contains("CONNECT") || phrase.contains("407"),
+            "{phrase}"
         );
+        assert!(
+            !phrase.contains("Fix:") && !phrase.contains("web.acme.test"),
+            "{phrase}"
+        );
+        assert_eq!(field(&log[0], "addr"), Some(&Value::Null));
         assert_no_credentials(&log_text(&hub));
         assert_no_credentials(&format!("{error} {error:?}"));
+    }
+}
+
+/// The result schema, as the generator wrote it.
+fn assert_matches_result_schema(report: &Value) {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(root.join("../rdy-spec/schema/result.v1.schema.json"))
+        .expect("schema file");
+    let schema: Value = serde_json::from_str(&text).expect("schema json");
+    let validator = jsonschema::draft202012::options()
+        .should_validate_formats(true)
+        .build(&schema)
+        .expect("schema compiles");
+    let errors: Vec<String> = validator
+        .iter_errors(report)
+        .map(|e| format!("{e} at {}", e.instance_path()))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "the report fails the schema: {errors:#?}"
+    );
+}
+
+#[tokio::test]
+async fn failed_and_denied_connect_entries_match_the_result_schema() {
+    let proxy = ConnectProxy::start(ProxyMode::Forbidden)
+        .await
+        .expect("proxy");
+    let hub = hub_over(proxied(proxy.addr()));
+    hub.set_proxy_text(&proxy_url(true)).expect("proxy");
+    let probe = probe(&hub, &["web.acme.test:443", "169.254.169.254:443"]);
+    // A proxied call that failed and one that was denied.
+    probe
+        .tcp(&target("web.acme.test:443"), Route::ViaProxy)
+        .await
+        .expect_err("403");
+    probe
+        .tcp(&target("169.254.169.254:443"), Route::ViaProxy)
+        .await
+        .expect_err("denied");
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let sample =
+        std::fs::read_to_string(root.join("../../tests/fixtures/reports/not-ready-7.2.json"))
+            .expect("the fixture is in the repo");
+    let mut report: rdy_spec::result::Report = serde_json::from_str(&sample).expect("a report");
+    hub.action_log().apply(&mut report);
+    let json = serde_json::to_value(&report).expect("report");
+    assert_matches_result_schema(&json);
+    let connects: Vec<&Value> = json["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .filter(|a| a["kind"] == "connect")
+        .collect();
+    assert_eq!(connects.len(), 2);
+    for entry in connects {
+        assert_eq!(entry["addr"], Value::Null, "{entry}");
     }
 }
 
@@ -995,13 +1116,7 @@ async fn a_password_the_set_refuses_stops_the_run_and_sets_no_proxy() {
     // The refusal is counted in the report's redaction counts, with no value.
     let counts = hub.action_log().redaction;
     assert_eq!(counts.get("known_secret_refused"), 1);
-    // The proxy was not set: a proxied call has none, and a corrected URL is accepted.
-    let probe = probe(&hub, &["web.acme.test:443"]);
-    let call = probe
-        .tcp(&target("web.acme.test:443"), Route::ViaProxy)
-        .await
-        .expect_err("no proxy");
-    assert_eq!(call, ProbeError::Net(NetFailure::NoProxy));
+    // The proxy was not set, so a corrected URL is accepted (it is not `AlreadySet`).
     hub.set_proxy_text("http://svc:longer-canary-pw@proxy.acme.test:3128")
         .expect("accepted");
     // A bad URL is a typed error that echoes nothing.
@@ -1013,10 +1128,85 @@ async fn a_password_the_set_refuses_stops_the_run_and_sets_no_proxy() {
     assert!(!error.to_string().contains("Canary"));
 }
 
+#[tokio::test]
+async fn a_user_with_no_password_is_the_secret() {
+    // The token-as-user pattern: `http://TOKEN@proxy`. The token goes out in `Proxy-Authorization`.
+    for text in [
+        "http://tok-canary-7@proxy.acme.test:3128",
+        "http://tok-canary-7:@proxy.acme.test:3128",
+    ] {
+        let hub = hub_over(Replay::new());
+        let probe = hub.run_probe();
+        let show = |text: &str| {
+            probe
+                .file_text(&FileBytes::new(text.as_bytes().to_vec()))
+                .expect("text")
+                .to_string()
+        };
+        hub.set_proxy_text(text).expect("proxy");
+        let user = show("the token is tok-canary-7 here");
+        assert!(!user.contains("canary"), "{text}: {user}");
+        // base64 of `tok-canary-7:`.
+        let pair = show("Proxy-Authorization: Basic dG9rLWNhbmFyeS03Og==");
+        assert!(!pair.contains("dG9rLWNhbmFyeS03Og"), "{text}: {pair}");
+    }
+    // A user name the set cannot hold is a refusal, as a short password is.
+    let hub = hub_over(Replay::new());
+    let error = hub
+        .set_proxy_text("http://tok@proxy.acme.test:3128")
+        .expect_err("refused");
+    assert_eq!(error, ProxyError::SecretRefused);
+    assert!(!error.to_string().contains("tok@"));
+    // Only the user name was refused. Its pair with the empty password (`tok:`) is long enough.
+    assert_eq!(hub.action_log().redaction.get("known_secret_refused"), 1);
+}
+
+#[tokio::test]
+async fn the_proxy_cannot_be_set_once_the_run_has_started() {
+    // A check's probe was opened, with no call made.
+    let hub = hub_over(Replay::new());
+    let _probe = hub.check_probe("net.egress", Os::Linux, Some(egress()));
+    assert_eq!(
+        hub.set_proxy_text(&proxy_url(true)),
+        Err(ProxyError::TooLate)
+    );
+    assert!(entries(&hub).is_empty());
+
+    // The action log has an entry from run-level work, and no check probe was opened.
+    let hub = hub_over(Replay::new());
+    let run = hub.run_probe();
+    run.begin(ActionKind::Read, serde_json::Map::new(), "/proc/cpuinfo")
+        .expect("run probe")
+        .1
+        .finish(ActionOutcome::Ok);
+    let error = hub.set_proxy_text(&proxy_url(true)).expect_err("too late");
+    assert_eq!(error, ProxyError::TooLate);
+    assert!(error.to_string().contains("Fix:"));
+    // Nothing was registered and no proxy is set: the password is not hidden, and no call may use it.
+    let probe = hub.run_probe();
+    let shown = probe
+        .file_text(&FileBytes::new(PASSWORD.as_bytes().to_vec()))
+        .expect("text")
+        .to_string();
+    assert_eq!(shown, PASSWORD);
+
+    // Before either, it works, and the order is the same for a clone of the hub.
+    let hub = hub_over(Replay::new());
+    let clone = hub.clone();
+    clone.set_proxy_text(&proxy_url(true)).expect("proxy");
+    let _probe = hub.check_probe("net.egress", Os::Linux, Some(egress()));
+}
+
 // ---- real sockets, through the live backend ----------------------------------------------------
 
 fn live_hub() -> ProbeHub {
-    hub_over_arc(crate::probe::live_backend())
+    // The engine's own tests build the live backend; check crates may not.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the engine's own tests build the live backend; check crates may not"
+    )]
+    let live = crate::probe::live_backend();
+    hub_over_arc(live)
 }
 
 fn hub_over_arc(backend: Arc<dyn Backend>) -> ProbeHub {
@@ -1031,6 +1221,12 @@ async fn the_live_backend_connects_refuses_and_tunnels_on_loopback() {
     let hub = live_hub();
     let listen = server.addr();
     let closed = closed_port().await.expect("a closed port");
+    // A real proxy that routes the name to the server. The proxy is set before the first probe.
+    let proxy = ConnectProxy::start_with_routes(ProxyMode::Ok, &[("web.acme.test:443", listen)])
+        .await
+        .expect("proxy");
+    hub.set_proxy_text(&format!("svc:{PASSWORD_RAW}@{}", proxy.addr()))
+        .expect("proxy");
     let probe = probe(
         &hub,
         &[
@@ -1039,6 +1235,15 @@ async fn the_live_backend_connects_refuses_and_tunnels_on_loopback() {
             "web.acme.test:443",
         ],
     );
+    // A refused connect to a closed loopback port is instant on Linux and macOS, but Windows retries
+    // the SYN for about 2 s before it reports the refusal. A wait of 10 s keeps that from being read
+    // as a silent host (a timeout), which would hide the `Refused` this test asserts.
+    probe
+        .scope
+        .peers
+        .timeout
+        .set(Duration::from_secs(10))
+        .expect("set once");
 
     let up = probe
         .tcp(&target(&listen.to_string()), Route::Direct)
@@ -1055,12 +1260,7 @@ async fn the_live_backend_connects_refuses_and_tunnels_on_loopback() {
     assert!(!down.connected);
     assert_eq!(down.attempts[0].outcome, AttemptOutcome::Refused);
 
-    // Through a real proxy that routes the name to the server.
-    let proxy = ConnectProxy::start_with_routes(ProxyMode::Ok, &[("web.acme.test:443", listen)])
-        .await
-        .expect("proxy");
-    hub.set_proxy_text(&format!("svc:{PASSWORD_RAW}@{}", proxy.addr()))
-        .expect("proxy");
+    // Through the real proxy.
     let tunnel = probe
         .tcp(&target("web.acme.test:443"), Route::ViaProxy)
         .await

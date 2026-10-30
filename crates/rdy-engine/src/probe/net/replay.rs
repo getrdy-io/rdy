@@ -94,7 +94,8 @@ impl Replay {
 
     /// Registers the server `name` as an in-process task. Each connection makes a duplex pipe, runs
     /// `serve` on one end in a new task and gives the other end to the caller. The task ends when
-    /// `serve` returns or when either end is dropped.
+    /// `serve` returns. Dropping the caller's end does not stop it: `serve` sees end of stream or a
+    /// write error on its end and decides when to return.
     #[must_use]
     pub fn serve_duplex<F, Fut>(self, name: &str, serve: F) -> Self
     where

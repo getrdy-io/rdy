@@ -636,6 +636,8 @@ pub struct ProbeHub {
     log: ActionLog,
     /// The run's proxy, set once before the checks start. Clones of the hub share it.
     proxy: Arc<OnceLock<ProxyUrl>>,
+    /// Set when a check's probe is opened. After that the proxy can no longer be set.
+    checks_started: Arc<AtomicBool>,
 }
 
 impl fmt::Debug for ProbeHub {
@@ -652,6 +654,7 @@ impl ProbeHub {
             backend,
             log: ActionLog::new(redactor, None, Limits::default()),
             proxy: Arc::new(OnceLock::new()),
+            checks_started: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -719,15 +722,20 @@ impl ProbeHub {
     /// as the base64 `Proxy-Authorization` pair, so no later string can carry it into the log or the
     /// report. If the set refuses any of them, the proxy is not set and the call fails: the run cannot
     /// promise to hide the password, and the caller ends it with exit code 70 (PR #96 reviews). Call it
-    /// before the first probe call and before anything is printed or written.
+    /// before the first probe call and before anything is printed or written. The log redacts an entry
+    /// when it is written, so an entry that exists before the password is known could hold it: the call
+    /// fails with [`ProxyError::TooLate`] once the action log has an entry or a check's probe was opened.
     ///
     /// # Errors
     ///
-    /// [`ProxyError::SecretRefused`] when the set refused the password, and [`ProxyError::AlreadySet`]
-    /// when a proxy was already set.
+    /// [`ProxyError::SecretRefused`] when the set refused the password, [`ProxyError::AlreadySet`]
+    /// when a proxy was already set, and [`ProxyError::TooLate`] when the run has started.
     pub fn set_proxy(&self, proxy: ProxyUrl) -> Result<(), ProxyError> {
         if self.proxy.get().is_some() {
             return Err(ProxyError::AlreadySet);
+        }
+        if self.checks_started.load(Ordering::SeqCst) || self.log.has_entries() {
+            return Err(ProxyError::TooLate);
         }
         // Every form is tried even after a refusal, so what fits is in the set when the run stops.
         let mut accepted = true;
@@ -766,6 +774,9 @@ impl ProbeHub {
     }
 
     fn probe(&self, check: Option<String>, os: Os, info: Option<&'static CheckInfo>) -> Probe {
+        if check.is_some() {
+            self.checks_started.store(true, Ordering::SeqCst);
+        }
         Probe {
             hub: Some(self.clone()),
             scope: Arc::new(Scope::new(check, os, info)),

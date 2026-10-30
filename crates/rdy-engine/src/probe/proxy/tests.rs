@@ -96,13 +96,16 @@ fn userinfo_is_percent_decoded_and_both_forms_are_secrets() {
 }
 
 #[test]
-fn a_user_without_a_password_sends_an_empty_one_and_registers_nothing() {
+fn a_user_without_a_password_sends_an_empty_one_and_the_user_is_the_secret() {
     let p = url("http://svc@proxy.acme.test:3128");
     assert!(p.has_credentials());
     assert_eq!(p.authorization().as_deref(), Some("Basic c3ZjOg=="));
-    assert!(p.secrets().is_empty());
+    // The token-as-user pattern: the user name and the base64 of `user:` both reach output.
+    assert_eq!(p.secrets(), ["svc", "c3ZjOg=="]);
     let empty = url("http://svc:@proxy.acme.test:3128");
-    assert!(empty.secrets().is_empty());
+    assert_eq!(empty.secrets(), ["svc", "c3ZjOg=="]);
+    // A URL with no user has nothing to hide.
+    assert!(url("http://proxy.acme.test:3128").secrets().is_empty());
 }
 
 #[test]
@@ -204,12 +207,55 @@ fn a_connect_reply_is_read_for_its_status_and_challenge_only() {
         .expect("407");
         assert_eq!((reply.status, reply.challenge), (407, want), "{header}");
     }
-    // The first challenge wins.
-    let reply = head(
-        "HTTP/1.1 407 x\r\nProxy-Authenticate: Negotiate\r\nProxy-Authenticate: Basic\r\n\r\n",
-    )
-    .expect("407");
-    assert_eq!(reply.challenge, ProxyChallenge::Negotiate);
+}
+
+#[test]
+fn every_challenge_is_read_and_basic_wins_when_offered() {
+    let challenge = |headers: &str| {
+        parse_connect_head(format!("HTTP/1.1 407 x\r\n{headers}\r\n\r\n").as_bytes())
+            .expect("407")
+            .challenge
+    };
+    // Negotiate first and Basic second: the hint must not say "integrated sign-in".
+    assert_eq!(
+        challenge("Proxy-Authenticate: Negotiate\r\nProxy-Authenticate: Basic realm=\"x\""),
+        ProxyChallenge::Basic
+    );
+    assert_eq!(
+        challenge("Proxy-Authenticate: Basic\r\nProxy-Authenticate: Negotiate"),
+        ProxyChallenge::Basic
+    );
+    // Two challenges in one header.
+    assert_eq!(
+        challenge("Proxy-Authenticate: Negotiate, Basic realm=\"x\", charset=\"UTF-8\""),
+        ProxyChallenge::Basic
+    );
+    // Without Basic, the first known scheme stays, and a known scheme beats an unknown one.
+    assert_eq!(
+        challenge("Proxy-Authenticate: NTLM\r\nProxy-Authenticate: Negotiate"),
+        ProxyChallenge::Ntlm
+    );
+    assert_eq!(
+        challenge(
+            "Proxy-Authenticate: Digest realm=\"x\", nonce=\"y\"\r\nProxy-Authenticate: Negotiate"
+        ),
+        ProxyChallenge::Negotiate
+    );
+    assert_eq!(
+        challenge("Proxy-Authenticate: Digest realm=\"x\", nonce=\"y\""),
+        ProxyChallenge::Other
+    );
+    // The advice follows: Basic with no credentials asks for them, and does not name sign-in.
+    let basic = NetFailure::ProxyAuthRequired {
+        target: "a.acme.test:443".to_owned(),
+        challenge: challenge("Proxy-Authenticate: Negotiate\r\nProxy-Authenticate: Basic"),
+        sent_credentials: false,
+    };
+    assert!(
+        basic.to_string().contains("user name and password"),
+        "{basic}"
+    );
+    assert!(!basic.to_string().contains("integrated sign-in"), "{basic}");
 }
 
 #[test]

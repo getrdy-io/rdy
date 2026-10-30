@@ -36,7 +36,8 @@
 //! **The log.** One `connect` entry per call, proxy `CONNECT` included: `host`, `port`, `via_proxy` (the
 //! proxy without its userinfo, or `null`) and `addr` (the connected address, `null` through a proxy or
 //! when nothing connected). There is no `proto`, which marks a datagram. A failure has a fixed `error`
-//! phrase, and a refused `CONNECT` names its status in it. The entry never holds a header.
+//! phrase, and a refused `CONNECT` names its status in it. The entry never holds a header. `addr` is
+//! `null` on every path that did not connect, a refusal included.
 
 use std::collections::HashMap;
 use std::io;
@@ -53,6 +54,7 @@ use tokio::task::{self, JoinSet};
 use tokio::time::{Instant, sleep_until, timeout};
 
 use super::addr::is_unusable_peer;
+use super::log::Pending;
 use super::proxy::{ProxyUrl, parse_connect_head};
 use super::sock::host_port;
 use super::{Backend, NetFailure, Probe, ProbeError, ProbeHub, refuse, settle};
@@ -91,6 +93,11 @@ pub const RULE_TCP_HOST: &str = "host is not one of the check's spec hosts";
 /// whether the spec wrote it or a lookup returned it.
 pub const RULE_TCP_ADDRESS: &str =
     "address is link-local, metadata, unspecified, multicast or broadcast";
+
+/// The rule of a call whose proxy resolves to a link-local, metadata, unspecified, multicast or
+/// broadcast address. The proxy is the problem here, not the target the check named.
+pub const RULE_PROXY_ADDRESS: &str =
+    "the proxy's address is link-local, metadata, unspecified, multicast or broadcast";
 
 /// A byte stream the backend opened. `tokio-rustls` and `hyper` sit on it in the TLS and HTTP tickets.
 pub trait AsyncStream: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
@@ -236,6 +243,8 @@ impl Probe {
         fields.insert("host".to_owned(), target.host().to_string().into());
         fields.insert("port".to_owned(), target.port().into());
         fields.insert("via_proxy".to_owned(), Value::Null);
+        // `null` on every path that does not connect; a connection replaces it.
+        fields.insert("addr".to_owned(), Value::Null);
         let (hub, mut entry) = self.begin(ActionKind::Connect, fields, &what)?;
 
         if let Err(rule) = self.admit_tcp(target, route) {
@@ -245,11 +254,7 @@ impl Probe {
             Route::Direct => None,
             Route::ViaProxy => {
                 let Some(proxy) = hub.proxy.get() else {
-                    return settle(
-                        entry,
-                        Err(ProbeError::Net(NetFailure::NoProxy)),
-                        |_: &TcpReport, _| {},
-                    );
+                    return Err(fail_net(entry, NetFailure::NoProxy));
                 };
                 entry.set("via_proxy", proxy.origin());
                 Some(proxy)
@@ -262,7 +267,6 @@ impl Probe {
             .map(|dialed| dialed.report);
         match result {
             Ok(report) if !report.connected => {
-                entry.set("addr", Value::Null);
                 entry.set("error", report.failure());
                 let silent = report.failure() == AttemptOutcome::TimedOut.phrase();
                 entry.finish(if silent {
@@ -272,6 +276,7 @@ impl Probe {
                 });
                 Ok(report)
             }
+            Err(ProbeError::Net(failure)) => Err(fail_net(entry, failure)),
             other => settle(entry, other, |report, entry| {
                 // Through a proxy the connected address is the proxy's, and the log shows the target.
                 entry.set(
@@ -323,7 +328,12 @@ impl Probe {
             Some(proxy) => (proxy.host().clone(), proxy.port()),
             None => (target.host().clone(), target.port()),
         };
-        let addrs = self.addresses(hub, &host, port, &what).await?;
+        let rule = if proxy.is_some() {
+            RULE_PROXY_ADDRESS
+        } else {
+            RULE_TCP_ADDRESS
+        };
+        let addrs = self.addresses(hub, &host, port, &what, rule).await?;
         let raced = race(
             &hub.backend,
             addrs
@@ -373,13 +383,14 @@ impl Probe {
     }
 
     /// The addresses to try for `host`: a literal as it is, or the vetted answers of a lookup, ordered
-    /// and capped. A refused address among the answers refuses the whole call.
+    /// and capped. A refused address among the answers refuses the whole call with `rule`.
     async fn addresses(
         &self,
         hub: &ProbeHub,
         host: &Host,
         port: u16,
         what: &str,
+        rule: &'static str,
     ) -> Result<Vec<IpAddr>, ProbeError> {
         let answers = match host {
             Host::Name(name) => {
@@ -404,10 +415,18 @@ impl Probe {
         // Any answer in a refused range refuses the call: a name that also points at a metadata
         // address is not one to connect to.
         if answers.iter().any(|ip| is_unusable_peer(*ip)) {
-            return Err(ProbeError::denied(RULE_TCP_ADDRESS, what));
+            return Err(ProbeError::denied(rule, what));
         }
         Ok(order(&answers))
     }
+}
+
+/// Closes `entry` as `failed` with the fixed phrase of `failure` and returns the error for the check.
+/// The log holds the phrase, not the user message, which names the spec host and a fix.
+fn fail_net(mut entry: Pending, failure: NetFailure) -> ProbeError {
+    entry.set("error", failure.log_phrase());
+    entry.finish(ActionOutcome::Failed);
+    ProbeError::Net(failure)
 }
 
 /// The address a literal host stands for, or `None` for a name.

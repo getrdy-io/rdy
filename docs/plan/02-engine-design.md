@@ -461,14 +461,19 @@ tests policy.
   in `rdy-checks-net`). `ProbeHub::set_proxy` stores it once per run and first adds the password, as
   written, percent-decoded and as the base64 `Proxy-Authorization` pair, to the known-secret set. A
   refusal is `ProxyError::SecretRefused` and the caller ends the run with exit 70 (the CLI wiring is
-  M1-057). The call checks, in order: the declared peer classes (`SpecHosts`, and `Proxy` for a proxied
-  call), the check's own host set (`Planned::with_hosts`, from `Built::hosts`), a forbidden literal
+  M1-097, which reads `HTTPS_PROXY` and `HTTP_PROXY`; a bad URL is exit 64). A proxy with a user and no
+  password registers the user name and the base64 of `user:` instead. `set_proxy` fails with
+  `ProxyError::TooLate` once the action log has an entry or a check probe was opened, because the log
+  redacts when an entry is written. The call checks, in order: the declared peer classes (`SpecHosts`, and `Proxy` for a proxied
+  call), the check's own host set (`Planned::with_hosts`, from `Built::hosts`; M1-095 feeds it from `PlanEntry::hosts()`), a forbidden literal
   (before the proxy is even called), then the resolved answers (any forbidden answer refuses the whole
   call). Attempts run IPv6 first with families alternating, at most 4, 250 ms apart or at once after a
   failure, 3 s each. The log entry is a `connect` with `host`, `port`, `via_proxy` (no userinfo) and
   `addr`, and no `proto`. Typed failures are `ProbeError::Net(NetFailure)`: `Dns`, `ProxyForbidden`,
   `ProxyAuthRequired` (with the challenge and whether credentials were sent), `ProxyRefused`,
-  `ProxyBadReply` and `NoProxy`. NO_PROXY matching is not built yet (M1-097, M1-098).
+  `ProxyBadReply` and `NoProxy`. The log's `error` is a fixed phrase per failure and `addr` is `null` on every
+  path that did not connect. A proxy whose own address is refused is denied with `RULE_PROXY_ADDRESS`. A
+  URL with no port means port 80. NO_PROXY matching is not built yet (M1-098).
 - `tls_chain` runs the recording verifier, private to the facade, and returns the presented chain and
   whether it validates against the system roots and the bundled roots. It never sends application data.
 - `http` sends HTTP/1.1 HEAD or GET over a verified stream. It returns status, a fixed header list,
