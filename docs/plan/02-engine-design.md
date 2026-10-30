@@ -194,8 +194,8 @@ The rule is 01 section 5.3, recorded in ADR 0013 (refining ADR 0008 decision 3).
   A `Partial` OS never gets the `evidence_only` exception, because its note is a reason of its own.
 - A pass that the partial rule turns into `warn` shows rdy's text, with `fix_source: rdy`, never the
   vendor's `fix`. Nothing was measured as failing, so the vendor's advice would send the customer after
-  a problem that was not found. `partial.missing_grants` goes to the result `notes` until 01 has the
-  field.
+  a problem that was not found. `partial.missing_grants` is a field of the wire `partial` (M1-110), once
+  each, in the order the check gave them.
 - A golden snapshot lists every `evidence_only` want and every `pass_by_absence` call site.
 - Unknown severity counts as block and unknown status as not run, in `rdy_spec::result::verdict()`.
 - A run that verified nothing is `ready_with_warnings`, `verdict_reason: nothing_verified`. A spec with

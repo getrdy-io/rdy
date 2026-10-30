@@ -6,7 +6,7 @@
 //! operator's kubeconfig (or the in-cluster config), builds the kube client with rustls and timeouts, and
 //! shows which cluster rdy is about to touch. The read-only guard ([`client::guard`], M1-103) sits in front
 //! of every request and logs each one. The checks build on both: `k8s.version` ([`VersionCheck`], M1-106)
-//! is the first, and the others (M1-109 and later) follow.
+//! and `k8s.storageclass` ([`StorageClassCheck`], M1-110) are built, and the others follow.
 
 #![forbid(unsafe_code)]
 // A check writes its answer in a Finding, never to the terminal (M1-044, 02 "Lint wall"). The print macros
@@ -33,7 +33,19 @@ mod cluster;
     clippy::disallowed_types,
     clippy::disallowed_macros
 )]
+mod provisioners;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
 mod registry;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod storageclass;
 #[forbid(
     clippy::disallowed_methods,
     clippy::disallowed_types,
@@ -42,4 +54,5 @@ mod registry;
 mod version;
 
 pub use cluster::Cluster;
+pub use storageclass::StorageClassCheck;
 pub use version::VersionCheck;

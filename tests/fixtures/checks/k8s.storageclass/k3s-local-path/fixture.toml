@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-k3s-local-path"
+summary = "k3s: local-path is the default and is not CSI"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

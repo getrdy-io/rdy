@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-eks-auto-mode"
+summary = "EKS Auto Mode: the class is on the Auto Mode provisioner and no node lists a driver"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

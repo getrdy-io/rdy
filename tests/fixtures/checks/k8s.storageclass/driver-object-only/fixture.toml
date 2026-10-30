@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-driver-object-only"
+summary = "A CSIDriver object exists and no CSINode lists the driver"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

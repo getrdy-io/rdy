@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/storage.k8s.io/v1/storageclasses",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "storage.k8s.io/v1",
+    "kind": "StorageClassList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "standard",
+          "creationTimestamp": "2026-01-01T00:00:00Z"
+        },
+        "provisioner": "rancher.io/local-path",
+        "volumeBindingMode": "WaitForFirstConsumer"
+      },
+      {
+        "metadata": {
+          "name": "managed-csi",
+          "creationTimestamp": "2026-01-01T00:00:00Z"
+        },
+        "provisioner": "disk.csi.azure.com",
+        "volumeBindingMode": "WaitForFirstConsumer"
+      }
+    ]
+  }
+}
