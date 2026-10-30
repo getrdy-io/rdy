@@ -13,7 +13,7 @@
 //! | `Rlimit(resource)` | any probe | the resource is in a closed list | `api`, `resource` |
 //! | `Hostname` | any probe | nothing to check | `api` |
 //! | `MachineId` | run-level probes only | a check's probe is refused | `api` |
-//! | `SystemRoots` | any probe | nothing to check; the answer is capped at [`MAX_SYSTEM_ROOTS`] certificates of [`MAX_ROOT_BYTES`] each | `api` |
+//! | `SystemRoots` | any probe | nothing to check; the answer is capped at [`MAX_SYSTEM_ROOTS`] certificates of [`MAX_ROOT_BYTES`] each, and names the files, directories or OS store it read | `api` |
 //!
 //! The log holds the call, never the answer. The machine id has a type of its own, [`MachineId`], that
 //! cannot be printed, serialized or read by a check, so the raw value cannot reach a log, an error
@@ -60,8 +60,9 @@ pub enum NativeCall {
     /// The OS machine id, for run-level work. The value is opaque: see [`MachineId`].
     MachineId,
     /// The trust roots of the OS store, as DER certificates, at most [`MAX_SYSTEM_ROOTS`] of at most
-    /// [`MAX_ROOT_BYTES`] each. Linux reads the PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the
-    /// standard paths) through the file rules; macOS and Windows ask the OS.
+    /// [`MAX_ROOT_BYTES`] each, with the places they were read from. Linux reads the PEM bundles
+    /// (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the standard paths) through the file rules; macOS and Windows
+    /// ask the OS.
     SystemRoots,
 }
 
@@ -161,8 +162,100 @@ pub enum NativeValue {
     Hostname(String),
     /// The answer to [`NativeCall::MachineId`].
     MachineId(MachineId),
-    /// The answer to [`NativeCall::SystemRoots`]: one DER certificate per entry.
-    SystemRoots(Vec<Vec<u8>>),
+    /// The answer to [`NativeCall::SystemRoots`]: the certificates and where they were read from.
+    SystemRoots(SystemRoots),
+}
+
+/// What kind of place a trust store was read from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StoreKind {
+    /// A PEM file that holds one or more certificates.
+    Bundle,
+    /// A directory of certificate files.
+    Directory,
+    /// The OS store itself ("System keychain" on macOS, "Windows Root store" on Windows), which has no
+    /// path.
+    OsStore,
+}
+
+/// Why a trust store place was read: it is a standard one, or the operator named it in a variable.
+///
+/// A path from a variable can hold a user name (`SSL_CERT_FILE=/home/alice/ca.pem`) and no redaction
+/// rule rewrites a path, so a report must tell the two apart (M1-100): a standard path shows as it is, a
+/// variable's path shows the variable name and the path with the home directory collapsed to `~` and
+/// control characters removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StoreOrigin {
+    /// A path of the OS or the distribution, or the OS store itself.
+    Standard,
+    /// The place the named environment variable (`SSL_CERT_FILE` or `SSL_CERT_DIR`) points at.
+    Env(&'static str),
+}
+
+/// One place the roots of a [`NativeCall::SystemRoots`] answer were read from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct StoreSource {
+    /// What it is.
+    pub kind: StoreKind,
+    /// The path as the OS writes it, or for [`StoreKind::OsStore`] a fixed name such as "System
+    /// keychain". It is raw: a report shows it by the rule of [`StoreOrigin`], not as it is.
+    pub location: String,
+    /// Whether the place is a standard one or came from an environment variable.
+    pub origin: StoreOrigin,
+}
+
+impl StoreSource {
+    /// A standard source of this kind at `location`.
+    #[must_use]
+    pub fn new(kind: StoreKind, location: impl Into<String>) -> Self {
+        Self {
+            kind,
+            location: location.into(),
+            origin: StoreOrigin::Standard,
+        }
+    }
+
+    /// The same source, with this origin.
+    #[must_use]
+    pub fn origin(mut self, origin: StoreOrigin) -> Self {
+        self.origin = origin;
+        self
+    }
+}
+
+/// The trust roots of the OS: one DER certificate per entry, and the places they came from.
+///
+/// A source is listed when it held at least one certificate, whether or not the certificate was kept
+/// (the caps and the repeats of a directory of hashed names do not hide where a bundle was).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct SystemRoots {
+    /// The certificates, as DER.
+    pub certs: Vec<Vec<u8>>,
+    /// Where they were read from. Empty when no source held a certificate, and for a backend that
+    /// does not say.
+    pub sources: Vec<StoreSource>,
+}
+
+impl SystemRoots {
+    /// Certificates with the places they were read from.
+    #[must_use]
+    pub fn new(certs: Vec<Vec<u8>>, sources: Vec<StoreSource>) -> Self {
+        Self { certs, sources }
+    }
+}
+
+impl From<Vec<Vec<u8>>> for SystemRoots {
+    /// Certificates from no named source.
+    fn from(certs: Vec<Vec<u8>>) -> Self {
+        Self {
+            certs,
+            sources: Vec::new(),
+        }
+    }
 }
 
 /// The OS store is replaced by `SSL_CERT_FILE` or `SSL_CERT_DIR` and this OS may not read what they
@@ -198,7 +291,8 @@ impl RootsOverridden {
 /// is dropped, and the list is cut at [`MAX_SYSTEM_ROOTS`]. The probe applies it to every backend's
 /// answer, so a replayed fixture and a live store are held to the same bound. A cut logs a warning with
 /// the counts and no certificate.
-pub(crate) fn cap_system_roots(certs: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+pub(crate) fn cap_system_roots(roots: SystemRoots) -> SystemRoots {
+    let SystemRoots { certs, sources } = roots;
     let total = certs.len();
     let kept: Vec<Vec<u8>> = certs
         .into_iter()
@@ -212,7 +306,10 @@ pub(crate) fn cap_system_roots(certs: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
             "the OS trust store was cut to the cap on certificates (count or size), so a root may be missing from the TLS verdict"
         );
     }
-    kept
+    SystemRoots {
+        certs: kept,
+        sources,
+    }
 }
 
 /// File system numbers from `statvfs(2)`. Block counts are in units of `fragment_size` bytes.
@@ -352,8 +449,8 @@ impl Probe {
                     .map_err(|e| ProbeError::from_native_io(&e, &what, policy.api))?;
                 if call.expects(&value) {
                     Ok(match value {
-                        NativeValue::SystemRoots(certs) => {
-                            NativeValue::SystemRoots(cap_system_roots(certs))
+                        NativeValue::SystemRoots(roots) => {
+                            NativeValue::SystemRoots(cap_system_roots(roots))
                         }
                         other => other,
                     })

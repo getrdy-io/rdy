@@ -100,6 +100,10 @@ tokio-rustls = { version = "0.26", default-features = false }
 rustls = { version = "0.23", default-features = false }
 webpki-roots = { version = "1", default-features = false }
 rustls-native-certs = { version = "=0.8.5", default-features = false }
+# The HTTP half of the probe facade (M1-093, ADR 0014 decision 4): hyper's client connection API over a
+# stream the facade opened. Only `client` and `http1`; the HTTP/1.1 probe never speaks h2. Already in the
+# lock file through kube-client. `deny.toml` lets only the engine and kube's own crates depend on it.
+hyper = { version = "1", default-features = false }
 
 # Test-only: the lint wall crate names `socket2::Socket` so the wall entry for it can fire (M1-044), and the
 # `loopback` feature of rdy-engine sets a zero linger with it (M1-090, ADR 0035). The version is the one

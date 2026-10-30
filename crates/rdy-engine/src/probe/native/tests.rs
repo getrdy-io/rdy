@@ -192,7 +192,7 @@ fn answers() -> Replay {
         )
         .native(
             NativeCall::SystemRoots,
-            NativeValue::SystemRoots(vec![vec![0x30, 0x03, 0x02, 0x01, 0x01]]),
+            NativeValue::SystemRoots(vec![vec![0x30, 0x03, 0x02, 0x01, 0x01]].into()),
         )
 }
 
@@ -727,7 +727,10 @@ async fn the_system_roots_answer_is_capped_in_count_and_in_size() {
     offered.insert(2, vec![8; MAX_ROOT_BYTES]);
     let replay = Replay::new().native(
         NativeCall::SystemRoots,
-        NativeValue::SystemRoots(offered.clone()),
+        NativeValue::SystemRoots(SystemRoots::new(
+            offered.clone(),
+            vec![StoreSource::new(StoreKind::Bundle, "/etc/ssl/test.pem")],
+        )),
     );
     let hub = hub(replay);
     let value = hub
@@ -735,9 +738,15 @@ async fn the_system_roots_answer_is_capped_in_count_and_in_size() {
         .native(NativeCall::SystemRoots)
         .await
         .expect("an answer");
-    let NativeValue::SystemRoots(kept) = value else {
+    let NativeValue::SystemRoots(found) = value else {
         panic!("the wrong kind of answer");
     };
+    // The places the roots came from pass the cap untouched.
+    assert_eq!(
+        found.sources,
+        [StoreSource::new(StoreKind::Bundle, "/etc/ssl/test.pem")]
+    );
+    let kept = found.certs;
     assert_eq!(kept.len(), MAX_SYSTEM_ROOTS);
     assert_eq!(
         kept[0],
@@ -751,5 +760,8 @@ async fn the_system_roots_answer_is_capped_in_count_and_in_size() {
     assert_eq!(kept[1], b"certificate 0".to_vec(), "the order is kept");
 
     // A short answer passes unchanged.
-    assert_eq!(cap_system_roots(vec![vec![1], vec![2]]), [vec![1], vec![2]]);
+    assert_eq!(
+        cap_system_roots(vec![vec![1], vec![2]].into()).certs,
+        [vec![1], vec![2]]
+    );
 }
