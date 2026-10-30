@@ -267,6 +267,95 @@ async fn the_redirect_server_answers_302_with_a_location() {
     );
 }
 
+#[tokio::test]
+async fn the_body_chunked_and_raw_replies_are_what_they_say() {
+    let body = b"canary-body".to_vec();
+
+    let server = HttpServer::start(HttpOptions::plain().reply(Reply::Body(body.clone())))
+        .await
+        .expect("start");
+    let mut tcp = connect(server.addr()).await.expect("connect");
+    tcp.write_all(b"GET / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .expect("write");
+    let reply = read_all(tcp).await;
+    assert!(reply.contains("Content-Length: 11\r\n"), "{reply}");
+    assert!(reply.ends_with("\r\n\r\ncanary-body"), "{reply}");
+
+    // A HEAD gets the length and no body.
+    let mut tcp = connect(server.addr()).await.expect("connect");
+    tcp.write_all(b"HEAD / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .expect("write");
+    let reply = read_all(tcp).await;
+    assert!(reply.contains("Content-Length: 11\r\n"), "{reply}");
+    assert!(!reply.contains("canary-body"), "{reply}");
+
+    let server = HttpServer::start(HttpOptions::plain().reply(Reply::Chunked(vec![b'x'; 20_000])))
+        .await
+        .expect("start");
+    let mut tcp = connect(server.addr()).await.expect("connect");
+    tcp.write_all(b"GET / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .expect("write");
+    let reply = read_all(tcp).await;
+    assert!(reply.contains("Transfer-Encoding: chunked\r\n"), "{reply}");
+    assert!(!reply.contains("Content-Length"), "{reply}");
+    assert!(reply.contains("\r\n2000\r\n"), "{reply}");
+    assert!(reply.ends_with("\r\n0\r\n\r\n"), "{reply}");
+
+    let server =
+        HttpServer::start(HttpOptions::plain().reply(Reply::Raw(b"not http\r\n".to_vec())))
+            .await
+            .expect("start");
+    let mut tcp = connect(server.addr()).await.expect("connect");
+    tcp.write_all(b"GET / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .expect("write");
+    assert_eq!(read_all(tcp).await, "not http\r\n");
+}
+
+#[tokio::test]
+async fn an_abrupt_reply_sends_its_bytes_and_then_drops_the_connection() {
+    let server = HttpServer::start(
+        HttpOptions::plain().reply(Reply::Abrupt(b"HTTP/1.1 200 OK\r\n\r\nabc".to_vec())),
+    )
+    .await
+    .expect("start");
+    let mut tcp = connect(server.addr()).await.expect("connect");
+    tcp.write_all(b"GET / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .expect("write");
+    assert_eq!(read_all(tcp).await, "HTTP/1.1 200 OK\r\n\r\nabc");
+}
+
+#[tokio::test]
+async fn a_stall_reply_sends_its_bytes_and_then_holds_the_connection_open() {
+    let server = HttpServer::start(
+        HttpOptions::plain().reply(Reply::Stall(b"HTTP/1.1 200 OK\r\n\r\nabc".to_vec())),
+    )
+    .await
+    .expect("start");
+    let mut tcp = connect(server.addr()).await.expect("connect");
+    tcp.write_all(b"GET / HTTP/1.1\r\nHost: h\r\n\r\n")
+        .await
+        .expect("write");
+    let mut got = vec![0u8; "HTTP/1.1 200 OK\r\n\r\nabc".len()];
+    timeout(LIMIT, tcp.read_exact(&mut got))
+        .await
+        .expect("no hang")
+        .expect("the bytes");
+    assert_eq!(got, b"HTTP/1.1 200 OK\r\n\r\nabc");
+    // Nothing more comes and the server does not close: a read waits.
+    let mut more = [0u8; 1];
+    assert!(
+        timeout(Duration::from_millis(150), tcp.read(&mut more))
+            .await
+            .is_err(),
+        "the server closed or sent more"
+    );
+}
+
 /// Sends a CONNECT with a synthetic credential and returns what the proxy answered up to the blank
 /// line, with the stream for a tunnel.
 async fn connect_through(proxy: SocketAddr, target: &str) -> (String, TcpStream) {

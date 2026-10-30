@@ -13,7 +13,9 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::probe::live::roots::MAX_TOTAL_BYTES;
-use crate::probe::{MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, Refused};
+use crate::probe::{
+    MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, Refused, StoreKind, StoreOrigin, StoreSource,
+};
 use crate::testing::loopback::TestCa;
 
 fn der(ca: &TestCa) -> Vec<u8> {
@@ -22,6 +24,11 @@ fn der(ca: &TestCa) -> Vec<u8> {
 
 fn none() -> Secrets {
     Secrets::default()
+}
+
+/// The certificates alone. The tests of the sources call `super::load` for the whole answer.
+fn load(sources: &Sources, secrets: &Secrets) -> io::Result<Vec<Vec<u8>>> {
+    super::load(sources, secrets).map(|found| found.certs)
 }
 
 /// Standard paths that lead nowhere, so a test never reads the machine's real store.
@@ -319,4 +326,56 @@ fn the_total_bytes_read_are_capped() {
     }
     let roots = load(&explicit(None, &[&certs], &root), &none()).expect("roots");
     assert_eq!(roots.len(), MAX_TOTAL_BYTES / MAX_READ);
+}
+
+#[test]
+fn the_answer_names_the_files_and_directories_that_held_certificates() {
+    let (_guard, root) = dir();
+    let bundle = root.join("bundle.pem");
+    let certs = root.join("certs");
+    let unused = root.join("unused");
+    fs::create_dir(&certs).expect("dir");
+    fs::create_dir(&unused).expect("dir");
+    fs::write(&bundle, TestCa::root("Root A").root_pem()).expect("write");
+    // Many files in one directory are one source, the directory.
+    for i in 0..5 {
+        fs::write(
+            certs.join(format!("c{i}.pem")),
+            TestCa::root(&format!("Dir {i}")).root_pem(),
+        )
+        .expect("write");
+    }
+    // A directory with no certificate is not a source.
+    fs::write(unused.join("notes.txt"), "nothing").expect("write");
+    let sources = explicit(Some(&bundle), &[&certs, &unused], &root);
+    let found = super::load(&sources, &none()).expect("roots");
+    assert_eq!(found.certs.len(), 6);
+    assert_eq!(
+        found.sources,
+        [
+            StoreSource::new(StoreKind::Bundle, bundle.to_string_lossy())
+                .origin(StoreOrigin::Env("SSL_CERT_FILE")),
+            StoreSource::new(StoreKind::Directory, certs.to_string_lossy())
+                .origin(StoreOrigin::Env("SSL_CERT_DIR")),
+        ]
+    );
+}
+
+#[test]
+fn the_standard_bundle_that_was_used_is_the_source_and_an_empty_store_has_none() {
+    let (_guard, root) = dir();
+    let (empty, good) = (root.join("empty.crt"), root.join("good.crt"));
+    fs::write(&empty, "# nothing\n").expect("write");
+    fs::write(&good, TestCa::root("Good").root_pem()).expect("write");
+    let sources = Sources::new(None, None).with_standard(vec![empty, good.clone()], vec![]);
+    let found = super::load(&sources, &none()).expect("roots");
+    assert_eq!(
+        found.sources,
+        [StoreSource::new(StoreKind::Bundle, good.to_string_lossy())]
+    );
+    assert_eq!(found.sources[0].origin, StoreOrigin::Standard);
+
+    let found = super::load(&nowhere(&root), &none()).expect("empty");
+    assert!(found.certs.is_empty());
+    assert!(found.sources.is_empty());
 }
