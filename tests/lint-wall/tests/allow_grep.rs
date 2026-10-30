@@ -103,6 +103,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "a test that pins the clock with load_at",
     ),
     (
+        "crates/rdy-cli/src/entry.rs",
+        "the one call site of live_backend outside the engine: the binary reads the real machine (INV-07, ADR 0011 decision 4, M1-074). `crates/rdy-cli/tests/entry_point_wall.rs` checks that no other CLI file names it",
+    ),
+    (
         "crates/xtask/src/main.rs",
         "xtask is a repo tool, not the `rdy` binary: it prints clap's own usage error",
     ),

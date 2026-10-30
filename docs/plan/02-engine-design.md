@@ -676,8 +676,15 @@ one.
     `net.json` and `api/` for the network and kube tickets, which read them (M1-091, M1-094 and the k8s
     mock).
     The refusal of a recorded link-local lookup is the facade's address rule (M1-094), not the backend's.
-- **CLI in process** (08 decision A, ADR 0011 decision 4 as amended). `#[doc(hidden)] rdy_cli::run(args,
-  backend, hooks, out, err)`. Test hooks are `RunHooks` fields, never flags or env vars. CI checks that
+- **CLI in process** (08 decision A, ADR 0011 decision 4 as amended). `#[doc(hidden)] async fn
+  rdy_cli::run(args, backend: Arc<dyn Backend>, hooks: RunHooks, out, err) -> ExitCode`. It is async
+  because the privilege snapshot reads through the backend, and a test can then run it under paused time.
+  `run` takes the snapshot and calls `gate_then` before any command except help and version (a usage
+  error reads nothing and comes first), so a setuid or file-capability `rdy` exits 70 before a spec, a
+  key or `trust.yaml` is touched. The privilege ids come from the backend (a replay machine records
+  `/proc/self/status`), not from a hook. `entry::main_code` builds the runtime and calls `live_backend`
+  once (INV-07), after the umask and the descriptor list. Test hooks are `RunHooks` fields, never flags
+  or env vars; the struct has no field until a ticket reads one. CI checks that
   `Replay` is unnamed in `crates/rdy-cli/src` outside tests and that the `testing` feature and a
   Replay-only marker string are absent from every release binary. The log layer, panic hook, ring
   provider and `process::exit` stay in `main`. So the `RUST_LOG=trace` canary test and the watchdog

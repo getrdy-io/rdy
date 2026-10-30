@@ -6,8 +6,15 @@
 //!    it ([`crate::startup`]).
 //! 2. The redacting log writer.
 //! 3. The panic hook, which prints nothing ([`crate::panic_hook`]).
-//! 4. [`crate::run`] inside [`guarded`], so that a panic outside a check exits 70, not 101 (07
-//!    section 5), with the same error text as every other internal error.
+//! 4. The live backend and the async runtime, then [`crate::run`] inside [`guarded`], so that a panic
+//!    outside a check exits 70, not 101 (07 section 5), with the same error text as every other
+//!    internal error.
+//!
+//! **The one call site of `live_backend` (INV-07, ADR 0011 decision 4).** [`main_code`] is the body of
+//! `main`, and it calls [`rdy_engine::live_backend`] once, here, with [`RunHooks::default`] and no
+//! other hooks. The call sits after step 0 because building the live backend stats the password and
+//! sudo files, and the descriptor list must be taken before rdy opens anything of its own. A test
+//! builds its own backend and calls [`crate::run`] (see `tests/entry_point.rs`).
 
 use std::ffi::OsString;
 use std::io::{self, Write};
@@ -16,7 +23,7 @@ use std::panic::{self, AssertUnwindSafe};
 use rdy_engine::exec;
 
 use crate::error::{CliError, emit, wants_json};
-use crate::{EXIT_INTERNAL, logging, panic_hook, redaction, run, startup};
+use crate::{EXIT_INTERNAL, RunHooks, logging, panic_hook, redaction, run, startup};
 
 /// Runs rdy as the binary does and returns the exit code.
 #[must_use]
@@ -52,8 +59,32 @@ pub fn main_code() -> u8 {
         json,
         &mut io::stdout(),
         &mut io::stderr(),
-        |stdout, stderr| run(args, stdout, stderr),
+        |stdout, stderr| run_live(args, json, stdout, stderr),
     )
+}
+
+/// Builds the live backend and the runtime, runs the command and returns its exit code.
+///
+/// A runtime that cannot start is an internal error. The runtime is shut down without waiting: a
+/// file read on a hung mount can leave a blocking thread, and the process is about to exit.
+fn run_live(args: Vec<OsString>, json: bool, stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "INV-07: this is the one call of live_backend outside the engine. The binary reads the real machine, and a check only ever gets the Probe it is handed (ADR 0014)"
+    )]
+    let backend = rdy_engine::live_backend();
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => return emit(&CliError::bug(), json, stdout, stderr),
+    };
+    let code = runtime
+        .block_on(run(args, backend, RunHooks::default(), stdout, stderr))
+        .code();
+    runtime.shutdown_background();
+    code
 }
 
 /// Runs `f` with the two streams. If `f` panics, prints the standard internal error and returns 70.

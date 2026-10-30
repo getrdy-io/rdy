@@ -344,6 +344,11 @@ Rules that keep these stable:
   set, not being root is a failure. `crates/rdy-cli/tests/root_smoke.rs` (`root_whoami_is_zero`) is the
   canary. It proves the job really runs as root, and `--no-tests=fail` proves the filter still matches.
 - The `test` job on linux-x64 lists the `ci` profile and fails if a `root_*` test appears.
+- The setuid-gate test (`crates/rdy-cli/tests/setuid_gate.rs`, M1-074) is not a root test: it runs as the CI
+  user and uses passwordless `sudo` only to `chown`, `chmod u+s` and `setcap` a copy of the binary. The
+  linux-x64 leg installs `libcap2-bin` and sets `RDY_REQUIRE_SETUID=1`. Without the variable the test
+  skips, so `cargo test --workspace` stays green for a normal user; with it, a missing `sudo` or `setcap` is
+  a failure. The spec path is a FIFO with no writer, so an exit 70 within 5 s shows the spec was never opened.
 - Root tests never run on macOS or Windows. The Windows store refusal tests (M1-122, ADR 0027) are `windows-only` tests; the ACL checks themselves are M2-105.
 
 What is `cfg`-gated, and nothing else:
