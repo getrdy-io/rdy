@@ -1,4 +1,4 @@
-//! Parameters of the six M1 Kubernetes check ids.
+//! Parameters of the Kubernetes check ids: the six M1 ids and the five M1-late ids.
 //!
 //! The fields, ranges and defaults follow `$defs` in `crates/rdy-spec/schema/spec.v1.schema.json` and
 //! the table in `docs/plan/01-spec-format.md` section 2.7. What each threshold means to the check is in
@@ -6,12 +6,13 @@
 //!
 //! Every struct refuses a key it does not have. That includes `needs` on `k8s.storageclass`, an alias
 //! that draft 1 had and 01 removed: it is `access_modes` now. Where 01 requires a key or a group of
-//! keys (`can` of `k8s.rbac`, and the "one of" groups of `k8s.nodes` and `k8s.version`), an entry
-//! without them decodes to [`UnsupportedReason::NoThreshold`](super::UnsupportedReason::NoThreshold).
-//! The other three read bare.
+//! keys (`can` of `k8s.rbac`, and the "one of" groups of `k8s.nodes`, `k8s.version` and `k8s.crds`), an
+//! entry without them decodes to
+//! [`UnsupportedReason::NoThreshold`](super::UnsupportedReason::NoThreshold). The others read bare.
 //!
 //! A list or an object that is empty would be a threshold that measures nothing, so it is refused
-//! where it can stand for one: `apis`, `arch`, `can`, and `per_node` and `free` with no resource.
+//! where it can stand for one: `apis`, `arch`, `can`, `quota_needs`, and `per_node`, `free` and
+//! `limit_needs` with no resource.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
@@ -20,7 +21,8 @@ use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
 
 use super::ParamSet;
-use super::common::{Arch, BoundedList, RegexText, from_value};
+use super::common::{Arch, BoundedList, BoundedMap, HostPort, RegexText, from_value};
+use super::net::Cidr;
 use crate::error::echo_safe;
 use crate::scalar::{Duration, Quantity, Version};
 
@@ -194,7 +196,7 @@ impl ParamSet for K8sStorageClass {
 macro_rules! lower_text {
     ($(#[$meta:meta])* $name:ident, max $max:literal, $alphabet:literal, $allowed:expr) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name(String);
 
         impl $name {
@@ -876,6 +878,331 @@ pub struct K8sVersion {
 impl ParamSet for K8sVersion {
     const FIELDS: &'static [&'static str] = &["min", "max", "openshift_min", "apis", "over_max"];
     const THRESHOLD: &'static [&'static str] = &["min", "max", "openshift_min", "apis"];
+}
+
+// ---- the M1-late ids ----------------------------------------------------------------------------
+
+lower_text!(
+    /// The name of a resource in a quota, such as `requests.cpu`, `pods` or `count/jobs.batch`.
+    QuotaResource, max 253, "letters, 0-9, -, _, . and /", |c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/')
+);
+
+/// An amount in the Kubernetes quantity form, such as `16`, `500m`, `0.5` or `64Gi`.
+///
+/// The text is a number, with at most a decimal part, and one suffix of `m`, `k`, `M`, `G`, `T`, `P`,
+/// `E`, `Ki`, `Mi`, `Gi`, `Ti`, `Pi` or `Ei`. It is not negative and is at most 20 characters. A bare YAML
+/// number is accepted too. The text is kept as written, and the check reads it with the rules of the
+/// Kubernetes API, the same ones it uses for the amounts a cluster reports.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct K8sQuantity(String);
+
+impl K8sQuantity {
+    /// The longest amount in characters.
+    pub const MAX_CHARS: usize = 20;
+
+    /// The largest bare number.
+    const MAX_NUMBER: f64 = 1e15;
+
+    /// The same limit for a whole number.
+    const MAX_WHOLE: u64 = 1_000_000_000_000_000;
+
+    /// The amount as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    fn is_valid(text: &str) -> bool {
+        const SUFFIXES: [&str; 14] = [
+            "", "m", "k", "M", "G", "T", "P", "E", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei",
+        ];
+        let numeral = |b: u8| b.is_ascii_digit();
+        let end = text
+            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+            .unwrap_or(text.len());
+        let (number, suffix) = text.split_at(end);
+        let number_ok = match number.split_once('.') {
+            Some((whole, fraction)) => {
+                whole.bytes().all(numeral) && !fraction.is_empty() && fraction.bytes().all(numeral)
+            }
+            None => !number.is_empty(),
+        };
+        text.len() <= Self::MAX_CHARS && number_ok && SUFFIXES.contains(&suffix)
+    }
+}
+
+impl<'de> Deserialize<'de> for K8sQuantity {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        let text = match &value {
+            Value::String(text) => Some(text.clone()),
+            Value::Number(n) => n
+                .as_u64()
+                .filter(|n| *n <= Self::MAX_WHOLE)
+                .map(|n| n.to_string())
+                .or_else(|| {
+                    n.as_f64()
+                        .filter(|f| (0.0..=Self::MAX_NUMBER).contains(f))
+                        .map(|f| f.to_string())
+                }),
+            _ => None,
+        };
+        match text {
+            Some(text) if Self::is_valid(&text) => Ok(Self(text)),
+            _ => {
+                let shown = match &value {
+                    Value::String(text) => echo_safe(text),
+                    other => echo_safe(&other.to_string()),
+                };
+                Err(bad(format!(
+                    "'{shown}' is not an amount: write a number with an optional suffix, \
+                     such as 16, \"500m\" or \"64Gi\""
+                )))
+            }
+        }
+    }
+}
+
+/// The `LimitRange` sizes that `k8s.namespace` checks. At least one is set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LimitNeeds {
+    /// The memory of the largest container the product runs. A `LimitRange` maximum below it blocks.
+    pub container_max_memory: Option<Quantity>,
+}
+
+impl<'de> Deserialize<'de> for LimitNeeds {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            container_max_memory: Option<Quantity>,
+        }
+        let Raw {
+            container_max_memory,
+        } = Raw::deserialize(deserializer)?;
+        if container_max_memory.is_none() {
+            return Err(bad("no limit is set: write container_max_memory"));
+        }
+        Ok(Self {
+            container_max_memory,
+        })
+    }
+}
+
+/// Whether a quota resource counts bytes: `requests.memory`, `limits.memory`, `requests.storage`,
+/// `requests.ephemeral-storage`, `hugepages-2Mi` and the per storage class form
+/// `fast.storageclass.storage.k8s.io/requests.storage`. The last part of the name decides.
+fn counts_bytes(resource: &str) -> bool {
+    let last = resource.rsplit(['.', '/']).next().unwrap_or(resource);
+    matches!(last, "memory" | "storage" | "ephemeral-storage") || last.starts_with("hugepages-")
+}
+
+/// Reads `quota_needs` and applies the strict size grammar to the resources that count bytes.
+fn quota_needs<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<BoundedMap<QuotaResource, K8sQuantity, 32, 1>>, D::Error> {
+    let needs = Option::<BoundedMap<QuotaResource, K8sQuantity, 32, 1>>::deserialize(deserializer)?;
+    for (resource, amount) in needs.iter().flat_map(|map| map.iter()) {
+        if counts_bytes(resource.as_str()) {
+            Quantity::parse(amount.as_str()).map_err(|error| {
+                bad(format!(
+                    "'{}' for '{}' is not a size in bytes: {}",
+                    echo_safe(amount.as_str()),
+                    echo_safe(resource.as_str()),
+                    error.hint()
+                ))
+            })?;
+        }
+    }
+    Ok(needs)
+}
+
+/// Parameters of `k8s.namespace`: the namespace, its quota and its limit range.
+///
+/// Every key is optional. With none, the check looks at the namespace of the family and reports what
+/// it finds.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct K8sNamespace {
+    /// The namespace the product installs into.
+    pub namespace: Option<K8sName>,
+    /// What the product needs from the quota of the namespace, by quota resource, 1 to 32. A quota
+    /// with less left blocks.
+    ///
+    /// An amount of memory, storage, ephemeral storage or huge pages is read with the strict size
+    /// grammar of the rest of the spec (01 section 2.5): a whole number with an optional binary suffix
+    /// (`64Gi`). `64G`, `500m` and `0.5Gi` are refused, because the decimal and binary forms differ by
+    /// 7 percent and a milli-byte is a mistake. Other resources, such as `requests.cpu` (`500m`) and
+    /// `pods`, keep the Kubernetes form.
+    #[serde(default, deserialize_with = "quota_needs")]
+    pub quota_needs: Option<BoundedMap<QuotaResource, K8sQuantity, 32, 1>>,
+    /// What the product needs from the limit range of the namespace.
+    pub limit_needs: Option<LimitNeeds>,
+}
+
+impl ParamSet for K8sNamespace {
+    const FIELDS: &'static [&'static str] = &["namespace", "quota_needs", "limit_needs"];
+}
+
+/// The version of a custom resource, such as `v1` or `v1beta1`: a `v` and lowercase letters and digits.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CrdVersion(String);
+
+impl CrdVersion {
+    /// The version as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for CrdVersion {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        let shape = text.strip_prefix('v').is_some_and(|rest| {
+            (1..=62).contains(&rest.len())
+                && rest
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        });
+        if shape {
+            Ok(Self(text))
+        } else {
+            Err(bad(format!(
+                "'{}' is not an API version: write it like v1 or v1beta1",
+                echo_safe(&text)
+            )))
+        }
+    }
+}
+
+/// A custom resource definition that must be installed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct CrdRule {
+    /// The name of the definition, such as `certificates.cert-manager.io`.
+    pub name: K8sName,
+    /// Versions the definition must serve, 1 to 16, none twice. Without it any version counts.
+    pub versions: Option<BoundedList<CrdVersion, 16, true, 1>>,
+}
+
+/// An operator whose deployment must run.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct OperatorRule {
+    /// The namespace of the deployment.
+    pub namespace: K8sName,
+    /// The name of the deployment.
+    pub deployment: K8sName,
+    /// An older operator blocks. It is read from the image tag or the version label of the deployment.
+    pub min_version: Option<Version>,
+}
+
+/// Parameters of `k8s.crds`: the custom resources and operators the product needs.
+///
+/// At least one of `crds` and `operators` is required.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct K8sCrds {
+    /// Definitions that must be installed, 1 to 64.
+    pub crds: Option<BoundedList<CrdRule, 64, false, 1>>,
+    /// Operators that must run, 1 to 16.
+    pub operators: Option<BoundedList<OperatorRule, 16, false, 1>>,
+}
+
+impl ParamSet for K8sCrds {
+    const FIELDS: &'static [&'static str] = &["crds", "operators"];
+    const THRESHOLD: &'static [&'static str] = &["crds", "operators"];
+}
+
+lower_text!(
+    /// The controller of an `IngressClass`, such as `k8s.io/ingress-nginx`, or `any`.
+    IngressController, max 253, "letters, 0-9, -, _, . and /", |c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/')
+);
+
+/// Whether the Gateway API must be installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum GatewayApi {
+    /// Missing blocks, except where the platform has its own ingress.
+    Required,
+    /// Missing is fine.
+    Optional,
+}
+
+/// Parameters of `k8s.ingress`: how traffic gets into the cluster.
+///
+/// Every key is optional. With none, the check reports the ingress classes it finds.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct K8sIngress {
+    /// The controller of an `IngressClass` that must exist, such as `k8s.io/ingress-nginx`, or `any`
+    /// for any class. It is the `spec.controller` of the class, not its name.
+    pub controller: Option<IngressController>,
+    /// Whether the Gateway API must be installed.
+    pub gateway_api: Option<GatewayApi>,
+    /// The product needs an OpenShift `Route`. The default is false.
+    #[serde(default)]
+    pub route: bool,
+    /// The product needs a `LoadBalancer` service, so one that stays pending warns. The default is
+    /// false.
+    #[serde(default)]
+    pub loadbalancer: bool,
+}
+
+impl ParamSet for K8sIngress {
+    const FIELDS: &'static [&'static str] = &["controller", "gateway_api", "route", "loadbalancer"];
+}
+
+/// What the cluster network must do with network policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum NetworkPolicyMode {
+    /// The network plugin must enforce `NetworkPolicy`. One that does not blocks.
+    Enforced,
+}
+
+/// Parameters of `k8s.cni`: the network plugin, network policy and address ranges.
+///
+/// Every key is optional. With none, the check reports the plugin and the address ranges it finds.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct K8sCni {
+    /// What the network plugin must do with network policies.
+    pub network_policy: Option<NetworkPolicyMode>,
+    /// Destinations the product's pods need to reach, `host:port`, 1 to 64, none twice. A default-deny
+    /// policy in the namespace that does not allow them warns. Nothing is connected to.
+    pub needs_egress: Option<BoundedList<HostPort, 64, true, 1>>,
+    /// Address ranges that the pod and service networks must not overlap, 1 to 32, none twice.
+    pub avoid_cidrs: Option<BoundedList<Cidr, 32, true, 1>>,
+}
+
+impl ParamSet for K8sCni {
+    const FIELDS: &'static [&'static str] = &["network_policy", "needs_egress", "avoid_cidrs"];
+}
+
+/// Parameters of `k8s.dns`: the cluster DNS.
+///
+/// The key is optional.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct K8sDns {
+    /// The cluster domain. The default, `cluster.local`, is the check's.
+    pub cluster_domain: Option<K8sName>,
+}
+
+impl ParamSet for K8sDns {
+    const FIELDS: &'static [&'static str] = &["cluster_domain"];
 }
 
 #[cfg(test)]

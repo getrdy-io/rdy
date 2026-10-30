@@ -256,8 +256,8 @@ pub enum SpecError {
     /// The checks name more distinct hosts than the limit (threat model INV-11).
     #[error("{count} endpoints. The limit is {limit}")]
     TooManyHosts {
-        /// How many distinct hosts the spec names across `net.egress`, `net.tls_intercept` and
-        /// `net.dns`.
+        /// How many distinct hosts the spec names across `net.egress`, `net.tls_intercept`, `net.dns`,
+        /// `host.time_sync`, `net.registry` and `net.bandwidth`.
         count: usize,
         /// The most distinct hosts a spec may name.
         limit: usize,
@@ -265,8 +265,8 @@ pub enum SpecError {
     /// The checks name more distinct host and port pairs than the limit (threat model INV-11).
     #[error("{count} host and port pairs. The limit is {limit}")]
     TooManyEndpoints {
-        /// How many distinct host and port pairs the spec names across `net.egress` and
-        /// `net.tls_intercept`.
+        /// How many distinct host and port pairs the spec names across the same checks, `net.dns`
+        /// apart.
         count: usize,
         /// The most distinct host and port pairs a spec may name.
         limit: usize,

@@ -64,18 +64,23 @@ fn minimal(id: &str) -> Value {
         "host.memory" => json!({"id": id, "min": "1Gi"}),
         "host.disk" => json!({"id": id, "path": "/", "min": "1Gi"}),
         "host.ports" => json!({"id": id, "free": [80]}),
+        "host.sysctl" => json!({"id": id, "expect": {"vm.max_map_count": ">=262144"}}),
+        "host.kernel" => json!({"id": id, "min": "5.4"}),
         "net.egress" => json!({"id": id, "endpoints": ["a.example:443"]}),
         "net.dns" => json!({"id": id, "names": ["a.example"]}),
+        "net.registry" => json!({"id": id, "registries": ["registry.acme.example"]}),
+        "net.bandwidth" => json!({"id": id, "url": "https://a.example/sample.bin"}),
         "k8s.rbac" => json!({"id": id, "can": ["create namespaces"]}),
         "k8s.nodes" => json!({"id": id, "min_ready": 1}),
         "k8s.version" => json!({"id": id, "min": "1.27"}),
+        "k8s.crds" => json!({"id": id, "crds": [{"name": "certificates.cert-manager.io"}]}),
         _ => json!({"id": id}),
     }
 }
 
 #[test]
-fn all_seventeen_m1_ids_are_known_and_decode_to_their_own_variant() {
-    assert_eq!(KNOWN_IDS.len(), 17);
+fn all_thirty_one_ids_are_known_and_decode_to_their_own_variant() {
+    assert_eq!(KNOWN_IDS.len(), 31);
     let mut seen = HashSet::new();
     for id in KNOWN_IDS {
         assert!(seen.insert(*id), "{id} is listed twice");
@@ -107,6 +112,21 @@ fn all_seventeen_m1_ids_are_known_and_decode_to_their_own_variant() {
         "k8s.admission",
         "k8s.nodes",
         "k8s.version",
+        // The M1-late ids (M1-172).
+        "host.firewall",
+        "host.time_sync",
+        "host.sysctl",
+        "host.container_runtime",
+        "host.cgroups",
+        "host.kernel",
+        "net.registry",
+        "net.mtu",
+        "net.bandwidth",
+        "k8s.namespace",
+        "k8s.dns",
+        "k8s.ingress",
+        "k8s.crds",
+        "k8s.cni",
     ] {
         assert!(KNOWN_IDS.contains(&id), "{id}");
     }
@@ -114,7 +134,12 @@ fn all_seventeen_m1_ids_are_known_and_decode_to_their_own_variant() {
 
 #[test]
 fn ids_of_reserved_but_unbuilt_checks_and_typos_are_unknown() {
-    for id in ["host.kernel", "aws.iam", "host.memroy", "upload.now"] {
+    for id in [
+        "host.virtualization",
+        "aws.iam",
+        "host.memroy",
+        "upload.now",
+    ] {
         let params = entry(&json!({ "id": id })).decode_params();
         assert!(matches!(params, CheckParams::Unknown { .. }), "{id}");
         assert_eq!(params.id(), id);
