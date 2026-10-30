@@ -106,13 +106,13 @@ and Dec 28 run at half capacity.
 
 | Week | Dates | Capacity | Hours | Build step | Tickets | Ships |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Nov 23 to Nov 29, 2026 | 13 | 13.5 | 1 Workspace, CI, release | M1-001 to M1-008 | `v0.1.0-alpha.0` (CI artefacts): `rdy version` built and tested on five CI legs and by dist in the release sandbox |
+| 1 | Nov 23 to Nov 29, 2026 | 13 | 14.5 | 1 Workspace, CI, release | M1-001 to M1-008 | `v0.1.0-alpha.0` (CI artefacts): `rdy version` built and tested on five CI legs and by dist in the release sandbox |
 | 2 | Nov 30 to Dec 6, 2026 | 13 | 13 | 1 Workspace, CI, release; 2 Spec parser, result model, engine core | M1-009 to M1-013 | `v0.1.0-alpha.1`: first cosign-signed pre-release on GitHub Releases; domain and org settings check scripts in the repo |
 | 3 | Dec 7 to Dec 13, 2026 | 13 | 13.5 | 1 Workspace, CI, release; 2 Spec parser, result model, engine core | M1-014 to M1-018 | `v0.1.0-alpha.2`: install.sh that checks the cosign signature, from the pinned release URL |
 | 4 | Dec 14 to Dec 20, 2026 | 13 | 13 | 2 Spec parser, result model, engine core | M1-019 to M1-022 | `v0.1.0-alpha.3`: result model and generated JSON schemas; errors carry fix hints; `rdy version --json` |
 | 5 | Dec 21 to Dec 27, 2026 | 6.5 | 6 | 2 Spec parser, result model, engine core | M1-023 to M1-025 | `v0.1.0-alpha.4`: same CLI; typed parameters for the M1 host, net and k8s check ids |
 | 6 | Dec 28, 2026 to Jan 3, 2027 | 6.5 | 6.5 | 2 Spec parser, result model, engine core | M1-026 to M1-028 | `v0.1.0-alpha.5`: same CLI; semantic validation, parser property tests, root CI job |
-| 7 | Jan 4 to Jan 10, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-029 to M1-032 | `v0.1.0-alpha.6`: `rdy spec lint <file>` with did-you-mean; usage errors exit 64 |
+| 7 | Jan 4 to Jan 10, 2027 | 13 | 12.5 | 2 Spec parser, result model, engine core | M1-029 to M1-032 | `v0.1.0-alpha.6`: `rdy spec lint <file>` with did-you-mean; usage errors exit 64 |
 | 8 | Jan 11 to Jan 17, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-033 to M1-037 | `v0.1.0-alpha.7`: engine runs checks with timeouts and panic isolation; unknown ids SKIP |
 | 9 | Jan 18 to Jan 24, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-038 to M1-042 | `v0.1.0-alpha.8`: commands only through the mediated runner; action log; privilege snapshot |
 | 10 | Jan 25 to Jan 31, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-043 to M1-048 | `v0.1.0-alpha.9`: run deadline and watchdog; facade file policy; redactor core |

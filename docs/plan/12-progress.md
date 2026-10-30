@@ -288,7 +288,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-137 | todo | | README draft from 10 section 1
 
-- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review); backlog corrected 2026-10-30 (correction-29): depends on M1-174 (PR #146 review)
+- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review); backlog corrected 2026-10-30 (correction-29): depends on M1-174 (PR #146 review); backlog corrected 2026-10-30 (correction-30): depends on M1-170; founder decides the kind gate first (PR #146, #147 reviews)
 
 - M1-139 | todo | | Alpha announcement to design partners | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
