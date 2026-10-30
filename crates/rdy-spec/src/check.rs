@@ -68,12 +68,13 @@ pub use host::{
 };
 
 pub use k8s::{
-    AccessMode, ApiGroup, ApiRef, CpuAmount, CrdRule, CrdVersion, GatewayApi, IngressController,
-    K8sAccess, K8sAdmission, K8sCni, K8sCrds, K8sDns, K8sIngress, K8sName, K8sNamespace, K8sNodes,
-    K8sQuantity, K8sRbac, K8sResources, K8sStorageClass, K8sVersion, LabelKey, LabelSelector,
-    LabelValue, LimitNeeds, NetworkPolicyMode, OperatorRule, OverMax, PodFeature, PodSecurityLevel,
-    QuotaResource, RbacResource, RbacRule, RbacSubresource, RbacVerb, ReclaimPolicy, TaintEffect,
-    Toleration, TolerationOperator, VolumeBinding,
+    AccessMode, ApiGroup, ApiRef, CpuAmount, CrdRule, CrdVersion, GatewayApi, ImpersonatedUser,
+    IngressController, K8sAccess, K8sAdmission, K8sCni, K8sCrds, K8sDns, K8sIngress, K8sName,
+    K8sNamespace, K8sNodes, K8sQuantity, K8sRbac, K8sResources, K8sStorageClass, K8sVersion,
+    LabelKey, LabelSelector, LabelValue, LimitNeeds, NetworkPolicyMode, NonResourcePath,
+    NonResourceRule, OperatorRule, OverMax, PodFeature, PodSecurityLevel, QuotaResource, RbacItem,
+    RbacResource, RbacRule, RbacSubresource, RbacVerb, ReclaimPolicy, TaintEffect, Toleration,
+    TolerationOperator, VolumeBinding,
 };
 pub use net::{
     Cidr, DnsName, DnsRule, Endpoint, HttpMethod, HttpStatus, HttpUrl, ImageRef, Mbps, Mtu,

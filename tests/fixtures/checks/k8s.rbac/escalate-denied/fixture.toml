@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-escalate-denied"
+summary = "The spec creates a ClusterRole and a ClusterRoleBinding; escalate and bind are refused, the items themselves are allowed"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

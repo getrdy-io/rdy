@@ -65,6 +65,7 @@ mod b64;
 mod credential;
 mod error;
 pub mod guard;
+mod impersonate;
 #[cfg(test)]
 pub(crate) mod mock;
 mod proxy;
@@ -81,7 +82,11 @@ pub use credential::Credential;
 pub use error::KubeError;
 pub(crate) use error::from_kube_error;
 use error::{from_kubeconfig_error, io_reason, proxy_display};
-pub use guard::{GuardError, ReadOnlyClient, guarded_service, guarded_service_via};
+pub use guard::{
+    GuardError, ImpersonateAs, ImpersonateError, ReadOnlyClient, guarded_service,
+    guarded_service_marked, guarded_service_via,
+};
+pub use impersonate::ImpersonationError;
 pub use proxy::{ProxyRule, ProxyUse};
 use text::escape;
 
@@ -351,6 +356,7 @@ pub struct ClusterLine {
     user: Option<String>,
     plugin: Option<String>,
     tls_verification_off: bool,
+    impersonates: bool,
 }
 
 impl ClusterLine {
@@ -385,6 +391,14 @@ impl ClusterLine {
     pub fn tls_verification_off(&self) -> bool {
         self.tls_verification_off
     }
+
+    /// True when the kubeconfig user sets any of `as`, `as-uid`, `as-groups` or `as-user-extra`. kube then
+    /// adds its own `Impersonate-*` headers to every request, below the guard, where the guard cannot see
+    /// them. `k8s.rbac` refuses a spec `as:` in that case (M1-111).
+    #[must_use]
+    pub fn kubeconfig_impersonates(&self) -> bool {
+        self.impersonates
+    }
 }
 
 impl fmt::Display for ClusterLine {
@@ -400,6 +414,9 @@ impl fmt::Display for ClusterLine {
         }
         if self.tls_verification_off {
             f.write_str(", TLS verification is OFF")?;
+        }
+        if self.impersonates {
+            f.write_str(", the kubeconfig impersonates another user")?;
         }
         Ok(())
     }
@@ -606,12 +623,17 @@ impl Loaded {
         // The clock around the first request. The plugin ran in the build above, so its time is not in
         // this number, which is the round trip to `/version` and nothing else.
         let started = std::time::Instant::now();
-        let info = ReadOnlyClient::new(&client, probe, facts.proxy.proxy())
-            .version()
-            .await
-            .map_err(|error| {
-                from_kube_error(&error, &server, plugin.as_deref(), proxied, ca_set)
-            })?;
+        // A kubeconfig that impersonates adds `Impersonate-*` below the guard, to every request. The one
+        // run-level entry says so, so a reader of the log can tell "not impersonated" from "not said".
+        let info = ReadOnlyClient::new_run(
+            &client,
+            probe,
+            facts.proxy.proxy(),
+            facts.line.kubeconfig_impersonates(),
+        )
+        .version()
+        .await
+        .map_err(|error| from_kube_error(&error, &server, plugin.as_deref(), proxied, ca_set))?;
         let latency = started.elapsed();
         Ok(Connected {
             facts,
@@ -705,6 +727,27 @@ impl Connected {
     #[must_use]
     pub fn read_only(&self, probe: &Probe) -> ReadOnlyClient {
         ReadOnlyClient::new(&self.client, probe, self.facts.proxy.proxy())
+    }
+
+    /// Like [`Connected::read_only`], and the two access review POSTs carry `Impersonate-User: <user>`
+    /// (`k8s.rbac` with a spec `as:`, M1-111). Every other request is sent as the kubeconfig user. Each
+    /// review request writes its `kube` entry with `impersonated: true`. Refused when the kubeconfig
+    /// already impersonates: see [`ClusterLine::kubeconfig_impersonates`].
+    ///
+    /// # Errors
+    ///
+    /// [`ImpersonationError::Conflict`] when the kubeconfig user sets any `as` field. Two sources would
+    /// write `Impersonate-User`, and the server would see two values. [`ImpersonationError::BadValue`] when
+    /// the user is not a valid header value.
+    pub fn read_only_as(
+        &self,
+        probe: &Probe,
+        user: ImpersonateAs,
+    ) -> Result<ReadOnlyClient, ImpersonationError> {
+        if self.facts.line.kubeconfig_impersonates() {
+            return Err(ImpersonationError::Conflict);
+        }
+        ReadOnlyClient::new_as(&self.client, probe, user, self.facts.proxy.proxy())
     }
 }
 
@@ -950,6 +993,9 @@ fn from_kubeconfig(
         });
     }
 
+    // kube adds its own `Impersonate-*` headers for these, below the guard (see `impersonate`).
+    let impersonates = auth.is_some_and(sets_impersonation);
+
     // Everything kube reads on its own is checked first: a FIFO would hang the build and a device such
     // as /dev/zero would fill memory. The files are listed for the action log.
     let mut secrets = inline_secrets(auth);
@@ -1010,6 +1056,7 @@ fn from_kubeconfig(
         user: user_name.as_deref().map(escape),
         plugin: plugin_of(&config),
         tls_verification_off: config.accept_invalid_certs,
+        impersonates,
     };
     let plugin_exec = plugin_exec_of(&config);
     let ca_set = config.root_cert.is_some();
@@ -1029,6 +1076,15 @@ fn from_kubeconfig(
         plugin_exec,
         secrets,
     })
+}
+
+/// True when the user entry sets any `as` field. Presence counts, even an empty value: kube sends
+/// `Impersonate-User` for any `as` that is set.
+fn sets_impersonation(auth: &AuthInfo) -> bool {
+    auth.impersonate.is_some()
+        || auth.impersonate_uid.is_some()
+        || auth.impersonate_groups.is_some()
+        || auth.impersonate_user_extra.is_some()
 }
 
 /// What the user entry sends to the server. `token` and `certificate` are the texts already read (inline
@@ -1204,6 +1260,7 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
         user: None,
         plugin: None,
         tls_verification_off: config.accept_invalid_certs,
+        impersonates: false,
     };
     let mut secrets: Vec<String> = files
         .first()

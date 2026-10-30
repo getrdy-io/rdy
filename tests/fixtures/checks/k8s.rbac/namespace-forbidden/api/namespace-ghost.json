@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/ghost"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "namespaces \"ghost\" is forbidden: User \"system:serviceaccount:acme-system:installer\" cannot get resource \"namespaces\" in API group \"\" in the namespace \"ghost\"",
+    "reason": "Forbidden",
+    "code": 403
+  }
+}
