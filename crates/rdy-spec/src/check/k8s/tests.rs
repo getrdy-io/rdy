@@ -55,8 +55,9 @@ fn cases() -> Vec<Case> {
             full: json!({"can": ["create namespaces", "get pods/log",
                 "create clusterroles.rbac.authorization.k8s.io",
                 {"verb": "get", "group": "apps", "resource": "deployments",
-                 "subresource": "status", "namespace": "acme", "name": "web"}],
-                "namespace": "acme"}),
+                 "subresource": "status", "namespace": "acme", "name": "web"},
+                "get /healthz", {"verb": "get", "path": "/metrics"}],
+                "namespace": "acme", "as": "system:serviceaccount:acme:installer"}),
             bad: vec![
                 ("can", json!([])),
                 ("can", json!("create namespaces")),
@@ -68,6 +69,10 @@ fn cases() -> Vec<Case> {
                 ("can", json!(["create namespaces."])),
                 ("can", json!(["get pods/"])),
                 ("can", json!(["get pods/Log"])),
+                ("can", json!(["get /a//b"])),
+                ("as", json!("")),
+                ("as", json!("caf\u{e9}")),
+                ("as", json!(7)),
                 ("can", json!([" create namespaces"])),
                 ("can", json!([7])),
                 ("can", json!([["create", "namespaces"]])),
@@ -446,15 +451,198 @@ fn a_permission_string_and_the_same_object_read_the_same_way() {
     ) else {
         panic!("not K8sRbac");
     };
+    let rule = |i: usize| r.can[i].as_resource().expect("a resource item");
+    // Everything but the form is the same. Only a string item takes the namespace of the entry.
+    for pair in 0..4 {
+        let (text, object) = (rule(pair * 2), rule(pair * 2 + 1));
+        assert!(text.from_text && !object.from_text, "pair {pair}");
+        let mut same = text.clone();
+        same.from_text = false;
+        assert_eq!(&same, object, "pair {pair}");
+    }
+    assert_eq!(rule(0).group.as_str(), "");
+    assert_eq!(rule(4).group.as_str(), "rbac.authorization.k8s.io");
+    assert_eq!(
+        rule(2).subresource.as_ref().map(RbacSubresource::as_str),
+        Some("log")
+    );
+}
+
+#[test]
+fn a_non_resource_string_and_the_same_object_read_the_same_way() {
+    let CheckParams::K8sRbac(r) = typed(
+        "k8s.rbac",
+        &json!({"can": [
+            "get /healthz",
+            {"verb": "get", "path": "/healthz"},
+            "get /logs/*",
+            {"verb": "get", "path": "/logs/*"}
+        ], "as": "system:serviceaccount:acme-system:installer"}),
+    ) else {
+        panic!("not K8sRbac");
+    };
     for pair in r.can.chunks(2) {
         assert_eq!(pair[0], pair[1]);
     }
-    assert_eq!(r.can[0].group.as_str(), "");
-    assert_eq!(r.can[4].group.as_str(), "rbac.authorization.k8s.io");
+    let RbacItem::NonResource(rule) = &r.can[2] else {
+        panic!("not a non-resource item");
+    };
+    assert_eq!((rule.verb.as_str(), rule.path.as_str()), ("get", "/logs/*"));
+    assert!(r.can[0].as_resource().is_none());
     assert_eq!(
-        r.can[2].subresource.as_ref().map(RbacSubresource::as_str),
-        Some("log")
+        r.as_user.as_ref().map(ImpersonatedUser::as_str),
+        Some("system:serviceaccount:acme-system:installer")
     );
+}
+
+#[test]
+fn a_non_resource_object_refuses_resource_keys() {
+    for item in [
+        json!({"verb": "get", "path": "/x", "resource": "pods"}),
+        json!({"verb": "get", "path": "/x", "namespace": "a"}),
+    ] {
+        let reason = why("k8s.rbac", &json!({"can": [item]}));
+        assert!(
+            matches!(reason, UnsupportedReason::UnknownNestedField { .. }),
+            "{reason:?}"
+        );
+    }
+}
+
+#[test]
+fn a_bad_non_resource_item_or_as_value_is_a_bad_value() {
+    for (params, field) in [
+        (json!({"can": ["get /a//b"]}), "can"),
+        (json!({"can": ["get /a/../b"]}), "can"),
+        (json!({"can": ["get /a b"]}), "can"),
+        (json!({"can": ["get /a*b"]}), "can"),
+        (json!({"can": [{"verb": "get", "path": "healthz"}]}), "can"),
+        (json!({"can": [{"verb": "Get", "path": "/x"}]}), "can"),
+        (json!({"can": ["get /x"], "as": ""}), "as"),
+        (json!({"can": ["get /x"], "as": "a\u{1b}[2J"}), "as"),
+        (json!({"can": ["get /x"], "as": "caf\u{e9}"}), "as"),
+        (json!({"can": ["get /x"], "as": 7}), "as"),
+        (json!({"can": ["get /x"], "as": "x".repeat(254)}), "as"),
+        // M1 tests as a service account only (ADR 0038).
+        (json!({"can": ["get /x"], "as": "bob"}), "as"),
+        (json!({"can": ["get /x"], "as": "jane@example.com"}), "as"),
+        (
+            json!({"can": ["get /x"], "as": "system:serviceaccount:"}),
+            "as",
+        ),
+        (
+            json!({"can": ["get /x"], "as": "system:serviceaccount:acme"}),
+            "as",
+        ),
+        (
+            json!({"can": ["get /x"], "as": "system:serviceaccount::sa"}),
+            "as",
+        ),
+        (
+            json!({"can": ["get /x"], "as": "system:serviceaccount:acme:"}),
+            "as",
+        ),
+        (
+            json!({"can": ["get /x"], "as": "system:serviceaccount:Acme:sa"}),
+            "as",
+        ),
+        (
+            json!({"can": ["get /x"], "as": "system:serviceaccount:acme:sa:more"}),
+            "as",
+        ),
+        (
+            json!({"can": ["get /x"], "as": format!("system:serviceaccount:{}:sa", "n".repeat(64))}),
+            "as",
+        ),
+    ] {
+        let reason = why("k8s.rbac", &params);
+        assert!(
+            matches!(&reason, UnsupportedReason::BadValue { field: Some(f), .. } if f == field),
+            "{params}: {reason:?}"
+        );
+        assert_printable(&reason);
+    }
+}
+
+#[test]
+fn an_as_value_is_a_service_account_and_the_error_says_what_to_write() {
+    let reason = why("k8s.rbac", &json!({"can": ["get /x"], "as": "bob"}));
+    let UnsupportedReason::BadValue {
+        message: detail, ..
+    } = &reason
+    else {
+        panic!("not a bad value: {reason:?}");
+    };
+    assert!(
+        detail.contains("system:serviceaccount:<namespace>:<name>")
+            && detail.contains("M1 takes no other user"),
+        "{detail}"
+    );
+    for good in [
+        "system:serviceaccount:acme-system:installer",
+        "system:serviceaccount:a:b",
+        "system:serviceaccount:kube-system:a.b-c",
+    ] {
+        let CheckParams::K8sRbac(r) = typed("k8s.rbac", &json!({"can": ["get /x"], "as": good}))
+        else {
+            panic!("not K8sRbac");
+        };
+        assert_eq!(r.as_user.as_ref().map(ImpersonatedUser::as_str), Some(good));
+    }
+    // The longest allowed: 253 bytes in all.
+    let name = "n".repeat(253 - "system:serviceaccount:a:".len());
+    let longest = format!("system:serviceaccount:a:{name}");
+    assert_eq!(longest.len(), 253);
+    typed("k8s.rbac", &json!({"can": ["get /x"], "as": longest}));
+    let too_long = format!("system:serviceaccount:a:{name}n");
+    let reason = why("k8s.rbac", &json!({"can": ["get /x"], "as": too_long}));
+    assert!(
+        matches!(reason, UnsupportedReason::BadValue { .. }),
+        "{reason:?}"
+    );
+}
+
+#[test]
+fn a_string_item_is_marked_and_an_object_item_is_not() {
+    let CheckParams::K8sRbac(r) = typed(
+        "k8s.rbac",
+        &json!({"can": ["create namespaces", {"verb": "create", "resource": "namespaces"}],
+            "namespace": "acme"}),
+    ) else {
+        panic!("not K8sRbac");
+    };
+    let flags: Vec<bool> = r
+        .can
+        .iter()
+        .filter_map(RbacItem::as_resource)
+        .map(|rule| rule.from_text)
+        .collect();
+    assert_eq!(flags, [true, false]);
+}
+
+#[test]
+fn a_url_item_is_253_characters_at_most_star_included() {
+    // With and without the trailing star, 253 characters in all: the parser and the schema agree.
+    let plain = format!("/{}", "a".repeat(252));
+    let star = format!("/{}*", "a".repeat(251));
+    for ok in [plain.clone(), star.clone()] {
+        assert_eq!(ok.len(), 253);
+        typed("k8s.rbac", &json!({"can": [format!("get {ok}")]}));
+        typed("k8s.rbac", &json!({"can": [{"verb": "get", "path": ok}]}));
+    }
+    for bad in [format!("{plain}a"), format!("/{}*", "a".repeat(252))] {
+        assert_eq!(bad.len(), 254);
+        let reason = why("k8s.rbac", &json!({"can": [format!("get {bad}")]}));
+        assert!(
+            matches!(reason, UnsupportedReason::BadValue { .. }),
+            "{reason:?}"
+        );
+        let reason = why("k8s.rbac", &json!({"can": [{"verb": "get", "path": bad}]}));
+        assert!(
+            matches!(reason, UnsupportedReason::BadValue { .. }),
+            "{reason:?}"
+        );
+    }
 }
 
 #[test]

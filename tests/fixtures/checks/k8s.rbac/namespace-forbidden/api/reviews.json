@@ -1,0 +1,30 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "deployments",
+          "group": "apps",
+          "namespace": "ghost"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": ""
+      }
+    }
+  ],
+  "rules": [
+    {
+      "spec": {
+        "namespace": "ghost"
+      },
+      "status": {
+        "resourceRules": [],
+        "nonResourceRules": [],
+        "incomplete": false
+      }
+    }
+  ]
+}

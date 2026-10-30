@@ -277,6 +277,8 @@ One side effect, recorded as it happened. Fields beyond the required ones depend
 | `via_proxy` | string or null | no |  | connect, kube: the proxy origin with the user info stripped, or null for a direct request |  |
 | `sni` | string | no |  | tls |  |
 | `header` | string | no |  | kube: name of the refused request header, never its value |  |
+| `impersonated` | boolean | no |  | kube: true when the request was sent with Impersonate-User, as the spec's `as` user. Absent otherwise. Never the user name. |  |
+| `kubeconfig_impersonates` | boolean | no |  | kube: true on the run-level `GET /version` when the kubeconfig user sets an `as`, `as-uid`, `as-groups` or `as-user-extra` field, so kube adds Impersonate headers to every request. Absent otherwise. Never the user name. |  |
 | `method` | string | no |  | http, kube |  |
 | `url` | string | no |  | http, without query string |  |
 | `status` | integer or null | no |  | http, kube |  |

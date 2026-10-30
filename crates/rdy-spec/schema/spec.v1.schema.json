@@ -1798,19 +1798,19 @@
                 "type": "object",
                 "properties": {
                   "verb": {
-                    "description": "The verb. An RBAC verb such as `create`. `*` means all verbs.",
+                    "description": "The verb. An RBAC verb such as `create`. `*` asks whether the wildcard itself is granted, as a role that lists `*` does. It does not ask whether every verb is allowed.",
                     "type": "string",
                     "pattern": "^[a-z*]+$",
                     "maxLength": 63
                   },
                   "group": {
-                    "description": "The API group. Empty, which is the default, is the core group.",
+                    "description": "The API group. Empty, which is the default, is the core group. It cannot be `*`.",
                     "type": "string",
                     "pattern": "^[a-z0-9.-]*$",
                     "maxLength": 253
                   },
                   "resource": {
-                    "description": "The resource. An RBAC resource such as `namespaces`. `*` means all resources.",
+                    "description": "The resource. An RBAC resource such as `namespaces`. `*` asks whether the wildcard itself is granted, as a role that lists `*` does. It does not ask whether every resource is allowed.",
                     "type": "string",
                     "pattern": "^[a-z0-9*-]+$",
                     "maxLength": 253
@@ -1822,7 +1822,7 @@
                     "maxLength": 63
                   },
                   "namespace": {
-                    "description": "The namespace of the object. For a string item this is the `namespace` of the entry.",
+                    "description": "The namespace of the object. A string item cannot name one: it takes the `namespace` of the entry.",
                     "$ref": "#/$defs/K8sName"
                   },
                   "name": {
@@ -1835,13 +1835,46 @@
                   "resource"
                 ],
                 "additionalProperties": false
+              },
+              {
+                "description": "verb /path, for a URL that is not a resource, such as get /healthz.",
+                "type": "string",
+                "pattern": "^[a-z*]{1,63} (?!.*(//|\\.\\.))(/[A-Za-z0-9._~/-]{0,252}|/[A-Za-z0-9._~/-]{0,251}\\*)$"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "verb": {
+                    "description": "The verb, usually `get`.",
+                    "type": "string",
+                    "pattern": "^[a-z*]+$",
+                    "maxLength": 63
+                  },
+                  "path": {
+                    "description": "The URL path, such as `/healthz`. A trailing `*` makes it a prefix.",
+                    "type": "string",
+                    "pattern": "^(?!.*(//|\\.\\.))(/[A-Za-z0-9._~/-]{0,252}|/[A-Za-z0-9._~/-]{0,251}\\*)$",
+                    "maxLength": 253
+                  }
+                },
+                "required": [
+                  "verb",
+                  "path"
+                ],
+                "additionalProperties": false
               }
             ]
           }
         },
         "namespace": {
-          "description": "The namespace for the string items. The default is cluster scope.",
+          "description": "The namespace for the string items. An object item names its own namespace. A string item that names a well-known cluster-scoped resource, such as `namespaces`, `nodes` or `clusterroles`, does not take it. The default is cluster scope.",
           "$ref": "#/$defs/K8sName"
+        },
+        "as": {
+          "description": "The service account to test as, `system:serviceaccount:<namespace>:<name>`, for example `system:serviceaccount:acme-system:installer`. The reviews are sent with `Impersonate-User` when the identity in the kubeconfig may impersonate it. It is refused when the kubeconfig already impersonates. M1 takes a service account only.",
+          "type": "string",
+          "maxLength": 253,
+          "pattern": "^system:serviceaccount:[a-z0-9-]{1,63}:[a-z0-9.-]{1,253}$"
         }
       },
       "required": [
