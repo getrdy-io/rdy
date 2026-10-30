@@ -18,6 +18,13 @@ fn mount(dev: (u32, u32), point: &str, options: &str, fstype: &str, source: &str
     }
 }
 
+fn found_btrfs(lookup: Lookup<'_>) -> &str {
+    match lookup {
+        Lookup::BtrfsByPath(m) => &m.point,
+        other => panic!("not a btrfs match: {other:?}"),
+    }
+}
+
 fn found(lookup: Lookup<'_>) -> &str {
     match lookup {
         Lookup::Found(m) => &m.point,
@@ -234,6 +241,7 @@ fn facts(stat: StatvfsInfo, mount: MountState) -> Facts<'static> {
         measured: "/var/lib/acme".to_owned(),
         stat,
         mount,
+        reading: Vec::new(),
         root: false,
     }
 }
@@ -343,15 +351,19 @@ fn an_unknown_noexec_is_not_a_pass() {
 }
 
 #[test]
-fn read_only_warns_without_a_forbid_and_fails_with_one() {
+fn read_only_is_evidence_and_fails_only_when_the_spec_forbids_it() {
     let mut s = stat(100);
     s.read_only = true;
+    // The spec did not forbid `ro`, so the check stays quiet and only records it.
     let finding = judge(&rules(), &facts(s, var_mount()));
-    assert_eq!(finding.level, Level::Warn);
-    assert!(finding.message.contains("read-only"));
+    assert_eq!(finding.level, Level::Pass);
+    assert!(!finding.message.contains("read-only"));
+    assert_eq!(finding.observed["read_only"], true);
     let mut r = rules();
     r.forbid = vec![MountOption::Ro];
-    assert_eq!(judge(&r, &facts(s, var_mount())).level, Level::Fail);
+    let finding = judge(&r, &facts(s, var_mount()));
+    assert_eq!(finding.level, Level::Fail);
+    assert!(finding.fix.expect("a fix").contains("remount,rw /var"));
 }
 
 #[test]
@@ -435,7 +447,17 @@ fn a_word_is_quoted_or_refused_never_passed_through() {
     assert_eq!(word("/mnt/acme data").as_deref(), Some("'/mnt/acme data'"));
     assert_eq!(word("/a;rm -rf ~").as_deref(), Some("'/a;rm -rf ~'"));
     assert_eq!(word("/a$(id)").as_deref(), Some("'/a$(id)'"));
-    for bad in ["", "/a'b", "/a`b", "/a\nb", "/a\tb"] {
+    for bad in [
+        "",
+        "/a'b",
+        "/a`b",
+        "/a\nb",
+        "/a\tb",
+        "/a\u{202e}b",
+        "/a\u{200b}b",
+        "/a\u{feff}b",
+        "/a\u{fffd}b",
+    ] {
         assert_eq!(word(bad), None, "{bad:?}");
     }
 }
@@ -450,7 +472,7 @@ fn a_hostile_mount_point_never_reaches_a_command() {
         let m = MountState::Found(mount((253, 1), point, "rw", "ext4", "/dev/mapper/a`b"));
         let finding = judge(&r, &facts(s, m));
         let fix = finding.fix.expect("a fix");
-        assert!(!fix.contains("remount"), "{fix}");
+        assert!(!fix.contains("mount -o"), "{fix}");
     }
 }
 
@@ -493,7 +515,7 @@ fn an_lvm_volume_gets_a_grow_command_sized_to_the_gap() {
     let fix = finding.fix.expect("a fix");
     // 24 GiB recommended, 10 GiB free: 14 GiB more.
     assert!(
-        fix.contains("lvextend -r -L +14G /dev/mapper/rl-var"),
+        fix.contains("If `/dev/mapper/rl-var` is an LVM volume, grow it with `lvextend -r -L +14G /dev/mapper/rl-var`"),
         "{fix}"
     );
     assert!(fix.contains("df -h /var/lib/acme"), "{fix}");
@@ -501,4 +523,155 @@ fn an_lvm_volume_gets_a_grow_command_sized_to_the_gap() {
     let plain = MountState::Found(mount((253, 1), "/var", "rw", "ext4", "/dev/sda3"));
     let fix = judge(&rules(), &facts(stat(10), plain)).fix.expect("a fix");
     assert!(!fix.contains("lvextend"), "{fix}");
+}
+
+#[test]
+fn lvextend_is_for_a_growable_type_on_a_mapper_source_that_is_not_encrypted() {
+    let fix_for = |fstype: &str, source: &str| {
+        let m = MountState::Found(mount((253, 1), "/var", "rw", fstype, source));
+        judge(&rules(), &facts(stat(10), m)).fix.expect("a fix")
+    };
+    assert!(fix_for("xfs", "/dev/mapper/rl-var").contains("lvextend"));
+    assert!(fix_for("ext3", "/dev/mapper/rl-var").contains("lvextend"));
+    // A FUSE mount can name any source, a type lvextend cannot grow gets no advice, and an encrypted
+    // container is not a logical volume.
+    for (fstype, source) in [
+        ("fuse.sshfs", "/dev/mapper/x"),
+        ("nfs4", "/dev/mapper/x"),
+        ("btrfs", "/dev/mapper/x"),
+        ("ext4", "/dev/mapper/luks-0a1b2c3d"),
+        ("ext4", "/dev/sda3"),
+        ("ext4", "/dev/mapper/"),
+    ] {
+        let fix = fix_for(fstype, source);
+        assert!(!fix.contains("lvextend"), "{fstype} {source}: {fix}");
+    }
+}
+
+#[test]
+fn a_noexec_mount_leads_with_moving_the_install_and_remounts_second() {
+    let mut r = rules();
+    r.forbid = vec![MountOption::Noexec];
+    let mut s = stat(100);
+    s.no_exec = Some(true);
+    let fix = judge(&r, &facts(s, var_mount())).fix.expect("a fix");
+    let move_at = fix.find("Move the install path").expect("move first");
+    let tmpdir_at = fix.find("TMPDIR").expect("TMPDIR");
+    let remount_at = fix.find("remount,exec /var").expect("remount");
+    assert!(move_at < tmpdir_at && tmpdir_at < remount_at, "{fix}");
+    assert!(fix.contains("security team"), "{fix}");
+}
+
+#[test]
+fn the_nearest_btrfs_mount_answers_for_a_device_mountinfo_does_not_show() {
+    let mounts = [
+        mount((0, 26), "/", "rw", "btrfs", "/dev/vda2"),
+        mount((0, 5), "/proc", "rw", "proc", "proc"),
+        mount((253, 1), "/boot", "rw", "ext4", "/dev/vda1"),
+    ];
+    // A subvolume has an anonymous device of its own: no line has it.
+    assert_eq!(
+        found_btrfs(mountinfo::find(&mounts, (0, 45), &["opt", "acme"])),
+        "/"
+    );
+    // The longest whole-component prefix, not just the root.
+    let nested = [
+        mount((0, 26), "/", "rw", "btrfs", "/dev/vda2"),
+        mount((0, 26), "/home", "rw", "btrfs", "/dev/vda2"),
+    ];
+    assert_eq!(
+        found_btrfs(mountinfo::find(&nested, (0, 45), &["home", "u"])),
+        "/home"
+    );
+    // `/home` is not above `/homework`.
+    assert_eq!(
+        found_btrfs(mountinfo::find(&nested, (0, 45), &["homework"])),
+        "/"
+    );
+}
+
+#[test]
+fn a_missing_device_is_not_guessed_when_the_nearest_mount_is_not_btrfs() {
+    let mounts = [
+        mount((8, 1), "/", "rw", "ext4", "/dev/sda1"),
+        mount((0, 26), "/data", "rw", "btrfs", "/dev/vdb1"),
+    ];
+    // The nearest mount above the path is ext4, so the missing device stays unknown.
+    assert_eq!(
+        mountinfo::find(&mounts, (0, 45), &["srv", "acme"]),
+        Lookup::NoDevice
+    );
+    // A btrfs mount that is not above the path does not count either.
+    assert_eq!(
+        mountinfo::find(&mounts, (0, 45), &["srv"]),
+        Lookup::NoDevice
+    );
+    // A deeper non-btrfs mount hides a shallower btrfs one.
+    let mounts = [
+        mount((0, 26), "/", "rw", "btrfs", "/dev/vda2"),
+        mount((8, 3), "/srv", "rw", "ext4", "/dev/sdc1"),
+    ];
+    assert_eq!(
+        mountinfo::find(&mounts, (0, 45), &["srv", "x"]),
+        Lookup::NoDevice
+    );
+    // No mounts at all.
+    assert_eq!(mountinfo::find(&[], (0, 45), &["srv"]), Lookup::NoDevice);
+}
+
+#[test]
+fn a_device_that_mountinfo_shows_still_wins_over_the_btrfs_fallback() {
+    let mounts = [
+        mount((0, 26), "/", "rw", "btrfs", "/dev/vda2"),
+        mount((8, 1), "/data", "rw", "xfs", "/dev/sdb1"),
+    ];
+    assert_eq!(
+        found(mountinfo::find(&mounts, (8, 1), &["data", "x"])),
+        "/data"
+    );
+}
+
+#[test]
+fn the_parse_counts_the_lines_it_cut() {
+    let line = "1 0 8:1 / / rw - ext4 /dev/sda1 rw\n";
+    let exact = line.repeat(mountinfo::MAX_LINES);
+    let parsed = mountinfo::parse(&exact);
+    assert_eq!(parsed.mounts.len(), mountinfo::MAX_LINES);
+    assert!(!parsed.cut);
+    let over = format!("{exact}{line}");
+    let parsed = mountinfo::parse(&over);
+    assert_eq!(parsed.mounts.len(), mountinfo::MAX_LINES);
+    assert!(parsed.cut);
+    // Blank lines after the limit are nothing to report.
+    assert!(!mountinfo::parse(&format!("{exact}\n\n")).cut);
+}
+
+#[test]
+fn reading_notes_reach_the_finding() {
+    let mut f = facts(stat(100), var_mount());
+    f.reading = vec!["2 line(s) were left out.".to_owned()];
+    let finding = judge(&rules(), &f);
+    assert_eq!(finding.notes, ["2 line(s) were left out."]);
+}
+
+#[test]
+fn the_display_of_a_hostile_path_or_mount_point_cannot_break_a_code_span() {
+    let hostile = mount((253, 1), "/mnt/x`id`\nA", "rw", "ext4", "/dev/sda3");
+    let mut f = facts(stat(5), MountState::Found(hostile));
+    f.requested = "/srv/a`b\u{202e}c";
+    f.measured = "/srv".to_owned();
+    let finding = judge(&rules(), &f);
+    let text = format!("{} {}", finding.message, finding.fix.expect("a fix"));
+    // Text with a backtick is shown bare, escaped, so no backtick of the text can close a span.
+    assert!(text.contains("/srv/a`b\\u{202e}c has"), "{text}");
+    assert!(text.contains("/mnt/x`id`\\x0aA (ext4)"), "{text}");
+    assert!(!text.contains('\n') && !text.contains('\u{202e}'), "{text}");
+    // A path with no backtick keeps the code span but escapes controls.
+    f.requested = "/srv/a\u{1b}[2Jb";
+    let finding = judge(&rules(), &f);
+    assert!(
+        finding.message.contains("`/srv/a\\x1b[2Jb` has"),
+        "{}",
+        finding.message
+    );
 }

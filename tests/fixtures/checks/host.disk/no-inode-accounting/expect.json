@@ -16,10 +16,11 @@
     "level": "pass",
     "message": "`/opt/acme` has 80 GiB free on `/` (btrfs). 20 GiB is needed.",
     "notes": [
-      "This file system keeps no inode count, so inodes were not checked."
+      "This file system keeps no inode count, so inodes were not checked.",
+      "No line in /proc/self/mountinfo has device 0:45. A btrfs subvolume has a device number of its own, so rdy matched the btrfs mount `/` by its mount point."
     ],
     "observed": {
-      "device": "0:27",
+      "device": "0:45",
       "free_bytes": 85899345920,
       "free_inodes": null,
       "fstype": "btrfs",

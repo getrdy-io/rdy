@@ -2,14 +2,16 @@
 //!
 //! The device of the measured file system (`major:minor`, field 3) finds the lines. Several lines can
 //! share a device (a bind mount, a stacked mount), so the longest mount point that is a whole-component
-//! prefix of the measured path breaks the tie. Paths are `/`-separated text everywhere here, never
+//! prefix of the measured path breaks the tie. A btrfs subvolume reports its own anonymous device in
+//! `st_dev` and mountinfo shows the superblock's, so no line matches. For that one case the longest
+//! whole-component mount point above the path is used, but only if its line is btrfs. Paths are `/`-separated text everywhere here, never
 //! `std::path`, so the same code and the same fixtures run on every CI leg.
 
 use crate::cgroup::unescape;
 
 /// The most lines read. The probe already caps the file at 1 MiB. This keeps the work bounded if lines
 /// are very short.
-const MAX_LINES: usize = 20_000;
+pub(super) const MAX_LINES: usize = 20_000;
 
 /// One mount.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,12 +41,15 @@ pub(super) struct Parsed {
     pub mounts: Vec<Mount>,
     /// Lines that were not in the form and were left out.
     pub skipped: usize,
+    /// Whether lines past [`MAX_LINES`] were not read.
+    pub cut: bool,
 }
 
 /// Parses the file. A line that is not in the form is counted and left out, never an error.
 pub(super) fn parse(text: &str) -> Parsed {
     let mut parsed = Parsed::default();
-    for line in text.lines().take(MAX_LINES) {
+    let mut lines = text.lines();
+    for line in lines.by_ref().take(MAX_LINES) {
         if line.trim().is_empty() {
             continue;
         }
@@ -53,6 +58,7 @@ pub(super) fn parse(text: &str) -> Parsed {
             None => parsed.skipped += 1,
         }
     }
+    parsed.cut = lines.any(|line| !line.trim().is_empty());
     parsed
 }
 
@@ -121,6 +127,9 @@ fn is_above(point: &str, path: &[&str]) -> Option<usize> {
 pub(super) enum Lookup<'a> {
     /// The line of the mount that holds the path.
     Found(&'a Mount),
+    /// No line has this device, but the longest mount point above the path is a btrfs mount. A btrfs
+    /// subvolume has a device number of its own that mountinfo does not show.
+    BtrfsByPath(&'a Mount),
     /// No line has this device.
     NoDevice,
     /// Several lines have this device and none is a prefix of the path, so the mount is not known.
@@ -134,6 +143,10 @@ pub(super) enum Lookup<'a> {
 /// mount point is a prefix, which happens when the path goes through a link, a single line with that
 /// device is still the answer, because the device names the file system. Several such lines are
 /// [`Lookup::Ambiguous`].
+///
+/// When no line has the device, the longest whole-component mount point above the path (any device, a
+/// later line winning a tie) is used if its type is `btrfs` ([`Lookup::BtrfsByPath`]). Any other type
+/// there is [`Lookup::NoDevice`].
 pub(super) fn find<'a>(mounts: &'a [Mount], dev: (u32, u32), path: &[&str]) -> Lookup<'a> {
     let same: Vec<&Mount> = mounts.iter().filter(|m| m.dev == dev).collect();
     let mut best: Option<(usize, &Mount)> = None;
@@ -147,9 +160,25 @@ pub(super) fn find<'a>(mounts: &'a [Mount], dev: (u32, u32), path: &[&str]) -> L
     match (best, same.as_slice()) {
         (Some((_, mount)), _) => Lookup::Found(mount),
         (None, [mount]) => Lookup::Found(mount),
-        (None, []) => Lookup::NoDevice,
+        (None, []) => match longest_above(mounts, path) {
+            Some(mount) if mount.fstype == "btrfs" => Lookup::BtrfsByPath(mount),
+            _ => Lookup::NoDevice,
+        },
         (None, _) => Lookup::Ambiguous,
     }
+}
+
+/// The mount, on any device, with the longest whole-component mount point above `path`.
+fn longest_above<'a>(mounts: &'a [Mount], path: &[&str]) -> Option<&'a Mount> {
+    let mut best: Option<(usize, &Mount)> = None;
+    for mount in mounts {
+        if let Some(depth) = is_above(&mount.point, path)
+            && best.is_none_or(|(deepest, _)| depth >= deepest)
+        {
+            best = Some((depth, mount));
+        }
+    }
+    best.map(|(_, mount)| mount)
 }
 
 /// File system types that live on another machine.

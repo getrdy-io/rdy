@@ -146,6 +146,10 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// The macros of the data-embedding tests that build an `include_str!` path from their arguments. A `..`
+/// in an argument would climb out of the fixture directory, so the scan reads each call.
+const FIXTURE_MACROS: &[&str] = &["fx!(", "expect!("];
+
 /// Lints that cover `disallowed_*`: the three lints, and the groups that include them. Compared with
 /// whitespace removed, so `clippy :: disallowed_methods` matches.
 const COVERING: &[&str] = &[
@@ -542,19 +546,19 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
             );
         }
         // Past the required prefix nothing may climb out of it: not in the first literal, not in a later
-        // literal of the call, not in the joined text, and not in an argument of an `fx!` call.
+        // literal of the call, not in the joined text, and not in an argument of a fixture macro call
+        // (`fx!` in the firewall tests, `expect!` in the disk tests).
         for call in include_calls(&source) {
             assert!(
                 !climbs(&call, prefix),
                 "{path}: an include path {call:?} climbs out of `{prefix}` with `..` ({why})"
             );
         }
-        for literal in macro_literals(&source, "fx!(") {
-            assert!(
-                !literal.contains(".."),
-                "{path}: an fx! argument `{literal}` contains `..`, which would leave the fixture directory ({why})"
-            );
-        }
+        let climbing = macro_climbs(&source);
+        assert!(
+            climbing.is_empty(),
+            "{path}: fixture macro arguments {climbing:?} contain `..`, which would leave the fixture directory ({why})"
+        );
         assert!(
             test_only(&base, path),
             "{path} embeds data but is not a #[cfg(test)] module: declare it, or the module above it, under #[cfg(test)] ({why})"
@@ -622,6 +626,15 @@ fn call_literals(args: &str) -> Vec<String> {
         rest = &rest[c.len_utf8()..];
     }
     out
+}
+
+/// The string literals in the arguments of the fixture macro calls that contain `..`.
+fn macro_climbs(source: &str) -> Vec<String> {
+    FIXTURE_MACROS
+        .iter()
+        .flat_map(|name| macro_literals(source, name))
+        .filter(|literal| literal.contains(".."))
+        .collect()
 }
 
 /// Every string literal in the arguments of every call of the macro `name` (written `fx!(`).
@@ -1049,6 +1062,14 @@ fn the_include_reader_sees_every_literal_of_a_call_and_of_fx() {
         "a nested call and a later literal are read"
     );
     assert_eq!(macro_literals(source, "fx!("), ["case", "a/../b"]);
+    // The disk tests' `expect!` is scanned like `fx!`, and a planted climb in either is found.
+    let planted = "const CASES: &[(&str, &str)] = &[expect!(\"../../x\"), expect!(\"plenty\")];";
+    assert_eq!(macro_climbs(planted), ["../../x"]);
+    assert_eq!(
+        macro_climbs("let b = fx!(\"case\", \"a/../b\");"),
+        ["a/../b"]
+    );
+    assert!(macro_climbs("let b = expect!(\"plenty\"); .expect(\"..\")").is_empty());
     // The macro definition is not a call.
     assert!(macro_literals("macro_rules! fx { () => {} }", "fx!(").is_empty());
     // A closing parenthesis inside a literal does not end the call.

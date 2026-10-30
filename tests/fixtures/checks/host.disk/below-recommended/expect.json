@@ -12,7 +12,7 @@
       "min_inodes": 100000,
       "recommended": 25769803776
     },
-    "fix": "Run `df -h /var/lib/acme` to see the volume. Grow it with `lvextend -r -L +2G /dev/mapper/rl-var`, or point the install at a larger disk.",
+    "fix": "Run `df -h /var/lib/acme` to see the volume. If `/dev/mapper/rl-var` is an LVM volume, grow it with `lvextend -r -L +2G /dev/mapper/rl-var`. Otherwise grow the volume, or point the install at a larger disk.",
     "level": "warn",
     "message": "`/var/lib/acme` has 22 GiB free on `/var` (ext4). 24 GiB is recommended and 20 GiB is the least.",
     "notes": [],

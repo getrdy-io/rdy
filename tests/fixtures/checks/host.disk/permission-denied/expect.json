@@ -20,9 +20,7 @@
       "path": "/srv/private/acme"
     },
     "partial": {
-      "missing": [
-        "Root"
-      ],
+      "missing": [],
       "note": "Not verified: cannot open the directory, permission denied."
     }
   }

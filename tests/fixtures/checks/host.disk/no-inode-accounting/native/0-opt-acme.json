@@ -11,6 +11,6 @@
     "read_only": false,
     "no_exec": false,
     "no_suid": false,
-    "dev": "0:27"
+    "dev": "0:45"
   }
 }

@@ -1,2 +1,3 @@
-30 1 0:27 /root / rw,relatime shared:1 - btrfs /dev/vda2 rw,space_cache=v2,subvolid=256,subvol=/root
+30 1 0:26 /root / rw,relatime shared:1 - btrfs /dev/vda2 rw,space_cache=v2,subvolid=256,subvol=/root
 31 30 0:5 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
+32 30 253:1 / /boot rw,relatime shared:30 - ext4 /dev/vda1 rw

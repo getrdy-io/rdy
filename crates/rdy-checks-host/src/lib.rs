@@ -39,6 +39,7 @@ mod family;
 mod firewall;
 mod memory;
 mod os;
+mod text;
 
 pub use disk::Disk;
 pub use family::HostFamily;

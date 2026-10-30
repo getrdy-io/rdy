@@ -10,8 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rdy_engine::check::{Check, CheckOutcome, Finding, Level, Need, Os};
+use rdy_engine::probe::ActionLogOutput;
 use rdy_engine::sched::{End, Planned};
-use rdy_engine::testing::{Fixture, TestRun, fixtures_dir};
+use rdy_engine::testing::{Fixture, TestRun, assert_within_manifest, fixtures_dir};
 use rdy_spec::check::CheckParams;
 use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use rdy_spec::spec::CheckSpec;
@@ -67,7 +68,7 @@ fn disk(entry: &Value) -> Disk {
 /// What a run produced.
 struct Run {
     end: End,
-    actions: Vec<Action>,
+    log: ActionLogOutput,
 }
 
 impl Run {
@@ -99,7 +100,7 @@ fn run(fixture: &Fixture, disk: Disk) -> Run {
     let mut ran = runtime.block_on(scheduler.run(vec![planned]));
     Run {
         end: ran.remove(0).end,
-        actions: test_run.action_log().actions,
+        log: test_run.action_log(),
     }
 }
 
@@ -158,8 +159,9 @@ fn every_case_matches_its_golden() {
 }
 
 #[test]
-fn every_case_directory_has_a_golden_in_the_list() {
-    // The list above is the only way a case runs. A new directory without a row would never be tested.
+fn the_case_list_names_the_cases_the_catalog_needs_and_lists_none_twice() {
+    // This does not look at the directory: a new case directory without a row is not caught here.
+    // It checks that the cases named in the ticket are in the list and that no row repeats.
     let names: Vec<&str> = CASES.iter().map(|(name, _)| *name).collect();
     for expected in [
         "plenty",
@@ -222,6 +224,7 @@ fn a_hung_mount_ends_in_a_timeout_at_the_check_default() {
     );
     // One call went out and never came back.
     let natives: Vec<&Action> = result
+        .log
         .actions
         .iter()
         .filter(|a| a.kind == ActionKind::Native)
@@ -238,7 +241,7 @@ fn a_run_stays_inside_the_manifest() {
         let golden: Value = serde_json::from_str(text).expect("json");
         let result = run(&load(case), disk(&golden["entry"]));
         assert!(result.outcome().is_ok(), "{case}: {:?}", result.outcome());
-        for action in &result.actions {
+        for action in &result.log.actions {
             assert!(
                 matches!(action.kind, ActionKind::Native | ActionKind::Read),
                 "{case}: {:?}",
@@ -259,6 +262,7 @@ fn a_run_stays_inside_the_manifest() {
             }
             assert_ne!(action.outcome, ActionOutcome::Denied, "{case}");
         }
+        assert_within_manifest(case, &INFO, &result.log);
     }
     assert_eq!(INFO.reads, [MOUNTINFO]);
     assert_eq!(INFO.statfs, ["/"]);
@@ -273,6 +277,7 @@ fn the_walk_up_retries_statvfs_and_stops_at_the_first_parent_that_exists() {
         disk(&json!({"id": "host.disk", "path": "/opt/acme/data", "min": "20Gi"})),
     );
     let paths: Vec<&str> = result
+        .log
         .actions
         .iter()
         .filter(|a| a.kind == ActionKind::Native)
@@ -412,7 +417,11 @@ fn a_windows_path_or_a_dotdot_path_is_not_verified_before_any_call() {
             disk(&json!({"id": "host.disk", "path": path, "min": "1Gi"})),
         );
         assert_eq!(result.finding().level, Level::Warn, "{path}");
-        assert!(result.actions.is_empty(), "{path}: {:?}", result.actions);
+        assert!(
+            result.log.actions.is_empty(),
+            "{path}: {:?}",
+            result.log.actions
+        );
     }
 }
 
@@ -430,4 +439,56 @@ fn on_another_os_the_check_is_unsupported_and_makes_no_call() {
         assert!(matches!(outcome, Err(CheckError::Unsupported(_))), "{os:?}");
     }
     assert!(test_run.action_log().actions.is_empty());
+}
+
+fn golden_entry(case: &str) -> Value {
+    let text = CASES
+        .iter()
+        .find(|(name, _)| *name == case)
+        .expect("a case")
+        .1;
+    let golden: Value = serde_json::from_str(text).expect("json");
+    golden["entry"].clone()
+}
+
+#[test]
+fn a_btrfs_subvolume_is_matched_by_mount_point_and_says_so() {
+    // `st_dev` is 0:45, the subvolume's own device. Mountinfo shows 0:26 for the superblock.
+    let fixture = load("no-inode-accounting");
+    let result = run(
+        &fixture,
+        disk(
+            &json!({"id": "host.disk", "path": "/opt/acme", "min": "20Gi", "forbid_fstypes": ["btrfs"]}),
+        ),
+    );
+    let finding = result.finding();
+    assert_eq!(finding.level, Level::Fail, "{}", finding.message);
+    assert_eq!(finding.observed["device"], "0:45");
+    assert_eq!(finding.observed["fstype"], "btrfs");
+    assert!(finding.partial.is_none());
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.contains("0:45")
+                && n.contains("matched the btrfs mount `/` by its mount point")),
+        "{:?}",
+        finding.notes
+    );
+}
+
+#[test]
+fn a_denied_directory_lists_no_missing_need_because_the_check_wants_none() {
+    let fixture = load("permission-denied");
+    let result = run(&fixture, disk(&golden_entry("permission-denied")));
+    let finding = result.finding();
+    let partial = finding.partial.as_ref().expect("a partial");
+    assert!(partial.missing.is_empty(), "{:?}", partial.missing);
+    assert!(INFO.wants.is_empty());
+    assert!(
+        finding
+            .fix
+            .as_deref()
+            .is_some_and(|f| f.contains("as root"))
+    );
 }

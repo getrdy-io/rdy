@@ -7,8 +7,10 @@
 //! A path that does not exist yet is measured through its nearest existing parent: the check retries
 //! `Statvfs` one level up for as long as the answer is `NotFound`. The mount line is the one whose
 //! device (field 3) equals the device `Statvfs` reported, and among those the longest whole-component
-//! mount point above the path. When no line fits, the type is unknown, and a check that needs the type
-//! says "not verified", never a pass.
+//! mount point above the path. A btrfs subvolume has a device number of its own that mountinfo does not
+//! show, so when no line has the device, the longest mount point above the path is used if it is btrfs.
+//! When no line fits, the type is unknown, and a check that needs the type says "not verified", never a
+//! pass.
 //!
 //! A hung network mount blocks `statvfs`. The live backend runs it on the blocking pool, so the check's
 //! timeout (5s) ends the wait and the result is `Timeout`.
@@ -23,13 +25,14 @@ use rdy_engine::check::{
     Need, Os, Partial,
 };
 use rdy_engine::probe::{NativeCall, NativeValue, ProbeError, StatvfsInfo};
+use rdy_engine::text::escape_untrusted;
 use rdy_engine::units::format_bytes;
 use rdy_spec::Quantity;
 use rdy_spec::check::{HostDisk, MountOption};
 use serde_json::{Value, json};
 
 use crate::family::OS;
-use crate::firewall::{short, soft};
+use crate::text::{code, is_odd, short, soft};
 
 mod mountinfo;
 #[cfg(test)]
@@ -144,7 +147,6 @@ impl Disk {
             return Ok(self.stop(
                 "the path is not an absolute Linux path without `..`",
                 "Write the install path from `/` without `..`, or scope this entry to the OS it is for with `os:`.",
-                Vec::new(),
             ));
         };
         let reached = match self.reach(ctx, &parts).await? {
@@ -152,12 +154,13 @@ impl Disk {
             Reach::Stop(finding) => return Ok(*finding),
         };
         let kept = &parts[..reached.depth];
-        let lookup = lookup_mount(ctx, reached.stat.dev, kept).await?;
+        let (lookup, reading) = lookup_mount(ctx, reached.stat.dev, kept).await?;
         let facts = Facts {
             requested: &self.path,
             measured: join(kept),
             stat: reached.stat,
             mount: lookup,
+            reading,
             root: ctx.has(&Need::Root),
         };
         Ok(judge(&self.rules, &facts))
@@ -192,26 +195,20 @@ impl Disk {
                     return Ok(Reach::Stop(Box::new(self.stop(
                         "no part of the path exists",
                         "Check that the path is on this machine, or run rdy where the install will run.",
-                        Vec::new(),
                     ))));
                 }
                 Err(ProbeError::PermissionDenied) => {
-                    let missing = if ctx.has(&Need::Root) {
-                        Vec::new()
-                    } else {
-                        vec![Need::Root]
-                    };
+                    // The check declares no `wants`, so nothing is listed as missing. The fix says
+                    // what would help.
                     return Ok(Reach::Stop(Box::new(self.stop(
                         "cannot open the directory, permission denied",
                         "Run rdy as a user who can enter every directory on the path, or as root.",
-                        missing,
                     ))));
                 }
                 Err(ProbeError::Denied { .. }) => {
                     return Ok(Reach::Stop(Box::new(self.stop(
                         "rdy does not read this path",
                         "Pick an install path outside the system directories rdy keeps off limits.",
-                        Vec::new(),
                     ))));
                 }
                 Err(ProbeError::Unsupported(_)) => return Err(CheckError::Unsupported(NO_SOURCE)),
@@ -220,7 +217,6 @@ impl Disk {
                     return Ok(Reach::Stop(Box::new(self.stop(
                         &format!("the file system call failed ({why})"),
                         "Check the path, then run rdy again.",
-                        Vec::new(),
                     ))));
                 }
                 Err(other) => return Err(CheckError::Probe(other)),
@@ -229,21 +225,20 @@ impl Disk {
         Ok(Reach::Stop(Box::new(self.stop(
             "the path has too many missing levels to walk up",
             "Create the install directory, or point the spec at a path that exists.",
-            Vec::new(),
         ))))
     }
 
     /// A warning that the path could not be measured. It never blocks.
-    fn stop(&self, why: &str, fix: &str, missing: Vec<Need>) -> Finding {
+    fn stop(&self, why: &str, fix: &str) -> Finding {
         let note = format!("Not verified: {why}.");
         Finding::new(
             Level::Warn,
-            format!("Cannot measure `{}`: {why}.", self.path),
+            format!("Cannot measure {}: {why}.", code(&self.path)),
         )
         .with_observed(json!({ "path": self.path }))
         .with_expected(expected(&self.rules))
         .with_fix(fix)
-        .with_partial(Partial::new(missing, note))
+        .with_partial(Partial::new(Vec::new(), note))
     }
 }
 
@@ -285,24 +280,25 @@ pub(crate) enum MountState {
     Unknown(String),
 }
 
-/// Reads the mount table and finds the line for `dev`.
+/// Reads the mount table and finds the line for `dev`. The second value is what to tell the reader
+/// about the reading itself: lines left out, a table cut short, a match by mount point.
 async fn lookup_mount(
     ctx: &CheckContext,
     dev: Option<(u32, u32)>,
     kept: &[&str],
-) -> Result<MountState, CheckError> {
+) -> Result<(MountState, Vec<String>), CheckError> {
     let Some(dev) = dev else {
-        return Ok(MountState::Unknown(
-            "the OS gave no device number".to_owned(),
-        ));
+        let why = "the OS gave no device number".to_owned();
+        return Ok((MountState::Unknown(why), Vec::new()));
     };
     let file = match ctx.probe().read(Path::new(MOUNTINFO)).await {
         Ok(file) => file,
         Err(error) => {
-            return Ok(MountState::Unknown(match soft(error)? {
+            let why = match soft(error)? {
                 ProbeError::NotFound => format!("{MOUNTINFO} is not there"),
                 other => format!("{MOUNTINFO} could not be read ({})", short(&other)),
-            }));
+            };
+            return Ok((MountState::Unknown(why), Vec::new()));
         }
     };
     let parsed = mountinfo::parse(&String::from_utf8_lossy(&file.bytes));
@@ -311,16 +307,38 @@ async fn lookup_mount(
     } else {
         ""
     };
+    let mut notes = Vec::new();
+    if parsed.skipped > 0 {
+        notes.push(format!(
+            "{} line(s) of {MOUNTINFO} were not in the expected form and were left out.",
+            parsed.skipped
+        ));
+    }
+    if parsed.cut {
+        notes.push(format!(
+            "{MOUNTINFO} has more than {} lines. Only the first {} were read.",
+            mountinfo::MAX_LINES,
+            mountinfo::MAX_LINES
+        ));
+    }
     let (major, minor) = dev;
-    Ok(match mountinfo::find(&parsed.mounts, dev, kept) {
+    let state = match mountinfo::find(&parsed.mounts, dev, kept) {
         Lookup::Found(mount) => MountState::Found(mount.clone()),
+        Lookup::BtrfsByPath(mount) => {
+            notes.push(format!(
+                "No line in {MOUNTINFO} has device {major}:{minor}. A btrfs subvolume has a device number of its own, so rdy matched the btrfs mount {} by its mount point.",
+                code(&mount.point)
+            ));
+            MountState::Found(mount.clone())
+        }
         Lookup::NoDevice => MountState::Unknown(format!(
             "no line in {MOUNTINFO} has device {major}:{minor}{cut}"
         )),
         Lookup::Ambiguous => MountState::Unknown(format!(
             "several mounts in {MOUNTINFO} share device {major}:{minor} and none is above the path{cut}"
         )),
-    })
+    };
+    Ok((state, notes))
 }
 
 /// Everything the judgement needs.
@@ -331,19 +349,17 @@ pub(crate) struct Facts<'a> {
     pub measured: String,
     pub stat: StatvfsInfo,
     pub mount: MountState,
+    /// Notes about how the mount table was read.
+    pub reading: Vec<String>,
     /// Whether rdy runs as root.
     pub root: bool,
 }
 
 /// A word that is safe to put in a command the customer copies: plain characters as they are, other
 /// text in single quotes, and nothing at all for text that no quoting makes safe (a quote, a backtick
-/// or a control character).
+/// or a control, invisible or bidirectional character).
 fn word(text: &str) -> Option<String> {
-    if text.is_empty()
-        || text
-            .chars()
-            .any(|c| c.is_control() || c == '`' || c == '\'')
-    {
+    if text.is_empty() || text.chars().any(|c| is_odd(c) || c == '`' || c == '\'') {
         return None;
     }
     let plain = text
@@ -396,8 +412,9 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
     };
     let place = mount.map_or_else(
         || "its file system".to_owned(),
-        |m| format!("`{}` ({})", m.point, m.fstype),
+        |m| format!("{} ({})", code(&m.point), escape_untrusted(&m.fstype)),
     );
+    let req = code(requested);
     let check_word = word(&facts.measured);
 
     let mut fails: Vec<String> = Vec::new();
@@ -417,13 +434,13 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
     } else if free < rules.recommended {
         let sentence = if free < rules.min {
             format!(
-                "`{requested}` has {} free on {place}, {} needed.",
+                "{req} has {} free on {place}, {} needed.",
                 format_bytes(free),
                 format_bytes(rules.min)
             )
         } else {
             format!(
-                "`{requested}` has {} free on {place}. {} is recommended and {} is the least.",
+                "{req} has {} free on {place}. {} is recommended and {} is the least.",
                 format_bytes(free),
                 format_bytes(rules.recommended),
                 format_bytes(rules.min)
@@ -446,7 +463,7 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
         notes.push("This file system keeps no inode count, so inodes were not checked.".to_owned());
     } else if stat.files_free < rules.min_inodes {
         fails.push(format!(
-            "`{requested}` has {} free inodes on {place}, {} needed.",
+            "{req} has {} free inodes on {place}, {} needed.",
             stat.files_free, rules.min_inodes
         ));
         fixes.push(match &check_word {
@@ -472,7 +489,7 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
         match state {
             Some(true) => {
                 fails.push(format!(
-                    "`{requested}` is on {place}, which is mounted {name}. The spec does not allow that."
+                    "{req} is on {place}, which is mounted {name}. The spec does not allow that."
                 ));
                 fixes.push(remount_fix(name, mount));
             }
@@ -480,13 +497,6 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
             None => unverified.push(format!("could not tell whether the file system is {name}")),
         }
     }
-    if stat.read_only && !rules.forbid.contains(&MountOption::Ro) {
-        lows.push(format!(
-            "`{requested}` is on {place}, which is mounted read-only. The install cannot write there."
-        ));
-        fixes.push(remount_fix("ro", mount));
-    }
-
     // File system type.
     match &facts.mount {
         MountState::Found(m) => {
@@ -496,16 +506,18 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
                 .find(|listed| mountinfo::type_matches(listed, &m.fstype));
             if let Some(listed) = banned {
                 fails.push(format!(
-                    "`{requested}` is on {place}, a file system type the spec does not allow ({listed})."
+                    "{req} is on {place}, a file system type the spec does not allow ({}).",
+                    escape_untrusted(listed)
                 ));
                 fixes.push(format!(
                     "Put the install on a local disk such as ext4 or xfs, or ask the vendor whether {} is supported.",
-                    m.fstype
+                    escape_untrusted(&m.fstype)
                 ));
             } else if mountinfo::is_network(&m.fstype) {
                 notes.push(format!(
-                    "`{}` is a network file system ({}). Free space and speed depend on the server.",
-                    m.point, m.fstype
+                    "{} is a network file system ({}). Free space and speed depend on the server.",
+                    code(&m.point),
+                    escape_untrusted(&m.fstype)
                 ));
             }
         }
@@ -531,8 +543,8 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
     }
     if facts.measured != join(&mountinfo::components(requested).unwrap_or_default()) {
         notes.push(format!(
-            "`{requested}` does not exist yet. rdy measured `{}`, the nearest parent that exists.",
-            facts.measured
+            "{req} does not exist yet. rdy measured {}, the nearest parent that exists.",
+            code(&facts.measured)
         ));
     }
 
@@ -548,7 +560,7 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
     sentences.extend(lows);
     if level == Level::Pass {
         sentences.push(format!(
-            "`{requested}` has {} free on {place}. {} is needed.",
+            "{req} has {} free on {place}. {} is needed.",
             format_bytes(free),
             format_bytes(rules.min)
         ));
@@ -557,7 +569,7 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
     let mut finding = Finding::new(level, sentences.join(" "))
         .with_observed(observed(facts, free, total))
         .with_expected(expected(rules));
-    for note in notes {
+    for note in notes.into_iter().chain(facts.reading.iter().cloned()) {
         finding = finding.with_note(note);
     }
     if level != Level::Pass {
@@ -572,41 +584,64 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
     finding
 }
 
+/// Whether `lvextend -r` can grow a file system of this type.
+fn grows_online(fstype: &str) -> bool {
+    matches!(fstype, "ext2" | "ext3" | "ext4" | "xfs")
+}
+
 /// The advice for too little free space.
+///
+/// The `lvextend` line is offered only for a local file system it can grow, on a `/dev/mapper/` source
+/// that is not an encrypted container (`luks-*`). The source comes from the mount table and a FUSE mount
+/// can name anything in it, so the advice says "if", never "it is".
 fn space_fix(path: Option<&str>, mount: Option<&Mount>, shortfall: u64) -> String {
     let look = match path {
         Some(p) => format!("Run `df -h {p}` to see the volume."),
         None => "Run `df -h` on the install path to see the volume.".to_owned(),
     };
     let lvm = mount
-        .filter(|m| m.source.starts_with("/dev/mapper/"))
+        .filter(|m| grows_online(&m.fstype))
+        .filter(|m| {
+            m.source
+                .strip_prefix("/dev/mapper/")
+                .is_some_and(|name| !name.is_empty() && !name.starts_with("luks-"))
+        })
         .and_then(|m| word(&m.source));
     match lvm {
         Some(source) => {
             let gib = shortfall.div_ceil(GIB).max(1);
             format!(
-                "{look} Grow it with `lvextend -r -L +{gib}G {source}`, or point the install at a larger disk."
+                "{look} If `{source}` is an LVM volume, grow it with `lvextend -r -L +{gib}G {source}`. Otherwise grow the volume, or point the install at a larger disk."
             )
         }
         None => format!("{look} Grow the volume, or point the install at a larger disk."),
     }
 }
 
-/// The advice for a forbidden or read-only mount.
+/// The advice for a forbidden mount option. Moving the install is the first choice. A remount changes
+/// a hardening setting such as `noexec` on `/tmp`, so it comes second and needs the security team.
 fn remount_fix(option: &str, mount: Option<&Mount>) -> String {
     let clear = clearing(option);
-    match mount.and_then(|m| word(&m.point)) {
-        Some(point) if option == "ro" => format!(
-            "Find out why the volume is read-only (`journalctl -k` shows disk errors). If it is safe, run `mount -o remount,{clear} {point}`. Otherwise move the install path."
-        ),
-        Some(point) => format!(
-            "Run `mount -o remount,{clear} {point}` and remove {option} from /etc/fstab so it stays, or move the install path."
-        ),
-        None if option == "ro" => {
-            "Find out why the volume is read-only, or move the install path.".to_owned()
+    let first = match option {
+        "noexec" => {
+            "Move the install path to a volume without noexec, or set `TMPDIR` to a directory on one."
         }
+        "ro" => {
+            "Find out why the volume is read-only (`journalctl -k` shows disk errors), or move the install path."
+        }
+        _ => "Move the install path to a volume without that option.",
+    };
+    let ask = if option == "ro" {
+        "If it is safe,"
+    } else {
+        "If the security team agrees,"
+    };
+    match mount.and_then(|m| word(&m.point)) {
+        Some(point) => format!(
+            "{first} {ask} run `mount -o remount,{clear} {point}` and remove {option} from /etc/fstab so it stays."
+        ),
         None => format!(
-            "Remount the volume without {option} and remove {option} from /etc/fstab, or move the install path."
+            "{first} {ask} remount the volume without {option} and remove {option} from /etc/fstab."
         ),
     }
 }
