@@ -68,7 +68,7 @@ newest minors as fixtures).
 - The read-only role is checked on the live server in two ways: the server's access reviews deny writes,
   Secrets, token minting, exec, impersonation and bind, and the server's rules review for `default` and
   `kube-system` lists no grant outside the role file, the self reviews of `system:basic-user` and a short, named list of
-  read-only defaults that newer minors give every signed-in user (today: `get clustertrustbundles`).
+  read-only defaults that newer minors give every signed-in user (today: get, list and watch of `clustertrustbundles`).
 - Three pins move by hand: the kind version, its hash and the image digests. Dependabot does not read them.
   The nightly run shows a pin that rotted (an image removed from Docker Hub).
 - Not tested: the in-cluster path (a pod's service account), OpenShift, and managed distributions. Those are

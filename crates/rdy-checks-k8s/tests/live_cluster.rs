@@ -428,9 +428,11 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
 /// is read-only and holds no secret. An entry stays only with a reason.
 const SERVER_DEFAULTS: &[(&str, &str, &str, &str)] = &[
     // ClusterTrustBundles are cluster-wide CA bundles, public by design. The rules review of the 1.37.0
-    // server listed this get for the identity (none of the role file, so a default binding); the 1.35.8
+    // server listed get, list and watch for the identity (none of the role file, so a default binding); the 1.35.8
     // server did not.
     ("get", "certificates.k8s.io", "clustertrustbundles", ""),
+    ("list", "certificates.k8s.io", "clustertrustbundles", ""),
+    ("watch", "certificates.k8s.io", "clustertrustbundles", ""),
 ];
 
 /// What the server grants the identity in `namespace`, one entry per verb, group, resource and name.
