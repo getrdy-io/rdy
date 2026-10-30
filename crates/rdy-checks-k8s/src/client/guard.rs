@@ -338,6 +338,26 @@ impl ReadOnlyClient {
         self.client.list_core_api_versions().await
     }
 
+    /// The resources the core group serves at `version`, `GET /api/<version>`. The core group has one
+    /// version, `v1`, and the guard allows that one discovery path, so any other value is refused as
+    /// [`RULE_PATH_SHAPE`] before anything is sent (it writes no log entry). A check reads that refusal as
+    /// "not served".
+    ///
+    /// # Errors
+    ///
+    /// The `kube::Error` of the request, which can be a [`GuardError`] inside `Service`.
+    pub async fn core_resources(&self, version: &str) -> Result<APIResourceList, kube::Error> {
+        if version != "v1" {
+            return Err(kube::Error::Service(
+                GuardError {
+                    rule: RULE_PATH_SHAPE,
+                }
+                .into(),
+            ));
+        }
+        self.client.list_core_api_resources(version).await
+    }
+
     /// The legacy discovery document of the named groups, `GET /apis`.
     ///
     /// # Errors

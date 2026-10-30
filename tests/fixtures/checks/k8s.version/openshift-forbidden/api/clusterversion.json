@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/config.openshift.io/v1/clusterversions/version"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "clusterversions.config.openshift.io \"version\" is forbidden: User \"acme-reader\" cannot get resource \"clusterversions\" in API group \"config.openshift.io\" at the cluster scope",
+    "reason": "Forbidden",
+    "details": {
+      "name": "version",
+      "group": "config.openshift.io",
+      "kind": "clusterversions"
+    },
+    "code": 403
+  }
+}

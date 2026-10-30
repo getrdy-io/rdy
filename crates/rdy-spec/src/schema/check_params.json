@@ -1076,7 +1076,7 @@
       "properties": {
         "min": {
           "$ref": "#/$defs/Version",
-          "description": "An older server blocks."
+          "description": "An older server blocks. This is a Kubernetes version. On OpenShift, `openshift_min` replaces it when both are set."
         },
         "max": {
           "$ref": "#/$defs/Version",
@@ -1094,7 +1094,7 @@
           }
         },
         "openshift_min": {
-          "description": "The lowest OpenShift version, used when the cluster is OpenShift.",
+          "description": "The lowest OpenShift version, used when the cluster is OpenShift. On an OpenShift cluster it replaces `min`: `min` is a Kubernetes version, and OpenShift 4.14 reports Kubernetes 1.27, so `min` is not applied there. `max` still applies to the Kubernetes version. On any other cluster `openshift_min` is ignored.",
           "$ref": "#/$defs/Version"
         },
         "over_max": {

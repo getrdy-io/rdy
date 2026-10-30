@@ -1,0 +1,42 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/nodes",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "NodeList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "acme-vm-1",
+          "labels": {
+            "kubernetes.io/os": "linux"
+          }
+        },
+        "spec": {
+          "providerID": "aws:///us-east-1a/i-0123456789abcdefa"
+        },
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.27.4",
+            "kubeProxyVersion": "v1.27.4",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      }
+    ]
+  }
+}
