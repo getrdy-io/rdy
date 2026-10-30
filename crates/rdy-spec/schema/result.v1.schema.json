@@ -128,7 +128,7 @@
           ]
         },
         "via_proxy": {
-          "description": "connect, user info stripped",
+          "description": "connect, kube: the proxy origin with the user info stripped, or null for a direct request",
           "type": [
             "string",
             "null"
@@ -1217,6 +1217,16 @@
           "items": {
             "$ref": "#/$defs/Need"
           },
+          "maxItems": 1000
+        },
+        "missing_grants": {
+          "description": "Permissions the check lacked, one short text each, such as `list nodes` or `list csinodes (storage.k8s.io)`. Empty when the partial result has no such cause. Older reports omit it.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "default": [],
           "maxItems": 1000
         },
         "note": {

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-pending-failed"
+summary = "A claim has been Pending for 20 minutes and its events say ProvisioningFailed"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

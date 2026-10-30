@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-both-forbidden"
+summary = "The identity may list neither CSINode nor CSIDriver"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

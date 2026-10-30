@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-eks-gp2-with-addon"
+summary = "EKS gp2 on the in-tree name, served through CSI migration, with the add-on installed"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

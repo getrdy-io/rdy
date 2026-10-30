@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-odf"
+summary = "OpenShift Data Foundation: an rbd default and a cephfs class, both registered with a prefix"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

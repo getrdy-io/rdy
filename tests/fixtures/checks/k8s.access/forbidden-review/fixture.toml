@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-access-forbidden-review"
+summary = "The version call works and the identity review answers 403"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.access"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -92,7 +92,7 @@
         "string",
         "null"
       ],
-      "description": "connect, user info stripped",
+      "description": "connect, kube: the proxy origin with the user info stripped, or null for a direct request",
       "maxLength": 4096
     },
     "sni": {

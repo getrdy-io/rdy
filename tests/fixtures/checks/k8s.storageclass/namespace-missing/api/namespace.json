@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "namespaces \"acme-system\" not found",
+    "reason": "NotFound",
+    "details": {},
+    "code": 404
+  }
+}

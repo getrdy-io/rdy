@@ -630,7 +630,9 @@ use it.
 
 `observed` holds measured values, `expected` the thresholds after defaults. Keys are snake_case per check
 id with the unit in the name (`total_bytes`, `connect_ms`, `tolerance_percent`). `needs` lists each
-declared need as `{need, name, hard, met}`. `partial` is `null` or `{missing: [needs], note}`; a partial
+declared need as `{need, name, hard, met}`. `partial` is `null` or `{missing: [needs], missing_grants: [text], note}`; `missing_grants` lists the
+permissions the check lacked, such as `list nodes`, and is empty when there is no such cause (a report written
+before the field existed reads as empty); a partial
 check never blocks on data it could not read (02, needs rule 4). Known needs: `root`, `kube_context`,
 `network`, `command` (with `name`), `cloud_credentials` (provider as `name`, M3).
 
@@ -740,7 +742,7 @@ Threat model R1 and INV-07: every side effect goes through the probe facade, whi
 | `env` | `name` (never the value) |
 | `lookup`, `dns` | `host`, `answers`; or `server`, `name`, `rtype` |
 | `connect`, `tls` | `host`, `port`, `addr`, `via_proxy`; or `host`, `sni`. A UDP exchange is a `connect` with `proto: udp` and `bytes` (the reply) |
-| `http`, `kube` | `method`, `url` (no query string) or `path`, `status`. A unix socket `GET` is an `http` with `path` (the socket) and `url` (the API path); a `kube` entry refused for a request header also has `header` (the name, never the value) |
+| `http`, `kube` | `method`, `url` (no query string) or `path`, `status`. A unix socket `GET` is an `http` with `path` (the socket) and `url` (the API path); a `kube` entry refused for a request header also has `header` (the name, never the value); a `kube` entry always has `via_proxy` (the proxy origin without user info, or `null`) |
 | `native` | `api`, `path` |
 | `coalesced` | `of` (the kind), `under` (the directory of a file call, or the program, host or path of another denied call, or `*` for the calls past 100 targets), `count`; with `rule` or `error` when the calls were `denied` or `failed`, and with neither when they were `ok` |
 

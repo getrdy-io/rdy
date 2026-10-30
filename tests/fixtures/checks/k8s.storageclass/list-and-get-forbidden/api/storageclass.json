@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/storage.k8s.io/v1/storageclasses/gp3"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "storageclasses.storage.k8s.io \"gp3\" is forbidden: User \"acme-reader\" cannot get resource \"storageclasses\" at the cluster scope",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}
