@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-csidriver-forbidden"
+summary = "No node lists the driver, and the CSIDriver list is refused"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

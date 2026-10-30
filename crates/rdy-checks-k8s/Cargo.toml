@@ -7,11 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-include = ["src/**", "Cargo.toml", "LICENSE", "clippy.toml"]
+include = ["src/**", "data/**", "Cargo.toml", "LICENSE", "clippy.toml"]
 
 [dependencies]
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
-# The typed parameters of the checks (`K8sVersion`, `K8sAccess` and their scalars) and the pattern compiler.
+# The typed parameters of the checks (`K8sVersion`, `K8sAccess`, `K8sStorageClass` and their scalars) and the
+# pattern compiler.
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 # Only `client` and `rustls-tls`, plus `ring` so rustls has a crypto provider and `aws-lc-rs` stays out
 # (ADR 0009, ADR 0031). `webpki-roots` makes the bundled roots the only system roots: without it kube
@@ -32,6 +33,10 @@ thiserror = { workspace = true, features = ["std"] }
 # A finding's `observed` and `expected` are JSON values, and the `exp` claim of a static JWT token is read
 # with it; nothing else of the token is.
 serde_json = { workspace = true, features = ["std"] }
+# Reads `data/provisioners.toml`, the storage provisioner table embedded at build time (M1-110, 03
+# Appendix B). `toml` parses text that `include_str!` put in the binary and touches no file.
+serde = { workspace = true, features = ["std", "derive"] }
+toml = { workspace = true, features = ["parse", "serde", "std"] }
 
 [dev-dependencies]
 # The test run (`TestRun`) writes the real action log, so the guard tests read the entries a run would.

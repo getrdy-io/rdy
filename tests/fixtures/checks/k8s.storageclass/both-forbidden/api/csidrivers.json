@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/storage.k8s.io/v1/csidrivers",
+    "query": "limit=500"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "csidrivers.storage.k8s.io is forbidden: User \"acme-reader\" cannot list resource \"csidrivers.storage.k8s.io\" at the cluster scope",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}

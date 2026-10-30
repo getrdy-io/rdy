@@ -244,6 +244,7 @@ Which sources a check could not read.
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
 | `missing` | array of one of `root`, `kube_context`, `network`, `command`, `cloud_credentials`, or another value | yes |  | The needs that were missing. |  |
+| `missing_grants` | array of string | no | `[]` | Permissions the check lacked, one short text each, such as `list nodes` or `list csinodes (storage.k8s.io)`. Empty when the partial result has no such cause. Older reports omit it. |  |
 | `note` | string | yes |  | What is missing, or the OS note for a `Partial` OS. |  |
 
 ## actions entries

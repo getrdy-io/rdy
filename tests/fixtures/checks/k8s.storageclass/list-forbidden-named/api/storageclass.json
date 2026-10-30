@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/storage.k8s.io/v1/storageclasses/gp3"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "storage.k8s.io/v1",
+    "kind": "StorageClass",
+    "metadata": {
+      "name": "gp3",
+      "creationTimestamp": "2026-01-01T00:00:00Z"
+    },
+    "provisioner": "ebs.csi.aws.com",
+    "volumeBindingMode": "WaitForFirstConsumer",
+    "allowVolumeExpansion": true
+  }
+}
