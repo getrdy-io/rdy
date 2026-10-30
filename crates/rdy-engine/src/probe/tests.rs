@@ -1727,7 +1727,7 @@ fn count_of(log: &ActionLogOutput, kind: &str, outcome: ActionOutcome) -> usize 
 }
 
 fn is_droppable_kind(kind: &str) -> bool {
-    matches!(kind, "read" | "read_dir" | "stat")
+    matches!(kind, "read" | "read_dir" | "read_link" | "stat")
 }
 
 #[test]
@@ -1750,6 +1750,7 @@ fn ok_reads_go_first_and_everything_else_stays() {
     for _ in 0..20 {
         put(&probe, ActionKind::Read, ActionOutcome::Ok);
         put(&probe, ActionKind::ReadDir, ActionOutcome::Ok);
+        put(&probe, ActionKind::ReadLink, ActionOutcome::Ok);
         put(&probe, ActionKind::Stat, ActionOutcome::Ok);
     }
     for (kind, outcome) in keep.clone() {
@@ -1775,9 +1776,9 @@ fn ok_reads_go_first_and_everything_else_stays() {
     }
     assert_eq!(log.last_resort_drops, 0);
     assert_eq!(log.actions.len(), 20, "the log holds exactly its cap");
-    // Every dropped entry is a gap in seq: 60 + 10 + 20 entries were made, 20 are left.
+    // Every dropped entry is a gap in seq: 80 + 10 + 20 entries were made, 20 are left.
     let total_dropped: u64 = log.dropped.values().sum();
-    assert_eq!(total_dropped + 20, 60 + 10 + 20);
+    assert_eq!(total_dropped + 20, 80 + 10 + 20);
     let seqs: Vec<u64> = log.actions.iter().map(|a| a.seq).collect();
     assert!(seqs.windows(2).all(|w| w[0] < w[1]));
 }
@@ -1854,6 +1855,115 @@ fn many_failed_reads_under_one_directory_fold_into_one_entry() {
     assert_eq!(field(folded, "error"), Some(&json!("not found")));
     assert_eq!(field(folded, "count"), Some(&json!(30)));
     assert!(!log.truncated, "folding is not dropping");
+}
+
+#[test]
+fn link_reads_fold_and_drop_like_file_reads() {
+    // A walk over many processes reads thousands of links under a few directories.
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("host.ports", Os::Linux, None);
+    for i in 0..(COALESCE_AFTER + 30) {
+        put_at(
+            &probe,
+            ActionKind::ReadLink,
+            ActionOutcome::Denied,
+            Some(&format!("/proc/4242/fd/{i}")),
+            "only socket links are read from a process's fd directory",
+        );
+    }
+    for i in 0..(COALESCE_OK_AFTER + 10) {
+        put_at(
+            &probe,
+            ActionKind::ReadLink,
+            ActionOutcome::Ok,
+            Some(&format!("/proc/4243/fd/{i}")),
+            "",
+        );
+    }
+    let log = hub.action_log();
+    let folded: Vec<&Action> = log
+        .actions
+        .iter()
+        .filter(|a| a.kind == ActionKind::Coalesced)
+        .collect();
+    assert_eq!(folded.len(), 2, "{folded:?}");
+    for entry in &folded {
+        assert_eq!(field(entry, "of"), Some(&json!("read_link")));
+    }
+    assert_eq!(field(folded[0], "under"), Some(&json!("/proc/4242/fd")));
+    assert_eq!(field(folded[0], "count"), Some(&json!(30)));
+    assert_eq!(folded[0].outcome, ActionOutcome::Denied);
+    assert_eq!(field(folded[1], "under"), Some(&json!("/proc/4243/fd")));
+    assert_eq!(field(folded[1], "count"), Some(&json!(10)));
+    assert_eq!(folded[1].outcome, ActionOutcome::Ok);
+    assert!(!log.truncated, "folding is not dropping");
+    // Each folded denial stands for a read_link call, and a drop counts under that kind.
+    assert_eq!(
+        crate::probe::dropped_calls(folded[1]),
+        ("read_link".to_owned(), 10)
+    );
+}
+
+#[tokio::test]
+async fn a_link_read_after_the_check_ended_is_refused_and_logged() {
+    use crate::check::{CheckInfo, CheckMeta, OsSupport, Support};
+    static LINKS: CheckInfo = CheckInfo {
+        id: "host.fixture",
+        family: "host",
+        summary: "Reads a link.",
+        meta: CheckMeta {
+            title: "Fixture check",
+            remediation: "Nothing to fix. This check is a test double.",
+        },
+        needs: &[],
+        wants: &[],
+        default_timeout: None,
+        os: OsSupport {
+            linux: Support::Full,
+            macos: Support::Full,
+            windows: Support::NotYet,
+        },
+        reads: &["/etc/os-release"],
+        statfs: &[],
+        env: &[],
+        commands: &[],
+        peers: &[],
+    };
+    let hub = hub(Replay::new().symlink("/etc/os-release", "../usr/lib/os-release"));
+    let probe = hub.check_probe("host.fixture", Os::Linux, Some(&LINKS));
+    probe
+        .read_link(Path::new("/etc/os-release"))
+        .await
+        .expect("a link under the declared reads");
+    probe.end();
+    let error = probe
+        .read_link(Path::new("/etc/os-release"))
+        .await
+        .expect_err("ended");
+    assert!(
+        matches!(
+            error,
+            ProbeError::Denied {
+                rule: RULE_CHECK_FINISHED,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert!(
+        Probe::closed()
+            .read_link(Path::new("/etc/os-release"))
+            .await
+            .is_err()
+    );
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 2);
+    assert_eq!(log.actions[0].kind, ActionKind::ReadLink);
+    assert_eq!(log.actions[1].outcome, ActionOutcome::Denied);
+    assert_eq!(
+        field(&log.actions[1], "rule"),
+        Some(&json!(RULE_CHECK_FINISHED))
+    );
 }
 
 #[test]
