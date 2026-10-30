@@ -34,8 +34,8 @@
 //!
 //! Not covered here, and carried (12-progress, M1-105 and M1-108):
 //! - The discovery routes (`/api`, `/apis`, `/apis/<group>/<version>`) and the raw
-//!   `SelfSubjectReview` POST. `ReadOnlyClient` has no route for either yet. M1-105 adds both, and
-//!   M1-108 runs them.
+//!   `SelfSubjectReview` POST. `ReadOnlyClient` has them since M1-105 (`core_versions`, `api_groups`,
+//!   `group_resources` and `self_subject_review`), proved against the mock only. M1-108 runs them here.
 //! - The OpenShift reads (`securitycontextconstraints` list, `clusterversions/version` get). A kind
 //!   cluster does not serve them, so the test asks the server's access review whether the role allows
 //!   them. That catches a typo in the rule, not a missing API.
