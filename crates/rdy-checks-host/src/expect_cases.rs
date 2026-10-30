@@ -40,13 +40,11 @@ fn build(entry: &CheckSpec) -> Arc<dyn Check> {
     Arc::from(built.check)
 }
 
-fn check(id: &str, at_least: usize) {
+/// Runs every case of `id` and counts them. A new case directory changes the count, so adding or
+/// deleting one is a deliberate edit here and not a silent change.
+fn check(id: &str, count: usize) {
     let cases = assert_cases(id, build);
-    assert!(
-        cases.len() >= at_least,
-        "{id}: {} cases, expected at least {at_least}: {cases:?}",
-        cases.len()
-    );
+    assert_eq!(cases.len(), count, "{id}: the cases are {cases:?}");
 }
 
 #[test]
@@ -61,7 +59,7 @@ fn host_disk_cases_match_their_expect_json() {
 
 #[test]
 fn host_firewall_cases_match_their_expect_json() {
-    check("host.firewall", 15);
+    check("host.firewall", 17);
 }
 
 #[test]

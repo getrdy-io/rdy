@@ -18,6 +18,8 @@
 //! level fails with a diff, and `UPDATE_GOLDENS=1` writes the new file for review.
 
 use std::fs;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::Path;
 use std::sync::Arc;
 
 use rdy_spec::spec::CheckSpec;
@@ -121,19 +123,37 @@ pub fn run_case(fixture: &Fixture, check: Arc<dyn Check>) -> End {
     ran.remove(0).end
 }
 
-/// Runs every case of `id` and compares each with its `expect.json`. Returns the case names, sorted.
-///
-/// `build` makes the check from the `entry` of a case. Every directory under `checks/<id>/` is a case:
-/// its fixture must load and answer `id`, and it needs an `expect.json` that holds an `entry`. One that
-/// has none fails and says how to write it, so a case cannot hide from this test.
+/// Runs every case of `id` under the shared fixtures and compares each with its `expect.json`. Returns
+/// the case names, sorted. See [`assert_cases_in`].
 ///
 /// # Panics
 ///
-/// When a case does not load, does not answer `id`, has no `expect.json` or `entry`, or differs from
-/// its `expect.json`.
+/// See [`assert_cases_in`].
 #[must_use]
 pub fn assert_cases(id: &str, build: impl Fn(&CheckSpec) -> Arc<dyn Check>) -> Vec<String> {
-    let root = fixtures_dir();
+    assert_cases_in(&fixtures_dir(), id, build)
+}
+
+/// Runs every case of `id` under the fixtures in `root` and compares each with its `expect.json`.
+/// Returns the case names, sorted.
+///
+/// `build` makes the check from the `entry` of a case. Every directory under `checks/<id>/` is a case:
+/// its fixture must load and answer `id`, and it needs an `expect.json` that holds an `entry` whose `id`
+/// is `id`. One that has none fails and says how to write it, so a case cannot hide from this test.
+///
+/// Every case runs. The failures are collected and reported together at the end, so one run shows all
+/// the cases that need attention.
+///
+/// # Panics
+///
+/// When any case does not load, does not answer `id`, has no `expect.json` or `entry`, has an `entry`
+/// for another check, or differs from its `expect.json`. The message lists every failing case.
+#[must_use]
+pub fn assert_cases_in(
+    root: &Path,
+    id: &str,
+    build: impl Fn(&CheckSpec) -> Arc<dyn Check>,
+) -> Vec<String> {
     let dir = root.join("checks").join(id);
     let mut names: Vec<String> = fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
@@ -142,31 +162,57 @@ pub fn assert_cases(id: &str, build: impl Fn(&CheckSpec) -> Arc<dyn Check>) -> V
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
+    let mut failures = Vec::new();
     for case in &names {
-        let name = format!("checks/{id}/{case}");
-        let fixture =
-            Fixture::load(&root, &name).unwrap_or_else(|e| panic!("{name} does not load: {e}"));
-        fixture
-            .ensure_answers(id)
-            .unwrap_or_else(|e| panic!("{name} is under checks/{id}/ and must answer it: {e}"));
-        let path = dir.join(case).join("expect.json");
-        let text = fs::read_to_string(&path).unwrap_or_else(|_| {
-            panic!(
-                "{name} has no expect.json. Fix: write {{\"entry\": {{\"id\": \"{id}\", ...}}}} \
-                 there, then run with UPDATE_GOLDENS=1 and read the result"
-            )
-        });
-        let golden: Value =
-            serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name}/expect.json: {e}"));
-        let entry = golden
-            .get("entry")
-            .unwrap_or_else(|| panic!("{name}/expect.json has no `entry`"));
-        let spec: CheckSpec = serde_json::from_value(entry.clone())
-            .unwrap_or_else(|e| panic!("{name}/expect.json `entry` is not a check entry: {e}"));
-        let end = run_case(&fixture, build(&spec));
-        assert_golden(&path, expect_bytes(entry, &end));
+        let ran = catch_unwind(AssertUnwindSafe(|| assert_case(root, id, case, &build)));
+        if let Err(payload) = ran {
+            let text = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("the case panicked without a message");
+            failures.push(format!("checks/{id}/{case}: {text}"));
+        }
     }
+    assert!(
+        failures.is_empty(),
+        "{} of {} cases of {id} failed:\n{}",
+        failures.len(),
+        names.len(),
+        failures.join("\n---\n")
+    );
     names
+}
+
+/// One case of [`assert_cases_in`].
+fn assert_case(root: &Path, id: &str, case: &str, build: &impl Fn(&CheckSpec) -> Arc<dyn Check>) {
+    let name = format!("checks/{id}/{case}");
+    let fixture =
+        Fixture::load(root, &name).unwrap_or_else(|e| panic!("{name} does not load: {e}"));
+    fixture
+        .ensure_answers(id)
+        .unwrap_or_else(|e| panic!("{name} is under checks/{id}/ and must answer it: {e}"));
+    let path = root.join("checks").join(id).join(case).join("expect.json");
+    let text = fs::read_to_string(&path).unwrap_or_else(|_| {
+        panic!(
+            "{name} has no expect.json. Fix: write {{\"entry\": {{\"id\": \"{id}\", ...}}}} \
+             there, then run with UPDATE_GOLDENS=1 and read the result"
+        )
+    });
+    let golden: Value =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name}/expect.json: {e}"));
+    let entry = golden
+        .get("entry")
+        .unwrap_or_else(|| panic!("{name}/expect.json has no `entry`"));
+    assert_eq!(
+        entry.get("id").and_then(Value::as_str),
+        Some(id),
+        "{name}/expect.json: the entry is for another check. Fix: set `entry.id` to {id}"
+    );
+    let spec: CheckSpec = serde_json::from_value(entry.clone())
+        .unwrap_or_else(|e| panic!("{name}/expect.json `entry` is not a check entry: {e}"));
+    let end = run_case(&fixture, build(&spec));
+    assert_golden(&path, expect_bytes(entry, &end));
 }
 
 #[cfg(test)]
@@ -246,6 +292,86 @@ mod tests {
         let end = run_case(&host_min(), Arc::new(FakeCheck::forever()));
         assert!(matches!(end, End::TimedOut { .. }), "{end:?}");
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    // ---- assert_cases_in, on planted trees ----
+
+    const MANIFEST: &str = "schema = 1\nname = \"case\"\nsummary = \"A planted case\"\norigin = \"hand\"\nos = \"linux\"\narch = \"x86_64\"\nanswers = [\"fake.plain\"]\n\n[caps]\nroot = false\nnetwork = false\nkube = false\n";
+
+    fn build(_: &CheckSpec) -> Arc<dyn Check> {
+        Arc::new(FakeCheck::pass())
+    }
+
+    /// A tree with one case of `fake.plain`, a manifest as given and an `expect.json` if any.
+    fn plant(manifest: &str, expect: Option<&str>) -> tempfile::TempDir {
+        let tree = tempfile::tempdir().expect("a temp dir");
+        let case = tree.path().join("checks/fake.plain/case");
+        fs::create_dir_all(&case).expect("a case dir");
+        fs::write(case.join("fixture.toml"), manifest).expect("a manifest");
+        if let Some(text) = expect {
+            fs::write(case.join("expect.json"), text).expect("an expect.json");
+        }
+        tree
+    }
+
+    fn right_bytes() -> String {
+        let end = run_case(&host_min(), Arc::new(FakeCheck::pass()));
+        expect_bytes(&json!({"id": "fake.plain"}), &end)
+    }
+
+    #[test]
+    fn a_case_with_the_right_result_passes_and_is_named() {
+        let tree = plant(MANIFEST, Some(&right_bytes()));
+        let names = assert_cases_in(tree.path(), "fake.plain", build);
+        assert_eq!(names, ["case"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no expect.json")]
+    fn a_case_with_no_expect_json_fails() {
+        let tree = plant(MANIFEST, None);
+        let _ = assert_cases_in(tree.path(), "fake.plain", build);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no `entry`")]
+    fn an_expect_json_with_no_entry_fails() {
+        let tree = plant(MANIFEST, Some("{\"result\": {}}\n"));
+        let _ = assert_cases_in(tree.path(), "fake.plain", build);
+    }
+
+    #[test]
+    #[should_panic(expected = "the entry is for another check")]
+    fn an_entry_for_another_check_fails() {
+        let text = right_bytes().replace("\"id\": \"fake.plain\"", "\"id\": \"host.memory\"");
+        let tree = plant(MANIFEST, Some(&text));
+        let _ = assert_cases_in(tree.path(), "fake.plain", build);
+    }
+
+    #[test]
+    #[should_panic(expected = "must answer it")]
+    fn a_case_that_does_not_answer_the_check_fails() {
+        let manifest = MANIFEST.replace("fake.plain", "host.memory");
+        let tree = plant(&manifest, Some(&right_bytes()));
+        let _ = assert_cases_in(tree.path(), "fake.plain", build);
+    }
+
+    #[test]
+    #[should_panic(expected = "1 of 1 cases of fake.plain failed")]
+    fn a_result_that_differs_from_the_golden_fails() {
+        let text = right_bytes().replace("\"pass\"", "\"fail\"");
+        let tree = plant(MANIFEST, Some(&text));
+        let _ = assert_cases_in(tree.path(), "fake.plain", build);
+    }
+
+    #[test]
+    #[should_panic(expected = "2 of 2 cases of fake.plain failed")]
+    fn every_failing_case_is_reported_not_only_the_first() {
+        let tree = plant(MANIFEST, None);
+        let second = tree.path().join("checks/fake.plain/second");
+        fs::create_dir_all(&second).expect("a second case");
+        fs::write(second.join("fixture.toml"), MANIFEST).expect("a manifest");
+        let _ = assert_cases_in(tree.path(), "fake.plain", build);
     }
 
     #[test]

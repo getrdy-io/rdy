@@ -151,30 +151,37 @@ const INCLUDE_SHIPPED_DATA_ALLOWED: &[(&str, &str, &str)] = &[
 /// Each entry is `(file, required_prefix, reason)`. Every include literal in the file must start with the
 /// prefix, so a later `include_str!` of some other path in the same file fails the test. The file must
 /// be a test module: it, or a module above it, is declared under `#[cfg(test)]`.
-const INCLUDE_DATA_ALLOWED: &[(&str, &str, &str)] = &[
+const INCLUDE_DATA_ALLOWED: &[(&str, &[&str], &str)] = &[
     (
         "crates/rdy-checks-host/src/disk/tests.rs",
-        "../../../../tests/fixtures/checks/host.disk/",
+        &["../../../../tests/fixtures/checks/host.disk/"],
         "embeds the expect.json goldens of tests/fixtures/checks/host.disk, because a check crate test may not read files",
     ),
     (
         "crates/rdy-checks-host/src/family/tests.rs",
-        "../../../../examples/specs/acme-platform.yaml",
+        &["../../../../examples/specs/acme-platform.yaml"],
         "embeds examples/specs/acme-platform.yaml for a test",
     ),
     (
         "crates/rdy-checks-host/src/firewall/tests.rs",
-        "../../../../tests/fixtures/",
+        &[
+            "../../../../tests/fixtures/checks/host.firewall/",
+            "../../../../tests/fixtures/envs/base-firewalld/",
+            "../../../../tests/fixtures/envs/base-ufw/",
+        ],
         "embeds the synthetic cases of tests/fixtures/checks/host.firewall and their bases under tests/fixtures/envs for the hand-wired machines",
     ),
     (
         "crates/rdy-checks-host/src/firewall/unit_tests.rs",
-        "../../../../tests/fixtures/",
+        &[
+            "../../../../tests/fixtures/checks/host.firewall/",
+            "../../../../tests/fixtures/envs/base-firewalld/",
+        ],
         "embeds recorded text from tests/fixtures/checks/host.firewall and the envs/base-firewalld base for the parser tests",
     ),
     (
         "crates/rdy-checks-k8s/src/client/guard/tests/parser.rs",
-        "../../../../../../docs/plan/03-check-catalog.md",
+        &["../../../../../../docs/plan/03-check-catalog.md"],
         "embeds docs/plan/03-check-catalog.md so a test can check the check ids that ALLOWED cites",
     ),
 ];
@@ -643,14 +650,14 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
         bad.is_empty(),
         "a check crate may not reach other files this way (add a data include to INCLUDE_DATA_ALLOWED in tests/lint-wall/tests/allow_grep.rs with a reason): {bad:#?}"
     );
-    for (path, prefix, why) in INCLUDE_DATA_ALLOWED {
+    for (path, prefixes, why) in INCLUDE_DATA_ALLOWED {
         let source = std::fs::read_to_string(base.join(path)).expect("read source");
         let found = findings_of(&source);
         assert!(
             found.include_data,
             "{path} is on INCLUDE_DATA_ALLOWED but embeds nothing now ({why})"
         );
-        if let Err(reason) = check_prefixed_includes(&found, prefix) {
+        if let Err(reason) = check_prefixed_includes(&found, prefixes) {
             panic!("{path}: {reason} ({why})");
         }
         assert!(
@@ -698,20 +705,20 @@ fn shipped_data_is_embedded_only_from_the_crates_own_data_directory() {
 
 /// The checks of an `INCLUDE_DATA_ALLOWED` entry, on what syn read from the tokens of the calls (so a
 /// decoy in a comment or a string is not seen, and a call in any delimiter is). The file embeds something,
-/// every call's first literal starts with `prefix`, and past the prefix nothing climbs out of it: not in
-/// the first literal, not in a later literal of the call, not in the joined text, and not in an argument
-/// of an `fx!` or `expect!` call.
-fn check_prefixed_includes(found: &Findings, prefix: &str) -> Result<(), String> {
+/// every call's first literal starts with one of `prefixes`, and past that prefix nothing climbs out of it:
+/// not in the first literal, not in a later literal of the call, not in the joined text, and not in an
+/// argument of an `fx!` or `expect!` call.
+fn check_prefixed_includes(found: &Findings, prefixes: &[&str]) -> Result<(), String> {
     if found.include_calls.is_empty() {
         return Err("it is on the list but embeds nothing now".to_owned());
     }
     for call in &found.include_calls {
         let first = call.first().map_or("", String::as_str);
-        if !first.starts_with(prefix) {
+        let Some(prefix) = prefixes.iter().find(|prefix| first.starts_with(**prefix)) else {
             return Err(format!(
-                "an include path `{first}` does not start with `{prefix}`. The entry allows only that data"
+                "an include path `{first}` does not start with any of {prefixes:?}. The entry allows only that data"
             ));
-        }
+        };
         if climbs(call, prefix) {
             return Err(format!(
                 "an include path {call:?} climbs out of `{prefix}` with `..`"
@@ -1159,7 +1166,7 @@ fn a_decoy_in_a_comment_does_not_hide_a_bracket_call() {
     let decoy = format!(
         "/* include_str!(\"{prefix}a\") */\nconst C: &str = include_str![\"/home/runner/.ssh/id_ed25519\"];\n"
     );
-    let err = check_prefixed_includes(&findings_of(&decoy), prefix).unwrap_err();
+    let err = check_prefixed_includes(&findings_of(&decoy), &[prefix]).unwrap_err();
     assert!(err.contains("does not start with"), "{err}");
     // The honest forms pass.
     assert!(
@@ -1170,7 +1177,16 @@ fn a_decoy_in_a_comment_does_not_hide_a_bracket_call() {
         .is_ok()
     );
     let good = format!("const C: &str = include_str![\"{prefix}a\"];");
-    assert!(check_prefixed_includes(&findings_of(&good), prefix).is_ok());
+    assert!(check_prefixed_includes(&findings_of(&good), &[prefix]).is_ok());
+    // With several prefixes a call matches any one of them, and a path under none is refused.
+    let envs = "../../../../tests/fixtures/envs/base-ufw/";
+    let both = format!("fn f() {{ include_str!(\"{prefix}a\"); include_str!(\"{envs}b\"); }}");
+    assert!(check_prefixed_includes(&findings_of(&both), &[prefix, envs]).is_ok());
+    let other = "fn f() { include_str!(\"../../../../tests/fixtures/envs/base-firewalld/b\"); }";
+    assert!(check_prefixed_includes(&findings_of(other), &[prefix, envs]).is_err());
+    // The matched prefix is the one a climb is judged against.
+    let climb_envs = format!("fn f() {{ include_str!(\"{envs}../base-firewalld/b\"); }}");
+    assert!(check_prefixed_includes(&findings_of(&climb_envs), &[prefix, envs]).is_err());
     // A second call, a climb and an fx! argument that leaves the directory are refused.
     assert!(
         check_single_include(
@@ -1180,12 +1196,12 @@ fn a_decoy_in_a_comment_does_not_hide_a_bracket_call() {
         .is_err()
     );
     let climb = format!("const C: &str = include_str![concat!(\"{prefix}\", \"../x\")];");
-    assert!(check_prefixed_includes(&findings_of(&climb), prefix).is_err());
+    assert!(check_prefixed_includes(&findings_of(&climb), &[prefix]).is_err());
     let fx = format!("fn f() {{ include_str!(\"{prefix}a\"); fx![\"../b\"]; }}");
-    assert!(check_prefixed_includes(&findings_of(&fx), prefix).is_err());
+    assert!(check_prefixed_includes(&findings_of(&fx), &[prefix]).is_err());
     let planted = format!("fn f() {{ include_str!(\"{prefix}a\"); expect![\"../b\"]; }}");
-    assert!(check_prefixed_includes(&findings_of(&planted), prefix).is_err());
-    assert!(check_prefixed_includes(&findings_of("fn f() {}"), prefix).is_err());
+    assert!(check_prefixed_includes(&findings_of(&planted), &[prefix]).is_err());
+    assert!(check_prefixed_includes(&findings_of("fn f() {}"), &[prefix]).is_err());
 }
 
 #[test]

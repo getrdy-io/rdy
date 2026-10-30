@@ -536,6 +536,10 @@ check, the classes and the ticket that owes them. A row for a class that is no l
 too. `PENDING` has been empty since M1-174. A new family adds its row in
 `crates/rdy-cli/tests/env_harness/families.rs`.
 
+**Known gaps.** Two cases bless behaviour that check-author found wrong against 03:
+`host.memory/cgroup-unreadable` and `host.security_agents/unreadable-comm`. Each has a `README.md` that says
+so. Both belong to M1-177. Whoever fixes the check regenerates the `expect.json` on purpose.
+
 **Reviewing an `expect.json`.** Read the level and the message of every new case before you accept it.
 The level must be the one the case is named for (a `pass` case that says `warn` is a bug in the check or
 in the entry, not a golden to accept). `UPDATE_GOLDENS=1` rewrites `result` and keeps `entry`, so a change

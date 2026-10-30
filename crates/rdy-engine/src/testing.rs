@@ -42,7 +42,7 @@ mod normalize;
 mod tests;
 
 #[cfg(feature = "runtime")]
-pub use expect::{assert_cases, expect_bytes, render, run_case, sorted};
+pub use expect::{assert_cases, assert_cases_in, expect_bytes, render, run_case, sorted};
 #[cfg(feature = "runtime")]
 pub use fake::{FAKE_INFO, Fake, FakeCheck, Release};
 pub use fixture_run::{

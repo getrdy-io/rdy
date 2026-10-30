@@ -105,6 +105,11 @@ jobs:
             echo "::error::the rdy binary would build the rdy-engine testing or loopback feature"
             exit 1
           fi
+          # The `testing` feature turns on tokio's `test-util` (the paused clock of the fixture runs).
+          if printf '%s\n' "$tree" | grep -E 'tokio feature "test-util"'; then
+            echo "::error::the rdy binary would build tokio's test-util feature"
+            exit 1
+          fi
           # The loopback servers make certificates with rcgen. Nothing in the shipped tree may use it
           # (ADR 0035). tokio-rustls is in the shipped tree on purpose: the facade's TLS uses it (M1-092).
           if cargo tree --locked -p rdy -e normal --target x86_64-unknown-linux-gnu -i rcgen 2>/dev/null | grep -q '^rcgen v'; then
