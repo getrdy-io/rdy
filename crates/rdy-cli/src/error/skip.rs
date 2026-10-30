@@ -28,7 +28,7 @@ pub enum SkipWhy {
         /// The family, such as `gpu`.
         family: String,
     },
-    /// This build has the family but not this check, such as `host.kernel`.
+    /// This build has the family but not this check, such as `host.virtualization`.
     NotInBuildCheck {
         /// The check id.
         id: String,
@@ -290,7 +290,7 @@ mod tests {
         vec![
             SkipWhy::NotInBuildFamily { family: s("gpu") },
             SkipWhy::NotInBuildCheck {
-                id: s("host.kernel"),
+                id: s("host.virtualization"),
             },
             SkipWhy::UnknownCheck {
                 id: s("host.memroy"),
@@ -385,7 +385,7 @@ mod tests {
         );
         assert_eq!(
             all[1].text().message,
-            "Not run. This version of rdy does not have the check host.kernel yet."
+            "Not run. This version of rdy does not have the check host.virtualization yet."
         );
         assert_eq!(
             pair(&all[2]),

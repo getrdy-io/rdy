@@ -182,7 +182,7 @@ mod tests {
         for id in ["host.memroy", "upload.now", "host.Kernel", "", "host"] {
             assert!(!is_reserved_id(id), "{id:?}");
         }
-        assert!(is_reserved_id("host.kernel"));
+        assert!(is_reserved_id("host.virtualization"));
         assert!(is_reserved_id("gpu.cuda"));
     }
 }

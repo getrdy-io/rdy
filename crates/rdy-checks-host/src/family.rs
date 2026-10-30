@@ -11,6 +11,8 @@ use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::firewall::{self, Firewall};
+
 #[cfg(test)]
 mod tests;
 
@@ -114,6 +116,16 @@ static SECURITY_AGENTS: CheckInfo = info(
     5,
     ROOT,
 );
+static TIME_SYNC: CheckInfo = info(
+    "host.time_sync",
+    "Clock sync state and offset",
+    CheckMeta {
+        title: "Clock sync",
+        remediation: "Turn on time sync with `timedatectl set-ntp true`, or install chrony with `dnf install chrony && systemctl enable --now chronyd`, then run `chronyc makestep`. On VMs also enable host time sync (VMware Tools, Hyper-V integration services).",
+    },
+    5,
+    &[],
+);
 static CPU: CheckInfo = info(
     "host.cpu",
     "Cores, arch, CPU flags, virtualization",
@@ -135,21 +147,70 @@ static HOST_OS: CheckInfo = info(
     &[],
 );
 
+static SYSCTL: CheckInfo = info(
+    "host.sysctl",
+    "Kernel parameters and limits",
+    CheckMeta {
+        title: "Kernel parameters and limits",
+        remediation: "Set the value now with `sysctl -w vm.max_map_count=262144`, using the parameter and value from the result. Then persist it in a file under `/etc/sysctl.d/` and run `sysctl --system`. `sysctl -p` does not read `sysctl.d`. For file limits, set `LimitNOFILE=` in the service unit.",
+    },
+    2,
+    &[],
+);
+static CONTAINER_RUNTIME: CheckInfo = info(
+    "host.container_runtime",
+    "Docker, containerd, Podman, CRI-O",
+    CheckMeta {
+        title: "Container runtime",
+        remediation: "Install a container runtime the vendor supports, and make its socket readable by adding the user to the `docker` group or by running as root. The runtime and the kubelet must use the same cgroup driver. For containerd, set `SystemdCgroup = true` in `/etc/containerd/config.toml`, then run `systemctl restart containerd`.",
+    },
+    5,
+    ROOT,
+);
+static CGROUPS: CheckInfo = info(
+    "host.cgroups",
+    "cgroup version and controllers",
+    CheckMeta {
+        title: "cgroups",
+        remediation: "Boot with the cgroup version the vendor needs. On the RHEL family, run `grubby --update-kernel=ALL --args=\"systemd.unified_cgroup_hierarchy=1\"` and reboot. On Debian and Ubuntu, add the argument to `GRUB_CMDLINE_LINUX` in `/etc/default/grub`, run `update-grub` and reboot.",
+    },
+    2,
+    &[],
+);
+
+static KERNEL: CheckInfo = info(
+    "host.kernel",
+    "Kernel version and modules",
+    CheckMeta {
+        title: "Kernel",
+        remediation: "Use a kernel at or above the minimum. Load a missing module now and at boot with `modprobe br_netfilter && echo br_netfilter | sudo tee /etc/modules-load.d/vendor.conf`, using the module from the result.",
+    },
+    2,
+    &[],
+);
+
 /// Every host check this build lists, in catalog order.
-static CHECKS: [&CheckInfo; 7] = [
+static CHECKS: [&CheckInfo; 13] = [
     &DISK,
     &MEMORY,
     &PORTS,
     &LSM,
     &SECURITY_AGENTS,
+    &firewall::INFO,
+    &TIME_SYNC,
     &CPU,
+    &SYSCTL,
+    &CONTAINER_RUNTIME,
+    &CGROUPS,
     &HOST_OS,
+    &KERNEL,
 ];
 
 /// The `host` family: `host.disk`, `host.memory`, `host.ports`, `host.lsm`, `host.security_agents`,
-/// `host.cpu` and `host.os`.
+/// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
+/// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// Each check is a stub for now ([`HostFamily::stub_ids`]).
+/// `host.firewall` is real ([`Firewall`]). The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -170,14 +231,19 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 7] = [
+static STUBS: [&str; 12] = [
     "host.disk",
     "host.memory",
     "host.ports",
     "host.lsm",
     "host.security_agents",
+    "host.time_sync",
     "host.cpu",
+    "host.sysctl",
+    "host.container_runtime",
+    "host.cgroups",
     "host.os",
+    "host.kernel",
 ];
 
 impl Family for HostFamily {
@@ -189,7 +255,15 @@ impl Family for HostFamily {
         &CHECKS
     }
 
-    fn build(&self, entry: &CheckSpec, _: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+    fn build(&self, entry: &CheckSpec, params: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        if let CheckParams::HostFirewall(firewall) = params {
+            let ports = firewall
+                .open_inbound
+                .iter()
+                .flatten()
+                .map(|port| port.get());
+            return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
         let info = CHECKS
             .iter()
             .find(|info| info.id == entry.id)
