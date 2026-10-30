@@ -119,7 +119,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-053 | [#136](https://github.com/getrdy-io/rdy/pull/136) | 2026-10-30 | `bucket` and `Bucket::order_key` were already in rdy-spec (M1-020), so the result format, schema and docs reference did not change. Built `rdy_spec::result::{sort_by_bucket, group_by_bucket, BucketGroup}` (stable, reads the stored bucket, an unknown bucket sorts with `required_not_run` per 01 section 3.2, and a group holding one is labelled `required_not_run`). Nothing calls these yet. The callers are the terminal renderers (M1-086, M1-143), the HTML renderer (M1-077) and `rdy report` (M2); they own the section headings. M1-070 is only the styling layer. No golden: the exit test is in-code unit tests
 
-- M1-054 | todo | | Summary line grammar and nothing-verified last line
+- M1-054 | [#138](https://github.com/getrdy-io/rdy/pull/138) | 2026-10-30 | Built `rdy_engine::summary` (`summary_line`, `last_line`, `verdict_line`), not in rdy-spec, because the golden helper lives in rdy-engine. Goldens are nine two-line files under `tests/fixtures/summary/`, and `xtask goldens check` now counts `summary/<case>.txt` as goldens. The `(N timed out)` and `(N failed)` suffixes follow the 07 section 2.4 wording and are counted per severity, apart from `Summary`, which has no severity split. Deferrals: none
 
 - M1-055 | todo | | HTML-safe deterministic JSON writer with size caps | backlog corrected 2026-10-29 (correction-14): the writer truncates lists past their schema caps, `observed` and `expected` past three levels and past 64 keys, and sets `truncated`; depends on M1-041 too (PR #83 review, PR #90 review)
 
