@@ -320,10 +320,17 @@ jobs:
       - name: Install C minisign
         if: matrix.name == 'linux-x64'
         run: sudo apt-get install -y --no-install-recommends minisign
+      # `setcap` is in libcap2-bin. The setuid-gate test (M1-074, INV-10) copies the rdy binary, makes
+      # the copy setuid root and, separately, gives it a file capability, with passwordless sudo. The
+      # variable below makes a missing `sudo` or `setcap` fail the test, never skip it.
+      - name: Install libcap2-bin
+        if: matrix.name == 'linux-x64'
+        run: sudo apt-get install -y --no-install-recommends libcap2-bin
       - name: Test (nextest, no retries)
         if: ${{ !matrix.compile_only }}
         env:
           RDY_REQUIRE_C_MINISIGN: ${{ matrix.name == 'linux-x64' && '1' || '' }}
+          RDY_REQUIRE_SETUID: ${{ matrix.name == 'linux-x64' && '1' || '' }}
         run: cargo nextest run --workspace --locked --target "$TARGET" --profile ci
       # nextest does not run doc tests. They build for the host, so they run on one leg only.
       - name: Doc tests

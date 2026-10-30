@@ -13,8 +13,9 @@
 //! with the hint, as every other internal error prints. [`gate_then`] runs the next step (reading the
 //! spec) only when the gate passes, so a refused run never opens the spec file.
 //!
-//! The real binary does not call it yet. It needs the live backend and the async runtime, which
-//! M1-074 and M1-057 bring, and they must call [`gate_then`] first in `rdy run`.
+//! [`crate::run`] calls it for every command except help and version, so a refused run never opens a
+//! spec, a key or the trust store. `rdy run` (M1-057) must keep the order: gate first, then read the
+//! spec, and it passes [`rdy_engine::privilege::Privilege::identity`] into the report.
 
 use std::io::Write;
 

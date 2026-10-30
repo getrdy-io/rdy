@@ -130,7 +130,11 @@ There are no inter-check dependencies. Every k8s check except `k8s.access` needs
 **Snapshot first.** Before the spec is read, the async `Privilege::snapshot(&probe)` runs through the
 run-level facade (`check: null`):
 - Linux: all four values on the `Uid:` and `Gid:` lines of `/proc/self/status` (real, effective, saved,
-  filesystem), `CapEff` and `CapAmb`, and `AT_SECURE` (type 23) from `/proc/self/auxv`.
+  filesystem), `CapEff`, `CapPrm` and `CapAmb`, and `AT_SECURE` (type 23) from `/proc/self/auxv`. The
+  status file is judged first. A binary with a file capability or the setuid bit is not dumpable, so the
+  kernel hides its own auxv from the user (mode 0400, owned by root). If the status is clean and only
+  the auxv is refused with `PermissionDenied`, the answer is the `NotDumpable` refusal with its own hint
+  (`ls -l` and `getcap`). Every other read error stays the unreadable-source error.
 - macOS: the real and effective ids from `rustix`, through the probe as a `native` call
   (`api: process_ids`). macOS has no call for the saved id and no filesystem id, so M1-042 reports both as the
   effective one and the capability and `AT_SECURE` fields stay unset. The refusal compares real with
@@ -138,7 +142,7 @@ run-level facade (`check: null`):
 - A source that cannot be read or parsed (no `/proc`, an auxv with no `AT_SECURE`) is a refusal too, exit 70
   with its own hint, because a snapshot that cannot be taken cannot show that the binary is safe. A kernel
   before 4.3 has no `CapAmb` line, which reads as zero.
-- `rdy` exits 70 if any uid or gid value differs from the real one, `CapEff` or `CapAmb` is nonzero for
+- `rdy` exits 70 if any uid or gid value differs from the real one, `CapEff`, `CapPrm` or `CapAmb` is nonzero for
   a non-root uid, or `AT_SECURE` is set (INV-10). The hint names `chmod u-s,g-s`, `setcap -r`, or
   ambient capabilities.
 - Windows: `C:\Windows\System32\whoami.exe /groups /fo csv`, from a constant path, never from
@@ -590,6 +594,10 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
   provider; spec load (verify, then parse); output directory created and held; plan; probes; checks
   (each result redacted as it completes); final pass; single-writer write; kill leftover process
   groups; exit.
+  In the CLI, `entry::run_live` calls `live_backend()` right after the redacting layer and before the
+  gate and before argv parsing. That call runs `Secrets::collect`, which stats the password and sudo
+  files (a stat only: nothing is opened, read or printed). So even `rdy --help` and `rdy --bogus` stat
+  them, and a setuid `rdy` does so as root. No spec, key or trust file is touched before the gate.
 - **Linux:** `/proc`, `/sys`, `O_PATH` reads, process groups.
 - **macOS:** same Unix paths; SIP and TCC denials become `partial`.
 - **Windows:** M1 exec is `whoami.exe` only; reports default to `%USERPROFILE%\rdy-reports`; Ctrl-C
@@ -676,8 +684,15 @@ one.
     `net.json` and `api/` for the network and kube tickets, which read them (M1-091, M1-094 and the k8s
     mock).
     The refusal of a recorded link-local lookup is the facade's address rule (M1-094), not the backend's.
-- **CLI in process** (08 decision A, ADR 0011 decision 4 as amended). `#[doc(hidden)] rdy_cli::run(args,
-  backend, hooks, out, err)`. Test hooks are `RunHooks` fields, never flags or env vars. CI checks that
+- **CLI in process** (08 decision A, ADR 0011 decision 4 as amended). `#[doc(hidden)] async fn
+  rdy_cli::run(args, backend: Arc<dyn Backend>, hooks: RunHooks, out, err) -> ExitCode`. It is async
+  because the privilege snapshot reads through the backend, and a test can then run it on a runtime it owns.
+  `run` takes the snapshot and calls `gate_then` before any command except help and version (a usage
+  error reads nothing and comes first), so a setuid or file-capability `rdy` exits 70 before a spec, a
+  key or `trust.yaml` is touched. The privilege ids come from the backend (a replay machine records
+  `/proc/self/status`), not from a hook. `entry::main_code` builds the runtime and calls `live_backend`
+  once (INV-07), after the umask and the descriptor list. Test hooks are `RunHooks` fields, never flags
+  or env vars; the struct has no field until a ticket reads one. CI checks that
   `Replay` is unnamed in `crates/rdy-cli/src` outside tests and that the `testing` feature and a
   Replay-only marker string are absent from every release binary. The log layer, panic hook, ring
   provider and `process::exit` stay in `main`. So the `RUST_LOG=trace` canary test and the watchdog
@@ -884,7 +899,7 @@ impl Registry { pub fn plan(&self, spec: &Spec, os: Os, rdy_version: &str) -> Ru
 // none), the error is `PrivilegeError` (message and hint, exit 70 in the CLI), and there is no `trust_scope`
 // (the CLI keeps mapping the euid to the trust store layout; M2-105 revisits Windows).
 pub struct Privilege { pub ids: Option<ProcessIds>, // uid and gid: [u32; 4], real, effective, saved, filesystem
-                       pub cap_eff: u64, pub cap_amb: u64, pub at_secure: bool, pub elevation: Elevation }
+                       pub cap_eff: u64, pub cap_prm: u64, pub cap_amb: u64, pub at_secure: bool, pub elevation: Elevation }
 pub enum Elevation { Root, High, System, NotElevated, Unknown }
 impl Privilege { pub async fn snapshot(probe: &Probe) -> Result<Self, PrivilegeError>; // all ids, CapEff, CapAmb, AT_SECURE
                  pub fn check(&self) -> Result<(), PrivilegeError>;     // INV-10
