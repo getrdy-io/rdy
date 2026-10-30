@@ -52,7 +52,7 @@ tests/fixtures/
   redaction/<category>/<case>.{in,expected,toml}
   results/<rdy-version>/*.json   result files from released versions, append only
   reports/*.json                 sample reports that engine tests put their own action log into
-  reports/golden/*.json          reports as the JSON writer emits them, compared byte for byte
+  reports/golden/*.{json,html}   reports as the JSON writer and the HTML renderer emit them, compared byte for byte
   specs/{valid,malformed}/       parser corpus
   signed/                        one signed spec, its .minisig and public key, never edited
   minisign-c/                    a key and a signature made by the C minisign tool, never edited
@@ -93,7 +93,7 @@ arrives with the tickets that need it. The names above are fixed now so nobody i
 | `summary/<case>.txt` | Two lines: the summary line and the last line a set of check results gets (01 section 5.3). Compared by `rdy_engine::summary` unit tests | By hand, or `UPDATE_GOLDENS=1` |
 | `results/<rdy-version>/*.json` | Result files written by released versions. They must stay parseable | Append only. Never edited |
 | `reports/*.json` | A valid sample report (`not-ready-7.2.json` is the 01 section 7.2 sample). A test replaces its `actions` and checks the result against the schema | By hand, when the sample in 01 changes |
-| `reports/golden/*.json` | A report exactly as `rdy_engine::report::write_json` writes it (`not-ready-hostile-host.json`: the sample with a `</script>` hostname and out-of-order maps). Compared on the linux-x64 leg, and the goldens check lists it | `UPDATE_GOLDENS=1`, then read the diff |
+| `reports/golden/*.json`, `reports/golden/*.html` | A report exactly as `rdy_engine::report::write_json` writes it (`not-ready-hostile-host.json`: the sample with a `</script>` hostname and out-of-order maps), or as `render_html` renders it (`not-ready-7.2.html`: the 01 section 7.2 sample; `five-sections-exec-plugin.html`: the sample plus a check that does not apply here, so all five sections show, and `identity.kube.exec_plugin` set to `aws`). Compared byte for byte, and the goldens check lists them | `UPDATE_GOLDENS=1`, then read the diff |
 | `specs/valid/`, `specs/malformed/` | Parser corpus. Each malformed file is one way a spec can be wrong | By hand |
 | `signed/` | One signed spec. See `signed/README.md` | Never. New cases get new files |
 | `minisign-c/` | A key with a published test password and a signature, both made by C minisign 0.11. See `minisign-c/README.md` | Never |

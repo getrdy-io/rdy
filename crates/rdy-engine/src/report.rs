@@ -5,10 +5,16 @@
 //!   copy embedded in the HTML report all share ([`HtmlSafeJson`]). [`read_report_from`] is the matching
 //!   reader: it refuses a document over [`MAX_REPORT_BYTES`] before it parses a byte.
 //!
-//! The HTML renderer arrives with M1-077.
+//! - `html` (feature `html`, on by default): [`render_html`] turns a [`crate::redact::RedactedReport`] into
+//!   one self-contained HTML page (M1-077). It needs no runtime, so `rdy-cloud` and `rdy report` can use
+//!   it with `default-features = false, features = ["html"]`.
 
+#[cfg(feature = "html")]
+pub mod html;
 pub mod json;
 
+#[cfg(feature = "html")]
+pub use html::{HtmlError, render_html};
 pub use json::{
     HtmlSafeJson, JsonError, MAX_REPORT_BYTES, json_bytes, read_report, read_report_from,
     write_json,

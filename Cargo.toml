@@ -115,6 +115,11 @@ proc-macro2 = { version = "1", default-features = false }
 # agents.toml catalog with it (M1-146).
 toml = { version = "1", default-features = false }
 
+# The HTML report templates (M1-077, ADR 0003 decision 5). Compiled into the binary: no runtime template
+# engine, no template read from disk. Exact pin: a template engine decides what is escaped, so every bump
+# is reviewed by hand. Approval record: docs/plan/05-threat-model.md, "Dependency approvals".
+askama = { version = "=0.16.1", default-features = false }
+
 # The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field
 # name and `=` would hide `password=hunter2` from the key-name rule (04 section 3.4).
 tracing = { version = "0.1", default-features = false }

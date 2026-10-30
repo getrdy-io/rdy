@@ -68,7 +68,7 @@ crates/rdy-engine/src/
   redact.rs    M1 rule set (no feature gate)
   units.rs     dotted version compare, quantities, nominal band, severity cap (03 asks for one home)
   output.rs    OutputDir
-  report/      json.rs, html.rs, templates/
+  report/      json.rs, html.rs (feature `html`); the askama templates are in `templates/` at the crate root (ADR 0003)
   testing.rs   Replay backend and helpers (feature "testing")
 ```
 
@@ -1051,7 +1051,7 @@ pub fn write_json(r: &RedactedReport, out: &mut dyn std::io::Write) -> Result<()
 pub fn json_bytes(r: &RedactedReport) -> Result<HtmlSafeJson, JsonError>;  // the same bytes, for the HTML embed
 pub fn read_report_from(r: impl std::io::Read) -> Result<Report, JsonError>;  // reads at most 2 MiB + 1 byte, refuses over 2 MiB before parsing
 pub fn read_report(bytes: &[u8]) -> Result<Report, JsonError>;  // the same check on bytes already in memory
-pub fn render_html(r: &RedactedReport) -> Result<String, ReportError>;
+pub fn render_html(r: &RedactedReport) -> Result<String, HtmlError>;  // M1-077: report::html, feature `html`; HtmlError, not ReportError, for the same reason as JsonError (ReportError needs `runtime`)
 pub struct RedactedReport(/* private */ Report);   // no From<Report>, no Deserialize, no DerefMut
 pub fn live_backend() -> Arc<dyn Backend>;        // disallowed in check crates
 pub struct FileBytes { pub bytes: Vec<u8>, pub truncated_head: bool, pub truncated_tail: bool }

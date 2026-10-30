@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-include = ["src/**", "Cargo.toml", "LICENSE"]
+include = ["src/**", "templates/**", "Cargo.toml", "LICENSE"]
 
 [features]
 # Test-only helpers (`TagKey::fixed`) and the replay backend with its fixture loader (M1-049). A release
@@ -20,7 +20,11 @@ testing = ["dep:toml"]
 # the `runtime` feature, so the build without default features still compiles and lints it.
 loopback = ["testing", "dep:tokio", "dep:rcgen", "dep:socket2", "dep:tokio-rustls", "dep:rustls", "dep:webpki-roots"]
 
-default = ["runtime"]
+# The HTML report renderer (M1-077): askama templates in `templates/`, compiled in. Needs no runtime, so
+# `rdy-cloud` and `rdy report` can render with `default-features = false, features = ["html"]`.
+html = ["dep:askama"]
+
+default = ["runtime", "html"]
 # The scheduler, the blocking helper, the process runner and their dependencies (02, "Crate layout").
 # It carries the TLS half of the probe facade (M1-092): rustls on ring, tokio-rustls, the bundled roots and,
 # on macOS and Windows, the OS store reader.
@@ -28,6 +32,7 @@ runtime = ["dep:tokio", "dep:rustix", "dep:cap-std", "dep:cap-primitives", "dep:
 
 [dependencies]
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
+askama = { workspace = true, features = ["derive", "std"], optional = true }
 cap-std = { workspace = true, optional = true }
 regex = { workspace = true, features = ["std", "perf", "unicode"] }
 ring = { workspace = true, features = ["alloc"] }

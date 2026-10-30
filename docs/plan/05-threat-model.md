@@ -326,6 +326,33 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 
 ### Dependency approvals
 
+- `askama` 0.16.1, with its build-time crates `askama_macros`, `askama_derive` and `askama_parser` (M1-077, ADR 0003
+  decision 5; D.5 of 07). **Pending security review.** Recorded by rust-engineer from the crate sources; the
+  security-reviewer's approval replaces this line. A direct dependency of `rdy-engine` behind the `html`
+  feature, which is on by default. The check crates may depend on none of them. Pinned with `=` in the
+  workspace `Cargo.toml`: a template engine decides what is escaped, so every bump is reviewed by hand.
+  - Purpose: compile the HTML report templates (`crates/rdy-engine/templates/`) into Rust at build time, with
+    HTML escaping on for `.html` files. No template is read at run time, and no template engine runs on a
+    customer box (ADR 0003, alternatives considered).
+  - Maintainers: the `askama-rs` organisation on GitHub (`askama-rs/askama`), the continuation of the
+    original askama project. The security-reviewer confirms the maintainer list.
+  - `unsafe`: yes, and not forbidden. `askama` (the runtime crate) uses `unsafe` in two places: two
+    `transmute` calls between `AsciiStr` and `str` or byte arrays (`ascii_str.rs`), and one
+    `from_utf8_unchecked` in the `json` filter, which is behind the `serde_json` feature and is off. The
+    derive crates (`askama_derive`, `askama_parser`) use `unsafe` in the code generator and the parser, and
+    they run only inside the compiler as proc macros, never in the binary. Our crates keep
+    `#![forbid(unsafe_code)]`. The reviewer reads the two runtime `transmute` sites.
+  - `build.rs`: none in any of the four crates. The derive runs as a proc macro, reads the template files
+    and writes nothing outside `OUT_DIR`.
+  - License: MIT OR Apache-2.0 for all four. Allowed in `deny.toml`.
+  - Features: `default-features = false` with `derive` and `std`. Off: `config` (no `askama.toml` is read),
+    `urlencode` and `serde_json` (no `json` filter, so no filter that can print unescaped JSON). New
+    packages in the lock file: the four askama crates and `rustc-hash`. `winnow`, `itoa`, `unicode-ident`,
+    `memchr`, `proc-macro2` and `quote` were already there.
+  - What the renderer must keep true: no template uses the `safe` filter (a CI grep, M1-078; the one value
+    that may be printed unescaped is `HtmlSafeJson`, and M1-077 does not print it); askama escapes `<`, `>`,
+    `&`, `"` and `'` as numeric references; the Content-Security-Policy `<meta>` is the second line of
+    defence (ADR 0003 decision 3).
 - `rustls` 0.23.46, `webpki-roots` 1.0.11 and `rustls-native-certs` 0.8.5 (M1-092, ADR 0009, ADR 0035).
   Direct dependencies of `rdy-engine` for the probe facade's TLS. Recorded from security-reviewer's review
   of PR #133 (SEC-133-3). The check crates may depend on none of them (the `NEVER` list of the dependency
