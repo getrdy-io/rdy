@@ -93,7 +93,7 @@ design partners for real POCs (PC-08). Until `rdy verify` lands they run specs o
   (M1-139). That is the core-only end date.
 - **M1 ends:** week 30, Jun 14 to Jun 20, 2027. End date: Sunday Jun 20, 2027.
 - **Correction 02 (2026-10-28) added 3.5 core hours.** M1-001's extra hour (05 revision 3) runs in week
-  7, which had 1 h of room and comes before M1-040, so week 1 holds 14.5 h of tickets and week 7 13.5 h.
+  7, which had 1 h of room and comes before M1-040, so week 1 holds 14.5 h of tickets and week 7 13.5 h (12.5 h after correction 30).
   M1-104's extra 2.5 h is absorbed by the re-cut from week 19 in M1-009: core still ends in week 25, and
   the non-core tickets M1-140 to M1-144 move to week 26, so M1 ends in week 30. The 10 and 15 hour dates
   are not recomputed.
