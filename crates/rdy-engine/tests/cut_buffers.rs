@@ -13,8 +13,8 @@
 //! - A buffer with no newline loses a window of 4 KiB and then up to the nearest separator, so a value
 //!   that straddles the cap goes whole, whatever rules exist.
 //! - A secret in a whole line near the cap needs a rule for its shape (key id, URL userinfo, a complete
-//!   PEM block). Those rules are M1-060, which depends on M1-061 and enables the held case below
-//!   (`#[ignore = "M1-060"]`). The geometry of that case is checked now, without the ignore.
+//!   PEM block). Those rules are M1-060, which enables the whole-line case below. Its geometry is also
+//!   checked on its own.
 //! - The HTML part of the exit test belongs to M1-083 (there is no renderer yet), and the stderr half of
 //!   cut buffers to M1-086. `rdy-cli/tests/log_redaction.rs` covers a known secret on stderr.
 
@@ -360,9 +360,9 @@ fn the_held_case_puts_each_canary_whole_inside_the_cut_at_every_offset() {
     }
 }
 
-/// A secret in a whole line near the cap needs the rule for its shape. M1-060 enables this test.
+/// A secret in a whole line near the cap needs the rule for its shape: the key id rule, the URL userinfo
+/// rule and the private key rule. The canary ends at cap minus 1 to cap minus 64 for every cap.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "M1-060"]
 async fn a_whole_line_secret_just_inside_the_cap_needs_its_rule() -> TestResult {
     let redactor = Redactor::new(TagKey::fixed([4; 32]));
     for (source, cap) in SOURCES {

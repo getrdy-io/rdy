@@ -314,7 +314,8 @@ fn no_byte_of_a_matched_secret_survives() {
         for w in &windows {
             assert!(!out.contains(w), "{w} survived in {} from {form}", *out);
         }
-        assert!(out.contains("[REDACTED:secret_by_key:"), "{form}");
+        // A shape or a header rule may win the name of a form that holds one, such as a PEM block.
+        assert!(out.contains("[REDACTED:"), "{form}");
     }
 }
 

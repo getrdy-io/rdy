@@ -122,10 +122,13 @@ fn an_unterminated_private_key_goes_to_the_end_of_a_cut_tail() {
 }
 
 #[test]
-fn a_private_key_with_its_end_is_not_the_guard_s_business() {
+fn a_private_key_with_its_end_is_removed_whole_by_the_pem_rule() {
     let text = "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\nrest\n";
     let out = red(text, TAIL);
-    assert!(!out.contains("pem_private_key"), "{out}");
+    assert!(
+        out.starts_with("[REDACTED:pem_private_key:") && out.ends_with("]\nrest\n[truncated]"),
+        "{out}"
+    );
     // A public certificate with no end is not a key.
     let out = red("-----BEGIN CERTIFICATE-----\nMIIC\nMIID\nMII", TAIL);
     assert!(!out.contains("pem_private_key"), "{out}");
@@ -144,9 +147,16 @@ fn a_private_key_whose_start_was_cut_goes_from_the_start_through_its_end_line() 
 }
 
 #[test]
-fn a_complete_block_after_a_begin_in_a_cut_head_is_left_to_the_pem_rule() {
+fn a_complete_block_after_a_cut_head_is_taken_by_the_pem_rule_alone() {
     let text = "cut\n-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n";
-    assert!(!red(text, HEAD).contains("pem_private_key"));
+    let out = red(text, HEAD);
+    // One placeholder, from the rule. The head guard does not take the BEGIN line a second time.
+    assert_eq!(
+        out.matches("[REDACTED:pem_private_key:").count(),
+        1,
+        "{out}"
+    );
+    assert!(!out.contains("AAAA") && !out.contains("BEGIN"), "{out}");
 }
 
 #[test]

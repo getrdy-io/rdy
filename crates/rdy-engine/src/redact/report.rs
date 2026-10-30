@@ -42,7 +42,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
 use super::rules::{
-    SECRET_BY_KEY, is_exempt_value, is_secret_key, last_word_is_unit, placeholder_spans,
+    SECRET_BY_KEY, is_exempt_value, is_secret_flag, is_secret_key, last_word_is_unit,
+    placeholder_spans,
 };
 use super::{RedactError, Redacted, RedactedReport, Redactor, RuleCounts};
 
@@ -394,8 +395,7 @@ impl<'a> Walk<'a> {
                 }
                 continue;
             };
-            next_is_secret =
-                s.starts_with('-') && !s.contains('=') && is_secret_key(s.trim_start_matches('-'));
+            next_is_secret = is_secret_flag(s);
             if capped {
                 self.generic(arg);
             } else {

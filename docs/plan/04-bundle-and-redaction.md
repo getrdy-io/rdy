@@ -466,6 +466,42 @@ Key-name exclusions (each has a negative): empty, `null`, `true`, `false`, `none
 `namespace`; paths under `/run/secrets/`. Stems match only in free-form text or free-form subtrees, never
 schema-defined field names (3.2).
 
+**How the M1 rules are built (M1-060).** The table is the contract and the code is the detail. These are
+the choices the table leaves open.
+
+- **Priority**, highest first: `pem_private_key` 90; `aws_access_key_id`, `rdy_share_token`, `jwt` 80;
+  `auth_header`, `api_key_header` 70; `url_userinfo` 65; `aws_secret_access_key`, `aws_session_token`,
+  `kubeconfig_credential` 62; `secret_by_key` 60. The merged span takes the highest name, so
+  `Authorization: Bearer x` reads `[REDACTED:auth_header:..]` although the key rule also took it.
+- **`url_userinfo`** reads the text after `://` up to the first `/`, `?`, `#`, quote, angle bracket, white
+  space, control character or backslash. The userinfo ends at the last `@` in it, or at a JSON `@`.
+  A raw `/`, `?`, `#` or space in a password is not valid in a URL, so it ends the authority early; write
+  it as a percent escape. `http:\/\/` (JSON slashes) is read too.
+- **`auth_header`** keeps the scheme and replaces the credential after it (`Authorization: Basic
+  <credential>`; one word is all credential). A quoted value runs to its closing quote, a header inside
+  a quoted word (`-H 'Authorization: ...'`) to that quote, anything else to the end of the line or a
+  backslash. A bare `Bearer <token>` needs 8 or more token characters and is not one of a few prose words.
+- **`pem_private_key`** takes every label that holds `PRIVATE KEY`, from the BEGIN line through the END
+  line of the same label, comment markers and `\n` escapes inside. No END, or another label's END: to the
+  end of the text. Certificates and public keys stay.
+- **`kubeconfig_credential`** names `client-key-data`, `client-secret`, `access-token`, `refresh-token`,
+  `id-token` and `client-key` wherever they appear, and `token` and `password` only in a text that looks
+  like a kubeconfig (`users:`, `clusters:`, `current-context`, `kind: Config` and the like). Elsewhere
+  those two are `secret_by_key`. `client-key-data` also has the `keydata` stem.
+- **The key rule** also reads `--password hunter2` (a flag that names a secret takes the next word; a
+  quoted word runs to its plain closing quote; another long flag, `$VAR` and a reference are left alone),
+  colour codes (`\x1b[0m`) around a key, its separator and its value, a tab written as backslash and `t`
+  before the separator, and commented-out blocks (`# token: |` takes the `#` lines below it). A list
+  marker (`- name: x`) and a line that is one quoted assignment (`NAME="x"`) now count as keys, so a
+  secret ends at its next sibling in a list or in an all-quoted `.env` file. A plain value with spaces
+  that opens no bracket or quote takes only the deeper lines below it.
+- **Words**: `method`, `mode`, `type`, `kind`, `scheme`, `provider`, `stdin` and `env` join the name
+  suffixes (`auth_method` is not a secret), `length`, `secs` and `sec` join the unit words, and
+  `authenticate` is not a stem hit.
+- **Evidence URLs**: `rdy_engine::redact::evidence_url` returns `scheme://host:port/path` with no userinfo,
+  query or fragment, and `None` for text that is not a URL. A check stores that and never the URL it was
+  given (03, "Redaction in evidence").
+
 ## Appendix C: layout, compression and manifest sample
 
 One top directory, so extracting never spills into the current directory; regular files only; deterministic

@@ -14,8 +14,8 @@
 //!    `-----END` of the same label is removed through the end of the buffer, and an
 //!    `-----END ... PRIVATE KEY-----` with no `BEGIN` of the same label before it from the start of the
 //!    buffer. With both ends cut (a tail read of a file past the scan budget), a base64 line of 40
-//!    bytes or more, even a single one, is removed as well. The full PEM rule is M1-060; this is the
-//!    part that only a cut buffer needs.
+//!    bytes or more, even a single one, is removed as well. The PEM rule of M1-060 finds a whole block;
+//!    this is the part that only a cut buffer needs.
 //! 3. **Known secrets cut by the edge.** An 8-byte or longer prefix of a known secret at the end, or
 //!    suffix at the start, is removed.
 //! 4. The rules and the exact known-secret match run on what is left, as for any string.
@@ -39,10 +39,10 @@ const BODY_LINE_MIN: usize = 40;
 const BODY_LINES_MIN: usize = 1;
 
 /// The rule name of the unterminated key guard. It is the name of the PEM rule of 04 Appendix B.
-pub(super) const PEM_RULE: &str = "pem_private_key";
+pub(super) const PEM_RULE: &str = super::shapes::PEM_PRIVATE_KEY;
 
-/// Priority of the guard: above every other rule, below known secrets.
-const PEM_PRIORITY: u8 = 90;
+/// Priority of the guard: the priority of the PEM rule, above every other rule.
+const PEM_PRIORITY: u8 = super::rules::priority::PEM;
 
 /// Which ends of a buffer the facade cut off.
 ///
@@ -136,6 +136,11 @@ impl Redactor {
         let mut by_rule = Vec::new();
         let mut found = Vec::new();
         for rule in super::rules::BUILT_IN {
+            // A private key is not a value the boundary must keep whole. The key guards below remove the
+            // part of it that is kept, and leave a placeholder, so the boundary stays where it is.
+            if rule.name == PEM_RULE {
+                continue;
+            }
             found.clear();
             (rule.find)(text, &mut found);
             by_rule.append(&mut found);
