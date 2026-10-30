@@ -4,7 +4,7 @@
 //!
 //! So far this crate holds the OS support table, a stub for each host check that is not written yet
 //! (M1-067), [`Firewall`] (`host.firewall`, M1-147), which the family builds from its spec entry
-//! (M1-172), and the cgroup helper ([`cgroup`], M1-065) that `host.memory`, `host.cpu` and `host.cgroups`
+//! (M1-172), [`Lsm`] (`host.lsm`, M1-145), and the cgroup helper ([`cgroup`], M1-065) that `host.memory`, `host.cpu` and `host.cgroups`
 //! share. The real checks replace the stubs one ticket at a time (M1-068 and later). Every check
 //! compiles on every target. Where a data source is not built, the check is `NotYet` on that OS, and the
 //! planner skips it with `skip_kind: not_yet_on_os` before it runs.
@@ -35,6 +35,9 @@
 pub mod cgroup;
 mod family;
 mod firewall;
+mod lsm;
+mod reads;
 
 pub use family::HostFamily;
 pub use firewall::Firewall;
+pub use lsm::Lsm;

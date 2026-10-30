@@ -1,0 +1,12 @@
+schema = 1
+name = "apparmor-root-less"
+summary = "AppArmor on, no root, the profile list is not readable"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.lsm"]
+
+[caps]
+root = false
+network = false
+kube = false

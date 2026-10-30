@@ -12,6 +12,7 @@ use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::firewall::{self, Firewall};
+use crate::lsm::{self, Lsm};
 
 #[cfg(test)]
 mod tests;
@@ -94,16 +95,6 @@ static PORTS: CheckInfo = info(
         remediation: "Stop the process that holds the port, or change the product's port setting. If the port is in the ephemeral range, reserve it with `net.ipv4.ip_local_reserved_ports` in a file under `/etc/sysctl.d/` as root, then run `sysctl --system`.",
     },
     5,
-    ROOT,
-);
-static LSM: CheckInfo = info(
-    "host.lsm",
-    "SELinux and AppArmor state, recent denials",
-    CheckMeta {
-        title: "SELinux and AppArmor",
-        remediation: "On SELinux, read recent denials with `ausearch -m avc -ts recent`. Install the vendor's policy module, or label the volume with `chcon -Rt container_file_t` or the `:Z` mount option. As a last resort, run `setenforce 0` and set `SELINUX=permissive` in `/etc/selinux/config`. This turns SELinux protection off, so ask the security team first. On AppArmor, read denials with `journalctl -k` and ask the vendor for a profile.",
-    },
-    3,
     ROOT,
 );
 static SECURITY_AGENTS: CheckInfo = info(
@@ -194,7 +185,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &DISK,
     &MEMORY,
     &PORTS,
-    &LSM,
+    &lsm::INFO,
     &SECURITY_AGENTS,
     &firewall::INFO,
     &TIME_SYNC,
@@ -210,7 +201,8 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.firewall` is real ([`Firewall`]). The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.firewall` ([`Firewall`]) and `host.lsm` ([`Lsm`]) are real. The others are stubs for now
+/// ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -231,11 +223,10 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 12] = [
+static STUBS: [&str; 11] = [
     "host.disk",
     "host.memory",
     "host.ports",
-    "host.lsm",
     "host.security_agents",
     "host.time_sync",
     "host.cpu",
@@ -263,6 +254,9 @@ impl Family for HostFamily {
                 .flatten()
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
+        if let CheckParams::HostLsm(lsm) = &params {
+            return Ok(Built::new(Box::new(Lsm::new(lsm))));
         }
         let info = CHECKS
             .iter()

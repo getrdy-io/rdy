@@ -1,0 +1,4 @@
+docker-default (enforce)
+/usr/sbin/chronyd (enforce)
+acme-agent (enforce)
+snap.lxd.lxc (complain)

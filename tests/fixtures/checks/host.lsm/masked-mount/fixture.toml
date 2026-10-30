@@ -1,0 +1,12 @@
+schema = 1
+name = "masked-mount"
+summary = "Container: /sys/fs/selinux is covered by an empty tmpfs mount"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.lsm"]
+
+[caps]
+root = true
+network = false
+kube = false
