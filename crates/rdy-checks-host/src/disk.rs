@@ -7,10 +7,12 @@
 //! A path that does not exist yet is measured through its nearest existing parent: the check retries
 //! `Statvfs` one level up for as long as the answer is `NotFound`. The mount line is the one whose
 //! device (field 3) equals the device `Statvfs` reported, and among those the longest whole-component
-//! mount point above the path. A btrfs subvolume has a device number of its own that mountinfo does not
-//! show, so when no line has the device, the longest mount point above the path is used if it is btrfs.
-//! When no line fits, the type is unknown, and a check that needs the type says "not verified", never a
-//! pass.
+//! mount point above the path. A btrfs subvolume has a device number of its own that mountinfo does
+//! not show, so when no line has the device, the longest mount point above the path is used if it is
+//! btrfs and its `ro`, `nosuid` and `noexec` equal the `statvfs` flags. That match is by path text,
+//! and the path may go through a link, so it never decides `nodev` and is not named in advice.
+//! When no line fits, the type is unknown, and a check that needs the type says "not verified", never
+//! a pass.
 //!
 //! A hung network mount blocks `statvfs`. The live backend runs it on the blocking pool, so the check's
 //! timeout (5s) ends the wait and the result is `Timeout`.
@@ -154,7 +156,7 @@ impl Disk {
             Reach::Stop(finding) => return Ok(*finding),
         };
         let kept = &parts[..reached.depth];
-        let (lookup, reading) = lookup_mount(ctx, reached.stat.dev, kept).await?;
+        let (lookup, reading) = lookup_mount(ctx, &reached.stat, kept).await?;
         let facts = Facts {
             requested: &self.path,
             measured: join(kept),
@@ -276,18 +278,40 @@ fn join(parts: &[&str]) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MountState {
     Found(Mount),
+    /// The nearest btrfs mount above the path, matched by mount point because the device is not in the
+    /// table. The path may go through a link, so the type is a best guess and the mount point is not
+    /// named in advice. `nodev` is not read from this line.
+    ByPath(Mount),
     /// Not known, and why.
     Unknown(String),
 }
 
-/// Reads the mount table and finds the line for `dev`. The second value is what to tell the reader
-/// about the reading itself: lines left out, a table cut short, a match by mount point.
+impl MountState {
+    /// The line, when it is the confirmed mount of the path (not a match by mount point).
+    fn confirmed(&self) -> Option<&Mount> {
+        match self {
+            MountState::Found(mount) => Some(mount),
+            MountState::ByPath(_) | MountState::Unknown(_) => None,
+        }
+    }
+}
+
+/// Whether the mount line agrees with the flags the OS reported for the path itself. `statvfs` on the
+/// real descriptor is the truth for `ro`, `nosuid` and `noexec`. A line that differs is the wrong line.
+fn flags_agree(mount: &Mount, stat: &StatvfsInfo) -> bool {
+    stat.no_exec.is_none_or(|v| v == mount.has_option("noexec"))
+        && stat.no_suid == mount.has_option("nosuid")
+        && stat.read_only == mount.has_option("ro")
+}
+
+/// Reads the mount table and finds the line for the device of `stat`. The second value is what to tell
+/// the reader about the reading itself: lines left out, a table cut short, a match by mount point.
 async fn lookup_mount(
     ctx: &CheckContext,
-    dev: Option<(u32, u32)>,
+    stat: &StatvfsInfo,
     kept: &[&str],
 ) -> Result<(MountState, Vec<String>), CheckError> {
-    let Some(dev) = dev else {
+    let Some(dev) = stat.dev else {
         let why = "the OS gave no device number".to_owned();
         return Ok((MountState::Unknown(why), Vec::new()));
     };
@@ -324,13 +348,16 @@ async fn lookup_mount(
     let (major, minor) = dev;
     let state = match mountinfo::find(&parsed.mounts, dev, kept) {
         Lookup::Found(mount) => MountState::Found(mount.clone()),
-        Lookup::BtrfsByPath(mount) => {
+        Lookup::BtrfsByPath(mount) if flags_agree(mount, stat) => {
             notes.push(format!(
-                "No line in {MOUNTINFO} has device {major}:{minor}. A btrfs subvolume has a device number of its own, so rdy matched the btrfs mount {} by its mount point.",
+                "No line in {MOUNTINFO} has device {major}:{minor}. A btrfs subvolume has a device number of its own, so rdy matched the btrfs mount {} by its mount point. The path may go through a link, so the type is a best guess and nodev is not checked.",
                 code(&mount.point)
             ));
-            MountState::Found(mount.clone())
+            MountState::ByPath(mount.clone())
         }
+        Lookup::BtrfsByPath(_) => MountState::Unknown(format!(
+            "no line in {MOUNTINFO} has device {major}:{minor}, and the btrfs mount found by mount point does not have the flags the OS reported for the path{cut}"
+        )),
         Lookup::NoDevice => MountState::Unknown(format!(
             "no line in {MOUNTINFO} has device {major}:{minor}{cut}"
         )),
@@ -406,14 +433,13 @@ fn expected(rules: &Rules) -> Value {
 pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
     let stat = &facts.stat;
     let requested = facts.requested;
-    let mount = match &facts.mount {
-        MountState::Found(mount) => Some(mount),
-        MountState::Unknown(_) => None,
+    // Advice and the place name a mount only when it is confirmed. A match by mount point is not.
+    let mount = facts.mount.confirmed();
+    let place = match &facts.mount {
+        MountState::Found(m) => format!("{} ({})", code(&m.point), escape_untrusted(&m.fstype)),
+        MountState::ByPath(m) => format!("its file system ({})", escape_untrusted(&m.fstype)),
+        MountState::Unknown(_) => "its file system".to_owned(),
     };
-    let place = mount.map_or_else(
-        || "its file system".to_owned(),
-        |m| format!("{} ({})", code(&m.point), escape_untrusted(&m.fstype)),
-    );
     let req = code(requested);
     let check_word = word(&facts.measured);
 
@@ -499,7 +525,7 @@ pub(crate) fn judge(rules: &Rules, facts: &Facts<'_>) -> Finding {
     }
     // File system type.
     match &facts.mount {
-        MountState::Found(m) => {
+        MountState::Found(m) | MountState::ByPath(m) => {
             let banned = rules
                 .forbid_fstypes
                 .iter()
@@ -618,14 +644,20 @@ fn space_fix(path: Option<&str>, mount: Option<&Mount>, shortfall: u64) -> Strin
     }
 }
 
+/// Whether the mount is the system temporary directory, where `TMPDIR` can steer a program elsewhere.
+fn is_temp_mount(mount: Option<&Mount>) -> bool {
+    mount.is_some_and(|m| matches!(m.point.as_str(), "/tmp" | "/var/tmp"))
+}
+
 /// The advice for a forbidden mount option. Moving the install is the first choice. A remount changes
 /// a hardening setting such as `noexec` on `/tmp`, so it comes second and needs the security team.
 fn remount_fix(option: &str, mount: Option<&Mount>) -> String {
     let clear = clearing(option);
     let first = match option {
-        "noexec" => {
+        "noexec" if is_temp_mount(mount) => {
             "Move the install path to a volume without noexec, or set `TMPDIR` to a directory on one."
         }
+        "noexec" => "Move the install path to a volume without noexec.",
         "ro" => {
             "Find out why the volume is read-only (`journalctl -k` shows disk errors), or move the install path."
         }
@@ -656,6 +688,12 @@ fn observed(facts: &Facts<'_>, free: u64, total: u64) -> Value {
             json!(m.fstype),
             json!(mountinfo::is_network(&m.fstype)),
             json!(m.has_option("nodev")),
+        ),
+        MountState::ByPath(m) => (
+            Value::Null,
+            json!(m.fstype),
+            json!(mountinfo::is_network(&m.fstype)),
+            Value::Null,
         ),
         MountState::Unknown(_) => (Value::Null, Value::Null, Value::Null, Value::Null),
     };

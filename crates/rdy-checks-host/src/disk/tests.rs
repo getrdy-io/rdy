@@ -48,6 +48,8 @@ const CASES: &[(&str, &str)] = &[
     expect!("root-run"),
     expect!("permission-denied"),
     expect!("no-mountinfo"),
+    expect!("btrfs-link-nodev"),
+    expect!("btrfs-flag-mismatch"),
 ];
 
 fn load(case: &str) -> Fixture {

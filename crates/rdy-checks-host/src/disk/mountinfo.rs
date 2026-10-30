@@ -4,8 +4,9 @@
 //! share a device (a bind mount, a stacked mount), so the longest mount point that is a whole-component
 //! prefix of the measured path breaks the tie. A btrfs subvolume reports its own anonymous device in
 //! `st_dev` and mountinfo shows the superblock's, so no line matches. For that one case the longest
-//! whole-component mount point above the path is used, but only if its line is btrfs. Paths are `/`-separated text everywhere here, never
-//! `std::path`, so the same code and the same fixtures run on every CI leg.
+//! whole-component mount point above the path is used, but only if its line is btrfs. Paths are
+//! `/`-separated text everywhere here, never `std::path`, so the same code and the same fixtures run
+//! on every CI leg.
 
 use crate::cgroup::unescape;
 

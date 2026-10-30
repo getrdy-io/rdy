@@ -554,12 +554,131 @@ fn a_noexec_mount_leads_with_moving_the_install_and_remounts_second() {
     r.forbid = vec![MountOption::Noexec];
     let mut s = stat(100);
     s.no_exec = Some(true);
-    let fix = judge(&r, &facts(s, var_mount())).fix.expect("a fix");
+    let tmp = MountState::Found(mount((253, 1), "/tmp", "rw,noexec", "tmpfs", "tmpfs"));
+    let fix = judge(&r, &facts(s, tmp)).fix.expect("a fix");
     let move_at = fix.find("Move the install path").expect("move first");
     let tmpdir_at = fix.find("TMPDIR").expect("TMPDIR");
-    let remount_at = fix.find("remount,exec /var").expect("remount");
+    let remount_at = fix.find("remount,exec /tmp").expect("remount");
     assert!(move_at < tmpdir_at && tmpdir_at < remount_at, "{fix}");
     assert!(fix.contains("security team"), "{fix}");
+}
+
+#[test]
+fn tmpdir_is_suggested_only_for_a_temporary_directory_mount() {
+    let mut r = rules();
+    r.forbid = vec![MountOption::Noexec];
+    let mut s = stat(100);
+    s.no_exec = Some(true);
+    let at = |point: &str| {
+        let m = MountState::Found(mount((253, 1), point, "rw,noexec", "ext4", "/dev/x"));
+        judge(&r, &facts(s, m)).fix.expect("a fix")
+    };
+    assert!(at("/tmp").contains("TMPDIR"));
+    assert!(at("/var/tmp").contains("TMPDIR"));
+    for point in ["/var", "/opt", "/tmpx"] {
+        let fix = at(point);
+        assert!(!fix.contains("TMPDIR"), "{point}: {fix}");
+        assert!(fix.contains(&format!("remount,exec {point}")), "{fix}");
+    }
+    let unknown = judge(&r, &facts(s, MountState::Unknown("why".to_owned())));
+    assert!(!unknown.fix.expect("a fix").contains("TMPDIR"));
+}
+
+/// The mount table of a host whose `/home` is a btrfs subvolume mounted `nodev` and whose `/opt/acme`
+/// is a link into it. `st_dev` is the anonymous device of the subvolume.
+fn linked_home() -> (Vec<Mount>, Vec<&'static str>) {
+    (
+        vec![
+            mount((0, 26), "/", "rw,relatime", "btrfs", "/dev/vda2"),
+            mount(
+                (0, 27),
+                "/home",
+                "rw,nosuid,nodev,relatime",
+                "btrfs",
+                "/dev/vda2",
+            ),
+        ],
+        vec!["opt", "acme"],
+    )
+}
+
+#[test]
+fn a_match_by_mount_point_never_passes_nodev_and_never_names_the_mount() {
+    let (mounts, path) = linked_home();
+    // The path text finds `/`, which is not nodev. The real file system is `/home`, which is.
+    let Lookup::BtrfsByPath(root) = mountinfo::find(&mounts, (0, 45), &path) else {
+        panic!("a match by mount point");
+    };
+    assert_eq!(root.point, "/");
+    let mut r = rules();
+    r.forbid = vec![MountOption::Nodev];
+    let finding = judge(&r, &facts(stat(100), MountState::ByPath(root.clone())));
+    assert_eq!(finding.level, Level::Warn, "{}", finding.message);
+    assert!(
+        finding.message.contains("Not verified"),
+        "{}",
+        finding.message
+    );
+    assert!(finding.message.contains("nodev"), "{}", finding.message);
+    assert!(finding.partial.is_some());
+    let fix = finding.fix.expect("a fix");
+    assert!(!fix.contains("remount"), "{fix}");
+    assert_eq!(finding.observed["nodev"], Value::Null);
+    assert_eq!(finding.observed["mount"], Value::Null);
+    assert_eq!(finding.observed["fstype"], "btrfs");
+}
+
+#[test]
+fn a_match_by_mount_point_names_no_mount_in_remount_advice() {
+    let (mounts, path) = linked_home();
+    let Lookup::BtrfsByPath(root) = mountinfo::find(&mounts, (0, 45), &path) else {
+        panic!("a match by mount point");
+    };
+    let mut r = rules();
+    r.forbid = vec![MountOption::Nosuid];
+    let mut s = stat(100);
+    s.no_suid = true;
+    // The statvfs flag is the truth, so the verdict stands. The fallback line is not named.
+    let finding = judge(&r, &facts(s, MountState::ByPath(root.clone())));
+    assert_eq!(finding.level, Level::Fail);
+    let fix = finding.fix.expect("a fix");
+    assert!(!fix.contains("remount,suid /"), "{fix}");
+    assert!(fix.contains("remount the volume"), "{fix}");
+    assert!(
+        !finding.message.contains("`/` (btrfs)"),
+        "{}",
+        finding.message
+    );
+}
+
+#[test]
+fn a_fallback_line_must_agree_with_the_flags_the_os_reported() {
+    let line = |options: &str| mount((0, 26), "/", options, "btrfs", "/dev/vda2");
+    let flags = |ro: bool, nosuid: bool, noexec: Option<bool>| {
+        let mut s = stat(100);
+        s.read_only = ro;
+        s.no_suid = nosuid;
+        s.no_exec = noexec;
+        s
+    };
+    assert!(flags_agree(
+        &line("rw,relatime"),
+        &flags(false, false, Some(false))
+    ));
+    assert!(flags_agree(
+        &line("ro,nosuid,noexec"),
+        &flags(true, true, Some(true))
+    ));
+    // Any one flag that differs means this is not the file system of the path.
+    assert!(!flags_agree(&line("rw"), &flags(true, false, Some(false))));
+    assert!(!flags_agree(&line("rw"), &flags(false, true, Some(false))));
+    assert!(!flags_agree(&line("rw"), &flags(false, false, Some(true))));
+    assert!(!flags_agree(
+        &line("rw,noexec"),
+        &flags(false, false, Some(false))
+    ));
+    // An OS that reports no `noexec` leaves that flag out of the comparison.
+    assert!(flags_agree(&line("rw,noexec"), &flags(false, false, None)));
 }
 
 #[test]

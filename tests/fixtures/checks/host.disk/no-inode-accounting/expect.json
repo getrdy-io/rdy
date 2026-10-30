@@ -14,10 +14,10 @@
     },
     "fix": null,
     "level": "pass",
-    "message": "`/opt/acme` has 80 GiB free on `/` (btrfs). 20 GiB is needed.",
+    "message": "`/opt/acme` has 80 GiB free on its file system (btrfs). 20 GiB is needed.",
     "notes": [
       "This file system keeps no inode count, so inodes were not checked.",
-      "No line in /proc/self/mountinfo has device 0:45. A btrfs subvolume has a device number of its own, so rdy matched the btrfs mount `/` by its mount point."
+      "No line in /proc/self/mountinfo has device 0:45. A btrfs subvolume has a device number of its own, so rdy matched the btrfs mount `/` by its mount point. The path may go through a link, so the type is a best guess and nodev is not checked."
     ],
     "observed": {
       "device": "0:45",
@@ -25,9 +25,9 @@
       "free_inodes": null,
       "fstype": "btrfs",
       "measured_path": "/opt/acme",
-      "mount": "/",
+      "mount": null,
       "network": false,
-      "nodev": false,
+      "nodev": null,
       "noexec": false,
       "nosuid": false,
       "path": "/opt/acme",
