@@ -3,8 +3,8 @@
 //! Every case loads with the real fixture loader and runs through the real scheduler, so the check
 //! timeout, the manifest (`statfs` and `reads`) and the action log are the ones a run has. Each case
 //! has an `expect.json` with the spec entry and the reviewed result. The test crate may not read files,
-//! so the goldens are compiled in with `include_str!`. A mismatch panics with the new result in full:
-//! when it is right, paste it into the case's `expect.json` and review the diff.
+//! so the goldens are compiled in with `include_str!` to read the spec entry. `assert_golden` compares
+//! the bytes: a mismatch fails with a diff, and `UPDATE_GOLDENS=1` rewrites the file for review.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,6 +12,7 @@ use std::time::Duration;
 use rdy_engine::check::{Check, CheckOutcome, Finding, Level, Need, Os};
 use rdy_engine::probe::ActionLogOutput;
 use rdy_engine::sched::{End, Planned};
+use rdy_engine::testing::golden::assert_golden;
 use rdy_engine::testing::{Fixture, TestRun, assert_within_manifest, fixtures_dir};
 use rdy_spec::check::CheckParams;
 use rdy_spec::result::{Action, ActionKind, ActionOutcome};
@@ -137,27 +138,35 @@ fn render(end: &End) -> Value {
     }
 }
 
+/// The value with every object's keys in order. The goldens have sorted keys, and a build where
+/// another crate turns on serde_json's `preserve_order` would otherwise write them in insertion order.
+fn sorted(value: Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<(String, Value)> = map.into_iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            Value::Object(entries.into_iter().map(|(k, v)| (k, sorted(v))).collect())
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(sorted).collect()),
+        other => other,
+    }
+}
+
 #[test]
 fn every_case_matches_its_golden() {
-    let mut changed = Vec::new();
     for (case, text) in CASES {
+        // The compiled-in golden is only read for the spec entry the case runs with.
         let golden: Value = serde_json::from_str(text).unwrap_or_else(|e| panic!("{case}: {e}"));
         let entry = &golden["entry"];
         let result = run(&load(case), disk(entry));
         let actual = json!({ "entry": entry, "result": render(&result.end) });
-        if actual != golden {
-            changed.push(format!(
-                "=== tests/fixtures/checks/host.disk/{case}/expect.json ===\n{}\n",
-                serde_json::to_string_pretty(&actual).expect("json")
-            ));
-        }
+        let mut bytes = serde_json::to_string_pretty(&sorted(actual)).expect("json");
+        bytes.push('\n');
+        assert_golden(
+            fixtures_dir().join(format!("checks/host.disk/{case}/expect.json")),
+            bytes,
+        );
     }
-    assert!(
-        changed.is_empty(),
-        "{} case(s) changed. If the new results are right, replace each expect.json with the text below it and review the diff:\n{}",
-        changed.len(),
-        changed.join("\n")
-    );
 }
 
 #[test]

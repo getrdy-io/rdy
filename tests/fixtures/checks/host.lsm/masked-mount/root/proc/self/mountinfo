@@ -1,0 +1,3 @@
+512 391 0:41 / / rw,relatime - overlay overlay rw,seclabel,lowerdir=/var/lib/containers/l1,upperdir=/var/lib/containers/u,workdir=/var/lib/containers/w
+513 512 0:44 / /sys ro,nosuid,nodev,noexec,relatime - sysfs sysfs ro,seclabel
+514 513 0:45 / /sys/fs/selinux ro,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,seclabel,size=0k
