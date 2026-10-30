@@ -9,8 +9,9 @@
 //!
 //! 1. The banners: UNSIGNED SPEC or KEY NOT PINNED when the signature is not verified by a pinned key
 //!    (01 section 4.7), and INCOMPLETE when the run did not finish.
-//! 2. The header: the verdict in the terminal's words, what the spec is for, the summary line, when
-//!    and by whom it ran, and the line about hostnames.
+//! 2. The header: the verdict in the terminal's words, what the spec is for, the summary line, "No
+//!    blocks." when no check blocks, when and by whom it ran, the legend of the status words, the
+//!    rule for the verdict in plain words, and the line about hostnames.
 //! 3. The page index.
 //! 4. One section per group of [`rdy_spec::result::group_by_bucket`], in that order: Blocks, Required
 //!    checks not run, Warnings, Passed, Does not apply here. A group with no checks has no section.
@@ -25,9 +26,12 @@
 //! template uses the `safe` filter (a CI grep enforces that, M1-078). The one value that may ever be
 //! printed unescaped is [`super::HtmlSafeJson`], and this renderer does not print it yet.
 //!
-//! Left to later tickets: the embedded JSON and its hash (M1-078), the print override and legend
-//! (M1-079), the fix source label and the action log table (M1-080), Found and Needed and the footer
-//! link (M1-081).
+//! **Print.** `@media print` is black on white whatever the screen theme: it sets `color-scheme: light`
+//! and replaces every variable of the dark palette, with no backgrounds. No raw JSON key is visible
+//! text in the template (a test scans it).
+//!
+//! Left to later tickets: the embedded JSON and its hash (M1-078), the fix source label and the action
+//! log table (M1-080), Found and Needed, the footer link and the fixed banner in print (M1-081).
 
 use crate::redact::RedactedReport;
 

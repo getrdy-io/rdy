@@ -7,10 +7,18 @@
 use askama::Template;
 use rdy_spec::result::{
     Bucket, BucketGroup, CheckResult, Need, NeedState, Report, SignatureState, SkipKind, Status,
-    TrustSource, Verdict, group_by_bucket,
+    Summary, TrustSource, Verdict, group_by_bucket,
 };
 
 use crate::summary::{summary_line, verdict_line};
+
+/// What the three status words mean (01 section 6 item 2, 07 D.7). 07 D.7 requires the same sentences
+/// in `rdy run --help`; not yet.
+pub(super) const LEGEND: &str =
+    "BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it.";
+
+/// How the verdict is decided, in plain words (01 section 6 item 2, 07 D.7).
+pub(super) const RULE: &str = "NOT READY if anything blocks or a required check could not run. READY with warnings if only optional things are wrong. READY if every check ran and passed.";
 
 /// A banner at the top of the page.
 pub(super) struct Banner {
@@ -133,6 +141,10 @@ pub(super) struct View {
     pub verdict_word: String,
     pub verdict_class: &'static str,
     pub summary_line: String,
+    /// True when no check has status block: the header then says "No blocks." (07 D.7).
+    pub no_blocks: bool,
+    pub legend: &'static str,
+    pub rule: &'static str,
     pub run_when: String,
     pub rdy_version: String,
     pub user: Option<String>,
@@ -165,6 +177,9 @@ impl View {
             verdict_word: verdict_line(judgement.verdict, None, 0),
             verdict_class,
             summary_line: summary_line(&report.checks),
+            no_blocks: Summary::from_checks(&report.checks).block == 0,
+            legend: LEGEND,
+            rule: RULE,
             run_when: utc_text(&report.run.started_at),
             rdy_version: report.producer.version.clone(),
             user: report.identity.user.clone(),
