@@ -1,0 +1,84 @@
+# ADR 0037: The kube client uses an `http://` proxy the way kubectl does, and k8s.access reads the attempt, not a connected cluster
+
+- Status: Proposed. Security review requested, because it touches the network path and credentials.
+- Date: 2026-10-30
+
+## Context
+
+ADR 0031 decision 6 refused a cluster `proxy-url` and kept kube away from `HTTPS_PROXY`, and said "proxy
+support is M1-109, with its own feature decision". `kubectl` honours both, so `kubectl` can work while `rdy`
+times out. 03 `k8s.access` says the check resolves the proxy as `net.proxy` does and reports which rule applied.
+
+Reading kube 4.2.0 (the pinned version) for that decision:
+
+- The `http-proxy` feature is `hyper-util/client-proxy`. It adds no crate to the lock that is not there
+  already (`base64`, `ipnet`, `percent-encoding`). The `socks5` feature is the same dependency.
+- An `https://` proxy is checked with the cluster's TLS settings (its CA), not with the proxy's own
+  certificate. A corporate proxy would fail with an unknown issuer that has nothing to do with the cluster.
+- The `Proxy-Authorization` header is built from the raw user info of the proxy URL. It is not
+  percent-decoded, so a password with `%` is sent as written.
+- Only the scheme `socks5` exists. `socks5h`, which `kubectl` also takes, is refused by kube.
+
+## Decision
+
+1. **Feature.** `kube` gets `http-proxy`. `socks5` stays off.
+2. **Only `http://`.** The proxy is a `CONNECT` tunnel. `https://`, `socks5://`, `socks5h://` and any other
+   scheme, a path or a query, and a value that is not a URL, are refused as `KubeError::ProxyUnsupported`.
+   The error names where the value came from (the kubeconfig `proxy-url` or the variable) and shows the
+   proxy as scheme, host and port. The hint says which of the two to change. `https://` and `socks5://` are
+   follow-ups if a design partner needs them.
+3. **Order, as `kubectl`.** (a) The chosen cluster's `proxy-url`. It applies whatever `NO_PROXY` says.
+   (b) `HTTPS_PROXY`, else `https_proxy`, for an `https` API server, unless `NO_PROXY` (else `no_proxy`)
+   covers the API host or the host is `localhost` or a loopback address. `HTTP_PROXY` is not read, and an
+   `http` API server never uses an environment proxy. (c) No proxy. A value without a scheme is read as
+   `http://`, as Go does.
+4. **`NO_PROXY` is Go's `httpproxy` rule.** A name matches itself and its subdomains, a leading dot or `*.`
+   matches subdomains only, `host:port` limits an entry to a port, an IP matches itself, a CIDR matches
+   addresses, `*` matches all, entries are case-insensitive and empty entries are skipped. A proxy variable
+   that `NO_PROXY` exempts is not parsed, so a stale value cannot fail a run that does not use it.
+5. **kube still never reads the environment.** The placeholder of ADR 0031 decision 6 stays. After the
+   build, `client::proxy::resolve` writes the chosen proxy to the config. The function is pure, and its
+   tests pin each rule.
+6. **The proxy password is a known secret.** The user info and its password join `Loaded::known_secrets()`
+   (the caller registers them before anything is printed, ADR 0015 decision 3). The user info is never in
+   an error, a log line, `Debug` output or a report: `Env` hides the variable in `Debug`, and the route is
+   shown as `scheme://host:port`.
+7. **The route is reported.** `ConnectionFacts` (kinds of credential, the proxy route, the CA state, the
+   source and the cluster line) is taken from `Loaded` before `connect`, so a failed connection can still
+   say which rule applied. A network error carries `proxied`, and the hint then says to check that the
+   proxy allows `CONNECT` to the API host and port. Two causes get their own phrase: the proxy answered 407,
+   and the proxy refused the tunnel.
+8. **Credential end dates are read at load, with no request.** A static token that is a JWT: its `exp`
+   claim, nothing else. A client certificate: `notAfter`, read by a small bounded DER walk in `client`,
+   because a check crate may not depend on an X.509 crate (`ci/check-crate-deps.toml`). An exec plugin and
+   the pod's service account have no expiry to warn about. Times are counted from `Env::now_unix`, so tests
+   pin them.
+9. **`k8s.access` reads the attempt (`Dial`), not a connected cluster.** Every other k8s check needs
+   `kube_context` and is skipped when the attempt failed. `k8s.access` says why it failed, so its input is
+   the facts, how the attempt ended (reached, failed, timed out, no network) and, when it reached, a
+   read-only client. The family probe (M1-107) makes the attempt once per run and wraps it in `Dialed`.
+   `Connected` gained `version_latency()`, the time of `GET /version` with the plugin's time left out (the
+   plugin runs when the client is built).
+
+## Consequences
+
+- `ProxyUnsupported` lost its "does not use a proxy yet" wording, and `proxy_env_set` became `proxied` on
+  `Timeout` and `Unreachable`. `Env` lost `proxy_env_set` and gained `https_proxy`, `no_proxy` and
+  `now_unix`. A malformed `HTTPS_PROXY` that applies now fails the load with an error that names the
+  variable (it was ignored before).
+- Proven on the real client stack: a `CONNECT` tunnel carries a TLS session for `proxy-url` and for
+  `HTTPS_PROXY`, the Basic header carries the user info, a 403, 407 and 502 from the proxy and a dead
+  proxy map to their own causes. `tests/tls.rs`.
+- A password with `%` in a proxy URL is sent undecoded (kube, decision list above). It is a known limit.
+- DNS for the API host happens at the proxy, as with `kubectl`. `net.proxy` (M1-098) and `net.egress`
+  (M1-097) build their own CONNECT through the probe facade; the two share the rule text, not code.
+
+## Alternatives considered
+
+| Option | Why it lost |
+| --- | --- |
+| Leave `HTTPS_PROXY` ignored, only honour `proxy-url` | `kubectl` works and `rdy` times out, the failure 03 names. |
+| Let kube read the environment | It fails the whole load on a malformed value, and it ignores `NO_PROXY`. |
+| Enable `socks5` and `https://` proxies now | The first has no test here and the second is verified against the wrong CA (see Context). |
+| An X.509 crate for `notAfter` | Only `rdy-checks-net` may depend on one (`ci/check-crate-deps.toml`). One field does not need it. |
+| `k8s.access` takes the connected `Cluster` handle | It exists only on success, so the check could not report a failure. |

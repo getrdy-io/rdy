@@ -14,9 +14,10 @@ rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
 # Only `client` and `rustls-tls`, plus `ring` so rustls has a crypto provider and `aws-lc-rs` stays out
 # (ADR 0009, ADR 0031). `webpki-roots` makes the bundled roots the only system roots: without it kube
 # defers to rustls-platform-verifier when a kubeconfig has no CA, which ADR 0014 decision 3 bans. The
-# crate stays in the tree but nothing reaches it (ADR 0031 decision 9). No `runtime`, `derive`, `ws`,
-# `oauth`, `oidc`, `http-proxy` or `socks5`.
-kube = { workspace = true, features = ["client", "rustls-tls", "ring", "webpki-roots"] }
+# crate stays in the tree but nothing reaches it (ADR 0031 decision 9). `http-proxy` is the CONNECT tunnel
+# for an `http://` proxy (ADR 0037); it adds no crate that is not in the tree already. No `runtime`,
+# `derive`, `ws`, `oauth`, `oidc` or `socks5`.
+kube = { workspace = true, features = ["client", "rustls-tls", "ring", "webpki-roots", "http-proxy"] }
 # The newest `v1_*` minor, set once here (ADR 0010).
 k8s-openapi = { workspace = true, features = ["std", "v1_36"] }
 secrecy = { workspace = true, features = [] }
@@ -26,12 +27,14 @@ http-body = { workspace = true, features = [] }
 tower-layer = { workspace = true, features = [] }
 tower-service = { workspace = true, features = [] }
 thiserror = { workspace = true, features = ["std"] }
+# `k8s.access` reads its spec parameters and compiles its patterns with the spec crate (M1-109). The JWT
+# `exp` claim of a static token is read with `serde_json`; nothing else is.
+rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
+serde_json = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 # The test run (`TestRun`) writes the real action log, so the guard tests read the entries a run would.
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing"] }
-rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
-serde_json = { workspace = true, features = ["std"] }
 serde-saphyr = { workspace = true, features = ["deserialize"] }
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
 tempfile = { workspace = true }

@@ -293,22 +293,23 @@ fn control_characters_in_names_cannot_reach_the_terminal() {
 }
 
 #[test]
-fn a_cluster_proxy_url_is_refused_with_a_hint() {
+fn a_cluster_proxy_url_that_is_not_http_is_refused_with_a_hint() {
     let text = kubeconfig_yaml(
         Some("ctx"),
         "https://prod.example:6443",
-        "    proxy-url: http://user:PROXYCANARY@proxy.example:3128\n",
+        "    proxy-url: socks5://user:PROXYCANARY@proxy.example:1080\n",
         &token_user("t"),
     );
     let error = load_one(&text).expect_err("proxy");
     assert!(
-        matches!(&error, KubeError::ProxyUnsupported { proxy } if proxy == "http://proxy.example:3128"),
+        matches!(&error, KubeError::ProxyUnsupported { proxy, origin }
+            if proxy == "socks5://proxy.example:1080" && origin.starts_with("the proxy-url")),
         "{error:?}"
     );
     let shown = format!("{error} {error:?} {}", error.hint());
     assert!(!shown.contains("PROXYCANARY"), "{shown}");
     assert!(!shown.contains("user:"), "{shown}");
-    assert!(shown.contains("proxy.example:3128"), "{shown}");
+    assert!(shown.contains("proxy.example:1080"), "{shown}");
     assert!(
         error.hint().contains("Do not edit your working kubeconfig")
             && error.hint().contains("--kubeconfig"),
@@ -757,22 +758,24 @@ fn each_auth_provider_gets_its_own_hint_and_oidc_makes_no_false_claim() {
 }
 
 #[test]
-fn the_proxy_environment_note_shows_only_when_it_applies() {
-    let note = "HTTPS_PROXY is set; rdy does not use it for the cluster yet.";
-    for proxy_env_set in [false, true] {
+fn the_proxy_note_shows_only_when_a_proxy_was_in_the_path() {
+    let note = "The request went through a proxy";
+    for proxied in [false, true] {
         let timeout = KubeError::Timeout {
             server: "https://a".to_owned(),
-            proxy_env_set,
+            proxied,
         };
         let unreachable = KubeError::Unreachable {
             server: "https://a".to_owned(),
             cause: "the connection failed",
-            proxy_env_set,
+            proxied,
             ca_set: true,
         };
-        assert_eq!(timeout.hint().contains(note), proxy_env_set);
-        assert_eq!(unreachable.hint().contains(note), proxy_env_set);
+        assert_eq!(timeout.hint().contains(note), proxied);
+        assert_eq!(unreachable.hint().contains(note), proxied);
         assert!(timeout.hint().contains("VPN"));
+        // The old text said rdy ignored the variable. It does not any more.
+        assert!(!timeout.hint().contains("does not use it"));
     }
 }
 
@@ -830,7 +833,7 @@ fn an_unknown_issuer_hint_depends_on_whether_the_kubeconfig_has_a_ca() {
         KubeError::Unreachable {
             server: "https://a".to_owned(),
             cause: "the server certificate is signed by an authority that is not trusted (UnknownIssuer)",
-            proxy_env_set: false,
+            proxied: false,
             ca_set,
         }
         .hint()
@@ -850,7 +853,7 @@ fn an_unknown_issuer_hint_depends_on_whether_the_kubeconfig_has_a_ca() {
     let other = KubeError::Unreachable {
         server: "https://a".to_owned(),
         cause: "the connection was refused",
-        proxy_env_set: false,
+        proxied: false,
         ca_set: false,
     };
     assert!(other.hint().contains("VPN"));
@@ -868,8 +871,13 @@ fn the_ca_state_comes_from_the_kubeconfig() {
     );
     let path = write(dir.path(), "config", &with_ca);
     let loaded = load_sync(&options().kubeconfig(path), &Env::empty()).expect("load");
-    assert!(loaded.ca_set);
-    assert!(!load_one(&simple(Some("ctx"))).expect("load").ca_set);
+    assert!(loaded.facts().ca_set());
+    assert!(
+        !load_one(&simple(Some("ctx")))
+            .expect("load")
+            .facts()
+            .ca_set()
+    );
 }
 
 #[test]

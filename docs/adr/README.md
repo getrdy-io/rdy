@@ -36,11 +36,12 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0026](0026-checkmeta-in-checkinfo.md) | CheckMeta holds a check's title and remediation and lives in its static CheckInfo | Accepted |
 | [0027](0027-windows-trust-stores-stay-refused-in-m1.md) | Windows trust stores stay refused in M1: reading a DACL needs FFI or unmaintained crates, and Windows has no user store | Accepted, security-reviewed and architect-reviewed (PR #68) |
 | [0028](0028-command-table-and-fix-text-lists.md) | The command table is typed data in `rdy-engine`, and fix text is audited against two reviewed lists | Accepted, security-reviewed (PR #70) |
-| [0031](0031-kube-client-layer.md) | The kube client layer reads the kubeconfig itself, announces first, and keeps plugin output out of every error | Accepted, security-reviewed (PR #76) |
+| [0031](0031-kube-client-layer.md) | The kube client layer reads the kubeconfig itself, announces first, and keeps plugin output out of every error | Accepted, security-reviewed (PR #76); decision 6 amended by 0037 (the proxy) |
 | [0033](0033-trust-add-key-argument-and-store-api.md) | `trust add` takes a key as a file or as text, refuses secret keys by form, and edits the store through `rdy-spec` | Accepted, security-reviewed (PR #77) |
 | [0034](0034-spec-examples-checked-in-the-test-suite.md) | Spec reference examples are validated by the test suite, not by the render | Accepted, architect-reviewed (PR #89); narrows 09 section 5 (PC-47) |
 | [0035](0035-loopback-servers-in-rdy-engine-loopback-feature.md) | The loopback test servers live in `rdy-engine` behind the `loopback` feature, not in `rdy-checks-net` | Accepted, security-reviewed (PR #114); moves the home 08 gave them |
 | [0036](0036-security-agents-process-names-and-shipped-data.md) | host.security_agents matches the kernel's cut process name and never reads `cmdline`; a check crate may embed its own shipped data by exact lint-wall entry | Accepted, security-reviewed (PR #119) |
+| [0037](0037-kube-proxy-and-access-facts.md) | The kube client uses an `http://` proxy the way kubectl does, and k8s.access reads the connection attempt, not a connected cluster | Proposed, security review requested; amends 0031 decision 6 |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.

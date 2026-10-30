@@ -62,7 +62,9 @@ tests/fixtures/
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), the twelve machines of
 `host.os/`, `host.security_agents/` (18 cases), `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
-cases and the `_kube` cases (`cluster`, `denied`). The rest
+cases, the `_kube` cases (`cluster`, `denied`) and the eleven `k8s.access` cases (`good`, `anonymous`, `unauthorized`,
+`forbidden-review`, `old-server`, `discovery-denied`, `review-error`, `review-silent`, `many-groups`, `hostile-names`,
+and `none`, which has no `api/` because the attempt never reached a cluster). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |

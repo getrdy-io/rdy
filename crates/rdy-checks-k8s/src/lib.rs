@@ -20,6 +20,12 @@
 // `a_check_crate_forbids_the_disallowed_lints_so_no_macro_can_allow_them` requires it, and allows only
 // `mod` and `use` items at this root.
 
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod access;
 pub mod client;
 #[forbid(
     clippy::disallowed_methods,
@@ -27,3 +33,5 @@ pub mod client;
     clippy::disallowed_macros
 )]
 mod registry;
+
+pub use access::{AccessCheck, Dial, DialOutcome, Dialed, PatternError};

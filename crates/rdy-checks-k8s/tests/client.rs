@@ -42,6 +42,33 @@ enum Mode {
     Hang,
     /// Answer `GET /version` with 200 and a body that is not a version document.
     NotJson,
+    /// Answer `/version`, the identity review, `/api` and `/apis` like a small cluster, and anything else
+    /// with 404.
+    Cluster,
+}
+
+const REVIEW_JSON: &str = r#"{"apiVersion":"authentication.k8s.io/v1","kind":"SelfSubjectReview","metadata":{"creationTimestamp":null},"status":{"userInfo":{"username":"jane@acme.example","groups":["acme-platform-admins","system:authenticated"]}}}"#;
+const API_JSON: &str =
+    r#"{"kind":"APIVersions","versions":["v1"],"serverAddressByClientCIDRs":[]}"#;
+const APIS_JSON: &str = r#"{"kind":"APIGroupList","apiVersion":"v1","groups":[{"name":"apps","versions":[{"groupVersion":"apps/v1","version":"v1"}],"preferredVersion":{"groupVersion":"apps/v1","version":"v1"}}]}"#;
+
+/// The answer of `Mode::Cluster` to the request line `line`.
+fn cluster_answer(line: &str) -> (u16, String) {
+    let path = line.split(' ').nth(1).unwrap_or("");
+    // A Rancher-style prefix is allowed: only the tail decides.
+    let tail = |name: &str| path.ends_with(name);
+    if line.starts_with("GET ") && tail("/version") {
+        (200, VERSION_JSON.to_owned())
+    } else if line.starts_with("POST ") && tail("/apis/authentication.k8s.io/v1/selfsubjectreviews")
+    {
+        (201, REVIEW_JSON.to_owned())
+    } else if line.starts_with("GET ") && tail("/apis") {
+        (200, APIS_JSON.to_owned())
+    } else if line.starts_with("GET ") && tail("/api") {
+        (200, API_JSON.to_owned())
+    } else {
+        (404, r#"{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}"#.to_owned())
+    }
 }
 
 struct MockApi {
@@ -76,10 +103,28 @@ impl MockApi {
                             Ok(n) => head.extend_from_slice(&buf[..n]),
                         }
                     }
-                    log.lock()
-                        .expect("log")
-                        .push(String::from_utf8_lossy(&head).into_owned());
+                    // Read the body too, so a test can see the exact bytes of a POST.
+                    let text = String::from_utf8_lossy(&head).to_ascii_lowercase();
+                    let wanted: usize = text
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .and_then(|value| value.trim().parse().ok())
+                        .unwrap_or(0);
+                    let body_at = head
+                        .windows(4)
+                        .position(|w| w == b"\r\n\r\n")
+                        .map_or(head.len(), |at| at + 4);
+                    while head.len() < body_at + wanted && head.len() < 64 * 1024 {
+                        match stream.read(&mut buf).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => head.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    let request_text = String::from_utf8_lossy(&head).into_owned();
+                    let first_line = request_text.lines().next().unwrap_or("").to_owned();
+                    log.lock().expect("log").push(request_text);
                     let (status, body) = match mode {
+                        Mode::Cluster => cluster_answer(&first_line),
                         Mode::Version => (200, VERSION_JSON.to_owned()),
                         Mode::Status(code) => (
                             code,
@@ -210,32 +255,136 @@ async fn a_path_prefix_in_the_server_reaches_the_server() {
 }
 
 #[tokio::test]
-async fn https_proxy_in_the_environment_is_ignored_even_when_malformed() {
+async fn k8s_access_runs_end_to_end_over_the_real_client_stack_behind_a_rancher_prefix() {
+    use rdy_checks_k8s::{AccessCheck, Dial, DialOutcome, Dialed};
+    use rdy_engine::check::{Check, Level, Os};
+    use rdy_engine::testing::{Replay, TestRun};
+
+    let api = MockApi::start(Mode::Cluster).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let server = format!("{}/k8s/clusters/c-m-1", api.url());
+    let loaded = load_text(dir.path(), &server, &token("t"), TIMEOUT).await;
+    let run = TestRun::new(Replay::new());
+    let connected = loaded
+        .connect(&run.run_probe(Os::Linux), |_| {})
+        .await
+        .expect("connect");
+    let dial = Arc::new(Dialed::connected(connected));
+    assert!(matches!(
+        dial.outcome(),
+        DialOutcome::Reached { latency, .. } if *latency > Duration::ZERO
+    ));
+    assert!(dial.facts().is_some());
+    let entry: rdy_spec::spec::CheckSpec =
+        serde_json::from_value(serde_json::json!({"id": "k8s.access"})).expect("an entry");
+    let rdy_spec::check::CheckParams::K8sAccess(params) = entry.decode_params() else {
+        panic!("not k8s.access");
+    };
+    let check = AccessCheck::new(&params, dial).expect("a check");
+    let ctx = run.context_for(AccessCheck::info(), "k8s.access", Os::Linux, []);
+
+    let finding = check.run(&ctx).await.expect("a finding");
+
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        finding.message.contains("as jane@acme.example"),
+        "{}",
+        finding.message
+    );
+    assert!(
+        finding.message.contains("/k8s/clusters/c-m-1"),
+        "the Rancher prefix stays in the report: {}",
+        finding.message
+    );
+    // The wire: the version, the raw identity review with the exact body, then discovery, all under the
+    // prefix, and nothing else.
+    let requests = api.requests();
+    let lines: Vec<&str> = requests
+        .iter()
+        .map(|request| request.lines().next().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "GET /k8s/clusters/c-m-1/version HTTP/1.1",
+            "POST /k8s/clusters/c-m-1/apis/authentication.k8s.io/v1/selfsubjectreviews HTTP/1.1",
+            "GET /k8s/clusters/c-m-1/api HTTP/1.1",
+            "GET /k8s/clusters/c-m-1/apis HTTP/1.1",
+        ]
+    );
+    assert!(
+        requests[1]
+            .ends_with(r#"{"apiVersion":"authentication.k8s.io/v1","kind":"SelfSubjectReview"}"#),
+        "{}",
+        requests[1]
+    );
+}
+
+#[tokio::test]
+async fn a_malformed_https_proxy_in_the_environment_fails_the_load_unless_no_proxy_covers_the_host()
+{
+    const NAME: &str =
+        "a_malformed_https_proxy_in_the_environment_fails_the_load_unless_no_proxy_covers_the_host";
     if !is_child() {
         run_child(
-            "https_proxy_in_the_environment_is_ignored_even_when_malformed",
+            NAME,
             &[
                 ("HTTPS_PROXY", "::not a url::"),
                 ("https_proxy", "http://127.0.0.1:1"),
+                ("NO_PROXY", ".covered.example, 10.0.0.0/8"),
             ],
         );
         return;
     }
+    // kube would read the variable inside `Config::try_from` and fail on its own terms. rdy reads it
+    // first, uppercase before lowercase as Go does, and names the variable in the error (ADR 0037).
     let env = Env::from_process();
-    assert!(env.proxy_env_set, "the child was started with a proxy set");
-    let api = MockApi::start(Mode::Version).await;
+    assert_eq!(env.https_proxy.as_deref(), Some("::not a url::"));
+    assert_eq!(env.https_proxy_name, "HTTPS_PROXY");
+    assert_eq!(
+        env.no_proxy.as_deref(),
+        Some(".covered.example, 10.0.0.0/8")
+    );
+    assert!(
+        !format!("{env:?}").contains("not a url"),
+        "Debug must hide the proxy value"
+    );
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("kubeconfig");
-    std::fs::write(&path, kubeconfig(&api.url(), &token("t"))).expect("write");
+    let write = |server: &str| {
+        std::fs::write(&path, kubeconfig(server, &token("t"))).expect("write");
+    };
+    let options = KubeOptions::new(TIMEOUT).kubeconfig(&path);
 
-    let loaded = load(&KubeOptions::new(TIMEOUT).kubeconfig(path), &env)
+    // An https server that NO_PROXY does not cover: the variable applies, and it is not usable.
+    write("https://k8s.acme.example:6443");
+    let error = load(&options, &env).await.expect_err("a malformed proxy");
+    assert!(
+        matches!(&error, KubeError::ProxyUnsupported { proxy, origin }
+            if proxy == "(not a valid URL)" && *origin == "HTTPS_PROXY"),
+        "{error:?}"
+    );
+    // NO_PROXY covers this one, so the variable is never parsed.
+    write("https://k8s.covered.example:6443");
+    let loaded = load(&options, &env).await.expect("covered by NO_PROXY");
+    assert!(!loaded.proxy().is_proxied());
+    assert!(
+        loaded
+            .proxy()
+            .describe()
+            .is_some_and(|text| text.contains("NO_PROXY"))
+    );
+
+    // A plain http server (the mock) never uses the https proxy, so a connect works with the variable set.
+    let api = MockApi::start(Mode::Version).await;
+    write(&api.url());
+    let loaded = load(&options, &env)
         .await
-        .expect("a malformed HTTPS_PROXY must not fail the load");
+        .expect("an http server ignores HTTPS_PROXY");
     loaded
         .connect(&common::run_probe(), |_| {})
         .await
         .expect("the request must go to the cluster, not to the proxy");
-
     assert_eq!(api.requests().len(), 1);
 }
 
