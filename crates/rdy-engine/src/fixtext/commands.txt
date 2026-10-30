@@ -3,6 +3,8 @@
 # command after it is judged. A name here is reviewed text for a customer, not something `rdy` runs
 # (that is the command table, src/exec/table.rs). Never list a shell, `sudo`, `su` or a program that
 # runs another program.
+# `pro` is the Ubuntu Pro client. It is a generic word, so it is listed on purpose and reviewed with the
+# `host.os` FIPS fix text.
 Set-VMProcessor
 ausearch
 aws
@@ -16,6 +18,7 @@ dnf
 dracut
 echo
 eksctl
+fips-mode-setup
 firewall-cmd
 gcloud
 grubby
@@ -30,6 +33,7 @@ mount
 nvidia-ctk
 nvidia-smi
 oc
+pro
 rdy
 rmmod
 setenforce

@@ -13,6 +13,7 @@ use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::disk::{self, Disk};
 use crate::firewall::{self, Firewall};
+use crate::os::{self, OsCheck};
 
 #[cfg(test)]
 mod tests;
@@ -127,17 +128,6 @@ static CPU: CheckInfo = info(
     2,
     &[],
 );
-static HOST_OS: CheckInfo = info(
-    "host.os",
-    "Distro, version, arch, FIPS",
-    CheckMeta {
-        title: "Operating system",
-        remediation: "Use an OS image the vendor supports, or ask the vendor about the one you have.",
-    },
-    2,
-    &[],
-);
-
 static SYSCTL: CheckInfo = info(
     "host.sysctl",
     "Kernel parameters and limits",
@@ -193,7 +183,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &SYSCTL,
     &CONTAINER_RUNTIME,
     &CGROUPS,
-    &HOST_OS,
+    &os::INFO,
     &KERNEL,
 ];
 
@@ -201,7 +191,7 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.disk` ([`Disk`]) and `host.firewall` ([`Firewall`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]) and `host.os` ([`OsCheck`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -222,7 +212,7 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 11] = [
+static STUBS: [&str; 10] = [
     "host.memory",
     "host.ports",
     "host.lsm",
@@ -232,7 +222,6 @@ static STUBS: [&str; 11] = [
     "host.sysctl",
     "host.container_runtime",
     "host.cgroups",
-    "host.os",
     "host.kernel",
 ];
 
@@ -256,6 +245,9 @@ impl Family for HostFamily {
                 .flatten()
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
+        if let CheckParams::HostOs(os) = &params {
+            return Ok(Built::new(Box::new(OsCheck::from_params(os))));
         }
         let info = CHECKS
             .iter()

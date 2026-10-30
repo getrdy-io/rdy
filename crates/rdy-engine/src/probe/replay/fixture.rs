@@ -286,6 +286,12 @@ impl Fixture {
         })
     }
 
+    /// The name the fixture was loaded under, such as `checks/host.memory/pass`.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     /// The manifest.
     #[must_use]
     pub fn manifest(&self) -> &Manifest {

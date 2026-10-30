@@ -151,7 +151,7 @@ fn a_stub_that_reaches_the_scheduler_follows_the_run_os_not_the_build() {
     for os in [Os::Macos, Os::Windows] {
         let (scheduler, checks) = built(os);
         let ran = runtime.block_on(scheduler.run(checks));
-        assert_eq!(ran.len(), 11);
+        assert_eq!(ran.len(), 10);
         for one in ran {
             let End::Done(done) = one.end else {
                 panic!("{} did not end", one.key);
@@ -216,7 +216,6 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
             "host.sysctl",
             "host.container_runtime",
             "host.cgroups",
-            "host.os",
             "host.kernel",
         ]
     );
@@ -257,4 +256,22 @@ fn host_firewall_builds_the_real_check_from_a_spec_entry() {
         "Host firewall active, inbound ports allowed"
     );
     assert!(!HostFamily::stub_ids().contains(&"host.firewall"));
+}
+
+#[test]
+fn host_os_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(json!({
+        "id": "host.os",
+        "supported": [{"id": "rhel", "versions": ["8", "9"]}],
+        "arch": ["amd64"],
+        "fips": "forbid"
+    }))
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.os");
+    assert_eq!(built.check.info().summary, "Distro, version, arch, FIPS");
+    assert!(!HostFamily::stub_ids().contains(&"host.os"));
 }
