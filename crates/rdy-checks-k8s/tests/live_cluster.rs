@@ -427,9 +427,11 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
 /// Reads the Kubernetes project gives every signed-in user on newer minors, outside the role file. Each
 /// is read-only and holds no secret. An entry stays only with a reason.
 const SERVER_DEFAULTS: &[(&str, &str, &str, &str)] = &[
-    // ClusterTrustBundles are cluster-wide CA bundles, public by design. The rules review of the 1.37.0
-    // server listed get, list and watch for the identity (none of the role file, so a default binding); the 1.35.8
-    // server did not.
+    // ClusterTrustBundles are cluster-wide CA bundles, public by design. The 1.37.0 server grants get, list
+    // and watch on them through the ClusterRole `system:cluster-trust-bundle-discovery`, bound to the group
+    // `system:serviceaccounts` (so to every service account, ours included, and not to the role file). It
+    // comes with the `ClusterTrustBundle` feature gate: on in 1.37.0, off in 1.35.8, whose rules review
+    // lists none of them.
     ("get", "certificates.k8s.io", "clustertrustbundles", ""),
     ("list", "certificates.k8s.io", "clustertrustbundles", ""),
     ("watch", "certificates.k8s.io", "clustertrustbundles", ""),

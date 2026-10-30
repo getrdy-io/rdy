@@ -17,6 +17,7 @@
 # It deletes the namespaces rdy-live and rdy-system and the rdy-readonly roles, before and after. So it
 # refuses to run unless the current context is named kind-* and its API server is on this machine
 # (127.0.0.1, localhost or [::1], where kind puts it), or RDY_LIVE_ALLOW_ANY_CLUSTER=1 is set.
+# Optional: RDY_LIVE_TARGET=<triple> passes --target to cargo.
 # Needs: kubectl 1.31 or newer (or KUBECTL=<path>), cargo-nextest, base64.
 # Exit:  0 all steps pass, 1 a step failed, 64 usage error.
 
@@ -205,5 +206,7 @@ RDY_READONLY_KUBECONFIG="$ro"
 RDY_LIVE_NAMESPACE="$NS"
 export RDY_READONLY_KUBECONFIG RDY_LIVE_NAMESPACE RDY_LIVE_EXPECT_MINOR
 cd "$root"
-cargo nextest run --locked -p rdy-checks-k8s --test live_cluster \
+# RDY_LIVE_TARGET is the target triple the workflow builds for (the musl target), so this run reuses the
+# build of the step before it. Unset, cargo builds for the host.
+cargo nextest run --locked ${RDY_LIVE_TARGET:+--target "$RDY_LIVE_TARGET"} -p rdy-checks-k8s --test live_cluster \
     --run-ignored only --profile ci --no-tests=fail --no-capture
