@@ -1,0 +1,12 @@
+schema = 1
+name = "linux-mint"
+summary = "Linux Mint 21.3 on x86_64, ID_LIKE lists ubuntu"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.os"]
+
+[caps]
+root = false
+network = false
+kube = false

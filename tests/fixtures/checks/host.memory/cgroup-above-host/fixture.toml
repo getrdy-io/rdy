@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-cgroup-above-host"
+summary = "32 GiB host, service slice limit of 128 GiB"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false
