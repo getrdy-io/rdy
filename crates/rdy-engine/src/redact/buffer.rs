@@ -14,12 +14,15 @@
 //!    `-----END` of the same label is removed through the end of the buffer, and an
 //!    `-----END ... PRIVATE KEY-----` with no `BEGIN` of the same label before it from the start of the
 //!    buffer. With both ends cut (a tail read of a file past the scan budget), a base64 line of 40
-//!    bytes or more, even a single one, is removed as well. The full PEM rule is M1-060; this is the
-//!    part that only a cut buffer needs.
+//!    bytes or more, even a single one, is removed as well. The PEM rule of M1-060 finds a whole block;
+//!    this is the part that only a cut buffer needs.
 //! 3. **Known secrets cut by the edge.** An 8-byte or longer prefix of a known secret at the end, or
 //!    suffix at the start, is removed.
 //! 4. The rules and the exact known-secret match run on what is left, as for any string.
 
+use std::collections::HashMap;
+
+use super::shapes::armor_line;
 use super::span::Span;
 use super::{Redacted, Redactor, RuleCounts};
 
@@ -39,10 +42,10 @@ const BODY_LINE_MIN: usize = 40;
 const BODY_LINES_MIN: usize = 1;
 
 /// The rule name of the unterminated key guard. It is the name of the PEM rule of 04 Appendix B.
-pub(super) const PEM_RULE: &str = "pem_private_key";
+pub(super) const PEM_RULE: &str = super::shapes::PEM_PRIVATE_KEY;
 
-/// Priority of the guard: above every other rule, below known secrets.
-const PEM_PRIORITY: u8 = 90;
+/// Priority of the guard: the priority of the PEM rule, above every other rule.
+const PEM_PRIORITY: u8 = super::rules::priority::PEM;
 
 /// Which ends of a buffer the facade cut off.
 ///
@@ -136,6 +139,11 @@ impl Redactor {
         let mut by_rule = Vec::new();
         let mut found = Vec::new();
         for rule in super::rules::BUILT_IN {
+            // A private key is not a value the boundary must keep whole. The key guards below remove the
+            // part of it that is kept, and leave a placeholder, so the boundary stays where it is.
+            if rule.name == PEM_RULE {
+                continue;
+            }
             found.clear();
             (rule.find)(text, &mut found);
             by_rule.append(&mut found);
@@ -239,59 +247,82 @@ fn tail_boundary(text: &str, floor: usize) -> usize {
         .map_or(floor, |(i, c)| from + i + c.len_utf8())
 }
 
-/// The label of an armor line such as `-----BEGIN RSA PRIVATE KEY-----`, given the prefix up to the
-/// label. A line with no closing dashes gives the whole line, which never matches a real label, so the
+/// The label of an armor line such as `-----BEGIN RSA PRIVATE KEY-----`, given the line from the label on.
+/// A line with no closing dashes gives the whole line, which never matches a real label, so the
 /// guards treat it as unmatched and remove more, not less.
-fn armor_label<'a>(line: &'a str, prefix: &str) -> &'a str {
-    let rest = line.strip_prefix(prefix).unwrap_or(line);
-    rest.find("-----")
-        .and_then(|end| rest.get(..end))
-        .unwrap_or(rest)
+fn armor_label(line: &str) -> &str {
+    line.find("-----")
+        .and_then(|end| line.get(..end))
+        .unwrap_or(line)
 }
 
 /// A private key that starts and never ends: removed through the end of the text. The END line must
-/// carry the label of the BEGIN line, so one key's END does not close another's BEGIN.
+/// carry the label of the BEGIN line, so one key's END does not close another's BEGIN. The search goes on
+/// after a matched END, and the label is read from a bounded window, so the work is linear.
 fn unterminated_begin(text: &str, out: &mut Vec<Span>) {
-    for (at, _) in text.match_indices("-----BEGIN ") {
-        let line = text
-            .get(at..)
-            .and_then(|t| t.split(['\n', '\r']).next())
-            .unwrap_or_default();
-        let label = armor_label(line, "-----BEGIN ");
+    const BEGIN: &str = "-----BEGIN ";
+    let mut from = 0;
+    while let Some(found) = text.get(from..).and_then(|t| t.find(BEGIN)) {
+        let at = from + found;
+        let label_start = at + BEGIN.len();
+        let line = armor_line(text.get(label_start..).unwrap_or_default());
+        let label = armor_label(line);
+        from = label_start;
         if !label.contains("PRIVATE KEY") {
             continue;
         }
-        let after = at + line.len();
+        let after = label_start + line.len();
         let end_line = format!("-----END {label}-----");
-        if !text.get(after..).unwrap_or_default().contains(&end_line) {
-            out.push(Span {
-                start: at,
-                end: text.len(),
-                rule: PEM_RULE,
-                priority: PEM_PRIORITY,
-            });
-            return;
+        match text.get(after..).and_then(|t| t.find(&end_line)) {
+            Some(end) => from = after + end + end_line.len(),
+            None => {
+                out.push(Span {
+                    start: at,
+                    end: text.len(),
+                    rule: PEM_RULE,
+                    priority: PEM_PRIORITY,
+                });
+                return;
+            }
         }
     }
 }
 
 /// A private key whose start was cut off: removed from the start of the text through its END line. A
-/// BEGIN line of another label before it does not count.
+/// BEGIN line of another label before it does not count. The first place of each private BEGIN label is
+/// found once, so the work is linear.
 fn unmatched_end(text: &str, out: &mut Vec<Span>) {
-    for (at, _) in text.match_indices("-----END ") {
+    const BEGIN: &str = "-----BEGIN ";
+    const END: &str = "-----END ";
+    // The label of a private BEGIN line, and where its first full line ends.
+    let mut first_begin: HashMap<&str, usize> = HashMap::new();
+    for (at, _) in text.match_indices(BEGIN) {
+        let rest = text.get(at + BEGIN.len()..).unwrap_or_default();
+        let line = armor_line(rest);
+        let label = armor_label(line);
+        // Only a closed label counts: a line with no closing dashes never matches an END.
+        if label.contains("PRIVATE KEY") && line.len() > label.len() {
+            let end = at + BEGIN.len() + label.len() + "-----".len();
+            first_begin.entry(label).or_insert(end);
+        }
+    }
+    for (at, _) in text.match_indices(END) {
+        let rest = text.get(at + END.len()..).unwrap_or_default();
+        let line = armor_line(rest);
+        let label = armor_label(line);
+        if !label.contains("PRIVATE KEY") {
+            continue;
+        }
+        if first_begin
+            .get(label)
+            .is_some_and(|&begin_end| begin_end <= at)
+        {
+            continue;
+        }
         let line_end = text
             .get(at..)
             .and_then(|t| t.find(['\n', '\r']))
             .map_or(text.len(), |i| at + i);
-        let line = text.get(at..line_end).unwrap_or_default();
-        let label = armor_label(line, "-----END ");
-        if !label.contains("PRIVATE KEY") {
-            continue;
-        }
-        let begin_line = format!("-----BEGIN {label}-----");
-        if text.get(..at).unwrap_or_default().contains(&begin_line) {
-            continue;
-        }
         out.push(Span {
             start: 0,
             end: line_end,
