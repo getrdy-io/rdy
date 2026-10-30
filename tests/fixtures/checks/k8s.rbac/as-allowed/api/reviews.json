@@ -1,0 +1,79 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "impersonate",
+          "resource": "serviceaccounts",
+          "namespace": "acme-system",
+          "name": "installer"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "namespaces"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "nodes"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": ""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "list",
+          "resource": "pods",
+          "namespace": "acme-system"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": ""
+      }
+    }
+  ],
+  "rules": [
+    {
+      "spec": {
+        "namespace": "acme-system"
+      },
+      "status": {
+        "resourceRules": [
+          {
+            "verbs": [
+              "create"
+            ],
+            "apiGroups": [
+              ""
+            ],
+            "resources": [
+              "namespaces"
+            ]
+          }
+        ],
+        "nonResourceRules": [],
+        "incomplete": false
+      }
+    }
+  ]
+}

@@ -854,6 +854,23 @@ impl fmt::Debug for KubeCall {
 }
 
 impl KubeCall {
+    /// Marks the entry: the request carries `Impersonate-User` with the spec's `as:` user. The entry gets
+    /// `impersonated: true`, and never the user name (02 Appendix B, rule 8).
+    #[must_use = "the entry is closed by refused, answered or failed"]
+    pub fn impersonated(mut self) -> Self {
+        self.entry.set("impersonated", true);
+        self
+    }
+
+    /// Marks the entry: the kubeconfig user sets an `as*` field, so kube adds `Impersonate-*` headers below
+    /// the guard, to every request. The entry gets `kubeconfig_impersonates: true`, and never the user
+    /// name. Absent otherwise, so a reader can tell "not impersonated" from "not said".
+    #[must_use = "the entry is closed by refused, answered or failed"]
+    pub fn kubeconfig_impersonates(mut self) -> Self {
+        self.entry.set("kubeconfig_impersonates", true);
+        self
+    }
+
     /// The guard refused the request. It never left the process. `rule` is a fixed sentence.
     pub fn refused(mut self, rule: &'static str) {
         self.entry.set("rule", rule);

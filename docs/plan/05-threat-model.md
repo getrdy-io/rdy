@@ -97,7 +97,7 @@ as the `Authorization` header from the token or the exec plugin, the user agent,
 leaves, and the check reports `Error`. A request header other than `accept`, `content-type` and
 `content-length` is refused. `connect()` keeps the raw client private and checks get only the guarded
 client type (`ReadOnlyClient`), so there is no unguarded client to pass. The one header exception is
-`Impersonate-User` with the spec's `as:` value on the two access review POSTs (02 Appendix B rule 8). Inside `rdy-checks-k8s`, only the client module may name a kube client or
+`Impersonate-User` with the spec's `as:` value on the two access review POSTs (02 Appendix B rule 8). A spec `as:` is a service account only and is refused when the kubeconfig user already impersonates, so the server never sees two values (ADR 0038). A kubeconfig that impersonates is named in the run-level `GET /version` entry of the action log (`kubeconfig_impersonates: true`), as well as on the cluster line. Inside `rdy-checks-k8s`, only the client module may name a kube client or
 config type (02 Appendix A), so a check cannot build a second client. The mock API server test from
 ADR 0010 stays as a second line.
 
@@ -390,6 +390,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 | E3 | Self-escalation | `rdy` calls `sudo` | L | H | `[M1]` `sudo`, `su`, `doas`, `pkexec`, `runas` are refused. Root-only checks report Skipped. | SEC-18 (M1-039) |
 | E4 | Memory corruption from crafted input | Crafted spec, command output, HTTP response | L | H | `[M1]` Workspace `unsafe_code = "forbid"`, one named FFI module. `[M2+]` fuzzing. | fold: workspace skeleton (M1-003), SEC-45 (M2-063) |
 | E5 | kubeconfig exec plugin | `aws eks get-token` runs with the user's env | L | H | `[M1]` Named exception (ADR 0010 decision 7). kubeconfig only from `--kubeconfig`, `KUBECONFIG` or the default path. The report names the binary run. | SEC-24 (M1-103), SEC-63 (M1-041) |
+| E6 | A spec `as:` borrows the operator's `impersonate` right | A vendor spec names `as: system:serviceaccount:kube-system:admin-sa`, or a person, to read what that identity may do | L | M | `[M1]` `as:` is a service account only (`rdy-spec` and `ImpersonateAs::new` both refuse any other value), so a person's rules are never listed. The header rides on the two read-only review POSTs only, once, with exactly that value; any other `Impersonate-*` header and any other request is refused by the guard. The check first asks whether the identity may `impersonate` the service account, and sends nothing as it without that grant. The run-level log entry says when the kubeconfig itself impersonates. | M1-111 (ADR 0038) |
 
 ## Appendix B: Surface 2 STRIDE
 

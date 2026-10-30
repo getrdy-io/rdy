@@ -45,6 +45,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "tests of the read-only guard on the real client stack: a mock API server and kubeconfig files",
     ),
     (
+        "crates/rdy-checks-k8s/tests/impersonate.rs",
+        "tests of the client module: impersonation on the real client stack against a mock API server",
+    ),
+    (
         "crates/rdy-checks-k8s/tests/rbac_example.rs",
         "reads examples/rbac/rdy-readonly.yaml to compare it with the guard's allowlist (SEC-24)",
     ),

@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "selfsubjectrulesreviews.authorization.k8s.io is forbidden: User \"system:serviceaccount:acme-system:installer\" cannot create resource \"selfsubjectrulesreviews\" in API group \"authorization.k8s.io\" at the cluster scope",
+    "reason": "Forbidden",
+    "code": 403
+  }
+}

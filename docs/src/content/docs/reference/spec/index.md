@@ -512,7 +512,8 @@ access_modes:
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
 | `can` | array of string or object | yes |  | The permissions to test, 1 to 100. Each one is an entry in the audit log of the cluster. | `["create namespaces"]` |
-| `namespace` | string | no |  | The namespace for the string items. The default is cluster scope. |  |
+| `namespace` | string | no |  | The namespace for the string items. An object item names its own namespace. A string item that names a well-known cluster-scoped resource, such as `namespaces`, `nodes` or `clusterroles`, does not take it. The default is cluster scope. |  |
+| `as` | string | no |  | The service account to test as, `system:serviceaccount:<namespace>:<name>`, for example `system:serviceaccount:acme-system:installer`. The reviews are sent with `Impersonate-User` when the identity in the kubeconfig may impersonate it. It is refused when the kubeconfig already impersonates. M1 takes a service account only. |  |
 
 Example:
 
@@ -522,16 +523,23 @@ can:
 - create namespaces
 ```
 
-#### can entries, as an object
+#### can entries, option 2
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `verb` | string | yes |  | The verb. An RBAC verb such as `create`. `*` means all verbs. |  |
-| `group` | string | no |  | The API group. Empty, which is the default, is the core group. |  |
-| `resource` | string | yes |  | The resource. An RBAC resource such as `namespaces`. `*` means all resources. |  |
+| `verb` | string | yes |  | The verb. An RBAC verb such as `create`. `*` asks whether the wildcard itself is granted, as a role that lists `*` does. It does not ask whether every verb is allowed. |  |
+| `group` | string | no |  | The API group. Empty, which is the default, is the core group. It cannot be `*`. |  |
+| `resource` | string | yes |  | The resource. An RBAC resource such as `namespaces`. `*` asks whether the wildcard itself is granted, as a role that lists `*` does. It does not ask whether every resource is allowed. |  |
 | `subresource` | string | no |  | The subresource, such as `log`. |  |
-| `namespace` | string | no |  | The namespace of the object. For a string item this is the `namespace` of the entry. |  |
+| `namespace` | string | no |  | The namespace of the object. A string item cannot name one: it takes the `namespace` of the entry. |  |
 | `name` | string | no |  | The name of the object. Leave it out to mean all names. |  |
+
+#### can entries, option 4
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `verb` | string | yes |  | The verb, usually `get`. |  |
+| `path` | string | yes |  | The URL path, such as `/healthz`. A trailing `*` makes it a prefix. |  |
 
 ### k8s.admission
 
