@@ -1,0 +1,12 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/compile_fail/html_safe_json_private.rs:6:13
+  |
+6 |     let _ = HtmlSafeJson("</script>".to_owned());
+  |             ^^^^^^^^^^^^
+  |
+  = note: a struct named `HtmlSafeJson` exists in another namespace
+note: constructor is not visible here due to private fields
+ --> src/report/json.rs
+  |
+  | pub struct HtmlSafeJson(String);
+  |                         ^^^^^^ private field
