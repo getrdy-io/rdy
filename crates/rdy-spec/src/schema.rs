@@ -15,7 +15,7 @@
 //!
 //! | Fragment | Holds | Goes away when |
 //! | --- | --- | --- |
-//! | `check_params.json` | the parameters of the 17 check ids, and the small shared definitions they use | the typed parameter structs derive `JsonSchema` |
+//! | `check_params.json` | the parameters of the 31 check ids, and the small shared definitions they use | the typed parameter structs derive `JsonSchema` |
 //! | `action_fields.json` | the fields of an action that depend on its `kind` | the action log is typed |
 //! | `command_output.json` | the `ErrorOutput` and `Verification` objects | the commands that print them own their types |
 //!

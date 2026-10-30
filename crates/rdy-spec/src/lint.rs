@@ -6,7 +6,7 @@
 //!
 //! | Decoding | Code | Level | `spec sign` |
 //! | --- | --- | --- | --- |
-//! | [`CheckParams::Unknown`], id is reserved (`host.kernel`, `gpu.cuda`) | [`LintCode::NotInBuild`] | [`Level::Warning`] | signs, with the warning |
+//! | [`CheckParams::Unknown`], id is reserved (`host.virtualization`, `gpu.cuda`) | [`LintCode::NotInBuild`] | [`Level::Warning`] | signs, with the warning |
 //! | [`CheckParams::Unknown`], id is not reserved (`host.memroy`) | [`LintCode::UnknownCheck`] | [`Level::Error`] | refuses |
 //! | [`CheckParams::Unsupported`], any other reason (`mn: 32Gi`, `min: 32G`) | [`LintCode::UnsupportedSpec`] | [`Level::Error`] | refuses |
 //! | [`CheckParams::Unsupported`] with no threshold (a bare `- id: host.memory`) | [`LintCode::NoThreshold`] | [`Level::Error`] | refuses |
@@ -320,7 +320,7 @@ fn regex_finding(
 }
 
 /// The message for a reserved id this build lacks. A family with no check in this build reads "no gpu
-/// checks yet". A family with some reads "does not have the check host.kernel yet".
+/// checks yet". A family with some reads "does not have the check host.virtualization yet".
 fn not_in_build_message(id: &str) -> String {
     let family = id.split_once('.').map_or(id, |(family, _)| family);
     let family_dot = format!("{family}.");
