@@ -144,8 +144,8 @@ pub(super) struct View {
     pub capabilities: Vec<CapabilityView>,
     pub details: Vec<Row>,
     /// The JSON of the report, the same bytes as the `.json` file. The one value the template prints
-    /// without escaping, because it is an [`HtmlSafeJson`] (M1-078).
-    pub json: HtmlSafeJson,
+    /// without escaping (M1-078).
+    pub json: EmbeddedJson,
     /// The SHA-256 of `json`, in lowercase hex: the `data-sha256` attribute.
     pub json_sha256: String,
 }
@@ -163,6 +163,7 @@ impl View {
         let report: &Report = redacted;
         let json = json_bytes(redacted)?;
         let json_sha256 = sha256_hex(json.as_bytes());
+        let json = EmbeddedJson(json);
         let judgement = rdy_spec::result::verdict(&report.checks);
         let verdict_class = match judgement.verdict {
             Verdict::Ready => "verdict-ready",
@@ -209,6 +210,21 @@ impl View {
         })
     }
 }
+
+/// The embedded result, printed raw. It is the one value in the page that skips askama's escaping, and
+/// the template prints it only as the text of `<script type="application/json">`. `HtmlSafeJson` has no
+/// `"`-safe form, so it cannot go in an attribute; this wrapper is private to the page, so nothing else
+/// can put it in one (M1-078, SEC-19-1). `scripts/check-html-escapes.sh` allows this one line. Clippy
+/// cannot see a trait in an `impl` header, so the script is the guard for the marker.
+pub(super) struct EmbeddedJson(HtmlSafeJson);
+
+impl std::fmt::Display for EmbeddedJson {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.as_str())
+    }
+}
+
+impl askama::filters::HtmlSafe for EmbeddedJson {}
 
 /// The SHA-256 of `bytes` as 64 lowercase hex digits.
 fn sha256_hex(bytes: &[u8]) -> String {

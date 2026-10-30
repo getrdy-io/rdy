@@ -579,7 +579,7 @@ fn embedded(html: &str) -> TestResult<(String, String)> {
 }
 
 /// A hostname that tries to close the element, open another and end the line in a script.
-const HOSTILE: &str = "</script><img onerror=x>&amp;\u{2028}end";
+const HOSTILE: &str = "</script><img onerror=x>&amp;\u{2028}end</SCRIPT x><!--<ScRiPt>\u{2029}";
 
 /// The ticket's exit test: the hostname comes back unchanged from the embedded JSON, and on the page it is
 /// text.
@@ -590,13 +590,14 @@ fn a_hostname_that_closes_the_script_round_trips_through_the_embedded_json() -> 
     let report = redact(doc)?;
     let html = render_html(&report)?;
 
-    // One element, and nothing in the text can end it.
-    assert_eq!(html.matches("<script").count(), 1);
-    assert_eq!(html.matches("</script>").count(), 1);
+    // One element, and nothing in the text can end it, in any case.
+    let lower = html.to_ascii_lowercase();
+    assert_eq!(lower.matches("<script").count(), 1);
+    assert_eq!(lower.matches("</script").count(), 1);
     let (hash, text) = embedded(&html)?;
     assert!(!text.contains(['<', '>', '&', '\u{2028}', '\u{2029}']));
     assert!(
-        text.contains("\\u003c/script\\u003e\\u003cimg onerror=x\\u003e\\u0026amp;\\u2028end"),
+        text.contains("\\u003c/script\\u003e\\u003cimg onerror=x\\u003e\\u0026amp;\\u2028end\\u003c/SCRIPT x\\u003e\\u003c!--\\u003cScRiPt\\u003e\\u2029"),
         "{text}"
     );
 
@@ -620,9 +621,12 @@ fn a_hostname_that_closes_the_script_round_trips_through_the_embedded_json() -> 
     let after = &html[at(&html, "</script>")?..];
     let outside = format!("{before}{after}");
     assert!(outside.contains("&#60;/script&#62;&#60;img onerror=x&#62;&#38;amp;"));
-    for raw in ["<img", "onerror=x>"] {
+    for raw in ["<img", "onerror=x>", "<!--"] {
         assert!(!outside.contains(raw), "{raw:?} reached the page as markup");
     }
+    let outside_lower = outside.to_ascii_lowercase();
+    assert_eq!(outside_lower.matches("<script").count(), 0);
+    assert_eq!(outside_lower.matches("</script").count(), 1);
     assert_eq!(well_formed(&html), Vec::<String>::new());
     Ok(())
 }
@@ -728,6 +732,11 @@ fn every_golden_page_hashes_its_own_element() -> TestResult {
             continue;
         }
         let page = std::fs::read_to_string(&path)?;
+        // One script element, in any case, and it is the data block.
+        let lower = page.to_ascii_lowercase();
+        assert_eq!(lower.matches("<script").count(), 1, "{}", path.display());
+        assert_eq!(lower.matches("</script").count(), 1, "{}", path.display());
+        assert!(page.contains(OPEN), "{}", path.display());
         let (hash, text) = embedded(&page)?;
         assert_eq!(hash, sha256_hex(text.as_bytes()), "{}", path.display());
         read_report(text.as_bytes())?;

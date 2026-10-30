@@ -92,7 +92,10 @@ tar -xzf "$work/vnu-jar.tgz" -C "$work" package/build/dist/vnu.jar
 # decision 3). The checker warns that an "inline script" is blocked by that policy, which is true of a
 # script that runs and does not apply to a data block. The page must not have an executable script, and
 # html_report.rs asserts that the page has exactly one `<script`, the data block. The CSP is not
-# loosened and not given a hash to quiet the checker. Every other warning and error still fails the run.
+# loosened and not given a hash to quiet the checker. The pattern matches the whole message (the curly
+# quotes are any one to three characters), so a different message about a script still fails. Every other
+# warning and error still fails the run.
 java -jar "$work/package/build/dist/vnu.jar" --Werror \
-    --filterpattern '.*Inline script violates Content Security Policy.*' "$@"
+    --filterpattern 'Inline script violates Content Security Policy \(meta tag\): blocked by .script-src. directive \(missing .{1,3}unsafe-inline.{1,3} or nonce/hash\)\.' \
+    "$@"
 echo "ok: $# file(s) pass the Nu HTML Checker ${VNU_VERSION}"

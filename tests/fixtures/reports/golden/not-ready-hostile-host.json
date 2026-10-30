@@ -43,7 +43,7 @@
     "reason": null
   },
   "host": {
-    "hostname": "\u003c/script\u003e\u003cimg onerror=x\u003e\u0026amp;\u2028end",
+    "hostname": "\u003c/script\u003e\u003cimg onerror=x\u003e\u0026amp;\u2028end\u003c/SCRIPT x\u003e\u003c!--\u003cScRiPt\u003e\u2029",
     "host_id": "5f1c0a9e3b7d2c41",
     "os": {
       "family": "linux",

@@ -353,13 +353,23 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     `urlencode` and `serde_json` (no `json` filter, so no filter that can print unescaped JSON). New
     packages in the lock file: the four askama crates and `rustc-hash`. `winnow`, `itoa`, `unicode-ident`,
     `memchr`, `proc-macro2` and `quote` were already there.
-  - What the renderer must keep true: no template uses the `safe` filter, and nothing else switches escaping
-    off (`scripts/check-html-escapes.sh`, a lint-job step, M1-078; it also fails on `escape = "none"`, `|e(`
-    and `|escape(`, `filters::Safe`, `MaybeSafe`, a second `HtmlSafe` impl, an `ext` or `source` on a
-    `#[template]`, an `askama.toml`, and the askama features `serde_json`, `urlencode`, `full`, `default`
-    and `config`). The one value printed unescaped is `HtmlSafeJson`, the embedded result, and its marker
-    (`impl askama::filters::HtmlSafe for HtmlSafeJson {}`, `report/json.rs`) is the one line the script
-    allows; askama escapes `<`, `>`,
+  - What the renderer must keep true: nothing switches escaping off (M1-078, two layers). The root
+    `clippy.toml` and the three check crates' (the lint wall, whose `tests/lint-wall` uses prove each entry fires; the
+    wall crate is the only other crate `deny.toml` lets name askama) ban the types `askama::filters::Safe`, `Unsafe`, `MaybeSafe`, `HtmlSafe` and
+    `HtmlSafeOutput` and the functions `safe`, `escape` and `e`, so any spelling of them (a glob import, an
+    alias, a lowercase call) fails to compile. Clippy does not read the trait in an `impl` header, so
+    `scripts/check-html-escapes.sh` (a lint-job step) is the second layer: it fails on the filters
+    `|safe`, `|unsafe`, `|e(`, `|escape(`, `|json`, `|json_pretty`, `|urlencode` and `|urlencode_strict`
+    (templates are read with their newlines joined), on `{% filter safe %}`, on any `::` inside a tag (a path
+    call works in askama 0.16.1), on `escape =`, on the words `filters`, `Safe` and `Unsafe` in a Rust file
+    that names askama, on a `#[template]` (also inside `cfg_attr`) that is not `path = "*.html"` or has
+    `ext`, `source`, `in_doc`, `config` or `escape`, on an `askama.toml`, and on the askama features
+    `serde_json`, `urlencode`, `full`, `default` and `config` in any manifest or feature list. `deny.toml`
+    pins askama's features with `exact = true` (`alloc`, `derive`, `std`). The one value printed unescaped is
+    the embedded result, held in the private `EmbeddedJson` of `report/html/view.rs`, and its marker
+    (`impl askama::filters::HtmlSafe for EmbeddedJson {}`) is the one line the script allows. The public
+    `HtmlSafeJson` has no marker, because its escapes cover `<`, `>`, `&` and the line separators and not
+    `"`: it is safe only as the text of the script element, never in an attribute (SEC-19-1). askama escapes `<`, `>`,
     `&`, `"` and `'` as numeric references; the Content-Security-Policy `<meta>` is the second line of
     defence (ADR 0003 decision 3).
 - `vnu-jar` 26.10.12 (M1-077, SEC-149-8). The Nu HTML Checker, an npm package that holds a Java jar. **CI only,

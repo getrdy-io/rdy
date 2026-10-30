@@ -752,7 +752,7 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
     `complete: false`.
   - The JSON is embedded with `data-sha256` (M1-078): `render_html` calls `json_bytes` on the same report, so
     it fails with `HtmlError::Json` when the writer refuses the report. The element text is the file's bytes,
-    printed through the one askama safe marker, which is on `HtmlSafeJson` alone (`scripts/check-html-escapes.sh`).
+    printed through the one askama safe marker, which is on a private wrapper of the page (`EmbeddedJson`), not on the public `HtmlSafeJson` (`scripts/check-html-escapes.sh`).
   - The CSP is ADR 0003's.
 - `rdy report` (M2) redacts input it did not produce before rendering.
 

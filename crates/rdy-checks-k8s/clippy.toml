@@ -56,6 +56,12 @@ disallowed-types = [
     { path = "std::thread::Builder", reason = "a check never starts a thread or task of its own; use rdy_engine::blocking (ADR 0014)" },
     # First-party escapes: the watchdog and the live process count (PC-48).
     { path = "rdy_engine::watchdog::ProcessEffects", reason = "the run owns the watchdog; a check never ends the process, kills a group or starts a thread of its own (ADR 0016)", allow-invalid = true },
+    # askama prints a value without escaping it through these (M1-078). Only the marker on EmbeddedJson in rdy-engine's report/html/view.rs may.
+    { path = "askama::filters::Safe", reason = "prints a value without escaping; only the EmbeddedJson marker in report/html/view.rs may switch escaping off", allow-invalid = true },
+    { path = "askama::filters::Unsafe", reason = "wraps a value for the escaper; use askama's default escaping", allow-invalid = true },
+    { path = "askama::filters::MaybeSafe", reason = "marks filter output as maybe unescaped; escaping stays on", allow-invalid = true },
+    { path = "askama::filters::HtmlSafe", reason = "marks a type as printed without escaping; only EmbeddedJson in report/html/view.rs may, with #[expect]", allow-invalid = true },
+    { path = "askama::filters::HtmlSafeOutput", reason = "marks filter output as HTML safe; escaping stays on", allow-invalid = true },
 ]
 
 disallowed-methods = [
@@ -226,6 +232,10 @@ disallowed-methods = [
     # rustls's `dangerous()` builders: only the TLS facade's recording verifier calls them (M1-092).
     { path = "rustls::ConfigBuilder::dangerous", reason = "builds a client that can skip certificate checks; only probe/net/tls/record.rs may, with #[expect]", allow-invalid = true },
     { path = "rustls::client::ClientConfig::dangerous", reason = "swaps the certificate verifier of a built client; only probe/net/tls/record.rs may, with #[expect]", allow-invalid = true },
+    # askama's functions behind the `safe`, `escape` and `e` filters. `escape("none")` turns escaping off (M1-078).
+    { path = "askama::filters::safe", reason = "prints a value without escaping it", allow-invalid = true },
+    { path = "askama::filters::escape", reason = "takes an escaper name, and \"none\" turns escaping off", allow-invalid = true },
+    { path = "askama::filters::e", reason = "takes an escaper name, and \"none\" turns escaping off", allow-invalid = true },
     # First-party escapes: the kube action-log entry (INV-14).
     { path = "rdy_engine::probe::Probe::kube_call", reason = "writes the kube entry of the action log; only the read-only guard in rdy-checks-k8s src/client/ calls it, so a check cannot forge a kube entry (INV-14)", allow-invalid = true },
 ]
