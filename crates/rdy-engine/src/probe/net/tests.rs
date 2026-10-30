@@ -1206,7 +1206,8 @@ async fn the_proxy_cannot_be_set_once_the_run_has_started() {
 
 // ---- real sockets, through the live backend ----------------------------------------------------
 
-fn live_hub() -> ProbeHub {
+/// A hub over the live backend. The TLS tests use it too, so only this file builds the live backend.
+pub(super) fn live_hub() -> ProbeHub {
     // The engine's own tests build the live backend; check crates may not.
     #[expect(
         clippy::disallowed_methods,

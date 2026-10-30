@@ -18,13 +18,14 @@ dist = false
 # --workspace` stays clean. `tests/clippy_wall.rs` runs clippy with this feature on, once for the root
 # clippy.toml and once for each check crate's, and expects every item to fail.
 # Do not build the workspace with `--all-features`: that turns this on, and then clippy fails by design.
-use-all = ["dep:clap", "dep:rdy-engine", "dep:rdy-spec", "dep:socket2", "dep:tokio", "rdy-engine/testing"]
+use-all = ["dep:clap", "dep:rdy-engine", "dep:rdy-spec", "dep:rustls", "dep:socket2", "dep:tokio", "rdy-engine/testing"]
 
 [dependencies]
 # These are the crates whose paths the wall names, so that every path resolves and every entry can fire.
 clap = { workspace = true, features = ["std", "derive", "error-context"], optional = true }
 rdy-engine = { path = "../../crates/rdy-engine", optional = true }
 rdy-spec = { path = "../../crates/rdy-spec", optional = true }
+rustls = { workspace = true, features = ["std"], optional = true }
 socket2 = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["net", "process", "rt"], optional = true }
 

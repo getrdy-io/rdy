@@ -8,6 +8,8 @@
 //!   [`Verdict`].
 //! - [`verdict()`], [`classify`], [`Summary::from_checks`] and [`apply_partial_rule`]: the one
 //!   implementation of the verdict rule (ADR 0013).
+//! - [`sort_by_bucket`] and [`group_by_bucket`]: the display order of the checks, the same in the
+//!   terminal, the HTML report and the portal.
 //! - [`Verdict::exit_code`] and [`ExitCode`]: the process exit codes.
 //! - [`VersionInfo`]: the object `rdy version --json` prints.
 //!
@@ -18,6 +20,7 @@
 mod codes;
 mod model;
 pub(crate) mod open;
+mod order;
 mod verdict;
 #[cfg(test)]
 mod verdict_tests;
@@ -32,5 +35,6 @@ pub use model::{
     Action, Capability, CheckResult, Host, HostOs, Identity, KubeIdentity, NeedState, Partial,
     Producer, Proxy, REPORT_KIND, Redaction, Report, Run, RunOptions, Signature, SpecRef, Summary,
 };
+pub use order::{BucketGroup, group_by_bucket, sort_by_bucket};
 pub use verdict::{Judgement, apply_partial_rule, classify, is_not_run, is_required, verdict};
 pub use version_info::VersionInfo;

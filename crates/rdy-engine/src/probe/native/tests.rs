@@ -714,3 +714,42 @@ fn the_threat_model_has_a_row_for_every_variant() {
         );
     }
 }
+
+/// The `SystemRoots` answer is capped for every backend (M1-092, 05 `system_roots`): at most
+/// `MAX_SYSTEM_ROOTS` certificates, none empty and none over `MAX_ROOT_BYTES`.
+#[tokio::test]
+async fn the_system_roots_answer_is_capped_in_count_and_in_size() {
+    let mut offered: Vec<Vec<u8>> = (0..MAX_SYSTEM_ROOTS + 100)
+        .map(|i| format!("certificate {i}").into_bytes())
+        .collect();
+    offered.insert(0, Vec::new());
+    offered.insert(1, vec![9; MAX_ROOT_BYTES + 1]);
+    offered.insert(2, vec![8; MAX_ROOT_BYTES]);
+    let replay = Replay::new().native(
+        NativeCall::SystemRoots,
+        NativeValue::SystemRoots(offered.clone()),
+    );
+    let hub = hub(replay);
+    let value = hub
+        .run_probe_for(Os::Linux)
+        .native(NativeCall::SystemRoots)
+        .await
+        .expect("an answer");
+    let NativeValue::SystemRoots(kept) = value else {
+        panic!("the wrong kind of answer");
+    };
+    assert_eq!(kept.len(), MAX_SYSTEM_ROOTS);
+    assert_eq!(
+        kept[0],
+        vec![8; MAX_ROOT_BYTES],
+        "the cap on size is inclusive"
+    );
+    assert!(
+        kept.iter()
+            .all(|der| !der.is_empty() && der.len() <= MAX_ROOT_BYTES)
+    );
+    assert_eq!(kept[1], b"certificate 0".to_vec(), "the order is kept");
+
+    // A short answer passes unchanged.
+    assert_eq!(cap_system_roots(vec![vec![1], vec![2]]), [vec![1], vec![2]]);
+}

@@ -118,17 +118,16 @@ impl Bucket {
     /// The sort key for display: blocker, required_not_run, warning, passed, not_applicable (01 section
     /// 5.2), then spec order. Sort with a stable sort so spec order is kept inside a bucket.
     ///
-    /// An unknown bucket sorts between `required_not_run` and `warning`. A reader cannot tell what it is,
-    /// so it must not sink below the passed checks.
+    /// An unknown bucket sorts with `required_not_run` (01 section 3.2): a reader cannot tell what it is,
+    /// so it counts as not run and must not sink below the passed checks.
     #[must_use]
     pub fn order_key(&self) -> u8 {
         match self {
             Self::Blocker => 0,
-            Self::RequiredNotRun => 1,
-            Self::Unknown(_) => 2,
-            Self::Warning => 3,
-            Self::Passed => 4,
-            Self::NotApplicable => 5,
+            Self::RequiredNotRun | Self::Unknown(_) => 1,
+            Self::Warning => 2,
+            Self::Passed => 3,
+            Self::NotApplicable => 4,
         }
     }
 }

@@ -100,7 +100,7 @@ deny = [
     # from a normal one, so the name is listed here. tests/lint-wall/tests/deps_allowlist.rs tells them
     # apart: it fails if either is anything but a dev-dependency of rdy-checks-k8s.
     { crate = "tempfile", wrappers = ["rdy", "rdy-checks-k8s", "rdy-engine", "rexpect", "xtask"], reason = "02 lint wall: file creation is not a check's; rdy-checks-k8s uses it in tests only" },
-    { crate = "tokio-rustls", wrappers = ["hyper-rustls", "rdy-checks-k8s", "rdy-engine"], reason = "02 lint wall: TLS goes through the probe or kube; rdy-checks-k8s uses it in its test server only; rdy-engine uses it in its `loopback` test servers only, ADR 0035" },
+    { crate = "tokio-rustls", wrappers = ["hyper-rustls", "rdy-checks-k8s", "rdy-engine"], reason = "02 lint wall: TLS goes through the probe or kube; rdy-checks-k8s uses it in its test server only; rdy-engine uses it for the facade's TLS (M1-092) and in its `loopback` test servers (ADR 0035)" },
 ]
 
 [sources]

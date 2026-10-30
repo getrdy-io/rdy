@@ -71,6 +71,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "the one call of exec::table::run, in the probe spawn (ADR 0014, ADR 0028)",
     ),
     (
+        "crates/rdy-engine/src/probe/net/tls/record.rs",
+        "the one call of rustls's dangerous() builder, for the recording verifier of the TLS facade (M1-092, SEC-133-2)",
+    ),
+    (
         "crates/rdy-engine/src/probe/tests.rs",
         "the tests of the probe call Probe::kube_call, which only the k8s guard may call in a check crate (M1-103)",
     ),

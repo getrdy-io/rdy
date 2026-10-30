@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cpu-no-avx2"
+summary = "RHEL 9 guest on a hypervisor that masks the CPU to a generic model: no AVX2"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false
