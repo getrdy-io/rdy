@@ -5,16 +5,16 @@
 //! well-formed spec must not say:
 //!
 //! - 1 to [`MAX_CHECKS`] checks;
-//! - at most [`MAX_HOSTS`] distinct hosts across every `net.egress` endpoint, `net.tls_intercept` host
-//!   and `net.dns` name in the whole spec;
-//! - at most [`MAX_ENDPOINTS`] distinct host and port pairs across every `net.egress` endpoint and
-//!   `net.tls_intercept` host in the whole spec;
+//! - at most [`MAX_HOSTS`] distinct hosts across every `net.egress` endpoint, `net.tls_intercept` host,
+//!   `net.dns` name, `host.time_sync` NTP server, `net.registry` host and `net.bandwidth` URL in the
+//!   whole spec;
+//! - at most [`MAX_ENDPOINTS`] distinct host and port pairs across the same, `net.dns` names apart;
 //! - `metadata.version` and `metadata.contact` within their lengths, at most 32 `annotations`, and
 //!   `expires` in the full UTC form;
 //! - the `bundle` block within its list sizes, with collectors that fit the grammar of 01 section 2.8
 //!   (`journal:<duration>`, `k8s:events`, `file:<absolute path or glob>` with no `..` segment).
 //!
-//! The host count reads the typed parameters of the three net checks. A check that does not decode (a
+//! The host count reads the typed parameters of those checks. A check that does not decode (a
 //! mistyped key, a list of 65) is skipped at run time, but a spec that names 65 hosts is still refused as
 //! a whole, so a vendor sees the problem in lint and sign and the limit does not depend on how a
 //! neighbouring check happens to decode. Such a check is counted from its raw parameters. When a host
@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use serde_json::{Map, Value};
 
-use crate::check::CheckParams;
+use crate::check::{CheckParams, host_with_default_port};
 use crate::error::echo_safe;
 use crate::expiry::parse_utc;
 use crate::pattern;
@@ -41,15 +41,18 @@ use crate::{Duration, Location, SpecError, Target};
 /// The most checks in a spec (01 section 2.1).
 pub const MAX_CHECKS: usize = 256;
 
-/// The most distinct hosts a spec may name across all of its checks (threat model INV-11).
+/// The most distinct hosts a spec may name across all of its checks (threat model INV-11). See
+/// `named_endpoints` for which checks count.
 pub const MAX_HOSTS: usize = 64;
 
-/// The most distinct host and port pairs a spec may name across `net.egress` and `net.tls_intercept`.
+/// The most distinct host and port pairs a spec may name across the checks that count toward
+/// [`MAX_HOSTS`], `net.dns` apart.
 /// Without it 256 checks of 64 endpoints each would be 16,384 pairs, enough to scan a network
 /// (threat model INV-11).
 pub const MAX_ENDPOINTS: usize = 256;
 
 const DEFAULT_TLS_PORT: u16 = 443;
+const DEFAULT_NTP_PORT: u16 = 123;
 
 const MAX_VERSION_CHARS: usize = 64;
 const MAX_CONTACT_CHARS: usize = 256;
@@ -342,13 +345,13 @@ fn check_hosts(spec: &Spec) -> Result<(), SpecError> {
     Ok(())
 }
 
-/// What the net checks of a spec name, collected up to one past each limit.
+/// What the checks of a spec name, collected up to one past each limit.
 #[derive(Debug, Default)]
 pub(crate) struct Named {
-    /// Distinct lowercase hosts across `net.egress`, `net.tls_intercept` and `net.dns`. Collection stops
-    /// at [`MAX_HOSTS`] plus one, because that is already a refusal.
+    /// Distinct lowercase hosts across the checks listed at [`named_endpoints`]. Collection stops at
+    /// [`MAX_HOSTS`] plus one, because that is already a refusal.
     pub(crate) hosts: HashSet<String>,
-    /// Distinct host and port pairs across `net.egress` and `net.tls_intercept`. Collection stops at
+    /// Distinct host and port pairs across the same checks, `net.dns` apart. Collection stops at
     /// [`MAX_ENDPOINTS`] plus one.
     pub(crate) pairs: HashSet<(String, u16)>,
 }
@@ -371,12 +374,27 @@ impl Named {
     }
 }
 
-/// Every distinct host and every distinct host and port pair that `net.egress`, `net.tls_intercept` and
-/// `net.dns` entries name, anywhere in the spec. A host named by several checks, or by several endpoints
-/// on different ports, counts once as a host. DNS names have no port and add no pairs.
+/// Every distinct host and every distinct host and port pair that the checks of a spec name, anywhere
+/// in the spec. A host named by several checks, or by several endpoints on different ports, counts
+/// once as a host. DNS names have no port and add no pairs.
 ///
-/// A check that decodes is read through its typed parameters. A check of these three ids that does not
-/// decode (a list of 65, a mistyped key) is skipped at run time, but it is still counted from its raw
+/// These are counted:
+///
+/// - `net.egress` endpoints, `net.tls_intercept` hosts and `net.dns` names;
+/// - `host.time_sync` `ntp_servers` (threat model INV-11 lists them), with port 123 when none is
+///   written;
+/// - `net.registry` `host` and `hosts` of every registry, with port 443 when none is written;
+/// - the `net.bandwidth` `url`.
+///
+/// These checks decode in the M1-late revision of the format. A spec written before it may already name
+/// such hosts, so they are counted from the first release that reads them: counting them later would
+/// refuse a signed spec that an earlier release accepted (01 section 3.3).
+///
+/// Not counted: the hosts that `needs_egress` of other checks may add. They are never connected to
+/// until a check names them, so they cannot widen what the spec reaches.
+///
+/// A check that decodes is read through its typed parameters. A check of these ids that does not decode
+/// (a list of 65, a mistyped key) is skipped at run time, but it is still counted from its raw
 /// parameters, so a spec cannot hide hosts in entries that fail to decode. See the module documentation.
 pub(crate) fn named_endpoints(spec: &Spec) -> Named {
     let mut named = Named::default();
@@ -389,34 +407,82 @@ pub(crate) fn named_endpoints(spec: &Spec) -> Named {
             }
             CheckParams::NetTlsIntercept(p) => {
                 for h in p.hosts.iter().flatten() {
-                    named.endpoint(h.host().to_string(), h.port().unwrap_or(DEFAULT_TLS_PORT));
+                    named.endpoint(h.host().to_string(), h.port_or_default());
                 }
             }
             CheckParams::NetDns(p) => {
                 for rule in &p.names {
-                    named.host(host_key(rule.name.as_str()).0);
+                    named.host(host_key(rule.name.as_str(), DEFAULT_TLS_PORT).0);
                 }
             }
-            CheckParams::Unsupported { id, fields, .. } => {
-                let (key, inner, has_port) = match id.as_str() {
-                    "net.egress" => ("endpoints", Some("target"), true),
-                    "net.tls_intercept" => ("hosts", None, true),
-                    "net.dns" => ("names", Some("name"), false),
-                    _ => continue,
-                };
-                for text in listed_texts(&fields, key, inner) {
-                    let (host, port) = host_key(text);
-                    if has_port {
-                        named.endpoint(host, port);
-                    } else {
-                        named.host(host);
+            CheckParams::HostTimeSync(p) => {
+                for server in p.ntp_servers.iter().flatten() {
+                    named.endpoint(server.host().to_string(), server.port_or_default());
+                }
+            }
+            CheckParams::NetRegistry(p) => {
+                for rule in &p.registries {
+                    let hosts = std::iter::once(&rule.host).chain(rule.hosts.iter().flatten());
+                    for h in hosts {
+                        named.endpoint(h.host().to_string(), h.port_or_default());
                     }
                 }
             }
+            CheckParams::NetBandwidth(p) => {
+                let target = p.url.target();
+                named.endpoint(target.host().to_string(), target.port());
+            }
+            CheckParams::Unsupported { id, fields, .. } => raw_endpoints(&mut named, &id, &fields),
             _ => {}
         }
     }
     named
+}
+
+/// Counts the hosts of a check that did not decode, from its parameters as written.
+fn raw_endpoints(named: &mut Named, id: &str, fields: &Map<String, Value>) {
+    // The key of the list, the key of the text inside an item that is an object, and the port that
+    // applies when the text has none. `None` for the port means the check has no ports (`net.dns`).
+    let (key, inner, port) = match id {
+        "net.egress" => ("endpoints", Some("target"), Some(DEFAULT_TLS_PORT)),
+        "net.tls_intercept" => ("hosts", None, Some(DEFAULT_TLS_PORT)),
+        "net.dns" => ("names", Some("name"), None),
+        "host.time_sync" => ("ntp_servers", None, Some(DEFAULT_NTP_PORT)),
+        "net.registry" => {
+            for item in fields
+                .get("registries")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let (host, more) = match item {
+                    Value::Object(object) => (object.get("host"), object.get("hosts")),
+                    other => (Some(other), None),
+                };
+                let more = more.and_then(Value::as_array).into_iter().flatten();
+                for text in host.into_iter().chain(more).filter_map(Value::as_str) {
+                    let (host, port) = host_key(text, DEFAULT_TLS_PORT);
+                    named.endpoint(host, port);
+                }
+            }
+            return;
+        }
+        "net.bandwidth" => {
+            if let Some(text) = fields.get("url").and_then(Value::as_str) {
+                let (host, port) = host_key(text, DEFAULT_TLS_PORT);
+                named.endpoint(host, port);
+            }
+            return;
+        }
+        _ => return,
+    };
+    for text in listed_texts(fields, key, inner) {
+        let (host, found) = host_key(text, port.unwrap_or(DEFAULT_TLS_PORT));
+        match port {
+            Some(_) => named.endpoint(host, found),
+            None => named.host(host),
+        }
+    }
 }
 
 /// The texts in the list at `key`. An item is a string, or an object whose `inner` key holds the string.
@@ -439,13 +505,17 @@ fn listed_texts<'a>(
 }
 
 /// The identity of an endpoint for counting: the lowercase host and the port of a target (`host:port`,
-/// `[v6]:port` or a URL), of a bare host (port 443), or the lowercase text itself and port 0 when it
-/// reads as neither.
-fn host_key(text: &str) -> (String, u16) {
+/// `[v6]:port` or a URL), of a bare host (with `default_port`), or the lowercase text itself and port 0
+/// when it reads as neither.
+fn host_key(text: &str, default_port: u16) -> (String, u16) {
     Target::parse(text)
-        .or_else(|_| Target::parse(&format!("{text}:{DEFAULT_TLS_PORT}")))
+        .ok()
+        .or_else(|| {
+            let (full, _) = host_with_default_port(text, default_port)?;
+            Target::parse(&full).ok()
+        })
         .map_or_else(
-            |_| (text.to_ascii_lowercase(), 0),
+            || (text.to_ascii_lowercase(), 0),
             |t| (t.host().to_string(), t.port()),
         )
 }
