@@ -33,13 +33,17 @@ pub struct TestCa {
     root_pem: String,
 }
 
-/// A server certificate with the CA certificates a server sends with it, and its private key.
-#[derive(Debug)]
+/// A server certificate with the CA certificates a server sends with it, and its private key. Its
+/// `Debug` output leaves the key out.
 pub struct Leaf {
     chain: Vec<CertificateDer<'static>>,
     key_pkcs8: Vec<u8>,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test support: setup that cannot fail in a working build panics with a message"
+)]
 fn ca_params(common_name: &str) -> CertificateParams {
     let mut params = CertificateParams::new(Vec::<String>::new()).expect("CA certificate params");
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -57,6 +61,10 @@ impl TestCa {
     ///
     /// If the crypto provider cannot make a key or sign, which is a broken build and not a test result.
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: setup that cannot fail in a working build panics with a message"
+    )]
     pub fn root(common_name: &str) -> Self {
         let params = ca_params(common_name);
         let key = KeyPair::generate().expect("generate the CA key");
@@ -78,6 +86,10 @@ impl TestCa {
     ///
     /// If signing fails (see [`TestCa::root`]).
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: setup that cannot fail in a working build panics with a message"
+    )]
     pub fn intermediate(&self, common_name: &str) -> Self {
         let params = ca_params(common_name);
         let key = KeyPair::generate().expect("generate the intermediate key");
@@ -124,6 +136,10 @@ impl TestCa {
     ///
     /// If a name is not a valid DNS name or IP address, or signing fails.
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: setup that cannot fail in a working build panics with a message"
+    )]
     pub fn issue(&self, names: &[&str], validity: Validity) -> Leaf {
         let mut params = CertificateParams::new(Vec::<String>::new()).expect("leaf params");
         params.subject_alt_names = names
@@ -161,6 +177,15 @@ impl TestCa {
             chain,
             key_pkcs8: key.serialize_der(),
         }
+    }
+}
+
+impl std::fmt::Debug for Leaf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Leaf")
+            .field("chain", &self.chain)
+            .field("key_pkcs8", &"<redacted>")
+            .finish()
     }
 }
 

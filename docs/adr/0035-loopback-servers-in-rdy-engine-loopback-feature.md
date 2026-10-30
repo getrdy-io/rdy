@@ -1,6 +1,6 @@
 # ADR 0035: The loopback test servers live in `rdy-engine`, behind the `loopback` feature
 
-- Status: Accepted. Moves the home that docs/plan/08-testing.md sections 1 and 8 gave them. Needs a `security-reviewer` look at the `deny.toml` wrapper change.
+- Status: Accepted, security-reviewed (PR #114). Moves the home that docs/plan/08-testing.md sections 1 and 8 gave them. The `security-reviewer` approved the `deny.toml` wrapper change and the placement.
 - Date: 2026-10-30
 
 ## Context

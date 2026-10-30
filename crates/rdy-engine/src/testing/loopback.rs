@@ -23,14 +23,11 @@
 //!   with every connection it accepted. A server never times out by itself, so do not pause the tokio
 //!   clock while a test waits on one; let the client side carry the timeout.
 //! - Setup that cannot fail in a working test (making a key, a certificate) panics with a message,
-//!   like the other helpers of [`crate::testing`]. Binding returns an [`std::io::Result`].
+//!   like the other helpers of [`crate::testing`]. Binding returns an [`std::io::Result`]. The
+//!   connection handlers never panic.
 //! - Certificates and keys are made in memory for each test and never written by this module. Nothing
 //!   here is for the release binary: the feature is test-only and `cargo tree` for the `rdy` package must
 //!   not show it (ADR 0035).
-
-// Test support, like `#[cfg(test)]` code: setup that cannot fail in a working build (a key, a certificate)
-// panics with a message instead of returning an error nobody could handle. Binding returns `io::Result`.
-#![allow(clippy::expect_used)]
 
 mod ca;
 mod http;
@@ -45,6 +42,8 @@ pub use raw::{
 };
 
 use std::future::Future;
+use std::io;
+use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::{AbortHandle, JoinSet};
 
@@ -73,7 +72,16 @@ where
                     Ok((stream, _)) => {
                         conns.spawn(per_conn(stream));
                     }
-                    Err(_) => return,
+                    // A connection that died in the queue is not the listener's fault: take the next.
+                    Err(e) if matches!(
+                        e.kind(),
+                        io::ErrorKind::ConnectionAborted
+                            | io::ErrorKind::ConnectionReset
+                            | io::ErrorKind::Interrupted
+                    ) => {}
+                    // Out of descriptors or the like: wait a moment and try again. Stopping would
+                    // refuse every later connect with no sign of why.
+                    Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
                 },
                 Some(_) = conns.join_next(), if !conns.is_empty() => {}
             }

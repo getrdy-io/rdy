@@ -36,12 +36,19 @@ fn client_config(roots: &[&CertificateDer<'static>]) -> Arc<ClientConfig> {
     Arc::new(config)
 }
 
+/// A TCP connect that cannot hang the test. A timeout is an `io::Error` of kind `TimedOut`.
+async fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
+    timeout(LIMIT, TcpStream::connect(addr))
+        .await
+        .unwrap_or_else(|_| Err(io::ErrorKind::TimedOut.into()))
+}
+
 async fn tls_connect(
     addr: SocketAddr,
     name: &'static str,
     config: Arc<ClientConfig>,
 ) -> io::Result<TlsStream<TcpStream>> {
-    let tcp = timeout(LIMIT, TcpStream::connect(addr)).await??;
+    let tcp = connect(addr).await?;
     let name = ServerName::try_from(name).expect("a server name");
     timeout(LIMIT, TlsConnector::from(config).connect(name, tcp)).await?
 }
@@ -226,7 +233,7 @@ async fn the_server_replies_with_the_status_and_date_it_was_given() {
     )
     .await
     .expect("start");
-    let mut tcp = TcpStream::connect(server.addr()).await.expect("connect");
+    let mut tcp = connect(server.addr()).await.expect("connect");
     tcp.write_all(b"HEAD /x HTTP/1.1\r\nHost: h\r\n\r\n")
         .await
         .expect("write");
@@ -248,7 +255,7 @@ async fn the_redirect_server_answers_302_with_a_location() {
     let server = HttpServer::redirect("https://second.acme.example/")
         .await
         .expect("start");
-    let mut tcp = TcpStream::connect(server.addr()).await.expect("connect");
+    let mut tcp = connect(server.addr()).await.expect("connect");
     tcp.write_all(b"GET / HTTP/1.1\r\nHost: first\r\n\r\n")
         .await
         .expect("write");
@@ -263,9 +270,7 @@ async fn the_redirect_server_answers_302_with_a_location() {
 /// Sends a CONNECT with a synthetic credential and returns what the proxy answered up to the blank
 /// line, with the stream for a tunnel.
 async fn connect_through(proxy: SocketAddr, target: &str) -> (String, TcpStream) {
-    let mut tcp = TcpStream::connect(proxy)
-        .await
-        .expect("connect to the proxy");
+    let mut tcp = connect(proxy).await.expect("connect to the proxy");
     let request = format!(
         "CONNECT {target} HTTP/1.1\r\nHost: {target}\r\nProxy-Authorization: Basic dGVzdDp0ZXN0\r\n\r\n"
     );
@@ -366,7 +371,7 @@ async fn a_client_that_sends_nothing_leaves_the_proxy_with_zero_bytes() {
     let proxy = ConnectProxy::start(ProxyMode::Forbidden)
         .await
         .expect("proxy");
-    let mut tcp = TcpStream::connect(proxy.addr()).await.expect("connect");
+    let mut tcp = connect(proxy.addr()).await.expect("connect");
     tcp.shutdown().await.expect("shutdown");
     assert!(read_all(tcp).await.is_empty());
     assert_eq!(proxy.bytes_received(), 0);
@@ -376,7 +381,7 @@ async fn a_client_that_sends_nothing_leaves_the_proxy_with_zero_bytes() {
 #[tokio::test]
 async fn the_proxy_refuses_a_method_that_is_not_connect() {
     let proxy = ConnectProxy::start(ProxyMode::Ok).await.expect("proxy");
-    let mut tcp = TcpStream::connect(proxy.addr()).await.expect("connect");
+    let mut tcp = connect(proxy.addr()).await.expect("connect");
     tcp.write_all(b"GET http://a.example/ HTTP/1.1\r\nHost: a.example\r\n\r\n")
         .await
         .expect("write");
@@ -388,14 +393,14 @@ async fn the_proxy_refuses_a_method_that_is_not_connect() {
 #[tokio::test]
 async fn a_closed_port_refuses_the_connection() {
     let addr = closed_port().await.expect("a port");
-    let e = TcpStream::connect(addr).await.expect_err("nothing listens");
+    let e = connect(addr).await.expect_err("nothing listens");
     assert_eq!(e.kind(), io::ErrorKind::ConnectionRefused, "{e:?}");
 }
 
 #[tokio::test]
 async fn a_listener_that_never_accepts_completes_the_connect_and_never_answers() {
     let server = NeverAccepts::start().await.expect("start");
-    let mut tcp = TcpStream::connect(server.addr())
+    let mut tcp = connect(server.addr())
         .await
         .expect("the kernel completes the connect");
     tcp.write_all(b"hello").await.expect("a write succeeds");
@@ -407,7 +412,7 @@ async fn a_listener_that_never_accepts_completes_the_connect_and_never_answers()
 #[tokio::test]
 async fn a_reset_after_the_client_hello_is_a_reset_and_not_a_close() {
     let server = ResetAfterClientHello::start().await.expect("start");
-    let mut tcp = TcpStream::connect(server.addr()).await.expect("connect");
+    let mut tcp = connect(server.addr()).await.expect("connect");
     // A TLS handshake record header (type 22, version 3.1, length 4) and a four byte body.
     tcp.write_all(&[0x16, 3, 1, 0, 4, 1, 0, 0, 0])
         .await
@@ -428,6 +433,8 @@ async fn a_reset_after_the_client_hello_is_a_reset_and_not_a_close() {
 
 #[tokio::test]
 async fn a_real_tls_client_sees_the_reset_as_an_error() {
+    // This accepts `UnexpectedEof` too, because rustls may report a reset as an end of stream, so it
+    // cannot tell a reset from a FIN. The raw client test above carries the proof that it is a reset.
     let server = ResetAfterClientHello::start().await.expect("start");
     let ca = TestCa::root("rdy test root");
     let e = tls_connect(server.addr(), "localhost", client_config(&[ca.root_der()]))
@@ -456,7 +463,7 @@ async fn the_dual_stack_case_has_a_live_v4_address_and_a_dead_v6_address_on_one_
     assert_eq!(dual.v4().port(), dual.dead_v6().port());
     assert!(dual.v4().is_ipv4() && dual.dead_v6().is_ipv6());
 
-    let e = TcpStream::connect(dual.dead_v6())
+    let e = connect(dual.dead_v6())
         .await
         .expect_err("the v6 address is dead");
     if ipv6_loopback_available().await {
@@ -481,7 +488,7 @@ async fn dropping_a_server_closes_its_port() {
     let mut refused = false;
     for _ in 0..200 {
         tokio::task::yield_now().await;
-        if TcpStream::connect(addr).await.is_err() {
+        if connect(addr).await.is_err() {
             refused = true;
             break;
         }
@@ -490,4 +497,27 @@ async fn dropping_a_server_closes_its_port() {
         refused,
         "the port still accepts after the server was dropped"
     );
+}
+
+#[test]
+#[should_panic(expected = "not a loopback address")]
+fn a_route_to_an_address_off_loopback_panics() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let off_loopback = SocketAddr::from(([203, 0, 113, 7], 443));
+    let _ = runtime.block_on(ConnectProxy::start_with_routes(
+        ProxyMode::Ok,
+        &[("registry.acme.example:443", off_loopback)],
+    ));
+}
+
+#[test]
+fn a_leaf_does_not_print_its_key() {
+    let ca = TestCa::root("rdy test root");
+    let leaf = ca.issue(&["localhost"], Validity::Always);
+    let shown = format!("{leaf:?}");
+    assert!(shown.contains("<redacted>"), "{shown}");
+    assert!(!shown.contains("key_pkcs8: ["), "{shown}");
 }

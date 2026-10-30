@@ -87,6 +87,10 @@ impl HttpOptions {
     ///
     /// If the leaf's key and certificate do not make a server config, which is a broken build.
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: setup that cannot fail in a working build panics with a message"
+    )]
     pub fn tls(leaf: &Leaf) -> Self {
         let config = ServerConfig::builder_with_provider(Arc::new(default_provider()))
             .with_safe_default_protocol_versions()

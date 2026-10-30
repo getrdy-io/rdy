@@ -5,9 +5,11 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
-use tokio::io::{AsyncWriteExt, copy_bidirectional};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::timeout;
 
 use super::http::{parse_head, read_head};
 use super::{Guard, serve};
@@ -69,10 +71,20 @@ impl ConnectProxy {
     /// # Errors
     ///
     /// If the socket cannot be bound.
+    ///
+    /// # Panics
+    ///
+    /// If an address in `routes` is not a loopback address. The proxy never dials anything else.
     pub async fn start_with_routes(
         mode: ProxyMode,
         routes: &[(&str, SocketAddr)],
     ) -> io::Result<Self> {
+        for (name, to) in routes {
+            assert!(
+                to.ip().is_loopback(),
+                "the route for {name} points at {to}, which is not a loopback address"
+            );
+        }
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let addr = listener.local_addr()?;
         let shared = Arc::new(Shared::default());
@@ -224,6 +236,14 @@ async fn respond(stream: &mut TcpStream, status: &str, headers: &[(&str, &str)])
     stream.write_all(text.as_bytes()).await?;
     if !status.starts_with("200") {
         stream.shutdown().await?;
+        // Close only after the client has stopped sending (or a moment has passed). Closing with
+        // client bytes unread makes the operating system send a reset, and on Windows a reset can
+        // throw away the answer the client has not read yet.
+        let mut sink = [0u8; 512];
+        let _ = timeout(Duration::from_millis(200), async {
+            while matches!(stream.read(&mut sink).await, Ok(n) if n > 0) {}
+        })
+        .await;
     }
     Ok(())
 }
