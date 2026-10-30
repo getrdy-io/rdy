@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-cgroup-swap-limit"
+summary = "62.8 GiB host with a 4 GiB swap partition, slice with memory.swap.max 0"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,12 @@
+schema = 1
+name = "comm-truncation"
+summary = "Names of 16 or more bytes appear cut to 15, plus near misses that must not match"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.security_agents"]
+
+[caps]
+root = true
+network = false
+kube = false

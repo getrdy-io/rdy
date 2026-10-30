@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-cgroup-v2-nested"
+summary = "62.8 GiB host, service in acme.slice (memory.max 4 GiB) with its own 8 GiB limit"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false

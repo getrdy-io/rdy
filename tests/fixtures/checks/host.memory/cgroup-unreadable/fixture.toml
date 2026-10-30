@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-cgroup-unreadable"
+summary = "62.8 GiB host, v2 slice with 4 GiB, memory.max of the service itself unreadable"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false

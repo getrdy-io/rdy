@@ -13,6 +13,9 @@ use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::firewall::{self, Firewall};
 use crate::lsm::{self, Lsm};
+use crate::memory::{self, Memory};
+use crate::os::{self, OsCheck};
+use crate::security_agents::{self, SecurityAgents};
 
 #[cfg(test)]
 mod tests;
@@ -77,32 +80,12 @@ static DISK: CheckInfo = info(
     5,
     &[],
 );
-static MEMORY: CheckInfo = info(
-    "host.memory",
-    "RAM, swap, cgroup limit",
-    CheckMeta {
-        title: "Memory",
-        remediation: "Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number. On Linux, if the spec forbids swap, run `swapoff -a` and comment out the swap lines in `/etc/fstab`.",
-    },
-    2,
-    &[],
-);
 static PORTS: CheckInfo = info(
     "host.ports",
     "Required ports free",
     CheckMeta {
         title: "Free ports",
         remediation: "Stop the process that holds the port, or change the product's port setting. If the port is in the ephemeral range, reserve it with `net.ipv4.ip_local_reserved_ports` in a file under `/etc/sysctl.d/` as root, then run `sysctl --system`.",
-    },
-    5,
-    ROOT,
-);
-static SECURITY_AGENTS: CheckInfo = info(
-    "host.security_agents",
-    "Security software processes that inspect file and process activity",
-    CheckMeta {
-        title: "Security software",
-        remediation: "Security software often inspects file opens and process launches. If the install is slow or fails, ask the security team to review exclusions for the product's paths, then run rdy again.",
     },
     5,
     ROOT,
@@ -127,17 +110,6 @@ static CPU: CheckInfo = info(
     2,
     &[],
 );
-static HOST_OS: CheckInfo = info(
-    "host.os",
-    "Distro, version, arch, FIPS",
-    CheckMeta {
-        title: "Operating system",
-        remediation: "Use an OS image the vendor supports, or ask the vendor about the one you have.",
-    },
-    2,
-    &[],
-);
-
 static SYSCTL: CheckInfo = info(
     "host.sysctl",
     "Kernel parameters and limits",
@@ -183,17 +155,17 @@ static KERNEL: CheckInfo = info(
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 13] = [
     &DISK,
-    &MEMORY,
+    &memory::INFO,
     &PORTS,
     &lsm::INFO,
-    &SECURITY_AGENTS,
+    &security_agents::INFO,
     &firewall::INFO,
     &TIME_SYNC,
     &CPU,
     &SYSCTL,
     &CONTAINER_RUNTIME,
     &CGROUPS,
-    &HOST_OS,
+    &os::INFO,
     &KERNEL,
 ];
 
@@ -201,7 +173,8 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.firewall` ([`Firewall`]) and `host.lsm` ([`Lsm`]) are real. The others are stubs for now
+/// `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]), `host.memory` ([`Memory`]), `host.os` ([`OsCheck`])
+/// and `host.security_agents` ([`SecurityAgents`]) are real. The others are stubs for now
 /// ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
@@ -223,17 +196,14 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 11] = [
+static STUBS: [&str; 8] = [
     "host.disk",
-    "host.memory",
     "host.ports",
-    "host.security_agents",
     "host.time_sync",
     "host.cpu",
     "host.sysctl",
     "host.container_runtime",
     "host.cgroups",
-    "host.os",
     "host.kernel",
 ];
 
@@ -257,6 +227,23 @@ impl Family for HostFamily {
         }
         if let CheckParams::HostLsm(lsm) = &params {
             return Ok(Built::new(Box::new(Lsm::new(lsm))));
+        }
+        if let CheckParams::HostMemory(memory) = params {
+            return Ok(Built::new(Box::new(Memory::from_params(&memory))));
+        }
+        if let CheckParams::HostOs(os) = &params {
+            return Ok(Built::new(Box::new(OsCheck::from_params(os))));
+        }
+        if let CheckParams::HostSecurityAgents(agents) = params {
+            let ids = |list: Option<&rdy_spec::check::StringList>| -> Vec<String> {
+                list.into_iter()
+                    .flatten()
+                    .map(|id| id.as_str().to_owned())
+                    .collect()
+            };
+            let check =
+                SecurityAgents::new(ids(agents.forbid.as_ref()), ids(agents.allow.as_ref()));
+            return Ok(Built::new(Box::new(check)));
         }
         let info = CHECKS
             .iter()

@@ -1757,11 +1757,14 @@ dependencies = [
 name = "rdy-checks-host"
 version = "0.1.0-alpha.0"
 dependencies = [
+ "proptest",
  "rdy-engine",
  "rdy-spec",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "toml",
 ]
 
 [[package]]
