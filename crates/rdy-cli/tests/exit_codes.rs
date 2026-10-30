@@ -160,23 +160,22 @@ fn a_usage_error_never_names_the_trust_flags() {
 
 #[test]
 fn commands_for_later_tickets_exit_70_with_a_fix_line() {
-    for args in [&["run", "spec.yaml"][..], &["verify", "spec.yaml"]] {
-        let out = rdy(args);
-        assert_eq!(code(&out), 70, "rdy {args:?}: {out:?}");
-        assert!(out.stdout.is_empty(), "rdy {args:?} wrote to stdout");
-        let err = text(&out.stderr);
-        assert!(
-            err.starts_with("error: rdy ") && err.contains("is not yet implemented in this build"),
-            "rdy {args:?}: {err:?}"
-        );
-        assert!(err.contains("\nfix: "), "rdy {args:?} has no fix: {err:?}");
-    }
+    let args = &["verify", "spec.yaml"];
+    let out = rdy(args);
+    assert_eq!(code(&out), 70, "rdy {args:?}: {out:?}");
+    assert!(out.stdout.is_empty(), "rdy {args:?} wrote to stdout");
+    let err = text(&out.stderr);
+    assert!(
+        err.starts_with("error: rdy ") && err.contains("is not yet implemented in this build"),
+        "rdy {args:?}: {err:?}"
+    );
+    assert!(err.contains("\nfix: "), "rdy {args:?} has no fix: {err:?}");
 }
 
 /// With `--json` the same failure also puts an error object on stdout (M1-021, 07 section 4.1).
 #[test]
 fn a_later_ticket_command_with_json_prints_the_error_object_too() {
-    let out = rdy(&["run", "spec.yaml", "--json"]);
+    let out = rdy(&["verify", "spec.yaml", "--json"]);
     assert_eq!(code(&out), 70);
     let err = text(&out.stderr);
     assert!(

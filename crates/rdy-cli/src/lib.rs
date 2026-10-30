@@ -4,8 +4,8 @@
 //! use the same code (ADR 0011).
 //!
 //! This is the M1 command tree (M1-029). `rdy version`, `rdy spec lint`, `rdy spec keygen`,
-//! `rdy spec sign` and `rdy trust add`, `list` and `remove` do their jobs. Every other command prints
-//! "not yet implemented in this build" and exits 70 until its own ticket lands.
+//! `rdy spec sign`, `rdy trust add`, `list` and `remove` and `rdy run` (M1-057) do their jobs. `rdy
+//! verify` prints "not yet implemented in this build" and exits 70 until its own ticket lands.
 //!
 //! Exit codes (CLAUDE.md, Output): clap's own exit code is 2, but in rdy 2 means NOT READY. So rdy
 //! parses with [`clap::Parser::try_parse_from`] and maps the outcome itself. Help and version go to
@@ -42,6 +42,9 @@ pub mod password;
 pub mod prompt;
 #[doc(hidden)]
 pub mod redaction;
+#[doc(hidden)]
+pub mod registry;
+mod run_cmd;
 
 #[doc(hidden)]
 pub mod signing;
@@ -122,15 +125,19 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let code = run_code(args, backend, hooks, stdout, stderr).await;
+    let code = run_code(args, backend, hooks, registry::registry, stdout, stderr).await;
     exit_code_of(code)
 }
 
 /// The exit code as the number the commands return. See [`run`].
+///
+/// `make_registry` builds the families of the run. [`run`] passes [`registry::registry`]. A test passes
+/// its own, to see the order of the start-up steps with a check that declares a secret variable.
 async fn run_code<I, T>(
     args: I,
     backend: Arc<dyn Backend>,
-    _hooks: RunHooks,
+    hooks: RunHooks,
+    make_registry: fn() -> Result<rdy_engine::family::Registry, rdy_engine::family::RegistryError>,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> u8
@@ -151,8 +158,8 @@ where
         .and_then(|matches| Cli::from_arg_matches(&matches));
     match parsed {
         Ok(cli) => {
-            tracing::debug!(command = %command_path(&args), json, "command parsed");
             if !reads_the_machine(&cli.command) {
+                tracing::debug!(command = %command_path(&args), json, "command parsed");
                 return dispatch(&cli.command, json, stdout, stderr);
             }
             let Ok(redactor) = redaction::init() else {
@@ -163,17 +170,66 @@ where
                     stderr,
                 );
             };
+            // The hub is built from the run's redactor, so the log, the errors and the report share one
+            // known-secret set.
             let hub = ProbeHub::new(backend, redactor.clone());
+            // `rdy run`: the check families, and the value of every secret-named environment variable
+            // they declare, go into the known-secret set before the first log event below and before
+            // any check starts (M1-057, ADR 0015 decision 3). A value the set refuses ends the run.
+            let registry = match &cli.command {
+                Commands::Run(_) => match run_registry(&hub, make_registry) {
+                    Ok(registry) => Some(registry),
+                    Err(err) => return emit(&err, json, stdout, stderr),
+                },
+                _ => None,
+            };
+            tracing::debug!(command = %command_path(&args), json, "command parsed");
             let snapshot = Privilege::snapshot(&hub.run_probe()).await;
-            startup::gate_then(
-                snapshot,
-                json,
-                stdout,
-                stderr,
-                |_privilege, stdout, stderr| dispatch(&cli.command, json, stdout, stderr),
-            )
+            match (&cli.command, registry) {
+                (Commands::Run(run_args), Some(registry)) => {
+                    // The gate first, then the spec: a refused run never opens it (INV-10).
+                    match startup::privilege_gate(snapshot) {
+                        Ok(privilege) => {
+                            let cx = run_cmd::RunContext {
+                                hub,
+                                redactor: redactor.clone(),
+                                privilege,
+                                hooks,
+                                registry,
+                            };
+                            run_cmd::run(run_args, cx, json, stdout, stderr).await
+                        }
+                        Err(err) => emit(&err, json, stdout, stderr),
+                    }
+                }
+                _ => startup::gate_then(
+                    snapshot,
+                    json,
+                    stdout,
+                    stderr,
+                    |_privilege, stdout, stderr| dispatch(&cli.command, json, stdout, stderr),
+                ),
+            }
         }
         Err(err) => report_parse_error(&err, &args, json, stdout, stderr),
+    }
+}
+
+/// The families of this build, with the declared secret environment values already registered in the
+/// hub's known-secret set.
+fn run_registry(
+    hub: &ProbeHub,
+    make_registry: fn() -> Result<rdy_engine::family::Registry, rdy_engine::family::RegistryError>,
+) -> Result<rdy_engine::family::Registry, CliError> {
+    let registry = make_registry().map_err(|_| CliError::bug())?;
+    let names = registry.infos().flat_map(|info| info.env.iter().copied());
+    let refused = hub.add_declared_env_secrets(names);
+    if refused.is_empty() {
+        Ok(registry)
+    } else {
+        Err(CliError::Internal(InternalKind::SecretRefused {
+            names: refused,
+        }))
     }
 }
 
@@ -207,11 +263,9 @@ fn dispatch(command: &Commands, json: bool, stdout: &mut dyn Write, stderr: &mut
         Commands::Version(args) if !args.json => finish(writeln!(stdout, "rdy {VERSION}"), stderr),
         Commands::Help { command } => show_help(command, json, stdout, stderr),
         Commands::Version(_) => finish(write!(stdout, "{}", version_json()), stderr),
-        Commands::Run(args) => {
-            // A user-supplied value in the log: the redactor has to cover it (threat model I2).
-            tracing::debug!(spec = %args.spec.display(), "run requested");
-            not_implemented("run", json, stdout, stderr)
-        }
+        // `run` is async and takes the whole privilege snapshot, so `run_code` calls it directly and
+        // never gets here. If it ever did, that is a bug in `run_code`.
+        Commands::Run(_) => emit(&CliError::bug(), json, stdout, stderr),
         Commands::Verify(args) => {
             tracing::debug!(spec = %args.spec.display(), "verify requested");
             not_implemented("verify", json, stdout, stderr)

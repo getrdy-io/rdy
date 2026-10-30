@@ -13,7 +13,8 @@
 //!    becomes `warn` with "not verified: ...", unless every missing need is `evidence_only` in the
 //!    check's wants. The rule itself is [`apply_partial_rule`], the same code the verdict tests cover.
 //! 3. **The fix.** On `warn` and `block` the spec's `fix` replaces rdy's text verbatim
-//!    (`fix_source: spec`) and rdy's text moves to `builtin_fix`. On `pass` there is no fix. When the
+//!    (`fix_source: spec`) and rdy's text moves to `builtin_fix`. rdy's text is the finding's own `fix`, or
+//!    when it gave none the check's `CheckMeta::remediation` (ADR 0026, M1-057). On `pass` there is no fix. When the
 //!    check did not run, the spec's fix is hidden and rdy's own text is shown (`fix_source: rdy`),
 //!    because the vendor's advice would tell the customer to fix something nobody measured. A `pass`
 //!    that became `warn` through the partial rule is in the same position: nothing was measured as
@@ -41,11 +42,15 @@ mod not_run;
 #[cfg(test)]
 mod tests;
 
-pub use not_run::{run_deadline_result, timeout_result, unfinished_result};
+pub use not_run::{
+    cancelled_result, panicked_result, run_deadline_result, timeout_result, unfinished_result,
+};
 
 /// Stands for the spec file name in the root fix. The text is 01 section 5.2 word for word, but the
-/// engine does not know the file name as typed. The CLI replaces this with its own shell-quoted
-/// spec argument, as `SkipWhy::MissingRoot` does. M1-057 reconciles the two sources of skip text.
+/// engine does not know the file name as typed. `Engine::execute` (feature `runtime`) replaces this with the
+/// shell-quoted spec argument the CLI gives it (`RunOptions::spec_arg`, M1-057). `SkipWhy` in `rdy-cli`
+/// still holds a second copy of the skip words, with the did-you-mean hint. Reconciling the two is not
+/// done yet.
 pub const SPEC_PLACEHOLDER: &str = "<spec>";
 
 /// Text for a result whose check gave no advice of its own and the spec gave none either.
@@ -54,6 +59,16 @@ const NO_ADVICE_FIX: &str =
 
 /// The most `missing_grants` a wire partial holds (the result schema's `maxItems`).
 const MAX_GRANTS: usize = 1000;
+
+/// The general fix of `info` (`CheckMeta::remediation`), or [`NO_ADVICE_FIX`] when it is blank.
+fn remediation_or_none(info: &CheckInfo) -> String {
+    let text = info.meta.remediation.trim();
+    if text.is_empty() {
+        NO_ADVICE_FIX.to_owned()
+    } else {
+        text.to_owned()
+    }
+}
 
 /// Text for a check that failed and gave an empty hint.
 const FAILED_FIX: &str = "Run again. If it fails again, tell the vendor which check it was.";
@@ -164,7 +179,9 @@ fn from_finding(
                     result.fix_source = Some(FixSource::FromSpec);
                     result.builtin_fix = builtin;
                 } else {
-                    result.fix = Some(builtin.unwrap_or_else(|| NO_ADVICE_FIX.to_owned()));
+                    // The check's own fix, else its registry remediation (ADR 0026), and only a
+                    // blank remediation (which `cargo xtask checks` refuses) gets the generic text.
+                    result.fix = Some(builtin.unwrap_or_else(|| remediation_or_none(info)));
                     result.fix_source = Some(FixSource::Rdy);
                 }
             }

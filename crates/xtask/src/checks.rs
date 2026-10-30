@@ -15,16 +15,10 @@ use rdy_engine::family::Registry;
 /// The header row of the listing.
 const HEADER: &str = "id\tfamily\ttitle\tremediation";
 
-/// The families of this build, registered as the CLI will register them.
-///
-/// The CLI has no registry yet. Until `rdy run` is wired (M1-057), this is the list. M1-057 moves it
-/// into `rdy_cli` and points this function there, so the docs and the binary read one registry.
+/// The families of this build: the list `rdy run` plans against (`rdy_cli::registry`, ADR 0026 decision
+/// 5), so the docs and the binary read one registry.
 pub fn registry() -> Result<Registry> {
-    let mut registry = Registry::new();
-    registry
-        .register(rdy_checks_host::HostFamily)
-        .map_err(|err| anyhow!("cannot build the check registry: {err}"))?;
-    Ok(registry)
+    rdy_cli::registry::registry().map_err(|err| anyhow!("cannot build the check registry: {err}"))
 }
 
 /// Every registered check, families in registration order and checks in catalog order.

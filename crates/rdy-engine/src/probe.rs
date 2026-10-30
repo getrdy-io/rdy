@@ -734,6 +734,46 @@ impl ProbeHub {
         accepted
     }
 
+    /// Adds the value of every environment variable in `names` whose name looks like a secret
+    /// ([`is_secret_name`]) and that is set to a value worth registering, to the known-secret set.
+    ///
+    /// `names` are the variables the registered checks declare in `CheckInfo::env`. The run calls this
+    /// before its first log event and before any check starts, so a value is in the set before any
+    /// string that could hold it exists (ADR 0015 decision 3, M1-057). It reads the backend directly and
+    /// writes no action-log entry: the log would otherwise hold entries before the proxy is set
+    /// ([`ProbeHub::set_proxy`] refuses once it has any), and the reads belong to the run, not to a
+    /// check. `Probe::env` still registers the value when a check reads it, which changes nothing here.
+    ///
+    /// Returns the names whose value the set refused (too short, too long or no room), each once, in
+    /// the order given. Never a value. The refusal is logged and counted as
+    /// [`ProbeHub::add_known_secret`] does, and the caller decides whether it can go on: `rdy run` exits
+    /// 70. A name that is not a secret name, an unset variable and a plain word register nothing and are
+    /// not refusals.
+    pub fn add_declared_env_secrets<'a>(
+        &self,
+        names: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<String> {
+        let mut refused: Vec<String> = Vec::new();
+        for name in names {
+            if name.is_empty() || name.contains(['=', '\0']) || !is_secret_name(name) {
+                continue;
+            }
+            if let Some(value) = self.backend.env(name)
+                && worth_registering(&value)
+                && !self.add_known_secret(&value)
+                && !refused.iter().any(|seen| seen == name)
+            {
+                refused.push(name.to_owned());
+            }
+        }
+        refused
+    }
+
+    /// The redactor every string of this hub's log passes.
+    pub(crate) fn redactor(&self) -> &Redactor {
+        self.log.redactor()
+    }
+
     /// Sets the proxy the run's checks reach through `Probe::tcp` with `Route::ViaProxy`, once.
     ///
     /// The password is added to the run-scoped known-secret set first, as written, percent-decoded and

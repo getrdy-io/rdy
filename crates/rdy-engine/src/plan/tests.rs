@@ -633,6 +633,54 @@ fn a_family_that_builds_the_wrong_check_fails_closed_with_a_fixed_message() {
     assert!(fix.contains("bug"), "{fix}");
 }
 
+#[test]
+fn an_id_a_family_lists_as_not_built_is_skipped_and_never_built() {
+    use crate::check::CheckInfo;
+    use crate::family::tests::{Fake, HOST_CPU, HOST_MEMORY};
+    static LIST: [&CheckInfo; 2] = [&HOST_CPU, &HOST_MEMORY];
+    static BUILT: AtomicUsize = AtomicUsize::new(0);
+    struct Stubby;
+    impl crate::family::Family for Stubby {
+        fn name(&self) -> &'static str {
+            "host"
+        }
+        fn checks(&self) -> &'static [&'static CheckInfo] {
+            &LIST
+        }
+        fn not_built(&self) -> &'static [&'static str] {
+            &["host.memory"]
+        }
+        fn build(
+            &self,
+            _: &CheckSpec,
+            _: rdy_spec::check::CheckParams,
+            _: &Spec,
+        ) -> Result<crate::family::Built, crate::family::BuildError> {
+            BUILT.fetch_add(1, Ordering::SeqCst);
+            Ok(crate::family::Built::new(Box::new(Fake(&HOST_CPU))))
+        }
+    }
+    let mut registry = Registry::new();
+    registry.register(Stubby).expect("registers");
+    let plan = plan(
+        &registry,
+        vec![
+            entry(json!({"id": "host.cpu", "min": 4})),
+            entry(json!({"id": "host.memory", "min": "1Gi"})),
+        ],
+        Os::Linux,
+    );
+    assert!(runs(&plan, "host.cpu"));
+    let s = skip(&plan, "host.memory");
+    assert_eq!(s.kind, SkipKind::NotInBuild);
+    assert_eq!(
+        s.message,
+        "Not run. This version of rdy does not have the check host.memory yet."
+    );
+    assert_eq!(s.fix.as_deref(), Some(NEWER_RDY));
+    assert_eq!(BUILT.load(Ordering::SeqCst), 1, "only host.cpu is built");
+}
+
 fn egress(endpoint: &str) -> CheckSpec {
     entry(json!({"id": "net.egress", "endpoints": [endpoint]}))
 }

@@ -14,7 +14,7 @@
 //! | 2 | The `os` list is empty | `unsupported_spec` |
 //! | 3 | The id is on the reserved list and this build lacks it | `not_in_build` |
 //! | 4 | The id is not reserved | `unknown_check` |
-//! | 5 | A known id that no registered family builds | `not_in_build` |
+//! | 5 | A known id that no registered family builds, or that its family lists in [`Family::not_built`] | `not_in_build` |
 //! | 6 | A known id with a field or value this rdy cannot read | `unsupported_spec` |
 //! | 7 | The family refuses to build it | `unsupported_spec` |
 //! | 8 | [`CheckInfo::os`](crate::check::CheckInfo::os) is `NotYet` here | `not_yet_on_os` |
@@ -29,8 +29,8 @@
 //!
 //! The reserved-id list is `rdy_spec::reserved`.
 //!
-//! The words here follow 01 section 5.2. M1-057 reconciles them with `SkipWhy` in `rdy-cli`, which also
-//! adds the did-you-mean hint.
+//! The words here follow 01 section 5.2. `SkipWhy` in `rdy-cli` holds a second copy, which also adds the
+//! did-you-mean hint. The run prints these words, and reconciling the two is not done yet.
 
 use rdy_spec::check::{CheckParams, UnsupportedReason};
 use rdy_spec::reserved::{RESERVED_IDS, UnknownKind};
@@ -38,6 +38,8 @@ use rdy_spec::result::{CheckResult, FixSource, Severity, SkipKind};
 use rdy_spec::spec::{CheckSpec, Lenient, OsFamily, Spec};
 
 use crate::check::Os;
+#[cfg(doc)]
+use crate::family::Family;
 use crate::family::{Built, HostSet, Registry};
 use crate::outcome::os_name;
 
@@ -156,6 +158,12 @@ impl RunPlan {
         &self.entries
     }
 
+    /// Gives up the entries, in spec order. The engine takes the built checks out of them.
+    #[must_use]
+    pub fn into_entries(self) -> Vec<PlanEntry> {
+        self.entries
+    }
+
     /// The entries that run.
     pub fn runnable(&self) -> impl Iterator<Item = &PlanEntry> {
         self.entries
@@ -261,6 +269,10 @@ impl Registry {
         let Some((family, info)) = self.check(&id) else {
             return Err(not_in_build(self, &id));
         };
+        // The family lists the id but has no code for it yet (a stub). Same rule and words as above.
+        if family.not_built().contains(&id.as_str()) {
+            return Err(not_in_build(self, &id));
+        }
         // Rule 6.
         if let CheckParams::Unsupported { reason, .. } = &params {
             return Err(unsupported(&id, reason, &version));

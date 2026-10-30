@@ -101,10 +101,10 @@ fn a_usage_error_without_json_prints_nothing_on_stdout() {
 #[test]
 fn a_command_that_is_not_built_yet_prints_an_internal_error_object() {
     let v = error_output_validator();
-    let out = rdy(&["run", "spec.yaml", "--json"]);
+    let out = rdy(&["verify", "spec.yaml", "--json"]);
     assert_eq!(out.status.code(), Some(70));
     let doc = parse(&out.stdout);
-    assert_valid(&v, &doc, "rdy run --json");
+    assert_valid(&v, &doc, "rdy verify --json");
     assert_eq!(doc["error"]["code"], "internal");
     assert!(
         doc["error"]["message"]

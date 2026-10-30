@@ -981,6 +981,20 @@ impl Engine {
     pub async fn run(&self, spec: &LoadedSpec, out: &OutputDir, opts: RunOptions)
         -> Result<RedactedReport, EngineError>;
 }
+// As built in M1-057 (`rdy_engine::engine`, feature `runtime`), the engine does the middle of the run and the
+// CLI keeps the edges, because the CLI alone knows the facts of the run (producer, host, identity from the
+// privilege snapshot, signature) and owns the folder and the streams:
+//   Engine::new(registry: Registry, hub: ProbeHub)       // the hub is built from the run's redactor first
+//   Engine::plan(&self, spec: &LoadedSpec, os: Os, rdy_version: &str) -> RunPlan
+//   Engine::execute(&self, spec: &LoadedSpec, plan: RunPlan, privilege: &Privilege, opts: &RunOptions) -> Executed
+//   Executed { results: Vec<CheckResult> /* redacted, spec order */, capabilities, log: ActionLogOutput, counts: RuleCounts }
+//   RunOptions { jobs, deadline, network, spec_arg /* fills <spec> in the root fix */, origin }
+// The CLI builds the Report from `results` and its own facts, then calls `redact_report_counted(report,
+// counts)` and the writers. `Family::not_built(&self) -> &'static [&'static str]` (default empty) lists the
+// ids of a family that are stubs: the planner skips each as `not_in_build`, so `HostFamily` is registered
+// while it still has stubs. `ProbeHub::add_declared_env_secrets(names)` registers the values of the secret-named
+// variables the checks declare, before the first log event, and returns the names the set refused.
+// Not built here: cancel and progress (M1-058, M1-086), the proxy (M1-097), the hosts of a check (M1-095).
 
 // probe
 impl Probe {
