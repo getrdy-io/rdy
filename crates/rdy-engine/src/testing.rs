@@ -18,7 +18,8 @@
 //! not answer the check, runs the check against it and returns a [`FixtureRun`]. Then
 //! [`FixtureRun::assert_within_manifest`] proves the check stayed inside its declaration.
 //! `FakeCheck` (feature `runtime`) is a scripted check for scheduler tests, and [`normalize`] scrubs a report so two runs
-//! of one environment compare equal.
+//! of one environment compare equal. [`golden::assert_golden`] compares output with a golden file and writes it
+//! under `UPDATE_GOLDENS=1`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,6 +32,7 @@ pub use crate::probe::replay::{
 #[cfg(feature = "runtime")]
 mod fake;
 mod fixture_run;
+pub mod golden;
 mod normalize;
 #[cfg(test)]
 mod tests;
