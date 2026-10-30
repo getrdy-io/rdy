@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rdy_spec::LoadedSpec;
-use rdy_spec::result::{Capability, CheckResult};
+use rdy_spec::result::{Capability, CheckResult, Severity, Status};
 use rdy_spec::spec::{CheckSpec, Lenient};
 
 use crate::check::{CheckContext, CheckInfo, Finding, Need, Os};
@@ -56,7 +56,8 @@ pub struct RunOptions {
     /// Whether sockets are allowed. With `false`, the `network` need is not met.
     pub network: bool,
     /// The spec as the user typed it, quoted for a shell and safe to print. It replaces `<spec>` in the
-    /// fix of a check that needs root.
+    /// fix of a check that needs root. That fix is in the report, so the typed path stays in a report
+    /// that is uploaded or shared. A home folder name in it is not redacted (04, what stays).
     pub spec_arg: String,
     /// The instant the deadline is counted from. `None` counts from the start of the run.
     pub origin: Option<std::time::Instant>,
@@ -174,11 +175,17 @@ impl Engine {
                 slots.push(Slot::Skipped(Box::new(result)));
                 continue;
             }
-            let PlanAction::Run(built) = entry.action else {
-                continue;
-            };
-            let Some(spec_entry) = spec.spec().checks.get(entry.index) else {
-                continue;
+            // A skip was handled above, and the plan was made from this spec, so both of these hold. If
+            // one did not, the entry still gets a result that counts as not run: an entry is never
+            // dropped, because a dropped required check could turn the verdict to READY.
+            let spec_entry = spec.spec().checks.get(entry.index);
+            let (built, spec_entry) = match (entry.action, spec_entry) {
+                (PlanAction::Run(built), Some(spec_entry)) => (built, spec_entry),
+                _ => {
+                    let template = identity(&entry.key, &entry.id, &entry.family, &entry.severity);
+                    slots.push(Slot::Skipped(Box::new(unfinished_result(&template))));
+                    continue;
+                }
             };
             let info = built.check.info();
             let ctx = CheckContext::new(entry.key.clone(), os, available.iter().cloned());
@@ -186,13 +193,14 @@ impl Engine {
             if let Some(timeout) = spec_timeout(spec_entry) {
                 run = run.with_timeout(timeout);
             }
-            slots.push(Slot::Ran(items.len()));
-            planned.push(run);
-            items.push(Item {
+            let item = Item {
                 info,
                 spec_entry,
                 ctx,
-            });
+            };
+            slots.push(Slot::Ran(Box::new(item.template())));
+            planned.push(run);
+            items.push(item);
         }
 
         let mut scheduler = Scheduler::new(options.jobs, os, available)
@@ -203,11 +211,16 @@ impl Engine {
         }
         let ran = scheduler.run(planned).await;
 
+        // One result per item, in order. A result the scheduler did not hand back is "not finished", never
+        // a missing entry.
+        let mut ran = ran.into_iter();
         let mapped: Vec<CheckResult> = items
             .iter()
-            .zip(ran)
-            .map(|(item, ran)| {
+            .map(|item| {
                 let template = item.template();
+                let Some(ran) = ran.next() else {
+                    return unfinished_result(&template);
+                };
                 match ran.end {
                     End::Done(outcome) => map_outcome(
                         item.info,
@@ -227,24 +240,24 @@ impl Engine {
 
         let redactor = self.hub.redactor();
         let mut counts = RuleCounts::default();
+        let mut mapped = mapped.into_iter();
         let results = slots
             .into_iter()
-            .filter_map(|slot| {
+            .map(|slot| {
                 let mut result = match slot {
                     Slot::Skipped(result) => *result,
-                    // `slots`, `items` and `mapped` are built together, so a miss cannot happen. If it
-                    // did, the check would count as not run, never as passed.
-                    Slot::Ran(at) => match mapped.get(at) {
-                        Some(result) => result.clone(),
-                        None => unfinished_result(&items.get(at)?.template()),
-                    },
+                    // `mapped` has one result per `Ran` slot, in the same order. A miss cannot happen.
+                    // If it did, the check would count as not run, never as passed, and never vanish.
+                    Slot::Ran(template) => mapped
+                        .next()
+                        .unwrap_or_else(|| unfinished_result(&template)),
                 };
                 fill_spec_arg(&mut result, &options.spec_arg);
-                Some(match redactor.redact_check(result.clone(), &mut counts) {
+                match redactor.redact_check(result.clone(), &mut counts) {
                     Ok(redacted) => (*redacted).clone(),
                     // The result no longer read as a result. Keep none of its text.
                     Err(_) => unfinished_result(&result),
-                })
+                }
             })
             .collect();
 
@@ -263,8 +276,16 @@ impl Engine {
 enum Slot {
     /// The plan skipped it.
     Skipped(Box<CheckResult>),
-    /// The scheduler ran it, at this position of its list.
-    Ran(usize),
+    /// The scheduler ran it. The next result of the run is this entry's. The result here holds only its
+    /// identity, for the "not finished" result if that one is ever missing.
+    Ran(Box<CheckResult>),
+}
+
+/// A result that holds only the identity of one spec entry (see [`crate::outcome`]).
+fn identity(key: &str, id: &str, family: &str, severity: &Severity) -> CheckResult {
+    let mut result = CheckResult::new(id, family, severity.clone(), Status::Error);
+    result.key = key.to_owned();
+    result
 }
 
 /// What the engine keeps of one scheduled check, to map its end.

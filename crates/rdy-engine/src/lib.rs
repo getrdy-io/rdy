@@ -14,7 +14,7 @@
 //! - [`probe`]: the facade a check reads the machine through, with the action log and the read
 //!   policy. `live_backend` (feature `runtime`) reads real files; the replay backend is in `testing`
 //!   behind the `testing` feature.
-//! - `engine` (feature `runtime`): [`engine::Engine`] plans a verified spec, probes the needs, runs the checks
+//! - `engine` (feature `runtime`): `engine::Engine` plans a verified spec, probes the needs, runs the checks
 //!   and returns their redacted results (M1-057).
 //! - `sched` (feature `runtime`, on by default): runs checks with a concurrency limit, a timeout each
 //!   and panic isolation.

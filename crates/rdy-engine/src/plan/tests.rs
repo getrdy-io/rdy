@@ -129,7 +129,9 @@ fn a_typo_id_is_unknown_check_and_not_a_parse_error() {
     );
     assert_eq!(
         typo.fix.as_deref(),
-        Some("Tell the vendor. The spec may have a typo, or it may need a newer rdy than 0.1.0.")
+        Some(
+            "Tell the vendor. The spec may have a typo (did you mean 'host.memory'?), or it may need a newer rdy than 0.1.0."
+        )
     );
 
     let nobody = skip(&plan, "upload.now");
@@ -137,6 +139,53 @@ fn a_typo_id_is_unknown_check_and_not_a_parse_error() {
     assert_eq!(
         nobody.message,
         "Not run. No version of rdy has checks named upload."
+    );
+    // Nothing near: no parenthesis.
+    assert_eq!(
+        nobody.fix.as_deref(),
+        Some("Tell the vendor. The spec may have a typo.")
+    );
+}
+
+#[test]
+fn a_typo_in_an_unreserved_family_gets_a_hint_in_the_short_sentence() {
+    let mut spec = acme();
+    spec.checks.push(entry(json!({"id": "hots.cpu", "min": 1})));
+    let plan = host_only().plan(&spec, Os::Linux, VERSION);
+    let typo = skip(&plan, "hots.cpu");
+    assert_eq!(typo.kind, SkipKind::UnknownCheck);
+    assert_eq!(
+        typo.message,
+        "Not run. No version of rdy has checks named hots."
+    );
+    assert_eq!(
+        typo.fix.as_deref(),
+        Some("Tell the vendor. The spec may have a typo (did you mean 'host.cpu'?).")
+    );
+}
+
+#[test]
+fn a_mistyped_field_of_a_known_check_gets_the_near_field_in_its_fix() {
+    let mut spec = acme();
+    spec.checks
+        .push(entry(json!({"id": "host.cpu", "name": "typo", "mn": 1})));
+    spec.checks.push(entry(
+        json!({"id": "host.memory", "name": "far", "zzzzzz": 1}),
+    ));
+    let plan = host_only().plan(&spec, Os::Linux, VERSION);
+    let near = skip(&plan, "host.cpu/typo");
+    assert_eq!(near.kind, SkipKind::UnsupportedSpec);
+    assert_eq!(
+        near.fix.as_deref(),
+        Some(
+            "Tell the vendor. The spec may have a typo (did you mean 'min'?), or it may need a newer rdy than 0.1.0."
+        )
+    );
+    // A field with nothing near it: no hint.
+    let far = skip(&plan, "host.memory/far");
+    assert_eq!(
+        far.fix.as_deref(),
+        Some("Tell the vendor. The spec may have a typo, or it may need a newer rdy than 0.1.0.")
     );
 }
 

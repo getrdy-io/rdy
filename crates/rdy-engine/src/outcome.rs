@@ -49,8 +49,7 @@ pub use not_run::{
 /// Stands for the spec file name in the root fix. The text is 01 section 5.2 word for word, but the
 /// engine does not know the file name as typed. `Engine::execute` (feature `runtime`) replaces this with the
 /// shell-quoted spec argument the CLI gives it (`RunOptions::spec_arg`, M1-057). `SkipWhy` in `rdy-cli`
-/// still holds a second copy of the skip words, with the did-you-mean hint. Reconciling the two is not
-/// done yet.
+/// holds a second copy of the skip words, and a test there keeps the two equal for the typo cases.
 pub const SPEC_PLACEHOLDER: &str = "<spec>";
 
 /// Text for a result whose check gave no advice of its own and the spec gave none either.

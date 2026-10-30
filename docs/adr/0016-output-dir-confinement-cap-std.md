@@ -112,7 +112,7 @@ target name. Nothing else here changes a decision.
   to the Windows report that says this and tells the user to keep the default folder. The note stays
   until SEC-58 (M2-085) and the `rdy-winacl` crate (M2-105). **As built (M1-057):** the Report has no
   top-level `notes` field in `rdy/v1`, so the note is a `note:` line on stderr, printed on Windows when
-  `--out-dir` was given. The default folder prints none. Refusing every Windows run for lack of an
+  `--out-dir` was given. The default folder prints none. The macOS residual (an inheritable access rule on the parent applies before the mode bits) is a `note:` line on stderr after every written report on macOS. Refusing every Windows run for lack of an
   ACL check was considered and not taken: it would remove Windows reports from M1, and the reparse
   and final path checks close the redirect attack that this ticket is about.
 - **Other targets.** A target with neither Unix modes nor these checks refuses every folder.

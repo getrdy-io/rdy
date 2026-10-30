@@ -224,6 +224,35 @@ async fn a_block_with_no_fix_anywhere_shows_the_check_remediation() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_entry_with_no_spec_entry_is_never_dropped_and_never_reads_as_ready() {
+    // A plan made from a longer spec, run against a one-entry spec: every entry past the first has no
+    // spec entry to run from. Each still gets a result, and a required one cannot make the run READY.
+    let engine = engine(Replay::new());
+    let plan = engine.plan(&loaded(SPEC), Os::Linux, "0.1.0");
+    let entries = plan.entries().len();
+    let short = loaded(
+        "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: host.cpu\n    min: 1\n",
+    );
+    let done = engine
+        .execute(&short, plan, &privilege(false), &RunOptions::new())
+        .await;
+    assert_eq!(done.results.len(), entries);
+    let lost = find(&done, "host.disk");
+    assert_eq!(lost.status, Status::Error);
+    assert_eq!(lost.error_kind, Some(ErrorKind::CheckFailed));
+    assert!(
+        lost.message.starts_with("Not finished."),
+        "{}",
+        lost.message
+    );
+    assert_eq!(lost.bucket, Bucket::RequiredNotRun);
+    assert_eq!(
+        rdy_spec::result::verdict(&done.results).verdict,
+        rdy_spec::result::Verdict::NotReady
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_root_fix_names_the_spec_as_the_user_typed_it() {
     let mut options = RunOptions::new();
     options.spec_arg = "'my specs/a.yaml'".to_owned();
@@ -309,8 +338,28 @@ fn declared_secret_env_values_join_the_known_secrets_before_any_check() {
             .redact_str("home /home/synthetic-user")
             .contains("/home/synthetic-user")
     );
-    // Nothing was written to the action log: a proxy can still be set.
-    assert!(hub.action_log().actions.is_empty());
+    // One run-level entry names the declared secret-named variable and never its value. `HOME` is not
+    // a secret name, so it is not listed.
+    let actions = hub.action_log().actions;
+    assert_eq!(actions.len(), 1, "{actions:?}");
+    let entry = actions.first().expect("one entry");
+    assert_eq!(entry.check, None);
+    assert_eq!(entry.kind, rdy_spec::result::ActionKind::Env);
+    assert_eq!(entry.outcome, rdy_spec::result::ActionOutcome::Ok);
+    assert_eq!(entry.fields.get("name"), Some(&"API_TOKEN".into()));
+    assert!(!format!("{actions:?}").contains(CANARY));
+    // It is a set-up entry: a proxy can still be set after it.
+    hub.set_proxy_text("http://proxy.acme.test:3128")
+        .expect("the entry does not block the proxy");
+}
+
+#[test]
+fn a_probe_entry_still_blocks_the_proxy_after_the_set_up_entry() {
+    let replay = Replay::new().env("API_TOKEN", CANARY);
+    let hub = ProbeHub::new(Arc::new(replay), Redactor::new(TagKey::fixed([7; 32])));
+    assert!(hub.add_declared_env_secrets(["API_TOKEN"]).is_empty());
+    drop(hub.run_probe().run_env("API_TOKEN"));
+    assert!(hub.set_proxy_text("http://proxy.acme.test:3128").is_err());
 }
 
 #[test]

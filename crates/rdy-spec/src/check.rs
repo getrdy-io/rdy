@@ -228,6 +228,16 @@ macro_rules! known_checks {
                 _ => None,
             }
         }
+
+        /// The keys the parameter struct of `id` accepts, or `None` when no check in this build has
+        /// that id. For did-you-mean advice in `rdy-engine`'s run plan, the same list lint uses.
+        ///
+        /// Not part of the stable API.
+        #[doc(hidden)]
+        #[must_use]
+        pub fn known_fields(id: &str) -> Option<&'static [&'static str]> {
+            fields_of(id)
+        }
     };
 }
 

@@ -5,8 +5,10 @@
 //!
 //! 1. Read the spec file and, when there is one, its `.minisig` sidecar. Verify, then parse
 //!    ([`rdy_spec::load`], INV-01). A spec that fails stops here with exit 64 and no folder.
-//! 2. Make the report folder, right after verification and before any check (ADR 0016). `--no-report`
-//!    makes none.
+//! 2. When the spec is unsigned, say so on stderr ([`UNSIGNED_WARNING`], product rule 3). Then make the
+//!    report folder, right after verification and before any check (ADR 0016). `--no-report` makes none.
+//!    The run id is made before the folder, so a failure to make it leaves no folder. A failure after the
+//!    folder exists removes it again when it is still empty.
 //! 3. Plan, probe the needs, run the checks, map and redact each result ([`Engine::execute`]).
 //! 4. Build the report from the results and the facts of the run (producer, run, spec, signature,
 //!    host, identity from the privilege snapshot), redact the whole of it and write it.
@@ -19,8 +21,8 @@
 //! 4.1) and the exit code is 70. If even that cannot be written, stdout gets the error object.
 //!
 //! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), Ctrl-C (M1-058),
-//! `--jobs` (M1-059), the kube flags (M1-107), `--key` and the unsigned banner (M1-126) and the terminal
-//! renderer (M1-086).
+//! `--jobs` (M1-059), the kube flags (M1-107), `--key` and the full unsigned banner (M1-126) and the
+//! terminal renderer (M1-086). The one-line [`UNSIGNED_WARNING`] is here until M1-126 replaces it.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -39,7 +41,7 @@ use rdy_engine::summary::{last_line, summary_line};
 use rdy_spec::result::{
     Host, HostOs, HostOsFamily, Producer, Report, Run, RunOptions, Signature, SpecRef,
 };
-use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, TrustStore};
+use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, SignatureState, TrustStore};
 use rdy_spec::{LoadedSpec, load};
 
 use crate::cli::{COMMIT, RunArgs, TARGET};
@@ -51,6 +53,12 @@ use crate::output::{open_report_dir, report_error};
 use crate::signing::files::{FileError, read_public};
 use crate::trust::{self, Layout, Vars};
 use crate::{lint, redaction};
+
+/// Printed on stderr, once, before the report folder is made, when the spec has no signature and the
+/// run goes on because of `--allow-unsigned` (product rule 3, "says so loudly"). It names no flag and no
+/// spec text. M1-126 replaces it with the full banner.
+pub(crate) const UNSIGNED_WARNING: &str =
+    "warning: this spec is not signed. rdy cannot tell who wrote it or if it was changed.";
 
 /// What `rdy run` needs from the entry point: everything built before the spec is read.
 pub(crate) struct RunContext {
@@ -110,6 +118,15 @@ async fn execute(
     let name = args.spec.to_string_lossy().into_owned();
     let loaded = load_spec(args, &name, &privilege)?;
 
+    if matches!(loaded.signature(), SignatureState::Unsigned) {
+        let _ = writeln!(stderr, "{UNSIGNED_WARNING}");
+    }
+
+    // Before the folder: a failure here must not leave one behind.
+    let run_id = match &hooks.run_id {
+        Some(id) => id.clone(),
+        None => uuid_v4()?,
+    };
     let started_at = clock();
     let product = loaded.spec().metadata.product.as_str().to_owned();
     let dir = open_report_dir(args, &product, started_at)?;
@@ -120,10 +137,6 @@ async fn execute(
     options.spec_arg = shell_word(&name);
     options.origin = Some(origin);
 
-    let run_id = match &hooks.run_id {
-        Some(id) => id.clone(),
-        None => uuid_v4()?,
-    };
     let host = host_facts(&hub.run_probe()).await;
     let engine = Engine::new(registry, hub);
     let plan = engine.plan(&loaded, current_os(), env!("CARGO_PKG_VERSION"));
@@ -136,6 +149,7 @@ async fn execute(
     );
     run_options.allow_unsigned = args.allow_unsigned;
     run_options.network = options.network;
+    // Recorded only. The flag does nothing until M1-107 builds the Kubernetes family.
     run_options.kube_context.clone_from(&args.kube_context);
     let run = Run::new(
         run_id,
@@ -157,26 +171,46 @@ async fn execute(
     executed.log.apply(&mut report);
     let counts = executed.counts;
 
-    let redacted = redactor
-        .redact_report_counted(report.clone(), counts.clone())
-        .map_err(|_| CliError::bug())?;
+    let redacted = match redactor.redact_report_counted(report.clone(), counts.clone()) {
+        Ok(redacted) => redacted,
+        Err(_) => {
+            discard_if_empty(dir);
+            return Err(CliError::bug());
+        }
+    };
 
     // Files first, so the "Report written to" line is true when it prints.
     let files = match &dir {
-        Some(dir) => write_files(dir, &loaded, &redacted).map(|()| Some(dir)),
-        None => Ok(None),
+        Some(dir) => write_files(dir, &loaded, &redacted),
+        None => Ok(()),
     };
     match files {
-        Ok(written) => {
+        Ok(()) => {
             if json {
-                write_json(&redacted, stdout).map_err(writer_error)?;
+                print_json(&redacted, stdout).map_err(writer_error)?;
             }
-            print_result(&redacted, written, args, stderr);
+            print_result(&redacted, dir.as_ref(), args, stderr);
             Ok(redacted.exit_code)
         }
-        Err(error) => Ok(fail_after_verdict(
-            &error, report, counts, &redactor, json, stdout, stderr,
-        )),
+        Err(error) => {
+            // A folder with nothing in it is not a report. One with a file in it stays, for the user.
+            discard_if_empty(dir);
+            Ok(fail_after_verdict(
+                &error, report, counts, &redactor, json, stdout, stderr,
+            ))
+        }
+    }
+}
+
+/// Removes the report folder when nothing was written into it. A folder that holds a file stays, and so
+/// does one that cannot be removed: this is a best-effort tidy, and the run's own error is what counts.
+/// The handle is dropped first, because Windows cannot remove a folder that is still open.
+fn discard_if_empty(dir: Option<OutputDir>) {
+    if let Some(dir) = dir {
+        let path = dir.path().to_owned();
+        drop(dir);
+        // `remove_dir` only removes an empty folder, and does not follow a link.
+        let _ = std::fs::remove_dir(path);
     }
 }
 
@@ -198,7 +232,7 @@ fn fail_after_verdict(
     let printed = json
         && incomplete
             .as_ref()
-            .is_some_and(|report| write_json(report, stdout).is_ok());
+            .is_some_and(|report| print_json(report, stdout).is_ok());
     if let Some(report) = &incomplete {
         print_summary(report, stderr);
     }
@@ -272,6 +306,14 @@ fn write_files(
     Ok(())
 }
 
+/// Writes the report as JSON to stdout and flushes it, so a closed or full pipe shows up here and not
+/// at exit. A flush that fails is the same error as a write that fails.
+fn print_json(report: &RedactedReport, stdout: &mut dyn Write) -> Result<(), JsonError> {
+    write_json(report, stdout)?;
+    stdout.flush()?;
+    Ok(())
+}
+
 /// The error for a failed write of the JSON document to stdout.
 fn writer_error(error: JsonError) -> CliError {
     CliError::report_writer(&error).unwrap_or_else(CliError::bug)
@@ -290,14 +332,29 @@ fn print_result(
         let line =
             redaction::redact_text_then(&format!("Report written to {folder}/"), escape_untrusted);
         let _ = writeln!(stderr, "{line}");
-        if cfg!(windows) && args.out_dir.is_some() {
-            let _ = writeln!(
-                stderr,
-                "note: on Windows rdy cannot set who may read the report folder. It keeps the access of the folder it is in. For the most privacy, leave out --out-dir and use the default folder."
-            );
+        if let Some(note) = residual_note(current_os(), args.out_dir.is_some()) {
+            let _ = writeln!(stderr, "{note}");
         }
     }
     let _ = writeln!(stderr, "{}", last_line(&report.checks));
+}
+
+/// The access-rule residual of ADR 0016 decision 7, for the OS that has one. The `Report` has no `notes`
+/// field in `rdy/v1`, so it is a line on stderr.
+///
+/// Windows keeps the access list of the folder it is in, which matters most for an `--out-dir` at a drive
+/// root. macOS applies an inheritable access rule of the parent folder before the mode bits, whichever
+/// parent it is.
+fn residual_note(os: Os, out_dir_given: bool) -> Option<&'static str> {
+    match os {
+        Os::Windows if out_dir_given => Some(
+            "note: on Windows rdy cannot set who may read the report folder. It keeps the access of the folder it is in. For the most privacy, leave out --out-dir and use the default folder.",
+        ),
+        Os::Macos => Some(
+            "note: on macOS an access rule that the parent folder passes down can let others read the report, whatever the file mode says. Keep the report in a folder only you can read.",
+        ),
+        _ => None,
+    }
 }
 
 fn print_summary(report: &RedactedReport, stderr: &mut dyn Write) {

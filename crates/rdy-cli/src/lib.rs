@@ -67,7 +67,7 @@ use rdy_engine::privilege::Privilege;
 use rdy_engine::probe::{Backend, ProbeHub};
 use rdy_spec::result::{ExitCode, VersionInfo};
 
-pub use hooks::RunHooks;
+pub use hooks::{FamiliesFn, RunHooks};
 
 /// Exit code for success.
 pub const EXIT_OK: u8 = ExitCode::Ready.code();
@@ -111,6 +111,12 @@ pub fn command() -> clap::Command {
 /// or writes `trust.yaml` ([`startup::gate_then`]). Help, version and usage errors read nothing, so
 /// they come before the gate.
 ///
+/// One read comes before the snapshot, so before the gate: `rdy run` reads the value of every
+/// secret-named environment variable that the check families declare (`CheckInfo::env`). The value has
+/// to be in the known-secret set before the first log event and before any check starts (ADR 0015
+/// decision 3), and the snapshot itself logs. The reads are recorded as one run-level `env` entry that
+/// lists the declared names, never a value. No spec, key or trust file is read before the gate.
+///
 /// Process-global work stays out of this function: the redacting log layer, the panic hook, the umask
 /// and the process exit are in [`entry::main_code`] (ADR 0011 decision 4).
 #[doc(hidden)]
@@ -125,14 +131,16 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let code = run_code(args, backend, hooks, registry::registry, stdout, stderr).await;
+    let families = hooks.families.unwrap_or(registry::registry);
+    let code = run_code(args, backend, hooks, families, stdout, stderr).await;
     exit_code_of(code)
 }
 
 /// The exit code as the number the commands return. See [`run`].
 ///
-/// `make_registry` builds the families of the run. [`run`] passes [`registry::registry`]. A test passes
-/// its own, to see the order of the start-up steps with a check that declares a secret variable.
+/// `make_registry` builds the families of the run. [`run`] passes [`registry::registry`], or the
+/// families a test put in [`RunHooks::families`], to see the order of the start-up steps with a check
+/// that declares a secret variable.
 async fn run_code<I, T>(
     args: I,
     backend: Arc<dyn Backend>,

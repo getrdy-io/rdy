@@ -2,7 +2,8 @@
 //! start-up steps, and the mapping of the report writer's errors.
 
 use std::io::{self, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckInfo, CheckMeta, CheckOutcome, Finding, Need, OsSupport,
@@ -20,7 +21,6 @@ use rdy_spec::result::{
 };
 use rdy_spec::spec::{CheckSpec, Spec};
 use serde_json::Value;
-use tracing_subscriber::layer::SubscriberExt;
 
 use crate::error::ReportStep;
 use crate::error::{CliError, ErrorCode};
@@ -156,52 +156,27 @@ fn call(
     )
 }
 
-/// Records, at each log event, whether the canary was already hidden by the process redactor.
-#[derive(Clone, Default)]
-struct HiddenAtEvent(Arc<Mutex<Vec<bool>>>);
-
-impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for HiddenAtEvent {
-    fn on_event(
-        &self,
-        _event: &tracing::Event<'_>,
-        _ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
-        let hidden = !crate::redaction::redact_text(CANARY).contains(CANARY);
-        if let Ok(mut seen) = self.0.lock() {
-            seen.push(hidden);
-        }
-    }
-}
+// The proof that the secret is in the set before the first log event is in
+// tests/run_secret_order.rs: it needs a global subscriber, which sees the threads of `spawn_blocking`.
 
 #[test]
-fn a_declared_secret_is_in_the_known_set_before_the_first_log_event_and_the_first_check() {
+fn a_declared_secret_is_in_the_known_set_before_the_first_check() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let spec = dir.path().join("spec.yaml");
     std::fs::write(&spec, SPEC).expect("write the spec");
     let spec = spec.to_string_lossy().into_owned();
 
-    let events = HiddenAtEvent::default();
-    let subscriber = tracing_subscriber::registry().with(events.clone());
-    let guard = tracing::subscriber::set_default(subscriber);
-    let (code, stdout, _) = call(
+    let (code, stdout, stderr) = call(
         unprivileged().env("API_TOKEN", CANARY),
         &["run", &spec, "--allow-unsigned", "--json", "--no-report"],
         leaky_registry,
     );
-    drop(guard);
-
-    // The log was live, and the secret was hidden at every event of the run, the first one included.
-    let seen = events.0.lock().expect("the log of events").clone();
-    assert!(
-        !seen.is_empty(),
-        "no log event was seen, so this proves nothing"
-    );
-    assert!(seen.iter().all(|hidden| *hidden), "{seen:?}");
 
     // The check never read the variable and put the value in its message. The value is not in the
     // report, so it was in the set before the check ran.
     assert_eq!(code, 0, "{stdout}");
     assert!(!stdout.contains(CANARY), "{stdout}");
+    assert!(!stderr.contains(CANARY), "{stderr}");
     let report: Value = serde_json::from_str(&stdout).expect("the report is JSON");
     let message = report["checks"][0]["message"].as_str().unwrap_or_default();
     assert!(
@@ -248,8 +223,140 @@ fn the_root_fix_names_the_spec_file_as_the_user_typed_it_quoted_for_a_shell() {
     let check = &report["checks"][0];
     assert_eq!(check["skip_kind"], "missing_need");
     let fix = check["fix"].as_str().unwrap_or_default();
-    assert_eq!(fix, format!("Rerun as root: sudo rdy run '{typed}'"));
+    if cfg!(windows) {
+        // Windows has no `sudo`: the fix names no spec file at all.
+        assert!(fix.starts_with("Run rdy from an elevated prompt"), "{fix}");
+    } else {
+        assert_eq!(fix, format!("Rerun as root: sudo rdy run '{typed}'"));
+    }
     assert!(!fix.contains("<spec>"));
+}
+
+/// Counts how many times it ran.
+static RAN: AtomicUsize = AtomicUsize::new(0);
+static COUNTED: CheckInfo = info(&[], &[]);
+static COUNTED_LIST: [&CheckInfo; 1] = [&COUNTED];
+
+struct Counted;
+
+impl Check for Counted {
+    fn info(&self) -> &'static CheckInfo {
+        &COUNTED
+    }
+
+    fn run<'a>(&'a self, _ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome> {
+        Box::pin(async {
+            RAN.fetch_add(1, Ordering::SeqCst);
+            Ok(Finding::pass("ran"))
+        })
+    }
+}
+
+struct CountedFamily;
+
+impl Family for CountedFamily {
+    fn name(&self) -> &'static str {
+        "host"
+    }
+
+    fn checks(&self) -> &'static [&'static CheckInfo] {
+        &COUNTED_LIST
+    }
+
+    fn build(&self, _: &CheckSpec, _: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        Ok(Built::new(Box::new(Counted)))
+    }
+}
+
+fn counted_registry() -> Result<Registry, RegistryError> {
+    let mut registry = Registry::new();
+    registry.register(CountedFamily)?;
+    Ok(registry)
+}
+
+#[test]
+fn a_report_folder_that_cannot_be_made_runs_no_check() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let spec = dir.path().join("spec.yaml");
+    std::fs::write(&spec, SPEC).expect("write the spec");
+    let spec = spec.to_string_lossy().into_owned();
+    let missing = dir.path().join("no-such-folder");
+    let before = RAN.load(Ordering::SeqCst);
+    let (code, _, stderr) = call(
+        unprivileged(),
+        &[
+            "run",
+            &spec,
+            "--allow-unsigned",
+            "--out-dir",
+            &missing.to_string_lossy(),
+        ],
+        counted_registry,
+    );
+    assert_eq!(code, 70, "{stderr}");
+    assert_eq!(RAN.load(Ordering::SeqCst), before, "a check ran");
+
+    // Control: with a folder that exists the same check does run.
+    let (code, _, stderr) = call(
+        unprivileged(),
+        &["run", &spec, "--allow-unsigned", "--no-report"],
+        counted_registry,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(RAN.load(Ordering::SeqCst), before + 1);
+}
+
+// --- what the run leaves behind ---
+
+#[test]
+fn an_empty_report_folder_is_removed_and_one_with_a_file_stays() {
+    let parent = tempfile::tempdir().expect("a temp dir");
+    let made = |ts: &str| {
+        rdy_engine::output::OutputDir::create_new(parent.path(), "acme", ts).expect("a folder")
+    };
+
+    let empty = made("20270309T101502Z");
+    let empty_path = empty.path().to_owned();
+    super::discard_if_empty(Some(empty));
+    assert!(!empty_path.exists(), "the empty folder stayed");
+
+    let full = made("20270309T101503Z");
+    let full_path = full.path().to_owned();
+    let redacted = redactor().redact_report(small_report()).expect("redacts");
+    full.write_json(&redacted).expect("a file");
+    super::discard_if_empty(Some(full));
+    assert!(full_path.exists(), "the folder with a file went");
+    assert!(std::fs::read_dir(&full_path).expect("a folder").count() > 0);
+
+    // No folder (`--no-report`) is fine.
+    super::discard_if_empty(None);
+}
+
+#[test]
+fn the_access_rule_residual_note_is_for_windows_with_out_dir_and_for_every_macos_report() {
+    use rdy_engine::check::Os;
+    assert!(super::residual_note(Os::Windows, true).is_some());
+    assert!(super::residual_note(Os::Windows, false).is_none());
+    assert!(super::residual_note(Os::Macos, false).is_some());
+    assert!(super::residual_note(Os::Macos, true).is_some());
+    assert!(super::residual_note(Os::Linux, true).is_none());
+    for note in [
+        super::residual_note(Os::Windows, true),
+        super::residual_note(Os::Macos, false),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        assert!(note.starts_with("note: "), "{note}");
+        assert!(!note.contains('\u{2014}'), "{note}");
+    }
+}
+
+#[test]
+fn the_unsigned_warning_names_no_flag_and_one_line() {
+    assert!(super::UNSIGNED_WARNING.starts_with("warning: this spec is not signed."));
+    assert!(!super::UNSIGNED_WARNING.contains("--"));
+    assert!(!super::UNSIGNED_WARNING.contains('\n'));
 }
 
 // --- the report writer's errors ---

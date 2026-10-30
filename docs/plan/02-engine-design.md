@@ -1046,7 +1046,7 @@ impl Engine {
 // counts)` and the writers. `Family::not_built(&self) -> &'static [&'static str]` (default empty) lists the
 // ids of a family that are stubs: the planner skips each as `not_in_build`, so `HostFamily` is registered
 // while it still has stubs. `ProbeHub::add_declared_env_secrets(names)` registers the values of the secret-named
-// variables the checks declare, before the first log event, and returns the names the set refused.
+// variables the checks declare, before the first log event, and returns the names the set refused. It records the declared names (never a value) as one run-level `env` entry, a set-up entry that `set_proxy` does not count.
 // Not built here: cancel and progress (M1-058, M1-086), the proxy (M1-097), the hosts of a check (M1-095).
 
 // probe

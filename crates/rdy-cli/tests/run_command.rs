@@ -290,7 +290,8 @@ fn a_spec_that_is_not_there_is_exit_64_and_makes_no_folder() {
 }
 
 #[test]
-fn an_out_dir_that_is_missing_is_exit_70_with_report_write_and_runs_no_check() {
+fn an_out_dir_that_is_missing_is_exit_70_with_report_write() {
+    // That no check runs is proved in src/run_cmd/tests.rs, with a check that counts its runs.
     let ran = call(
         common::unprivileged(),
         pinned(),
@@ -476,4 +477,281 @@ fn the_binary_runs_a_signed_spec_whose_key_the_user_pinned() {
         let doc = parse(&text(refused.stdout.clone()));
         assert_eq!(doc["error"]["code"], "spec_signature_invalid", "{doc}");
     }
+}
+
+// --- the unsigned warning (product rule 3) ---
+
+const UNSIGNED_WARNING: &str =
+    "warning: this spec is not signed. rdy cannot tell who wrote it or if it was changed.";
+
+fn warning_lines(stderr: &str) -> usize {
+    stderr
+        .lines()
+        .filter(|line| *line == UNSIGNED_WARNING)
+        .count()
+}
+
+#[test]
+fn the_binary_warns_once_on_stderr_when_it_runs_an_unsigned_spec() {
+    let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let output = rdy(&[
+        "run",
+        &acme().to_string_lossy(),
+        "--allow-unsigned",
+        "--json",
+        "--out-dir",
+        &out.path().to_string_lossy(),
+    ]);
+    let stderr = text(output.stderr.clone());
+    assert_eq!(warning_lines(&stderr), 1, "{stderr}");
+    // It comes first, above everything else the run prints, and nothing of it is on stdout.
+    assert_eq!(stderr.lines().next(), Some(UNSIGNED_WARNING), "{stderr}");
+    assert!(!text(output.stdout.clone()).contains("not signed"));
+    // The warning names no flag.
+    assert!(!UNSIGNED_WARNING.contains("--"));
+}
+
+#[test]
+fn the_warning_does_not_wait_for_the_report_folder() {
+    // A folder that cannot be made is exit 70, after the warning.
+    let ran = call(
+        common::unprivileged(),
+        pinned(),
+        &[
+            "run",
+            &acme().to_string_lossy(),
+            "--allow-unsigned",
+            "--out-dir",
+            "/no/such/dir",
+        ],
+    );
+    assert_eq!(ran.code, 70, "{}", ran.stderr);
+    assert_eq!(ran.stderr.lines().next(), Some(UNSIGNED_WARNING));
+}
+
+#[test]
+fn a_refused_spec_prints_no_warning() {
+    let output = rdy(&["run", &acme().to_string_lossy(), "--no-report"]);
+    assert_eq!(output.status.code(), Some(64));
+    assert_eq!(warning_lines(&text(output.stderr.clone())), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_signed_spec_prints_no_unsigned_warning() {
+    if rustix::process::geteuid().is_root() {
+        eprintln!("skipped: a root run reads only /etc/rdy/trust.yaml");
+        return;
+    }
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/signed");
+    let home = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let with_home = |args: &[&str]| -> Output {
+        common::quiet(
+            Command::new(env!("CARGO_BIN_EXE_rdy"))
+                .args(args)
+                .env("HOME", home.path())
+                .env_remove("XDG_CONFIG_HOME")
+                .env_remove("RDY_PROGRESS")
+                .env_remove("RUST_LOG")
+                .output()
+                .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
+        )
+    };
+    let pinned = with_home(&[
+        "trust",
+        "add",
+        "acme-platform",
+        "--key",
+        &fixtures.join("acme-platform.pub").to_string_lossy(),
+        "--yes",
+    ]);
+    assert_eq!(pinned.status.code(), Some(0), "{pinned:?}");
+    let spec = fixtures.join("acme-platform.yaml");
+    // With and without the flag: a verified spec is never "not signed".
+    for extra in [&[][..], &["--allow-unsigned"]] {
+        let mut args = vec!["run", "--no-report"];
+        args.extend(extra);
+        let path = spec.to_string_lossy().into_owned();
+        args.push(&path);
+        let ran = with_home(&args);
+        let stderr = text(ran.stderr.clone());
+        assert!(matches!(ran.status.code(), Some(0..=2)), "{stderr}");
+        assert_eq!(warning_lines(&stderr), 0, "{stderr}");
+    }
+}
+
+// --- a sidecar that cannot be used ---
+
+/// A temp folder with a copy of the example spec in it, and the path of the copy.
+fn spec_copy() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let spec = dir.path().join("acme-platform.yaml");
+    std::fs::copy(acme(), &spec).unwrap_or_else(|e| panic!("cannot copy the spec: {e}"));
+    (dir, spec)
+}
+
+fn run_with_sidecar(spec: &Path, out: &Path, extra: &[&str]) -> Ran {
+    let out = out.to_string_lossy().into_owned();
+    let spec = spec.to_string_lossy().into_owned();
+    let mut args = vec!["run", "--allow-unsigned", "--json", "--out-dir", &out];
+    args.extend(extra);
+    args.push(&spec);
+    call(common::unprivileged(), pinned(), &args)
+}
+
+fn assert_refused_with_no_folder(ran: &Ran, out: &Path) {
+    assert_eq!(ran.code, 64, "{}", ran.stderr);
+    let doc = parse(&ran.stdout);
+    assert_eq!(doc["kind"], "Error", "{doc}");
+    assert_ne!(doc["error"]["code"], "spec_unsigned");
+    assert!(report_dirs(out).is_empty(), "a folder was made");
+    // Never run as unsigned: no warning, no report.
+    assert_eq!(warning_lines(&ran.stderr), 0, "{}", ran.stderr);
+}
+
+#[test]
+fn a_sidecar_that_is_a_folder_is_exit_64_and_makes_no_folder() {
+    let (dir, spec) = spec_copy();
+    std::fs::create_dir(dir.path().join("acme-platform.yaml.minisig"))
+        .unwrap_or_else(|e| panic!("cannot make the folder: {e}"));
+    let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let ran = run_with_sidecar(&spec, out.path(), &[]);
+    assert_refused_with_no_folder(&ran, out.path());
+    assert_eq!(parse(&ran.stdout)["error"]["code"], "spec_unreadable");
+}
+
+#[test]
+fn a_sidecar_of_garbage_is_exit_64_and_is_not_read_as_unsigned() {
+    let (dir, spec) = spec_copy();
+    std::fs::write(
+        dir.path().join("acme-platform.yaml.minisig"),
+        b"this is not a signature\n",
+    )
+    .unwrap_or_else(|e| panic!("cannot write: {e}"));
+    let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let ran = run_with_sidecar(&spec, out.path(), &[]);
+    assert_refused_with_no_folder(&ran, out.path());
+    assert_eq!(
+        parse(&ran.stdout)["error"]["code"],
+        "spec_signature_invalid"
+    );
+}
+
+#[test]
+fn a_named_sidecar_that_is_missing_is_exit_64_even_with_the_flag() {
+    let (dir, spec) = spec_copy();
+    let missing = dir.path().join("nothing.minisig");
+    let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let ran = run_with_sidecar(&spec, out.path(), &["--sig", &missing.to_string_lossy()]);
+    assert_refused_with_no_folder(&ran, out.path());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_sidecar_that_cannot_be_read_is_exit_64_and_makes_no_folder() {
+    use std::os::unix::fs::PermissionsExt as _;
+    if rustix::process::geteuid().is_root() {
+        eprintln!("skipped: root reads a mode 000 file");
+        return;
+    }
+    let (dir, spec) = spec_copy();
+    let sidecar = dir.path().join("acme-platform.yaml.minisig");
+    std::fs::write(&sidecar, b"x").unwrap_or_else(|e| panic!("cannot write: {e}"));
+    std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o000))
+        .unwrap_or_else(|e| panic!("cannot chmod: {e}"));
+    let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let ran = run_with_sidecar(&spec, out.path(), &[]);
+    assert_refused_with_no_folder(&ran, out.path());
+    assert_eq!(parse(&ran.stdout)["error"]["code"], "spec_unreadable");
+}
+
+// --- the words of a skipped entry carry the did-you-mean hint ---
+
+/// The `message` and `fix` of the entry `key` in the report of a run of `yaml`.
+fn skip_words(yaml: &str, key: &str) -> (String, String) {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let spec = dir.path().join("typos.yaml");
+    std::fs::write(&spec, yaml).unwrap_or_else(|e| panic!("cannot write: {e}"));
+    let ran = call(
+        common::unprivileged(),
+        pinned(),
+        &[
+            "run",
+            &spec.to_string_lossy(),
+            "--allow-unsigned",
+            "--json",
+            "--no-report",
+        ],
+    );
+    let doc = parse(&ran.stdout);
+    let check = doc["checks"]
+        .as_array()
+        .and_then(|checks| checks.iter().find(|c| c["key"] == key))
+        .unwrap_or_else(|| panic!("no result {key} in {doc} ({})", ran.stderr));
+    (
+        check["message"].as_str().unwrap_or_default().to_owned(),
+        check["fix"].as_str().unwrap_or_default().to_owned(),
+    )
+}
+
+const TYPOS: &str = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: host.memroy\n    min: 1Gi\n  - id: hots.cpu\n    min: 1\n  - id: upload.now\n  - id: host.cpu\n    mn: 1\n";
+
+/// The words of the run for `key` are the words of `SkipWhy` (01 section 5.2), hint included.
+fn assert_words(key: &str, why: &rdy_cli::error::SkipWhy) -> String {
+    let (message, fix) = skip_words(TYPOS, key);
+    let want = why.text();
+    assert_eq!(message, want.message);
+    assert_eq!(Some(&fix), want.fix.as_ref());
+    fix
+}
+
+#[test]
+fn an_unknown_id_and_an_unknown_field_carry_the_did_you_mean_hint_of_skip_why() {
+    use rdy_cli::error::SkipWhy;
+    let version = env!("CARGO_PKG_VERSION").to_owned();
+    let s = |text: &str| text.to_owned();
+
+    let fix = assert_words(
+        "host.memroy",
+        &SkipWhy::UnknownCheck {
+            id: s("host.memroy"),
+            rdy_version: version.clone(),
+            family_reserved: true,
+            did_you_mean: Some(s("host.memory")),
+        },
+    );
+    assert!(fix.contains("(did you mean 'host.memory'?)"), "{fix}");
+
+    assert_words(
+        "hots.cpu",
+        &SkipWhy::UnknownCheck {
+            id: s("hots.cpu"),
+            rdy_version: version.clone(),
+            family_reserved: false,
+            did_you_mean: Some(s("host.cpu")),
+        },
+    );
+
+    // Nothing near: no parenthesis.
+    let fix = assert_words(
+        "upload.now",
+        &SkipWhy::UnknownCheck {
+            id: s("upload.now"),
+            rdy_version: version.clone(),
+            family_reserved: false,
+            did_you_mean: None,
+        },
+    );
+    assert!(!fix.contains("did you mean"), "{fix}");
+
+    let fix = assert_words(
+        "host.cpu",
+        &SkipWhy::UnsupportedField {
+            check: s("host.cpu"),
+            field: s("mn"),
+            rdy_version: version,
+            did_you_mean: Some(s("min")),
+        },
+    );
+    assert!(fix.contains("(did you mean 'min'?)"), "{fix}");
 }

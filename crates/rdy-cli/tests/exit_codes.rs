@@ -158,6 +158,9 @@ fn a_usage_error_never_names_the_trust_flags() {
     }
 }
 
+// `verify` is the command that is not built yet. M1-126 builds it, and then deletes these two tests and
+// `a_command_that_is_not_built_yet_prints_an_internal_error_object` in error_json.rs, or points them at
+// the next command that is still missing.
 #[test]
 fn commands_for_later_tickets_exit_70_with_a_fix_line() {
     let args = &["verify", "spec.yaml"];
