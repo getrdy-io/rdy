@@ -44,6 +44,12 @@ by path).
    servers.
 6. Certificates and keys are made in memory per test. The module writes no file.
 
+**Amendment (M1-092).** Decision 2 said the release tree shows no `tokio-rustls`. That was true until the
+TLS half of the facade landed. From M1-092 the `runtime` feature itself uses `tokio-rustls`, `rustls` (ring
+only) and `webpki-roots`, as 02 and ADR 0014 decision 3 planned, so they are in the `rdy` tree. What stays
+out of it is `loopback`, `testing` and `rcgen`, and the CI guard checks those. The `deny.toml` wrapper for
+`tokio-rustls` is unchanged (`rdy-engine` was already listed) and still keeps it out of check crates.
+
 ## Alternatives considered
 
 - **A `test-support` feature of `rdy-checks-net` (the plan as written).** Rejected: it needs the wall opened

@@ -1,0 +1,1404 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "impersonate",
+          "resource": "serviceaccounts",
+          "namespace": "acme-system",
+          "name": "installer"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-000"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-001"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-002"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-003"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-004"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-005"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-006"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-007"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-008"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-009"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-010"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-011"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-012"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-013"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-014"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-015"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-016"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-017"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-018"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-019"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-020"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-021"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-022"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-023"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-024"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-025"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-026"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-027"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-028"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-029"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-030"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-031"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-032"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-033"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-034"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-035"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-036"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-037"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-038"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-039"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-040"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-041"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-042"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-043"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-044"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-045"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-046"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-047"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-048"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-049"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-050"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-051"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-052"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-053"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-054"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-055"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-056"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-057"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-058"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-059"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-060"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-061"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-062"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-063"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-064"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-065"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-066"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-067"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-068"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-069"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-070"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-071"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-072"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-073"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-074"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-075"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-076"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-077"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-078"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-079"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-080"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-081"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-082"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-083"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-084"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-085"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-086"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-087"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-088"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-089"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-090"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-091"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-092"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-093"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-094"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-095"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-096"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-097"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "configmaps",
+          "namespace": "acme-system",
+          "name": "cfg-098"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    }
+  ]
+}

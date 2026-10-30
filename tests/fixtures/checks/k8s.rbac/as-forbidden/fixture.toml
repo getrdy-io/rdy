@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-as-forbidden"
+summary = "The identity may impersonate the service account, but the first impersonated review is refused with a 403"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

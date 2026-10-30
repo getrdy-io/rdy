@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::client::mock::Harness;
+use crate::client::{ImpersonateAs, ImpersonationError};
 
 /// The time the claims are aged at: two hours after the fixtures' oldest claim was made.
 const NOW: &str = "2026-06-01T12:00:00Z";
@@ -42,6 +43,15 @@ impl Cluster for Fixtured {
 
     fn read_only(&self, probe: &Probe) -> ReadOnlyClient {
         self.harness.client(probe)
+    }
+
+    fn read_only_as(
+        &self,
+        _probe: &Probe,
+        _user: ImpersonateAs,
+    ) -> Result<ReadOnlyClient, ImpersonationError> {
+        // This check never impersonates.
+        Err(ImpersonationError::Conflict)
     }
 }
 

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-two-denied"
+summary = "Two of four items are refused: one plain not allowed, one denied by a webhook authorizer; the namespace exists"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

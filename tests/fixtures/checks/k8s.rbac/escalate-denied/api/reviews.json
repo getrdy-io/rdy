@@ -1,0 +1,81 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "clusterroles",
+          "group": "rbac.authorization.k8s.io"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "clusterrolebindings",
+          "group": "rbac.authorization.k8s.io"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "escalate",
+          "resource": "clusterroles",
+          "group": "rbac.authorization.k8s.io"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": ""
+      }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "bind",
+          "resource": "clusterroles",
+          "group": "rbac.authorization.k8s.io"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": ""
+      }
+    }
+  ],
+  "rules": [
+    {
+      "spec": {
+        "namespace": "acme-system"
+      },
+      "status": {
+        "resourceRules": [
+          {
+            "verbs": [
+              "create"
+            ],
+            "apiGroups": [
+              "rbac.authorization.k8s.io"
+            ],
+            "resources": [
+              "clusterroles",
+              "clusterrolebindings"
+            ]
+          }
+        ],
+        "nonResourceRules": [],
+        "incomplete": false
+      }
+    }
+  ]
+}

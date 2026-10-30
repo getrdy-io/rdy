@@ -1,0 +1,18 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "deployments",
+          "group": "apps",
+          "namespace": "acme-system"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": ""
+      }
+    }
+  ]
+}

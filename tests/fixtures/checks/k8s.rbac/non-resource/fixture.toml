@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-non-resource"
+summary = "Two URLs that are not resources: one allowed, one not"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -45,6 +45,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "tests of the read-only guard on the real client stack: a mock API server and kubeconfig files",
     ),
     (
+        "crates/rdy-checks-k8s/tests/impersonate.rs",
+        "tests of the client module: impersonation on the real client stack against a mock API server",
+    ),
+    (
         "crates/rdy-checks-k8s/tests/rbac_example.rs",
         "reads examples/rbac/rdy-readonly.yaml to compare it with the guard's allowlist (SEC-24)",
     ),
@@ -65,6 +69,10 @@ const ALLOWED: &[(&str, &str)] = &[
     (
         "crates/rdy-engine/src/probe.rs",
         "the one call of exec::table::run, in the probe spawn (ADR 0014, ADR 0028)",
+    ),
+    (
+        "crates/rdy-engine/src/probe/net/tls/record.rs",
+        "the one call of rustls's dangerous() builder, for the recording verifier of the TLS facade (M1-092, SEC-133-2)",
     ),
     (
         "crates/rdy-engine/src/probe/tests.rs",

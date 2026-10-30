@@ -97,7 +97,7 @@ as the `Authorization` header from the token or the exec plugin, the user agent,
 leaves, and the check reports `Error`. A request header other than `accept`, `content-type` and
 `content-length` is refused. `connect()` keeps the raw client private and checks get only the guarded
 client type (`ReadOnlyClient`), so there is no unguarded client to pass. The one header exception is
-`Impersonate-User` with the spec's `as:` value on the two access review POSTs (02 Appendix B rule 8). Inside `rdy-checks-k8s`, only the client module may name a kube client or
+`Impersonate-User` with the spec's `as:` value on the two access review POSTs (02 Appendix B rule 8). A spec `as:` is a service account only and is refused when the kubeconfig user already impersonates, so the server never sees two values (ADR 0038). A kubeconfig that impersonates is named in the run-level `GET /version` entry of the action log (`kubeconfig_impersonates: true`), as well as on the cluster line. Inside `rdy-checks-k8s`, only the client module may name a kube client or
 config type (02 Appendix A), so a check cannot build a second client. The mock API server test from
 ADR 0010 stays as a second line.
 
@@ -119,7 +119,10 @@ ADR 0010 stays as a second line.
 - Windows output files inherit folder ACLs, and macOS honours inheritable ACEs on the parent before mode
   bits. Both are named in the report's notes until SEC-58 (ADR 0016).
 - TLS (ADR 0014): on Linux the facade reads only PEM bundles (`SSL_CERT_FILE`, `SSL_CERT_DIR`, the
-  standard paths), so a proxy CA added only to NSS or a Java keystore is invisible. There is no
+  standard paths), so a proxy CA added only to NSS or a Java keystore is invisible. On macOS and Windows
+  `rustls-native-certs` reads the OS store, but it reads the two variables itself with no rules and no
+  caps, so it is never called while either is set (M1-092). Windows has no file reads in M1, so there a
+  set variable makes the OS store "could not be read" and the operator unsets it. There is no
   revocation check in M1, and the report says so. webpki rejects certificates with no SAN, and SHA-1
   signatures, that some old appliances still issue. `net.tls_intercept` reports "rejected by rustls
   policy" as its own result, and docs explain `SSL_CERT_FILE`.
@@ -299,7 +302,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 | `rlimit` | `Rlimit(resource)` | any probe | Reads one limit of this process. | `Resource` is a closed list of five. | `api`, `resource` |
 | `hostname` | `Hostname` | any probe | A customer host name, which the redactor treats as personal data. | None to check. The answer is raw and is redacted before it is shown. | `api` |
 | `machine_id` | `MachineId` | run-level probes only | The id is stable per host. Anyone who holds it can recognise the host across runs and reports. | A check's probe is refused before the backend. `MachineId` has no `Display`, `Serialize` or getter, and its `Debug` shows nothing. `/etc/machine-id` and `/var/lib/dbus/machine-id` are on the deny list for every other reader; the backend reads them through a guard that admits only those two files (SEC-94-1). | `api` |
-| `system_roots` | `SystemRoots` | any probe | The OS trust roots. Public data, but an unbounded list. | None to check. M1-092 caps the count and the size of each certificate. | `api` |
+| `system_roots` | `SystemRoots` | any probe | The OS trust roots. Public data, but an unbounded list. | None to check. The answer is capped at 1024 certificates of 16 KiB each, by the live reader and again by the probe for every backend (M1-092). Unix reads PEM files through the file rules, so a bundle path is judged on its real path and a link to `/etc/shadow` is refused. The PEM reader reads at most 2048 files of a directory and 8 MiB in all, and keeps only `CERTIFICATE` blocks. Residual: `SSL_CERT_FILE` and `SSL_CERT_DIR` may name any path the denylist does not refuse, not only the trust store paths, so a probe can read the certificates of any such file. macOS and Windows with neither variable set use `rustls-native-certs` (keychains, root store); with either set, macOS reads PEM through the same rules and Windows fails the call with a typed error (verdict `Overridden`, fix: unset the variables), because that crate reads the variables with plain `std::fs`. "Set" means set at all, even empty, which covers every 0.8.x rule. | `api` |
 
 ## Dependency policy
 
@@ -323,6 +326,28 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 
 ### Dependency approvals
 
+- `rustls` 0.23.46, `webpki-roots` 1.0.11 and `rustls-native-certs` 0.8.5 (M1-092, ADR 0009, ADR 0035).
+  Direct dependencies of `rdy-engine` for the probe facade's TLS. Recorded from security-reviewer's review
+  of PR #133 (SEC-133-3). The check crates may depend on none of them (the `NEVER` list of the dependency
+  allowlist test).
+  - `rustls`. Purpose: the TLS client for the handshake probe, on the `ring` provider only (`aws-lc` is
+    banned in `deny.toml` and CI checks the graph). Maintainers: the rustls organisation on GitHub
+    (`rustls/rustls`). `unsafe`: none in the crate (`#![forbid(unsafe_code)]`); `ring` holds the
+    unsafe code. `build.rs`: yes, it only turns on a cfg flag on nightly compilers. License:
+    Apache-2.0 OR ISC OR MIT.
+  - `webpki-roots`. Purpose: the Mozilla root list, as data, for the "bundled roots" verdict.
+    Maintainers: the rustls organisation (`rustls/webpki-roots`). `unsafe`: none
+    (`#![forbid(unsafe_code)]`). `build.rs`: none. License: CDLA-Permissive-2.0, allowed in `deny.toml`.
+  - `rustls-native-certs`. Purpose: the macOS keychains and the Windows root store, only where
+    `SSL_CERT_FILE` and `SSL_CERT_DIR` are unset (see the `system_roots` row). A target dependency
+    (`cfg(any(target_os = "macos", windows))`), so the Linux build does not contain it. Maintainers: the
+    rustls organisation (`rustls/rustls-native-certs`). `unsafe`: none in the crate. Its target-only
+    dependencies hold `unsafe` FFI: `security-framework` (macOS, calls into the Apple Security
+    framework) and `schannel` (Windows, calls into the Windows certificate store). Our crates call only
+    their safe wrappers. `build.rs`: none. License: Apache-2.0 OR ISC OR MIT (`security-framework`:
+    MIT OR Apache-2.0, `schannel`: MIT).
+  - Residual: `rustls-native-certs` 0.8 unwraps inside its Windows reader (`valid_uses().unwrap()`), so a
+    broken store entry would panic that native call. `native_store::load` wraps the call in `catch_unwind`, and a panic becomes the error "the OS trust store could not be read", which is one cached `Unreadable` verdict for the run (SEC-133-9). The panic message still prints through the panic hook. The crate is pinned with `=0.8.5` in the workspace `Cargo.toml` because rdy copies its rule for when it reads the two variables (SEC-133-10): a bump must be re-reviewed against that rule.
 - `cap-std` and `cap-primitives` 4.0.3 (M1-036, ADR 0016). Approved by security-reviewer on PR #71.
   - Purpose: open the report folder once and resolve every path under it without leaving it, so a
     symlink cannot send a write elsewhere (T1, INV-09). 4.0.3 is above 3.4.1, which fixes
@@ -365,6 +390,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 | E3 | Self-escalation | `rdy` calls `sudo` | L | H | `[M1]` `sudo`, `su`, `doas`, `pkexec`, `runas` are refused. Root-only checks report Skipped. | SEC-18 (M1-039) |
 | E4 | Memory corruption from crafted input | Crafted spec, command output, HTTP response | L | H | `[M1]` Workspace `unsafe_code = "forbid"`, one named FFI module. `[M2+]` fuzzing. | fold: workspace skeleton (M1-003), SEC-45 (M2-063) |
 | E5 | kubeconfig exec plugin | `aws eks get-token` runs with the user's env | L | H | `[M1]` Named exception (ADR 0010 decision 7). kubeconfig only from `--kubeconfig`, `KUBECONFIG` or the default path. The report names the binary run. | SEC-24 (M1-103), SEC-63 (M1-041) |
+| E6 | A spec `as:` borrows the operator's `impersonate` right | A vendor spec names `as: system:serviceaccount:kube-system:admin-sa`, or a person, to read what that identity may do | L | M | `[M1]` `as:` is a service account only (`rdy-spec` and `ImpersonateAs::new` both refuse any other value), so a person's rules are never listed. The header rides on the two read-only review POSTs only, once, with exactly that value; any other `Impersonate-*` header and any other request is refused by the guard. The check first asks whether the identity may `impersonate` the service account, and sends nothing as it without that grant. The run-level log entry says when the kubeconfig itself impersonates. | M1-111 (ADR 0038) |
 
 ## Appendix B: Surface 2 STRIDE
 

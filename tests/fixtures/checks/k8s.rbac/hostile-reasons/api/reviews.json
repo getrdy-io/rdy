@@ -1,0 +1,41 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "namespaces",
+          "namespace": "acme-system"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": "\u001b[31mred\u001b[0m `evil` xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    }
+  ],
+  "rules": [
+    {
+      "spec": {
+        "namespace": "acme-system"
+      },
+      "status": {
+        "resourceRules": [
+          {
+            "verbs": [
+              "get"
+            ],
+            "apiGroups": [
+              "a`b`"
+            ],
+            "resources": [
+              "pods"
+            ]
+          }
+        ],
+        "nonResourceRules": [],
+        "incomplete": false
+      }
+    }
+  ]
+}

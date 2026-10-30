@@ -840,11 +840,6 @@ fn an_as_value_is_checked_once() {
         AS_SA,
         "system:serviceaccount:default:default",
         "system:serviceaccount:kube-system:a.b-c",
-        "jane@example.com",
-        "kube:admin",
-        "CN=jane doe",
-        "j",
-        long.as_str(),
     ] {
         assert_eq!(
             ImpersonateAs::new(good).as_ref().map(ImpersonateAs::as_str),
@@ -856,7 +851,13 @@ fn an_as_value_is_checked_once() {
     let long_label = format!("system:serviceaccount:{}:sa", "n".repeat(64));
     let ok_label = format!("system:serviceaccount:{}:sa", "n".repeat(63));
     assert!(ImpersonateAs::new(&ok_label).is_ok());
-    let bad: [(&str, ImpersonateError); 26] = [
+    let bad: [(&str, ImpersonateError); 31] = [
+        // M1 tests as a service account only: any other user is refused with a hint.
+        ("jane@example.com", ImpersonateError::NotServiceAccount),
+        ("kube:admin", ImpersonateError::NotServiceAccount),
+        ("CN=jane doe", ImpersonateError::NotServiceAccount),
+        ("j", ImpersonateError::NotServiceAccount),
+        (&long, ImpersonateError::NotServiceAccount),
         ("", ImpersonateError::Empty),
         (&too_long, ImpersonateError::TooLong),
         ("a\nb", ImpersonateError::BadCharacter),
@@ -930,7 +931,19 @@ fn an_as_value_is_checked_once() {
         shown.contains("Fix:") && !shown.contains("canary"),
         "{shown}"
     );
-    let debug = format!("{:?}", ImpersonateAs::new("canary-user").expect("ok"));
+    let plain = ImpersonateAs::new("canary-user")
+        .expect_err("not a service account")
+        .to_string();
+    assert!(
+        plain.contains("Fix:")
+            && plain.contains("system:serviceaccount:")
+            && !plain.contains("canary"),
+        "{plain}"
+    );
+    let debug = format!(
+        "{:?}",
+        ImpersonateAs::new("system:serviceaccount:canary:canary-user").expect("ok")
+    );
     assert!(!debug.contains("canary"), "{debug}");
 }
 
@@ -1042,7 +1055,7 @@ fn the_selector_a_list_needs_is_still_checked_after_the_value_rules() {
 /// Check ids that `ALLOWED` cites and that no `CheckInfo` exists for yet. A check ticket removes its id
 /// when it registers its info in `crate::registry::infos`; the test fails if an id is in both places or
 /// in neither. M1-115 requires this list to be empty.
-const NOT_BUILT_YET: &[&str] = &["k8s.admission", "k8s.nodes", "k8s.rbac"];
+const NOT_BUILT_YET: &[&str] = &["k8s.admission", "k8s.nodes"];
 
 /// The ids `ALLOWED` cites that no info in `infos` has.
 fn uncited<'a>(

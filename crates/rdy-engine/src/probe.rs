@@ -79,8 +79,8 @@ pub use log::{
     ActionLogOutput, CHECK_QUOTA, COALESCE_AFTER, COALESCE_OK_AFTER, DENIED_TARGETS, MAX_ENTRIES,
 };
 pub use native::{
-    MachineId, NativeCall, NativeValue, RULE_MACHINE_ID, Resource, RlimitInfo, StatvfsInfo,
-    UnameInfo,
+    MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, MachineId, NativeCall, NativeValue, RULE_MACHINE_ID,
+    Resource, RlimitInfo, StatvfsInfo, UnameInfo,
 };
 #[cfg(feature = "testing")]
 pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS};
@@ -183,6 +183,12 @@ pub enum ProbeError {
         "{0} is not available on this OS in this version of rdy. Fix: none needed, the result is skipped here; a later version adds it"
     )]
     Unsupported(String),
+    /// The OS trust store is replaced by `SSL_CERT_FILE` or `SSL_CERT_DIR`, and rdy may not read what they
+    /// name on this OS (Windows, in this version). Only the trust roots call gives it.
+    #[error(
+        "SSL_CERT_FILE or SSL_CERT_DIR is set, and rdy reads no files on this OS in this version. Fix: unset SSL_CERT_FILE and SSL_CERT_DIR and run again"
+    )]
+    StoreOverridden,
     /// The replay fixture holds no answer for this call. Only the replay backend gives it: a fixture
     /// never falls through to the real machine (08 section 2). The text names the call.
     #[error(
@@ -229,6 +235,9 @@ impl ProbeError {
         if error.kind() == io::ErrorKind::Unsupported {
             return Self::Unsupported(format!("the native call {api}"));
         }
+        if native::RootsOverridden::is_in(error) {
+            return Self::StoreOverridden;
+        }
         Self::from_file_io(error, what)
     }
 
@@ -254,6 +263,7 @@ impl ProbeError {
             Self::Timeout | Self::Hung { .. } => ActionOutcome::Timeout,
             Self::NotFound
             | Self::PermissionDenied
+            | Self::StoreOverridden
             | Self::Unsupported(_)
             | Self::NotRecorded(_)
             | Self::Net(_)
@@ -640,6 +650,9 @@ pub struct ProbeHub {
     proxy: Arc<OnceLock<ProxyUrl>>,
     /// Set when a check's probe is opened. After that the proxy can no longer be set.
     checks_started: Arc<AtomicBool>,
+    /// The trust stores of the TLS calls, built once per run.
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    tls: Arc<net::TlsState>,
 }
 
 impl fmt::Debug for ProbeHub {
@@ -657,6 +670,8 @@ impl ProbeHub {
             log: ActionLog::new(redactor, None, Limits::default()),
             proxy: Arc::new(OnceLock::new()),
             checks_started: Arc::new(AtomicBool::new(false)),
+            #[cfg(any(feature = "runtime", feature = "loopback"))]
+            tls: Arc::default(),
         }
     }
 
@@ -839,6 +854,23 @@ impl fmt::Debug for KubeCall {
 }
 
 impl KubeCall {
+    /// Marks the entry: the request carries `Impersonate-User` with the spec's `as:` user. The entry gets
+    /// `impersonated: true`, and never the user name (02 Appendix B, rule 8).
+    #[must_use = "the entry is closed by refused, answered or failed"]
+    pub fn impersonated(mut self) -> Self {
+        self.entry.set("impersonated", true);
+        self
+    }
+
+    /// Marks the entry: the kubeconfig user sets an `as*` field, so kube adds `Impersonate-*` headers below
+    /// the guard, to every request. The entry gets `kubeconfig_impersonates: true`, and never the user
+    /// name. Absent otherwise, so a reader can tell "not impersonated" from "not said".
+    #[must_use = "the entry is closed by refused, answered or failed"]
+    pub fn kubeconfig_impersonates(mut self) -> Self {
+        self.entry.set("kubeconfig_impersonates", true);
+        self
+    }
+
     /// The guard refused the request. It never left the process. `rule` is a fixed sentence.
     pub fn refused(mut self, rule: &'static str) {
         self.entry.set("rule", rule);
