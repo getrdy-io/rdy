@@ -225,11 +225,12 @@ fn problem(level: Level, text: String, fix: Option<String>) -> Option<Problem> {
     })
 }
 
-/// The fix for a limit that is too low: where to set `DefaultLimitNOFILE=`, and that it needs
-/// `daemon-reexec`. The unit file is the other way, and often the better one.
+/// The fix for a limit that is too low. The drop-in comes first because it is the one this check
+/// reads. A unit's `LimitNOFILE=` may be the better fix for one service, but this check does not read
+/// unit files, so it would keep reporting the default.
 fn set_limit_fix(want: i128) -> String {
     format!(
-        "Set `LimitNOFILE={want}` in the service unit, or for every service set `DefaultLimitNOFILE={want}` under `[Manager]` in a file in `/etc/systemd/system.conf.d/` and run `systemctl daemon-reexec`."
+        "Set `DefaultLimitNOFILE={want}` under `[Manager]` in a file in `/etc/systemd/system.conf.d/` and run `systemctl daemon-reexec`. A service can also set `LimitNOFILE={want}` in its unit, but this check does not read unit files and will not see it."
     )
 }
 

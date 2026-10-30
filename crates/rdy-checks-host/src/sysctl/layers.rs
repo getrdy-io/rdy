@@ -220,7 +220,9 @@ pub(super) async fn read_layers(
                     // A tail file that a directory file already holds, word for word, is the same file
                     // seen through a link (Debian links `/etc/sysctl.d/99-sysctl.conf` to
                     // `/etc/sysctl.conf`). The directory applies it in its place, so it is not applied
-                    // a second time and does not take over the file name.
+                    // a second time and does not take over the file name. Two files that merely hold
+                    // the same text also meet this test: applying either is the same, so only the
+                    // label of the winning file can be wrong, never a value.
                     if winner_text.values().any(|seen| *seen == text) {
                         continue;
                     }

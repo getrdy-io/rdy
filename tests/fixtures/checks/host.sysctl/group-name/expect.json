@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "expect": {
+      "net.ipv4.conf": 1
+    },
+    "id": "host.sysctl"
+  },
+  "result": {
+    "expected": {
+      "parameters": {
+        "net.ipv4.conf": "1"
+      }
+    },
+    "fix": null,
+    "level": "warn",
+    "message": "`net.ipv4.conf` is a group of parameters, not one value, so it is not verified.",
+    "notes": [],
+    "observed": {
+      "parameters": {
+        "net.ipv4.conf": {
+          "live": null,
+          "persisted": null,
+          "state": "not_a_value"
+        }
+      }
+    },
+    "partial": {
+      "missing": [],
+      "note": "Not verified: net.ipv4.conf is not a single parameter."
+    }
+  }
+}

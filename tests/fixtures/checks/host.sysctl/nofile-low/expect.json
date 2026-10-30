@@ -11,7 +11,7 @@
         "nofile": ">=65536"
       }
     },
-    "fix": "Set `LimitNOFILE=65536` in the service unit, or for every service set `DefaultLimitNOFILE=65536` under `[Manager]` in a file in `/etc/systemd/system.conf.d/` and run `systemctl daemon-reexec`.",
+    "fix": "Set `DefaultLimitNOFILE=65536` under `[Manager]` in a file in `/etc/systemd/system.conf.d/` and run `systemctl daemon-reexec`. A service can also set `LimitNOFILE=65536` in its unit, but this check does not read unit files and will not see it.",
     "level": "fail",
     "message": "`DefaultLimitNOFILE=1024:524288` in `/etc/systemd/system.conf.d/10-defaults.conf` gives services an open files limit of 1024, need at least 65536.",
     "notes": [

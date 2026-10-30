@@ -53,8 +53,12 @@ const NO_SOURCE: &str =
     "this check reads Linux kernel parameter files and has no data source on this OS yet";
 
 const PROC_SYS: &str = "/proc/sys";
+/// How the read rules name the refusal to read a directory as a file.
+const NOT_REGULAR_RULE: &str = "only regular files are read";
 /// The file the fix text asks a customer to add a line to. It sorts after almost every other name.
 pub(super) const PERSIST_FILE: &str = "/etc/sysctl.d/99-rdy.conf";
+/// The base name of [`PERSIST_FILE`].
+const PERSIST_BASE: &str = "99-rdy.conf";
 /// The most characters of a live value in a sentence.
 const SHOWN_VALUE: usize = 128;
 /// The most characters of a live value in the evidence.
@@ -140,7 +144,9 @@ impl Sysctl {
             .flat_map(|map| map.iter())
             .map(|(name, rule)| Wanted {
                 name: name.as_str().to_owned(),
-                canonical: name.canonical(),
+                // Not `SysctlName::canonical`: for `net.ipv4.conf.eth0/100.rp_filter` it keeps the text
+                // and names a path that is not there. The first separator decides, as in `sysctl.d`.
+                canonical: persist::canonical_key(name.as_str()),
                 rule: rule.clone(),
             })
             .collect();
@@ -205,9 +211,11 @@ async fn read_live(ctx: &CheckContext, canonical: &str) -> Result<Live, CheckErr
         Ok(file) => Ok(Live::Value(normalise(&String::from_utf8_lossy(
             &file.bytes,
         )))),
-        // Nothing under `/proc/sys` is on the deny list, so the one refusal left is "not a regular
-        // file": a directory of parameters.
-        Err(ProbeError::Denied { .. }) => Ok(Live::Group),
+        // Nothing under `/proc/sys` is on the deny list. The one refusal that means something here is
+        // "not a regular file": the name is a directory of parameters. The engine exports no rule id,
+        // so the sentence is matched, and the `group-name` case fails if it changes. Any other refusal
+        // is a fault in the check's manifest and ends the check.
+        Err(ProbeError::Denied { rule, .. }) if rule == NOT_REGULAR_RULE => Ok(Live::Group),
         Err(error) => Ok(match soft(error)? {
             ProbeError::NotFound => Live::Missing,
             ProbeError::PermissionDenied => Live::Unreadable("permission denied".to_owned()),
@@ -255,18 +263,38 @@ fn persist_step(name: &str, rule: &ValueRule) -> String {
     }
 }
 
-/// `Change the line in FILE to `name = value`.`
+/// What to do about a file that sets the wrong value and wins at boot.
+///
+/// A file under `/etc/` is the customer's, so they change the line. Any other file (`/usr/lib`, `/lib`,
+/// `/run`, `/usr/local/lib`) belongs to a package or to the boot, and an update or a reboot puts it
+/// back, so the customer overrides it from `/etc/sysctl.d/` instead. A file of the same base name
+/// there replaces it. `99-rdy.conf` is the shorter way, when that name sorts after the file.
 fn change_step(name: &str, rule: &ValueRule, file: &str) -> String {
-    let value = normalise(&rule.value);
-    if is_quotable(&value) {
-        format!(
-            "Change the line for `{name}` in {} to `{name} = {value}`.",
-            code(file)
-        )
+    if file.starts_with("/etc/") {
+        let value = normalise(&rule.value);
+        return if is_quotable(&value) {
+            format!(
+                "Change the line for `{name}` in {} to `{name} = {value}`.",
+                code(file)
+            )
+        } else {
+            format!(
+                "Change the line for `{name}` in {} to the value the spec asks for.",
+                code(file)
+            )
+        };
+    }
+    let base = file.rsplit('/').next().unwrap_or(file);
+    let note = format!(
+        "Do not edit {}: an update or a reboot puts it back.",
+        code(file)
+    );
+    if base < PERSIST_BASE {
+        format!("{note} Override it. {}", persist_step(name, rule))
     } else {
         format!(
-            "Change the line for `{name}` in {} to the value the spec asks for.",
-            code(file)
+            "{note} Copy it to {}, which replaces it, and change the line there.",
+            code(&format!("/etc/sysctl.d/{base}"))
         )
     }
 }
@@ -466,7 +494,18 @@ impl Sysctl {
                         .map_or(Saved::Unset, |why| Saved::Unknown(why.clone())),
                 },
             };
-            rows.push((wanted, self.judge_row(wanted, live, &saved, persisted)));
+            let mut row = self.judge_row(wanted, live, &saved, persisted);
+            // A setting was found, but a file that was not read could set the key again later.
+            if let (Saved::Set(_), Some(p)) = (&saved, persisted)
+                && row.unverified.is_none()
+                && let Some(why) = p.unknown.first()
+            {
+                row.unverified = Some(format!(
+                    "a file that could change {} at boot was not read ({why})",
+                    wanted.name
+                ));
+            }
+            rows.push((wanted, row));
         }
 
         let mut problems: Vec<&Problem> = rows
@@ -476,7 +515,7 @@ impl Sysctl {
         if let Some(p) = limit.as_ref().and_then(|l| l.problem.as_ref()) {
             problems.push(p);
         }
-        // Blocks first, and the order of the spec inside a level.
+        // Blocks first, and the order of the names (the spec's map is sorted by name) inside a level.
         problems.sort_by_key(|p| std::cmp::Reverse(rank(p.level)));
         let level = problems
             .iter()
@@ -592,16 +631,21 @@ fn missing_fix(name: &str) -> String {
 
 /// The fix of the first few problems, then the closing step once.
 fn fix_text(problems: &[&Problem]) -> Option<String> {
-    let mut parts: Vec<String> = problems
+    let fixes: Vec<&String> = problems
         .iter()
         .filter(|p| p.level != Level::Pass)
-        .filter_map(|p| p.fix.clone())
-        .take(SHOWN_PROBLEMS)
+        .filter_map(|p| p.fix.as_ref())
         .collect();
-    if parts.is_empty() {
+    if fixes.is_empty() {
         return None;
     }
-    let more = problems.len().saturating_sub(SHOWN_PROBLEMS);
+    let mut parts: Vec<String> = fixes
+        .iter()
+        .take(SHOWN_PROBLEMS)
+        .map(|f| (*f).clone())
+        .collect();
+    // Only a problem with a fix is counted: one without says nothing to "do the same" for.
+    let more = fixes.len().saturating_sub(SHOWN_PROBLEMS);
     if more > 0 {
         parts.push(format!("Do the same for the other {more}."));
     }

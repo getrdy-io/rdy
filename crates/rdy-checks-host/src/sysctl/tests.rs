@@ -43,6 +43,7 @@ fn cases() -> Vec<(&'static str, Value)> {
         ("null-mask", mm.clone()),
         ("sysctl-conf-last", mm.clone()),
         ("sysctl-conf-linked", mm.clone()),
+        ("unreadable-sibling", mm.clone()),
         (
             "missing-parameter",
             json!({"id": "host.sysctl", "expect": {"net.bridge.bridge-nf-call-iptables": 1}}),
@@ -54,6 +55,22 @@ fn cases() -> Vec<(&'static str, Value)> {
             json!({"id": "host.sysctl", "expect": {
                 "net.ipv4.conf.eth0.rp_filter": 1,
                 "net.ipv4.conf.lo.rp_filter": 1,
+            }}),
+        ),
+        (
+            "mixed-separators",
+            json!({"id": "host.sysctl", "expect": {"net.ipv4.conf.eth0/100.rp_filter": 1}}),
+        ),
+        (
+            "group-name",
+            json!({"id": "host.sysctl", "expect": {"net.ipv4.conf": 1}}),
+        ),
+        (
+            "priority-order",
+            json!({"id": "host.sysctl", "expect": {
+                "vm.max_map_count": ">=262144",
+                "vm.swappiness": 10,
+                "net.core.somaxconn": ">=4096",
             }}),
         ),
         (
@@ -294,11 +311,98 @@ fn files_apply_in_the_order_of_their_names_whatever_the_directory() {
         finding.message
     );
     let fix = finding.fix.as_deref().expect("a fix");
+    // The file belongs to a package: the fix never says to edit it. It overrides from /etc.
     assert!(
-        fix.contains(
-            "Change the line for `vm.max_map_count` in `/usr/lib/sysctl.d/90-hardening.conf`"
-        ),
+        fix.contains("Do not edit `/usr/lib/sysctl.d/90-hardening.conf`"),
         "{fix}"
+    );
+    assert!(
+        fix.contains("sudo tee -a /etc/sysctl.d/99-rdy.conf"),
+        "{fix}"
+    );
+    assert!(!fix.contains("Change the line"), "{fix}");
+}
+
+#[test]
+fn a_package_file_that_sorts_after_the_override_is_copied_into_etc() {
+    let rule: ValueRule = serde_json::from_value(json!(">=262144")).expect("a rule");
+    let late = change_step(
+        "vm.max_map_count",
+        &rule,
+        "/usr/lib/sysctl.d/99-z-hardening.conf",
+    );
+    assert!(
+        late.contains("Copy it to `/etc/sysctl.d/99-z-hardening.conf`"),
+        "{late}"
+    );
+    assert!(!late.contains("99-rdy.conf"), "{late}");
+    let run = change_step("vm.max_map_count", &rule, "/run/sysctl.d/10-x.conf");
+    assert!(run.contains("Do not edit"), "{run}");
+    let own = change_step("vm.max_map_count", &rule, "/etc/sysctl.d/90-mine.conf");
+    assert!(own.starts_with("Change the line for"), "{own}");
+}
+
+#[test]
+fn a_name_with_dots_then_a_slash_reads_the_right_proc_path() {
+    let run = run_case("mixed-separators");
+    let finding = run.finding();
+    assert_eq!(finding.level, Level::Pass, "{}", finding.message);
+    let reads: Vec<&str> = run
+        .log
+        .actions
+        .iter()
+        .filter_map(|a| a.fields.get("path").and_then(Value::as_str))
+        .collect();
+    assert!(
+        reads.contains(&"/proc/sys/net/ipv4/conf/eth0.100/rp_filter"),
+        "{reads:?}"
+    );
+}
+
+#[test]
+fn a_name_that_is_a_directory_is_not_verified() {
+    // This also pins the sentence of the read rule that the check matches.
+    let run = run_case("group-name");
+    let finding = run.finding();
+    assert_eq!(finding.level, Level::Warn);
+    assert!(
+        finding.message.contains("is a group of parameters"),
+        "{}",
+        finding.message
+    );
+}
+
+#[test]
+fn directory_priority_is_etc_then_run_then_usr_local_lib_then_usr_lib() {
+    let run = run_case("priority-order");
+    let finding = run.finding();
+    assert_eq!(finding.level, Level::Pass, "{}", finding.message);
+    let file = |name: &str| {
+        finding.observed["parameters"][name]["persisted"]["file"]
+            .as_str()
+            .expect("a file")
+            .to_owned()
+    };
+    assert_eq!(file("vm.max_map_count"), "/run/sysctl.d/50-a.conf");
+    assert_eq!(file("vm.swappiness"), "/etc/sysctl.d/50-b.conf");
+    assert_eq!(
+        file("net.core.somaxconn"),
+        "/usr/local/lib/sysctl.d/50-c.conf"
+    );
+}
+
+#[test]
+fn a_setting_with_an_unread_file_beside_it_keeps_its_level_and_is_partial() {
+    let run = run_case("unreadable-sibling");
+    let finding = run.finding();
+    assert_eq!(finding.level, Level::Pass, "{}", finding.message);
+    let partial = finding.partial.as_ref().expect("partial");
+    assert!(
+        partial
+            .note
+            .contains("a file that could change vm.max_map_count at boot was not read"),
+        "{}",
+        partial.note
     );
 }
 
@@ -412,6 +516,10 @@ fn the_levels_are_what_the_catalog_says() {
     assert_eq!(level_of("null-mask"), Level::Warn);
     assert_eq!(level_of("sysctl-conf-last"), Level::Warn);
     assert_eq!(level_of("sysctl-conf-linked"), Level::Pass);
+    assert_eq!(level_of("unreadable-sibling"), Level::Pass);
+    assert_eq!(level_of("mixed-separators"), Level::Pass);
+    assert_eq!(level_of("group-name"), Level::Warn);
+    assert_eq!(level_of("priority-order"), Level::Pass);
     assert_eq!(level_of("missing-parameter"), Level::Fail);
     assert_eq!(level_of("unreadable-parameter"), Level::Warn);
     assert_eq!(level_of("unreadable-sysctl-d"), Level::Warn);
@@ -521,7 +629,8 @@ fn nothing_setting_the_limit_leaves_the_built_in_default() {
         finding.notes
     );
     let fix = finding.fix.as_deref().expect("a fix");
-    assert!(fix.contains("LimitNOFILE=65536"), "{fix}");
+    assert!(fix.starts_with("Set `DefaultLimitNOFILE=65536`"), "{fix}");
+    assert!(fix.contains("does not read unit files"), "{fix}");
     assert!(fix.contains("systemctl daemon-reexec"), "{fix}");
 }
 
@@ -628,7 +737,7 @@ fn a_run_stays_inside_the_manifest_and_only_reads() {
                     "{case}"
                 );
             }
-            if case != "null-mask" {
+            if case != "null-mask" && case != "group-name" {
                 assert_ne!(action.outcome, ActionOutcome::Denied, "{case}: {action:?}");
             }
         }
@@ -675,25 +784,27 @@ fn every_fix_the_cases_produce_passes_the_fix_text_audit() {
 #[test]
 fn a_non_linux_run_is_not_yet_on_this_os() {
     use rdy_engine::check::Os;
-    let fixture = load("pass");
-    let test_run = TestRun::for_fixture(&fixture);
-    let ctx = test_run.context_for(
-        &INFO,
-        "host.sysctl",
-        Os::Macos,
-        Vec::<rdy_engine::check::Need>::new(),
-    );
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .expect("a runtime");
-    let outcome = runtime.block_on(sysctl(&entry_of("pass")).run(&ctx));
-    assert!(
-        matches!(outcome, Err(CheckError::Unsupported(_))),
-        "{outcome:?}"
-    );
-    assert!(
-        test_run.action_log().actions.is_empty(),
-        "nothing is read on macOS"
-    );
+    for os in [Os::Macos, Os::Windows] {
+        let fixture = load("pass");
+        let test_run = TestRun::for_fixture(&fixture);
+        let ctx = test_run.context_for(
+            &INFO,
+            "host.sysctl",
+            os,
+            Vec::<rdy_engine::check::Need>::new(),
+        );
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("a runtime");
+        let outcome = runtime.block_on(sysctl(&entry_of("pass")).run(&ctx));
+        assert!(
+            matches!(outcome, Err(CheckError::Unsupported(_))),
+            "{os:?}: {outcome:?}"
+        );
+        assert!(
+            test_run.action_log().actions.is_empty(),
+            "{os:?}: nothing is read off Linux"
+        );
+    }
 }
