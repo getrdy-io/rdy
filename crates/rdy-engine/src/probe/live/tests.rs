@@ -224,7 +224,7 @@ async fn the_exit_test_refusals_are_logged() {
         let result = tokio::time::timeout(Duration::from_secs(10), probe.read(path))
             .await
             .expect("the refusal does not wait");
-        let error = result.err().expect("refused");
+        let error = result.expect_err("refused");
         assert_eq!(rule_of(&error), *rule, "{}", path.display());
     }
 
@@ -637,8 +637,8 @@ fn a_rule_refusal_of_the_target_is_final_and_gets_no_parent() {
     let none = files::Secrets::default();
     let (real, stat) = files::locate_by_path(&fifo, &guard, &none).expect("described");
     let error = files::statvfs_by_path(&fifo, &real, &stat, &guard, &none)
-        .err()
-        .expect("refused");
+        .map(|_| ())
+        .expect_err("refused");
     assert_eq!(
         crate::probe::Refused::from_io(&error).map(|r| r.rule),
         Some(RULE_NOT_FILE_OR_DIR)
@@ -667,8 +667,8 @@ fn an_unreadable_directory_is_measured_through_a_parent_on_the_same_file_system(
     let prefixes: &'static [&'static str] = Box::leak(vec![prefix].into_boxed_slice());
     let narrow = ReadGuard::new(Os::Linux, Some(prefixes));
     let error = files::statvfs_through_parent(denied(), &real, &stat, &narrow, &none)
-        .err()
-        .expect("the parent is outside the prefixes");
+        .map(|_| ())
+        .expect_err("the parent is outside the prefixes");
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
 }
 
@@ -684,8 +684,8 @@ fn a_mount_point_is_reported_not_measured_through_its_parent() {
     }
     let denied = io::Error::from(io::ErrorKind::PermissionDenied);
     let error = files::statvfs_through_parent(denied, &real, &stat, &guard, &none)
-        .err()
-        .expect("a mount point is not measured through its parent");
+        .map(|_| ())
+        .expect_err("a mount point is not measured through its parent");
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
 }
 
