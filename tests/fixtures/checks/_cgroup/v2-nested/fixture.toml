@@ -1,0 +1,12 @@
+schema = 1
+name = "v2-nested"
+summary = "Rocky 9 host, service in a nested slice whose parent slice caps memory at 4 GiB, swap at 1 GiB and CPU at 2 cores"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory", "host.cpu", "host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false

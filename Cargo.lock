@@ -1760,6 +1760,7 @@ dependencies = [
  "rdy-engine",
  "rdy-spec",
  "serde_json",
+ "thiserror",
  "tokio",
 ]
 

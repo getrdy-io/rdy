@@ -46,6 +46,7 @@ tests/fixtures/
   checks/<check-id>/<case>/      one check, one situation
   checks/_policy/<case>/         engine policy cases, for example symlink-to-shadow
   checks/_loader/<case>/         loader cases, for example manifest-entries
+  checks/_cgroup/<case>/         cgroup trees for the shared cgroup helper (v2, v1, hybrid)
   envs/<env>/                    one whole environment plus a spec to run against it
   redaction/<category>/<case>.{in,expected,toml}
   results/<rdy-version>/*.json   result files from released versions, append only
@@ -58,7 +59,7 @@ tests/fixtures/
 ```
 
 What exists today: `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/`, `reports/`, and under
-`checks/` the cases `host.memory/pass`, `_policy/symlink-to-shadow` and `_loader/manifest-entries`. The rest
+`checks/` the cases `host.memory/pass`, `_policy/symlink-to-shadow` and `_loader/manifest-entries`, and the `_cgroup` cases. The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -66,6 +67,7 @@ arrives with the tickets that need it. The names above are fixed now so nobody i
 | `allow.toml` | Lint exceptions. `169.254.169.254` for the metadata tests is the first | By hand, with a reason per entry |
 | `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command or opens a socket | By hand, with the check ticket |
 | `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied`. The expectation of a policy or loader case lives in its Rust test until the fixture lint has a format for it | By hand |
+| `checks/_cgroup/<case>/` | Machines for the cgroup helper that `host.memory`, `host.cpu` and `host.cgroups` share: `/proc/self/cgroup`, `/proc/self/mountinfo` and a `/sys/fs/cgroup` tree. Cases: `v2-nested`, `v2-unlimited`, `v2-memory-off`, `v1-tree`, `v1-unlimited`, `hybrid`. A check's own cases carry their own trees | By hand |
 | `checks/_loader/<case>/` | Cases that exercise the loader and the replay, such as every kind of manifest entry. Their expectation is in the Rust test too | By hand |
 | `envs/<env>/` | A whole environment and the spec the env test runs against it. Five in M1: `all-pass`, `warnings-only`, `all-block`, `no-privileges`, `timeouts` | By hand, goldens by `UPDATE_GOLDENS=1` |
 | `redaction/<category>/<case>.in`, `.expected`, `.toml` | Input, expected output and the rule setup for a redaction case | By hand only. `UPDATE_GOLDENS` never touches it |
