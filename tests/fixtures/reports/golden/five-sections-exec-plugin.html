@@ -80,6 +80,8 @@ h3 { font-size: 1.125rem; margin: 0 0 0.5rem; }
 .verdict-warnings { color: var(--warn); }
 .verdict-not-ready { color: var(--block); }
 .summary { font-weight: 600; }
+.no-blocks { font-weight: 600; }
+.legend, .rule { margin: 0.25rem 0; }
 .privacy { padding: 0.5rem 0.75rem; border: 1px solid var(--rule); background: var(--panel); }
 nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; list-style: none; margin: 1rem auto; padding: 0; }
 .check {
@@ -117,6 +119,23 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
   dl.details { grid-template-columns: 1fr; }
 }
 @media print {
+  /* Black on white whatever the screen theme: this block comes after the dark palette and replaces every
+     variable it sets. No backgrounds, so a printer spends no ink on them. */
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --text: #000000;
+    --muted: #333333;
+    --rule: #6b6b6b;
+    --panel: #ffffff;
+    --block: #b3261e;
+    --warn: #8a4b00;
+    --pass: #1a7f37;
+    --link: #0b5cad;
+    --banner-fg: #8a1c14;
+    --banner-bg: #ffffff;
+  }
+  body { background: #ffffff; color: #000000; }
   .check, tr { break-inside: avoid; }
   #passed, #capabilities { break-before: page; }
 }
@@ -128,6 +147,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p>For <bdi>acme-platform</bdi> <bdi>&#62;=4.2</bdi>, on <bdi>acme-node-01.corp.example</bdi></p>
 <p class="summary">2 blocks, 1 warning, 3 passed, 2 required checks not run, 1 not applicable</p>
 <p>Run <bdi>2026-12-01 14:30:05 UTC</bdi> with rdy <bdi>0.1.0</bdi> by <bdi>jdoe</bdi> (not root)</p>
+<p class="legend">BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it.</p>
+<p class="rule">NOT READY if anything blocks or a required check could not run. READY with warnings if only optional things are wrong. READY if every check ran and passed.</p>
 <p class="privacy">This file lists hostnames and addresses from this machine. Read it before you send it.</p>
 </header>
 <nav aria-label="Sections">
