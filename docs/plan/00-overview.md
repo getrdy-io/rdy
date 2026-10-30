@@ -91,8 +91,8 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 174 | 384.5 |
-| M1, core | 145 | 323 |
+| M1, all | 175 | 386 |
+| M1, core | 146 | 324.5 |
 | M1, `core: no` (the cut list) | 29 | 61.5 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
@@ -119,7 +119,7 @@ and Dec 28 run at half capacity.
 | 11 | Feb 1 to Feb 7, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-049 to M1-056 | `v0.1.0-alpha.10`: replay fixtures, fixture lint and golden helpers; logs redacted |
 | 12 | Feb 8 to Feb 14, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-057 to M1-062 | `v0.1.0-alpha.11`: `rdy run <file> --allow-unsigned --json` writes a 0700 report dir, every check SKIP; Ctrl-C exits 70; `--no-network` |
 | 13 | Feb 15 to Feb 21, 2027 | 13 | 14 | 3 Host checks, HTML report | M1-063 to M1-069, M1-171 | `v0.1.0-alpha.12`: every report string redacted, 28-case corpus gates CI; host.memory and host.disk |
-| 14 | Feb 22 to Feb 28, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-070, M1-071, M1-074 to M1-076, M1-169, M1-170 | `v0.1.0-alpha.13`: host.cpu on Linux; facade `read_link`; machine identity files denied; terminal styling; in-process env harness |
+| 14 | Feb 22 to Feb 28, 2027 | 13 | 15 | 3 Host checks, HTML report | M1-070, M1-071, M1-074 to M1-076, M1-169, M1-170, M1-176 | `v0.1.0-alpha.13`: host.cpu on Linux; facade `read_link`; machine identity files denied; terminal styling; in-process env harness |
 | 15 | Mar 1 to Mar 7, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-077 to M1-085 | `v0.1.0-alpha.14`: HTML report next to the JSON, with golden reports; generated spec reference |
 | 16 | Mar 8 to Mar 14, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 4 Network checks | M1-086 to M1-090, M1-168 | `v0.1.0-alpha.15`: the demo: bucket-sorted terminal output with fix lines and the verdict last; umask 077 and an inherited-descriptor warning at start-up |
 | 17 | Mar 15 to Mar 21, 2027 | 13 | 14 | 4 Network checks | M1-091 to M1-095, M1-141 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy |
