@@ -23,7 +23,7 @@ fails when a description names an ADR, a milestone, a plan document or a section
 reaches customers.
 
 Three parts of the contract do not derive the schema yet. They are JSON fragments in
-`crates/rdy-spec/src/schema/` that the generator merges in as they are: the parameters of the 17 check ids,
+`crates/rdy-spec/src/schema/` that the generator merges in as they are: the parameters of the 31 check ids,
 the kind-specific fields of an action, and the `Verification` and `ErrorOutput` objects. Edit
 the fragment, then regenerate. Each goes away when its type derives the schema.
 
@@ -48,3 +48,4 @@ file adds a line here.
 | --- | --- | --- |
 | 0 | 0.1.0 | First contract: spec envelope, 17 M1 check ids with required thresholds, bundle shape with `redact_patterns` and `max_size`; result report with `bucket`, key fingerprint, action log retention, redaction summary, size caps; `Verification`, `ErrorOutput` and `LintReport` objects. |
 | 0 | 0.1.0 | The files are generated from the types. Same documents accepted and refused, with these differences: `spec.serial` in a result has `minimum` 0, the `file:` rule of `bundle.collect` writes the NUL byte as `\x00` so every validator can compile it, and enum values and the `Kind` constant are definitions of their own. Added the `Version` definition for `rdy version --json`. |
+| 1 | 0.1.0 | Parameters for the 14 M1-late check ids: `host.firewall`, `host.time_sync`, `host.sysctl`, `host.container_runtime`, `host.cgroups`, `host.kernel`, `net.registry`, `net.mtu`, `net.bandwidth`, `k8s.namespace`, `k8s.dns`, `k8s.ingress`, `k8s.crds` and `k8s.cni`. Additive: nothing the first revision accepted is refused, except that a spec which named one of these ids with a key its type does not have is now `unsupported_spec` and not `not_in_build`. New definitions: `NtpServer`, `OptionalPortHost`, `HostPort`, `HttpUrl`, `ValueRule`, `SysctlName`, `KernelVersion`, `K8sQuantity` and `ImageRef`. |

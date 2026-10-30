@@ -210,6 +210,124 @@ fips: any
 | `id` | string | yes |  | The distribution id from `/etc/os-release`, such as `rhel`. |  |
 | `versions` | array of string | no |  | The versions that are supported. `"8"` matches a major version and `"22.04"` an exact one. Without it every version is. |  |
 
+### host.firewall
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `open_inbound` | array of integer | no |  | TCP ports that must be open for inbound traffic, 1 to 256, none twice. | `[6443, 10250]` |
+
+Example:
+
+```yaml
+id: host.firewall
+open_inbound:
+- 6443
+- 10250
+```
+
+### host.time_sync
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `max_skew` | string | no |  | The offset from the time servers that the product tolerates. The default is a warning above 5s and a block above 300s. | `5s` |
+| `require_sync` | boolean | no | `false` | A clock that is not synchronized blocks. The default is false. | `true` |
+| `ntp_servers` | array of string | no |  | Servers to measure the offset against, 1 to 8, none twice. There are no default servers: without this list the offset is not measured and rdy sends no time packet. | `["ntp.acme.test"]` |
+
+Example:
+
+```yaml
+id: host.time_sync
+max_skew: 5s
+require_sync: true
+ntp_servers:
+- ntp.acme.test
+```
+
+### host.sysctl
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `expect` | object | no |  | Kernel parameters and what each must be, 1 to 64. A live value that differs blocks. A right value that no file in a sysctl.d directory sets warns. | `{"vm.max_map_count": ">=262144", "net.ipv4.ip_forward": 1}` |
+| `limits` | object | no |  | File limits and what each must be. | `{"nofile": ">=65536"}` |
+
+Example:
+
+```yaml
+id: host.sysctl
+expect:
+  vm.max_map_count: ">=262144"
+  net.ipv4.ip_forward: 1
+limits:
+  nofile: ">=65536"
+```
+
+#### limits
+
+File limits and what each must be.
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `nofile` | integer or string | no |  | The open files limit that services get, DefaultLimitNOFILE of systemd. |  |
+
+### host.container_runtime
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `runtime` | array of one of `docker`, `containerd`, `podman`, `crio` | no |  | Runtimes of which one must be present, 1 to 4. | `["docker", "containerd"]` |
+| `min_version` | string or integer | no |  | An older runtime blocks. |  |
+| `cgroup_driver` | one of `systemd`, `cgroupfs` | no |  | The cgroup driver the runtime must use. A runtime that differs from the kubelet blocks too. | `systemd` |
+| `storage_driver` | string | no |  | The storage driver the runtime must use, such as `overlay2`. |  |
+
+Example:
+
+```yaml
+id: host.container_runtime
+runtime:
+- docker
+- containerd
+cgroup_driver: systemd
+```
+
+### host.cgroups
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `version` | one of `v2`, `v1`, `any` | no | `any` | The cgroup version the host must have. The default is `any`. | `v2` |
+| `controllers` | array of string | no |  | Controllers that must be available, such as `cpu`, `memory`, `io` and `pids`. 1 to 32, none twice. | `["cpu", "memory", "io", "pids"]` |
+
+Example:
+
+```yaml
+id: host.cgroups
+version: v2
+controllers:
+- cpu
+- memory
+- io
+- pids
+```
+
+### host.kernel
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `min` | string or integer | no |  | An older kernel blocks. | `"5.4"` |
+| `distro_min` | object | no |  | A minimum for one distribution, by its os-release id, 1 to 16. It replaces `min` on that distribution, because a vendor kernel carries fixes under an older number. | `{"rhel": "4.18.0-305"}` |
+| `modules` | array of string | no |  | Modules that must be available, 1 to 64, none twice. One that is absent blocks and one that is not loaded warns. | `["overlay", "br_netfilter"]` |
+| `btf` | boolean | no | `false` | The kernel must expose BTF type information. The default is false. |  |
+
+Example:
+
+```yaml
+id: host.kernel
+min: "5.4"
+distro_min:
+  rhel: 4.18.0-305
+modules:
+- overlay
+- br_netfilter
+```
+
 ### net.egress
 
 | Property | Type | Required | Default | Description | Example |
@@ -294,6 +412,66 @@ names:
 | `name` | string | yes |  | The name to look up. |  |
 | `expect_in` | array of string | no |  | Every answer must be inside one of these ranges, 1 to 16. |  |
 | `expect_public` | boolean | no |  | The answers must be public addresses (`true`) or private ones (`false`). |  |
+
+### net.registry
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `registries` | array of string or object | yes |  | The registries, 1 to 16. Each one is a host, or an object with `host` and the options. | `[{"host": "registry.acme.test", "hosts": ["blobs.acme.test"], "images": ["acme/agent:1.4"]}]` |
+
+Example:
+
+```yaml
+id: net.registry
+registries:
+- host: registry.acme.test
+  hosts:
+  - blobs.acme.test
+  images:
+  - acme/agent:1.4
+```
+
+#### registries entries, as an object
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `host` | string | yes |  | The registry host, with a port when it is not 443. |  |
+| `hosts` | array of string | no |  | The other hosts the registry uses: the token service and the blob store. At most 8, none twice. A host the check finds that is not listed is not contacted, and the result names it. |  |
+| `images` | array of string | no |  | Public images to resolve to a manifest, 1 to 16, none twice. |  |
+| `optional` | boolean | no | `false` | An unreachable registry warns and does not block. The default is false. |  |
+
+### net.mtu
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `min_mtu` | integer | no |  | The pod network needs this MTU. An interface MTU, less the overlay header, below it blocks. | `1400` |
+| `overlay` | one of `vxlan`, `geneve`, `wireguard`, `ipip` | no |  | The overlay the pod network will use. | `vxlan` |
+| `underlay` | one of `ipv4`, `ipv6` | no | `ipv4` | The IP version under the overlay. The default is `ipv4`. |  |
+
+Example:
+
+```yaml
+id: net.mtu
+min_mtu: 1400
+overlay: vxlan
+```
+
+### net.bandwidth
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `url` | string | yes |  | Where to download from. There is no default URL. | `https://mirror.acme.test/sample.bin` |
+| `bytes` | integer or string | no |  | How much to download, 1Mi to 100Mi. The default is 10Mi. |  |
+| `min_mbps` | number | no |  | A slower single stream blocks. In megabits per second, above 0 and at most 100000. | `50` |
+| `recommended_mbps` | number | no |  | A slower single stream warns. In megabits per second, above 0 and at most 100000. |  |
+
+Example:
+
+```yaml
+id: net.bandwidth
+url: https://mirror.acme.test/sample.bin
+min_mbps: 50
+```
 
 ### k8s.access
 
@@ -440,6 +618,118 @@ Example:
 ```yaml
 id: k8s.version
 min: "1.28"
+```
+
+### k8s.namespace
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `namespace` | string | no |  | The namespace the product installs into. | `acme-system` |
+| `quota_needs` | object | no |  | What the product needs from the quota of the namespace, by quota resource, 1 to 32. A quota with less left blocks. | `{"requests.cpu": 16, "requests.memory": "64Gi", "pods": 100}` |
+| `limit_needs` | object | no |  | What the product needs from the limit range of the namespace. | `{"container_max_memory": "16Gi"}` |
+
+Example:
+
+```yaml
+id: k8s.namespace
+namespace: acme-system
+quota_needs:
+  requests.cpu: 16
+  requests.memory: 64Gi
+  pods: 100
+limit_needs:
+  container_max_memory: 16Gi
+```
+
+#### limit_needs
+
+What the product needs from the limit range of the namespace.
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `container_max_memory` | integer or string | no |  | The memory of the largest container the product runs. A limit range maximum below it blocks. |  |
+
+### k8s.dns
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `cluster_domain` | string | no |  | The cluster domain. The default is `cluster.local`. | `cluster.local` |
+
+Example:
+
+```yaml
+id: k8s.dns
+cluster_domain: cluster.local
+```
+
+### k8s.ingress
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `controller` | string | no |  | The controller of an IngressClass that must exist, such as `k8s.io/ingress-nginx`, or `any` for any class. It is the controller of the class, not its name. | `any` |
+| `gateway_api` | one of `required`, `optional` | no |  | Whether the Gateway API must be installed. `required` blocks when it is missing, except where the platform has its own ingress. |  |
+| `route` | boolean | no | `false` | The product needs an OpenShift Route. The default is false. |  |
+| `loadbalancer` | boolean | no | `false` | The product needs a LoadBalancer service, so one that stays pending warns. The default is false. | `true` |
+
+Example:
+
+```yaml
+id: k8s.ingress
+controller: any
+loadbalancer: true
+```
+
+### k8s.crds
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `crds` | array of object | no |  | Custom resource definitions that must be installed, 1 to 64. | `[{"name": "certificates.cert-manager.io", "versions": ["v1"]}]` |
+| `operators` | array of object | no |  | Operators whose deployment must run, 1 to 16. | `[{"namespace": "cert-manager", "deployment": "cert-manager", "min_version": "1.13"}]` |
+
+Example:
+
+```yaml
+id: k8s.crds
+crds:
+- name: certificates.cert-manager.io
+  versions:
+  - v1
+operators:
+- namespace: cert-manager
+  deployment: cert-manager
+  min_version: "1.13"
+```
+
+#### crds entries
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string | yes |  | The name of the definition, such as `certificates.cert-manager.io`. |  |
+| `versions` | array of string | no |  | Versions the definition must serve, 1 to 16, none twice. Without it any version counts. |  |
+
+#### operators entries
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `namespace` | string | yes |  | The namespace of the deployment. |  |
+| `deployment` | string | yes |  | The name of the deployment. |  |
+| `min_version` | string or integer | no |  | An older operator blocks. It is read from the image tag or the version label of the deployment. |  |
+
+### k8s.cni
+
+| Property | Type | Required | Default | Description | Example |
+| --- | --- | --- | --- | --- | --- |
+| `network_policy` | one of `enforced` | no |  | What the network plugin must do with network policies. `enforced` blocks when it does not enforce them. | `enforced` |
+| `needs_egress` | array of string | no |  | Destinations the product's pods need to reach, as host:port, 1 to 64, none twice. A default-deny policy in the namespace that does not allow them warns. Nothing is connected to. |  |
+| `avoid_cidrs` | array of string | no |  | Address ranges that the pod and service networks must not overlap, 1 to 32, none twice. | `["10.0.0.0/8"]` |
+
+Example:
+
+```yaml
+id: k8s.cni
+network_policy: enforced
+avoid_cidrs:
+- 10.0.0.0/8
 ```
 
 ## bundle

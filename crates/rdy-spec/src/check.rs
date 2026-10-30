@@ -23,13 +23,16 @@
 //! because dropping a stricter threshold from a newer spec would turn a failing host into a passing one
 //! (ADR 0008).
 //!
-//! The 17 M1 ids have their parameter structs: the seven host ids from [`HostCpu`] to [`HostOs`], the
-//! four net ids from [`NetEgress`] to [`NetDns`], and the six k8s ids from [`K8sAccess`] to
-//! [`K8sVersion`].
+//! The 17 M1 ids and the 14 M1-late ids have their parameter structs: the 13 host ids from [`HostCpu`]
+//! to [`HostKernel`], the 7 net ids from [`NetEgress`] to [`NetBandwidth`], and the 11 k8s ids from
+//! [`K8sAccess`] to [`K8sCni`]. A parameter type is additive (01 section 2.7): an id that gains one
+//! stops being `not_in_build`, and a spec that already named it with keys the type does not have is
+//! [`UnsupportedReason::UnknownField`] from then on.
 //!
 //! A check that needs a threshold and has none is [`UnsupportedReason::NoThreshold`], not a pass. A bare
 //! `- id: host.memory` would otherwise measure nothing and report ready. The same goes for a bare
-//! `net.egress` without `endpoints` and a `k8s.rbac` without `can`.
+//! `net.egress` without `endpoints`, a `k8s.rbac` without `can` and a `host.sysctl` without `expect` or
+//! `limits`.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -51,24 +54,30 @@ mod net;
 mod testkit;
 
 pub use common::{
-    AbsPath, Arch, BoundedList, Cores, CpuFlag, DistroId, FsType, ListText, OsVersion, Port,
-    RegexText, StringList, TolerancePercent,
+    AbsPath, Arch, BoundedList, BoundedMap, CgroupController, Cores, CpuFlag, DistroId, FsType,
+    HostPort, ListText, ModuleName, OsVersion, Port, RegexText, StorageDriver, StringList,
+    TolerancePercent,
 };
 pub use host::{
-    ApparmorMode, ApparmorPolicy, Bind, FipsPolicy, HostCpu, HostDisk, HostLsm, HostMemory, HostOs,
-    HostPorts, HostSecurityAgents, MountOption, PortRule, SelinuxMode, SelinuxPolicy, SupportedOs,
-    SwapPolicy, ToleranceResult,
+    ApparmorMode, ApparmorPolicy, Bind, CgroupDriver, CgroupVersion, Compare, ContainerRuntime,
+    FipsPolicy, HostCgroups, HostContainerRuntime, HostCpu, HostDisk, HostFirewall, HostKernel,
+    HostLsm, HostMemory, HostOs, HostPorts, HostSecurityAgents, HostSysctl, HostTimeSync,
+    KernelVersion, MountOption, NtpServer, PortRule, SelinuxMode, SelinuxPolicy, SupportedOs,
+    SwapPolicy, SysctlLimits, SysctlName, ToleranceResult, ValueRule,
 };
 
 pub use k8s::{
-    AccessMode, ApiGroup, ApiRef, CpuAmount, K8sAccess, K8sAdmission, K8sName, K8sNodes, K8sRbac,
-    K8sResources, K8sStorageClass, K8sVersion, LabelKey, LabelSelector, LabelValue, OverMax,
-    PodFeature, PodSecurityLevel, RbacResource, RbacRule, RbacSubresource, RbacVerb, ReclaimPolicy,
-    TaintEffect, Toleration, TolerationOperator, VolumeBinding,
+    AccessMode, ApiGroup, ApiRef, CpuAmount, CrdRule, CrdVersion, GatewayApi, IngressController,
+    K8sAccess, K8sAdmission, K8sCni, K8sCrds, K8sDns, K8sIngress, K8sName, K8sNamespace, K8sNodes,
+    K8sQuantity, K8sRbac, K8sResources, K8sStorageClass, K8sVersion, LabelKey, LabelSelector,
+    LabelValue, LimitNeeds, NetworkPolicyMode, OperatorRule, OverMax, PodFeature, PodSecurityLevel,
+    QuotaResource, RbacResource, RbacRule, RbacSubresource, RbacVerb, ReclaimPolicy, TaintEffect,
+    Toleration, TolerationOperator, VolumeBinding,
 };
 pub use net::{
-    Cidr, DnsName, DnsRule, Endpoint, HttpMethod, HttpStatus, NetDns, NetEgress, NetProxy,
-    NetTlsIntercept, Sha256Hex, TlsHost, Trust, ViaProxy,
+    Cidr, DnsName, DnsRule, Endpoint, HttpMethod, HttpStatus, HttpUrl, ImageRef, Mbps, Mtu,
+    NetBandwidth, NetDns, NetEgress, NetMtu, NetProxy, NetRegistry, NetTlsIntercept, Overlay,
+    RegistryRule, SampleBytes, Sha256Hex, TlsHost, Trust, Underlay, ViaProxy,
 };
 
 /// The most characters of a message from the value reader that a reason keeps.
@@ -224,16 +233,30 @@ known_checks! {
     "host.lsm" => HostLsm(HostLsm),
     "host.security_agents" => HostSecurityAgents(HostSecurityAgents),
     "host.os" => HostOs(HostOs),
+    "host.firewall" => HostFirewall(HostFirewall),
+    "host.time_sync" => HostTimeSync(HostTimeSync),
+    "host.sysctl" => HostSysctl(HostSysctl),
+    "host.container_runtime" => HostContainerRuntime(HostContainerRuntime),
+    "host.cgroups" => HostCgroups(HostCgroups),
+    "host.kernel" => HostKernel(HostKernel),
     "net.egress" => NetEgress(NetEgress),
     "net.proxy" => NetProxy(NetProxy),
     "net.tls_intercept" => NetTlsIntercept(NetTlsIntercept),
     "net.dns" => NetDns(NetDns),
+    "net.registry" => NetRegistry(NetRegistry),
+    "net.mtu" => NetMtu(NetMtu),
+    "net.bandwidth" => NetBandwidth(NetBandwidth),
     "k8s.access" => K8sAccess(K8sAccess),
     "k8s.storageclass" => K8sStorageClass(K8sStorageClass),
     "k8s.rbac" => K8sRbac(K8sRbac),
     "k8s.admission" => K8sAdmission(K8sAdmission),
     "k8s.nodes" => K8sNodes(K8sNodes),
     "k8s.version" => K8sVersion(K8sVersion),
+    "k8s.namespace" => K8sNamespace(K8sNamespace),
+    "k8s.dns" => K8sDns(K8sDns),
+    "k8s.ingress" => K8sIngress(K8sIngress),
+    "k8s.crds" => K8sCrds(K8sCrds),
+    "k8s.cni" => K8sCni(K8sCni),
 }
 
 impl CheckParams {
@@ -621,5 +644,7 @@ pub(crate) fn find_duplicate(checks: &[CheckSpec]) -> Option<(usize, SpecError)>
     None
 }
 
+#[cfg(test)]
+mod late_tests;
 #[cfg(test)]
 mod tests;

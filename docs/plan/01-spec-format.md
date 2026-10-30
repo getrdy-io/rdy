@@ -131,14 +131,18 @@ Version fields take quoted strings or bare integers. By step 1 an unquoted `1.30
 1.3, so per ADR 0001 decision 4 it is rejected with "quote it: min: \"1.30\"".
 
 Parameter types are added to `rdy-spec` in the PR that builds the check (ADR 0012). Revision 0 of the
-schema has the 17 ids of the catalog's M1 tier.
+schema has the 17 ids of the catalog's M1 tier. Revision 1 adds the 14 ids of the catalog's M1-late tier at
+once (M1-172), ahead of their checks, so a check that is built is reachable from a spec and the family
+that holds it lists it. From then on those 14 ids are no longer `not_in_build`: a spec that already named
+one of them with a key the new type does not have is `unsupported_spec`, by the rule below.
 
 **Reserved ids.** `rdy-spec` ships the list of every id named in 03-check-catalog.md, built or not:
 the host, net, k8s, aws, gpu, store and custom ids of sections 2 to 8, the `gcp.*` and `azure.*` ids of
 section 5, and the reserved ids of section 9 (`aws.imds`, `gpu.rocm`, `gpu.vgpu_license`,
 `host.hostname`, `host.virtualization`, `k8s.egress_probe`, `k8s.images`, `k8s.metrics`, `k8s.snapshots`,
 `net.pmtu`, `store.kafka`). Adding an id to the list is additive. A reserved id this rdy does not
-implement is `not_in_build`, so `host.kernel` on M1 says "not in this version", not "did you mean".
+implement is `not_in_build`, so `host.virtualization` on M1 says "not in this version", not "did you
+mean".
 
 ### 2.5 Unknown fields, unknown ids and bad values
 
@@ -151,7 +155,7 @@ exits 64. Lint and sign are stricter, because the person running them is the ven
 | --- | --- | --- | --- |
 | Unknown key at the top level, in `metadata` or in `bundle` | exit 64 | error | refuses |
 | Structure: syntax, limits, tags, missing `id`, duplicate keys, wrong `apiVersion` or `kind`, no checks, over 256 checks, over 64 distinct hosts or over 256 host and port pairs, bad product, bad `expires`, expired | exit 64 | error | refuses |
-| Reserved id not implemented here (`gpu.cuda`, `host.kernel` on M1) | skipped, `not_in_build` | warning | signs, with the warning |
+| Reserved id not implemented here (`gpu.cuda`, `host.virtualization` on M1) | skipped, `not_in_build` | warning | signs, with the warning |
 | Id not reserved (`host.memroy`, `upload.now`) | skipped, `unknown_check` | error | refuses |
 | Unknown field or bad value in a known check (`mn: 32Gi`, `min: 32G`, `severity: blok`, `timeout: 90s`) | skipped, `unsupported_spec`; an unreadable `severity` counts as `block` | error | refuses |
 | A check with no threshold (`- id: host.memory` alone) | skipped, `unsupported_spec` (the parameter is required) | error, `no_threshold` | refuses |
@@ -159,8 +163,8 @@ exits 64. Lint and sign are stricter, because the person running them is the ven
 
 A key with no value (`min:` and nothing after it) is a bad value, not an absent key, so it cannot drop a
 threshold by accident. Where this table says "no threshold", the required key or keys are the bold ones
-and the "one of" groups in section 2.7. `host.lsm`, `host.security_agents` and `host.os` have no required
-key and read when bare.
+and the "one of" groups in section 2.7. `host.lsm`, `host.security_agents`, `host.os` and the M1-late
+ids without a bold key or a "one of" group have no required key and read when bare.
 
 `spec lint` exits 0 with no findings, 1 with warnings only, 2 with errors, 64 for usage, like `run`.
 With `--json` it prints a `LintReport` (result schema `$defs`). This answers the open question of draft 1
@@ -215,7 +219,7 @@ S1). When a check did not run the vendor's fix is not shown, because it would te
 something nobody measured; rdy's own fix for the non-run is shown, with `fix_source: rdy`. The same holds for a pass that the partial rule turns into `warn` (02, Verdict): nothing was measured as
 failing, so rdy's own text is shown, with `fix_source: rdy`, and the vendor's `fix` is hidden.
 
-### 2.7 Parameters of the M1 check ids
+### 2.7 Parameters of the check ids
 
 Two conventions: the main threshold is `min` (or `max`), as in `examples/specs/acme-platform.yaml`, and a
 warn threshold is `recommended`. Types, ranges and defaults are in the schema file; what each threshold
@@ -230,16 +234,30 @@ means is in 03-check-catalog.md. Bold parameters are required; "one of" means at
 | `host.lsm` | `selinux: {allow, denials_max, denials_window, watch}`, `apparmor: {allow, require_profiles}` |
 | `host.security_agents` | `forbid`, `allow` |
 | `host.os` | `supported: [{id, versions}]`, `arch`, `fips` (`forbid`, `require`, `any`), `windows_min_build` |
+| `host.firewall` | `open_inbound` (TCP ports, 1 to 256) |
+| `host.time_sync` | `max_skew`, `require_sync` (default false), `ntp_servers` (1 to 8, a name or address with an optional port, default 123). There are no default servers: without `ntp_servers` the offset is not measured. |
+| `host.sysctl` | one of `expect` (kernel parameter name to a value, a bare value or `">=N"` or `"<=N"`, 1 to 64; a name uses dots or, for a part with a dot, slashes), `limits` (`nofile`, with the same value forms) |
+| `host.container_runtime` | `runtime` (any of `docker`, `containerd`, `podman`, `crio`), `min_version`, `cgroup_driver` (`systemd`, `cgroupfs`), `storage_driver` |
+| `host.cgroups` | `version` (`v2`, `v1`, `any`; default `any`), `controllers` |
+| `host.kernel` | one of `min`, `distro_min` (distribution id to version), `modules`, `btf`. A version is dotted numbers with an optional build part, such as `5.4` or `4.18.0-305`. |
 | `net.egress` | **`endpoints`** (a target, or `{target, optional, expect_status, method, via_proxy, tls}`), `via_proxy` (`auto`, `direct`, `proxy_only`; default `auto`), `trust` (`system`, `bundled`), `max_latency` |
 | `net.proxy` | `required_no_proxy`, `daemons_need_proxy` |
 | `net.tls_intercept` | `hosts` (default: every `net.egress` host in the spec, so an empty `tls_intercept` tests each of them and adds at most 64 connections), `expected_issuer`, `pin_sha256`, `forbid_interception` |
 | `net.dns` | **`names`** (a name or `{name, expect_in, expect_public}`), `max_latency` |
+| `net.registry` | **`registries`** (a host, or `{host, hosts, images, optional}`; `images` are `repository:tag`) |
+| `net.mtu` | `min_mtu` (68 to 65535), `overlay` (`vxlan`, `geneve`, `wireguard`, `ipip`), `underlay` (`ipv4`, `ipv6`; default `ipv4`) |
+| `net.bandwidth` | **`url`**, `bytes` (1Mi to 100Mi), `min_mbps`, `recommended_mbps` |
 | `k8s.access` | `context_pattern`, `server_pattern`, `max_latency` |
 | `k8s.storageclass` | `class`, `access_modes`, `binding`, `expansion`, `reclaim_policy` |
 | `k8s.rbac` | **`can`** (1 to 100; `"create namespaces"` or `{verb, group, resource, subresource, namespace, name}`), `namespace` |
 | `k8s.admission` | `pod_security` (`privileged`, `baseline`, `restricted`), `uses` (`hostPath`, `hostNetwork`, `hostPID`, `privileged`, `runAsRoot`), `namespace`, `scc` |
 | `k8s.nodes` | one of `min_ready`, `per_node: {cpu, memory, ephemeral, pods}`, `free: {...}`; also `min_zones`, `arch`, `selector`, `tolerations` |
 | `k8s.version` | one of `min`, `max`, `openshift_min`, `apis`; also `over_max` (`warn` or `block`, default `warn`) |
+| `k8s.namespace` | `namespace`, `quota_needs` (quota resource name to an amount such as `16`, `500m` or `64Gi`, 1 to 32), `limit_needs` (`container_max_memory`) |
+| `k8s.dns` | `cluster_domain` |
+| `k8s.ingress` | `controller` (an `IngressClass` controller, or `any`), `gateway_api` (`required`, `optional`), `route`, `loadbalancer` |
+| `k8s.crds` | one of `crds` (`{name, versions}`), `operators` (`{namespace, deployment, min_version}`) |
+| `k8s.cni` | `network_policy` (`enforced`), `needs_egress` (`host:port`), `avoid_cidrs` |
 
 Changes from draft 1, from the cli-ux review: the deprecated `needs` alias on `k8s.storageclass` is gone
 (nothing has shipped, and the canonical example now says `access_modes`); `k8s.version` `max_severity` is
@@ -637,7 +655,7 @@ One vocabulary everywhere (ADR 0008 decision 1):
 
 | `skip_kind` | `message` | `fix` | Counts |
 | --- | --- | --- | --- |
-| `not_in_build` | `Not run. This version of rdy has no gpu checks yet.` (or "does not have the check host.kernel yet") | `Install a newer rdy. If there is none yet, ask the vendor how to go on.` | yes |
+| `not_in_build` | `Not run. This version of rdy has no gpu checks yet.` (or "does not have the check host.virtualization yet") | `Install a newer rdy. If there is none yet, ask the vendor how to go on.` | yes |
 | `unknown_check` | `Not run. rdy 0.1.0 does not know the check 'host.memroy'.` (unreserved family: "No version of rdy has checks named upload.") | `Tell the vendor. The spec may have a typo (did you mean 'host.memory'?), or it may need a newer rdy than 0.1.0.` | yes |
 | `unsupported_spec`, field | `Not run. rdy 0.1.0 cannot read 'mn' in host.memory.` | `Tell the vendor. The spec may have a typo (did you mean 'min'?), or it may need a newer rdy than 0.1.0.` | yes |
 | `unsupported_spec`, value | `Not run. 'min: 32G' in host.memory is not a size.` | `Tell the vendor to write 32Gi, not 32G. Sizes use Ki, Mi, Gi or Ti.` | yes |
