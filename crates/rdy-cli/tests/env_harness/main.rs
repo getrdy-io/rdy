@@ -139,48 +139,10 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
 
 /// What the implemented checks still owe, by check. See `completeness`.
 ///
-/// A case counts only through its `expect.json`. The checks below were merged with cases that their own
-/// Rust tests assert by hand, so the goldens are owed, not the cases. M1-174 (backlog correction-29) writes
-/// the `expect.json` files for all six. Each row shrinks when its files land, and the stale-row finding
-/// forces the edit.
-const PENDING: &[Pending] = &[
-    Pending {
-        check: "host.cpu",
-        classes: &[Class::Pass, Class::NonPass],
-        owner: "M1-174",
-        why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
-    },
-    Pending {
-        check: "host.firewall",
-        classes: &[Class::Pass, Class::NonPass, Class::Partial, Class::Timeout],
-        owner: "M1-174",
-        why: "no expect.json, and Replay cannot yet hang or deny the firewall reads (PR #98)",
-    },
-    Pending {
-        check: "host.lsm",
-        classes: &[Class::Pass, Class::NonPass, Class::Partial],
-        owner: "M1-174",
-        why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
-    },
-    Pending {
-        check: "host.memory",
-        classes: &[Class::Pass, Class::NonPass],
-        owner: "M1-174",
-        why: "expect.json goldens were deferred in PR #116",
-    },
-    Pending {
-        check: "host.os",
-        classes: &[Class::Pass, Class::NonPass],
-        owner: "M1-174",
-        why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
-    },
-    Pending {
-        check: "host.security_agents",
-        classes: &[Class::Pass, Class::NonPass, Class::Partial],
-        owner: "M1-174",
-        why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
-    },
-];
+/// Empty since M1-174: every implemented check has its cases, each with a reviewed `expect.json`. A
+/// check merged without its cases goes here with the ticket that owes them, and the stale-row finding
+/// forces the row out when they land.
+const PENDING: &[Pending] = &[];
 
 #[test]
 fn every_implemented_check_has_its_fixture_cases() -> TestResult {

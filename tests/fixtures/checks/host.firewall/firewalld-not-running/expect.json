@@ -1,0 +1,27 @@
+{
+  "entry": {
+    "id": "host.firewall",
+    "open_inbound": [
+      6443,
+      10250
+    ]
+  },
+  "result": {
+    "expected": {
+      "open_inbound": [
+        6443,
+        10250
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "No host firewall manager is active (firewalld is not running and ufw is not enabled).",
+    "notes": [
+      "Rules written directly into nftables or iptables are not read in this build."
+    ],
+    "observed": {
+      "active": []
+    },
+    "partial": null
+  }
+}

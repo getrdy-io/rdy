@@ -1,9 +1,10 @@
 //! Tests of `host.firewall` against synthetic machines.
 //!
 //! The machines are the cases under `tests/fixtures/checks/host.firewall/` (the layout of
-//! docs/plan/08-testing.md). The Replay fixture loader (M1-049) is not built yet, so each case is wired
-//! in by hand below: its files with `include_str!`, its `base` as a parent. The test code reads no real
-//! file. When the loader lands, the cases load as they are.
+//! docs/plan/08-testing.md). `crate::expect_cases` runs every case through the Replay fixture loader and
+//! compares it with its `expect.json`. The tests below wire the same cases by hand (the files with
+//! `include_str!`, the `base` as a parent) to look inside a run: the action log, the order of the
+//! calls, a machine with a tool changed. The test code reads no real file.
 
 use rdy_engine::check::{Check, CheckError, CheckInfo, CheckOutcome, Finding, Level, Need, Os};
 use rdy_engine::probe::DirEntry;
@@ -13,7 +14,17 @@ use serde_json::Value;
 
 use super::*;
 
+/// A file of a case (`fx!("ufw-closed", "root/etc/ufw/user.rules")`) or, with `base`, of a base
+/// environment, which the loader looks up under `tests/fixtures/envs/`.
 macro_rules! fx {
+    (base $base:literal, $file:literal) => {
+        include_str!(concat!(
+            "../../../../tests/fixtures/envs/",
+            $base,
+            "/",
+            $file
+        ))
+    };
     ($case:literal, $file:literal) => {
         include_str!(concat!(
             "../../../../tests/fixtures/checks/host.firewall/",
@@ -48,16 +59,16 @@ const BASE_FIREWALLD: Case = Case {
     files: &[
         (
             "/proc/net/route",
-            fx!("base-firewalld", "root/proc/net/route"),
+            fx!(base "base-firewalld", "root/proc/net/route"),
         ),
         (
             "/usr/lib/firewalld/services/ssh.xml",
-            fx!("base-firewalld", "root/usr/lib/firewalld/services/ssh.xml"),
+            fx!(base "base-firewalld", "root/usr/lib/firewalld/services/ssh.xml"),
         ),
     ],
     commands: &[
-        fx!("base-firewalld", "commands/state.json"),
-        fx!("base-firewalld", "commands/active-zones.json"),
+        fx!(base "base-firewalld", "commands/state.json"),
+        fx!(base "base-firewalld", "commands/active-zones.json"),
     ],
     ..EMPTY
 };
@@ -152,12 +163,18 @@ const FIREWALLD_ROOT_LESS: Case = Case {
 
 const BASE_UFW: Case = Case {
     files: &[
-        ("/proc/net/route", fx!("base-ufw", "root/proc/net/route")),
+        (
+            "/proc/net/route",
+            fx!(base "base-ufw", "root/proc/net/route"),
+        ),
         (
             "/etc/ufw/ufw.conf",
-            fx!("base-ufw", "root/etc/ufw/ufw.conf"),
+            fx!(base "base-ufw", "root/etc/ufw/ufw.conf"),
         ),
-        ("/etc/default/ufw", fx!("base-ufw", "root/etc/default/ufw")),
+        (
+            "/etc/default/ufw",
+            fx!(base "base-ufw", "root/etc/default/ufw"),
+        ),
     ],
     ..EMPTY
 };
@@ -742,7 +759,7 @@ fn a_zone_name_that_fails_the_command_table_rule_is_not_passed_to_the_tool() {
         .dir("/run/firewalld", vec![])
         .file(
             "/proc/net/route",
-            fx!("base-firewalld", "root/proc/net/route"),
+            fx!(base "base-firewalld", "root/proc/net/route"),
         )
         .command("firewall-cmd", &["--state"], 0, "running\n")
         .command(

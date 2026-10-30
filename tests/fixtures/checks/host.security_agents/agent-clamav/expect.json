@@ -1,0 +1,36 @@
+{
+  "entry": {
+    "id": "host.security_agents"
+  },
+  "result": {
+    "expected": {
+      "allow": [],
+      "forbid": []
+    },
+    "fix": "Software in this category often inspects file opens and process launches. If the install is slow or fails, ask the security team to review exclusions for the product's paths, then run rdy again. Detected: ClamAV (antivirus).",
+    "level": "warn",
+    "message": "Detected ClamAV (antivirus).",
+    "notes": [
+      "A match means a process with this name is running. It does not show that the product is installed."
+    ],
+    "observed": {
+      "detected": [
+        {
+          "category": "av",
+          "count": 2,
+          "display_name": "ClamAV",
+          "id": "clamav",
+          "processes": [
+            "clamd",
+            "clamonacc"
+          ]
+        }
+      ],
+      "limited_view": false,
+      "list_cut": false,
+      "processes_read": 5,
+      "processes_unreadable": 0
+    },
+    "partial": null
+  }
+}

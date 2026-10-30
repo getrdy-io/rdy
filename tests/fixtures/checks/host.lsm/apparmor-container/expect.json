@@ -1,0 +1,45 @@
+{
+  "entry": {
+    "apparmor": {
+      "allow": [
+        "enabled"
+      ],
+      "require_profiles": [
+        "acme-agent"
+      ]
+    },
+    "id": "host.lsm"
+  },
+  "result": {
+    "expected": {
+      "apparmor": {
+        "allow": [
+          "enabled"
+        ],
+        "require_profiles": [
+          "acme-agent"
+        ]
+      }
+    },
+    "fix": "Run rdy on the host, not inside a container, or run `aa-status` on the host.",
+    "level": "warn",
+    "message": "The AppArmor profile list is not visible from here, so the required profiles cannot be checked.",
+    "notes": [],
+    "observed": {
+      "apparmor": {
+        "required_profiles": {
+          "loaded": null,
+          "required": [
+            "acme-agent"
+          ]
+        },
+        "state": "enabled"
+      },
+      "selinux": {
+        "configured": null,
+        "state": "disabled"
+      }
+    },
+    "partial": null
+  }
+}

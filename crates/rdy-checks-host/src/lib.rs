@@ -39,6 +39,8 @@ pub mod agents;
 pub mod cgroup;
 mod cpu;
 mod disk;
+#[cfg(test)]
+mod expect_cases;
 mod family;
 mod firewall;
 mod lsm;

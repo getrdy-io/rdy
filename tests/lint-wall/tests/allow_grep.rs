@@ -164,13 +164,13 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &str, &str)] = &[
     ),
     (
         "crates/rdy-checks-host/src/firewall/tests.rs",
-        "../../../../tests/fixtures/checks/host.firewall/",
-        "embeds the synthetic cases of tests/fixtures/checks/host.firewall until the Replay loader (M1-049) reads them",
+        "../../../../tests/fixtures/",
+        "embeds the synthetic cases of tests/fixtures/checks/host.firewall and their bases under tests/fixtures/envs for the hand-wired machines",
     ),
     (
         "crates/rdy-checks-host/src/firewall/unit_tests.rs",
-        "../../../../tests/fixtures/checks/host.firewall/",
-        "embeds recorded text from tests/fixtures/checks/host.firewall for the parser tests",
+        "../../../../tests/fixtures/",
+        "embeds recorded text from tests/fixtures/checks/host.firewall and the envs/base-firewalld base for the parser tests",
     ),
     (
         "crates/rdy-checks-k8s/src/client/guard/tests/parser.rs",

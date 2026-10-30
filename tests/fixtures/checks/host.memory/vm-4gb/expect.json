@@ -1,0 +1,34 @@
+{
+  "entry": {
+    "id": "host.memory",
+    "min": "4Gi"
+  },
+  "result": {
+    "expected": {
+      "band_bytes": 268435456,
+      "min_available_bytes": 2147483648,
+      "min_bytes": 4294967296,
+      "swap": "any"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "3.8 GiB found, 4 GiB needed, inside the 256 MiB tolerance",
+    "notes": [
+      "Machines sold with a nominal size show a little less than that size, so the spec allows a small shortfall (tolerance_percent)."
+    ],
+    "observed": {
+      "available_bytes": 3072000000,
+      "available_effective_bytes": 3072000000,
+      "available_estimated": false,
+      "cgroup_hierarchy": null,
+      "cgroup_limit_at": null,
+      "cgroup_limit_bytes": null,
+      "cgroup_swap_limit_bytes": null,
+      "effective_bytes": 4080218112,
+      "swap_total_bytes": 0,
+      "swap_used_bytes": 0,
+      "total_bytes": 4080218112
+    },
+    "partial": null
+  }
+}

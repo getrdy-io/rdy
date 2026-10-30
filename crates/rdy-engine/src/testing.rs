@@ -17,6 +17,8 @@
 //! For a whole check against a recorded machine, [`run_fixture`] loads a fixture, refuses one that does
 //! not answer the check, runs the check against it and returns a [`FixtureRun`]. Then
 //! [`FixtureRun::assert_within_manifest`] proves the check stayed inside its declaration.
+//! [`assert_cases`] (feature `runtime`) runs every fixture case of a check through the scheduler and compares
+//! it with the case's reviewed `expect.json`.
 //! `FakeCheck` (feature `runtime`) is a scripted check for scheduler tests, and [`normalize`] scrubs a report so two runs
 //! of one environment compare equal. [`golden::assert_golden`] compares output with a golden file and writes it
 //! under `UPDATE_GOLDENS=1`.
@@ -30,6 +32,8 @@ pub use crate::probe::replay::{
 };
 
 #[cfg(feature = "runtime")]
+mod expect;
+#[cfg(feature = "runtime")]
 mod fake;
 mod fixture_run;
 pub mod golden;
@@ -37,6 +41,8 @@ mod normalize;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "runtime")]
+pub use expect::{assert_cases, expect_bytes, render, run_case, sorted};
 #[cfg(feature = "runtime")]
 pub use fake::{FAKE_INFO, Fake, FakeCheck, Release};
 pub use fixture_run::{

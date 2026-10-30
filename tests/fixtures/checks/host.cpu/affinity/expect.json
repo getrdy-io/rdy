@@ -1,0 +1,28 @@
+{
+  "entry": {
+    "id": "host.cpu",
+    "min": 4
+  },
+  "result": {
+    "expected": {
+      "min": 4
+    },
+    "fix": "A CPU affinity mask limits rdy to 2 vCPUs. Allow 4 or more: `--cpuset-cpus` for Docker, `AllowedCPUs=` in the systemd unit, or the cpuset of the pod. Or resize the instance.",
+    "level": "fail",
+    "message": "2 vCPUs found, 4 needed (a CPU affinity mask limits the 8 CPUs of the host)",
+    "notes": [],
+    "observed": {
+      "allowed_cores": 2,
+      "arch": "x86_64",
+      "effective_cores": 2.0,
+      "flags": {},
+      "hypervisor": true,
+      "logical_cores": 8,
+      "physical_cores": 4,
+      "quota_cores": null,
+      "virtualization": "vm",
+      "x86_64_level": 4
+    },
+    "partial": null
+  }
+}

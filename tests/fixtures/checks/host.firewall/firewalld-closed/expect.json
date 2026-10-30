@@ -1,0 +1,43 @@
+{
+  "entry": {
+    "id": "host.firewall",
+    "open_inbound": [
+      6443,
+      10250
+    ]
+  },
+  "result": {
+    "expected": {
+      "open_inbound": [
+        6443,
+        10250
+      ]
+    },
+    "fix": "Run `firewall-cmd --permanent --zone=public --add-port=6443/tcp && firewall-cmd --reload`.",
+    "level": "fail",
+    "message": "firewalld blocks 6443/tcp in zone public.",
+    "notes": [
+      "firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read"
+    ],
+    "observed": {
+      "active": [
+        {
+          "interface": "eth0",
+          "manager": "firewalld",
+          "ports": {
+            "10250": {
+              "detail": "ports: 10250/tcp",
+              "verdict": "open"
+            },
+            "6443": {
+              "detail": "not in ports or services, and the zone target is default",
+              "verdict": "closed"
+            }
+          },
+          "zone": "public"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

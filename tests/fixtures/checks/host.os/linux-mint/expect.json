@@ -1,0 +1,64 @@
+{
+  "entry": {
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "rhel",
+        "versions": [
+          "8",
+          "9"
+        ]
+      },
+      {
+        "id": "ubuntu",
+        "versions": [
+          "22.04"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "any",
+      "supported": [
+        {
+          "id": "rhel",
+          "versions": [
+            "8",
+            "9"
+          ]
+        },
+        {
+          "id": "ubuntu",
+          "versions": [
+            "22.04"
+          ]
+        }
+      ]
+    },
+    "fix": "Use a supported OS image, or ask the vendor whether linuxmint 21.3 can be supported.",
+    "level": "fail",
+    "message": "Linux Mint 21.3 (linuxmint 21.3) is not supported. The spec supports rhel 8 or 9, ubuntu 22.04.",
+    "notes": [],
+    "observed": {
+      "arch": "x86_64",
+      "container": [],
+      "fips": false,
+      "init": "systemd",
+      "kernel": "5.15.0-91-generic",
+      "os": {
+        "id": "linuxmint",
+        "id_like": [
+          "ubuntu",
+          "debian"
+        ],
+        "name": "Linux Mint",
+        "pretty_name": "Linux Mint 21.3",
+        "source": "/etc/os-release",
+        "version_id": "21.3"
+      },
+      "wsl": false
+    },
+    "partial": null
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "entry": {
+    "apparmor": {
+      "allow": [
+        "enabled"
+      ],
+      "require_profiles": [
+        "acme-agent"
+      ]
+    },
+    "id": "host.lsm"
+  },
+  "result": {
+    "expected": {
+      "apparmor": {
+        "allow": [
+          "enabled"
+        ],
+        "require_profiles": [
+          "acme-agent"
+        ]
+      }
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "SELinux is disabled. AppArmor is on.",
+    "notes": [],
+    "observed": {
+      "apparmor": {
+        "profiles": {
+          "complain": 1,
+          "enforce": 3,
+          "loaded": 4
+        },
+        "required_profiles": {
+          "missing": [],
+          "required": [
+            "acme-agent"
+          ]
+        },
+        "state": "enabled"
+      },
+      "selinux": {
+        "configured": null,
+        "state": "disabled"
+      }
+    },
+    "partial": null
+  }
+}
