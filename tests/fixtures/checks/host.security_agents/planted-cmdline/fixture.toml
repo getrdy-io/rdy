@@ -1,0 +1,12 @@
+schema = 1
+name = "planted-cmdline"
+summary = "A detected agent whose command line and environment hold a planted token that must never be read"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.security_agents"]
+
+[caps]
+root = true
+network = false
+kube = false

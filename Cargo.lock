@@ -1760,9 +1760,11 @@ dependencies = [
  "proptest",
  "rdy-engine",
  "rdy-spec",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "toml",
 ]
 
 [[package]]

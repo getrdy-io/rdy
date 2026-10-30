@@ -112,6 +112,20 @@ const ALLOWED: &[(&str, &str)] = &[
     ),
 ];
 
+/// Check-crate files that embed a data file the crate ships, with `include_str!` in code that is not a test
+/// (03 Appendix B: data files are embedded at build time). Data only: a `.toml` file under the crate's own
+/// `data/` directory, never Rust.
+///
+/// Each entry is `(file, literal, reason)`. The file holds exactly one include call, its only literal is
+/// `literal` (no `concat!`), and `literal` is `../data/<name>.toml`, one step out of the crate's `src/` into
+/// its own `data/` directory (`shipped_data_is_embedded_only_from_the_crates_own_data_directory` checks it).
+/// A test module of the same crate is covered by `INCLUDE_DATA_ALLOWED`.
+const INCLUDE_SHIPPED_DATA_ALLOWED: &[(&str, &str, &str)] = &[(
+    "crates/rdy-checks-host/src/agents.rs",
+    "../data/agents.toml",
+    "embeds the security-software catalog that host.security_agents matches against (M1-146)",
+)];
+
 /// Check-crate files that embed a data file with `include_str!` or `include_bytes!`. Data only: the file
 /// is text, never Rust. `include!` and `#[path]` are never allowed in a check crate.
 ///
@@ -198,13 +212,79 @@ struct Findings {
     include_code: bool,
     /// `include_str!` or `include_bytes!`.
     include_data: bool,
+    /// The string literals of every `include_str!` and `include_bytes!` call, one list per call, read from
+    /// the tokens of the call: any delimiter (`(..)`, `[..]` or `{..}`), looking through `concat!(..)`. A
+    /// call that does not start with a literal (a macro variable, say) has an empty string first, which
+    /// no prefix matches. Comments and strings are not code, so a decoy in them is not a call.
+    include_calls: Vec<Vec<String>>,
+    /// The string literals in the arguments of every `fx!` call, with any delimiter.
+    fx_literals: Vec<String>,
 }
 
-/// The macro names that read a file at build time.
-fn note_macro_name(findings: &mut Findings, name: &str) {
+/// The string literals in the tokens, in order, looking through every group.
+fn string_literals(tokens: proc_macro2::TokenStream, out: &mut Vec<String>) {
+    use proc_macro2::TokenTree;
+    for tree in tokens {
+        match tree {
+            TokenTree::Group(g) => string_literals(g.stream(), out),
+            TokenTree::Literal(lit) => {
+                if let Ok(text) = syn::parse_str::<syn::LitStr>(&lit.to_string()) {
+                    out.push(text.value());
+                }
+            }
+            TokenTree::Ident(_) | TokenTree::Punct(_) => {}
+        }
+    }
+}
+
+/// Whether the call starts with a string literal, or with `concat!(` and then one.
+fn starts_with_literal(tokens: &proc_macro2::TokenStream) -> bool {
+    use proc_macro2::TokenTree;
+    let is_literal = |tree: Option<&TokenTree>| {
+        matches!(tree, Some(TokenTree::Literal(lit))
+            if syn::parse_str::<syn::LitStr>(&lit.to_string()).is_ok())
+    };
+    let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
+    match trees.first() {
+        Some(TokenTree::Ident(id))
+            if id == "concat"
+                && matches!(trees.get(1), Some(TokenTree::Punct(p)) if p.as_char() == '!') =>
+        {
+            match trees.get(2) {
+                Some(TokenTree::Group(g)) => {
+                    is_literal(g.stream().into_iter().collect::<Vec<_>>().first())
+                }
+                _ => false,
+            }
+        }
+        first => is_literal(first),
+    }
+}
+
+/// The macro names that read a file at build time. `args` is the token stream between the delimiters of
+/// the call, when the call has one.
+fn note_macro(findings: &mut Findings, name: &str, args: Option<proc_macro2::TokenStream>) {
     match name {
         "include" => findings.include_code = true,
-        "include_str" | "include_bytes" => findings.include_data = true,
+        "include_str" | "include_bytes" => {
+            findings.include_data = true;
+            let mut call = Vec::new();
+            match args {
+                Some(args) => {
+                    if !starts_with_literal(&args) {
+                        call.push(String::new());
+                    }
+                    string_literals(args, &mut call);
+                }
+                None => call.push(String::new()),
+            }
+            findings.include_calls.push(call);
+        }
+        "fx" => {
+            if let Some(args) = args {
+                string_literals(args, &mut findings.fx_literals);
+            }
+        }
         _ => {}
     }
 }
@@ -290,7 +370,11 @@ fn scan_with(
                 let bang =
                     matches!(trees.get(i + 1), Some(TokenTree::Punct(p)) if p.as_char() == '!');
                 if bang {
-                    note_macro_name(findings, &id.to_string().replace("r#", ""));
+                    let args = match trees.get(i + 2) {
+                        Some(TokenTree::Group(g)) => Some(g.stream()),
+                        _ => None,
+                    };
+                    note_macro(findings, &id.to_string().replace("r#", ""), args);
                 }
             }
             // `$h [$a]`: the hash of an attribute is a `tt` the caller passes. Nothing in the source
@@ -376,9 +460,10 @@ impl<'ast> syn::visit::Visit<'ast> for Finder {
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
         if let Some(last) = mac.path.segments.last() {
-            note_macro_name(
+            note_macro(
                 &mut self.findings,
                 &last.ident.to_string().replace("r#", ""),
+                Some(mac.tokens.clone()),
             );
         }
         scan_tokens(&mut self.findings, mac.tokens.clone());
@@ -406,6 +491,16 @@ fn findings_of(source: &str) -> Findings {
                 include_code: stripped.contains("include!"),
                 include_data: stripped.contains("include_str!")
                     || stripped.contains("include_bytes!"),
+                // The text cannot say what the paths are. One empty path per call matches no prefix.
+                include_calls: vec![
+                    vec![String::new()];
+                    stripped.matches("include_str!").count()
+                        + stripped.matches("include_bytes!").count()
+                ],
+                fx_literals: vec!["..".to_owned()]
+                    .into_iter()
+                    .filter(|_| stripped.contains("fx!"))
+                    .collect(),
             }
         }
     }
@@ -509,7 +604,12 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
             if found.path_attribute || found.include_code {
                 bad.push(format!("{rel}: #[path] or include!"));
             }
-            if found.include_data && !INCLUDE_DATA_ALLOWED.iter().any(|(p, _, _)| *p == rel) {
+            if found.include_data
+                && !INCLUDE_DATA_ALLOWED.iter().any(|(p, _, _)| *p == rel)
+                && !INCLUDE_SHIPPED_DATA_ALLOWED
+                    .iter()
+                    .any(|(p, _, _)| *p == rel)
+            {
                 bad.push(format!("{rel}: include_str! or include_bytes!"));
             }
         }
@@ -525,30 +625,8 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
             found.include_data,
             "{path} is on INCLUDE_DATA_ALLOWED but embeds nothing now ({why})"
         );
-        let literals = include_literals(&source);
-        assert!(
-            !literals.is_empty(),
-            "{path}: found include_str! but could not read its path literal ({why})"
-        );
-        for literal in literals {
-            assert!(
-                literal.starts_with(prefix),
-                "{path}: an include path `{literal}` does not start with `{prefix}`. The entry allows only that data ({why})"
-            );
-        }
-        // Past the required prefix nothing may climb out of it: not in the first literal, not in a later
-        // literal of the call, not in the joined text, and not in an argument of an `fx!` call.
-        for call in include_calls(&source) {
-            assert!(
-                !climbs(&call, prefix),
-                "{path}: an include path {call:?} climbs out of `{prefix}` with `..` ({why})"
-            );
-        }
-        for literal in macro_literals(&source, "fx!(") {
-            assert!(
-                !literal.contains(".."),
-                "{path}: an fx! argument `{literal}` contains `..`, which would leave the fixture directory ({why})"
-            );
+        if let Err(reason) = check_prefixed_includes(&found, prefix) {
+            panic!("{path}: {reason} ({why})");
         }
         assert!(
             test_only(&base, path),
@@ -557,13 +635,90 @@ fn a_check_crate_does_not_reach_other_files_by_path_or_include() {
     }
 }
 
-/// The source without whole-line `//` comments.
-fn without_comments(source: &str) -> String {
-    source
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n")
+#[test]
+fn shipped_data_is_embedded_only_from_the_crates_own_data_directory() {
+    let base = root();
+    let crates: Vec<String> = check_crates()
+        .iter()
+        .map(|dir| format!("{}/", relative(&base, dir)))
+        .collect();
+    for (path, literal, why) in INCLUDE_SHIPPED_DATA_ALLOWED {
+        let source = std::fs::read_to_string(base.join(path)).expect("read source");
+        if let Err(reason) = check_single_include(&findings_of(&source), literal) {
+            panic!("{path}: {reason} ({why})");
+        }
+        let name = literal
+            .strip_prefix("../data/")
+            .unwrap_or_else(|| panic!("{path}: `{literal}` is not under ../data/ ({why})"));
+        assert!(
+            name.ends_with(".toml")
+                && !name.contains('/')
+                && !name.contains('\\')
+                && !name.contains(".."),
+            "{path}: `{name}` must be a plain .toml file name ({why})"
+        );
+        // The file sits directly in the crate's src/ directory: `<crate>/src/<file>.rs`.
+        let crate_dir = crates
+            .iter()
+            .find(|dir| path.starts_with(&format!("{dir}src/")))
+            .unwrap_or_else(|| panic!("{path} is not in a check crate's src/ ({why})"));
+        assert!(
+            !path[crate_dir.len() + "src/".len()..].contains('/'),
+            "{path} must sit directly in src/ so that `../data/` is the crate's own directory ({why})"
+        );
+        let target = base.join(crate_dir).join("data").join(name);
+        assert!(target.is_file(), "{} is missing ({why})", target.display());
+    }
+}
+
+/// The checks of an `INCLUDE_DATA_ALLOWED` entry, on what syn read from the tokens of the calls (so a
+/// decoy in a comment or a string is not seen, and a call in any delimiter is). The file embeds something,
+/// every call's first literal starts with `prefix`, and past the prefix nothing climbs out of it: not in
+/// the first literal, not in a later literal of the call, not in the joined text, and not in an argument
+/// of an `fx!` call.
+fn check_prefixed_includes(found: &Findings, prefix: &str) -> Result<(), String> {
+    if found.include_calls.is_empty() {
+        return Err("it is on the list but embeds nothing now".to_owned());
+    }
+    for call in &found.include_calls {
+        let first = call.first().map_or("", String::as_str);
+        if !first.starts_with(prefix) {
+            return Err(format!(
+                "an include path `{first}` does not start with `{prefix}`. The entry allows only that data"
+            ));
+        }
+        if climbs(call, prefix) {
+            return Err(format!(
+                "an include path {call:?} climbs out of `{prefix}` with `..`"
+            ));
+        }
+    }
+    for literal in &found.fx_literals {
+        if literal.contains("..") {
+            return Err(format!(
+                "an fx! argument `{literal}` contains `..`, which would leave the fixture directory"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The checks of an `INCLUDE_SHIPPED_DATA_ALLOWED` entry: exactly one include call, in any delimiter, and
+/// its only literal is `literal`.
+fn check_single_include(found: &Findings, literal: &str) -> Result<(), String> {
+    if found.include_calls.len() != 1 {
+        return Err(format!(
+            "it must hold exactly one include_str! or include_bytes! call, in any delimiter, and it holds {}",
+            found.include_calls.len()
+        ));
+    }
+    if found.include_calls[0] != [literal.to_owned()] {
+        return Err(format!(
+            "the include must be the single literal `{literal}`, not {:?}",
+            found.include_calls[0]
+        ));
+    }
+    Ok(())
 }
 
 /// Whether the literals of one include call climb out of `prefix`: past the prefix, a `..` in the first
@@ -573,98 +728,6 @@ fn climbs(call: &[String], prefix: &str) -> bool {
     let mut after: Vec<&str> = vec![first.get(prefix.len()..).unwrap_or_default()];
     after.extend(call.iter().skip(1).map(String::as_str));
     after.iter().any(|part| part.contains("..")) || after.concat().contains("..")
-}
-
-/// Reads one string literal. `body` starts just after the opening quote. Returns the text and what is
-/// left after the closing quote.
-fn read_literal(body: &str) -> (String, &str) {
-    let mut text = String::new();
-    let mut chars = body.char_indices();
-    while let Some((at, c)) = chars.next() {
-        match c {
-            '"' => return (text, &body[at + 1..]),
-            '\\' => text.extend(chars.next().map(|(_, c)| c)),
-            c => text.push(c),
-        }
-    }
-    (text, "")
-}
-
-/// Every string literal in the arguments of the macro call that starts at `args` (just after the
-/// opening parenthesis), up to the matching closing one. Nested calls such as `concat!(..)` are read
-/// too.
-fn call_literals(args: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut depth = 1_usize;
-    let mut rest = args;
-    while let Some(c) = rest.chars().next() {
-        match c {
-            '"' => {
-                let (text, after) = read_literal(&rest[1..]);
-                out.push(text);
-                rest = after;
-                continue;
-            }
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    break;
-                }
-            }
-            _ => {}
-        }
-        rest = &rest[c.len_utf8()..];
-    }
-    out
-}
-
-/// Every string literal in the arguments of every call of the macro `name` (written `fx!(`).
-fn macro_literals(source: &str, name: &str) -> Vec<String> {
-    let code = without_comments(source);
-    let mut out = Vec::new();
-    let mut rest = code.as_str();
-    while let Some(at) = rest.find(name) {
-        rest = &rest[at + name.len()..];
-        out.extend(call_literals(rest));
-    }
-    out
-}
-
-/// All the string literals of every `include_str!(..)` and `include_bytes!(..)` call, one list per call,
-/// looking through a `concat!(`.
-fn include_calls(source: &str) -> Vec<Vec<String>> {
-    let code = without_comments(source);
-    let mut out = Vec::new();
-    for name in ["include_str!(", "include_bytes!("] {
-        let mut rest = code.as_str();
-        while let Some(at) = rest.find(name) {
-            rest = &rest[at + name.len()..];
-            out.push(call_literals(rest));
-        }
-    }
-    out
-}
-
-/// The first string literal of every `include_str!(..)` and `include_bytes!(..)` in the source, looking
-/// through a `concat!(`. A path that does not start with a literal (a macro variable, say) reads as the
-/// empty string, which no prefix matches. Whole-line `//` comments are ignored.
-fn include_literals(source: &str) -> Vec<String> {
-    let code = without_comments(source);
-    let mut out = Vec::new();
-    for name in ["include_str!(", "include_bytes!("] {
-        let mut rest = code.as_str();
-        while let Some(at) = rest.find(name) {
-            rest = &rest[at + name.len()..];
-            let mut arg = rest.trim_start();
-            if let Some(inner) = arg.strip_prefix("concat!(") {
-                arg = inner.trim_start();
-            }
-            let literal = arg.strip_prefix('"').map(|body| read_literal(body).0);
-            out.push(literal.unwrap_or_default());
-        }
-    }
-    out
 }
 
 /// Whether the module in `module` is compiled only for tests: it is declared under `#[cfg(test)]` in
@@ -967,6 +1030,128 @@ fn the_reach_scan_sees_path_and_include() {
 }
 
 #[test]
+fn an_include_in_any_delimiter_is_read_from_its_tokens() {
+    // The paths come from the tokens of the call, so `[..]`, `{..}` and a space before the delimiter are
+    // read like `(..)`.
+    for (what, source) in [
+        ("parentheses", "const A: &str = include_str!(\"x\");"),
+        ("brackets", "const A: &str = include_str![\"x\"];"),
+        ("braces", "const A: &[u8] = include_bytes!{\"x\"};"),
+        ("a space", "const A: &str = include_str! (\"x\");"),
+        ("a path", "const A: &str = core::include_str!(\"x\");"),
+        ("nested", "const A: &str = concat!(include_str![\"x\"]);"),
+        (
+            "a macro body",
+            "macro_rules! m { () => { include_str![\"x\"] }; }",
+        ),
+    ] {
+        assert_eq!(findings_of(source).include_calls, [["x"]], "{what}");
+    }
+    assert_eq!(
+        findings_of("fn f() { include_str!(\"a\"); include_bytes![\"b\"]; }").include_calls,
+        [["a"], ["b"]]
+    );
+    // A file that does not parse has one empty path per call, which no prefix matches.
+    assert_eq!(
+        findings_of("fn ( include_str![\"x\"]").include_calls,
+        [[""]]
+    );
+}
+
+#[test]
+fn the_include_reader_sees_every_literal_and_refuses_what_it_cannot_read() {
+    let calls = |source: &str| findings_of(source).include_calls;
+    assert_eq!(
+        calls("const A: &str = include_str!(\"../a/b.txt\");"),
+        [["../a/b.txt"]]
+    );
+    assert_eq!(
+        calls("macro_rules! fx { () => { include_bytes!(concat!(\n \"../x/\", $c)) }; }"),
+        [["../x/"]]
+    );
+    // A path that is not a literal reads as the empty string first.
+    assert_eq!(calls("fn f() { let a = include_str!($path); }"), [[""]]);
+    assert_eq!(
+        calls("fn f() { let a = include_str!(f(\"x\")); }"),
+        [["", "x"]]
+    );
+    // Raw strings and escapes are decoded.
+    assert_eq!(
+        calls("fn f() { include_str!(r#\"../a\"#); include_str!(\"..\\u{2f}b\"); }"),
+        [["../a"], ["../b"]]
+    );
+    // Comments and strings are not code.
+    assert!(calls("// include_str!(\"../a\")\nfn f() {}").is_empty());
+    assert!(calls("/* include_str!(\"../a\") */ fn f() {}").is_empty());
+    assert!(calls("const S: &str = \"include_str!(\\\"../a\\\")\";").is_empty());
+}
+
+#[test]
+fn the_include_reader_sees_every_literal_of_a_call_and_of_fx() {
+    let source = "fn f() { let a = include_str!(concat!(\"../x/\", $c, \"/../../etc\", f(\"y\"))); let b = fx![\"case\", \"a/../b\"]; }";
+    let found = findings_of(source);
+    assert_eq!(
+        found.include_calls,
+        [["../x/", "/../../etc", "y"]],
+        "a nested call and a later literal are read"
+    );
+    assert_eq!(found.fx_literals, ["case", "a/../b"]);
+    // The macro definition is not a call.
+    assert!(
+        findings_of("macro_rules! fx { () => {} }")
+            .fx_literals
+            .is_empty()
+    );
+    // A closing parenthesis inside a literal does not end the call.
+    assert_eq!(
+        findings_of("fn f() { include_str!(\"a)\", \"b\"); fx!(\"c\"); }").include_calls,
+        [["a)", "b"]]
+    );
+}
+
+#[test]
+fn a_decoy_in_a_comment_does_not_hide_a_bracket_call() {
+    // SEC-1R: a block comment holds a call with a good path, and the real call is written with brackets.
+    // The checks read the tokens, so the decoy is not there and the real path is.
+    let decoy = "/* include_str!(\"../data/agents.toml\") */\nconst CATALOG: &str = include_str![\"/home/runner/.ssh/id_ed25519\"];\n";
+    let found = findings_of(decoy);
+    assert_eq!(found.include_calls, [["/home/runner/.ssh/id_ed25519"]]);
+    // INCLUDE_SHIPPED_DATA_ALLOWED
+    let err = check_single_include(&found, "../data/agents.toml").unwrap_err();
+    assert!(err.contains("/home/runner/.ssh/id_ed25519"), "{err}");
+    // INCLUDE_DATA_ALLOWED, with a decoy that has a good prefix
+    let prefix = "../../../../tests/fixtures/checks/host.firewall/";
+    let decoy = format!(
+        "/* include_str!(\"{prefix}a\") */\nconst C: &str = include_str![\"/home/runner/.ssh/id_ed25519\"];\n"
+    );
+    let err = check_prefixed_includes(&findings_of(&decoy), prefix).unwrap_err();
+    assert!(err.contains("does not start with"), "{err}");
+    // The honest forms pass.
+    assert!(
+        check_single_include(
+            &findings_of("const C: &str = include_str![\"../data/agents.toml\"];"),
+            "../data/agents.toml"
+        )
+        .is_ok()
+    );
+    let good = format!("const C: &str = include_str![\"{prefix}a\"];");
+    assert!(check_prefixed_includes(&findings_of(&good), prefix).is_ok());
+    // A second call, a climb and an fx! argument that leaves the directory are refused.
+    assert!(
+        check_single_include(
+            &findings_of("fn f() { include_str![\"../data/agents.toml\"]; include_str!(\"x\"); }"),
+            "../data/agents.toml"
+        )
+        .is_err()
+    );
+    let climb = format!("const C: &str = include_str![concat!(\"{prefix}\", \"../x\")];");
+    assert!(check_prefixed_includes(&findings_of(&climb), prefix).is_err());
+    let fx = format!("fn f() {{ include_str!(\"{prefix}a\"); fx![\"../b\"]; }}");
+    assert!(check_prefixed_includes(&findings_of(&fx), prefix).is_err());
+    assert!(check_prefixed_includes(&findings_of("fn f() {}"), prefix).is_err());
+}
+
+#[test]
 fn the_walk_reaches_every_directory() {
     // `#[path]` can name a file in a directory the walk would skip if it skipped `target` or dot dirs.
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("allow-grep-walk");
@@ -1017,37 +1202,6 @@ fn the_repo_walk_starts_at_the_root_and_skips_only_build_output() {
             "scripts/x.rs"
         ]
     );
-}
-
-#[test]
-fn the_include_reader_sees_every_literal_and_refuses_what_it_cannot_read() {
-    assert_eq!(
-        include_literals("const A: &str = include_str!(\"../a/b.txt\");"),
-        ["../a/b.txt"]
-    );
-    assert_eq!(
-        include_literals(
-            "macro_rules! fx { () => { include_bytes!(concat!(\n \"../x/\", $c)) }; }"
-        ),
-        ["../x/"]
-    );
-    assert_eq!(include_literals("let a = include_str!($path);"), [""]);
-    assert!(include_literals("// include_str!(\"../a\")\nfn f() {}").is_empty());
-}
-
-#[test]
-fn the_include_reader_sees_every_literal_of_a_call_and_of_fx() {
-    let source = "const A: &str = include_str!(concat!(\"../x/\", $c, \"/../../etc\", f(\"y\")));\nlet b = fx!(\"case\", \"a/../b\");";
-    assert_eq!(
-        include_calls(source),
-        [["../x/", "/../../etc", "y"]],
-        "a nested call and a later literal are read"
-    );
-    assert_eq!(macro_literals(source, "fx!("), ["case", "a/../b"]);
-    // The macro definition is not a call.
-    assert!(macro_literals("macro_rules! fx { () => {} }", "fx!(").is_empty());
-    // A closing parenthesis inside a literal does not end the call.
-    assert_eq!(call_literals("\"a)\", \"b\") \"c\""), ["a)", "b"]);
 }
 
 #[test]

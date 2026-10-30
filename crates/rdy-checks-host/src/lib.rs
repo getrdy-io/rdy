@@ -3,11 +3,12 @@
 //! Internal to rdy. No API stability promise.
 //!
 //! So far this crate holds the OS support table, a stub for each host check that is not written yet
-//! (M1-067), [`Firewall`] (`host.firewall`, M1-147), [`Memory`] (`host.memory`, M1-069) and [`OsCheck`]
-//! (`host.os`, M1-073), which the family builds from their spec entries (M1-172), and the cgroup helper
-//! ([`cgroup`], M1-065) that `host.memory`, `host.cpu` and `host.cgroups` share. The real checks replace the
-//! stubs one ticket at a time (M1-068 and later). Every check compiles on every target. Where a data source
-//! is not built, the check is `NotYet` on that OS, and the planner skips it with
+//! (M1-067), [`Firewall`] (`host.firewall`, M1-147), [`Memory`] (`host.memory`, M1-069), [`OsCheck`]
+//! (`host.os`, M1-073) and [`SecurityAgents`] (`host.security_agents`, M1-146), which the family builds
+//! from their spec entries (M1-172), the security-software catalog ([`agents`]), and the cgroup helper
+//! ([`cgroup`], M1-065) that `host.memory`, `host.cpu` and `host.cgroups` share. The real checks replace
+//! the stubs one ticket at a time (M1-068 and later). Every check compiles on every target. Where a data
+//! source is not built, the check is `NotYet` on that OS, and the planner skips it with
 //! `skip_kind: not_yet_on_os` before it runs.
 //!
 //! Rule: do not register [`HostFamily`] in the CLI while [`HostFamily::stub_ids`] is not empty. On Linux
@@ -33,13 +34,16 @@
 )]
 #![warn(missing_docs)]
 
+pub mod agents;
 pub mod cgroup;
 mod family;
 mod firewall;
 mod memory;
 mod os;
+mod security_agents;
 
 pub use family::HostFamily;
 pub use firewall::Firewall;
 pub use memory::Memory;
 pub use os::OsCheck;
+pub use security_agents::SecurityAgents;

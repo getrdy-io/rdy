@@ -1,0 +1,12 @@
+schema = 1
+name = "two-agents"
+summary = "A host with an endpoint agent, a backup agent and a runtime monitor"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.security_agents"]
+
+[caps]
+root = true
+network = false
+kube = false
