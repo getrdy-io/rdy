@@ -63,14 +63,15 @@ mod b64;
 mod error;
 pub mod guard;
 #[cfg(test)]
-mod mock;
+pub(crate) mod mock;
 mod text;
 
 #[cfg(test)]
 mod tests;
 
 pub use error::KubeError;
-use error::{from_kube_error, from_kubeconfig_error, io_reason, proxy_display};
+pub(crate) use error::from_kube_error;
+use error::{from_kubeconfig_error, io_reason, proxy_display};
 pub use guard::{GuardError, ReadOnlyClient, guarded_service};
 use text::escape;
 

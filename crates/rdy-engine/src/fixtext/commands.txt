@@ -25,6 +25,8 @@ grubby
 helm
 journalctl
 keytool
+kind
+kubeadm
 kubectl
 kubelogin
 lvextend

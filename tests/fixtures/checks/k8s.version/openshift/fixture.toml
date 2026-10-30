@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-openshift"
+summary = "OpenShift 4.14.9 on Kubernetes 1.27, with the ClusterVersion readable"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true
