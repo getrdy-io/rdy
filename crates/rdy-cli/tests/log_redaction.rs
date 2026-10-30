@@ -125,6 +125,31 @@ fn trace_level_output_matches_the_golden_file_and_holds_no_canary() {
     assert_eq!(got, want, "golden mismatch. Got:\n{got}");
 }
 
+/// A kubeconfig token the facade handled. It has no key name and no known shape around it, so only the
+/// run-scoped known-secret set can remove it (M1-061, ADR 0015 decision 3).
+const KNOWN: &str = "kt-Zk3v9Qx7canaryTOKEN";
+
+#[test]
+fn a_known_secret_never_reaches_stderr_or_the_cli_error_text() {
+    // The process redactor is shared: the log writer, the CLI error text and a probe hub built from a
+    // clone of it all see one set.
+    let process = redaction::init().unwrap_or_else(|e| panic!("{e}"));
+    let for_a_probe_hub = process.clone();
+    assert!(for_a_probe_hub.add_known_secret(KNOWN));
+
+    let out = captured(Some("trace"), || {
+        tracing::info!("user said {KNOWN} out loud");
+        tracing::debug!(who = KNOWN, "a field");
+        tracing::warn!(target: "hyper::proto::h1::io", "dependency echoed {KNOWN}");
+    });
+    assert!(!out.contains(KNOWN), "{out}");
+    assert_eq!(out.matches("[REDACTED:known_secret:").count(), 3, "{out}");
+
+    let text = redaction::redact_text(&format!("cannot reach the cluster as {KNOWN}"));
+    assert!(!text.contains(KNOWN), "{text}");
+    assert!(text.contains("[REDACTED:known_secret:"), "{text}");
+}
+
 #[test]
 fn a_tag_is_the_same_for_the_same_secret_in_one_run() {
     let out = captured(Some("trace"), || {
