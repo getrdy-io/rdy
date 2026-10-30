@@ -35,8 +35,8 @@
 //!
 //! **Native calls.** `Probe::native` takes a [`NativeCall`], a closed enum, never a closure. Each
 //! variant has one policy row and writes one `native` entry that holds the call and never the answer.
-//! A `Statvfs` path passes the read rules. The machine id is opaque and run-level only (see the
-//! `native` module, ADR 0014).
+//! A `Statvfs` path passes the read denylist and the check's `statfs` prefixes. The machine id is
+//! opaque and run-level only (see the `native` module, ADR 0014).
 //!
 //! **What is here, and what is not.** The handle, the log, the read policy, `read`, `read_tail`,
 //! `read_dir`, `stat`, `env`, `exec`, `native`, `udp_exchange` and `unix_get` (M1-144, policy in `sock`),
@@ -707,7 +707,7 @@ struct Scope {
     check: Option<String>,
     /// The OS the command table is read for.
     os: Os,
-    /// The check's manifest: commands, `reads`, `env` and `peers`.
+    /// The check's manifest: commands, `reads`, `statfs`, `env` and `peers`.
     info: Option<&'static CheckInfo>,
     ended: AtomicBool,
     /// The spec hosts and timeouts of the socket calls (M1-144).

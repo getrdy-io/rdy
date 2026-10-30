@@ -40,6 +40,7 @@ static PASSING_INFO: CheckInfo = CheckInfo {
     default_timeout: None,
     os: LINUX_ONLY,
     reads: &[],
+    statfs: &[],
     env: &[],
     commands: &[],
     peers: &[],
@@ -61,6 +62,7 @@ static NEEDY_INFO: CheckInfo = CheckInfo {
     default_timeout: Some(Duration::from_secs(5)),
     os: LINUX_ONLY,
     reads: &["/proc/meminfo"],
+    statfs: &[],
     env: &["TZ"],
     commands: &[CommandSpec {
         program: "ss",
