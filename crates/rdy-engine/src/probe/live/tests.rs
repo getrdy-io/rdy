@@ -1012,3 +1012,356 @@ fn a_tail_streams_to_the_end_and_says_when_it_could_not() {
     assert_eq!(tail.bytes, b"yyyyyyyyyy");
     assert!(tail.truncated_head && !tail.truncated_tail);
 }
+
+// ---- read_link (M1-169) ------------------------------------------------------------------------
+
+fn text_of(file: &crate::probe::FileBytes) -> String {
+    String::from_utf8(file.bytes.clone()).expect("utf-8")
+}
+
+fn link_entries(sandbox: &Sandbox) -> Vec<Action> {
+    sandbox
+        .actions()
+        .into_iter()
+        .filter(|action| action.kind == rdy_spec::result::ActionKind::ReadLink)
+        .collect()
+}
+
+#[tokio::test]
+async fn read_link_returns_the_target_without_following_it() {
+    let sandbox = Sandbox::new();
+    // The target does not exist, and a read of the link would fail. The link itself is fine.
+    symlink("../gone/away.txt", sandbox.path("dangling")).expect("symlink");
+    let shadow = sandbox.write("etc/shadow", b"root:!:19000::::::\n");
+    symlink(&shadow, sandbox.path("to-shadow")).expect("symlink");
+    let probe = sandbox.probe(&[], &[]);
+
+    let target = probe
+        .read_link(&sandbox.path("dangling"))
+        .await
+        .expect("the link");
+    assert_eq!(text_of(&target), "../gone/away.txt");
+    // Where it points is not judged: the link to the password file says so, and opens nothing.
+    let target = probe
+        .read_link(&sandbox.path("to-shadow"))
+        .await
+        .expect("the link");
+    assert_eq!(Path::new(&text_of(&target)), shadow);
+    assert_eq!(
+        rule_of(
+            &probe
+                .read(&sandbox.path("to-shadow"))
+                .await
+                .expect_err("the file behind it stays closed")
+        ),
+        RULE_SYSTEM_SECRET
+    );
+
+    // One entry per link read, holding the link's path and not its target.
+    let log = link_entries(&sandbox);
+    assert_eq!(log.len(), 2);
+    for entry in &log {
+        assert_eq!(entry.outcome, ActionOutcome::Ok);
+        let keys: Vec<&str> = entry.fields.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["path"]);
+    }
+    let json = serde_json::to_string(&sandbox.actions()).expect("json");
+    assert!(!json.contains("away.txt"), "{json}");
+}
+
+#[tokio::test]
+async fn read_link_resolves_a_link_in_the_parent_and_judges_the_real_link() {
+    let sandbox = Sandbox::new();
+    sandbox.write("real/placeholder", b"x");
+    symlink("target-name", sandbox.path("real/inner")).expect("symlink");
+    symlink(sandbox.path("real"), sandbox.path("via")).expect("symlink");
+    let probe = sandbox.probe(&[], &[]);
+    let target = probe
+        .read_link(&sandbox.path("via/inner"))
+        .await
+        .expect("through the directory link");
+    assert_eq!(text_of(&target), "target-name");
+
+    // The real parent is outside the declared prefixes: refused, though the name looked fine.
+    let outside = Sandbox::new();
+    outside.write("elsewhere/placeholder", b"x");
+    symlink("t", outside.path("elsewhere/inner")).expect("symlink");
+    symlink(outside.path("elsewhere"), sandbox.path("escape")).expect("symlink");
+    let error = probe
+        .read_link(&sandbox.path("escape/inner"))
+        .await
+        .expect_err("outside the prefixes");
+    assert_eq!(rule_of(&error), RULE_OUTSIDE_READS, "{error:?}");
+    let log = link_entries(&sandbox);
+    assert_eq!(log.last().map(|a| &a.outcome), Some(&ActionOutcome::Denied));
+}
+
+#[tokio::test]
+async fn read_link_refuses_the_denylist_the_prefixes_and_bad_paths() {
+    let sandbox = Sandbox::new();
+    symlink("x", sandbox.path("id_rsa")).expect("symlink");
+    symlink("x", sandbox.path("fine")).expect("symlink");
+    let probe = sandbox.probe(&[], &[]);
+    let error = probe
+        .read_link(&sandbox.path("id_rsa"))
+        .await
+        .expect_err("a key name");
+    assert!(matches!(error, ProbeError::Denied { .. }), "{error:?}");
+    let error = probe
+        .read_link(Path::new("/etc/os-release"))
+        .await
+        .expect_err("outside the prefixes");
+    assert_eq!(rule_of(&error), RULE_OUTSIDE_READS);
+    let error = probe
+        .read_link(Path::new("etc/os-release"))
+        .await
+        .expect_err("relative");
+    assert!(matches!(error, ProbeError::Denied { .. }), "{error:?}");
+    let dotted = format!("{}/x/../fine", sandbox.root.display());
+    let error = probe
+        .read_link(Path::new(&dotted))
+        .await
+        .expect_err("dot dot");
+    assert_eq!(rule_of(&error), RULE_DOT_DOT);
+    // The one fine link reads, so the refusals above are the rules' and not the setup's.
+    probe.read_link(&sandbox.path("fine")).await.expect("fine");
+}
+
+#[tokio::test]
+async fn read_link_says_not_found_and_not_a_link() {
+    let sandbox = Sandbox::new();
+    sandbox.write("plain", b"x");
+    let probe = sandbox.probe(&[], &[]);
+    assert_eq!(
+        probe.read_link(&sandbox.path("missing")).await,
+        Err(ProbeError::NotFound)
+    );
+    assert_eq!(
+        probe.read_link(&sandbox.path("no-such-dir/link")).await,
+        Err(ProbeError::NotFound)
+    );
+    match probe.read_link(&sandbox.path("plain")).await {
+        Err(ProbeError::Io(text)) => assert!(text.contains("not a symbolic link"), "{text}"),
+        other => panic!("expected an Io error, got {other:?}"),
+    }
+    // A directory is not a link either.
+    sandbox.write("dir/f", b"x");
+    assert!(matches!(
+        probe.read_link(&sandbox.path("dir")).await,
+        Err(ProbeError::Io(_))
+    ));
+}
+
+#[test]
+fn the_portable_read_link_gives_the_same_answers() {
+    // Linux uses O_PATH; macOS uses this. It is compiled everywhere, so it is tested here.
+    let sandbox = Sandbox::new();
+    sandbox.write("real/placeholder", b"x");
+    symlink("target-name", sandbox.path("real/inner")).expect("symlink");
+    symlink(sandbox.path("real"), sandbox.path("via")).expect("symlink");
+    symlink("/etc/shadow", sandbox.path("real/shadow-link")).expect("symlink");
+    // The target is text: it need not exist.
+    let reads = leak_prefixes(&[sandbox.root.as_path()]);
+    let guard = ReadGuard::link(Os::Linux, Some(reads));
+    let read = |parent: &Path, name: &str| {
+        files::read_link_by_path(parent, std::ffi::OsStr::new(name), &guard)
+    };
+
+    assert_eq!(
+        read(&sandbox.path("via"), "inner").expect("through the directory link"),
+        b"target-name"
+    );
+    assert_eq!(
+        read(&sandbox.path("real"), "shadow-link").expect("a target is not judged"),
+        b"/etc/shadow"
+    );
+    let error = read(&sandbox.path("real"), "placeholder").expect_err("not a link");
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    let error = read(&sandbox.path("real"), "missing").expect_err("missing");
+    assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    let error = read(Path::new("/etc"), "os-release").expect_err("outside the prefixes");
+    assert_eq!(
+        crate::probe::Refused::from_io(&error).map(|r| r.rule),
+        Some(RULE_OUTSIDE_READS)
+    );
+}
+
+#[cfg(target_os = "linux")]
+mod proc_links {
+    use super::*;
+    use crate::check::FD_WALK;
+    use crate::probe::policy::RULE_FD_TARGET;
+    use std::os::unix::net::UnixListener;
+
+    fn walker(sandbox: &Sandbox) -> Probe {
+        sandbox.probe(&[Path::new(FD_WALK), Path::new("/proc/self/ns/net")], &[])
+    }
+
+    #[tokio::test]
+    async fn the_net_namespace_of_rdy_resolves() {
+        let sandbox = Sandbox::new();
+        let probe = sandbox.probe(&[Path::new("/proc/self/ns/net")], &[]);
+        let ns = probe
+            .read_link(Path::new("/proc/self/ns/net"))
+            .await
+            .expect("the namespace link");
+        let text = text_of(&ns);
+        assert!(text.starts_with("net:["), "{text}");
+        assert!(text.ends_with(']'), "{text}");
+        // It is the namespace of this process: the kernel says the same.
+        let own = std::fs::read_link("/proc/self/ns/net").expect("the real link");
+        assert_eq!(Path::new(&text), own);
+        let log = link_entries(&sandbox);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].outcome, ActionOutcome::Ok);
+
+        // Another process's namespace and another namespace are closed.
+        let error = probe
+            .read_link(Path::new("/proc/1/ns/net"))
+            .await
+            .expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_PROC);
+        let wide = sandbox.probe(&[Path::new("/proc")], &[]);
+        let error = wide
+            .read_link(Path::new("/proc/self/ns/mnt"))
+            .await
+            .expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_PROC);
+        // A pid in the path is refused as written, even our own, as with `auxv`.
+        let own = format!("/proc/{}/ns/net", std::process::id());
+        let error = wide.read_link(Path::new(&own)).await.expect_err("refused");
+        assert_eq!(rule_of(&error), RULE_PROC);
+    }
+
+    #[tokio::test]
+    async fn a_walk_over_this_processs_fds_returns_only_sockets() {
+        let sandbox = Sandbox::new();
+        // A socket, a regular file and a directory held open by this process, under names the test
+        // can look for.
+        let socket_path = sandbox.path("walk.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind");
+        let secret_name = "rdy-169-held-open-file.txt";
+        let held = sandbox.write(secret_name, b"x");
+        let file = std::fs::File::open(&held).expect("open");
+        let inode = rustix::fs::fstat(&listener).expect("fstat").st_ino;
+
+        let probe = walker(&sandbox);
+        let names: Vec<String> = probe
+            .read_dir(Path::new("/proc/self/fd"))
+            .await
+            .expect("the fd directory")
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        assert!(!names.is_empty());
+        let mut sockets = Vec::new();
+        let mut refused = 0_usize;
+        for name in &names {
+            let path = format!("/proc/self/fd/{name}");
+            match probe.read_link(Path::new(&path)).await {
+                Ok(target) => {
+                    let text = text_of(&target);
+                    assert!(
+                        text.starts_with("socket:["),
+                        "only sockets come back: {text}"
+                    );
+                    sockets.push(text);
+                }
+                Err(ProbeError::Denied { rule, what }) => {
+                    assert_eq!(rule, RULE_FD_TARGET);
+                    assert!(!what.contains(secret_name), "{what}");
+                    refused += 1;
+                }
+                // An fd that closed between the listing and the read (the listing's own, a runner
+                // thread's).
+                Err(ProbeError::NotFound) => {}
+                Err(other) => panic!("{path}: {other:?}"),
+            }
+        }
+        assert!(
+            sockets.contains(&format!("socket:[{inode}]")),
+            "{sockets:?} holds the listener {inode}"
+        );
+        assert!(refused > 0, "files, pipes and the like are refused");
+        drop((listener, file));
+
+        // Nothing logged names what the refused fds pointed to.
+        let json = serde_json::to_string(&sandbox.actions()).expect("json");
+        assert!(!json.contains(secret_name), "{json}");
+        assert!(!json.contains("walk.sock"), "{json}");
+        let log = link_entries(&sandbox);
+        assert!(log.iter().any(|a| a.outcome == ActionOutcome::Denied
+            && a.fields.get("rule").and_then(Value::as_str) == Some(RULE_FD_TARGET)));
+    }
+
+    #[tokio::test]
+    async fn the_fd_directory_is_closed_without_the_declaration_and_to_other_calls() {
+        let sandbox = Sandbox::new();
+        let proc_only = sandbox.probe(&[Path::new("/proc")], &[]);
+        for path in ["/proc/self/fd/0", "/proc/self/fd"] {
+            let error = proc_only.read_link(Path::new(path)).await.expect_err(path);
+            assert_eq!(rule_of(&error), RULE_PROC, "{path}");
+        }
+        let error = proc_only
+            .read_dir(Path::new("/proc/self/fd"))
+            .await
+            .expect_err("no declaration");
+        assert_eq!(rule_of(&error), RULE_PROC);
+
+        // With it, the file behind a link is still out of reach: read, stat and a deeper walk fail.
+        let probe = walker(&sandbox);
+        for path in ["/proc/self/fd/0", "/proc/self/fd"] {
+            let error = probe.read(Path::new(path)).await.expect_err(path);
+            assert_eq!(rule_of(&error), RULE_PROC, "{path}");
+            let error = probe.stat(Path::new(path)).await.expect_err(path);
+            assert_eq!(rule_of(&error), RULE_PROC, "{path}");
+        }
+        for path in [
+            "/proc/thread-self/fd/0",
+            "/proc/self/task/1/fd/0",
+            "/proc/self/fd/0/x",
+        ] {
+            let error = probe.read_link(Path::new(path)).await.expect_err(path);
+            assert!(
+                matches!(error, ProbeError::Denied { .. }),
+                "{path}: {error:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_link_to_the_fd_directory_does_not_hide_the_rule() {
+        // `<sandbox>/fds` is a link to `/proc/self/fd`. As written the path is under the sandbox. The
+        // real link is `/proc/<pid>/fd/<n>`, and the target rule applies to it all the same.
+        let sandbox = Sandbox::new();
+        let held = sandbox.write("held-open.txt", b"x");
+        let file = std::fs::File::open(&held).expect("open");
+        symlink("/proc/self/fd", sandbox.path("fds")).expect("symlink");
+        let probe = sandbox.probe(&[Path::new(FD_WALK)], &[]);
+        let names: Vec<String> = probe
+            .read_dir(&sandbox.path("fds"))
+            .await
+            .expect("the listing")
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        assert!(!names.is_empty());
+        let mut refused = false;
+        for name in names {
+            match probe.read_link(&sandbox.path(&format!("fds/{name}"))).await {
+                Ok(target) => assert!(text_of(&target).starts_with("socket:["), "{target:?}"),
+                Err(ProbeError::Denied { rule, .. }) => {
+                    assert_eq!(rule, RULE_FD_TARGET);
+                    refused = true;
+                }
+                Err(ProbeError::NotFound) => {}
+                Err(other) => panic!("{other:?}"),
+            }
+        }
+        assert!(
+            refused,
+            "a regular file's fd is refused through the link too"
+        );
+        drop(file);
+    }
+}

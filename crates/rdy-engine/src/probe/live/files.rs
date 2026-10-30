@@ -1,5 +1,6 @@
 //! Unix file access for the live backend. See the parent module for the order of steps.
 
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::os::fd::OwnedFd;
@@ -191,6 +192,108 @@ pub(super) fn stat(
         is_dir: kind == FileType::Directory,
         len: u64::try_from(target.stat.st_size).unwrap_or(0),
     }))
+}
+
+/// Reads where the link at `path` points, without following it (M1-169).
+///
+/// The parent directory is resolved, so a link in the path of the parent is followed, and the link
+/// itself is not. The rules judge the link's real path (the real parent and the link's own name)
+/// before anything is read, and again judge what was read ([`ReadGuard::admit_link`]: an fd link may
+/// lead to a socket only). Where the link points is not judged. Linux holds the parent through an
+/// `O_PATH` descriptor, so the real path that was judged and the directory that is read are one inode.
+pub(super) fn read_link(path: &Path, guard: &ReadGuard) -> io::Result<Vec<u8>> {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the path has no link name",
+        ));
+    };
+    #[cfg(target_os = "linux")]
+    {
+        read_link_through_anchor(parent, name, guard)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        read_link_by_path(parent, name, guard)
+    }
+}
+
+/// The Linux way: open the parent with `O_PATH` (links followed, nothing run), read its real path from
+/// `/proc/self/fd/<n>`, judge the link's real path, then `readlinkat` on the same descriptor.
+#[cfg(target_os = "linux")]
+fn read_link_through_anchor(parent: &Path, name: &OsStr, guard: &ReadGuard) -> io::Result<Vec<u8>> {
+    use std::os::unix::ffi::OsStringExt;
+    let anchor = fs::openat(
+        CWD,
+        parent,
+        OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    let real_parent = fs::readlink(fd_link(&anchor), Vec::new()).map_err(proc_error)?;
+    let real_parent = PathBuf::from(std::ffi::OsString::from_vec(real_parent.into_bytes()));
+    // A directory with no names left reads "... (deleted)", which would hide the end of its name.
+    if fs::fstat(&anchor)?.st_nlink == 0 {
+        return Err(refused(RULE_CHANGED));
+    }
+    let real = real_parent.join(name);
+    guard.admit_real(&real).map_err(Refused::into_io)?;
+    let target = fs::readlinkat(&anchor, name, Vec::new()).map_err(not_a_link)?;
+    let target = target.into_bytes();
+    guard.admit_link(&real, &target).map_err(Refused::into_io)?;
+    Ok(target)
+}
+
+/// The portable way, for an OS with no `O_PATH`: `realpath` of the parent, the rules on the link's
+/// real path, then the parent opened by that real path with no link followed (macOS: anywhere along
+/// it, and the path of the descriptor is judged again). Compiled on every Unix so Linux tests it.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(super) fn read_link_by_path(
+    parent: &Path,
+    name: &OsStr,
+    guard: &ReadGuard,
+) -> io::Result<Vec<u8>> {
+    let real_parent = std::fs::canonicalize(parent)?;
+    let real = real_parent.join(name);
+    guard.admit_real(&real).map_err(Refused::into_io)?;
+    #[cfg(target_vendor = "apple")]
+    let follow = OFlags::NOFOLLOW_ANY;
+    #[cfg(not(target_vendor = "apple"))]
+    let follow = OFlags::NOFOLLOW;
+    let flags = OFlags::RDONLY
+        | OFlags::DIRECTORY
+        | OFlags::NONBLOCK
+        | OFlags::CLOEXEC
+        | OFlags::NOCTTY
+        | follow;
+    let dir = fs::openat(CWD, &real_parent, flags, Mode::empty())?;
+    #[cfg(target_vendor = "apple")]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let again = fs::getpath(&dir)?;
+        let again = PathBuf::from(std::ffi::OsString::from_vec(again.into_bytes()));
+        guard
+            .admit_real(&again.join(name))
+            .map_err(Refused::into_io)?;
+        if again != real_parent {
+            return Err(refused(RULE_CHANGED));
+        }
+    }
+    let target = fs::readlinkat(&dir, name, Vec::new()).map_err(not_a_link)?;
+    let target = target.into_bytes();
+    guard.admit_link(&real, &target).map_err(Refused::into_io)?;
+    Ok(target)
+}
+
+/// `readlinkat` fails with `EINVAL` on a path that is not a link. That is a plain, readable error.
+fn not_a_link(error: rustix::io::Errno) -> io::Error {
+    if error == rustix::io::Errno::INVAL {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the path is not a symbolic link",
+        )
+    } else {
+        error.into()
+    }
 }
 
 /// The size and mount flags of the file system that holds `path`. The path is resolved and judged

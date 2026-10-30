@@ -22,6 +22,11 @@
 //! file with the device and inode of a password or sudo file, whatever its name. Windows has no file
 //! reads in M1: every file call fails with a typed error.
 //!
+//! **Links (M1-169).** `read_link` resolves the parent directory, judges the link's real path (the real
+//! parent and the link's own name), reads the link without following it, and judges what it read: a
+//! link in `/proc/<pid>/fd` may lead to a socket only. Linux holds the parent through an `O_PATH`
+//! descriptor. Windows has no file reads in M1.
+//!
 //! **Sockets (M1-144, M1-091).** `resolve`, `connect`, `udp_exchange` and `unix_get` do the socket work and nothing else:
 //! the probe has already applied the peer, address and path policy. A datagram is read into a
 //! 65535-byte buffer and cut to the cap here. A unix socket reply is read by a small HTTP/1.x client
@@ -167,6 +172,26 @@ impl Backend for Live {
             #[cfg(unix)]
             {
                 on_pool(move || files::stat(&path, &guard, &secrets)).await
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (path, guard);
+                unsupported()
+            }
+        })
+    }
+
+    fn read_link<'a>(
+        &'a self,
+        path: &'a Path,
+        guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Vec<u8>>> {
+        let path = path.to_owned();
+        let guard = *guard;
+        Box::pin(async move {
+            #[cfg(unix)]
+            {
+                on_pool(move || files::read_link(&path, &guard)).await
             }
             #[cfg(not(unix))]
             {

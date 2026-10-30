@@ -232,6 +232,13 @@ pub struct CheckMeta {
     pub remediation: &'static str,
 }
 
+/// The `reads` entry that declares the fd walk (M1-169, ADR 0039): the check may list `/proc/<pid>/fd`
+/// and read the links in it, and only for the links that lead to a socket (`socket:[8841]`). The text
+/// is not a real path, so it grants no read by itself: `/proc/<pid>/fd` is no process id. Only
+/// `host.ports` declares it, to find which process holds a port. It does not allow `read`, `stat` or
+/// any other file under `/proc/<pid>/`.
+pub const FD_WALK: &str = "/proc/<pid>/fd";
+
 /// The static facts about a check.
 ///
 /// Every check has exactly one, as a `static`. The planner reads it without running anything, the
@@ -256,7 +263,9 @@ pub struct CheckInfo {
     /// Support per OS.
     pub os: OsSupport,
     /// Absolute path prefixes the check may read, matched on whole path components. A path and the real
-    /// path it resolves to must both sit under one of them, so name a link and its target.
+    /// path it resolves to must both sit under one of them, so name a link and its target. The same
+    /// prefixes decide `read_dir` and `read_link`: a link is judged by where it sits, never by where it
+    /// points. [`FD_WALK`] is the one entry that is not a prefix.
     pub reads: &'static [&'static str],
     /// Absolute path prefixes the check may ask `NativeCall::Statvfs` about, matched like `reads` (whole
     /// path components, on the path as written and on the real path). It is a separate list so that a

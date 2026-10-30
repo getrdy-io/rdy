@@ -20,7 +20,7 @@
 //!   because those are not results. So a large real cluster still gives a report that validates.
 //! - **The 2 MiB cap.** The whole document is at most [`MAX_REPORT_BYTES`], measured on the final bytes
 //!   after the escapes. Past that, the writer works in two stages. First it sheds entries of the action
-//!   log in the order the log itself keeps (01 section 5.4): the newest `ok` `read`, `read_dir` and
+//!   log in the order the log itself keeps (01 section 5.4): the newest `ok` `read`, `read_dir`, `read_link` and
 //!   `stat`, then `failed` ones, then other entries. `denied` entries (refused calls) are never shed to
 //!   make room. `actions_truncated` and `actions_dropped` say what went. Past 5000 entries the same
 //!   order applies. If the report is still too big, it sets `observed` and `expected` to `null` on the

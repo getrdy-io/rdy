@@ -460,6 +460,8 @@ and a golden diff that code-reviewer has read first.
 ```
 
 Built in memory. The tree holds no symlinks, no special modes and no name with `:`, `[` or `]`.
+`Probe::read_link` serves `symlinks` (M1-169): it returns the target text as recorded, applies the read policy to the
+link's real path, and in `/proc/<pid>/fd` returns only a `socket:[N]` target. `checks/_policy/fd-walk` is the case.
 `unreadable` simulates a no-privilege run.
 
 **`commands/*.json`** (any slug): `{ "argv": ["/usr/bin/chronyc", "-n", "-c", "tracking"], "stdout": "...",

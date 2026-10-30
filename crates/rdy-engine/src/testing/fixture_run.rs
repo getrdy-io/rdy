@@ -17,11 +17,11 @@ use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use serde_json::Value;
 
 use super::{Fixture, FixtureError, TestRun, fixtures_dir};
-use crate::check::{Check, CheckError, CheckInfo, CheckOutcome, Finding};
+use crate::check::{Check, CheckError, CheckInfo, CheckOutcome, FD_WALK, Finding};
 use crate::probe::sock::{RULE_UDP_UNDECLARED, RULE_UNIX_UNDECLARED};
 use crate::probe::{
     ActionLogOutput, RULE_COMMAND_UNDECLARED, RULE_ENV_NOT_DECLARED, RULE_ENV_UNDECLARED,
-    RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS,
+    RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, is_fd_path,
 };
 
 /// The refusals that mean "the check went beyond what its `CheckInfo` declares".
@@ -202,10 +202,11 @@ pub fn manifest_violations(info: &CheckInfo, log: &ActionLogOutput) -> Vec<Strin
         .collect()
 }
 
-/// A file call (read, listing, `stat`, `statvfs`) whose logged path no declared prefix covers.
-fn undeclared_file(info: &CheckInfo, action: &Action) -> bool {
+/// A file call (read, listing, link, `stat`, `statvfs`) whose logged path no declared prefix covers.
+pub(super) fn undeclared_file(info: &CheckInfo, action: &Action) -> bool {
     let declared: &[&str] = if action.kind == ActionKind::Read
         || action.kind == ActionKind::ReadDir
+        || action.kind == ActionKind::ReadLink
         || action.kind == ActionKind::Stat
     {
         info.reads
@@ -219,7 +220,12 @@ fn undeclared_file(info: &CheckInfo, action: &Action) -> bool {
     let Some(path) = action.fields.get("path").and_then(Value::as_str) else {
         return false;
     };
-    !declared.iter().any(|prefix| covers(prefix, path))
+    // The fd walk declaration covers a listing of `/proc/<pid>/fd` and a read of a link in it, and
+    // nothing else (it is not a prefix, so `covers` cannot see it).
+    let walk = matches!(action.kind, ActionKind::ReadDir | ActionKind::ReadLink)
+        && info.reads.contains(&FD_WALK)
+        && text_names(path).is_some_and(|names| is_fd_path(&names));
+    !walk && !declared.iter().any(|prefix| covers(prefix, path))
 }
 
 /// Whether the declared `prefix` covers `path`. Both are Linux paths, so both are read as `/`-separated
