@@ -114,6 +114,8 @@ impl Redactor {
     pub fn redact_report_counted(&self, r: Report, earlier: RuleCounts) -> Result<RedactedReport, RedactError>; // M1: keeps the counts of results redacted earlier
     pub fn redact_check(&self, c: CheckResult, counts: &mut RuleCounts) -> Result<Redacted<CheckResult>, RedactError>; // M1: as each result completes
     pub fn redact_action(&self, a: Action, counts: &mut RuleCounts) -> Result<Redacted<Action>, RedactError>;         // M1: as each entry is written
+    pub fn redact_buffer(&self, b: &[u8], cut: Cut) -> Redacted<String>; // M1: a facade buffer with its cut flags (M1-061)
+    pub fn add_known_secret(&self, s: &str) -> bool;                    // M1: run-scoped set, shared by clones (M1-061)
     pub fn redact_bytes(&self, b: &[u8]) -> Redacted<Vec<u8>>;         // M2
     pub fn stream(&self) -> RedactStream;                               // M2
 }
