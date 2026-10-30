@@ -990,6 +990,34 @@ impl<'de> Deserialize<'de> for LimitNeeds {
     }
 }
 
+/// Whether a quota resource counts bytes: `requests.memory`, `limits.memory`, `requests.storage`,
+/// `requests.ephemeral-storage`, `hugepages-2Mi` and the per storage class form
+/// `fast.storageclass.storage.k8s.io/requests.storage`. The last part of the name decides.
+fn counts_bytes(resource: &str) -> bool {
+    let last = resource.rsplit(['.', '/']).next().unwrap_or(resource);
+    matches!(last, "memory" | "storage" | "ephemeral-storage") || last.starts_with("hugepages-")
+}
+
+/// Reads `quota_needs` and applies the strict size grammar to the resources that count bytes.
+fn quota_needs<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<BoundedMap<QuotaResource, K8sQuantity, 32, 1>>, D::Error> {
+    let needs = Option::<BoundedMap<QuotaResource, K8sQuantity, 32, 1>>::deserialize(deserializer)?;
+    for (resource, amount) in needs.iter().flat_map(|map| map.iter()) {
+        if counts_bytes(resource.as_str()) {
+            Quantity::parse(amount.as_str()).map_err(|error| {
+                bad(format!(
+                    "'{}' for '{}' is not a size in bytes: {}",
+                    echo_safe(amount.as_str()),
+                    echo_safe(resource.as_str()),
+                    error.hint()
+                ))
+            })?;
+        }
+    }
+    Ok(needs)
+}
+
 /// Parameters of `k8s.namespace`: the namespace, its quota and its limit range.
 ///
 /// Every key is optional. With none, the check looks at the namespace of the family and reports what
@@ -1002,6 +1030,13 @@ pub struct K8sNamespace {
     pub namespace: Option<K8sName>,
     /// What the product needs from the quota of the namespace, by quota resource, 1 to 32. A quota
     /// with less left blocks.
+    ///
+    /// An amount of memory, storage, ephemeral storage or huge pages is read with the strict size
+    /// grammar of the rest of the spec (01 section 2.5): a whole number with an optional binary suffix
+    /// (`64Gi`). `64G`, `500m` and `0.5Gi` are refused, because the decimal and binary forms differ by
+    /// 7 percent and a milli-byte is a mistake. Other resources, such as `requests.cpu` (`500m`) and
+    /// `pods`, keep the Kubernetes form.
+    #[serde(default, deserialize_with = "quota_needs")]
     pub quota_needs: Option<BoundedMap<QuotaResource, K8sQuantity, 32, 1>>,
     /// What the product needs from the limit range of the namespace.
     pub limit_needs: Option<LimitNeeds>,

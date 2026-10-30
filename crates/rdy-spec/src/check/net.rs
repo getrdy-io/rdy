@@ -19,7 +19,9 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use super::ParamSet;
-use super::common::{BoundedList, RegexText, StringList, from_value};
+use super::common::{
+    BoundedList, MAX_HOST_PORT_CHARS, RegexText, StringList, from_value, host_with_default_port,
+};
 use crate::error::echo_safe;
 use crate::scalar::{Duration, Host, Quantity, Target, is_plain_host_name, redact_for_echo};
 
@@ -190,19 +192,38 @@ impl ParamSet for NetProxy {
     const FIELDS: &'static [&'static str] = &["required_no_proxy", "daemons_need_proxy"];
 }
 
-/// A host for `net.tls_intercept`: a name or address, with a port when written.
+/// A host for `net.tls_intercept` and `net.registry`: a name or address, with a port when written.
 ///
-/// It is read with the grammar of [`Target`], so the same forms are refused. The port is optional and
-/// then 443 applies.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// It is read with the grammar of [`Target`], so the same forms are refused. A bare IPv6 address
+/// (`fd00::1`) and a bracketed one (`[fd00::1]:8443`) are both accepted. The port is optional and then
+/// 443 applies. Two hosts are equal when they name the same host and port, so `registry.acme.example`
+/// and `registry.acme.example:443` are the same host.
+#[derive(Debug, Clone)]
 pub struct TlsHost {
     target: Target,
     port_written: bool,
 }
 
+impl PartialEq for TlsHost {
+    fn eq(&self, other: &Self) -> bool {
+        self.target == other.target
+    }
+}
+
+impl Eq for TlsHost {}
+
+impl std::hash::Hash for TlsHost {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.target.hash(state);
+    }
+}
+
 impl TlsHost {
     /// The longest host in characters: a 253 character name, a colon and a 5 digit port.
-    pub const MAX_CHARS: usize = 259;
+    pub const MAX_CHARS: usize = MAX_HOST_PORT_CHARS;
+
+    /// The port that applies when the spec has none.
+    pub const DEFAULT_PORT: u16 = 443;
 
     /// The host.
     #[must_use]
@@ -210,39 +231,35 @@ impl TlsHost {
         self.target.host()
     }
 
-    /// The port as written, or `None` when the spec has none and 443 applies.
+    /// The port as written, or `None` when the spec has none and [`TlsHost::DEFAULT_PORT`] applies.
     #[must_use]
     pub fn port(&self) -> Option<u16> {
         self.port_written.then(|| self.target.port())
+    }
+
+    /// The port to use: the one written, or 443.
+    #[must_use]
+    pub fn port_or_default(&self) -> u16 {
+        self.target.port()
     }
 }
 
 impl<'de> Deserialize<'de> for TlsHost {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        let fits = |c: char| c.is_ascii_alphanumeric() || c == '.' || c == '-';
-        let (host, port) = match text.split_once(':') {
-            Some((host, port)) => (host, Some(port)),
-            None => (text.as_str(), None),
-        };
-        let shape_ok = text.chars().count() <= Self::MAX_CHARS
-            && !host.is_empty()
-            && host.chars().all(fits)
-            && port.is_none_or(|p| {
-                (1..=5).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit())
-            });
-        if !shape_ok {
-            return Err(bad(format!(
+        let not_a_host = || {
+            bad(format!(
                 "'{}' is not a host: write a name or address, with an optional :port",
                 // A spec carries no credentials, but a mistake like user:secret@host must not be echoed.
                 echo_safe(&redact_for_echo(&text))
-            )));
-        }
-        let full = format!("{host}:{}", port.unwrap_or("443"));
+            ))
+        };
+        let (full, port_written) =
+            host_with_default_port(&text, Self::DEFAULT_PORT).ok_or_else(not_a_host)?;
         let target = Target::parse(&full).map_err(bad)?;
         Ok(Self {
             target,
-            port_written: port.is_some(),
+            port_written,
         })
     }
 }
@@ -590,13 +607,32 @@ impl<'de> Deserialize<'de> for RegistryRule {
 
 /// Parameters of `net.registry`: does an OCI registry work from start to finish.
 ///
-/// `registries` is required. At most 16.
+/// `registries` is required. At most 16. Two entries with the same `host` are refused, because the
+/// second would say nothing the first does not.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct NetRegistry {
-    /// The registries, 1 to 16.
+    /// The registries, 1 to 16, each with its own `host`.
+    #[serde(deserialize_with = "distinct_registries")]
     pub registries: BoundedList<RegistryRule, 16, false, 1>,
+}
+
+/// Reads `registries` and refuses two entries with the same `host`.
+fn distinct_registries<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<BoundedList<RegistryRule, 16, false, 1>, D::Error> {
+    let registries = BoundedList::<RegistryRule, 16, false, 1>::deserialize(deserializer)?;
+    let mut seen = std::collections::HashSet::new();
+    for rule in &registries {
+        if !seen.insert(&rule.host) {
+            return Err(bad(format!(
+                "the registry '{}' is listed twice: write it once, with all its hosts and images",
+                echo_safe(&redact_for_echo(&rule.host.host().to_string()))
+            )));
+        }
+    }
+    Ok(registries)
 }
 
 impl ParamSet for NetRegistry {

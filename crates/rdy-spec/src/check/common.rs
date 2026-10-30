@@ -20,6 +20,32 @@ fn bad<E: de::Error>(message: impl fmt::Display) -> E {
     E::custom(message)
 }
 
+/// The longest host with an optional port, in characters: a 253 character name, a colon and a 5 digit
+/// port.
+pub(crate) const MAX_HOST_PORT_CHARS: usize = 259;
+
+/// Reads the text of a host that may carry a port, for a check with a default port.
+///
+/// Returns the text to give [`Target::parse`], with the default port added when the text has none, and
+/// whether the port was written. A bare IPv6 address (`fd00::1`), a bracketed one (`[fd00::1]`) and
+/// either with a port (`[fd00::1]:123`) are all read. Returns `None` for a character a host never
+/// holds, so a URL, user info and a space are refused before [`Target::parse`] sees them.
+pub(crate) fn host_with_default_port(text: &str, default_port: u16) -> Option<(String, bool)> {
+    let fits = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']');
+    if text.is_empty() || text.chars().count() > MAX_HOST_PORT_CHARS || !text.chars().all(fits) {
+        return None;
+    }
+    Some(if text.parse::<std::net::Ipv6Addr>().is_ok() {
+        (format!("[{text}]:{default_port}"), false)
+    } else if text.starts_with('[') && text.ends_with(']') {
+        (format!("{text}:{default_port}"), false)
+    } else if text.contains(':') {
+        (text.to_owned(), true)
+    } else {
+        (format!("{text}:{default_port}"), false)
+    })
+}
+
 /// A TCP or UDP port, 1 to 65535.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Port(u16);

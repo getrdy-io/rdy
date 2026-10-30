@@ -137,6 +137,7 @@ fn a_stub_that_reaches_the_scheduler_follows_the_run_os_not_the_build() {
         let checks: Vec<Planned> = HostFamily
             .checks()
             .iter()
+            .filter(|info| HostFamily::stub_ids().contains(&info.id))
             .map(|info| Planned::new(Arc::new(Stub(info)), info.id))
             .collect();
         (Scheduler::new(2, os, []), checks)
@@ -150,7 +151,7 @@ fn a_stub_that_reaches_the_scheduler_follows_the_run_os_not_the_build() {
     for os in [Os::Macos, Os::Windows] {
         let (scheduler, checks) = built(os);
         let ran = runtime.block_on(scheduler.run(checks));
-        assert_eq!(ran.len(), 13);
+        assert_eq!(ran.len(), 12);
         for one in ran {
             let End::Done(done) = one.end else {
                 panic!("{} did not end", one.key);
@@ -211,7 +212,6 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
             "host.ports",
             "host.lsm",
             "host.security_agents",
-            "host.firewall",
             "host.time_sync",
             "host.cpu",
             "host.sysctl",
@@ -225,4 +225,21 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
     for id in HostFamily::stub_ids() {
         assert!(listed.contains(id), "{id} is not a host check");
     }
+}
+
+#[test]
+fn host_firewall_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec =
+        serde_json::from_value(json!({"id": "host.firewall", "open_inbound": [6443, 443]}))
+            .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.firewall");
+    assert_eq!(
+        built.check.info().summary,
+        "Host firewall active, inbound ports allowed"
+    );
+    assert!(!HostFamily::stub_ids().contains(&"host.firewall"));
 }

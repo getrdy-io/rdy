@@ -11,6 +11,8 @@ use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::firewall::{self, Firewall};
+
 #[cfg(test)]
 mod tests;
 
@@ -113,16 +115,6 @@ static SECURITY_AGENTS: CheckInfo = info(
     5,
     ROOT,
 );
-static FIREWALL: CheckInfo = info(
-    "host.firewall",
-    "Host firewall active, inbound ports allowed",
-    CheckMeta {
-        title: "Host firewall",
-        remediation: "Open the inbound ports the product needs in the host firewall. With firewalld, run `firewall-cmd --permanent --zone=public --add-port=6443/tcp && firewall-cmd --reload`, with the right zone and port. With ufw, run `ufw allow 6443/tcp`.",
-    },
-    5,
-    ROOT,
-);
 static TIME_SYNC: CheckInfo = info(
     "host.time_sync",
     "Clock sync state and offset",
@@ -203,7 +195,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &PORTS,
     &LSM,
     &SECURITY_AGENTS,
-    &FIREWALL,
+    &firewall::INFO,
     &TIME_SYNC,
     &CPU,
     &SYSCTL,
@@ -217,7 +209,7 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// Each check is a stub for now ([`HostFamily::stub_ids`]).
+/// `host.firewall` is real ([`Firewall`]). The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -238,13 +230,12 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 13] = [
+static STUBS: [&str; 12] = [
     "host.disk",
     "host.memory",
     "host.ports",
     "host.lsm",
     "host.security_agents",
-    "host.firewall",
     "host.time_sync",
     "host.cpu",
     "host.sysctl",
@@ -263,7 +254,15 @@ impl Family for HostFamily {
         &CHECKS
     }
 
-    fn build(&self, entry: &CheckSpec, _: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+    fn build(&self, entry: &CheckSpec, params: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        if let CheckParams::HostFirewall(firewall) = params {
+            let ports = firewall
+                .open_inbound
+                .iter()
+                .flatten()
+                .map(|port| port.get());
+            return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
         let info = CHECKS
             .iter()
             .find(|info| info.id == entry.id)

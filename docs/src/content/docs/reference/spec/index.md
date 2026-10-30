@@ -229,7 +229,8 @@ open_inbound:
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `max_skew` | string | no |  | The offset from the time servers that the product tolerates. The default is a warning above 5s and a block above 300s. | `5s` |
+| `max_skew` | string | no |  | The offset from the time servers above which the check blocks. The default is 300s, because AWS signing, Kerberos and TLS validity fail near five minutes. The warning level is `recommended_skew`. | `300s` |
+| `recommended_skew` | string | no |  | The offset above which the check warns. The default is 5s. Set `max_skew` as well to move the block level. | `5s` |
 | `require_sync` | boolean | no | `false` | A clock that is not synchronized blocks. The default is false. | `true` |
 | `ntp_servers` | array of string | no |  | Servers to measure the offset against, 1 to 8, none twice. There are no default servers: without this list the offset is not measured and rdy sends no time packet. | `["ntp.acme.test"]` |
 
@@ -237,7 +238,8 @@ Example:
 
 ```yaml
 id: host.time_sync
-max_skew: 5s
+recommended_skew: 5s
+max_skew: 300s
 require_sync: true
 ntp_servers:
 - ntp.acme.test
@@ -247,7 +249,7 @@ ntp_servers:
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `expect` | object | no |  | Kernel parameters and what each must be, 1 to 64. A live value that differs blocks. A right value that no file in a sysctl.d directory sets warns. | `{"vm.max_map_count": ">=262144", "net.ipv4.ip_forward": 1}` |
+| `expect` | object | no |  | Kernel parameters and what each must be, 1 to 64. A live value that differs blocks. A right value that no file in a sysctl.d directory sets warns. The same parameter written twice, as vm.max_map_count and vm/max_map_count, is refused. | `{"vm.max_map_count": ">=262144", "net.ipv4.ip_forward": 1}` |
 | `limits` | object | no |  | File limits and what each must be. | `{"nofile": ">=65536"}` |
 
 Example:
@@ -274,7 +276,7 @@ File limits and what each must be.
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
 | `runtime` | array of one of `docker`, `containerd`, `podman`, `crio` | no |  | Runtimes of which one must be present, 1 to 4. | `["docker", "containerd"]` |
-| `min_version` | string or integer | no |  | An older runtime blocks. |  |
+| `min_version` | string or integer | no |  | An older runtime blocks. Needs `runtime` with exactly one entry, because one number means nothing across several runtimes. |  |
 | `cgroup_driver` | one of `systemd`, `cgroupfs` | no |  | The cgroup driver the runtime must use. A runtime that differs from the kubelet blocks too. | `systemd` |
 | `storage_driver` | string | no |  | The storage driver the runtime must use, such as `overlay2`. |  |
 
@@ -314,7 +316,7 @@ controllers:
 | `min` | string or integer | no |  | An older kernel blocks. | `"5.4"` |
 | `distro_min` | object | no |  | A minimum for one distribution, by its os-release id, 1 to 16. It replaces `min` on that distribution, because a vendor kernel carries fixes under an older number. | `{"rhel": "4.18.0-305"}` |
 | `modules` | array of string | no |  | Modules that must be available, 1 to 64, none twice. One that is absent blocks and one that is not loaded warns. | `["overlay", "br_netfilter"]` |
-| `btf` | boolean | no | `false` | The kernel must expose BTF type information. The default is false. |  |
+| `btf` | boolean | no | `false` | The kernel must expose BTF type information. The default is false. Only true counts as a threshold. |  |
 
 Example:
 
@@ -417,7 +419,7 @@ names:
 
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
-| `registries` | array of string or object | yes |  | The registries, 1 to 16. Each one is a host, or an object with `host` and the options. | `[{"host": "registry.acme.test", "hosts": ["blobs.acme.test"], "images": ["acme/agent:1.4"]}]` |
+| `registries` | array of string or object | yes |  | The registries, 1 to 16. Each one is a host, or an object with `host` and the options. Two entries with the same host are refused. | `[{"host": "registry.acme.test", "hosts": ["blobs.acme.test"], "images": ["acme/agent:1.4"]}]` |
 
 Example:
 
@@ -625,7 +627,7 @@ min: "1.28"
 | Property | Type | Required | Default | Description | Example |
 | --- | --- | --- | --- | --- | --- |
 | `namespace` | string | no |  | The namespace the product installs into. | `acme-system` |
-| `quota_needs` | object | no |  | What the product needs from the quota of the namespace, by quota resource, 1 to 32. A quota with less left blocks. | `{"requests.cpu": 16, "requests.memory": "64Gi", "pods": 100}` |
+| `quota_needs` | object | no |  | What the product needs from the quota of the namespace, by quota resource, 1 to 32. A quota with less left blocks. An amount of memory, storage, ephemeral storage or huge pages is a size in bytes with an optional binary suffix such as 64Gi (64G and 500m are refused). Other resources keep the Kubernetes form, such as 500m of requests.cpu. | `{"requests.cpu": 16, "requests.memory": "64Gi", "pods": 100}` |
 | `limit_needs` | object | no |  | What the product needs from the limit range of the namespace. | `{"container_max_memory": "16Gi"}` |
 
 Example:

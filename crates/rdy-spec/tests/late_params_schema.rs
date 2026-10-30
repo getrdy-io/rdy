@@ -5,8 +5,9 @@
 //! the structs, which rdy runs, cannot drift apart without this test failing.
 //!
 //! The decoder is stricter than the schema in a few places that a pattern cannot say: a host with a
-//! trailing dot or a single-number IPv4 form, a time server written twice in two spellings, a sample
-//! size outside 1 MiB to 100 MiB, and the length of a repository. Those entries are tested against the
+//! trailing dot or a single-number IPv4 form, a time server or a registry host written twice in two
+//! spellings, a kernel parameter written with dots and with slashes, two registries with one host, a
+//! sample size outside 1 MiB to 100 MiB, and the length of a repository. Those entries are tested against the
 //! decoder only, in the unit tests. Every other entry is in "both accept" or "both refuse".
 
 use std::error::Error;
@@ -57,11 +58,12 @@ fn host_entries_both_accept() -> TestResult {
             json!({"id": "host.firewall", "open_inbound": [6443, 10250]}),
             json!({"id": "host.firewall", "open_inbound": [1, 65535]}),
             json!({"id": "host.time_sync"}),
-            json!({"id": "host.time_sync", "max_skew": "5s", "require_sync": true,
+            json!({"id": "host.time_sync", "max_skew": "300s", "recommended_skew": "5s", "require_sync": true,
                 "ntp_servers": ["ntp.acme.example", "ntp2.acme.example:1123", "10.0.0.1",
                     "fd00:ec2::123", "[fd00:ec2::124]", "[fd00:ec2::125]:1234"]}),
             json!({"id": "host.sysctl", "expect": {"vm.max_map_count": ">=262144"}}),
             json!({"id": "host.sysctl", "limits": {"nofile": ">=65536"}}),
+            json!({"id": "host.sysctl", "expect": {"a": "x=y", "b": "a!b", "c": -1}}),
             json!({"id": "host.sysctl",
                 "expect": {"net.ipv4.ip_forward": 1, "net.ipv4.tcp_congestion_control": "bbr",
                     "net/ipv4/conf/eth0.100/rp_filter": "2", "fs.file-max": "<= 9999999",
@@ -70,8 +72,11 @@ fn host_entries_both_accept() -> TestResult {
                 "limits": {"nofile": 1048576}}),
             json!({"id": "host.container_runtime"}),
             json!({"id": "host.container_runtime", "runtime": ["docker", "containerd", "podman", "crio"],
+                "cgroup_driver": "systemd", "storage_driver": "overlay2"}),
+            json!({"id": "host.container_runtime", "runtime": ["containerd"],
                 "min_version": "1.7", "cgroup_driver": "systemd", "storage_driver": "overlay2"}),
-            json!({"id": "host.container_runtime", "min_version": 20, "cgroup_driver": "cgroupfs",
+            json!({"id": "host.container_runtime", "runtime": ["docker"], "min_version": 20,
+                "cgroup_driver": "cgroupfs",
                 "storage_driver": "fuse-overlayfs"}),
             json!({"id": "host.cgroups"}),
             json!({"id": "host.cgroups", "version": "v1"}),
@@ -83,7 +88,7 @@ fn host_entries_both_accept() -> TestResult {
             json!({"id": "host.kernel", "distro_min": {"rhel": "4.18.0-305", "ubuntu": "5.15"}}),
             json!({"id": "host.kernel", "modules": ["overlay", "br_netfilter", "xt_TCPMSS"]}),
             json!({"id": "host.kernel", "btf": true}),
-            json!({"id": "host.kernel", "btf": false}),
+            json!({"id": "host.kernel", "min": "5.4", "btf": false}),
             json!({"id": "host.kernel", "min": "5.4", "distro_min": {"rhel": "4.18.0-305"},
                 "modules": ["overlay"], "btf": true}),
         ],
@@ -98,12 +103,23 @@ fn host_entries_both_refuse() -> TestResult {
             // a required threshold is missing
             json!({"id": "host.sysctl"}),
             json!({"id": "host.kernel"}),
+            json!({"id": "host.kernel", "btf": false}),
             // empty lists and maps
             json!({"id": "host.firewall", "open_inbound": []}),
             json!({"id": "host.time_sync", "ntp_servers": []}),
             json!({"id": "host.sysctl", "expect": {}}),
+            json!({"id": "host.sysctl", "expect": {"a": "!=0"}}),
+            json!({"id": "host.sysctl", "expect": {"a": "\u{2265}5"}}),
+            json!({"id": "host.sysctl", "expect": {"a": "\u{2264}5"}}),
+            json!({"id": "host.sysctl", "expect": {"a": "\u{2260}0"}}),
+            json!({"id": "host.sysctl", "expect": {"a": "~5"}}),
+            json!({"id": "host.sysctl", "expect": {"a": "==1"}}),
             json!({"id": "host.sysctl", "limits": {}}),
             json!({"id": "host.container_runtime", "runtime": []}),
+            // a minimum version means nothing across several runtimes or none
+            json!({"id": "host.container_runtime", "min_version": "1.7"}),
+            json!({"id": "host.container_runtime", "runtime": ["docker", "containerd"],
+                "min_version": "1.7"}),
             json!({"id": "host.cgroups", "controllers": []}),
             json!({"id": "host.kernel", "distro_min": {}}),
             json!({"id": "host.kernel", "modules": []}),
@@ -127,6 +143,8 @@ fn host_entries_both_refuse() -> TestResult {
             json!({"id": "host.firewall", "open_inbound": 6443}),
             json!({"id": "host.time_sync", "max_skew": "0s"}),
             json!({"id": "host.time_sync", "max_skew": 5}),
+            json!({"id": "host.time_sync", "recommended_skew": "0s"}),
+            json!({"id": "host.time_sync", "recommended_skew": 5}),
             json!({"id": "host.time_sync", "require_sync": "yes"}),
             json!({"id": "host.time_sync", "ntp_servers": ["http://ntp.acme.example"]}),
             json!({"id": "host.time_sync", "ntp_servers": ["ntp.acme.example:0"]}),
@@ -215,6 +233,8 @@ fn net_entries_both_accept() -> TestResult {
         &[
             json!({"id": "net.registry", "registries": ["registry.acme.example"]}),
             json!({"id": "net.registry", "registries": ["registry.acme.example:5000"]}),
+            json!({"id": "net.registry", "registries": ["fd00::1", "[fd00::2]", "[fd00::3]:5000"]}),
+            json!({"id": "net.tls_intercept", "hosts": ["fd00::1", "[fd00::2]:8443", "a.example"]}),
             json!({"id": "net.registry", "registries": [
                 {"host": "registry.acme.example"},
                 {"host": "registry.acme.example:5000", "hosts": ["auth.acme.example", "blobs.acme.example:443"],
@@ -324,6 +344,11 @@ fn k8s_entries_both_accept() -> TestResult {
                     "persistentvolumeclaims": "10", "requests.storage": "500Gi", "limits.cpu": "500m",
                     "count/jobs.batch": 0.5, "a": ".5", "b": "1.5Gi", "c": "0", "d": "2E"},
                 "limit_needs": {"container_max_memory": "16Gi"}}),
+            json!({"id": "k8s.namespace", "quota_needs": {"requests.memory": "64Gi",
+                "limits.memory": 1048576, "requests.storage": "500Gi",
+                "requests.ephemeral-storage": "10Gi", "hugepages-2Mi": "1Gi",
+                "fast.storageclass.storage.k8s.io/requests.storage": "1Ti",
+                "requests.cpu": "500m", "limits.cpu": 0.5, "pods": "100"}}),
             json!({"id": "k8s.dns"}),
             json!({"id": "k8s.dns", "cluster_domain": "cluster.local"}),
             json!({"id": "k8s.ingress"}),
@@ -394,6 +419,13 @@ fn k8s_entries_both_refuse() -> TestResult {
             json!({"id": "k8s.namespace", "quota_needs": {"pods": true}}),
             json!({"id": "k8s.namespace", "quota_needs": {"pods": 1e16}}),
             json!({"id": "k8s.namespace", "limit_needs": {"container_max_memory": "16G"}}),
+            json!({"id": "k8s.namespace", "quota_needs": {"requests.memory": "64G"}}),
+            json!({"id": "k8s.namespace", "quota_needs": {"limits.memory": "500m"}}),
+            json!({"id": "k8s.namespace", "quota_needs": {"requests.storage": "1.5Gi"}}),
+            json!({"id": "k8s.namespace", "quota_needs": {"requests.ephemeral-storage": "10G"}}),
+            json!({"id": "k8s.namespace", "quota_needs": {"hugepages-2Mi": "0.5"}}),
+            json!({"id": "k8s.namespace",
+                "quota_needs": {"fast.storageclass.storage.k8s.io/requests.storage": "1T"}}),
             json!({"id": "k8s.namespace", "limit_needs": {"container_max_memory": ""}}),
             json!({"id": "k8s.dns", "cluster_domain": ""}),
             json!({"id": "k8s.dns", "cluster_domain": "Cluster.Local"}),

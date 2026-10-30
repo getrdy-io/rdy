@@ -18,7 +18,8 @@ use serde_json::Value;
 use super::ParamSet;
 use super::common::{
     AbsPath, Arch, BoundedList, BoundedMap, CgroupController, Cores, CpuFlag, DistroId, FsType,
-    ModuleName, OsVersion, Port, StorageDriver, StringList, TolerancePercent, from_value,
+    MAX_HOST_PORT_CHARS, ModuleName, OsVersion, Port, StorageDriver, StringList, TolerancePercent,
+    from_value, host_with_default_port,
 };
 use crate::error::echo_safe;
 use crate::scalar::{Duration, Host, Quantity, Target, Version, redact_for_echo};
@@ -379,16 +380,34 @@ impl ParamSet for HostFirewall {
 
 /// A time server for the offset probe of `host.time_sync`: a name or address, with a port when written.
 ///
-/// It is read with the grammar of [`Target`]. A bare IPv6 address (`fd00:ec2::123`) and a bracketed one
-/// (`[fd00:ec2::123]:123`) are both accepted. The port is optional and then 123 applies. A URL is
-/// refused. Parsing does not classify an address: the probe applies the egress policy of ADR 0009
-/// before it sends a packet.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NtpServer(Target);
+/// It is read with the grammar of [`Target`], like [`TlsHost`](super::TlsHost). A bare IPv6 address
+/// (`fd00:ec2::123`) and a bracketed one (`[fd00:ec2::123]:123`) are both accepted. The port is optional
+/// and then 123 applies. A URL is refused. Parsing does not classify an address: the probe applies the
+/// egress policy of ADR 0009 before it sends a packet. Two servers are equal when they name the same
+/// host and port, so `ntp.acme.example` and `ntp.acme.example:123` are the same server.
+#[derive(Debug, Clone)]
+pub struct NtpServer {
+    target: Target,
+    port_written: bool,
+}
+
+impl PartialEq for NtpServer {
+    fn eq(&self, other: &Self) -> bool {
+        self.target == other.target
+    }
+}
+
+impl Eq for NtpServer {}
+
+impl std::hash::Hash for NtpServer {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.target.hash(state);
+    }
+}
 
 impl NtpServer {
     /// The longest server in characters: a 253 character name, a colon and a 5 digit port.
-    pub const MAX_CHARS: usize = 259;
+    pub const MAX_CHARS: usize = MAX_HOST_PORT_CHARS;
 
     /// The port that applies when the spec has none.
     pub const DEFAULT_PORT: u16 = 123;
@@ -396,39 +415,32 @@ impl NtpServer {
     /// The host.
     #[must_use]
     pub fn host(&self) -> &Host {
-        self.0.host()
+        self.target.host()
     }
 
-    /// The port: the one written, or 123.
+    /// The port as written, or `None` when the spec has none and [`NtpServer::DEFAULT_PORT`] applies.
     #[must_use]
-    pub fn port(&self) -> u16 {
-        self.0.port()
+    pub fn port(&self) -> Option<u16> {
+        self.port_written.then(|| self.target.port())
     }
 
-    /// The text to give [`Target::parse`], or `None` when `text` is not a server.
-    fn with_port(text: &str) -> Option<String> {
-        let fits = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']');
-        if text.is_empty() || text.chars().count() > Self::MAX_CHARS || !text.chars().all(fits) {
-            return None;
-        }
-        let port = Self::DEFAULT_PORT;
-        Some(if text.parse::<std::net::Ipv6Addr>().is_ok() {
-            format!("[{text}]:{port}")
-        } else if text.starts_with('[') && text.ends_with(']') {
-            format!("{text}:{port}")
-        } else if text.contains(':') {
-            text.to_owned()
-        } else {
-            format!("{text}:{port}")
-        })
+    /// The port to use: the one written, or 123.
+    #[must_use]
+    pub fn port_or_default(&self) -> u16 {
+        self.target.port()
     }
 }
 
 impl<'de> Deserialize<'de> for NtpServer {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        match Self::with_port(&text).map(|full| Target::parse(&full)) {
-            Some(Ok(target)) => Ok(Self(target)),
+        match host_with_default_port(&text, Self::DEFAULT_PORT)
+            .map(|(full, port_written)| (Target::parse(&full), port_written))
+        {
+            Some((Ok(target), port_written)) => Ok(Self {
+                target,
+                port_written,
+            }),
             _ => Err(bad(format!(
                 "'{}' is not a time server: write a name or address, with an optional :port",
                 echo_safe(&redact_for_echo(&text))
@@ -444,9 +456,13 @@ impl<'de> Deserialize<'de> for NtpServer {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct HostTimeSync {
-    /// The offset from the time servers that the product tolerates. The default, a warning above 5s
-    /// and a block above 300s, is the check's.
+    /// The offset from the time servers above which the check blocks. The default, 300s, is the check's,
+    /// because AWS signing, Kerberos and TLS validity fail near five minutes. The warning level is
+    /// `recommended_skew`.
     pub max_skew: Option<Duration>,
+    /// The offset above which the check warns. The default, 5s, is the check's. Set `max_skew` as well to
+    /// move the block level.
+    pub recommended_skew: Option<Duration>,
     /// A clock that is not synchronized blocks. The default is false.
     #[serde(default)]
     pub require_sync: bool,
@@ -456,7 +472,12 @@ pub struct HostTimeSync {
 }
 
 impl ParamSet for HostTimeSync {
-    const FIELDS: &'static [&'static str] = &["max_skew", "require_sync", "ntp_servers"];
+    const FIELDS: &'static [&'static str] = &[
+        "max_skew",
+        "recommended_skew",
+        "require_sync",
+        "ntp_servers",
+    ];
 }
 
 /// A comparison for a value of `host.sysctl`.
@@ -476,7 +497,12 @@ pub enum Compare {
 /// A bare whole number in a spec means [`Compare::Equal`], as does any text that starts with neither
 /// `>=` nor `<=`. After `>=` or `<=` come a whole number, with one optional space before it. The text
 /// is 1 to 128 characters with no control character and no space at either end, and does not start with
-/// `<`, `>` or `=` unless it is one of the two comparisons.
+/// an operator unless it is one of the two comparisons. The characters `<`, `>`, `=`, `!`, `~`, `≥`, `≤`
+/// and `≠` are refused there, so `"!=0"` and `"≥5"` are errors and not an equality that always fails.
+///
+/// A value such as `4096 87380 6291456` (`net.ipv4.tcp_rmem`) is compared as text. The kernel prints
+/// it with tabs and a vendor writes it with spaces, so `host.sysctl` (M1-149) must treat a tab and a
+/// space as the same, and any run of them as one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct ValueRule {
@@ -512,7 +538,7 @@ impl ValueRule {
         let first = text.chars().next()?;
         let last = text.chars().next_back()?;
         let shape = text.chars().count() <= Self::MAX_CHARS
-            && !matches!(first, '<' | '>' | '=')
+            && !matches!(first, '<' | '>' | '=' | '!' | '~' | '≥' | '≤' | '≠')
             && !first.is_whitespace()
             && !last.is_whitespace()
             && !text.chars().any(char::is_control);
@@ -561,6 +587,17 @@ impl SysctlName {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// The name as a path under `/proc/sys`, with slashes: `vm/max_map_count` for both
+    /// `vm.max_map_count` and `vm/max_map_count`. Two names with the same path are the same parameter.
+    #[must_use]
+    pub fn canonical(&self) -> String {
+        if self.0.contains('/') {
+            self.0.clone()
+        } else {
+            self.0.replace('.', "/")
+        }
     }
 
     fn is_valid(text: &str) -> bool {
@@ -617,6 +654,24 @@ impl<'de> Deserialize<'de> for SysctlLimits {
     }
 }
 
+/// Reads `expect` and refuses a parameter written twice, once with dots and once with slashes.
+fn expect_once<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<BoundedMap<SysctlName, ValueRule, 64, 1>>, D::Error> {
+    let expect = Option::<BoundedMap<SysctlName, ValueRule, 64, 1>>::deserialize(deserializer)?;
+    let mut seen = std::collections::HashMap::new();
+    for name in expect.iter().flat_map(|map| map.keys()) {
+        if let Some(first) = seen.insert(name.canonical(), name) {
+            return Err(bad(format!(
+                "'{}' and '{}' are the same kernel parameter: write it once",
+                echo_safe(first.as_str()),
+                echo_safe(name.as_str())
+            )));
+        }
+    }
+    Ok(expect)
+}
+
 /// Parameters of `host.sysctl`: kernel parameters and limits.
 ///
 /// At least one of `expect` and `limits` is required. There are no built-in values.
@@ -625,7 +680,9 @@ impl<'de> Deserialize<'de> for SysctlLimits {
 #[non_exhaustive]
 pub struct HostSysctl {
     /// Kernel parameters and what each must be, 1 to 64. A live value that differs blocks. A right
-    /// value that no file in a `sysctl.d` directory sets warns.
+    /// value that no file in a `sysctl.d` directory sets warns. `vm.max_map_count` and
+    /// `vm/max_map_count` are the same parameter, so writing both is refused.
+    #[serde(default, deserialize_with = "expect_once")]
     pub expect: Option<BoundedMap<SysctlName, ValueRule, 64, 1>>,
     /// File limits and what each must be.
     pub limits: Option<SysctlLimits>,
@@ -666,18 +723,51 @@ pub enum CgroupDriver {
 ///
 /// Every key is optional. With none, the check blocks when no runtime is found and reports what it
 /// finds.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+///
+/// `min_version` needs `runtime` with exactly one entry. One number means nothing across several
+/// runtimes, and a per-runtime form can be added later without breaking this one.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct HostContainerRuntime {
     /// Runtimes of which one must be present, 1 to 4.
     pub runtime: Option<BoundedList<ContainerRuntime, 4, true, 1>>,
-    /// An older runtime blocks.
+    /// An older runtime blocks. It applies to the one runtime named in `runtime`.
     pub min_version: Option<Version>,
     /// The cgroup driver the runtime must use. A runtime that differs from the kubelet blocks too.
     pub cgroup_driver: Option<CgroupDriver>,
     /// The storage driver the runtime must use, such as `overlay2`.
     pub storage_driver: Option<StorageDriver>,
+}
+
+impl<'de> Deserialize<'de> for HostContainerRuntime {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            runtime: Option<BoundedList<ContainerRuntime, 4, true, 1>>,
+            min_version: Option<Version>,
+            cgroup_driver: Option<CgroupDriver>,
+            storage_driver: Option<StorageDriver>,
+        }
+        let Raw {
+            runtime,
+            min_version,
+            cgroup_driver,
+            storage_driver,
+        } = Raw::deserialize(deserializer)?;
+        if min_version.is_some() && runtime.as_ref().is_none_or(|list| list.len() != 1) {
+            return Err(bad(
+                "min_version needs runtime with exactly one entry, such as runtime: [containerd]: \
+                 one version number means nothing across several runtimes",
+            ));
+        }
+        Ok(Self {
+            runtime,
+            min_version,
+            cgroup_driver,
+            storage_driver,
+        })
+    }
 }
 
 impl ParamSet for HostContainerRuntime {
@@ -798,7 +888,8 @@ impl<'de> Deserialize<'de> for KernelVersion {
 
 /// Parameters of `host.kernel`: the kernel version and the modules it must have.
 ///
-/// At least one of `min`, `distro_min`, `modules` and `btf` is required.
+/// At least one of `min`, `distro_min`, `modules` and `btf: true` is required. `btf: false` alone
+/// measures nothing, so it is [`UnsupportedReason::NoThreshold`](super::UnsupportedReason::NoThreshold).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -811,7 +902,8 @@ pub struct HostKernel {
     /// Modules that must be available, 1 to 64. One that is absent blocks and one that is not loaded
     /// warns.
     pub modules: Option<BoundedList<ModuleName, 64, true, 1>>,
-    /// The kernel must expose BTF type information. The default is false.
+    /// The kernel must expose BTF type information. The default is false. Only `true` counts as a
+    /// threshold.
     #[serde(default)]
     pub btf: bool,
 }
@@ -819,6 +911,7 @@ pub struct HostKernel {
 impl ParamSet for HostKernel {
     const FIELDS: &'static [&'static str] = &["min", "distro_min", "modules", "btf"];
     const THRESHOLD: &'static [&'static str] = &["min", "distro_min", "modules", "btf"];
+    const TRUE_ONLY: &'static [&'static str] = &["btf"];
     const THRESHOLD_EXAMPLE: &'static str = "min: \"5.4\"";
 }
 

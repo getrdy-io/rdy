@@ -53,6 +53,7 @@ mod net;
 #[cfg(test)]
 mod testkit;
 
+pub(crate) use common::host_with_default_port;
 pub use common::{
     AbsPath, Arch, BoundedList, BoundedMap, CgroupController, Cores, CpuFlag, DistroId, FsType,
     HostPort, ListText, ModuleName, OsVersion, Port, RegexText, StorageDriver, StringList,
@@ -92,6 +93,10 @@ pub(crate) trait ParamSet: DeserializeOwned {
     /// Empty when the check needs no threshold. An entry with none of them is
     /// [`UnsupportedReason::NoThreshold`].
     const THRESHOLD: &'static [&'static str] = &[];
+
+    /// Keys of [`ParamSet::THRESHOLD`] that are booleans and count only when `true`. A `false` there
+    /// measures nothing, so an entry with only that key is [`UnsupportedReason::NoThreshold`].
+    const TRUE_ONLY: &'static [&'static str] = &[];
 
     /// A key and value to show a vendor whose entry has no threshold, such as `min: 4`. Empty when the
     /// check has no one obvious example. Then the fix lists the threshold keys instead.
@@ -394,7 +399,12 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
             message: "the key has no value: write one, or remove the key".to_owned(),
         });
     }
-    if !P::THRESHOLD.is_empty() && !P::THRESHOLD.iter().any(|key| fields.contains_key(*key)) {
+    let counts = |key: &&str| {
+        fields
+            .get(*key)
+            .is_some_and(|v| !(P::TRUE_ONLY.contains(key) && *v == Value::Bool(false)))
+    };
+    if !P::THRESHOLD.is_empty() && !P::THRESHOLD.iter().any(counts) {
         return Err(UnsupportedReason::NoThreshold {
             one_of: P::THRESHOLD,
             and: P::ALSO_REQUIRED
@@ -414,7 +424,7 @@ fn decode<P: ParamSet>(fields: &Map<String, Value>) -> Result<P, UnsupportedReas
             }
         } else {
             UnsupportedReason::BadValue {
-                field: culprit::<P>(fields),
+                field: culprit::<P>(fields, &message),
                 message: echo_reason(&message, MAX_REASON_CHARS),
             }
         }
@@ -534,20 +544,29 @@ fn missing_field_name<'m, P: ParamSet>(
 }
 
 /// The key whose value alone makes `P` fail. A required key that is absent is not a culprit.
-fn culprit<P: ParamSet>(fields: &Map<String, Value>) -> Option<String> {
+///
+/// A key that fails alone with the very message of the whole entry wins. Otherwise a rule that spans two
+/// keys (`min_version` needs `runtime`) would blame the key that sorts first and not the bad one.
+fn culprit<P: ParamSet>(fields: &Map<String, Value>, message: &str) -> Option<String> {
     // Sorted, so the key named does not depend on the order the map keeps.
     let mut entries: Vec<(&String, &Value)> = fields.iter().collect();
     entries.sort_by(|a, b| a.0.cmp(b.0));
-    entries.into_iter().find_map(|(key, value)| {
-        let mut one = Map::new();
-        one.insert(key.clone(), value.clone());
-        match serde_json::from_value::<P>(Value::Object(one.clone())) {
-            Err(e) if missing_field_name::<P>(&e.to_string(), &one).is_none() => {
-                Some(echo_safe(key))
+    let failures: Vec<(&String, String)> = entries
+        .into_iter()
+        .filter_map(|(key, value)| {
+            let mut one = Map::new();
+            one.insert(key.clone(), value.clone());
+            match serde_json::from_value::<P>(Value::Object(one.clone())) {
+                Err(e) if missing_field_name::<P>(&e.to_string(), &one).is_none() => {
+                    Some((key, e.to_string()))
+                }
+                _ => None,
             }
-            _ => None,
-        }
-    })
+        })
+        .collect();
+    let same = failures.iter().find(|(_, own)| own == message);
+    same.or_else(|| failures.first())
+        .map(|(key, _)| echo_safe(key))
 }
 
 impl CheckSpec {

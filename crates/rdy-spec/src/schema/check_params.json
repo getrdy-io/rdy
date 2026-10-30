@@ -619,9 +619,7 @@
           "minItems": 1,
           "maxItems": 64,
           "items": {
-            "type": "string",
-            "maxLength": 259,
-            "pattern": "^[A-Za-z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
+            "$ref": "#/$defs/OptionalPortHost"
           }
         },
         "expected_issuer": {
@@ -1144,10 +1142,10 @@
       "pattern": "^(\\[[0-9A-Fa-f:]+\\](:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?|[0-9A-Fa-f]*:[0-9A-Fa-f]*:[0-9A-Fa-f:]*|[A-Za-z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?)$"
     },
     "OptionalPortHost": {
-      "description": "A host name or address, with an optional port. Without a port, 443 applies.",
+      "description": "A host name or address, with an optional port. Without a port, 443 applies. An IPv6 address may be bare (fd00::1) or in square brackets with a port ([fd00::1]:8443).",
       "type": "string",
       "maxLength": 259,
-      "pattern": "^[A-Za-z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"
+      "pattern": "^(\\[[0-9A-Fa-f:]+\\](:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?|[0-9A-Fa-f]*:[0-9A-Fa-f]*:[0-9A-Fa-f:]*|[A-Za-z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?)$"
     },
     "HostPort": {
       "description": "host:port or [ipv6]:port. A URL is refused.",
@@ -1162,14 +1160,14 @@
       "pattern": "^https?://[^/@\\s#]+(/[^\\s#]*)?$"
     },
     "ValueRule": {
-      "description": "What a value must be. A bare whole number or any text means equal to it. \">=N\" and \"<=N\" compare whole numbers, with one optional space after the sign. At most 128 characters, with no control character and no space at either end.",
+      "description": "What a value must be. A bare whole number or any text means equal to it. \">=N\" and \"<=N\" compare whole numbers, with one optional space after the sign. Text does not start with an operator character (< > = ! ~ or the signs for greater, less or not equal). At most 128 characters, with no control character and no space at either end.",
       "oneOf": [
         {
           "type": "integer"
         },
         {
           "type": "string",
-          "pattern": "^((>=|<=) ?-?[0-9]{1,18}|[^<>=\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]{0,126}[^\\s\\u0000-\\u001f\\u007f-\\u009f])?)$"
+          "pattern": "^((>=|<=) ?-?[0-9]{1,18}|[^<>=!~\u2260\u2264\u2265\\s\\u0000-\\u001f\\u007f-\\u009f]([^\\u0000-\\u001f\\u007f-\\u009f]{0,126}[^\\s\\u0000-\\u001f\\u007f-\\u009f])?)$"
         }
       ]
     },
@@ -1240,7 +1238,11 @@
     "HostTimeSyncParams": {
       "properties": {
         "max_skew": {
-          "description": "The offset from the time servers that the product tolerates. The default is a warning above 5s and a block above 300s.",
+          "description": "The offset from the time servers above which the check blocks. The default is 300s, because AWS signing, Kerberos and TLS validity fail near five minutes. The warning level is `recommended_skew`.",
+          "$ref": "#/$defs/Duration"
+        },
+        "recommended_skew": {
+          "description": "The offset above which the check warns. The default is 5s. Set `max_skew` as well to move the block level.",
           "$ref": "#/$defs/Duration"
         },
         "require_sync": {
@@ -1262,7 +1264,8 @@
       "examples": [
         {
           "id": "host.time_sync",
-          "max_skew": "5s",
+          "recommended_skew": "5s",
+          "max_skew": "300s",
           "require_sync": true,
           "ntp_servers": [
             "ntp.acme.test"
@@ -1273,7 +1276,7 @@
     "HostSysctlParams": {
       "properties": {
         "expect": {
-          "description": "Kernel parameters and what each must be, 1 to 64. A live value that differs blocks. A right value that no file in a sysctl.d directory sets warns.",
+          "description": "Kernel parameters and what each must be, 1 to 64. A live value that differs blocks. A right value that no file in a sysctl.d directory sets warns. The same parameter written twice, as vm.max_map_count and vm/max_map_count, is refused.",
           "type": "object",
           "minProperties": 1,
           "maxProperties": 64,
@@ -1340,7 +1343,7 @@
           }
         },
         "min_version": {
-          "description": "An older runtime blocks.",
+          "description": "An older runtime blocks. Needs `runtime` with exactly one entry, because one number means nothing across several runtimes.",
           "$ref": "#/$defs/Version"
         },
         "cgroup_driver": {
@@ -1354,6 +1357,19 @@
           "description": "The storage driver the runtime must use, such as `overlay2`.",
           "type": "string",
           "pattern": "^[a-z0-9_.-]{1,32}$"
+        }
+      },
+      "dependentSchemas": {
+        "min_version": {
+          "required": [
+            "runtime"
+          ],
+          "properties": {
+            "runtime": {
+              "minItems": 1,
+              "maxItems": 1
+            }
+          }
         }
       },
       "examples": [
@@ -1434,7 +1450,7 @@
           }
         },
         "btf": {
-          "description": "The kernel must expose BTF type information. The default is false.",
+          "description": "The kernel must expose BTF type information. The default is false. Only true counts as a threshold.",
           "type": "boolean",
           "default": false
         }
@@ -1458,7 +1474,12 @@
         {
           "required": [
             "btf"
-          ]
+          ],
+          "properties": {
+            "btf": {
+              "const": true
+            }
+          }
         }
       ],
       "examples": [
@@ -1481,7 +1502,7 @@
       ],
       "properties": {
         "registries": {
-          "description": "The registries, 1 to 16. Each one is a host, or an object with `host` and the options.",
+          "description": "The registries, 1 to 16. Each one is a host, or an object with `host` and the options. Two entries with the same host are refused.",
           "type": "array",
           "minItems": 1,
           "maxItems": 16,
@@ -1624,7 +1645,7 @@
           "$ref": "#/$defs/K8sName"
         },
         "quota_needs": {
-          "description": "What the product needs from the quota of the namespace, by quota resource, 1 to 32. A quota with less left blocks.",
+          "description": "What the product needs from the quota of the namespace, by quota resource, 1 to 32. A quota with less left blocks. An amount of memory, storage, ephemeral storage or huge pages is a size in bytes with an optional binary suffix such as 64Gi (64G and 500m are refused). Other resources keep the Kubernetes form, such as 500m of requests.cpu.",
           "type": "object",
           "minProperties": 1,
           "maxProperties": 32,
@@ -1632,6 +1653,11 @@
             "type": "string",
             "maxLength": 253,
             "pattern": "^[A-Za-z0-9._/-]+$"
+          },
+          "patternProperties": {
+            "(^|[./])(memory|storage|ephemeral-storage|hugepages-[A-Za-z0-9]+)$": {
+              "$ref": "#/$defs/Quantity"
+            }
           },
           "additionalProperties": {
             "$ref": "#/$defs/K8sQuantity"

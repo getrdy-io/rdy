@@ -51,7 +51,7 @@ fn host_cases() -> Vec<Case> {
         Case {
             id: "host.time_sync",
             full: json!({
-                "max_skew": "5s", "require_sync": true,
+                "max_skew": "300s", "recommended_skew": "5s", "require_sync": true,
                 "ntp_servers": ["ntp.acme.example", "10.0.0.1:1123", "[fd00:ec2::123]"]
             }),
             bad: vec![
@@ -59,6 +59,9 @@ fn host_cases() -> Vec<Case> {
                 ("max_skew", json!("5")),
                 ("max_skew", json!(5)),
                 ("max_skew", json!("fast")),
+                ("recommended_skew", json!("0s")),
+                ("recommended_skew", json!(5)),
+                ("recommended_skew", json!("fast")),
                 ("require_sync", json!("yes")),
                 ("require_sync", json!(1)),
                 ("ntp_servers", json!([])),
@@ -149,7 +152,7 @@ fn host_cases() -> Vec<Case> {
         Case {
             id: "host.container_runtime",
             full: json!({
-                "runtime": ["docker", "containerd", "podman", "crio"], "min_version": "1.7",
+                "runtime": ["containerd"], "min_version": "1.7",
                 "cgroup_driver": "systemd", "storage_driver": "overlay2"
             }),
             bad: vec![
@@ -754,8 +757,11 @@ fn ntp_servers_read_every_form_and_default_to_port_123() {
     let servers = t.ntp_servers.expect("servers");
     let shown: Vec<(String, u16)> = servers
         .iter()
-        .map(|s| (s.host().to_string(), s.port()))
+        .map(|s| (s.host().to_string(), s.port_or_default()))
         .collect();
+    assert_eq!(servers[0].port(), None);
+    assert_eq!(servers[1].port(), Some(1123));
+    assert_eq!(servers[5].port(), Some(1234));
     assert_eq!(
         shown,
         [
@@ -919,14 +925,16 @@ fn image_references_split_into_repository_and_tag() {
 
 #[test]
 fn a_bare_registry_and_a_registry_object_read_the_same_way() {
-    let CheckParams::NetRegistry(r) = typed(
-        "net.registry",
-        &json!({"registries": ["r.example:5000", {"host": "r.example:5000"}]}),
-    ) else {
-        panic!("not NetRegistry");
+    let read = |entry: Value| {
+        let CheckParams::NetRegistry(r) = typed("net.registry", &json!({ "registries": [entry] }))
+        else {
+            panic!("not NetRegistry");
+        };
+        r.registries[0].clone()
     };
-    assert_eq!(r.registries[0], r.registries[1]);
-    assert_eq!(r.registries[0].host.port(), Some(5000));
+    let bare = read(json!("r.example:5000"));
+    assert_eq!(bare, read(json!({"host": "r.example:5000"})));
+    assert_eq!(bare.host.port(), Some(5000));
 }
 
 #[test]
@@ -1164,4 +1172,282 @@ fn an_unknown_key_in_a_late_check_is_named() {
             near: Some("versions".into())
         }
     );
+}
+
+// ---- fix round 1 of PR 105 ----------------------------------------------------------------------
+
+fn bad_value(id: &str, params: &Value) -> String {
+    match why(id, params) {
+        UnsupportedReason::BadValue { message, .. } => message,
+        other => panic!("{id} {params}: expected BadValue, got {other:?}"),
+    }
+}
+
+#[test]
+fn btf_false_alone_is_no_threshold_and_btf_true_is_one() {
+    assert_eq!(
+        why("host.kernel", &json!({"btf": false})),
+        UnsupportedReason::NoThreshold {
+            one_of: &["min", "distro_min", "modules", "btf"],
+            and: vec![]
+        }
+    );
+    typed("host.kernel", &json!({"btf": true}));
+    typed("host.kernel", &json!({"min": "5.4", "btf": false}));
+    typed(
+        "host.kernel",
+        &json!({"modules": ["overlay"], "btf": false}),
+    );
+    // A value that is not a bool is still a bad value, not a missing threshold.
+    assert!(matches!(
+        why("host.kernel", &json!({"btf": "no"})),
+        UnsupportedReason::BadValue { .. }
+    ));
+}
+
+#[test]
+fn a_minimum_runtime_version_needs_exactly_one_runtime() {
+    for params in [
+        json!({"min_version": "1.7"}),
+        json!({"min_version": "1.7", "runtime": ["docker", "containerd"]}),
+        json!({"min_version": "1.7", "cgroup_driver": "systemd"}),
+    ] {
+        let message = bad_value("host.container_runtime", &params);
+        assert!(message.contains("exactly one"), "{params}: {message}");
+    }
+    let CheckParams::HostContainerRuntime(r) = typed(
+        "host.container_runtime",
+        &json!({"min_version": "1.7", "runtime": ["containerd"]}),
+    ) else {
+        panic!("not HostContainerRuntime");
+    };
+    assert_eq!(r.runtime.map(|list| list.len()), Some(1));
+    // Several runtimes without a version stay valid.
+    typed(
+        "host.container_runtime",
+        &json!({"runtime": ["docker", "containerd"]}),
+    );
+}
+
+#[test]
+fn memory_and_storage_quotas_are_strict_sizes() {
+    for resource in [
+        "requests.memory",
+        "limits.memory",
+        "requests.storage",
+        "requests.ephemeral-storage",
+        "hugepages-2mi",
+        "requests.hugepages-1gi",
+        "fast.storageclass.storage.k8s.io/requests.storage",
+        "memory",
+    ] {
+        for bad in [
+            "64G", "64M", "64k", "64T", "64P", "64E", "500m", "0.5Gi", "1.5", ".5",
+        ] {
+            let params = json!({"quota_needs": {resource: bad}});
+            let message = bad_value("k8s.namespace", &params);
+            assert!(message.contains(resource), "{message}");
+        }
+        for good in [
+            json!("64Gi"),
+            json!("512Mi"),
+            json!(1_048_576),
+            json!("1Ki"),
+        ] {
+            typed("k8s.namespace", &json!({"quota_needs": {resource: good}}));
+        }
+    }
+    let message = bad_value(
+        "k8s.namespace",
+        &json!({"quota_needs": {"requests.memory": "64G"}}),
+    );
+    assert!(message.contains("32Gi, not 32G"), "{message}");
+}
+
+#[test]
+fn cpu_and_count_quotas_keep_the_kubernetes_form() {
+    typed(
+        "k8s.namespace",
+        &json!({"quota_needs": {
+            "requests.cpu": "500m", "limits.cpu": 0.5, "pods": 100, "count/jobs.batch": "10",
+            "requests.nvidia.com/gpu": 4, "persistentvolumeclaims": "10"
+        }}),
+    );
+}
+
+#[test]
+fn a_sysctl_written_with_dots_and_with_slashes_is_one_parameter() {
+    let name = |text: &str| {
+        let CheckParams::HostSysctl(s) = typed("host.sysctl", &json!({"expect": {text: 1}})) else {
+            panic!("not HostSysctl");
+        };
+        s.expect
+            .expect("expect")
+            .keys()
+            .next()
+            .expect("a key")
+            .clone()
+    };
+    assert_eq!(name("vm.max_map_count").canonical(), "vm/max_map_count");
+    assert_eq!(name("vm/max_map_count").canonical(), "vm/max_map_count");
+    assert_eq!(
+        name("net/ipv4/conf/eth0.100/rp_filter").canonical(),
+        "net/ipv4/conf/eth0.100/rp_filter"
+    );
+    assert_eq!(name("net.ipv4.ip_forward").as_str(), "net.ipv4.ip_forward");
+
+    let message = bad_value(
+        "host.sysctl",
+        &json!({"expect": {"vm.max_map_count": 1, "vm/max_map_count": 2}}),
+    );
+    assert!(message.contains("same kernel parameter"), "{message}");
+    assert!(message.contains("vm.max_map_count"), "{message}");
+    // Different parameters stay different.
+    typed(
+        "host.sysctl",
+        &json!({"expect": {"vm.max_map_count": 1, "vm.swappiness": 10,
+            "net/ipv4/conf/eth0.100/rp_filter": 2, "net/ipv4/conf/eth0/rp_filter": 1}}),
+    );
+}
+
+#[test]
+fn a_value_that_looks_like_an_unsupported_operator_is_refused() {
+    for text in [
+        "!=0",
+        "!0",
+        "\u{2265}5",
+        "\u{2264}5",
+        "\u{2260}0",
+        "~5",
+        "==1",
+        "=1",
+        "<5",
+        ">5",
+        "<>1",
+        ">== 1",
+        "=>1",
+    ] {
+        let message = bad_value("host.sysctl", &json!({"expect": {"a": text}}));
+        assert!(
+            message.contains("not a value to expect"),
+            "{text}: {message}"
+        );
+    }
+    for text in [">=5", "<= -1", "5", "bbr", "a!b", "a=b", "-1"] {
+        typed("host.sysctl", &json!({"expect": {"a": text}}));
+    }
+}
+
+#[test]
+fn tls_hosts_and_time_servers_read_the_same_host_forms() {
+    let hosts = |id: &str, params: Value| match typed(id, &params) {
+        CheckParams::NetTlsIntercept(p) => p
+            .hosts
+            .expect("hosts")
+            .iter()
+            .map(|h| (h.host().to_string(), h.port(), h.port_or_default()))
+            .collect::<Vec<_>>(),
+        CheckParams::HostTimeSync(p) => p
+            .ntp_servers
+            .expect("servers")
+            .iter()
+            .map(|h| (h.host().to_string(), h.port(), h.port_or_default()))
+            .collect(),
+        _ => panic!("unexpected params"),
+    };
+    let forms = json!([
+        "a.example",
+        "a2.example:8443",
+        "fd00::1",
+        "[fd00::2]",
+        "[fd00::3]:8443"
+    ]);
+    let tls = hosts("net.tls_intercept", json!({"hosts": forms}));
+    let ntp = hosts("host.time_sync", json!({"ntp_servers": forms}));
+    assert_eq!(
+        tls,
+        [
+            ("a.example".to_owned(), None, 443),
+            ("a2.example".to_owned(), Some(8443), 8443),
+            ("[fd00::1]".to_owned(), None, 443),
+            ("[fd00::2]".to_owned(), None, 443),
+            ("[fd00::3]".to_owned(), Some(8443), 8443),
+        ]
+    );
+    // The same forms and the same ports as written. Where no port is written, 123 applies and not 443.
+    let written = |rows: &[(String, Option<u16>, u16)]| -> Vec<Option<u16>> {
+        rows.iter().map(|row| row.1).collect()
+    };
+    assert_eq!(written(&ntp), written(&tls));
+    assert_eq!(ntp[0].2, 123);
+    for bad in [
+        "http://a.example",
+        "a.example/x",
+        "user:pw@a.example",
+        "a b",
+        "a.example:0",
+        "",
+    ] {
+        assert!(
+            matches!(
+                why("net.tls_intercept", &json!({"hosts": [bad]})),
+                UnsupportedReason::BadValue { .. }
+            ),
+            "{bad}"
+        );
+        assert!(
+            matches!(
+                why("host.time_sync", &json!({"ntp_servers": [bad]})),
+                UnsupportedReason::BadValue { .. }
+            ),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn a_host_is_the_same_host_with_or_without_its_default_port() {
+    let message = bad_value(
+        "net.registry",
+        &json!({"registries": [{"host": "r.example", "hosts": ["a.example", "a.example:443"]}]}),
+    );
+    assert!(message.contains("repeat"), "{message}");
+    let message = bad_value(
+        "host.time_sync",
+        &json!({"ntp_servers": ["a.example", "a.example:123"]}),
+    );
+    assert!(message.contains("repeat"), "{message}");
+}
+
+#[test]
+fn two_registries_with_the_same_host_are_refused() {
+    for registries in [
+        json!(["r.example", "r.example"]),
+        json!(["r.example", {"host": "R.example:443", "images": ["a/b:1"]}]),
+        json!([{"host": "r.example", "optional": true}, "r.example"]),
+        json!(["[fd00::1]", "fd00::1"]),
+    ] {
+        let message = bad_value("net.registry", &json!({ "registries": registries }));
+        assert!(message.contains("listed twice"), "{registries}: {message}");
+    }
+    // The same name on another port is another registry.
+    typed(
+        "net.registry",
+        &json!({"registries": ["r.example", "r.example:5000"]}),
+    );
+}
+
+#[test]
+fn skew_has_a_block_level_and_a_warn_level() {
+    let CheckParams::HostTimeSync(t) = typed(
+        "host.time_sync",
+        &json!({"max_skew": "60s", "recommended_skew": "2s"}),
+    ) else {
+        panic!("not HostTimeSync");
+    };
+    assert!(t.max_skew.is_some() && t.recommended_skew.is_some());
+    let CheckParams::HostTimeSync(t) = typed("host.time_sync", &json!({})) else {
+        panic!("not HostTimeSync");
+    };
+    assert!(t.max_skew.is_none() && t.recommended_skew.is_none());
 }
