@@ -3,8 +3,8 @@
 **Install day should be boring.**
 
 rdy checks a machine, a Kubernetes cluster or a cloud account against a software vendor's written
-requirements, before the install. It tells you what is wrong and how to fix it. It is one signed binary
-with no runtime, and it works offline.
+requirements, before the install. It tells you what is wrong and how to fix it. It ships as one signed
+binary with no runtime, and it works offline.
 
 > **Pre-release.** rdy is under active development. There is no release yet, so there is no install
 > command on this page. `rdy run`, the command that does the main job, is not wired up on `main`
@@ -27,7 +27,8 @@ sales engineer who is tired of finding out about the proxy on install day. Both 
 
 This is what a run will look like. It is illustrative and written by hand from the output format in
 [`docs/plan/07-cli-ux.md`](docs/plan/07-cli-ux.md), not recorded from a real run, because `rdy run` is
-not wired up yet. The host names are made up. The banner and the report lines are left out.
+not wired up yet. It uses a signed copy of `examples/specs/acme-quickstart.yaml` with `net.egress` left
+out. The host names are made up. The report lines are left out.
 
 ```console
 $ rdy run acme-quickstart.yaml
@@ -58,23 +59,26 @@ signature). Exit 70 means rdy itself failed.
 
 ## Why it is safe to run
 
-rdy runs inside your environment, sometimes on a production host. You should not take our word for
-what it does, so every claim below is a rule the code is built and tested against, and the code is
-open (Apache-2.0).
+rdy runs inside your environment, sometimes on a production host. Do not take our word for what it
+does. The code is open (Apache-2.0). These are the rules it is built to. Items marked (before 0.1.0)
+or (M2) are not in the code yet.
 
 - **Least privilege.** Every check declares what it needs: root, a kube context, cloud credentials.
-  rdy runs what it can and reports what it could not. It never asks for `sudo`, and it never changes
-  anything on the machine.
+  rdy runs what it can and reports what it could not. It never asks for `sudo`. Checks only read. A
+  run writes one new report folder and nothing else. In a cluster it reads, plus three self-review
+  requests, and never reads Secrets.
 - **Nothing leaves the machine by default.** Results are written to a local folder. Sending anything
-  anywhere is a separate, explicit step you choose. The upload client and the HTML report renderer are
-  open source so a security reviewer can read exactly what would leave the box. Secrets are redacted
-  before anything is written to disk.
+  anywhere will be a separate, explicit step you choose (M2). The HTML report renderer (before 0.1.0)
+  and the upload client (M2) will be open source in this repo, so a security reviewer can read exactly
+  what would leave the box. Secrets are redacted before anything is written to disk.
 - **Specs are signed.** The vendor signs the spec with an ed25519 key (a standard minisign signature).
-  You pin the vendor's key once, after you check its fingerprint by another route. rdy refuses a spec
-  whose signature does not verify, always. It refuses an unsigned spec unless you pass
-  `--allow-unsigned`, and then it says so loudly.
-- **Offline first.** Every command works with no network. Checks only contact the hosts the spec
-  lists. A vendor portal is planned, and it is optional.
+  You pin the vendor's key once, after you check its fingerprint by another route. rdy will refuse a spec
+  whose signature does not verify, always. It will refuse an unsigned spec unless you pass
+  `--allow-unsigned`, and then it will say so loudly (verify and refuse: before 0.1.0; the verifier
+  itself is built and tested).
+- **Offline first.** Every command works with no network. Checks connect only to the hosts the spec
+  lists, your proxy, your DNS servers and the Kubernetes API server you chose. Redirects are recorded,
+  never followed (enforced before 0.1.0). A vendor portal is planned, and it is optional.
 - **One static binary.** No runtime to install, no OpenSSL. musl on Linux, rustls everywhere.
 - **No telemetry.**
 
@@ -96,11 +100,14 @@ vulnerability, read [`SECURITY.md`](SECURITY.md).
 
 | Family | Checks | Status |
 | --- | --- | --- |
-| Host | CPU, memory, disk, OS, SELinux and AppArmor | Built (Linux), not reachable from `rdy run` yet |
-| Host | ports, kernel, cgroups, time sync, sysctl, container runtime | Coming before 0.1.0 |
-| Network | egress through a proxy, DNS, registry, TLS interception, MTU, bandwidth | Coming before 0.1.0. The probe layer under them is built |
-| Kubernetes | version, storage classes, RBAC for the install identity | Built, not reachable from `rdy run` yet |
-| Kubernetes | nodes, admission, namespace, DNS, ingress, CRDs, CNI | Coming before 0.1.0 |
+| Host | CPU, memory, disk, OS, SELinux and AppArmor, firewall | Built (Linux), not reachable from `rdy run` yet |
+| Host | ports | Coming before 0.1.0 |
+| Host | kernel, cgroups, time sync, sysctl, container runtime | Planned after 0.1.0 |
+| Network | egress through a proxy, proxy settings, TLS interception | Coming before 0.1.0. The probe layer under them is built |
+| Network | DNS, registry, MTU, bandwidth | Planned after 0.1.0 |
+| Kubernetes | access, version, storage classes, RBAC for the install identity | Built, not reachable from `rdy run` yet |
+| Kubernetes | nodes, Pod Security admission | Coming before 0.1.0 |
+| Kubernetes | admission webhooks, namespace, DNS, ingress, CRDs, CNI | Planned after 0.1.0 |
 | Diagnostics bundle | redacted collection and upload | Planned (M2) |
 | AWS account | IAM dry run, quotas, regions | Planned (M3) |
 | GPU | driver, CUDA, VRAM, device plugin | Planned (M4) |
@@ -158,28 +165,31 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
   class and RBAC checks. These are tested against recorded fixtures. They are not reachable from the
   command line yet.
 
-**In progress**
+**Next**
 
 - Wiring `rdy run` end to end: load the spec, run the checks, write the reports, set the exit code.
 - The human terminal output and the HTML report.
-- The network checks and the rest of the host and Kubernetes checks.
+- Host ports, the egress, proxy and TLS interception checks, and Kubernetes nodes and Pod Security
+  admission.
 
 **Before 0.1.0**
 
 - `rdy verify` and signature checking inside `rdy run`, with the `--allow-unsigned` banner.
 - Signed release binaries and an install script that checks them.
-- A time-boxed quickstart, tested on a clean machine, and golden transcripts for this page.
+- A first-run page and the quickstart spec, run end to end on a clean checkout, and golden
+  transcripts for this page.
 
 **After 0.1.0**
 
+- 0.1.x: the remaining host, network and Kubernetes checks in the table above.
 - M2: the redacted diagnostics bundle, `rdy upload`, and the hosted portal for vendors. The portal is
   not needed to use the tool.
 - M3: AWS account checks, `spec init`, `self-update`.
 - M4: GPU checks and custom checks that run a command you approve.
 
-The five release targets are Linux x86_64 and aarch64 (musl),
-macOS aarch64 and x86_64, and Windows x86_64. Where a data source is not built for an OS yet, the check
-reports it as skipped. It does not pass.
+The five release targets are Linux x86_64 and aarch64 (musl), macOS aarch64 and x86_64, and Windows
+x86_64. In 0.1.0 the host checks read Linux data sources only. On macOS and Windows they report not
+run, which makes a required check NOT READY. Those data sources are planned for M2.
 
 ## Rdy and the Kubernetes-only preflight tool
 
@@ -196,4 +206,5 @@ issue. Follow [`SECURITY.md`](SECURITY.md).
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE).
+Apache-2.0. See [`LICENSE`](LICENSE) and `NOTICE`. The Rdy name and logo are trademarks and are not
+covered by the license; see `TRADEMARKS.md`.
