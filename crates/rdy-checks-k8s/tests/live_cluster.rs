@@ -1,48 +1,50 @@
-//! Runs the client against a real cluster, for the kind job (M1-108). Ignored by default.
+//! Runs the client and `k8s.version` against a real cluster, for the kind job (M1-108). Ignored by default.
 //!
+//! The kind workflow (`.github/workflows/kind.yml`) runs every test here on the oldest and newest
+//! supported minors (ADR 0039) through `scripts/kind-live-test.sh`, which sets up the cluster side:
+//!
+//! - the namespace `rdy-live`, labelled `restricted` for enforce, audit and warn (and shown to refuse a
+//!   privileged pod before the tests start);
+//! - `examples/rbac/rdy-readonly.yaml`, and a kubeconfig of its service account in
+//!   `RDY_READONLY_KUBECONFIG`;
+//! - `RDY_LIVE_NAMESPACE` (`rdy-live`) and `RDY_LIVE_EXPECT_MINOR` (`1.35`), so a green run proves it
+//!   tested the cluster it says it did.
+//!
+//! To run them by hand against a cluster you own, run the script with `KUBECONFIG` pointing at it. It
+//! needs `kubectl`, `cargo-nextest` and `RDY_LIVE_EXPECT_MINOR`; it creates and deletes the namespaces
+//! `rdy-live` and `rdy-system`. The tests themselves are plain ignored tests:
 //! `cargo test -p rdy-checks-k8s --test live_cluster -- --ignored --nocapture` uses the kubeconfig the
 //! environment points at (`KUBECONFIG` or `~/.kube/config`), as `rdy run` does.
 //!
 //! - `the_default_kubeconfig_reaches_the_cluster` sends one request, `GET /version`.
+//! - `k8s_version_passes_on_the_cluster` runs the `k8s.version` check (the real check code, built
+//!   directly here until M1-107 builds it from the spec) and expects a pass on the minor the job started.
+//! - `the_server_names_the_caller_and_answers_access_reviews` sends the raw `SelfSubjectReview` and two
+//!   access reviews as the admin of the kind cluster.
+//! - `the_test_namespace_enforces_restricted` reads the namespace labels through the read-only client.
+//! - `the_readonly_role_serves_discovery_and_names_itself` runs the discovery routes, the raw
+//!   `SelfSubjectReview` and `k8s.version` as the `rdy-readonly` service account.
 //! - `the_readonly_role_serves_every_allowed_read_and_nothing_else` is the guard test of M1-103
 //!   (SEC-24). It reads `RDY_READONLY_KUBECONFIG`, the path of a kubeconfig whose only user is the
 //!   `rdy-readonly` service account. When the variable is not set, the test panics with a message that
 //!   says so, so an explicit `--ignored` run can never pass without proving SEC-24. It does not use
 //!   `KUBECONFIG`, because under an admin kubeconfig the server would allow the writes it checks for.
-//!   M1-108 sets the variable and runs it.
 //!
-//!   ```text
-//!   kubectl apply -f examples/rbac/rdy-readonly.yaml
-//!   TOKEN=$(kubectl -n rdy-system create token rdy-readonly --duration 1h)
-//!   SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
-//!   kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
-//!       | base64 -d > ca.crt
-//!   kubectl config --kubeconfig=ro.kubeconfig set-cluster c --server="$SERVER" \
-//!       --certificate-authority=ca.crt --embed-certs
-//!   kubectl config --kubeconfig=ro.kubeconfig set-credentials rdy --token="$TOKEN"
-//!   kubectl config --kubeconfig=ro.kubeconfig set-context c --cluster=c --user=rdy
-//!   kubectl config --kubeconfig=ro.kubeconfig use-context c
-//!   RDY_READONLY_KUBECONFIG=$PWD/ro.kubeconfig cargo test -p rdy-checks-k8s --test live_cluster \
-//!       -- --ignored --nocapture
-//!   ```
-//!
-//!   It proves two things on a real API server. Every read the guard allows is served to the role
+//!   It proves three things on a real API server. Every read the guard allows is served to the role
 //!   (each must return `Ok`; a 404 is tolerated only for the get of a storage class that does not
-//!   exist, where the point is that the answer is not a 403), and the
-//!   same role, asked through the server's own access review, may not write or read Secrets. The
-//!   guard's refusals need no cluster and are tested without one.
+//!   exist, where the point is that the answer is not a 403). The same role, asked through the
+//!   server's own access review, may not write, read Secrets, mint tokens, exec, impersonate or bind.
+//!   And the server's rules review of the role, for `default` and `kube-system`, lists only the grants
+//!   of the role file (and `system:basic-user`'s reviews), so nothing else is granted by any binding.
+//!   The guard's refusals need no cluster and are tested without one.
 //!
-//! Not covered here, and carried (12-progress, M1-105 and M1-108):
-//! - The discovery routes (`/api`, `/apis`, `/apis/<group>/<version>`) and the raw
-//!   `SelfSubjectReview` POST. `ReadOnlyClient` has them since M1-105 (`core_versions`, `api_groups`,
-//!   `group_resources` and `self_subject_review`), proved against the mock only. M1-108 runs them here.
+//! Not covered here, and carried:
 //! - The OpenShift reads (`securitycontextconstraints` list, `clusterversions/version` get). A kind
 //!   cluster does not serve them, so the test asks the server's access review whether the role allows
 //!   them. That catches a typo in the rule, not a missing API.
+//! - The in-cluster path (a pod's service account). The job runs rdy outside the cluster.
 //! - The optional `kube-system` Role: the deployments list runs, and a 403 there means the optional
 //!   Role was not applied.
-//!
-//! They have not run in CI yet: the kind job is M1-108, which runs this file.
 
 #![allow(clippy::expect_used)]
 // These are tests of the client module. They start mock servers, write kubeconfigs and run plugin
@@ -54,6 +56,7 @@
     clippy::disallowed_types
 )]
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use k8s_openapi::api::authorization::v1::{
@@ -64,8 +67,11 @@ use k8s_openapi::api::core::v1::{Event, Namespace, Node, PersistentVolumeClaim, 
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
 use kube::api::{DeleteParams, ListParams, PostParams};
 use rdy_checks_k8s::client::{Connected, Env, GuardError, KubeOptions, load};
-use rdy_engine::check::Os;
+use rdy_checks_k8s::{Cluster, VersionCheck};
+use rdy_engine::check::{Check, Finding, Level, Need, Os};
 use rdy_engine::testing::{Replay, TestRun};
+use rdy_spec::check::K8sVersion;
+use serde_json::json;
 
 async fn connect_with(run: &TestRun, options: KubeOptions) -> Connected {
     let loaded = load(&options, &Env::from_process())
@@ -80,7 +86,7 @@ async fn connect_with(run: &TestRun, options: KubeOptions) -> Connected {
 }
 
 #[tokio::test]
-#[ignore = "needs a cluster; the kind job runs it (M1-108)"]
+#[ignore = "runs in job: kind"]
 async fn the_default_kubeconfig_reaches_the_cluster() {
     let run = TestRun::new(Replay::new());
     let connected = connect_with(&run, KubeOptions::new(Duration::from_secs(10))).await;
@@ -92,6 +98,217 @@ async fn the_default_kubeconfig_reaches_the_cluster() {
         "{}",
         version.git_version
     );
+}
+
+/// The minor the job started (`1.35`). A run that tested another one is not a proof of the one it names.
+fn expected_minor() -> String {
+    std::env::var("RDY_LIVE_EXPECT_MINOR").expect(
+        "RDY_LIVE_EXPECT_MINOR is not set. Set it to the Kubernetes minor of the cluster, for example \
+         1.35; scripts/kind-live-test.sh does",
+    )
+}
+
+fn assert_expected_minor(connected: &Connected) {
+    let git_version = &connected.server_version().git_version;
+    let prefix = format!("v{}.", expected_minor());
+    assert!(
+        git_version.starts_with(&prefix),
+        "the cluster says {git_version}, the job meant to test {prefix}x"
+    );
+}
+
+/// Runs `k8s.version` against the cluster `connected` reached, as the check runs in a real run: its own
+/// probe, bound to its id, and the real client behind the guard. The spec entry asks for the floor the
+/// docs use and four APIs every supported minor serves.
+async fn version_finding(connected: Connected, run: &TestRun) -> Finding {
+    let params: K8sVersion = serde_json::from_value(json!({
+        "min": "1.28",
+        "apis": [
+            "autoscaling/v2 HorizontalPodAutoscaler",
+            "networking.k8s.io/v1 Ingress",
+            "batch/v1 CronJob",
+            "v1 Pod",
+        ],
+    }))
+    .expect("the parameters parse");
+    let cluster: Arc<dyn Cluster> = Arc::new(connected);
+    let ctx = run.context_for(
+        VersionCheck::info(),
+        "k8s.version",
+        Os::Linux,
+        [Need::KubeContext],
+    );
+    VersionCheck::new(params, cluster)
+        .run(&ctx)
+        .await
+        .expect("the check ran")
+}
+
+fn assert_version_passes(finding: &Finding, connected_minor: &str) {
+    assert_eq!(finding.level, Level::Pass, "{finding:#?}");
+    assert!(finding.partial.is_none(), "{finding:#?}");
+    let kubernetes = finding.observed["kubernetes"].as_str().unwrap_or_default();
+    assert!(
+        kubernetes.starts_with(&format!("{connected_minor}.")),
+        "{finding:#?}"
+    );
+    assert!(
+        finding.observed["nodes_read"].as_u64().unwrap_or(0) >= 1,
+        "{finding:#?}"
+    );
+    eprintln!("k8s.version: {}", finding.message);
+}
+
+#[tokio::test]
+#[ignore = "runs in job: kind"]
+async fn k8s_version_passes_on_the_cluster() {
+    let run = TestRun::new(Replay::new());
+    let connected = connect_with(&run, KubeOptions::new(Duration::from_secs(10))).await;
+    assert_expected_minor(&connected);
+    let finding = version_finding(connected, &run).await;
+    assert_version_passes(&finding, &expected_minor());
+    // A real server answered every request, and the log holds one entry per request under the check.
+    let log = run.action_log().actions;
+    let own: Vec<_> = log
+        .iter()
+        .filter(|entry| entry.check.as_deref() == Some("k8s.version"))
+        .collect();
+    assert!(!own.is_empty(), "{log:#?}");
+    assert!(
+        own.iter()
+            .all(|entry| entry.outcome == rdy_spec::result::ActionOutcome::Ok),
+        "{own:#?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "runs in job: kind"]
+async fn the_server_names_the_caller_and_answers_access_reviews() {
+    let run = TestRun::new(Replay::new());
+    let connected = connect_with(&run, KubeOptions::new(Duration::from_secs(10))).await;
+    let check = run.context("k8s.access", Os::Linux, []);
+    let client = connected.read_only(check.probe());
+
+    // The raw route and its fixed body: a typed `SelfSubjectReview` carries `metadata` and is refused.
+    let who = client
+        .self_subject_review()
+        .await
+        .expect("the server answers the review");
+    let username = who
+        .status
+        .and_then(|status| status.user_info)
+        .and_then(|info| info.username)
+        .expect("the review names the caller");
+    assert!(!username.is_empty());
+    eprintln!("the server says the caller is {username}");
+
+    // Access reviews round trip: the admin of a kind cluster may create a pod in the test namespace and
+    // read nodes, and the server says so in `status.allowed`.
+    let namespace = std::env::var("RDY_LIVE_NAMESPACE")
+        .expect("RDY_LIVE_NAMESPACE is not set; scripts/kind-live-test.sh sets it");
+    let reviews = client.all::<SelfSubjectAccessReview>();
+    for (verb, resource, scoped) in [("create", "pods", true), ("list", "nodes", false)] {
+        let spec = review(
+            verb,
+            "",
+            resource,
+            scoped.then_some(namespace.as_str()),
+            None,
+        );
+        let answer = reviews
+            .create(&PostParams::default(), &spec)
+            .await
+            .expect("access review")
+            .status
+            .expect("the server fills the status");
+        assert!(answer.allowed, "{verb} {resource}: {answer:?}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "runs in job: kind"]
+async fn the_test_namespace_enforces_restricted() {
+    let namespace = std::env::var("RDY_LIVE_NAMESPACE")
+        .expect("RDY_LIVE_NAMESPACE is not set; scripts/kind-live-test.sh sets it");
+    let run = TestRun::new(Replay::new());
+    let connected = connect_with(&run, KubeOptions::new(Duration::from_secs(10))).await;
+    let check = run.context("k8s.admission", Os::Linux, []);
+    let client = connected.read_only(check.probe());
+    let object = client
+        .all::<Namespace>()
+        .get(&namespace)
+        .await
+        .expect("the namespace is readable");
+    let labels = object.metadata.labels.unwrap_or_default();
+    for level in ["enforce", "audit", "warn"] {
+        assert_eq!(
+            labels
+                .get(&format!("pod-security.kubernetes.io/{level}"))
+                .map(String::as_str),
+            Some("restricted"),
+            "{level}: {labels:?}"
+        );
+    }
+}
+
+/// The read-only client of the `rdy-readonly` kubeconfig, or the panic that says how to set it.
+async fn readonly_connection(run: &TestRun) -> Connected {
+    let kubeconfig = std::env::var_os("RDY_READONLY_KUBECONFIG").expect(
+        "RDY_READONLY_KUBECONFIG is not set. Point it at a kubeconfig of the rdy-readonly service \
+         account (see the header of this file); scripts/kind-live-test.sh sets it. The tests never fall \
+         back to KUBECONFIG, and the readonly test must not pass without proving SEC-24",
+    );
+    connect_with(
+        run,
+        KubeOptions::new(Duration::from_secs(10)).kubeconfig(kubeconfig),
+    )
+    .await
+}
+
+#[tokio::test]
+#[ignore = "runs in job: kind"]
+async fn the_readonly_role_serves_discovery_and_names_itself() {
+    let run = TestRun::new(Replay::new());
+    let connected = readonly_connection(&run).await;
+    assert_expected_minor(&connected);
+    let check = run.context("k8s.access", Os::Linux, []);
+    let client = connected.read_only(check.probe());
+
+    // The three discovery routes, and the core one k8s.version reads. system:discovery serves them.
+    let core = client.core_versions().await.expect("GET /api");
+    assert!(core.versions.iter().any(|v| v == "v1"), "{core:?}");
+    let groups = client.api_groups().await.expect("GET /apis");
+    assert!(
+        groups.groups.iter().any(|g| g.name == "storage.k8s.io"),
+        "{groups:?}"
+    );
+    let served = client
+        .group_resources("storage.k8s.io", "v1")
+        .await
+        .expect("GET /apis/storage.k8s.io/v1");
+    assert!(
+        served.resources.iter().any(|r| r.name == "storageclasses"),
+        "{served:?}"
+    );
+    let core_v1 = client.core_resources("v1").await.expect("GET /api/v1");
+    assert!(core_v1.resources.iter().any(|r| r.name == "pods"));
+
+    // The raw SelfSubjectReview names the service account the kubeconfig holds.
+    let username = client
+        .self_subject_review()
+        .await
+        .expect("the server answers the review")
+        .status
+        .and_then(|status| status.user_info)
+        .and_then(|info| info.username);
+    assert_eq!(
+        username.as_deref(),
+        Some("system:serviceaccount:rdy-system:rdy-readonly")
+    );
+
+    // k8s.version with only the role: discovery, and the node list the role grants, so nothing is partial.
+    let finding = version_finding(connected, &run).await;
+    assert_version_passes(&finding, &expected_minor());
 }
 
 /// What a read must do on a real cluster: succeed. A 404 is tolerated only where `optional` is set,
@@ -114,12 +331,18 @@ fn review(
     namespace: Option<&str>,
     name: Option<&str>,
 ) -> SelfSubjectAccessReview {
+    // `pods/exec` is the resource `pods` and the subresource `exec`.
+    let (resource, subresource) = match resource.split_once('/') {
+        Some((resource, subresource)) => (resource, Some(subresource.to_owned())),
+        None => (resource, None),
+    };
     SelfSubjectAccessReview {
         spec: SelfSubjectAccessReviewSpec {
             resource_attributes: Some(ResourceAttributes {
                 verb: Some(verb.to_owned()),
                 group: Some(group.to_owned()),
                 resource: Some(resource.to_owned()),
+                subresource,
                 namespace: namespace.map(str::to_owned),
                 name: name.map(str::to_owned),
                 ..ResourceAttributes::default()
@@ -139,10 +362,11 @@ type Ask = (
     Option<&'static str>,
 );
 
-/// Asks the server whether the identity may do `ask`.
+/// Asks the server whether the identity may do `ask`. The answer counts only when the server filled
+/// the status and reported no evaluation error, so a denial can never be a missing answer.
 async fn is_allowed(reviews: &kube::Api<SelfSubjectAccessReview>, ask: Ask) -> bool {
     let (verb, group, resource, namespace, name) = ask;
-    reviews
+    let status = reviews
         .create(
             &PostParams::default(),
             &review(verb, group, resource, namespace, name),
@@ -150,20 +374,116 @@ async fn is_allowed(reviews: &kube::Api<SelfSubjectAccessReview>, ask: Ask) -> b
         .await
         .expect("access review")
         .status
-        .is_some_and(|status| status.allowed)
+        .expect("the server fills the status");
+    assert!(
+        status
+            .evaluation_error
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty(),
+        "{ask:?}: the server could not evaluate the review: {status:?}"
+    );
+    status.allowed
+}
+
+/// One grant of a rules review: `(verb, api group, resource, resource name)`. The name is empty for
+/// every name. A resource with a subresource reads `pods/exec`, as in a role.
+type Grant = (String, String, String, String);
+
+/// What the `rdy-readonly` role grants as resources, from `examples/rbac/rdy-readonly.yaml`. A test keeps
+/// that file and the guard's `ALLOWED` in step; this list keeps the live server in step with the file.
+const GRANTED: &[(&str, &str, &str, &str)] = &[
+    ("get", "", "namespaces", ""),
+    ("list", "", "nodes", ""),
+    ("list", "", "pods", ""),
+    ("list", "", "persistentvolumeclaims", ""),
+    ("list", "", "events", ""),
+    ("get", "storage.k8s.io", "storageclasses", ""),
+    ("list", "storage.k8s.io", "storageclasses", ""),
+    ("list", "storage.k8s.io", "csinodes", ""),
+    ("list", "storage.k8s.io", "csidrivers", ""),
+    (
+        "list",
+        "security.openshift.io",
+        "securitycontextconstraints",
+        "",
+    ),
+    ("get", "config.openshift.io", "clusterversions", "version"),
+    ("create", "authentication.k8s.io", "selfsubjectreviews", ""),
+    (
+        "create",
+        "authorization.k8s.io",
+        "selfsubjectaccessreviews",
+        "",
+    ),
+    (
+        "create",
+        "authorization.k8s.io",
+        "selfsubjectrulesreviews",
+        "",
+    ),
+];
+
+/// Reads the Kubernetes project gives every signed-in user on newer minors, outside the role file. Each
+/// is read-only and holds no secret. An entry stays only with a reason.
+const SERVER_DEFAULTS: &[(&str, &str, &str, &str)] = &[
+    // ClusterTrustBundles are cluster-wide CA bundles, public by design. The 1.37.0 server grants get, list
+    // and watch on them through the ClusterRole `system:cluster-trust-bundle-discovery`, bound to the group
+    // `system:serviceaccounts` (so to every service account, ours included, and not to the role file). It
+    // comes with the `ClusterTrustBundle` feature gate: on in 1.37.0, off in 1.35.8, whose rules review
+    // lists none of them.
+    ("get", "certificates.k8s.io", "clustertrustbundles", ""),
+    ("list", "certificates.k8s.io", "clustertrustbundles", ""),
+    ("watch", "certificates.k8s.io", "clustertrustbundles", ""),
+];
+
+/// What the server grants the identity in `namespace`, one entry per verb, group, resource and name.
+/// The server may merge rules, so the answer is expanded before it is compared.
+fn grants(namespace: &str, answer: &SelfSubjectRulesReview) -> Vec<Grant> {
+    let status = answer
+        .status
+        .as_ref()
+        .expect("the server fills the status of a rules review");
+    assert!(
+        !status.incomplete,
+        "{namespace}: the rules review is incomplete, so it cannot prove the role is read-only: {status:?}"
+    );
+    assert!(
+        status
+            .evaluation_error
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty(),
+        "{namespace}: the server could not evaluate the rules review: {status:?}"
+    );
+    let mut out = Vec::new();
+    for rule in &status.resource_rules {
+        let groups = rule.api_groups.clone().unwrap_or_default();
+        let resources = rule.resources.clone().unwrap_or_default();
+        let names = rule.resource_names.clone().unwrap_or_default();
+        let names = if names.is_empty() {
+            vec![String::new()]
+        } else {
+            names
+        };
+        for verb in &rule.verbs {
+            for group in &groups {
+                for resource in &resources {
+                    for name in &names {
+                        out.push((verb.clone(), group.clone(), resource.clone(), name.clone()));
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 #[tokio::test]
-#[ignore = "needs a cluster and the rdy-readonly kubeconfig; the kind job runs it (M1-108)"]
+#[ignore = "runs in job: kind"]
 async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
-    let kubeconfig = std::env::var_os("RDY_READONLY_KUBECONFIG").expect(
-        "RDY_READONLY_KUBECONFIG is not set. Point it at a kubeconfig of the rdy-readonly service \
-         account (see the header of this file); M1-108 sets it. The test never falls back to KUBECONFIG, \
-         and it must not pass without proving SEC-24",
-    );
     let run = TestRun::new(Replay::new());
-    let options = KubeOptions::new(Duration::from_secs(10)).kubeconfig(kubeconfig);
-    let connected = connect_with(&run, options).await;
+    let connected = readonly_connection(&run).await;
     let check = run.context("k8s.nodes", Os::Linux, []);
     let client = connected.read_only(check.probe());
     let all = ListParams::default().limit(50);
@@ -222,21 +542,24 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             .list(&all)
             .await,
     );
-    // The rules review is a POST the guard allows. The server answers 201.
-    let rules = SelfSubjectRulesReview {
-        spec: SelfSubjectRulesReviewSpec {
-            namespace: Some("default".to_owned()),
-        },
-        ..SelfSubjectRulesReview::default()
-    };
-    assert_served(
-        "selfsubjectrulesreviews",
-        false,
-        &client
+    // The rules review is a POST the guard allows. The server answers 201. It is asked for `default`
+    // (where only the cluster role applies) and for `kube-system` (where the optional Role adds the
+    // deployments list), and the answers are read in step 2.
+    let mut rules_answers = Vec::new();
+    for namespace in ["default", "kube-system"] {
+        let rules = SelfSubjectRulesReview {
+            spec: SelfSubjectRulesReviewSpec {
+                namespace: Some(namespace.to_owned()),
+            },
+            ..SelfSubjectRulesReview::default()
+        };
+        let answer = client
             .all::<SelfSubjectRulesReview>()
             .create(&PostParams::default(), &rules)
-            .await,
-    );
+            .await;
+        assert_served("selfsubjectrulesreviews", false, &answer);
+        rules_answers.push((namespace, answer.expect("served, checked above")));
+    }
 
     // 2. The server itself says what the role can and cannot do. These are the allowed
     //    SelfSubjectAccessReview POSTs, so they pass the guard.
@@ -282,12 +605,55 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             None,
             Some("other"),
         ),
+        // Escalation paths: minting tokens, running commands in pods, acting as someone else and
+        // granting roles.
+        ("create", "", "serviceaccounts/token", Some("default"), None),
+        ("create", "", "pods/exec", Some("default"), None),
+        ("impersonate", "", "users", None, None),
+        (
+            "bind",
+            "rbac.authorization.k8s.io",
+            "clusterroles",
+            None,
+            None,
+        ),
     ] {
         assert!(
             !is_allowed(&reviews, ask).await,
             "the role must not allow {ask:?}"
         );
     }
+
+    //    "Nothing else" is read from the server, not sampled. Every grant the server reports for the
+    //    identity must be one the role file lists, a default the Kubernetes project gives every signed-in
+    //    user (`SERVER_DEFAULTS`), or the deployments list the optional Role adds in `kube-system`.
+    //    Another binding, an aggregated role or a broad grant to `system:authenticated` shows up here.
+    //    All of them are collected, so one run names every surprise.
+    let mut unexpected = Vec::new();
+    for (namespace, answer) in &rules_answers {
+        for grant in grants(namespace, answer) {
+            let listed = |table: &[(&str, &str, &str, &str)]| {
+                table.iter().any(|&(verb, group, resource, name)| {
+                    grant
+                        == (
+                            verb.to_owned(),
+                            group.to_owned(),
+                            resource.to_owned(),
+                            name.to_owned(),
+                        )
+                })
+            };
+            let optional =
+                *namespace == "kube-system" && listed(&[("list", "apps", "deployments", "")]);
+            if !(listed(GRANTED) || listed(SERVER_DEFAULTS) || optional) {
+                unexpected.push(format!("{namespace}: {grant:?}"));
+            }
+        }
+    }
+    assert!(
+        unexpected.is_empty(),
+        "the server grants the rdy-readonly identity more than the role file lists: {unexpected:#?}"
+    );
 
     // 3. The guard refuses a write and a Secrets read before they reach the server.
     let error = client
@@ -309,7 +675,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, 11 reads and posts, 12 reviews, two refusals.
+    // 4. One log entry per call: /version, 12 reads and posts, 16 reviews, two refusals.
     let log = run.action_log().actions;
-    assert_eq!(log.len(), 1 + 11 + 12 + 2, "{log:#?}");
+    assert_eq!(log.len(), 1 + 12 + 16 + 2, "{log:#?}");
 }

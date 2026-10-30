@@ -326,6 +326,45 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 
 ### Dependency approvals
 
+- `askama` 0.16.1, with its build-time crates `askama_macros`, `askama_derive` and `askama_parser` (M1-077, ADR 0003
+  decision 5; D.5 of 07). **Approved by security-reviewer, PR #149 (SEC-149-2).** A direct dependency of `rdy-engine` behind the `html`
+  feature, which is on by default. The check crates may depend on none of them: `deny.toml` bans `askama` with `wrappers = ["rdy-engine"]`, and bans the three build-time crates except through their parent (the kube pattern). Pinned with `=` in the
+  workspace `Cargo.toml`: a template engine decides what is escaped, so every bump is reviewed by hand.
+  - Purpose: compile the HTML report templates (`crates/rdy-engine/templates/`) into Rust at build time, with
+    HTML escaping on for `.html` files. No template is read at run time, and no template engine runs on a
+    customer box (ADR 0003, alternatives considered).
+  - Maintainers (crates.io owners, confirmed in review): `askama` and `askama_derive`: GuillaumeGomez, djc,
+    Kijewski and the team `askama-rs:maintainer`. `askama_parser`: djc, Kijewski and the team.
+    `askama_macros`: GuillaumeGomez alone, a single owner, which is accepted because the crate is
+    build-time only and every version bump is reviewed by hand. 0.16.1 is the latest release (published
+    2026-09-04) and is not yanked. No RustSec advisory names any askama crate or `rustc-hash`.
+  - `unsafe`: yes, and not forbidden. `askama` (the runtime crate) uses `unsafe` in two files: four
+    `transmute` calls in `ascii_str.rs` (lines 35, 42, 92 and 102), read and sound (`AsciiStr` and
+    `AsciiChar` are `repr(transparent)`, `AsciiChar::new` panics on a non-ASCII value, the field is private
+    and there is no `DerefMut`), and one `from_utf8_unchecked` in the `json` filter, which is behind the
+    `serde_json` feature and is off. The
+    derive crates (`askama_derive`, `askama_parser`) use `unsafe` in the code generator and the parser, and
+    they run only inside the compiler as proc macros, never in the binary. Our crates keep
+    `#![forbid(unsafe_code)]`.
+  - `build.rs`: none in any of the four crates. The derive runs as a proc macro, reads the template files
+    and writes nothing outside `OUT_DIR`.
+  - License: MIT OR Apache-2.0 for all four. Allowed in `deny.toml`.
+  - Features: `default-features = false` with `derive` and `std`. Off: `config` (no `askama.toml` is read),
+    `urlencode` and `serde_json` (no `json` filter, so no filter that can print unescaped JSON). New
+    packages in the lock file: the four askama crates and `rustc-hash`. `winnow`, `itoa`, `unicode-ident`,
+    `memchr`, `proc-macro2` and `quote` were already there.
+  - What the renderer must keep true: no template uses the `safe` filter (a CI grep, M1-078; the one value
+    that may be printed unescaped is `HtmlSafeJson`, and M1-077 does not print it); askama escapes `<`, `>`,
+    `&`, `"` and `'` as numeric references; the Content-Security-Policy `<meta>` is the second line of
+    defence (ADR 0003 decision 3).
+- `vnu-jar` 26.10.12 (M1-077, SEC-149-8). The Nu HTML Checker, an npm package that holds a Java jar. **CI only,
+  never shipped:** it runs in the `html-validator` job through `scripts/validate-html.sh` and is not a Cargo
+  dependency, so no `deny.toml` or lock file entry exists. The script pins the tarball sha256 and checks it
+  before the jar runs. The pin was checked against the registry digest and the SLSA v1 provenance (signed with
+  Sigstore; identity `https://github.com/validator/validator/.github/workflows/build.yml@refs/heads/main`,
+  workflow commit 973e40b16d1c653cf52523b126ef92aec8bf9e0e, Rekor log index 3228121956). The script header
+  lists the `cosign verify-blob-attestation` command that every bump must run. The job has a read-only token,
+  no cargo and no cache, so the jar sits beside nothing a PR could poison.
 - `rustls` 0.23.46, `webpki-roots` 1.0.11 and `rustls-native-certs` 0.8.5 (M1-092, ADR 0009, ADR 0035).
   Direct dependencies of `rdy-engine` for the probe facade's TLS. Recorded from security-reviewer's review
   of PR #133 (SEC-133-3). The check crates may depend on none of them (the `NEVER` list of the dependency
@@ -391,7 +430,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 | T3 | Markup in the HTML report | Proxy cert subject or node name carries `<script>` | M | M | `[M1]` askama autoescape, no `safe`, CSP `default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'` (ADR 0003), embedded JSON escaped as `\u003c`, `\u003e`, `\u0026`. | fold: embed JSON (M1-078) |
 | T4 | Terminal escape injection | Banner with ANSI sequences | M | L | `[M1]` Escape control characters in untrusted strings. | fold: error types (M1-021) |
 | R1 | "What did it do on my box?" | No record after the run | M | M | `[M1]` Action log in the result. `[M2+]` `rdy run --dry-run`. | SEC-17 (M1-040), SEC-40 (M2-040) |
-| I1 | Secrets in the report | `HTTPS_PROXY=http://svc:pa55@proxy:3128` echoed as evidence; an HTTP error carrying a URL; a key cut by an output cap | H | H | `[M1]` Every string field passes the redactor before any cap or write, with span union, the truncated-edge rule and the run-scoped known-secret set (INV-15). | SEC-25 (M1-048), SEC-26 (M1-063), M1-060, M1-061, M1-062 |
+| I1 | Secrets in the report | `HTTPS_PROXY=http://svc:pa55@proxy:3128` echoed as evidence; an HTTP error carrying a URL; a key cut by an output cap | H | H | `[M1]` Every string field passes the redactor before any cap or write, with span union, the truncated-edge rule and the run-scoped known-secret set (INV-15). Residual: 0.1.0 does not redact the Kubernetes env-list form (`- name: DB_PASSWORD` then `value: x`, and its JSON form), `MYSQL_PWD=` or `pwd=`. M2-113 adds them (SEC-13-1). | SEC-25 (M1-048), SEC-26 (M1-063), M1-060, M1-061, M1-062, M2-113 |
 | I2 | Secrets in logs | `RUST_LOG=trace` makes a dependency print a header | M | H | `[M1]` A redacting log layer always, installed first in `main`. Default caps on hyper, h2, rustls, tower and kube apply only when `RUST_LOG` is unset. | M1-056 |
 | I3 | Report readable by others | Report in `/tmp`, or in a shared Windows folder such as the System32 start folder of an elevated prompt, which passes on its ACL | M | M | `[M1]` Unix 0700 and 0600 with `fchmod`. Windows: default `%USERPROFILE%\rdy-reports` (ADR 0016); `.` only when given explicitly. ACL inheritance on Windows and inheritable ACEs on macOS are a residual named in the report until SEC-58. | SEC-19 (M1-036), M1-037, SEC-58 (M2-085) |
 | I4 | Kubernetes secret material | LIST `secrets`; a full pod LIST returns literal env values | L | H | `[M1]` Guard forbids `secrets`. Pod, event and deployment responses deserialize into minimal structs, so env values are never held. | fold: kube guard (M1-103, M1-104) |
