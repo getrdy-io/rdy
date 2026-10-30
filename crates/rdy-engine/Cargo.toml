@@ -59,6 +59,8 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"
 tempfile = { workspace = true }
 proptest = { workspace = true, features = ["std"] }
 trybuild = { workspace = true }
+# The fixture lint (tests/fixture_lint.rs) reads allow.toml and the `crlf` list of fixture.toml.
+toml = { workspace = true, features = ["parse", "std"] }
 
 [lints]
 workspace = true
