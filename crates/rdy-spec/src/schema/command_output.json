@@ -9,12 +9,15 @@
     ],
     "properties": {
       "api_version": {
+        "description": "Always `rdy/v1`.",
         "const": "rdy/v1"
       },
       "kind": {
+        "description": "Always `Error`.",
         "const": "Error"
       },
       "error": {
+        "description": "What went wrong, and what to do next.",
         "type": "object",
         "required": [
           "code",
@@ -27,14 +30,17 @@
             "$ref": "#/$defs/OpenCode"
           },
           "message": {
+            "description": "What went wrong, in words.",
             "type": "string",
             "maxLength": 4096
           },
           "fix": {
+            "description": "What to do next.",
             "type": "string",
             "maxLength": 4096
           },
           "file": {
+            "description": "The file the error is about, or null.",
             "type": [
               "string",
               "null"
@@ -42,6 +48,7 @@
             "maxLength": 4096
           },
           "line": {
+            "description": "The line in that file, from 1, or null.",
             "type": [
               "integer",
               "null"
@@ -49,6 +56,7 @@
             "minimum": 1
           },
           "column": {
+            "description": "The column in that line, from 1, or null.",
             "type": [
               "integer",
               "null"
@@ -58,9 +66,11 @@
         }
       },
       "verdict": {
+        "description": "Always null. No verdict was reached.",
         "type": "null"
       },
       "complete": {
+        "description": "Always false. No complete report was written.",
         "const": false
       }
     }
@@ -77,9 +87,11 @@
     ],
     "properties": {
       "api_version": {
+        "description": "Always `rdy/v1`.",
         "const": "rdy/v1"
       },
       "kind": {
+        "description": "Always `Verification`.",
         "const": "Verification"
       },
       "producer": {
