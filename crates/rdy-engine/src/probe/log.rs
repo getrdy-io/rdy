@@ -110,9 +110,10 @@ struct Shared {
     state: Mutex<State>,
 }
 
-/// How retention ranks an entry. The lower the number, the sooner it goes.
+/// How retention ranks an entry. The lower the number, the sooner it goes. The JSON writer sheds
+/// entries in the same order when the document is too big (`report::json`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tier {
+pub(crate) enum Tier {
     /// `ok` `read`, `read_dir` and `stat`, and the `coalesced` entry that stands for more of them.
     Ok = 0,
     /// `failed` `read`, `read_dir`, `stat` and `coalesced`.
@@ -460,7 +461,7 @@ fn is_secret_flag(redactor: &Redactor, flag: &str) -> bool {
 }
 
 /// How retention ranks an entry.
-fn tier(action: &Action) -> Tier {
+pub(crate) fn tier(action: &Action) -> Tier {
     let files = matches!(
         action.kind,
         ActionKind::Read | ActionKind::ReadDir | ActionKind::Stat | ActionKind::Coalesced
@@ -615,7 +616,15 @@ fn record(state: &mut State, action: Action, limits: Limits) {
 /// Counts a dropped entry. A `coalesced` entry stands for `count` calls of the kind in `of`, so it adds
 /// that many to that kind, not one to `coalesced`.
 fn count_drop(state: &mut State, action: &Action) {
-    let (kind, calls) = if action.kind == ActionKind::Coalesced {
+    let (kind, calls) = dropped_calls(action);
+    *state.dropped.entry(kind).or_insert(0) += calls;
+    state.truncated = true;
+}
+
+/// The kind and the number of calls that dropping `action` loses. A `coalesced` entry stands for
+/// `count` calls of the kind in `of`; any other entry is one call of its own kind.
+pub(crate) fn dropped_calls(action: &Action) -> (String, u64) {
+    if action.kind == ActionKind::Coalesced {
         let of = action.fields.get("of").and_then(Value::as_str);
         let count = action.fields.get("count").and_then(Value::as_u64);
         (
@@ -624,9 +633,7 @@ fn count_drop(state: &mut State, action: &Action) {
         )
     } else {
         (action.kind.as_str().to_owned(), 1)
-    };
-    *state.dropped.entry(kind).or_insert(0) += calls;
-    state.truncated = true;
+    }
 }
 
 /// Records a drop that the order of tiers did not allow for, and warns.
