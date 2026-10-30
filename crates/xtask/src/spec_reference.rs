@@ -729,7 +729,7 @@ mod tests {
         // Five top-level properties, six in metadata, four in bundle, six in each checks entry and
         // two in each redact_patterns entry. The parameters of the 31 check ids come on top, as their
         // own tables under each checks entry.
-        assert_eq!(expected, 172);
+        assert_eq!(expected, 173);
         assert!(page.contains("\n## checks entries\n\n"), "{page}");
         // `bundle` is a section, so its own sections sit one level below it.
         assert!(page.contains("\n### redact_patterns entries\n\n"), "{page}");
