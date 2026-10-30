@@ -240,9 +240,12 @@ async fn the_os_trust_roots_are_read_within_the_caps_and_the_log_holds_no_certif
         .native(NativeCall::SystemRoots)
         .await
         .expect("the store reads, or is empty");
-    let NativeValue::SystemRoots(certs) = value else {
+    let NativeValue::SystemRoots(found) = value else {
         panic!("the wrong kind of answer");
     };
+    // A store that gave certificates names where they came from.
+    assert!(found.certs.is_empty() || !found.sources.is_empty());
+    let certs = found.certs;
     // A machine with no `ca-certificates` has an empty store, which is an answer.
     assert!(certs.len() <= crate::probe::MAX_SYSTEM_ROOTS);
     assert!(
