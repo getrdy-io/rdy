@@ -159,8 +159,10 @@ impl ProxyUrl {
     /// secret, as in `http://TOKEN@proxy`: the user name and the base64 of `user:`, but only when the
     /// user name is at least [`KNOWN_SECRET_MIN_LEN`] bytes. A shorter user name is not a token, so
     /// nothing is registered and nothing is refused. A caller adds all of them to the known-secret set.
-    /// Empty when the URL has no user.
-    pub(crate) fn secrets(&self) -> Vec<String> {
+    /// Empty when the URL has no user. A check that sends its own proxy header (the kube client) uses
+    /// this, so every proxy password is hidden by the same rule. Never print the result.
+    #[must_use]
+    pub fn secrets(&self) -> Vec<String> {
         let Some(Credentials {
             user,
             password,

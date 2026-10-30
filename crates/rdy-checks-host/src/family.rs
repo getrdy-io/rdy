@@ -11,6 +11,7 @@ use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::cpu::{self, CpuCheck};
 use crate::disk::{self, Disk};
 use crate::firewall::{self, Firewall};
 use crate::lsm::{self, Lsm};
@@ -91,16 +92,6 @@ static TIME_SYNC: CheckInfo = info(
     5,
     &[],
 );
-static CPU: CheckInfo = info(
-    "host.cpu",
-    "Cores, arch, CPU flags, virtualization",
-    CheckMeta {
-        title: "CPU",
-        remediation: "Resize the instance to get more vCPUs or the right architecture. If a CPU flag is missing on a VM, set the VM CPU model to host passthrough or turn off CPU feature masking on the hypervisor.",
-    },
-    2,
-    &[],
-);
 static SYSCTL: CheckInfo = info(
     "host.sysctl",
     "Kernel parameters and limits",
@@ -152,7 +143,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &security_agents::INFO,
     &firewall::INFO,
     &TIME_SYNC,
-    &CPU,
+    &cpu::INFO,
     &SYSCTL,
     &CONTAINER_RUNTIME,
     &CGROUPS,
@@ -164,9 +155,9 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]), `host.memory` ([`Memory`]),
-/// `host.os` ([`OsCheck`]) and `host.security_agents` ([`SecurityAgents`]) are real. The others are
-/// stubs for now ([`HostFamily::stub_ids`]).
+/// `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
+/// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]) and `host.security_agents` ([`SecurityAgents`]) are
+/// real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -187,10 +178,9 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 7] = [
+static STUBS: [&str; 6] = [
     "host.ports",
     "host.time_sync",
-    "host.cpu",
     "host.sysctl",
     "host.container_runtime",
     "host.cgroups",
@@ -217,6 +207,9 @@ impl Family for HostFamily {
                 .flatten()
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
+        if let CheckParams::HostCpu(cpu) = &params {
+            return Ok(Built::new(Box::new(CpuCheck::from_params(cpu))));
         }
         if let CheckParams::HostLsm(lsm) = &params {
             return Ok(Built::new(Box::new(Lsm::new(lsm))));

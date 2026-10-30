@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIVersions",
+    "versions": [
+      "v1"
+    ],
+    "serverAddressByClientCIDRs": [
+      {
+        "clientCIDR": "0.0.0.0/0",
+        "serverAddress": "192.0.2.10:6443"
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/apis/authentication.k8s.io/v1/selfsubjectreviews"
+  },
+  "status": 201,
+  "body": {
+    "apiVersion": "authentication.k8s.io/v1",
+    "kind": "SelfSubjectReview",
+    "metadata": {
+      "creationTimestamp": null
+    },
+    "status": {
+      "userInfo": {
+        "username": "jane\u001b[2J@acme.example",
+        "uid": "00000000-0000-4000-8000-0000000000a1",
+        "groups": [
+          "grp\u202eevil",
+          "system:authenticated"
+        ]
+      }
+    }
+  }
+}

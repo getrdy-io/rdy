@@ -125,7 +125,7 @@ built check or a skip kind with no I/O. The first row that fits wins, in this or
 | Run interrupted (M2 graceful Ctrl-C) | `cancelled` |
 
 There are no inter-check dependencies. Every k8s check except `k8s.access` needs `kube_context`;
-`k8s.access` has no hard need and reports the probe outcome as a block with its fix.
+`k8s.access` has no `KubeContext` need and reports the probe outcome as a block with its fix. It declares the `Network` need only, because it is skipped as `missing_need` `network` when the run forbids the network.
 
 ## Privilege and needs
 
@@ -309,7 +309,7 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
 - The facade writes every entry; checks cannot skip it. Run-level work (snapshot, machine id, hostname,
   os-release, command stats, kubeconfig read) is logged with `check: null`.
 - `exec` entries record the resolved absolute path and `argv` as a JSON array of strings, redacted.
-- Kube entries open in the guard's `call` through `Probe::kube_call(method, path)` (M1-103) and are
+- Kube entries open in the guard's `call` through `Probe::kube_call(method, path, via_proxy)` (M1-103) and are
   closed by the response future: `answered(status)`, `refused(rule)` or `failed(phrase)`. The path has no
   query string and the entry holds no body. A dropped request is closed as `timeout`. Each check gets
   its own client from its own probe (`Connected::read_only(probe)`), which shares the connection but has
@@ -1003,7 +1003,7 @@ impl Probe {
     pub async fn tls_chain(&self, target: &Target, route: Route) -> Result<TlsChain, ProbeError>;
     pub async fn http(&self, req: HttpProbe) -> Result<HttpOutcome, ProbeError>;
     pub async fn native(&self, call: NativeCall) -> Result<NativeValue, ProbeError>;
-    pub fn kube_call(&self, method: &str, path: &str) -> Result<KubeCall, ProbeError>;  // M1-103; the guard's door to the log
+    pub fn kube_call(&self, method: &str, path: &str, via_proxy: Option<&str>) -> Result<KubeCall, ProbeError>;  // M1-103; the guard's door to the log
 }
 // One Cmd type: rdy_engine::exec::policy::Cmd { program: &'static str, args, extra_dirs, env names, timeout, stdout_cap }.
 // Build it with CommandEntry::cmd (the command table, ADR 0028). Probe::exec applies the check's

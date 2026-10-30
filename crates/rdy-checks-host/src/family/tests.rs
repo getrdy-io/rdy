@@ -209,7 +209,6 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
         [
             "host.ports",
             "host.time_sync",
-            "host.cpu",
             "host.sysctl",
             "host.container_runtime",
             "host.cgroups",
@@ -305,6 +304,40 @@ fn host_os_builds_the_real_check_from_a_spec_entry() {
     assert_eq!(built.check.info().id, "host.os");
     assert_eq!(built.check.info().summary, "Distro, version, arch, FIPS");
     assert!(!HostFamily::stub_ids().contains(&"host.os"));
+}
+
+#[test]
+fn host_cpu_builds_the_real_check_and_it_gives_a_finding() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec =
+        serde_json::from_value(json!({"id": "host.cpu", "min": 8})).expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.cpu");
+    assert!(!HostFamily::stub_ids().contains(&"host.cpu"));
+
+    // A stub reports the same id, so run it: only the real check ends in a finding.
+    let fixture = rdy_engine::testing::Fixture::load(
+        &rdy_engine::testing::fixtures_dir(),
+        "checks/host.cpu/pass",
+    )
+    .expect("the fixture loads");
+    let run = rdy_engine::testing::TestRun::for_fixture(&fixture);
+    let ctx = run.context_for(
+        built.check.info(),
+        "host.cpu",
+        Os::Linux,
+        Vec::<rdy_engine::check::Need>::new(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    let outcome = runtime.block_on(built.check.run(&ctx));
+    let finding = outcome.expect("the real check ends in a finding, not an error");
+    assert_eq!(finding.level, rdy_engine::check::Level::Pass);
+    assert_eq!(finding.message, "8 vCPUs found, 8 needed");
 }
 
 #[test]

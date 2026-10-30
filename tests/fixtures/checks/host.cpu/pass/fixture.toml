@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cpu-pass"
+summary = "RHEL 9 KVM guest with 8 vCPUs on 4 cores, AVX-512, cgroup v2 with no CPU limit"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cpu"]
+
+[caps]
+root = false
+network = false
+kube = false
