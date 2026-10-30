@@ -427,3 +427,143 @@ fn docs_exits_70_and_names_the_path_of_a_property_without_a_description() -> Res
     );
     Ok(())
 }
+
+// ---- goldens check ----------------------------------------------------------------------------
+
+const GOLDEN_JSON: &str = "tests/fixtures/envs/all-pass/golden/report.json";
+const GOLDEN_TEXT: &str = "tests/fixtures/envs/all-pass/golden/terminal.txt";
+const GOLDEN_EXPECT: &str = "tests/fixtures/checks/host.memory/pass/expect.json";
+const GOLDEN_REDACTED: &str = "tests/fixtures/redaction/url/proxy.expected";
+
+/// Writes a record the way `assert_golden` does: one repo-relative path per line in `<pid>.txt`.
+fn record(repo: &Repo, pid: u32, lines: &[&str]) -> Result<()> {
+    repo.write(
+        &format!("used/{pid}.txt"),
+        lines.iter().map(|l| format!("{l}\n")).collect::<String>(),
+    )?;
+    Ok(())
+}
+
+fn goldens_check(repo: &Repo) -> Result<Output> {
+    let used = repo.path().join("used");
+    xtask(
+        repo.path(),
+        &["goldens", "check", "--used-dir", &used.to_string_lossy()],
+    )
+}
+
+#[test]
+fn goldens_check_fails_on_an_orphan_and_names_it() -> Result<()> {
+    let repo = Repo::new()?;
+    repo.write(GOLDEN_JSON, "{}\n")?;
+    repo.write(GOLDEN_TEXT, "ready\n")?;
+    record(&repo, 100, &[GOLDEN_JSON])?;
+    let out = goldens_check(&repo)?;
+    assert_eq!(code(&out), Some(1), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains(&format!("goldens: orphan {GOLDEN_TEXT}")),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!stderr(&out).contains(&format!("orphan {GOLDEN_JSON}")));
+    Ok(())
+}
+
+#[test]
+fn goldens_check_passes_when_every_golden_is_used_across_records() -> Result<()> {
+    let repo = Repo::new()?;
+    for path in [GOLDEN_JSON, GOLDEN_TEXT, GOLDEN_EXPECT, GOLDEN_REDACTED] {
+        repo.write(path, "x\n")?;
+    }
+    record(&repo, 1, &[GOLDEN_JSON, GOLDEN_TEXT])?;
+    // The tests of one package run in several processes, so the used paths are split across files.
+    record(
+        &repo,
+        2,
+        &[GOLDEN_EXPECT, "/tmp/.tmpAbC/golden/a.json", GOLDEN_JSON],
+    )?;
+    record(&repo, 3, &[GOLDEN_REDACTED])?;
+    let out = goldens_check(&repo)?;
+    assert_eq!(code(&out), Some(0), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("4 golden file(s) on disk, none orphaned"),
+        "{}",
+        stderr(&out)
+    );
+    Ok(())
+}
+
+#[test]
+fn goldens_check_asks_for_a_test_run_when_nothing_was_recorded() -> Result<()> {
+    let repo = Repo::new()?;
+    repo.write(GOLDEN_JSON, "{}\n")?;
+    let out = goldens_check(&repo)?;
+    assert_eq!(code(&out), Some(1), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("Run the tests first"),
+        "{}",
+        stderr(&out)
+    );
+    Ok(())
+}
+
+#[test]
+fn goldens_check_passes_with_no_goldens_and_no_records() -> Result<()> {
+    let repo = Repo::new()?;
+    let out = goldens_check(&repo)?;
+    assert_eq!(code(&out), Some(0), "{}", stderr(&out));
+    Ok(())
+}
+
+#[test]
+fn goldens_check_ignores_inputs_sidecars_and_released_results() -> Result<()> {
+    let repo = Repo::new()?;
+    for path in [
+        "tests/fixtures/envs/all-pass/golden/report.json.actual",
+        "tests/fixtures/envs/all-pass/spec.yaml",
+        "tests/fixtures/checks/host.memory/pass/root/proc/meminfo",
+        "tests/fixtures/redaction/url/proxy.in",
+        "tests/fixtures/results/0.1.0-alpha.1/ready.json",
+        "crates/x/golden/report.json",
+    ] {
+        repo.write(path, "x\n")?;
+    }
+    let out = goldens_check(&repo)?;
+    assert_eq!(code(&out), Some(0), "{}", stderr(&out));
+    Ok(())
+}
+
+#[test]
+fn goldens_check_reads_target_goldens_used_by_default() -> Result<()> {
+    let repo = Repo::new()?;
+    repo.write(GOLDEN_JSON, "{}\n")?;
+    repo.write("target/goldens-used/7.txt", format!("{GOLDEN_JSON}\n"))?;
+    let run = |target: Option<&str>| -> Result<Output> {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_xtask"));
+        cmd.arg("--root")
+            .arg(repo.path())
+            .args(["goldens", "check"])
+            .env_remove("CARGO_TARGET_DIR");
+        if let Some(target) = target {
+            cmd.env("CARGO_TARGET_DIR", target);
+        }
+        Ok(cmd.output()?)
+    };
+    let out = run(None)?;
+    assert_eq!(code(&out), Some(0), "{}", stderr(&out));
+    // A relative CARGO_TARGET_DIR is taken from the repo root, where the record is not.
+    let out = run(Some("elsewhere"))?;
+    assert_eq!(code(&out), Some(1), "{}", stderr(&out));
+    repo.write("elsewhere/goldens-used/7.txt", format!("{GOLDEN_JSON}\n"))?;
+    let out = run(Some("elsewhere"))?;
+    assert_eq!(code(&out), Some(0), "{}", stderr(&out));
+    Ok(())
+}
+
+#[test]
+fn goldens_without_an_action_is_a_usage_error() -> Result<()> {
+    let repo = Repo::new()?;
+    let out = xtask(repo.path(), &["goldens"])?;
+    assert_eq!(code(&out), Some(64), "{}", stderr(&out));
+    Ok(())
+}

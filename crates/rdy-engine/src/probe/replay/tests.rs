@@ -675,6 +675,11 @@ fn a_full_manifest_keeps_every_field() {
 }
 
 #[test]
+fn the_output_of_a_failed_golden_compare_does_not_break_the_load() {
+    load(&[("expect.json", "{}"), ("expect.json.actual", "{}")]).expect("loads");
+}
+
+#[test]
 fn the_tree_and_the_json_files_are_checked() {
     let cases: [FileCase; 14] = [
         (
