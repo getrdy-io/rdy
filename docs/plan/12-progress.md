@@ -168,13 +168,13 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-077 | todo | | askama HTML report with inline CSS, dark mode and print | backlog corrected 2026-10-29 (correction-13): the golden HTML run details show the credential plugin name (01 section 6, item 6) for a fixture with `identity.kube.exec_plugin` set, moved from M1-041; depends on M1-041 too (PR #83 reviews); backlog corrected 2026-10-30 (correction-26): sections from `group_by_bucket`, five-section golden; depends on M1-053 (PR #136 review)
 
-- M1-078 | todo | | Embed result JSON in the HTML report safely
+- M1-078 | todo | | Embed result JSON in the HTML report safely | backlog corrected 2026-10-30 (correction-31): CI grep for askama escape bypasses (PR #149 review)
 
-- M1-079 | todo | | HTML print override, labels and legend
+- M1-079 | todo | | HTML print override, labels and legend | backlog corrected 2026-10-30 (correction-31): verdict box rule in plain words and "No blocks" note (PR #149 review)
 
-- M1-080 | todo | | HTML fix source label and action log table
+- M1-080 | todo | | HTML fix source label and action log table | backlog corrected 2026-10-30 (correction-31): asserts planted action canaries render redacted (PR #149 review)
 
-- M1-081 | todo | | HTML Found and Needed rendering and the footer link (extends HTML print override)
+- M1-081 | todo | | HTML Found and Needed rendering and the footer link (extends HTML print override) | backlog corrected 2026-10-30 (correction-31): asserts planted `observed` canaries render redacted (PR #149 review)
 
 - M1-082 | todo | | HTML structure test: headings, landmarks, tables and links
 
@@ -238,7 +238,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-112 | [#19](https://github.com/getrdy-io/rdy/pull/19) | 2026-10-28 | The "sign a spec in CI" half of the exit test is proved at the helper level (`RDY_KEY_PASSWORD` and `--password-file -` through `rdy_cli::password`); `spec sign` itself is M1-125, which must call `read_key_password`. `--password` is refused by a raw argv check, not a hidden clap flag, so it wins over missing-argument errors; only `spec sign` and `spec keygen` get the reason. Windows checks the file type and refuses reparse points but not ACLs; its file tests run on the Windows CI leg only (compiled here, not run). `read_key_password` now takes stderr for the env-variable note (tty only); it adds the `rustix` dependency (Unix only) for O_NOFOLLOW and geteuid without unsafe. Follow-up fix PR for macOS test build.
 
-- M1-113 | todo | | k8s.nodes allocatable, node filters, conditions, zones and pod-count limit | backlog corrected 2026-10-30 (correction-24): moves k8s.storageclass's lists onto the paging helper; depends on M1-107 and M1-110 (PR #131 review); backlog corrected 2026-10-30 (correction-26): implements `Cluster::read_only_as` and `Cluster::is_openshift` on the lazy connection; depends on M1-111; 3 h (PR #135 review)
+- M1-113 | todo | | k8s.nodes allocatable, node filters, conditions, zones and pod-count limit | backlog corrected 2026-10-30 (correction-24): moves k8s.storageclass's lists onto the paging helper; depends on M1-107 and M1-110 (PR #131 review); backlog corrected 2026-10-30 (correction-26): implements `Cluster::read_only_as` and `Cluster::is_openshift` on the lazy connection; depends on M1-111; 3 h (PR #135 review); backlog corrected 2026-10-30 (correction-31): live role test checks `nonResourceRules`; depends on M1-108 (PR #147 review)
 
 - M1-114 | todo | | k8s.admission PSA labels, policy engine and SCC discovery
 
@@ -288,13 +288,13 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-137 | todo | | README draft from 10 section 1 | interim README landed ([#155](https://github.com/getrdy-io/rdy/pull/155)); M1-137 replaces transcripts with goldens
 
-- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review); backlog corrected 2026-10-30 (correction-29): depends on M1-174 (PR #146 review)
+- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review); backlog corrected 2026-10-30 (correction-29): depends on M1-174 (PR #146 review); backlog corrected 2026-10-30 (correction-31): depends on M1-141 (PR #149 review)
 
 - M1-139 | todo | | Alpha announcement to design partners | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
 - M1-140 | todo | | HTML next-step sentences and the nothing-verified wording
 
-- M1-141 | todo | | HTML untrusted strings in bdi with bidi controls shown as escapes
+- M1-141 | todo | | HTML untrusted strings in bdi with bidi controls shown as escapes | backlog corrected 2026-10-30 (correction-31): now core, week 17; also the title and Cf and zero-width characters (PR #149 review)
 
 - M1-142 | todo | | Progress line with indicatif, TTY only | backlog corrected 2026-10-30 (correction-27): Windows console width through `console` (PR #140 review)
 
@@ -358,7 +358,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-172 | [#108](https://github.com/getrdy-io/rdy/pull/108) | 2026-10-30 | Fix round 1: `HostFamily` builds the real `Firewall::new(open_inbound)` for host.firewall (PR #98 merged) and keeps stubs for the other twelve host ids. INV-11 counting (`limits::named_endpoints`) now reads `ntp_servers`, `net.registry` `host` and `hosts` and the `net.bandwidth` `url`, typed and raw, pairs included; `needs_egress` is left out (never connected to). The limits paragraph of 01 is updated; the M1-026 backlog wording goes to the coordinator's correction. Parameter changes, all additive in revision 1: `container_runtime` `min_version` needs exactly one `runtime`; memory, storage, ephemeral and huge pages quotas take strict sizes (`64G` and `500m` refused); `max_skew` is the block level and `recommended_skew` the warn level; `btf: false` alone is `no_threshold`; sysctl names are canonical (dots and slashes) and a duplicate is refused; `ValueRule` refuses `!=`, `≥`, `≤` and similar; two registries with one host are refused; `TlsHost` and `NtpServer` share one reader (IPv6, `port()` is `Option`, `port_or_default()`, equality ignores whether the default port was written). `ValueRule` rustdoc says M1-149 must treat tabs and spaces as equal. 03 changes still to log in the next correction: `k8s.ingress` flat keys, and `max_skew` / `recommended_skew` wording. No other M1-late check is built yet. Not done: `k8s.ingress` has no Gateway API kinds key (03 names none; additive later).; backlog corrected 2026-10-30 (correction-20): the INV-11 count of the new host fields is in its exit test (PR #105 reviews)
 
-- M1-173 | todo | | Agent catalog staleness gate and lint-wall include gaps | added 2026-10-30 (correction-22, PR #119 reviews)
+- M1-173 | todo | | Agent catalog staleness gate and lint-wall include gaps | added 2026-10-30 (correction-22, PR #119 reviews); backlog corrected 2026-10-30 (correction-31): CI builds rdy-engine's bare no-default-features library (PR #149 review)
 
 - M1-174 | todo | | Expected results for the host check fixture cases | added 2026-10-30 (correction-29, PR #145 review)
 
