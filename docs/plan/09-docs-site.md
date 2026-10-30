@@ -128,12 +128,14 @@ The version picker is part of the header, not a page. The site has no pricing, r
 
 **Output.** `reference/spec/index.md` (rdy/v1 spec) and `reference/result/index.md` (JSON result) in M1, plus `checks/<family>.md`. When rdy/v2 ships, its reference goes to `reference/spec/v2/`. The v1 pages stay.
 
+**Hand-written intros (M1-085).** The prose above each reference table is in `docs/intro/` (`reference-spec.md`, `reference-result.md`). That folder sits outside `docs/src/content/docs/`, so it is not published. The renderer puts the intro after the banner. An object that more than one field names gets one section. A later row that names it links to that section, so each field appears once. The result page also has a section for each other JSON object that rdy prints: `Verification`, `ErrorOutput`, `LintReport` and `Version`.
+
 **Renderer rules.**
 
 - Each property gets a row: name, type, required, default, description, example. Descriptions come from doc comments through schemars, so the rule "every public item documented" carries over.
 - A property with no description fails `cargo xtask docs`, and the error names the property path.
 - `oneOf` or `allOf` if/then variants render one subsection per variant. Check parameters use `allOf` with if/then, so each check kind shows its own fields.
-- Examples are stored as JSON in the schema. The renderer validates each example against its schema, then shows it as YAML.
+- Examples are stored as JSON in the schema. The test suite validates each check example against the schema node it sits under, and decodes it with the rdy-spec parser. The render shows each example as YAML, checks that the YAML reads back as the same value, and checks that a variant example carries the value that selects its variant (ADR 0034).
 - Output is deterministic. It depends only on committed files: no timestamps, no git history, schema key order, LF line endings. Checkouts stay shallow.
 
 **CI check.** The `docs-gen` job runs `cargo xtask schema --check` and `cargo xtask docs --check`. A stale file fails the job, and the message names the file and the command to run.

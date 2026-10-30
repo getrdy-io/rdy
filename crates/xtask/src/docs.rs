@@ -3,8 +3,12 @@
 //! Only `docs/src/content/docs/` is published by Starlight. Generated pages live there too
 //! (docs/plan/09-docs-site.md, sections 2 and 5).
 //!
-//! This build generates the spec reference page. It is rendered from the committed readiness schema
-//! that `cargo xtask schema` writes, so `docs` reads that file and never the Rust types directly.
+//! This build generates the spec and result reference pages. Each is rendered from a committed JSON
+//! schema that `cargo xtask schema` writes, so `docs` reads those files and never the Rust types.
+//!
+//! The intro above the tables is hand-written, in `docs/intro/`. That folder is outside the published
+//! tree. The generator adds the frontmatter, the banner and the tables, and their text comes from the
+//! schema's descriptions.
 
 use std::fs;
 use std::path::Path;
@@ -12,25 +16,67 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::generate::{self, Generated};
-use crate::schema::SPEC_PATH;
-use crate::spec_reference;
+use crate::schema::{RESULT_PATH, SPEC_PATH};
+use crate::spec_reference::{self, Page};
 
 /// Where the spec reference page is written.
 const SPEC_PAGE: &str = "docs/src/content/docs/reference/spec/index.md";
+/// Where the result reference page is written.
+const RESULT_PAGE: &str = "docs/src/content/docs/reference/result/index.md";
+/// The hand-written intro of the spec reference page.
+const SPEC_INTRO: &str = "docs/intro/reference-spec.md";
+/// The hand-written intro of the result reference page.
+const RESULT_INTRO: &str = "docs/intro/reference-result.md";
 
-/// The pages this build generates. Reads the committed readiness schema under `root`.
+/// The objects in the result schema that are documents of their own, not the report. Each gets a section
+/// after the report, in this order: its definition name and its heading.
+pub(crate) const RESULT_DOCUMENTS: &[(&str, &str)] = &[
+    ("Verification", "rdy verify --json"),
+    ("ErrorOutput", "Error output with --json"),
+    ("LintReport", "rdy spec lint --json"),
+    ("Version", "rdy version --json"),
+];
+
+/// The pages this build generates. Reads the committed schemas and intros under `root`.
 pub fn pages(root: &Path) -> Result<Vec<Generated>> {
-    let schema_path = generate::safe_join(root, SPEC_PATH)?;
-    let schema = fs::read_to_string(&schema_path).with_context(|| {
-        format!(
-            "cannot read {}. Run `cargo xtask schema` first, then `cargo xtask docs`.",
-            schema_path.display()
-        )
-    })?;
-    Ok(vec![Generated {
-        path: SPEC_PAGE,
-        contents: spec_reference::page(&schema)?,
-    }])
+    let schema_hint = "Run `cargo xtask schema` first, then `cargo xtask docs`.";
+    let intro_hint = "The hand-written intro of this page lives here. Restore the file, then run `cargo xtask docs`.";
+    let spec = read(root, SPEC_PATH, schema_hint)?;
+    let result = read(root, RESULT_PATH, schema_hint)?;
+    let spec_intro = read(root, SPEC_INTRO, intro_hint)?;
+    let result_intro = read(root, RESULT_INTRO, intro_hint)?;
+    Ok(vec![
+        Generated {
+            path: SPEC_PAGE,
+            contents: spec_reference::page(
+                &spec,
+                &Page {
+                    title: "Spec reference",
+                    description: "Look up each rdy/v1 spec field, its type, whether it is required and its default.",
+                    intro: &spec_intro,
+                    documents: &[],
+                },
+            )?,
+        },
+        Generated {
+            path: RESULT_PAGE,
+            contents: spec_reference::page(
+                &result,
+                &Page {
+                    title: "Result reference",
+                    description: "Look up each field of the JSON that rdy prints, its type and what it means.",
+                    intro: &result_intro,
+                    documents: RESULT_DOCUMENTS,
+                },
+            )?,
+        },
+    ])
+}
+
+/// Reads a committed file under `root`. A missing file fails with `hint`, which says how to get it back.
+fn read(root: &Path, rel: &str, hint: &str) -> Result<String> {
+    let path = generate::safe_join(root, rel)?;
+    fs::read_to_string(&path).with_context(|| format!("cannot read {}. {hint}", path.display()))
 }
 
 /// Writes the pages, or checks them when `check` is set. Returns `Ok(true)` when the run passes.
