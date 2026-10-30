@@ -68,6 +68,15 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked -p rdy-engine --no-default-features --no-deps
+      # rdy-cloud builds rdy-engine with `default-features = false, features = ["html"]` (02, M1-077). Lint and
+      # document that build. `--all-targets` turns on the dev-dependency features, like the steps above, so
+      # the library alone is not linted without them (a gap carried in backlog correction-31).
+      - name: cargo clippy rdy-engine html feature without the runtime
+        run: cargo clippy --locked -p rdy-engine --no-default-features --features html --all-targets -- -D warnings
+      - name: cargo doc rdy-engine html feature without the runtime
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked -p rdy-engine --no-default-features --features html --no-deps
       # The loopback servers (ADR 0035) are public items behind a feature. Document them with warnings
       # as errors, on the build without the runtime, which is the narrowest one that has them.
       - name: cargo doc rdy-engine loopback feature
@@ -478,6 +487,25 @@ jobs:
       - name: release.yml matches dist and the hardening script
         run: sh scripts/gen-release-workflow.sh --check
 
+  # The M1-077 exit test says the page passes an HTML validator. The Nu HTML Checker (pinned, sha256
+  # checked in the script) runs over the HTML goldens with --Werror. It is third-party code, so it has its
+  # own job: checkout and the runner's Java only, no cargo, no rust-cache, a read-only token. `well_formed`
+  # in rdy-engine's html_report test is the smoke test on all five legs of `test`.
+  html-validator:
+    name: html-validator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The HTML goldens pass the Nu HTML Checker
+        run: |
+          java -version
+          scripts/validate-html.sh
+
   # M1-010: the real cosign verify-blob forms from 06 against real keyless signatures: cosign's own
   # v3.1.4 release (identity and issuer) and goreleaser v2.19.0 (a GitHub Actions run: identity, issuer,
   # repository, ref and trigger), each also after a change that must fail. It needs the network (GitHub
@@ -501,7 +529,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint, zizmor, deny, dco, install-sh, test, root, release-workflow, cosign-roundtrip]
+    needs: [lint, zizmor, deny, dco, install-sh, test, html-validator, root, release-workflow, cosign-roundtrip]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
