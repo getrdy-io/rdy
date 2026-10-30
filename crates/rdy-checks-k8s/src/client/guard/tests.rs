@@ -141,7 +141,7 @@ impl Rig {
         let mock = Mock::default();
         let probe = run.context("k8s.rbac", Os::Linux, []).probe().clone();
         let user = ImpersonateAs::new(user).expect("a valid user");
-        let client = kube::Client::new(guarded_service_as(mock.clone(), &probe, user), "");
+        let client = kube::Client::new(guarded_service_as(mock.clone(), &probe, user, None), "");
         Self {
             mock,
             run,

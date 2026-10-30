@@ -66,6 +66,10 @@ cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 1
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
 `apis-unreadable-vanilla`), all `generated` by `scripts/gen-k8s-version-fixtures.py` (`--check` fails on drift).
+`checks/k8s.access/` holds twelve cases (`good`, `anonymous`, `unauthorized`, `forbidden-review`, `old-server`
+(1.27), `route-missing` (1.29 with the review route answering 404), `discovery-denied`, `review-error`,
+`review-silent`, `many-groups`, `hostile-names` (it also lists twenty `/api` versions, one with escape bytes), and
+`none`, which has no `api/` and `kube = false` because the attempt never reached a cluster).
 `checks/k8s.storageclass/` holds 30 clusters, all `generated` by `scripts/gen-k8s-storageclass-fixtures.py`
 (`--check` fails on drift and on a file the script did not write). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.

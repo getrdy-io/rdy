@@ -23,7 +23,7 @@ pub trait Cluster: Send + Sync + 'static {
     fn read_only(&self, probe: &Probe) -> ReadOnlyClient;
 
     /// Sorts an error of a request of this cluster, with what the connection knows: the server, the
-    /// credential plugin, a proxy variable and a CA setting, so the fix hint can name them (02, "Errors").
+    /// credential plugin, whether a proxy is in the path and the CA setting, so the fix hint can name them (02, "Errors").
     ///
     /// The default knows none of that. A test double may keep it.
     fn map_error(&self, error: &kube::Error) -> KubeError {

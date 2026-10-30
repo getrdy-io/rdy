@@ -1,0 +1,444 @@
+//! Which proxy the kube client uses, and why (03 `k8s.access`, ADR 0037).
+//!
+//! kube takes a proxy only from the cluster's `proxy-url` and never reads `HTTPS_PROXY` on its own that
+//! rdy would want (the load reads it and fails on a malformed value, so the client module keeps it away
+//! from kube, ADR 0031 decision 6). `kubectl` honours both, so `kubectl` can work while `rdy` times out.
+//! This module makes rdy choose the way `kubectl` does and says which rule applied:
+//!
+//! 1. The cluster entry's `proxy-url`. It applies to the cluster whatever `NO_PROXY` says. It is refused
+//!    for an API server that is not `https`: the tunnel would go to port 443 and the token would cross the
+//!    proxy in clear text.
+//! 2. `HTTPS_PROXY`, else `https_proxy`, for an `https` API server, unless `NO_PROXY` (else `no_proxy`)
+//!    covers the API host. Loopback hosts and `localhost` never use a proxy. An `http://` API server
+//!    ignores `HTTP_PROXY` and `HTTPS_PROXY` alike (Go would read `HTTP_PROXY` for it; rdy does not
+//!    support that case).
+//! 3. No proxy.
+//!
+//! Both values are trimmed once, and a value without a scheme is read as `http://`. The scheme is read in
+//! any case (`HTTP://` is `http://`), as Go does. Only an `http://` proxy is used (a `CONNECT` tunnel). `https://`, `socks5://` and any other scheme are
+//! refused with a hint, because kube checks an `https` proxy against the cluster's CA settings and the
+//! SOCKS path is not tested here (ADR 0037 decision 2). The `NO_PROXY` rules are Go's `httpproxy`
+//! rules, the ones `kubectl` follows: a name matches itself and its subdomains, a leading dot matches
+//! subdomains only, `*.example.com` is the same as `.example.com`, `host:port` limits the entry to a
+//! port, an IP and a CIDR match addresses, and `*` matches everything.
+//!
+//! The functions here are pure. They read the [`Env`] values the caller gathered and open nothing.
+
+use std::fmt;
+use std::net::IpAddr;
+use std::str::FromStr;
+
+use http::Uri;
+use rdy_engine::probe::ProxyUrl;
+use rdy_engine::redact::KNOWN_SECRET_MIN_LEN;
+
+use super::Env;
+use super::error::KubeError;
+use super::proxy_display;
+use super::text::escape_capped;
+
+/// The longest `NO_PROXY` entry shown in a report, in characters.
+const SHOWN_ENTRY: usize = 64;
+
+/// Which rule chose the route to the API server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ProxyRule {
+    /// No proxy is configured anywhere that applies.
+    None,
+    /// The cluster entry's `proxy-url` in the kubeconfig.
+    KubeconfigProxyUrl,
+    /// The environment variable of this name.
+    Environment(&'static str),
+    /// A proxy variable is set, but the API host is exempt, so the request goes direct.
+    Bypassed {
+        /// The variable that names the proxy.
+        var: &'static str,
+        /// Why: a fixed phrase, or the `NO_PROXY` entry that matched (escaped and cut).
+        why: String,
+    },
+}
+
+/// The route to the API server: the rule and the proxy it chose.
+///
+/// The proxy is shown as scheme, host and port. User info, path and query never appear, because the
+/// user info is a password.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyUse {
+    rule: ProxyRule,
+    proxy: Option<String>,
+}
+
+impl ProxyUse {
+    /// No proxy.
+    #[must_use]
+    pub fn none() -> Self {
+        Self {
+            rule: ProxyRule::None,
+            proxy: None,
+        }
+    }
+
+    /// The rule that applied.
+    #[must_use]
+    pub fn rule(&self) -> &ProxyRule {
+        &self.rule
+    }
+
+    /// The proxy as `scheme://host:port`, when the request goes through one.
+    #[must_use]
+    pub fn proxy(&self) -> Option<&str> {
+        self.proxy.as_deref()
+    }
+
+    /// True when the request goes through a proxy.
+    #[must_use]
+    pub fn is_proxied(&self) -> bool {
+        self.proxy.is_some()
+    }
+
+    /// One phrase for a report or a fix, or `None` when no proxy is involved at all.
+    ///
+    /// `through the proxy http://proxy.acme.example:3128 (HTTPS_PROXY)` or `directly, although
+    /// HTTPS_PROXY is set (NO_PROXY entry ".acme.example" covers the API host)`.
+    #[must_use]
+    pub fn describe(&self) -> Option<String> {
+        match (&self.rule, &self.proxy) {
+            (ProxyRule::KubeconfigProxyUrl, Some(proxy)) => Some(format!(
+                "through the proxy {proxy} (proxy-url in the kubeconfig)"
+            )),
+            (ProxyRule::Environment(var), Some(proxy)) => {
+                Some(format!("through the proxy {proxy} ({var})"))
+            }
+            (ProxyRule::Bypassed { var, why }, _) => {
+                Some(format!("directly, although {var} is set ({why})"))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// What [`resolve`] decided.
+pub(crate) struct Resolved {
+    /// The proxy to put on the kube config. `None` for a direct request.
+    pub(crate) uri: Option<Uri>,
+    /// The route, for reports.
+    pub(crate) used: ProxyUse,
+    /// Every form of the proxy password (the facade's list) and the whole user info. They join the
+    /// known-secret set.
+    pub(crate) secrets: Vec<String>,
+}
+
+impl fmt::Debug for Resolved {
+    // The `Uri` holds the user info and `secrets` is the password, so neither is printed.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Resolved")
+            .field("used", &self.used)
+            .field("proxied", &self.uri.is_some())
+            .field("secrets", &self.secrets.len())
+            .finish()
+    }
+}
+
+/// Picks the proxy for the API server at `server`.
+///
+/// `kubeconfig_proxy` is the cluster entry's `proxy-url` (empty counts as unset).
+///
+/// # Errors
+///
+/// [`KubeError::ProxyUnsupported`] when the rule that applies names a proxy rdy cannot use: not an `http`
+/// URL, no host, or not a URL at all. [`KubeError::ProxyPlainServer`] when the `proxy-url` of the
+/// kubeconfig meets an API server that is not `https`. A proxy variable that `NO_PROXY` exempts is not
+/// read, so a stale value there never fails a run that does not use it.
+pub(crate) fn resolve(
+    kubeconfig_proxy: Option<&str>,
+    env: &Env,
+    server: &Uri,
+) -> Result<Resolved, KubeError> {
+    if let Some(raw) = kubeconfig_proxy
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+    {
+        const ORIGIN: &str = "the proxy-url in the kubeconfig";
+        let resolved = use_proxy(raw, ORIGIN, ProxyRule::KubeconfigProxyUrl)?;
+        // The tunnel goes to port 443 when the server URL names none, and an `http` server would then get
+        // its token through the proxy in clear text.
+        if server.scheme_str() != Some("https") {
+            return Err(KubeError::ProxyPlainServer {
+                proxy: resolved.used.proxy().unwrap_or_default().to_owned(),
+                origin: ORIGIN,
+            });
+        }
+        return Ok(resolved);
+    }
+    let direct = |used| Resolved {
+        uri: None,
+        used,
+        secrets: Vec::new(),
+    };
+    let (Some(raw), true) = (
+        env.https_proxy
+            .as_deref()
+            .map(str::trim)
+            .filter(|raw| !raw.is_empty()),
+        server.scheme_str() == Some("https"),
+    ) else {
+        return Ok(direct(ProxyUse::none()));
+    };
+    let var = env.https_proxy_name;
+    let host = bare_host(server);
+    let port = server.port_u16().unwrap_or(443);
+    if is_loopback(&host) {
+        return Ok(direct(bypassed(
+            var,
+            "loopback addresses never use a proxy",
+        )));
+    }
+    if let Some(list) = env.no_proxy.as_deref()
+        && let Some(entry) = no_proxy_entry(list, &host, port)
+    {
+        let why = if entry == "*" {
+            "NO_PROXY is *".to_owned()
+        } else {
+            format!(
+                "NO_PROXY entry \"{}\" covers the API host",
+                escape_capped(&entry, SHOWN_ENTRY)
+            )
+        };
+        return Ok(direct(bypassed(var, &why)));
+    }
+    use_proxy(raw, var, ProxyRule::Environment(var))
+}
+
+fn bypassed(var: &'static str, why: &str) -> ProxyUse {
+    ProxyUse {
+        rule: ProxyRule::Bypassed {
+            var,
+            why: why.to_owned(),
+        },
+        proxy: None,
+    }
+}
+
+/// The text with an `http://` scheme: `host:port` is read as http, as Go does, and the scheme is read in
+/// any case. Any other scheme is left as written, for the facade to refuse.
+fn with_scheme(raw: &str) -> String {
+    match raw.split_once("://") {
+        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("http") => format!("http://{rest}"),
+        Some(_) => raw.to_owned(),
+        None => format!("http://{raw}"),
+    }
+}
+
+/// Checks `written` (trimmed) is a proxy rdy can use, and describes the route through it.
+///
+/// An error shows the value as it was written, with the user info cut away, so a value without a scheme
+/// reads "(not a valid URL)" and never echoes a token.
+fn use_proxy(written: &str, origin: &'static str, rule: ProxyRule) -> Result<Resolved, KubeError> {
+    let raw = with_scheme(written);
+    let raw = raw.as_str();
+    let unusable = || KubeError::ProxyUnsupported {
+        proxy: proxy_display(written),
+        origin,
+    };
+    // The facade parses the same text for the other checks, so what counts as a usable proxy is decided in
+    // one place: plain `http://`, no path, a valid host and port, a user name without a colon.
+    let url = ProxyUrl::parse(raw).map_err(|_| unusable())?;
+    // The facade percent-decodes the user info, as Go does, and so must the header kube builds. kube takes
+    // the user info of the URL as it stands and does not decode it, so the decoded text goes into the URL.
+    let after_scheme = raw
+        .strip_prefix("http://")
+        .unwrap_or(raw)
+        .trim_end_matches('/');
+    let (userinfo, hostport) = match after_scheme.rsplit_once('@') {
+        Some((userinfo, hostport)) => (Some(userinfo), hostport),
+        None => (None, after_scheme),
+    };
+    let bad_userinfo = || KubeError::ProxyUserInfo {
+        proxy: proxy_display(written),
+        origin,
+    };
+    // kube cuts the user info at the first `@`, so an `@` in the decoded text would send the wrong
+    // password. It is refused rather than sent wrong.
+    let decoded = userinfo
+        .map(|text| {
+            percent_decode(text)
+                .filter(|decoded| !decoded.contains('@'))
+                .ok_or_else(bad_userinfo)
+        })
+        .transpose()?;
+    let rebuilt = match &decoded {
+        Some(decoded) => format!("http://{decoded}@{hostport}"),
+        None => format!("http://{hostport}"),
+    };
+    let uri = Uri::from_str(&rebuilt).map_err(|_| {
+        if userinfo.is_some() {
+            bad_userinfo()
+        } else {
+            unusable()
+        }
+    })?;
+    // A decoded `/`, `?` or `#` in the user info would end the authority early and could name another
+    // host. The URL must read back as exactly what was built.
+    let intact = uri.authority().map(http::uri::Authority::as_str)
+        == rebuilt.strip_prefix("http://")
+        && uri.path() == "/"
+        && uri.query().is_none();
+    if !intact {
+        return Err(bad_userinfo());
+    }
+    // The facade's list: the password as written and decoded, the base64 of `user:password` (the
+    // `Proxy-Authorization` value kube sends), and for a user with no password the user name and the
+    // base64 of `user:` when it is at least `KNOWN_SECRET_MIN_LEN` long. A shorter user name registers
+    // nothing, so the set never refuses it. The whole user info joins them, in both forms, under the same
+    // length rule.
+    let mut secrets = url.secrets();
+    for text in userinfo.into_iter().chain(decoded.as_deref()) {
+        if text.len() >= KNOWN_SECRET_MIN_LEN && !secrets.iter().any(|known| known == text) {
+            secrets.push(text.to_owned());
+        }
+    }
+    Ok(Resolved {
+        used: ProxyUse {
+            rule,
+            proxy: Some(url.origin()),
+        },
+        uri: Some(uri),
+        secrets,
+    })
+}
+
+/// Decodes `%XX`. `None` for a bad escape or a result that is not UTF-8.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        if byte == b'%' {
+            let high = hex(*bytes.get(at + 1)?)?;
+            let low = hex(*bytes.get(at + 2)?)?;
+            out.push(high << 4 | low);
+            at += 3;
+        } else {
+            out.push(byte);
+            at += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+fn hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// The host of `server` in lower case, without the brackets of an IPv6 literal.
+fn bare_host(server: &Uri) -> String {
+    server
+        .host()
+        .unwrap_or("")
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase()
+}
+
+/// `localhost` and loopback addresses. Go never proxies them.
+fn is_loopback(host: &str) -> bool {
+    host == "localhost" || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// The first `NO_PROXY` entry that covers `host` and `port`, lower-cased.
+///
+/// `host` is lower case with no brackets.
+pub(crate) fn no_proxy_entry(list: &str, host: &str, port: u16) -> Option<String> {
+    let ip = host.parse::<IpAddr>().ok();
+    for raw in list.split(',') {
+        let entry = raw.trim().to_ascii_lowercase();
+        if entry.is_empty() {
+            continue;
+        }
+        if entry == "*" {
+            return Some(entry);
+        }
+        if let Some((net, bits)) = entry.split_once('/') {
+            if let (Some(ip), Ok(net), Ok(bits)) = (ip, net.parse::<IpAddr>(), bits.parse::<u8>())
+                && cidr_contains(net, bits, ip)
+            {
+                return Some(entry);
+            }
+            continue;
+        }
+        // `host:abc` is not an entry Go can match: it never matches, not even the bare name.
+        let Some((name, entry_port)) = split_port(&entry) else {
+            continue;
+        };
+        if entry_port.is_some_and(|wanted| wanted != port) {
+            continue;
+        }
+        if let Ok(listed) = name.parse::<IpAddr>() {
+            if ip == Some(listed) {
+                return Some(entry);
+            }
+            continue;
+        }
+        if name.is_empty() {
+            continue;
+        }
+        // `*.acme.example` is `.acme.example`. A name with no leading dot matches itself too.
+        let dotted = name
+            .strip_prefix("*.")
+            .map_or_else(|| name.to_owned(), |rest| format!(".{rest}"));
+        let (suffix, itself) = if dotted.starts_with('.') {
+            (dotted, false)
+        } else {
+            (format!(".{dotted}"), true)
+        };
+        if host.ends_with(&suffix) || (itself && host == &suffix[1..]) {
+            return Some(entry);
+        }
+    }
+    None
+}
+
+/// Splits `name:port`, `[v6]:port` and `[v6]`. An unbracketed IPv6 literal has no port. `None` for an
+/// entry whose port is not a number (`host:abc`, `host:`), which matches nothing.
+fn split_port(entry: &str) -> Option<(&str, Option<u16>)> {
+    if let Some(rest) = entry.strip_prefix('[') {
+        let Some((name, after)) = rest.split_once(']') else {
+            return Some((entry, None));
+        };
+        if after.is_empty() {
+            return Some((name, None));
+        }
+        let port = after.strip_prefix(':')?.parse().ok()?;
+        return Some((name, Some(port)));
+    }
+    if entry.matches(':').count() == 1
+        && let Some((name, port)) = entry.split_once(':')
+    {
+        return port.parse().ok().map(|port| (name, Some(port)));
+    }
+    Some((entry, None))
+}
+
+/// Whether `ip` is inside the network `net`/`bits`. A family mismatch or a prefix too long is no match.
+fn cidr_contains(net: IpAddr, bits: u8, ip: IpAddr) -> bool {
+    match (net, ip) {
+        (IpAddr::V4(net), IpAddr::V4(ip)) if bits <= 32 => {
+            let mask = u32::MAX.checked_shl(32 - u32::from(bits)).unwrap_or(0);
+            u32::from(net) & mask == u32::from(ip) & mask
+        }
+        (IpAddr::V6(net), IpAddr::V6(ip)) if bits <= 128 => {
+            let mask = u128::MAX.checked_shl(128 - u32::from(bits)).unwrap_or(0);
+            u128::from(net) & mask == u128::from(ip) & mask
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests;

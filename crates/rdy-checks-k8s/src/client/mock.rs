@@ -63,9 +63,9 @@ use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use serde_json::{Value, json};
 use tower_service::Service;
 
-use super::ReadOnlyClient;
 use super::guard::{BodyView, Target, decode_query_value, judge, log_path, target_of};
 use super::text::escape_capped;
+use super::{ConnectionFacts, KubeError, ReadOnlyClient, ServerVersion, from_kube_error};
 
 #[cfg(test)]
 mod tests;
@@ -536,6 +536,7 @@ pub(crate) struct Harness {
     run: TestRun,
     mock: Mock,
     audited: AtomicBool,
+    via_proxy: Option<String>,
 }
 
 impl fmt::Debug for Harness {
@@ -566,7 +567,16 @@ impl Harness {
             run,
             mock: Mock::new(replay)?,
             audited: AtomicBool::new(false),
+            via_proxy: None,
         })
+    }
+
+    /// Makes the clients record `via_proxy: origin` on every `kube` entry, as a connection through a
+    /// proxy does.
+    #[must_use]
+    pub(crate) fn via_proxy(mut self, origin: &str) -> Self {
+        self.via_proxy = Some(origin.to_owned());
+        self
     }
 
     /// The run the clients log into.
@@ -582,7 +592,7 @@ impl Harness {
     /// A read-only client for the check that owns `probe` (`CheckContext::probe`): the guard in front of
     /// the mock, as `Connected::read_only` builds it in front of the real server. Needs a tokio runtime.
     pub(crate) fn client(&self, probe: &Probe) -> ReadOnlyClient {
-        ReadOnlyClient::over(self.mock.clone(), probe)
+        ReadOnlyClient::over(self.mock.clone(), probe, self.via_proxy.as_deref())
     }
 
     /// Like [`Harness::client`], for a check called `check` that has the `KubeContext` need.
@@ -594,6 +604,27 @@ impl Harness {
     /// A client from the run-level probe, which logs `check: null`, as `Loaded::connect` does.
     pub(crate) fn run_client(&self) -> ReadOnlyClient {
         self.client(&self.run.run_probe(Os::Linux))
+    }
+
+    /// The run's connection attempt over the mock, as `Loaded::connect` makes it: `GET /version` through
+    /// the guard from the run-level probe (`check: null`), timed, with an error mapped as production maps
+    /// it. `facts` says whether a proxy or a CA was in play, for the hints.
+    pub(crate) async fn attempt(
+        &self,
+        facts: &ConnectionFacts,
+    ) -> Result<(ServerVersion, Duration), KubeError> {
+        let plugin = facts.line().plugin();
+        let started = std::time::Instant::now();
+        let info = self.run_client().version().await.map_err(|error| {
+            from_kube_error(
+                &error,
+                facts.line().server(),
+                plugin,
+                facts.proxy().is_proxied(),
+                facts.ca_set(),
+            )
+        })?;
+        Ok((ServerVersion::from_info(info), started.elapsed()))
     }
 
     /// Audits the run so far ([`audit`]). A failing audit turns off the audit at drop, so the test does not
