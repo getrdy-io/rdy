@@ -1,0 +1,12 @@
+schema = 1
+name = "hidepid"
+summary = "Non-root run on a host whose /proc is mounted with hidepid=2, no security software visible"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.security_agents"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -101,7 +101,8 @@ socket2 = { version = "0.6", default-features = false }
 syn = { version = "2", default-features = false }
 proc-macro2 = { version = "1", default-features = false }
 
-# Test-only: the lint wall tests read manifests and Cargo configs as TOML (M1-044). Already in the tree.
+# The lint wall tests read manifests and Cargo configs as TOML (M1-044). rdy-checks-host parses its embedded
+# agents.toml catalog with it (M1-146).
 toml = { version = "1", default-features = false }
 
 # The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field
