@@ -675,6 +675,11 @@ fn a_full_manifest_keeps_every_field() {
 }
 
 #[test]
+fn the_output_of_a_failed_golden_compare_does_not_break_the_load() {
+    load(&[("expect.json", "{}"), ("expect.json.actual", "{}")]).expect("loads");
+}
+
+#[test]
 fn the_tree_and_the_json_files_are_checked() {
     let cases: [FileCase; 14] = [
         (
@@ -1060,7 +1065,7 @@ async fn native_files_answer_each_call_and_unrecorded_calls_fail() {
     let fixture = load(&[
         (
             "native/statvfs.json",
-            r#"{"call":"statvfs","path":"/var/lib/acme","value":{"fragment_size":4096,"blocks":1000,"blocks_free":500,"blocks_available":400,"files":0,"files_free":0,"read_only":false,"no_exec":true,"no_suid":false}}"#,
+            r#"{"call":"statvfs","path":"/var/lib/acme","value":{"fragment_size":4096,"blocks":1000,"blocks_free":500,"blocks_available":400,"files":0,"files_free":0,"read_only":false,"no_exec":true,"no_suid":false,"dev":"8:1"}}"#,
         ),
         (
             "native/uname.json",
@@ -1110,6 +1115,7 @@ async fn native_files_answer_each_call_and_unrecorded_calls_fail() {
             read_only: false,
             no_exec: Some(true),
             no_suid: false,
+            dev: Some((8, 1)),
         })
     );
     match probe.native(NativeCall::Uname).await.expect("recorded") {
@@ -1188,7 +1194,7 @@ async fn a_statvfs_through_a_link_to_the_password_file_is_denied() {
 
 #[test]
 fn native_files_are_checked() {
-    let cases: [(&str, &str); 7] = [
+    let cases: [(&str, &str); 10] = [
         (r#"{"call":"cpuid","value":1}"#, "`call` is `cpuid`"),
         (r#"{"call":"uname"}"#, "needs a `value` or an `error`"),
         (
@@ -1208,6 +1214,18 @@ fn native_files_are_checked() {
             "`release` is missing",
         ),
         (r#"{"call":"statvfs","path":"var","value":{}}"#, "absolute"),
+        (
+            r#"{"call":"statvfs","path":"/var","value":{"fragment_size":1,"blocks":1,"blocks_free":1,"blocks_available":1,"files":1,"files_free":1,"read_only":false,"no_exec":false,"no_suid":false}}"#,
+            "`dev` is missing",
+        ),
+        (
+            r#"{"call":"statvfs","path":"/var","value":{"fragment_size":1,"blocks":1,"blocks_free":1,"blocks_available":1,"files":1,"files_free":1,"read_only":false,"no_exec":false,"no_suid":false,"dev":"8-1"}}"#,
+            "`dev` must be a text like",
+        ),
+        (
+            r#"{"call":"statvfs","path":"/var","value":{"fragment_size":1,"blocks":1,"blocks_free":1,"blocks_available":1,"files":1,"files_free":1,"read_only":false,"no_exec":false,"no_suid":false,"dev":"8:x"}}"#,
+            "`dev` must be a text like",
+        ),
     ];
     for (text, want) in cases {
         let error = load(&[("native/a.json", text)]).expect_err(want);
@@ -1930,7 +1948,7 @@ mod clock {
     async fn a_native_delay_waits_for_the_caller_to_give_up() {
         let fixture = load(&[(
             "native/hung.json",
-            r#"{"call":"statvfs","path":"/mnt/nfs","delay_ms":3600000,"value":{"fragment_size":4096,"blocks":1,"blocks_free":1,"blocks_available":1,"files":1,"files_free":1,"read_only":false,"no_exec":false,"no_suid":false}}"#,
+            r#"{"call":"statvfs","path":"/mnt/nfs","delay_ms":3600000,"value":{"fragment_size":4096,"blocks":1,"blocks_free":1,"blocks_available":1,"files":1,"files_free":1,"read_only":false,"no_exec":false,"no_suid":false,"dev":null}}"#,
         )])
         .expect("loads");
         let run = TestRun::for_fixture(&fixture);

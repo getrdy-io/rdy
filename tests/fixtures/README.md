@@ -60,8 +60,8 @@ tests/fixtures/
 ```
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
-`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), the twelve machines of
-`host.os/`, `host.security_agents/` (18 cases), `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
+`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), `host.disk/` (15 cases), the twelve machines of
+`host.os/`, `host.security_agents/` (18 cases), the `host.lsm/` cases, `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
@@ -75,7 +75,7 @@ arrives with the tickets that need it. The names above are fixed now so nobody i
 | Path | What it is | Who edits it |
 | --- | --- | --- |
 | `allow.toml` | Lint exceptions: the CRLF canary, a reference link in the third-party vectors, the four-part WSL kernel version. The metadata address `169.254.169.254` gets its entry with the first test that uses it. The format is in the file header | By hand, with a reason per entry |
-| `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command or opens a socket | By hand, with the check ticket |
+| `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command, opens a socket or makes a native call that can hang (`host.disk/hung-nfs`) | By hand, with the check ticket |
 | `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied`. The expectation of a policy or loader case lives in its Rust test until the fixture lint has a format for it | By hand |
 | `checks/_cgroup/<case>/` | Machines for the cgroup helper that `host.memory`, `host.cpu` and `host.cgroups` share: `/proc/self/cgroup`, `/proc/self/mountinfo` and a `/sys/fs/cgroup` tree. Cases: `v2-nested`, `v2-unlimited`, `v2-memory-off`, `v1-tree`, `v1-unlimited`, `hybrid`. A check's own cases carry their own trees | By hand |
 | `checks/_kube/<case>/` | Synthetic clusters for the kube mock harness: `cluster` (paged nodes, a stale token, a pod selector, legacy discovery, an identity review, a review table) and `denied` (401 and 403). The k8s check tickets add their own cases under `checks/<check-id>/` and reuse the harness | By hand |
@@ -295,7 +295,8 @@ the facade has today are `statvfs`, `uname`, `rlimit`, `hostname`, `machine_id` 
 ```json
 { "call": "statvfs", "path": "/var/lib/acme", "delay_ms": 0,
   "value": { "fragment_size": 4096, "blocks": 1000, "blocks_free": 500, "blocks_available": 400,
-             "files": 0, "files_free": 0, "read_only": false, "no_exec": true, "no_suid": false } }
+             "files": 0, "files_free": 0, "read_only": false, "no_exec": true, "no_suid": false,
+             "dev": "8:1" } }
 { "call": "uname", "value": { "sysname": "Linux", "release": "5.14.0-362.el9.x86_64", "version": "#1 SMP", "machine": "x86_64" } }
 { "call": "rlimit", "resource": "nofile", "value": { "soft": 1024, "hard": null } }
 { "call": "hostname", "value": "host-01.acme.example" }
@@ -304,7 +305,8 @@ the facade has today are `statvfs`, `uname`, `rlimit`, `hostname`, `machine_id` 
 ```
 
 Every field of a `statvfs`, `uname` or `rlimit` value is required, so a missing one cannot pass as zero.
-`no_exec` is `null` where the OS does not report it, and a `null` limit is unlimited. Use `error`
+`no_exec` is `null` where the OS does not report it, `dev` is the `major:minor` of the file system in
+decimal (field 3 of `/proc/self/mountinfo`) or `null` where the OS has none, and a `null` limit is unlimited. Use `error`
 (`unsupported`, `permission_denied`, `not_found` or `io`) instead of `value` for a call that fails.
 `system_roots` values are base64 DER certificates. `delay_ms` waits on the tokio clock, so a hung
 `statvfs` is a large delay that the check's timeout ends. A call the fixture does not hold fails with
@@ -363,6 +365,45 @@ the text after it must not start with a hex digit. Everything else must match by
 `report.json`, `report.html` and `terminal.txt` from the in-process run. HTML goldens exist for `all-pass`,
 `warnings-only` and `all-block` only. A golden is the exact bytes the product writes. It changes only with
 `UPDATE_GOLDENS=1`, and the diff is read before the code diff.
+
+### Comparing and updating goldens
+
+A test compares output with a golden through one helper, `rdy_engine::testing::golden::assert_golden(path,
+bytes)`. It compares bytes and does no scrubbing: hand it output that is already deterministic.
+
+| Situation | What happens |
+| --- | --- |
+| Same bytes | Pass. A stale `<path>.actual` is deleted |
+| Different bytes | Fail. The message has the first 40 lines of a unified diff and the accept command. The new bytes are in `<path>.actual`, which the repo ignores |
+| No golden | Fail the same way. The golden is not created |
+| `UPDATE_GOLDENS=1` | Write the golden (and its folders), print `golden written: <path>` for each file, pass |
+| `UPDATE_GOLDENS=1` and `CI` set | Fail at once, even when the golden matches. An empty `CI` does not count |
+| `UPDATE_GOLDENS` is anything but `1`, `0` or empty | Fail, so a typo never passes |
+| A path under `tests/fixtures/redaction` or `tests/fixtures/results` | `UPDATE_GOLDENS` never writes there, even through a symlink. The compare still runs. A failure parks the new bytes in `target/goldens-actual/<repo-relative path>.actual` and creates nothing in those folders. Edit the file by hand |
+| The golden is a symlink | `UPDATE_GOLDENS=1` fails instead of writing through it, dangling or not |
+
+The accept command is `UPDATE_GOLDENS=1 cargo nextest run -p <package>`. Read the diff of `tests/` and
+`crates/` before you commit. The PR body has a `## Golden changes` section, one sentence per changed file.
+
+Every path given to the helper is appended to `target/goldens-used/<pid>.txt` (below `CARGO_TARGET_DIR`
+when it is set), as repo-relative text with `/` separators. `cargo xtask goldens check` lists the golden
+files on disk and fails on each one that no record names. A golden file on disk is:
+
+- `envs/<env>/golden/<file>`;
+- `checks/<check-id>/<case>/expect.json`;
+- `redaction/<category>/<case>.expected`.
+
+Anything else is an input, or data that a check reads, such as a fake file tree. So the redaction corpus
+must compare `.expected` through `assert_golden`. The helper never writes there, so the compare is all it
+does.
+
+Run `rm -rf target/goldens-used` before the test run, and `cargo xtask goldens check` after
+`cargo nextest run --workspace`. A record left by an older run can hide an orphan. A run of one package
+makes every other package's goldens look orphaned. CI does both on linux-x64.
+
+CI scope: the check only counts what ran on linux-x64. So a golden must be compared by a test that is not
+`root_*`, not `#[ignore]`, not behind a non-default feature and not gated to another OS. Otherwise the check
+calls it an orphan. If nextest is ever sharded, run `goldens check` on the combined records of all shards.
 
 ## Line endings
 

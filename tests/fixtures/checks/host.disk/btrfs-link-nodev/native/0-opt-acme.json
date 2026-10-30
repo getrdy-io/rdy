@@ -1,0 +1,16 @@
+{
+  "call": "statvfs",
+  "path": "/opt/acme",
+  "value": {
+    "fragment_size": 4096,
+    "blocks": 31457280,
+    "blocks_free": 20971520,
+    "blocks_available": 20971520,
+    "files": 0,
+    "files_free": 0,
+    "read_only": false,
+    "no_exec": false,
+    "no_suid": false,
+    "dev": "0:45"
+  }
+}

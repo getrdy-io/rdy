@@ -18,7 +18,8 @@
 //! not answer the check, runs the check against it and returns a [`FixtureRun`]. Then
 //! [`FixtureRun::assert_within_manifest`] proves the check stayed inside its declaration.
 //! `FakeCheck` (feature `runtime`) is a scripted check for scheduler tests, and [`normalize`] scrubs a report so two runs
-//! of one environment compare equal.
+//! of one environment compare equal. [`golden::assert_golden`] compares output with a golden file and writes it
+//! under `UPDATE_GOLDENS=1`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,6 +32,7 @@ pub use crate::probe::replay::{
 #[cfg(feature = "runtime")]
 mod fake;
 mod fixture_run;
+pub mod golden;
 mod normalize;
 #[cfg(test)]
 mod tests;
@@ -145,6 +147,20 @@ impl TestRun {
     /// decision 3). Returns `false` if the value was refused (see `Redactor::add_known_secret`).
     pub fn add_known_secret(&self, secret: &str) -> bool {
         self.hub.add_known_secret(secret)
+    }
+
+    /// A scheduler whose checks get a probe from this run, so a test sees the check's timeout, its
+    /// manifest and the action log as a real run does. A test that needs a hung call to end in
+    /// `End::TimedOut` runs the check through it (`Scheduler::run`), on a runtime with a paused clock.
+    #[cfg(feature = "runtime")]
+    #[must_use]
+    pub fn scheduler(
+        &self,
+        jobs: usize,
+        os: Os,
+        available: impl IntoIterator<Item = Need>,
+    ) -> crate::sched::Scheduler {
+        crate::sched::Scheduler::new(jobs, os, available).with_probes(self.hub.clone())
     }
 
     /// The action log so far.

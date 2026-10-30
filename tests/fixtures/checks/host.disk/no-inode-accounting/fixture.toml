@@ -1,0 +1,12 @@
+schema = 1
+name = "no-inode-accounting"
+summary = "Btrfs root subvolume with no inode count: st_dev is the subvolume device, mountinfo shows the superblock device"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,10 @@
+{
+  "entry": {
+    "id": "host.disk",
+    "min": "20Gi",
+    "path": "/mnt/nfs/data"
+  },
+  "result": {
+    "timed_out_ms": 5000
+  }
+}

@@ -1,0 +1,12 @@
+schema = 1
+name = "permission-denied"
+summary = "A directory the user may not enter, on a run without root"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false

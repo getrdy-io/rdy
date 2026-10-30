@@ -1,0 +1,2 @@
+24 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw
+27 24 0:22 / /sys rw,nosuid,nodev,noexec,relatime shared:6 - sysfs sysfs rw

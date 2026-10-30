@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "forbid_options": [
+      "noexec"
+    ],
+    "id": "host.disk",
+    "min": "1Gi",
+    "path": "/tmp/acme"
+  },
+  "result": {
+    "expected": {
+      "forbid_fstypes": [],
+      "forbid_options": [
+        "noexec"
+      ],
+      "min": 1073741824,
+      "min_inodes": 100000,
+      "recommended": 1288490188
+    },
+    "fix": "Move the install path to a volume without noexec, or set `TMPDIR` to a directory on one. If the security team agrees, run `mount -o remount,exec /tmp` and remove noexec from /etc/fstab so it stays.",
+    "level": "fail",
+    "message": "`/tmp/acme` is on `/tmp` (tmpfs), which is mounted noexec. The spec does not allow that.",
+    "notes": [
+      "`/tmp/acme` does not exist yet. rdy measured `/tmp`, the nearest parent that exists."
+    ],
+    "observed": {
+      "device": "0:30",
+      "free_bytes": 3221225472,
+      "free_inodes": 999000,
+      "fstype": "tmpfs",
+      "measured_path": "/tmp",
+      "mount": "/tmp",
+      "network": false,
+      "nodev": true,
+      "noexec": true,
+      "nosuid": true,
+      "path": "/tmp/acme",
+      "read_only": false,
+      "total_bytes": 4294967296,
+      "total_inodes": 1000000
+    },
+    "partial": null
+  }
+}

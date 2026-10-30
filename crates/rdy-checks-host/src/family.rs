@@ -11,7 +11,9 @@ use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::disk::{self, Disk};
 use crate::firewall::{self, Firewall};
+use crate::lsm::{self, Lsm};
 use crate::memory::{self, Memory};
 use crate::os::{self, OsCheck};
 use crate::security_agents::{self, SecurityAgents};
@@ -69,16 +71,6 @@ const fn info(
 // Titles and remediation follow the Fix lines of 03 section 2, with the measured values taken out.
 // The check that replaces each stub may sharpen its text. Its findings carry the specific fix.
 
-static DISK: CheckInfo = info(
-    "host.disk",
-    "Free space, inodes, mount flags per path",
-    CheckMeta {
-        title: "Disk space and mount flags",
-        remediation: "Free up space on the volume that holds the install path, grow the volume, or point the install at a larger disk. On Linux, run `df -h` on the install path to see what is free. If the path is on a `noexec` mount, remount it with `exec` and remove `noexec` from `/etc/fstab`, or move the install path.",
-    },
-    5,
-    &[],
-);
 static PORTS: CheckInfo = info(
     "host.ports",
     "Required ports free",
@@ -87,16 +79,6 @@ static PORTS: CheckInfo = info(
         remediation: "Stop the process that holds the port, or change the product's port setting. If the port is in the ephemeral range, reserve it with `net.ipv4.ip_local_reserved_ports` in a file under `/etc/sysctl.d/` as root, then run `sysctl --system`.",
     },
     5,
-    ROOT,
-);
-static LSM: CheckInfo = info(
-    "host.lsm",
-    "SELinux and AppArmor state, recent denials",
-    CheckMeta {
-        title: "SELinux and AppArmor",
-        remediation: "On SELinux, read recent denials with `ausearch -m avc -ts recent`. Install the vendor's policy module, or label the volume with `chcon -Rt container_file_t` or the `:Z` mount option. As a last resort, run `setenforce 0` and set `SELINUX=permissive` in `/etc/selinux/config`. This turns SELinux protection off, so ask the security team first. On AppArmor, read denials with `journalctl -k` and ask the vendor for a profile.",
-    },
-    3,
     ROOT,
 );
 static TIME_SYNC: CheckInfo = info(
@@ -163,10 +145,10 @@ static KERNEL: CheckInfo = info(
 
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 13] = [
-    &DISK,
+    &disk::INFO,
     &memory::INFO,
     &PORTS,
-    &LSM,
+    &lsm::INFO,
     &security_agents::INFO,
     &firewall::INFO,
     &TIME_SYNC,
@@ -182,9 +164,9 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.firewall` ([`Firewall`]), `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]) and
-/// `host.security_agents` ([`SecurityAgents`]) are real. The others are stubs for now
-/// ([`HostFamily::stub_ids`]).
+/// `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]), `host.memory` ([`Memory`]),
+/// `host.os` ([`OsCheck`]) and `host.security_agents` ([`SecurityAgents`]) are real. The others are
+/// stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -205,10 +187,8 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 9] = [
-    "host.disk",
+static STUBS: [&str; 7] = [
     "host.ports",
-    "host.lsm",
     "host.time_sync",
     "host.cpu",
     "host.sysctl",
@@ -227,6 +207,9 @@ impl Family for HostFamily {
     }
 
     fn build(&self, entry: &CheckSpec, params: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        if let CheckParams::HostDisk(params) = &params {
+            return Ok(Built::new(Box::new(Disk::new(params))));
+        }
         if let CheckParams::HostFirewall(firewall) = params {
             let ports = firewall
                 .open_inbound
@@ -234,6 +217,9 @@ impl Family for HostFamily {
                 .flatten()
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
+        if let CheckParams::HostLsm(lsm) = &params {
+            return Ok(Built::new(Box::new(Lsm::new(lsm))));
         }
         if let CheckParams::HostMemory(memory) = params {
             return Ok(Built::new(Box::new(Memory::from_params(&memory))));

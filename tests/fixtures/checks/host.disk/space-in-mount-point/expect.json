@@ -1,0 +1,42 @@
+{
+  "entry": {
+    "forbid_options": [
+      "nodev"
+    ],
+    "id": "host.disk",
+    "min": "20Gi",
+    "path": "/mnt/acme data/releases"
+  },
+  "result": {
+    "expected": {
+      "forbid_fstypes": [],
+      "forbid_options": [
+        "nodev"
+      ],
+      "min": 21474836480,
+      "min_inodes": 100000,
+      "recommended": 25769803776
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "`/mnt/acme data/releases` has 90 GiB free on `/mnt/acme data` (xfs). 20 GiB is needed.",
+    "notes": [],
+    "observed": {
+      "device": "253:2",
+      "free_bytes": 96636764160,
+      "free_inodes": 900000,
+      "fstype": "xfs",
+      "measured_path": "/mnt/acme data/releases",
+      "mount": "/mnt/acme data",
+      "network": false,
+      "nodev": false,
+      "noexec": false,
+      "nosuid": false,
+      "path": "/mnt/acme data/releases",
+      "read_only": false,
+      "total_bytes": 107374182400,
+      "total_inodes": 1000000
+    },
+    "partial": null
+  }
+}

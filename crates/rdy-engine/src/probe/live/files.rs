@@ -205,16 +205,20 @@ pub(super) fn statvfs(
     path: &Path,
     guard: &ReadGuard,
     secrets: &Secrets,
-) -> io::Result<fs::StatVfs> {
+) -> io::Result<(fs::StatVfs, fs::Dev)> {
     let target = locate(path, guard, secrets)?;
+    // The device of the judged inode. When the portable path measures the parent instead, it has
+    // checked that the parent is on this same device.
+    let dev = target.stat.st_dev;
     #[cfg(target_os = "linux")]
     {
         target.confirm(path)?;
-        Ok(fs::fstatvfs(&target.anchor)?)
+        Ok((fs::fstatvfs(&target.anchor)?, dev))
     }
     #[cfg(not(target_os = "linux"))]
     {
-        statvfs_by_path(path, &target.real, &target.stat, guard, secrets)
+        let raw = statvfs_by_path(path, &target.real, &target.stat, guard, secrets)?;
+        Ok((raw, dev))
     }
 }
 

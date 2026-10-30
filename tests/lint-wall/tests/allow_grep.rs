@@ -142,6 +142,11 @@ const INCLUDE_SHIPPED_DATA_ALLOWED: &[(&str, &str, &str)] = &[(
 /// be a test module: it, or a module above it, is declared under `#[cfg(test)]`.
 const INCLUDE_DATA_ALLOWED: &[(&str, &str, &str)] = &[
     (
+        "crates/rdy-checks-host/src/disk/tests.rs",
+        "../../../../tests/fixtures/checks/host.disk/",
+        "embeds the expect.json goldens of tests/fixtures/checks/host.disk, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-host/src/family/tests.rs",
         "../../../../examples/specs/acme-platform.yaml",
         "embeds examples/specs/acme-platform.yaml for a test",
@@ -225,7 +230,8 @@ struct Findings {
     /// call that does not start with a literal (a macro variable, say) has an empty string first, which
     /// no prefix matches. Comments and strings are not code, so a decoy in them is not a call.
     include_calls: Vec<Vec<String>>,
-    /// The string literals in the arguments of every `fx!` call, with any delimiter.
+    /// The string literals in the arguments of every `fx!` call (the firewall tests) and every `expect!`
+    /// call (the disk tests), with any delimiter.
     fx_literals: Vec<String>,
 }
 
@@ -288,7 +294,7 @@ fn note_macro(findings: &mut Findings, name: &str, args: Option<proc_macro2::Tok
             }
             findings.include_calls.push(call);
         }
-        "fx" => {
+        "fx" | "expect" => {
             if let Some(args) = args {
                 string_literals(args, &mut findings.fx_literals);
             }
@@ -507,7 +513,7 @@ fn findings_of(source: &str) -> Findings {
                 ],
                 fx_literals: vec!["..".to_owned()]
                     .into_iter()
-                    .filter(|_| stripped.contains("fx!"))
+                    .filter(|_| stripped.contains("fx!") || stripped.contains("expect!"))
                     .collect(),
             }
         }
@@ -683,7 +689,7 @@ fn shipped_data_is_embedded_only_from_the_crates_own_data_directory() {
 /// decoy in a comment or a string is not seen, and a call in any delimiter is). The file embeds something,
 /// every call's first literal starts with `prefix`, and past the prefix nothing climbs out of it: not in
 /// the first literal, not in a later literal of the call, not in the joined text, and not in an argument
-/// of an `fx!` call.
+/// of an `fx!` or `expect!` call.
 fn check_prefixed_includes(found: &Findings, prefix: &str) -> Result<(), String> {
     if found.include_calls.is_empty() {
         return Err("it is on the list but embeds nothing now".to_owned());
@@ -704,7 +710,7 @@ fn check_prefixed_includes(found: &Findings, prefix: &str) -> Result<(), String>
     for literal in &found.fx_literals {
         if literal.contains("..") {
             return Err(format!(
-                "an fx! argument `{literal}` contains `..`, which would leave the fixture directory"
+                "an fx! or expect! argument `{literal}` contains `..`, which would leave the fixture directory"
             ));
         }
     }
@@ -1104,6 +1110,16 @@ fn the_include_reader_sees_every_literal_of_a_call_and_of_fx() {
         "a nested call and a later literal are read"
     );
     assert_eq!(found.fx_literals, ["case", "a/../b"]);
+    // The disk tests' `expect!` is read like `fx!`. A method call `.expect("..")` is not a macro call.
+    let expect =
+        findings_of("const C: &[(&str, &str)] = &[expect!(\"../../x\"), expect!(\"plenty\")];");
+    assert_eq!(expect.fx_literals, ["../../x", "plenty"]);
+    assert!(
+        findings_of("fn f() { a.expect(\"..\"); expect!(\"ok\"); }")
+            .fx_literals
+            .iter()
+            .all(|l| l != "..")
+    );
     // The macro definition is not a call.
     assert!(
         findings_of("macro_rules! fx { () => {} }")
@@ -1156,6 +1172,8 @@ fn a_decoy_in_a_comment_does_not_hide_a_bracket_call() {
     assert!(check_prefixed_includes(&findings_of(&climb), prefix).is_err());
     let fx = format!("fn f() {{ include_str!(\"{prefix}a\"); fx![\"../b\"]; }}");
     assert!(check_prefixed_includes(&findings_of(&fx), prefix).is_err());
+    let planted = format!("fn f() {{ include_str!(\"{prefix}a\"); expect![\"../b\"]; }}");
+    assert!(check_prefixed_includes(&findings_of(&planted), prefix).is_err());
     assert!(check_prefixed_includes(&findings_of("fn f() {}"), prefix).is_err());
 }
 

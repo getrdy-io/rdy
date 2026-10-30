@@ -1,0 +1,12 @@
+schema = 1
+name = "noexec-tmp"
+summary = "The install path is under /tmp, a tmpfs mounted noexec, and does not exist yet"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false

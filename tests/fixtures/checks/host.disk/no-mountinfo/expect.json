@@ -1,0 +1,45 @@
+{
+  "entry": {
+    "forbid_fstypes": [
+      "nfs"
+    ],
+    "id": "host.disk",
+    "min": "20Gi",
+    "path": "/var/lib/acme"
+  },
+  "result": {
+    "expected": {
+      "forbid_fstypes": [
+        "nfs"
+      ],
+      "forbid_options": [],
+      "min": 21474836480,
+      "min_inodes": 100000,
+      "recommended": 25769803776
+    },
+    "fix": "Check by hand: `df -hT /var/lib/acme` shows the type and free space, and `mount` lists the flags.",
+    "level": "warn",
+    "message": "Not verified: could not tell the file system type (/proc/self/mountinfo is not there).",
+    "notes": [],
+    "observed": {
+      "device": "253:1",
+      "free_bytes": 107374182400,
+      "free_inodes": 900000,
+      "fstype": null,
+      "measured_path": "/var/lib/acme",
+      "mount": null,
+      "network": null,
+      "nodev": null,
+      "noexec": false,
+      "nosuid": false,
+      "path": "/var/lib/acme",
+      "read_only": false,
+      "total_bytes": 214748364800,
+      "total_inodes": 1000000
+    },
+    "partial": {
+      "missing": [],
+      "note": "Not verified: could not tell the file system type (/proc/self/mountinfo is not there)."
+    }
+  }
+}

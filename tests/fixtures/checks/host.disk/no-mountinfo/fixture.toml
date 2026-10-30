@@ -1,0 +1,12 @@
+schema = 1
+name = "no-mountinfo"
+summary = "A container that does not show /proc/self/mountinfo"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false
