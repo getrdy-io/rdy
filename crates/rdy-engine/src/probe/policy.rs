@@ -178,7 +178,7 @@ impl Refused {
 
 /// What a check may read: the rules of one check's file calls. The probe builds it from the check's
 /// `Os` and `CheckInfo::reads` and hands it to the backend, which applies [`ReadGuard::admit_real`] to
-/// the resolved path. The `Statvfs` call builds it with [`ReadGuard::statfs`] from `CheckInfo::statfs`
+/// the resolved path. The `Statvfs` call builds it with `ReadGuard::statfs` from `CheckInfo::statfs`
 /// instead, and a refusal by prefix then names `statfs`.
 #[derive(Debug, Clone, Copy)]
 pub struct ReadGuard {
