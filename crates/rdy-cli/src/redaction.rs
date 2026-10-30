@@ -8,9 +8,10 @@
 //! If no key can be made, or the redactor itself panics, [`redact_text`] replaces the whole text. It
 //! never returns the raw text.
 //!
-//! Carry note for M1-061: the run-scoped known-secret set must be shared through an `Arc`, so that the
-//! log writer, the CLI error text and the report all see the same secrets. Today the process redactor is
-//! the key and the built-in rules only.
+//! **Known secrets (M1-061).** The run-scoped known-secret set lives inside the [`Redactor`] and clones
+//! share it. So the process redactor, the log writer, the CLI error text and a probe hub built from
+//! `init()?.clone()` all see one set. Register a secret with `init()?.add_known_secret(value)` before
+//! anything is printed or written; from then on every string any of them redacts has the value removed.
 
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::OnceLock;

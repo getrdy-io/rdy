@@ -93,7 +93,7 @@ fn no_exec(flags: rustix::fs::StatVfsMountFlags) -> Option<bool> {
 }
 
 /// Linux reads the id as a file, through a guard that admits only [`MACHINE_ID_FILES`] (the denylist
-/// refuses both names to every other reader) and with a 128 byte cap. macOS has none in M1, so its
+/// refuses all three names to every other reader) and with a 128 byte cap. macOS has none in M1, so its
 /// `host_id` is null.
 #[cfg(target_os = "linux")]
 fn machine_id(secrets: &Secrets) -> io::Result<NativeValue> {
