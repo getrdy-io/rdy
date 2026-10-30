@@ -91,8 +91,8 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 173 | 382 |
-| M1, core | 143 | 319.5 |
+| M1, all | 174 | 384.5 |
+| M1, core | 144 | 322 |
 | M1, `core: no` (the cut list) | 30 | 62.5 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
@@ -121,14 +121,14 @@ and Dec 28 run at half capacity.
 | 13 | Feb 15 to Feb 21, 2027 | 13 | 14 | 3 Host checks, HTML report | M1-063 to M1-069, M1-171 | `v0.1.0-alpha.12`: every report string redacted, 28-case corpus gates CI; host.memory and host.disk |
 | 14 | Feb 22 to Feb 28, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-070, M1-071, M1-074 to M1-076, M1-169, M1-170 | `v0.1.0-alpha.13`: host.cpu on Linux; facade `read_link`; machine identity files denied; terminal styling; in-process env harness |
 | 15 | Mar 1 to Mar 7, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-077 to M1-085 | `v0.1.0-alpha.14`: HTML report next to the JSON, with golden reports; generated spec reference |
-| 16 | Mar 8 to Mar 14, 2027 | 13 | 13 | 3 Host checks, HTML report; 4 Network checks | M1-086 to M1-090, M1-168 | `v0.1.0-alpha.15`: the demo: bucket-sorted terminal output with fix lines and the verdict last; umask 077 and an inherited-descriptor warning at start-up |
+| 16 | Mar 8 to Mar 14, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 4 Network checks | M1-086 to M1-090, M1-168 | `v0.1.0-alpha.15`: the demo: bucket-sorted terminal output with fix lines and the verdict last; umask 077 and an inherited-descriptor warning at start-up |
 | 17 | Mar 15 to Mar 21, 2027 | 13 | 13 | 4 Network checks | M1-091 to M1-095 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy |
 | 18 | Mar 22 to Mar 28, 2027 | 13 | 13 | 3 Host checks, HTML report; 4 Network checks | M1-096 to M1-101, M1-073 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept; host.os on Linux |
 | 19 | Mar 29 to Apr 4, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-102 to M1-104, M1-072 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard with path parser and resource allowlist; host.ports on Linux |
 | 20 | Apr 5 to Apr 11, 2027 | 13 | 14 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |
 | 21 | Apr 12 to Apr 18, 2027 | 13 | 13.5 | 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-110 to M1-115 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed |
 | 22 | Apr 19 to Apr 25, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-116 to M1-120 | `v0.1.0-alpha.21`: family pages; fixture envs for every verdict; timeouts env; signatures verified before parsing |
-| 23 | Apr 26 to May 2, 2027 | 13 | 11.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-121 to M1-125 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign` |
+| 23 | Apr 26 to May 2, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-121 to M1-125, M1-174 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign` |
 | 24 | May 3 to May 9, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-126 to M1-131 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove` |
 | 25 | May 10 to May 16, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-132 to M1-139 | **`v0.1.0`**: signing review closed; install and sign pages; README ready, core done, announcement sent to design partners |
 | 26 | May 17 to May 23, 2027 | 13 | 13 | Non-core, steps 2 and 3 | M1-140 to M1-142, M1-144, M1-145, M1-172 | `v0.1.1`: progress line, HTML wording; UDP and unix socket facade; host.lsm; parameters for the M1-late check ids |
