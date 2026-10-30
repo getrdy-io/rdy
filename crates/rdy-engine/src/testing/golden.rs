@@ -25,7 +25,9 @@
 //! - **A path under `tests/fixtures/redaction` or `tests/fixtures/results`:** `UPDATE_GOLDENS` never
 //!   writes there. A golden you can regenerate is not a security test, and result files of released
 //!   versions are append only. The comparison still runs and still fails with a diff. A symlink into
-//!   those folders counts. Edit the file by hand.
+//!   those folders counts. Edit the file by hand. The helper creates nothing in those folders, not even
+//!   the `.actual` file: the new bytes go to `target/goldens-actual/<repo-relative path>.actual` instead.
+//! - **A golden that is a symlink:** `UPDATE_GOLDENS=1` refuses to write through it, dangling or not.
 //!
 //! Every path the helper is given is appended, as repo-relative text with `/` separators, to
 //! `target/goldens-used/<pid>.txt` (under `CARGO_TARGET_DIR` when it is set). `cargo xtask goldens check`
@@ -37,7 +39,7 @@
 
 use std::fs;
 use std::io::{self, Write as _};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[cfg(test)]
 mod tests;
@@ -76,7 +78,7 @@ pub fn assert_golden(path: impl AsRef<Path>, actual: impl AsRef<[u8]>) {
             shown(path)
         );
     }
-    if let Err(message) = compare(path, actual.as_ref(), update) {
+    if let Err(message) = compare(path, actual.as_ref(), update, &actual_dir()) {
         panic!("{message}");
     }
 }
@@ -124,9 +126,11 @@ enum Done {
     Written,
 }
 
-/// The comparison. `update` is `UPDATE_GOLDENS=1`. Returns the failure message as `Err`.
-fn compare(path: &Path, actual: &[u8], update: bool) -> Result<Done, String> {
-    let sidecar = actual_path(path);
+/// The comparison. `update` is `UPDATE_GOLDENS=1`. `parked` is where the output of a protected golden is
+/// saved. Returns the failure message as `Err`.
+fn compare(path: &Path, actual: &[u8], update: bool, parked: &Path) -> Result<Done, String> {
+    let protected = is_protected(path);
+    let sidecar = sidecar_path(path, protected, parked);
     let golden = match fs::read(path) {
         Ok(bytes) => Some(bytes),
         Err(err) if err.kind() == io::ErrorKind::NotFound => None,
@@ -142,8 +146,15 @@ fn compare(path: &Path, actual: &[u8], update: bool) -> Result<Done, String> {
         let _ = fs::remove_file(&sidecar);
         return Ok(Done::Matched);
     }
-    let protected = is_protected(path);
     if update && !protected {
+        // `fs::write` follows a symlink, so a link could send the write anywhere.
+        if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(format!(
+                "golden is a symlink: {}\n{UPDATE_VAR}=1 never writes through a symlink. Replace the link with \
+                 the file, then run the test again.",
+                shown(path)
+            ));
+        }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|err| format!("cannot create {}: {err}", shown(parent)))?;
@@ -154,7 +165,8 @@ fn compare(path: &Path, actual: &[u8], update: bool) -> Result<Done, String> {
         eprintln!("golden written: {}", shown(path));
         return Ok(Done::Written);
     }
-    // A missing golden may have no folder yet. The output still goes next to where the golden belongs.
+    // A missing golden may have no folder yet. The output still goes next to where the golden belongs,
+    // except for a protected golden: nothing is created in those folders.
     if let Some(parent) = sidecar.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -200,7 +212,17 @@ fn accept_command() -> String {
     }
 }
 
-/// `<path>.actual`, next to the golden. `.gitignore` lists `*.actual`.
+/// Where the output of a failed comparison is saved: next to the golden (`.gitignore` lists `*.actual`),
+/// or for a protected golden under `parked`, so nothing is created in the protected folders.
+fn sidecar_path(path: &Path, protected: bool, parked: &Path) -> PathBuf {
+    if !protected {
+        return actual_path(path);
+    }
+    let flat = shown(path).trim_start_matches('/').replace(':', "_");
+    parked.join(format!("{flat}.actual"))
+}
+
+/// `<path>.actual`, next to the golden.
 fn actual_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(".actual");
@@ -216,15 +238,24 @@ fn repo_root_text() -> String {
     text_of(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
 }
 
-/// `target/goldens-used` of this checkout (`CARGO_TARGET_DIR` first when it is set; a relative value is
+/// The target folder of this checkout (`CARGO_TARGET_DIR` first when it is set; a relative value is
 /// taken from the repo root, as `cargo xtask goldens check` does).
-fn used_dir() -> PathBuf {
+fn target_dir() -> PathBuf {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let target = match std::env::var_os("CARGO_TARGET_DIR") {
+    match std::env::var_os("CARGO_TARGET_DIR") {
         Some(dir) if !dir.is_empty() => root.join(dir),
         _ => root.join("target"),
-    };
-    target.join("goldens-used")
+    }
+}
+
+/// `target/goldens-used`: the record of the goldens the tests compared.
+fn used_dir() -> PathBuf {
+    target_dir().join("goldens-used")
+}
+
+/// `target/goldens-actual`: the output of a failed comparison against a protected golden.
+fn actual_dir() -> PathBuf {
+    target_dir().join("goldens-actual")
 }
 
 /// Appends the path to `<dir>/<pid>.txt`, one line each. One `write` per line, so two threads of a
@@ -286,25 +317,32 @@ fn is_protected(path: &Path) -> bool {
     in_protected_folder(&text_of(path)) || in_protected_folder(&real_text(path))
 }
 
-/// The text of `path` with the symlinks of its longest existing ancestor resolved.
+/// The text of `path` with every symlink followed, in order. A `..` is applied after the folder before
+/// it is resolved, so `link/..` is the parent of the link's target. A part that does not exist (or a
+/// dangling link) is kept as it is.
 fn real_text(path: &Path) -> String {
-    let absolute = PathBuf::from(text_of(path));
-    let mut rest: Vec<std::ffi::OsString> = Vec::new();
-    let mut head = absolute.as_path();
-    loop {
-        if let Ok(real) = fs::canonicalize(head) {
-            let mut full = real;
-            full.extend(rest.iter().rev());
-            return lexical(&full.to_string_lossy());
-        }
-        match (head.parent(), head.file_name()) {
-            (Some(parent), Some(name)) => {
-                rest.push(name.to_os_string());
-                head = parent;
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+    let mut real = PathBuf::new();
+    for part in absolute.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                real.pop();
             }
-            _ => return lexical(&absolute.to_string_lossy()),
+            Component::Normal(name) => {
+                real.push(name);
+                if let Ok(resolved) = fs::canonicalize(&real) {
+                    real = resolved;
+                }
+            }
+            other => real.push(other.as_os_str()),
         }
     }
+    lexical(&real.to_string_lossy())
 }
 
 /// Whether the `/`-separated `text` has the folders `tests/fixtures/<protected>` in a row.

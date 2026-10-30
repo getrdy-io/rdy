@@ -368,7 +368,8 @@ bytes)`. It compares bytes and does no scrubbing: hand it output that is already
 | `UPDATE_GOLDENS=1` | Write the golden (and its folders), print `golden written: <path>` for each file, pass |
 | `UPDATE_GOLDENS=1` and `CI` set | Fail at once, even when the golden matches. An empty `CI` does not count |
 | `UPDATE_GOLDENS` is anything but `1`, `0` or empty | Fail, so a typo never passes |
-| A path under `tests/fixtures/redaction` or `tests/fixtures/results` | `UPDATE_GOLDENS` never writes there, even through a symlink. The compare still runs. Edit the file by hand |
+| A path under `tests/fixtures/redaction` or `tests/fixtures/results` | `UPDATE_GOLDENS` never writes there, even through a symlink. The compare still runs. A failure parks the new bytes in `target/goldens-actual/<repo-relative path>.actual` and creates nothing in those folders. Edit the file by hand |
+| The golden is a symlink | `UPDATE_GOLDENS=1` fails instead of writing through it, dangling or not |
 
 The accept command is `UPDATE_GOLDENS=1 cargo nextest run -p <package>`. Read the diff of `tests/` and
 `crates/` before you commit. The PR body has a `## Golden changes` section, one sentence per changed file.
@@ -388,6 +389,10 @@ does.
 Run `rm -rf target/goldens-used` before the test run, and `cargo xtask goldens check` after
 `cargo nextest run --workspace`. A record left by an older run can hide an orphan. A run of one package
 makes every other package's goldens look orphaned. CI does both on linux-x64.
+
+CI scope: the check only counts what ran on linux-x64. So a golden must be compared by a test that is not
+`root_*`, not `#[ignore]`, not behind a non-default feature and not gated to another OS. Otherwise the check
+calls it an orphan. If nextest is ever sharded, run `goldens check` on the combined records of all shards.
 
 ## Line endings
 

@@ -23,6 +23,15 @@ impl Tree {
         self.dir.path().join(relative)
     }
 
+    /// Where the output of a protected golden is parked.
+    fn parked(&self) -> PathBuf {
+        self.path("target/goldens-actual")
+    }
+
+    fn compare(&self, path: &Path, actual: &[u8], update: bool) -> Result<Done, String> {
+        compare(path, actual, update, &self.parked())
+    }
+
     fn write(&self, relative: &str, bytes: &[u8]) -> PathBuf {
         let path = self.path(relative);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -47,7 +56,10 @@ fn equal_bytes_pass_and_delete_a_stale_actual_file() {
     let tree = Tree::new();
     let golden = tree.write("golden/report.json", b"{\"a\":1}\n");
     let stale = tree.write("golden/report.json.actual", b"old failure");
-    assert_eq!(compare(&golden, b"{\"a\":1}\n", false), Ok(Done::Matched));
+    assert_eq!(
+        tree.compare(&golden, b"{\"a\":1}\n", false),
+        Ok(Done::Matched)
+    );
     assert!(!stale.exists());
 }
 
@@ -55,7 +67,9 @@ fn equal_bytes_pass_and_delete_a_stale_actual_file() {
 fn changed_output_fails_with_a_diff_and_an_actual_file() {
     let tree = Tree::new();
     let golden = tree.write("golden/terminal.txt", b"one\ntwo\nthree\n");
-    let err = compare(&golden, b"one\n2\nthree\n", false).unwrap_err();
+    let err = tree
+        .compare(&golden, b"one\n2\nthree\n", false)
+        .unwrap_err();
     assert!(err.starts_with("golden differs: "), "{err}");
     assert!(err.contains("golden/terminal.txt"), "{err}");
     assert!(
@@ -76,7 +90,7 @@ fn changed_output_fails_with_a_diff_and_an_actual_file() {
 fn a_missing_golden_fails_and_is_not_created() {
     let tree = Tree::new();
     let golden = tree.path("golden/report.html");
-    let err = compare(&golden, b"<html>\n", false).unwrap_err();
+    let err = tree.compare(&golden, b"<html>\n", false).unwrap_err();
     assert!(err.starts_with("golden missing: "), "{err}");
     assert!(err.contains("7 bytes"), "{err}");
     assert!(err.contains("UPDATE_GOLDENS=1 cargo nextest run"), "{err}");
@@ -93,7 +107,7 @@ fn a_golden_that_is_a_folder_fails_and_names_the_path() {
     let tree = Tree::new();
     let folder = tree.path("golden");
     fs::create_dir_all(&folder).unwrap();
-    let err = compare(&folder, b"x", false).unwrap_err();
+    let err = tree.compare(&folder, b"x", false).unwrap_err();
     assert!(err.starts_with("golden unreadable: "), "{err}");
 }
 
@@ -101,12 +115,12 @@ fn a_golden_that_is_a_folder_fails_and_names_the_path() {
 fn update_writes_a_missing_golden_with_its_folders_and_a_changed_one() {
     let tree = Tree::new();
     let fresh = tree.path("envs/all-pass/golden/report.json");
-    assert_eq!(compare(&fresh, b"{}\n", true), Ok(Done::Written));
+    assert_eq!(tree.compare(&fresh, b"{}\n", true), Ok(Done::Written));
     assert_eq!(fs::read(&fresh).unwrap(), b"{}\n");
 
     let stale = tree.write("envs/all-pass/golden/terminal.txt", b"old\n");
     let sidecar = tree.write("envs/all-pass/golden/terminal.txt.actual", b"older\n");
-    assert_eq!(compare(&stale, b"new\n", true), Ok(Done::Written));
+    assert_eq!(tree.compare(&stale, b"new\n", true), Ok(Done::Written));
     assert_eq!(fs::read(&stale).unwrap(), b"new\n");
     assert!(
         !sidecar.exists(),
@@ -114,7 +128,25 @@ fn update_writes_a_missing_golden_with_its_folders_and_a_changed_one() {
     );
 
     // A second update with the same bytes writes nothing and still passes.
-    assert_eq!(compare(&stale, b"new\n", true), Ok(Done::Matched));
+    assert_eq!(tree.compare(&stale, b"new\n", true), Ok(Done::Matched));
+}
+
+/// Every file and folder below `dir`, as sorted `/`-separated text relative to `dir`.
+fn listing(dir: &Path) -> Vec<String> {
+    fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let rel = path.strip_prefix(base).unwrap();
+            out.push(rel.to_string_lossy().replace('\\', "/"));
+            if path.is_dir() {
+                walk(&path, base, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out.sort();
+    out
 }
 
 #[test]
@@ -124,7 +156,11 @@ fn update_never_touches_the_redaction_folder() {
         "tests/fixtures/redaction/url/proxy.expected",
         b"http://~@h\n",
     );
-    let err = compare(&expected, b"http://other\n", true).unwrap_err();
+    let redaction = tree.path("tests/fixtures/redaction");
+    let before = listing(&redaction);
+    let err = tree
+        .compare(&expected, b"http://other\n", true)
+        .unwrap_err();
     assert!(err.starts_with("golden differs: "), "{err}");
     assert!(
         err.contains("never writes under tests/fixtures/redaction"),
@@ -135,19 +171,47 @@ fn update_never_touches_the_redaction_folder() {
         "no accept command for a hand-edited file: {err}"
     );
     assert_eq!(fs::read(&expected).unwrap(), b"http://~@h\n");
+    // The new bytes are parked under target, and nothing was created in the protected tree.
+    assert!(err.contains("goldens-actual"), "{err}");
+    let parked = listing(&tree.parked());
+    assert!(
+        parked
+            .iter()
+            .any(|p| p.ends_with("tests/fixtures/redaction/url/proxy.expected.actual")),
+        "{parked:?}"
+    );
+    assert_eq!(listing(&redaction), before);
 
-    // A missing file is not created either.
-    let missing = tree.path("tests/fixtures/redaction/url/new.expected");
-    let err = compare(&missing, b"x\n", true).unwrap_err();
+    // A missing file is not created either, and neither is its folder.
+    let missing = tree.path("tests/fixtures/redaction/fresh/new.expected");
+    let err = tree.compare(&missing, b"x\n", true).unwrap_err();
     assert!(err.starts_with("golden missing: "), "{err}");
     assert!(!missing.exists());
+    assert_eq!(listing(&redaction), before);
+    assert!(!redaction.join("fresh").exists());
+}
+
+#[test]
+fn a_matching_protected_golden_clears_its_parked_output() {
+    let tree = Tree::new();
+    let expected = tree.write("tests/fixtures/redaction/url/proxy.expected", b"ok\n");
+    tree.compare(&expected, b"bad\n", false).unwrap_err();
+    assert!(!listing(&tree.parked()).is_empty());
+    assert_eq!(tree.compare(&expected, b"ok\n", false), Ok(Done::Matched));
+    assert!(
+        listing(&tree.parked())
+            .iter()
+            .all(|p| !p.ends_with(".actual")),
+        "{:?}",
+        listing(&tree.parked())
+    );
 }
 
 #[test]
 fn update_never_touches_released_result_files() {
     let tree = Tree::new();
     let result = tree.write("tests/fixtures/results/0.1.0-alpha.1/ready.json", b"{}\n");
-    let err = compare(&result, b"{\"x\":1}\n", true).unwrap_err();
+    let err = tree.compare(&result, b"{\"x\":1}\n", true).unwrap_err();
     assert!(
         err.contains("never writes under tests/fixtures/redaction or tests/fixtures/results"),
         "{err}"
@@ -160,7 +224,7 @@ fn a_protected_golden_that_matches_passes_under_update() {
     // `UPDATE_GOLDENS=1 cargo nextest run --workspace` must not fail the corpus when nothing changed.
     let tree = Tree::new();
     let expected = tree.write("tests/fixtures/redaction/url/proxy.expected", b"ok\n");
-    assert_eq!(compare(&expected, b"ok\n", true), Ok(Done::Matched));
+    assert_eq!(tree.compare(&expected, b"ok\n", true), Ok(Done::Matched));
 }
 
 #[test]
@@ -169,7 +233,7 @@ fn a_dotdot_path_into_the_redaction_folder_is_still_protected() {
     tree.write("tests/fixtures/redaction/url/proxy.expected", b"ok\n");
     let sneaky = tree.path("crates/x/../../tests/fixtures/redaction/url/proxy.expected");
     assert!(is_protected(&sneaky));
-    let err = compare(&sneaky, b"changed\n", true).unwrap_err();
+    let err = tree.compare(&sneaky, b"changed\n", true).unwrap_err();
     assert!(err.contains("never writes"), "{err}");
 }
 
@@ -182,7 +246,7 @@ fn a_symlink_into_the_redaction_folder_is_still_protected() {
         .unwrap();
     let through_link = tree.path("innocent/url/proxy.expected");
     assert!(is_protected(&through_link));
-    let err = compare(&through_link, b"changed\n", true).unwrap_err();
+    let err = tree.compare(&through_link, b"changed\n", true).unwrap_err();
     assert!(err.contains("never writes"), "{err}");
     assert_eq!(
         fs::read(tree.path("tests/fixtures/redaction/url/proxy.expected")).unwrap(),
@@ -190,6 +254,48 @@ fn a_symlink_into_the_redaction_folder_is_still_protected() {
     );
     // A new file below the link is protected too, though it does not exist yet.
     assert!(is_protected(&tree.path("innocent/url/new.expected")));
+}
+
+#[cfg(unix)]
+#[test]
+fn dotdot_after_a_symlink_is_judged_after_the_link_is_followed() {
+    let tree = Tree::new();
+    tree.write("tests/fixtures/redaction/url/proxy.expected", b"ok\n");
+    // `innocent/..` is `tests/fixtures/redaction`, though its text is the tree root.
+    std::os::unix::fs::symlink(
+        tree.path("tests/fixtures/redaction/url"),
+        tree.path("innocent"),
+    )
+    .unwrap();
+    let sneaky = tree.path("innocent/../new.expected");
+    assert!(is_protected(&sneaky));
+    let err = tree.compare(&sneaky, b"x\n", true).unwrap_err();
+    assert!(err.contains("never writes"), "{err}");
+    assert!(!tree.path("tests/fixtures/redaction/new.expected").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn update_refuses_to_write_through_a_symlink_even_a_dangling_one() {
+    let tree = Tree::new();
+    fs::create_dir_all(tree.path("golden")).unwrap();
+    let target = tree.path("elsewhere/out.json");
+    let link = tree.path("golden/report.json");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let err = tree.compare(&link, b"{}\n", true).unwrap_err();
+    assert!(err.starts_with("golden is a symlink: "), "{err}");
+    assert!(!target.exists(), "the write must not follow the link");
+    assert!(!tree.path("elsewhere").exists());
+
+    // A link to a real file is refused too, and the file keeps its bytes.
+    let real = tree.write("real.json", b"old\n");
+    let link2 = tree.path("golden/other.json");
+    std::os::unix::fs::symlink(&real, &link2).unwrap();
+    let err = tree.compare(&link2, b"new\n", true).unwrap_err();
+    assert!(err.starts_with("golden is a symlink: "), "{err}");
+    assert_eq!(fs::read(&real).unwrap(), b"old\n");
+    // Comparing through the link still works when nothing is written.
+    assert_eq!(tree.compare(&link2, b"old\n", true), Ok(Done::Matched));
 }
 
 #[test]
