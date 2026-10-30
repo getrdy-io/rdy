@@ -1,0 +1,12 @@
+schema = 1
+name = "enforcing-root-less"
+summary = "SELinux enforcing, no root, the audit log exists and is not readable"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.lsm"]
+
+[caps]
+root = false
+network = false
+kube = false
