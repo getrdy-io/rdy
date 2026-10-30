@@ -57,13 +57,13 @@ tests/fixtures/
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/`, `reports/`, and under
+What exists today: `allow.toml`, `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/`, `reports/`, and under
 `checks/` the cases `host.memory/pass`, `_policy/symlink-to-shadow` and `_loader/manifest-entries`. The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
 | --- | --- | --- |
-| `allow.toml` | Lint exceptions. `169.254.169.254` for the metadata tests is the first | By hand, with a reason per entry |
+| `allow.toml` | Lint exceptions: the CRLF canary, a reference link in the third-party vectors. The metadata address `169.254.169.254` gets its entry with the first test that uses it. The format is in the file header | By hand, with a reason per entry |
 | `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command or opens a socket | By hand, with the check ticket |
 | `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied`. The expectation of a policy or loader case lives in its Rust test until the fixture lint has a format for it | By hand |
 | `checks/_loader/<case>/` | Cases that exercise the loader and the replay, such as every kind of manifest entry. Their expectation is in the Rust test too | By hand |
@@ -312,19 +312,38 @@ a byte. A fixture that must carry CRLF keeps it on every OS, and any other fixtu
   are not pinned, because they are regenerated with a fresh key when the example spec changes.
 - A red canary on Windows means `.gitattributes` or the checkout is wrong. Do not change the digests to
   make it green.
-- The lint (M1-050) rejects a `\r` outside `crlf` in `tests/fixtures` and `examples/specs`. It must add an
-  allow entry for `canary/netstat-crlf.txt` with a reason.
+- The lint rejects a `\r` outside `crlf` in `tests/fixtures` and `examples/specs`. `allow.toml` holds the one
+  entry for `canary/netstat-crlf.txt`, with its reason.
 
-## Names and sizes
+## The lint
 
-The lint (M1-050) fails on:
+`crates/rdy-engine/tests/fixture_lint.rs` is a normal test, so every leg runs it with `cargo nextest run`.
+Each finding names the file. It covers `tests/fixtures`, and `examples/specs` for line endings, host names
+and addresses. It fails on:
 
-- a file name unique only by case, a Windows reserved name (`con`, `nul`, `aux`, `com1`), a trailing dot or
-  space, one of `<>:"|?*[]`, a path over 150 characters, a symlink;
-- a file over 256 KiB, an env over 1 MiB;
-- a bad manifest, a missing `origin`, an `origin` outside the four;
-- a URL host or FQDN outside the allowed names above, and any publicly routable IP address;
-- a registered check without its cases, and a missing `checks/_policy/symlink-to-shadow`.
+- a file name unique only by case, a Windows reserved name (`con`, `nul`, `aux`, `prn`, `com1` to `com9`,
+  `lpt1` to `lpt9`), a trailing dot or space, one of `<>:"|?*[]\`, a path over 150 characters, a symlink;
+- a file over 256 KiB, a fixture directory over 1 MiB;
+- a `\r` that the fixture's `crlf` list and `allow.toml` do not allow;
+- a URL host or a dotted name that is not `.example`, `.test`, `.invalid`, `.local`, an RFC 2606 example
+  domain or a vendor on the built-in list (OS vendors, `k8s.io`, `kubernetes.io`, `openshift.io`,
+  `nvidia.com`, the clouds, `github.com`), unless `allow.toml` allows it. Only names that end in a common
+  top-level label are checked outside URLs, so `cpu.max` and `install.sh` pass. `README.md` files are not
+  scanned;
+- an IP address that is publicly routable or link-local, unless `allow.toml` allows it. Allowed without an
+  entry: the documentation ranges, RFC 1918, `100.64.0.0/10`, `fd00::/8`, loopback, unspecified, multicast
+  and reserved (`240.0.0.0/4`, which holds netmasks). An IPv4-mapped address counts as its IPv4 address;
+- a bad manifest, a missing `origin` or one outside the four, a duplicate argv, native call or API request,
+  and every other refusal of `Fixture::load`. The lint calls the loader. It has no second parser. The
+  `host.firewall` cases are not loaded yet because they name a sibling `base`; the `LOADER_PENDING` row in
+  the lint says so and M1-172 removes it;
+- a case or environment directory without a `fixture.toml`;
+- a missing required case. The list is `REQUIRED` in the lint: `checks/_policy/symlink-to-shadow` (its
+  `root.manifest.json` must link to `/etc/shadow`) and `checks/host.memory/pass`. A ticket that adds a case
+  the lint should guard, such as the `Timeout` case of `host.disk` in M1-068, adds a row.
+
+An entry in `allow.toml` that matches nothing is a finding too, so the list cannot go stale. The tests of
+the lint plant one violation at a time in an in-memory copy of this tree and expect exactly that finding.
 
 ## Recording (M2)
 
