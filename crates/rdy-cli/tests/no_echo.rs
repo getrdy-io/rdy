@@ -4,7 +4,8 @@
 //! A did-you-mean never offers `--key` or `--allow-unsigned`, a hidden flag or a flag of another
 //! command. The tests run the library entry point with capture buffers.
 
-use rdy_cli::run;
+mod common;
+
 use serde_json::Value;
 
 const CANARY: &str = "CANARYsecret0123456789";
@@ -14,7 +15,7 @@ fn rdy(args: &[&str]) -> (u8, String, String) {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let argv = std::iter::once("rdy").chain(args.iter().copied());
-    let code = run(argv, &mut out, &mut err);
+    let code = common::run_in_process(argv, &mut out, &mut err);
     let text = |b: Vec<u8>| String::from_utf8(b).unwrap_or_else(|e| panic!("not UTF-8: {e}"));
     (code, text(out), text(err))
 }

@@ -30,9 +30,9 @@ disallowed-methods = [
     { path = "rdy_engine::exec::run", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
     { path = "rdy_engine::exec::ExecSpec::new", reason = "the raw runner skips the command table and the policy; use Probe::exec", allow-invalid = true },
     # The live backend reads the real machine. A check gets its backend from the probe it is handed, and
-    # only the engine and the CLI make one (ADR 0014 decision 3). The CLI does not call it yet. When it
-    # does, that one call site opts out with `#[expect(clippy::disallowed_methods)]` (INV-07); so do the
-    # engine's own tests.
+    # only the engine and the CLI make one (ADR 0014 decision 3). The CLI calls it once, in
+    # `rdy_cli::entry`, and opts out there with `#[expect(clippy::disallowed_methods)]` (INV-07,
+    # M1-074); so do the engine's own tests.
     { path = "rdy_engine::live_backend", reason = "a check never builds a backend; it uses the Probe it is handed (ADR 0014)", allow-invalid = true },
     { path = "rdy_engine::probe::Probe::kube_call", reason = "writes the kube entry of the action log; only the read-only guard in rdy-checks-k8s src/client/ calls it, so a check cannot forge a kube entry (INV-14)", allow-invalid = true },
 ]
