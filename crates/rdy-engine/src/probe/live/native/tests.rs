@@ -94,6 +94,15 @@ async fn statvfs_of_a_directory_inside_the_statfs_prefixes_answers_real_numbers(
     assert!(info.blocks > 0);
     assert!(info.blocks_free <= info.blocks);
     assert!(info.blocks_available <= info.blocks_free);
+    // The device is the pair `/proc/self/mountinfo` prints as `major:minor`.
+    let stat = rustix::fs::stat(&sandbox.root).expect("stat");
+    assert_eq!(
+        info.dev,
+        Some((
+            rustix::fs::major(stat.st_dev),
+            rustix::fs::minor(stat.st_dev)
+        ))
+    );
     let log = sandbox.hub.action_log().actions;
     assert_eq!(log.len(), 1);
     assert_eq!(log[0].outcome, ActionOutcome::Ok);

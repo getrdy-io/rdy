@@ -1,0 +1,5 @@
+{
+  "call": "statvfs",
+  "path": "/opt/acme/data",
+  "error": "not_found"
+}

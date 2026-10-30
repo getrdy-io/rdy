@@ -209,6 +209,10 @@ pub struct StatvfsInfo {
     pub no_exec: Option<bool>,
     /// Mounted with set-user-id bits ignored (`ST_NOSUID`).
     pub no_suid: bool,
+    /// The device of the file system as `(major, minor)`, the pair that field 3 of
+    /// `/proc/self/mountinfo` prints as `major:minor`. A check uses it to find the mount line of the
+    /// file system it measured. `None` where the OS has no such number (Windows).
+    pub dev: Option<(u32, u32)>,
 }
 
 /// The fields of `uname(2)` that checks use. The node name is left out: `Hostname` has it.

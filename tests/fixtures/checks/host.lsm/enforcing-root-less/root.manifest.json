@@ -1,0 +1,5 @@
+{
+  "unreadable": [
+    "var/log/audit/audit.log"
+  ]
+}
