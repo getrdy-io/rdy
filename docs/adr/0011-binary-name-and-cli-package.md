@@ -30,6 +30,21 @@ The plan reserves `rdy` on crates.io. Package name, directory and binary name mu
      `RUST_LOG=trace` canary test and the watchdog exit-70 test run against the real binary
      (`assert_cmd`).
    - `Backend` is sealed (ADR 0014), so `run` cannot take a third-party backend.
+   - **As built (M1-074).** `run` is `async` and takes `Arc<dyn Backend>`, because the privilege snapshot
+     (INV-10) reads through the backend and a test then runs it under a runtime it owns (paused time
+     works). It returns `rdy_spec::result::ExitCode`. It calls the privilege gate before every command
+     except help and version. `RunHooks` is a `#[non_exhaustive]` struct with no field yet: each field
+     (clock, run id, deadline, watchdog action) is added by the ticket that reads it. The privilege ids
+     need no hook, because a replay backend that records `/proc/self/status` supplies them. `main.rs`
+     stays a one-line wrapper around `entry::main_code`, which builds the live backend and the runtime,
+     because the umask and the descriptor list come before anything else opens a file. That is the one
+     call of `live_backend` in the CLI (INV-07, allowed in `tests/lint-wall`). The CI conditions above
+     are checked as: the `cargo tree` steps of `ci.yml` (feature tree), `crates/rdy-cli/tests/
+     entry_point_wall.rs` (no `Replay` or `testing` outside `cfg(test)`, one `live_backend` call site,
+     no `testing` on the normal engine dependency). The marker-string check on release archives belongs
+     to the release workflow and is not built yet (see 12-progress, M1-074).
+     No `RunHooks` field may weaken the privilege gate, the redactor or the output-dir rules. Each new
+     field needs security-reviewer review.
 5. A no-code `rdy-cli` 0.0.1 placeholder is published whose description says "install `rdy`", so
    someone who reads the directory name and runs `cargo install rdy-cli` cannot get a squatter's code.
 6. `rdy version` and `rdy --version` both work and print `rdy 0.1.0-alpha.3 (abc1234 2026-12-01)` on

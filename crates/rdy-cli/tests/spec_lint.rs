@@ -6,8 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
+mod common;
+
 use jsonschema::Validator;
-use rdy_cli::run;
 use serde_json::Value;
 
 struct Ran {
@@ -20,7 +21,7 @@ fn rdy(args: &[&str]) -> Ran {
     let mut out = Vec::new();
     let mut err = Vec::new();
     let argv = std::iter::once("rdy").chain(args.iter().copied());
-    let code = run(argv, &mut out, &mut err);
+    let code = common::run_in_process(argv, &mut out, &mut err);
     let text = |b: Vec<u8>| String::from_utf8(b).unwrap_or_else(|e| panic!("not UTF-8: {e}"));
     Ran {
         code,

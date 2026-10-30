@@ -21,7 +21,7 @@ const USER: [u32; 4] = [1000; 4];
 #[cfg(not(windows))]
 fn status(uid: [u32; 4], gid: [u32; 4], cap_eff: u64, cap_amb: u64) -> String {
     format!(
-        "Name:\trdy\nUid:\t{}\t{}\t{}\t{}\nGid:\t{}\t{}\t{}\t{}\nCapEff:\t{cap_eff:016x}\nCapAmb:\t{cap_amb:016x}\n",
+        "Name:\trdy\nUid:\t{}\t{}\t{}\t{}\nGid:\t{}\t{}\t{}\t{}\nCapEff:\t{cap_eff:016x}\nCapPrm:\t{cap_eff:016x}\nCapAmb:\t{cap_amb:016x}\n",
         uid[0], uid[1], uid[2], uid[3], gid[0], gid[1], gid[2], gid[3]
     )
 }

@@ -55,6 +55,16 @@ fn auxv(secure: u64) -> Vec<u8> {
 const USER: [u32; 4] = [1000; 4];
 
 #[cfg(not(windows))]
+/// A status file whose `CapPrm` line is `cap_prm` and whose `CapEff` is zero, the way a file with
+/// `cap_net_raw+p` and no `e` bit looks.
+fn status_with_prm(cap_prm: u64) -> String {
+    status(USER, USER, 0, Some(0)).replace(
+        "CapPrm:\t0000000000000000",
+        &format!("CapPrm:\t{cap_prm:016x}"),
+    )
+}
+
+#[cfg(not(windows))]
 fn linux(uid: [u32; 4], gid: [u32; 4], cap_eff: u64, cap_amb: u64, secure: u64) -> Replay {
     Replay::new()
         .file(STATUS, status(uid, gid, cap_eff, Some(cap_amb)))
@@ -172,6 +182,69 @@ mod linux_snapshot {
             refused_with(linux(USER, USER, 0, 1 << 10, 0)).await,
             [Refusal::Capabilities]
         );
+    }
+
+    #[tokio::test]
+    async fn a_permitted_only_capability_for_a_non_root_user_is_refused() {
+        // `cap_net_raw+p`: CapEff and CapAmb are zero, CapPrm is not.
+        let replay = Replay::new()
+            .file(STATUS, status_with_prm(1 << 13))
+            .file(AUXV, auxv(0));
+        assert_eq!(refused_with(replay).await, [Refusal::Capabilities]);
+        // Root holds a full permitted set and is clean.
+        let all = 0x0000_01ff_ffff_ffff;
+        let (snapshot, _) = snapshot_of(linux([0; 4], [0; 4], all, 0, 0)).await;
+        assert_eq!(snapshot.expect("snapshot").check(), Ok(()));
+    }
+
+    #[tokio::test]
+    async fn a_dirty_status_is_refused_even_when_the_auxv_is_hidden() {
+        // A file-capability process is not dumpable, so its auxv is not readable. The status file
+        // already shows the capability, so the answer is the capability refusal, not a read error.
+        let replay = Replay::new()
+            .file(STATUS, status(USER, USER, 1 << 13, Some(0)))
+            .unreadable(AUXV);
+        assert_eq!(refused_with(replay).await, [Refusal::Capabilities]);
+        let replay = Replay::new()
+            .file(STATUS, status_with_prm(1 << 13))
+            .unreadable(AUXV);
+        assert_eq!(refused_with(replay).await, [Refusal::Capabilities]);
+        let replay = Replay::new()
+            .file(STATUS, status([1000, 0, 0, 0], USER, 0, Some(0)))
+            .unreadable(AUXV);
+        assert_eq!(refused_with(replay).await, [Refusal::UidMismatch]);
+    }
+
+    #[tokio::test]
+    async fn a_hidden_own_auxv_after_a_clean_status_is_a_not_dumpable_refusal() {
+        let replay = Replay::new()
+            .file(STATUS, status(USER, USER, 0, Some(0)))
+            .unreadable(AUXV);
+        let (snapshot, _) = snapshot_of(replay).await;
+        let error = snapshot.expect_err("refused");
+        assert_eq!(error, PrivilegeError::NotDumpable);
+        let text = error.to_string();
+        assert!(text.contains("will not run with more privilege"), "{text}");
+        assert!(text.contains("not dumpable"), "{text}");
+        assert!(text.contains("ls -l"), "{text}");
+        assert!(text.contains("getcap"), "{text}");
+        assert!(text.contains("Fix: "), "{text}");
+        assert_eq!(error.hint(), PrivilegeError::HINT_NOT_DUMPABLE);
+        assert!(!error.message().contains("Fix"), "{}", error.message());
+    }
+
+    #[tokio::test]
+    async fn only_a_permission_denied_auxv_is_a_not_dumpable_refusal() {
+        // A missing auxv (no /proc, a stripped container) stays an unreadable source with the /proc hint.
+        let replay = Replay::new().file(STATUS, status(USER, USER, 0, Some(0)));
+        let (snapshot, _) = snapshot_of(replay).await;
+        match snapshot.expect_err("unreadable") {
+            PrivilegeError::Unreadable(Unreadable {
+                what: Source::ProcAuxv,
+                cause,
+            }) => assert_ne!(cause, ProbeError::PermissionDenied),
+            other => panic!("expected Unreadable, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -436,6 +509,7 @@ fn status_lines_parse() {
         parse_status(&status([1, 2, 3, 4], [5, 6, 7, 8], 0xa80425fb, Some(0x10))).expect("parses");
     assert_eq!(parsed.ids, ProcessIds::new([1, 2, 3, 4], [5, 6, 7, 8]));
     assert_eq!(parsed.cap_eff, 0xa80425fb);
+    assert_eq!(parsed.cap_prm, 0xa80425fb);
     assert_eq!(parsed.cap_amb, 0x10);
 }
 
@@ -457,6 +531,7 @@ fn a_repeated_status_line_is_malformed() {
         "Uid:\t0\t0\t0\t0\n",
         "Gid:\t0\t0\t0\t0\n",
         "CapEff:\t0000000000000000\n",
+        "CapPrm:\t0000000000000000\n",
         "CapAmb:\t0000000000000000\n",
     ] {
         assert!(parse_status(&format!("{base}{extra}")).is_none(), "{extra}");
@@ -773,6 +848,7 @@ fn user() -> Privilege {
     Privilege {
         ids: Some(ProcessIds::new(USER, USER)),
         cap_eff: 0,
+        cap_prm: 0,
         cap_amb: 0,
         at_secure: false,
         elevation: Elevation::NotElevated,
@@ -902,6 +978,7 @@ async fn kube_context_is_left_to_the_family_probe() {
 fn every_error_has_a_message_and_a_hint() {
     for error in [
         PrivilegeError::Refused(vec![Refusal::AtSecure]),
+        PrivilegeError::NotDumpable,
         PrivilegeError::Unreadable(Unreadable {
             what: Source::ProcStatus,
             cause: ProbeError::NotFound,
