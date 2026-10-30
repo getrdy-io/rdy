@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use rdy_spec::result::{ActionKind, ActionOutcome};
@@ -236,16 +237,18 @@ fn a_link_local_answer_loads_so_the_address_rule_can_run_in_every_net_fixture() 
                     "[2001:db8::13]:443": "reset"}}"#,
     )])
     .expect("loads");
-    let net = fixture.replay().net();
+    let replay = fixture.replay();
+    let net = replay.net();
+    // Keys are lower case, and the compare ignores case.
     assert_eq!(
-        net.dns("metadata.acme.example"),
+        replay.dns("METADATA.acme.example"),
         Some(&DnsAnswer::Addrs(vec![
             "169.254.169.254".parse().expect("ip"),
             "fd00:ec2::254".parse().expect("ip"),
         ]))
     );
-    assert_eq!(net.dns("gone.acme.example"), Some(&DnsAnswer::NxDomain));
-    assert_eq!(net.dns("unknown.acme.example"), None);
+    assert_eq!(replay.dns("gone.acme.example"), Some(&DnsAnswer::NxDomain));
+    assert_eq!(replay.dns("unknown.acme.example"), None);
     assert_eq!(
         net.tcp("192.0.2.10:443".parse().expect("addr")),
         Some(&TcpScript::Serve("tls-private-ca".to_owned()))
@@ -1267,6 +1270,83 @@ fn api_and_env_files_are_indexed_by_what_is_inside() {
     assert_eq!(invalid_path(&error), "api/a.json");
 }
 
+/// `net.json` is the table that `Backend::resolve` reads: the facade's lookup gets the recorded answer,
+/// the link-local one included, so the address rule (M1-094) can refuse it.
+#[tokio::test]
+async fn a_recorded_name_answer_is_what_the_backend_resolves() {
+    let fixture = load(&[(
+        "net.json",
+        r#"{"dns": {"Metadata.acme.example": ["169.254.169.254"],
+                    "gone.acme.example": "NXDOMAIN"}}"#,
+    )])
+    .expect("loads");
+    let replay = fixture.replay();
+    let wait = Duration::from_secs(1);
+    let got = Backend::resolve(replay, "metadata.ACME.example", 123, wait)
+        .await
+        .expect("recorded");
+    assert_eq!(got, vec!["169.254.169.254".parse::<IpAddr>().expect("ip")]);
+    let gone = Backend::resolve(replay, "gone.acme.example", 123, wait)
+        .await
+        .expect_err("NXDOMAIN");
+    assert_eq!(gone.kind(), io::ErrorKind::NotFound);
+    assert!(Unrecorded::from_io(&gone).is_none(), "NXDOMAIN is recorded");
+    // A name the fixture does not hold is not recorded, which is not the same as not found.
+    let missing = Backend::resolve(replay, "other.acme.example", 123, wait)
+        .await
+        .expect_err("unrecorded");
+    assert!(Unrecorded::from_io(&missing).is_some(), "{missing}");
+    assert!(matches!(
+        ProbeError::from_io(&missing),
+        ProbeError::NotRecorded(_)
+    ));
+}
+
+/// Through the probe: a spec host that a fixture records at a link-local address is refused.
+#[tokio::test]
+async fn a_fixture_name_at_a_link_local_address_is_refused_by_the_probe() {
+    use crate::check::PeerClass;
+    use crate::family::HostSet;
+    use crate::probe::ProbeHub;
+    use crate::probe::sock::RULE_UDP_ADDRESS;
+    use crate::redact::{Redactor, TagKey};
+
+    static TIME: CheckInfo = CheckInfo {
+        id: "host.time_sync",
+        family: "host",
+        summary: "Asks a time server.",
+        meta: META,
+        needs: &[],
+        wants: &[],
+        default_timeout: None,
+        os: OS,
+        reads: &[],
+        env: &[],
+        commands: &[],
+        peers: &[PeerClass::NtpServers],
+    };
+    let fixture = load(&[(
+        "net.json",
+        r#"{"dns": {"Meta.acme.example": ["169.254.169.254"]}}"#,
+    )])
+    .expect("loads");
+    let hub = ProbeHub::new(
+        Arc::new(fixture.into_replay()),
+        Redactor::new(TagKey::fixed([3; 32])),
+    );
+    let probe = hub.check_probe(TIME.id, Os::Linux, Some(&TIME));
+    let server = rdy_spec::Target::parse("meta.acme.example:123").expect("target");
+    probe.permit_hosts(HostSet::new([server.clone()]));
+    let error = probe
+        .udp_exchange(&server, &[0; 48], 48)
+        .await
+        .expect_err("a link-local answer");
+    assert!(
+        matches!(error, ProbeError::Denied { rule, .. } if rule == RULE_UDP_ADDRESS),
+        "{error:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_recording_answers_only_where_the_live_runner_would_find_the_program() {
     static DIRS: &[&str] = &["/opt/tools/bin"];
@@ -1334,6 +1414,28 @@ async fn a_recording_answers_only_where_the_live_runner_would_find_the_program()
     assert!(matches!(got, Err(ProbeError::NotRecorded(_))), "{got:?}");
     let error = got.expect_err("not recorded").to_string();
     assert!(error.contains("no recorded answer"), "{error}");
+    // Two recordings are in directories that are not searched here; the first by path is named.
+    assert!(
+        error.contains("/opt/tools/bin/chronyc")
+            && error.contains("does not search that directory"),
+        "{error}"
+    );
+    // A command that is recorded nowhere gets no such hint.
+    let got = only
+        .replay()
+        .spawn(plain(&["sources"]))
+        .await
+        .expect_err("not recorded");
+    assert!(!got.to_string().contains("does not search"), "{got}");
+
+    // A declared directory the live runner would refuse is refused here too.
+    static BAD: &[&str] = &["/opt/../etc"];
+    let bad = Cmd::new("chronyc", Duration::from_secs(5)).extra_dirs(BAD);
+    let got = only.replay().spawn(bad).await;
+    assert!(
+        matches!(got, Err(ProbeError::Policy(PolicyError::InvalidDir { .. }))),
+        "{got:?}"
+    );
 
     // /bin is a search directory.
     let bin = load(&[(
@@ -1665,29 +1767,35 @@ fn a_child_manifest_replaces_the_whole_root_manifest_of_the_base() {
 
 #[test]
 fn a_fixture_over_the_file_or_byte_budget_is_refused() {
-    // MAX_FILES small files.
+    // The loader takes its limits as an argument, so a few small files prove both checks. A limit of
+    // three files is under the four this fixture holds (the manifest and three more).
     let dir = TempDir::new().expect("temp dir");
     put(dir.path(), "x", "linux", "", &[]);
     let root = dir.path().join("envs/x/root/many");
     fs::create_dir_all(&root).expect("dirs");
-    for n in 0..fixture::MAX_FILES {
+    for n in 0..3 {
         fs::write(root.join(format!("f{n}")), "").expect("write");
     }
-    let error = Fixture::load(dir.path(), "envs/x").expect_err("too many files");
-    assert!(error.to_string().contains("over"), "{error}");
+    let error = Fixture::load_with(dir.path(), "envs/x", fixture::Budget::limited(3, u64::MAX))
+        .expect_err("too many files");
+    assert!(error.to_string().contains("over 3 files"), "{error}");
+    Fixture::load_with(dir.path(), "envs/x", fixture::Budget::limited(5, u64::MAX))
+        .expect("within the file limit");
 
-    // MAX_TOTAL_BYTES in files that are each under the file cap.
+    // Bytes: a limit under the size of one file.
     let dir = TempDir::new().expect("temp dir");
-    put(dir.path(), "x", "linux", "", &[]);
-    let root = dir.path().join("envs/x/root/big");
-    fs::create_dir_all(&root).expect("dirs");
-    let chunk = vec![0u8; usize::try_from(fixture::MAX_FILE_BYTES).expect("fits")];
-    let count = fixture::MAX_TOTAL_BYTES / fixture::MAX_FILE_BYTES + 1;
-    for n in 0..count {
-        fs::write(root.join(format!("b{n}")), &chunk).expect("write");
-    }
-    let error = Fixture::load(dir.path(), "envs/x").expect_err("too many bytes");
-    assert!(error.to_string().contains("over"), "{error}");
+    put(
+        dir.path(),
+        "x",
+        "linux",
+        "",
+        &[("root/big", &"x".repeat(4096))],
+    );
+    let error = Fixture::load_with(dir.path(), "envs/x", fixture::Budget::limited(100, 2048))
+        .expect_err("too many bytes");
+    assert!(error.to_string().contains("2048 bytes"), "{error}");
+    Fixture::load_with(dir.path(), "envs/x", fixture::Budget::limited(100, 1 << 20))
+        .expect("within the byte limit");
 }
 
 #[test]

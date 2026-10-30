@@ -190,12 +190,15 @@ Any slug for the file name. One command per file:
 The key is the normalised resolved `argv`. `argv[0]` is the absolute path the program lives at, and it
 stays in the key. Replay finds a recording as the live runner finds a program: it tries `/usr/sbin`,
 `/usr/bin`, `/sbin` and `/bin`, then the directories the check declared, and uses the first one that
-holds the program. A recording in any other directory (`/opt/x/chronyc`) answers nothing. On a Windows
+holds the program. A recording in any other directory (`/opt/x/chronyc`) answers nothing, and the
+`NotRecorded` error names the recorded path and says the runner does not search that directory. On a Windows
 fixture only `whoami.exe` in `C:\Windows\System32` runs, and names compare without case.
 
 A machine that lacks a tool is recorded as `{ "argv": ["chronyc"], "missing": true }`: the bare program
 name and nothing else in the file. A call to it fails with the error the live runner gives for a program
-that is not on the search path. The same program cannot also be recorded as installed in one fixture. `exit` may be `null` for a command a signal ended. Binary output uses `stdout_b64`
+that is not on the search path. The same program cannot also be recorded as installed in one fixture.
+
+`exit` may be `null` for a command a signal ended. Binary output uses `stdout_b64`
 (standard base64 with padding); `stdout` and `stdout_b64` are exclusive. Stdout and stderr are cut at the
 same caps as a live run, with the truncation flags set. A duplicate key fails the load and the lint.
 A `delay_ms` is a timer on the tokio clock. A delay that reaches the command's time limit gives a
@@ -260,6 +263,9 @@ lookup may answer with a link-local or metadata address, as recorded. The addres
 the facade's (M1-094), and every net fixture can hold such an answer so the rule runs against it. Keys of
 `tcp` are an IP address and a port, with IPv6 in brackets. A host name compares without case. An address
 the file does not hold fails with `NotRecorded`.
+
+The `dns` answers are the one table that `Backend::resolve` reads, so a facade lookup gets exactly what
+the file holds. `NXDOMAIN` is "not found". A name the file does not hold fails with `NotRecorded`.
 
 ### `env.json`
 

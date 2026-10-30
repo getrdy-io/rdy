@@ -1,9 +1,10 @@
 //! `net.json`: scripted name lookups and connections (08 Appendix A).
 //!
-//! The script is data. The facade's name and socket calls arrive with the network tickets (M1-091 and
-//! M1-094), and they read it through [`NetScript`] and [`Replay::dial`](super::Replay::dial). A lookup
-//! may answer with an address the engine refuses (a link-local one, say): the script holds it as
-//! recorded so that the address rule runs in every net fixture, and the rule is the facade's.
+//! The connections are data in [`NetScript`], read through [`Replay::dial`](super::Replay::dial). The
+//! name answers are not here: the loader puts them in the one table that `Backend::resolve` reads (see
+//! `sock::replay`), so a fixture's recorded answer is what the facade's lookup gets. A lookup may
+//! answer with an address the engine refuses (a link-local one, say): the table holds it as recorded
+//! so that the address rule runs in every net fixture, and the rule is the facade's.
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
@@ -37,26 +38,14 @@ pub enum TcpScript {
 /// The parsed `net.json` of a fixture.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NetScript {
-    dns: BTreeMap<String, DnsAnswer>,
     tcp: BTreeMap<SocketAddr, TcpScript>,
 }
 
 impl NetScript {
-    /// The answer for a host name, or `None` when the fixture has none. Names compare without regard
-    /// to case.
-    #[must_use]
-    pub fn dns(&self, host: &str) -> Option<&DnsAnswer> {
-        self.dns.get(&host.to_ascii_lowercase())
-    }
-
     /// What connecting to `addr` does, or `None` when the fixture has no entry.
     #[must_use]
     pub fn tcp(&self, addr: SocketAddr) -> Option<&TcpScript> {
         self.tcp.get(&addr)
-    }
-
-    pub(super) fn insert_dns(&mut self, host: &str, answer: DnsAnswer) {
-        self.dns.insert(host.to_ascii_lowercase(), answer);
     }
 
     pub(super) fn insert_tcp(&mut self, addr: SocketAddr, script: TcpScript) {

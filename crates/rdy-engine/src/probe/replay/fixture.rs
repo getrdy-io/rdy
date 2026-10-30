@@ -228,8 +228,17 @@ impl Fixture {
     ///
     /// [`FixtureError`] naming the first file that is wrong.
     pub fn load(root: &Path, name: &str) -> Result<Self, FixtureError> {
+        Self::load_with(root, name, Budget::default())
+    }
+
+    /// [`Fixture::load`] with these limits. The tests lower them so that the budget check does not
+    /// need a fixture of tens of thousands of files.
+    pub(super) fn load_with(
+        root: &Path,
+        name: &str,
+        mut budget: Budget,
+    ) -> Result<Self, FixtureError> {
         check_name(name, name)?;
-        let mut budget = Budget::default();
         let child = read_layer(root, name, &mut budget)?;
         let files = match child.manifest.base.clone() {
             None => {
@@ -375,10 +384,35 @@ fn check_name(fixture: &str, name: &str) -> Result<(), FixtureError> {
 
 // ---- reading the directory ---------------------------------------------------------------------
 
-#[derive(Default)]
-struct Budget {
+/// What the loader has read so far, and the most it may read.
+pub(super) struct Budget {
     files: usize,
     bytes: u64,
+    max_files: usize,
+    max_bytes: u64,
+}
+
+impl Default for Budget {
+    fn default() -> Self {
+        Self {
+            files: 0,
+            bytes: 0,
+            max_files: MAX_FILES,
+            max_bytes: MAX_TOTAL_BYTES,
+        }
+    }
+}
+
+impl Budget {
+    /// A budget with lower limits, for tests.
+    #[cfg(test)]
+    pub(super) fn limited(max_files: usize, max_bytes: u64) -> Self {
+        Self {
+            max_files,
+            max_bytes,
+            ..Self::default()
+        }
+    }
 }
 
 /// One directory read: its manifest and the files the replay uses, by path below the directory.
@@ -424,11 +458,14 @@ fn read_file(
     }
     budget.files += 1;
     budget.bytes += len;
-    if budget.files > MAX_FILES || budget.bytes > MAX_TOTAL_BYTES {
+    if budget.files > budget.max_files || budget.bytes > budget.max_bytes {
         return Err(invalid(
             fixture,
             shown,
-            format!("the fixture is over {MAX_FILES} files or {MAX_TOTAL_BYTES} bytes"),
+            format!(
+                "the fixture is over {} files or {} bytes",
+                budget.max_files, budget.max_bytes
+            ),
         ));
     }
     fs::read(path).map_err(|e| read_error(&e))
@@ -951,7 +988,11 @@ fn build(
                 replay.api.insert(key, record);
             }
         } else if path == "net.json" {
-            replay.script = net(&ctx, bytes)?;
+            let (names, script) = net(&ctx, bytes)?;
+            for (host, answer) in names {
+                replay.net.insert_name(&host, answer);
+            }
+            replay.script = script;
         } else if path == "env.json" {
             replay.env = env(&ctx, bytes)?;
         }
@@ -1552,10 +1593,14 @@ fn api(ctx: &Ctx<'_>, bytes: &[u8]) -> Result<(ApiKey, String, ApiRecord), Fixtu
     ))
 }
 
-/// `net.json`.
-fn net(ctx: &Ctx<'_>, bytes: &[u8]) -> Result<super::net::NetScript, FixtureError> {
+/// `net.json`: the recorded name answers, and the connection script.
+fn net(
+    ctx: &Ctx<'_>,
+    bytes: &[u8],
+) -> Result<(Vec<(String, DnsAnswer)>, super::net::NetScript), FixtureError> {
     let mut obj = Obj::parse(ctx, bytes)?;
     let mut script = super::net::NetScript::default();
+    let mut names = Vec::new();
     let mut hosts: HashMap<String, String> = HashMap::new();
     for (host, answer) in obj.optional_object("dns")?.unwrap_or_default() {
         if host.is_empty() {
@@ -1583,7 +1628,7 @@ fn net(ctx: &Ctx<'_>, bytes: &[u8]) -> Result<super::net::NetScript, FixtureErro
                 )));
             }
         };
-        script.insert_dns(&host, answer);
+        names.push((host, answer));
     }
     let mut addrs: HashMap<String, String> = HashMap::new();
     for (addr, how) in obj.optional_object("tcp")?.unwrap_or_default() {
@@ -1620,7 +1665,7 @@ fn net(ctx: &Ctx<'_>, bytes: &[u8]) -> Result<super::net::NetScript, FixtureErro
         script.insert_tcp(addr, how);
     }
     obj.finish()?;
-    Ok(script)
+    Ok((names, script))
 }
 
 /// `env.json`.

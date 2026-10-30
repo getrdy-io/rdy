@@ -52,7 +52,7 @@ use super::{
 };
 use crate::check::{BoxFuture, Os};
 use crate::exec::DEFAULT_STDERR_CAP;
-use crate::exec::policy::{Cmd, PolicyError, SEARCH_DIRS, WINDOWS_WHOAMI};
+use crate::exec::policy::{Cmd, PolicyError, SEARCH_DIRS, WINDOWS_WHOAMI, check_dir, stem};
 use crate::privilege::ProcessIds;
 
 mod b64;
@@ -82,7 +82,7 @@ impl fmt::Display for Unrecorded {
 impl std::error::Error for Unrecorded {}
 
 impl Unrecorded {
-    fn error(what: impl Into<String>) -> io::Error {
+    pub(crate) fn error(what: impl Into<String>) -> io::Error {
         io::Error::new(io::ErrorKind::NotFound, Self(what.into()))
     }
 
@@ -157,7 +157,7 @@ pub struct Replay {
     missing: HashSet<String>,
     ids: Option<ProcessIds>,
     native: HashMap<NativeCall, NativeAnswer>,
-    /// The scripted names and connections of `net.json` (M1-049).
+    /// The scripted connections of `net.json` (M1-049).
     script: NetScript,
     /// Names, datagram servers and unix socket replies (M1-144). Its builders are in `sock::replay`.
     pub(super) net: super::sock::replay::ReplayNet,
@@ -315,7 +315,8 @@ impl Replay {
         self
     }
 
-    /// The scripted names and connections of `net.json`.
+    /// The scripted connections of `net.json`. The name answers are in the table that `Backend::resolve`
+    /// reads; see [`Replay::dns`].
     #[must_use]
     pub fn net(&self) -> &NetScript {
         &self.script
@@ -394,9 +395,13 @@ impl Replay {
         cmd: &Cmd,
     ) -> Result<Option<&HashMap<Vec<String>, CommandAnswer>>, ProbeError> {
         let name = self.program_key(cmd.program());
+        // The live runner checks the declared directories before it looks for the program, on every OS.
+        for dir in cmd.declared_dirs() {
+            check_dir(dir).map_err(ProbeError::Policy)?;
+        }
         let candidates: Vec<String> = if self.os == Os::Windows {
             // Until job objects land (M2-006) only `whoami` runs, from the constant path.
-            if name.strip_suffix(".exe").unwrap_or(&name) != "whoami" {
+            if stem(cmd.program()) != "whoami" {
                 return Err(ProbeError::Policy(PolicyError::NotAllowedOnWindows {
                     program: cmd.program(),
                 }));
@@ -410,6 +415,19 @@ impl Replay {
                 .collect()
         };
         Ok(candidates.iter().find_map(|path| self.commands.get(path)))
+    }
+
+    /// The path of a recording of `cmd` with these arguments in a directory the runner does not search,
+    /// if the fixture holds one. It explains a "not recorded" that would otherwise look like a typo.
+    fn unsearched(&self, cmd: &Cmd, args: &[String]) -> Option<&str> {
+        let name = self.program_key(cmd.program());
+        self.commands
+            .iter()
+            .filter(|(path, by_args)| {
+                path.rsplit(['/', '\\']).next() == Some(name.as_str()) && by_args.contains_key(args)
+            })
+            .map(|(path, _)| path.as_str())
+            .min()
     }
 
     /// Follows links on the virtual tree, one component at a time, like `realpath`.
@@ -642,11 +660,15 @@ impl Backend for Replay {
                         program: cmd.program(),
                     }));
                 }
-                return Err(ProbeError::NotRecorded(format!(
-                    "the command `{} {}`",
-                    cmd.program(),
-                    args.join(" ")
-                )));
+                let what = format!("the command `{} {}`", cmd.program(), args.join(" "));
+                return Err(ProbeError::NotRecorded(
+                    match self.unsearched(&cmd, &args) {
+                        Some(path) => format!(
+                            "{what}: it is recorded at {path}, but the runner does not search that directory"
+                        ),
+                        None => what,
+                    },
+                ));
             };
             // The live runner kills a command at its time limit. A delay that reaches it is a timeout,
             // after the limit and no longer.

@@ -628,7 +628,7 @@ fn check_name(program: &'static str) -> Result<(), PolicyError> {
 }
 
 /// Lower case, without a trailing `.exe`.
-fn stem(name: &str) -> String {
+pub(crate) fn stem(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
     lower.strip_suffix(".exe").unwrap_or(&lower).to_owned()
 }
@@ -680,7 +680,7 @@ fn check_env(vars: &[(&'static str, OsString)]) -> Result<(), PolicyError> {
 
 /// A declared directory must be absolute and spelled plainly: no `.`, no `..`, no empty segment.
 /// `Path::components` hides `.` and `//`, so the text is checked as well.
-fn check_dir(dir: &'static str) -> Result<PathBuf, PolicyError> {
+pub(crate) fn check_dir(dir: &'static str) -> Result<PathBuf, PolicyError> {
     let path = Path::new(dir);
     let spelled_plainly = dir
         .split(['/', '\\'])
