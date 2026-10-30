@@ -101,6 +101,10 @@ pub(crate) enum NativeFailure {
     PermissionDenied,
     NotFound,
     Io(String),
+    /// The trust store is replaced by a variable this OS may not read. Only the tests of a caller that
+    /// maps it record this.
+    #[cfg(test)]
+    Overridden,
     /// A call that ran out of time. Only the tests of a caller that maps it record this.
     #[cfg(test)]
     TimedOut,
@@ -113,6 +117,8 @@ impl NativeFailure {
             Self::PermissionDenied => io::Error::from(io::ErrorKind::PermissionDenied),
             Self::NotFound => io::Error::from(io::ErrorKind::NotFound),
             Self::Io(text) => io::Error::other(text),
+            #[cfg(test)]
+            Self::Overridden => super::native::RootsOverridden::error(),
             #[cfg(test)]
             Self::TimedOut => io::Error::from(io::ErrorKind::TimedOut),
         }

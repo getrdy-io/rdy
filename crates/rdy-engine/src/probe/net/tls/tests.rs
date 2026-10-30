@@ -579,6 +579,26 @@ async fn a_store_that_would_not_read_is_unreadable_and_kept_but_a_timeout_is_ask
     assert_eq!(of_kind(&hub, ActionKind::Native).len(), 2);
 }
 
+#[tokio::test]
+async fn a_store_replaced_by_a_variable_is_overridden_and_kept() {
+    let ca = TestCa::root("Acme Test Root");
+    let server = tls_server(&ca, &["web.acme.test"], Validity::Always).await;
+    let at = web(&server);
+    let hub = hub_over(
+        machine(server.addr(), None)
+            .native_failure(NativeCall::SystemRoots, NativeFailure::Overridden),
+    );
+    for _ in 0..2 {
+        let chain = probe(&hub, &[&at])
+            .tls_chain(&target(&at), Route::Direct)
+            .await
+            .expect("a chain");
+        assert_eq!(chain.system, TrustVerdict::Unavailable(NoRoots::Overridden));
+        assert_eq!(chain.system_roots, 0);
+    }
+    assert_eq!(of_kind(&hub, ActionKind::Native).len(), 1);
+}
+
 // ---- policy and the log -------------------------------------------------------------------------
 
 #[tokio::test]
@@ -740,6 +760,24 @@ async fn the_live_backend_handshakes_on_loopback_and_reads_the_real_store() {
     assert_eq!(chain.certs.len(), 1);
     assert_eq!(chain.sni, None);
     assert_eq!(chain.bundled, rejected(TrustFailure::UnknownIssuer));
+    // Windows reads no files in M1, so with either variable set the store is not asked (it would read
+    // the variable with no rules): the verdict says so, or says the read failed.
+    if cfg!(windows)
+        && (std::env::var_os("SSL_CERT_FILE").is_some()
+            || std::env::var_os("SSL_CERT_DIR").is_some())
+    {
+        assert!(
+            matches!(
+                chain.system,
+                TrustVerdict::Unavailable(NoRoots::Overridden | NoRoots::Unreadable)
+            ),
+            "{:?}",
+            chain.system
+        );
+        assert_eq!(chain.system_roots, 0);
+        handshakes_settle(&server, 1).await;
+        return;
+    }
     // The test CA is in no real store. A Linux machine with no store at all (a bare container) says so.
     assert!(
         matches!(

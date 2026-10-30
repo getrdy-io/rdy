@@ -165,6 +165,35 @@ pub enum NativeValue {
     SystemRoots(Vec<Vec<u8>>),
 }
 
+/// The OS store is replaced by `SSL_CERT_FILE` or `SSL_CERT_DIR` and this OS may not read what they
+/// name (Windows, which has no file reads in M1). It rides inside an `io::Error` and the probe turns it
+/// back into [`ProbeError::StoreOverridden`], so the check can say how to fix it.
+#[derive(Debug)]
+pub(crate) struct RootsOverridden;
+
+impl fmt::Display for RootsOverridden {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SSL_CERT_FILE or SSL_CERT_DIR is set")
+    }
+}
+
+impl std::error::Error for RootsOverridden {}
+
+impl RootsOverridden {
+    /// The error a backend returns.
+    #[cfg(any(windows, test))]
+    pub(crate) fn error() -> std::io::Error {
+        std::io::Error::other(Self)
+    }
+
+    /// Whether `error` carries the marker.
+    pub(crate) fn is_in(error: &std::io::Error) -> bool {
+        error
+            .get_ref()
+            .is_some_and(|inner| inner.downcast_ref::<Self>().is_some())
+    }
+}
+
 /// Applies the caps of [`NativeCall::SystemRoots`]: an empty certificate or one over [`MAX_ROOT_BYTES`]
 /// is dropped, and the list is cut at [`MAX_SYSTEM_ROOTS`]. The probe applies it to every backend's
 /// answer, so a replayed fixture and a live store are held to the same bound. A cut logs a warning with

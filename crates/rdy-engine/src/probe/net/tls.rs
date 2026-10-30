@@ -22,8 +22,10 @@
 //! are capped at [`MAX_SYSTEM_ROOTS`](crate::probe::MAX_SYSTEM_ROOTS) certificates of
 //! [`MAX_ROOT_BYTES`](crate::probe::MAX_ROOT_BYTES) each. A store that is empty or that the OS could not
 //! give leaves the system verdict [`TrustVerdict::Unavailable`], with [`NoRoots::Empty`] ("no OS trust
-//! store found") or [`NoRoots::Unreadable`] ("the OS trust store could not be read"). The run keeps
-//! an empty store and a read error; it asks again after a timeout or a refusal. The bundled roots are the `webpki-roots` list. There is **no revocation check**:
+//! store found"), [`NoRoots::Unreadable`] ("the OS trust store could not be read") or
+//! [`NoRoots::Overridden`] ("unset `SSL_CERT_FILE` and `SSL_CERT_DIR`"; Windows reads no files in M1).
+//! The run keeps an empty store, a read error and an override; it asks again after a timeout or a
+//! refusal. The bundled roots are the `webpki-roots` list. There is **no revocation check**:
 //! [`REVOCATION_NOTE`] is the wording a report uses.
 //!
 //! **The log.** One `tls` entry per call: `host`, `port`, `via_proxy`, `addr` and, for a name, `sni`. The
@@ -132,6 +134,9 @@ pub enum NoRoots {
     /// `SSL_CERT_DIR` was missing or refused, or the OS gave an error. A check reports "the OS trust store
     /// could not be read" and not "no store found".
     Unreadable,
+    /// `SSL_CERT_FILE` or `SSL_CERT_DIR` is set and rdy may not read what it names on this OS (Windows,
+    /// in this version). A check reports that and says to unset the variable.
+    Overridden,
 }
 
 /// What one TLS call found.
@@ -325,6 +330,10 @@ impl Probe {
                     // No source on this OS.
                     Err(ProbeError::Unsupported(_)) => {
                         Ok(Arc::new(Trust::unavailable(NoRoots::Empty)))
+                    }
+                    // The operator replaced the store with a variable this OS may not read.
+                    Err(ProbeError::StoreOverridden) => {
+                        Ok(Arc::new(Trust::unavailable(NoRoots::Overridden)))
                     }
                     // The store is there and did not read.
                     Err(

@@ -485,8 +485,8 @@ tests policy.
   `h2` and `http/1.1`, no session resumption and a 5 s limit. A `TlsChain` holds the DER chain as sent
   (leaf first, no root), the `sni`, one `TrustVerdict` for the system roots and one for the bundled
   roots (`Valid`, `Rejected(UnknownIssuer | Expired | NotYetValid | NameMismatch | BadSignature |
-  Policy)` or `Unavailable(Empty | Unreadable)` when the set has no roots: `Empty` for an empty store or an
-  OS with no source, `Unreadable` for a store that did not read), the number of system roots used,
+  Policy)` or `Unavailable(Empty | Unreadable | Overridden)` when the set has no roots: `Empty` for an empty store or an
+  OS with no source, `Unreadable` for a store that did not read, `Overridden` for a variable Windows may not read), the number of system roots used,
   the protocol, the chosen ALPN protocol, the handshake time and the `TcpReport` of the connection.
   `Expired` and `NotYetValid` are the `clock_or_expiry` class (`TrustFailure::is_clock_or_expiry`). A
   chain that fails to validate is data, not an error. The call fails with `NetFailure::NotConnected`
@@ -541,8 +541,9 @@ tests policy.
     instead, and Windows with neither set asks it for the root store (it is the one native call Windows
     answers). `rustls-native-certs` reads the two variables with plain `std::fs`, no rules and no caps,
     and then skips the OS store, so rdy never calls it while either is set: macOS takes the PEM reader,
-    and Windows, which has no file reads in M1, fails the call with a typed error (the verdict is
-    `Unavailable(Unreadable)`). The answer is capped in count and size by `MAX_SYSTEM_ROOTS` (1024) and
+    and Windows, which has no file reads in M1, fails the call with a typed error (`ProbeError::StoreOverridden`;
+    the verdict is `Unavailable(Overridden)` and a check says to unset the variables). A panic inside
+    `rustls-native-certs` is caught and becomes one cached `Unavailable(Unreadable)`. The answer is capped in count and size by `MAX_SYSTEM_ROOTS` (1024) and
     `MAX_ROOT_BYTES` (16 KiB), by the live reader and again by `Probe::native` for every backend, and the
     PEM reader reads at most 2048 files of a directory and 8 MiB in all. A certificate over the size is
     dropped, one past the count is cut, a repeat is kept once, and a warning with the counts (no

@@ -37,13 +37,13 @@ const CERT_FILE_VAR: &str = "SSL_CERT_FILE";
 #[cfg(any(target_os = "macos", windows))]
 const CERT_DIR_VAR: &str = "SSL_CERT_DIR";
 
-/// Whether `rustls-native-certs` would read these values instead of the OS store. It does when
-/// `SSL_CERT_FILE` is set at all (even empty) or `SSL_CERT_DIR` names a directory. This is the rule
-/// of rustls-native-certs 0.8, copied so that the OS store is asked only when the crate would ask it.
+/// Whether `rustls-native-certs` might read these values instead of the OS store. Either variable set
+/// at all, even empty, counts. Every 0.8.x release reads at least that much (0.8.5 skips the OS store
+/// for a set file and for a directory list with a non-empty entry), so this covers all of them. It is
+/// the rule of the crate, copied; the workspace pins the crate with `=` so a bump forces a re-review.
 #[cfg(any(target_os = "macos", windows, test))]
 fn overrides(file: Option<&std::ffi::OsStr>, dirs: Option<&std::ffi::OsStr>) -> bool {
-    file.is_some()
-        || dirs.is_some_and(|dirs| std::env::split_paths(dirs).any(|p| !p.as_os_str().is_empty()))
+    file.is_some() || dirs.is_some()
 }
 
 /// [`overrides`] for the values the process has.
@@ -70,16 +70,23 @@ pub(super) fn system_roots(secrets: &super::files::Secrets) -> io::Result<Vec<Ve
 /// The OS trust roots as DER, on Windows. Blocking: the caller puts it on the blocking pool.
 ///
 /// Windows has no file reads in M1, and `rustls-native-certs` would read `SSL_CERT_FILE` and
-/// `SSL_CERT_DIR` without any rule, so with either set this is an error and the verdict is
-/// "could not be read".
+/// `SSL_CERT_DIR` without any rule, so with either set this is a typed error
+/// (`RootsOverridden`) and the verdict is `NoRoots::Overridden`, which carries the "unset it" hint.
 #[cfg(windows)]
 pub(super) fn system_roots() -> io::Result<Vec<Vec<u8>>> {
     if env_overrides() {
-        return Err(io::Error::other(
-            "SSL_CERT_FILE or SSL_CERT_DIR is set, and rdy reads no files on Windows in this version",
-        ));
+        return Err(crate::probe::native::RootsOverridden::error());
     }
     native_store::load()
+}
+
+/// Runs the read of the OS store and turns a panic inside it into an error. `rustls-native-certs` 0.8
+/// unwraps inside its Windows reader, and a panic must not end the run or leave the roots asked twice:
+/// the error becomes one cached "could not be read" verdict.
+#[cfg(any(target_os = "macos", windows, test))]
+fn guarded<T>(read: impl FnOnce() -> io::Result<T> + std::panic::UnwindSafe) -> io::Result<T> {
+    std::panic::catch_unwind(read)
+        .unwrap_or_else(|_| Err(io::Error::other("the OS trust store could not be read")))
 }
 
 /// The certificates collected so far: capped in count and size, and without repeats.
@@ -359,6 +366,10 @@ mod native_store {
     /// `rustls-native-certs` goes to the keychains or the root store and reads no file of its own.
     /// An error means the OS gave nothing and said why; a store that is simply empty is an empty list.
     pub(super) fn load() -> io::Result<Vec<Vec<u8>>> {
+        super::guarded(read)
+    }
+
+    fn read() -> io::Result<Vec<Vec<u8>>> {
         let result = rustls_native_certs::load_native_certs();
         let mut found = Collected::new();
         for cert in &result.certs {
