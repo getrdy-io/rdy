@@ -11,30 +11,12 @@ use serde_json::json;
 
 use super::*;
 use crate::check::{BoxFuture, CheckInfo, CheckMeta, Finding, Level, OsSupport, Support};
+use crate::testing::{FAKE_INFO, Fake, FakeCheck};
 
 const FULL: OsSupport = OsSupport {
     linux: Support::Full,
     macos: Support::Full,
     windows: Support::Full,
-};
-
-static PLAIN: CheckInfo = CheckInfo {
-    id: "fake.plain",
-    family: "fake",
-    summary: "A fake check with no needs.",
-    meta: CheckMeta {
-        title: "Fake check",
-        remediation: "Nothing to fix. This check is a test double.",
-    },
-    needs: &[],
-    wants: &[],
-    default_timeout: None,
-    os: FULL,
-    reads: &[],
-    statfs: &[],
-    env: &[],
-    commands: &[],
-    peers: &[],
 };
 
 static QUICK: CheckInfo = CheckInfo {
@@ -75,22 +57,11 @@ static NEEDS_ROOT: CheckInfo = CheckInfo {
     peers: &[],
 };
 
-/// What a fake check does when it runs.
-enum Mode {
-    /// Passes at once.
-    Pass,
-    /// Waits for this long, then passes.
-    Sleep(Duration),
-    /// Waits forever.
-    Forever,
-    /// Panics with this text.
-    Panic(&'static str),
-    /// Holds its thread until the flag is set, without ever yielding.
-    Spin(Arc<AtomicBool>),
+/// A check that watches the scheduler instead of doing a scripted thing. The scripted ones are
+/// `FakeCheck`.
+enum Watcher {
     /// Counts how many are in flight, waits 10 ms, then passes.
     Track(Arc<Gauge>),
-    /// Passes and counts the run.
-    Count(Arc<AtomicUsize>),
     /// Saves `remaining()` at the start and after a 3 s wait, then passes.
     Remaining(Arc<Mutex<Vec<Duration>>>),
     /// Sets the flag when the future is dropped.
@@ -113,62 +84,60 @@ impl Drop for SetOnDrop {
     }
 }
 
-struct Fake {
-    info: &'static CheckInfo,
-    mode: Mode,
+impl Check for Watcher {
+    fn info(&self) -> &'static CheckInfo {
+        &FAKE_INFO
+    }
+
+    fn run<'a>(&'a self, ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome> {
+        Box::pin(async move {
+            match self {
+                Self::Track(gauge) => {
+                    let now = gauge.now.fetch_add(1, Ordering::SeqCst) + 1;
+                    gauge.max.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    gauge.now.fetch_sub(1, Ordering::SeqCst);
+                }
+                Self::Remaining(seen) => {
+                    seen.lock().expect("lock").push(ctx.remaining());
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    seen.lock().expect("lock").push(ctx.remaining());
+                }
+                Self::DropFlag(dropped) => {
+                    let _flag = SetOnDrop(Arc::clone(dropped));
+                    std::future::pending::<()>().await;
+                }
+                Self::KeepProbe(slot) => {
+                    *slot.lock().expect("lock") = Some(ctx.probe().clone());
+                    std::future::pending::<()>().await;
+                }
+            }
+            FakeCheck::passed(ctx.key())
+        })
+    }
 }
 
-impl Check for Fake {
+/// Counts its runs, so a test can tell that a check with a missing need never started.
+struct Counting {
+    info: &'static CheckInfo,
+    runs: Arc<AtomicUsize>,
+}
+
+impl Check for Counting {
     fn info(&self) -> &'static CheckInfo {
         self.info
     }
 
     fn run<'a>(&'a self, ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome> {
         Box::pin(async move {
-            match &self.mode {
-                Mode::Pass => {}
-                Mode::Sleep(wait) => tokio::time::sleep(*wait).await,
-                Mode::Forever => std::future::pending::<()>().await,
-                Mode::Panic(text) => panic!("{text}"),
-                Mode::Spin(release) => {
-                    while !release.load(Ordering::SeqCst) {
-                        std::hint::spin_loop();
-                    }
-                }
-                Mode::Track(gauge) => {
-                    let now = gauge.now.fetch_add(1, Ordering::SeqCst) + 1;
-                    gauge.max.fetch_max(now, Ordering::SeqCst);
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                    gauge.now.fetch_sub(1, Ordering::SeqCst);
-                }
-                Mode::Count(runs) => {
-                    runs.fetch_add(1, Ordering::SeqCst);
-                }
-                Mode::Remaining(seen) => {
-                    seen.lock().expect("lock").push(ctx.remaining());
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                    seen.lock().expect("lock").push(ctx.remaining());
-                }
-                Mode::DropFlag(dropped) => {
-                    let _flag = SetOnDrop(Arc::clone(dropped));
-                    std::future::pending::<()>().await;
-                }
-                Mode::KeepProbe(slot) => {
-                    *slot.lock().expect("lock") = Some(ctx.probe().clone());
-                    std::future::pending::<()>().await;
-                }
-            }
-            Ok(Finding::pass(format!("{} ran", ctx.key())).with_observed(json!({ "ok": true })))
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            FakeCheck::passed(ctx.key())
         })
     }
 }
 
-fn fake(info: &'static CheckInfo, mode: Mode) -> Arc<dyn Check> {
-    Arc::new(Fake { info, mode })
-}
-
-fn planned(key: &str, mode: Mode) -> Planned {
-    Planned::new(fake(&PLAIN, mode), key)
+fn planned(key: &str, check: impl Check) -> Planned {
+    Planned::new(Arc::new(check), key)
 }
 
 fn scheduler(jobs: usize) -> Scheduler {
@@ -206,9 +175,9 @@ fn the_timeout_is_spec_then_check_default_then_ten_seconds_capped_at_sixty() {
 async fn a_check_that_sleeps_forever_reports_timeout_and_the_others_still_pass() {
     let ran = scheduler(8)
         .run(vec![
-            planned("fake.plain/a", Mode::Pass),
-            planned("fake.plain/stuck", Mode::Forever),
-            planned("fake.plain/b", Mode::Pass),
+            planned("fake.plain/a", FakeCheck::pass()),
+            planned("fake.plain/stuck", FakeCheck::forever()),
+            planned("fake.plain/b", FakeCheck::pass()),
         ])
         .await;
     assert!(passed(&ran[0]));
@@ -224,9 +193,15 @@ async fn a_check_that_sleeps_forever_reports_timeout_and_the_others_still_pass()
 
 #[tokio::test(start_paused = true)]
 async fn the_check_default_timeout_applies_and_the_spec_timeout_replaces_it() {
-    let default = Planned::new(fake(&QUICK, Mode::Forever), "fake.quick");
-    let spec = Planned::new(fake(&QUICK, Mode::Forever), "fake.quick/spec")
-        .with_timeout(Duration::from_secs(7));
+    let default = Planned::new(
+        Arc::new(FakeCheck::with_info(&QUICK, Fake::Forever)),
+        "fake.quick",
+    );
+    let spec = Planned::new(
+        Arc::new(FakeCheck::with_info(&QUICK, Fake::Forever)),
+        "fake.quick/spec",
+    )
+    .with_timeout(Duration::from_secs(7));
     let ran = scheduler(8).run(vec![default, spec]).await;
     assert_eq!(
         ran[0].end,
@@ -244,7 +219,8 @@ async fn the_check_default_timeout_applies_and_the_spec_timeout_replaces_it() {
 
 #[tokio::test(start_paused = true)]
 async fn a_spec_timeout_above_sixty_seconds_is_held_to_sixty() {
-    let item = planned("fake.plain/long", Mode::Forever).with_timeout(Duration::from_secs(600));
+    let item =
+        planned("fake.plain/long", FakeCheck::forever()).with_timeout(Duration::from_secs(600));
     let ran = scheduler(8).run(vec![item]).await;
     assert_eq!(
         ran[0].end,
@@ -256,7 +232,7 @@ async fn a_spec_timeout_above_sixty_seconds_is_held_to_sixty() {
 
 #[tokio::test(start_paused = true)]
 async fn a_check_that_finishes_before_its_timeout_is_not_a_timeout() {
-    let item = planned("fake.plain/slow", Mode::Sleep(Duration::from_secs(9)));
+    let item = planned("fake.plain/slow", FakeCheck::sleep(Duration::from_secs(9)));
     let ran = scheduler(8).run(vec![item]).await;
     assert!(passed(&ran[0]));
     assert_eq!(ran[0].elapsed, Duration::from_secs(9));
@@ -266,9 +242,9 @@ async fn a_check_that_finishes_before_its_timeout_is_not_a_timeout() {
 async fn a_panicking_check_reports_the_panic_and_the_others_still_pass() {
     let ran = scheduler(8)
         .run(vec![
-            planned("fake.plain/a", Mode::Pass),
-            planned("fake.plain/bad", Mode::Panic("index out of range")),
-            planned("fake.plain/b", Mode::Pass),
+            planned("fake.plain/a", FakeCheck::pass()),
+            planned("fake.plain/bad", FakeCheck::panic("index out of range")),
+            planned("fake.plain/b", FakeCheck::pass()),
         ])
         .await;
     assert!(passed(&ran[0]));
@@ -289,7 +265,7 @@ async fn panic_text_is_redacted_and_its_debug_output_is_hidden() {
     let ran = scheduler(1)
         .run(vec![planned(
             "fake.plain/bad",
-            Mode::Panic("bad config: password=canary-hunter2 end"),
+            FakeCheck::panic("bad config: password=canary-hunter2 end"),
         )])
         .await;
     let End::Panicked { message } = &ran[0].end else {
@@ -303,18 +279,16 @@ async fn panic_text_is_redacted_and_its_debug_output_is_hidden() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_spinning_check_on_a_two_worker_runtime_does_not_stop_the_others() {
-    let release = Arc::new(AtomicBool::new(false));
-    let _release_on_exit = SetOnDrop(Arc::clone(&release));
-
-    let spin = planned("fake.plain/spin", Mode::Spin(Arc::clone(&release)))
-        .with_timeout(Duration::from_millis(300));
+    // Dropped at the end of the test, which lets the spinning worker go.
+    let (spin_check, _release) = FakeCheck::spin();
+    let spin = planned("fake.plain/spin", spin_check).with_timeout(Duration::from_millis(300));
     let mut items = vec![spin];
     for n in 0..5 {
-        items.push(planned(&format!("fake.plain/{n}"), Mode::Pass));
+        items.push(planned(&format!("fake.plain/{n}"), FakeCheck::pass()));
     }
     items.push(planned(
         "fake.plain/sleeper",
-        Mode::Sleep(Duration::from_millis(50)),
+        FakeCheck::sleep(Duration::from_millis(50)),
     ));
 
     let ran = scheduler(8).run(items).await;
@@ -331,7 +305,12 @@ async fn a_spinning_check_on_a_two_worker_runtime_does_not_stop_the_others() {
 async fn at_most_jobs_checks_run_at_once() {
     let gauge = Arc::new(Gauge::default());
     let items: Vec<Planned> = (0..12)
-        .map(|n| planned(&format!("fake.plain/{n}"), Mode::Track(Arc::clone(&gauge))))
+        .map(|n| {
+            planned(
+                &format!("fake.plain/{n}"),
+                Watcher::Track(Arc::clone(&gauge)),
+            )
+        })
         .collect();
     let ran = scheduler(3).run(items).await;
     assert!(ran.iter().all(passed));
@@ -344,7 +323,7 @@ async fn one_job_runs_checks_one_after_another_in_input_order() {
         .map(|n| {
             planned(
                 &format!("fake.plain/{n}"),
-                Mode::Sleep(Duration::from_secs(1)),
+                FakeCheck::sleep(Duration::from_secs(1)),
             )
         })
         .collect();
@@ -367,10 +346,13 @@ async fn one_job_runs_checks_one_after_another_in_input_order() {
 async fn a_fake_family_comes_back_as_pass_and_missing_need() {
     let runs = Arc::new(AtomicUsize::new(0));
     let items = vec![
-        planned("fake.plain", Mode::Pass),
-        Planned::new(
-            fake(&NEEDS_ROOT, Mode::Count(Arc::clone(&runs))),
+        planned("fake.plain", FakeCheck::pass()),
+        planned(
             "fake.needs_root",
+            Counting {
+                info: &NEEDS_ROOT,
+                runs: Arc::clone(&runs),
+            },
         ),
     ];
 
@@ -402,7 +384,7 @@ async fn a_fake_family_comes_back_as_pass_and_missing_need() {
 #[tokio::test]
 async fn the_check_sees_its_key_and_the_os_it_was_given() {
     let ran = Scheduler::new(2, Os::Macos, [Need::Network])
-        .run(vec![planned("fake.plain/named", Mode::Pass)])
+        .run(vec![planned("fake.plain/named", FakeCheck::pass())])
         .await;
     let End::Done(done) = &ran[0].end else {
         panic!("expected a finding");
@@ -417,7 +399,7 @@ async fn the_check_sees_its_key_and_the_os_it_was_given() {
 #[tokio::test(start_paused = true)]
 async fn remaining_counts_down_to_the_timeout() {
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let item = planned("fake.plain/r", Mode::Remaining(Arc::clone(&seen)))
+    let item = planned("fake.plain/r", Watcher::Remaining(Arc::clone(&seen)))
         .with_timeout(Duration::from_secs(10));
     let ran = scheduler(8).run(vec![item]).await;
     assert!(passed(&ran[0]));
@@ -439,7 +421,7 @@ async fn remaining_is_the_cap_outside_the_scheduler_and_zero_after_the_deadline(
 #[tokio::test(start_paused = true)]
 async fn dropping_the_run_aborts_the_checks_still_running() {
     let dropped = Arc::new(AtomicBool::new(false));
-    let item = planned("fake.plain/held", Mode::DropFlag(Arc::clone(&dropped)));
+    let item = planned("fake.plain/held", Watcher::DropFlag(Arc::clone(&dropped)));
     let outcome = tokio::time::timeout(Duration::from_secs(1), scheduler(8).run(vec![item])).await;
     assert!(outcome.is_err(), "the run should still be waiting");
     // Let the aborted task unwind.
@@ -458,8 +440,8 @@ async fn an_empty_plan_returns_an_empty_result() {
 async fn the_permit_comes_back_after_a_timeout() {
     let ran = scheduler(1)
         .run(vec![
-            planned("fake.plain/stuck", Mode::Forever),
-            planned("fake.plain/after", Mode::Pass),
+            planned("fake.plain/stuck", FakeCheck::forever()),
+            planned("fake.plain/after", FakeCheck::pass()),
         ])
         .await;
     assert!(matches!(ran[0].end, End::TimedOut { .. }));
@@ -470,8 +452,8 @@ async fn the_permit_comes_back_after_a_timeout() {
 async fn the_permit_comes_back_after_a_panic() {
     let ran = scheduler(1)
         .run(vec![
-            planned("fake.plain/bad", Mode::Panic("boom")),
-            planned("fake.plain/after", Mode::Pass),
+            planned("fake.plain/bad", FakeCheck::panic("boom")),
+            planned("fake.plain/after", FakeCheck::pass()),
         ])
         .await;
     assert!(matches!(ran[0].end, End::Panicked { .. }));
@@ -516,10 +498,10 @@ async fn running_checks_time_out_at_the_deadline_and_unstarted_ones_are_run_dead
     let ran = scheduler(2)
         .with_deadline(Duration::from_secs(30))
         .run(vec![
-            planned("fake.plain/a", Mode::Forever).with_timeout(Duration::from_secs(60)),
-            planned("fake.plain/b", Mode::Forever).with_timeout(Duration::from_secs(60)),
-            planned("fake.plain/c", Mode::Pass),
-            planned("fake.plain/d", Mode::Pass),
+            planned("fake.plain/a", FakeCheck::forever()).with_timeout(Duration::from_secs(60)),
+            planned("fake.plain/b", FakeCheck::forever()).with_timeout(Duration::from_secs(60)),
+            planned("fake.plain/c", FakeCheck::pass()),
+            planned("fake.plain/d", FakeCheck::pass()),
         ])
         .await;
     let at_deadline = End::TimedOut {
@@ -539,9 +521,12 @@ async fn a_timeout_is_held_to_the_time_left_in_the_run() {
     let ran = scheduler(1)
         .with_deadline(Duration::from_secs(25))
         .run(vec![
-            planned("fake.plain/early", Mode::Sleep(Duration::from_secs(20)))
-                .with_timeout(Duration::from_secs(30)),
-            planned("fake.plain/late", Mode::Forever).with_timeout(Duration::from_secs(10)),
+            planned(
+                "fake.plain/early",
+                FakeCheck::sleep(Duration::from_secs(20)),
+            )
+            .with_timeout(Duration::from_secs(30)),
+            planned("fake.plain/late", FakeCheck::forever()).with_timeout(Duration::from_secs(10)),
         ])
         .await;
     assert!(passed(&ran[0]));
@@ -560,7 +545,7 @@ async fn the_check_sees_the_capped_time_as_what_remains() {
         .with_deadline(Duration::from_secs(2))
         .run(vec![planned(
             "fake.plain/r",
-            Mode::Remaining(Arc::clone(&seen)),
+            Watcher::Remaining(Arc::clone(&seen)),
         )])
         .await;
     // The check waits 3 s, the run has 2 s: it times out after having seen 2 s remaining.
@@ -573,9 +558,9 @@ async fn a_run_that_finishes_before_the_deadline_has_no_run_deadline_results() {
     let ran = scheduler(2)
         .with_deadline(Duration::from_secs(30))
         .run(vec![
-            planned("fake.plain/a", Mode::Sleep(Duration::from_secs(5))),
-            planned("fake.plain/b", Mode::Pass),
-            planned("fake.plain/c", Mode::Pass),
+            planned("fake.plain/a", FakeCheck::sleep(Duration::from_secs(5))),
+            planned("fake.plain/b", FakeCheck::pass()),
+            planned("fake.plain/c", FakeCheck::pass()),
         ])
         .await;
     assert!(ran.iter().all(passed), "{ran:?}");
@@ -588,8 +573,8 @@ async fn the_observer_sees_every_start_and_every_end_including_checks_never_star
         .with_deadline(Duration::from_secs(5))
         .run_observed(
             vec![
-                planned("fake.plain/a", Mode::Forever).with_timeout(Duration::from_secs(60)),
-                planned("fake.plain/b", Mode::Pass),
+                planned("fake.plain/a", FakeCheck::forever()).with_timeout(Duration::from_secs(60)),
+                planned("fake.plain/b", FakeCheck::pass()),
             ],
             log.clone(),
         )
@@ -607,8 +592,11 @@ async fn a_missing_need_is_reported_as_such_even_after_the_deadline() {
     let ran = scheduler(1)
         .with_deadline(Duration::from_secs(1))
         .run(vec![
-            planned("fake.plain/a", Mode::Forever),
-            Planned::new(fake(&NEEDS_ROOT, Mode::Pass), "fake.needs_root"),
+            planned("fake.plain/a", FakeCheck::forever()),
+            planned(
+                "fake.needs_root",
+                FakeCheck::with_info(&NEEDS_ROOT, Fake::Sleep(Duration::ZERO)),
+            ),
         ])
         .await;
     assert!(matches!(
@@ -630,7 +618,7 @@ async fn a_check_cut_by_the_run_deadline_has_its_probe_ended() {
         .with_probes(hub)
         .with_deadline(Duration::from_secs(5))
         .run(vec![
-            planned("fake.plain/held", Mode::KeepProbe(Arc::clone(&slot)))
+            planned("fake.plain/held", Watcher::KeepProbe(Arc::clone(&slot)))
                 .with_timeout(Duration::from_secs(60)),
         ])
         .await;
@@ -660,4 +648,120 @@ async fn a_check_cut_by_the_run_deadline_has_its_probe_ended() {
 fn the_default_deadline_is_five_minutes() {
     assert_eq!(DEFAULT_DEADLINE, Duration::from_secs(300));
     assert_eq!(scheduler(1).deadline(), DEFAULT_DEADLINE);
+}
+
+// Every status, from `FakeCheck` (M1-051). The scheduler returns raw outcomes, and the mapping gives each
+// its status, so this runs both.
+
+#[tokio::test(start_paused = true)]
+async fn fake_checks_reach_every_status() {
+    use crate::outcome::{map_outcome, run_deadline_result, timeout_result};
+    use rdy_spec::result::{CheckResult, Severity, Status};
+    use rdy_spec::spec::CheckSpec;
+
+    let failed = CheckError::Failed {
+        message: "boom".to_owned(),
+        hint: "Run again.".to_owned(),
+    };
+    let table = [
+        (
+            "pass",
+            FakeCheck::outcome(Ok(Finding::pass("fine"))),
+            Status::Pass,
+        ),
+        (
+            "warn",
+            FakeCheck::outcome(Ok(Finding::warn("close"))),
+            Status::Warn,
+        ),
+        (
+            "fail",
+            FakeCheck::outcome(Ok(Finding::fail("short"))),
+            Status::Block,
+        ),
+        (
+            "need",
+            FakeCheck::outcome(Err(CheckError::MissingNeed(Need::Root))),
+            Status::Skipped,
+        ),
+        (
+            "unsupported",
+            FakeCheck::outcome(Err(CheckError::Unsupported("no data source"))),
+            Status::Skipped,
+        ),
+        ("error", FakeCheck::outcome(Err(failed)), Status::Error),
+        ("timeout", FakeCheck::forever(), Status::Timeout),
+    ];
+    let mut planned_checks = Vec::new();
+    let mut wanted = Vec::new();
+    for (name, check, status) in table {
+        planned_checks.push(planned(&format!("fake.plain/{name}"), check));
+        wanted.push(status);
+    }
+
+    let ran = scheduler(8).run(planned_checks).await;
+    let entry = CheckSpec::new("fake.plain");
+    let results: Vec<CheckResult> = ran
+        .iter()
+        .map(|one| {
+            let template = CheckResult::new(&one.key, "fake", Severity::Block, Status::Pass);
+            match &one.end {
+                End::Done(outcome) => {
+                    let ctx = CheckContext::new(&one.key, Os::Linux, []);
+                    map_outcome(&FAKE_INFO, &entry, &ctx, (**outcome).clone(), 0, 0)
+                }
+                End::TimedOut { after } => timeout_result(&template, *after, one.started),
+                other => panic!("unexpected end {other:?}"),
+            }
+        })
+        .collect();
+    let got: Vec<Status> = results.iter().map(|r| r.status.clone()).collect();
+    assert_eq!(got, wanted);
+
+    // A panic and a run deadline are the other two ways a fake ends.
+    let ran = scheduler(1)
+        .run(vec![planned("fake.plain/bad", FakeCheck::panic("boom"))])
+        .await;
+    assert!(matches!(ran[0].end, End::Panicked { .. }));
+    let ran = scheduler(1)
+        .with_deadline(Duration::ZERO)
+        .run(vec![planned("fake.plain/late", FakeCheck::pass())])
+        .await;
+    assert_eq!(ran[0].end, End::RunDeadline);
+    let template = CheckResult::new("fake.plain/late", "fake", Severity::Block, Status::Pass);
+    let late = run_deadline_result(&template, Duration::ZERO);
+    assert_eq!(late.status, Status::Skipped);
+    assert_eq!(late.skip_kind, Some(SkipKind::RunDeadline));
+}
+
+#[test]
+fn a_blocked_thread_does_not_hold_the_run_and_ends_when_released() {
+    // Real time, as 08 section 5 says: tokio may stop advancing paused time while a blocking task runs.
+    // The upper bound is generous. Nothing asserts a lower bound.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_time()
+        .build()
+        .expect("runtime");
+    let (stuck, release) = FakeCheck::block();
+    let began = std::time::Instant::now();
+    let ran = runtime.block_on(scheduler(2).run(vec![
+        planned("fake.plain/stuck", stuck).with_timeout(Duration::from_millis(50)),
+        planned("fake.plain/after", FakeCheck::pass()),
+    ]));
+    assert!(
+        began.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        began.elapsed()
+    );
+    assert_eq!(
+        ran[0].end,
+        End::TimedOut {
+            after: Duration::from_millis(50)
+        }
+    );
+    assert!(passed(&ran[1]));
+    // The thread is still parked on the receiver. Letting it go is what lets the runtime end.
+    release.release();
+    runtime.shutdown_timeout(Duration::from_millis(100));
 }

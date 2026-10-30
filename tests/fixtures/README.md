@@ -79,7 +79,12 @@ arrives with the tickets that need it. The names above are fixed now so nobody i
 
 A check case and an environment use the same format. A case is a small environment. One loader reads both:
 `rdy_engine::testing::Fixture::load(fixtures_root, "checks/host.memory/pass")`. A test then builds a run with
-`TestRun::for_fixture(&fixture)`. The loader is behind the `testing` feature of `rdy-engine`, which a release
+`TestRun::for_fixture(&fixture)`. To run a whole check against a case, call
+`rdy_engine::testing::run_fixture(&check, "checks/host.memory/pass").await`. It loads the case, calls
+`ensure_answers` for the check (a case that does not list the check fails with the check named, before
+the check runs), binds the probe to the check's `CheckInfo` and returns the outcome and the action log.
+`FixtureRun::assert_within_manifest()` then fails if the check tried a read, command, variable or peer
+that its `CheckInfo` does not declare, even when the check swallowed the refusal. The loader is behind the `testing` feature of `rdy-engine`, which a release
 build never turns on.
 
 ## An environment or case

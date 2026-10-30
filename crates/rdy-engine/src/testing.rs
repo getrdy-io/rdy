@@ -13,6 +13,12 @@
 //! assert_eq!(ctx.key(), "host.memory");
 //! assert!(run.action_log().actions.is_empty());
 //! ```
+//!
+//! For a whole check against a recorded machine, [`run_fixture`] loads a fixture, refuses one that does
+//! not answer the check, runs the check against it and returns a [`FixtureRun`]. Then
+//! [`FixtureRun::assert_within_manifest`] proves the check stayed inside its declaration.
+//! [`FakeCheck`] is a scripted check for scheduler tests, and [`normalize`] scrubs a report so two runs
+//! of one environment compare equal.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -21,6 +27,21 @@ pub use crate::probe::replay::{
     ApiRecord, Caps, DnsAnswer, Expect, Fixture, FixtureError, Manifest, NetScript, Origin, Replay,
     RunPins, TcpScript,
 };
+
+#[cfg(feature = "runtime")]
+mod fake;
+mod fixture_run;
+mod normalize;
+#[cfg(test)]
+mod tests;
+
+#[cfg(feature = "runtime")]
+pub use fake::{FAKE_INFO, Fake, FakeCheck, Release};
+pub use fixture_run::{
+    FixtureRun, assert_within_manifest, manifest_violations, run_fixture, run_fixture_in,
+    run_loaded,
+};
+pub use normalize::{normalize, normalize_across_jobs};
 
 use crate::check::{CheckContext, CheckInfo, Need, Os};
 use crate::family::HostSet;
