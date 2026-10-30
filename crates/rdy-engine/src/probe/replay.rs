@@ -348,6 +348,21 @@ impl Replay {
         ))
     }
 
+    /// Every recorded API response with its request, sorted by method, path and query so the order is the
+    /// same on every run. The k8s mock reads it to match a request by its decoded query pairs, so a
+    /// fixture may write a selector in any order and in plain text.
+    pub fn api_records(&self) -> impl Iterator<Item = (&str, &str, &str, &ApiRecord)> {
+        let mut records: Vec<_> = self
+            .api
+            .iter()
+            .map(|((method, path, query), record)| {
+                (method.as_str(), path.as_str(), query.as_str(), record)
+            })
+            .collect();
+        records.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+        records.into_iter()
+    }
+
     /// The access review table (`api/reviews.json`): attributes to `allowed` and `reason`. The k8s mock
     /// reads it.
     #[must_use]
