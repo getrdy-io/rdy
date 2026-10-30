@@ -258,6 +258,12 @@ pub struct CheckInfo {
     /// Absolute path prefixes the check may read, matched on whole path components. A path and the real
     /// path it resolves to must both sit under one of them, so name a link and its target.
     pub reads: &'static [&'static str],
+    /// Absolute path prefixes the check may ask `NativeCall::Statvfs` about, matched like `reads` (whole
+    /// path components, on the path as written and on the real path). It is a separate list so that a
+    /// check which needs file system numbers for any path, such as `host.disk`, does not also get to
+    /// read files there: `statfs: ["/"]` with no `reads` answers `Statvfs` anywhere and reads nothing.
+    /// The read denylist still applies to the path.
+    pub statfs: &'static [&'static str],
     /// Environment variable names the check may read.
     pub env: &'static [&'static str],
     /// Programs the check may run.

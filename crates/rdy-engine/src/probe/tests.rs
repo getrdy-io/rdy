@@ -584,6 +584,7 @@ mod reads {
             windows: Support::NotYet,
         },
         reads: &["/proc", "/etc/os-release"],
+        statfs: &[],
         env: &["HTTPS_PROXY"],
         commands: &[],
         peers: &[],
@@ -796,6 +797,7 @@ mod commands {
         default_timeout: None,
         os: ALL_OS,
         reads: &[],
+        statfs: &[],
         env: &[],
         commands: &[CommandSpec {
             program: "getent",
@@ -817,6 +819,7 @@ mod commands {
         default_timeout: None,
         os: ALL_OS,
         reads: &[],
+        statfs: &[],
         env: &[],
         commands: &[CommandSpec {
             program: "nvidia-smi",
@@ -2449,6 +2452,7 @@ mod scheduled {
             windows: Support::Full,
         },
         reads: &["/proc", "/home/tester"],
+        statfs: &[],
         env: &[],
         commands: &[CommandSpec {
             program: "getent",

@@ -12,6 +12,10 @@
 //!    location too: a check that reads `/etc/os-release` on a system where it is a link to
 //!    `/usr/lib/os-release` declares both.
 //!
+//! `Statvfs` uses the same two layers with the check's `statfs` prefixes in place of `reads`
+//! ([`ReadGuard::statfs`]). A path outside them is refused with `RULE_OUTSIDE_STATFS`, which names
+//! `statfs`, so the author widens the right field.
+//!
 //! Before the prefix match, `/proc/<rdy's pid>/...` and `/proc/net/...` are put in the `/proc/self/...`
 //! form, on the path and on the declared prefixes alike. A check that declares `/proc/net` or
 //! `/proc/self/mountinfo` is not refused for where those links lead.
@@ -86,6 +90,10 @@ pub(crate) const RULE_DEVICE: &str = "device files are never read";
 
 /// The path is outside every prefix the check declared in `reads`.
 pub(crate) const RULE_OUTSIDE_READS: &str = "path is outside the check's declared reads";
+/// The path is outside every prefix the check declared in `statfs`. The fix is a `statfs` prefix, not
+/// a wider `reads`.
+pub(crate) const RULE_OUTSIDE_STATFS: &str =
+    "path is outside the check's declared statfs prefixes; add the prefix to `statfs`";
 /// The target is not a regular file (a FIFO, a socket, a device, a directory).
 #[cfg_attr(
     not(any(test, feature = "testing", all(feature = "runtime", unix))),
@@ -170,7 +178,8 @@ impl Refused {
 
 /// What a check may read: the rules of one check's file calls. The probe builds it from the check's
 /// `Os` and `CheckInfo::reads` and hands it to the backend, which applies [`ReadGuard::admit_real`] to
-/// the resolved path.
+/// the resolved path. The `Statvfs` call builds it with `ReadGuard::statfs` from `CheckInfo::statfs`
+/// instead, and a refusal by prefix then names `statfs`.
 #[derive(Debug, Clone, Copy)]
 pub struct ReadGuard {
     os: Os,
@@ -180,6 +189,9 @@ pub struct ReadGuard {
     only: Option<&'static [&'static str]>,
     /// True for the `MachineId` guard alone. A future `only` list would not set it.
     machine_id: bool,
+    /// True for the `Statvfs` guard: `reads` holds the check's `statfs` prefixes, and a refusal by
+    /// prefix names `statfs` ([`RULE_OUTSIDE_STATFS`]) instead of `reads`.
+    statfs: bool,
 }
 
 impl ReadGuard {
@@ -189,6 +201,17 @@ impl ReadGuard {
             reads,
             only: None,
             machine_id: false,
+            statfs: false,
+        }
+    }
+
+    /// The guard of the `Statvfs` call: the same rules as [`ReadGuard::new`], with the check's `statfs`
+    /// prefixes in place of `reads`. A path outside them is refused with [`RULE_OUTSIDE_STATFS`], so the
+    /// log and the report point at `statfs` and not at `reads`.
+    pub(crate) fn statfs(os: Os, prefixes: Option<&'static [&'static str]>) -> Self {
+        Self {
+            statfs: true,
+            ..Self::new(os, prefixes)
         }
     }
 
@@ -204,6 +227,7 @@ impl ReadGuard {
             reads: None,
             only: Some(MACHINE_ID_FILES),
             machine_id: true,
+            statfs: false,
         }
     }
 
@@ -271,6 +295,8 @@ impl ReadGuard {
         });
         if covered {
             Ok(())
+        } else if self.statfs {
+            Err(RULE_OUTSIDE_STATFS)
         } else {
             Err(RULE_OUTSIDE_READS)
         }
