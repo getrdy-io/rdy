@@ -59,7 +59,7 @@ tests/fixtures/
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
+What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `summary/` (nine cases), `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), `host.disk/` (15 cases), the twelve machines of
 `host.os/`, `host.security_agents/` (18 cases), the `host.lsm/` cases, `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
@@ -80,6 +80,7 @@ arrives with the tickets that need it. The names above are fixed now so nobody i
 | `checks/_loader/<case>/` | Cases that exercise the loader and the replay, such as every kind of manifest entry. Their expectation is in the Rust test too | By hand |
 | `envs/<env>/` | A whole environment and the spec the env test runs against it. Five in M1: `all-pass`, `warnings-only`, `all-block`, `no-privileges`, `timeouts` | By hand, goldens by `UPDATE_GOLDENS=1` |
 | `redaction/<category>/<case>.in`, `.expected`, `.toml` | Input, expected output and the rule setup for a redaction case | By hand only. `UPDATE_GOLDENS` never touches it |
+| `summary/<case>.txt` | Two lines: the summary line and the last line a set of check results gets (01 section 5.3). Compared by `rdy_engine::summary` unit tests | By hand, or `UPDATE_GOLDENS=1` |
 | `results/<rdy-version>/*.json` | Result files written by released versions. They must stay parseable | Append only. Never edited |
 | `reports/*.json` | A valid sample report (`not-ready-7.2.json` is the 01 section 7.2 sample). A test replaces its `actions` and checks the result against the schema | By hand, when the sample in 01 changes |
 | `specs/valid/`, `specs/malformed/` | Parser corpus. Each malformed file is one way a spec can be wrong | By hand |
