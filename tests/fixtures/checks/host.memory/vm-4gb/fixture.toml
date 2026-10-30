@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-vm-4gb"
+summary = "VM sold as 4 GB, showing 3.8 GiB"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false

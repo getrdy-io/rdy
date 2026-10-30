@@ -12,6 +12,7 @@ use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::firewall::{self, Firewall};
+use crate::memory::{self, Memory};
 use crate::os::{self, OsCheck};
 use crate::security_agents::{self, SecurityAgents};
 
@@ -76,16 +77,6 @@ static DISK: CheckInfo = info(
         remediation: "Free up space on the volume that holds the install path, grow the volume, or point the install at a larger disk. On Linux, run `df -h` on the install path to see what is free. If the path is on a `noexec` mount, remount it with `exec` and remove `noexec` from `/etc/fstab`, or move the install path.",
     },
     5,
-    &[],
-);
-static MEMORY: CheckInfo = info(
-    "host.memory",
-    "RAM, swap, cgroup limit",
-    CheckMeta {
-        title: "Memory",
-        remediation: "Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number. On Linux, if the spec forbids swap, run `swapoff -a` and comment out the swap lines in `/etc/fstab`.",
-    },
-    2,
     &[],
 );
 static PORTS: CheckInfo = info(
@@ -173,7 +164,7 @@ static KERNEL: CheckInfo = info(
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 13] = [
     &DISK,
-    &MEMORY,
+    &memory::INFO,
     &PORTS,
     &LSM,
     &security_agents::INFO,
@@ -191,8 +182,9 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.firewall` ([`Firewall`]), `host.os` ([`OsCheck`]) and `host.security_agents`
-/// ([`SecurityAgents`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.firewall` ([`Firewall`]), `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]) and
+/// `host.security_agents` ([`SecurityAgents`]) are real. The others are stubs for now
+/// ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -213,9 +205,8 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 10] = [
+static STUBS: [&str; 9] = [
     "host.disk",
-    "host.memory",
     "host.ports",
     "host.lsm",
     "host.time_sync",
@@ -243,6 +234,9 @@ impl Family for HostFamily {
                 .flatten()
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
+        if let CheckParams::HostMemory(memory) = params {
+            return Ok(Built::new(Box::new(Memory::from_params(&memory))));
         }
         if let CheckParams::HostOs(os) = &params {
             return Ok(Built::new(Box::new(OsCheck::from_params(os))));

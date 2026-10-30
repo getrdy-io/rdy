@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-below-min"
+summary = "VM with 24 GiB of memory, swap off"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false
