@@ -251,6 +251,20 @@ async fn a_probe_with_no_hosts_or_no_declaration_can_reach_nothing() {
 
 // ---- the address rule ---------------------------------------------------------------------------
 
+#[test]
+fn a_mapped_or_compatible_ipv4_literal_never_becomes_a_target() {
+    // The spec parser is the first door: these forms do not parse, so no check holds one as a
+    // `Target`. The facade's rule decodes them as well, for answers (see the lookup tests).
+    for text in [
+        "[::ffff:169.254.169.254]:443",
+        "[::ffff:a9fe:a9fe]:443",
+        "[::ffff:168.63.129.16]:80",
+        "[::169.254.169.254]:443",
+    ] {
+        assert!(Target::parse(text).is_err(), "{text} must not parse");
+    }
+}
+
 #[tokio::test]
 async fn a_connect_to_a_literal_metadata_address_sends_no_byte() {
     let server = HttpServer::start(HttpOptions::plain())
@@ -271,6 +285,8 @@ async fn a_connect_to_a_literal_metadata_address_sends_no_byte() {
         "[fd00:ec2::254]:443",
         "[fd20:ce::254]:443",
         "168.63.129.16:80",
+        "[64:ff9b::a9fe:a9fe]:443",
+        "[64:ff9b::a83f:8110]:80",
         "0.0.0.0:443",
     ];
     let mut hosts = literals.to_vec();

@@ -110,11 +110,20 @@ ADR 0010 stays as a second line.
   that is not listed is not protected, and a private-range service on the customer's network is allowed
   on purpose, because a spec may name a server there. Decision on `168.63.129.16`, the Azure host-services
   address (WireServer and the virtual DNS address): refused. Its HTTP side serves the VM agent's extension
-  settings and certificates, which is the same class of secret as the metadata service, and no check has a
-  reason to connect to it. Azure's own resolver use of it is the OS's, not a facade connect, so name
-  lookups through the system resolver still work on an Azure VM. Cost: a spec that names that address as an
-  endpoint or NTP server is refused with the address rule's text. Residual: a name server on the customer's
-  own network that forwards to it is not seen, because only the answers are judged.
+  settings and certificates, which is the same class of secret as the metadata service, and no spec host
+  has a reason to be it. It is also the `resolv.conf` nameserver on every Azure VM, so one narrow door is
+  planned (02 "Network", 03 `net.dns`, backlog M1-155): the `SystemResolver` peer class may reach it on
+  port 53 (UDP and TCP) and only when the address came from the OS nameserver list. A spec host on any
+  port, and ports 80 and 32526 (the WireServer ports), stay refused. Until that class exists, the
+  `net.dns` direct lookup of such a nameserver reports Skipped, "nameserver in a refused range". Name
+  lookups through the system resolver (`lookup`, `getaddrinfo`, `getent`) work on an Azure VM today,
+  because the OS makes that connection, not the facade. Cost today: a spec that names that address as an
+  endpoint or NTP server is refused with the address rule's text. Residual: a name server on the
+  customer's own network that forwards to it is not seen, because only the answers are judged.
+- The IPv4 forms the rule decodes are IPv4-mapped, IPv4-compatible and `64:ff9b::/96`. A NAT64 network
+  with its own prefix (macOS `getaddrinfo` synthesizes one), 6to4 `2002::/16`, Teredo `2001::/32`, the
+  local-use `64:ff9b:1::/48` and `::ffff:0:a.b.c.d` are not decoded. None reaches a metadata service in
+  practice, because the service sits on a link-local address that those transition networks do not route.
 - Exec plugins run whatever the operator's kubeconfig says.
 - Process escape (M1-038): `rdy` kills a timed-out command's whole process group, but a program that
   calls `setsid` or `setpgid` for a child puts that child in a new group and it survives. The M1 command

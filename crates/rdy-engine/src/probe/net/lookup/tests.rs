@@ -76,9 +76,21 @@ async fn a_refused_answer_refuses_the_whole_lookup_and_returns_no_address() {
         let host = name.trim_end_matches(":443");
         let error = probe.lookup(host).await.expect_err("a refused answer");
         assert_eq!(denied_rule(&error), RULE_TCP_ADDRESS, "{host}");
+        let shown = format!("{error} {error:?}");
+        for refused in REFUSED {
+            assert!(
+                !shown.contains(refused),
+                "{refused} is in the error: {shown}"
+            );
+        }
     }
     let log = entries(&hub);
     assert_eq!(log.len(), names.len());
+    // No refused address reaches the log or the error text.
+    let text = serde_json::to_string(&log).expect("log");
+    for refused in REFUSED {
+        assert!(!text.contains(refused), "{refused} is in the log: {text}");
+    }
     for entry in &log {
         assert_eq!(entry.outcome, ActionOutcome::Denied);
         assert_eq!(field(entry, "rule"), Some(&json!(RULE_TCP_ADDRESS)));
@@ -337,5 +349,53 @@ async fn tls_and_http_apply_the_same_host_set_and_address_rule_as_tcp() {
             .iter()
             .filter(|e| e.kind != ActionKind::Native)
             .all(|e| e.outcome == ActionOutcome::Denied)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn answers_are_vetted_before_the_cap() {
+    // 64 good answers, then a metadata address: the cap must not hide it.
+    let mut answers: Vec<IpAddr> = (1..=64_u8).map(|n| ip(&format!("192.0.2.{n}"))).collect();
+    answers.push(ip("169.254.169.254"));
+    let hub = hub_over(Replay::new().host("tail.acme.test", answers));
+    let probe = probe(&hub, &["tail.acme.test:443"]);
+    let error = probe.lookup("tail.acme.test").await.expect_err("refused");
+    assert_eq!(denied_rule(&error), RULE_TCP_ADDRESS);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unlisted_name_leaves_no_host_in_the_log_and_a_listed_one_logs_the_spec_text() {
+    let hub = hub_over(Replay::new().host("web.acme.test", [ip("192.0.2.7")]));
+    let probe = probe(&hub, &["web.acme.test:443", "[2001:db8::5]:443"]);
+    probe
+        .lookup("secret-looking-name.example")
+        .await
+        .expect_err("unlisted");
+    probe.lookup("WEB.acme.test").await.expect("listed");
+    probe.lookup("2001:db8::5").await.expect("literal");
+    let log = entries(&hub);
+    assert_eq!(field(&log[0], "host"), None);
+    assert!(
+        !serde_json::to_string(&log[0])
+            .expect("entry")
+            .contains("secret-looking")
+    );
+    assert_eq!(field(&log[1], "host"), Some(&json!("web.acme.test")));
+    assert_eq!(field(&log[2], "host"), Some(&json!("[2001:db8::5]")));
+}
+
+#[test]
+fn brackets_are_stripped_only_around_an_ipv6_literal() {
+    for text in ["[web.acme.test]", "[10.0.0.1]", "[", "[]", "[::1", "::1]"] {
+        assert!(
+            matches!(host_of(text), Host::Name(_)),
+            "{text} is a name, which no spec host equals"
+        );
+    }
+    assert_eq!(host_of("[::1]"), Host::Ipv6("::1".parse().expect("ip")));
+    assert_eq!(host_of("::1"), Host::Ipv6("::1".parse().expect("ip")));
+    assert_eq!(
+        host_of("10.0.0.1"),
+        Host::Ipv4("10.0.0.1".parse().expect("ip"))
     );
 }

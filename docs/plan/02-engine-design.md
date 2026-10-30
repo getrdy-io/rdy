@@ -457,6 +457,11 @@ tests policy.
   A table test backs it. `Probe::lookup(host)` (M1-094) resolves one of the check's own spec hosts,
   refuses the whole call if any answer is in the table, and logs one `lookup` entry with `host` and an
   `answers` count; `tcp`, `tls_chain`, `http` and `udp_exchange` apply the same table.
+- One narrow door in the table (planned, M1-155): the `SystemResolver` peer class may reach 168.63.129.16
+  on port 53 (UDP and TCP), and only when the address came from the OS nameserver list (`resolv.conf` or
+  the platform's equivalent), because it is the nameserver on every Azure VM. A spec host on any port, and
+  ports 80 and 32526 (the WireServer ports), stay refused. Until the class is built, a check that wants
+  to query such a nameserver reports Skipped, "nameserver in a refused range".
 - `tcp` tries each address with a 250 ms stagger and a per-attempt timeout, and reports every attempt.
   Checks cannot pick addresses.
 - Proxied path: the facade writes CONNECT (8 KiB head cap, own timeout, Basic auth from `ProxyUrl`,

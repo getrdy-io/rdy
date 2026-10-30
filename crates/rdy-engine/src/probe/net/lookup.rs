@@ -20,10 +20,11 @@
 //! [`MAX_ANSWERS`] are returned. A lookup that finds nothing is [`NetFailure::Dns`]. The lookup takes
 //! at most [`RESOLVE_TIMEOUT`].
 //!
-//! **The log.** One `lookup` entry per call: `host` (as the check wrote it, cut to 256 characters) and
-//! `answers`, the count returned. The addresses are not logged.
+//! **The log.** One `lookup` entry per call: `host` (the spec's text for the host, set once the name is
+//! admitted, so a refused unlisted name leaves no `host`) and `answers`, the count returned. The
+//! addresses are not logged.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 
 use rdy_spec::result::ActionKind;
 use rdy_spec::scalar::Host;
@@ -57,14 +58,15 @@ impl Probe {
     /// - [`ProbeError::Timeout`] when the resolver ran out of time.
     pub async fn lookup(&self, host: &str) -> Result<Vec<IpAddr>, ProbeError> {
         let shown: String = host.chars().take(256).collect();
-        let mut fields = Map::new();
-        fields.insert("host".to_owned(), shown.clone().into());
-        let (hub, entry) = self.begin(ActionKind::Lookup, fields, &shown)?;
+        // The entry has no `host` until the name is admitted: a name the spec does not list is the
+        // check's text, not the spec's, and a denied entry without it folds per rule (INV-17).
+        let (hub, mut entry) = self.begin(ActionKind::Lookup, Map::new(), &shown)?;
 
         let (spec_host, port) = match self.admit_lookup(host) {
             Ok(found) => found,
             Err(rule) => return Err(refuse(entry, rule, &shown)),
         };
+        entry.set("host", spec_host.to_string());
         let name = match &spec_host {
             Host::Name(name) => name,
             other => {
@@ -148,11 +150,14 @@ fn noted(answers: &[IpAddr], entry: &mut Pending) {
 /// The host a text names: an address literal (IPv6 with or without brackets), else a name in lower
 /// case. The spec's names never end in a number, so a name does not parse as an address.
 fn host_of(text: &str) -> Host {
-    let bare = text
+    let bracketed = text
         .strip_prefix('[')
         .and_then(|rest| rest.strip_suffix(']'))
-        .unwrap_or(text);
-    match bare.parse::<IpAddr>() {
+        .and_then(|inside| inside.parse::<Ipv6Addr>().ok());
+    if let Some(v6) = bracketed {
+        return Host::Ipv6(v6);
+    }
+    match text.parse::<IpAddr>() {
         Ok(IpAddr::V4(v4)) => Host::Ipv4(v4),
         Ok(IpAddr::V6(v6)) => Host::Ipv6(v6),
         Err(_) => Host::Name(text.to_ascii_lowercase()),
