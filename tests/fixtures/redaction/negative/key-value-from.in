@@ -1,0 +1,6 @@
+env:
+- name: DB_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: acme-db
+      key: password

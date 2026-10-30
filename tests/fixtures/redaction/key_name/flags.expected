@@ -1,0 +1,2 @@
+mysql --host db --password=[REDACTED:secret_by_key:~]
+mysql --password [REDACTED:secret_by_key:~] --host db

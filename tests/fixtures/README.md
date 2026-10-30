@@ -77,8 +77,9 @@ cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 1
 `evaluation-error`, `non-resource`, `reviews-forbidden`, `rules-forbidden`, `old-server`, `identity-forbidden`,
 `as-allowed`, `as-forbidden`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`,
 `as-at-the-cap`, `hostile-reasons`), `generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on
-drift and on a file the script did not write). The rest
-arrives with the tickets that need it. The names above are fixed now so nobody invents another.
+drift and on a file the script did not write).
+`redaction/` holds the M1 corpus: 34 cases in ten categories, `FLOOR` (28) and `synthetic.toml` (M1-063).
+The rest arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
 | --- | --- | --- |
@@ -421,6 +422,49 @@ makes every other package's goldens look orphaned. CI does both on linux-x64.
 CI scope: the check only counts what ran on linux-x64. So a golden must be compared by a test that is not
 `root_*`, not `#[ignore]`, not behind a non-default feature and not gated to another OS. Otherwise the check
 calls it an orphan. If nextest is ever sharded, run `goldens check` on the combined records of all shards.
+
+## The redaction corpus
+
+`redaction/` is the M1 gate for the redactor (04 section 4, SEC-26). The test is
+`crates/rdy-engine/tests/redaction_corpus.rs`, so it runs in `cargo test` on all five legs.
+
+```text
+redaction/FLOOR                       the minimum case count (28; it may rise, never fall)
+redaction/synthetic.toml              secrets as parts, joined by the harness
+redaction/<category>/<case>.in        the input
+redaction/<category>/<case>.expected  the output with every tag shown as ~
+redaction/<category>/<case>.toml      what the case is
+```
+
+A case `.toml` has `polarity` (`positive` or `negative`), `since` (`m1`), `rulesets` (`["report"]`), `rules`
+(rules that must fire), `forms` (positive: the syntax form the case covers), `exclusions` (negative: the
+key-name exclusions it proves), `secrets` (strings that must not survive) and an optional `note`. An unknown
+key fails the load.
+
+- `${SYN:name}` in `.in` and in `secrets` joins the parts of `synthetic.toml`. A part has at least two
+  pieces, so a scanner never sees a whole token. `.expected` never holds a reference. The vendor-documented
+  `AKIAIOSFODNN7EXAMPLE` is used as it is.
+- `.expected` is blessed by hand and compared with `assert_golden`, which never writes here. A failed compare
+  parks the output in `target/goldens-actual/`. A negative has `.expected` equal to `.in`.
+- The `hostile/ansi-password` case holds real ESC bytes (0x1b), as a terminal wrote them.
+- The harness also checks that no `secrets` entry survives (and that each one is in the input, so it proves
+  something), that every `rules` entry fired, that a second pass changes nothing and finds no span outside a
+  placeholder, and that a placeholder is well formed.
+- The gate is coverage. It fails on a rule of the engine with no positive case, a syntax form that a rule
+  claims (the `CLAIMS` table in the test) with no positive case, a key-name exclusion with no negative, a
+  rule list that differs from the M1 rows of 04 Appendix B, a part nobody uses, a stray file, or fewer cases
+  than `FLOOR`. A new rule fails the gate until it has cases and a row in `CLAIMS`.
+- 04 Appendix D lists 28 cases (23 positive, 5 negative). The corpus has 34. The six extra cases are
+  coverage the gate asks for: an INI `password =` (Appendix B claims INI for the key rule) and one negative
+  for each group of key-name exclusions.
+
+What the corpus does not claim. M1-060 left these to M2, so no case here passes for them and none is blessed
+as handled: `Cookie` and `Set-Cookie`, a 40-character secret by proximity, a one-line JSON object after a
+secret key (`{"password":"x","user":"y"}` loses the rest of its line), `--password=x --host db` and
+`-H 'Authorization: ...' url` (the rest of the line goes too, an over-redaction, not a leak), a space in URL
+userinfo, `curl -u` and `--user`, base64-armored and bare DER keys, a PEM block split over log events, and
+crafted bracket and quote escapes. M2-061 adds `known_gap` cases and a ledger. Until then a `known_gap` case
+fails the load.
 
 ## Line endings
 

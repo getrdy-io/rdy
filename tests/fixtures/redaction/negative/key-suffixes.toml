@@ -1,0 +1,6 @@
+polarity = "negative"
+since = "m1"
+rulesets = ["report"]
+rules = []
+exclusions = ["suffix_name", "suffix_ref", "suffix_file", "suffix_path", "suffix_namespace"]
+secrets = []

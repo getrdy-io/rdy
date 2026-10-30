@@ -1,0 +1,3 @@
+[db]
+password = [REDACTED:secret_by_key:~]
+host = db.acme.test

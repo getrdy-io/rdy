@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["secret_by_key"]
+forms = ["ini"]
+secrets = ["hunter2"]
+note = "Beyond Appendix D: 04 Appendix B claims INI for the key rule, so the gate needs a case."

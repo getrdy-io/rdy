@@ -1,0 +1,32 @@
+# Synthetic secrets for the redaction corpus (04 section 4, M1-063).
+#
+# Every value here is made up. Each is stored as parts, so push protection and secret scanners never see a
+# whole token in the repo. A case writes `${SYN:name}` in its `.in` and in its `secrets`, and the harness
+# joins the parts. The vendor-documented `AKIAIOSFODNN7EXAMPLE` is the one value used as it is.
+#
+# `.expected` files never use `${SYN:..}`: they hold placeholders and the text around them, and the harness
+# compares them byte for byte. A part that no case uses fails the gate, so the list cannot go stale.
+
+[parts]
+proxy_pw = ["pa", "55"]
+pg_pw = ["Zq9xK7", "mW2"]
+pct_pw = ["p%40ss%3A", "w0rd-canary"]
+bearer = ["canary", "BearerCredential42"]
+basic = ["dXNlcjpwYXNzd29y", "ZC1jYW5hcnk="]
+api_key = ["canary-api", "-key-0042"]
+asia_id = ["ASIA", "IOSFODNN7EXAMPLE"]
+aws_secret = ["wJalrXUtnFEMI/K7MDENG/", "bPxRfiCYEXAMPLEKEY"]
+aws_session = ["IQoJb3Jp", "Z2luX2VjEXAMPLETOKEN9876"]
+pem_rsa_begin = ["-----BEGIN RSA ", "PRIVATE KEY-----"]
+pem_rsa_end = ["-----END RSA ", "PRIVATE KEY-----"]
+rsa_body_1 = ["MIIEowIBAAKCAQEA", "canaryRsaBody1111111111111111111111111111111"]
+rsa_body_2 = ["cGVtLWNhbmFy", "eS1ib2R5LTI="]
+pem_pkcs8_begin = ["-----BEGIN ", "PRIVATE KEY-----"]
+pem_pkcs8_end = ["-----END ", "PRIVATE KEY-----"]
+pkcs8_body = ["MIIEvQIBADANBgkqhkiG9w0BAQEFAA", "canaryPkcs8Body22222222222222"]
+kube_token = ["Zk3v9Qx7", "canaryKubeTokenAb012"]
+client_key_data = ["Y2FuYXJ5LWNsaWVudC1r", "ZXktZGF0YQ=="]
+share_token = ["rdy_st_", "Zk3v9Qx7canaryShareTok01"]
+client_secret = ["canary-client", "-secret"]
+jwt = ["eyJh", "bGciOiJSUzI1NiJ9.", "eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50In0.", "c2lnbmF0dXJl", "LWNhbmFyeS0x"]
+jwt_signature = ["c2lnbmF0dXJl", "LWNhbmFyeS0x"]

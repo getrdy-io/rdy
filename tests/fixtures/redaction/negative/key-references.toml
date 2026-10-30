@@ -1,0 +1,6 @@
+polarity = "negative"
+since = "m1"
+rulesets = ["report"]
+rules = []
+exclusions = ["shell_reference", "command_substitution", "template"]
+secrets = []

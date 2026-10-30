@@ -1,0 +1,6 @@
+polarity = "negative"
+since = "m1"
+rulesets = ["report"]
+rules = []
+exclusions = ["empty", "null", "true", "false", "none", "required"]
+secrets = []

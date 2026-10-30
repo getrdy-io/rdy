@@ -1,0 +1,6 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["secret_by_key"]
+forms = ["yaml"]
+secrets = ["hunter2"]
