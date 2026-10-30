@@ -2,8 +2,8 @@
 //!
 //! The commands write and check the generated files (the JSON schemas under `crates/rdy-spec/schema/`
 //! and the pages under `docs/`), lint the tracked text files for dashes and banned tokens, and list
-//! the registered checks with their title and remediation. `dist` and `publish` are off until their
-//! tickets land.
+//! the registered checks with their title and remediation, and fail on a golden file no test used.
+//! `dist` and `publish` are off until their tickets land.
 //! This crate is never published (docs/plan/09-docs-site.md, section 2).
 
 #![forbid(unsafe_code)]
@@ -11,6 +11,7 @@
 mod checks;
 mod docs;
 mod generate;
+mod goldens;
 mod lint;
 mod schema;
 mod spec_reference;
@@ -63,10 +64,27 @@ enum Command {
     DocsLint,
     /// List each registered check with its id, family, title and remediation. Fail on an empty one.
     Checks,
+    /// Golden file tasks.
+    Goldens {
+        #[command(subcommand)]
+        action: GoldensAction,
+    },
     /// Off in this build. Refuses and exits 64.
     Dist,
     /// Off in this build. Refuses and exits 64.
     Publish,
+}
+
+/// What to do with the goldens.
+#[derive(Subcommand)]
+enum GoldensAction {
+    /// Fail on a golden file under tests/fixtures that no test used. Run it after
+    /// `cargo nextest run --workspace` on an empty target/goldens-used (08 section 3).
+    Check {
+        /// The folder of records `assert_golden` wrote. Defaults to target/goldens-used.
+        #[arg(long, value_name = "DIR")]
+        used_dir: Option<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -105,6 +123,9 @@ fn run(cli: Cli) -> Result<u8> {
             text & checks::report(&checks::ordered(&registry))
         }
         Command::Checks => checks::run()?,
+        Command::Goldens {
+            action: GoldensAction::Check { used_dir },
+        } => goldens::check(&root, used_dir.as_deref())?,
         Command::Dist => return Ok(refuse(DIST_OFF)),
         Command::Publish => return Ok(refuse(PUBLISH_OFF)),
     };

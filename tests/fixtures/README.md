@@ -352,6 +352,40 @@ the text after it must not start with a hex digit. Everything else must match by
 `warnings-only` and `all-block` only. A golden is the exact bytes the product writes. It changes only with
 `UPDATE_GOLDENS=1`, and the diff is read before the code diff.
 
+### Comparing and updating goldens
+
+A test compares output with a golden through one helper, `rdy_engine::testing::golden::assert_golden(path,
+bytes)`. It compares bytes and does no scrubbing: hand it output that is already deterministic.
+
+| Situation | What happens |
+| --- | --- |
+| Same bytes | Pass. A stale `<path>.actual` is deleted |
+| Different bytes | Fail. The message has the first 40 lines of a unified diff and the accept command. The new bytes are in `<path>.actual`, which the repo ignores |
+| No golden | Fail the same way. The golden is not created |
+| `UPDATE_GOLDENS=1` | Write the golden (and its folders), print `golden written: <path>` for each file, pass |
+| `UPDATE_GOLDENS=1` and `CI` set | Fail at once, even when the golden matches. An empty `CI` does not count |
+| `UPDATE_GOLDENS` is anything but `1`, `0` or empty | Fail, so a typo never passes |
+| A path under `tests/fixtures/redaction` or `tests/fixtures/results` | `UPDATE_GOLDENS` never writes there, even through a symlink. The compare still runs. Edit the file by hand |
+
+The accept command is `UPDATE_GOLDENS=1 cargo nextest run -p <package>`. Read the diff of `tests/` and
+`crates/` before you commit. The PR body has a `## Golden changes` section, one sentence per changed file.
+
+Every path given to the helper is appended to `target/goldens-used/<pid>.txt` (below `CARGO_TARGET_DIR`
+when it is set), as repo-relative text with `/` separators. `cargo xtask goldens check` lists the golden
+files on disk and fails on each one that no record names. A golden file on disk is:
+
+- `envs/<env>/golden/<file>`;
+- `checks/<check-id>/<case>/expect.json`;
+- `redaction/<category>/<case>.expected`.
+
+Anything else is an input, or data that a check reads, such as a fake file tree. So the redaction corpus
+must compare `.expected` through `assert_golden`. The helper never writes there, so the compare is all it
+does.
+
+Run `rm -rf target/goldens-used` before the test run, and `cargo xtask goldens check` after
+`cargo nextest run --workspace`. A record left by an older run can hide an orphan. A run of one package
+makes every other package's goldens look orphaned. CI does both on linux-x64.
+
 ## Line endings
 
 A default Windows checkout rewrites line endings. That breaks a signed spec, because the signature covers
