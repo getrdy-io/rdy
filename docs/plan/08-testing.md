@@ -184,16 +184,25 @@ It is a nextest test in `rdy-engine` (`tests/fixture_lint.rs`), so it runs on ev
 command. It fails on:
 
 - a bad manifest, a missing `origin`, an `origin` outside the four;
-- a file name unique only by case, a Windows reserved name (`con`, `nul`, `aux`, `com1`), a trailing dot or
+- a file name unique only by case, a Windows reserved name (`con`, `nul`, `aux`, `com0`, `com1`, `conin$`), a trailing dot or
   space, one of `<>:"|?*[]`, a path over 150 characters, a symlink, a file over 256 KiB, an env over 1 MiB;
 - a `\r` not listed in `crlf`, in `tests/fixtures` or `examples/specs`;
-- a URL host or FQDN with a public suffix that is not `.example`, `.test`, `.invalid`, `.local`,
+- a URL host, or a dotted name that ends in an IANA top-level domain (see the note below), that is not `.example`, `.test`, `.invalid`, `.local`,
   `cluster.local` or on the built-in allow-list of vendors Rdy checks (OS vendors, `k8s.io`,
   `nvidia.com`); any publicly routable IP address. Other entries need `allow.toml` with a reason
   (`169.254.169.254` for the metadata tests is the first);
-- a registered, implemented check (its `CheckInfo` says so) with no `checks/<id>/` directory, or without a
+- (M1-075, not in the lint file) a registered, implemented check (its `CheckInfo` says so) with no `checks/<id>/` directory, or without a
   passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a
   `Timeout` case where it runs a command or opens a socket; a missing `checks/_policy/symlink-to-shadow`.
+
+Two deviations, decided in the M1-050 review. The host rule uses the IANA root zone list
+(`crates/rdy-engine/tests/data/iana-tlds.txt`, checked in so the test needs no network), not the public
+suffix list. It leaves out the labels that are also file extensions in the fixtures (`sh`, `py`, `rs`, `md`,
+`so`, `in`, `zip`, `link` and a few more) for dotted names outside URLs. A URL host is checked with any
+label. On `amazonaws.com`, `azure.com` and `googleapis.com` only the bare name, `<service>.<domain>` and
+`<service>.<region>.<domain>` pass, because anyone can get a name there. The registry rule in the last
+bullet needs the check families, which `rdy-engine` cannot link, so M1-075 (the env harness links the CLI
+and the families) owns it, and the lint file keeps a hand-kept `REQUIRED` list until then.
 
 M2 adds the rule that nothing in a fixture changes under the redactor (it needs SEC-25), and the recorder.
 

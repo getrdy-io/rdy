@@ -57,8 +57,9 @@ tests/fixtures/
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `allow.toml`, `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/`, `reports/`, and under
-`checks/` the cases `host.memory/pass`, `_policy/symlink-to-shadow` and `_loader/manifest-entries`. The rest
+What exists today: `allow.toml`, `signed/`, `minisign-c/`, `specs/malformed/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`, `malformed/`), and under
+`checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), `_policy/symlink-to-shadow` and
+`_loader/manifest-entries`. The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -321,27 +322,33 @@ a byte. A fixture that must carry CRLF keeps it on every OS, and any other fixtu
 Each finding names the file. It covers `tests/fixtures`, and `examples/specs` for line endings, host names
 and addresses. It fails on:
 
-- a file name unique only by case, a Windows reserved name (`con`, `nul`, `aux`, `prn`, `com1` to `com9`,
-  `lpt1` to `lpt9`), a trailing dot or space, one of `<>:"|?*[]\`, a path over 150 characters, a symlink;
+- a file name unique only by case, a Windows reserved name (`con`, `nul`, `aux`, `prn`, `conin$`, `conout$`,
+  `com0` to `com9`, `lpt0` to `lpt9`), a trailing dot or space, one of `<>:"|?*[]\`, a path over 150 characters, a symlink;
 - a file over 256 KiB, a fixture directory over 1 MiB;
 - a `\r` that the fixture's `crlf` list and `allow.toml` do not allow;
 - a URL host or a dotted name that is not `.example`, `.test`, `.invalid`, `.local`, an RFC 2606 example
   domain or a vendor on the built-in list (OS vendors, `k8s.io`, `kubernetes.io`, `openshift.io`,
-  `nvidia.com`, the clouds, `github.com`), unless `allow.toml` allows it. Only names that end in a common
-  top-level label are checked outside URLs, so `cpu.max` and `install.sh` pass. `README.md` files are not
-  scanned;
+  `nvidia.com`, the clouds, `github.com`), unless `allow.toml` allows it. On the big cloud domains
+  (`amazonaws.com`, `azure.com`, `googleapis.com`) only the bare name, `<service>.<domain>` and
+  `<service>.<region>.<domain>` pass, so `acme-backups.s3.amazonaws.com` and
+  `ec2-54-1-2-3.compute-1.amazonaws.com` fail. Outside URLs only names whose last label is a real top-level
+  domain are checked. The list is the IANA root zone list, checked in at
+  `crates/rdy-engine/tests/data/iana-tlds.txt`, minus the labels that are also file extensions (`sh`, `py`,
+  `rs`, `md`, `so`, `in`, `zip`, `link` and a few more), so `cpu.max` and `install.sh` pass. A URL host is
+  checked with any label. `README.md` files are not scanned, except inside `checks/` and `envs/`;
 - an IP address that is publicly routable or link-local, unless `allow.toml` allows it. Allowed without an
   entry: the documentation ranges, RFC 1918, `100.64.0.0/10`, `fd00::/8`, loopback, unspecified, multicast
   and reserved (`240.0.0.0/4`, which holds netmasks). An IPv4-mapped address counts as its IPv4 address;
 - a bad manifest, a missing `origin` or one outside the four, a duplicate argv, native call or API request,
   and every other refusal of `Fixture::load`. The lint calls the loader. It has no second parser. The
-  `host.firewall` cases are not loaded yet because they name a sibling `base`; the `LOADER_PENDING` row in
-  the lint says so and M1-172 removes it;
+  `host.firewall` cases name a sibling `base` that the loader cannot find yet. The `LOADER_PENDING` row in
+  the lint excuses that one error and nothing else; M1-117 moves the bases to `envs/` and removes the row;
 - a case or environment directory without a `fixture.toml`. A `checks/_<name>/` helper directory (`_policy`,
   `_loader`, `_cgroup`) is checked like any other, so a new one needs no change to the lint;
 - a missing required case. The list is `REQUIRED` in the lint: `checks/_policy/symlink-to-shadow` (its
   `root.manifest.json` must link to `/etc/shadow`) and `checks/host.memory/pass`. A ticket that adds a case
-  the lint should guard, such as the `Timeout` case of `host.disk` in M1-068, adds a row.
+  the lint should guard, such as the `Timeout` case of `host.disk` in M1-068, adds a row. The rule "every registered check has its cases" is not in this lint,
+  because `rdy-engine` cannot link the check families. M1-075 (the in-process env harness) owns it.
 
 An entry in `allow.toml` that matches nothing is a finding too, so the list cannot go stale. The tests of
 the lint plant one violation at a time in an in-memory copy of this tree and expect exactly that finding.

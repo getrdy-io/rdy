@@ -52,6 +52,11 @@ const MAX_PATH_CHARS: usize = 150;
 /// A case that must exist. Add a row when a ticket lands a check that needs a case the lint should guard,
 /// for example the `Timeout` case of `host.disk` (M1-068). `holds` is a file below the case and a text it
 /// must contain.
+///
+/// Not here: 08 also asks that every registered, implemented check has its cases. That rule needs the
+/// registry, and this crate cannot link the check families. M1-075 owns it (correction-21): the in-process
+/// env harness links the CLI and the families, so it can walk the registry and fail on a check with no
+/// case. Until then this list guards single cases by hand.
 struct Required {
     dir: &'static str,
     holds: Option<(&'static str, &'static str)>,
@@ -451,11 +456,28 @@ fn name_problem(name: &str) -> Option<String> {
         .next()
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let reserved = matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
-        || ["com", "lpt"].iter().any(|prefix| {
-            stem.strip_prefix(prefix)
-                .is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"))
-        });
+    let reserved = matches!(
+        stem.as_str(),
+        "con" | "prn" | "aux" | "nul" | "conin$" | "conout$"
+    ) || ["com", "lpt"].iter().any(|prefix| {
+        stem.strip_prefix(prefix).is_some_and(|n| {
+            matches!(
+                n,
+                "0" | "1"
+                    | "2"
+                    | "3"
+                    | "4"
+                    | "5"
+                    | "6"
+                    | "7"
+                    | "8"
+                    | "9"
+                    | "\u{b9}"
+                    | "\u{b2}"
+                    | "\u{b3}"
+            )
+        })
+    });
     reserved.then(|| {
         format!("`{name}` is a reserved device name on Windows. Fix: rename the file, for example `{stem}-out.json`")
     })
@@ -622,6 +644,9 @@ fn loader_findings(fixtures_root: &Path, dirs: &[String]) -> Vec<Finding> {
         let Err(error) = Fixture::load(fixtures_root, dir) else {
             continue;
         };
+        if loader_pending(dir) && is_missing_base(&error) {
+            continue;
+        }
         let of = |fixture: &str, path: &str| {
             if path.is_empty() || path == "." || path.starts_with('(') {
                 format!("{FIXTURES}/{fixture}")
@@ -640,15 +665,31 @@ fn loader_findings(fixtures_root: &Path, dirs: &[String]) -> Vec<Finding> {
     found
 }
 
-/// Fixture directories (from the repo root) that the loader cannot load yet, with the reason. Every other
-/// rule still covers them. The `host.firewall` cases were written before the loader (M1-147) and name a
-/// `base` that is a sibling directory, while the loader looks a base up under `envs/`. M1-172 registers the
-/// check and moves its cases onto the loader. It removes this row then. A row that matches no fixture
-/// is a finding, so the list cannot outlive its cases.
+/// Fixture directories (from the repo root) that cannot finish loading yet, with the reason. Only one loader
+/// error is excused for them: the `base` is not found. Every other loader error and every other lint rule
+/// still covers them, so a bad manifest or a duplicate argv in these cases still fails. The `host.firewall`
+/// cases were written before the loader (M1-147) and name a `base` that is a sibling directory, while the
+/// loader looks a base up under `envs/`. M1-117 builds the fixture environments under `envs/`. It moves these
+/// bases there and removes this row. A row that matches no fixture is a finding, so the list cannot outlive
+/// its cases.
 const LOADER_PENDING: &[(&str, &str)] = &[(
     "tests/fixtures/checks/host.firewall/",
-    "the cases name a sibling `base`; M1-172 moves them onto the loader",
+    "the cases name a sibling `base`; M1-117 moves the bases to envs/",
 )];
+
+/// The loader's "base not found" error. The case itself is read first, so a `Read` error on a fixture below
+/// `envs/` is always the base.
+fn is_missing_base(error: &FixtureError) -> bool {
+    matches!(error, FixtureError::Read { fixture, .. } if fixture.starts_with("envs/"))
+}
+
+/// Whether `dir` (a name below `tests/fixtures`) is covered by a `LOADER_PENDING` row.
+fn loader_pending(dir: &str) -> bool {
+    let full = format!("{FIXTURES}/{dir}/");
+    LOADER_PENDING
+        .iter()
+        .any(|(prefix, _)| full.starts_with(prefix))
+}
 
 /// The fixture directories the loader rule covers, as names below `tests/fixtures`, and the findings
 /// for pending rows that match nothing.
@@ -665,11 +706,6 @@ fn loadable(dirs: &BTreeSet<String>, found: &mut Vec<Finding>) -> Vec<String> {
         }
     }
     dirs.iter()
-        .filter(|dir| {
-            !LOADER_PENDING
-                .iter()
-                .any(|(prefix, _)| dir.starts_with(prefix))
-        })
         .filter_map(|dir| dir.strip_prefix(&format!("{FIXTURES}/")))
         .map(str::to_owned)
         .collect()
@@ -677,21 +713,86 @@ fn loadable(dirs: &BTreeSet<String>, found: &mut Vec<Finding>) -> Vec<String> {
 
 // ---- rule: line endings, host names, addresses --------------------------------------------------
 
-/// Third-party and documentation files are not scanned for host names and addresses.
+/// The allow file and the documentation files outside the cases are not scanned for host names and
+/// addresses. A README inside `checks/` or `envs/` is case data, so it is scanned.
 fn scans_text(path: &str) -> bool {
-    path != ALLOW_PATH && !path.ends_with("/README.md")
+    let in_cases = [format!("{FIXTURES}/checks/"), format!("{FIXTURES}/envs/")]
+        .iter()
+        .any(|dir| path.starts_with(dir));
+    path != ALLOW_PATH && (in_cases || !path.ends_with("/README.md"))
 }
 
-/// Host names with a trailing label from this list are checked. The list is short on purpose: it leaves
-/// out labels that are also file extensions (`sh`, `py`, `rs`, `md`, `so`, `in`, `zip`).
-const TLDS: &[&str] = &[
-    "com", "net", "org", "io", "edu", "gov", "mil", "int", "info", "biz", "cloud", "ai", "co",
-    "us", "uk", "de", "fr", "ru", "cn", "jp", "br", "au", "ca", "nl", "se", "ch", "eu", "xyz",
-    "tech", "online", "site", "store",
+/// The IANA root zone list of top-level domains, as downloaded from
+/// <https://data.iana.org/TLD/tlds-alpha-by-domain.txt> on 2026-10-30 (its first line holds the version).
+/// It is checked in so the test needs no network. Refresh it by downloading the file again.
+///
+/// 08 says "a public suffix". This is the deviation: the root zone list, not the public suffix list, because
+/// it is one small file with a stable format, and the lint only needs to know that a last label is a real TLD.
+const IANA_TLDS: &str = include_str!("data/iana-tlds.txt");
+
+/// Labels that are in the list and are also file extensions in the fixtures or in common shell, script and
+/// archive names (`install.sh`, `probe.py`, `lib.rs`, `README.md`, `libfoo.so`, `sh.in`, `a.zip`,
+/// `license.link`). A dotted name that ends in one of them is a file name, not a host. A URL host is still
+/// checked with any label.
+const EXTENSION_LABELS: &[&str] = &[
+    "cc", "in", "link", "md", "ml", "mov", "new", "pid", "pl", "pm", "ps", "pub", "py", "rs",
+    "run", "sh", "so", "target", "zip",
 ];
 
+/// Whether `label` ends a host name that is checked outside a URL.
+fn is_tld(label: &str) -> bool {
+    static TLDS: LazyLock<BTreeSet<String>> = LazyLock::new(|| {
+        IANA_TLDS
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(str::to_ascii_lowercase)
+            .filter(|tld| !EXTENSION_LABELS.contains(&tld.as_str()))
+            .collect()
+    });
+    TLDS.contains(label)
+}
+
+/// Domains where anyone can get a name: the service owns the domain, the customer owns the label. Only the
+/// exact name, `<service>.<domain>` and `<service>.<region>.<domain>` pass, with a plain service label and a
+/// region of the usual shape. `acme-backups.s3.amazonaws.com` and `ec2-54-1-2-3.compute-1.amazonaws.com`
+/// carry a customer or a machine, so they fail.
+const MULTI_TENANT: &[&str] = &["amazonaws.com", "azure.com", "googleapis.com"];
+
+/// `s3`, `sts`, `storage`, `management`: one plain label, no hyphen.
+fn is_service_label(label: &str) -> bool {
+    label.starts_with(|c: char| c.is_ascii_lowercase())
+        && label
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+}
+
+/// `us-east-1`, `eu-west-2`, `us-gov-west-1`, `us-central1`, `europe-west4`, `eastus`, `westeurope`.
+fn is_region_label(label: &str) -> bool {
+    static REGION: LazyLock<Regex> = LazyLock::new(|| {
+        regex(
+            r"^(?:[a-z]{2}(?:-[a-z]+)+-[0-9]+|[a-z]+-[a-z]{2,}[0-9]+|(?:east|west|central)us2?|(?:north|west)europe)$",
+        )
+    });
+    REGION.is_match(label)
+}
+
+/// `Some(shape_ok)` when `host` is below a [`MULTI_TENANT`] domain, `None` when it is not.
+fn multi_tenant_shape(host: &str) -> Option<bool> {
+    MULTI_TENANT.iter().find_map(|domain| {
+        let prefix = host.strip_suffix(&format!(".{domain}"))?;
+        let labels: Vec<&str> = prefix.split('.').collect();
+        Some(match labels.as_slice() {
+            [service] => is_service_label(service),
+            [service, region] => is_service_label(service) && is_region_label(region),
+            _ => false,
+        })
+    })
+}
+
 /// Names that are not real hosts: the reserved labels of RFC 2606 and RFC 6761, the example domains, and
-/// the vendors Rdy checks (OS vendors, Kubernetes distributions, NVIDIA, the clouds, GitHub).
+/// the vendors Rdy checks (OS vendors, Kubernetes distributions, NVIDIA, the clouds, GitHub). Every name
+/// here also matches its subdomains, except the [`MULTI_TENANT`] ones.
 const ALLOWED_HOSTS: &[&str] = &[
     "example",
     "test",
@@ -730,6 +831,9 @@ const ALLOWED_HOSTS: &[&str] = &[
 
 fn host_is_synthetic(host: &str) -> bool {
     let host = host.trim_end_matches('.');
+    if let Some(shape_ok) = multi_tenant_shape(host) {
+        return shape_ok;
+    }
     !host.contains('.')
         || ALLOWED_HOSTS
             .iter()
@@ -804,7 +908,7 @@ fn hosts_in(line: &str) -> Vec<String> {
     for m in NAME.find_iter(line) {
         let name = m.as_str().to_ascii_lowercase();
         let last = name.rsplit('.').next().unwrap_or_default();
-        if TLDS.contains(&last) {
+        if is_tld(last) {
             hosts.push(name);
         }
     }
@@ -1027,6 +1131,112 @@ fn a_planted_public_hostname_fails_with_the_file_named() -> TestResult {
     assert_eq!(summary(&found), [(path, "host")], "{}", render(&found));
     let found = plant(path, r#"{"stdout": "https://api.vendor.sh/v1"}"#)?;
     assert_eq!(summary(&found), [(path, "host")], "{}", render(&found));
+    // A dotted name outside a URL is checked against the IANA list, so `.dev`, `.app` and country codes count.
+    for text in [
+        "pull from registry.corp.dev now",
+        "tools.vendor.app",
+        "git.vendor.me",
+        "x.vendor.se",
+    ] {
+        let found = plant(path, format!(r#"{{"stdout": "{text}"}}"#))?;
+        assert_eq!(
+            summary(&found),
+            [(path, "host")],
+            "{text}: {}",
+            render(&found)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn the_iana_list_is_embedded_and_leaves_out_file_extensions() {
+    assert!(
+        IANA_TLDS.lines().count() > 1000,
+        "the list is checked in whole"
+    );
+    for tld in ["com", "dev", "app", "me", "se", "xn--p1ai", "cloud"] {
+        assert!(is_tld(tld), "{tld}");
+    }
+    for extension in EXTENSION_LABELS {
+        assert!(!is_tld(extension), "{extension} is a file extension here");
+        assert!(
+            IANA_TLDS
+                .lines()
+                .any(|line| line.eq_ignore_ascii_case(extension)),
+            "{extension} is not in the list, so it needs no row in EXTENSION_LABELS"
+        );
+    }
+    for not_tld in ["json", "yaml", "toml", "memory", "max", "service", "6"] {
+        assert!(!is_tld(not_tld), "{not_tld}");
+    }
+}
+
+#[test]
+fn a_cloud_domain_passes_only_by_its_fixed_shape() -> TestResult {
+    let path = "tests/fixtures/checks/host.memory/pass/commands/cloud.json";
+    for ok in [
+        "amazonaws.com",
+        "sts.amazonaws.com",
+        "s3.us-east-1.amazonaws.com",
+        "ec2.eu-west-2.amazonaws.com",
+        "sts.us-gov-west-1.amazonaws.com",
+        "management.azure.com",
+        "storage.googleapis.com",
+        "compute.us-central1.googleapis.com",
+        "ebs.csi.aws.com",
+    ] {
+        let found = plant(path, format!("https://{ok}/x {ok}"))?;
+        assert!(found.is_empty(), "{ok}: {}", render(&found));
+    }
+    for bad in [
+        "acme-backups.s3.amazonaws.com",
+        "ec2-54-1-2-3.compute-1.amazonaws.com",
+        "acme-backups.amazonaws.com",
+        "a1b2c3.execute-api.us-east-1.amazonaws.com",
+        "acme.blob.core.azure.com",
+        "acme.s3.us-east-1.amazonaws.com",
+        "acme-prod.us-east-1.amazonaws.com",
+    ] {
+        let found = plant(path, format!("https://{bad}/x"))?;
+        assert_eq!(
+            summary(&found),
+            [(path, "host")],
+            "{bad}: {}",
+            render(&found)
+        );
+        let found = plant(path, bad)?;
+        assert_eq!(
+            summary(&found),
+            [(path, "host")],
+            "{bad} bare: {}",
+            render(&found)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_readme_is_skipped_outside_the_cases_and_scanned_inside() -> TestResult {
+    let text = "see registry.vendor-prod.com and 8.8.8.8\n";
+    let outside = "tests/fixtures/specs/README.md";
+    let found = plant(outside, text)?;
+    assert!(found.is_empty(), "{}", render(&found));
+    let inside = format!("{MEMORY_PASS}/README.md");
+    let found = plant(&inside, text)?;
+    assert_eq!(
+        summary(&found),
+        [(inside.as_str(), "host"), (inside.as_str(), "ip")],
+        "{}",
+        render(&found)
+    );
+    let env = "tests/fixtures/envs/all-pass/README.md";
+    let found = plant(env, text)?;
+    assert!(
+        found.iter().any(|f| f.path == env && f.rule == "host"),
+        "{}",
+        render(&found)
+    );
     Ok(())
 }
 
@@ -1210,6 +1420,10 @@ fn name_rules() {
         "com1",
         "COM9.log",
         "lpt3.txt",
+        "com0",
+        "LPT0.txt",
+        "conin$",
+        "CONOUT$.log",
         "trailing.",
         "trailing ",
         "a<b",
@@ -1472,4 +1686,69 @@ fn a_repeated_json_key_fails_with_the_file_named() -> TestResult {
         render(&found)
     );
     Ok(())
+}
+
+#[test]
+fn a_pending_case_is_excused_only_for_its_missing_base() -> TestResult {
+    let pending = "checks/host.firewall/ufw-planted";
+    assert!(loader_pending(pending));
+    assert!(!loader_pending("checks/host.memory/pass"));
+    assert!(!loader_pending("checks/host.firewall-other/x"));
+
+    let dir = tempfile::tempdir()?;
+    let manifest = MANIFEST.replace("answers", "base = \"base-ufw\"\nanswers");
+    write(dir.path(), &format!("{pending}/fixture.toml"), &manifest)?;
+    // The base is a sibling, not under envs/: the one excused error.
+    let found = loader_findings(dir.path(), &[pending.to_owned()]);
+    assert!(found.is_empty(), "{}", render(&found));
+
+    // The same missing base in a case that is not pending is a finding.
+    let other = "checks/host.test/needs-base";
+    write(dir.path(), &format!("{other}/fixture.toml"), &manifest)?;
+    let found = loader_findings(dir.path(), &[other.to_owned()]);
+    assert_eq!(found.len(), 1, "{}", render(&found));
+    assert!(
+        found[0].path.ends_with("envs/base-ufw/fixture.toml"),
+        "{}",
+        found[0]
+    );
+
+    // Any other loader error in a pending case still fails: a bad origin, a duplicate argv.
+    write(
+        dir.path(),
+        &format!("{pending}/fixture.toml"),
+        &manifest.replace("origin = \"hand\"", "origin = \"laptop\""),
+    )?;
+    let found = loader_findings(dir.path(), &[pending.to_owned()]);
+    assert_eq!(found.len(), 1, "{}", render(&found));
+    assert!(found[0].detail.contains("laptop"), "{}", found[0]);
+
+    write(dir.path(), &format!("{pending}/fixture.toml"), MANIFEST)?;
+    write(
+        dir.path(),
+        &format!("{pending}/commands/one.json"),
+        &command("one", "a\\n"),
+    )?;
+    write(
+        dir.path(),
+        &format!("{pending}/commands/again.json"),
+        &command("one", "b\\n"),
+    )?;
+    let found = loader_findings(dir.path(), &[pending.to_owned()]);
+    assert_eq!(found.len(), 1, "{}", render(&found));
+    assert!(found[0].detail.contains("again.json"), "{}", found[0]);
+    Ok(())
+}
+
+#[test]
+fn a_pending_row_with_no_fixtures_is_a_finding() {
+    let mut found = Vec::new();
+    let dirs = loadable(&BTreeSet::new(), &mut found);
+    assert!(dirs.is_empty());
+    assert_eq!(found.len(), LOADER_PENDING.len(), "{}", render(&found));
+    assert!(
+        found.iter().all(|f| f.rule == "loader"),
+        "{}",
+        render(&found)
+    );
 }
