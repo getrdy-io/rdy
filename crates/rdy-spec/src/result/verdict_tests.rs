@@ -385,7 +385,6 @@ fn bucket_order_key() {
     let order = [
         Bucket::Blocker,
         Bucket::RequiredNotRun,
-        Bucket::Unknown("frozen".into()),
         Bucket::Warning,
         Bucket::Passed,
         Bucket::NotApplicable,
@@ -393,6 +392,11 @@ fn bucket_order_key() {
     for pair in order.windows(2) {
         assert!(pair[0].order_key() < pair[1].order_key(), "{pair:?}");
     }
+    // An unknown bucket sorts with required_not_run (01 section 3.2).
+    assert_eq!(
+        Bucket::Unknown("frozen".into()).order_key(),
+        Bucket::RequiredNotRun.order_key()
+    );
 }
 
 #[test]
