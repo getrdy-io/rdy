@@ -14,7 +14,6 @@ use rdy_spec::result::{Action, CheckResult, Report};
 use serde_json::{Map, Value};
 
 use super::JsonError;
-use crate::outcome::MAX_GRANTS;
 use crate::redact::cap_text;
 
 /// Results in a report (a spec has at most 256 checks).
@@ -58,7 +57,7 @@ pub(super) fn bound_report(report: &mut Report) -> Result<(), JsonError> {
     if let Some(proxy) = &mut report.proxy {
         proxy.no_proxy.truncate(MAX_ITEMS);
     }
-    cap_keys(&mut report.actions_dropped, MAX_SMALL_MAP);
+    fold_counts(&mut report.actions_dropped, MAX_SMALL_MAP);
     cap_keys(&mut report.spec.annotations, MAX_SMALL_MAP);
     cap_keys(&mut report.redaction.by_rule, MAX_BY_RULE);
     Ok(())
@@ -73,6 +72,21 @@ pub(super) fn cap_keys<V>(map: &mut BTreeMap<String, V>, max: usize) -> bool {
     cut
 }
 
+/// Keeps the first `max` keys of a map of counters. The counters of the keys past that are added to the
+/// last key kept, so no count is lost (`actions_dropped` never holds more than a handful of kinds, so
+/// this is a guard).
+pub(super) fn fold_counts(map: &mut BTreeMap<String, u64>, max: usize) {
+    while map.len() > max.max(1) {
+        let Some((_, count)) = map.pop_last() else {
+            return;
+        };
+        if let Some(mut last) = map.last_entry() {
+            let total = last.get().saturating_add(count);
+            *last.get_mut() = total;
+        }
+    }
+}
+
 fn bound_check(check: &mut CheckResult) {
     let mut cut = false;
     cut |= truncate(&mut check.needs, MAX_NEEDS);
@@ -82,7 +96,7 @@ fn bound_check(check: &mut CheckResult) {
     }
     if let Some(partial) = &mut check.partial {
         cut |= truncate(&mut partial.missing, MAX_ITEMS);
-        cut |= truncate(&mut partial.missing_grants, MAX_GRANTS);
+        cut |= truncate(&mut partial.missing_grants, MAX_ITEMS);
     }
     for map in [&mut check.observed, &mut check.expected]
         .into_iter()

@@ -582,7 +582,7 @@ test asserts both identities, and that bucket counts match the summary.
 values of at most three levels; `annotations` 32, `actions_dropped` 32 and `by_rule` 64 keys; any other list 1000 items
 and any other map 256 keys; a key the schema does not know holds a value of at most three levels with the same
 bounds (readers ignore unknown keys, 3.4); `findings` in a lint report 258; `identity.kube.exec_plugin` a bare name of 1 to 255 letters, digits, `.`, `_`, `+` or `-`; every other string 4 KiB;
-`observed` and `expected` 64 KiB each (prose, checked by the writer). A string cut by a cap ends with ` [truncated]`, and the check's `truncated` flag is set. The whole document is at most 2 MiB, which every reader checks before it parses. That check is the real size control (05 Appendix A D2); a schema cannot cap bytes.
+`observed` and `expected` 64 KiB each (prose, checked by the redactor before the escapes; the writer checks the whole document after them). A string cut by a cap ends with ` [truncated]`, and the check's `truncated` flag is set. The whole document is at most 2 MiB, which every reader checks before it parses. That check is the real size control (05 Appendix A D2); a schema cannot cap bytes.
 
 ### 5.1 Host identity
 
@@ -783,15 +783,20 @@ Both slashes and backslashes end a directory, so Windows paths fold per director
 - Free-form maps (`observed`, `expected`, the own fields of an action, and any object inside them) are
   written with their keys sorted, so the bytes do not depend on how a map was filled.
 - Size: target under 1 MiB, hard cap 2 MiB, with the action log retention rule of 5.4 and lists inside
-  `observed` cut to 200 items with `truncated: true`. The cap is measured on the final bytes, after the
-  escapes. The writer also cuts what the schema caps would refuse (M1-055): in a check, a list past its
+  `observed` cut to 200 items with `truncated: true`. The redactor already holds `observed` and
+  `expected` to 64 KiB each, measured before the escapes; the writer's cap is on the final bytes, after
+  them. The writer also cuts what the schema caps would refuse (M1-055): in a check, a list past its
   `maxItems` (`needs` 32, `notes` 20, `missing_grants` 1000), `observed` and `expected` past 64 keys
   (the first 64 in key order stay), an object past 64 keys or a list past 256 items inside them, a list or
   object nested deeper than three levels (it becomes the text `[truncated]`) and a text over 4 KiB. Each
-  cut sets the check's `truncated`. Past 5000 entries, or past 2 MiB, it sheds action entries in the
-  order of 5.4 (newest first inside a tier) and sets `actions_truncated` and `actions_dropped`. Results
-  are never cut: more than 256 of them, or a report still over 2 MiB with no action entries, is an
-  error and nothing is written. A reader checks the size before it parses (`read_report`).
+  cut sets the check's `truncated`. Past 5000 entries, or past 2 MiB, it works in two stages. Stage one
+  sheds action entries in the order of 5.4 (newest first inside a tier) and sets `actions_truncated` and
+  `actions_dropped`. A `denied` entry is never shed to make room. Stage two, only if the report is still
+  over 2 MiB, sets `observed` and `expected` to `null` on the checks that hold the most of them, largest
+  first, and sets `truncated: true` on each. Verdict, status, message and fix are never touched. More than
+  256 results, or a report still over 2 MiB with all of that cleared, is an error naming the largest
+  checks, and nothing is written (the vendor can trim those checks). A reader checks the size before it
+  parses (`read_report_from` stops reading one byte past the cap).
 - Location (ADR 0003): a new directory `rdy-report-<product>-<YYYYMMDDTHHMMSSZ>/` holding
   `rdy-report-<product>-<ts>.json`, `.html`, and a copy of the verified spec and its `.minisig` from the
   same buffers (02). The `Report written to` line names all four files.

@@ -8,10 +8,10 @@
 //!   order of the schema), a trailing newline. The keys of every free-form map (`observed`, `expected`
 //!   and the fields of an action) are sorted, so the bytes do not depend on how a map was filled or on
 //!   which crate turned on `serde_json`'s `preserve_order`. The same report gives the same bytes.
-//! - **HTML safe.** After serializing, `<`, `>` and `&` become `<`, `>` and `&`, and
-//!   U+2028 and U+2029 become ` ` and ` `. Those characters only occur inside JSON strings,
-//!   so the result is still the same JSON and cannot close a `<script>` element. The result is an
-//!   [`HtmlSafeJson`], which only this writer can build.
+//! - **HTML safe.** After serializing, `<`, `>` and `&` become the escapes `\u003c`, `\u003e` and
+//!   `\u0026`, and the line separators U+2028 and U+2029 become `\u2028` and `\u2029`. Those characters
+//!   only occur inside JSON strings, so the result is still the same JSON and cannot close a `<script>`
+//!   element. The result is an [`HtmlSafeJson`], which only this writer can build.
 //! - **The schema's caps.** The redactor has cut every text already (4 KiB, a message 1 KiB). The writer
 //!   cuts what the redactor leaves: a list past its `maxItems`, a map past its keys, a value in
 //!   `observed`, `expected` or an action nested deeper than three levels (the deeper list or object
@@ -19,15 +19,19 @@
 //!   its `truncated` flag. A cut of a list or a map elsewhere (capabilities, annotations) sets nothing,
 //!   because those are not results. So a large real cluster still gives a report that validates.
 //! - **The 2 MiB cap.** The whole document is at most [`MAX_REPORT_BYTES`], measured on the final bytes
-//!   after the escapes. Past that, entries of the action log go in the order the log itself keeps
-//!   (01 section 5.4): the newest `ok` `read`, `read_dir` and `stat`, then `failed` ones, then
-//!   other entries, and `denied` entries last. `actions_truncated` and `actions_dropped` say what went.
-//!   Past 5000 entries the same order applies. Results are never cut. If the report is still too big
-//!   with no action entries, [`JsonError::TooLarge`] says so and nothing is written.
-//! - **A reader's cap.** [`read_report`] refuses a document over the cap before it parses it (threat
-//!   model D2). A schema cannot cap bytes, so this check is the real size control.
+//!   after the escapes. Past that, the writer works in two stages. First it sheds entries of the action
+//!   log in the order the log itself keeps (01 section 5.4): the newest `ok` `read`, `read_dir` and
+//!   `stat`, then `failed` ones, then other entries. `denied` entries (refused calls) are never shed to
+//!   make room. `actions_truncated` and `actions_dropped` say what went. Past 5000 entries the same
+//!   order applies. If the report is still too big, it sets `observed` and `expected` to `null` on the
+//!   checks that hold the most of them, largest first, and sets their `truncated` flag. The verdict, the
+//!   status, the message and the fix of a check are never cut. If it is still too big with all of that
+//!   cleared, [`JsonError::TooLarge`] names the largest checks and nothing is written.
+//! - **A reader's cap.** [`read_report_from`] and [`read_report`] refuse a document over the cap before
+//!   they parse it, and the first never holds more than the cap plus one byte (threat model D2). A
+//!   schema cannot cap bytes, so this check is the real size control.
 
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 
 use rdy_spec::result::Report;
 use serde::Serialize;
@@ -62,16 +66,21 @@ pub enum JsonError {
         /// The most the format holds.
         max: usize,
     },
-    /// The report is over the cap even with every action entry shed.
+    /// The report is over the cap even with every action entry shed and every `observed` and `expected`
+    /// cleared.
     #[error(
-        "the report is {bytes} bytes with no action log, over the limit of {max} bytes, so it was not written. \
-         Fix: run again with fewer checks in the spec, or tell the vendor which checks give so much output"
+        "the report is {bytes} bytes with no measured values, over the limit of {max} bytes, so it was not written. \
+         The checks with the most data are: {largest}. \
+         Fix: send this message to the vendor, so they can make those checks give less output"
     )]
     TooLarge {
         /// The size of the smallest form the writer could make.
         bytes: usize,
         /// The cap, [`MAX_REPORT_BYTES`].
         max: usize,
+        /// The keys of the checks that weigh the most, comma separated. They are check ids from the
+        /// spec, not report text.
+        largest: String,
     },
     /// The document to read is over the cap. It was not parsed.
     #[error(
@@ -113,6 +122,9 @@ pub enum JsonError {
 /// can put it inside a `<script type="application/json">` element without escaping it, because it
 /// cannot close the element, and because it is the same bytes as the `.json` file, a hash of one is a
 /// hash of the other. The text ends with one newline.
+///
+/// This is the only value a template may print unescaped (an askama safe marker belongs on this type
+/// alone). Any other string can hold `</script>` or `<!--`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HtmlSafeJson(String);
 
@@ -166,7 +178,7 @@ impl std::fmt::Display for HtmlSafeJson {
 /// # Errors
 ///
 /// [`JsonError::TooManyChecks`] for more than 256 results, [`JsonError::TooLarge`] when no cut of the
-/// action log brings the report under the cap, and [`JsonError::Serialize`] if serde fails (a bug).
+/// action log and of `observed` and `expected` brings the report under the cap, and [`JsonError::Serialize`] if serde fails (a bug).
 pub fn json_bytes(report: &RedactedReport) -> Result<HtmlSafeJson, JsonError> {
     let mut cut = (**report).clone();
     bound::bound_report(&mut cut)?;
@@ -186,11 +198,29 @@ pub fn write_json(report: &RedactedReport, out: &mut dyn Write) -> Result<(), Js
     Ok(())
 }
 
-/// Reads a report from `bytes`, after checking the size.
+/// Reads a report from `reader`, never taking in more than [`MAX_REPORT_BYTES`] plus one byte.
 ///
-/// A document over [`MAX_REPORT_BYTES`] is refused before any of it is parsed (threat model D2). The
-/// result is not redacted: a reader that shows or forwards a report it did not write runs the redactor
-/// on it first (`rdy report`, M2).
+/// The read stops one byte past the cap, so a huge or endless file costs 2 MiB of memory and no more
+/// (threat model D2). A document over the cap is refused before any of it is parsed. The result is not
+/// redacted: a reader that shows or forwards a report it did not write runs the redactor on it first
+/// (`rdy report`, M2).
+///
+/// # Errors
+///
+/// [`JsonError::InputTooLarge`] over the cap (`bytes` is then the cap plus one, because the rest was not
+/// read), [`JsonError::Io`] if the reader fails, [`JsonError::Parse`] if it is not a report.
+pub fn read_report_from(reader: impl Read) -> Result<Report, JsonError> {
+    let mut bytes = Vec::new();
+    reader
+        .take(MAX_REPORT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    read_report(&bytes)
+}
+
+/// Reads a report from `bytes` that are already in memory, after checking the size.
+///
+/// Use [`read_report_from`] for a file or a stream, so the cap also limits memory. A document over
+/// [`MAX_REPORT_BYTES`] is refused before any of it is parsed.
 ///
 /// # Errors
 ///

@@ -3,15 +3,8 @@
 
 use serde_json::{Value, json};
 
-use super::bound::{MAX_ITEMS, bound_map, bound_value};
+use super::bound::{bound_map, bound_value, fold_counts};
 use super::escape_html;
-use crate::outcome::MAX_GRANTS;
-
-#[test]
-fn the_list_cap_is_the_one_the_outcome_mapping_uses_for_missing_grants() {
-    // One number for the schema's `maxItems: 1000` on `missing_grants` (M1-110 caps it in `outcome`).
-    assert_eq!(MAX_ITEMS, MAX_GRANTS);
-}
 
 #[test]
 fn the_five_characters_are_escaped_and_nothing_else_changes() {
@@ -119,4 +112,14 @@ fn a_map_comes_out_sorted_and_with_at_most_64_keys() {
     assert_eq!(big.len(), 64);
     assert!(big.contains_key("k00"));
     assert!(!big.contains_key("k64"));
+}
+
+#[test]
+fn counters_past_the_cap_are_added_to_the_last_key_kept() {
+    let mut map: std::collections::BTreeMap<String, u64> =
+        (0..5).map(|i| (format!("k{i}"), 10)).collect();
+    fold_counts(&mut map, 3);
+    assert_eq!(map.len(), 3);
+    assert_eq!(map.get("k2"), Some(&30));
+    assert_eq!(map.values().sum::<u64>(), 50);
 }

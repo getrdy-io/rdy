@@ -1,17 +1,21 @@
-//! The JSON writer end to end (M1-055): the escapes, one byte string for the file, stdout and the HTML
-//! copy, the layout, the schema's caps, the 2 MiB cap and the reader's check.
+//! The JSON writer end to end (M1-055): the escapes, one byte string for the file and stdout, the layout,
+//! the schema's caps, the 2 MiB cap with its two stages and the reader's check. The HTML copy of the same
+//! bytes is proved by the HTML golden (M1-078, `data-sha256`).
 //!
 //! Every report here goes through a real redactor first, because the writer takes nothing else. The
 //! base is the 01 section 7.2 sample at `tests/fixtures/reports/not-ready-7.2.json`.
 
 use std::error::Error;
 use std::fmt::Write as _;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use jsonschema::Validator;
 use rdy_engine::output::OutputDir;
 use rdy_engine::redact::{RedactedReport, Redactor, TagKey};
-use rdy_engine::report::{JsonError, MAX_REPORT_BYTES, json_bytes, read_report, write_json};
+use rdy_engine::report::{
+    JsonError, MAX_REPORT_BYTES, json_bytes, read_report, read_report_from, write_json,
+};
 use rdy_spec::result::Report;
 use serde_json::{Map, Value, json};
 
@@ -103,7 +107,9 @@ fn a_hostname_with_a_script_end_tag_is_written_escaped() -> TestResult {
 }
 
 #[test]
-fn the_file_stdout_and_the_html_copy_are_the_same_bytes() -> TestResult {
+fn the_file_and_stdout_are_the_same_bytes_as_the_returned_text() -> TestResult {
+    // The HTML copy is not simulated here: the renderer does not exist yet, and a test that wraps the
+    // string itself proves nothing about it. M1-078 hashes the `<script>` text of the real page.
     let report = redact(hostile_doc()?)?;
     let json = json_bytes(&report)?;
 
@@ -120,21 +126,14 @@ fn the_file_stdout_and_the_html_copy_are_the_same_bytes() -> TestResult {
     let file = std::fs::read(&path)?;
     assert_eq!(file, json.as_bytes());
 
-    // The copy in the HTML report: the renderer (M1-077) puts the text between the tags, unescaped.
-    let html = format!("<script type=\"application/json\" id=\"rdy-result\">{json}</script>");
-    let open = html.find('>').ok_or("no tag")? + 1;
-    let close = html.rfind("</script>").ok_or("no end tag")?;
-    let embedded = html.get(open..close).ok_or("bad slice")?;
-    // Exactly one element is in the page, so the text could not close it early.
-    assert_eq!(html.matches("</script>").count(), 1);
-
     let hashes = [
         sha256_hex(json.as_bytes()),
         sha256_hex(&stdout),
         sha256_hex(&file),
-        sha256_hex(embedded.as_bytes()),
     ];
     assert!(hashes.iter().all(|h| h == &hashes[0]), "{hashes:?}");
+    // Nothing in the text can close or open an element, so a template can print it unescaped.
+    assert!(!json.as_str().contains(['<', '>', '&']));
     Ok(())
 }
 
@@ -465,38 +464,115 @@ fn the_cap_is_measured_after_the_escapes() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn a_report_too_big_with_no_actions_is_refused_and_nothing_is_written() -> TestResult {
-    let mut doc = sample_value()?;
+/// `n` checks cloned from the sample's first, each with the map `observed(i)` as `observed`.
+fn with_checks(doc: &mut Value, n: usize, observed: impl Fn(usize) -> Option<Map<String, Value>>) {
     let template = doc["checks"][0].clone();
-    let observed: Map<String, Value> = (0..20)
-        .map(|i| {
-            (
-                format!("k{i:02}"),
-                json!(format!("some words {i} ").repeat(300)),
-            )
-        })
-        .collect();
-    let checks: Vec<Value> = (0..64)
+    let checks: Vec<Value> = (0..n)
         .map(|i| {
             let mut check = template.clone();
             check["key"] = json!(format!("host.cpu.{i}"));
-            check["observed"] = Value::Object(observed.clone());
-            check["expected"] = Value::Object(observed.clone());
+            check["observed"] = observed(i).map_or(Value::Null, Value::Object);
+            check["expected"] = Value::Null;
             check
         })
         .collect();
     doc["checks"] = Value::Array(checks);
+}
+
+/// A map of 20 texts of `words` repeats each. Words, so no rule reads them as one secret.
+fn text_map(words: usize) -> Map<String, Value> {
+    (0..20)
+        .map(|i| {
+            (
+                format!("k{i:02}"),
+                json!(format!("some words {i} ").repeat(words)),
+            )
+        })
+        .collect()
+}
+
+fn observed_len(check: &Value) -> usize {
+    check["observed"].as_object().map_or(0, |map| {
+        serde_json::to_string(map).map_or(0, |text| text.len())
+    })
+}
+
+#[test]
+fn a_report_over_2_mib_clears_observed_on_the_largest_checks_first() -> TestResult {
+    let mut doc = sample_value()?;
+    // 64 checks whose `observed` grows with the index. Together they are about 4 MiB.
+    with_checks(&mut doc, 64, |i| Some(text_map(20 + 4 * i)));
+    let report = redact(doc)?;
+    let before: Vec<Value> = serde_json::to_value(&*report)?["checks"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let json = written(&report)?;
+    assert!(json.len() <= MAX_REPORT_BYTES, "{}", json.len());
+    let out = parsed(&json)?;
+    let after = out["checks"].as_array().ok_or("no checks")?;
+    assert_eq!(after.len(), 64);
+
+    let cleared: Vec<usize> = (0..64)
+        .filter(|&i| after[i]["observed"].is_null())
+        .collect();
+    assert!(!cleared.is_empty() && cleared.len() < 64, "{cleared:?}");
+    // The largest first: every cleared one is at least as big as every one that kept its values.
+    let smallest_cleared = cleared.iter().map(|&i| observed_len(&before[i])).min();
+    let biggest_kept = (0..64)
+        .filter(|i| !cleared.contains(i))
+        .map(|i| observed_len(&before[i]))
+        .max();
+    assert!(
+        smallest_cleared >= biggest_kept,
+        "{smallest_cleared:?} {biggest_kept:?}"
+    );
+    // Only what was needed: one value fewer cleared would not fit, so the report is within the size of
+    // the next largest value (70 KiB at most) of the cap.
+    assert!(json.len() + 70 * 1024 > MAX_REPORT_BYTES, "{}", json.len());
+
+    for i in 0..64 {
+        let (was, now) = (&before[i], &after[i]);
+        for field in ["key", "status", "message", "fix", "needs", "notes"] {
+            assert_eq!(was.get(field), now.get(field), "check {i} field {field}");
+        }
+        assert_eq!(
+            now["truncated"].as_bool(),
+            Some(cleared.contains(&i) || was["truncated"] == true),
+            "check {i}"
+        );
+    }
+    assert_eq!(out["verdict"], serde_json::to_value(report.verdict)?);
+    assert_valid(&json)
+}
+
+#[test]
+fn a_report_too_big_with_nothing_left_to_clear_is_refused_and_nothing_is_written() -> TestResult {
+    let mut doc = sample_value()?;
+    // 256 checks with 20 notes of 1 KiB each and no measured values: about 5 MiB of results.
+    with_checks(&mut doc, 256, |_| None);
+    let note = "a note with some words ".repeat(44);
+    for check in doc["checks"].as_array_mut().ok_or("no checks")? {
+        check["notes"] = json!((0..20).map(|_| note.clone()).collect::<Vec<_>>());
+    }
     let report = redact(doc)?;
 
     let Err(err) = json_bytes(&report) else {
-        return Err("a 4 MiB report was written".into());
+        return Err("a 5 MiB report was written".into());
     };
-    assert!(
-        matches!(err, JsonError::TooLarge { max, .. } if max == MAX_REPORT_BYTES),
-        "{err}"
-    );
-    assert!(err.to_string().contains("Fix:"));
+    let JsonError::TooLarge {
+        max,
+        ref largest,
+        bytes,
+    } = err
+    else {
+        return Err(format!("wrong error: {err}").into());
+    };
+    assert_eq!(max, MAX_REPORT_BYTES);
+    assert!(bytes > MAX_REPORT_BYTES);
+    assert_eq!(largest.split(", ").count(), 3, "{largest}");
+    let text = err.to_string();
+    assert!(text.contains("Fix:") && text.contains("vendor") && text.contains(largest.as_str()));
 
     let mut sink = Vec::new();
     assert!(write_json(&report, &mut sink).is_err());
@@ -507,6 +583,131 @@ fn a_report_too_big_with_no_actions_is_refused_and_nothing_is_written() -> TestR
     assert!(out.write_json(&report).is_err());
     let listing: Vec<_> = std::fs::read_dir(out.path())?.collect();
     assert!(listing.is_empty(), "{listing:?}");
+    Ok(())
+}
+
+/// A refused read whose path is about `len` bytes of words.
+fn denied_long(seq: u64, len: usize) -> Value {
+    let mut entry = denied(seq);
+    entry["path"] = json!(format!("/srv/{}", "data dir ".repeat(len / 9)));
+    entry
+}
+
+#[test]
+fn denied_entries_are_never_shed_to_make_room() -> TestResult {
+    let mut doc = sample_value()?;
+    // 30 checks of 64 KiB each are just under the cap. 50 refused reads of 3 KiB push it over.
+    with_checks(&mut doc, 30, |_| Some(text_map(400)));
+    let alone = written(&redact(doc.clone())?)?.len();
+    assert!(
+        alone <= MAX_REPORT_BYTES && alone + 150 * 1024 > MAX_REPORT_BYTES,
+        "the results alone are {alone} bytes"
+    );
+    doc["actions"] = Value::Array((1..=50).map(|i| denied_long(i, 3000)).collect());
+
+    let json = written(&redact(doc)?)?;
+    assert!(json.len() <= MAX_REPORT_BYTES, "{}", json.len());
+    let out = parsed(&json)?;
+    let kept = kinds(&out);
+    assert_eq!(kept.len(), 50, "a refused call was shed");
+    assert!(kept.iter().all(|(_, _, outcome)| outcome == "denied"));
+    // Nothing was shed from the log, so it is not marked as cut.
+    assert_eq!(out["actions_truncated"], false);
+    // The room came from `observed` of the largest checks.
+    let cleared = out["checks"].as_array().map_or(0, |checks| {
+        checks.iter().filter(|c| c["observed"].is_null()).count()
+    });
+    assert!(cleared >= 1, "{cleared}");
+    assert_valid(&json)
+}
+
+#[test]
+fn last_resort_shedding_takes_other_entries_before_denied_and_counts_folded_calls() -> TestResult {
+    let mut doc = sample_value()?;
+    let words = "some words ".repeat(300);
+    let heavy_exec = |seq: u64| {
+        let mut entry = exec(seq);
+        entry["argv"] = json!(["lscpu", words.clone()]);
+        entry
+    };
+    let mut actions = vec![json!({
+        "seq": 1, "check": "host.cpu", "at_ms": 1, "duration_ms": 0, "kind": "coalesced",
+        "outcome": "ok", "of": "read", "under": "/proc", "count": 400
+    })];
+    actions.extend((2..=51).map(|i| denied_long(i, 200)));
+    // 800 commands of 3.3 KiB are about 2.6 MiB: more than the cap, with no file call left but one fold.
+    actions.extend((52..=851).map(heavy_exec));
+    doc["actions"] = Value::Array(actions);
+
+    let json = written(&redact(doc)?)?;
+    assert!(json.len() <= MAX_REPORT_BYTES, "{}", json.len());
+    assert!(
+        json.len() + 8 * 1024 > MAX_REPORT_BYTES,
+        "{}: it shed more than it had to",
+        json.len()
+    );
+    let out = parsed(&json)?;
+    let kept = kinds(&out);
+    // All 50 refused calls stay, and the folded `ok` entry went first.
+    assert_eq!(kept.iter().filter(|(_, _, o)| o == "denied").count(), 50);
+    assert!(!kept.iter().any(|(_, kind, _)| kind == "coalesced"));
+    // The newest commands go first, so the ones that stay are a prefix.
+    let execs: Vec<u64> = kept
+        .iter()
+        .filter(|(_, kind, _)| kind == "exec")
+        .map(|(seq, _, _)| *seq)
+        .collect();
+    assert!(!execs.is_empty() && execs.len() < 800);
+    assert_eq!(execs, (52..52 + execs.len() as u64).collect::<Vec<u64>>());
+    // A folded entry counts its calls, not one.
+    assert_eq!(out["actions_dropped"]["read"], 400);
+    assert_eq!(
+        out["actions_dropped"]["exec"].as_u64(),
+        Some(800 - execs.len() as u64)
+    );
+    assert_eq!(out["actions_truncated"], true);
+    assert_valid(&json)
+}
+
+/// True if `rest` starts with a whole placeholder, `[REDACTED:<rule>:<8 hex digits>]`.
+fn starts_with_placeholder(rest: &str) -> bool {
+    let Some(body) = rest.strip_prefix("[REDACTED:") else {
+        return false;
+    };
+    let Some((inside, _)) = body.split_once(']') else {
+        return false;
+    };
+    inside.rsplit_once(':').is_some_and(|(rule, hex)| {
+        !rule.is_empty() && hex.len() == 8 && hex.bytes().all(|b| b.is_ascii_hexdigit())
+    })
+}
+
+#[test]
+fn a_cut_text_never_ends_in_part_of_a_placeholder() -> TestResult {
+    let mut cut_cases = 0;
+    for lead in 3990..4100 {
+        let mut doc = sample_value()?;
+        let pad = "ab ".repeat(lead / 3);
+        doc["checks"][0]["observed"] = json!({
+            "log": format!("{pad}password=hunter2canary\n{pad}")
+        });
+        let json = written(&redact(doc)?)?;
+        let out = parsed(&json)?;
+        let text = out["checks"][0]["observed"]["log"]
+            .as_str()
+            .ok_or("no log")?;
+        assert!(!text.contains("hunter2canary"), "lead {lead}");
+        for (at, _) in text.match_indices("[REDACTED") {
+            let rest = text.get(at..).unwrap_or_default();
+            assert!(
+                starts_with_placeholder(rest),
+                "lead {lead} left a stub: {rest}"
+            );
+        }
+        cut_cases += usize::from(text.ends_with(" [truncated]") && text.contains("[REDACTED"));
+        assert!(text.len() <= 4096, "lead {lead}: {}", text.len());
+    }
+    assert!(cut_cases > 0, "no case cut a text next to a placeholder");
     Ok(())
 }
 
@@ -550,6 +751,47 @@ fn a_reader_refuses_a_document_over_2_mib_before_it_parses() -> TestResult {
     Ok(())
 }
 
+/// A reader that never ends and counts what it handed out.
+struct Endless {
+    served: usize,
+}
+
+impl Read for Endless {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        buf.fill(b' ');
+        self.served += buf.len();
+        Ok(buf.len())
+    }
+}
+
+/// A reader that fails.
+struct Broken;
+
+impl Read for Broken {
+    fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::other("disk gone"))
+    }
+}
+
+#[test]
+fn a_stream_is_read_no_further_than_one_byte_past_the_cap() -> TestResult {
+    let mut endless = Endless { served: 0 };
+    let result = read_report_from(&mut endless);
+    assert!(
+        matches!(result, Err(JsonError::InputTooLarge { bytes, max })
+            if bytes == MAX_REPORT_BYTES + 1 && max == MAX_REPORT_BYTES),
+        "{result:?}"
+    );
+    assert_eq!(endless.served, MAX_REPORT_BYTES + 1);
+
+    // A report the writer made reads back through a stream, and a failing stream is an `Io` error.
+    let report = redact(sample_value()?)?;
+    let json = json_bytes(&report)?;
+    assert_eq!(read_report_from(json.as_bytes())?, *report);
+    assert!(matches!(read_report_from(Broken), Err(JsonError::Io(_))));
+    Ok(())
+}
+
 #[test]
 fn the_file_is_private_and_named_after_the_folder() -> TestResult {
     let report = redact(sample_value()?)?;
@@ -574,9 +816,7 @@ fn the_file_is_private_and_named_after_the_folder() -> TestResult {
 }
 
 /// The golden: the sample with a hostile hostname and maps that were filled out of order, written by
-/// the writer. It is compared on one leg (the golden record and the orphan check run there). Every other
-/// leg proves the same bytes through the tests above.
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+/// the writer. Every leg compares it, because the bytes must not depend on the OS.
 #[test]
 fn the_written_report_matches_its_golden() -> TestResult {
     use rdy_engine::testing::{fixtures_dir, golden::assert_golden};

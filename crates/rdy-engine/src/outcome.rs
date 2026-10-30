@@ -52,9 +52,8 @@ pub const SPEC_PLACEHOLDER: &str = "<spec>";
 const NO_ADVICE_FIX: &str =
     "rdy has no advice for this result. Tell the vendor which check it was.";
 
-/// The most `missing_grants` a wire partial holds (the result schema's `maxItems`). The JSON writer
-/// keeps the same number (`report::json`).
-pub(crate) const MAX_GRANTS: usize = 1000;
+/// The most `missing_grants` a wire partial holds (the result schema's `maxItems`).
+const MAX_GRANTS: usize = 1000;
 
 /// Text for a check that failed and gave an empty hint.
 const FAILED_FIX: &str = "Run again. If it fails again, tell the vendor which check it was.";
