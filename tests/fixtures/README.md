@@ -60,14 +60,14 @@ tests/fixtures/
 ```
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
-`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), `_policy/symlink-to-shadow`,
+`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), `host.disk/` (13 cases), `_policy/symlink-to-shadow`,
 `_loader/manifest-entries`, the `_cgroup` cases and the `_kube` cases (`cluster`, `denied`). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
 | --- | --- | --- |
 | `allow.toml` | Lint exceptions: the CRLF canary, a reference link in the third-party vectors. The metadata address `169.254.169.254` gets its entry with the first test that uses it. The format is in the file header | By hand, with a reason per entry |
-| `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command or opens a socket | By hand, with the check ticket |
+| `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command, opens a socket or makes a native call that can hang (`host.disk/hung-nfs`) | By hand, with the check ticket |
 | `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied`. The expectation of a policy or loader case lives in its Rust test until the fixture lint has a format for it | By hand |
 | `checks/_cgroup/<case>/` | Machines for the cgroup helper that `host.memory`, `host.cpu` and `host.cgroups` share: `/proc/self/cgroup`, `/proc/self/mountinfo` and a `/sys/fs/cgroup` tree. Cases: `v2-nested`, `v2-unlimited`, `v2-memory-off`, `v1-tree`, `v1-unlimited`, `hybrid`. A check's own cases carry their own trees | By hand |
 | `checks/_kube/<case>/` | Synthetic clusters for the kube mock harness: `cluster` (paged nodes, a stale token, a pod selector, legacy discovery, an identity review, a review table) and `denied` (401 and 403). The k8s check tickets add their own cases under `checks/<check-id>/` and reuse the harness | By hand |
@@ -274,7 +274,8 @@ the facade has today are `statvfs`, `uname`, `rlimit`, `hostname`, `machine_id` 
 ```json
 { "call": "statvfs", "path": "/var/lib/acme", "delay_ms": 0,
   "value": { "fragment_size": 4096, "blocks": 1000, "blocks_free": 500, "blocks_available": 400,
-             "files": 0, "files_free": 0, "read_only": false, "no_exec": true, "no_suid": false } }
+             "files": 0, "files_free": 0, "read_only": false, "no_exec": true, "no_suid": false,
+             "dev": "8:1" } }
 { "call": "uname", "value": { "sysname": "Linux", "release": "5.14.0-362.el9.x86_64", "version": "#1 SMP", "machine": "x86_64" } }
 { "call": "rlimit", "resource": "nofile", "value": { "soft": 1024, "hard": null } }
 { "call": "hostname", "value": "host-01.acme.example" }
@@ -283,7 +284,8 @@ the facade has today are `statvfs`, `uname`, `rlimit`, `hostname`, `machine_id` 
 ```
 
 Every field of a `statvfs`, `uname` or `rlimit` value is required, so a missing one cannot pass as zero.
-`no_exec` is `null` where the OS does not report it, and a `null` limit is unlimited. Use `error`
+`no_exec` is `null` where the OS does not report it, `dev` is the `major:minor` of the file system in
+decimal (field 3 of `/proc/self/mountinfo`) or `null` where the OS has none, and a `null` limit is unlimited. Use `error`
 (`unsupported`, `permission_denied`, `not_found` or `io`) instead of `value` for a call that fails.
 `system_roots` values are base64 DER certificates. `delay_ms` waits on the tokio clock, so a hung
 `statvfs` is a large delay that the check's timeout ends. A call the fixture does not hold fails with

@@ -1265,6 +1265,32 @@ impl<'a> Obj<'a> {
         }
     }
 
+    /// A device as `"major:minor"` in decimal, as field 3 of `/proc/self/mountinfo` prints it, or
+    /// `null` for an OS that has none.
+    fn device(&mut self, key: &str) -> Result<Option<(u32, u32)>, FixtureError> {
+        let wrong = || {
+            self.ctx.err(format!(
+                "`{key}` must be a text like \"8:1\" (major:minor, decimal) or null"
+            ))
+        };
+        match self.take(key) {
+            Some(Value::Null) => Ok(None),
+            Some(Value::String(text)) => {
+                let number = |part: &str| {
+                    (!part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+                        .then(|| part.parse::<u32>().ok())
+                        .flatten()
+                };
+                text.split_once(':')
+                    .and_then(|(major, minor)| Some((number(major)?, number(minor)?)))
+                    .map(Some)
+                    .ok_or_else(wrong)
+            }
+            Some(_) => Err(wrong()),
+            None => Err(self.ctx.err(format!("`{key}` is missing"))),
+        }
+    }
+
     /// A number, or `null` for none.
     fn nullable_unsigned(&mut self, key: &str) -> Result<Option<u64>, FixtureError> {
         match self.take(key) {
@@ -1514,6 +1540,7 @@ fn native_value(
                     }
                 },
                 no_suid: obj.boolean("no_suid")?,
+                dev: obj.device("dev")?,
             };
             obj.finish()?;
             Ok(NativeValue::Statvfs(info))

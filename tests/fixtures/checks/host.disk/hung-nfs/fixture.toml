@@ -1,0 +1,12 @@
+schema = 1
+name = "hung-nfs"
+summary = "An NFS server that has stopped answering: statvfs on its mount point never returns"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false

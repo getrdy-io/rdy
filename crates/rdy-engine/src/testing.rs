@@ -127,6 +127,20 @@ impl TestRun {
         self.hub.add_known_secret(secret)
     }
 
+    /// A scheduler whose checks get a probe from this run, so a test sees the check's timeout, its
+    /// manifest and the action log as a real run does. A test that needs a hung call to end in
+    /// `End::TimedOut` runs the check through it (`Scheduler::run`), on a runtime with a paused clock.
+    #[cfg(feature = "runtime")]
+    #[must_use]
+    pub fn scheduler(
+        &self,
+        jobs: usize,
+        os: Os,
+        available: impl IntoIterator<Item = Need>,
+    ) -> crate::sched::Scheduler {
+        crate::sched::Scheduler::new(jobs, os, available).with_probes(self.hub.clone())
+    }
+
     /// The action log so far.
     #[must_use]
     pub fn action_log(&self) -> ActionLogOutput {
