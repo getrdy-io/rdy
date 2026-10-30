@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-csinode-capped"
+summary = "The first CSINode page has no hit and there are more pages, and no CSIDriver object"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

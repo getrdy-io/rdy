@@ -128,7 +128,7 @@
           ]
         },
         "via_proxy": {
-          "description": "connect, user info stripped",
+          "description": "connect, kube: the proxy origin with the user info stripped, or null for a direct request",
           "type": [
             "string",
             "null"
@@ -147,6 +147,10 @@
         },
         "impersonated": {
           "description": "kube: true when the request was sent with Impersonate-User, as the spec's `as` user. Absent otherwise. Never the user name.",
+          "type": "boolean"
+        },
+        "kubeconfig_impersonates": {
+          "description": "kube: true on the run-level `GET /version` when the kubeconfig user sets an `as`, `as-uid`, `as-groups` or `as-user-extra` field, so kube adds Impersonate headers to every request. Absent otherwise. Never the user name.",
           "type": "boolean"
         },
         "method": {
@@ -1221,6 +1225,16 @@
           "items": {
             "$ref": "#/$defs/Need"
           },
+          "maxItems": 1000
+        },
+        "missing_grants": {
+          "description": "Permissions the check lacked, one short text each, such as `list nodes` or `list csinodes (storage.k8s.io)`. Empty when the partial result has no such cause. Older reports omit it.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "default": [],
           "maxItems": 1000
         },
         "note": {

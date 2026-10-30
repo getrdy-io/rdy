@@ -272,7 +272,7 @@ impl<'de> Deserialize<'de> for ApiGroup {
 ///
 /// In a spec it is a string like `create namespaces` or `get pods/log`, or an object. The string is
 /// `verb resource[.group][/subresource]`, as in `kubectl auth can-i`. A string cannot carry a
-/// namespace or a name: it uses the `namespace` of the entry.
+/// namespace or a name: it uses the `namespace` of the entry, unless it names a cluster-scoped resource.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct RbacRule {
@@ -284,10 +284,14 @@ pub struct RbacRule {
     pub resource: RbacResource,
     /// The subresource, such as `log`.
     pub subresource: Option<RbacSubresource>,
-    /// The namespace of the object. For a string item this is the `namespace` of the entry.
+    /// The namespace of the object. A string item cannot name one: it takes the `namespace` of the entry
+    /// (see [`RbacRule::from_text`]), and this is `None`.
     pub namespace: Option<K8sName>,
     /// The name of the object.
     pub name: Option<K8sName>,
+    /// True when the item was written as a string such as `create namespaces`. Only a string item takes
+    /// the `namespace` of the entry. An object item names its own namespace or none.
+    pub from_text: bool,
 }
 
 /// Splits `verb resource[.group][/subresource]` into the keys of the object form, or `None` when the
@@ -325,7 +329,7 @@ fn rbac_string_to_object(text: &str) -> Option<Map<String, Value>> {
 /// A non-resource URL such as `/healthz` or `/metrics`, or a prefix that ends in `*` such as `/logs/*`.
 ///
 /// It starts with `/`, has 1 to 253 characters from `A-Z`, `a-z`, `0-9`, `-`, `.`, `_`, `~` and `/`,
-/// may end in one `*`, and has no `//` and no `..`.
+/// may end in one `*` (the `*` is one of the 253), and has no `//` and no `..`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NonResourcePath(String);
 
@@ -439,9 +443,11 @@ impl<'de> Deserialize<'de> for RbacRule {
             namespace: Option<K8sName>,
             name: Option<K8sName>,
         }
+        let mut from_text = false;
         let object = match Value::deserialize(deserializer)? {
             value @ Value::Object(_) => value,
             Value::String(text) => {
+                from_text = true;
                 rbac_string_to_object(&text)
                     .map(Value::Object)
                     .ok_or_else(|| {
@@ -472,6 +478,7 @@ impl<'de> Deserialize<'de> for RbacRule {
             subresource: full.subresource,
             namespace: full.namespace,
             name: full.name,
+            from_text,
         })
     }
 }
@@ -485,12 +492,14 @@ impl<'de> Deserialize<'de> for RbacRule {
 pub struct K8sRbac {
     /// The permissions to test, 1 to 100. Each one is an entry in the audit log of the cluster.
     pub can: BoundedList<RbacItem, 100, false, 1>,
-    /// The namespace for the items that name none (a string item cannot name one). The default is cluster
-    /// scope.
+    /// The namespace for the string items. An object item names its own namespace. A string item that
+    /// names a well-known cluster-scoped resource (`namespaces`, `nodes`, `clusterroles`) does not take
+    /// it. The default is cluster scope.
     pub namespace: Option<K8sName>,
-    /// The user to test as (`as:`), for example `system:serviceaccount:acme-system:installer`. The
-    /// reviews are sent with `Impersonate-User` when the identity in the kubeconfig may impersonate it,
-    /// so the check answers for the install identity before it exists as a kubeconfig.
+    /// The service account to test as (`as:`), `system:serviceaccount:<namespace>:<name>`, for example
+    /// `system:serviceaccount:acme-system:installer`. The reviews are sent with `Impersonate-User` when the
+    /// identity in the kubeconfig may impersonate it, so the check answers for the install identity before
+    /// it exists as a kubeconfig. M1 takes a service account only.
     #[serde(rename = "as")]
     pub as_user: Option<ImpersonatedUser>,
 }
@@ -500,10 +509,12 @@ impl ParamSet for K8sRbac {
     const THRESHOLD: &'static [&'static str] = &["can"];
 }
 
-/// The user a `k8s.rbac` entry tests as: 1 to 253 printable ASCII characters.
+/// The service account a `k8s.rbac` entry tests as: `system:serviceaccount:<namespace>:<name>`.
 ///
-/// The check applies the stricter rules of an `Impersonate-User` header (no space at either end, and the
-/// exact form of a service account name).
+/// The namespace has 1 to 63 characters from `a-z`, `0-9` and `-`, the name 1 to 253 from `a-z`, `0-9`, `-`
+/// and `.`, and the whole is 253 characters at most. The check applies the exact DNS-1123 rules. M1 takes
+/// a service account only: the server derives its groups, and rdy sends no `Impersonate-Group`, so a plain
+/// user would lose the grants it holds through groups.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ImpersonatedUser(String);
 
@@ -518,12 +529,25 @@ impl ImpersonatedUser {
 impl<'de> Deserialize<'de> for ImpersonatedUser {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
-        if (1..=253).contains(&text.len()) && text.bytes().all(|b| (0x20..=0x7E).contains(&b)) {
+        let fits = text
+            .strip_prefix("system:serviceaccount:")
+            .and_then(|rest| rest.split_once(':'))
+            .is_some_and(|(namespace, name)| {
+                (1..=63).contains(&namespace.len())
+                    && namespace
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+                    && (1..=253).contains(&name.len())
+                    && name.bytes().all(|b| {
+                        b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'.')
+                    })
+            });
+        if fits && text.len() <= 253 {
             Ok(Self(text))
         } else {
             Err(bad(format!(
-                "'{}' is not a user name: use 1 to 253 printable ASCII characters, for example \
-                 system:serviceaccount:acme-system:installer",
+                "'{}' is not a service account: write system:serviceaccount:<namespace>:<name>. \
+                 M1 takes no other user",
                 echo_safe(&text)
             )))
         }

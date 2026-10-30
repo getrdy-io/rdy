@@ -18,13 +18,14 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::client::mock::Harness;
-use crate::client::{ImpersonateAs, ImpersonationConflict, ServerVersion};
+use crate::client::{ImpersonateAs, ImpersonationError, ServerVersion};
 
 /// A cluster over the mock. `impersonating` stands for a kubeconfig user that sets `as`.
 struct Fixtured {
     harness: Harness,
     version: ServerVersion,
     impersonating: bool,
+    openshift: bool,
 }
 
 impl Cluster for Fixtured {
@@ -40,11 +41,15 @@ impl Cluster for Fixtured {
         &self,
         probe: &Probe,
         user: ImpersonateAs,
-    ) -> Result<ReadOnlyClient, ImpersonationConflict> {
+    ) -> Result<ReadOnlyClient, ImpersonationError> {
         if self.impersonating {
-            return Err(ImpersonationConflict);
+            return Err(ImpersonationError::Conflict);
         }
-        Ok(self.harness.client_as(probe, user))
+        self.harness.client_as(probe, user)
+    }
+
+    fn is_openshift(&self) -> bool {
+        self.openshift
     }
 }
 
@@ -54,6 +59,10 @@ struct Rig {
 }
 
 fn rig_with(case: &str, impersonating: bool) -> Rig {
+    build_rig(case, impersonating, false)
+}
+
+fn build_rig(case: &str, impersonating: bool, openshift: bool) -> Rig {
     let fixture = Fixture::load(&fixtures_dir(), &format!("checks/k8s.rbac/{case}"))
         .expect("the fixture loads");
     let harness = Harness::new(TestRun::for_fixture(&fixture), fixture.replay()).expect("a mock");
@@ -71,6 +80,7 @@ fn rig_with(case: &str, impersonating: bool) -> Rig {
             harness,
             version,
             impersonating,
+            openshift,
         }),
         ctx,
     }
@@ -165,11 +175,23 @@ async fn a_table_with_two_denied_items_blocks_and_lists_both_with_reasons_and_th
     // Both are listed with their reason, and the notes tell plain "not allowed" from "denied: true".
     assert_eq!(
         finding.notes[0],
-        "`create namespaces`: not allowed, no rule grants it"
+        "`create namespaces`: not allowed, no rule grants it. The server said: no RBAC policy matched"
     );
     assert_eq!(
         finding.notes[1],
         "`list pods in acme-system`: explicitly denied (denied: true) by an authorizer, so adding a role cannot fix it. The server said: denied by the admission webhook acme-guard"
+    );
+    // Both reasons are in the notes, not just one.
+    assert!(
+        finding.notes[..2]
+            .iter()
+            .all(|note| note.contains("The server said:")),
+        "{:?}",
+        finding.notes
+    );
+    assert_eq!(
+        finding.observed["missing"][0]["reason"],
+        "no RBAC policy matched"
     );
     // What the identity may already do, and nothing about the namespace (it exists).
     assert!(
@@ -448,7 +470,9 @@ async fn an_identity_that_may_not_create_reviews_gets_one_request_and_a_partial_
     );
     assert_eq!(
         partial.missing_grants,
-        ["create selfsubjectaccessreviews.authorization.k8s.io"]
+        [
+            "create selfsubjectaccessreviews.authorization.k8s.io (for system:serviceaccount:acme-system:installer)"
+        ]
     );
     // The first review found out; the other three were never sent.
     assert_eq!(rig.count(ACCESS), 1);
@@ -707,15 +731,96 @@ async fn a_spec_as_sends_exactly_one_impersonate_user_on_the_reviews_and_marks_t
     rig.audit();
 }
 
+#[test]
+fn a_plain_user_as_does_not_parse_and_the_error_says_what_to_write() {
+    // M1 tests as a service account only (ADR 0038): the server derives a service account's groups, and
+    // rdy sends no Impersonate-Group, so a plain user would lose the grants it holds through groups.
+    for bad in [
+        "acme-installer",
+        "jane@example.com",
+        "system:serviceaccount:acme",
+        "",
+    ] {
+        let error =
+            serde_json::from_value::<K8sRbac>(json!({"can": ["create namespaces"], "as": bad}))
+                .expect_err("refused")
+                .to_string();
+        assert!(
+            error.contains("system:serviceaccount:<namespace>:<name>"),
+            "{bad}: {error}"
+        );
+    }
+}
+
 #[tokio::test]
-async fn a_plain_user_is_checked_with_impersonate_on_users() {
-    let rig = rig("as-user");
+async fn a_403_on_the_first_impersonated_review_reads_as_a_refused_impersonation() {
+    let rig = rig("as-forbidden");
     let finding = rig
-        .finding(json!({"can": ["create namespaces"], "as": "acme-installer"}))
+        .finding(json!({"can": ["create namespaces", "create nodes"], "as": AS}))
         .await;
-    assert_eq!(finding.level, Level::Pass, "{finding:?}");
-    assert_eq!(finding.message, "`acme-installer` can do all 1 permission");
+    assert_eq!(finding.level, Level::Pass, "not a block: {finding:?}");
+    let partial = finding.partial.clone().expect("partial");
+    assert_eq!(
+        partial.note,
+        "2 permissions were not evaluated: the identity may not `impersonate serviceaccounts installer in acme-system`"
+    );
+    assert_eq!(
+        partial.missing_grants,
+        ["impersonate serviceaccounts installer in acme-system"]
+    );
+    // The question and the one refused review. The second item was not sent.
+    assert_eq!(rig.count(ACCESS), 2);
+    assert_eq!(result(&rig, finding).status, Status::Warn);
     rig.audit();
+}
+
+#[tokio::test]
+async fn the_impersonation_question_counts_toward_the_cap_of_100() {
+    let rig = rig("as-at-the-cap");
+    let mut can: Vec<Value> = (0..99)
+        .map(|i| json!({"verb": "get", "resource": "configmaps", "namespace": "acme-system", "name": format!("cfg-{i:03}")}))
+        .collect();
+    can.push(json!("create clusterroles.rbac.authorization.k8s.io"));
+    let finding = rig.finding(json!({"can": can, "as": AS})).await;
+    assert_eq!(rig.count(ACCESS), 100, "the question and 99 items, not 101");
+    assert_eq!(finding.observed["reviews"], 100);
+    // The 100th item was not asked, and its escalate was dropped.
+    let partial = finding.partial.clone().expect("partial");
+    assert!(
+        partial
+            .note
+            .contains("the run is at its cap of 100 reviews"),
+        "{}",
+        partial.note
+    );
+    assert!(
+        finding.notes.iter().any(|note| note
+            == "1 implied escalate or bind review was left out: a run sends 100 reviews at most"),
+        "{:?}",
+        finding.notes
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_cluster_that_is_openshift_gets_the_oc_binding_in_the_fix() {
+    let rig = build_rig("two-denied", false, true);
+    let finding = rig.finding(json!({"can": ["create namespaces"]})).await;
+    assert_eq!(finding.level, Level::Fail);
+    let fix = finding.fix.expect("a fix");
+    assert!(
+        fix.contains(
+            "`oc adm policy add-cluster-role-to-user rdy-installer -z installer -n acme-system`"
+        ),
+        "{fix}"
+    );
+    let plain = rig_with("two-denied", false);
+    let fix = plain
+        .finding(json!({"can": ["create namespaces"]}))
+        .await
+        .fix
+        .expect("a fix");
+    assert!(!fix.contains("oc adm policy"), "{fix}");
 }
 
 #[tokio::test]
@@ -796,10 +901,11 @@ async fn a_kubeconfig_that_impersonates_does_not_matter_without_a_spec_as() {
 #[tokio::test]
 async fn an_as_value_the_header_cannot_carry_is_refused_before_any_request() {
     for bad in [
-        "system:serviceaccount:acme-system",
-        "system:serviceaccount:Acme:installer",
-        " padded",
-        "padded ",
+        // The spec accepts these shapes, and the guard's exact DNS-1123 rules refuse them.
+        "system:serviceaccount:-acme:installer",
+        "system:serviceaccount:acme-:installer",
+        "system:serviceaccount:acme:.installer",
+        "system:serviceaccount:acme:installer.",
     ] {
         let rig = rig("as-allowed");
         let error = rig
@@ -813,7 +919,7 @@ async fn an_as_value_the_header_cannot_carry_is_refused_before_any_request() {
             message,
             "the `as` value of the k8s.rbac entry cannot be sent as Impersonate-User"
         );
-        assert!(hint.contains("Fix:"), "{hint}");
+        assert!(!hint.is_empty() && !hint.contains("Fix:"), "{hint}");
         assert!(rig.requests().is_empty(), "{bad}");
     }
 }

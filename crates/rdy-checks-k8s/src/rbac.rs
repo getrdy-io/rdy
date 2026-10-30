@@ -8,10 +8,12 @@
 //!   creates nothing: the server answers and stores nothing. It is still one entry in the cluster's audit
 //!   log, so the note of the result says how many were sent. For an item that creates or changes roles or
 //!   bindings, `escalate` and `bind` asks are added (they count toward the 100).
-//! - With a spec `as:`, the reviews are sent as that user (`Impersonate-User`, [`ImpersonateAs`]). First one
-//!   un-impersonated review asks whether the kubeconfig identity may `impersonate` it. If it may not, nothing
-//!   is evaluated and the result is partial with the grant to ask for. The kubeconfig must not impersonate
-//!   already (kube would add a second header below the guard): the check then fails before any request.
+//! - With a spec `as:` (a service account), the reviews are sent as that service account
+//!   (`Impersonate-User`, [`ImpersonateAs`]). First one un-impersonated review asks whether the kubeconfig
+//!   identity may `impersonate` it (it counts toward the 100). If it may not, nothing is evaluated and the
+//!   result is partial with the grant to ask for. A 403 on the first impersonated review reads the same
+//!   way. The kubeconfig must not impersonate already (kube would add a second header below the guard):
+//!   the check then fails before any request.
 //! - `SelfSubjectRulesReview`, once, only when something is denied: what the tested user may do in the
 //!   namespace, printed so the admin sees what is already granted.
 //! - `GET` of the `Namespace` for each namespace a denied item names (3 at most): a missing namespace is
@@ -43,7 +45,7 @@ use rdy_engine::check::{
 };
 use rdy_spec::check::K8sRbac;
 
-use crate::client::{ImpersonateAs, KubeError, ReadOnlyClient};
+use crate::client::{ImpersonateAs, ImpersonateError, KubeError, ReadOnlyClient};
 use crate::cluster::Cluster;
 
 mod ask;
@@ -169,43 +171,59 @@ impl RbacCheck {
         let as_user = match &self.params.as_user {
             Some(user) => Some(ImpersonateAs::new(user.as_str()).map_err(|error| {
                 CheckError::Failed {
-                    message:
+                    message: if error == ImpersonateError::NotServiceAccount {
+                        "the `as` value of the k8s.rbac entry is not a service account"
+                    } else {
                         "the `as` value of the k8s.rbac entry cannot be sent as Impersonate-User"
-                            .to_owned(),
-                    hint: error.to_string(),
+                    }
+                    .to_owned(),
+                    hint: error.hint().to_owned(),
                 }
             })?),
             None => None,
         };
+        let asks = Asks::from_params(&self.params);
+        if asks.unknown > 0 {
+            return Err(CheckError::Failed {
+                message: "the spec has a permission of a kind this rdy does not know".to_owned(),
+                hint: "Install a newer rdy, or remove the item from the k8s.rbac entry.".to_owned(),
+            });
+        }
         let plain = self.cluster.read_only(ctx.probe());
         let reviewer = match &as_user {
             Some(user) => self
                 .cluster
                 .read_only_as(ctx.probe(), user.clone())
-                .map_err(|conflict| CheckError::Failed {
-                    message: conflict.to_string(),
-                    hint: conflict.hint().to_owned(),
+                .map_err(|error| CheckError::Failed {
+                    message: error.to_string(),
+                    hint: error.hint().to_owned(),
                 })?,
             None => plain.clone(),
         };
 
-        let asks = Asks::from_params(&self.params);
         let sent = AtomicUsize::new(0);
         let identity = identity(&mapper, &plain).await?;
 
         // With `as:`, first ask whether the kubeconfig identity may act as that user.
-        let impersonation = match &as_user {
+        let as_ask = as_user
+            .as_ref()
+            .map(|user| {
+                impersonation_ask(user.as_str()).ok_or_else(|| CheckError::Failed {
+                    message: "the `as` value of the k8s.rbac entry is not a service account"
+                        .to_owned(),
+                    hint: ImpersonateError::NotServiceAccount.hint().to_owned(),
+                })
+            })
+            .transpose()?;
+        let impersonation = match &as_ask {
             None => Impersonation::NotUsed,
-            Some(user) => {
-                let ask = impersonation_ask(user.as_str());
-                match review_one(&mapper, &plain, &ask, &sent).await? {
-                    Answer::Allowed => Impersonation::Allowed,
-                    Answer::NotEvaluated(why) => Impersonation::Unknown(why),
-                    Answer::NotAllowed { .. } | Answer::Denied { .. } | Answer::Unclear { .. } => {
-                        Impersonation::Refused(ask.describe())
-                    }
+            Some(ask) => match review_one(&mapper, &plain, ask, &sent).await? {
+                Answer::Allowed => Impersonation::Allowed,
+                Answer::NotEvaluated(why) => Impersonation::Unknown(why),
+                Answer::NotAllowed { .. } | Answer::Denied { .. } | Answer::Unclear { .. } => {
+                    Impersonation::Refused(ask.describe())
                 }
-            }
+            },
         };
 
         let (spec, implied) = if impersonation.blocks_reviews() {
@@ -217,7 +235,8 @@ impl RbacCheck {
             };
             (none(&asks.spec), none(&asks.implied))
         } else {
-            self.review_all(ctx, &mapper, &reviewer, &asks, &sent)
+            let forbidden = as_ask.as_ref().map(|ask| Why::Impersonate(ask.describe()));
+            self.review_all(ctx, &mapper, &reviewer, &asks, &sent, forbidden)
                 .await?
         };
 
@@ -231,6 +250,7 @@ impl RbacCheck {
             rules: None,
             namespaces: Vec::new(),
             sent: 0,
+            openshift: self.cluster.is_openshift(),
         };
 
         // What is already granted, and whether the namespaces exist, only when it helps the fix.
@@ -259,7 +279,9 @@ impl RbacCheck {
     /// Sends the reviews: the first one alone, then the rest 8 at a time.
     ///
     /// If the first one shows that the server has no review API or that the identity may not create
-    /// reviews, the rest are not sent: every one would fail the same way.
+    /// reviews, the rest are not sent: every one would fail the same way. `forbidden` is what a 403 on the
+    /// first review means when the reviews run as the `as:` user: the impersonation was refused, so the
+    /// grant to ask for is the `impersonate` one.
     async fn review_all(
         &self,
         ctx: &CheckContext,
@@ -267,27 +289,32 @@ impl RbacCheck {
         reviewer: &ReadOnlyClient,
         asks: &Asks,
         sent: &AtomicUsize,
+        forbidden: Option<Why>,
     ) -> Result<(Vec<(Ask, Answer)>, Vec<(Ask, Answer)>), CheckError> {
         let all: Vec<&Ask> = asks.all().collect();
         let mut answers: Vec<Answer> = Vec::with_capacity(all.len());
         if let Some(first) = all.first() {
             answers.push(review_one(mapper, reviewer, first, sent).await?);
         }
+        if let (Some(Answer::NotEvaluated(Why::Forbidden)), Some(why)) =
+            (answers.first(), forbidden)
+        {
+            answers[0] = Answer::NotEvaluated(why);
+        }
         let stop = match answers.first() {
-            Some(Answer::NotEvaluated(why @ (Why::Forbidden | Why::Missing))) => Some(why.clone()),
+            Some(Answer::NotEvaluated(
+                why @ (Why::Forbidden | Why::Missing | Why::Impersonate(_)),
+            )) => Some(why.clone()),
             _ => None,
         };
         // Boxed with a named lifetime: a closure that returns an `async fn` future makes the compiler
         // ask for a bound it cannot name once the check future is boxed as `dyn Future + Send`.
         let mut rest: Vec<BoxFuture<'_, Result<Answer, CheckError>>> = Vec::new();
-        for ask in all.iter().skip(1).copied() {
+        for (index, ask) in all.iter().copied().enumerate().skip(1) {
+            // An item past the cap is not asked, and the stop of the first review wins over it.
+            let stop = stop.clone().or_else(|| asks.left_out(index));
             rest.push(Box::pin(review_unless_stopped(
-                ctx,
-                mapper,
-                reviewer,
-                ask,
-                stop.as_ref(),
-                sent,
+                ctx, mapper, reviewer, ask, stop, sent,
             )));
         }
         for answer in window::windowed(IN_FLIGHT, rest).await {
@@ -309,11 +336,11 @@ async fn review_unless_stopped(
     mapper: Mapper<'_>,
     client: &ReadOnlyClient,
     ask: &Ask,
-    stop: Option<&Why>,
+    stop: Option<Why>,
     sent: &AtomicUsize,
 ) -> Result<Answer, CheckError> {
     if let Some(why) = stop {
-        return Ok(Answer::NotEvaluated(why.clone()));
+        return Ok(Answer::NotEvaluated(why));
     }
     if out_of_time(ctx) {
         return Ok(Answer::NotEvaluated(Why::OutOfTime));
@@ -368,7 +395,7 @@ fn answer_of(status: &SubjectAccessReviewStatus) -> Answer {
     } else if status.denied == Some(true) {
         Answer::Denied { reason }
     } else if !error.is_empty() {
-        Answer::Unclear { reason: error }
+        Answer::Unclear { reason, error }
     } else {
         Answer::NotAllowed { reason }
     }

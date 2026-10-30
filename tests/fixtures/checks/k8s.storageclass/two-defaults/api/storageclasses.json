@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/storage.k8s.io/v1/storageclasses",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "storage.k8s.io/v1",
+    "kind": "StorageClassList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "acme-old",
+          "creationTimestamp": "2026-01-01T00:00:00Z",
+          "annotations": {
+            "storageclass.kubernetes.io/is-default-class": "true"
+          }
+        },
+        "provisioner": "csi.acme.example",
+        "volumeBindingMode": "WaitForFirstConsumer"
+      },
+      {
+        "metadata": {
+          "name": "acme-new",
+          "creationTimestamp": "2026-03-01T00:00:00Z",
+          "annotations": {
+            "storageclass.beta.kubernetes.io/is-default-class": "true"
+          }
+        },
+        "provisioner": "csi.acme.example",
+        "volumeBindingMode": "WaitForFirstConsumer"
+      }
+    ]
+  }
+}

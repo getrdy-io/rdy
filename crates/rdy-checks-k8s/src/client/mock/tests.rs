@@ -710,7 +710,7 @@ async fn an_unguarded_request_is_not_hidden_by_a_guarded_one_that_never_reached_
     let harness = cluster();
     // A guarded request for `/api` that is dropped before it is sent: the probe logs it as a timeout.
     let probe = harness.run().run_probe(Os::Linux);
-    drop(probe.kube_call("GET", "/api").expect("an open probe"));
+    drop(probe.kube_call("GET", "/api", None).expect("an open probe"));
     // An unguarded request for `/version`. One request and one sent entry: a count would call it clean.
     assert_eq!(
         raw(harness.mock(), Method::GET, "/version", &[], b"").await,

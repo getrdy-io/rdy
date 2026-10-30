@@ -22,10 +22,12 @@
 //!   variables that can swap the server URL or impersonate a user, and rdy must not honour them.
 //! - It never reads a credential plugin's output into an error, a log line or a report ([`KubeError`]).
 //! - It refuses `auth-provider` entries (legacy `gcp`, `oidc` and `azure` providers can run a command
-//!   that the report would not name) and a cluster `proxy-url` (proxy support is M1-109).
+//!   that the report would not name).
 //! - It never lets kube read `HTTPS_PROXY`. kube would read it inside `Config::try_from` and fail on a
 //!   malformed value, so a fixed placeholder takes the `proxy_url` slot of the chosen cluster before the
-//!   build and the slot is cleared after it. The cluster is contacted directly.
+//!   build and the slot is cleared after it. rdy then picks the proxy itself, the way `kubectl` does
+//!   (the cluster's `proxy-url`, else `HTTPS_PROXY` unless `NO_PROXY` covers the API host), and reports
+//!   which rule applied ([`ProxyUse`], ADR 0037). Only an `http://` proxy is used.
 //! - It never lets a credential plugin talk to the terminal unless stdin and stderr are both terminals
 //!   (client-go's `IfAvailable` rule). Without a terminal the plugin runs with `interactiveMode: Never`,
 //!   so its stderr is captured, not inherited (ADR 0031 decision 8).
@@ -60,21 +62,32 @@ use rdy_engine::probe::Probe;
 use secrecy::ExposeSecret;
 
 mod b64;
+mod credential;
 mod error;
 pub mod guard;
 mod impersonate;
 #[cfg(test)]
 pub(crate) mod mock;
+mod proxy;
 mod text;
 
 #[cfg(test)]
+mod facts_tests;
+#[cfg(test)]
+pub(crate) mod testkit;
+#[cfg(test)]
 mod tests;
 
+pub use credential::Credential;
 pub use error::KubeError;
 pub(crate) use error::from_kube_error;
 use error::{from_kubeconfig_error, io_reason, proxy_display};
-pub use guard::{GuardError, ImpersonateAs, ReadOnlyClient, guarded_service};
-pub use impersonate::ImpersonationConflict;
+pub use guard::{
+    GuardError, ImpersonateAs, ImpersonateError, ReadOnlyClient, guarded_service,
+    guarded_service_marked, guarded_service_via,
+};
+pub use impersonate::ImpersonationError;
+pub use proxy::{ProxyRule, ProxyUse};
 use text::escape;
 
 /// The largest kubeconfig rdy reads. A real one is a few kilobytes.
@@ -163,8 +176,9 @@ fn is_rdy_var(name: &str, case_insensitive: bool) -> bool {
 
 /// The parts of the process environment this module looks at, gathered once.
 ///
-/// Tests build one by hand, so they never change the process environment.
-#[derive(Debug, Clone, Default)]
+/// Tests build one by hand, so they never change the process environment. `Debug` hides the proxy URL,
+/// which can hold a password.
+#[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct Env {
     /// The value of `KUBECONFIG`, a list of paths separated by the OS list separator.
@@ -179,12 +193,35 @@ pub struct Env {
     pub stdin_is_terminal: bool,
     /// Whether stderr is a terminal.
     pub stderr_is_terminal: bool,
-    /// Whether `HTTPS_PROXY` or `https_proxy` is set to something. rdy does not use it for the cluster,
-    /// and the hint of a network error says so.
-    pub proxy_env_set: bool,
+    /// The value of `HTTPS_PROXY`, else `https_proxy`, when it is not empty. It is the proxy for an
+    /// `https` API server unless `no_proxy` covers the host (ADR 0037). It can hold a password: never
+    /// print it.
+    pub https_proxy: Option<String>,
+    /// The name of the variable `https_proxy` was read from, for reports.
+    pub https_proxy_name: &'static str,
+    /// The value of `NO_PROXY`, else `no_proxy`, when it is not empty.
+    pub no_proxy: Option<String>,
     /// The names of the `RDY_*` variables set in the process. They are removed from a plugin's
     /// environment.
     pub rdy_vars: Vec<String>,
+    /// The time at load, in Unix seconds. The time left on a token or certificate is counted from it.
+    pub now_unix: i64,
+}
+
+impl fmt::Debug for Env {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Env")
+            .field("kubeconfig", &self.kubeconfig)
+            .field("home", &self.home)
+            .field("in_cluster", &self.in_cluster)
+            .field("stdin_is_terminal", &self.stdin_is_terminal)
+            .field("stderr_is_terminal", &self.stderr_is_terminal)
+            .field("https_proxy", &self.https_proxy.as_ref().map(|_| "(set)"))
+            .field("no_proxy", &self.no_proxy)
+            .field("rdy_vars", &self.rdy_vars)
+            .field("now_unix", &self.now_unix)
+            .finish()
+    }
 }
 
 impl Env {
@@ -193,17 +230,27 @@ impl Env {
     #[must_use]
     pub fn from_process() -> Self {
         let set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+        let text = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+        // Go reads the upper case name first, and so does kubectl. On Windows the two are one variable.
+        let (https_proxy, https_proxy_name) = match (text("HTTPS_PROXY"), text("https_proxy")) {
+            (Some(value), _) => (Some(value), "HTTPS_PROXY"),
+            (None, Some(value)) => (Some(value), "https_proxy"),
+            (None, None) => (None, ""),
+        };
         Self {
             kubeconfig: std::env::var_os("KUBECONFIG"),
             home: std::env::home_dir(),
             in_cluster: set("KUBERNETES_SERVICE_HOST"),
             stdin_is_terminal: std::io::stdin().is_terminal(),
             stderr_is_terminal: std::io::stderr().is_terminal(),
-            proxy_env_set: set("HTTPS_PROXY") || set("https_proxy"),
+            https_proxy,
+            https_proxy_name,
+            no_proxy: text("NO_PROXY").or_else(|| text("no_proxy")),
             rdy_vars: std::env::vars_os()
                 .filter_map(|(name, _)| name.into_string().ok())
                 .filter(|name| is_rdy_var(name, cfg!(windows)))
                 .collect(),
+            now_unix: unix_now(),
         }
     }
 
@@ -242,10 +289,25 @@ impl Env {
         self
     }
 
-    /// Says that `HTTPS_PROXY` is set.
+    /// Sets `HTTPS_PROXY`.
     #[must_use]
-    pub fn with_proxy_env(mut self) -> Self {
-        self.proxy_env_set = true;
+    pub fn with_https_proxy(mut self, value: impl Into<String>) -> Self {
+        self.https_proxy = Some(value.into());
+        self.https_proxy_name = "HTTPS_PROXY";
+        self
+    }
+
+    /// Sets `NO_PROXY`.
+    #[must_use]
+    pub fn with_no_proxy(mut self, value: impl Into<String>) -> Self {
+        self.no_proxy = Some(value.into());
+        self
+    }
+
+    /// Pins the time at load, in Unix seconds.
+    #[must_use]
+    pub fn with_now(mut self, now_unix: i64) -> Self {
+        self.now_unix = now_unix;
         self
     }
 
@@ -394,24 +456,70 @@ impl fmt::Debug for PluginExec {
     }
 }
 
+/// What the config says about the connection, known before any request: `k8s.access` reports it, and
+/// still can when the connection then fails.
+///
+/// It holds no secret. The credentials are kinds and times (see [`Credential`]), the proxy is shown as
+/// scheme, host and port, and the cluster line is escaped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionFacts {
+    source: Source,
+    line: ClusterLine,
+    credentials: Vec<Credential>,
+    proxy: ProxyUse,
+    ca_set: bool,
+}
+
+impl ConnectionFacts {
+    /// Where the config came from.
+    #[must_use]
+    pub fn source(&self) -> &Source {
+        &self.source
+    }
+
+    /// The cluster rdy is about to touch.
+    #[must_use]
+    pub fn line(&self) -> &ClusterLine {
+        &self.line
+    }
+
+    /// What the kubeconfig user sends: tokens, a client certificate, a password, a plugin or the pod's
+    /// service account. Empty means the kubeconfig carries no credentials, so the server sees
+    /// `system:anonymous`.
+    #[must_use]
+    pub fn credentials(&self) -> &[Credential] {
+        &self.credentials
+    }
+
+    /// The route to the API server and the rule that chose it.
+    #[must_use]
+    pub fn proxy(&self) -> &ProxyUse {
+        &self.proxy
+    }
+
+    /// Whether the kubeconfig (or the pod) names a certificate authority. Without one rdy trusts only
+    /// its bundled public roots.
+    #[must_use]
+    pub fn ca_set(&self) -> bool {
+        self.ca_set
+    }
+}
+
 /// A config that is read and checked, with no socket opened and no plugin run.
 pub struct Loaded {
-    source: Source,
+    facts: ConnectionFacts,
     files: Vec<PathBuf>,
-    line: ClusterLine,
     config: Config,
     plugin_exec: Option<PluginExec>,
     secrets: Vec<String>,
-    proxy_env_set: bool,
-    ca_set: bool,
 }
 
 impl fmt::Debug for Loaded {
     // The kube `Config` holds tokens and plugin settings, so it is never printed.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Loaded")
-            .field("source", &self.source)
-            .field("line", &self.line)
+            .field("source", &self.facts.source)
+            .field("line", &self.facts.line)
             .finish_non_exhaustive()
     }
 }
@@ -420,7 +528,20 @@ impl Loaded {
     /// Where the config came from.
     #[must_use]
     pub fn source(&self) -> &Source {
-        &self.source
+        &self.facts.source
+    }
+
+    /// What the config says about the connection. A copy: keep it, because `connect` takes `self`, and
+    /// `k8s.access` reports it even when `connect` fails.
+    #[must_use]
+    pub fn facts(&self) -> ConnectionFacts {
+        self.facts.clone()
+    }
+
+    /// The route to the API server and the rule that chose it (ADR 0037).
+    #[must_use]
+    pub fn proxy(&self) -> &ProxyUse {
+        &self.facts.proxy
     }
 
     /// Every file that was read to build this config, in order: the kubeconfig files, then the
@@ -436,7 +557,7 @@ impl Loaded {
     /// The cluster rdy is about to touch.
     #[must_use]
     pub fn line(&self) -> &ClusterLine {
-        &self.line
+        &self.facts.line
     }
 
     /// The credential plugin kube will run, for the `exec` entry of the action log. `None` when the
@@ -474,18 +595,16 @@ impl Loaded {
         probe: &Probe,
         announce: impl FnOnce(&ClusterLine),
     ) -> Result<Connected, KubeError> {
-        announce(&self.line);
+        announce(&self.facts.line);
         let Self {
-            source,
+            facts,
             files,
-            line,
             config,
-            proxy_env_set,
-            ca_set,
             ..
         } = self;
-        let server = line.server.clone();
-        let plugin = line.plugin.clone();
+        let server = facts.line.server.clone();
+        let plugin = facts.line.plugin.clone();
+        let (proxied, ca_set) = (facts.proxy.is_proxied(), facts.ca_set);
         let built =
             rdy_engine::blocking::blocking(move || Ok::<_, CheckError>(build_client(config))).await;
         let client = match built {
@@ -495,54 +614,53 @@ impl Loaded {
                     &error,
                     &server,
                     plugin.as_deref(),
-                    proxy_env_set,
+                    proxied,
                     ca_set,
                 ));
             }
             Err(_) => return Err(KubeError::Cancelled),
         };
-        let info = ReadOnlyClient::new(&client, probe)
-            .version()
-            .await
-            .map_err(|error| {
-                from_kube_error(&error, &server, plugin.as_deref(), proxy_env_set, ca_set)
-            })?;
+        // The clock around the first request. The plugin ran in the build above, so its time is not in
+        // this number, which is the round trip to `/version` and nothing else.
+        let started = std::time::Instant::now();
+        // A kubeconfig that impersonates adds `Impersonate-*` below the guard, to every request. The one
+        // run-level entry says so, so a reader of the log can tell "not impersonated" from "not said".
+        let info = ReadOnlyClient::new_run(
+            &client,
+            probe,
+            facts.proxy.proxy(),
+            facts.line.kubeconfig_impersonates(),
+        )
+        .version()
+        .await
+        .map_err(|error| from_kube_error(&error, &server, plugin.as_deref(), proxied, ca_set))?;
+        let latency = started.elapsed();
         Ok(Connected {
-            source,
+            facts,
             files,
-            line,
-            version: ServerVersion {
-                git_version: info.git_version,
-                major: info.major,
-                minor: info.minor,
-                platform: info.platform,
-            },
+            version: ServerVersion::from_info(info),
+            latency,
             client,
-            proxy_env_set,
-            ca_set,
         })
     }
 }
 
 /// A client that has answered `GET /version`.
 pub struct Connected {
-    source: Source,
+    facts: ConnectionFacts,
     files: Vec<PathBuf>,
-    line: ClusterLine,
     version: ServerVersion,
+    latency: Duration,
     // The unguarded client. It is private, and the only way to send with it is through the guard
     // (`Connected::read_only`), which wraps it in a service that refuses before it sends.
     client: kube::Client,
-    // What the error hints need to know about the connection (see `Connected::map_error`).
-    proxy_env_set: bool,
-    ca_set: bool,
 }
 
 impl fmt::Debug for Connected {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Connected")
-            .field("source", &self.source)
-            .field("line", &self.line)
+            .field("source", &self.facts.source)
+            .field("line", &self.facts.line)
             .field("version", &self.version)
             .finish_non_exhaustive()
     }
@@ -552,7 +670,13 @@ impl Connected {
     /// Where the config came from.
     #[must_use]
     pub fn source(&self) -> &Source {
-        &self.source
+        &self.facts.source
+    }
+
+    /// What the config said about the connection.
+    #[must_use]
+    pub fn facts(&self) -> &ConnectionFacts {
+        &self.facts
     }
 
     /// The kubeconfig files that were read.
@@ -564,7 +688,7 @@ impl Connected {
     /// The cluster that answered.
     #[must_use]
     pub fn line(&self) -> &ClusterLine {
-        &self.line
+        &self.facts.line
     }
 
     /// What `GET /version` said.
@@ -573,16 +697,23 @@ impl Connected {
         &self.version
     }
 
+    /// How long `GET /version` took from send to a parsed answer. A credential plugin's time is not in
+    /// it: the plugin runs when the client is built.
+    #[must_use]
+    pub fn version_latency(&self) -> Duration {
+        self.latency
+    }
+
     /// Sorts an error of a request on this connection, the way `connect` sorted its own: the hint can name
-    /// the server, the credential plugin, a proxy variable that is set and a CA setting.
+    /// the server, the credential plugin, whether a proxy is in the path and the CA setting.
     #[must_use]
     pub fn map_error(&self, error: &kube::Error) -> KubeError {
         from_kube_error(
             error,
-            self.line.server(),
-            self.line.plugin(),
-            self.proxy_env_set,
-            self.ca_set,
+            self.facts.line.server(),
+            self.facts.line.plugin(),
+            self.facts.proxy.is_proxied(),
+            self.facts.ca_set,
         )
     }
 
@@ -595,7 +726,7 @@ impl Connected {
     /// so call it from a tokio runtime.
     #[must_use]
     pub fn read_only(&self, probe: &Probe) -> ReadOnlyClient {
-        ReadOnlyClient::new(&self.client, probe)
+        ReadOnlyClient::new(&self.client, probe, self.facts.proxy.proxy())
     }
 
     /// Like [`Connected::read_only`], and the two access review POSTs carry `Impersonate-User: <user>`
@@ -605,17 +736,18 @@ impl Connected {
     ///
     /// # Errors
     ///
-    /// [`ImpersonationConflict`] when the kubeconfig user sets any `as` field. Two sources
-    /// would write `Impersonate-User`, and the server would see two values.
+    /// [`ImpersonationError::Conflict`] when the kubeconfig user sets any `as` field. Two sources would
+    /// write `Impersonate-User`, and the server would see two values. [`ImpersonationError::BadValue`] when
+    /// the user is not a valid header value.
     pub fn read_only_as(
         &self,
         probe: &Probe,
         user: ImpersonateAs,
-    ) -> Result<ReadOnlyClient, ImpersonationConflict> {
-        if self.line.kubeconfig_impersonates() {
-            return Err(ImpersonationConflict);
+    ) -> Result<ReadOnlyClient, ImpersonationError> {
+        if self.facts.line.kubeconfig_impersonates() {
+            return Err(ImpersonationError::Conflict);
         }
-        Ok(ReadOnlyClient::new_as(&self.client, probe, user))
+        ReadOnlyClient::new_as(&self.client, probe, user, self.facts.proxy.proxy())
     }
 }
 
@@ -631,6 +763,18 @@ pub struct ServerVersion {
     pub minor: String,
     /// For example `linux/amd64`.
     pub platform: String,
+}
+
+impl ServerVersion {
+    /// The four texts of a `GET /version` answer.
+    fn from_info(info: k8s_openapi::apimachinery::pkg::version::Info) -> Self {
+        Self {
+            git_version: info.git_version,
+            major: info.major,
+            minor: info.minor,
+            platform: info.platform,
+        }
+    }
 }
 
 /// Finds and reads the config. Reads files, opens no socket, runs no plugin.
@@ -830,15 +974,8 @@ fn from_kubeconfig(
         .ok_or(KubeError::IncompleteKubeconfig {
             what: "the context names a cluster that the kubeconfig does not define",
         })?;
-    if let Some(proxy) = cluster
-        .proxy_url
-        .as_deref()
-        .filter(|proxy| !proxy.is_empty())
-    {
-        return Err(KubeError::ProxyUnsupported {
-            proxy: proxy_display(proxy),
-        });
-    }
+    // The cluster's own proxy. It is judged after the config is built, with the environment (ADR 0037).
+    let kubeconfig_proxy = cluster.proxy_url.clone().filter(|proxy| !proxy.is_empty());
 
     let user_name = context.user.clone().filter(|user| !user.is_empty());
     let auth = user_name
@@ -862,13 +999,27 @@ fn from_kubeconfig(
     // Everything kube reads on its own is checked first: a FIFO would hang the build and a device such
     // as /dev/zero would fill memory. The files are listed for the action log.
     let mut secrets = inline_secrets(auth);
+    let mut token_text = auth
+        .and_then(|auth| auth.token.as_ref())
+        .map(|t| t.expose_secret().to_owned());
+    let mut certificate_text = auth
+        .and_then(|auth| auth.client_certificate_data.as_deref())
+        .and_then(b64::decode)
+        .and_then(|bytes| String::from_utf8(bytes).ok());
     for path in referenced_files(cluster, auth) {
         check_referenced(&path)?;
         if auth.is_some_and(|auth| {
             auth.client_key.as_deref() == path.to_str()
                 || auth.token_file.as_deref() == path.to_str()
         }) {
-            secrets.extend(read_secret_file(&path));
+            let text = read_secret_file(&path);
+            if auth.is_some_and(|auth| auth.token_file.as_deref() == path.to_str()) {
+                token_text = token_text.or_else(|| text.clone());
+            }
+            secrets.extend(text);
+        }
+        if auth.is_some_and(|auth| auth.client_certificate.as_deref() == path.to_str()) {
+            certificate_text = certificate_text.or_else(|| fs::read_to_string(&path).ok());
         }
         files.push(path);
     }
@@ -876,6 +1027,7 @@ fn from_kubeconfig(
     // `Config::try_from(Kubeconfig)` reads the current context, so the choice is written there. It also
     // reads HTTPS_PROXY unless the cluster has a `proxy_url`, and fails on a malformed value. A fixed
     // placeholder takes the slot, and the slot is cleared below, so kube never looks at the environment.
+    // The proxy is chosen after the build, from the kubeconfig and the environment, by `proxy::resolve`.
     kubeconfig.current_context = Some(context_name.clone());
     if let Some(chosen) = kubeconfig
         .clusters
@@ -885,10 +1037,18 @@ fn from_kubeconfig(
     {
         chosen.proxy_url = Some(PROXY_PLACEHOLDER.to_owned());
     }
+    let credentials = credentials_of(
+        auth,
+        token_text.as_deref(),
+        certificate_text.as_deref(),
+        env.now_unix,
+    );
     let mut config =
         Config::try_from(kubeconfig).map_err(|error| from_kubeconfig_error(&error, ""))?;
-    config.proxy_url = None;
-    harden_plugin(&mut config, env);
+    let resolved = proxy::resolve(kubeconfig_proxy.as_deref(), env, &config.cluster_url)?;
+    secrets.extend(resolved.secrets);
+    config.proxy_url = resolved.uri;
+    harden_plugin(&mut config, env, kubeconfig_proxy.as_deref());
 
     let line = ClusterLine {
         context: escape(&context_name),
@@ -904,14 +1064,17 @@ fn from_kubeconfig(
     config.default_namespace = String::new();
     limit(&mut config, options.timeout);
     Ok(Loaded {
-        source,
+        facts: ConnectionFacts {
+            source,
+            line,
+            credentials,
+            proxy: resolved.used,
+            ca_set,
+        },
         files,
-        line,
         config,
         plugin_exec,
         secrets,
-        proxy_env_set: env.proxy_env_set,
-        ca_set,
     })
 }
 
@@ -924,16 +1087,59 @@ fn sets_impersonation(auth: &AuthInfo) -> bool {
         || auth.impersonate_user_extra.is_some()
 }
 
+/// What the user entry sends to the server. `token` and `certificate` are the texts already read (inline
+/// or from the file the entry names); only their end dates are kept.
+fn credentials_of(
+    auth: Option<&AuthInfo>,
+    token: Option<&str>,
+    certificate: Option<&str>,
+    now: i64,
+) -> Vec<Credential> {
+    let Some(auth) = auth else {
+        return Vec::new();
+    };
+    let mut credentials = Vec::new();
+    if let Some(token) = token {
+        credentials.push(Credential::Token {
+            expires_in: credential::token_expires_in(token, now),
+        });
+    } else if auth.username.is_some() && auth.password.is_some() {
+        credentials.push(Credential::Password);
+    }
+    let has_key = auth.client_key_data.is_some() || auth.client_key.is_some();
+    if has_key && (auth.client_certificate_data.is_some() || auth.client_certificate.is_some()) {
+        credentials.push(Credential::ClientCertificate {
+            expires_in: certificate.and_then(|pem| credential::certificate_expires_in(pem, now)),
+        });
+    }
+    if let Some(binary) = auth
+        .exec
+        .as_ref()
+        .and_then(|exec| exec.command.as_deref())
+        .and_then(plugin_file)
+    {
+        credentials.push(Credential::Plugin { binary });
+    }
+    credentials
+}
+
 /// The plugin's terminal use and environment, set from the process state (ADR 0031 decisions 8 and 10).
 ///
 /// kube treats `interactiveMode` unset or `IfAvailable` as interactive even with no terminal: it
 /// inherits stderr, which would bring plugin text past the redactor, and a login prompt would wait for
 /// nobody. client-go only prompts when a terminal is there. So unless stdin and stderr are both
 /// terminals the mode becomes `Never` (also for `Always`, which could not prompt anyway).
-fn harden_plugin(config: &mut Config, env: &Env) {
+///
+/// `kubeconfig_proxy` is the cluster's own `proxy-url` as the kubeconfig has it. kube copies the cluster
+/// into the plugin's `KUBERNETES_EXEC_INFO` (when `provideClusterInfo` is true) after the placeholder was
+/// written to it, so the copy is set back to the real value, as `kubectl` passes it, or to none.
+fn harden_plugin(config: &mut Config, env: &Env, kubeconfig_proxy: Option<&str>) {
     let Some(exec) = config.auth_info.exec.as_mut() else {
         return;
     };
+    if let Some(cluster) = exec.cluster.as_mut() {
+        cluster.proxy_url = kubeconfig_proxy.map(str::to_owned);
+    }
     if !(env.stdin_is_terminal && env.stderr_is_terminal) {
         exec.interactive_mode = Some(ExecInteractiveMode::Never);
     }
@@ -1045,7 +1251,9 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
             });
         }
     };
-    config.proxy_url = None;
+    // A pod has no kubeconfig, so only the environment can name a proxy (ADR 0037).
+    let resolved = proxy::resolve(None, env, &config.cluster_url)?;
+    config.proxy_url = resolved.uri;
     let line = ClusterLine {
         context: "in-cluster".to_owned(),
         server: server_of(&config),
@@ -1054,22 +1262,26 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
         tls_verification_off: config.accept_invalid_certs,
         impersonates: false,
     };
-    let secrets = files
+    let mut secrets: Vec<String> = files
         .first()
         .and_then(|token| read_secret_file(token))
         .into_iter()
         .collect();
+    secrets.extend(resolved.secrets);
     config.default_namespace = String::new();
     limit(&mut config, options.timeout);
     Ok(Loaded {
-        source: Source::InCluster,
+        facts: ConnectionFacts {
+            source: Source::InCluster,
+            line,
+            credentials: vec![Credential::ServiceAccount],
+            proxy: resolved.used,
+            ca_set: true,
+        },
         files,
-        line,
         config,
         plugin_exec: None,
         secrets,
-        proxy_env_set: env.proxy_env_set,
-        ca_set: true,
     })
 }
 
@@ -1079,6 +1291,15 @@ fn in_cluster(options: &KubeOptions, env: &Env) -> Result<Loaded, KubeError> {
 /// [`Connected`], and [`ReadOnlyClient`] is the only way to send with it.
 fn build_client(config: Config) -> Result<kube::Client, kube::Error> {
     Ok(ClientBuilder::try_from(config)?.build())
+}
+
+/// The wall clock in Unix seconds. A clock before 1970 reads as 0, which makes every token look valid.
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|elapsed| i64::try_from(elapsed.as_secs()).ok())
+        .unwrap_or(0)
 }
 
 /// Sets the timeouts from the check timeout and turns kube's retries off.
@@ -1106,7 +1327,11 @@ fn server_of(config: &Config) -> String {
 
 /// The file name of the exec plugin's command, never its arguments.
 fn plugin_of(config: &Config) -> Option<String> {
-    let command = config.auth_info.exec.as_ref()?.command.as_deref()?;
+    plugin_file(config.auth_info.exec.as_ref()?.command.as_deref()?)
+}
+
+/// The file name of a plugin command, escaped.
+fn plugin_file(command: &str) -> Option<String> {
     let file = Path::new(command).file_name().map_or_else(
         || command.to_owned(),
         |name| name.to_string_lossy().into_owned(),

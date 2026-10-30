@@ -125,7 +125,7 @@ built check or a skip kind with no I/O. The first row that fits wins, in this or
 | Run interrupted (M2 graceful Ctrl-C) | `cancelled` |
 
 There are no inter-check dependencies. Every k8s check except `k8s.access` needs `kube_context`;
-`k8s.access` has no hard need and reports the probe outcome as a block with its fix.
+`k8s.access` has no `KubeContext` need and reports the probe outcome as a block with its fix. It declares the `Network` need only, because it is skipped as `missing_need` `network` when the run forbids the network.
 
 ## Privilege and needs
 
@@ -194,8 +194,8 @@ The rule is 01 section 5.3, recorded in ADR 0013 (refining ADR 0008 decision 3).
   A `Partial` OS never gets the `evidence_only` exception, because its note is a reason of its own.
 - A pass that the partial rule turns into `warn` shows rdy's text, with `fix_source: rdy`, never the
   vendor's `fix`. Nothing was measured as failing, so the vendor's advice would send the customer after
-  a problem that was not found. `partial.missing_grants` goes to the result `notes` until 01 has the
-  field.
+  a problem that was not found. `partial.missing_grants` is a field of the wire `partial` (M1-110), once
+  each, in the order the check gave them.
 - A golden snapshot lists every `evidence_only` want and every `pass_by_absence` call site.
 - Unknown severity counts as block and unknown status as not run, in `rdy_spec::result::verdict()`.
 - A run that verified nothing is `ready_with_warnings`, `verdict_reason: nothing_verified`. A spec with
@@ -309,7 +309,7 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
 - The facade writes every entry; checks cannot skip it. Run-level work (snapshot, machine id, hostname,
   os-release, command stats, kubeconfig read) is logged with `check: null`.
 - `exec` entries record the resolved absolute path and `argv` as a JSON array of strings, redacted.
-- Kube entries open in the guard's `call` through `Probe::kube_call(method, path)` (M1-103) and are
+- Kube entries open in the guard's `call` through `Probe::kube_call(method, path, via_proxy)` (M1-103) and are
   closed by the response future: `answered(status)`, `refused(rule)` or `failed(phrase)`. The path has no
   query string and the entry holds no body. A dropped request is closed as `timeout`. Each check gets
   its own client from its own probe (`Connected::read_only(probe)`), which shares the connection but has
@@ -964,7 +964,7 @@ impl Probe {
     pub async fn tls_chain(&self, target: &Target) -> Result<TlsChain, ProbeError>;
     pub async fn http(&self, req: HttpProbe) -> Result<HttpOutcome, ProbeError>;
     pub async fn native(&self, call: NativeCall) -> Result<NativeValue, ProbeError>;
-    pub fn kube_call(&self, method: &str, path: &str) -> Result<KubeCall, ProbeError>;  // M1-103; the guard's door to the log
+    pub fn kube_call(&self, method: &str, path: &str, via_proxy: Option<&str>) -> Result<KubeCall, ProbeError>;  // M1-103; the guard's door to the log
 }
 // One Cmd type: rdy_engine::exec::policy::Cmd { program: &'static str, args, extra_dirs, env names, timeout, stdout_cap }.
 // Build it with CommandEntry::cmd (the command table, ADR 0028). Probe::exec applies the check's
@@ -1194,7 +1194,8 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
    (`AddImpersonation`) adds the one header to the two review POSTs, and the guard below it judges it. The
    log entry of such a call has `impersonated: true` and never the user name. kube adds the kubeconfig's
    own `as` and `as-groups` below the guard, where the guard cannot see them, so `read_only_as` refuses
-   when the kubeconfig user sets any `as*` field (ADR 0038).
+   when the kubeconfig user sets any `as*` field (ADR 0038). The run-level `GET /version` entry of such a
+   kubeconfig has `kubeconfig_impersonates: true`, so the log says what the guard cannot see.
 
    M1-103 builds the allow list under this rule. The guard sees the request as the caller built it, above
    kube's layers, so it refuses every header except `accept`, `content-type` and `content-length`

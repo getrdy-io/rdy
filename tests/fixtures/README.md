@@ -66,10 +66,17 @@ cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 1
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
 `apis-unreadable-vanilla`), all `generated` by `scripts/gen-k8s-version-fixtures.py` (`--check` fails on drift).
-`checks/k8s.rbac/` holds 18 clusters (`all-allowed`, `two-denied`, `one-denied`, `escalate-denied`, `escalate-allowed`,
+`checks/k8s.access/` holds twelve cases (`good`, `anonymous`, `unauthorized`, `forbidden-review`, `old-server`
+(1.27), `route-missing` (1.29 with the review route answering 404), `discovery-denied`, `review-error`,
+`review-silent`, `many-groups`, `hostile-names` (it also lists twenty `/api` versions, one with escape bytes), and
+`none`, which has no `api/` and `kube = false` because the attempt never reached a cluster).
+`checks/k8s.storageclass/` holds 30 clusters, all `generated` by `scripts/gen-k8s-storageclass-fixtures.py`
+(`--check` fails on drift and on a file the script did not write).
+`checks/k8s.rbac/` holds 18 clusters (`all-allowed`, `two-denied`, `escalate-denied`, `escalate-allowed`,
 `evaluation-error`, `non-resource`, `reviews-forbidden`, `rules-forbidden`, `old-server`, `identity-forbidden`,
-`as-allowed`, `as-user`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`, `hostile-reasons`),
-`generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on drift). The rest
+`as-allowed`, `as-forbidden`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`,
+`as-at-the-cap`, `hostile-reasons`), `generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on
+drift and on a file the script did not write). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -272,9 +279,11 @@ optional `rules` list). The `access` list looks like this:
 A row matches when its `spec` equals the posted `spec`, ignoring empty strings and nulls (so a row may
 leave out `name` and `subresource`). The row's `status` is the answer, and the mock echoes the posted
 `spec`. `status` needs a boolean `allowed`; `reason`, `denied` and `evaluationError` are optional. Two rows
-with the same `spec`, an unknown key or a missing `spec` fail the build of the mock. Attributes with no
-row fall back to a recorded `POST` of the review path (one file that answers every review, for example a
-`403`), and with none of those they get `501` and fail the run. A `rules` row is
+with the same `spec`, an unknown key or a missing `spec` fail the build of the mock. A row may hold
+`"refuse": 403` (any status from 400 to 599) in place of `status`, and the review is refused. A review path
+whose table has no rows falls back to a recorded `POST` of the path (one file that answers every review,
+for example a `403`). A review that matches no row of a table that has rows gets `501` and fails the run,
+so a mistyped row cannot hide behind a refusal. A `rules` row is
 `{"spec": {"namespace": "acme"}, "status": {"resourceRules": [...], "nonResourceRules": [...], "incomplete": false}}`;
 `status` needs a boolean `incomplete`.
 

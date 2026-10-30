@@ -30,9 +30,7 @@ use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
 };
 use kube::api::{ObjectMeta, PostParams};
-use rdy_checks_k8s::client::{
-    Env, ImpersonateAs, ImpersonationConflict, KubeOptions, Loaded, load,
-};
+use rdy_checks_k8s::client::{Env, ImpersonateAs, ImpersonationError, KubeOptions, Loaded, load};
 use rdy_engine::check::{Need, Os};
 use rdy_engine::testing::{Replay, TestRun};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -295,7 +293,7 @@ async fn a_kubeconfig_as_is_added_by_kube_below_the_guard_which_is_why_a_spec_as
     let refused = connected
         .read_only_as(ctx.probe(), ImpersonateAs::new(AS).expect("valid"))
         .expect_err("refused");
-    assert_eq!(refused, ImpersonationConflict);
+    assert_eq!(refused, ImpersonationError::Conflict);
     assert_eq!(server.heads().len(), before);
 }
 

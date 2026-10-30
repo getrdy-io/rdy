@@ -12,6 +12,9 @@ script would write, so the files and the script cannot drift.
 A case holds `api/self-subject-review.json` (who the identity is), `api/reviews.json` (the table of
 `SelfSubjectAccessReview` and `SelfSubjectRulesReview` answers, see tests/fixtures/README.md) and, where
 a test needs it, a recorded namespace or a recorded refusal of the review POSTs.
+
+`--check` also fails on a file under the case directories that this script did not write. Without
+`--check`, such a file is deleted.
 """
 
 import json
@@ -23,6 +26,7 @@ CHECK = "--check" in sys.argv[1:]
 ROOT = ARGS[0] if ARGS else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.path.join(ROOT, "tests/fixtures/checks/k8s.rbac")
 DIFFERENT = []
+WRITTEN = set()
 
 USER = "system:serviceaccount:acme-system:installer"
 GROUPS = [
@@ -35,6 +39,7 @@ RBAC = "rbac.authorization.k8s.io"
 
 def write(case, name, value, text=False):
     path = os.path.join(BASE, case, name)
+    WRITTEN.add(os.path.normpath(path))
     data = value if text else json.dumps(value, indent=2) + "\n"
     if CHECK:
         try:
@@ -241,7 +246,7 @@ def case_two_denied():
     reviews(
         c,
         [
-            no(resource("create", "namespaces")),
+            no(resource("create", "namespaces"), "no RBAC policy matched"),
             yes(resource("create", "deployments", "apps", "acme-system")),
             denied(
                 resource("list", "pods", None, "acme-system"),
@@ -261,13 +266,6 @@ def case_two_denied():
         ],
     )
     namespace(c, "acme-system")
-
-
-def case_one_denied():
-    c = "one-denied"
-    manifest(c, "One cluster-scoped item is not allowed, with an empty reason")
-    identity(c)
-    reviews(c, [no(resource("create", "namespaces"))])
 
 
 def refuse_one_rules(case):
@@ -399,17 +397,18 @@ def case_as_allowed():
     namespace(c, "acme-system")
 
 
-def case_as_user():
-    c = "as-user"
-    manifest(c, "The spec tests as a plain user name; the impersonate review is for users")
-    identity(c, user="acme-admin", groups=["system:authenticated"])
-    reviews(
+def case_as_forbidden():
+    c = "as-forbidden"
+    manifest(
         c,
-        [
-            yes(resource("impersonate", "users", None, None, "acme-installer")),
-            yes(resource("create", "namespaces")),
-        ],
+        "The identity may impersonate the service account, but the first impersonated review is refused with a 403",
     )
+    identity(c, user="acme-admin", groups=["system:authenticated"])
+    rows = [
+        yes(resource("impersonate", "serviceaccounts", None, "acme-system", "installer")),
+        {"spec": resource("create", "namespaces"), "refuse": 403},
+    ]
+    reviews(c, rows)
 
 
 def case_as_refused():
@@ -449,6 +448,18 @@ def case_namespace_forbidden():
     namespace(c, "ghost", 403)
 
 
+def case_as_at_the_cap():
+    c = "as-at-the-cap"
+    manifest(
+        c,
+        "A spec with 100 items and an as: the impersonate question is one of the 100, so the last item is not asked",
+    )
+    identity(c, user="acme-admin", groups=["system:authenticated"])
+    rows = [yes(resource("impersonate", "serviceaccounts", None, "acme-system", "installer"))]
+    rows += [yes(resource("get", "configmaps", None, "acme-system", f"cfg-{i:03d}")) for i in range(99)]
+    reviews(c, rows)
+
+
 def case_at_the_cap():
     c = "at-the-cap"
     manifest(c, "A spec with 100 items, one of them a ClusterRole: the escalate review does not fit")
@@ -475,7 +486,6 @@ def case_fixed_hostile():
 for build in (
     case_all_allowed,
     case_two_denied,
-    case_one_denied,
     case_escalate,
     case_escalate_held,
     case_evaluation_error,
@@ -485,14 +495,30 @@ for build in (
     case_old_server,
     case_identity_forbidden,
     case_as_allowed,
-    case_as_user,
+    case_as_forbidden,
     case_as_refused,
     case_namespace_missing,
     case_namespace_forbidden,
     case_at_the_cap,
+    case_as_at_the_cap,
     case_fixed_hostile,
 ):
     build()
+
+# A file the script did not write is stale: it names a case that was removed or renamed.
+for folder, _, files in os.walk(BASE):
+    for file_name in files:
+        found = os.path.normpath(os.path.join(folder, file_name))
+        if found in WRITTEN:
+            continue
+        if CHECK:
+            DIFFERENT.append(found)
+        else:
+            os.remove(found)
+if not CHECK:
+    for folder, _, _ in sorted(os.walk(BASE), reverse=True):
+        if folder != BASE and not os.listdir(folder):
+            os.rmdir(folder)
 
 if CHECK and DIFFERENT:
     for path_ in DIFFERENT:

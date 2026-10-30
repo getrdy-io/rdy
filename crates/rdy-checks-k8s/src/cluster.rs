@@ -10,7 +10,7 @@ use std::sync::Arc;
 use rdy_engine::probe::Probe;
 
 use crate::client::{
-    Connected, ImpersonateAs, ImpersonationConflict, KubeError, ReadOnlyClient, ServerVersion,
+    Connected, ImpersonateAs, ImpersonationError, KubeError, ReadOnlyClient, ServerVersion,
     from_kube_error,
 };
 
@@ -30,18 +30,23 @@ pub trait Cluster: Send + Sync + 'static {
     ///
     /// # Errors
     ///
-    /// [`ImpersonationConflict`] when the kubeconfig user already impersonates. The default refuses, so
-    /// a test double that does not model impersonation can never send an unmarked impersonation.
+    /// [`ImpersonationError::Conflict`] when the kubeconfig user already impersonates. There is no
+    /// default: an implementor must say how it impersonates, so a spec `as:` can never be answered with a
+    /// refusal that blames the kubeconfig by mistake.
     fn read_only_as(
         &self,
-        _probe: &Probe,
-        _user: ImpersonateAs,
-    ) -> Result<ReadOnlyClient, ImpersonationConflict> {
-        Err(ImpersonationConflict)
+        probe: &Probe,
+        user: ImpersonateAs,
+    ) -> Result<ReadOnlyClient, ImpersonationError>;
+
+    /// True when the cluster facts say the cluster is OpenShift, so a fix can name `oc` commands. The
+    /// default knows nothing and says no; M1-107's holder of the cluster facts answers it.
+    fn is_openshift(&self) -> bool {
+        false
     }
 
     /// Sorts an error of a request of this cluster, with what the connection knows: the server, the
-    /// credential plugin, a proxy variable and a CA setting, so the fix hint can name them (02, "Errors").
+    /// credential plugin, whether a proxy is in the path and the CA setting, so the fix hint can name them (02, "Errors").
     ///
     /// The default knows none of that. A test double may keep it.
     fn map_error(&self, error: &kube::Error) -> KubeError {
@@ -62,7 +67,7 @@ impl Cluster for Connected {
         &self,
         probe: &Probe,
         user: ImpersonateAs,
-    ) -> Result<ReadOnlyClient, ImpersonationConflict> {
+    ) -> Result<ReadOnlyClient, ImpersonationError> {
         Connected::read_only_as(self, probe, user)
     }
 
@@ -84,8 +89,12 @@ impl<T: Cluster + ?Sized> Cluster for Arc<T> {
         &self,
         probe: &Probe,
         user: ImpersonateAs,
-    ) -> Result<ReadOnlyClient, ImpersonationConflict> {
+    ) -> Result<ReadOnlyClient, ImpersonationError> {
         (**self).read_only_as(probe, user)
+    }
+
+    fn is_openshift(&self) -> bool {
+        (**self).is_openshift()
     }
 
     fn map_error(&self, error: &kube::Error) -> KubeError {

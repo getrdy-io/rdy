@@ -1,0 +1,38 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIVersions",
+    "versions": [
+      "v1",
+      "v2\u001b[31mevil\u001b]0;pwn\u0007",
+      "v3",
+      "v4",
+      "v5",
+      "v6",
+      "v7",
+      "v8",
+      "v9",
+      "v10",
+      "v11",
+      "v12",
+      "v13",
+      "v14",
+      "v15",
+      "v16",
+      "v17",
+      "v18",
+      "v19",
+      "v20"
+    ],
+    "serverAddressByClientCIDRs": [
+      {
+        "clientCIDR": "0.0.0.0/0",
+        "serverAddress": "192.0.2.10:6443"
+      }
+    ]
+  }
+}

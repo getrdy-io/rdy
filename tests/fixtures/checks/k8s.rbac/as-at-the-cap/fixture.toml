@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-as-at-the-cap"
+summary = "A spec with 100 items and an as: the impersonate question is one of the 100, so the last item is not asked"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

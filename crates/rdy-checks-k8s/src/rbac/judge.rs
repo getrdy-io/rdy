@@ -41,7 +41,8 @@ pub(super) enum Answer {
     /// `denied: true`: an authorizer said no, and a role cannot change that.
     Denied { reason: String },
     /// `allowed: false` with an `evaluationError`: an authorizer failed, so the answer is not reliable.
-    Unclear { reason: String },
+    /// The server's `reason` is kept next to the `error`.
+    Unclear { reason: String, error: String },
     /// The review was not asked, or the server could not answer it.
     NotEvaluated(Why),
 }
@@ -87,10 +88,17 @@ impl Answer {
                 "explicitly denied (denied: true) by an authorizer, so adding a role cannot fix it",
                 reason,
             ),
-            Self::Unclear { reason } => (
-                "not allowed by RBAC, and an authorizer reported an error (evaluationError), so the answer may be wrong",
-                reason,
-            ),
+            Self::Unclear { reason, error } => {
+                let lead = "not allowed by RBAC, and an authorizer reported an error (evaluationError), so the answer may be wrong";
+                let mut text = lead.to_owned();
+                if !reason.is_empty() {
+                    text.push_str(&format!(". The server said: {}", shown(reason, SHOWN)));
+                }
+                if !error.is_empty() {
+                    text.push_str(&format!(". The error was: {}", shown(error, SHOWN)));
+                }
+                return text;
+            }
             Self::Allowed => ("allowed", &String::new()),
             Self::NotEvaluated(why) => return why.text(),
         };
@@ -103,9 +111,19 @@ impl Answer {
 
     fn reason(&self) -> Option<&str> {
         match self {
-            Self::NotAllowed { reason } | Self::Denied { reason } | Self::Unclear { reason } => {
+            Self::NotAllowed { reason }
+            | Self::Denied { reason }
+            | Self::Unclear { reason, .. } => {
                 Some(reason.as_str()).filter(|reason| !reason.is_empty())
             }
+            _ => None,
+        }
+    }
+
+    /// The `evaluationError` of an unclear answer.
+    fn error(&self) -> Option<&str> {
+        match self {
+            Self::Unclear { error, .. } => Some(error.as_str()).filter(|error| !error.is_empty()),
             _ => None,
         }
     }
@@ -124,6 +142,8 @@ pub(super) enum Why {
     NoStatus,
     /// The check ran out of time before it asked.
     OutOfTime,
+    /// The run is at the cap of 100 reviews, so this item was not asked.
+    OverCap,
     /// The identity may not impersonate the `as:` user. The text is the ask it lacks.
     Impersonate(String),
 }
@@ -136,15 +156,23 @@ impl Why {
             Self::Status(code) => format!("the server answered {code}"),
             Self::NoStatus => "the server's answer had no status".to_owned(),
             Self::OutOfTime => "rdy ran out of time".to_owned(),
+            Self::OverCap => format!(
+                "the run is at its cap of {MAX_REVIEWS} reviews (the question whether the identity may impersonate counts as one)"
+            ),
             Self::Impersonate(ask) => format!("the identity may not `{ask}`"),
         }
     }
 
-    /// The grant that would remove the gap, if a grant would.
-    fn grant(&self) -> Option<String> {
+    /// The grant that would remove the gap, if a grant would. `party` is who lacks it, when known: the `as:`
+    /// user when the reviews ran as that user, else the identity the server reported.
+    fn grant(&self, party: Option<&str>) -> Option<String> {
         match self {
             Self::Forbidden => {
-                Some("create selfsubjectaccessreviews.authorization.k8s.io".to_owned())
+                let grant = "create selfsubjectaccessreviews.authorization.k8s.io";
+                Some(match party {
+                    Some(party) => format!("{grant} (for {})", shown(party, SHOWN)),
+                    None => grant.to_owned(),
+                })
             }
             Self::Impersonate(ask) => Some(ask.clone()),
             _ => None,
@@ -216,6 +244,8 @@ pub(super) struct Gathered {
     pub(super) namespaces: Vec<(String, NamespaceState)>,
     /// How many access reviews were sent, the impersonation question included.
     pub(super) sent: usize,
+    /// True when the cluster is OpenShift (the cluster facts say so).
+    pub(super) openshift: bool,
 }
 
 impl Gathered {
@@ -395,6 +425,11 @@ pub(super) fn judge(params: &K8sRbac, gathered: &Gathered) -> Finding {
     if let Some(note) = impersonation_note(gathered) {
         finding = finding.with_note(note);
     }
+    if matches!(gathered.impersonation, Impersonation::Refused(_)) {
+        finding = finding.with_note(
+            "This check asked about the `impersonate` verb. A cluster with constrained impersonation can grant `impersonate:user-info` or `impersonate-on:*` instead, which this check does not ask about.",
+        );
+    }
     if let Identity::Unverified(why) = &gathered.identity {
         finding = finding.with_note(format!(
             "The identity is not verified by the API server: {}",
@@ -452,6 +487,7 @@ pub(super) fn judge(params: &K8sRbac, gathered: &Gathered) -> Finding {
                 .filter(|(_, state)| *state == NamespaceState::Missing)
                 .map(|(namespace, _)| namespace.as_str())
                 .collect(),
+            openshift: gathered.openshift,
         });
         if text.is_empty() {
             text.push_str("Run `kubectl auth can-i --list` as the identity to see what it may do.");
@@ -481,7 +517,7 @@ pub(super) fn judge(params: &K8sRbac, gathered: &Gathered) -> Finding {
                 plural(count, "permission was", "permissions were"),
                 why.text()
             ));
-            grants.extend(why.grant());
+            grants.extend(why.grant(grant_party(gathered).as_deref()));
         }
         grants.dedup();
         finding = finding
@@ -491,6 +527,20 @@ pub(super) fn judge(params: &K8sRbac, gathered: &Gathered) -> Finding {
     finding
         .with_observed(observed(gathered, &who))
         .with_expected(expected(params, gathered))
+}
+
+/// Who lacks a grant that a failed review names: the `as:` user when the reviews ran as that user, else the
+/// identity the server reported, else nobody the report can name.
+fn grant_party(gathered: &Gathered) -> Option<String> {
+    match (
+        &gathered.as_user,
+        &gathered.impersonation,
+        &gathered.identity,
+    ) {
+        (Some(user), Impersonation::Allowed, _) => Some(user.clone()),
+        (_, _, Identity::Verified { user, .. }) => Some(user.clone()),
+        _ => None,
+    }
 }
 
 /// What the notes say about the reviews running as another user.
@@ -540,6 +590,9 @@ fn observed(gathered: &Gathered, who: &str) -> Value {
                 entry.insert("answer".into(), json!(answer.wire()));
                 if let Some(reason) = answer.reason() {
                     entry.insert("reason".into(), json!(shown(reason, SHOWN)));
+                }
+                if let Some(error) = answer.error() {
+                    entry.insert("error".into(), json!(shown(error, SHOWN)));
                 }
                 if let Answer::NotEvaluated(why) = answer {
                     entry.insert("why".into(), json!(why.text()));

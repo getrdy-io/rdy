@@ -29,17 +29,44 @@ impl Who {
         }
     }
 
+    /// The service account as `(namespace, name)`, when the subject is one.
+    fn service_account(&self) -> Option<(&str, &str)> {
+        self.user
+            .as_deref()?
+            .strip_prefix("system:serviceaccount:")?
+            .split_once(':')
+    }
+
     /// The flag that names the subject of a binding.
     fn subject_flag(&self) -> String {
-        match self.user.as_deref() {
-            Some(user) => match user
-                .strip_prefix("system:serviceaccount:")
-                .and_then(|rest| rest.split_once(':'))
-            {
-                Some((namespace, name)) => format!("--serviceaccount={namespace}:{name}"),
-                None => format!("--user={user}"),
-            },
-            None => "--user=<user>".to_owned(),
+        match (self.service_account(), self.user.as_deref()) {
+            (Some((namespace, name)), _) => format!("--serviceaccount={namespace}:{name}"),
+            (None, Some(user)) => format!("--user={user}"),
+            (None, None) => "--user=<user>".to_owned(),
+        }
+    }
+
+    /// The OpenShift command that binds `rdy-installer` to the subject, in one step. `role_namespace` is the
+    /// namespace of a `Role`, or `None` for a `ClusterRole`. `None` when no `oc adm policy` form fits: a
+    /// service account of another namespace than the role's has no `-z` form (`-z` means the current
+    /// namespace).
+    fn openshift_bind(&self, role_namespace: Option<&str>) -> Option<String> {
+        match (role_namespace, self.service_account(), self.user.as_deref()) {
+            (None, Some((namespace, name)), _) => Some(format!(
+                "oc adm policy add-cluster-role-to-user rdy-installer -z {name} -n {namespace}"
+            )),
+            (None, None, user) => Some(format!(
+                "oc adm policy add-cluster-role-to-user rdy-installer {}",
+                user.unwrap_or("<user>")
+            )),
+            (Some(role), Some((namespace, name)), _) if role == namespace => Some(format!(
+                "oc adm policy add-role-to-user rdy-installer -z {name} -n {role} --role-namespace={role}"
+            )),
+            (Some(_), Some(_), _) => None,
+            (Some(role), None, user) => Some(format!(
+                "oc adm policy add-role-to-user rdy-installer {} -n {role} --role-namespace={role}",
+                user.unwrap_or("<user>")
+            )),
         }
     }
 }
@@ -66,6 +93,8 @@ pub(super) struct Context<'a> {
     pub(super) unclear: Vec<&'a Ask>,
     /// Namespaces of denied items that do not exist.
     pub(super) missing_namespaces: Vec<&'a str>,
+    /// True when the cluster is OpenShift: the binding is also given as an `oc adm policy` command.
+    pub(super) openshift: bool,
 }
 
 /// The fix text. Empty when nothing needs fixing.
@@ -82,6 +111,7 @@ pub(super) fn text(context: &Context<'_>) -> String {
         parts.push(grant(
             ask,
             &context.who,
+            context.openshift,
             "Ask the cluster admin to bind a role that grants the missing permissions to this identity.",
         ));
     }
@@ -102,6 +132,7 @@ pub(super) fn text(context: &Context<'_>) -> String {
         parts.push(grant(
             ask,
             &context.who,
+            context.openshift,
             "To prove the identity may grant roles without holding every rule itself, give it `escalate` and `bind`.",
         ));
     }
@@ -156,9 +187,16 @@ fn word(value: &str) -> String {
 }
 
 /// The two commands that grant `ask`, after `lead`.
-fn grant(ask: &Ask, who: &Who, lead: &str) -> String {
+fn grant(ask: &Ask, who: &Who, openshift: bool, lead: &str) -> String {
     let subject = who.subject_flag();
     let verb = word(&ask.verb);
+    let role_namespace = match &ask.target {
+        Target::Resource {
+            namespace: Some(namespace),
+            ..
+        } => Some(namespace.as_str()),
+        _ => None,
+    };
     let (create, bind) = match &ask.target {
         Target::NonResource { path } => (
             format!(
@@ -210,8 +248,17 @@ fn grant(ask: &Ask, who: &Who, lead: &str) -> String {
             }
         }
     };
-    format!(
-        "{lead} For `{}`: `{create}`, then `{bind}`. Add one `--verb` and `--resource` pair for each other permission.",
+    let mut text = format!(
+        "{lead} For `{}`: `{create}`, then `{bind}`.",
         ask.describe()
-    )
+    );
+    if openshift && let Some(command) = who.openshift_bind(role_namespace) {
+        text.push_str(&format!(
+            " On OpenShift, `{command}` makes the binding once the role exists."
+        ));
+    }
+    text.push_str(
+        " For each other permission, add a `--verb` and `--resource` pair to the same role. A namespaced item needs its own role and rolebinding in its namespace, so repeat both commands per namespace. Cluster-scoped items and URLs go in a clusterrole.",
+    );
+    text
 }

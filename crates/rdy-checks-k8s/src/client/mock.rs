@@ -23,9 +23,11 @@
 //!   `{"access": [{"spec": {...}, "status": {...}}]}`. A row matches when its `spec` equals the posted
 //!   `spec`, ignoring empty strings and nulls, and the row's `status` is the answer. The `rules` list of
 //!   the same file answers `SelfSubjectRulesReview` the same way (`spec` is `{"namespace": ...}`, `status`
-//!   needs a boolean `incomplete`). A review with no row falls back to a recorded `POST` of that path, so
-//!   a fixture can answer every review with one `403`. Any other POST (the `SelfSubjectReview`) is a plain
-//!   recorded request.
+//!   needs a boolean `incomplete`). A review path whose table has no rows at all falls back to a recorded
+//!   `POST` of that path, so a fixture can answer every review with one `403`. A review that matches no
+//!   row of a table that has rows is a `501`, so a mistyped row cannot hide behind a recorded refusal. Any
+//!   other POST (the `SelfSubjectReview`) is a plain recorded request. A row may hold `"refuse": 403` (any
+//!   status from 400 to 599) instead of a `status`, and the mock answers that review with the refusal.
 //! - Anything the fixture does not hold fails: a `501` that names the request, and a line in
 //!   [`Mock::unrecorded`]. A fixture never falls through to a default (02).
 //!
@@ -69,10 +71,12 @@ use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use serde_json::{Value, json};
 use tower_service::Service;
 
-use super::ImpersonateAs;
-use super::ReadOnlyClient;
 use super::guard::{BodyView, Target, decode_query_value, judge, log_path, target_of};
 use super::text::escape_capped;
+use super::{
+    ConnectionFacts, ImpersonateAs, ImpersonationError, KubeError, ReadOnlyClient, ServerVersion,
+    from_kube_error,
+};
 
 #[cfg(test)]
 mod rbac_tests;
@@ -119,6 +123,8 @@ struct ReviewRow {
     /// The `spec` with empty strings and nulls removed.
     spec: Value,
     status: Value,
+    /// A row that refuses the review with this HTTP status instead of answering it (`"refuse": 403`).
+    refuse: Option<u16>,
 }
 
 /// A request that reached the mock.
@@ -247,7 +253,7 @@ fn parse_rows(table: &Value, list: &str, flag: &str) -> Result<Vec<ReviewRow>, M
             .ok_or_else(|| bad("a row must be an object with `spec` and `status`"))?;
         if let Some(key) = row
             .keys()
-            .find(|key| !matches!(key.as_str(), "spec" | "status"))
+            .find(|key| !matches!(key.as_str(), "spec" | "status" | "refuse"))
         {
             return Err(MockError::BadReviews(format!("unknown row key `{key}`")));
         }
@@ -255,14 +261,30 @@ fn parse_rows(table: &Value, list: &str, flag: &str) -> Result<Vec<ReviewRow>, M
             .get("spec")
             .filter(|spec| spec.is_object())
             .ok_or_else(|| bad("a row needs a `spec` object"))?;
-        let status = row
-            .get("status")
-            .filter(|status| status.get(flag).is_some_and(Value::is_boolean))
-            .ok_or_else(|| {
-                MockError::BadReviews(format!(
-                    "a row needs a `status` object with a boolean `{flag}`"
-                ))
-            })?;
+        let refuse = match row.get("refuse") {
+            None => None,
+            Some(code) => Some(
+                code.as_u64()
+                    .and_then(|code| u16::try_from(code).ok())
+                    .filter(|code| (400..=599).contains(code))
+                    .filter(|_| !row.contains_key("status"))
+                    .ok_or_else(|| {
+                        bad("`refuse` is an HTTP status from 400 to 599, and the row has no `status`")
+                    })?,
+            ),
+        };
+        let none = Value::Null;
+        let status = if refuse.is_some() {
+            &none
+        } else {
+            row.get("status")
+                .filter(|status| status.get(flag).is_some_and(Value::is_boolean))
+                .ok_or_else(|| {
+                    MockError::BadReviews(format!(
+                        "a row needs a `status` object with a boolean `{flag}`"
+                    ))
+                })?
+        };
         let spec = without_empty(spec);
         if parsed.iter().any(|earlier| earlier.spec == spec) {
             return Err(MockError::BadReviews(format!(
@@ -272,6 +294,7 @@ fn parse_rows(table: &Value, list: &str, flag: &str) -> Result<Vec<ReviewRow>, M
         parsed.push(ReviewRow {
             spec,
             status: status.clone(),
+            refuse,
         });
     }
     Ok(parsed)
@@ -386,10 +409,11 @@ impl Mock {
             );
         }
 
-        // A review with a row in the table is answered from it. One without falls through to a recorded
-        // `POST` of the path, and then to the 501.
+        // A review with a row in the table is answered from it. A path whose table has no rows falls
+        // through to a recorded `POST` of the path, and then to the 501. A table with rows and no match
+        // is a 501 at once.
         if parts.method == Method::POST
-            && let Some(response) = self.review_row(&path, &seen.body)
+            && let Some(response) = self.review_row(&path, &seen.body, &line)
         {
             return response;
         }
@@ -404,14 +428,18 @@ impl Mock {
         respond_bytes(record.status, record.body.clone())
     }
 
-    /// The answer from the review table for a POST to `path`, or `None` when the path is not a review
-    /// with a table or no row matches.
-    fn review_row(&self, path: &str, body: &[u8]) -> Option<Response<Body>> {
+    /// The answer from the review table for a POST to `path`, or `None` when the path is not a review or
+    /// its table has no rows. A table with rows and no row for this review answers 501 and is recorded as
+    /// unanswered.
+    fn review_row(&self, path: &str, body: &[u8], line: &str) -> Option<Response<Body>> {
         let (rows, kind) = match path {
             ACCESS_REVIEW_PATH => (&self.inner.reviews, "SelfSubjectAccessReview"),
             RULES_REVIEW_PATH => (&self.inner.rules, "SelfSubjectRulesReview"),
             _ => return None,
         };
+        if rows.is_empty() {
+            return None;
+        }
         let Ok(posted) = serde_json::from_slice::<Value>(body) else {
             return Some(respond(
                 400,
@@ -419,7 +447,21 @@ impl Mock {
             ));
         };
         let spec = posted.get("spec").map(without_empty).unwrap_or(Value::Null);
-        let row = rows.iter().find(|row| row.spec == spec)?;
+        let Some(row) = rows.iter().find(|row| row.spec == spec) else {
+            return Some(self.not_recorded(line));
+        };
+        if let Some(code) = row.refuse {
+            let reason = match code {
+                401 => "Unauthorized",
+                403 => "Forbidden",
+                404 => "NotFound",
+                _ => "Failure",
+            };
+            return Some(respond(
+                code,
+                &status_body(code, reason, "the fixture refuses this review"),
+            ));
+        }
         Some(respond(
             201,
             &json!({
@@ -615,6 +657,9 @@ pub(crate) struct Harness {
     audited: AtomicBool,
     /// The `as:` user of the clients made by [`Harness::client_as`], for the audit.
     as_user: Mutex<Option<ImpersonateAs>>,
+    via_proxy: Option<String>,
+    /// True for a harness whose clients are the run-level one of a kubeconfig that impersonates.
+    kubeconfig_impersonates: bool,
 }
 
 impl fmt::Debug for Harness {
@@ -646,7 +691,23 @@ impl Harness {
             mock: Mock::new(replay)?,
             audited: AtomicBool::new(false),
             as_user: Mutex::new(None),
+            via_proxy: None,
+            kubeconfig_impersonates: false,
         })
+    }
+
+    /// Makes the clients record `via_proxy: origin` on every `kube` entry, as a connection through a
+    /// proxy does.
+    pub(crate) fn via_proxy(mut self, origin: &str) -> Self {
+        self.via_proxy = Some(origin.to_owned());
+        self
+    }
+
+    /// Makes the clients say `kubeconfig_impersonates: true` on every `kube` entry, as the run-level
+    /// connection does when the kubeconfig user sets an `as*` field.
+    pub(crate) fn kubeconfig_impersonates(mut self) -> Self {
+        self.kubeconfig_impersonates = true;
+        self
     }
 
     /// The run the clients log into.
@@ -662,7 +723,12 @@ impl Harness {
     /// A read-only client for the check that owns `probe` (`CheckContext::probe`): the guard in front of
     /// the mock, as `Connected::read_only` builds it in front of the real server. Needs a tokio runtime.
     pub(crate) fn client(&self, probe: &Probe) -> ReadOnlyClient {
-        ReadOnlyClient::over(self.mock.clone(), probe)
+        ReadOnlyClient::over_run(
+            self.mock.clone(),
+            probe,
+            self.via_proxy.as_deref(),
+            self.kubeconfig_impersonates,
+        )
     }
 
     /// Like [`Harness::client`], and the two access review POSTs carry `Impersonate-User: <user>`: the
@@ -672,7 +738,15 @@ impl Harness {
     /// # Panics
     ///
     /// When called with a user other than the one it was first called with.
-    pub(crate) fn client_as(&self, probe: &Probe, user: ImpersonateAs) -> ReadOnlyClient {
+    ///
+    /// # Errors
+    ///
+    /// [`ImpersonationError::BadValue`], as production.
+    pub(crate) fn client_as(
+        &self,
+        probe: &Probe,
+        user: ImpersonateAs,
+    ) -> Result<ReadOnlyClient, ImpersonationError> {
         let mut known = self.as_user.lock().expect("as user");
         match known.as_ref() {
             Some(first) if first != &user => {
@@ -681,7 +755,7 @@ impl Harness {
             Some(_) => {}
             None => *known = Some(user.clone()),
         }
-        ReadOnlyClient::over_as(self.mock.clone(), probe, user)
+        ReadOnlyClient::over_as(self.mock.clone(), probe, user, self.via_proxy.as_deref())
     }
 
     /// Like [`Harness::client`], for a check called `check` that has the `KubeContext` need.
@@ -693,6 +767,27 @@ impl Harness {
     /// A client from the run-level probe, which logs `check: null`, as `Loaded::connect` does.
     pub(crate) fn run_client(&self) -> ReadOnlyClient {
         self.client(&self.run.run_probe(Os::Linux))
+    }
+
+    /// The run's connection attempt over the mock, as `Loaded::connect` makes it: `GET /version` through
+    /// the guard from the run-level probe (`check: null`), timed, with an error mapped as production maps
+    /// it. `facts` says whether a proxy or a CA was in play, for the hints.
+    pub(crate) async fn attempt(
+        &self,
+        facts: &ConnectionFacts,
+    ) -> Result<(ServerVersion, Duration), KubeError> {
+        let plugin = facts.line().plugin();
+        let started = std::time::Instant::now();
+        let info = self.run_client().version().await.map_err(|error| {
+            from_kube_error(
+                &error,
+                facts.line().server(),
+                plugin,
+                facts.proxy().is_proxied(),
+                facts.ca_set(),
+            )
+        })?;
+        Ok((ServerVersion::from_info(info), started.elapsed()))
     }
 
     /// Audits the run so far ([`audit`]). A failing audit turns off the audit at drop, so the test does not

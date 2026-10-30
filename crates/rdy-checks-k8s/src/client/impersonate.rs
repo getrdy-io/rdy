@@ -11,7 +11,7 @@
 //!
 //! kube's own stack sits below the guard and adds `Impersonate-User` and `Impersonate-Group` when the
 //! kubeconfig user sets `as` or `as-groups`. If both sources wrote the header, the server would see two
-//! values, so rdy refuses before it builds the client: [`ImpersonationConflict`].
+//! values, so rdy refuses before it builds the client: [`ImpersonationError::Conflict`].
 
 use std::task::{Context, Poll};
 
@@ -28,20 +28,36 @@ mod tests;
 /// The header kube and the API server use for the user to act as.
 const IMPERSONATE_USER: HeaderName = HeaderName::from_static("impersonate-user");
 
-/// The kubeconfig user already impersonates, so a spec `as:` cannot be used.
+/// Why a client that impersonates cannot be built.
 ///
 /// The text holds no user name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "the kubeconfig user already sets an impersonation field (as, as-uid, as-groups or as-user-extra)"
-)]
-pub struct ImpersonationConflict;
+#[non_exhaustive]
+pub enum ImpersonationError {
+    /// The kubeconfig user already sets an `as` field, so a spec `as:` cannot be used.
+    #[error(
+        "the kubeconfig user already sets an impersonation field (as, as-uid, as-groups or as-user-extra)"
+    )]
+    Conflict,
+    /// The user cannot be written as an `Impersonate-User` header value. [`ImpersonateAs`] only holds
+    /// printable ASCII, so this does not happen; it is an error and not a fallback value so a change to
+    /// that type cannot send a wrong header.
+    #[error("the `as` value cannot be written as an Impersonate-User header value")]
+    BadValue,
+}
 
-impl ImpersonationConflict {
+impl ImpersonationError {
     /// What to do about it.
     #[must_use]
     pub fn hint(&self) -> &'static str {
-        "Use a kubeconfig whose user does not set `as`, `as-uid`, `as-groups` or `as-user-extra` (see `kubectl config view --minify`), or remove `as:` from the k8s.rbac entry of the spec. rdy does not stack two impersonations: the server would see two Impersonate-User headers."
+        match self {
+            Self::Conflict => {
+                "Use a kubeconfig whose user does not set `as`, `as-uid`, `as-groups` or `as-user-extra` (see `kubectl config view --minify`), or remove `as:` from the k8s.rbac entry of the spec. rdy does not stack two impersonations: the server would see two Impersonate-User headers."
+            }
+            Self::BadValue => {
+                "Use a service account name made of letters, digits, `-` and `.`, as in system:serviceaccount:<namespace>:<name>. If it already is one, this is a bug in rdy: report it."
+            }
+        }
     }
 }
 
@@ -58,11 +74,15 @@ pub(super) struct AddImpersonation<S> {
 impl<S> AddImpersonation<S> {
     /// Wraps `inner`. A value the guard accepted is printable ASCII, so it is a valid header value. The
     /// value is marked sensitive so it is not printed by a debug format of the request.
-    pub(super) fn new(inner: S, user: ImpersonateAs) -> Self {
-        let mut value = HeaderValue::from_str(user.as_str())
-            .unwrap_or_else(|_| HeaderValue::from_static("invalid"));
+    ///
+    /// # Errors
+    ///
+    /// [`ImpersonationError::BadValue`] when the user is not a valid header value.
+    pub(super) fn new(inner: S, user: ImpersonateAs) -> Result<Self, ImpersonationError> {
+        let mut value =
+            HeaderValue::try_from(user.as_str()).map_err(|_| ImpersonationError::BadValue)?;
         value.set_sensitive(true);
-        Self { inner, user, value }
+        Ok(Self { inner, user, value })
     }
 }
 

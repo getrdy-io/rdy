@@ -35,7 +35,8 @@ impl Service<Request<Body>> for Recorder {
 fn send(method: &str, path: &str, caller_header: Option<&str>) -> Vec<String> {
     let recorder = Recorder::default();
     let mut service =
-        AddImpersonation::new(recorder.clone(), ImpersonateAs::new(USER).expect("valid"));
+        AddImpersonation::new(recorder.clone(), ImpersonateAs::new(USER).expect("valid"))
+            .expect("a header value");
     let mut request = Request::builder().method(method).uri(path);
     if let Some(value) = caller_header {
         request = request.header("impersonate-user", value);
@@ -93,16 +94,17 @@ fn the_value_is_marked_sensitive() {
     let service = AddImpersonation::new(
         Recorder::default(),
         ImpersonateAs::new(USER).expect("valid"),
-    );
+    )
+    .expect("a header value");
     assert!(service.value.is_sensitive());
 }
 
 #[test]
 fn the_conflict_text_names_the_fields_and_no_user() {
-    let text = ImpersonationConflict.to_string();
+    let text = ImpersonationError::Conflict.to_string();
     assert!(text.contains("as-groups") && !text.contains("system:"));
     assert!(
-        ImpersonationConflict
+        ImpersonationError::Conflict
             .hint()
             .contains("remove `as:` from the k8s.rbac entry")
     );

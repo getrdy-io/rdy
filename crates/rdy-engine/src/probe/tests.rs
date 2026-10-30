@@ -1340,12 +1340,12 @@ fn a_failed_kube_status_carries_a_fixed_error_and_a_redirect_is_not_ok() {
     let probe = hub.check_probe("k8s.nodes", Os::Linux, None);
     for status in [200_u16, 204, 302, 403, 503] {
         probe
-            .kube_call("GET", "/api/v1/nodes")
+            .kube_call("GET", "/api/v1/nodes", None)
             .expect("open")
             .answered(status);
     }
     probe
-        .kube_call("GET", "/api/v1/nodes")
+        .kube_call("GET", "/api/v1/nodes", None)
         .expect("open")
         .refused_header("a header rule", "authorization");
     let log = hub.action_log();
@@ -1394,17 +1394,22 @@ fn an_impersonated_kube_call_is_marked_and_the_others_are_not() {
         .kube_call(
             "POST",
             "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
+            None,
         )
         .expect("open")
         .impersonated()
         .answered(201);
     probe
-        .kube_call("POST", "/apis/authentication.k8s.io/v1/selfsubjectreviews")
+        .kube_call(
+            "POST",
+            "/apis/authentication.k8s.io/v1/selfsubjectreviews",
+            None,
+        )
         .expect("open")
         .answered(201);
     // A refusal of the header is a refusal with the header named, and no mark.
     probe
-        .kube_call("GET", "/version")
+        .kube_call("GET", "/version", None)
         .expect("open")
         .refused_header("this request header is not allowed", "authorization");
     // A marked call that is dropped in flight is still marked, and a timeout.
@@ -1413,6 +1418,7 @@ fn an_impersonated_kube_call_is_marked_and_the_others_are_not() {
             .kube_call(
                 "POST",
                 "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews",
+                Some("http://proxy.test:3128"),
             )
             .expect("open")
             .impersonated(),
@@ -1424,6 +1430,32 @@ fn an_impersonated_kube_call_is_marked_and_the_others_are_not() {
     assert_eq!(field(&log.actions[2], "impersonated"), None);
     assert_eq!(field(&log.actions[3], "impersonated"), Some(&json!(true)));
     assert_eq!(log.actions[3].outcome, ActionOutcome::Timeout);
+    // The proxy of an impersonated call is still recorded.
+    assert_eq!(
+        field(&log.actions[3], "via_proxy"),
+        Some(&json!("http://proxy.test:3128"))
+    );
+}
+
+#[test]
+fn a_kube_call_under_an_impersonating_kubeconfig_says_so() {
+    let hub = hub(Replay::new());
+    let probe = hub.run_probe();
+    probe
+        .kube_call("GET", "/version", None)
+        .expect("open")
+        .kubeconfig_impersonates()
+        .answered(200);
+    probe
+        .kube_call("GET", "/version", None)
+        .expect("open")
+        .answered(200);
+    let log = hub.action_log();
+    assert_eq!(
+        field(&log.actions[0], "kubeconfig_impersonates"),
+        Some(&json!(true))
+    );
+    assert_eq!(field(&log.actions[1], "kubeconfig_impersonates"), None);
 }
 
 #[test]
@@ -1431,23 +1463,23 @@ fn a_kube_call_writes_one_entry_under_its_check() {
     let hub = hub(Replay::new());
     let probe = hub.check_probe("k8s.nodes", Os::Linux, None);
     probe
-        .kube_call("GET", "/api/v1/nodes")
+        .kube_call("GET", "/api/v1/nodes", None)
         .expect("open")
         .answered(200);
     probe
-        .kube_call("GET", "/api/v1/pods")
+        .kube_call("GET", "/api/v1/pods", None)
         .expect("open")
         .answered(503);
     probe
-        .kube_call("DELETE", "/api/v1/nodes/n1")
+        .kube_call("DELETE", "/api/v1/nodes/n1", None)
         .expect("open")
         .refused("a rule");
     probe
-        .kube_call("GET", "/version")
+        .kube_call("GET", "/version", None)
         .expect("open")
         .failed("the request failed");
     // Dropped before it is closed: a cancelled request still leaves its entry.
-    drop(probe.kube_call("GET", "/apis").expect("open"));
+    drop(probe.kube_call("GET", "/apis", None).expect("open"));
 
     let log = hub.action_log();
     let seen: Vec<_> = log
@@ -1495,11 +1527,11 @@ fn a_kube_call_writes_one_entry_under_its_check() {
 
     // A run-level probe logs `check: null`. An ended probe refuses, and the refusal is logged.
     hub.run_probe()
-        .kube_call("GET", "/version")
+        .kube_call("GET", "/version", None)
         .expect("open")
         .answered(200);
     probe.end();
-    let error = probe.kube_call("GET", "/api").expect_err("ended");
+    let error = probe.kube_call("GET", "/api", None).expect_err("ended");
     assert!(matches!(
         error,
         ProbeError::Denied {
@@ -1509,7 +1541,7 @@ fn a_kube_call_writes_one_entry_under_its_check() {
     ));
     // A probe with no hub has nothing to log in, so it refuses and writes nothing.
     assert!(matches!(
-        Probe::closed().kube_call("GET", "/version"),
+        Probe::closed().kube_call("GET", "/version", None),
         Err(ProbeError::Denied {
             rule: RULE_NO_PROBE,
             ..

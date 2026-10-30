@@ -41,7 +41,7 @@ use k8s_openapi::api::core::v1::Node;
 use kube::api::ListParams;
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Level,
-    Need, OsSupport, Partial, Support,
+    Need, OsSupport, Partial, PeerClass, Support,
 };
 use rdy_engine::text::escape_untrusted;
 use rdy_spec::check::{ApiRef, K8sVersion, OverMax};
@@ -94,7 +94,7 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
     statfs: &[],
     env: &[],
     commands: &[],
-    peers: &[],
+    peers: &[PeerClass::KubeApi, PeerClass::Proxy],
 };
 
 /// `k8s.version`, built from its spec entry.

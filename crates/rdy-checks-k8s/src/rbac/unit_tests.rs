@@ -21,19 +21,67 @@ fn describe(asks: &[Ask]) -> Vec<String> {
 // ---- the asks --------------------------------------------------------------------------------------------------
 
 #[test]
-fn the_entry_namespace_goes_onto_resource_items_that_name_none() {
+fn the_entry_namespace_goes_onto_string_items_only() {
     let asks = Asks::from_params(&params(json!({
-        "can": ["create deployments.apps", {"verb": "get", "resource": "pods", "namespace": "other"}, "get /healthz"],
+        "can": [
+            "create deployments.apps",
+            {"verb": "get", "resource": "pods", "namespace": "other"},
+            {"verb": "list", "resource": "services"},
+            "get /healthz"
+        ],
         "namespace": "acme"
     })));
+    // The object item that names no namespace keeps none (01: the key is for string items).
     assert_eq!(
         describe(&asks.spec),
         [
             "create deployments.apps in acme",
             "get pods in other",
+            "list services",
             "get /healthz"
         ]
     );
+}
+
+#[test]
+fn a_string_item_on_a_cluster_scoped_resource_does_not_take_the_entry_namespace() {
+    let asks = Asks::from_params(&params(json!({
+        "can": [
+            "create namespaces",
+            "create clusterroles.rbac.authorization.k8s.io",
+            "list nodes",
+            "create customresourcedefinitions.apiextensions.k8s.io",
+            "get storageclasses.storage.k8s.io",
+            "create widgets.example.com",
+            "create roles.rbac.authorization.k8s.io"
+        ],
+        "namespace": "acme"
+    })));
+    assert_eq!(
+        describe(&asks.spec),
+        [
+            "create namespaces",
+            "create clusterroles.rbac.authorization.k8s.io",
+            "list nodes",
+            "create customresourcedefinitions.apiextensions.k8s.io",
+            "get storageclasses.storage.k8s.io",
+            "create widgets.example.com in acme",
+            "create roles.rbac.authorization.k8s.io in acme"
+        ]
+    );
+    // A cluster-scoped kind from the list is no longer in a namespace, so its escalate is at cluster scope.
+    assert_eq!(
+        describe(&asks.implied),
+        [
+            "escalate clusterroles.rbac.authorization.k8s.io",
+            "escalate roles.rbac.authorization.k8s.io in acme"
+        ]
+    );
+    // An object item that names a namespace keeps it, on any kind.
+    let own = Asks::from_params(&params(json!({"can": [
+        {"verb": "create", "resource": "namespaces", "namespace": "acme"}
+    ]})));
+    assert_eq!(describe(&own.spec), ["create namespaces in acme"]);
 }
 
 #[test]
@@ -73,6 +121,8 @@ fn roles_and_bindings_add_escalate_and_bind() {
             "escalate clusterroles.rbac.authorization.k8s.io",
             "escalate roles.rbac.authorization.k8s.io",
             "bind clusterroles.rbac.authorization.k8s.io",
+            // The server asks `bind` in the binding's namespace, for a ClusterRole too.
+            "bind clusterroles.rbac.authorization.k8s.io in acme",
             "bind roles.rbac.authorization.k8s.io in acme",
         ]
     );
@@ -169,8 +219,8 @@ fn a_review_leaves_out_the_core_group_and_empty_fields() {
 }
 
 #[test]
-fn the_impersonation_question_is_about_the_service_account_or_the_user() {
-    let sa = impersonation_ask("system:serviceaccount:acme-system:installer");
+fn the_impersonation_question_is_about_the_service_account() {
+    let sa = impersonation_ask("system:serviceaccount:acme-system:installer").expect("a question");
     assert_eq!(
         sa.describe(),
         "impersonate serviceaccounts installer in acme-system"
@@ -179,8 +229,31 @@ fn the_impersonation_question_is_about_the_service_account_or_the_user() {
         &sa.target,
         Target::Resource { group, resource, .. } if group.is_empty() && resource == "serviceaccounts"
     ));
-    let user = impersonation_ask("acme-installer");
-    assert_eq!(user.describe(), "impersonate users acme-installer");
+    // M1 tests as a service account only: a plain user has no question.
+    assert!(impersonation_ask("acme-installer").is_none());
+}
+
+#[test]
+fn the_impersonation_question_counts_toward_the_cap() {
+    let items = |count: usize| -> Vec<Value> {
+        (0..count)
+            .map(|i| json!(format!("get r{i}")))
+            .collect::<Vec<_>>()
+    };
+    let user = "system:serviceaccount:acme-system:installer";
+    let with = Asks::from_params(&params(json!({"can": items(100), "as": user})));
+    assert_eq!(with.budget, MAX_REVIEWS - 1);
+    assert_eq!(with.left_out(98), None);
+    assert_eq!(with.left_out(99), Some(Why::OverCap));
+    let without = Asks::from_params(&params(json!({"can": items(100)})));
+    assert_eq!(without.budget, MAX_REVIEWS);
+    assert_eq!(without.left_out(99), None);
+    // Implied asks are dropped against the smaller budget.
+    let mut can = items(98);
+    can.push(json!("create clusterroles.rbac.authorization.k8s.io"));
+    let asks = Asks::from_params(&params(json!({"can": can, "as": user})));
+    assert_eq!(asks.implied.len(), 0);
+    assert_eq!(asks.dropped, 1);
 }
 
 // ---- reading a status ------------------------------------------------------------------------------------------
@@ -224,9 +297,15 @@ fn a_status_is_allowed_denied_unclear_or_not_allowed() {
         }
     );
     assert_eq!(
-        answer_of(&status(false, None, Some("boom"), None)),
+        answer_of(&status(
+            false,
+            None,
+            Some("boom"),
+            Some("webhook said maybe")
+        )),
         Answer::Unclear {
-            reason: "boom".to_owned()
+            reason: "webhook said maybe".to_owned(),
+            error: "boom".to_owned()
         }
     );
     assert_eq!(
@@ -268,6 +347,7 @@ fn gathered(spec: Vec<(Ask, Answer)>, implied: Vec<(Ask, Answer)>) -> Gathered {
         rules: None,
         namespaces: Vec::new(),
         sent: 0,
+        openshift: false,
     }
 }
 
@@ -293,7 +373,8 @@ fn a_missing_permission_outranks_an_unclear_one_and_a_denied_escalate() {
             (
                 ask("list nodes"),
                 Answer::Unclear {
-                    reason: "x".to_owned(),
+                    reason: String::new(),
+                    error: "x".to_owned(),
                 },
             ),
             (
@@ -322,13 +403,19 @@ fn unclear_answers_warn_and_only_unclear_ones() {
             (
                 ask("list nodes"),
                 Answer::Unclear {
-                    reason: "x".to_owned(),
+                    reason: "why".to_owned(),
+                    error: "x".to_owned(),
                 },
             ),
         ],
         Vec::new(),
     );
-    assert_eq!(judge(&spec, &g).level, Level::Warn);
+    let finding = judge(&spec, &g);
+    assert_eq!(finding.level, Level::Warn);
+    // Both texts of the server are kept.
+    let note = &finding.notes[0];
+    assert!(note.contains("The server said: why"), "{note}");
+    assert!(note.contains("The error was: x"), "{note}");
 }
 
 #[test]
@@ -373,9 +460,10 @@ fn gaps_are_grouped_by_reason_with_a_grant_when_a_grant_would_help() {
         partial.note,
         "1 permission was not evaluated: the identity may not create access reviews; 1 permission was not evaluated: rdy ran out of time"
     );
+    // The grant names who lacks it.
     assert_eq!(
         partial.missing_grants,
-        ["create selfsubjectaccessreviews.authorization.k8s.io"]
+        ["create selfsubjectaccessreviews.authorization.k8s.io (for acme-installer)"]
     );
 }
 
@@ -396,13 +484,72 @@ fn a_missing_permission_and_a_gap_give_a_block_with_a_partial() {
 
 #[test]
 fn the_tested_user_is_the_subject_when_the_spec_has_as() {
-    let spec = params(json!({"can": ["a x"], "as": "acme-user"}));
+    let user = "system:serviceaccount:acme:user";
+    let spec = params(json!({"can": ["a x"], "as": user}));
     let mut g = gathered(vec![(ask("a x"), no())], Vec::new());
-    g.as_user = Some("acme-user".to_owned());
+    g.as_user = Some(user.to_owned());
     g.impersonation = Impersonation::Allowed;
     assert_eq!(
         judge(&spec, &g).message,
-        "`acme-user` cannot `a x`: not allowed"
+        format!("`{user}` cannot `a x`: not allowed")
+    );
+}
+
+#[test]
+fn a_forbidden_grant_names_the_as_user_when_the_reviews_ran_as_that_user() {
+    let user = "system:serviceaccount:acme:user";
+    let spec = params(json!({"can": ["a x", "b x"], "as": user}));
+    let mut g = gathered(
+        vec![
+            (ask("a x"), Answer::NotEvaluated(Why::Forbidden)),
+            (ask("b x"), Answer::NotEvaluated(Why::Forbidden)),
+        ],
+        Vec::new(),
+    );
+    g.as_user = Some(user.to_owned());
+    g.impersonation = Impersonation::Allowed;
+    let partial = judge(&spec, &g).partial.expect("partial");
+    assert_eq!(
+        partial.missing_grants,
+        [format!(
+            "create selfsubjectaccessreviews.authorization.k8s.io (for {user})"
+        )]
+    );
+}
+
+#[test]
+fn a_refused_impersonation_says_constrained_impersonation_is_not_asked() {
+    let user = "system:serviceaccount:acme:user";
+    let spec = params(json!({"can": ["a x"], "as": user}));
+    let mut g = gathered(
+        vec![(
+            ask("a x"),
+            Answer::NotEvaluated(Why::Impersonate(
+                "impersonate serviceaccounts user in acme".to_owned(),
+            )),
+        )],
+        Vec::new(),
+    );
+    g.as_user = Some(user.to_owned());
+    g.impersonation = Impersonation::Refused("impersonate serviceaccounts user in acme".to_owned());
+    let finding = judge(&spec, &g);
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|note| note.contains("`impersonate:user-info`")
+                && note.contains("`impersonate-on:*`")
+                && note.contains("asked about the `impersonate` verb")),
+        "{:?}",
+        finding.notes
+    );
+    // Not for a run that was never refused.
+    g.impersonation = Impersonation::Allowed;
+    assert!(
+        !judge(&spec, &g)
+            .notes
+            .iter()
+            .any(|note| note.contains("impersonate:user-info"))
     );
 }
 
@@ -417,8 +564,8 @@ fn namespaces_of_denied_items_are_listed_once_in_order() {
                     reason: String::new(),
                 },
             ),
-            (ask_in("get nodes", "a"), no()),
-            (ask_in("get secrets", "b"), no()),
+            (ask_in("get deployments.apps", "a"), no()),
+            (ask_in("get services", "b"), no()),
         ],
         Vec::new(),
     );
@@ -454,7 +601,63 @@ fn fix_for(grantable: &[Ask], denied: &[Ask], user: &str) -> String {
         implied: Vec::new(),
         unclear: Vec::new(),
         missing_namespaces: Vec::new(),
+        openshift: false,
     })
+}
+
+fn fix_on_openshift(grantable: &[Ask], user: &str) -> String {
+    fix::text(&fix::Context {
+        who: who(user),
+        grantable: grantable.iter().collect(),
+        denied: Vec::new(),
+        implied: Vec::new(),
+        unclear: Vec::new(),
+        missing_namespaces: Vec::new(),
+        openshift: true,
+    })
+}
+
+#[test]
+fn the_grant_text_says_how_to_repeat_it() {
+    let text = fix_for(&[ask("create namespaces")], &[], "acme-installer");
+    assert!(
+        text.contains("A namespaced item needs its own role and rolebinding in its namespace, so repeat both commands per namespace. Cluster-scoped items and URLs go in a clusterrole."),
+        "{text}"
+    );
+    assert!(!text.contains("Add one `--verb`"), "{text}");
+}
+
+#[test]
+fn openshift_gets_the_oc_adm_policy_binding() {
+    let sa = "system:serviceaccount:acme:installer";
+    let text = fix_on_openshift(&[ask("create namespaces")], sa);
+    assert!(
+        text.contains("On OpenShift, `oc adm policy add-cluster-role-to-user rdy-installer -z installer -n acme` makes the binding once the role exists."),
+        "{text}"
+    );
+    let text = fix_on_openshift(&[ask("create namespaces")], "bob@acme.example");
+    assert!(
+        text.contains("`oc adm policy add-cluster-role-to-user rdy-installer bob@acme.example`"),
+        "{text}"
+    );
+    let text = fix_on_openshift(&[ask_in("get pods/log", "acme")], sa);
+    assert!(
+        text.contains("`oc adm policy add-role-to-user rdy-installer -z installer -n acme --role-namespace=acme`"),
+        "{text}"
+    );
+    let text = fix_on_openshift(&[ask_in("get pods/log", "acme")], "bob");
+    assert!(
+        text.contains(
+            "`oc adm policy add-role-to-user rdy-installer bob -n acme --role-namespace=acme`"
+        ),
+        "{text}"
+    );
+    // A service account of another namespace than the role's has no `-z` form: kubectl text only.
+    let text = fix_on_openshift(&[ask_in("get pods/log", "other")], sa);
+    assert!(!text.contains("oc adm policy"), "{text}");
+    // Without OpenShift there is no oc text.
+    let text = fix_for(&[ask("create namespaces")], &[], sa);
+    assert!(!text.contains("oc adm policy"), "{text}");
 }
 
 #[test]

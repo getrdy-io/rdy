@@ -1,0 +1,37 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/storage.k8s.io/v1/storageclasses",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "storage.k8s.io/v1",
+    "kind": "StorageClassList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "gp3",
+          "creationTimestamp": "2026-01-01T00:00:00Z",
+          "annotations": {
+            "storageclass.kubernetes.io/is-default-class": "true",
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"parameters\": {\"kmsKeyId\": \"arn:aws:kms:us-east-1:111122223333:key/sentinel-7f3a-kms\", \"csi.storage.k8s.io/provisioner-secret-name\": \"sentinel-7f3a-secret\", \"csi.storage.k8s.io/provisioner-secret-namespace\": \"sentinel-7f3a-secret-ns\"}}"
+          }
+        },
+        "provisioner": "ebs.csi.aws.com",
+        "volumeBindingMode": "WaitForFirstConsumer",
+        "allowVolumeExpansion": true,
+        "parameters": {
+          "type": "gp3",
+          "encrypted": "true",
+          "kmsKeyId": "arn:aws:kms:us-east-1:111122223333:key/sentinel-7f3a-kms",
+          "csi.storage.k8s.io/provisioner-secret-name": "sentinel-7f3a-secret",
+          "csi.storage.k8s.io/provisioner-secret-namespace": "sentinel-7f3a-secret-ns"
+        }
+      }
+    ]
+  }
+}

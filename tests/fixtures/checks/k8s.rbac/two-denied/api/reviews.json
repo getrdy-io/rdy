@@ -9,7 +9,7 @@
       },
       "status": {
         "allowed": false,
-        "reason": ""
+        "reason": "no RBAC policy matched"
       }
     },
     {

@@ -4,13 +4,17 @@
 //! URL that is not a resource. The spec's items become asks, in order and without repeats. For an item
 //! that creates or changes roles or bindings, the check adds the asks the API server makes of the
 //! caller: `escalate` for a role, `bind` for a binding (03, "k8s.rbac"). Those are implied asks.
-//! The spec has 100 items at most, and so does a run: implied asks past the cap are dropped and counted.
+//! The spec has 100 items at most, and so does a run: the question whether the identity may impersonate the
+//! `as:` user counts toward the 100, implied asks past the cap are dropped and counted, and a spec item past
+//! it is not asked.
 
 use k8s_openapi::api::authorization::v1::{
     NonResourceAttributes, ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
 };
 use kube::api::ObjectMeta;
 use rdy_spec::check::{K8sRbac, NonResourceRule, RbacItem, RbacRule};
+
+use super::judge::Why;
 
 /// The most reviews one run sends (03: "up to 100 per run").
 pub(super) const MAX_REVIEWS: usize = 100;
@@ -136,18 +140,31 @@ pub(super) struct Asks {
     pub(super) implied: Vec<Ask>,
     /// Implied asks left out because the run is at [`MAX_REVIEWS`].
     pub(super) dropped: usize,
+    /// How many of [`Asks::all`] may be sent: [`MAX_REVIEWS`] less the question whether the identity may
+    /// impersonate the `as:` user, when the spec has one. A spec item past it is not asked.
+    pub(super) budget: usize,
+    /// Items of a kind this rdy does not know. A spec parsed by this rdy has none; the count makes a future
+    /// kind fail the check instead of being skipped.
+    pub(super) unknown: usize,
 }
 
 impl Asks {
-    /// Builds the asks for `params`. The entry's `namespace` applies to every item that names none.
+    /// Builds the asks for `params`. The entry's `namespace` applies to the string items, except those that
+    /// name a cluster-scoped resource.
     pub(super) fn from_params(params: &K8sRbac) -> Self {
         let entry_namespace = params.namespace.as_ref().map(|ns| ns.as_str().to_owned());
-        let mut asks = Self::default();
+        let mut asks = Self {
+            budget: MAX_REVIEWS - usize::from(params.as_user.is_some()),
+            ..Self::default()
+        };
         for item in params.can.iter() {
             let ask = match item {
                 RbacItem::Resource(rule) => resource_ask(rule, entry_namespace.as_deref()),
                 RbacItem::NonResource(rule) => non_resource_ask(rule),
-                _ => continue,
+                _ => {
+                    asks.unknown += 1;
+                    continue;
+                }
             };
             if !asks.spec.iter().any(|seen| seen.same(&ask)) {
                 asks.spec.push(ask);
@@ -158,7 +175,7 @@ impl Asks {
             if asks.all().any(|seen| seen.same(&ask)) {
                 continue;
             }
-            if asks.spec.len() + asks.implied.len() >= MAX_REVIEWS {
+            if asks.spec.len() + asks.implied.len() >= asks.budget {
                 asks.dropped += 1;
             } else {
                 asks.implied.push(ask);
@@ -167,13 +184,61 @@ impl Asks {
         asks
     }
 
+    /// Why the ask at `index` of [`Asks::all`] is not sent, or `None` when it is.
+    pub(super) fn left_out(&self, index: usize) -> Option<Why> {
+        (index >= self.budget).then_some(Why::OverCap)
+    }
+
     /// Every ask: the spec's, then the implied ones.
     pub(super) fn all(&self) -> impl Iterator<Item = &Ask> {
         self.spec.iter().chain(&self.implied)
     }
 }
 
+/// True for a resource that has no namespace, so a namespace on its review would only ask the wrong thing:
+/// a RoleBinding in that namespace can answer it, and the real call fails. A short list of the kinds
+/// installers touch, not the whole API: any other kind keeps the namespace the spec gave.
+fn cluster_scoped(group: &str, resource: &str) -> bool {
+    matches!(
+        (group, resource),
+        (
+            "",
+            "namespaces" | "nodes" | "persistentvolumes" | "componentstatuses"
+        ) | (
+            "rbac.authorization.k8s.io",
+            "clusterroles" | "clusterrolebindings"
+        ) | ("apiextensions.k8s.io", "customresourcedefinitions")
+            | (
+                "storage.k8s.io",
+                "storageclasses" | "csidrivers" | "csinodes" | "volumeattachments"
+            )
+            | ("scheduling.k8s.io", "priorityclasses")
+            | ("node.k8s.io", "runtimeclasses")
+            | ("networking.k8s.io", "ingressclasses")
+            | ("apiregistration.k8s.io", "apiservices")
+            | ("certificates.k8s.io", "certificatesigningrequests")
+            | (
+                "admissionregistration.k8s.io",
+                "validatingwebhookconfigurations"
+                    | "mutatingwebhookconfigurations"
+                    | "validatingadmissionpolicies"
+                    | "validatingadmissionpolicybindings"
+            )
+            | (
+                "snapshot.storage.k8s.io",
+                "volumesnapshotclasses" | "volumesnapshotcontents"
+            )
+    )
+}
+
 fn resource_ask(rule: &RbacRule, entry_namespace: Option<&str>) -> Ask {
+    // Only a string item takes the entry's namespace (01), and not for a cluster-scoped resource.
+    let from_entry =
+        if rule.from_text && !cluster_scoped(rule.group.as_str(), rule.resource.as_str()) {
+            entry_namespace
+        } else {
+            None
+        };
     Ask {
         verb: rule.verb.as_str().to_owned(),
         target: Target::Resource {
@@ -184,7 +249,7 @@ fn resource_ask(rule: &RbacRule, entry_namespace: Option<&str>) -> Ask {
                 .namespace
                 .as_ref()
                 .map(|ns| ns.as_str().to_owned())
-                .or_else(|| entry_namespace.map(str::to_owned)),
+                .or_else(|| from_entry.map(str::to_owned)),
             name: rule.name.as_ref().map(|name| name.as_str().to_owned()),
         },
         implied: false,
@@ -204,9 +269,10 @@ fn non_resource_ask(rule: &NonResourceRule) -> Ask {
 /// The asks the API server makes of a caller that writes `ask`.
 ///
 /// Creating or changing a role needs `escalate` on it, unless the caller already holds every rule the role
-/// grants. Creating or changing a binding needs `bind` on the role it names, with the same exception.
-/// The binding's role is not known, so the ask is for any role of the kind (`clusterroles`, and `roles`
-/// in the binding's namespace).
+/// grants. Creating or changing a binding needs `bind` on the role it names, with the same exception. The
+/// server asks `bind` in the binding's namespace, for a `ClusterRole` as well as a `Role`, so a RoleBinding
+/// gets both asks in its namespace. The binding's role is not known, so the ask is for any role of the
+/// kind.
 fn implied_by(ask: &Ask) -> Vec<Ask> {
     let Target::Resource {
         group,
@@ -237,38 +303,29 @@ fn implied_by(ask: &Ask) -> Vec<Ask> {
         "roles" => vec![on("escalate", "roles", namespace.as_ref())],
         "clusterrolebindings" => vec![on("bind", "clusterroles", None)],
         "rolebindings" => vec![
-            on("bind", "clusterroles", None),
+            on("bind", "clusterroles", namespace.as_ref()),
             on("bind", "roles", namespace.as_ref()),
         ],
         _ => Vec::new(),
     }
 }
 
-/// The ask that tells whether the identity may act as `user`: `impersonate` on the service account, or on
-/// the user. It is asked of the kubeconfig identity itself, never impersonated.
-pub(super) fn impersonation_ask(user: &str) -> Ask {
-    let target = match user
+/// The ask that tells whether the identity may act as the service account `user`
+/// (`system:serviceaccount:<namespace>:<name>`): `impersonate` on that service account. It is asked of the
+/// kubeconfig identity itself, never impersonated. `None` for any other user, which M1 does not test as.
+pub(super) fn impersonation_ask(user: &str) -> Option<Ask> {
+    let (namespace, name) = user
         .strip_prefix("system:serviceaccount:")
-        .and_then(|rest| rest.split_once(':'))
-    {
-        Some((namespace, name)) => Target::Resource {
+        .and_then(|rest| rest.split_once(':'))?;
+    Some(Ask {
+        verb: "impersonate".to_owned(),
+        target: Target::Resource {
             group: String::new(),
             resource: "serviceaccounts".to_owned(),
             subresource: None,
             namespace: Some(namespace.to_owned()),
             name: Some(name.to_owned()),
         },
-        None => Target::Resource {
-            group: String::new(),
-            resource: "users".to_owned(),
-            subresource: None,
-            namespace: None,
-            name: Some(user.to_owned()),
-        },
-    };
-    Ask {
-        verb: "impersonate".to_owned(),
-        target,
         implied: false,
-    }
+    })
 }

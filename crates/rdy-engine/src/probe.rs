@@ -847,6 +847,15 @@ impl KubeCall {
         self
     }
 
+    /// Marks the entry: the kubeconfig user sets an `as*` field, so kube adds `Impersonate-*` headers below
+    /// the guard, to every request. The entry gets `kubeconfig_impersonates: true`, and never the user
+    /// name. Absent otherwise, so a reader can tell "not impersonated" from "not said".
+    #[must_use = "the entry is closed by refused, answered or failed"]
+    pub fn kubeconfig_impersonates(mut self) -> Self {
+        self.entry.set("kubeconfig_impersonates", true);
+        self
+    }
+
     /// The guard refused the request. It never left the process. `rule` is a fixed sentence.
     pub fn refused(mut self, rule: &'static str) {
         self.entry.set("rule", rule);
@@ -982,7 +991,9 @@ impl Probe {
     /// Opens the action-log entry for one Kubernetes API request (`kind` `kube`, with `method` and
     /// `path`). The read-only guard in `rdy-checks-k8s` calls this once per request, before it decides.
     /// Pass the path without the query string: a query can hold selector text, and 01 keeps it out of
-    /// the log.
+    /// the log. `via_proxy` is the proxy the request goes through, as `scheme://host:port` with no user
+    /// info ([`ProxyUrl::origin`] has that form), or `None` for a direct request (the entry then has
+    /// `via_proxy: null`, as a `connect` entry does). A caller that sends its own `CONNECT` records it here.
     ///
     /// The entry carries this probe's check id, so a check that derives its client from its own probe
     /// gets its requests logged under its own key. A probe with no check (run-level work) logs
@@ -994,10 +1005,19 @@ impl Probe {
     /// [`ProbeError::Denied`] after the check ended (the refusal is logged, rule
     /// [`RULE_CHECK_FINISHED`]) or on a probe with no hub (rule [`RULE_NO_PROBE`]). The request must not
     /// be sent.
-    pub fn kube_call(&self, method: &str, path: &str) -> Result<KubeCall, ProbeError> {
+    pub fn kube_call(
+        &self,
+        method: &str,
+        path: &str,
+        via_proxy: Option<&str>,
+    ) -> Result<KubeCall, ProbeError> {
         let mut fields = Map::new();
         fields.insert("method".to_owned(), method.into());
         fields.insert("path".to_owned(), path.into());
+        fields.insert(
+            "via_proxy".to_owned(),
+            via_proxy.map_or(Value::Null, Into::into),
+        );
         let (_, entry) = self.begin(ActionKind::Kube, fields, path)?;
         Ok(KubeCall { entry })
     }
