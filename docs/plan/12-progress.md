@@ -127,7 +127,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-057 | todo | | Wire rdy run end to end: load, needs, families, engine, report, exit code | backlog corrected 2026-10-29 (correction-09): a result with no fix of its own shows the check's `CheckMeta.remediation`, and `cargo xtask checks` reads the same family list as `rdy run` | backlog corrected 2026-10-29 (correction-11): depends on M1-037, because the Windows output-folder harden step fails open until then (PR #71 security review, finding 3) | backlog corrected 2026-10-29 (correction-13): the run report records `identity` from the privilege snapshot; depends on M1-042 too (PR #84 review); backlog corrected 2026-10-29 (correction-16): depends on M1-061; registers declared secret-named env values before the first tracing event and the first check (PR #96 reviews); backlog corrected 2026-10-30 (correction-20): removes `run` from the not-wired sentence in the result reference intro, if present (PR #106 review); backlog corrected 2026-10-30 (correction-27): writer `TooLarge` and I/O errors map to `report_write` (PR #139 review)
 
-- M1-058 | todo | | Ctrl-C in M1: abort, remove the empty report folder, exit 70
+- M1-058 | todo | | Ctrl-C in M1: abort, remove the empty report folder, exit 70 | backlog corrected 2026-10-30 (correction-33): depends on M1-176 (PR #15 review)
 
 - M1-059 | todo | | --no-network and --jobs flags
 
@@ -156,7 +156,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-071 | [#126](https://github.com/getrdy-io/rdy/pull/126) | 2026-10-30 | Built as `rdy_checks_host::CpuCheck` (Linux). Deferrals: (1) flags through `std::is_x86_feature_detected!` and `native/cpu_flags.json`: the closed `NativeCall` list has no CPU variant and adding one touches the engine, the threat model table and the files M1-068 changes, so `/proc/cpuinfo` is the only flag source; filed as backlog correction-23: M1-071 is retitled to drop "flags through std macros" and the CPU feature variant goes to M2-004. (2) Rosetta detection moves to M2-007 and the macOS and Windows counts to M2-005. (3) Physical cores come from `cpuinfo` lines, not the `topology` files (one action-log entry per file per CPU is too noisy). (4) No `REQUIRED` row in `fixture_lint.rs` for `host.cpu/pass`: M1-068 edits that list at the same time and M1-075 owns the completeness rule. (5) `host.cpu` uses the shared `soft` and `short` in `crate::text`; `host.os` keeps its own `short`, whose wording differs.
 
-- M1-072 | todo | | host.ports (Linux /proc/net TCP and UDP, lazy owner lookup, ephemeral overlap) | backlog corrected 2026-10-29 (correction-14): depends on M1-169 (facade `read_link`) too and runs in week 19, not week 14 (PR #88 review)
+- M1-072 | todo | | host.ports (Linux /proc/net TCP and UDP, lazy owner lookup, ephemeral overlap) | backlog corrected 2026-10-29 (correction-14): depends on M1-169 (facade `read_link`) too and runs in week 19, not week 14 (PR #88 review); backlog corrected 2026-10-30 (correction-33): process name from `comm`, early stop of the fd walk (PR #153 reviews)
 
 - M1-073 | [#112](https://github.com/getrdy-io/rdy/pull/112) | 2026-10-30 | Built as `rdy_checks_host::OsCheck`, registered in `HostFamily` through `CheckParams::HostOs` (`host.os` leaves `stub_ids`). Cases are the twelve machines in `tests/fixtures/checks/host.os/`, loaded with `Fixture::load` (M1-049). Linux only: macOS and Windows report skipped, not yet on this OS (M2-005 and M2-008 add the rest). Review round 1 fixes: the FIPS fix text follows `ID` and major version (`fips-mode-setup` on EL 8 and 9 and Amazon Linux 2023, reinstall with `fips=1` on EL 10 and later, `dracut-fips` + `dracut -f` + `grubby` on Amazon Linux 2, `pro disable fips-updates` on Ubuntu, the vendor's procedure elsewhere); `ol` maps to `rhel` by name; a dotted spec version that is a prefix of the host version (`3.19` on `3.19.1`) stays a miss and the check says so in a note; WSL is also seen from the uname release; arch list sorted and deduplicated; both os-release paths named on failure. Deferred: a `bare_metal` key (container or WSL is evidence and a note only; M2-111, 03 reworded, correction-21). A missing `VERSION_ID` against a versioned entry, and an unreadable `os-release`, `uname` or FIPS file, give warn. `fips-mode-setup` and `pro` are in `crates/rdy-engine/src/fixtext/commands.txt` (`dracut` and `grubby` were already there). `windows_min_build` is not read on Linux (M2-008)
 
@@ -188,7 +188,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-087 | todo | | Exit-code golden suite for 0, 1, 2, 64 and 70
 
-- M1-088 | todo | | --json stdout hygiene on every exit path and the static TTY line
+- M1-088 | todo | | --json stdout hygiene on every exit path and the static TTY line | backlog corrected 2026-10-30 (correction-33): depends on M1-176 (PR #154 reviews)
 
 - M1-089 | [#62](https://github.com/getrdy-io/rdy/pull/62) | 2026-10-29 | ADR 0026 (Accepted after the cli-ux review on PR #62). The family list lives in `xtask::checks::registry` until M1-057 moves it into `rdy_cli` (correction-09). `HostFamily` is not registered in the CLI (M1-067 rule stands). `xtask checks` lists the seven host stubs, so M1-116 must skip ids in `HostFamily::stub_ids()` (correction-09). The report does not fall back to `meta.remediation` yet: correction-09 adds it to M1-057. `docs-lint` runs the same validation, but neither command is in `ci.yml` yet; a unit test runs it in `cargo test`.
 
@@ -242,7 +242,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-114 | todo | | k8s.admission PSA labels, policy engine and SCC discovery
 
-- M1-115 | todo | | Review k8s checks and fixtures (semantics, API groups, RBAC degrade, per-distro sets) | backlog corrected 2026-10-29 (correction-16): `NOT_BUILT_YET` empty, every k8s check in `infos()`, every entry and check pair hit (PR #95 reviews)
+- M1-115 | todo | | Review k8s checks and fixtures (semantics, API groups, RBAC degrade, per-distro sets) | backlog corrected 2026-10-29 (correction-16): `NOT_BUILT_YET` empty, every k8s check in `infos()`, every entry and check pair hit (PR #95 reviews); backlog corrected 2026-10-30 (correction-33): three OpenShift label-sync checks (PR #151 k8s review)
 
 - M1-116 | todo | | Check family renderer and the host, network and Kubernetes pages with hand-written intros | backlog corrected 2026-10-29 (correction-09): ids still in `HostFamily::stub_ids()` get no section, and reads are listed without an OS split until the manifest is keyed by OS
 
@@ -294,7 +294,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-140 | todo | | HTML next-step sentences and the nothing-verified wording
 
-- M1-141 | todo | | HTML untrusted strings in bdi with bidi controls shown as escapes | backlog corrected 2026-10-30 (correction-31): now core, week 17; also the title and Cf and zero-width characters (PR #149 review)
+- M1-141 | todo | | HTML untrusted strings in bdi with bidi controls shown as escapes | backlog corrected 2026-10-30 (correction-31): now core, week 17; also the title and Cf and zero-width characters (PR #149 review); backlog corrected 2026-10-30 (correction-33): tests add `"x\u{2069}\u{202e}"` (PR #149 security review)
 
 - M1-142 | todo | | Progress line with indicatif, TTY only | backlog corrected 2026-10-30 (correction-27): Windows console width through `console` (PR #140 review)
 
@@ -363,6 +363,8 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-174 | todo | | Expected results for the host check fixture cases | added 2026-10-30 (correction-29, PR #145 review)
 
 - M1-175 | todo | | Kubernetes family builds every k8s check from its parameters | added 2026-10-30 (correction-32, PR #151 review)
+
+- M1-176 | todo | | The watchdog in `rdy run` | added 2026-10-30 (correction-33, PR #154 reviews)
 
 ## Summary
 
