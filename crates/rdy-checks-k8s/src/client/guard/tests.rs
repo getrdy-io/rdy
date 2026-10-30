@@ -1167,10 +1167,10 @@ const SSAR: &str = "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews";
 const SSRR: &str = "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews";
 const PHASE: &str = "fieldSelector=status.phase%21%3DSucceeded%2Cstatus.phase%21%3DFailed";
 
-/// Every API call the M1 checks make, from 03 and 02 Appendix B, one list per check. The checks are not
-/// built yet (M1-106 onward), so these are the calls the design says each one sends, written as the
-/// requests kube builds. Each check ticket (M1-106 onward) replaces its list with the real check over the
-/// mock harness (`client::mock`), whose audit then proves INV-14 with real check code.
+/// Every API call the M1 checks make, from 03 and 02 Appendix B, one list per check. Only the checks not
+/// built yet are listed (M1-107 onward), so these are the calls the design says each one sends, written as
+/// the requests kube builds. `k8s.version` is built: its fixture tests prove INV-14 with the real check.
+/// Each check ticket (M1-107 onward) replaces its list with the real check over the mock harness (`client::mock`), whose audit then proves INV-14 with real check code.
 fn calls_of(check: &str) -> Vec<Call> {
     let get = |uri| ("GET", uri, &b""[..]);
     match check {
@@ -1180,13 +1180,6 @@ fn calls_of(check: &str) -> Vec<Call> {
             get("/apis"),
             ("POST", SSR, SELF_SUBJECT_REVIEW_BODY),
             ("POST", SSAR, SSAR_BODY),
-        ],
-        "k8s.version" => vec![
-            get("/version"),
-            get("/apis/autoscaling/v2"),
-            get("/apis/networking.k8s.io/v1"),
-            get("/api/v1/nodes?&limit=500"),
-            get("/apis/config.openshift.io/v1/clusterversions/version"),
         ],
         "k8s.storageclass" => vec![
             get("/api/v1/namespaces/app"),
@@ -1285,12 +1278,11 @@ fn hostile_calls() -> Vec<(Call, &'static str)> {
 
 #[tokio::test]
 async fn a_full_fixture_run_reaches_the_server_with_only_allowlisted_requests() {
-    // INV-14 and the M1-103 exit test. Six checks, each with its own client and probe over one mock
+    // INV-14 and the M1-103 exit test. Five checks, each with its own client and probe over one mock
     // server. Each check also makes the hostile calls. The server must see exactly the allowed calls,
     // in order, and the log must hold one entry per call.
     let checks = [
         "k8s.access",
-        "k8s.version",
         "k8s.storageclass",
         "k8s.rbac",
         "k8s.admission",
