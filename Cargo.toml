@@ -112,7 +112,7 @@ socket2 = { version = "0.6", default-features = false }
 
 # Test-only: the allow grep of the lint wall parses every source file (M1-044). Both are already in the tree
 # through the derive crates.
-syn = { version = "2", default-features = false }
+syn = { version = "3", default-features = false }
 proc-macro2 = { version = "1", default-features = false }
 
 # The lint wall tests read manifests and Cargo configs as TOML (M1-044). rdy-checks-host parses its embedded
