@@ -424,6 +424,15 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
     ),
 ];
 
+/// Reads the Kubernetes project gives every signed-in user on newer minors, outside the role file. Each
+/// is read-only and holds no secret. An entry stays only with a reason.
+const SERVER_DEFAULTS: &[(&str, &str, &str, &str)] = &[
+    // ClusterTrustBundles are cluster-wide CA bundles, public by design. The rules review of the 1.37.0
+    // server listed this get for the identity (none of the role file, so a default binding); the 1.35.8
+    // server did not.
+    ("get", "certificates.k8s.io", "clustertrustbundles", ""),
+];
+
 /// What the server grants the identity in `namespace`, one entry per verb, group, resource and name.
 /// The server may merge rules, so the answer is expanded before it is compared.
 fn grants(namespace: &str, answer: &SelfSubjectRulesReview) -> Vec<Grant> {
@@ -612,33 +621,35 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
     }
 
     //    "Nothing else" is read from the server, not sampled. Every grant the server reports for the
-    //    identity must be one the role file lists, plus the deployments list in `kube-system`. Another
-    //    binding, an aggregated role or a broad grant to `system:authenticated` shows up here.
+    //    identity must be one the role file lists, a default the Kubernetes project gives every signed-in
+    //    user (`SERVER_DEFAULTS`), or the deployments list the optional Role adds in `kube-system`.
+    //    Another binding, an aggregated role or a broad grant to `system:authenticated` shows up here.
+    //    All of them are collected, so one run names every surprise.
+    let mut unexpected = Vec::new();
     for (namespace, answer) in &rules_answers {
         for grant in grants(namespace, answer) {
-            let known = GRANTED.iter().any(|&(verb, group, resource, name)| {
-                grant
-                    == (
-                        verb.to_owned(),
-                        group.to_owned(),
-                        resource.to_owned(),
-                        name.to_owned(),
-                    )
-            });
-            let optional = *namespace == "kube-system"
-                && grant
-                    == (
-                        "list".into(),
-                        "apps".into(),
-                        "deployments".into(),
-                        String::new(),
-                    );
-            assert!(
-                known || optional,
-                "{namespace}: the server grants {grant:?}, which the rdy-readonly role file does not list"
-            );
+            let listed = |table: &[(&str, &str, &str, &str)]| {
+                table.iter().any(|&(verb, group, resource, name)| {
+                    grant
+                        == (
+                            verb.to_owned(),
+                            group.to_owned(),
+                            resource.to_owned(),
+                            name.to_owned(),
+                        )
+                })
+            };
+            let optional =
+                *namespace == "kube-system" && listed(&[("list", "apps", "deployments", "")]);
+            if !(listed(GRANTED) || listed(SERVER_DEFAULTS) || optional) {
+                unexpected.push(format!("{namespace}: {grant:?}"));
+            }
         }
     }
+    assert!(
+        unexpected.is_empty(),
+        "the server grants the rdy-readonly identity more than the role file lists: {unexpected:#?}"
+    );
 
     // 3. The guard refuses a write and a Secrets read before they reach the server.
     let error = client
