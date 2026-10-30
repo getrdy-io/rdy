@@ -480,7 +480,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 
 - Layout: `tests/fixtures/redaction/<category>/<case>.in`, `.expected` and `.toml` (`polarity`, the
   `rules` that must fire, `since`, `rulesets` and `secrets`). Replacements are `[REDACTED:<rule>:<tag>]`.
-  The harness runs with a fixed key and replaces each tag with `~`.
+  The harness runs with a fixed key and replaces each tag with its ordinal in the file (`~1`, `~2`).
 - All values are synthetic. Use vendor-documented examples (`AKIAIOSFODNN7EXAMPLE`). Values that push
   protection would block are built from parts in `synthetic.toml`.
 - M1 categories: URL userinfo, bearer and basic auth, API key headers, AWS keys, PEM private keys,

@@ -79,7 +79,7 @@ cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 1
 `as-at-the-cap`, `hostile-reasons`), `generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on
 drift and on a file the script did not write). `envs/host-min/` is the smallest environment (M1-075): a
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id and a `golden/report.json`.
-`redaction/` holds the M1 corpus: 34 cases in ten categories, `FLOOR` (28) and `synthetic.toml` (M1-063).
+`redaction/` holds the M1 corpus: 44 cases in ten categories, `FLOOR` (28) and `synthetic.toml` (M1-063).
 The rest arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -433,39 +433,76 @@ calls it an orphan. If nextest is ever sharded, run `goldens check` on the combi
 redaction/FLOOR                       the minimum case count (28; it may rise, never fall)
 redaction/synthetic.toml              secrets as parts, joined by the harness
 redaction/<category>/<case>.in        the input
-redaction/<category>/<case>.expected  the output with every tag shown as ~
+redaction/<category>/<case>.expected  the output with each tag shown as its ordinal: ~1, ~2, ...
 redaction/<category>/<case>.toml      what the case is
 ```
 
 A case `.toml` has `polarity` (`positive` or `negative`), `since` (`m1`), `rulesets` (`["report"]`), `rules`
 (rules that must fire), `forms` (positive: the syntax form the case covers), `exclusions` (negative: the
-key-name exclusions it proves), `secrets` (strings that must not survive) and an optional `note`. An unknown
-key fails the load.
+key-name exclusions it proves), `controls` (negative: one edit per exclusion, see below), `secrets` (strings
+that must not survive) and an optional `note`. An unknown key fails the load.
 
 - `${SYN:name}` in `.in` and in `secrets` joins the parts of `synthetic.toml`. A part has at least two
-  pieces, so a scanner never sees a whole token. `.expected` never holds a reference. The vendor-documented
-  `AKIAIOSFODNN7EXAMPLE` is used as it is.
+  pieces and none is empty, so a scanner never sees a whole token. `.expected` never holds a reference. The
+  vendor-documented `AKIAIOSFODNN7EXAMPLE` is used as it is. The loader fails when the raw `.in`, `.toml` or
+  `.expected` text holds a PEM private-key header, a JWT, `rdy_st_` or any other AWS key id, and when
+  `synthetic.toml` holds one of them in a single piece.
 - `.expected` is blessed by hand and compared with `assert_golden`, which never writes here. A failed compare
   parks the output in `target/goldens-actual/`. A negative has `.expected` equal to `.in`.
+- A tag is shown as its ordinal in the file: the first distinct tag is `~1`, the next `~2`, and the same
+  secret keeps its number wherever it stands. `url/token-userinfo-and-env` has the same token in a URL and in
+  an env var and shows `~1` twice. A golden therefore pins which spans share a secret.
 - The `hostile/ansi-password` case holds real ESC bytes (0x1b), as a terminal wrote them.
 - The harness also checks that no `secrets` entry survives (and that each one is in the input, so it proves
-  something), that every `rules` entry fired, that a second pass changes nothing and finds no span outside a
-  placeholder, and that a placeholder is well formed.
+  something), that no run of six characters of one survives once the placeholders are cut out (a prefix or a
+  suffix left behind), that every `rules` entry fired, that a second pass changes nothing and finds no span
+  outside a placeholder, and that a placeholder is well formed.
+- A negative case lists a control for each exclusion: `["suffix_name", "secretName: acme-tls", "secret:
+  acme-tls", "acme-tls"]` edits that text in the input, and the redactor must then hide the last item. That
+  shows the key rule reads the key and the exclusion is what kept the original value.
 - The gate is coverage. It fails on a rule of the engine with no positive case, a syntax form that a rule
   claims (the `CLAIMS` table in the test) with no positive case, a key-name exclusion with no negative, a
   rule list that differs from the M1 rows of 04 Appendix B, a part nobody uses, a stray file, or fewer cases
   than `FLOOR`. A new rule fails the gate until it has cases and a row in `CLAIMS`.
-- 04 Appendix D lists 28 cases (23 positive, 5 negative). The corpus has 34. The six extra cases are
-  coverage the gate asks for: an INI `password =` (Appendix B claims INI for the key rule) and one negative
-  for each group of key-name exclusions.
+- The form list follows 04 Appendix B too. The `MATCHES` table in the test holds every backticked item of an
+  M1 row's Matches cell with the forms that cover it. An item added to the appendix fails the gate until it
+  has a case, or is marked as not claimed with a reason. An item removed or renamed fails it as well.
+- 04 Appendix D lists 28 cases (23 positive, 5 negative). The corpus has 44. The extra cases are coverage the
+  gate asks for: every form Appendix B claims (STS `SecretAccessKey`, `aws_session_token`, the
+  `x-amz-security-token` header, `X-Auth-Token`, `-H 'Authorization: ...'`, a bare `Bearer`, systemd
+  `Environment=`, the kubeconfig `password`, `client-secret`, `id-token`, `refresh-token` and `access-token`,
+  a PEM block with no END line, the `ABIA` and `ACCA` prefixes, each key stem), an INI `password =`, and one
+  negative for each group of key-name exclusions.
 
-What the corpus does not claim. M1-060 left these to M2, so no case here passes for them and none is blessed
-as handled: `Cookie` and `Set-Cookie`, a 40-character secret by proximity, a one-line JSON object after a
-secret key (`{"password":"x","user":"y"}` loses the rest of its line), `--password=x --host db` and
-`-H 'Authorization: ...' url` (the rest of the line goes too, an over-redaction, not a leak), a space in URL
-userinfo, `curl -u` and `--user`, base64-armored and bare DER keys, a PEM block split over log events, and
-crafted bracket and quote escapes. M2-061 adds `known_gap` cases and a ledger. Until then a `known_gap` case
-fails the load.
+What the corpus does not claim. No case here passes for these and none is blessed as handled. M2-061 adds
+`known_gap` cases and a ledger; until then a `known_gap` case fails the load. A test checks that the harness
+header and this list name the same forms.
+
+Left to M2 by M1-060:
+
+- `Cookie` and `Set-Cookie`, and a 40-character secret by proximity.
+- a one-line JSON object after a secret key (`{"password":"x","user":"y"}` loses the rest of its line).
+- `--password=x` followed by another flag, and `-H '...' url` (the rest of the line goes too: an
+  over-redaction, not a leak).
+- a space in URL userinfo, and `app:1234/x@db` (a URL password with a raw `/` after an all-digit head).
+- `curl -u` and `--user`, and `-pPASS`.
+- base64-armored keys (`LS0tLS1CRUdJTi`), bare DER keys (`MIIEvQIBADANBg`) and SSH2 keys
+  (`---- BEGIN SSH2 ... PRIVATE KEY ----`).
+- a crafted `BEGIN` line (a `BEGIN B` inside a closed `A` block, with B's body after `END A`).
+- a PEM block split over log events.
+- a Kubernetes env list: `- name: DB_PASSWORD` then `value: x`, and its JSON form
+  `{"name":"DB_PASSWORD","value":"x"}`. `redact_str` leaves both as they are. This one is a leak.
+- `Authorization header: Basic <b64>` in prose, and crafted bracket and quote escapes (stray apostrophes).
+
+Never handled by the redactor, no ticket yet:
+
+- `MYSQL_PWD=` and `pwd=`: no key stem matches `pwd`. Both come out unchanged. This one is a leak.
+- `valueFrom` and `secretKeyRef`: 04 Appendix B lists them as key-name exclusions, but the redactor has no
+  such exclusion. `DB_PASSWORD:` then `valueFrom:` then `secretKeyRef:` comes out as one placeholder. That
+  fails safe, so there is no `value_from` exclusion and no case for it.
+
+Known over-redactions, for M2-061 to settle (no failing case): `max_tokens: 4096`, `secretary: bob` and
+`compass: north` are all redacted, because the stems `token`, `secret` and `pass` match inside the key.
 
 ## Line endings
 

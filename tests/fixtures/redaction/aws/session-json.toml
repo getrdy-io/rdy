@@ -1,6 +1,7 @@
 polarity = "positive"
 since = "m1"
 rulesets = ["report"]
-rules = ["aws_access_key_id", "aws_session_token"]
+rules = ["aws_access_key_id", "aws_secret_access_key", "aws_session_token"]
 forms = ["json"]
-secrets = ["${SYN:asia_id}", "${SYN:aws_session}"]
+secrets = ["${SYN:asia_id}", "${SYN:aws_secret}", "${SYN:aws_session}"]
+note = "The shape of `aws sts get-session-token` output: all three credentials in one object."

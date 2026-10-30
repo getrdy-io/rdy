@@ -1,6 +1,0 @@
-polarity = "negative"
-since = "m1"
-rulesets = ["report"]
-rules = []
-exclusions = ["value_from"]
-secrets = []

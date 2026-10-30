@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["secret_by_key"]
+forms = ["stem_pass", "stem_secret", "stem_token", "stem_api_key", "stem_access_key", "stem_private_key", "stem_credential", "stem_auth", "stem_bearer", "stem_dsn"]
+secrets = ["canaryStemVal01", "canaryStemVal02", "canaryStemVal03", "canaryStemVal04", "canaryStemVal05", "canaryStemVal06", "canaryStemVal07", "canaryStemVal08", "canaryStemVal09", "canaryStemVal10"]
+note = "One line per stem of Appendix B, each with a prefix so the stem is inside the key and not the whole key."

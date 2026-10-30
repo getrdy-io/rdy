@@ -1,1 +1,1 @@
-proxy: http://[REDACTED:url_userinfo:~]@proxy.acme.test:3128/
+proxy: http://[REDACTED:url_userinfo:~1]@proxy.acme.test:3128/

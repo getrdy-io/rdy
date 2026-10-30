@@ -1,5 +1,6 @@
 {
   "AccessKeyId": "${SYN:asia_id}",
+  "SecretAccessKey": "${SYN:aws_secret}",
   "SessionToken": "${SYN:aws_session}",
   "Expiration": "2026-11-04T10:15:00Z"
 }
