@@ -289,26 +289,26 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <section aria-labelledby="actions">
 <h2 id="actions">What rdy read and contacted</h2>
 <table>
-<caption>Every command, file, host and cluster request rdy used, in order</caption>
+<caption>What rdy recorded, in order</caption>
 <thead>
 <tr><th scope="col">No.</th><th scope="col">Check</th><th scope="col">What</th><th scope="col">Detail</th><th scope="col">Result</th></tr>
 </thead>
 <tbody>
 <tr><th scope="row">1</th><td>the run itself</td><td>Read a file</td><td><bdi>~/.kube/config</bdi></td><td>Done, 5412 bytes</td></tr>
-<tr><th scope="row">2</th><td>the run itself</td><td>Sent a Kubernetes API request</td><td><bdi>GET /version</bdi></td><td>Done, status 200</td></tr>
+<tr><th scope="row">2</th><td>the run itself</td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/version</bdi></td><td>Done, status 200</td></tr>
 <tr><th scope="row">3</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/cpuinfo</bdi></td><td>Done, 8320 bytes</td></tr>
 <tr><th scope="row">4</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cpu.max</bdi></td><td>Done, 13 bytes</td></tr>
 <tr><th scope="row">5</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/meminfo</bdi></td><td>Done, 1482 bytes</td></tr>
 <tr><th scope="row">6</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/memory.max</bdi></td><td>Done, 4 bytes</td></tr>
 <tr><th scope="row">7</th><td><bdi>host.disk</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 2870 bytes</td></tr>
 <tr><th scope="row">8</th><td><bdi>net.egress</bdi></td><td>Looked up a host name</td><td><bdi>proxy.corp.example</bdi></td><td>Done</td></tr>
-<tr><th scope="row">9</th><td><bdi>host.disk</bdi></td><td>Made a system call</td><td><bdi>statvfs /var/lib</bdi></td><td>Done</td></tr>
-<tr><th scope="row">10</th><td><bdi>k8s.version</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET /version</bdi></td><td>Done, status 200</td></tr>
-<tr><th scope="row">11</th><td><bdi>k8s.storageclass</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET /apis/storage.k8s.io/v1/storageclasses</bdi></td><td>Done, status 200</td></tr>
-<tr><th scope="row">12</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>registry.acme.example:443 through http://proxy.corp.example:3128</bdi></td><td>Done</td></tr>
+<tr><th scope="row">9</th><td><bdi>host.disk</bdi></td><td>Made a system call</td><td><bdi>statvfs</bdi> <bdi>/var/lib</bdi></td><td>Done</td></tr>
+<tr><th scope="row">10</th><td><bdi>k8s.version</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/version</bdi></td><td>Done, status 200</td></tr>
+<tr><th scope="row">11</th><td><bdi>k8s.storageclass</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/apis/storage.k8s.io/v1/storageclasses</bdi></td><td>Done, status 200</td></tr>
+<tr><th scope="row">12</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>registry.acme.example:443</bdi> through <bdi>http://proxy.corp.example:3128</bdi></td><td>Done</td></tr>
 <tr><th scope="row">13</th><td><bdi>net.egress</bdi></td><td>Started a TLS handshake</td><td><bdi>registry.acme.example</bdi></td><td>Done</td></tr>
-<tr><th scope="row">14</th><td><bdi>k8s.storageclass</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET /apis/storage.k8s.io/v1/csidrivers</bdi></td><td>Done, status 200</td></tr>
-<tr><th scope="row">15</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>license.acme.example:443 through http://proxy.corp.example:3128</bdi></td><td>Failed: <bdi>proxy answered 403 to CONNECT</bdi></td></tr>
+<tr><th scope="row">14</th><td><bdi>k8s.storageclass</bdi></td><td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/apis/storage.k8s.io/v1/csidrivers</bdi></td><td>Done, status 200</td></tr>
+<tr><th scope="row">15</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>license.acme.example:443</bdi> through <bdi>http://proxy.corp.example:3128</bdi></td><td>Failed: <bdi>proxy answered 403 to CONNECT</bdi></td></tr>
 </tbody>
 </table>
 </section>

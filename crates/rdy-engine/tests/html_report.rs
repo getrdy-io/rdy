@@ -415,8 +415,8 @@ fn canaries_never_reach_the_page() -> TestResult {
     assert!(html.contains("<bdi>token="));
     // The action log shows the command with the secret replaced, not only without it (M1-080). The
     // placeholder keeps the flag and the argument after it.
-    assert!(html.contains("<bdi>/usr/bin/tool --password [REDACTED:"));
-    assert!(html.contains("] --verbose</bdi>"));
+    assert!(html.contains("<bdi>/usr/bin/tool</bdi> <bdi>--password</bdi> <bdi>[REDACTED:"));
+    assert!(html.contains("]</bdi> <bdi>--verbose</bdi>"));
     assert!(html.contains("Failed: <bdi>refused, token=[REDACTED:"));
     Ok(())
 }
@@ -584,6 +584,29 @@ fn a_spec_fix_that_was_not_verified_does_not_carry_the_product_name() -> TestRes
     Ok(())
 }
 
+/// A `fix_source` this version does not know, and a fix with none, are not verified (SEC-22-3). The raw
+/// value is never shown, and the product name is not put on it even when the key is pinned.
+#[test]
+fn an_unknown_or_missing_fix_source_is_labelled_not_verified() -> TestResult {
+    let mut unknown = sample()?;
+    unknown["checks"][1]["fix_source"] = json!("future_source");
+    let mut missing = sample()?;
+    missing["checks"][1]["fix_source"] = Value::Null;
+    for doc in [unknown, missing] {
+        let html = html_of(doc)?;
+        assert!(html.contains(
+            "<span class=\"label\">From the spec file (not verified):</span> <bdi>Add RAM or choose a larger node class.</bdi>"
+        ));
+        assert!(!html.contains("future_source"));
+        assert!(!html.contains("unknown source"));
+        // The other vendor fix on the page, whose source is known, keeps the product label.
+        assert!(html.contains(
+            "<span class=\"label\">From <bdi>acme-platform</bdi>:</span> <bdi>Ask your network team"
+        ));
+    }
+    Ok(())
+}
+
 #[test]
 fn a_product_name_in_a_fix_label_is_shown_as_text() -> TestResult {
     let mut doc = sample()?;
@@ -633,10 +656,10 @@ fn an_action_row_says_what_was_done_to_what_and_how_it_ended() -> TestResult {
         "<td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/cpuinfo</bdi></td>"
     ));
     assert!(section.contains(
-        "<td>Sent a Kubernetes API request</td><td><bdi>GET /version</bdi></td><td>Done, status 200</td>"
+        "<td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/version</bdi></td><td>Done, status 200</td>"
     ));
     assert!(section.contains(
-        "<td>Opened a connection</td><td><bdi>license.acme.example:443 through http://proxy.corp.example:3128</bdi></td><td>Failed: <bdi>proxy answered 403 to CONNECT</bdi></td>"
+        "<td>Opened a connection</td><td><bdi>license.acme.example:443</bdi> through <bdi>http://proxy.corp.example:3128</bdi></td><td>Failed: <bdi>proxy answered 403 to CONNECT</bdi></td>"
     ));
     // No raw JSON key or engine word is visible text.
     for raw in [
@@ -668,27 +691,113 @@ fn action_text_from_the_report_is_shown_as_text() -> TestResult {
     Ok(())
 }
 
-/// The page lists the first 1000 entries and counts the rest (01 section 6, item 7). The 5 MiB cap on the
-/// whole page is not here: it is measured with the embedded JSON in it (M1-078).
-#[test]
-fn the_action_log_stops_at_1000_rows_and_counts_the_rest() -> TestResult {
+/// A sample whose action log is `count` copies of its first entry, numbered from 1.
+fn doc_with_actions(count: u64) -> TestResult<Value> {
     let mut doc = sample()?;
     let template = doc["actions"][0].clone();
     let actions = doc["actions"]
         .as_array_mut()
         .ok_or("actions is not a list")?;
     actions.clear();
-    for seq in 1..=1003 {
+    for seq in 1..=count {
         let mut entry = template.clone();
         entry["seq"] = json!(seq);
         actions.push(entry);
     }
-    let html = html_of(doc)?;
+    Ok(doc)
+}
+
+/// The page lists the first 1000 entries and counts the rest (01 section 6, item 7). The 5 MiB cap on the
+/// whole page is not here: it is measured with the embedded JSON in it (M1-078).
+#[test]
+fn the_action_log_stops_at_1000_rows_and_counts_the_rest() -> TestResult {
+    let html = html_of(doc_with_actions(1003)?)?;
     let section = action_section(&html)?;
     assert_eq!(section.matches("<tr><th scope=\"row\">").count(), 1000);
     assert!(section.contains("<th scope=\"row\">1000</th>"));
     assert!(!section.contains("<th scope=\"row\">1001</th>"));
-    assert!(section.contains("<p>3 more entries are in the embedded JSON.</p>"));
+    assert!(section.contains("<p>3 more entries are in the embedded JSON."));
+    Ok(())
+}
+
+#[test]
+fn one_entry_left_out_reads_as_one_entry() -> TestResult {
+    let html = html_of(doc_with_actions(1001)?)?;
+    assert!(action_section(&html)?.contains("<p>1 more entry is in the embedded JSON."));
+    Ok(())
+}
+
+/// A refusal is never left to the JSON: every `denied` entry past the cut is a row too (SEC-22-1).
+#[test]
+fn a_refusal_past_the_row_limit_is_still_listed() -> TestResult {
+    let mut doc = doc_with_actions(1010)?;
+    for index in [1004, 1008] {
+        doc["actions"][index]["outcome"] = json!("denied");
+        doc["actions"][index]["rule"] = json!("read_denylist");
+    }
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert_eq!(section.matches("<tr><th scope=\"row\">").count(), 1002);
+    assert!(section.contains("<th scope=\"row\">1005</th>"));
+    assert!(section.contains("<th scope=\"row\">1009</th>"));
+    assert!(!section.contains("<th scope=\"row\">1006</th>"));
+    assert_eq!(
+        section
+            .matches("Refused by rdy: <bdi>read_denylist</bdi>")
+            .count(),
+        2
+    );
+    assert!(section.contains("<p>8 more entries are in the embedded JSON. Every refused call in the log is listed above.</p>"));
+    Ok(())
+}
+
+/// A log the engine cut says so and counts what it dropped, and the caption never claims to be complete
+/// (SEC-22-2).
+#[test]
+fn a_cut_log_says_what_was_dropped() -> TestResult {
+    let plain_html = html_of(sample()?)?;
+    let plain_section = action_section(&plain_html)?;
+    assert!(plain_section.contains("<caption>What rdy recorded, in order</caption>"));
+    assert!(!plain_section.contains("Every "));
+    assert!(!plain_section.contains("left some entries out"));
+
+    let mut doc = sample()?;
+    doc["actions_truncated"] = json!(true);
+    doc["actions_dropped"] = json!({"read": 120, "read_dir": 5, "future_kind": 2});
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert!(section.contains("<caption>What rdy recorded, in order</caption>"));
+    assert!(section.contains(
+        "<p>rdy left some entries out of its own log to stay within its size limits: 2 <bdi>future_kind</bdi>, 120 file reads, 5 folder listings.</p>"
+    ));
+    assert!(!section.contains("read_dir"));
+    Ok(())
+}
+
+#[test]
+fn a_folded_row_uses_plain_words() -> TestResult {
+    let mut doc = sample()?;
+    let mut entry = doc["actions"][0].clone();
+    entry["seq"] = json!(16);
+    entry["kind"] = json!("coalesced");
+    entry["outcome"] = json!("failed");
+    entry["error"] = json!("permission denied");
+    entry["of"] = json!("read_dir");
+    entry["under"] = json!("/var/lib");
+    entry["count"] = json!(12);
+    for key in ["path", "bytes", "truncated"] {
+        entry[key] = Value::Null;
+    }
+    doc["actions"]
+        .as_array_mut()
+        .ok_or("actions is not a list")?
+        .push(entry);
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert!(section.contains(
+        "<td>Many calls shown as one row</td><td>12 folder listings under <bdi>/var/lib</bdi></td>"
+    ));
+    assert!(!section.contains("read_dir"));
     Ok(())
 }
 

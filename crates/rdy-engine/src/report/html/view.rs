@@ -202,7 +202,7 @@ impl View {
                 })
                 .collect(),
             details: details(report),
-            actions: ActionLog::new(&report.actions),
+            actions: ActionLog::new(report),
         }
     }
 }
@@ -273,9 +273,11 @@ fn key_is_pinned(report: &Report) -> bool {
         )
 }
 
-/// The fix with its label. The vendor's product name labels spec text only when the key is pinned; a spec
-/// that was not verified is "the spec file (not verified)", so a reader does not take its commands for
-/// the vendor's. A fix with no recorded source, which only another producer writes, is not attributed.
+/// The fix with its label. The vendor's product name labels spec text only when the key is pinned. Every
+/// other case is "the spec file (not verified)": a spec that was not verified, a `fix_source` this version
+/// does not know and a fix with no `fix_source` at all (only another producer writes that). Unknown means
+/// not verified (01 section 2.6), and the raw value is never shown, so a reader does not take commands
+/// for the vendor's.
 fn fix_view(report: &Report, check: &CheckResult) -> Option<FixView> {
     let text = check.fix.clone()?;
     let label = match &check.fix_source {
@@ -283,9 +285,7 @@ fn fix_view(report: &Report, check: &CheckResult) -> Option<FixView> {
         Some(FixSource::FromSpec) if key_is_pinned(report) => {
             vec![Span::own("From "), Span::untrusted(&report.spec.product)]
         }
-        Some(FixSource::FromSpec) => vec![Span::own("From the spec file (not verified)")],
-        Some(other) => vec![Span::own("From "), Span::untrusted(other.as_str())],
-        None => vec![Span::own("From an unknown source (not verified)")],
+        _ => vec![Span::own("From the spec file (not verified)")],
     };
     Some(FixView { label, text })
 }
