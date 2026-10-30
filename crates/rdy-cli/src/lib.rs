@@ -48,6 +48,9 @@ pub mod signing;
 #[doc(hidden)]
 pub mod startup;
 
+#[doc(hidden)]
+pub mod style;
+
 mod spec_cmds;
 
 #[doc(hidden)]
