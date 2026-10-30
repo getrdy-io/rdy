@@ -2,10 +2,11 @@
 //!
 //! Internal to rdy. No API stability promise.
 //!
-//! So far this crate holds the [`client`] module: it finds the operator's kubeconfig (or the in-cluster
-//! config), builds the kube client with rustls and timeouts, and shows which cluster rdy is about to
-//! touch. The read-only guard ([`client::guard`], M1-103) sits in front of every request and logs each one;
-//! the checks (M1-106 and later) build on both.
+//! This crate holds the [`client`] module, the checks, and the [`Cluster`] a check reads. The client finds the
+//! operator's kubeconfig (or the in-cluster config), builds the kube client with rustls and timeouts, and
+//! shows which cluster rdy is about to touch. The read-only guard ([`client::guard`], M1-103) sits in front
+//! of every request and logs each one. The checks build on both: `k8s.version` ([`VersionCheck`], M1-106)
+//! is the first, and the others (M1-109 and later) follow.
 
 #![forbid(unsafe_code)]
 // A check writes its answer in a Finding, never to the terminal (M1-044, 02 "Lint wall"). The print macros
@@ -26,4 +27,19 @@ pub mod client;
     clippy::disallowed_types,
     clippy::disallowed_macros
 )]
+mod cluster;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
 mod registry;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod version;
+
+pub use cluster::Cluster;
+pub use version::VersionCheck;

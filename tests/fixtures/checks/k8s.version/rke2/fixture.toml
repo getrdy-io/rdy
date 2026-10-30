@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-rke2"
+summary = "RKE2 1.29"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true
