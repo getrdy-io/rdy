@@ -383,10 +383,10 @@ impl CliError {
     ///
     /// Looks through `.context(..)` layers for a [`CliError`], a [`PasswordError`], a [`PromptError`], a
     /// [`TrustStoreError`], a [`SpecError`] or a [`ScalarError`]. Anything else is a bug. The text of an
-    /// unknown error is dropped on purpose: it may hold a path, a URL or a secret, and the M1 redactor has
-    /// only the key-name rule until M1-060 adds URL userinfo, headers and token shapes. Every string that
-    /// [`CliError::render`] prints does go through the redactor (M1-056), so showing the redacted chain
-    /// later is a change in this one function.
+    /// unknown error is dropped on purpose: it may hold a path, a URL or a secret, and an error is not a
+    /// place for the redactor's best effort. Every string that [`CliError::render`] prints does go
+    /// through the redactor (M1-056, M1-060 rules), so showing the redacted chain later is a change in
+    /// this one function.
     #[must_use]
     pub fn from_anyhow(err: anyhow::Error) -> Self {
         let err = match err.downcast::<Self>() {
