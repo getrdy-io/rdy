@@ -83,7 +83,7 @@ deny = [
     # here: a wrapper is a crate that may depend on the banned one, and no check crate is a wrapper. The
     # exceptions are named below. The test is tests/lint-wall/tests/deny_wrappers.rs.
     # To let a new crate use one of these, add it to `wrappers` with a review. Never add a check crate.
-    { crate = "socket2", wrappers = ["hyper-util", "tokio"], reason = "02 lint wall: raw sockets are the probe facade's (tests/lint-wall names the type behind an optional feature that deny does not enable)" },
+    { crate = "socket2", wrappers = ["hyper-util", "rdy-engine", "tokio"], reason = "02 lint wall: raw sockets are the probe facade's; rdy-engine sets a zero linger in its `loopback` test servers only, ADR 0035 (tests/lint-wall names the type behind an optional feature that deny does not enable)" },
     { crate = "walkdir", reason = "02 lint wall: a directory walk goes through Probe::read_dir (jni, an Android-only build dependency of kube, is not a shipped target)" },
     { crate = "sysinfo", reason = "02 lint wall: machine facts go through the probe" },
     { crate = "which", reason = "02 lint wall: a program is resolved by the command table" },
@@ -100,7 +100,7 @@ deny = [
     # from a normal one, so the name is listed here. tests/lint-wall/tests/deps_allowlist.rs tells them
     # apart: it fails if either is anything but a dev-dependency of rdy-checks-k8s.
     { crate = "tempfile", wrappers = ["rdy", "rdy-checks-k8s", "rdy-engine", "rexpect", "xtask"], reason = "02 lint wall: file creation is not a check's; rdy-checks-k8s uses it in tests only" },
-    { crate = "tokio-rustls", wrappers = ["hyper-rustls", "rdy-checks-k8s"], reason = "02 lint wall: TLS goes through the probe or kube; rdy-checks-k8s uses it in its test server only" },
+    { crate = "tokio-rustls", wrappers = ["hyper-rustls", "rdy-checks-k8s", "rdy-engine"], reason = "02 lint wall: TLS goes through the probe or kube; rdy-checks-k8s uses it in its test server only; rdy-engine uses it in its `loopback` test servers only, ADR 0035" },
 ]
 
 [sources]

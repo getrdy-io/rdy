@@ -76,7 +76,9 @@ Features: `default = ["runtime", "html"]`. `runtime`: scheduler, privilege, need
 (tokio, tokio-util, cap-std, rustix, http, tower-layer, tower-service, hyper, tokio-rustls, rustls with
 ring only, webpki-roots). `html`: askama. `redact` and `units` need no feature, so `rdy-cloud`
 (`default-features = false, features = ["html"]`) and `rdy report` can use them. `testing` is never in
-the release binary; CI asserts `cargo tree -p rdy -e features` lacks it.
+the release binary; CI asserts `cargo tree -p rdy -e features` lacks it. `loopback` implies `testing`, adds
+the loopback network servers (`rdy_engine::testing::loopback`, `rcgen`, `tokio-rustls`, `socket2`; ADR 0035)
+and is kept out of the release binary the same way.
 
 ## Checks, families and the run plan
 
