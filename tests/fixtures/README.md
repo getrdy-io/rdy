@@ -60,13 +60,14 @@ tests/fixtures/
 ```
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
-`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), `_policy/symlink-to-shadow`,
-`_loader/manifest-entries`, the `_cgroup` cases and the `_kube` cases (`cluster`, `denied`). The rest
+`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), the twelve machines of
+`host.os/`, `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup` cases and the `_kube` cases
+(`cluster`, `denied`). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
 | --- | --- | --- |
-| `allow.toml` | Lint exceptions: the CRLF canary, a reference link in the third-party vectors. The metadata address `169.254.169.254` gets its entry with the first test that uses it. The format is in the file header | By hand, with a reason per entry |
+| `allow.toml` | Lint exceptions: the CRLF canary, a reference link in the third-party vectors, the four-part WSL kernel version. The metadata address `169.254.169.254` gets its entry with the first test that uses it. The format is in the file header | By hand, with a reason per entry |
 | `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command or opens a socket | By hand, with the check ticket |
 | `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied`. The expectation of a policy or loader case lives in its Rust test until the fixture lint has a format for it | By hand |
 | `checks/_cgroup/<case>/` | Machines for the cgroup helper that `host.memory`, `host.cpu` and `host.cgroups` share: `/proc/self/cgroup`, `/proc/self/mountinfo` and a `/sys/fs/cgroup` tree. Cases: `v2-nested`, `v2-unlimited`, `v2-memory-off`, `v1-tree`, `v1-unlimited`, `hybrid`. A check's own cases carry their own trees | By hand |
