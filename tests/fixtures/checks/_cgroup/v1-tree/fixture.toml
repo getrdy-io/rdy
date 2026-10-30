@@ -1,0 +1,12 @@
+schema = 1
+name = "v1-tree"
+summary = "RHEL 8 host on cgroup v1, parent slice caps memory at 2 GiB and CPU at 1.5 cores, unlimited elsewhere"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory", "host.cpu", "host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false
