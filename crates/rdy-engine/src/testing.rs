@@ -42,6 +42,8 @@ pub use fixture_run::{
     run_loaded,
 };
 pub use normalize::{normalize, normalize_across_jobs};
+#[cfg(feature = "loopback")]
+pub mod loopback;
 
 use crate::check::{CheckContext, CheckInfo, Need, Os};
 use crate::family::HostSet;

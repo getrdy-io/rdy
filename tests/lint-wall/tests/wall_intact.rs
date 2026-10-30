@@ -665,6 +665,68 @@ fn the_root_manifest_replaces_no_dependency() {
     );
 }
 
+/// Whether a feature list entry turns on the optional dependency `name`.
+fn enables_dep(entry: &toml::Value, name: &str) -> bool {
+    entry.as_str().is_some_and(|e| {
+        e == format!("dep:{name}") || e.starts_with(&format!("{name}/")) || e == name
+    })
+}
+
+#[test]
+fn rdy_engine_takes_socket2_and_rcgen_only_through_the_loopback_feature() {
+    // socket2 reaches raw sockets and rcgen makes certificates. deny.toml lets `rdy-engine` wrap socket2
+    // and ignores features, so this is what keeps them out of every build but the test-only `loopback`
+    // one (ADR 0035): each is optional, is not a target-specific or build dependency, and only
+    // `loopback` turns it on.
+    let manifest = toml_of(&root().join("crates/rdy-engine/Cargo.toml"));
+    let deps = manifest
+        .get("dependencies")
+        .and_then(toml::Value::as_table)
+        .expect("[dependencies]");
+    let features = manifest
+        .get("features")
+        .and_then(toml::Value::as_table)
+        .expect("[features]");
+    for name in ["socket2", "rcgen"] {
+        let optional = deps
+            .get(name)
+            .and_then(|d| d.get("optional"))
+            .and_then(toml::Value::as_bool);
+        assert_eq!(
+            optional,
+            Some(true),
+            "rdy-engine must list {name} under [dependencies] with optional = true (ADR 0035)"
+        );
+        let turned_on_by: Vec<&String> = features
+            .iter()
+            .filter(|(_, list)| {
+                list.as_array()
+                    .is_some_and(|l| l.iter().any(|e| enables_dep(e, name)))
+            })
+            .map(|(feature, _)| feature)
+            .collect();
+        assert_eq!(
+            turned_on_by,
+            ["loopback"],
+            "only the loopback feature of rdy-engine may turn on {name}"
+        );
+        for table in ["build-dependencies", "dev-dependencies"] {
+            let listed = manifest
+                .get(table)
+                .and_then(toml::Value::as_table)
+                .is_some_and(|t| t.contains_key(name));
+            assert!(!listed, "rdy-engine lists {name} under [{table}]");
+        }
+        let targets = manifest.get("target").and_then(toml::Value::as_table);
+        for (cfg, table) in targets.into_iter().flatten() {
+            let listed = ["dependencies", "build-dependencies", "dev-dependencies"]
+                .iter()
+                .any(|k| table.get(k).and_then(|t| t.get(name)).is_some());
+            assert!(!listed, "rdy-engine lists {name} under [target.{cfg}]");
+        }
+    }
+}
+
 #[test]
 fn no_agent_checkout_is_tracked() {
     // The walks skip `.claude/worktrees/` because it holds other copies of this repository on a
