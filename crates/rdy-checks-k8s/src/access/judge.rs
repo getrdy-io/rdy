@@ -5,7 +5,8 @@
 //! | Condition | Level |
 //! | --- | --- |
 //! | the server did not accept the credentials (401), or refused the identity review (403) | fail |
-//! | a credential in the kubeconfig has ended | fail |
+//! | a credential in the kubeconfig has ended and the server answered 401 | fail |
+//! | a credential has ended but the server did not reject it (this machine's clock is wrong) | warn |
 //! | the context or the server does not match its spec pattern | fail |
 //! | connected as `system:anonymous` | warn |
 //! | `insecure-skip-tls-verify: true` | warn |
@@ -37,6 +38,9 @@ const GROUPS_LISTED: usize = 10;
 /// The most groups kept at all.
 const GROUPS_KEPT: usize = 50;
 
+/// The most `/api` versions kept. A real server serves one (`v1`).
+pub(super) const CORE_VERSIONS_KEPT: usize = 16;
+
 /// The longest text from the server that goes into a sentence, in characters.
 const SHOWN: usize = 96;
 
@@ -57,9 +61,9 @@ pub(super) enum Who {
         groups: Vec<String>,
         group_count: usize,
     },
-    /// The server predates `SelfSubjectReview` (before 1.28). One access review was accepted, so the
-    /// credentials work, but the identity is not known.
-    NotVerified,
+    /// The identity review has no route (404). One access review was accepted, so the credentials work,
+    /// but the identity is not known.
+    NotVerified(NotVerified),
     /// 401.
     Unauthorized,
     /// 403.
@@ -72,10 +76,86 @@ pub(super) enum Who {
     Broken(KubeError),
 }
 
+/// Why the identity review (`authentication.k8s.io/v1`, GA in 1.28) answered 404.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum NotVerified {
+    /// The server is 1.27 or older. 1.27 serves the review as `v1beta1`, which rdy does not use.
+    Before128 { v1beta1: bool },
+    /// The server is 1.28 or later, so the route should exist: the group may be disabled, or a gateway
+    /// in front of the API server filters it.
+    NotServed,
+    /// The version could not be read.
+    Unknown,
+}
+
+impl NotVerified {
+    /// Reads major and minor from `git_version` (`v1.29.4-eks-abc123`), else from `major` and `minor`
+    /// (`29+`).
+    pub(super) fn of(version: &ServerVersion) -> Self {
+        // The leading digits of a text: `29+` is 29, `4-eks` is 4.
+        let number = |text: &str| -> Option<u32> {
+            let digits: String = text.chars().take_while(char::is_ascii_digit).collect();
+            digits.parse().ok()
+        };
+        let mut parts = version.git_version.trim_start_matches('v').split('.');
+        let from_git = (parts.next().and_then(number), parts.next().and_then(number));
+        let (major, minor) = match from_git {
+            (Some(major), Some(minor)) => (Some(major), Some(minor)),
+            _ => (number(&version.major), number(&version.minor)),
+        };
+        match (major, minor) {
+            (Some(1), Some(minor)) if minor < 28 => Self::Before128 {
+                v1beta1: minor == 27,
+            },
+            (Some(1), Some(_)) => Self::NotServed,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// A clause for the `partial` note.
+    fn short(self) -> &'static str {
+        match self {
+            Self::Before128 { v1beta1: true } => {
+                "the server is 1.27 and serves the identity review only as v1beta1"
+            }
+            Self::Before128 { v1beta1: false } => {
+                "the server is older than 1.28 and has no SelfSubjectReview"
+            }
+            Self::NotServed => {
+                "the identity review route is not served, although the server is 1.28 or later"
+            }
+            Self::Unknown => {
+                "the server is older than 1.28 or does not serve the identity review route"
+            }
+        }
+    }
+
+    /// One sentence for the notes.
+    fn why(self) -> &'static str {
+        match self {
+            Self::Before128 { v1beta1: true } => {
+                "The server is 1.27, which serves the identity review only as authentication.k8s.io/v1beta1 (1.27 is out of support). rdy asks for v1, so it cannot show who it is"
+            }
+            Self::Before128 { v1beta1: false } => {
+                "The server is older than 1.28 and has no SelfSubjectReview (added in 1.28)"
+            }
+            Self::NotServed => {
+                "The identity review route (authentication.k8s.io/v1 selfsubjectreviews) is not served by this server, although it is 1.28 or later. The API group may be disabled, or a gateway in front of the API server filters it"
+            }
+            Self::Unknown => {
+                "The server is older than 1.28 or does not serve the identity review route (authentication.k8s.io/v1 selfsubjectreviews)"
+            }
+        }
+    }
+}
+
 /// What discovery said. A failure of either request is a note, never a failure of the check.
 #[derive(Debug, Default)]
 pub(super) struct Discovery {
+    /// The `/api` versions, escaped and at most [`CORE_VERSIONS_KEPT`].
     pub(super) core_versions: Option<Vec<String>>,
+    /// How many versions `/api` listed.
+    pub(super) core_total: usize,
     pub(super) group_count: Option<usize>,
     pub(super) notes: Vec<String>,
 }
@@ -143,19 +223,31 @@ pub(super) fn judge(rules: &Rules, seen: &Seen<'_>) -> Finding {
     let has_credentials = !facts.credentials().is_empty();
     let mut issues: Vec<Issue> = Vec::new();
 
-    // Credentials that have ended explain a 401, so they come first and the 401 text is left out.
+    // Credentials that have ended explain a 401, so they come first and the 401 text is left out. A server
+    // that did not answer 401 to a credential whose end date has passed says this machine's clock is wrong:
+    // that is a warning, not a block.
+    let rejected = matches!(seen.who, Who::Unauthorized);
     let mut credential_ended = false;
     for credential in facts.credentials() {
         let Some(left) = credential.expires_in() else {
             continue;
         };
         let kind = kind_name(credential);
-        if left < 0 {
+        if left < 0 && rejected {
             credential_ended = true;
             issues.push(Issue {
                 level: Level::Fail,
                 text: ended_text(credential, left),
                 fix: fix::renew(&guess, credential),
+            });
+        } else if left < 0 {
+            issues.push(Issue {
+                level: Level::Warn,
+                text: format!(
+                    "The {kind} in the kubeconfig ended {} ago by this machine's clock, yet the server did not reject it (no 401). The clock is probably wrong.",
+                    span(left)
+                ),
+                fix: fix::clock(),
             });
         } else if left < EXPIRY_WARN_SECS {
             issues.push(Issue {
@@ -210,7 +302,7 @@ pub(super) fn judge(rules: &Rules, seen: &Seen<'_>) -> Finding {
             text: "The identity review answered without a user, so who rdy is could not be confirmed.".to_owned(),
             fix: "Tell the vendor which Kubernetes distribution this is, with the JSON report.".to_owned(),
         }),
-        Who::Verified { .. } | Who::NotVerified => {}
+        Who::Verified { .. } | Who::NotVerified(_) => {}
     }
 
     if let Some(pattern) = &rules.context_pattern
@@ -241,9 +333,16 @@ pub(super) fn judge(rules: &Rules, seen: &Seen<'_>) -> Finding {
     }
 
     if facts.line().tls_verification_off() {
+        // With verification off a proxy in the path can read the bearer token, because rdy cannot tell the
+        // proxy from the API server behind it.
+        let proxy_risk = if facts.proxy().is_proxied() {
+            " A proxy is in the path, and it can read the credentials rdy sends."
+        } else {
+            ""
+        };
         issues.push(Issue {
             level: Level::Warn,
-            text: "TLS verification is off in the kubeconfig (insecure-skip-tls-verify), so rdy cannot tell this server from an impostor.".to_owned(),
+            text: format!("TLS verification is off in the kubeconfig (insecure-skip-tls-verify), so rdy cannot tell this server from an impostor.{proxy_risk}"),
             fix: "Give the cluster its CA: `kubectl config set-cluster <cluster> --certificate-authority=<ca-file> --embed-certs=true --insecure-skip-tls-verify=false`.".to_owned(),
         });
     }
@@ -287,10 +386,10 @@ pub(super) fn judge(rules: &Rules, seen: &Seen<'_>) -> Finding {
     for note in evidence(seen, &version) {
         finding = finding.with_note(note);
     }
-    if matches!(seen.who, Who::NotVerified) {
+    if let Who::NotVerified(why) = seen.who {
         finding = finding.with_partial(Partial::new(
             Vec::new(),
-            "who rdy is was not verified: the server is older than 1.28 and has no SelfSubjectReview",
+            format!("who rdy is was not verified: {}", why.short()),
         ));
     }
     finding
@@ -333,7 +432,11 @@ fn evidence(seen: &Seen<'_>, version: &str) -> Vec<String> {
             groups,
             group_count,
         } => {
-            let listed: Vec<&str> = groups.iter().take(GROUPS_LISTED).map(String::as_str).collect();
+            let listed: Vec<&str> = groups
+                .iter()
+                .take(GROUPS_LISTED)
+                .map(String::as_str)
+                .collect();
             let mut line = format!("Identity: {username}");
             if !listed.is_empty() {
                 line.push_str(&format!("; groups: {}", listed.join(", ")));
@@ -343,18 +446,28 @@ fn evidence(seen: &Seen<'_>, version: &str) -> Vec<String> {
             }
             notes.push(line);
         }
-        Who::NotVerified => notes.push(
-            "Identity: not verified. The server has no SelfSubjectReview (added in 1.28); one access review was accepted, so the credentials work.".to_owned(),
-        ),
+        Who::NotVerified(why) => notes.push(format!(
+            "Identity: not verified. {}; one access review was accepted, so the credentials work.",
+            why.why()
+        )),
         _ => {}
     }
     notes.extend(facts_notes(facts));
-    match (&seen.discovery.core_versions, seen.discovery.group_count) {
+    let core = seen.discovery.core_versions.as_ref().map(|core| {
+        let mut text = core.join(", ");
+        if seen.discovery.core_total > core.len() {
+            text.push_str(&format!(
+                " and {} more",
+                seen.discovery.core_total - core.len()
+            ));
+        }
+        text
+    });
+    match (core, seen.discovery.group_count) {
         (Some(core), Some(groups)) => notes.push(format!(
-            "Discovery: /api serves {}; /apis lists {groups} groups.",
-            core.join(", ")
+            "Discovery: /api serves {core}; /apis lists {groups} groups."
         )),
-        (Some(core), None) => notes.push(format!("Discovery: /api serves {}.", core.join(", "))),
+        (Some(core), None) => notes.push(format!("Discovery: /api serves {core}.")),
         (None, Some(groups)) => notes.push(format!("Discovery: /apis lists {groups} groups.")),
         (None, None) => {}
     }

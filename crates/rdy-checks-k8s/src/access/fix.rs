@@ -3,7 +3,9 @@
 //! The words are chosen from what rdy knows without asking: the credential plugin's file name, the shape
 //! of the context name, the server host. Where it cannot tell which cloud a cluster is on, the text says
 //! "the way you made this kubeconfig" and names no command that may not apply. A value rdy does not know
-//! (a profile, a resource group, a principal) is an angle-bracket placeholder, never a guess.
+//! (a profile, a resource group, a principal) is an angle-bracket placeholder, never a guess. A cluster,
+//! region or project read from the context name goes into a copyable command only when it is made of
+//! letters, digits, `.`, `_` and `-`; anything else becomes the placeholder.
 //!
 //! Every backtick span is a command the customer can copy. The tests run each text through
 //! `rdy_engine::fixtext::check`.
@@ -17,6 +19,7 @@ pub(super) enum Provider {
     Gke,
     Aks,
     OpenShift,
+    Rancher,
     Other,
 }
 
@@ -28,6 +31,8 @@ pub(super) struct Guess {
     pub(super) cluster: Option<String>,
     /// The region (EKS) or location (GKE), when the context name gives it.
     pub(super) region: Option<String>,
+    /// The project (GKE), when the context name gives it.
+    pub(super) project: Option<String>,
     /// The API server as the cluster line shows it.
     pub(super) server: String,
 }
@@ -40,6 +45,21 @@ impl Guess {
     fn region(&self) -> &str {
         self.region.as_deref().unwrap_or("<region>")
     }
+
+    fn project(&self) -> &str {
+        self.project.as_deref().unwrap_or("<project>")
+    }
+}
+
+/// A name from the context that is safe to put in a command the customer copies: letters, digits, `.`,
+/// `_` and `-`. A context name is free text, and `;curl ...|sh` must not get into a fix.
+fn safe(text: &str) -> Option<String> {
+    (!text.is_empty()
+        && text.len() <= 128
+        && text
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))
+    .then(|| text.to_owned())
 }
 
 /// Reads the provider, cluster and region from the plugin, the context name and the server host.
@@ -49,6 +69,7 @@ pub(super) fn guess(facts: Option<&ConnectionFacts>) -> Guess {
             provider: Provider::Other,
             cluster: None,
             region: None,
+            project: None,
             server: String::new(),
         };
     };
@@ -58,33 +79,37 @@ pub(super) fn guess(facts: Option<&ConnectionFacts>) -> Guess {
         provider: Provider::Other,
         cluster: None,
         region: None,
+        project: None,
         server: server.to_owned(),
     };
     // `arn:aws:eks:<region>:<account>:cluster/<name>` is what `aws eks update-kubeconfig` writes.
     let parts: Vec<&str> = context.split(':').collect();
     if context.starts_with("arn:aws") && parts.len() == 6 && parts[2] == "eks" {
         guess.provider = Provider::Eks;
-        guess.region = Some(parts[3].to_owned());
-        guess.cluster = parts[5].strip_prefix("cluster/").map(str::to_owned);
+        guess.region = safe(parts[3]);
+        guess.cluster = parts[5].strip_prefix("cluster/").and_then(safe);
     } else if let Some(rest) = context.strip_prefix("gke_") {
         // `gke_<project>_<location>_<cluster>`. A project id has no underscore.
         let fields: Vec<&str> = rest.split('_').collect();
         if fields.len() == 3 {
             guess.provider = Provider::Gke;
-            guess.region = Some(fields[1].to_owned());
-            guess.cluster = Some(fields[2].to_owned());
+            guess.project = safe(fields[0]);
+            guess.region = safe(fields[1]);
+            guess.cluster = safe(fields[2]);
         }
     } else if is_oc_context(context) {
         guess.provider = Provider::OpenShift;
     }
     if guess.provider == Provider::Other {
-        let host = server
-            .split_once("://")
-            .map_or(server, |(_, rest)| rest)
-            .split(['/', ':'])
-            .next()
-            .unwrap_or("");
-        if host.ends_with(".eks.amazonaws.com") || host.ends_with(".eks.amazonaws.com.cn") {
+        let after_scheme = server.split_once("://").map_or(server, |(_, rest)| rest);
+        let host = after_scheme.split(['/', ':']).next().unwrap_or("");
+        // Rancher serves each cluster behind `/k8s/clusters/<id>` on its own host.
+        if after_scheme
+            .split_once('/')
+            .is_some_and(|(_, path)| path.starts_with("k8s/clusters/"))
+        {
+            guess.provider = Provider::Rancher;
+        } else if host.ends_with(".eks.amazonaws.com") || host.ends_with(".eks.amazonaws.com.cn") {
             guess.provider = Provider::Eks;
         } else if host.ends_with(".azmk8s.io") {
             guess.provider = Provider::Aks;
@@ -131,6 +156,7 @@ fn plugin_provider(binary: &str) -> Option<Provider> {
         "gke-gcloud-auth-plugin" | "gcloud" => Some(Provider::Gke),
         "kubelogin" => Some(Provider::Aks),
         "oc" => Some(Provider::OpenShift),
+        "rancher" => Some(Provider::Rancher),
         _ => None,
     }
 }
@@ -144,18 +170,17 @@ pub(super) fn login(guess: &Guess) -> String {
             guess.region()
         ),
         Provider::Gke => format!(
-            "Refresh the kubeconfig with `gcloud container clusters get-credentials {} --location {}`, and keep `gke-gcloud-auth-plugin` on PATH. If gcloud asks for a login, run `gcloud auth login` first.",
+            "Refresh the kubeconfig with `gcloud container clusters get-credentials {} --location {} --project {}`, and keep `gke-gcloud-auth-plugin` on PATH. If gcloud asks for a login, run `gcloud auth login` first.",
             guess.cluster(),
-            guess
-                .region
-                .as_deref()
-                .unwrap_or("<location>")
+            guess.region.as_deref().unwrap_or("<location>"),
+            guess.project()
         ),
         Provider::Aks => format!(
             "Refresh the kubeconfig with `az aks get-credentials -g <resource-group> -n {}`, then `kubelogin convert-kubeconfig -l azurecli`. If az asks for a login, run `az login` first.",
             guess.cluster()
         ),
         Provider::OpenShift => format!("Log in again with `oc login {}`.", server_or_placeholder(guess)),
+        Provider::Rancher => "Download the kubeconfig again from the Rancher UI (Cluster Management, the menu at the end of the cluster row, Download KubeConfig), or log in with `rancher login <rancher-url> --token <bearer-token>`.".to_owned(),
         Provider::Other => "Log in again the way you did when you made this kubeconfig, or ask the cluster admin for a new one.".to_owned(),
     }
 }
@@ -188,12 +213,20 @@ pub(super) fn unauthorized(guess: &Guess) -> String {
 
 /// The fix for an identity that the server treats as `system:anonymous`.
 pub(super) fn anonymous(guess: &Guess, has_credentials: bool) -> String {
-    let lead = if has_credentials {
-        "The server did not accept the credentials in the kubeconfig and fell back to anonymous."
-    } else {
-        "The kubeconfig user has no token, client certificate or credential plugin."
-    };
-    format!("{lead} {}", login(guess))
+    if has_credentials {
+        // The API server answers 401 for a token or certificate it rejects. It never falls back to
+        // anonymous, so anonymous with credentials in the file means none of them was sent.
+        return "The server saw no credentials, although the kubeconfig has some, so none were sent. Check that the context's user name matches an entry under users, and that its token or certificate is not empty.".to_owned();
+    }
+    format!(
+        "The kubeconfig user has no token, client certificate or credential plugin. {}",
+        login(guess)
+    )
+}
+
+/// The fix for a credential whose end date has passed while the server still accepts it.
+pub(super) fn clock() -> String {
+    "Check this machine's date, time zone and time source (`timedatectl` on Linux). The server did not reject the credential, so the clock here is probably wrong.".to_owned()
 }
 
 /// The fix for a 403 on the identity review.
@@ -218,6 +251,11 @@ pub(super) fn unreachable(guess: &Guess, cause: &str, route: Option<&str>) -> St
         String::new()
     } else if cause.contains("NotValidForName") {
         "The address in the kubeconfig is not in the server certificate. Use the name the certificate has (`kubectl config view --minify` shows the server), or set `tls-server-name` on the cluster.".to_owned()
+    } else if cause.contains("client certificate as expired") {
+        format!(
+            "The API server rejected the client certificate in the kubeconfig as expired. {}",
+            renew(guess, &Credential::ClientCertificate { expires_in: None })
+        )
     } else if cause.contains("(Expired)") {
         "The API server's certificate has expired. The cluster admin must renew it (kubeadm clusters: kubeadm certs renew all, on each control-plane node). Managed clusters rotate it themselves, so check with the provider.".to_owned()
     } else if cause.contains("NotValidYet") {
@@ -262,7 +300,7 @@ pub(super) fn no_reply(guess: &Guess) -> String {
         Provider::Eks => "EKS: check `endpointPublicAccess` and `publicAccessCidrs`.",
         Provider::Gke => "GKE: check the master authorized networks.",
         Provider::Aks => "AKS: check `--api-server-authorized-ip-ranges`.",
-        Provider::OpenShift | Provider::Other => {
+        Provider::OpenShift | Provider::Rancher | Provider::Other => {
             "EKS: check `endpointPublicAccess` and `publicAccessCidrs`. GKE: check the master authorized networks. AKS: check `--api-server-authorized-ip-ranges`."
         }
     };
@@ -278,6 +316,7 @@ pub(super) fn plugin_timed_out(binary: &str, guess: &Guess) -> String {
         Provider::Gke => "`gcloud auth login`",
         Provider::Aks => "`az login`",
         Provider::OpenShift => "`oc login <server>`",
+        Provider::Rancher => "`rancher login <rancher-url> --token <bearer-token>`",
         Provider::Other => "the login your provider uses",
     };
     format!(

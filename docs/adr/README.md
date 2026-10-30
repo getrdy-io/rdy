@@ -41,7 +41,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0034](0034-spec-examples-checked-in-the-test-suite.md) | Spec reference examples are validated by the test suite, not by the render | Accepted, architect-reviewed (PR #89); narrows 09 section 5 (PC-47) |
 | [0035](0035-loopback-servers-in-rdy-engine-loopback-feature.md) | The loopback test servers live in `rdy-engine` behind the `loopback` feature, not in `rdy-checks-net` | Accepted, security-reviewed (PR #114); moves the home 08 gave them |
 | [0036](0036-security-agents-process-names-and-shipped-data.md) | host.security_agents matches the kernel's cut process name and never reads `cmdline`; a check crate may embed its own shipped data by exact lint-wall entry | Accepted, security-reviewed (PR #119) |
-| [0037](0037-kube-proxy-and-access-facts.md) | The kube client uses an `http://` proxy the way kubectl does, and k8s.access reads the connection attempt, not a connected cluster | Proposed, security review requested; amends 0031 decision 6 |
+| [0037](0037-kube-proxy-and-access-facts.md) | The kube client uses an `http://` proxy the way kubectl does, and k8s.access reads the connection attempt, not a connected cluster | Accepted, security-reviewed (PR #130); amends 0031 decision 6 |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.

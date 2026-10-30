@@ -5,12 +5,17 @@
 //! from kube, ADR 0031 decision 6). `kubectl` honours both, so `kubectl` can work while `rdy` times out.
 //! This module makes rdy choose the way `kubectl` does and says which rule applied:
 //!
-//! 1. The cluster entry's `proxy-url`. It applies to the cluster whatever `NO_PROXY` says.
+//! 1. The cluster entry's `proxy-url`. It applies to the cluster whatever `NO_PROXY` says. It is refused
+//!    for an API server that is not `https`: the tunnel would go to port 443 and the token would cross the
+//!    proxy in clear text.
 //! 2. `HTTPS_PROXY`, else `https_proxy`, for an `https` API server, unless `NO_PROXY` (else `no_proxy`)
-//!    covers the API host. Loopback hosts and `localhost` never use a proxy.
+//!    covers the API host. Loopback hosts and `localhost` never use a proxy. An `http://` API server
+//!    ignores `HTTP_PROXY` and `HTTPS_PROXY` alike (Go would read `HTTP_PROXY` for it; rdy does not
+//!    support that case).
 //! 3. No proxy.
 //!
-//! Only an `http://` proxy is used (a `CONNECT` tunnel). `https://`, `socks5://` and any other scheme are
+//! Both values are trimmed once, and a value without a scheme is read as `http://`. The scheme is read in
+//! any case (`HTTP://` is `http://`), as Go does. Only an `http://` proxy is used (a `CONNECT` tunnel). `https://`, `socks5://` and any other scheme are
 //! refused with a hint, because kube checks an `https` proxy against the cluster's CA settings and the
 //! SOCKS path is not tested here (ADR 0037 decision 2). The `NO_PROXY` rules are Go's `httpproxy`
 //! rules, the ones `kubectl` follows: a name matches itself and its subdomains, a leading dot matches
@@ -19,11 +24,13 @@
 //!
 //! The functions here are pure. They read the [`Env`] values the caller gathered and open nothing.
 
+use std::fmt;
 use std::net::IpAddr;
 use std::str::FromStr;
 
 use http::Uri;
 use rdy_engine::probe::ProxyUrl;
+use rdy_engine::redact::KNOWN_SECRET_MIN_LEN;
 
 use super::Env;
 use super::error::KubeError;
@@ -112,14 +119,25 @@ impl ProxyUse {
 }
 
 /// What [`resolve`] decided.
-#[derive(Debug)]
 pub(crate) struct Resolved {
     /// The proxy to put on the kube config. `None` for a direct request.
     pub(crate) uri: Option<Uri>,
     /// The route, for reports.
     pub(crate) used: ProxyUse,
-    /// The user info of the proxy URL, whole and its password. They join the known-secret set.
+    /// Every form of the proxy password (the facade's list) and the whole user info. They join the
+    /// known-secret set.
     pub(crate) secrets: Vec<String>,
+}
+
+impl fmt::Debug for Resolved {
+    // The `Uri` holds the user info and `secrets` is the password, so neither is printed.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Resolved")
+            .field("used", &self.used)
+            .field("proxied", &self.uri.is_some())
+            .field("secrets", &self.secrets.len())
+            .finish()
+    }
 }
 
 /// Picks the proxy for the API server at `server`.
@@ -129,20 +147,29 @@ pub(crate) struct Resolved {
 /// # Errors
 ///
 /// [`KubeError::ProxyUnsupported`] when the rule that applies names a proxy rdy cannot use: not an `http`
-/// URL, no host, or not a URL at all. A proxy variable that `NO_PROXY` exempts is not read, so a stale
-/// value there never fails a run that does not use it.
+/// URL, no host, or not a URL at all. [`KubeError::ProxyPlainServer`] when the `proxy-url` of the
+/// kubeconfig meets an API server that is not `https`. A proxy variable that `NO_PROXY` exempts is not
+/// read, so a stale value there never fails a run that does not use it.
 pub(crate) fn resolve(
     kubeconfig_proxy: Option<&str>,
     env: &Env,
     server: &Uri,
 ) -> Result<Resolved, KubeError> {
-    if let Some(raw) = kubeconfig_proxy.filter(|raw| !raw.is_empty()) {
-        return use_proxy(
-            raw,
-            raw,
-            "the proxy-url in the kubeconfig",
-            ProxyRule::KubeconfigProxyUrl,
-        );
+    if let Some(raw) = kubeconfig_proxy
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+    {
+        const ORIGIN: &str = "the proxy-url in the kubeconfig";
+        let resolved = use_proxy(raw, ORIGIN, ProxyRule::KubeconfigProxyUrl)?;
+        // The tunnel goes to port 443 when the server URL names none, and an `http` server would then get
+        // its token through the proxy in clear text.
+        if server.scheme_str() != Some("https") {
+            return Err(KubeError::ProxyPlainServer {
+                proxy: resolved.used.proxy().unwrap_or_default().to_owned(),
+                origin: ORIGIN,
+            });
+        }
+        return Ok(resolved);
     }
     let direct = |used| Resolved {
         uri: None,
@@ -150,7 +177,10 @@ pub(crate) fn resolve(
         secrets: Vec::new(),
     };
     let (Some(raw), true) = (
-        env.https_proxy.as_deref().filter(|raw| !raw.is_empty()),
+        env.https_proxy
+            .as_deref()
+            .map(str::trim)
+            .filter(|raw| !raw.is_empty()),
         server.scheme_str() == Some("https"),
     ) else {
         return Ok(direct(ProxyUse::none()));
@@ -177,14 +207,7 @@ pub(crate) fn resolve(
         };
         return Ok(direct(bypassed(var, &why)));
     }
-    // Go reads `host:port` as an http proxy. The kubeconfig field needs a scheme.
-    // An error shows the value as it was written, so a malformed one reads "(not a valid URL)".
-    let candidate = if raw.contains("://") {
-        raw.to_owned()
-    } else {
-        format!("http://{raw}")
-    };
-    use_proxy(&candidate, raw, var, ProxyRule::Environment(var))
+    use_proxy(raw, var, ProxyRule::Environment(var))
 }
 
 fn bypassed(var: &'static str, why: &str) -> ProxyUse {
@@ -197,13 +220,23 @@ fn bypassed(var: &'static str, why: &str) -> ProxyUse {
     }
 }
 
-/// Checks `raw` is a proxy rdy can use, and describes the route through it.
-fn use_proxy(
-    raw: &str,
-    written: &str,
-    origin: &'static str,
-    rule: ProxyRule,
-) -> Result<Resolved, KubeError> {
+/// The text with an `http://` scheme: `host:port` is read as http, as Go does, and the scheme is read in
+/// any case. Any other scheme is left as written, for the facade to refuse.
+fn with_scheme(raw: &str) -> String {
+    match raw.split_once("://") {
+        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("http") => format!("http://{rest}"),
+        Some(_) => raw.to_owned(),
+        None => format!("http://{raw}"),
+    }
+}
+
+/// Checks `written` (trimmed) is a proxy rdy can use, and describes the route through it.
+///
+/// An error shows the value as it was written, with the user info cut away, so a value without a scheme
+/// reads "(not a valid URL)" and never echoes a token.
+fn use_proxy(written: &str, origin: &'static str, rule: ProxyRule) -> Result<Resolved, KubeError> {
+    let raw = with_scheme(written);
+    let raw = raw.as_str();
     let unusable = || KubeError::ProxyUnsupported {
         proxy: proxy_display(written),
         origin,
@@ -254,18 +287,15 @@ fn use_proxy(
     if !intact {
         return Err(bad_userinfo());
     }
-    // The user info with no password is a secret too: `http://TOKEN@proxy` is a common form.
-    let mut secrets: Vec<String> = Vec::new();
+    // The facade's list: the password as written and decoded, the base64 of `user:password` (the
+    // `Proxy-Authorization` value kube sends), and for a user with no password the user name and the
+    // base64 of `user:` when it is at least `KNOWN_SECRET_MIN_LEN` long. A shorter user name registers
+    // nothing, so the set never refuses it. The whole user info joins them, in both forms, under the same
+    // length rule.
+    let mut secrets = url.secrets();
     for text in userinfo.into_iter().chain(decoded.as_deref()) {
-        for part in [
-            Some(text),
-            text.split_once(':').map(|(_, password)| password),
-        ] {
-            if let Some(part) = part.filter(|part| !part.is_empty())
-                && !secrets.iter().any(|known| known == part)
-            {
-                secrets.push(part.to_owned());
-            }
+        if text.len() >= KNOWN_SECRET_MIN_LEN && !secrets.iter().any(|known| known == text) {
+            secrets.push(text.to_owned());
         }
     }
     Ok(Resolved {
@@ -342,7 +372,10 @@ pub(crate) fn no_proxy_entry(list: &str, host: &str, port: u16) -> Option<String
             }
             continue;
         }
-        let (name, entry_port) = split_port(&entry);
+        // `host:abc` is not an entry Go can match: it never matches, not even the bare name.
+        let Some((name, entry_port)) = split_port(&entry) else {
+            continue;
+        };
         if entry_port.is_some_and(|wanted| wanted != port) {
             continue;
         }
@@ -371,24 +404,25 @@ pub(crate) fn no_proxy_entry(list: &str, host: &str, port: u16) -> Option<String
     None
 }
 
-/// Splits `name:port`, `[v6]:port` and `[v6]`. An unbracketed IPv6 literal has no port.
-fn split_port(entry: &str) -> (&str, Option<u16>) {
+/// Splits `name:port`, `[v6]:port` and `[v6]`. An unbracketed IPv6 literal has no port. `None` for an
+/// entry whose port is not a number (`host:abc`, `host:`), which matches nothing.
+fn split_port(entry: &str) -> Option<(&str, Option<u16>)> {
     if let Some(rest) = entry.strip_prefix('[') {
-        return match rest.split_once(']') {
-            Some((name, after)) => (name, after.strip_prefix(':').and_then(|p| p.parse().ok())),
-            None => (entry, None),
+        let Some((name, after)) = rest.split_once(']') else {
+            return Some((entry, None));
         };
+        if after.is_empty() {
+            return Some((name, None));
+        }
+        let port = after.strip_prefix(':')?.parse().ok()?;
+        return Some((name, Some(port)));
     }
     if entry.matches(':').count() == 1
         && let Some((name, port)) = entry.split_once(':')
     {
-        return match port.parse() {
-            Ok(port) => (name, Some(port)),
-            // `host:` or `host:abc` is not a port. Match the name alone, as Go does.
-            Err(_) => (name, None),
-        };
+        return port.parse().ok().map(|port| (name, Some(port)));
     }
-    (entry, None)
+    Some((entry, None))
 }
 
 /// Whether `ip` is inside the network `net`/`bits`. A family mismatch or a prefix too long is no match.

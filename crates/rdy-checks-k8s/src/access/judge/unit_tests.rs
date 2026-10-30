@@ -180,3 +180,178 @@ fn a_connection_that_breaks_while_asking_is_a_block_with_that_errors_fix() {
     );
     assert!(finding.fix.expect("a fix").contains("No reply from"));
 }
+
+/// A JWT whose `exp` is 100 s before `NOW`.
+const JWT_EXPIRED: &str = "eyJhbGciOiJSUzI1NiJ9.eyJleHAiOjE3OTMzMTgzMDB9.c2ln";
+/// 2026-10-30 00:00:00 UTC.
+const NOW: i64 = 1_793_318_400;
+
+fn expired_token_facts() -> ConnectionFacts {
+    facts(
+        &kubeconfig(
+            "ctx",
+            "https://k8s.acme.example:6443",
+            "",
+            &format!("\n    token: {JWT_EXPIRED}\n"),
+        ),
+        &[],
+        &Env::empty().with_now(NOW),
+    )
+}
+
+#[test]
+fn an_ended_credential_blocks_only_when_the_server_says_401() {
+    let facts = expired_token_facts();
+    let version = version();
+    let finding = judge(&rules(), &seen(&facts, &version, Who::Unauthorized));
+    assert_eq!(finding.level, Level::Fail);
+    assert_eq!(
+        finding.message,
+        "The token in the kubeconfig ended 1 minute ago."
+    );
+    // The 401 text is left out: the ended token explains it.
+    assert!(
+        !finding
+            .notes
+            .iter()
+            .any(|note| note.contains("did not accept")),
+        "{:?}",
+        finding.notes
+    );
+}
+
+#[test]
+fn an_ended_credential_the_server_accepted_is_a_clock_warning_for_every_other_answer() {
+    let facts = expired_token_facts();
+    let version = version();
+    for who in [
+        who_from_user("jane", &["system:authenticated".to_owned()]),
+        Who::NotVerified(NotVerified::Before128 { v1beta1: false }),
+        Who::Other { code: 500 },
+        Who::Silent,
+    ] {
+        let finding = judge(&rules(), &seen(&facts, &version, who));
+        assert_eq!(finding.level, Level::Warn, "{}", finding.message);
+        assert!(
+            finding.message.contains("clock is probably wrong"),
+            "{}",
+            finding.message
+        );
+        assert!(finding.message.contains("yet the server did not reject it"));
+        assert!(finding.fix.expect("a fix").contains("`timedatectl`"));
+    }
+}
+
+fn version_of(git_version: &str, major: &str, minor: &str) -> ServerVersion {
+    ServerVersion {
+        git_version: git_version.to_owned(),
+        major: major.to_owned(),
+        minor: minor.to_owned(),
+        platform: "linux/amd64".to_owned(),
+    }
+}
+
+#[test]
+fn the_version_says_why_the_identity_review_has_no_route() {
+    for (version, want) in [
+        (
+            version_of("v1.27.9", "1", "27"),
+            NotVerified::Before128 { v1beta1: true },
+        ),
+        (
+            version_of("v1.26.1", "1", "26"),
+            NotVerified::Before128 { v1beta1: false },
+        ),
+        (version_of("v1.28.0", "1", "28"), NotVerified::NotServed),
+        (
+            version_of("v1.29.4-eks-abc123", "1", "29+"),
+            NotVerified::NotServed,
+        ),
+        (version_of("v1.36.0", "1", "36"), NotVerified::NotServed),
+        // A git version that does not parse falls back to the minor, then to unknown.
+        (
+            version_of("garbage", "1", "27"),
+            NotVerified::Before128 { v1beta1: true },
+        ),
+        (version_of("garbage", "1", "29+"), NotVerified::NotServed),
+        (version_of("garbage", "", ""), NotVerified::Unknown),
+        (version_of("v2.1.0", "2", "1"), NotVerified::Unknown),
+    ] {
+        assert_eq!(NotVerified::of(&version), want, "{}", version.git_version);
+    }
+}
+
+#[test]
+fn each_reason_has_its_own_words_and_none_is_empty() {
+    let texts: Vec<(&str, &str)> = [
+        NotVerified::Before128 { v1beta1: true },
+        NotVerified::Before128 { v1beta1: false },
+        NotVerified::NotServed,
+        NotVerified::Unknown,
+    ]
+    .into_iter()
+    .map(|why| (why.why(), why.short()))
+    .collect();
+    for (long, short) in &texts {
+        assert!(!long.is_empty() && !short.is_empty());
+        assert!(!long.contains('\u{2014}') && !short.contains('\u{2014}'));
+    }
+    assert!(texts[0].0.contains("v1beta1") && texts[0].0.contains("1.27"));
+    assert!(texts[2].0.contains("although it is 1.28 or later"));
+    assert!(texts[2].0.contains("disabled") && texts[2].0.contains("gateway"));
+    let distinct: std::collections::BTreeSet<&str> = texts.iter().map(|(long, _)| *long).collect();
+    assert_eq!(distinct.len(), 4);
+}
+
+#[test]
+fn a_proxy_in_the_path_with_tls_verification_off_says_it_can_read_the_token() {
+    let env = Env::empty().with_https_proxy("http://proxy.acme.example:3128");
+    let yaml = kubeconfig(
+        "ctx",
+        "https://k8s.acme.example:6443",
+        "    insecure-skip-tls-verify: true\n",
+        "\n    token: t\n",
+    );
+    let facts = facts(&yaml, &[], &env);
+    let version = version();
+    let finding = judge(
+        &rules(),
+        &seen(
+            &facts,
+            &version,
+            who_from_user("jane", &["system:authenticated".to_owned()]),
+        ),
+    );
+    assert_eq!(finding.level, Level::Warn);
+    assert!(
+        finding
+            .message
+            .contains("A proxy is in the path, and it can read the credentials rdy sends."),
+        "{}",
+        finding.message
+    );
+    // Without a proxy the warning does not claim it.
+    let direct = facts_direct_insecure();
+    let finding = judge(
+        &rules(),
+        &seen(
+            &direct,
+            &version,
+            who_from_user("jane", &["system:authenticated".to_owned()]),
+        ),
+    );
+    assert!(!finding.message.contains("proxy"), "{}", finding.message);
+}
+
+fn facts_direct_insecure() -> ConnectionFacts {
+    facts(
+        &kubeconfig(
+            "ctx",
+            "https://k8s.acme.example:6443",
+            "    insecure-skip-tls-verify: true\n",
+            "\n    token: t\n",
+        ),
+        &[],
+        &Env::empty(),
+    )
+}

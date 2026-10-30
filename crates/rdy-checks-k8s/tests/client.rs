@@ -269,12 +269,23 @@ async fn k8s_access_runs_end_to_end_over_the_real_client_stack_behind_a_rancher_
         .connect(&run.run_probe(Os::Linux), |_| {})
         .await
         .expect("connect");
-    let dial = Arc::new(Dialed::connected(connected));
+    let dial = Arc::new(Dialed::reached(connected));
     assert!(matches!(
         dial.outcome(),
         DialOutcome::Reached { latency, .. } if *latency > Duration::ZERO
     ));
     assert!(dial.facts().is_some());
+    // The same holder gives the family probe (M1-107) the connection for the other k8s checks.
+    assert!(dial.connected().is_some_and(|connected| {
+        connected.server_version().git_version == "v1.29.4-eks-abc123"
+    }));
+    assert!(
+        Dialed::failed(None, KubeError::NoKubeconfig)
+            .connected()
+            .is_none()
+    );
+    assert!(Dialed::timed_out(None).connected().is_none());
+    assert!(Dialed::no_network().connected().is_none());
     let entry: rdy_spec::spec::CheckSpec =
         serde_json::from_value(serde_json::json!({"id": "k8s.access"})).expect("an entry");
     let rdy_spec::check::CheckParams::K8sAccess(params) = entry.decode_params() else {
@@ -326,14 +337,17 @@ async fn a_malformed_https_proxy_in_the_environment_fails_the_load_unless_no_pro
     const NAME: &str =
         "a_malformed_https_proxy_in_the_environment_fails_the_load_unless_no_proxy_covers_the_host";
     if !is_child() {
-        run_child(
-            NAME,
-            &[
-                ("HTTPS_PROXY", "::not a url::"),
-                ("https_proxy", "http://127.0.0.1:1"),
-                ("NO_PROXY", ".covered.example, 10.0.0.0/8"),
-            ],
-        );
+        let mut vars = vec![
+            ("HTTPS_PROXY", "::not a url::"),
+            ("NO_PROXY", ".covered.example, 10.0.0.0/8"),
+        ];
+        // Windows environment names are case-insensitive, so `https_proxy` would overwrite `HTTPS_PROXY`
+        // (the child saw the second value on the Windows leg). The upper-before-lower order is a Unix
+        // fact, and it is asserted on Unix only.
+        if !cfg!(windows) {
+            vars.push(("https_proxy", "http://127.0.0.1:1"));
+        }
+        run_child(NAME, &vars);
         return;
     }
     // kube would read the variable inside `Config::try_from` and fail on its own terms. rdy reads it
@@ -644,6 +658,37 @@ mod plugin {
         );
         let exec_info = std::fs::read_to_string(&info).expect("exec info");
         assert!(exec_info.contains(r#""interactive":false"#), "{exec_info}");
+    }
+
+    #[tokio::test]
+    async fn a_plugin_that_asks_for_the_cluster_never_sees_the_proxy_placeholder() {
+        // kube copies the cluster into KUBERNETES_EXEC_INFO after the placeholder (ADR 0031 decision 6)
+        // was written to it. The cluster has no `proxy-url`, so the plugin must get none.
+        let api = MockApi::start(Mode::Version).await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let info = dir.path().join("info.dump");
+        let plugin = script(
+            dir.path(),
+            "get-token",
+            &format!(
+                "printf '%s' \"$KUBERNETES_EXEC_INFO\" > '{}'\n{}\n",
+                info.display(),
+                credential("t", None),
+            ),
+        );
+        let user = format!("{}      provideClusterInfo: true\n", exec_user(&plugin));
+        let loaded = load_text(dir.path(), &api.url(), &user, TIMEOUT).await;
+        loaded
+            .connect(&common::run_probe(), |_| {})
+            .await
+            .expect("connect");
+
+        let exec_info = std::fs::read_to_string(&info).expect("exec info");
+        assert!(exec_info.contains(r#""cluster""#), "{exec_info}");
+        assert!(
+            !exec_info.contains("proxy.invalid") && !exec_info.contains("proxy-url"),
+            "{exec_info}"
+        );
     }
 
     #[tokio::test]

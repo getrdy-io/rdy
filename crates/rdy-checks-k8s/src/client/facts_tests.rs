@@ -295,3 +295,73 @@ fn the_proxy_is_not_on_the_cluster_line() {
     let loaded = with_user("\n    token: t-1\n", "", &env);
     assert!(!loaded.line().to_string().contains("proxy"));
 }
+
+// ---- the cluster info a plugin is given ---------------------------------------------------------------------
+
+const INFO_USER: &str = "\n    exec:\n      apiVersion: client.authentication.k8s.io/v1\n      command: /usr/local/bin/get-token\n      provideClusterInfo: true\n";
+
+fn plugin_cluster_proxy(loaded: &Loaded) -> Option<Option<String>> {
+    loaded
+        .config
+        .auth_info
+        .exec
+        .as_ref()
+        .and_then(|exec| exec.cluster.as_ref())
+        .map(|cluster| cluster.proxy_url.clone())
+}
+
+fn load_text(yaml: &str, env: &Env) -> Result<Loaded, KubeError> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("config");
+    fs::write(&path, yaml).expect("write");
+    load_sync(
+        &KubeOptions::new(Duration::from_secs(10)).kubeconfig(path),
+        env,
+    )
+}
+
+#[test]
+fn the_plugin_cluster_info_carries_the_real_proxy_url_never_the_placeholder() {
+    // `kubectl` passes the cluster's own `proxy-url` to a plugin that asks for the cluster
+    // (`provideClusterInfo`). kube builds that copy after the placeholder was written to the cluster.
+    let with = kubeconfig(
+        "ctx",
+        api(),
+        "    proxy-url: http://proxy.acme.example:3128\n",
+        INFO_USER,
+    );
+    let loaded = load_text(&with, &env()).expect("load");
+    assert_eq!(
+        plugin_cluster_proxy(&loaded),
+        Some(Some("http://proxy.acme.example:3128".to_owned()))
+    );
+    // No `proxy-url`: the plugin gets none, whatever the environment says.
+    let without = kubeconfig("ctx", api(), "", INFO_USER);
+    let env = env().with_https_proxy("http://env-proxy.acme.example:3128");
+    let loaded = load_text(&without, &env).expect("load");
+    assert_eq!(plugin_cluster_proxy(&loaded), Some(None));
+    for yaml in [&with, &without] {
+        let loaded = load_text(yaml, &env).expect("load");
+        assert!(
+            !format!("{:?}", plugin_cluster_proxy(&loaded)).contains(".invalid"),
+            "the placeholder must not reach the plugin"
+        );
+    }
+}
+
+#[test]
+fn a_proxy_url_for_an_http_server_fails_the_load_with_its_own_error() {
+    let yaml = kubeconfig(
+        "ctx",
+        "http://k8s.acme.example:8080",
+        "    proxy-url: http://svc:PLAIN-CANARY-6@proxy.acme.example:3128\n",
+        "\n    token: t-1\n",
+    );
+    let error = load_text(&yaml, &env()).expect_err("a plain server behind a proxy");
+    assert!(
+        matches!(&error, KubeError::ProxyPlainServer { proxy, .. } if proxy == "http://proxy.acme.example:3128"),
+        "{error:?}"
+    );
+    let shown = format!("{error} | {error:?} | {}", error.hint());
+    assert!(!shown.contains("PLAIN-CANARY"), "{shown}");
+}

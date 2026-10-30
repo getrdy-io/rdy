@@ -536,6 +536,7 @@ pub(crate) struct Harness {
     run: TestRun,
     mock: Mock,
     audited: AtomicBool,
+    via_proxy: Option<String>,
 }
 
 impl fmt::Debug for Harness {
@@ -566,7 +567,16 @@ impl Harness {
             run,
             mock: Mock::new(replay)?,
             audited: AtomicBool::new(false),
+            via_proxy: None,
         })
+    }
+
+    /// Makes the clients record `via_proxy: origin` on every `kube` entry, as a connection through a
+    /// proxy does.
+    #[must_use]
+    pub(crate) fn via_proxy(mut self, origin: &str) -> Self {
+        self.via_proxy = Some(origin.to_owned());
+        self
     }
 
     /// The run the clients log into.
@@ -582,7 +592,7 @@ impl Harness {
     /// A read-only client for the check that owns `probe` (`CheckContext::probe`): the guard in front of
     /// the mock, as `Connected::read_only` builds it in front of the real server. Needs a tokio runtime.
     pub(crate) fn client(&self, probe: &Probe) -> ReadOnlyClient {
-        ReadOnlyClient::over(self.mock.clone(), probe)
+        ReadOnlyClient::over(self.mock.clone(), probe, self.via_proxy.as_deref())
     }
 
     /// Like [`Harness::client`], for a check called `check` that has the `KubeContext` need.

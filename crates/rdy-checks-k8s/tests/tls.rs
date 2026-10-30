@@ -26,6 +26,8 @@ use std::time::Duration;
 use common::{is_child, run_child};
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
 use rdy_checks_k8s::client::{Env, KubeError, KubeOptions, Loaded, load};
+use rdy_engine::check::Os;
+use rdy_engine::testing::{Replay, TestRun};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
@@ -388,12 +390,34 @@ async fn a_kubeconfig_proxy_url_carries_the_tls_session_through_a_connect_tunnel
     for form in ["PROXY%2BCANARY-2", "PROXY+CANARY-2"] {
         assert!(loaded.known_secrets().contains(&form.to_owned()), "{form}");
     }
+    let run = TestRun::new(Replay::new());
     let connected = loaded
-        .connect(&common::run_probe(), |_| {})
+        .connect(&run.run_probe(Os::Linux), |_| {})
         .await
         .expect("connect through the proxy");
 
     assert_eq!(connected.server_version().git_version, "v1.30.2");
+    // INV-07: the proxy hop is in the action log. The `kube` entry names the proxy origin, with no user
+    // info.
+    let log = run.action_log();
+    let kube: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|entry| entry.kind == rdy_spec::result::ActionKind::Kube)
+        .collect();
+    assert_eq!(kube.len(), 1, "{kube:?}");
+    for entry in kube {
+        assert_eq!(
+            entry.fields["via_proxy"],
+            format!("http://{proxy_addr}"),
+            "{entry:?}"
+        );
+    }
+    let logged = serde_json::to_string(&log.actions).expect("json");
+    assert!(
+        !logged.contains("CANARY") && !logged.contains("svc"),
+        "{logged}"
+    );
     let heads = heads.lock().expect("heads");
     assert_eq!(heads.len(), 1, "{heads:?}");
     assert!(
@@ -435,10 +459,22 @@ async fn https_proxy_in_the_environment_alone_carries_the_session_the_same_way()
         loaded.proxy().rule(),
         &rdy_checks_k8s::client::ProxyRule::Environment("HTTPS_PROXY")
     );
+    let run = TestRun::new(Replay::new());
     loaded
-        .connect(&common::run_probe(), |_| {})
+        .connect(&run.run_probe(Os::Linux), |_| {})
         .await
         .expect("connect through the proxy named by HTTPS_PROXY");
+    let log = run.action_log();
+    let versions: Vec<_> = log
+        .actions
+        .iter()
+        .filter(|entry| entry.kind == rdy_spec::result::ActionKind::Kube)
+        .map(|entry| entry.fields["via_proxy"].clone())
+        .collect();
+    assert_eq!(
+        versions,
+        [serde_json::json!(format!("http://{proxy_addr}"))]
+    );
 
     let heads = heads.lock().expect("heads");
     assert_eq!(heads.len(), 1, "{heads:?}");

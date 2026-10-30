@@ -8,6 +8,11 @@
 //!
 //! The family probe (M1-107) makes the attempt once per run, lazily, under the 10 s timer, and wraps what
 //! it got in a [`Dialed`]. This crate only reads it.
+//!
+//! **Order.** Building `k8s.access` does no I/O, so it is handed a `Dial` that is filled before it runs:
+//! the family probe makes the attempt whenever the plan holds any k8s check (`k8s.access` included, even
+//! when it is the only one), then runs the checks. A `Dial` is read only after that family probe is done.
+//! [`Dial::outcome`] is synchronous and never waits.
 
 use std::time::Duration;
 
@@ -36,6 +41,10 @@ pub enum DialOutcome {
 }
 
 /// The run's attempt to reach the cluster.
+///
+/// Read it only after the family probe has made the attempt: every method is synchronous and returns
+/// what is there now. Before the attempt there is nothing to report, so a holder is not created (or its
+/// methods are not called) until the attempt has ended.
 pub trait Dial: Send + Sync + 'static {
     /// What the config said about the connection. `None` when no config loaded.
     fn facts(&self) -> Option<&ConnectionFacts>;
@@ -67,7 +76,7 @@ impl std::fmt::Debug for Dialed {
 impl Dialed {
     /// The attempt reached the cluster.
     #[must_use]
-    pub fn connected(connected: Connected) -> Self {
+    pub fn reached(connected: Connected) -> Self {
         Self {
             facts: Some(connected.facts().clone()),
             outcome: DialOutcome::Reached {
@@ -107,6 +116,16 @@ impl Dialed {
             outcome: DialOutcome::NoNetwork,
             connected: None,
         }
+    }
+}
+
+impl Dialed {
+    /// The connected cluster, when the attempt reached it. The family probe (M1-107) uses it to hand the
+    /// same connection to the other k8s checks, so one holder serves `k8s.access` and the `Cluster` the
+    /// rest read.
+    #[must_use]
+    pub fn connected(&self) -> Option<&Connected> {
+        self.connected.as_ref()
     }
 }
 

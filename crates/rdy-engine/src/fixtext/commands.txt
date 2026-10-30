@@ -36,6 +36,7 @@ nvidia-ctk
 nvidia-smi
 oc
 pro
+rancher
 rdy
 rmmod
 setenforce

@@ -11,14 +11,17 @@
 //!   the credentials. The check sends a `SelfSubjectReview` (`authentication.k8s.io/v1`, GA in 1.28)
 //!   through the raw route of `ReadOnlyClient`, never a typed k8s-openapi review (the guard refuses the
 //!   `metadata` member a typed value carries). It prints the user and groups and warns on
-//!   `system:anonymous`. On a server that has no such route (404) one `SelfSubjectAccessReview` shows that
-//!   the credentials are accepted, and the identity is "not verified".
+//!   `system:anonymous`. When the route answers 404 one `SelfSubjectAccessReview` shows that the
+//!   credentials are accepted, and the identity is "not verified". The server version says why: 1.27
+//!   serves only `v1beta1`, older servers have no review, and a 1.28 or later server that answers 404 has
+//!   the route switched off or filtered.
 //! - **Discovery.** `GET /api` and `GET /apis`, named exactly. A refusal is a note, never a failure.
 //!
 //! When the attempt failed, the check says why, with the fix for that cause: no kubeconfig, a login that
 //! needs a person, a certificate rdy does not trust, a private endpoint, a proxy that refuses the tunnel.
 //! It never fails on data it could not read: the only blocks are an unreachable cluster, credentials the
-//! server refuses, and a context or server that is not the one the spec expects.
+//! server refuses (a credential whose end date has passed is a block only when the server also says 401;
+//! otherwise it is a clock warning), and a context or server that is not the one the spec expects.
 //!
 //! **Privilege.** None. It reads the kubeconfig the operator chose, through the client module, and sends
 //! three read-only requests. Without a cluster it still reports, because the attempt's outcome is its
@@ -49,7 +52,7 @@ mod judge;
 mod tests;
 
 pub use dial::{Dial, DialOutcome, Dialed};
-use judge::{DEFAULT_MAX_LATENCY, Discovery, Rules, Seen, Who};
+use judge::{CORE_VERSIONS_KEPT, DEFAULT_MAX_LATENCY, Discovery, NotVerified, Rules, Seen, Who};
 
 /// The time `k8s.access` keeps back for its own requests: below it, discovery is skipped.
 const DISCOVERY_MIN_TIME: Duration = Duration::from_secs(1);
@@ -63,8 +66,9 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
         title: "Cluster access",
         remediation: "Point rdy at the right cluster with `--kubeconfig <file>` and `--kube-context <name>`, and sign in again if the credentials ended. EKS: `aws eks update-kubeconfig`. GKE: `gcloud container clusters get-credentials`. AKS: `az aks get-credentials`, then `kubelogin convert-kubeconfig -l azurecli`. OpenShift: `oc login`. A private API endpoint needs a host inside the network or the VPN. Behind a proxy, set `proxy-url` in the kubeconfig or HTTPS_PROXY, and make sure the proxy allows CONNECT to the API server.",
     },
-    // No hard need: this check reports the outcome of the attempt that meets `kube_context` (02).
-    needs: &[],
+    // Not `KubeContext`: this check reports the outcome of the attempt that meets it (02). It needs the
+    // network, because it returns `MissingNeed(Network)` when the run forbids it.
+    needs: &[Need::Network],
     wants: &[],
     default_timeout: Some(Duration::from_secs(10)),
     os: OsSupport {
@@ -261,7 +265,7 @@ impl AccessCheck {
                 hint: "Tell the vendor, with the JSON report.".to_owned(),
             });
         };
-        let who = ask_who(&client, facts).await?;
+        let who = ask_who(&client, facts, version).await?;
         let discovery = match who {
             Who::Unauthorized | Who::Forbidden | Who::Broken(_) => Discovery::default(),
             _ => discover(&client, ctx, facts).await?,
@@ -288,7 +292,9 @@ fn state_of(error: &KubeError) -> &'static str {
         KubeError::PluginFailed { .. }
         | KubeError::PluginNotStarted { .. }
         | KubeError::PluginOutputInvalid { .. } => "plugin_failed",
-        KubeError::ProxyUnsupported { .. } => "proxy_unsupported",
+        KubeError::ProxyUnsupported { .. } | KubeError::ProxyPlainServer { .. } => {
+            "proxy_unsupported"
+        }
         _ => "not_connected",
     }
 }
@@ -320,22 +326,29 @@ fn refusal(error: &KubeError) -> CheckError {
 }
 
 /// Asks the server who rdy is.
-async fn ask_who(client: &ReadOnlyClient, facts: &ConnectionFacts) -> Result<Who, CheckError> {
+async fn ask_who(
+    client: &ReadOnlyClient,
+    facts: &ConnectionFacts,
+    version: &ServerVersion,
+) -> Result<Who, CheckError> {
     let error = match client.self_subject_review().await {
         Ok(review) => return Ok(who_from(&review)),
         Err(error) => classify(&error, facts),
     };
     match error {
-        KubeError::Api { code: 404, .. } => ask_access_review(client, facts).await,
+        KubeError::Api { code: 404, .. } => {
+            ask_access_review(client, facts, NotVerified::of(version)).await
+        }
         other => settle(other),
     }
 }
 
-/// The servers before 1.28 have no `SelfSubjectReview`. One access review shows that the credentials are
+/// A server with no `SelfSubjectReview` route (404). One access review shows that the credentials are
 /// accepted. It asks about a single read of namespaces and keeps no part of the answer.
 async fn ask_access_review(
     client: &ReadOnlyClient,
     facts: &ConnectionFacts,
+    why: NotVerified,
 ) -> Result<Who, CheckError> {
     let review = SelfSubjectAccessReview {
         spec: SelfSubjectAccessReviewSpec {
@@ -353,7 +366,7 @@ async fn ask_access_review(
         .create(&PostParams::default(), &review)
         .await
     {
-        Ok(_) => Ok(Who::NotVerified),
+        Ok(_) => Ok(Who::NotVerified(why)),
         Err(error) => settle(classify(&error, facts)),
     }
 }
@@ -398,7 +411,17 @@ async fn discover(
         return Ok(found);
     }
     match client.core_versions().await {
-        Ok(list) => found.core_versions = Some(list.versions),
+        Ok(list) => {
+            // The versions come from the server: escape each and keep a few (INV-17).
+            found.core_total = list.versions.len();
+            found.core_versions = Some(
+                list.versions
+                    .iter()
+                    .take(CORE_VERSIONS_KEPT)
+                    .map(|version| judge::shown(version))
+                    .collect(),
+            );
+        }
         Err(error) => found.notes.push(discovery_note("/api", &error, facts)?),
     }
     match client.api_groups().await {

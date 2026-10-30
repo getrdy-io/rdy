@@ -87,6 +87,18 @@ pub enum KubeError {
         origin: &'static str,
     },
 
+    /// A proxy applies to an API server that is not `https`. The credentials would cross the proxy in
+    /// clear text.
+    #[error(
+        "{origin} names the proxy {proxy}, but the API server is not https, so the credentials would cross the proxy unprotected"
+    )]
+    ProxyPlainServer {
+        /// The proxy as scheme, host and port. Never user info. Escaped.
+        proxy: String,
+        /// Where the proxy came from, as for [`KubeError::ProxyUnsupported`].
+        origin: &'static str,
+    },
+
     /// The proxy's user name or password cannot be sent: a bad percent escape, or an `@` in the decoded
     /// text, which kube's header builder would cut at.
     #[error("{origin} names the proxy {proxy} with a user name or password that rdy cannot send")]
@@ -264,6 +276,10 @@ impl KubeError {
                     "Set it to an http:// URL (host:port is read as http), or unset it for this run, or list the API host in NO_PROXY."
                 };
                 format!("rdy uses an http:// proxy through a CONNECT tunnel. https:// and socks5:// proxies are not supported yet. {fix}")
+            }
+            Self::ProxyPlainServer { .. } => {
+                "Use an https:// API server, or run rdy from a host that reaches the API server directly. For this run, pass a copy of the kubeconfig without proxy-url with --kubeconfig."
+                    .to_owned()
             }
             Self::ProxyUserInfo { .. } => {
                 "Write the proxy user name and password with valid percent escapes, and without an @ once decoded: kube builds the Proxy-Authorization header from the text before the first @. Ask for a proxy account that avoids it, or run rdy from a host that reaches the API server directly."
@@ -571,6 +587,11 @@ pub(crate) fn cause_words(seen: &str, kind: Option<io::ErrorKind>) -> &'static s
     if has("tunnel error: unsuccessful") || has("tunnel error: unexpected end of file") {
         return "the proxy refused to open a tunnel to the API server";
     }
+    // An alert the server sent about the client certificate is not about the server's certificate, so it is
+    // read before the words below, where `expired` would blame the server.
+    if has("received fatal alert") && has("certificateexpired") {
+        return "the server rejected the client certificate as expired (alert CertificateExpired)";
+    }
     // rustls 0.23 words these in its Display text ("certificate not valid for name ..."); older text
     // and the Debug names are matched too.
     if has("unknownissuer") {
@@ -607,12 +628,16 @@ pub(crate) fn cause_words(seen: &str, kind: Option<io::ErrorKind>) -> &'static s
 }
 
 /// A proxy URL as scheme, host and port: no user info, path or query. Escaped.
+///
+/// The user info ends at the last `@` of the whole text, because a password may hold a raw `/`, `?` or `#`
+/// (such a URL is refused before any secret is registered, so nothing else would hide it). So everything
+/// up to the last `@` is dropped first, and only then is the rest cut at the first `/`, `?` or `#`.
 pub(crate) fn proxy_display(raw: &str) -> String {
     let Some((scheme, rest)) = raw.split_once("://") else {
         return "(not a valid URL)".to_owned();
     };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host_port = authority.rsplit('@').next().unwrap_or("");
+    let after_userinfo = rest.rsplit_once('@').map_or(rest, |(_, host)| host);
+    let host_port = after_userinfo.split(['/', '?', '#']).next().unwrap_or("");
     escape_capped(&format!("{scheme}://{host_port}"), CAUSE_CAP)
 }
 

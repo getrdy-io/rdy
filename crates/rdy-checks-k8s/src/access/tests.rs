@@ -158,6 +158,11 @@ fn run_dial(dial: TestDial, run: TestRun, spec: &Value) -> Ran {
 /// `latency` replaces the measured time, which would be a few microseconds.
 fn run_case(case: &str, facts: ConnectionFacts, latency: Duration, spec: &Value) -> Ran {
     let harness = Harness::load(&format!("checks/k8s.access/{case}")).expect("the fixture loads");
+    // As production builds the client: the requests record the proxy the facts name.
+    let harness = match facts.proxy().proxy() {
+        Some(origin) => harness.via_proxy(origin),
+        None => harness,
+    };
     let run = harness.run().clone();
     let attempt = runtime().block_on(harness.attempt(&facts));
     let outcome = match attempt {
@@ -451,7 +456,7 @@ fn a_401_names_the_right_login_per_provider() {
     assert!(
         has(
             &fix,
-            "`gcloud container clusters get-credentials acme-prod --location europe-west1`"
+            "`gcloud container clusters get-credentials acme-prod --location europe-west1 --project acme-proj`"
         ),
         "{fix}"
     );
@@ -564,14 +569,11 @@ fn an_anonymous_kubeconfig_warns() {
 fn anonymous_with_a_token_in_the_kubeconfig_says_the_token_was_not_accepted() {
     let ran = good("anonymous", token_facts());
     assert_eq!(ran.finding().level, Level::Warn);
-    assert!(
-        has(
-            ran.fix(),
-            "did not accept the credentials in the kubeconfig and fell back to anonymous"
-        ),
-        "{}",
-        ran.fix()
-    );
+    // The server answers 401 for a credential it rejects and never falls back to anonymous, so anonymous
+    // with a token in the file means no credential was sent.
+    assert!(has(ran.fix(), "saw no credentials"), "{}", ran.fix());
+    assert!(has(ran.fix(), "none were sent"), "{}", ran.fix());
+    assert!(!has(ran.fix(), "fell back"), "{}", ran.fix());
 }
 
 #[test]
@@ -585,7 +587,9 @@ fn a_server_without_selfsubjectreview_is_a_partial_pass_with_the_user_not_verifi
         f.message
     );
     let partial = f.partial.as_ref().expect("partial");
-    assert!(has(&partial.note, "older than 1.28"), "{}", partial.note);
+    // The fixture is a 1.27 server, which serves the review only as v1beta1.
+    assert!(has(&partial.note, "1.27"), "{}", partial.note);
+    assert!(has(&partial.note, "v1beta1"), "{}", partial.note);
     assert_eq!(f.observed["identity"], json!({"verified": false}));
     assert!(
         has(&ran.notes(), "Identity: not verified."),
@@ -1393,13 +1397,15 @@ fn a_pattern_that_does_not_compile_refuses_to_build() {
 // ---- the declaration ----------------------------------------------------------------------------------------
 
 #[test]
-fn the_check_is_registered_and_declares_no_hard_need() {
+fn the_check_is_registered_and_needs_the_network_but_not_a_cluster() {
     let info = crate::registry::infos()
         .iter()
         .find(|info| info.id == "k8s.access")
         .expect("k8s.access is registered");
     assert_eq!(info.family, "k8s");
-    assert!(info.needs.is_empty(), "02: k8s.access has no hard need");
+    // 02: no `KubeContext` need, because this check reports why the attempt failed. The network need is
+    // the one the check itself returns when the run forbids the network.
+    assert_eq!(info.needs, &[Need::Network]);
     assert!(info.wants.is_empty());
     assert_eq!(info.default_timeout, Some(Duration::from_secs(10)));
     assert!(info.reads.is_empty() && info.commands.is_empty() && info.env.is_empty());
@@ -1430,4 +1436,291 @@ fn the_credential_kind_is_the_same_in_facts_and_json() {
         &json!([{"kind": "token", "expires_in_seconds": 3 * 86_400}])
     );
     let _ = Credential::Password;
+}
+
+// ---- fix round 1 of PR #130 ---------------------------------------------------------------------------------
+
+/// The `via_proxy` value of every `kube` entry of the run, in order.
+fn kube_via(ran: &Ran) -> Vec<Value> {
+    ran.run
+        .action_log()
+        .actions
+        .iter()
+        .filter(|entry| entry.kind == rdy_spec::result::ActionKind::Kube)
+        .map(|entry| entry.fields["via_proxy"].clone())
+        .collect()
+}
+
+#[test]
+fn every_kube_entry_names_the_proxy_it_went_through() {
+    // INV-07: the proxy hop is recorded. The origin has no user info.
+    let facts = proxy_facts(
+        "    proxy-url: http://svc:VIA-CANARY-8@proxy.acme.example:3128\n",
+        &env(),
+    );
+    let ran = good("good", facts);
+    let via = kube_via(&ran);
+    assert_eq!(via.len(), 4, "{via:?}");
+    assert!(
+        via.iter()
+            .all(|value| value == "http://proxy.acme.example:3128"),
+        "{via:?}"
+    );
+    let logged = serde_json::to_string(&ran.run.action_log().actions).expect("json");
+    assert!(
+        !logged.contains("VIA-CANARY") && !logged.contains("svc:"),
+        "{logged}"
+    );
+    // An environment proxy is recorded the same way.
+    let with_env = env().with_https_proxy("http://env-proxy.acme.example:3128");
+    let ran = good("good", proxy_facts("", &with_env));
+    assert!(
+        kube_via(&ran)
+            .iter()
+            .all(|value| value == "http://env-proxy.acme.example:3128")
+    );
+    // A direct request has `via_proxy: null`, as a `connect` entry does.
+    let ran = good("good", token_facts());
+    assert!(
+        kube_via(&ran).iter().all(Value::is_null),
+        "{:?}",
+        kube_via(&ran)
+    );
+    // A proxy that NO_PROXY exempts is not in the path.
+    let env = env()
+        .with_https_proxy("http://proxy.acme.example:3128")
+        .with_no_proxy(".acme.example");
+    let ran = good("good", proxy_facts("", &env));
+    assert!(kube_via(&ran).iter().all(Value::is_null));
+}
+
+#[test]
+fn an_ended_token_the_server_accepted_warns_about_the_clock_and_does_not_block() {
+    let user = format!("\n    token: {JWT_EXPIRED}\n");
+    let ran = good("good", user_facts(&user));
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Warn, "{}", f.message);
+    assert_eq!(
+        f.message,
+        "The token in the kubeconfig ended 1 minute ago by this machine's clock, yet the server did not reject it (no 401). The clock is probably wrong."
+    );
+    assert!(has(ran.fix(), "`timedatectl`"), "{}", ran.fix());
+    assert_eq!(f.observed["identity"]["verified"], true);
+    // The run reached the cluster and read who rdy is: it is not the failed-attempt path.
+    assert_eq!(f.observed["state"], "connected");
+}
+
+#[test]
+fn a_client_certificate_that_ended_but_was_accepted_also_warns_about_the_clock() {
+    let key = rcgen::KeyPair::generate().expect("key");
+    let mut cert_params =
+        rcgen::CertificateParams::new(vec!["admin.acme.example".to_owned()]).expect("params");
+    cert_params.not_before = rcgen::date_time_ymd(2020, 1, 1);
+    cert_params.not_after = rcgen::date_time_ymd(2026, 10, 1);
+    let cert = cert_params.self_signed(&key).expect("cert").pem();
+    let yaml = kubeconfig(
+        "acme-prod",
+        SERVER,
+        "",
+        "\n    client-certificate: client.crt\n    client-key: client.key\n",
+    );
+    let facts = facts(
+        &yaml,
+        &[("client.crt", &cert), ("client.key", &key.serialize_pem())],
+        &env(),
+    );
+    let ran = good("good", facts);
+    assert_eq!(ran.finding().level, Level::Warn);
+    assert!(
+        has(
+            &ran.finding().message,
+            "client certificate in the kubeconfig ended 29 days ago"
+        ),
+        "{}",
+        ran.finding().message
+    );
+    assert!(has(ran.fix(), "`timedatectl`"), "{}", ran.fix());
+}
+
+#[test]
+fn hostile_api_versions_are_escaped_and_capped_at_sixteen() {
+    let ran = good("hostile-names", token_facts());
+    let text = ran.text();
+    for bad in ['\u{1b}', '\u{7}', '\u{9b}'] {
+        assert!(!text.contains(bad), "{bad:?} in {text:?}");
+    }
+    let versions = ran.observed("discovery")["core_versions"]
+        .as_array()
+        .expect("a list")
+        .clone();
+    assert_eq!(versions.len(), 16, "{versions:?}");
+    assert_eq!(versions[0], "v1");
+    assert_eq!(versions[1], "v2\\x1b[31mevil\\x1b]0;pwn\\x07");
+    let notes = ran.notes();
+    assert!(
+        has(&notes, "v1, v2\\x1b[31mevil\\x1b]0;pwn\\x07, v3"),
+        "{notes}"
+    );
+    assert!(has(&notes, "v16 and 4 more; /apis lists"), "{notes}");
+    assert!(!has(&notes, "v17"), "{notes}");
+}
+
+#[test]
+fn a_404_on_the_identity_review_of_a_new_server_says_the_route_is_not_served() {
+    let ran = good("route-missing", token_facts());
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Pass);
+    let partial = f.partial.as_ref().expect("partial");
+    assert!(has(&partial.note, "is not served"), "{}", partial.note);
+    assert!(has(&partial.note, "1.28 or later"), "{}", partial.note);
+    assert!(!has(&partial.note, "older than 1.28"), "{}", partial.note);
+    let notes = ran.notes();
+    assert!(
+        has(
+            &notes,
+            "The identity review route (authentication.k8s.io/v1 selfsubjectreviews) is not served by this server, although it is 1.28 or later."
+        ),
+        "{notes}"
+    );
+    assert!(has(&notes, "gateway"), "{notes}");
+    assert!(!has(&notes, "older than"), "{notes}");
+    assert_eq!(f.observed["identity"], json!({"verified": false}));
+}
+
+#[test]
+fn a_1_27_server_is_named_with_its_v1beta1_route() {
+    let ran = good("old-server", token_facts());
+    let notes = ran.notes();
+    assert!(
+        has(
+            &notes,
+            "The server is 1.27, which serves the identity review only as authentication.k8s.io/v1beta1"
+        ),
+        "{notes}"
+    );
+    assert!(has(&notes, "1.27 is out of support"), "{notes}");
+}
+
+#[test]
+fn tls_verification_off_behind_a_proxy_warns_that_the_proxy_can_read_the_token() {
+    let env = env().with_https_proxy("http://proxy.acme.example:3128");
+    let facts = facts(
+        &kubeconfig(
+            "acme-prod",
+            SERVER,
+            "    insecure-skip-tls-verify: true\n",
+            TOKEN_USER,
+        ),
+        &[],
+        &env,
+    );
+    let ran = good("good", facts);
+    assert_eq!(ran.finding().level, Level::Warn);
+    assert!(
+        has(
+            &ran.finding().message,
+            "A proxy is in the path, and it can read the credentials rdy sends."
+        ),
+        "{}",
+        ran.finding().message
+    );
+}
+
+#[test]
+fn a_rancher_cluster_gets_the_rancher_login_not_the_generic_one() {
+    let facts = facts(
+        &kubeconfig(
+            "acme-rancher",
+            "https://rancher.acme.example/k8s/clusters/c-m-abc12",
+            "",
+            TOKEN_USER,
+        ),
+        &[],
+        &env(),
+    );
+    let ran = good("unauthorized", facts);
+    assert_eq!(ran.finding().level, Level::Fail);
+    assert!(has(ran.fix(), "Download KubeConfig"), "{}", ran.fix());
+    assert!(
+        has(
+            ran.fix(),
+            "`rancher login <rancher-url> --token <bearer-token>`"
+        ),
+        "{}",
+        ran.fix()
+    );
+    assert!(!has(ran.fix(), "the way you did"), "{}", ran.fix());
+}
+
+#[test]
+fn the_none_fixture_is_the_run_of_an_attempt_that_never_reached_a_cluster() {
+    let fixture = rdy_engine::testing::Fixture::load(
+        &rdy_engine::testing::fixtures_dir(),
+        "checks/k8s.access/none",
+    )
+    .expect("the fixture loads");
+    let run = TestRun::for_fixture(&fixture);
+    let ran = run_dial(
+        TestDial {
+            facts: None,
+            outcome: DialOutcome::Failed(KubeError::NoKubeconfig),
+            harness: None,
+        },
+        run,
+        &json!({}),
+    );
+    assert_eq!(ran.finding().level, Level::Fail);
+    assert_eq!(ran.finding().message, "no kubeconfig found");
+    // The fixture sends no request: its log holds no `kube` entry.
+    assert!(kube_via(&ran).is_empty());
+}
+
+#[test]
+fn a_proxy_url_on_a_plain_server_blocks_with_its_own_state() {
+    let error = KubeError::ProxyPlainServer {
+        proxy: "http://proxy.acme.example:3128".to_owned(),
+        origin: "the proxy-url in the kubeconfig",
+    };
+    let ran = run_outcome(None, DialOutcome::Failed(error), &json!({}));
+    assert_eq!(ran.finding().level, Level::Fail);
+    assert_eq!(ran.finding().observed["state"], "proxy_unsupported");
+    assert!(has(ran.fix(), "--kubeconfig"), "{}", ran.fix());
+}
+
+#[test]
+fn a_client_certificate_alert_is_not_blamed_on_the_server_certificate() {
+    let facts = token_facts();
+    let error = network_error("received fatal alert: CertificateExpired", &facts);
+    let ran = run_outcome(Some(facts), DialOutcome::Failed(error), &json!({}));
+    assert_eq!(ran.finding().level, Level::Fail);
+    assert!(
+        has(
+            &ran.finding().message,
+            "rejected the client certificate as expired"
+        ),
+        "{}",
+        ran.finding().message
+    );
+    assert!(
+        has(
+            ran.fix(),
+            "rejected the client certificate in the kubeconfig as expired"
+        ),
+        "{}",
+        ran.fix()
+    );
+    assert!(
+        !has(ran.fix(), "API server's certificate has expired"),
+        "{}",
+        ran.fix()
+    );
+    // A server certificate that really expired keeps its own words.
+    let facts = token_facts();
+    let error = network_error("invalid peer certificate: Expired", &facts);
+    let ran = run_outcome(Some(facts), DialOutcome::Failed(error), &json!({}));
+    assert!(
+        has(ran.fix(), "API server's certificate has expired"),
+        "{}",
+        ran.fix()
+    );
 }

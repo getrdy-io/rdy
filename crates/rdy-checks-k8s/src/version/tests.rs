@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use rdy_engine::check::{Check, CheckContext, CheckOutcome, Finding, Level, Need, Os};
+use rdy_engine::check::{Check, CheckContext, CheckOutcome, Finding, Level, Need, Os, PeerClass};
 use rdy_engine::outcome::map_outcome;
 use rdy_engine::probe::Probe;
 use rdy_engine::testing::{Fixture, TestRun, fixtures_dir};
@@ -730,7 +730,9 @@ async fn the_check_declares_what_the_registry_and_the_planner_read() {
     assert_eq!(info.id, "k8s.version");
     assert_eq!(info.needs, [Need::KubeContext]);
     assert_eq!(info.default_timeout, Some(Duration::from_secs(10)));
-    assert!(info.reads.is_empty() && info.commands.is_empty() && info.peers.is_empty());
+    assert!(info.reads.is_empty() && info.commands.is_empty());
+    // It talks to the API server, and the connection may go through a proxy (ADR 0037).
+    assert_eq!(info.peers, [PeerClass::KubeApi, PeerClass::Proxy]);
     assert!(
         crate::registry::infos()
             .iter()

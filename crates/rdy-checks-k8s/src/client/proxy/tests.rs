@@ -270,9 +270,24 @@ fn proxy_credentials_become_known_secrets_and_never_show() {
         &Env::empty(),
     )
     .expect("ok");
+    // The facade's forms (the password, the base64 of `user:password` that is the header value) and the
+    // whole user info.
     assert_eq!(
         resolved.secrets,
-        ["svc-rdy:PROXY-CANARY-77", "PROXY-CANARY-77"]
+        [
+            "PROXY-CANARY-77",
+            "c3ZjLXJkeTpQUk9YWS1DQU5BUlktNzc=",
+            "svc-rdy:PROXY-CANARY-77"
+        ]
+    );
+    let from_facade = ProxyUrl::parse("http://svc-rdy:PROXY-CANARY-77@proxy.acme.example:3128")
+        .expect("parses")
+        .secrets();
+    assert!(
+        from_facade
+            .iter()
+            .all(|secret| resolved.secrets.contains(secret)),
+        "every form the facade registers is registered here too"
     );
     let shown = format!(
         "{:?} {:?} {}",
@@ -312,6 +327,8 @@ fn percent_escapes_in_the_user_info_are_decoded_for_the_header_and_every_form_is
         "svc:p:WORD+9",
         "p%3AWORD%2B9",
         "p:WORD+9",
+        // base64 of `svc:p:WORD+9`, the Proxy-Authorization value.
+        "c3ZjOnA6V09SRCs5",
     ] {
         assert!(
             resolved.secrets.iter().any(|secret| secret == form),
@@ -377,7 +394,234 @@ fn a_proxy_without_user_info_has_no_secrets() {
         &Env::empty(),
     )
     .expect("ok");
-    assert_eq!(resolved.secrets, ["onlyuser"]);
+    assert_eq!(resolved.secrets, ["onlyuser", "b25seXVzZXI6"]);
+}
+
+#[test]
+fn a_short_user_name_with_no_password_registers_nothing_so_the_set_never_refuses_it() {
+    // `http://bob@proxy` is not a token. The facade registers nothing for it, and so does this.
+    let resolved = resolve_api(Some("http://bob@proxy.acme.example:3128"), &Env::empty())
+        .expect("a short user name is usable");
+    assert!(resolved.secrets.is_empty(), "{:?}", resolved.secrets);
+    assert!(resolved.uri.is_some());
+    // With a password, the password and the pair are registered whatever the user name length.
+    let resolved = resolve_api(
+        Some("http://bob:PW-CANARY-1@proxy.acme.example:3128"),
+        &Env::empty(),
+    )
+    .expect("ok");
+    assert!(
+        resolved
+            .secrets
+            .iter()
+            .any(|secret| secret == "PW-CANARY-1")
+    );
+    assert!(resolved.secrets.iter().all(|secret| secret.len() >= 6));
+}
+
+#[test]
+fn the_debug_text_of_a_resolved_proxy_has_no_user_info_and_no_secret() {
+    let resolved = resolve_api(
+        Some("http://svc-rdy:DEBUG-CANARY-5@proxy.acme.example:3128"),
+        &Env::empty(),
+    )
+    .expect("ok");
+    let text = format!("{resolved:?}");
+    assert!(!text.contains("DEBUG-CANARY"), "{text}");
+    assert!(!text.contains("svc-rdy"), "{text}");
+    assert!(!text.contains("c3ZjLXJk"), "{text}");
+    assert!(text.contains("proxy.acme.example:3128"), "{text}");
+}
+
+// ---- a refused URL never shows its password -----------------------------------------------------------------
+
+#[test]
+fn a_refused_proxy_never_shows_a_password_with_a_raw_slash_question_mark_or_hash() {
+    // The URL is refused (a path, a query or a fragment), so nothing was registered as a secret yet, and
+    // the error text is the only protection. The user info ends at the last @ of the whole text.
+    for password in [
+        "se/cret-CANARY",
+        "se?cret-CANARY",
+        "se#cret-CANARY",
+        "a/b?c#d-CANARY",
+    ] {
+        let raw = format!("http://svc:{password}@proxy.acme.example:3128");
+        // From the kubeconfig.
+        let error = resolve_api(Some(&raw), &Env::empty()).expect_err(&raw);
+        let shown = format!("{error} | {error:?} | {}", error.hint());
+        assert!(
+            !shown.contains("CANARY") && !shown.contains("cret"),
+            "{shown}"
+        );
+        assert!(
+            matches!(&error, KubeError::ProxyUnsupported { proxy, .. } if proxy == "http://proxy.acme.example:3128"),
+            "{error:?}"
+        );
+        // From the environment.
+        let error = resolve_api(None, &env_with(&raw)).expect_err(&raw);
+        let shown = format!("{error} | {error:?} | {}", error.hint());
+        assert!(
+            !shown.contains("CANARY") && !shown.contains("cret"),
+            "{shown}"
+        );
+        assert!(
+            matches!(&error, KubeError::ProxyUnsupported { proxy, origin }
+                if proxy == "http://proxy.acme.example:3128" && *origin == "HTTPS_PROXY"),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn a_password_with_an_at_sign_is_cut_at_the_last_at_in_the_display() {
+    let error = resolve_api(
+        Some("http://svc:p@ss-CANARY@proxy.acme.example:3128/path"),
+        &Env::empty(),
+    )
+    .expect_err("a path");
+    assert!(
+        matches!(&error, KubeError::ProxyUnsupported { proxy, .. } if proxy == "http://proxy.acme.example:3128"),
+        "{error:?}"
+    );
+    // A value with no scheme is never echoed.
+    let error = resolve_api(None, &env_with("svc:TOKEN-CANARY@:notaport")).expect_err("bad port");
+    assert!(!format!("{error}").contains("CANARY"), "{error}");
+}
+
+// ---- trimming, the scheme and the server ---------------------------------------------------------------------
+
+#[test]
+fn a_padded_value_is_trimmed_once_for_both_origins() {
+    let resolved = resolve_api(
+        Some(
+            "  http://proxy.acme.example:3128  
+",
+        ),
+        &Env::empty(),
+    )
+    .expect("trimmed");
+    assert_eq!(
+        resolved.used.proxy(),
+        Some("http://proxy.acme.example:3128")
+    );
+    let resolved = resolve_api(
+        None,
+        &env_with(" svc:PADDED-CANARY-3@proxy.acme.example:3128 "),
+    )
+    .expect("ok");
+    assert_eq!(
+        resolved.used.proxy(),
+        Some("http://proxy.acme.example:3128")
+    );
+    assert!(
+        resolved
+            .secrets
+            .iter()
+            .any(|secret| secret == "PADDED-CANARY-3")
+    );
+    // A value that is only blanks is unset.
+    let resolved = resolve_api(Some("   "), &env_with("   ")).expect("unset");
+    assert_eq!(resolved.used.rule(), &ProxyRule::None);
+}
+
+#[test]
+fn a_scheme_without_a_scheme_or_in_capitals_is_read_as_http() {
+    for raw in [
+        "HTTP://proxy.acme.example:3128",
+        "Http://proxy.acme.example:3128",
+        "proxy.acme.example:3128",
+    ] {
+        let resolved = resolve_api(Some(raw), &Env::empty()).expect(raw);
+        assert_eq!(
+            resolved.used.proxy(),
+            Some("http://proxy.acme.example:3128"),
+            "{raw}"
+        );
+        let resolved = resolve_api(None, &env_with(raw)).expect(raw);
+        assert_eq!(
+            resolved.used.proxy(),
+            Some("http://proxy.acme.example:3128"),
+            "{raw}"
+        );
+    }
+    // The user info of a capital-scheme URL is parsed, not mistaken for part of the host.
+    let resolved = resolve_api(
+        Some("HTTP://svc:CAPS-CANARY-2@proxy.acme.example:3128"),
+        &Env::empty(),
+    )
+    .expect("ok");
+    assert!(
+        resolved
+            .secrets
+            .iter()
+            .any(|secret| secret == "CAPS-CANARY-2")
+    );
+    assert!(
+        resolved
+            .uri
+            .expect("uri")
+            .to_string()
+            .contains("CAPS-CANARY-2@")
+    );
+    // Other schemes are still refused, in any case.
+    let error = resolve_api(Some("HTTPS://proxy.acme.example:3128"), &Env::empty())
+        .expect_err("https proxy");
+    assert!(
+        matches!(error, KubeError::ProxyUnsupported { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_proxy_url_for_an_http_server_is_refused_because_the_token_would_cross_it_in_clear() {
+    let error = resolve(
+        Some("http://svc:TOKEN-CANARY-4@proxy.acme.example:3128"),
+        &Env::empty(),
+        &server("http://k8s.acme.example:8080"),
+    )
+    .expect_err("a plain server");
+    assert!(
+        matches!(&error, KubeError::ProxyPlainServer { proxy, origin }
+            if proxy == "http://proxy.acme.example:3128" && *origin == "the proxy-url in the kubeconfig"),
+        "{error:?}"
+    );
+    let shown = format!("{error} | {error:?} | {}", error.hint());
+    assert!(
+        !shown.contains("CANARY") && !shown.contains("svc"),
+        "{shown}"
+    );
+    assert!(shown.contains("not https"), "{shown}");
+    assert!(error.hint().contains("--kubeconfig"), "{}", error.hint());
+    // An https server with the same proxy is fine.
+    resolve_api(Some("http://proxy.acme.example:3128"), &Env::empty()).expect("https server");
+}
+
+#[test]
+fn an_http_server_ignores_the_environment_proxy_whatever_it_says() {
+    // Go would read HTTP_PROXY for it. rdy does not support that case, and says so in the module docs.
+    let resolved = resolve(
+        None,
+        &env_with("http://proxy.acme.example:3128"),
+        &server("http://k8s.acme.example:8080"),
+    )
+    .expect("direct");
+    assert!(resolved.uri.is_none());
+}
+
+#[test]
+fn a_no_proxy_entry_with_a_port_that_is_not_a_number_never_matches() {
+    let m = |list: &str, host: &str, port: u16| no_proxy_entry(list, host, port).is_some();
+    // Go never matches `host:abc`, not even the bare name.
+    assert!(!m("acme.example:abc", "k8s.acme.example", 443));
+    assert!(!m("acme.example:", "k8s.acme.example", 443));
+    assert!(!m("[fd00::5]:abc", "fd00::5", 443));
+    assert!(!m("[fd00::5]x", "fd00::5", 443));
+    // The next entry is still read.
+    assert!(m(
+        "acme.example:abc, .acme.example",
+        "k8s.acme.example",
+        443
+    ));
 }
 
 #[test]

@@ -9,4 +9,4 @@ answers = ["k8s.access"]
 [caps]
 root = false
 network = true
-kube = true
+kube = false

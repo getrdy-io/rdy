@@ -1,6 +1,6 @@
 # ADR 0037: The kube client uses an `http://` proxy the way kubectl does, and k8s.access reads the attempt, not a connected cluster
 
-- Status: Proposed. Security review requested, because it touches the network path and credentials.
+- Status: Accepted, security-reviewed (PR #130). It touches the network path and credentials.
 - Date: 2026-10-30
 
 ## Context
@@ -32,8 +32,11 @@ Reading kube 4.2.0 (the pinned version) for that decision:
 3. **Order, as `kubectl`.** (a) The chosen cluster's `proxy-url`. It applies whatever `NO_PROXY` says.
    (b) `HTTPS_PROXY`, else `https_proxy`, for an `https` API server, unless `NO_PROXY` (else `no_proxy`)
    covers the API host or the host is `localhost` or a loopback address. `HTTP_PROXY` is not read, and an
-   `http` API server never uses an environment proxy. (c) No proxy. A value without a scheme is read as
-   `http://`, as Go does.
+   `http` API server never uses an environment proxy (Go would read `HTTP_PROXY` for it; rdy does not
+   support that case). (c) No proxy. Either value is trimmed once. A value without a scheme is read as
+   `http://`, from either origin, and the scheme is read in any case (`HTTP://`), as Go does. A cluster
+   `proxy-url` for an API server that is not `https` is refused (`KubeError::ProxyPlainServer`): kube
+   tunnels to port 443 when the server URL names none, and the token would cross the proxy in clear text.
 4. **`NO_PROXY` is Go's `httpproxy` rule.** A name matches itself and its subdomains, a leading dot or `*.`
    matches subdomains only, `host:port` limits an entry to a port, an IP matches itself, a CIDR matches
    addresses, `*` matches all, entries are case-insensitive and empty entries are skipped. A proxy variable
@@ -46,15 +49,26 @@ Reading kube 4.2.0 (the pinned version) for that decision:
    URL kube gets, and its header carries the same password the facade would send. kube cuts the user info
    at the first `@`, so a decoded `@` is refused (`KubeError::ProxyUserInfo`) rather than sent wrong, and so
    is a decoded `/`, `?`, `#` or a character a URL cannot hold, because the authority would end early and
-   could name another host (the URL must read back exactly as built). The user info and password, as
-   written and as decoded, join `Loaded::known_secrets()` (the caller registers them before anything is
-   printed, ADR 0015 decision 3). The user info is never in an error, a log line, `Debug` output or a
-   report: `Env` hides the variable in `Debug`, and the route is shown as `scheme://host:port`.
+   could name another host (the URL must read back exactly as built). The secrets are the facade's own
+   list, `ProxyUrl::secrets` (public since this PR): the password as written and decoded, the base64 of
+   `user:password` that kube sends as `Proxy-Authorization`, and for a user with no password the user name
+   and the base64 of `user:` when it is at least `KNOWN_SECRET_MIN_LEN` long. The whole user info, as
+   written and as decoded, is added under the same length rule. They join `Loaded::known_secrets()` (the
+   caller registers them before anything is printed, ADR 0015 decision 3). A secret the set refuses is
+   fatal, as for every other known secret: the run exits 70 (M1-107). The user info is never in an error,
+   a log line, `Debug` output or a report: `Env` and `Resolved` hide it in `Debug`, the route is shown as
+   `scheme://host:port`, and for a URL that was refused (nothing is registered yet) the display drops
+   everything up to the last `@` before it cuts at `/`, `?` or `#`, so a raw `/`, `?` or `#` in the
+   password cannot show.
 7. **The route is reported.** `ConnectionFacts` (kinds of credential, the proxy route, the CA state, the
    source and the cluster line) is taken from `Loaded` before `connect`, so a failed connection can still
    say which rule applied. A network error carries `proxied`, and the hint then says to check that the
    proxy allows `CONNECT` to the API host and port. Two causes get their own phrase: the proxy answered 407,
-   and the proxy refused the tunnel.
+   and the proxy refused the tunnel. Every `kube` entry of the action log records `via_proxy`, the proxy
+   origin with no user info, or `null` for a direct request, so the proxy hop is in the log (INV-07), and
+   every k8s check that talks to the API server declares `PeerClass::Proxy`. A credential plugin that
+   asks for the cluster (`provideClusterInfo`) is given the cluster's own `proxy-url`, as `kubectl` does,
+   never the placeholder of decision 5.
 8. **Credential end dates are read at load, with no request.** A static token that is a JWT: its `exp`
    claim, nothing else. A client certificate: `notAfter`, read by a small bounded DER walk in `client`,
    because a check crate may not depend on an X.509 crate (`ci/check-crate-deps.toml`). An exec plugin and
@@ -63,7 +77,10 @@ Reading kube 4.2.0 (the pinned version) for that decision:
 9. **`k8s.access` reads the attempt (`Dial`), not a connected cluster.** Every other k8s check needs
    `kube_context` and is skipped when the attempt failed. `k8s.access` says why it failed, so its input is
    the facts, how the attempt ended (reached, failed, timed out, no network) and, when it reached, a
-   read-only client. The family probe (M1-107) makes the attempt once per run and wraps it in `Dialed`.
+   read-only client. The family probe (M1-107) makes the attempt once per run, whenever the plan holds any
+   k8s check (a spec with only `k8s.access` included), and wraps it in `Dialed`. The check is built with
+   a `Dial` that is filled before it runs and is read only after that attempt. `Dialed::connected()`
+   gives the same connection to the other checks, so one holder serves both.
    `Connected` gained `version_latency()`, the time of `GET /version` with the plugin's time left out (the
    plugin runs when the client is built).
 
@@ -78,6 +95,11 @@ Reading kube 4.2.0 (the pinned version) for that decision:
   proxy map to their own causes. `tests/tls.rs`.
 - A proxy password that contains `@` once decoded cannot be sent through kube and is refused with its own
   hint. The facade (`net.*` checks) can send it. It is a known limit of kube 4.2.0.
+- With `insecure-skip-tls-verify: true` and a proxy in the path, the proxy can read the bearer token,
+  because rdy cannot tell the proxy from the API server behind it (SEC-130-7). The `k8s.access` warning
+  says so, and the fix is to give the cluster its CA.
+- A credential whose end date has passed does not block when the server answered anything but 401: the
+  server accepting it means this machine's clock is wrong, which is a warning.
 - DNS for the API host happens at the proxy, as with `kubectl`. `net.proxy` (M1-098) and `net.egress`
   (M1-097) build their own CONNECT through the probe facade; the two share the rule text, not code.
 

@@ -81,7 +81,7 @@ pub use credential::Credential;
 pub use error::KubeError;
 pub(crate) use error::from_kube_error;
 use error::{from_kubeconfig_error, io_reason, proxy_display};
-pub use guard::{GuardError, ReadOnlyClient, guarded_service};
+pub use guard::{GuardError, ReadOnlyClient, guarded_service, guarded_service_via};
 pub use proxy::{ProxyRule, ProxyUse};
 use text::escape;
 
@@ -606,7 +606,7 @@ impl Loaded {
         // The clock around the first request. The plugin ran in the build above, so its time is not in
         // this number, which is the round trip to `/version` and nothing else.
         let started = std::time::Instant::now();
-        let info = ReadOnlyClient::new(&client, probe)
+        let info = ReadOnlyClient::new(&client, probe, facts.proxy.proxy())
             .version()
             .await
             .map_err(|error| {
@@ -704,7 +704,7 @@ impl Connected {
     /// so call it from a tokio runtime.
     #[must_use]
     pub fn read_only(&self, probe: &Probe) -> ReadOnlyClient {
-        ReadOnlyClient::new(&self.client, probe)
+        ReadOnlyClient::new(&self.client, probe, self.facts.proxy.proxy())
     }
 }
 
@@ -1002,7 +1002,7 @@ fn from_kubeconfig(
     let resolved = proxy::resolve(kubeconfig_proxy.as_deref(), env, &config.cluster_url)?;
     secrets.extend(resolved.secrets);
     config.proxy_url = resolved.uri;
-    harden_plugin(&mut config, env);
+    harden_plugin(&mut config, env, kubeconfig_proxy.as_deref());
 
     let line = ClusterLine {
         context: escape(&context_name),
@@ -1073,10 +1073,17 @@ fn credentials_of(
 /// inherits stderr, which would bring plugin text past the redactor, and a login prompt would wait for
 /// nobody. client-go only prompts when a terminal is there. So unless stdin and stderr are both
 /// terminals the mode becomes `Never` (also for `Always`, which could not prompt anyway).
-fn harden_plugin(config: &mut Config, env: &Env) {
+///
+/// `kubeconfig_proxy` is the cluster's own `proxy-url` as the kubeconfig has it. kube copies the cluster
+/// into the plugin's `KUBERNETES_EXEC_INFO` (when `provideClusterInfo` is true) after the placeholder was
+/// written to it, so the copy is set back to the real value, as `kubectl` passes it, or to none.
+fn harden_plugin(config: &mut Config, env: &Env, kubeconfig_proxy: Option<&str>) {
     let Some(exec) = config.auth_info.exec.as_mut() else {
         return;
     };
+    if let Some(cluster) = exec.cluster.as_mut() {
+        cluster.proxy_url = kubeconfig_proxy.map(str::to_owned);
+    }
     if !(env.stdin_is_terminal && env.stderr_is_terminal) {
         exec.interactive_mode = Some(ExecInteractiveMode::Never);
     }
