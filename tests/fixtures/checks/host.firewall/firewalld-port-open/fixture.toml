@@ -1,0 +1,13 @@
+schema = 1
+name = "firewalld-port-open"
+summary = "6443 and 10250 are open by port number in the default-route zone"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-firewalld"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false

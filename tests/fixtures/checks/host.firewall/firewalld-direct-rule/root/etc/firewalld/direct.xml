@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<direct>
+  <rule ipv="ipv4" table="filter" chain="INPUT" priority="0">-p tcp --dport 6443 -s 192.0.2.0/24 -j DROP</rule>
+</direct>

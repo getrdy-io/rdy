@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "/usr/bin/firewall-cmd",
+    "--state"
+  ],
+  "stdout": "",
+  "stderr": "not running\n",
+  "exit": 252,
+  "delay_ms": 0
+}

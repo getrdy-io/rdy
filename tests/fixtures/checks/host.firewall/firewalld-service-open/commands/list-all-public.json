@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/usr/bin/firewall-cmd",
+    "--list-all",
+    "--zone=public"
+  ],
+  "stdout": "public (active)\n  target: default\n  icmp-block-inversion: no\n  interfaces: eth0\n  sources: \n  services: ssh acme-api acme-kubelet\n  ports: \n  protocols: \n  forward: yes\n  masquerade: no\n  forward-ports: \n  source-ports: \n  icmp-blocks: \n  rich rules: \n",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 0
+}

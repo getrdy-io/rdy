@@ -1,0 +1,13 @@
+schema = 1
+name = "ufw-limited-source"
+summary = "ufw allows 6443 only from one network"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-ufw"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false
