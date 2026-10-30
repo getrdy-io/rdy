@@ -204,7 +204,8 @@ This file is the corrections list.
   that returns a 403 partial. M1-020 is done, so no rdy-spec result ticket is open. M1-110 starts with a
   small rdy-spec change: the `missing_grants` field on `Partial`, the schema, 01 section 5.2 and the
   regenerated docs. Then M1-033's `notes` line moves to the field. M1-109 (k8s.access) reports a block
-  with a fix and does not need it.
+  with a fix and does not need it. Built in M1-110: the field, the schema, 01 section 5.2 and the notes line
+  moved to the field.
 
 ## CLAUDE.md edits
 

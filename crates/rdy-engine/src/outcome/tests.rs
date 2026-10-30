@@ -524,10 +524,13 @@ fn a_partial_os_keeps_the_note_of_the_check_too() {
 }
 
 #[test]
-fn missing_grants_are_kept_in_the_notes() {
+fn missing_grants_are_a_field_of_the_wire_partial_once_each() {
     let finding = Finding::fail("denied").with_partial(
-        Partial::new(vec![], "RBAC denied some reads")
-            .with_missing_grants(vec!["list nodes".to_owned(), "get pods".to_owned()]),
+        Partial::new(vec![], "RBAC denied some reads").with_missing_grants(vec![
+            "list nodes".to_owned(),
+            "get pods".to_owned(),
+            "list nodes".to_owned(),
+        ]),
     );
     let result = map(
         &PLAIN,
@@ -535,7 +538,26 @@ fn missing_grants_are_kept_in_the_notes() {
         &ctx("fake.plain", &[]),
         Ok(finding),
     );
-    assert_eq!(result.notes, ["Missing grants: list nodes, get pods"]);
+    let partial = result.partial.expect("partial");
+    assert_eq!(partial.missing_grants, ["list nodes", "get pods"]);
+    // They no longer go to the notes.
+    assert!(
+        result.notes.iter().all(|note| !note.contains("grants")),
+        "{:?}",
+        result.notes
+    );
+}
+
+#[test]
+fn a_partial_without_grants_has_an_empty_list() {
+    let finding = Finding::pass("ok").with_partial(Partial::new(vec![Need::Root], "no root"));
+    let result = map(
+        &WITH_WANTS,
+        &entry("fake.wants"),
+        &ctx("fake.wants", &[]),
+        Ok(finding),
+    );
+    assert!(result.partial.expect("partial").missing_grants.is_empty());
 }
 
 #[test]

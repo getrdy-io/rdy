@@ -1,0 +1,172 @@
+# The storage provisioner table behind k8s.storageclass (M1-110, docs/plan/03-check-catalog.md Appendix B).
+#
+# A StorageClass cannot say which access modes it serves, so the check reads them from here. It also maps
+# the names of the old in-tree provisioners to the CSI drivers that serve them after CSI migration.
+#
+# [[in_tree]]
+#   from                the provisioner name a class carries, such as kubernetes.io/aws-ebs.
+#   to                  the CSI driver name that serves it. CSINode and CSIDriver objects use this name.
+#
+# [[driver]]
+#   name                the driver or provisioner name. With match = "suffix" the entry matches a name that
+#                       equals it or ends with a dot and then it (ceph-csi drivers carry a prefix, such as
+#                       the OpenShift Data Foundation one).
+#   match               "exact" or "suffix".
+#   csi                 true for a CSI driver. A provisioner that is not CSI registers nothing on CSINode.
+#   modes               access modes the driver serves, from ReadWriteOnce, ReadOnlyMany, ReadWriteMany,
+#                       ReadWriteOncePod. A shared file system serves ReadWriteOnce and ReadOnlyMany too.
+#   conditional_modes   optional. Modes the driver serves only under `condition` (a class cannot say which).
+#   condition           fixed words for the condition. Required with conditional_modes, else absent.
+#   topology            "zone" if a volume lives in one zone, "node" if it lives on one node, else "none".
+#   source              https URL of the public page the entry came from.
+#   checked_on          YYYY-MM-DD, the day someone read that page.
+#
+# A mode that is in neither list is "not served" only when the driver is known to refuse it. For a CSI driver
+# that serves ReadWriteOnce, ReadOnlyMany and ReadWriteOncePod are reported as not verified, not as refused:
+# support depends on the driver version. ReadWriteOncePod on a provisioner that is not CSI is refused,
+# because Kubernetes serves that mode for CSI volumes only.
+#
+# No free-text notes. The check prints fixed words.
+#
+# FOUNDER HAND STEP: this seed table is a proposal. A person must read each entry and its source before the
+# release that ships it. Several sources describe the mode on a neighbouring page and not in one sentence.
+
+schema = 1
+
+[[in_tree]]
+from = "kubernetes.io/aws-ebs"
+to = "ebs.csi.aws.com"
+
+[[in_tree]]
+from = "kubernetes.io/gce-pd"
+to = "pd.csi.storage.gke.io"
+
+[[in_tree]]
+from = "kubernetes.io/azure-disk"
+to = "disk.csi.azure.com"
+
+[[in_tree]]
+from = "kubernetes.io/azure-file"
+to = "file.csi.azure.com"
+
+[[in_tree]]
+from = "kubernetes.io/cinder"
+to = "cinder.csi.openstack.org"
+
+[[in_tree]]
+from = "kubernetes.io/vsphere-volume"
+to = "csi.vsphere.vmware.com"
+
+[[driver]]
+name = "ebs.csi.aws.com"
+match = "exact"
+csi = true
+modes = ["ReadWriteOnce"]
+conditional_modes = ["ReadWriteMany"]
+condition = "raw block volumes on a multi-attach volume type"
+topology = "zone"
+source = "https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "ebs.csi.eks.amazonaws.com"
+match = "exact"
+csi = true
+modes = ["ReadWriteOnce"]
+topology = "zone"
+source = "https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "pd.csi.storage.gke.io"
+match = "exact"
+csi = true
+modes = ["ReadWriteOnce", "ReadOnlyMany"]
+topology = "zone"
+source = "https://docs.cloud.google.com/kubernetes-engine/docs/concepts/persistent-volumes"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "filestore.csi.storage.gke.io"
+match = "exact"
+csi = true
+modes = ["ReadWriteMany", "ReadWriteOnce", "ReadOnlyMany"]
+topology = "none"
+source = "https://docs.cloud.google.com/kubernetes-engine/docs/concepts/filestore-for-gke"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "disk.csi.azure.com"
+match = "exact"
+csi = true
+modes = ["ReadWriteOnce"]
+conditional_modes = ["ReadWriteMany"]
+condition = "raw block volumes on a shared disk"
+topology = "zone"
+source = "https://learn.microsoft.com/azure/aks/concepts-storage"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "file.csi.azure.com"
+match = "exact"
+csi = true
+modes = ["ReadWriteMany", "ReadWriteOnce", "ReadOnlyMany"]
+topology = "none"
+source = "https://learn.microsoft.com/azure/aks/concepts-storage"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "efs.csi.aws.com"
+match = "exact"
+csi = true
+modes = ["ReadWriteMany", "ReadWriteOnce", "ReadOnlyMany"]
+topology = "none"
+source = "https://docs.aws.amazon.com/eks/latest/userguide/efs-csi.html"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "nfs.csi.k8s.io"
+match = "exact"
+csi = true
+modes = ["ReadWriteMany", "ReadWriteOnce", "ReadOnlyMany"]
+topology = "none"
+source = "https://github.com/kubernetes-csi/csi-driver-nfs"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "driver.longhorn.io"
+match = "exact"
+csi = true
+modes = ["ReadWriteOnce", "ReadWriteMany"]
+topology = "none"
+source = "https://longhorn.io/docs/latest/nodes-and-volumes/volumes/rwx-volumes/"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "cephfs.csi.ceph.com"
+match = "suffix"
+csi = true
+modes = ["ReadWriteMany", "ReadWriteOnce", "ReadOnlyMany"]
+topology = "none"
+source = "https://docs.ceph.com/en/latest/csi/"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "rbd.csi.ceph.com"
+match = "suffix"
+csi = true
+modes = ["ReadWriteOnce", "ReadOnlyMany"]
+conditional_modes = ["ReadWriteMany"]
+condition = "raw block volumes"
+topology = "none"
+source = "https://docs.ceph.com/en/squid/rbd/rbd-kubernetes/"
+checked_on = "2026-10-30"
+
+[[driver]]
+name = "rancher.io/local-path"
+match = "exact"
+csi = false
+modes = ["ReadWriteOnce"]
+topology = "node"
+source = "https://github.com/rancher/local-path-provisioner"
+checked_on = "2026-10-30"

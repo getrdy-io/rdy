@@ -120,11 +120,18 @@ const ALLOWED: &[(&str, &str)] = &[
 /// `literal` (no `concat!`), and `literal` is `../data/<name>.toml`, one step out of the crate's `src/` into
 /// its own `data/` directory (`shipped_data_is_embedded_only_from_the_crates_own_data_directory` checks it).
 /// A test module of the same crate is covered by `INCLUDE_DATA_ALLOWED`.
-const INCLUDE_SHIPPED_DATA_ALLOWED: &[(&str, &str, &str)] = &[(
-    "crates/rdy-checks-host/src/agents.rs",
-    "../data/agents.toml",
-    "embeds the security-software catalog that host.security_agents matches against (M1-146)",
-)];
+const INCLUDE_SHIPPED_DATA_ALLOWED: &[(&str, &str, &str)] = &[
+    (
+        "crates/rdy-checks-host/src/agents.rs",
+        "../data/agents.toml",
+        "embeds the security-software catalog that host.security_agents matches against (M1-146)",
+    ),
+    (
+        "crates/rdy-checks-k8s/src/provisioners.rs",
+        "../data/provisioners.toml",
+        "embeds the provisioner table that k8s.storageclass reads access modes from (M1-110)",
+    ),
+];
 
 /// Check-crate files that embed a data file with `include_str!` or `include_bytes!`. Data only: the file
 /// is text, never Rust. `include!` and `#[path]` are never allowed in a check crate.

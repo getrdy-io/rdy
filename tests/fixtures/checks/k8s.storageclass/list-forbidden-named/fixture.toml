@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-storageclass-list-forbidden-named"
+summary = "The list is refused and the class named in the spec can be read by name"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.storageclass"]
+
+[caps]
+root = false
+network = true
+kube = true

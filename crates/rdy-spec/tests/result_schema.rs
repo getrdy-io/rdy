@@ -387,6 +387,36 @@ fn a_newer_producer_still_reads() -> TestResult {
     Ok(())
 }
 
+/// `partial.missing_grants` (M1-110): a report written before the field existed reads as empty, a
+/// partial with grants round trips, and the schema bounds the field to a list of text.
+#[test]
+fn partial_missing_grants_default_to_empty_and_round_trip() -> TestResult {
+    let partial = validator(Some("Partial"))?;
+    let old = serde_json::json!({"missing": ["kube_context"], "note": "no cluster"});
+    assert_valid(&partial, &old, "a partial without grants");
+    let read: rdy_spec::result::Partial = serde_json::from_value(old)?;
+    assert!(read.missing_grants.is_empty());
+
+    let with = rdy_spec::result::Partial::new(Vec::new(), "csinodes forbidden")
+        .with_missing_grants(vec!["list csinodes (storage.k8s.io)".to_owned()]);
+    let written = serde_json::to_value(&with)?;
+    assert_eq!(
+        written["missing_grants"],
+        serde_json::json!(["list csinodes (storage.k8s.io)"])
+    );
+    assert_valid(&partial, &written, "a partial with grants");
+    assert_eq!(
+        serde_json::from_value::<rdy_spec::result::Partial>(written)?,
+        with
+    );
+
+    let not_text = serde_json::json!({"missing": [], "missing_grants": [7], "note": "x"});
+    assert!(!is_valid(&partial, &not_text));
+    let not_list = serde_json::json!({"missing": [], "missing_grants": "list nodes", "note": "x"});
+    assert!(!is_valid(&partial, &not_list));
+    Ok(())
+}
+
 /// A datagram exchange as `Probe::udp_exchange` logs it (M1-144) satisfies the action schema, and a
 /// `proto` other than `udp` does not.
 #[test]

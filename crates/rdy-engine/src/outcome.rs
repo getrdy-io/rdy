@@ -119,15 +119,6 @@ fn from_finding(
     } = finding;
 
     let partial = merge_partial(info, ctx, partial);
-    if let Some(partial) = &partial
-        && !partial.missing_grants.is_empty()
-    {
-        // The wire `partial` has no field for grants yet, so they go to the notes.
-        notes.push(format!(
-            "Missing grants: {}",
-            partial.missing_grants.join(", ")
-        ));
-    }
 
     let level_status = cap_level(level, severity);
     let wire_partial = partial.as_ref().map(wire_partial);
@@ -313,7 +304,14 @@ fn wire_partial(partial: &Partial) -> WirePartial {
             wire.push(need);
         }
     }
-    WirePartial::new(wire, partial.note.clone())
+    // The grants keep the order the check gave them, once each.
+    let mut grants: Vec<String> = Vec::new();
+    for grant in &partial.missing_grants {
+        if !grants.contains(grant) {
+            grants.push(grant.clone());
+        }
+    }
+    WirePartial::new(wire, partial.note.clone()).with_missing_grants(grants)
 }
 
 /// What [`apply_partial_rule`] should treat as evidence only.

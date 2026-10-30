@@ -34,3 +34,23 @@ rule = "ip"
 path = "tests/fixtures/checks/host.os/ubuntu-wsl/root/proc/sys/kernel/osrelease"
 value = "5.15.90.1"
 reason = "A WSL2 kernel version with four parts (5.15.90.1-microsoft-standard-WSL2), not an address; host.os parses it"
+
+[[allow]]
+rule = "host"
+value = "pd.csi.storage.gke.io"
+reason = "A CSI driver name that a StorageClass carries as its provisioner, not a host a test contacts (k8s.storageclass)"
+
+[[allow]]
+rule = "host"
+value = "disk.csi.azure.com"
+reason = "A CSI driver name that a StorageClass carries as its provisioner, not a host a test contacts (k8s.storageclass)"
+
+[[allow]]
+rule = "host"
+value = "rancher.io"
+reason = "The prefix of the local-path provisioner name (rancher.io/local-path), not a host a test contacts (k8s.storageclass)"
+
+[[allow]]
+rule = "host"
+value = "ceph.com"
+reason = "The suffix of the ceph-csi driver names (openshift-storage.rbd.csi.ceph.com), not a host a test contacts (k8s.storageclass)"
