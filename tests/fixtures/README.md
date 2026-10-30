@@ -61,7 +61,7 @@ tests/fixtures/
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), `host.disk/` (15 cases), the twelve machines of
-`host.os/`, `host.security_agents/` (18 cases), `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
+`host.os/`, `host.security_agents/` (18 cases), the `host.lsm/` cases, `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
@@ -360,6 +360,45 @@ the text after it must not start with a hex digit. Everything else must match by
 `report.json`, `report.html` and `terminal.txt` from the in-process run. HTML goldens exist for `all-pass`,
 `warnings-only` and `all-block` only. A golden is the exact bytes the product writes. It changes only with
 `UPDATE_GOLDENS=1`, and the diff is read before the code diff.
+
+### Comparing and updating goldens
+
+A test compares output with a golden through one helper, `rdy_engine::testing::golden::assert_golden(path,
+bytes)`. It compares bytes and does no scrubbing: hand it output that is already deterministic.
+
+| Situation | What happens |
+| --- | --- |
+| Same bytes | Pass. A stale `<path>.actual` is deleted |
+| Different bytes | Fail. The message has the first 40 lines of a unified diff and the accept command. The new bytes are in `<path>.actual`, which the repo ignores |
+| No golden | Fail the same way. The golden is not created |
+| `UPDATE_GOLDENS=1` | Write the golden (and its folders), print `golden written: <path>` for each file, pass |
+| `UPDATE_GOLDENS=1` and `CI` set | Fail at once, even when the golden matches. An empty `CI` does not count |
+| `UPDATE_GOLDENS` is anything but `1`, `0` or empty | Fail, so a typo never passes |
+| A path under `tests/fixtures/redaction` or `tests/fixtures/results` | `UPDATE_GOLDENS` never writes there, even through a symlink. The compare still runs. A failure parks the new bytes in `target/goldens-actual/<repo-relative path>.actual` and creates nothing in those folders. Edit the file by hand |
+| The golden is a symlink | `UPDATE_GOLDENS=1` fails instead of writing through it, dangling or not |
+
+The accept command is `UPDATE_GOLDENS=1 cargo nextest run -p <package>`. Read the diff of `tests/` and
+`crates/` before you commit. The PR body has a `## Golden changes` section, one sentence per changed file.
+
+Every path given to the helper is appended to `target/goldens-used/<pid>.txt` (below `CARGO_TARGET_DIR`
+when it is set), as repo-relative text with `/` separators. `cargo xtask goldens check` lists the golden
+files on disk and fails on each one that no record names. A golden file on disk is:
+
+- `envs/<env>/golden/<file>`;
+- `checks/<check-id>/<case>/expect.json`;
+- `redaction/<category>/<case>.expected`.
+
+Anything else is an input, or data that a check reads, such as a fake file tree. So the redaction corpus
+must compare `.expected` through `assert_golden`. The helper never writes there, so the compare is all it
+does.
+
+Run `rm -rf target/goldens-used` before the test run, and `cargo xtask goldens check` after
+`cargo nextest run --workspace`. A record left by an older run can hide an orphan. A run of one package
+makes every other package's goldens look orphaned. CI does both on linux-x64.
+
+CI scope: the check only counts what ran on linux-x64. So a golden must be compared by a test that is not
+`root_*`, not `#[ignore]`, not behind a non-default feature and not gated to another OS. Otherwise the check
+calls it an orphan. If nextest is ever sharded, run `goldens check` on the combined records of all shards.
 
 ## Line endings
 
