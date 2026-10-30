@@ -4,7 +4,9 @@ use rdy_spec::check::SelinuxMode;
 
 use super::apparmor::{parse_enabled, parse_profiles};
 use super::audit::{scan, stamp};
-use super::selinux::{Configured, Mount, parse_config, parse_enforce, selinux_mount};
+use super::selinux::{
+    Configured, Mount, mount_words, parse_config, parse_enforce, root_is_overlay, selinux_mount,
+};
 use super::{age, join_or, plural};
 
 fn avc(at: u64, source: &str, target: &str, class: &str, comm: &str) -> String {
@@ -27,10 +29,33 @@ fn enforce_is_one_or_zero() {
 }
 
 #[test]
-fn config_takes_the_last_selinux_line() {
+fn config_takes_the_first_known_selinux_line_as_libselinux_does() {
     let text =
         "# SELINUX=disabled\nSELINUXTYPE=targeted\nSELINUX=permissive\nSELINUX=Enforcing # now\n";
-    assert_eq!(parse_config(text), Configured::Mode(SelinuxMode::Enforcing));
+    assert_eq!(
+        parse_config(text),
+        Configured::Mode(SelinuxMode::Permissive)
+    );
+    // An unknown value is skipped, a leading space hides the line, and case does not matter.
+    assert_eq!(
+        parse_config("SELINUX=strict\n  SELINUX=disabled\nSELINUX=ENFORCING\n"),
+        Configured::Mode(SelinuxMode::Enforcing)
+    );
+    assert_eq!(parse_config(" SELINUX=enforcing\n"), Configured::Unset);
+    // White space after the `=` is skipped, and the value is matched by its start.
+    assert_eq!(
+        parse_config("SELINUX= disabled\n"),
+        Configured::Mode(SelinuxMode::Disabled)
+    );
+    assert_eq!(
+        parse_config("SELINUX=enforcing # comment\n"),
+        Configured::Mode(SelinuxMode::Enforcing)
+    );
+    // The first unknown value is the one reported when no line is known.
+    assert_eq!(
+        parse_config("SELINUX=strict\nSELINUX=other\n"),
+        Configured::Other("strict".to_owned())
+    );
     assert_eq!(parse_config("SELINUXTYPE=mls\n"), Configured::Unset);
     assert_eq!(parse_config(""), Configured::Unset);
     assert_eq!(
@@ -69,6 +94,40 @@ fn mountinfo_finds_the_topmost_mount_on_the_selinux_directory() {
         selinux_mount(escaped_dir),
         Some(Mount::Masked("tmpfs".to_owned()))
     );
+}
+
+#[test]
+fn an_overlay_root_is_the_last_mount_on_slash() {
+    let overlay = "601 391 0:55 / / rw - overlay overlay rw,lowerdir=/a\n";
+    assert!(root_is_overlay(overlay));
+    assert!(!root_is_overlay("24 1 8:2 / / rw - ext4 /dev/sda2 rw\n"));
+    // An overlay mounted elsewhere is not the root.
+    assert!(!root_is_overlay(
+        "24 1 8:2 / / rw - ext4 /dev/sda2 rw\n25 24 0:5 / /var/lib/x rw - overlay overlay rw\n"
+    ));
+    // The topmost mount on `/` wins.
+    assert!(!root_is_overlay(&format!(
+        "{overlay}602 601 8:2 / / rw - ext4 /dev/sda2 rw\n"
+    )));
+    for text in ["", "garbage\n", "1 0 0:1 / / rw\n", "1 0 0:1 / / rw - \n"] {
+        assert!(!root_is_overlay(text), "{text:?}");
+    }
+}
+
+#[test]
+fn only_plain_mount_types_are_repeated() {
+    assert_eq!(mount_words("tmpfs"), "a tmpfs mount");
+    assert_eq!(mount_words("fuse.sshfs-2_x"), "a fuse.sshfs-2_x mount");
+    for odd in [
+        "",
+        "Tmpfs",
+        "fuse.\u{1b}[2J",
+        "a\u{202e}b",
+        "evil fs",
+        "x/y",
+    ] {
+        assert_eq!(mount_words(odd), "another file system", "{odd:?}");
+    }
 }
 
 #[test]

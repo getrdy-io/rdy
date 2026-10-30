@@ -166,8 +166,9 @@ impl Lsm {
 
     /// Fixes the time the denial window counts back from, in Unix seconds. Tests use it. A run reads
     /// the clock.
+    #[cfg(test)]
     #[must_use]
-    pub fn at(mut self, unix_seconds: u64) -> Self {
+    pub(crate) fn at(mut self, unix_seconds: u64) -> Self {
         self.now = Some(unix_seconds);
         self
     }
@@ -310,7 +311,8 @@ async fn absent_state(ctx: &CheckContext) -> Result<SeState, CheckError> {
         match selinux::selinux_mount(&text) {
             Some(selinux::Mount::Masked(fstype)) => {
                 return Ok(SeState::NotVisible(format!(
-                    "{SELINUX_DIR} is covered by a {fstype} mount, which is how a container runtime hides it"
+                    "{SELINUX_DIR} is covered by {}, which is how a container runtime hides it",
+                    selinux::mount_words(&fstype)
                 )));
             }
             Some(selinux::Mount::Selinuxfs) => {
@@ -319,6 +321,12 @@ async fn absent_state(ctx: &CheckContext) -> Result<SeState, CheckError> {
                 )));
             }
             None => {}
+        }
+        // Containerd and CRI-O leave no marker file and no mask, but the root is an overlay.
+        if selinux::root_is_overlay(&text) {
+            return Ok(SeState::NotVisible(format!(
+                "this looks like a container (the root file system is an overlay) and {SELINUX_DIR} has no enforce file"
+            )));
         }
     }
     for marker in CONTAINER_MARKERS {
@@ -611,10 +619,11 @@ impl Lsm {
                 part.observed["state"] = json!("not visible");
                 part.observed["why"] = json!(why);
                 part.notes.push(format!("SELinux is not visible: {why}."));
-                if rule.is_some_and(|r| r.allow.is_some()) {
+                if let Some(what) = rule.and_then(unchecked) {
+                    part.observed["denials"] = json!({ "inspected": false, "why": "not visible" });
                     part.problem(
                         Level::Warn,
-                        "SELinux is not visible from here, so its mode cannot be checked.",
+                        format!("SELinux is not visible from here, so {what} cannot be checked."),
                         "Run rdy on the host, not inside a container, or run `getenforce` on the host.",
                     );
                 }
@@ -625,10 +634,13 @@ impl Lsm {
                 part.observed["why"] = json!(why);
                 part.notes
                     .push(format!("The SELinux state could not be read: {why}."));
-                if rule.is_some_and(|r| r.allow.is_some()) {
+                if let Some(what) = rule.and_then(unchecked) {
+                    part.observed["denials"] = json!({ "inspected": false, "why": "unreadable" });
                     part.problem(
                         Level::Warn,
-                        "The SELinux mode could not be read, so it cannot be checked.",
+                        format!(
+                            "The SELinux state could not be read, so {what} cannot be checked."
+                        ),
                         "Run `getenforce` on the host to see the mode.",
                     );
                 }
@@ -677,6 +689,20 @@ impl Lsm {
     }
 }
 
+/// What the spec asked about SELinux that cannot be checked when the state is not known: the mode, the
+/// denials, or both. `None` when the spec asked for neither.
+fn unchecked(rule: &SelinuxRule) -> Option<&'static str> {
+    match (rule.allow.is_some(), rule.denials_asked) {
+        (true, false) => Some("its mode"),
+        (false, true) => Some("its denials"),
+        (true, true) => Some("its mode and denials"),
+        (false, false) => None,
+    }
+}
+
+/// Nothing on the machine can fix an empty allow list, so the fix points at the spec.
+const EMPTY_ALLOW_FIX: &str = "Ask the vendor to fix the spec's allow list.";
+
 const SELINUX_LAST_RESORT: &str = "Last resort: run `setenforce 0` now and set `SELINUX=permissive` in `/etc/selinux/config`. This turns SELinux protection off, so ask the security team first.";
 
 /// A runtime mode the spec does not allow, and a configured mode that will not be allowed after a reboot.
@@ -697,10 +723,10 @@ fn judge_mode(
             part.problem(
                 Level::Fail,
                 format!(
-                    "SELinux is {}, but the spec's allow list is empty, so no mode is accepted. Ask the vendor to fix the spec.",
+                    "SELinux is {}, but the spec's allow list is empty, so no mode is accepted.",
                     se_word(mode)
                 ),
-                "",
+                EMPTY_ALLOW_FIX,
             );
             return;
         }
@@ -753,12 +779,14 @@ fn note_config_drift(mode: SelinuxMode, configured: &selinux::Configured, part: 
 }
 
 fn ausearch_since(window_secs: u64) -> &'static str {
+    // `today`, `this-week` and `this-month` start at a calendar boundary and can cover less than the
+    // window. These start before it.
     if window_secs <= 24 * 3600 {
-        "today"
+        "yesterday"
     } else if window_secs <= 7 * 24 * 3600 {
-        "this-week"
+        "week-ago"
     } else {
-        "this-month"
+        "this-year"
     }
 }
 
@@ -823,7 +851,7 @@ fn judge_denials(
                         rule.window_text
                     ),
                     format!(
-                        "Read them with `ausearch -m avc -ts {}`. Install the vendor policy module, or label the volume with `chcon -Rt container_file_t <volume path>` or the `:Z` mount option. {SELINUX_LAST_RESORT}",
+                        "Read them with `ausearch -m avc -ts {}`. Install the vendor policy module, or label the volume with `chcon -Rt container_file_t <volume path>` or the `:Z` mount option. The `chcon` label does not survive a relabel. Ask the vendor for the persistent rule. {SELINUX_LAST_RESORT}",
                         ausearch_since(rule.window_secs)
                     ),
                 );
@@ -850,28 +878,38 @@ fn judge_denials(
         Denials::Forbidden => {
             part.observed["denials"] =
                 json!({ "inspected": false, "why": "permission denied as root" });
-            part.problem(
-                Level::Warn,
-                "SELinux denials were not inspected: the audit log could not be read as root (permission denied).",
-                format!(
-                    "Read the denials by hand with `ausearch -m avc -ts {}`.",
-                    ausearch_since(rule.window_secs)
-                ),
+            unread_log(
+                rule,
+                part,
+                "the audit log could not be read as root (permission denied)",
             );
         }
         Denials::Failed(why) => {
             part.observed["denials"] = json!({ "inspected": false, "why": why });
-            part.problem(
-                Level::Warn,
-                format!(
-                    "SELinux denials were not inspected: the audit log could not be read ({why})."
-                ),
-                format!(
-                    "Read the denials by hand with `ausearch -m avc -ts {}`.",
-                    ausearch_since(rule.window_secs)
-                ),
+            unread_log(
+                rule,
+                part,
+                &format!("the audit log could not be read ({why})"),
             );
         }
+    }
+}
+
+/// One rule for an audit log that is missing or cannot be read as root: when the spec asked about
+/// denials it is a warning with a fix, and otherwise only a note.
+fn unread_log(rule: &SelinuxRule, part: &mut Part, reason: &str) {
+    let text = format!("SELinux denials were not inspected: {reason}.");
+    if rule.denials_asked {
+        part.problem(
+            Level::Warn,
+            text,
+            format!(
+                "Read the denials by hand with `ausearch -m avc -ts {}`.",
+                ausearch_since(rule.window_secs)
+            ),
+        );
+    } else {
+        part.notes.push(text);
     }
 }
 
@@ -910,7 +948,7 @@ fn judge_apparmor_state(rule: &ApparmorRule, mode: ApparmorMode, part: &mut Part
     let allowed = join_or(allow.iter().map(|m| aa_word(*m)));
     let text = if allow.is_empty() {
         format!(
-            "AppArmor is {}, but the spec's allow list is empty, so no state is accepted. Ask the vendor to fix the spec.",
+            "AppArmor is {}, but the spec's allow list is empty, so no state is accepted.",
             aa_word(mode)
         )
     } else {
@@ -920,11 +958,11 @@ fn judge_apparmor_state(rule: &ApparmorRule, mode: ApparmorMode, part: &mut Part
         )
     };
     let fix = if allow.is_empty() {
-        String::new()
+        EMPTY_ALLOW_FIX.to_owned()
     } else if mode == ApparmorMode::Disabled {
         "Turn AppArmor on with `systemctl enable --now apparmor`. If the kernel has it off, add `apparmor=1 security=apparmor` to the kernel command line and reboot.".to_owned()
     } else {
-        "The spec expects AppArmor to be off. Ask the vendor whether a profile exists before you change anything. To turn it off for a boot, add `apparmor=0` to the kernel command line.".to_owned()
+        "The spec expects AppArmor to be off. Ask the vendor whether a profile exists before you change anything. To turn it off for a boot, add `apparmor=0` to the kernel command line. This turns AppArmor protection off, so ask the security team first.".to_owned()
     };
     part.problem(Level::Fail, text, fix);
 }

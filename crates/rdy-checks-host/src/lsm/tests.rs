@@ -91,7 +91,7 @@ fn run_case(name: &str, params: Value) -> Ran {
     )
 }
 
-const CASES: [&str; 13] = [
+const CASES: [&str; 16] = [
     "enforcing-clean",
     "enforcing-watched-denials",
     "enforcing-other-denials",
@@ -105,6 +105,9 @@ const CASES: [&str; 13] = [
     "apparmor-profile-missing",
     "apparmor-root-less",
     "apparmor-container",
+    "apparmor-off",
+    "container-overlay-root",
+    "enforcing-hostile-avc",
 ];
 
 // ---- the exit tests ------------------------------------------------------------------------------
@@ -132,13 +135,19 @@ fn enforcing_with_two_denials_for_a_watched_context_blocks() {
         json!([{"source": "acme_t", "target": "var_lib_t", "class": "file", "count": 2}])
     );
     let fix = f.fix.as_deref().expect("a fix");
-    assert!(fix.contains("`ausearch -m avc -ts today`"), "{fix}");
+    assert!(fix.contains("`ausearch -m avc -ts yesterday`"), "{fix}");
     assert!(
         fix.contains("`chcon -Rt container_file_t <volume path>`"),
         "{fix}"
     );
     assert!(fix.contains("`setenforce 0`"), "{fix}");
     assert!(fix.contains("ask the security team first"), "{fix}");
+    assert!(
+        fix.contains(
+            "The `chcon` label does not survive a relabel. Ask the vendor for the persistent rule."
+        ),
+        "{fix}"
+    );
 }
 
 #[test]
@@ -170,7 +179,7 @@ fn an_unreadable_audit_log_gives_partial() {
 
 #[test]
 fn a_masked_selinux_directory_says_not_visible() {
-    for name in ["masked-mount", "container-marker"] {
+    for name in ["masked-mount", "container-marker", "container-overlay-root"] {
         let ran = run_case(name, json!({"selinux": {"allow": ["enforcing"]}}));
         let f = ran.finding();
         assert_eq!(f.level, Level::Warn, "{name}: {f:?}");
@@ -206,6 +215,77 @@ fn the_two_ways_to_see_a_mask_give_different_reasons() {
         .expect("why")
         .to_owned();
     assert!(why.contains("/run/.containerenv exists"), "{why}");
+    // containerd and CRI-O leave neither a marker nor a mask, only an overlay root.
+    let overlay = run_case("container-overlay-root", json!({}));
+    let why = overlay.finding().observed["selinux"]["why"]
+        .as_str()
+        .expect("why")
+        .to_owned();
+    assert!(why.contains("root file system is an overlay"), "{why}");
+}
+
+#[test]
+fn denials_asked_on_a_host_that_cannot_be_seen_warn_and_say_not_inspected() {
+    for name in ["masked-mount", "container-overlay-root"] {
+        for (params, message) in [
+            (
+                json!({"selinux": {"watch": ["acme_t"]}}),
+                "SELinux is not visible from here, so its denials cannot be checked.",
+            ),
+            (
+                json!({"selinux": {"allow": ["enforcing"], "denials_max": 1}}),
+                "SELinux is not visible from here, so its mode and denials cannot be checked.",
+            ),
+        ] {
+            let ran = run_case(name, params);
+            let f = ran.finding();
+            assert_eq!(f.level, Level::Warn, "{name}: {f:?}");
+            assert_eq!(f.message, message, "{name}");
+            assert_eq!(
+                f.observed["selinux"]["denials"]["inspected"], false,
+                "{name}: {f:?}"
+            );
+            assert!(!ran.read("/var/log/audit/audit.log"), "{name}");
+        }
+    }
+    // A spec that asks for neither stays a pass with a note.
+    let ran = run_case("masked-mount", json!({"selinux": {}}));
+    assert_eq!(ran.finding().level, Level::Pass);
+}
+
+#[test]
+fn an_unreadable_selinux_state_with_denials_asked_warns() {
+    let replay = Replay::new().file("/sys/fs/selinux/enforce", "maybe\n");
+    let ran = execute(
+        replay,
+        vec![Need::Root],
+        Os::Linux,
+        &check(json!({"selinux": {"denials_window": "7d"}})),
+    );
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert_eq!(
+        f.message,
+        "The SELinux state could not be read, so its denials cannot be checked."
+    );
+    assert_eq!(f.observed["selinux"]["denials"]["inspected"], false);
+}
+
+#[test]
+fn a_fake_mount_type_is_not_repeated_in_the_message() {
+    let mountinfo = "1 0 0:1 / / rw - xfs /dev/sda rw\n\
+        2 1 0:2 / /sys/fs/selinux rw - fuse.\u{1b}[31mevil x rw\n";
+    let replay = Replay::new().file("/proc/self/mountinfo", mountinfo);
+    let ran = execute(
+        replay,
+        vec![],
+        Os::Linux,
+        &check(json!({"selinux": {"allow": ["enforcing"]}})),
+    );
+    let f = ran.finding();
+    let why = f.observed["selinux"]["why"].as_str().expect("why");
+    assert!(why.contains("covered by another file system,"), "{why}");
+    assert!(!why.contains("evil") && !why.contains('\u{1b}'), "{why}");
 }
 
 // ---- SELinux modes -------------------------------------------------------------------------------
@@ -261,11 +341,7 @@ fn a_clean_log_passes_and_an_old_denial_is_outside_the_window() {
         "{}",
         f.message
     );
-    assert!(
-        f.fix
-            .as_deref()
-            .is_some_and(|x| x.contains("-ts this-week"))
-    );
+    assert!(f.fix.as_deref().is_some_and(|x| x.contains("-ts week-ago")));
 }
 
 #[test]
@@ -384,7 +460,11 @@ fn an_empty_allow_list_accepts_no_mode() {
         "{}",
         f.message
     );
-    assert!(f.fix.is_none(), "a machine change cannot fix a spec");
+    assert_eq!(
+        f.fix.as_deref(),
+        Some("Ask the vendor to fix the spec's allow list."),
+        "the fix points at the spec"
+    );
     let ran = run_case(
         "apparmor-profile-loaded",
         json!({"apparmor": {"allow": []}}),
@@ -392,6 +472,10 @@ fn an_empty_allow_list_accepts_no_mode() {
     let f = ran.finding();
     assert_eq!(f.level, Level::Fail, "{f:?}");
     assert!(f.message.contains("no state is accepted"), "{}", f.message);
+    assert_eq!(
+        f.fix.as_deref(),
+        Some("Ask the vendor to fix the spec's allow list.")
+    );
 }
 
 #[test]
@@ -429,14 +513,18 @@ fn no_audit_log_is_a_note_unless_the_spec_asked_about_denials() {
 }
 
 #[test]
-fn an_unreadable_log_as_root_is_a_warning_not_a_partial() {
+fn an_unreadable_log_as_root_follows_the_same_rule_as_a_missing_log() {
     let fixture = case("enforcing-root-less");
-    let ran = execute(
-        fixture.replay().clone(),
-        vec![Need::Root],
-        Os::Linux,
-        &check(json!({"selinux": {"allow": ["enforcing"]}})),
-    );
+    let run = |params: Value| {
+        execute(
+            fixture.replay().clone(),
+            vec![Need::Root],
+            Os::Linux,
+            &check(params),
+        )
+    };
+    // The spec asked about denials: a warning, not a partial.
+    let ran = run(json!({"selinux": {"allow": ["enforcing"], "denials_max": 0}}));
     let f = ran.finding();
     assert_eq!(f.level, Level::Warn, "{f:?}");
     assert!(
@@ -446,6 +534,28 @@ fn an_unreadable_log_as_root_is_a_warning_not_a_partial() {
         f.message
     );
     assert!(f.partial.is_none());
+    assert!(
+        f.fix
+            .as_deref()
+            .is_some_and(|x| x.contains("`ausearch -m avc -ts yesterday`"))
+    );
+
+    // The spec did not: a note, as for a missing log.
+    let ran = run(json!({"selinux": {"allow": ["enforcing"]}}));
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Pass, "{f:?}");
+    assert!(f.partial.is_none());
+    assert!(
+        f.notes
+            .iter()
+            .any(|n| n.contains("could not be read as root (permission denied)")),
+        "{:?}",
+        f.notes
+    );
+    assert_eq!(
+        f.observed["selinux"]["denials"]["inspected"], false,
+        "{f:?}"
+    );
 }
 
 // ---- the audit log window ------------------------------------------------------------------------
@@ -559,6 +669,47 @@ fn evidence_holds_no_user_name_file_name_or_command_from_the_log() {
             "{secret} reached the finding: {everything}"
         );
     }
+}
+
+#[test]
+fn hostile_text_in_an_audit_line_never_reaches_the_finding() {
+    let ran = run_case(
+        "enforcing-hostile-avc",
+        json!({"selinux": {"watch": ["acme_t"]}}),
+    );
+    let f = ran.finding();
+    // The first line is a real denial for acme_t. The second still counts, but its bad type and class
+    // are shown as `unknown`.
+    assert_eq!(f.level, Level::Fail, "{f:?}");
+    let denials = &f.observed["selinux"]["denials"];
+    assert_eq!(denials["count"], 2, "{f:?}");
+    assert_eq!(denials["watched"], json!({"acme_t": 1}));
+    assert!(
+        denials["groups"].as_array().is_some_and(|groups| groups
+            .iter()
+            .any(|g| g["source"] == "unknown" && g["class"] == "unknown")),
+        "{f:?}"
+    );
+    let everything = format!(
+        "{f:?} {} {} {}",
+        f.observed,
+        f.message,
+        f.fix.as_deref().unwrap_or_default()
+    );
+    for bad in ['\u{1b}', '\u{7}', '\u{202e}'] {
+        assert!(!everything.contains(bad), "{bad:?} reached the finding");
+    }
+    for bad in [
+        "\\u{1b}",
+        "\\u{202e}",
+        "\\u001b",
+        "evil",
+        "gnp.exe",
+        "AAAAAAAAAAAAAAAA",
+    ] {
+        assert!(!everything.contains(bad), "{bad:?} reached the finding");
+    }
+    assert!(everything.len() < 8192, "{}", everything.len());
 }
 
 // ---- AppArmor ------------------------------------------------------------------------------------
@@ -693,7 +844,23 @@ fn an_apparmor_host_with_apparmor_forbidden() {
         f.message,
         "AppArmor is enabled, and the spec allows disabled."
     );
-    assert!(f.fix.as_deref().is_some_and(|x| x.contains("`apparmor=0`")));
+    let fix = f.fix.as_deref().expect("a fix");
+    assert!(fix.contains("`apparmor=0`"), "{fix}");
+    assert!(
+        fix.contains("This turns AppArmor protection off, so ask the security team first."),
+        "{fix}"
+    );
+}
+
+#[test]
+fn a_kernel_without_the_apparmor_file_reads_as_off() {
+    let ran = run_case("apparmor-off", json!({"apparmor": {"allow": ["disabled"]}}));
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Pass, "{f:?}");
+    assert_eq!(f.observed["apparmor"]["state"], "disabled");
+    assert_eq!(f.message, "AppArmor is off. The spec allows that.");
+    let ran = run_case("apparmor-off", json!({"apparmor": {"allow": ["enabled"]}}));
+    assert_eq!(ran.finding().level, Level::Fail);
 }
 
 // ---- the machine ---------------------------------------------------------------------------------

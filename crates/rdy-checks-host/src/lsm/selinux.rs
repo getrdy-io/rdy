@@ -22,24 +22,34 @@ pub(super) enum Configured {
     Other(String),
 }
 
-/// The value of the last `SELINUX=` line, as the library that reads the file takes it.
+/// The mode `SELINUX=` sets, as libselinux's `selinux_getenforcemode` reads the file. The tag must start
+/// the line, white space after the `=` is skipped, and the value is matched by its start, ignoring
+/// case. The first line with a known value wins. A line with an unknown value is skipped, and the
+/// first of those is kept only to say so when no line is known.
 pub(super) fn parse_config(text: &str) -> Configured {
-    let mut found = Configured::Unset;
+    let mut other = None;
+    // `SELINUXTYPE=` does not start with `SELINUX=`, so it never gets here.
     for line in text.lines() {
-        let line = line.trim();
         let Some(value) = line.strip_prefix("SELINUX=") else {
             continue;
         };
-        // `SELINUXTYPE=` does not start with `SELINUX=`, so it never gets here.
-        let value = value.split('#').next().unwrap_or_default().trim();
-        found = match value.to_ascii_lowercase().as_str() {
-            "enforcing" => Configured::Mode(SelinuxMode::Enforcing),
-            "permissive" => Configured::Mode(SelinuxMode::Permissive),
-            "disabled" => Configured::Mode(SelinuxMode::Disabled),
-            _ => Configured::Other(value.chars().take(32).collect()),
-        };
+        let value = value.trim_start();
+        let lower = value.to_ascii_lowercase();
+        for (word, mode) in [
+            ("enforcing", SelinuxMode::Enforcing),
+            ("permissive", SelinuxMode::Permissive),
+            ("disabled", SelinuxMode::Disabled),
+        ] {
+            if lower.starts_with(word) {
+                return Configured::Mode(mode);
+            }
+        }
+        if other.is_none() {
+            let shown = value.split('#').next().unwrap_or_default().trim();
+            other = Some(Configured::Other(shown.chars().take(32).collect()));
+        }
     }
-    found
+    other.unwrap_or(Configured::Unset)
 }
 
 /// What is mounted on `/sys/fs/selinux`, from `/proc/self/mountinfo`.
@@ -78,6 +88,40 @@ pub(super) fn selinux_mount(mountinfo: &str) -> Option<Mount> {
         });
     }
     found
+}
+
+/// The root file system is an overlay, which is how a container runtime builds the root of a pod.
+/// The last mount on `/` is the one a process sees. A line that does not parse is skipped.
+pub(super) fn root_is_overlay(mountinfo: &str) -> bool {
+    let mut found = false;
+    for line in mountinfo.lines() {
+        let Some((before, after)) = line.split_once(" - ") else {
+            continue;
+        };
+        if before.split(' ').nth(4) != Some("/") {
+            continue;
+        }
+        let Some(fstype) = after.split(' ').next().filter(|t| !t.is_empty()) else {
+            continue;
+        };
+        found = fstype == "overlay";
+    }
+    found
+}
+
+/// The mount as it may appear in a message: `a tmpfs mount`. The type keeps lower case letters, digits,
+/// `.`, `_` and `-` only. A FUSE subtype is chosen by whoever mounted it, so anything else is not
+/// repeated.
+pub(super) fn mount_words(fstype: &str) -> String {
+    let plain = !fstype.is_empty()
+        && fstype
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'));
+    if plain {
+        format!("a {fstype} mount")
+    } else {
+        "another file system".to_owned()
+    }
 }
 
 /// Undoes the octal escapes mountinfo uses for a space, tab, newline and backslash.
