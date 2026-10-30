@@ -1,0 +1,12 @@
+schema = 1
+name = "v2-memory-off"
+summary = "Host booted with cgroup_disable=memory: v2 mounted, no memory files, CPU capped at 1 core"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory", "host.cpu", "host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false
