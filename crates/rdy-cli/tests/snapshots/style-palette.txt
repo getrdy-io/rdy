@@ -1,0 +1,13 @@
+Pass: on=\x1b[32mWORD\x1b[0m off=WORD
+Warn: on=\x1b[33mWORD\x1b[0m off=WORD
+Block: on=\x1b[1;31mWORD\x1b[0m off=WORD
+Failure: on=\x1b[31mWORD\x1b[0m off=WORD
+Label: on=\x1b[1mWORD\x1b[0m off=WORD
+BannerTitle: on=\x1b[1;31mWORD\x1b[0m off=WORD
+Banner: on=\x1b[31mWORD\x1b[0m off=WORD
+ErrorPrefix: on=\x1b[1;31mWORD\x1b[0m off=WORD
+VerdictReady: on=\x1b[1;32mWORD\x1b[0m off=WORD
+VerdictWarnings: on=\x1b[1;33mWORD\x1b[0m off=WORD
+VerdictNotReady: on=\x1b[1;31mWORD\x1b[0m off=WORD
+Dim: on=\x1b[2mWORD\x1b[0m off=WORD
+line: \x1b[33mWARN\x1b[0m web-01\x1b[31m.acme\u{202e}.test
