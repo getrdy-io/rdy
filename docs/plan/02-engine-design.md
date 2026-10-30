@@ -457,6 +457,25 @@ tests policy.
 - Proxied path: the facade writes CONNECT (8 KiB head cap, own timeout, Basic auth from `ProxyUrl`,
   `Proxy-Authorization` never logged) and refuses a forbidden literal target before any byte is sent.
   Names resolve at the proxy (05 residual). `NO_PROXY` matching lives here.
+  As built in M1-091: `ProxyUrl` is `rdy_engine::probe::ProxyUrl` (the facade needs it, so it cannot sit
+  in `rdy-checks-net`). `ProbeHub::set_proxy` stores it once per run and first adds the password, as
+  written, percent-decoded and as the base64 `Proxy-Authorization` pair, to the known-secret set. A
+  refusal is `ProxyError::SecretRefused` and the caller ends the run with exit 70 (the CLI wiring is
+  M1-097, which reads `HTTPS_PROXY` and `HTTP_PROXY`; a bad URL is exit 64). A proxy with a user and no
+  password registers the user name and the base64 of `user:` instead when the user name is 6 bytes or
+  more (a shorter one registers nothing and refuses nothing). `set_proxy` fails with
+  `ProxyError::TooLate` once the action log has an entry or a check probe was opened, because the log
+  redacts when an entry is written. Call it after `ProbeHub::new` and before `Privilege::snapshot` (the
+  first probe read). The call checks, in order: the declared peer classes (`SpecHosts`, and `Proxy` for a proxied
+  call), the check's own host set (`Planned::with_hosts`, from `Built::hosts`; M1-095 feeds it from `PlanEntry::hosts()`), a forbidden literal
+  (before the proxy is even called), then the resolved answers (any forbidden answer refuses the whole
+  call). Attempts run IPv6 first with families alternating, at most 4, 250 ms apart or at once after a
+  failure, 3 s each. The log entry is a `connect` with `host`, `port`, `via_proxy` (no userinfo) and
+  `addr`, and no `proto`. Typed failures are `ProbeError::Net(NetFailure)`: `Dns`, `ProxyForbidden`,
+  `ProxyAuthRequired` (with the challenge and whether credentials were sent), `ProxyRefused`,
+  `ProxyBadReply` and `NoProxy`. The log's `error` is a fixed phrase per failure and `addr` is `null` on every
+  path that did not connect. A proxy whose own address is refused is denied with `RULE_PROXY_ADDRESS`. A
+  URL with no port means port 80. NO_PROXY matching is not built yet (M1-098).
 - `tls_chain` runs the recording verifier, private to the facade, and returns the presented chain and
   whether it validates against the system roots and the bundled roots. It never sends application data.
 - `http` sends HTTP/1.1 HEAD or GET over a verified stream. It returns status, a fixed header list,
@@ -934,7 +953,9 @@ impl Probe {
     pub fn stderr_text(&self, o: &Output) -> Result<Redacted<String>, ProbeError>;
     pub async fn exec(&self, cmd: Cmd) -> Result<Output, ProbeError>;
     pub async fn lookup(&self, host: &str) -> Result<Vec<IpAddr>, ProbeError>;
-    pub async fn tcp(&self, target: &Target) -> Result<TcpReport, ProbeError>;     // attempts per address
+    // As built in M1-091: `target` is the spec `rdy_spec::Target` (host and port), `route` is `Route::Direct | ViaProxy`.
+    // An address that refuses, resets or stays silent is data in `TcpReport.attempts`, not an error.
+    pub async fn tcp(&self, target: &Target, route: Route) -> Result<TcpReport, ProbeError>;
     pub async fn tls_chain(&self, target: &Target) -> Result<TlsChain, ProbeError>;
     pub async fn http(&self, req: HttpProbe) -> Result<HttpOutcome, ProbeError>;
     pub async fn native(&self, call: NativeCall) -> Result<NativeValue, ProbeError>;
@@ -945,7 +966,7 @@ impl Probe {
 // CommandSpec (dirs, env names, cap), then table::validate_for(ctx.os, ..), so a command that is not in
 // the table never reaches any backend, replay included (PC-44).
 
-pub enum Target { Direct { host: String, port: u16 }, ViaProxy { host: String, port: u16 } }
+// `Target` is `rdy_spec::Target`. `Route { Direct, ViaProxy }` carries the choice (M1-091).
 pub struct HttpProbe { pub url: String, pub method: Method /* Head | Get */, pub route: Route,
                        pub roots: Roots /* System | Bundled */ }
 #[non_exhaustive]
@@ -966,6 +987,7 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
     // Provided: the live path, exec::table::run (the only public runner). Replay overrides it. (PC-44)
     fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> { /* table::run */ }
     fn resolve<'a>(&'a self, host: &'a str) -> BoxFuture<'a, io::Result<Vec<IpAddr>>>;
+    // Feature `runtime` or `loopback` only: the stream types need tokio. The probe adds the per-attempt timeout.
     fn connect<'a>(&'a self, addr: SocketAddr) -> BoxFuture<'a, io::Result<BoxedStream>>;
     // The ReadGuard matters to `Statvfs` only, and for that call it holds the check's `statfs` prefixes,
     // not `reads` (M1-171). A backend that resolves links judges the real path with

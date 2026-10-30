@@ -11,7 +11,7 @@ include = ["src/**", "data/**", "Cargo.toml", "LICENSE", "clippy.toml"]
 
 [dependencies]
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
-# The typed parameters of the checks (`K8sStorageClass` and its scalars).
+# The typed parameters of the checks (`K8sVersion`, `K8sStorageClass` and their scalars).
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 # Only `client` and `rustls-tls`, plus `ring` so rustls has a crypto provider and `aws-lc-rs` stays out
 # (ADR 0009, ADR 0031). `webpki-roots` makes the bundled roots the only system roots: without it kube

@@ -78,8 +78,11 @@ jobs:
       # without `cargo xtask schema` fails here and names the file to regenerate.
       - name: Generated schemas are current
         run: cargo run --locked --quiet --package xtask -- schema --check
-      # The k8s.storageclass fixtures are written by a script (tests/fixtures/README.md, origin `generated`).
-      # A change to the script or to a fixture without the other fails here.
+      # The k8s.version fixtures are written by a script (tests/fixtures/README.md, origin `generated`). A
+      # change to the script or to a fixture without the other fails here.
+      - name: k8s.version fixtures are current
+        run: python3 -I scripts/gen-k8s-version-fixtures.py --check
+      # Same for the k8s.storageclass fixtures.
       - name: k8s.storageclass fixtures are current
         run: python3 -I scripts/gen-k8s-storageclass-fixtures.py --check
       # The schema generator is the optional `schema` feature of rdy-spec. It pulls in schemars and

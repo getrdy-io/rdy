@@ -37,6 +37,12 @@ reason = "A WSL2 kernel version with four parts (5.15.90.1-microsoft-standard-WS
 
 [[allow]]
 rule = "host"
+path = "tests/fixtures/checks/k8s.version/gke/api/nodes.json"
+value = "cloud.google.com"
+reason = "A label key the managed GKE service sets on nodes (cloud.google.com/gke-nodepool), not a host a test contacts"
+
+[[allow]]
+rule = "host"
 value = "pd.csi.storage.gke.io"
 reason = "A CSI driver name that a StorageClass carries as its provisioner, not a host a test contacts (k8s.storageclass)"
 

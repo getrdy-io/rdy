@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-kind"
+summary = "kind 1.29: the provider id scheme is kind"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true

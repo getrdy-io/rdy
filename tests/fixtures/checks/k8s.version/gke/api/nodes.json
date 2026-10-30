@@ -1,0 +1,43 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/nodes",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "NodeList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "acme-gke-1",
+          "labels": {
+            "kubernetes.io/os": "linux",
+            "cloud.google.com/gke-nodepool": "acme-pool"
+          }
+        },
+        "spec": {
+          "providerID": "gce://acme-project/us-central1-a/acme-gke-1"
+        },
+        "status": {
+          "nodeInfo": {
+            "machineID": "",
+            "systemUUID": "",
+            "bootID": "",
+            "kernelVersion": "5.14.0",
+            "osImage": "Acme Linux",
+            "containerRuntimeVersion": "containerd",
+            "kubeletVersion": "v1.26.9-gke.1000",
+            "kubeProxyVersion": "v1.26.9-gke.1000",
+            "operatingSystem": "linux",
+            "architecture": "amd64"
+          }
+        }
+      }
+    ]
+  }
+}

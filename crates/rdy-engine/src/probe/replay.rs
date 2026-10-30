@@ -158,7 +158,10 @@ pub struct Replay {
     ids: Option<ProcessIds>,
     native: HashMap<NativeCall, NativeAnswer>,
     /// The scripted connections of `net.json` (M1-049).
-    script: NetScript,
+    pub(super) script: NetScript,
+    /// The servers a `serve` entry of the script can reach (M1-091). They need sockets.
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    pub(super) servers: super::net::replay::Servers,
     /// Names, datagram servers and unix socket replies (M1-144). Its builders are in `sock::replay`.
     pub(super) net: super::sock::replay::ReplayNet,
     api: HashMap<(String, String, String), ApiRecord>,
@@ -195,6 +198,8 @@ impl Replay {
             ids: None,
             native: HashMap::new(),
             script: NetScript::default(),
+            #[cfg(any(feature = "runtime", feature = "loopback"))]
+            servers: super::net::replay::Servers::default(),
             net: super::sock::replay::ReplayNet::default(),
             api: HashMap::new(),
             reviews: None,
@@ -728,6 +733,14 @@ impl Backend for Replay {
         _timeout: Duration,
     ) -> BoxFuture<'a, io::Result<Vec<IpAddr>>> {
         Box::pin(async move { self.net.resolve(host) })
+    }
+
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    fn connect<'a>(
+        &'a self,
+        addr: SocketAddr,
+    ) -> BoxFuture<'a, io::Result<super::net::BoxedStream>> {
+        self.connect_to(addr)
     }
 
     fn udp_exchange<'a>(

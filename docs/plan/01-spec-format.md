@@ -253,7 +253,7 @@ means is in 03-check-catalog.md. Bold parameters are required; "one of" means at
 | `k8s.rbac` | **`can`** (1 to 100; `"create namespaces"` or `{verb, group, resource, subresource, namespace, name}`), `namespace` |
 | `k8s.admission` | `pod_security` (`privileged`, `baseline`, `restricted`), `uses` (`hostPath`, `hostNetwork`, `hostPID`, `privileged`, `runAsRoot`), `namespace`, `scc` |
 | `k8s.nodes` | one of `min_ready`, `per_node: {cpu, memory, ephemeral, pods}`, `free: {...}`; also `min_zones`, `arch`, `selector`, `tolerations` |
-| `k8s.version` | one of `min`, `max`, `openshift_min`, `apis`; also `over_max` (`warn` or `block`, default `warn`) |
+| `k8s.version` | one of `min`, `max`, `openshift_min`, `apis`; also `over_max` (`warn` or `block`, default `warn`). `min` and `max` are Kubernetes versions. On an OpenShift cluster, `openshift_min` replaces `min` when both are set (OpenShift 4.14 reports Kubernetes 1.27), and `max` still applies; off OpenShift, `openshift_min` is ignored |
 | `k8s.namespace` | `namespace`, `quota_needs` (quota resource name to an amount such as `16`, `500m` or `64Gi`, 1 to 32; memory, storage, ephemeral storage and huge pages take a size with a binary suffix, so `64G` and `500m` are refused there), `limit_needs` (`container_max_memory`) |
 | `k8s.dns` | `cluster_domain` |
 | `k8s.ingress` | `controller` (an `IngressClass` controller, or `any`), `gateway_api` (`required`, `optional`), `route`, `loadbalancer` |
