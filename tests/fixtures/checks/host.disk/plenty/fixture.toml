@@ -1,0 +1,12 @@
+schema = 1
+name = "plenty"
+summary = "RHEL 9 VM, /var on its own LVM volume with 100 GiB free"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false

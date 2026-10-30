@@ -1,0 +1,39 @@
+{
+  "entry": {
+    "id": "host.disk",
+    "min": "20Gi",
+    "path": "/var/lib/acme"
+  },
+  "result": {
+    "expected": {
+      "forbid_fstypes": [],
+      "forbid_options": [],
+      "min": 21474836480,
+      "min_inodes": 100000,
+      "recommended": 25769803776
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "`/var/lib/acme` has 100 GiB free on `/var` (ext4). 20 GiB is needed.",
+    "notes": [
+      "rdy runs as root. Free space is what other users can use. Blocks reserved for root are not counted."
+    ],
+    "observed": {
+      "device": "253:1",
+      "free_bytes": 107374182400,
+      "free_inodes": 900000,
+      "fstype": "ext4",
+      "measured_path": "/var/lib/acme",
+      "mount": "/var",
+      "network": false,
+      "nodev": false,
+      "noexec": false,
+      "nosuid": false,
+      "path": "/var/lib/acme",
+      "read_only": false,
+      "total_bytes": 214748364800,
+      "total_inodes": 1000000
+    },
+    "partial": null
+  }
+}

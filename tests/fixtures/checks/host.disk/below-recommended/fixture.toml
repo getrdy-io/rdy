@@ -1,0 +1,12 @@
+schema = 1
+name = "below-recommended"
+summary = "RHEL 9 VM, /var with 22 GiB free: enough, but under the 24 GiB that 20 GiB plus 20 percent asks for"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false

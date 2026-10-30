@@ -93,7 +93,7 @@ fn mount_line(line: &str) -> Option<Mount> {
 
 /// Undoes the octal escapes the kernel writes in mountinfo paths: `\040` is a space, `\011` a tab,
 /// `\012` a newline and `\134` a backslash.
-pub(super) fn unescape(text: &str) -> String {
+pub(crate) fn unescape(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut at = 0;

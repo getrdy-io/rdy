@@ -1,0 +1,12 @@
+schema = 1
+name = "missing-parent"
+summary = "The install path does not exist yet; its grandparent /opt does, on the root volume"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false

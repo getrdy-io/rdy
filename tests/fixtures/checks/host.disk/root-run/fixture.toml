@@ -1,0 +1,12 @@
+schema = 1
+name = "root-run"
+summary = "A root run on a machine with plenty of space"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = true
+network = false
+kube = false
