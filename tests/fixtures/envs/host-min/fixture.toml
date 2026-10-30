@@ -1,0 +1,23 @@
+schema = 1
+name = "host-min"
+summary = "The smallest environment: a RHEL 9 VM with 31.3 GiB showing, and a spec that asks for host.memory only"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+spec = "spec.yaml"
+
+[caps]
+root = false
+network = false
+kube = false
+
+[run]
+clock = "2026-11-02T09:00:00Z"
+run_id = "00000000-0000-4000-8000-000000000001"
+jobs = 1
+deadline_ms = 20000
+
+[expect]
+verdict = "ready"
+exit_code = 0

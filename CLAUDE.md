@@ -35,7 +35,7 @@ product plan doc). Read it before planning anything.
 
 ## Names and places
 
-- Product: Rdy. Command: `rdy`. Company entity: Rdy Labs LLC (Wisconsin, pending).
+- Product: Rdy. Command: `rdy`. Company entity: Apostolic Path LLC (Wisconsin).
 - Site: getrdy.io. Install: in M1, the pinned release `install.sh`, then `"$HOME/.local/bin/rdy" run <spec>`. From M2,
   `curl --proto '=https' --tlsv1.2 -sSf https://getrdy.io/install | sh` (root shells: `sh -s -- --allow-root`). Docs: docs.getrdy.io. Portal: app.getrdy.io.
 - GitHub org: `getrdy-io`. Repos: `rdy` (public, Apache-2.0) and `rdy-cloud` (private).

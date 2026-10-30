@@ -1,0 +1,11 @@
+# Synthetic. The env harness runs this against the host-min machine (M1-075).
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme-min
+  version: ">=1.0"
+checks:
+  - id: host.memory
+    min: 16Gi
+    severity: block
+    fix: "Add RAM or choose a larger VM size."
