@@ -16,6 +16,19 @@ pub(crate) const PEM_PRIVATE_KEY: &str = "pem_private_key";
 const BEGIN: &str = "-----BEGIN ";
 const DASHES: &str = "-----";
 
+/// The most bytes read for the label of an armor line. A real label is a few words, so a longer one is
+/// not read further. This keeps the work linear on text with many `-----BEGIN ` markers and no newline.
+pub(super) const LABEL_WINDOW: usize = 128;
+
+/// The text of an armor line from `rest` (the text after `-----BEGIN ` or `-----END `): up to the end of
+/// the line, and never more than [`LABEL_WINDOW`] bytes.
+pub(super) fn armor_line(rest: &str) -> &str {
+    let window = rest
+        .get(..rest.floor_char_boundary(LABEL_WINDOW))
+        .unwrap_or(rest);
+    window.split(['\n', '\r']).next().unwrap_or_default()
+}
+
 /// `(AKIA|ASIA|ABIA|ACCA)` and 16 characters of base32. There is no check on the character in front of
 /// it, because a key id behind a JSON escape (`\nAKIA...`) has a letter in front of it.
 static AWS_ACCESS_KEY_ID: LazyLock<Result<Regex, regex::Error>> =
@@ -70,8 +83,9 @@ pub(super) fn find_pem_private_key(text: &str, out: &mut Vec<Range<usize>>) {
         let start = from + found;
         let label_start = start + BEGIN.len();
         let rest = text.get(label_start..).unwrap_or_default();
-        // The label ends at the closing dashes, or at the end of the line when there are none.
-        let line = rest.split(['\n', '\r']).next().unwrap_or_default();
+        // The label ends at the closing dashes, or at the end of the line (or of the window) when there
+        // are none.
+        let line = armor_line(rest);
         let label = line.split(DASHES).next().unwrap_or_default();
         if !label.contains("PRIVATE KEY") {
             from = label_start;
@@ -223,6 +237,26 @@ mod tests {
         // A certificate after a key is not taken with it.
         let both = format!("{KEY}\n{cert}");
         assert_eq!(found(find_pem_private_key, &both), [KEY]);
+    }
+
+    #[test]
+    fn many_begin_markers_with_no_newline_cost_linear_time() {
+        let text = "-----BEGIN CERTIFICATE----- ".repeat(40_000);
+        assert!(text.len() > 1_000_000);
+        let started = std::time::Instant::now();
+        assert!(found(find_pem_private_key, &text).is_empty());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        // A label that never closes is read as far as the window and no further.
+        let text = "-----BEGIN X ".repeat(80_000);
+        let started = std::time::Instant::now();
+        assert!(found(find_pem_private_key, &text).is_empty());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_label_with_no_closing_dashes_is_read_to_the_window_and_still_removed() {
+        let text = format!("-----BEGIN PRIVATE KEY {}", "QUJD".repeat(1000));
+        assert_eq!(found(find_pem_private_key, &text), [text.as_str()]);
     }
 
     #[test]

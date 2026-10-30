@@ -88,19 +88,19 @@ fn positives() -> Vec<Case> {
             "auth bearer",
             &format!("Authorization: Bearer {bearer}"),
             &[&bearer],
-            "Authorization: [REDACTED:auth_header:~]",
+            "Authorization: Bearer [REDACTED:auth_header:~]",
         ),
         case(
             "auth basic",
             &format!("authorization: Basic {basic}"),
             &[basic],
-            "authorization: [REDACTED:auth_header:~]",
+            "authorization: Basic [REDACTED:auth_header:~]",
         ),
         case(
             "auth proxy",
             &format!("Proxy-Authorization: Basic {basic}"),
             &[basic],
-            "Proxy-Authorization: [REDACTED:auth_header:~]",
+            "Proxy-Authorization: Basic [REDACTED:auth_header:~]",
         ),
         case(
             "auth x-api-key",
@@ -266,7 +266,7 @@ fn equal_secrets_share_a_tag_whatever_rule_found_them() {
 #[test]
 fn the_negatives_come_out_unchanged() {
     let r = redactor();
-    let cert = "-----BEGIN CERTIFICATE-----\nMIIDdzCCAl+gAwIBAgIEAgAAuTANBgkqhkiG9w0BAQUFADBaMQswCQYDVQQGEwJJ\nRTESMBAGA1UEChMJQmFsdGltb3JlMRMwEQYDVQQLEwpDeWJlclRydXN0\n-----END CERTIFICATE-----";
+    let cert = "-----BEGIN CERTIFICATE-----\nc3ludGhldGljLWNlcnRpZmljYXRlLWJvZHktbGluZS1vbmU=\nc3ludGhldGljLWNlcnRpZmljYXRlLWJvZHktbGluZS10d28=\n-----END CERTIFICATE-----";
     let public = "-----BEGIN PUBLIC KEY-----\nMFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf\n-----END PUBLIC KEY-----";
     for text in [
         "secretName: acme-tls",
@@ -375,4 +375,102 @@ fn evidence_urls_are_scheme_host_port_and_path() {
     assert_eq!(stored, "https://dl.acme.test:8443/pkg/a.tgz");
     assert!(!stored.contains(&planted) && !stored.contains(token));
     assert_eq!(evidence_url("not a url"), None);
+}
+
+/// The tags of every placeholder of `rule` in `text`.
+fn tags_of<'a>(text: &'a str, rule: &str) -> Vec<&'a str> {
+    let open = format!("[REDACTED:{rule}:");
+    text.match_indices(&open)
+        .map(|(i, _)| &text[i + open.len()..i + open.len() + 8])
+        .collect()
+}
+
+#[test]
+fn one_secret_has_one_tag_in_a_header_a_flag_and_a_bare_bearer() {
+    let r = redactor();
+    let token = ["canary", "SharedBearer77"].concat();
+    let header = r.redact_str(&format!("Authorization: Bearer {token}"));
+    let flag = r.redact_str(&format!("run --token {token}"));
+    let bare = r.redact_str(&format!("got bearer {token} from the proxy"));
+    let proxy = r.redact_str(&format!("Proxy-Authorization: Bearer {token}"));
+    assert_eq!(
+        normalized(&header),
+        "Authorization: Bearer [REDACTED:auth_header:~]"
+    );
+    let want = tags_of(&header, "auth_header");
+    assert_eq!(want.len(), 1, "{}", *header);
+    assert_eq!(tags_of(&flag, "secret_by_key"), want, "{}", *flag);
+    assert_eq!(tags_of(&bare, "auth_header"), want, "{}", *bare);
+    assert_eq!(tags_of(&proxy, "auth_header"), want, "{}", *proxy);
+}
+
+#[test]
+fn a_header_with_a_plain_word_is_left_alone() {
+    let r = redactor();
+    for text in [
+        "authorization: true",
+        "Authorization: null",
+        "authorization: none",
+    ] {
+        assert_eq!(*r.redact_str(text), text);
+    }
+}
+
+#[test]
+fn a_raw_slash_in_a_url_password_is_still_userinfo() {
+    let r = redactor();
+    let out = r.redact_str("DATABASE_URL=postgres://app:K7x/9+Qa@db:5432/app");
+    assert_eq!(
+        normalized(&out),
+        "DATABASE_URL=postgres://[REDACTED:url_userinfo:~]@db:5432/app"
+    );
+    let out = r.redact_str("see postgres://app:K7x?9#Qa@db:5432/app now");
+    assert_eq!(
+        normalized(&out),
+        "see postgres://[REDACTED:url_userinfo:~]@db:5432/app now"
+    );
+    // A port, a scoped package and a digest are not userinfo.
+    for text in [
+        "https://h.test:8443/pkg/@scope/x",
+        "https://registry.test/@scope/pkg",
+        "docker://reg.test/app@sha256:0123456789abcdef",
+        "https://dl.acme.test/pkg?email=a@b.test",
+    ] {
+        assert_eq!(*r.redact_str(text), text, "{text}");
+    }
+}
+
+#[test]
+fn an_evidence_url_with_an_at_sign_after_the_authority_stores_nothing() {
+    for url in [
+        "https://dl.acme.test/pkg?email=a@b.test",
+        "docker://reg.test/app@sha256:0123456789abcdef",
+        "https://registry.test/@scope/pkg",
+        "https://h.test/v1?k=svc@Zk3v9TokenAbc",
+        "https://u:K7x/9+Qa@db.test:5432/app",
+    ] {
+        assert_eq!(evidence_url(url), None, "{url}");
+    }
+}
+
+#[test]
+fn an_angle_bracket_placeholder_after_a_flag_is_a_fix_text_not_a_secret() {
+    let r = redactor();
+    // The fix text of the k8s.access check.
+    let fix = "Log in with `rancher login <rancher-url> --token <bearer-token>` and run again.";
+    assert_eq!(*r.redact_str(fix), fix);
+    // A real value is still taken, and so is a bracketed word in a key rule.
+    assert_eq!(
+        normalized(&r.redact_str("rancher login --token abc123def")),
+        "rancher login --token [REDACTED:secret_by_key:~]"
+    );
+    assert!(!r.redact_str("password: <hunter2>").contains("hunter2"));
+    assert!(!r.redact_str("run --token <a>hunter2").contains("hunter2"));
+}
+
+#[test]
+fn a_client_key_path_in_a_kubeconfig_stays() {
+    let r = redactor();
+    let text = "users:\n- name: admin\n  user:\n    client-key: /etc/kube/client.key\n";
+    assert_eq!(*r.redact_str(text), text);
 }

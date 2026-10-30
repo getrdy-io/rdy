@@ -24,9 +24,12 @@ static SCHEME: LazyLock<Result<Regex, regex::Error>> =
 ///
 /// The authority is the text after `://` up to the first `/`, `?`, `#`, quote, angle bracket, white
 /// space, control character or backslash. The userinfo ends at the last `@` in it, so a password that
-/// holds a raw `@` (or `;`, `&`, `,`, `'`) goes whole. A JSON-escaped `\u0040` counts as an `@`. A raw
-/// `/`, `?` or `#` or a space in a password ends the authority early and leaves the rest in view: write
-/// them as percent escapes, as the URL standard asks.
+/// holds a raw `@` (or `;`, `&`, `,`, `'`) goes whole. A JSON-escaped `\u0040` counts as an `@`.
+///
+/// A raw `/`, `?` or `#` in a password ends the authority with no `@` in it. When what came before is
+/// `user:x` (a name, a colon and something that is not a port), and an `@` follows before the next white
+/// space, quote or backslash, the userinfo runs to the last such `@`: `postgres://app:K7x/9+Qa@db/app`.
+/// A space in a password is not read: write it as a percent escape, as the URL standard asks.
 pub(super) fn find_url_userinfo(text: &str, out: &mut Vec<Range<usize>>) {
     // A scheme is followed by `:` and two slashes, either of which may carry a JSON backslash.
     if !text.contains(":/") && !text.contains(":\\/") {
@@ -37,10 +40,20 @@ pub(super) fn find_url_userinfo(text: &str, out: &mut Vec<Range<usize>>) {
         return;
     };
     let mut at = 0;
+    // No `@` sits between a scheme and this offset, so a later scheme before it needs no second look.
+    let mut no_at_before = 0;
     while let Some(m) = scheme.find_at(text, at) {
-        let (userinfo_end, scan_end) = authority(text, m.end());
+        let (mut userinfo_end, scan_end) = authority(text, m.end());
         // Resume after the authority just read, so a long run of `a://a://` is read once.
         at = scan_end.max(m.end());
+        if userinfo_end.is_none() && scan_end >= no_at_before {
+            let (found, scanned_to) = raw_delimiter_password(text, m.end(), scan_end);
+            userinfo_end = found;
+            no_at_before = scanned_to;
+            if let Some(end) = found {
+                at = end;
+            }
+        }
         let Some(end) = userinfo_end.filter(|&end| end > m.end()) else {
             continue;
         };
@@ -84,16 +97,53 @@ fn authority(text: &str, from: usize) -> (Option<usize>, usize) {
     (userinfo_end, text.len())
 }
 
+/// A password with a raw `/`, `?` or `#`: the authority from `start` to `end` has no `@` and stops at one
+/// of those characters. Returns where the userinfo ends (the last `@` before white space, a quote or a
+/// backslash) and how far the search went.
+///
+/// The authority must be `user:x`, with `x` not all digits, so `host:8443/path@x` is a host and a port.
+/// The scan stops at the first character that cannot be in a URL, so the work stays linear.
+fn raw_delimiter_password(text: &str, start: usize, end: usize) -> (Option<usize>, usize) {
+    let Some(authority) = text.get(start..end) else {
+        return (None, end);
+    };
+    let delimiter = text.get(end..).and_then(|t| t.chars().next());
+    let Some((user, password)) = authority.split_once(':') else {
+        return (None, end);
+    };
+    let is_userinfo = matches!(delimiter, Some('/' | '?' | '#'))
+        && !user.is_empty()
+        && !user.starts_with('[')
+        && !password.is_empty()
+        && !password.bytes().all(|b| b.is_ascii_digit());
+    if !is_userinfo {
+        return (None, end);
+    }
+    let mut last_at = None;
+    let mut scanned_to = text.len();
+    for (i, c) in text[end..].char_indices() {
+        if c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '`' | '<' | '>' | '\\') {
+            scanned_to = end + i;
+            break;
+        }
+        if c == '@' {
+            last_at = Some(end + i);
+        }
+    }
+    (last_at, scanned_to)
+}
+
 /// A URL as a check stores it in evidence: `scheme://host:port/path`, with no userinfo, no query and no
 /// fragment. A query carries tokens (a presigned URL), and the userinfo carries the password.
 ///
-/// The userinfo ends at the last `@` of the whole text, because a password may hold a raw `/`, `?` or
-/// `#`, and such a URL has no other safe reading. So a path with an `@` in it loses the part before the
-/// `@`; write such a path without the `@` or store the host alone. The port and the path are kept as
-/// written: a URL with no port gets none.
+/// The userinfo is the part of the authority before its last `@`. An `@` after the first `/`, `?` or `#`
+/// has no safe reading (a password with a raw `/`, or a path, a query or an image digest that holds an
+/// `@`), so such a URL gives `None`. The port and the path are kept as written: a URL with no port gets
+/// none.
 ///
-/// Returns `None` for text that is not a URL, and for one with a space or a control character, which
-/// a URL cannot hold. A caller that gets `None` stores nothing (or a fixed word), never the original.
+/// Returns `None` for text that is not a URL, for one with a space or a control character, which a URL
+/// cannot hold, and for one with an `@` after its authority. A caller that gets `None` stores nothing (or
+/// a fixed word), never the original.
 ///
 /// ```
 /// use rdy_engine::redact::evidence_url;
@@ -114,10 +164,14 @@ pub fn evidence_url(url: &str) -> Option<String> {
     if !scheme_ok || rest.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return None;
     }
-    let after_userinfo = rest.rsplit_once('@').map_or(rest, |(_, after)| after);
-    let without_query = after_userinfo.split(['?', '#']).next().unwrap_or_default();
-    let (host_port, path) =
-        without_query.split_at_checked(without_query.find('/').unwrap_or(without_query.len()))?;
+    let (authority, tail) = rest.split_at(rest.find(['/', '?', '#']).unwrap_or(rest.len()));
+    if tail.contains('@') {
+        return None;
+    }
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, after)| after);
+    let path = tail.split(['?', '#']).next().unwrap_or_default();
     let host_ok = !host_port.is_empty()
         && host_port
             .chars()
@@ -223,13 +277,65 @@ mod tests {
             ("https://tok@h.test", "https://h.test"),
             ("https://[::1]:8443/x", "https://[::1]:8443/x"),
             ("  https://h.test:1/p  ", "https://h.test:1/p"),
-            // A raw slash in a password: everything up to the last `@` goes.
-            ("https://u:pa/ss@h.test:9/p", "https://h.test:9/p"),
-            ("https://u:pa?ss@h.test/p", "https://h.test/p"),
+            ("https://u:p@a@h.test/p", "https://h.test/p"),
             ("https://h.test?x=1", "https://h.test"),
         ] {
             assert_eq!(evidence_url(url).as_deref(), Some(want), "{url}");
         }
+    }
+
+    #[test]
+    fn an_at_sign_after_the_authority_gives_none() {
+        for url in [
+            // A raw slash, question mark or hash in a password.
+            "https://u:pa/ss@h.test:9/p",
+            "https://u:pa?ss@h.test/p",
+            "https://u:pa#ss@h.test/p",
+            // A query, an image digest and a scoped package path.
+            "https://dl.acme.test/pkg?email=a@b.test",
+            "docker://reg.test/app@sha256:0123456789abcdef",
+            "https://registry.test/@scope/pkg",
+            "https://h.test/v1?k=svc@Zk3v9TokenAbc",
+            "https://h.test#frag@x",
+            "https://u:p@h.test/a@b",
+        ] {
+            assert_eq!(evidence_url(url), None, "{url:?}");
+        }
+    }
+
+    #[test]
+    fn a_raw_delimiter_in_a_password_goes_to_the_last_at_sign() {
+        for (text, want) in [
+            (
+                "DATABASE_URL=postgres://app:K7x/9+Qa@db:5432/app",
+                "app:K7x/9+Qa",
+            ),
+            ("https://u:pa?ss@h.test/p", "u:pa?ss"),
+            ("https://u:pa#ss@h.test/p", "u:pa#ss"),
+            ("(https://u:a/b@c@h.test/p)", "u:a/b@c"),
+            ("\"u\":\"https://u:a/b@h.test/p\"", "u:a/b"),
+        ] {
+            assert_eq!(found(text), [want], "{text}");
+        }
+        // Not userinfo: a port, a name with no colon, an IPv6 host, no `@` before the space or quote.
+        for text in [
+            "https://h.test:8443/pkg/@scope/x",
+            "https://h.test/pkg@x",
+            "https://[::1]/x@y",
+            "https://u:pa/ss and a@b.test",
+            "'https://u:pa/ss' a@b.test",
+            "https://u:/x@h",
+        ] {
+            assert!(found(text).is_empty(), "{text}: {:?}", found(text));
+        }
+    }
+
+    #[test]
+    fn many_raw_delimiter_urls_cost_linear_time() {
+        let text = "a://u:x/".repeat(100_000);
+        assert!(found(&text).is_empty());
+        let text = "a://u:x/@".repeat(100_000);
+        assert!(!found(&text).is_empty());
     }
 
     #[test]

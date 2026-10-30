@@ -6,5 +6,5 @@ TRACE log_redaction: kubeconfig:
     user:
       token: [REDACTED:kubeconfig_credential:~]
 
-TRACE log_redaction: command output output="Authorization: [REDACTED:auth_header:~]
- WARN hyper::proto::h1::io: write headers: authorization: [REDACTED:auth_header:~]
+TRACE log_redaction: command output output="Authorization: Bearer [REDACTED:auth_header:~]
+ WARN hyper::proto::h1::io: write headers: authorization: Bearer [REDACTED:auth_header:~]

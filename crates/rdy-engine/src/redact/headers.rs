@@ -10,12 +10,15 @@
 //! - a header inside a quoted word, `-H 'Authorization: Bearer x'`, runs to the closing quote;
 //! - anything else runs to the end of the line, or to a backslash (a literal `\r\n` in a log line).
 //!
+//! A plain word as the whole value (`authorization: true`, `null`) and a reference (`${TOKEN}`) are left
+//! alone, as in the key rule.
+//!
 //! The key-name rule also reads these headers (`auth` is a stem), so a value it takes is the larger span
 //! and the placeholder carries the name of the higher priority rule, `auth_header`.
 
 use std::ops::Range;
 
-use super::rules::is_single_placeholder;
+use super::rules::is_exempt_value;
 
 /// Header names, lower case. A name matches without regard to case, as headers do. `Proxy-Authorization`
 /// is the `authorization` name with a `proxy-` or `proxy_` in front.
@@ -186,7 +189,7 @@ fn scan_headers(text: &str, authorization: bool, out: &mut Vec<Range<usize>>) {
         };
         let span = region.start + credential..region.end;
         let credential_text = &text[span.clone()];
-        if span.is_empty() || is_single_placeholder(credential_text) {
+        if span.is_empty() || is_exempt_value(credential_text) {
             continue;
         }
         out.push(span);

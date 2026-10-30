@@ -362,26 +362,51 @@ fn the_held_case_puts_each_canary_whole_inside_the_cut_at_every_offset() {
 
 /// A secret in a whole line near the cap needs the rule for its shape: the key id rule, the URL userinfo
 /// rule and the private key rule. The canary ends at cap minus 1 to cap minus 64 for every cap.
-#[tokio::test(flavor = "current_thread")]
-async fn a_whole_line_secret_just_inside_the_cap_needs_its_rule() -> TestResult {
+///
+/// One test per source, so no test runs near the 120 s limit of the CI profile.
+async fn whole_line_secret_at(index: usize) -> TestResult {
     let redactor = Redactor::new(TagKey::fixed([4; 32]));
-    for (source, cap) in SOURCES {
-        for canary in [aws(), url(), pem()] {
-            for k in 1..=64 {
-                let start = whole_start(source, &canary, cap, k).ok_or("does not fit")?;
-                let data = whole_line_buffer(cap, start, &canary);
-                let shown = shown_text(source, cap, data, &[]).await?;
-                assert_clean("whole line", k, &shown, &canary);
-                assert_clean(
-                    "whole line report",
-                    k,
-                    &through_report(&redactor, &shown)?,
-                    &canary,
-                );
-            }
+    let (source, cap) = *SOURCES.get(index).ok_or("no such source")?;
+    for canary in [aws(), url(), pem()] {
+        for k in 1..=64 {
+            let start = whole_start(source, &canary, cap, k).ok_or("does not fit")?;
+            let data = whole_line_buffer(cap, start, &canary);
+            let shown = shown_text(source, cap, data, &[]).await?;
+            assert_clean("whole line", k, &shown, &canary);
+            assert_clean(
+                "whole line report",
+                k,
+                &through_report(&redactor, &shown)?,
+                &canary,
+            );
         }
     }
     Ok(())
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_whole_line_secret_just_inside_the_cap_needs_its_rule_file() -> TestResult {
+    whole_line_secret_at(0).await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_whole_line_secret_just_inside_the_cap_needs_its_rule_tail() -> TestResult {
+    whole_line_secret_at(1).await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_whole_line_secret_just_inside_the_cap_needs_its_rule_stdout() -> TestResult {
+    whole_line_secret_at(2).await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_whole_line_secret_just_inside_the_cap_needs_its_rule_small_stdout() -> TestResult {
+    whole_line_secret_at(3).await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_whole_line_secret_just_inside_the_cap_needs_its_rule_stderr() -> TestResult {
+    whole_line_secret_at(4).await
 }
 
 /// The redacted text of `data` as a check would get it from the facade, cut at `cap`. The `known`

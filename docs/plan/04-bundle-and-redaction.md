@@ -475,8 +475,10 @@ the choices the table leaves open.
   `Authorization: Bearer x` reads `[REDACTED:auth_header:..]` although the key rule also took it.
 - **`url_userinfo`** reads the text after `://` up to the first `/`, `?`, `#`, quote, angle bracket, white
   space, control character or backslash. The userinfo ends at the last `@` in it, or at a JSON `@`.
-  A raw `/`, `?`, `#` or space in a password is not valid in a URL, so it ends the authority early; write
-  it as a percent escape. `http:\/\/` (JSON slashes) is read too.
+  A raw `/`, `?` or `#` in a password ends the authority with no `@` in it. If what came before is
+  `user:x` (`x` not all digits, so not a port) and an `@` follows before white space, a quote or a
+  backslash, the userinfo runs to the last such `@` (`postgres://app:K7x/9+Qa@db/app`). A space in a
+  password is not read; write it as a percent escape. `http:\/\/` (JSON slashes) is read too.
 - **`auth_header`** keeps the scheme and replaces the credential after it (`Authorization: Basic
   <credential>`; one word is all credential). A quoted value runs to its closing quote, a header inside
   a quoted word (`-H 'Authorization: ...'`) to that quote, anything else to the end of the line or a
@@ -484,22 +486,27 @@ the choices the table leaves open.
 - **`pem_private_key`** takes every label that holds `PRIVATE KEY`, from the BEGIN line through the END
   line of the same label, comment markers and `\n` escapes inside. No END, or another label's END: to the
   end of the text. Certificates and public keys stay.
-- **`kubeconfig_credential`** names `client-key-data`, `client-secret`, `access-token`, `refresh-token`,
-  `id-token` and `client-key` wherever they appear, and `token` and `password` only in a text that looks
+- **`kubeconfig_credential`** names `client-key-data`, `client-secret`, `access-token`, `refresh-token`
+  and `id-token` wherever they appear (`client-key` is a file path and stays), and `token` and `password` only in a text that looks
   like a kubeconfig (`users:`, `clusters:`, `current-context`, `kind: Config` and the like). Elsewhere
   those two are `secret_by_key`. `client-key-data` also has the `keydata` stem.
 - **The key rule** also reads `--password hunter2` (a flag that names a secret takes the next word; a
   quoted word runs to its plain closing quote; another long flag, `$VAR` and a reference are left alone),
   colour codes (`\x1b[0m`) around a key, its separator and its value, a tab written as backslash and `t`
   before the separator, and commented-out blocks (`# token: |` takes the `#` lines below it). A list
-  marker (`- name: x`) and a line that is one quoted assignment (`NAME="x"`) now count as keys, so a
-  secret ends at its next sibling in a list or in an all-quoted `.env` file. A plain value with spaces
-  that opens no bracket or quote takes only the deeper lines below it.
+  marker (`- name: x`) counts as a key only as a sibling (its dash is left of the key's content column), so
+  `tokens:` with an empty value takes the list below it. A line that is one quoted assignment (`NAME="x"`)
+  counts as a key, so a secret ends at its next sibling in an all-quoted `.env` file. A plain value with
+  spaces that opens no bracket and holds no quote, backtick or backslash takes only the deeper lines below
+  it. For `Authorization` keys the scheme word stays, as in the header rule, so `Authorization: Bearer T`,
+  `--token T` and a bare `Bearer T` give `T` one tag. A `<word>` after a flag is a placeholder in a usage
+  text or a fix, and stays.
 - **Words**: `method`, `mode`, `type`, `kind`, `scheme`, `provider`, `stdin` and `env` join the name
   suffixes (`auth_method` is not a secret), `length`, `secs` and `sec` join the unit words, and
   `authenticate` is not a stem hit.
 - **Evidence URLs**: `rdy_engine::redact::evidence_url` returns `scheme://host:port/path` with no userinfo,
-  query or fragment, and `None` for text that is not a URL. A check stores that and never the URL it was
+  query or fragment, and `None` for text that is not a URL or has an `@` after its authority (a raw `/` in a
+  password, a digest, a scoped package path, a query value). A check stores that and never the URL it was
   given (03, "Redaction in evidence").
 
 ## Appendix C: layout, compression and manifest sample

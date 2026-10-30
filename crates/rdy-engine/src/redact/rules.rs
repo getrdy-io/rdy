@@ -280,7 +280,6 @@ fn find_aws_session_token(text: &str, out: &mut Vec<Range<usize>>) {
 /// Keys that only a kubeconfig, or the OIDC settings in one, spells with hyphens.
 const KUBECONFIG_HYPHEN_KEYS: &[&str] = &[
     "client-key-data",
-    "client-key",
     "client-secret",
     "access-token",
     "refresh-token",
@@ -353,8 +352,35 @@ fn scan_assignments(text: &str, accept: impl Fn(&str) -> bool, out: &mut Vec<Ran
         let lines = lines.get_or_init(|| Lines::new(text));
         let (span, covered) = value_span(text, lines, key.start(), whole.end());
         covered_until = covered_until.max(covered);
+        let span = if is_authorization_key(key.as_str()) {
+            span.and_then(|s| skip_scheme(text, s))
+        } else {
+            span
+        };
         out.extend(span);
     }
+}
+
+/// True for `Authorization`, `Proxy-Authorization`, `HTTP_AUTHORIZATION` and the like.
+fn is_authorization_key(key: &str) -> bool {
+    normalize_key(key).0.ends_with("authorization")
+}
+
+/// The credential of an `Authorization` value: the scheme word (`Bearer`, `Basic`) and the blanks after
+/// it stay, so `Authorization: Bearer T`, `--token T` and a bare `Bearer T` all hide the same `T` and give
+/// it the same tag (04 Appendix B). One word is all credential. `None` when nothing is left to redact, or
+/// what is left is a placeholder already.
+fn skip_scheme(text: &str, span: Range<usize>) -> Option<Range<usize>> {
+    let value = text.get(span.clone())?;
+    let start = value.find(char::is_whitespace).map_or(0, |i| {
+        // Blanks, not a line break: a value that starts on the next line has no scheme word.
+        let rest = &value[i..];
+        let blanks = rest.len() - rest.trim_start_matches([' ', '\t']).len();
+        if blanks == 0 { 0 } else { i + blanks }
+    });
+    let span = span.start + start..span.end;
+    let credential = text.get(span.clone())?;
+    (!credential.is_empty() && !is_single_placeholder(credential)).then_some(span)
 }
 
 /// True if `arg` is a flag that names a secret and has no `=`: `--password`, `-token`. Its value is the
@@ -426,7 +452,28 @@ fn flag_value(text: &str, lines: &Lines, from: usize) -> Option<Range<usize>> {
         }
     };
     let word = text.get(range.clone())?;
-    (!word.is_empty() && !is_exempt_value(word) && !is_shell_variable(word)).then_some(range)
+    (!word.is_empty()
+        && !is_exempt_value(word)
+        && !is_shell_variable(word)
+        && !is_angle_placeholder(word))
+    .then_some(range)
+}
+
+/// `<bearer-token>`: a word in angle brackets, which a usage text or a fix writes where the reader puts
+/// their own value. Closing punctuation after it (`` ` ``, `.`, `,`) is fine, anything else is not
+/// (`<a>b` is a value). Only the flag rule leaves it alone. A key rule still redacts `password: <word>`,
+/// which a secret could be.
+fn is_angle_placeholder(word: &str) -> bool {
+    let Some((name, after)) = word.strip_prefix('<').and_then(|w| w.split_once('>')) else {
+        return false;
+    };
+    name.starts_with(|c: char| c.is_ascii_alphabetic())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        && after
+            .chars()
+            .all(|c| matches!(c, '`' | '\'' | '"' | '.' | ',' | ';' | ')'))
 }
 
 /// `$NAME`: a reference to a variable, not a value.
@@ -451,13 +498,19 @@ fn is_shell_variable(word: &str) -> bool {
 ///    `{{ .Name }}`, `[REDACTED:..]`, `null`, a `/run/secrets/` path) counts as simple too, but it is left
 ///    alone when nothing is taken below it.
 /// 3. A simple value is redacted in place. It also takes the lines **below it that are indented deeper**
-///    than the key's line (blank lines inside are fine), so `password: a` then `  b` is covered.
+///    than the key's line (blank lines inside are fine), so `password: a` then `  b` is covered. A
+///    **plain** value is read the same way: it starts like a simple one, has spaces in it
+///    (`hunter2 --host db`), has no quote, backtick or backslash anywhere, and opens no bracket. A
+///    quote, a backtick or a backslash in the value could open something the next line closes
+///    (`abc'def` then `ghi'`, `first\` then `second`), so such a value is read by rule 4.
 /// 4. Any other value (empty, quoted, bracketed, tagged, anchored, a block indicator, escaped, or with
-///    spaces) is redacted to the end of the line, and so is every following line up to, but not
-///    including, the first line that **both** starts at or left of the key line's first non-blank column
-///    **and** itself starts with a key (`name:`, `name=`, `"name":`). With no such line it runs to the
-///    end of the text. If the value is one line wrapped in a matching pair of quotes, the two outer
-///    quotes stay. A tab and space mix in the two indents counts as deeper.
+///    spaces and one of those characters) is redacted to the end of the line, and so is every following
+///    line up to, but not including, the first line that **both** starts at or left of the key line's
+///    first non-blank column **and** itself starts with a key (`name:`, `name=`, `"name":`). A `- name:`
+///    line counts only when its dash is left of the key's content column, so `tokens:` then `- id: ci`
+///    at the same indent is a list the secret holds, and `- password:` then `- id: ci` is the next item.
+///    With no such line it runs to the end of the text. If the value is one line wrapped in a matching
+///    pair of quotes, the two outer quotes stay. A tab and space mix in the two indents counts as deeper.
 /// 5. The terminator test in rule 4 is switched off, so the value goes on, while any of these plain counts
 ///    over the text taken so far says it is still open: more `[` and `{` than `]` and `}`; an odd number
 ///    of the value's opening quote character (`"` or `'`); or more `-----BEGIN ` than `-----END `
@@ -467,13 +520,14 @@ fn is_shell_variable(word: &str) -> bool {
 /// 6. A line only counts as a key when `name=` is not directly followed by another `=`, a quote or the end
 ///    of the line, so the base64 tail `QUJD==` is not a key. This also keeps `NEXT="1"` inside the
 ///    value, while `NEXT= "1"` still counts as a key.
-/// 7. A key inside a `#` comment line takes only its own value, never the lines below.
+/// 7. A key inside a `#` comment line is read from the text after its `#` and the blanks behind it. It
+///    takes the comment lines below it, by the same rules, and stops at the first line that is not a
+///    comment.
 ///
 /// This over-redacts on purpose: a one-line JSON object after a secret key loses the rest of its line,
 /// a `[INFO]` log line is not a key, so a quoted secret in a log can take every line below it, and a
-/// sibling list item or a stray closing bracket is taken with the value. M1-060 narrows this with
-/// corpus evidence. A line is visited a constant number of times, and keys inside what was taken are
-/// skipped by the caller, so the work is linear.
+/// stray closing bracket is taken with the value. A line is visited a constant number of times, and keys
+/// inside what was taken are skipped by the caller, so the work is linear.
 ///
 /// Returns the range to redact, if any, and the offset up to which the caller can skip keys.
 fn value_span(
@@ -494,6 +548,16 @@ fn value_span(
         Indent::of(&key_line[..key_line.len() - key_text.len()])
     };
     visit(key_line.len());
+    // Where the key's content starts, after the blanks and any `- ` list markers: `- password:` at indent
+    // 2 has its content at column 4.
+    let content_col = {
+        let (indent, text) = if commented {
+            comment_indent(key_line).map_or((Indent::Empty, key_text), |(i, t)| (i, t))
+        } else {
+            (key_indent, key_text)
+        };
+        indent.width() + (text.len() - strip_list_markers(text).len())
+    };
 
     let raw = &text[from..line_end];
     // A colour code after the value is not part of it: `password=\x1b[31mhunter2\x1b[0m`.
@@ -532,8 +596,12 @@ fn value_span(
     let mut open = Open::default();
     open.add(value, quote);
     // A plain value that starts like a simple one and has spaces in it (`hunter2 --host db`) and opens
-    // nothing is read like a simple one: it takes the deeper lines below it and nothing else.
-    let plain = value.bytes().next().is_some_and(is_simple_byte) && !open.is_open();
+    // nothing is read like a simple one: it takes the deeper lines below it and nothing else. A quote, a
+    // backtick or a backslash anywhere in it may open something the next line closes (`abc'def` then
+    // `ghi'`, `first\` then `second`), so such a value is not plain.
+    let plain = value.bytes().next().is_some_and(is_simple_byte)
+        && !open.is_open()
+        && !value.contains(['"', '\'', '`', '\\']);
     let simple = is_simple || is_exempt || plain;
     let mut first = None;
     let mut last_end = None;
@@ -555,7 +623,12 @@ fn value_span(
                 (Indent::of(&line[..line.len() - rest.len()]), rest)
             };
             let at_or_left = key_indent.is_at_or_left_of(&indent);
-            if at_or_left && (simple || (!open.is_open() && starts_with_key_token(rest))) {
+            let ends_value = simple
+                || (!open.is_open()
+                    && starts_with_key_token(rest)
+                    && (!has_list_marker(rest)
+                        || is_sibling_item(key_indent, content_col, indent)));
+            if at_or_left && ends_value {
                 break;
             }
             first.get_or_insert(start);
@@ -664,14 +737,41 @@ fn is_closed_quoted(rest: &str) -> bool {
     }
 }
 
+/// The text after any `- ` list markers and the blanks behind them.
+fn strip_list_markers(text: &str) -> &str {
+    let mut rest = text;
+    while let Some(after) = rest.strip_prefix("- ").or_else(|| rest.strip_prefix("-\t")) {
+        rest = after.trim_start_matches([' ', '\t']);
+    }
+    rest
+}
+
+/// True if the line text starts with a `- ` list marker.
+fn has_list_marker(rest: &str) -> bool {
+    rest.starts_with("- ") || rest.starts_with("-\t")
+}
+
+/// True if a `- ` line at `dash` is a sibling of the key that read the value: its dash is left of the key's
+/// content column. `password:` with an empty value, then `- id: ci` at the same indent, is a list that the
+/// secret holds (`tokens:` and a compact sequence below it). `- password:` then `- id: ci` at the same
+/// indent is the next item of the list the key sits in. Indents that cannot be compared (tabs against
+/// spaces) count as inside the value, which fails closed.
+fn is_sibling_item(key_indent: Indent, content_col: usize, dash: Indent) -> bool {
+    let comparable = matches!(
+        (key_indent, dash),
+        (Indent::Empty, _)
+            | (_, Indent::Empty)
+            | (Indent::Spaces(_), Indent::Spaces(_))
+            | (Indent::Tabs(_), Indent::Tabs(_))
+    );
+    comparable && dash.width() < content_col
+}
+
 /// True if the line text starts with a key: `name:`, `name=`, `"name":` or `'name':`, after any list
 /// markers (`- name: v`). `name="v"` counts when the line is that one quoted assignment and nothing else,
 /// so an `.env` file with every value quoted ends a secret at its next line.
 fn starts_with_key_token(rest: &str) -> bool {
-    let mut rest = rest;
-    while let Some(after) = rest.strip_prefix("- ").or_else(|| rest.strip_prefix("-\t")) {
-        rest = after.trim_start_matches([' ', '\t']);
-    }
+    let rest = strip_list_markers(rest);
     let bytes = rest.as_bytes();
     let mut i = 0;
     if let Some(&quote) = bytes.first().filter(|b| matches!(b, b'"' | b'\'')) {
@@ -1166,7 +1266,7 @@ mod tests {
             ),
             ("password=\"\"hunter2", "\"\"hunter2"),
             ("password=\"a\"hunter2 more", "\"a\"hunter2 more"),
-            ("Authorization: Basic dXNlcjpwYXNz", "Basic dXNlcjpwYXNz"),
+            ("Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
             // Escaped.
             (r#"{\"apiKey\":\"hunter2\"}"#, r#"\"hunter2\"}"#),
         ] {
@@ -1491,8 +1591,56 @@ mod tests {
     }
 
     #[test]
+    fn a_list_item_ends_a_value_only_as_a_sibling_of_the_key() {
+        // The key has an empty value and the list below it belongs to it, at the same indent or deeper.
+        assert_covered("tokens:\n- id: ci\n  value: s3cr3tAbc", "s3cr3tAbc");
+        assert_covered("  tokens:\n  - id: ci\n    value: s3cr3tAbc", "s3cr3tAbc");
+        assert_covered("- tokens:\n  - id: ci\n    value: s3cr3tAbc", "s3cr3tAbc");
+        assert_covered(
+            "tokens:\n- id: ci\n  value: s3cr3tAbc\n- id: cd\n  value: s3cr3tDef\nname: x",
+            "s3cr3tDef",
+        );
+        // The next item of the list the key sits in, or a list left of it, is a sibling.
+        let text = "- password: |\n    hunter2\n- name: second\n";
+        assert_eq!(found(text), ["|\n    hunter2"]);
+        let text = "  - password: |\n      hunter2\n  - name: second\n";
+        assert_eq!(found(text), ["|\n      hunter2"]);
+        let text = "  tokens:\n    hunter2\n- name: second\n";
+        assert_eq!(found(text), ["    hunter2"]);
+        // A tab against spaces cannot be compared, so the item stays inside the value.
+        assert_covered("tokens:\n\t- id: ci\n  value: s3cr3tAbc", "s3cr3tAbc");
+    }
+
+    #[test]
+    fn a_plain_value_with_a_quote_or_a_backslash_is_not_plain() {
+        assert_covered("db.password=first\\\nsecond", "second");
+        assert_covered("PASSWORD=abc'def\nghi'", "ghi'");
+        assert_covered("password: abc`def\nghi`", "ghi`");
+        assert_covered("password: abc\"def\nghi\"", "ghi\"");
+        // Still plain: spaces only. The next key ends it.
+        assert_eq!(
+            found("password: hunter2 --host db\nnext: 1"),
+            ["hunter2 --host db"]
+        );
+    }
+
+    #[test]
+    fn an_authorization_value_keeps_its_scheme() {
+        assert_eq!(found("Authorization: Bearer abc123xyz"), ["abc123xyz"]);
+        assert_eq!(found("HTTP_AUTHORIZATION=Basic dXNlcg=="), ["dXNlcg=="]);
+        assert_eq!(
+            found("\"authorization\": \"Bearer abc123xyz\""),
+            ["abc123xyz"]
+        );
+        assert_eq!(found("authorization: abc123xyz"), ["abc123xyz"]);
+        // Other keys take the whole value, and a placeholder is left alone.
+        assert_eq!(found("token: Bearer abc123xyz"), ["Bearer abc123xyz"]);
+        assert!(found("Authorization: Bearer [REDACTED:auth_header:1a2b3c4d]").is_empty());
+    }
+
+    #[test]
     fn auth_words_are_matched_whole() {
-        assert_eq!(found("authorization: Bearer x"), ["Bearer x"]);
+        assert_eq!(found("authorization: Bearer x"), ["x"]);
         assert_eq!(found("authProfile: hunter2"), ["hunter2"]);
         assert_eq!(found("auth_profile: hunter2"), ["hunter2"]);
         assert_eq!(found("authorizationHeader: hunter2"), ["hunter2"]);
