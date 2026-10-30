@@ -1,0 +1,31 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/storage.k8s.io/v1/csinodes",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "storage.k8s.io/v1",
+    "kind": "CSINodeList",
+    "metadata": {
+      "resourceVersion": "1000",
+      "continue": "tok-stale"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "node-a"
+        },
+        "spec": {
+          "drivers": [
+            {
+              "name": "ebs.csi.example.com",
+              "nodeID": "node-a"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

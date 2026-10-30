@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/storage.k8s.io/v1/csinodes",
+    "query": "continue=tok-stale&limit=500"
+  },
+  "status": 410,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "The provided continue parameter is too old to display a consistent list result.",
+    "reason": "Expired",
+    "code": 410
+  }
+}

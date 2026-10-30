@@ -46,6 +46,7 @@ tests/fixtures/
   checks/<check-id>/<case>/      one check, one situation
   checks/_policy/<case>/         engine policy cases, for example symlink-to-shadow
   checks/_loader/<case>/         loader cases, for example manifest-entries
+  checks/_kube/<case>/           clusters for the kube mock harness (api/ only), for example cluster and denied
   checks/_cgroup/<case>/         cgroup trees for the shared cgroup helper (v2, v1, hybrid)
   envs/<env>/                    one whole environment plus a spec to run against it
   redaction/<category>/<case>.{in,expected,toml}
@@ -60,7 +61,7 @@ tests/fixtures/
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.firewall/` (18 cases), `host.security_agents/` (18 cases), `_policy/symlink-to-shadow`,
-`_loader/manifest-entries` and the `_cgroup` cases. The rest
+`_loader/manifest-entries`, the `_cgroup` cases and the `_kube` cases (`cluster`, `denied`). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -69,6 +70,7 @@ arrives with the tickets that need it. The names above are fixed now so nobody i
 | `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command or opens a socket | By hand, with the check ticket |
 | `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied`. The expectation of a policy or loader case lives in its Rust test until the fixture lint has a format for it | By hand |
 | `checks/_cgroup/<case>/` | Machines for the cgroup helper that `host.memory`, `host.cpu` and `host.cgroups` share: `/proc/self/cgroup`, `/proc/self/mountinfo` and a `/sys/fs/cgroup` tree. Cases: `v2-nested`, `v2-unlimited`, `v2-memory-off`, `v1-tree`, `v1-unlimited`, `hybrid`. A check's own cases carry their own trees | By hand |
+| `checks/_kube/<case>/` | Synthetic clusters for the kube mock harness: `cluster` (paged nodes, a stale token, a pod selector, legacy discovery, an identity review, a review table) and `denied` (401 and 403). The k8s check tickets add their own cases under `checks/<check-id>/` and reuse the harness | By hand |
 | `checks/_loader/<case>/` | Cases that exercise the loader and the replay, such as every kind of manifest entry. Their expectation is in the Rust test too | By hand |
 | `envs/<env>/` | A whole environment and the spec the env test runs against it. Five in M1: `all-pass`, `warnings-only`, `all-block`, `no-privileges`, `timeouts` | By hand, goldens by `UPDATE_GOLDENS=1` |
 | `redaction/<category>/<case>.in`, `.expected`, `.toml` | Input, expected output and the rule setup for a redaction case | By hand only. `UPDATE_GOLDENS` never touches it |
@@ -218,9 +220,50 @@ Any slug for the file name. One request per file:
 
 Paged lists have one file per `continue` token. The key is the upper-cased method, the path and the query
 text; `query` may be left out. A duplicate key fails the load. Access reviews are answered from
-`api/reviews.json`, a table of attributes to `allowed` and `reason`; the loader keeps it as it is. The mock
-records every request, and the k8s tests assert that only the allowed ones arrived. The loader holds the
-responses (`Replay::api`); the mock that serves them comes with the k8s tickets.
+`api/reviews.json`. The loader holds the responses (`Replay::api`, `Replay::api_records`); the mock that
+serves them is `client/mock.rs` in `rdy-checks-k8s` (M1-105, test code only).
+
+How the mock reads a fixture:
+
+- **A request is found by its method, its path and its decoded query pairs, sorted.** Write the query in
+  plain text and in any order: `limit=500&fieldSelector=status.phase!=Failed,status.phase!=Succeeded`
+  matches the `%21%3D` form kube sends. Two files that are the same request after decoding fail the build
+  of the mock. A list with another selector is another request, so it needs its own file.
+- **Paging.** The first page has the query `limit=500`. Its body names the next token in
+  `metadata.continue`, and the next file has the query `limit=500&continue=<token>`. A file that records
+  status `410` answers it every time. A test that wants a token to expire only once calls
+  `Mock::expire_once(token)`: the first request with that token gets `410 Gone`, the next finds the file.
+- **Discovery** (`/version`, `/api`, `/apis`, `/apis/<group>/<version>`) is the legacy document, one file
+  each. A group the cluster does not serve is a file with status `404`. A request whose `Accept` selects
+  the aggregated discovery document gets `406`, because that document is not recorded.
+- **Any other POST**, such as the `SelfSubjectReview`, is a plain recorded request (`"method": "POST"`, no
+  query). The body of the request is not part of the key; the guard has already checked it.
+- **A request the fixture does not hold** gets `501` and fails the run. A fixture never falls through to a
+  default.
+
+`api/reviews.json` answers `SelfSubjectAccessReview` and holds one list:
+
+```json
+{ "access": [
+  { "spec": { "resourceAttributes": { "verb": "create", "resource": "namespaces" } },
+    "status": { "allowed": true, "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\"" } },
+  { "spec": { "nonResourceAttributes": { "path": "/healthz", "verb": "get" } },
+    "status": { "allowed": false, "denied": true, "reason": "denied by a webhook" } }
+] }
+```
+
+A row matches when its `spec` equals the posted `spec`, ignoring empty strings and nulls (so a row may
+leave out `name` and `subresource`). The row's `status` is the answer, and the mock echoes the posted
+`spec`. `status` needs a boolean `allowed`; `reason`, `denied` and `evaluationError` are optional. Two rows
+with the same `spec`, an unknown key or a missing `spec` fail the build of the mock. Attributes with no
+row get `501` and fail the run.
+
+**The audit (INV-14).** The harness records every request that reaches the mock and checks the run when it
+is dropped. Each recorded request must pass the guard's own rules and name an `ALLOWED` entry (or be
+`/version`, discovery or a review). Each sent action-log entry that names an `ALLOWED` entry must be
+logged under a check id that the entry cites in `checks`. The log must hold one sent entry per recorded
+request, and the fixture must have answered all of them. A failing audit panics the test and says which
+request broke which rule. See the module docs of `client/mock.rs`.
 
 ### `native/*.json`
 
