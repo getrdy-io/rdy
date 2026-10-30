@@ -76,7 +76,8 @@ cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 1
 `evaluation-error`, `non-resource`, `reviews-forbidden`, `rules-forbidden`, `old-server`, `identity-forbidden`,
 `as-allowed`, `as-forbidden`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`,
 `as-at-the-cap`, `hostile-reasons`), `generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on
-drift and on a file the script did not write). The rest
+drift and on a file the script did not write). `envs/host-min/` is the smallest environment (M1-075): a
+RHEL 9 VM, `host.memory` only, with a pinned clock and run id and a `golden/report.json`. The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
@@ -464,11 +465,40 @@ and addresses. It fails on:
   `_loader`, `_cgroup`) is checked like any other, so a new one needs no change to the lint;
 - a missing required case. The list is `REQUIRED` in the lint: `checks/_policy/symlink-to-shadow` (its
   `root.manifest.json` must link to `/etc/shadow`) and `checks/host.memory/pass`. A ticket that adds a case
-  the lint should guard, such as the `Timeout` case of `host.disk` in M1-068, adds a row. The rule "every registered check has its cases" is not in this lint,
-  because `rdy-engine` cannot link the check families. M1-075 (the in-process env harness) owns it.
+  the lint should guard, such as the `Timeout` case of `host.disk` in M1-068, adds a row. The rule "every
+  registered check has its cases" is not in this lint, because `rdy-engine` cannot link the check
+  families. It is in the env harness (next section).
 
 An entry in `allow.toml` that matches nothing is a finding too, so the list cannot go stale. The tests of
 the lint plant one violation at a time in an in-memory copy of this tree and expect exactly that finding.
+
+## The env harness and the completeness rule
+
+`crates/rdy-cli/tests/env_harness/main.rs` is one test binary with two jobs. It links the CLI crate and the
+check families, which `rdy-engine` cannot.
+
+**Environments.** Every directory under `envs/` whose `fixture.toml` has a `spec` is run in process: the
+spec is planned against the registered families, run through the real scheduler on a paused clock, and
+written as a `Report`. The test checks the verdict and exit code against `[expect]`, the report against
+`golden/report.json` (normalised, keys sorted, validated against the result schema), that no check went
+beyond its `CheckInfo`, and that the report at `jobs = 1` equals the report at `jobs = 8`. The clock, run
+id and jobs come from `[run]`. Adding an environment directory adds a run, with no code change. A directory
+with no `spec` is a base that other environments build on, and is skipped. Not built yet: `terminal.txt`
+(M1-086), `report.html` (M1-077) and the call to `rdy_cli::run` (M1-057).
+
+**Completeness.** For every check that a registered family lists and that is not on the family's stub list,
+`checks/<id>/` must hold the cases 08 names. A case counts through its `expect.json`:
+
+| Class | Needed when | What counts |
+| --- | --- | --- |
+| passing | always | `result.level` is `pass` |
+| non-passing | always | `result.level` is `warn` or `fail` |
+| no-privilege partial | the check has a `Root` want | `caps.root = false` and `result.partial` set |
+| Timeout | the check declares a command, a peer or a `statfs` prefix | `result.timed_out_ms`, and a `delay_ms` or `blackhole` entry in the case |
+
+A missing class that `PENDING` (in the test file) does not list is a failure. Each `PENDING` row names the
+check, the classes and the ticket that owes them. A row for a class that is no longer missing is a failure
+too. A new family adds its row in `crates/rdy-cli/tests/env_harness/families.rs`.
 
 ## Recording (M2)
 

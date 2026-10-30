@@ -54,9 +54,9 @@ const MAX_PATH_CHARS: usize = 150;
 /// must contain.
 ///
 /// Not here: 08 also asks that every registered, implemented check has its cases. That rule needs the
-/// registry, and this crate cannot link the check families. M1-075 owns it (correction-21): the in-process
-/// env harness links the CLI and the families, so it can walk the registry and fail on a check with no
-/// case. Until then this list guards single cases by hand.
+/// registry, and this crate cannot link the check families. It lives in
+/// `crates/rdy-cli/tests/env_harness/main.rs` (M1-075, correction-21), which links the CLI and the families.
+/// This list guards single cases by hand.
 struct Required {
     dir: &'static str,
     holds: Option<(&'static str, &'static str)>,

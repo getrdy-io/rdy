@@ -191,9 +191,13 @@ command. It fails on:
   `cluster.local` or on the built-in allow-list of vendors Rdy checks (OS vendors, `k8s.io`,
   `nvidia.com`); any publicly routable IP address. Other entries need `allow.toml` with a reason
   (`169.254.169.254` for the metadata tests is the first);
-- (M1-075, not in the lint file) a registered, implemented check (its `CheckInfo` says so) with no `checks/<id>/` directory, or without a
-  passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a
-  `Timeout` case where it runs a command or opens a socket; a missing `checks/_policy/symlink-to-shadow`.
+- (M1-075, in `crates/rdy-cli/tests/env_harness/main.rs`, not in the lint file) a registered, implemented check
+  (registered by a family and not on its stub list) with no `checks/<id>/` directory, or without a passing
+  case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout`
+  case where it declares a command, a peer or a `statfs` prefix. A case counts through its `expect.json`
+  (`result.level`, `result.partial`, `result.timed_out_ms`). A `PENDING` list in the test names what is still
+  owed and by which ticket, and a row that is no longer true is a failure; a missing
+  `checks/_policy/symlink-to-shadow` stays in the lint file.
 
 Two deviations, decided in the M1-050 review. The host rule uses a short list of country codes and common
 generic labels, not brand TLDs (`crates/rdy-engine/tests/data/iana-tlds.txt`, taken from the IANA root zone
