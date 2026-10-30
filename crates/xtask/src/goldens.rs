@@ -11,6 +11,7 @@
 //! - `checks/<check-id>/<case>/expect.json`: the reviewed result of a check case;
 //! - `redaction/<category>/<case>.expected`: a redaction expectation;
 //! - `reports/golden/<file>`: a report as the JSON writer emits it (M1-055).
+//! - `summary/<case>.txt`: the summary line and last line of a result set (M1-054).
 //!
 //! A `<file>.actual` is a local failure output, git ignores it, and it is never a golden. Files under
 //! `results/` are released result files that other tests parse, so they are not goldens.
@@ -150,6 +151,7 @@ fn is_golden(path: &str) -> bool {
         ["checks", _id, _case, "expect.json"] => true,
         ["redaction", _category, file] => file.ends_with(".expected") && !is_sidecar(file),
         ["reports", "golden", file] => !is_sidecar(file),
+        ["summary", file] => file.ends_with(".txt") && !is_sidecar(file),
         _ => false,
     }
 }
@@ -171,6 +173,7 @@ mod tests {
             "tests/fixtures/checks/host.memory/pass/expect.json",
             "tests/fixtures/redaction/url/proxy.expected",
             "tests/fixtures/reports/golden/not-ready-hostile-host.json",
+            "tests/fixtures/summary/all-passed.txt",
         ] {
             assert!(is_golden(yes), "{yes}");
         }
