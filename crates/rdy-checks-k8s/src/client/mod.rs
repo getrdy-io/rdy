@@ -59,6 +59,7 @@ use rdy_engine::check::{CheckError, MAX_TIMEOUT};
 use rdy_engine::probe::Probe;
 use secrecy::ExposeSecret;
 
+mod b64;
 mod error;
 pub mod guard;
 mod text;
@@ -892,8 +893,18 @@ fn inline_secrets(auth: Option<&AuthInfo>) -> Vec<String> {
         .map(|secret| secret.expose_secret().trim().to_owned())
         .filter(|value| !value.is_empty())
         .collect();
+    // `client-key-data` is the base64 of a PEM key. The key shows up in output as PEM lines, not as
+    // base64, so the decoded text is a known secret too. The set adds a multi-line value line by line.
+    if let Some(data) = &auth.client_key_data
+        && let Some(decoded) = b64::decode(data.expose_secret())
+        && let Ok(pem) = String::from_utf8(decoded)
+        && !pem.trim().is_empty()
+    {
+        secrets.push(pem.trim().to_owned());
+    }
     // The `env` entries of an exec plugin go into the plugin's environment. The ones whose name looks
-    // like a secret are known secrets too (a short value such as a profile name is not).
+    // like a secret are known secrets too (a value under the redactor's minimum, such as a profile
+    // name, is not: it would match common words).
     for entry in auth
         .exec
         .iter()
@@ -904,7 +915,7 @@ fn inline_secrets(auth: Option<&AuthInfo>) -> Vec<String> {
             // The redactor's own key-name rule, plus `KEY` (it treats `KEY` alone as a plain word).
             let secret_name = rdy_engine::redact::is_secret_name(name)
                 || name.to_ascii_uppercase().contains("KEY");
-            if secret_name && value.len() >= 8 {
+            if secret_name && value.trim().len() >= rdy_engine::redact::KNOWN_SECRET_MIN_LEN {
                 secrets.push(value.clone());
             }
         }
