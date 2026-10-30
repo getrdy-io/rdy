@@ -292,6 +292,17 @@ impl Replay {
         self
     }
 
+    /// Records that the machine lacks `program`, as a fixture does with `"missing": true`. A call to it
+    /// fails as the live runner fails for a program that is not on the search path. A program with no
+    /// recording at all is "not recorded", which is a test bug, so a test that expects the program to be
+    /// absent must say so with this.
+    #[must_use]
+    pub fn missing(mut self, program: &str) -> Self {
+        let name = self.program_key(program);
+        self.missing.insert(name);
+        self
+    }
+
     /// Records the answer to a native call. A call with no answer recorded is "not recorded", so a test
     /// that forgets one fails loudly. A later answer to the same call replaces the earlier one.
     #[must_use]

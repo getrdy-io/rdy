@@ -44,6 +44,7 @@ const fn reader(id: &'static str, reads: &'static [&'static str]) -> CheckInfo {
         default_timeout: None,
         os: OS,
         reads,
+        statfs: reads,
         env: &[],
         commands: &[],
         peers: &[],
@@ -1321,6 +1322,7 @@ async fn a_fixture_name_at_a_link_local_address_is_refused_by_the_probe() {
         default_timeout: None,
         os: OS,
         reads: &[],
+        statfs: &[],
         env: &[],
         commands: &[],
         peers: &[PeerClass::NtpServers],
@@ -1457,6 +1459,24 @@ async fn a_recording_answers_only_where_the_live_runner_would_find_the_program()
             .stdout,
         b"late\n"
     );
+}
+
+#[tokio::test]
+async fn the_builder_records_a_missing_program_like_the_fixture_does() {
+    let replay = Replay::new().missing("chronyc");
+    let got = replay
+        .spawn(Cmd::new("chronyc", Duration::from_secs(5)).args(["tracking"]))
+        .await;
+    assert!(
+        matches!(&got, Err(ProbeError::Policy(PolicyError::NotFound { program })) if *program == "chronyc"),
+        "{got:?}"
+    );
+    assert!(matches!(
+        replay
+            .spawn(Cmd::new("getent", Duration::from_secs(5)).args(["hosts"]))
+            .await,
+        Err(ProbeError::NotRecorded(_))
+    ));
 }
 
 #[tokio::test]
