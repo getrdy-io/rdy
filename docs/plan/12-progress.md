@@ -166,7 +166,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-076 | [#80](https://github.com/getrdy-io/rdy/pull/80) | 2026-10-29 | Objects, scalars and arrays get rows. Array items that are objects get their own sections, so the `checks` entry fields and the `redact_patterns` entry fields are listed. `oneOf`, `anyOf` and `enum` fields show `choice` only, and their values, the Example column and the missing-description failure wait for M1-084. Per-id check parameters (`allOf` if/then) wait for M1-084 too. The committed page is the golden: `docs` tests run `check_all` on it, so CI catches a stale page.
 
-- M1-077 | todo | | askama HTML report with inline CSS, dark mode and print | backlog corrected 2026-10-29 (correction-13): the golden HTML run details show the credential plugin name (01 section 6, item 6) for a fixture with `identity.kube.exec_plugin` set, moved from M1-041; depends on M1-041 too (PR #83 reviews)
+- M1-077 | todo | | askama HTML report with inline CSS, dark mode and print | backlog corrected 2026-10-29 (correction-13): the golden HTML run details show the credential plugin name (01 section 6, item 6) for a fixture with `identity.kube.exec_plugin` set, moved from M1-041; depends on M1-041 too (PR #83 reviews); backlog corrected 2026-10-30 (correction-26): sections from `group_by_bucket`, five-section golden; depends on M1-053 (PR #136 review)
 
 - M1-078 | todo | | Embed result JSON in the HTML report safely
 
@@ -238,7 +238,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-112 | [#19](https://github.com/getrdy-io/rdy/pull/19) | 2026-10-28 | The "sign a spec in CI" half of the exit test is proved at the helper level (`RDY_KEY_PASSWORD` and `--password-file -` through `rdy_cli::password`); `spec sign` itself is M1-125, which must call `read_key_password`. `--password` is refused by a raw argv check, not a hidden clap flag, so it wins over missing-argument errors; only `spec sign` and `spec keygen` get the reason. Windows checks the file type and refuses reparse points but not ACLs; its file tests run on the Windows CI leg only (compiled here, not run). `read_key_password` now takes stderr for the env-variable note (tty only); it adds the `rustix` dependency (Unix only) for O_NOFOLLOW and geteuid without unsafe. Follow-up fix PR for macOS test build.
 
-- M1-113 | todo | | k8s.nodes allocatable, node filters, conditions, zones and pod-count limit | backlog corrected 2026-10-30 (correction-24): moves k8s.storageclass's lists onto the paging helper; depends on M1-107 and M1-110 (PR #131 review)
+- M1-113 | todo | | k8s.nodes allocatable, node filters, conditions, zones and pod-count limit | backlog corrected 2026-10-30 (correction-24): moves k8s.storageclass's lists onto the paging helper; depends on M1-107 and M1-110 (PR #131 review); backlog corrected 2026-10-30 (correction-26): implements `Cluster::read_only_as` and `Cluster::is_openshift` on the lazy connection; depends on M1-111; 3 h (PR #135 review)
 
 - M1-114 | todo | | k8s.admission PSA labels, policy engine and SCC discovery
 
