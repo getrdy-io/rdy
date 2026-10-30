@@ -37,6 +37,13 @@ pub enum Reply {
     /// These bytes exactly, in place of any HTTP reply, then the connection closes. For a server that
     /// answers a client with something that is not HTTP.
     Raw(Vec<u8>),
+    /// These bytes exactly, then the connection is dropped with no goodbye: no TLS `close_notify`, only
+    /// the end of the TCP stream. For a server whose body ends where the connection does, or that dies
+    /// in the middle of a reply.
+    Abrupt(Vec<u8>),
+    /// These bytes exactly, then silence: the connection stays open until the client closes it. For a
+    /// server that sends a head and part of a body and then stalls.
+    Stall(Vec<u8>),
 }
 
 /// One request the server read.
@@ -301,8 +308,27 @@ where
         let _ = stream.shutdown().await;
         return;
     }
+    if let Reply::Abrupt(bytes) = reply {
+        let _ = stream.write_all(bytes).await;
+        let _ = stream.flush().await;
+        // Dropped, not shut down: a TLS stream sends no `close_notify`.
+        return;
+    }
+    if let Reply::Stall(bytes) = reply {
+        let _ = stream.write_all(bytes).await;
+        let _ = stream.flush().await;
+        // Hold the connection open. The task ends when the client closes or the server drops.
+        let mut sink = [0u8; 256];
+        while matches!(stream.read(&mut sink).await, Ok(n) if n > 0) {}
+        return;
+    }
     let (code, location) = match reply {
-        Reply::Ok | Reply::Body(_) | Reply::Chunked(_) | Reply::Raw(_) => (200, None),
+        Reply::Ok
+        | Reply::Body(_)
+        | Reply::Chunked(_)
+        | Reply::Raw(_)
+        | Reply::Abrupt(_)
+        | Reply::Stall(_) => (200, None),
         Reply::Redirect(location) => (302, Some(location.as_str())),
         Reply::Status(code) => (*code, None),
     };

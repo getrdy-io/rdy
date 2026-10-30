@@ -25,7 +25,9 @@ use crate::probe::net::tests::assert_matches_result_schema;
 use crate::probe::net::{AttemptOutcome, RULE_PROXY_UNDECLARED, RULE_TCP_ADDRESS, RULE_TCP_HOST};
 use crate::probe::net::{NoRoots, TrustFailure, TrustStore, TrustVerdict};
 use crate::probe::replay::{Fixture, NativeFailure, Replay, TcpScript};
-use crate::probe::{Backend, NativeCall, NativeValue, StoreKind, StoreSource, SystemRoots};
+use crate::probe::{
+    Backend, NativeCall, NativeValue, StoreKind, StoreOrigin, StoreSource, SystemRoots,
+};
 use crate::redact::{Redactor, TagKey};
 use crate::testing::loopback::{
     ConnectProxy, HttpOptions, HttpServer, NeverAccepts, ProxyMode, Reply, ResetAfterClientHello,
@@ -255,6 +257,15 @@ async fn a_302_returns_its_location_host_without_a_second_request() {
         // One request, no second, and nothing was looked up or dialled for the new host.
         assert_eq!(server.requests().len(), 1, "no second request");
         assert_eq!(server.accepted(), 1);
+        // The request names the spec host, never the host of the `Location`: `Host` always, and the SNI
+        // when the connection is TLS.
+        assert_eq!(
+            server.requests()[0].header("host"),
+            Some(format!("web.acme.test:{}", server.addr().port()).as_str())
+        );
+        if url {
+            assert_eq!(server.sni_seen(), [Some("web.acme.test".to_owned())]);
+        }
         assert_eq!(of_kind(&hub, ActionKind::Http).len(), 1);
         assert_eq!(
             entries(&hub).len(),
@@ -277,6 +288,17 @@ async fn location_hosts_are_read_from_absolute_urls_only() {
         ("//cdn.acme.example/x", Some("cdn.acme.example")),
         ("https://[2001:db8::1]/x", Some("[2001:db8::1]")),
         ("https://10.0.0.7:8443/", Some("10.0.0.7")),
+        // The scheme is matched without regard to case.
+        ("HTTPS://A.ACME.example/x", Some("a.acme.example")),
+        ("HtTp://a.acme.example:8080", Some("a.acme.example")),
+        // The authority ends at the first `/`, `?` or `#`.
+        ("https://a.acme.example?next=/x", Some("a.acme.example")),
+        ("https://a.acme.example#frag/x", Some("a.acme.example")),
+        ("  https://a.acme.example/x  ", Some("a.acme.example")),
+        ("https:///only-a-path", None),
+        ("https://", None),
+        ("https:/a.acme.example/", None),
+        ("https://a.acme.example\\@evil.example/", None),
         ("/relative/path", None),
         ("next", None),
         ("https://user:pw@evil.example/", None),
@@ -286,6 +308,46 @@ async fn location_hosts_are_read_from_absolute_urls_only() {
         assert_eq!(location_host(value).as_deref(), want, "{value:?}");
     }
     assert_eq!(location_host(&"a".repeat(MAX_LOCATION + 1)), None);
+
+    // A signed CDN redirect runs far past the 512 characters a `Target` takes: only its authority is
+    // parsed, so the host still comes back. The signature is never read.
+    let signed = format!(
+        "https://blobs.acme.example/v2/layer/sha256:abc?X-Sig={}&X-Expires=300",
+        "s".repeat(1500)
+    );
+    assert!(signed.len() > 1500 && signed.len() <= MAX_LOCATION);
+    assert_eq!(
+        location_host(&signed).as_deref(),
+        Some("blobs.acme.example")
+    );
+    let scheme_relative = format!("//blobs.acme.example/x?sig={}", "s".repeat(1500));
+    assert_eq!(
+        location_host(&scheme_relative).as_deref(),
+        Some("blobs.acme.example")
+    );
+    // An authority that is itself too long is not a host.
+    assert_eq!(
+        location_host(&format!("https://{}/", "h".repeat(600))),
+        None
+    );
+}
+
+#[tokio::test]
+async fn a_long_signed_location_gives_its_host_end_to_end() {
+    let signed = format!(
+        "HTTPS://blobs.acme.example/v2/blob?sig={}",
+        "q".repeat(1500)
+    );
+    let server = plain_server(Reply::Redirect(signed)).await;
+    let hub = hub_over(machine(server.addr(), None));
+    let at = hosts_of(&server);
+    let outcome = probe(&hub, &[&at])
+        .http(get(http_url(&server, "/")))
+        .await
+        .expect("the 302 is an answer");
+    assert_eq!(outcome.location_host.as_deref(), Some("blobs.acme.example"));
+    assert!(!log_text(&hub).contains("qqqq"));
+    assert!(!format!("{outcome:?}").contains("qqqq"));
 }
 
 #[tokio::test]
@@ -318,6 +380,7 @@ async fn a_body_canary_never_reaches_the_report_and_the_discard_is_capped() {
     }
 
     // A HEAD gets no body even though the length is announced.
+    // (See also `a_body_of_exactly_the_cap_is_complete`.)
     let server = tls_server(&ca, Validity::Always, Reply::Body(small.clone())).await;
     let hub = hub_over(machine(server.addr(), Some(trusting(&ca))));
     let at = hosts_of(&server);
@@ -450,6 +513,114 @@ async fn the_request_is_a_plain_get_with_no_credentials() {
     assert!(!log_text(&hub).contains("QUERY-CANARY"));
 }
 
+// ---- a connection that ends after the head ------------------------------------------------------
+
+const CUT_BODY: &[u8] =
+    b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\nhello";
+const EOF_BODY: &[u8] = b"HTTP/1.1 200 OK\r\nServer: acme-gw\r\nConnection: close\r\n\r\nhello";
+
+#[tokio::test]
+async fn a_body_cut_short_by_the_server_is_a_status_with_body_cut() {
+    // The head said 1000 bytes, five came, and the server closed. The status is data: it is not lost to
+    // the read error.
+    let server = plain_server(Reply::Raw(CUT_BODY.to_vec())).await;
+    let hub = hub_over(machine(server.addr(), None));
+    let at = hosts_of(&server);
+    let outcome = probe(&hub, &[&at])
+        .http(get(http_url(&server, "/")))
+        .await
+        .expect("the status came before the cut");
+    assert_eq!(outcome.status, 200);
+    assert_eq!(outcome.body_bytes, 5);
+    assert!(outcome.body_cut);
+    assert_eq!(
+        of_kind(&hub, ActionKind::Http)[0].outcome,
+        ActionOutcome::Ok
+    );
+
+    // A reset in the middle of the body is the same.
+    let server = plain_server(Reply::Abrupt(CUT_BODY.to_vec())).await;
+    let hub = hub_over(machine(server.addr(), None));
+    let at = hosts_of(&server);
+    let outcome = probe(&hub, &[&at])
+        .http(get(http_url(&server, "/")))
+        .await
+        .expect("the status came before the cut");
+    assert_eq!((outcome.status, outcome.body_bytes), (200, 5));
+    assert!(outcome.body_cut);
+}
+
+#[tokio::test]
+async fn a_close_delimited_body_over_tls_keeps_its_status_with_or_without_a_close_notify() {
+    let ca = TestCa::root("Acme Test Root");
+    // With `close_notify` the body ends where the connection does: complete.
+    // Without it (a server that just drops the socket) the end is not proven: `body_cut`, and the status
+    // and the headers are kept either way.
+    for (reply, cut) in [
+        (Reply::Raw(EOF_BODY.to_vec()), false),
+        (Reply::Abrupt(EOF_BODY.to_vec()), true),
+    ] {
+        let name = format!("{reply:?}");
+        let server = tls_server(&ca, Validity::Always, reply).await;
+        let hub = hub_over(machine(server.addr(), Some(trusting(&ca))));
+        let at = hosts_of(&server);
+        let outcome = probe(&hub, &[&at])
+            .http(get(https(&server, "/")))
+            .await
+            .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        assert_eq!(outcome.status, 200, "{name}");
+        assert_eq!(outcome.header("server"), Some("acme-gw"), "{name}");
+        assert_eq!(outcome.body_bytes, 5, "{name}");
+        assert_eq!(outcome.body_cut, cut, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn a_stalled_body_is_cut_by_the_body_timeout_and_does_not_hang() {
+    // The head and five bytes arrive, then the server holds the connection open and says nothing.
+    let server = plain_server(Reply::Stall(CUT_BODY.to_vec())).await;
+    let hub = hub_over(machine(server.addr(), None));
+    let at = hosts_of(&server);
+    let p = probe(&hub, &[&at]);
+    quick(&p);
+    let started = std::time::Instant::now();
+    let outcome =
+        tokio::time::timeout(Duration::from_secs(20), p.http(get(http_url(&server, "/"))))
+            .await
+            .expect("the call does not hang")
+            .expect("the status came before the stall");
+    assert_eq!(outcome.status, 200);
+    assert_eq!(outcome.body_bytes, 5);
+    assert!(outcome.body_cut);
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(
+        of_kind(&hub, ActionKind::Http)[0].outcome,
+        ActionOutcome::Ok
+    );
+}
+
+#[tokio::test]
+async fn a_body_of_exactly_the_cap_is_complete_and_one_byte_more_is_cut() {
+    for (reply, counted, cut) in [
+        (Reply::Body(vec![b'z'; MAX_BODY]), MAX_BODY, false),
+        (Reply::Chunked(vec![b'z'; MAX_BODY]), MAX_BODY, false),
+        (Reply::Body(vec![b'z'; MAX_BODY + 1]), MAX_BODY, true),
+        (Reply::Chunked(vec![b'z'; MAX_BODY + 1]), MAX_BODY, true),
+        (Reply::Body(vec![b'z'; MAX_BODY - 1]), MAX_BODY - 1, false),
+    ] {
+        let name = format!("{} of {counted}", reply_name(&reply));
+        let server = plain_server(reply).await;
+        let hub = hub_over(machine(server.addr(), None));
+        let at = hosts_of(&server);
+        let outcome = probe(&hub, &[&at])
+            .http(get(http_url(&server, "/")))
+            .await
+            .expect("an answer");
+        assert_eq!(outcome.body_bytes, counted, "{name}");
+        assert_eq!(outcome.body_cut, cut, "{name}");
+    }
+}
+
 // ---- the failure classes ------------------------------------------------------------------------
 
 #[tokio::test]
@@ -510,6 +681,7 @@ async fn dns_refused_blackhole_and_blocked_address_are_their_own_failures() {
         error,
         ProbeError::Net(NetFailure::NotConnected {
             target: dead.clone(),
+            outcome: AttemptOutcome::Refused,
             reason: AttemptOutcome::Refused.phrase(),
         })
     );
@@ -522,6 +694,7 @@ async fn dns_refused_blackhole_and_blocked_address_are_their_own_failures() {
         error,
         ProbeError::Net(NetFailure::NotConnected {
             target: "hole.acme.test:80".to_owned(),
+            outcome: AttemptOutcome::TimedOut,
             reason: AttemptOutcome::TimedOut.phrase(),
         })
     );
@@ -751,6 +924,12 @@ async fn the_proxy_answers_403_and_407_as_typed_errors_and_a_200_tunnels_https()
     assert_eq!(outcome.status, 200);
     assert!(outcome.connect.via_proxy);
     assert_eq!(outcome.connect.proxy_status, Some(200));
+    // Through the tunnel the origin sees the spec host as the SNI and as `Host`, not the proxy's name.
+    assert_eq!(server.sni_seen(), [Some("web.acme.test".to_owned())]);
+    assert_eq!(
+        server.requests()[0].header("host"),
+        Some(format!("web.acme.test:{port}").as_str())
+    );
     let log = of_kind(&hub, ActionKind::Http);
     assert_eq!(
         field(&log[0], "via_proxy"),
@@ -774,6 +953,48 @@ fn proxied(proxy: SocketAddr, bundle: Option<SystemRoots>) -> Replay {
 }
 
 #[tokio::test]
+async fn the_proxy_credentials_reach_the_proxy_and_never_the_origin_or_the_log() {
+    let ca = TestCa::root("Acme Test Root");
+    let server = tls_server(&ca, Validity::Always, Reply::Ok).await;
+    let port = server.addr().port();
+    let at = format!("web.acme.test:{port}");
+    let proxy = ConnectProxy::start_with_routes(ProxyMode::Ok, &[(&at, server.addr())])
+        .await
+        .expect("proxy");
+    let hub = hub_over(proxied(proxy.addr(), Some(trusting(&ca))));
+    hub.set_proxy_text("http://svc:longer-canary-pw@proxy.acme.test:3128")
+        .expect("proxy");
+    let outcome = probe(&hub, &[&at])
+        .http(get(https(&server, "/")).route(Route::ViaProxy))
+        .await
+        .expect("through the tunnel");
+    assert_eq!(outcome.status, 200);
+    assert_eq!(outcome.connect.proxy_status, Some(200));
+
+    // The origin got one request with no proxy credential, and the secret is in none of its bytes.
+    let seen = server.requests();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].header("proxy-authorization"), None);
+    assert_eq!(seen[0].header("authorization"), None);
+    let origin_saw = format!("{seen:?}");
+    let encoded = base64(b"svc:longer-canary-pw");
+    for secret in ["longer-canary-pw", encoded.as_str()] {
+        assert!(!origin_saw.contains(secret), "{secret} reached the origin");
+        assert!(!log_text(&hub).contains(secret), "{secret} is in the log");
+        assert!(
+            !format!("{outcome:?}").contains(secret),
+            "{secret} is in the outcome"
+        );
+    }
+    // The log names the proxy without its user info.
+    let log = of_kind(&hub, ActionKind::Http);
+    assert_eq!(
+        field(&log[0], "via_proxy"),
+        Some(&Value::from("http://proxy.acme.test:3128"))
+    );
+}
+
+#[tokio::test]
 async fn plain_http_through_the_proxy_is_refused_before_a_byte_is_sent() {
     let server = plain_server(Reply::Ok).await;
     let at = hosts_of(&server);
@@ -790,6 +1011,43 @@ async fn plain_http_through_the_proxy_is_refused_before_a_byte_is_sent() {
     assert_eq!(denied_rule(&error), RULE_HTTP_PLAIN_VIA_PROXY);
     assert_eq!(proxy.accepted(), 0);
     assert_eq!(server.accepted(), 0);
+}
+
+#[tokio::test]
+async fn nothing_is_dialled_when_the_call_cannot_be_made() {
+    let ca = TestCa::root("Acme Test Root");
+    let server = tls_server(&ca, Validity::Always, Reply::Ok).await;
+    let at = hosts_of(&server);
+
+    // No OS store to verify with: the call fails before a connection opens.
+    let hub = hub_over(machine(server.addr(), Some(SystemRoots::default())));
+    let error = probe(&hub, &[&at])
+        .http(get(https(&server, "/")))
+        .await
+        .expect_err("no roots");
+    assert!(
+        matches!(error, ProbeError::Net(NetFailure::NoTrustRoots { .. })),
+        "{error:?}"
+    );
+    assert_eq!(
+        server.accepted(),
+        0,
+        "no connection for a store that is missing"
+    );
+}
+
+#[tokio::test]
+async fn a_failure_after_the_connection_opened_still_names_the_address() {
+    let server = plain_server(Reply::Raw(b"SSH-2.0-OpenSSH_9.6\r\n".to_vec())).await;
+    let hub = hub_over(machine(server.addr(), None));
+    let at = hosts_of(&server);
+    probe(&hub, &[&at])
+        .http(get(http_url(&server, "/")))
+        .await
+        .expect_err("not HTTP");
+    let log = of_kind(&hub, ActionKind::Http);
+    assert_eq!(log[0].outcome, ActionOutcome::Failed);
+    assert_eq!(field(&log[0], "addr"), Some(&Value::from("127.0.0.1")));
 }
 
 // ---- policy -------------------------------------------------------------------------------------
@@ -1189,10 +1447,20 @@ async fn the_trust_store_location_and_each_roots_sha256_are_returned() {
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     );
 
-    // Asked once for the run, the same answer the TLS calls use.
+    // Asked once for the run, the same answer the TLS calls use. The run-level `native` entry records
+    // the question to the OS; each call of the check writes its own entry, as every probe call does.
     let again = p.trust_store().await.expect("the store");
     assert_eq!(again, store);
-    assert_eq!(of_kind(&hub, ActionKind::Native).len(), 1);
+    let native = of_kind(&hub, ActionKind::Native);
+    assert_eq!(native.len(), 3, "{native:?}");
+    assert_eq!(native.iter().filter(|e| e.check.is_none()).count(), 1);
+    for entry in native.iter().filter(|e| e.check.is_some()) {
+        assert_eq!(entry.check.as_deref(), Some("net.tls_intercept"));
+        assert_eq!(entry.outcome, ActionOutcome::Ok);
+        assert_eq!(field(entry, "api"), Some(&Value::from("system_roots")));
+    }
+    // Neither the roots nor where they were read from are in the log.
+    assert!(!log_text(&hub).contains("ca-certificates"));
 
     // An empty store, a store that did not read, and a store that is overridden are not errors.
     for (replay, want) in [
@@ -1275,7 +1543,46 @@ async fn trust_store_is_refused_after_the_check_ended() {
     p.end();
     let error = p.trust_store().await.expect_err("ended");
     assert_eq!(denied_rule(&error), crate::probe::RULE_CHECK_FINISHED);
-    assert!(of_kind(&hub, ActionKind::Native).is_empty());
+    // The refusal is logged, as for every call after the check ended, and the store was not asked.
+    let native = of_kind(&hub, ActionKind::Native);
+    assert_eq!(native.len(), 1, "{native:?}");
+    assert_eq!(native[0].outcome, ActionOutcome::Denied);
+    assert_eq!(native[0].check.as_deref(), Some("net.tls_intercept"));
+    assert_eq!(field(&native[0], "api"), Some(&Value::from("system_roots")));
+    assert_eq!(
+        field(&native[0], "rule"),
+        Some(&Value::from(crate::probe::RULE_CHECK_FINISHED))
+    );
+}
+
+#[tokio::test]
+async fn a_probe_with_no_hub_refuses_trust_store() {
+    let error = Probe::closed().trust_store().await.expect_err("no hub");
+    assert_eq!(denied_rule(&error), crate::probe::RULE_NO_PROBE);
+}
+
+#[tokio::test]
+async fn a_store_named_by_a_variable_says_so() {
+    let hub = hub_over(Replay::new().native(
+        NativeCall::SystemRoots,
+        NativeValue::SystemRoots(SystemRoots::new(
+            Vec::new(),
+            vec![
+                StoreSource::new(StoreKind::Bundle, "/home/alice/ca.pem")
+                    .origin(StoreOrigin::Env("SSL_CERT_FILE")),
+            ],
+        )),
+    ));
+    let store = hub
+        .check_probe("net.tls_intercept", Os::Linux, None)
+        .trust_store()
+        .await
+        .expect("the store");
+    assert_eq!(store.sources[0].origin, StoreOrigin::Env("SSL_CERT_FILE"));
+    assert_eq!(
+        StoreSource::new(StoreKind::OsStore, "x").origin,
+        StoreOrigin::Standard
+    );
 }
 
 // ---- helpers and the live backend ---------------------------------------------------------------
@@ -1286,7 +1593,7 @@ fn the_host_header_and_the_logged_url_follow_the_target() {
         (
             "https://a.acme.test/x?y=1",
             "a.acme.test",
-            "https://a.acme.test:443/x",
+            "https://a.acme.test/x",
         ),
         (
             "https://a.acme.test:8443",
@@ -1296,7 +1603,7 @@ fn the_host_header_and_the_logged_url_follow_the_target() {
         (
             "http://a.acme.test:80/p",
             "a.acme.test",
-            "http://a.acme.test:80/p",
+            "http://a.acme.test/p",
         ),
         (
             "http://a.acme.test:8080/?q",
@@ -1306,9 +1613,9 @@ fn the_host_header_and_the_logged_url_follow_the_target() {
         (
             "https://[2001:db8::1]:443/x",
             "[2001:db8::1]",
-            "https://[2001:db8::1]:443/x",
+            "https://[2001:db8::1]/x",
         ),
-        ("https://10.0.0.7/", "10.0.0.7", "https://10.0.0.7:443/"),
+        ("https://10.0.0.7/", "10.0.0.7", "https://10.0.0.7/"),
     ] {
         let t = target(text);
         assert_eq!(host_header(&t), host, "{text}");

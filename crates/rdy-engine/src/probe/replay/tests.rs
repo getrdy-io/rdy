@@ -1062,13 +1062,13 @@ async fn a_symlink_chain_resolves_and_a_loop_fails() {
 
 #[tokio::test]
 async fn a_system_roots_value_may_name_where_the_roots_were_read_from() {
-    use crate::probe::{StoreKind, StoreSource};
+    use crate::probe::{StoreKind, StoreOrigin, StoreSource};
     let fixture = load(&[(
         "native/roots.json",
         r#"{"call":"system_roots","value":{"certs":["AQID","BAUG"],"sources":[
             {"kind":"bundle","location":"/etc/pki/tls/certs/ca-bundle.crt"},
-            {"kind":"directory","location":"/etc/ssl/certs"},
-            {"kind":"os","location":"the macOS keychains"}]}}"#,
+            {"kind":"directory","location":"/etc/ssl/certs","env":"SSL_CERT_DIR"},
+            {"kind":"os","location":"System keychain"}]}}"#,
     )])
     .expect("loads");
     let run = TestRun::for_fixture(&fixture);
@@ -1079,8 +1079,9 @@ async fn a_system_roots_value_may_name_where_the_roots_were_read_from() {
             vec![vec![1, 2, 3], vec![4, 5, 6]],
             vec![
                 StoreSource::new(StoreKind::Bundle, "/etc/pki/tls/certs/ca-bundle.crt"),
-                StoreSource::new(StoreKind::Directory, "/etc/ssl/certs"),
-                StoreSource::new(StoreKind::OsStore, "the macOS keychains"),
+                StoreSource::new(StoreKind::Directory, "/etc/ssl/certs")
+                    .origin(StoreOrigin::Env("SSL_CERT_DIR")),
+                StoreSource::new(StoreKind::OsStore, "System keychain"),
             ]
         )))
     );
@@ -1115,6 +1116,10 @@ async fn a_system_roots_value_may_name_where_the_roots_were_read_from() {
         (
             r#"{"call":"system_roots","value":{"certs":["AQID"],"sources":[{"kind":"bundle"}]}}"#,
             "location",
+        ),
+        (
+            r#"{"call":"system_roots","value":{"certs":["AQID"],"sources":[{"kind":"bundle","location":"/x","env":"HOME"}]}}"#,
+            "must be SSL_CERT_FILE or SSL_CERT_DIR",
         ),
         (
             r#"{"call":"system_roots","value":{"certs":["AQID"],"extra":1}}"#,

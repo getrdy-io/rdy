@@ -13,7 +13,9 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::probe::live::roots::MAX_TOTAL_BYTES;
-use crate::probe::{MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, Refused, StoreKind, StoreSource};
+use crate::probe::{
+    MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, Refused, StoreKind, StoreOrigin, StoreSource,
+};
 use crate::testing::loopback::TestCa;
 
 fn der(ca: &TestCa) -> Vec<u8> {
@@ -351,8 +353,10 @@ fn the_answer_names_the_files_and_directories_that_held_certificates() {
     assert_eq!(
         found.sources,
         [
-            StoreSource::new(StoreKind::Bundle, bundle.to_string_lossy()),
-            StoreSource::new(StoreKind::Directory, certs.to_string_lossy()),
+            StoreSource::new(StoreKind::Bundle, bundle.to_string_lossy())
+                .origin(StoreOrigin::Env("SSL_CERT_FILE")),
+            StoreSource::new(StoreKind::Directory, certs.to_string_lossy())
+                .origin(StoreOrigin::Env("SSL_CERT_DIR")),
         ]
     );
 }
@@ -369,6 +373,7 @@ fn the_standard_bundle_that_was_used_is_the_source_and_an_empty_store_has_none()
         found.sources,
         [StoreSource::new(StoreKind::Bundle, good.to_string_lossy())]
     );
+    assert_eq!(found.sources[0].origin, StoreOrigin::Standard);
 
     let found = super::load(&nowhere(&root), &none()).expect("empty");
     assert!(found.certs.is_empty());

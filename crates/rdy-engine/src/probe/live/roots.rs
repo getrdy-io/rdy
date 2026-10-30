@@ -20,7 +20,9 @@
 use std::io;
 
 #[cfg(any(unix, windows))]
-use crate::probe::{MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, StoreKind, StoreSource, SystemRoots};
+use crate::probe::{
+    MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, StoreKind, StoreOrigin, StoreSource, SystemRoots,
+};
 
 /// The most files of a certificate directory that are read.
 #[cfg(unix)]
@@ -95,6 +97,8 @@ struct Collected {
     certs: Vec<Vec<u8>>,
     /// The files, directories or OS store that held a certificate, in the order they were read.
     sources: Vec<StoreSource>,
+    /// What the place being read now is: standard, or named by a variable.
+    origin: StoreOrigin,
     known: std::collections::HashSet<Vec<u8>>,
     /// A certificate or file was left out for a cap.
     dropped: usize,
@@ -109,6 +113,7 @@ impl Collected {
         Self {
             certs: Vec::new(),
             sources: Vec::new(),
+            origin: StoreOrigin::Standard,
             known: std::collections::HashSet::new(),
             dropped: 0,
             #[cfg(unix)]
@@ -145,7 +150,8 @@ impl Collected {
             .iter()
             .any(|s| s.kind == kind && s.location == location)
         {
-            self.sources.push(StoreSource::new(kind, location));
+            self.sources
+                .push(StoreSource::new(kind, location).origin(self.origin));
         }
     }
 
@@ -173,7 +179,7 @@ mod pem {
     use super::{Collected, MAX_FILES};
     use crate::check::current_os;
     use crate::probe::live::files::{self, Secrets};
-    use crate::probe::{MAX_READ, ReadGuard, ReadRange, StoreKind, SystemRoots};
+    use crate::probe::{MAX_READ, ReadGuard, ReadRange, StoreKind, StoreOrigin, SystemRoots};
 
     /// The bundle files of the common distributions, in the order they are tried. Debian and Ubuntu,
     /// RHEL and Fedora, SUSE, Alpine and older RHEL, Arch, the BSDs, and the file macOS ships.
@@ -259,12 +265,14 @@ mod pem {
         let mut last_error = None;
         if explicit {
             if let Some(file) = &sources.file {
+                found.origin = StoreOrigin::Env("SSL_CERT_FILE");
                 note(
                     read_bundle(file, &guard, secrets, &mut found),
                     &mut last_error,
                 );
             }
             for dir in &sources.dirs {
+                found.origin = StoreOrigin::Env("SSL_CERT_DIR");
                 note(read_dir(dir, &guard, secrets, &mut found), &mut last_error);
             }
         } else {
@@ -397,9 +405,9 @@ mod native_store {
 
     /// The fixed name of the store on this OS, for the answer's source.
     const STORE: &str = if cfg!(windows) {
-        "the Windows root certificate store"
+        "Windows Root store"
     } else {
-        "the macOS keychains"
+        "System keychain"
     };
 
     fn read() -> io::Result<SystemRoots> {

@@ -12,6 +12,7 @@
 
 use std::fmt;
 
+use super::attempt::AttemptOutcome;
 use super::trust::{NoRoots, TrustFailure};
 use crate::redact::KNOWN_SECRET_MIN_LEN;
 use rdy_spec::Target;
@@ -412,7 +413,11 @@ pub enum NetFailure {
     NotConnected {
         /// The `host:port` that was asked for.
         target: String,
-        /// A fixed phrase for the last attempt's outcome.
+        /// What the attempts came to: [`AttemptOutcome::Refused`] for a closed port,
+        /// [`AttemptOutcome::TimedOut`] for a silent host, and so on. This is what a check reads to tell
+        /// `refused` from `blackhole`.
+        outcome: AttemptOutcome,
+        /// A fixed phrase for the same outcome, for messages.
         reason: &'static str,
     },
     /// The connection was reset during the TLS handshake, before the server sent a certificate.

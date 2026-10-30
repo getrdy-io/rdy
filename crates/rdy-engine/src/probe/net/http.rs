@@ -30,14 +30,16 @@
 //! `http/1.1` alone.
 //!
 //! **Failures.** Each class a check reports has its own value: [`NetFailure::Dns`], the refusals of the
-//! address rule (`ProbeError::Denied`), [`NetFailure::NotConnected`] (refused or silent, by `reason`),
+//! address rule (`ProbeError::Denied`), [`NetFailure::NotConnected`] (refused or silent, by its typed `outcome`),
 //! [`NetFailure::ProxyForbidden`] and [`NetFailure::ProxyAuthRequired`], [`NetFailure::TlsReset`],
 //! [`NetFailure::TlsAlert`], [`NetFailure::TlsUntrusted`], [`NetFailure::NoTrustRoots`],
 //! [`NetFailure::HttpFailed`] and [`ProbeError::Timeout`]. An HTTP status is data in the outcome, not an
 //! error.
 //!
-//! **The log.** One `http` entry per call: `method`, `url` (the scheme, host, port and path, never the
-//! query), `via_proxy`, `addr` and the `status`. No header and no body.
+//! **The log.** One `http` entry per call: `method`, `url` (the scheme, host and path, never the query;
+//! the port only when it is not the scheme's default), `via_proxy`, `addr` and the `status`. `addr` is set
+//! as soon as a direct connection opens, so a call that fails after it still names the address. No header
+//! and no body.
 
 use std::future::poll_fn;
 use std::pin::pin;
@@ -59,6 +61,7 @@ use super::{
     BoxedStream, Dialed, NetFailure, Probe, ProbeError, ProbeHub, Roots, Route, TcpReport,
 };
 use super::{fail_net, proxy_for, settle};
+use crate::probe::log::Pending;
 use crate::probe::refuse;
 use crate::probe::sock::host_port;
 
@@ -133,8 +136,9 @@ impl HttpMethod {
     }
 }
 
-/// One HTTP call: which URL, how, by which route and against which roots.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One HTTP call: which URL, how, by which route and against which roots. Its `Debug` shows the URL
+/// without its query, as the log does: a query can hold a token.
+#[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct HttpProbe {
     /// The URL: an `http://` or `https://` target, with its path and query. Its host and port must be
@@ -146,6 +150,17 @@ pub struct HttpProbe {
     pub route: Route,
     /// The roots an `https://` target is verified against.
     pub roots: Roots,
+}
+
+impl std::fmt::Debug for HttpProbe {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpProbe")
+            .field("url", &shown_url(&self.target))
+            .field("method", &self.method)
+            .field("route", &self.route)
+            .field("roots", &self.roots)
+            .finish()
+    }
 }
 
 impl HttpProbe {
@@ -282,18 +297,15 @@ impl Probe {
         };
 
         let result = self
-            .unless_ended(&what, self.exchange(hub, &target, method, roots, proxy))
+            .unless_ended(
+                &what,
+                self.exchange(hub, &mut entry, &target, method, roots, proxy),
+            )
             .await;
         match result {
             Err(ProbeError::Net(failure)) => Err(fail_net(entry, failure)),
             other => settle(entry, other, |outcome, entry| {
                 entry.set("status", outcome.status);
-                let addr = outcome
-                    .connect
-                    .addr
-                    .filter(|_| !outcome.connect.via_proxy)
-                    .map_or(Value::Null, |a| a.ip().to_string().into());
-                entry.set("addr", addr);
             }),
         }
     }
@@ -302,41 +314,51 @@ impl Probe {
     async fn exchange(
         &self,
         hub: &ProbeHub,
+        entry: &mut Pending,
         target: &Target,
         method: HttpMethod,
         roots: Roots,
         proxy: Option<&crate::probe::proxy::ProxyUrl>,
     ) -> Result<HttpOutcome, ProbeError> {
         let what = host_port(target);
+        // Everything that can be wrong with the call itself is found before a connection opens: a
+        // request that cannot be sent, a store that is missing, a name TLS cannot carry.
+        let request = build_request(target, method).map_err(|reason| failed(&what, reason))?;
+        let strict = if target.scheme() == Some("https") {
+            Some(self.strict_tls(hub, target, roots).await?)
+        } else {
+            None
+        };
+
         let started = Instant::now();
         let Dialed { report, stream } = self.dial(hub, target, proxy).await?;
+        // Through a proxy the connected address is the proxy's, and the log shows the target.
+        if let Some(addr) = report.addr.filter(|_| !report.via_proxy) {
+            entry.set("addr", addr.ip().to_string());
+        }
         let Some(stream) = stream else {
-            return Err(ProbeError::Net(NetFailure::NotConnected {
-                target: what,
-                reason: report.failure(),
-            }));
+            return Err(ProbeError::Net(report.not_connected(&what)));
         };
         let connect = started.elapsed();
 
         // `https` is verified before one byte of the request is written. `http` is plain text.
-        let (io, tls, tls_time): (BoxedStream, Option<HttpTls>, Option<Duration>) =
-            if target.scheme() == Some("https") {
+        let (io, tls, tls_time): (BoxedStream, Option<HttpTls>, Option<Duration>) = match strict {
+            Some(strict) => {
                 let Secured {
                     stream,
                     protocol,
                     alpn,
                     handshake,
-                } = self.secure(hub, target, stream, roots).await?;
+                } = self.secure(strict, target, stream).await?;
                 (
                     Box::new(stream),
                     Some(HttpTls { protocol, alpn }),
                     Some(handshake),
                 )
-            } else {
-                (stream, None, None)
-            };
+            }
+            None => (stream, None, None),
+        };
 
-        let request = build_request(target, method).map_err(|reason| failed(&what, reason))?;
         let reply = converse(
             io,
             request,
@@ -416,21 +438,18 @@ async fn converse(
         })
     };
 
-    // The connection task moves bytes for the body, so it is polled alongside the exchange. If it ends
-    // first with an error, the exchange cannot go on. If it ends cleanly, the exchange finishes on what
-    // it has.
+    // The connection task moves bytes for the body, so it is polled alongside the exchange. When it
+    // ends, with or without an error, the exchange goes on with what it has: hyper has already handed
+    // the error to the request (no head yet) or to the body (a cut, a reset, a close with no
+    // `close_notify`), and the status and `Location` of a head that arrived are data. The stage timeouts
+    // stop an exchange that has nothing more to wait for.
     let mut work = pin!(work);
     let mut connection = pin!(connection);
     let mut open = true;
     loop {
         tokio::select! {
             result = &mut work => return result,
-            ended = &mut connection, if open => {
-                open = false;
-                if let Err(error) = ended {
-                    return Err(http_error(&error, what));
-                }
-            }
+            _ended = &mut connection, if open => open = false,
         }
     }
 }
@@ -448,8 +467,13 @@ async fn discard(body: hyper::body::Incoming, limit: Duration) -> (usize, bool) 
                 Some(Ok(frame)) => {
                     if let Ok(data) = frame.into_data() {
                         counted = counted.saturating_add(data.len());
-                        if counted >= MAX_BODY {
+                        if counted > MAX_BODY {
                             return true;
+                        }
+                        if counted == MAX_BODY {
+                            // A body of exactly the cap is complete if nothing follows it. One more
+                            // look tells, and the bytes of a further frame are not counted.
+                            return poll_fn(|cx| body.as_mut().poll_frame(cx)).await.is_some();
                         }
                     }
                 }
@@ -498,7 +522,8 @@ fn host_header(target: &Target) -> String {
     }
 }
 
-/// The URL for the log: scheme, host, port and path, never the query.
+/// The URL for the log: scheme, host and path, never the query. The port is left out when it is the
+/// default of the scheme, as in the examples of 01.
 fn shown_url(target: &Target) -> String {
     let scheme = target.scheme().unwrap_or("tcp");
     let tail = target.path_and_query().unwrap_or_default();
@@ -508,7 +533,17 @@ fn shown_url(target: &Target) -> String {
     } else {
         path
     };
-    format!("{scheme}://{}:{}{path}", target.host(), target.port())
+    let default = match target.scheme() {
+        Some("http") => Some(80),
+        Some("https") => Some(443),
+        _ => None,
+    };
+    let port = if Some(target.port()) == default {
+        String::new()
+    } else {
+        format!(":{}", target.port())
+    };
+    format!("{scheme}://{}{port}{path}", target.host())
 }
 
 /// The headers of [`REPORTED_HEADERS`] the reply had.
@@ -533,22 +568,35 @@ fn printable(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// The host of an absolute `Location`. A relative one, a long one and one with user info give `None`.
+/// The host of an absolute `Location`. A relative one, one over [`MAX_LOCATION`] and one with user info
+/// give `None`.
+///
+/// Only `scheme://authority` is parsed. The scheme is matched without regard to case, and the text is
+/// cut at the first `/`, `?` or `#` after the `//`, so the path, the query and the fragment (a signed
+/// redirect can run to a thousand characters of them) are never read or judged.
 fn location_host(value: &str) -> Option<String> {
     if value.len() > MAX_LOCATION {
         return None;
     }
-    // The fragment is cut first: a target refuses one, and the host does not depend on it.
-    let value = value.split('#').next().unwrap_or_default().trim();
-    // A scheme-relative `//host/path` keeps its host.
-    let owned;
-    let text = if value.starts_with("//") {
-        owned = format!("https:{value}");
-        owned.as_str()
+    let value = value.trim();
+    // A scheme-relative `//host/path` keeps its host and takes https.
+    let (scheme, rest) = if let Some(rest) = value.strip_prefix("//") {
+        ("https", rest)
     } else {
-        value
+        let (scheme, rest) = value.split_once("://")?;
+        let scheme = if scheme.eq_ignore_ascii_case("https") {
+            "https"
+        } else if scheme.eq_ignore_ascii_case("http") {
+            "http"
+        } else {
+            return None;
+        };
+        (scheme, rest)
     };
-    let parsed = Target::parse(text).ok().filter(Target::is_url)?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let parsed = Target::parse(&format!("{scheme}://{authority}"))
+        .ok()
+        .filter(Target::is_url)?;
     match parsed.host() {
         Host::Name(name) => Some(name.clone()),
         other => Some(other.to_string()),

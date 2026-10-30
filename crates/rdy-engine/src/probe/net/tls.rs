@@ -214,10 +214,7 @@ impl Probe {
         // Connect first: a host that cannot be reached does not cost a read of the OS store.
         let Dialed { report, stream } = self.dial(hub, target, proxy).await?;
         let Some(stream) = stream else {
-            return Err(ProbeError::Net(NetFailure::NotConnected {
-                target: what.clone(),
-                reason: report.failure(),
-            }));
+            return Err(ProbeError::Net(report.not_connected(&what)));
         };
         let (system, bundled) = self.trust(hub, &provider).await?;
 
@@ -339,19 +336,19 @@ impl Probe {
         Arc::clone(bundled)
     }
 
-    /// Wraps `stream` in a TLS session that verifies strictly (M1-093): the roots of `roots` accept
-    /// the server's chain for the spec host, or the handshake fails and nothing is sent. The caller
-    /// speaks HTTP/1.1 on the result; the ALPN offer is `http/1.1` only.
+    /// Builds the strict client configuration for `target` (M1-093): the roots of `roots` accept the
+    /// server's chain for the spec host, or the handshake fails and nothing is sent. The caller builds it
+    /// before it dials, so a store that is missing or a name TLS cannot carry costs no connection. The
+    /// ALPN offer is `http/1.1` only.
     ///
     /// `Roots::System` asks for the OS store, once for the run; `Roots::Bundled` never touches the
     /// machine.
-    pub(super) async fn secure(
+    pub(super) async fn strict_tls(
         &self,
         hub: &ProbeHub,
         target: &Target,
-        stream: BoxedStream,
         roots: Roots,
-    ) -> Result<Secured, ProbeError> {
+    ) -> Result<StrictTls, ProbeError> {
         let what = host_port(target);
         let failed = |reason: &'static str| {
             ProbeError::Net(NetFailure::TlsFailed {
@@ -374,8 +371,22 @@ impl Probe {
             StrictError::Config => failed("rustls could not build a client configuration"),
         })?;
         pin_clock(hub, &mut config);
-        let connector = TlsConnector::from(Arc::new(config));
+        Ok(StrictTls {
+            connector: TlsConnector::from(Arc::new(config)),
+            name,
+        })
+    }
 
+    /// Wraps `stream` in the TLS session of `strict`. The handshake verifies strictly: a chain the roots
+    /// do not accept fails it and no request byte is written. The caller speaks HTTP/1.1 on the result.
+    pub(super) async fn secure(
+        &self,
+        strict: StrictTls,
+        target: &Target,
+        stream: BoxedStream,
+    ) -> Result<Secured, ProbeError> {
+        let what = host_port(target);
+        let StrictTls { connector, name } = strict;
         let started = Instant::now();
         let limit = self.scope.peers.timeout(HANDSHAKE_TIMEOUT);
         let tls = match timeout(limit, connector.connect(name, stream)).await {
@@ -402,37 +413,37 @@ impl Probe {
     /// The OS trust store as the run found it: where it was read from and the SHA-256 of each root.
     /// The store is asked once for the run, as for [`Probe::tls_chain`], and the answer is kept.
     ///
-    /// This is a read of what the run already holds: it adds no entry of its own, and the one `native`
-    /// entry with `check: null` records the question. An empty or unreadable store is not an error: it
-    /// is [`TrustStore::missing`], so a check can say "no OS trust store found".
+    /// The call writes one `native` entry with `api: system_roots` and the check's id, closed `ok` or
+    /// `denied`, as every probe call does; a call after the check ended is refused and logged. The
+    /// run-level `native` entry with `check: null` still records the question to the OS. An empty or
+    /// unreadable store is not an error: it is [`TrustStore::missing`], so a check can say "no OS trust
+    /// store found".
     ///
     /// # Errors
     ///
     /// [`ProbeError::Denied`] after the check ended or on a probe with no hub, and
     /// [`ProbeError::NotRecorded`] on a replay backend with no `system_roots` answer recorded.
     pub async fn trust_store(&self) -> Result<TrustStore, ProbeError> {
-        let Some(hub) = &self.hub else {
-            return Err(ProbeError::denied(
-                crate::probe::RULE_NO_PROBE,
-                "trust store",
-            ));
-        };
-        if self.scope.ended.load(std::sync::atomic::Ordering::Acquire) {
-            return Err(ProbeError::denied(
-                crate::probe::RULE_CHECK_FINISHED,
-                "trust store",
-            ));
-        }
+        let mut fields = Map::new();
+        fields.insert("api".to_owned(), "system_roots".into());
+        let (hub, entry) = self.begin(ActionKind::Native, fields, "trust store")?;
         let provider = provider();
-        let trust = self
+        let result = self
             .unless_ended("trust store", self.system_trust(hub, &provider))
-            .await?;
-        Ok(TrustStore {
-            missing: trust.verifier.is_none().then(|| trust.missing()),
-            sources: trust.sources().to_vec(),
-            roots: trust.hashes().to_vec(),
-        })
+            .await
+            .map(|trust| TrustStore {
+                missing: trust.verifier.is_none().then(|| trust.missing()),
+                sources: trust.sources().to_vec(),
+                roots: trust.hashes().to_vec(),
+            });
+        settle(entry, result, |_, _| {})
     }
+}
+
+/// The strict client configuration and the server name of one call, built before the connection opens.
+pub(super) struct StrictTls {
+    connector: TlsConnector,
+    name: ServerName<'static>,
 }
 
 /// A TLS session that passed strict verification, and what its handshake showed.

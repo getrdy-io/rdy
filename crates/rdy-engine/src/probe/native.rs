@@ -174,8 +174,24 @@ pub enum StoreKind {
     Bundle,
     /// A directory of certificate files.
     Directory,
-    /// The OS store itself (the macOS keychains, the Windows root store), which has no path.
+    /// The OS store itself ("System keychain" on macOS, "Windows Root store" on Windows), which has no
+    /// path.
     OsStore,
+}
+
+/// Why a trust store place was read: it is a standard one, or the operator named it in a variable.
+///
+/// A path from a variable can hold a user name (`SSL_CERT_FILE=/home/alice/ca.pem`) and no redaction
+/// rule rewrites a path, so a report must tell the two apart (M1-100): a standard path shows as it is, a
+/// variable's path shows the variable name and the path with the home directory collapsed to `~` and
+/// control characters removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StoreOrigin {
+    /// A path of the OS or the distribution, or the OS store itself.
+    Standard,
+    /// The place the named environment variable (`SSL_CERT_FILE` or `SSL_CERT_DIR`) points at.
+    Env(&'static str),
 }
 
 /// One place the roots of a [`NativeCall::SystemRoots`] answer were read from.
@@ -184,19 +200,29 @@ pub enum StoreKind {
 pub struct StoreSource {
     /// What it is.
     pub kind: StoreKind,
-    /// The path as the OS writes it, or for [`StoreKind::OsStore`] a fixed name such as "the macOS
-    /// keychains". It is raw: it goes through the redactor before it enters a report.
+    /// The path as the OS writes it, or for [`StoreKind::OsStore`] a fixed name such as "System
+    /// keychain". It is raw: a report shows it by the rule of [`StoreOrigin`], not as it is.
     pub location: String,
+    /// Whether the place is a standard one or came from an environment variable.
+    pub origin: StoreOrigin,
 }
 
 impl StoreSource {
-    /// A source of this kind at `location`.
+    /// A standard source of this kind at `location`.
     #[must_use]
     pub fn new(kind: StoreKind, location: impl Into<String>) -> Self {
         Self {
             kind,
             location: location.into(),
+            origin: StoreOrigin::Standard,
         }
+    }
+
+    /// The same source, with this origin.
+    #[must_use]
+    pub fn origin(mut self, origin: StoreOrigin) -> Self {
+        self.origin = origin;
+        self
     }
 }
 

@@ -525,21 +525,33 @@ tests policy.
   and `body_cut` (the facade counts and drops at most 64 KiB), `tls` (protocol and chosen ALPN), the
   `TcpReport`, and `HttpTiming { connect, tls, first_byte, total }`. A status is data, never an error.
   The other failures are `NetFailure::HttpFailed { reason }` (not HTTP/1.1, cut off, reset, or a head over 16 KiB), `Timeout`
-  (10 s for the reply head, 5 s for the discard), `NotConnected` (its `reason` is
-  `AttemptOutcome::Refused.phrase()` for a refused port and `AttemptOutcome::TimedOut.phrase()` for a
-  silent one, which is how a check tells `refused` from `blackhole`), `Dns`, `TlsReset`, `TlsAlert`,
+  (10 s for the reply head, 5 s for the discard), `NotConnected` (its typed `outcome` is
+  `AttemptOutcome::Refused` for a refused port and `AttemptOutcome::TimedOut` for a silent one, which is
+  how a check tells `refused` from `blackhole`; `reason` is the matching fixed phrase), `Dns`, `TlsReset`, `TlsAlert`,
   `ProxyForbidden`, `ProxyAuthRequired`, and `Denied` for `blocked_address`, a `host:port` target
   (`RULE_HTTP_NOT_URL`) and a plain `http://` target through the proxy (`RULE_HTTP_PLAIN_VIA_PROXY`: the
-  absolute form is M1-097). One `http` entry per call: `method`, `url` (scheme, host, port and path, never
-  the query), `via_proxy`, `addr` and `status`.
+  absolute form is M1-097). A connection that ends after the reply head (a cut or reset body, a close
+  with no TLS `close_notify`) keeps the status: the body is `body_cut` and the call is `Ok`. A body of exactly
+  64 KiB is complete. The request, the strict configuration and the trust roots are built before the
+  connection opens, so a missing store costs no connection. One `http` entry per call: `method`, `url`
+  (scheme, host and path, never the query, and the port only when it is not the scheme's default),
+  `via_proxy`, `addr` (set as soon as a direct connection opens) and `status`. The `Location` host is read
+  from `scheme://authority` only (the scheme without regard to case, cut at the first `/`, `?` or `#`), so a
+  signed redirect longer than 512 characters still gives its host.
 - `Probe::trust_store() -> Result<TrustStore, ProbeError>` (M1-093, for M1-100) returns what the run
   found in the OS store: `sources` (the bundle files or directories that held a certificate, or the OS
   store, as raw `StoreSource { kind, location }`), the SHA-256 of each root in store order (`roots`,
   with `TrustStore::hash`, `contains` and `hex`), and `missing: Option<NoRoots>` for an empty,
-  unreadable or overridden store. It adds no log entry; the one run-level `native` entry records the
-  question. `NativeValue::SystemRoots` now holds a `SystemRoots { certs, sources }`; a replay fixture
-  writes `value` as a list of base64 certificates (no source) or as `{ "certs": [...], "sources":
-  [{ "kind": "bundle" | "directory" | "os", "location": "..." }] }`.
+  unreadable or overridden store. It writes one `native` entry (`api: system_roots`, the check's id)
+  per call, closed `ok` or `denied` (a call after the check ended is refused and logged); the one
+  run-level `native` entry with `check: null` records the question to the OS. Each `StoreSource` has an
+  `origin`: `StoreOrigin::Standard`, or `StoreOrigin::Env("SSL_CERT_FILE" | "SSL_CERT_DIR")` for a place a
+  variable named, so M1-100 can show a variable's path with the home directory collapsed (a path can hold a
+  user name and no redaction rule rewrites a path). The OS store is named "System keychain" on macOS and
+  "Windows Root store" on Windows, as 03 writes it. `NativeValue::SystemRoots` now holds a
+  `SystemRoots { certs, sources }`; a replay fixture writes `value` as a list of base64 certificates (no
+  source) or as `{ "certs": [...], "sources": [{ "kind": "bundle" | "directory" | "os", "location": "...",
+  "env": "SSL_CERT_FILE" | "SSL_CERT_DIR" }] }` (`env` is optional).
 - **Test clock (feature `testing`).** `ProbeHub::pin_clock(Duration since the epoch)` and `unpin_clock`
   set the time that both the recording (`tls_chain`) and the strict (`http`) configurations give
   rustls as their `time_provider`, so a generated leaf is `Expired` or `NotYetValid` whatever the real date

@@ -43,7 +43,7 @@ use super::{ApiRecord, CommandAnswer, NativeAnswer, NativeFailure, Replay, b64, 
 use crate::check::{Need, Os};
 use crate::probe::{
     DirEntry, MachineId, NativeCall, NativeValue, Output, Resource, RlimitInfo, StatvfsInfo,
-    StoreKind, StoreSource, SystemRoots, UnameInfo,
+    StoreKind, StoreOrigin, StoreSource, SystemRoots, UnameInfo,
 };
 
 /// The largest fixture file the loader reads. The fixture lint (M1-050) is stricter.
@@ -1618,7 +1618,8 @@ fn root_certs(ctx: &Ctx<'_>, value: Value) -> Result<Vec<Vec<u8>>, FixtureError>
         .collect()
 }
 
-/// One `{ "kind": "bundle" | "directory" | "os", "location": "..." }` of a `system_roots` value.
+/// One `{ "kind": "bundle" | "directory" | "os", "location": "...", "env": "SSL_CERT_FILE" }` of a
+/// `system_roots` value. `env` is optional: without it the source is a standard one.
 fn root_source(ctx: &Ctx<'_>, value: Value) -> Result<StoreSource, FixtureError> {
     let mut obj = Obj::from_value(ctx, value, "sources")?;
     let kind = match obj.string("kind")?.as_str() {
@@ -1632,8 +1633,18 @@ fn root_source(ctx: &Ctx<'_>, value: Value) -> Result<StoreSource, FixtureError>
         }
     };
     let location = obj.string("location")?;
+    let origin = match obj.optional_string("env")?.as_deref() {
+        None => StoreOrigin::Standard,
+        Some("SSL_CERT_FILE") => StoreOrigin::Env("SSL_CERT_FILE"),
+        Some("SSL_CERT_DIR") => StoreOrigin::Env("SSL_CERT_DIR"),
+        Some(other) => {
+            return Err(ctx.err(format!(
+                "a source `env` is `{other}`; it must be SSL_CERT_FILE or SSL_CERT_DIR"
+            )));
+        }
+    };
     obj.finish()?;
-    Ok(StoreSource::new(kind, location))
+    Ok(StoreSource::new(kind, location).origin(origin))
 }
 
 /// `api/*.json`.

@@ -80,7 +80,7 @@ pub use log::{
 };
 pub use native::{
     MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, MachineId, NativeCall, NativeValue, RULE_MACHINE_ID,
-    Resource, RlimitInfo, StatvfsInfo, StoreKind, StoreSource, SystemRoots, UnameInfo,
+    Resource, RlimitInfo, StatvfsInfo, StoreKind, StoreOrigin, StoreSource, SystemRoots, UnameInfo,
 };
 #[cfg(feature = "testing")]
 pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS};
@@ -90,11 +90,13 @@ pub use proxy::{
     ProxyUrlError,
 };
 
+pub use attempt::AttemptOutcome;
 pub use trust::{NoRoots, TrustFailure};
 
 use log::{ActionLog, Limits, Pending};
 
 mod addr;
+mod attempt;
 #[cfg(feature = "runtime")]
 mod live;
 mod log;

@@ -74,6 +74,7 @@ pub(super) mod replay;
 mod tests;
 mod tls;
 
+pub use super::AttemptOutcome;
 pub use http::{
     BODY_TIMEOUT, HttpMethod, HttpOutcome, HttpProbe, HttpTiming, HttpTls, MAX_BODY,
     REPORTED_HEADERS, RESPONSE_TIMEOUT, RULE_HTTP_NOT_URL, RULE_HTTP_PLAIN_VIA_PROXY,
@@ -136,57 +137,6 @@ pub enum Route {
     ViaProxy,
 }
 
-/// What one connection attempt did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum AttemptOutcome {
-    /// The connection opened.
-    Connected,
-    /// The host answered with a refusal (a closed port, or a firewall that rejects).
-    Refused,
-    /// The connection was reset.
-    Reset,
-    /// No answer within [`ATTEMPT_TIMEOUT`]: a firewall that drops packets looks like this.
-    TimedOut,
-    /// No route to the network or the host.
-    Unreachable,
-    /// Another failure.
-    Failed,
-    /// Another address connected first, so this attempt was cut while it was still running.
-    Abandoned,
-}
-
-impl AttemptOutcome {
-    fn of(error: &io::Error) -> Self {
-        match error.kind() {
-            io::ErrorKind::ConnectionRefused => Self::Refused,
-            io::ErrorKind::ConnectionReset
-            | io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::BrokenPipe => Self::Reset,
-            io::ErrorKind::TimedOut => Self::TimedOut,
-            io::ErrorKind::NetworkUnreachable
-            | io::ErrorKind::HostUnreachable
-            | io::ErrorKind::NetworkDown => Self::Unreachable,
-            _ => Self::Failed,
-        }
-    }
-
-    /// A fixed phrase for the log, and for the `reason` of a [`NetFailure::NotConnected`]: a check tells
-    /// a refused port (`Refused.phrase()`) from a silent one (`TimedOut.phrase()`) by comparing it.
-    #[must_use]
-    pub fn phrase(self) -> &'static str {
-        match self {
-            Self::Connected => "connected",
-            Self::Refused => "connection refused",
-            Self::Reset => "connection reset",
-            Self::TimedOut => "no answer in time",
-            Self::Unreachable => "network or host unreachable",
-            Self::Failed => "connection failed",
-            Self::Abandoned => "cut because another address connected",
-        }
-    }
-}
-
 /// One connection attempt to one address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -219,19 +169,38 @@ pub struct TcpReport {
 }
 
 impl TcpReport {
-    /// The fixed phrase for why nothing connected, from the attempts.
-    fn failure(&self) -> &'static str {
+    /// Why nothing connected, from the attempts: [`AttemptOutcome::TimedOut`] when every attempt was
+    /// silent, else the last attempt's outcome, and [`AttemptOutcome::Failed`] when there was no address
+    /// to try.
+    fn failure_outcome(&self) -> AttemptOutcome {
         let all_silent = !self.attempts.is_empty()
             && self
                 .attempts
                 .iter()
                 .all(|a| a.outcome == AttemptOutcome::TimedOut);
         if all_silent {
-            return AttemptOutcome::TimedOut.phrase();
+            return AttemptOutcome::TimedOut;
         }
         self.attempts
             .last()
-            .map_or("no address to try", |a| a.outcome.phrase())
+            .map_or(AttemptOutcome::Failed, |a| a.outcome)
+    }
+
+    /// The fixed phrase for why nothing connected, from the attempts.
+    fn failure(&self) -> &'static str {
+        if self.attempts.is_empty() {
+            return "no address to try";
+        }
+        self.failure_outcome().phrase()
+    }
+
+    /// The failure of a call that got no connection, typed.
+    fn not_connected(&self, target: &str) -> NetFailure {
+        NetFailure::NotConnected {
+            target: target.to_owned(),
+            outcome: self.failure_outcome(),
+            reason: self.failure(),
+        }
     }
 }
 
@@ -279,7 +248,7 @@ impl Probe {
         match result {
             Ok(report) if !report.connected => {
                 entry.set("error", report.failure());
-                let silent = report.failure() == AttemptOutcome::TimedOut.phrase();
+                let silent = report.failure_outcome() == AttemptOutcome::TimedOut;
                 entry.finish(if silent {
                     ActionOutcome::Timeout
                 } else {

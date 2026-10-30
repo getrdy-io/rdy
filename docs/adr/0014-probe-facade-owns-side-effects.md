@@ -87,6 +87,9 @@ lists `rdy-engine` as a wrapper), reached through a safe `Io` adapter, with no `
 `http://` target through the proxy is refused until M1-097 writes the absolute form. (d) A `testing`-gated
 hub clock (`ProbeHub::pin_clock`) feeds the `time_provider` of both the recording and the strict
 configuration. (e) `Probe::trust_store` gives a check the OS store's sources and the SHA-256 of each root.
+It is a probe call like any other: it writes one `native` entry (`api: system_roots`) with the check's id,
+and a call after the check ended is denied and logged. (f) A connection that ends after the reply head
+does not lose the status: the head is data, and the body is cut (`body_cut`).
 
 ## Consequences
 

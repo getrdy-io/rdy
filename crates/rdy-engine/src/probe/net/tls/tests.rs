@@ -452,6 +452,7 @@ async fn failures_have_their_own_typed_errors() {
         error,
         ProbeError::Net(NetFailure::NotConnected {
             target: at.clone(),
+            outcome: AttemptOutcome::Refused,
             reason: AttemptOutcome::Refused.phrase(),
         })
     );

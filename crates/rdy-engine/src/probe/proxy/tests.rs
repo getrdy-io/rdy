@@ -363,6 +363,7 @@ fn every_failure_ends_with_a_fix_and_names_no_peer_text() {
         NetFailure::NoProxy,
         NetFailure::NotConnected {
             target: "registry.acme.test:443".to_owned(),
+            outcome: crate::probe::net::AttemptOutcome::Refused,
             reason: "connection refused",
         },
         NetFailure::TlsReset {
