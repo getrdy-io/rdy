@@ -11,6 +11,14 @@ const REBUILDS: &[&str] = &["rocky", "almalinux", "ol", "centos"];
 /// version numbers do not track the rebuild's.
 const PARENTS: &[&str] = &["rhel", "centos"];
 
+/// Whether `release` is a rebuild that stands for the parent `want`. A rebuild names its parent in
+/// `ID_LIKE`, except Oracle Linux: it says `ID_LIKE="fedora"`, so `ol` is mapped to `rhel` here.
+fn stands_for(release: &Release, want: &str) -> bool {
+    REBUILDS.contains(&release.id.as_str())
+        && PARENTS.contains(&want)
+        && (release.id_like.iter().any(|w| w == want) || (release.id == "ol" && want == "rhel"))
+}
+
 /// The most distributions named in a sentence before the rest are counted.
 const LIST_MAX: usize = 8;
 
@@ -36,17 +44,18 @@ pub(crate) enum Match {
 /// Matches `release` against `supported`.
 ///
 /// `ID` is compared exactly. `ID_LIKE` counts only on a rebuild (`rocky`, `almalinux`, `ol`, `centos`)
-/// and only for the parents `rhel` and `centos`. A version without a dot is a major match, a dotted one
-/// is exact.
+/// and only for the parents `rhel` and `centos`. Oracle Linux (`ol`) says `ID_LIKE="fedora"`, so it is
+/// mapped to `rhel` by name. A version without a dot is a major match, a dotted one is exact.
+///
+/// Trap: a dotted version is exact, so a spec entry that is a shorter prefix of the host version does
+/// not match. Alpine `3.19.1` is not matched by `3.19`. List `3.19.1`, or the major (`3`) to accept
+/// every 3.x. [`prefix_trap`] finds this case so the check can say so.
 pub(crate) fn matches(release: &Release, supported: &[Wanted]) -> Match {
     let mut via = None;
     let mut unknown = false;
     for want in supported {
         let direct = want.id == release.id;
-        let like = !direct
-            && REBUILDS.contains(&release.id.as_str())
-            && PARENTS.contains(&want.id.as_str())
-            && release.id_like.contains(&want.id);
+        let like = !direct && stands_for(release, &want.id);
         if !direct && !like {
             continue;
         }
@@ -80,6 +89,23 @@ pub(crate) fn version_matches(wanted: &str, have: &str) -> bool {
     } else {
         have.split('.').next() == Some(wanted)
     }
+}
+
+/// The spec entry versions that are a dotted prefix of `have` but do not match it, such as `3.19` for a
+/// host on `3.19.1`. The check names them in a note, because the miss looks like a bug in the spec.
+pub(crate) fn prefix_trap<'a>(wanted: &'a [String], have: &str) -> Vec<&'a str> {
+    let have = have.trim();
+    wanted
+        .iter()
+        .map(|w| w.trim())
+        .filter(|w| {
+            w.contains('.')
+                && !version_matches(w, have)
+                && have
+                    .strip_prefix(w)
+                    .is_some_and(|rest| rest.starts_with('.'))
+        })
+        .collect()
 }
 
 /// The spec's architecture names (`amd64`, `arm64`) and the kernel's (`x86_64`, `aarch64`) in one form.
@@ -118,41 +144,85 @@ fn or_list(items: &[String]) -> String {
 
 /// Which FIPS procedure fits the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Family {
-    /// RHEL and its rebuilds, Fedora, Amazon Linux.
-    Rhel,
-    /// Ubuntu and its derivatives.
-    Ubuntu,
-    /// Anything else.
-    Other,
+pub(crate) enum Procedure {
+    /// RHEL 8 and 9, their rebuilds, and Amazon Linux 2023: `fips-mode-setup`.
+    ModeSetup,
+    /// RHEL 10 and later and their rebuilds: no tool, FIPS mode is chosen when the host is installed.
+    InstallOnly,
+    /// Amazon Linux 2: `dracut-fips`, `dracut` and `grubby`.
+    AmazonLinux2,
+    /// Ubuntu and its derivatives: the Ubuntu Pro client.
+    UbuntuPro,
+    /// Anything else, including Fedora: the OS vendor's own procedure.
+    Vendor,
 }
 
-/// The family from `ID` and `ID_LIKE`.
-pub(crate) fn family(release: &Release) -> Family {
-    let any = |names: &[&str]| {
-        std::iter::once(&release.id)
-            .chain(&release.id_like)
-            .any(|w| names.contains(&w.as_str()))
-    };
-    if any(&["rhel", "centos", "fedora", "amzn"]) {
-        Family::Rhel
-    } else if any(&["ubuntu"]) {
-        Family::Ubuntu
-    } else {
-        Family::Other
+/// The first number of a `VERSION_ID`, as in `9` for `9.2`.
+fn major(release: &Release) -> Option<u32> {
+    release
+        .version_id
+        .as_deref()?
+        .trim()
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+}
+
+/// The FIPS procedure from `ID`, `ID_LIKE` and the major version.
+pub(crate) fn procedure(release: &Release) -> Procedure {
+    let id = release.id.as_str();
+    let like = |name: &str| release.id_like.iter().any(|w| w == name);
+    if id == "amzn" {
+        return match major(release) {
+            Some(2) => Procedure::AmazonLinux2,
+            Some(2023) => Procedure::ModeSetup,
+            _ => Procedure::Vendor,
+        };
+    }
+    if id == "ubuntu" || like("ubuntu") {
+        return Procedure::UbuntuPro;
+    }
+    let el = matches!(id, "rhel" | "centos" | "rocky" | "almalinux" | "ol")
+        || (id != "fedora" && (like("rhel") || like("centos")));
+    if !el {
+        return Procedure::Vendor;
+    }
+    match major(release) {
+        Some(8 | 9) => Procedure::ModeSetup,
+        Some(10..) => Procedure::InstallOnly,
+        _ => Procedure::Vendor,
     }
 }
 
 /// The fix for FIPS mode being on when the spec forbids it, or off when it requires it.
-pub(crate) fn fips_fix(require: bool, family: Family) -> &'static str {
-    match (require, family) {
-        (true, Family::Rhel) => "Run `fips-mode-setup --enable`, then reboot.",
-        (false, Family::Rhel) => "Run `fips-mode-setup --disable`, then reboot.",
-        (true, Family::Ubuntu) => "Attach Ubuntu Pro, run `pro enable fips-updates`, then reboot.",
-        (false, Family::Ubuntu) => {
-            "Remove fips=1 from GRUB_CMDLINE_LINUX in /etc/default/grub, run `update-grub`, then reboot."
+pub(crate) fn fips_fix(require: bool, procedure: Procedure) -> &'static str {
+    match (require, procedure) {
+        (true, Procedure::ModeSetup) => "Run `fips-mode-setup --enable`, then reboot.",
+        (false, Procedure::ModeSetup) => "Run `fips-mode-setup --disable`, then reboot.",
+        (true, Procedure::InstallOnly) => {
+            "This release sets FIPS mode at install time only. Reinstall the host with `fips=1` on the installer command line."
         }
-        (true, Family::Other) => "Turn FIPS mode on with the OS vendor's procedure, then reboot.",
-        (false, Family::Other) => "Turn FIPS mode off with the OS vendor's procedure, then reboot.",
+        (false, Procedure::InstallOnly) => {
+            "This release sets FIPS mode at install time only. Reinstall the host without `fips=1` on the installer command line."
+        }
+        (true, Procedure::AmazonLinux2) => {
+            "Install the `dracut-fips` package, run `dracut -f`, run `grubby --update-kernel=ALL --args=fips=1`, then reboot."
+        }
+        (false, Procedure::AmazonLinux2) => {
+            "Run `grubby --update-kernel=ALL --remove-args=fips`, then reboot."
+        }
+        (true, Procedure::UbuntuPro) => {
+            "Attach Ubuntu Pro, run `pro enable fips-updates`, then reboot."
+        }
+        (false, Procedure::UbuntuPro) => {
+            "Run `pro disable fips-updates` (or `pro disable fips`), purge the FIPS kernel with Canonical's procedure, then reboot."
+        }
+        (true, Procedure::Vendor) => {
+            "Turn FIPS mode on with the OS vendor's procedure, then reboot."
+        }
+        (false, Procedure::Vendor) => {
+            "Turn FIPS mode off with the OS vendor's procedure, then reboot."
+        }
     }
 }

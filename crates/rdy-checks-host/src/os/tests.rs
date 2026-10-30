@@ -457,7 +457,11 @@ fn a_file_that_is_not_an_os_release_is_a_warning() {
     let ran = execute(replay, Os::Linux, &check(&rhel_ubuntu()));
     let f = ran.finding();
     assert_eq!(f.level, Level::Warn, "{f:?}");
-    assert!(f.message.contains("holds no ID or NAME"), "{}", f.message);
+    assert!(
+        f.message.contains("holds none of ID, NAME"),
+        "{}",
+        f.message
+    );
 }
 
 #[test]
@@ -583,7 +587,205 @@ fn from_params_reads_the_keys_a_spec_entry_can_carry() {
     assert_eq!(c.supported.len(), 2);
     assert_eq!(c.supported[0].id, "rhel");
     assert_eq!(c.supported[1].versions, None);
-    assert_eq!(c.arch, ["x86_64", "aarch64"]);
+    assert_eq!(c.arch, ["aarch64", "x86_64"]);
+    let sorted = check(&json!({"arch": ["x86_64", "aarch64", "amd64"]}));
+    assert_eq!(sorted.arch, ["aarch64", "x86_64"]);
     assert_eq!(c.fips, Fips::Forbid);
     assert_eq!(check(&json!({})), OsCheck::default());
+}
+
+/// A fix text for the host of one `os-release`, FIPS required or forbidden.
+fn fips_fix_for(os_release: &str, fips: &str, enabled: bool) -> String {
+    let replay = bare_with(&[
+        ("/etc/os-release", os_release),
+        (
+            "/proc/sys/crypto/fips_enabled",
+            if enabled { "1\n" } else { "0\n" },
+        ),
+    ]);
+    let ran = execute(replay, Os::Linux, &check(&json!({ "fips": fips })));
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Fail, "{f:?}");
+    let fix = f.fix.clone().expect("fix");
+    if let Err(error) = rdy_engine::fixtext::check(&fix) {
+        panic!("{os_release}: {error}");
+    }
+    fix
+}
+
+#[test]
+fn the_fips_fix_follows_the_id_and_the_major_version() {
+    // Amazon Linux 2 has no fips-mode-setup: the AWS steps.
+    let al2 = run_case("amazon-linux-2", &json!({"fips": "require"}));
+    let fix = al2.finding().fix.clone().expect("fix");
+    assert!(!fix.contains("fips-mode-setup"), "{fix}");
+    for part in [
+        "dracut-fips",
+        "dracut -f",
+        "grubby --update-kernel=ALL --args=fips=1",
+    ] {
+        assert!(fix.contains(part), "{fix}");
+    }
+    let fix = fips_fix_for("ID=amzn\nVERSION_ID=\"2\"\n", "forbid", true);
+    assert!(
+        fix.contains("grubby") && !fix.contains("fips-mode-setup"),
+        "{fix}"
+    );
+
+    // Amazon Linux 2023 and EL 8 and 9 keep fips-mode-setup.
+    let fix = fips_fix_for("ID=amzn\nVERSION_ID=\"2023\"\n", "require", false);
+    assert!(fix.contains("fips-mode-setup --enable"), "{fix}");
+    let fix = fips_fix_for(
+        "ID=rocky\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"8.9\"\n",
+        "require",
+        false,
+    );
+    assert!(fix.contains("fips-mode-setup --enable"), "{fix}");
+
+    // RHEL 10 and later: no tool, so a reinstall.
+    for (os_release, fips, enabled) in [
+        ("ID=rhel\nVERSION_ID=\"10.0\"\n", "require", false),
+        (
+            "ID=almalinux\nID_LIKE=\"rhel centos fedora\"\nVERSION_ID=\"10.1\"\n",
+            "forbid",
+            true,
+        ),
+        (
+            "ID=ol\nID_LIKE=fedora\nVERSION_ID=\"11.0\"\n",
+            "require",
+            false,
+        ),
+    ] {
+        let fix = fips_fix_for(os_release, fips, enabled);
+        assert!(fix.contains("Reinstall the host"), "{fix}");
+        assert!(fix.contains("fips=1"), "{fix}");
+        assert!(!fix.contains("fips-mode-setup"), "{fix}");
+    }
+
+    // Fedora, EL 7, an unknown version and Alpine get the vendor text.
+    for os_release in [
+        "ID=fedora\nVERSION_ID=\"40\"\n",
+        "ID=centos\nID_LIKE=\"rhel fedora\"\nVERSION_ID=\"7\"\n",
+        "ID=rhel\n",
+        "ID=amzn\nVERSION_ID=\"1\"\n",
+        "ID=alpine\nVERSION_ID=3.19.1\n",
+    ] {
+        let fix = fips_fix_for(os_release, "require", false);
+        assert!(fix.contains("OS vendor's procedure"), "{os_release}: {fix}");
+    }
+}
+
+#[test]
+fn the_ubuntu_fix_for_fips_on_uses_the_pro_client() {
+    let fix = fips_fix_for("ID=ubuntu\nVERSION_ID=\"22.04\"\n", "forbid", true);
+    assert!(fix.contains("pro disable fips-updates"), "{fix}");
+    assert!(fix.contains("Canonical's procedure"), "{fix}");
+    assert!(
+        !fix.contains("update-grub") && !fix.contains("GRUB"),
+        "{fix}"
+    );
+}
+
+#[test]
+fn the_remediation_names_rhel_8_and_9_only() {
+    let text = info().meta.remediation;
+    assert!(text.contains("On RHEL 8 and 9"), "{text}");
+    assert!(!text.contains("RHEL family"), "{text}");
+}
+
+#[test]
+fn oracle_linux_matches_rhel_through_its_id_even_though_id_like_says_fedora() {
+    let text = "NAME=\"Oracle Linux Server\"\nID=\"ol\"\nID_LIKE=\"fedora\"\nVERSION_ID=\"9.3\"\n";
+    let replay = bare_with(&[("/etc/os-release", text)]);
+    let list = |id: &str| check(&json!({"supported": [{"id": id, "versions": ["9"]}]}));
+    let ran = execute(replay.clone(), Os::Linux, &list("rhel"));
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Pass, "{f:?}");
+    assert!(
+        f.notes.iter().any(|n| n.contains("ID_LIKE")),
+        "{:?}",
+        f.notes
+    );
+    // Listed as itself it matches, and fedora does not stand for it.
+    let ran = execute(replay.clone(), Os::Linux, &list("ol"));
+    assert_eq!(ran.finding().level, Level::Pass);
+    let ran = execute(replay, Os::Linux, &list("fedora"));
+    assert_eq!(ran.finding().level, Level::Fail);
+}
+
+#[test]
+fn a_spec_version_that_is_a_prefix_of_the_host_version_is_explained() {
+    let ran = run_case(
+        "alpine",
+        &json!({"supported": [{"id": "alpine", "versions": ["3.19"]}]}),
+    );
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Fail, "{f:?}");
+    let note = f
+        .notes
+        .iter()
+        .find(|n| n.contains("3.19.1"))
+        .expect("a note");
+    assert!(
+        note.contains("the spec lists 3.19, which matches only 3.19 exactly"),
+        "{note}"
+    );
+    for text in &f.notes {
+        if let Err(error) = rdy_engine::fixtext::check(text) {
+            panic!("{error}");
+        }
+    }
+    // No note when nothing is a prefix, or when it matches.
+    for versions in [json!(["3.18"]), json!(["3"])] {
+        let ran = run_case(
+            "alpine",
+            &json!({"supported": [{"id": "alpine", "versions": versions}]}),
+        );
+        assert!(
+            ran.finding()
+                .notes
+                .iter()
+                .all(|n| !n.contains("matches only"))
+        );
+    }
+}
+
+#[test]
+fn wsl_is_seen_from_the_uname_release_when_the_proc_file_is_unreadable() {
+    let replay = machine("ubuntu-wsl")
+        .replay()
+        .clone()
+        .unreadable("/proc/sys/kernel/osrelease");
+    let ran = execute(replay, Os::Linux, &check(&json!({})));
+    let f = ran.finding();
+    assert_eq!(f.observed["wsl"], true, "{f:?}");
+    assert!(f.notes.iter().any(|n| n.contains("WSL")), "{:?}", f.notes);
+}
+
+#[test]
+fn both_os_release_paths_are_named_when_neither_can_be_used() {
+    let list = check(&rhel_ubuntu());
+    let replay = bare_with(&[]).unreadable("/usr/lib/os-release");
+    let ran = execute(replay, Os::Linux, &list);
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Warn, "{f:?}");
+    assert!(
+        f.message.contains("/etc/os-release does not exist"),
+        "{}",
+        f.message
+    );
+    assert!(
+        f.message
+            .contains("/usr/lib/os-release could not be read (permission denied)"),
+        "{}",
+        f.message
+    );
+    let ran = execute(bare_with(&[]), Os::Linux, &list);
+    assert!(
+        ran.finding()
+            .message
+            .contains("neither /etc/os-release nor /usr/lib/os-release exists"),
+        "{}",
+        ran.finding().message
+    );
 }

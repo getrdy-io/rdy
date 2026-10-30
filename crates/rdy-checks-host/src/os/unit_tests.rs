@@ -1,7 +1,7 @@
 //! Tests of the pure parts of `host.os`: the `os-release` parser and the match rules.
 
 use super::release::{self, Release};
-use super::rules::{self, Family, Match, Wanted};
+use super::rules::{self, Match, Procedure, Wanted};
 
 fn release(id: &str, like: &[&str], version: Option<&str>) -> Release {
     Release {
@@ -143,9 +143,15 @@ fn id_is_exact_and_id_like_counts_only_for_rebuilds_of_rhel_and_centos() {
         rules::matches(&centos, &rhel),
         Match::Yes { via: Some(_) }
     ));
-    // Oracle Linux says ID_LIKE=fedora, and fedora is not a parent that counts.
+    // Oracle Linux says ID_LIKE=fedora, and fedora is not a parent that counts. `ol` maps to `rhel`.
     let oracle = release("ol", &["fedora"], Some("9.3"));
-    assert_eq!(rules::matches(&oracle, &rhel), Match::No);
+    assert_eq!(
+        rules::matches(&oracle, &rhel),
+        Match::Yes {
+            via: Some("ol".to_owned())
+        }
+    );
+    assert_eq!(rules::matches(&oracle, &[want("centos", None)]), Match::No);
     assert_eq!(rules::matches(&oracle, &[want("fedora", None)]), Match::No);
     // Not a rebuild.
     let amzn = release("amzn", &["centos", "rhel", "fedora"], Some("2"));
@@ -237,24 +243,44 @@ fn the_supported_list_reads_as_a_sentence_and_is_capped() {
 }
 
 #[test]
-fn the_family_comes_from_id_and_id_like() {
-    assert_eq!(rules::family(&release("rhel", &[], None)), Family::Rhel);
+fn the_procedure_comes_from_id_id_like_and_the_major_version() {
+    let p = |id: &str, like: &[&str], version: Option<&str>| {
+        rules::procedure(&release(id, like, version))
+    };
+    assert_eq!(p("rhel", &[], Some("9.2")), Procedure::ModeSetup);
+    assert_eq!(p("rocky", &["rhel"], Some("8")), Procedure::ModeSetup);
+    assert_eq!(p("ol", &["fedora"], Some("9.3")), Procedure::ModeSetup);
+    assert_eq!(p("rhel", &[], Some("10.0")), Procedure::InstallOnly);
     assert_eq!(
-        rules::family(&release("rocky", &["rhel"], None)),
-        Family::Rhel
+        p("almalinux", &["rhel"], Some("10")),
+        Procedure::InstallOnly
     );
+    assert_eq!(p("centos", &["rhel"], Some("7")), Procedure::Vendor);
+    assert_eq!(p("rhel", &[], None), Procedure::Vendor);
     assert_eq!(
-        rules::family(&release("amzn", &["fedora"], None)),
-        Family::Rhel
+        p("amzn", &["rhel", "fedora"], Some("2")),
+        Procedure::AmazonLinux2
     );
+    assert_eq!(p("amzn", &["fedora"], Some("2023")), Procedure::ModeSetup);
+    assert_eq!(p("amzn", &[], Some("1")), Procedure::Vendor);
+    assert_eq!(p("fedora", &[], Some("40")), Procedure::Vendor);
     assert_eq!(
-        rules::family(&release("ubuntu", &["debian"], None)),
-        Family::Ubuntu
+        p("ubuntu", &["debian"], Some("22.04")),
+        Procedure::UbuntuPro
     );
+    assert_eq!(p("linuxmint", &["ubuntu"], None), Procedure::UbuntuPro);
+    assert_eq!(p("alpine", &[], None), Procedure::Vendor);
+    assert_eq!(p("debian", &[], None), Procedure::Vendor);
+}
+
+#[test]
+fn the_prefix_trap_finds_dotted_prefixes_only() {
+    let v = |items: &[&str]| -> Vec<String> { items.iter().map(|s| (*s).to_owned()).collect() };
     assert_eq!(
-        rules::family(&release("linuxmint", &["ubuntu"], None)),
-        Family::Ubuntu
+        rules::prefix_trap(&v(&["3.19", "3.18"]), "3.19.1"),
+        ["3.19"]
     );
-    assert_eq!(rules::family(&release("alpine", &[], None)), Family::Other);
-    assert_eq!(rules::family(&release("debian", &[], None)), Family::Other);
+    assert!(rules::prefix_trap(&v(&["3"]), "3.19.1").is_empty());
+    assert!(rules::prefix_trap(&v(&["3.19.1"]), "3.19.1").is_empty());
+    assert!(rules::prefix_trap(&v(&["3.1"]), "3.19.1").is_empty());
 }

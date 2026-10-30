@@ -56,7 +56,7 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
     summary: "Distro, version, arch, FIPS",
     meta: CheckMeta {
         title: "Operating system",
-        remediation: "Use an OS image the vendor supports, or ask the vendor about the one you have. If FIPS mode is wrong, change it with the OS vendor's procedure. On the RHEL family, run `fips-mode-setup --enable` or `fips-mode-setup --disable`, then reboot.",
+        remediation: "Use an OS image the vendor supports, or ask the vendor about the one you have. If FIPS mode is wrong, change it with the OS vendor's procedure. On RHEL 8 and 9, run `fips-mode-setup --enable` or `fips-mode-setup --disable`, then reboot.",
     },
     needs: &[],
     wants: &[],
@@ -133,6 +133,7 @@ impl OsCheck {
                 _ => None,
             })
             .collect();
+        arch.sort();
         arch.dedup();
         let fips = match params.fips {
             FipsPolicy::Forbid => Fips::Forbid,
@@ -236,9 +237,10 @@ impl Machine {
         if matches!(ctx.probe().env(KUBE_HOST), Ok(Some(value)) if !value.is_empty()) {
             containers.push("kubernetes");
         }
-        let wsl = kernel_text
-            .as_deref()
-            .is_some_and(|k| k.to_ascii_lowercase().contains("microsoft"));
+        let wsl = uname_kernel
+            .iter()
+            .chain(kernel_text.iter())
+            .any(|k| k.to_ascii_lowercase().contains("microsoft"));
         Ok(Self {
             release,
             release_path,
@@ -306,28 +308,37 @@ async fn stat(ctx: &CheckContext, path: &str) -> Result<Got<bool>, CheckError> {
     }
 }
 
-/// `/etc/os-release`, then `/usr/lib/os-release`.
+/// `/etc/os-release`, then `/usr/lib/os-release`. When neither gives a release, the failure names both
+/// paths, so a denied second path is not hidden behind a missing first one.
 async fn read_release(
     ctx: &CheckContext,
 ) -> Result<(Got<Release>, Option<&'static str>), CheckError> {
-    let mut first = None;
+    let mut states = Vec::new();
+    let mut all_absent = true;
     for path in [OS_RELEASE, OS_RELEASE_USR] {
         match read_text(ctx, path).await? {
             Got::Value(text) => match release::parse(&text) {
                 Some(release) => return Ok((Got::Value(release), Some(path))),
                 None => {
-                    first.get_or_insert(Got::Failed("it holds no ID or NAME".to_owned()));
+                    all_absent = false;
+                    states.push(format!(
+                        "{path} holds none of ID, NAME, PRETTY_NAME, VERSION_ID or ID_LIKE"
+                    ));
                 }
             },
-            Got::Absent => {
-                first.get_or_insert(Got::Absent);
-            }
+            Got::Absent => states.push(format!("{path} does not exist")),
             Got::Failed(why) => {
-                first.get_or_insert(Got::Failed(why));
+                all_absent = false;
+                states.push(format!("{path} could not be read ({why})"));
             }
         }
     }
-    Ok((first.unwrap_or(Got::Absent), None))
+    let got = if all_absent {
+        Got::Absent
+    } else {
+        Got::Failed(states.join(" and "))
+    };
+    Ok((got, None))
 }
 
 /// The machine type and kernel release from `uname`.
@@ -438,7 +449,10 @@ impl OsCheck {
         }
         let list = rules::list_supported(&self.supported);
         let Some(release) = machine.release.value() else {
-            let why = machine.release.why(OS_RELEASE);
+            let why = match &machine.release {
+                Got::Failed(why) => why.clone(),
+                _ => format!("neither {OS_RELEASE} nor {OS_RELEASE_USR} exists"),
+            };
             problems.push(Problem {
                 level: Level::Warn,
                 message: format!("Cannot tell which OS this is: {why}. The spec supports {list}."),
@@ -463,6 +477,21 @@ impl OsCheck {
                 fix: "Ask the vendor whether this release is supported.".to_owned(),
             }),
             Match::No => {
+                if let Some(host) = &release.version_id {
+                    for want in &self.supported {
+                        let Some(versions) = &want.versions else {
+                            continue;
+                        };
+                        if want.id != release.id && !release.id_like.contains(&want.id) {
+                            continue;
+                        }
+                        for listed in rules::prefix_trap(versions, host) {
+                            notes.push(format!(
+                                "The host is {host}; the spec lists {listed}, which matches only {listed} exactly. List {host}, or the major version to accept every release of it."
+                            ));
+                        }
+                    }
+                }
                 let id = match &release.version_id {
                     Some(version) => format!("{} {version}", release.id),
                     None => release.id.clone(),
@@ -512,10 +541,10 @@ impl OsCheck {
             return;
         }
         let require = self.fips == Fips::Require;
-        let family = machine
+        let procedure = machine
             .release
             .value()
-            .map_or(rules::Family::Other, rules::family);
+            .map_or(rules::Procedure::Vendor, rules::procedure);
         let state = match &machine.fips {
             Got::Value(on) => Some(*on),
             Got::Absent => {
@@ -534,7 +563,7 @@ impl OsCheck {
                 } else {
                     "FIPS mode is off, and the spec requires it.".to_owned()
                 },
-                fix: rules::fips_fix(require, family).to_owned(),
+                fix: rules::fips_fix(require, procedure).to_owned(),
             }),
             Some(_) => {}
             None => problems.push(Problem {
