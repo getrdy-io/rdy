@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-at-the-cap"
+summary = "A spec with 100 items, one of them a ClusterRole: the escalate review does not fit"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

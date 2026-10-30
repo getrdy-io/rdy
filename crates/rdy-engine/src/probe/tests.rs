@@ -1387,6 +1387,78 @@ fn a_failed_kube_status_carries_a_fixed_error_and_a_redirect_is_not_ok() {
 }
 
 #[test]
+fn an_impersonated_kube_call_is_marked_and_the_others_are_not() {
+    let hub = hub(Replay::new());
+    let probe = hub.check_probe("k8s.rbac", Os::Linux, None);
+    probe
+        .kube_call(
+            "POST",
+            "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
+            None,
+        )
+        .expect("open")
+        .impersonated()
+        .answered(201);
+    probe
+        .kube_call(
+            "POST",
+            "/apis/authentication.k8s.io/v1/selfsubjectreviews",
+            None,
+        )
+        .expect("open")
+        .answered(201);
+    // A refusal of the header is a refusal with the header named, and no mark.
+    probe
+        .kube_call("GET", "/version", None)
+        .expect("open")
+        .refused_header("this request header is not allowed", "authorization");
+    // A marked call that is dropped in flight is still marked, and a timeout.
+    drop(
+        probe
+            .kube_call(
+                "POST",
+                "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews",
+                Some("http://proxy.test:3128"),
+            )
+            .expect("open")
+            .impersonated(),
+    );
+    let log = hub.action_log();
+    assert_eq!(log.actions.len(), 4);
+    assert_eq!(field(&log.actions[0], "impersonated"), Some(&json!(true)));
+    assert_eq!(field(&log.actions[1], "impersonated"), None);
+    assert_eq!(field(&log.actions[2], "impersonated"), None);
+    assert_eq!(field(&log.actions[3], "impersonated"), Some(&json!(true)));
+    assert_eq!(log.actions[3].outcome, ActionOutcome::Timeout);
+    // The proxy of an impersonated call is still recorded.
+    assert_eq!(
+        field(&log.actions[3], "via_proxy"),
+        Some(&json!("http://proxy.test:3128"))
+    );
+}
+
+#[test]
+fn a_kube_call_under_an_impersonating_kubeconfig_says_so() {
+    let hub = hub(Replay::new());
+    let probe = hub.run_probe();
+    probe
+        .kube_call("GET", "/version", None)
+        .expect("open")
+        .kubeconfig_impersonates()
+        .answered(200);
+    probe
+        .kube_call("GET", "/version", None)
+        .expect("open")
+        .answered(200);
+    let log = hub.action_log();
+    assert_eq!(
+        field(&log.actions[0], "kubeconfig_impersonates"),
+        Some(&json!(true))
+    );
+    assert_eq!(field(&log.actions[1], "kubeconfig_impersonates"), None);
+}
+
+#[test]
 fn a_kube_call_writes_one_entry_under_its_check() {
     let hub = hub(Replay::new());
     let probe = hub.check_probe("k8s.nodes", Os::Linux, None);

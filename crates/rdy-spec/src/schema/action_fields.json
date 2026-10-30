@@ -105,6 +105,14 @@
       "description": "kube: name of the refused request header, never its value",
       "maxLength": 4096
     },
+    "impersonated": {
+      "type": "boolean",
+      "description": "kube: true when the request was sent with Impersonate-User, as the spec's `as` user. Absent otherwise. Never the user name."
+    },
+    "kubeconfig_impersonates": {
+      "type": "boolean",
+      "description": "kube: true on the run-level `GET /version` when the kubeconfig user sets an `as`, `as-uid`, `as-groups` or `as-user-extra` field, so kube adds Impersonate headers to every request. Absent otherwise. Never the user name."
+    },
     "method": {
       "type": "string",
       "description": "http, kube",

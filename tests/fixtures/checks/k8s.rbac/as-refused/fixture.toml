@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-as-refused"
+summary = "The kubeconfig identity may not impersonate the user the spec names"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

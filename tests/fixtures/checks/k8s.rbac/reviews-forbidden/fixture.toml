@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-reviews-forbidden"
+summary = "The identity may not create access reviews: every review POST is a 403"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1005,7 +1005,7 @@ mod tests {
         // two in each redact_patterns entry. The parameters of the 31 check ids come on top, as their
         // own tables under each checks entry. `k8s.nodes` has `per_node` and `free` of one definition,
         // so its four fields are shown once, under `per_node`, and `free` links to that section.
-        assert_eq!(expected, 169);
+        assert_eq!(expected, 172);
         assert!(page.contains("\n## checks entries\n\n"), "{page}");
         // `bundle` is a section, so its own sections sit one level below it.
         assert!(page.contains("\n### redact_patterns entries\n\n"), "{page}");
