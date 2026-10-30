@@ -21,7 +21,7 @@ use crate::check::{Check, CheckError, CheckInfo, CheckOutcome, FD_WALK, Finding}
 use crate::probe::sock::{RULE_UDP_UNDECLARED, RULE_UNIX_UNDECLARED};
 use crate::probe::{
     ActionLogOutput, RULE_COMMAND_UNDECLARED, RULE_ENV_NOT_DECLARED, RULE_ENV_UNDECLARED,
-    RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, is_fd_path,
+    RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, is_fd_dir, is_fd_link,
 };
 
 /// The refusals that mean "the check went beyond what its `CheckInfo` declares".
@@ -221,11 +221,19 @@ pub(super) fn undeclared_file(info: &CheckInfo, action: &Action) -> bool {
         return false;
     };
     // The fd walk declaration covers a listing of `/proc/<pid>/fd` and a read of a link in it, and
-    // nothing else (it is not a prefix, so `covers` cannot see it).
-    let walk = matches!(action.kind, ActionKind::ReadDir | ActionKind::ReadLink)
-        && info.reads.contains(&FD_WALK)
-        && text_names(path).is_some_and(|names| is_fd_path(&names));
-    !walk && !declared.iter().any(|prefix| covers(prefix, path))
+    // nothing else. The path shape goes with the kind: three names for a listing, four for a link.
+    // It is no prefix, so the prefix loop skips it (as text it would cover `/proc/<pid>/fd/x`).
+    let walk = info.reads.contains(&FD_WALK)
+        && text_names(path).is_some_and(|names| match action.kind {
+            ActionKind::ReadDir => is_fd_dir(&names),
+            ActionKind::ReadLink => is_fd_link(&names),
+            _ => false,
+        });
+    !walk
+        && !declared
+            .iter()
+            .filter(|prefix| **prefix != FD_WALK)
+            .any(|prefix| covers(prefix, path))
 }
 
 /// Whether the declared `prefix` covers `path`. Both are Linux paths, so both are read as `/`-separated

@@ -81,7 +81,7 @@ pub use native::{
     Resource, RlimitInfo, StatvfsInfo, StoreKind, StoreOrigin, StoreSource, SystemRoots, UnameInfo,
 };
 #[cfg(feature = "testing")]
-pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, is_fd_path};
+pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, is_fd_dir, is_fd_link};
 pub use policy::{ReadGuard, Refused};
 pub use proxy::{
     DEFAULT_PROXY_PORT, MAX_CONNECT_HEAD, NetFailure, ProxyChallenge, ProxyError, ProxyUrl,
@@ -514,9 +514,9 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
     /// bytes come back: a path, or a name such as `socket:[8841]`. A backend resolves the links in the
     /// parent directory, applies [`ReadGuard::admit_real`] to the link's real path (the real parent
     /// plus the link's own name) before it reads anything, and then [`ReadGuard::admit_link`] to what
-    /// it read. A refusal is [`Refused`] inside an `io::Error` of kind `PermissionDenied`. A path that is
-    /// not a link is an `io::Error` of kind `InvalidInput`. The provided body is for a backend with no
-    /// links: it reports `Unsupported`.
+    /// it read. A refusal is [`Refused`] inside an `io::Error` of kind `PermissionDenied`. A path that
+    /// is not a link is an `io::Error` of kind `InvalidInput`. The provided body is for a backend with
+    /// no links: it reports `Unsupported`.
     fn read_link<'a>(
         &'a self,
         path: &'a Path,

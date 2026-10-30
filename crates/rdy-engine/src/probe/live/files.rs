@@ -87,6 +87,20 @@ impl Secrets {
     }
 }
 
+/// Whether `/proc/self` on this machine names rdy's own process id: the one fact that "rdy's own
+/// process" in the read rules rests on. Another pid namespace's procfs (reached by `nsenter` or a
+/// mount of the host's) numbers processes its own way, so its `/proc/<our pid>` is not us. A `/proc`
+/// that is missing or unreadable says no.
+pub(super) fn proc_self_is_own() -> bool {
+    fs::readlink("/proc/self", Vec::new())
+        .is_ok_and(|link| names_pid(link.as_bytes(), std::process::id()))
+}
+
+/// Whether the text of a `/proc/self` link is `pid`.
+pub(super) fn names_pid(link: &[u8], pid: u32) -> bool {
+    link == pid.to_string().as_bytes()
+}
+
 /// What a call wants to open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Want {
@@ -201,6 +215,9 @@ pub(super) fn stat(
 /// before anything is read, and again judge what was read ([`ReadGuard::admit_link`]: an fd link may
 /// lead to a socket only). Where the link points is not judged. Linux holds the parent through an
 /// `O_PATH` descriptor, so the real path that was judged and the directory that is read are one inode.
+/// It also checks that the real path of the parent leads to that inode here and, for a procfs, that
+/// it is `/proc` ([`confirm_real_parent`]), so a directory from another mount namespace is refused.
+/// A Unix that is neither Linux nor Apple answers `Unsupported`.
 pub(super) fn read_link(path: &Path, guard: &ReadGuard) -> io::Result<Vec<u8>> {
     let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
         return Err(io::Error::new(
@@ -212,9 +229,19 @@ pub(super) fn read_link(path: &Path, guard: &ReadGuard) -> io::Result<Vec<u8>> {
     {
         read_link_through_anchor(parent, name, guard)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_vendor = "apple")]
     {
         read_link_by_path(parent, name, guard)
+    }
+    // Another Unix has neither `O_PATH` nor `O_NOFOLLOW_ANY`: `O_NOFOLLOW` covers the last name only,
+    // so a parent swapped for a link after the judgment would go unseen. Not a release target.
+    #[cfg(not(any(target_os = "linux", target_vendor = "apple")))]
+    {
+        let _ = (parent, name, guard);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this call is not available on this OS in this version of rdy",
+        ))
     }
 }
 
@@ -235,6 +262,14 @@ fn read_link_through_anchor(parent: &Path, name: &OsStr, guard: &ReadGuard) -> i
     if fs::fstat(&anchor)?.st_nlink == 0 {
         return Err(refused(RULE_CHANGED));
     }
+    // `d_path` names the directory in the mount namespace of its mount. A directory that came from
+    // another one (through `/proc/<pid>/root`, or a bind mount of a procfs) reads back under a name
+    // the rules do not know, so the name is only used after it is shown to lead to this inode on a
+    // procfs that is not under another name (SEC-153-1).
+    let named = fs::statat(CWD, &real_parent, AtFlags::SYMLINK_NOFOLLOW);
+    let anchor_stat = fs::fstat(&anchor)?;
+    let on_proc = fs::fstatfs(&anchor)?.f_type == fs::PROC_SUPER_MAGIC;
+    confirm_real_parent(&anchor_stat, named, on_proc, &real_parent)?;
     let real = real_parent.join(name);
     guard.admit_real(&real).map_err(Refused::into_io)?;
     let target = fs::readlinkat(&anchor, name, Vec::new()).map_err(not_a_link)?;
@@ -243,9 +278,38 @@ fn read_link_through_anchor(parent: &Path, name: &OsStr, guard: &ReadGuard) -> i
     Ok(target)
 }
 
+/// Whether the name `d_path` gave for the parent of a link can be trusted. `named` is a `lstat` of
+/// that name. It must be the inode of the descriptor, so the name is not a path in another mount
+/// namespace that happens to exist here. A procfs must be seen as `/proc`, because the `/proc/<pid>`
+/// rules match on that name: a procfs mounted under another name would escape them.
+///
+/// # Errors
+///
+/// `RULE_CHANGED` when the name leads nowhere or to another inode, `RULE_PROC` for a procfs that is
+/// not at `/proc`.
+#[cfg(target_os = "linux")]
+pub(super) fn confirm_real_parent(
+    anchor: &Stat,
+    named: rustix::io::Result<Stat>,
+    on_proc: bool,
+    real_parent: &Path,
+) -> io::Result<()> {
+    let Ok(named) = named else {
+        return Err(refused(RULE_CHANGED));
+    };
+    if identity(&named) != identity(anchor) {
+        return Err(refused(RULE_CHANGED));
+    }
+    if on_proc && !real_parent.starts_with("/proc") {
+        return Err(refused(crate::probe::policy::RULE_PROC));
+    }
+    Ok(())
+}
+
 /// The portable way, for an OS with no `O_PATH`: `realpath` of the parent, the rules on the link's
 /// real path, then the parent opened by that real path with no link followed (macOS: anywhere along
-/// it, and the path of the descriptor is judged again). Compiled on every Unix so Linux tests it.
+/// it, and the path of the descriptor is judged again). Compiled on Linux and Apple, so Linux tests it.
+#[cfg(any(target_os = "linux", target_vendor = "apple"))]
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(super) fn read_link_by_path(
     parent: &Path,

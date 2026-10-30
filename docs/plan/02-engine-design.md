@@ -445,13 +445,16 @@ tests policy.
   `Loaded::files()` (ADR 0031, M1-102).
 - Links (`read_link`, M1-169, ADR 0040): the link is judged where it sits and never followed. The path as
   written, and its real path (the real parent plus its own name), must be off the deny list and under
-  `reads`. Linux opens the parent with `O_PATH` and calls `readlinkat` on that descriptor. The target is
+  `reads`. Linux opens the parent with `O_PATH` and calls `readlinkat` on that descriptor, after it checks
+  that the real path of the parent leads to that inode and that a procfs is seen as `/proc` (a directory
+  from another mount namespace is refused). Another Unix that is not macOS answers `Unsupported`. The target is
   returned raw and is not judged or logged: the entry holds `path` only. Two entries of `/proc/<pid>/` are open
-  to it: `/proc/self/ns/net` (rdy's own process, when `reads` cover it) and, for a check that declares
+  to it: `/proc/self/ns/net` (rdy's own process, when `reads` cover it and `/proc/self` is rdy's own pid, read once when the live backend is built) and, for a check that declares
   `check::FD_WALK` in `reads`, `/proc/<pid>/fd/<n>` (and `read_dir` of `/proc/<pid>/fd`). A link whose real
   path is `/proc/<pid>/fd/<n>` returns only a `socket:[digits]` target; any other target is refused with a
   fixed rule, and neither the error nor the log holds it. `read`, `stat` and `Statvfs` of an fd path stay
-  refused. `thread-self`, `task/<tid>/fd` and a `proc` that is not at the root stay refused.
+  refused. `thread-self`, `task/<tid>/fd` and a `proc` that is not at the root stay refused. The
+  declaration is no prefix: it never covers a read of the text `/proc/<pid>/fd/x`.
 - 1 MiB cap (`MAX_READ`); a longer file sets `truncated_tail`, and `read_tail` sets `truncated_head`.
   A directory listing holds at most 65,536 entries and a longer one is an error. Reads run on
   `spawn_blocking`.

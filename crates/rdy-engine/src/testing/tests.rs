@@ -295,6 +295,31 @@ fn the_fd_walk_declaration_covers_a_listing_and_link_reads_of_an_fd_directory_on
     // Without the declaration a link read is covered by a prefix like any other call.
     assert!(!undeclared_file(&PROC_ONLY, &link));
     assert!(undeclared_file(&MEMORY, &link));
+
+    // The path shape goes with the call: a listing is of the directory, a link read is of a link in it.
+    for path in ["/proc/1234/fd/7", "/proc/self/fd/0"] {
+        assert!(
+            undeclared_file(&WALKER, &action(ActionKind::ReadDir, path)),
+            "read_dir {path}"
+        );
+    }
+    for path in ["/proc/1234/fd", "/proc/self/fd"] {
+        assert!(
+            undeclared_file(&WALKER, &action(ActionKind::ReadLink, path)),
+            "read_link {path}"
+        );
+    }
+    // The declaration text is no prefix: it covers no read of a literal `/proc/<pid>/fd/x`.
+    for kind in [ActionKind::Read, ActionKind::Stat, ActionKind::ReadLink] {
+        assert!(
+            undeclared_file(&WALKER, &action(kind.clone(), "/proc/<pid>/fd/x")),
+            "{kind:?}"
+        );
+    }
+    assert!(undeclared_file(
+        &WALKER,
+        &action(ActionKind::ReadDir, "/proc/<pid>/fd")
+    ));
 }
 
 #[test]

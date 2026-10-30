@@ -13,19 +13,21 @@
 //!
 //! **Retention.** These limits keep the log bounded and the entries that matter in it.
 //!
-//! - *Coalescing.* A `denied` or `failed` `read`, `read_dir`, `read_link` or `stat` is written as it happens, up to
-//!   [`COALESCE_AFTER`] times for one (check, kind, rule or error, parent directory). A `denied` call of
-//!   any other kind (`exec`, `connect`, `tls`, `http`, `kube`, a late call) folds the same way per
-//!   (check, kind, rule, program or host or path). The calls after that fold into one `coalesced` entry
-//!   that carries a `count`. It takes the `seq` of the first call it folded, and the folded calls leave
-//!   a gap in `seq`. The limit is per key, so a flood of calls at one target costs 21 entries, and the
-//!   first denied calls are in the log.
-//! - *Ok reads.* An `ok` `read`, `read_dir`, `read_link` or `stat` folds the same way per (check, kind, parent
-//!   directory), but only after [`COALESCE_OK_AFTER`] calls. The `coalesced` entry has outcome `ok`, no
-//!   `rule` or `error`, and counts as an `ok` file entry when retention picks what to drop.
+//! - *Coalescing.* A `denied` or `failed` `read`, `read_dir`, `read_link` or `stat` is written as it
+//!   happens, up to [`COALESCE_AFTER`] times for one (check, kind, rule or error, parent directory). A
+//!   `denied` call of any other kind (`exec`, `connect`, `tls`, `http`, `kube`, a late call) folds
+//!   the same way per (check, kind, rule, program or host or path). The calls after that fold into one
+//!   `coalesced` entry that carries a `count`. It takes the `seq` of the first call it folded, and the
+//!   folded calls leave a gap in `seq`. The limit is per key, so a flood of calls at one target costs
+//!   21 entries, and the first denied calls are in the log.
+//! - *Ok reads.* An `ok` `read`, `read_dir`, `read_link` or `stat` folds the same way per (check,
+//!   kind, parent directory), but only after [`COALESCE_OK_AFTER`] calls. The `coalesced` entry has
+//!   outcome `ok`, no `rule` or `error`, and counts as an `ok` file entry when retention picks what
+//!   to drop.
 //! - *Quota.* A check may hold [`CHECK_QUOTA`] entries, and the log [`MAX_ENTRIES`]. At either limit
-//!   the log drops, in this order: a new `ok` `read`, `read_dir`, `read_link` or `stat` (the oldest are kept), then
-//!   `ok` ones already held, then `failed` ones (`read`, `read_dir`, `read_link`, `stat` and `coalesced`).
+//!   the log drops, in this order: a new `ok` `read`, `read_dir`, `read_link` or `stat` (the oldest
+//!   are kept), then `ok` ones already held, then `failed` ones (`read`, `read_dir`, `read_link`,
+//!   `stat` and `coalesced`).
 //!   `actions_dropped` counts them by kind.
 //! - *Last resort.* A `denied` entry is never dropped to make room for another kind of entry, and
 //!   repeated denials fold, so the log holds one per distinct (check, kind, rule, target). A check keeps
@@ -114,7 +116,8 @@ struct Shared {
 /// entries in the same order when the document is too big (`report::json`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tier {
-    /// `ok` `read`, `read_dir`, `read_link` and `stat`, and the `coalesced` entry that stands for more of them.
+    /// `ok` `read`, `read_dir`, `read_link` and `stat`, and the `coalesced` entry that stands for more
+    /// of them.
     Ok = 0,
     /// `failed` `read`, `read_dir`, `read_link`, `stat` and `coalesced`.
     Failed = 1,

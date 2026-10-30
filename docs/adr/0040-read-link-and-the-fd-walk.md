@@ -1,6 +1,6 @@
 # ADR 0040: The facade reads links with `read_link`, judges the link where it sits, and opens `/proc/<pid>/fd` to a declared walk that returns sockets only
 
-- Status: Accepted, pending security review (M1-169)
+- Status: Accepted, security-reviewed (PR #153)
 - Date: 2026-10-30
 
 ## Context
@@ -29,7 +29,11 @@ Two choices were open: how a check declares the walk, and what a link read may r
    link's own name, the link not followed) must be off the denylist and under one of the check's `reads`.
    Where the link points is not judged, because nothing is opened. Linux holds the parent through an
    `O_PATH` descriptor and calls `readlinkat` on it, so the judged directory and the read directory are one
-   inode. Other Unix resolves the parent with `realpath` and opens it without following links.
+   inode. Linux also checks that the real path of the parent leads to that inode here (a `lstat` of the
+   name), and that a procfs is seen as `/proc`: a directory that came from another mount namespace, or a
+   procfs mounted under another name, is refused, because the rules match on the name `proc` (security
+   review SEC-153-1). macOS resolves the parent with `realpath` and opens it without following links.
+   Another Unix answers `Unsupported`: it has no way to hold the parent.
 3. **The fd walk is declared by one `reads` entry, `rdy_engine::check::FD_WALK` (`/proc/<pid>/fd`).** A
    typed `CheckInfo` field would force every check and every test double in the workspace and in the open
    PRs to change. The text is not a real path (`<pid>` is no process id), so as a prefix it matches nothing
@@ -40,11 +44,14 @@ Two choices were open: how a check declares the walk, and what a link read may r
    `proc` that is not the first component stay refused.
 5. **Only sockets come back.** After the read, a link whose real path is `/proc/<pid>/fd/<n>` must lead to
    `socket:[digits]`. Any other target (a path, a pipe, an anonymous inode) is refused with a fixed rule,
-   and neither the error nor the log holds it. The rule is applied on the real path, so a link to an fd
+   and neither the error nor the log holds it. The target is read into memory first and then dropped, so
+   "refused" means not kept, not never read. The rule is applied on the real path, so a link to an fd
    directory cannot hide it. The check treats a refused fd as "not a socket" and goes on.
 6. **`/proc/self/ns/net` is open to `read_link` for rdy's own process only,** when the check's `reads` cover
-   it. Another process's namespace and every other namespace stay refused. Where there is no `/proc` the
-   call is `NotFound`. A Windows check reads no links, as it reads no files in M1: the policy refuses it
+   it. Another process's namespace and every other namespace stay refused. "Own" is the process id of
+   rdy, and the live backend reads `/proc/self` once when it is built: if that is not the same number
+   (the procfs of another pid namespace), the own-process grants for `ns/net` and `auxv` stay closed.
+   Where there is no `/proc` the call is `NotFound`. A Windows check reads no links, as it reads no files in M1: the policy refuses it
    with the Windows rule.
 7. **Replay serves the manifest `symlinks` map** through the same policy. The fixture form needs no new key:
    `root.manifest.json` already lists links, and a link whose target is not a path is a socket or pipe
@@ -54,12 +61,17 @@ Two choices were open: how a check declares the walk, and what a link read may r
 ## Consequences
 
 - `host.ports` declares `FD_WALK` and the namespace link in `reads`, and reads `/proc/<pid>/comm` and
-  `/proc/<pid>/cgroup` as before. The catalog says it reads `/proc/<pid>/cmdline` for the process name, which
-  the allowlist refuses; M1-072 uses `comm`, or asks for a separate decision.
+  `/proc/<pid>/cgroup` as before. The process name comes from `comm`, not `cmdline`, which the
+  allowlist refuses (ADR 0036; the catalog says so).
 - A walk over many processes makes many `denied` link entries (every file and pipe fd). They fold per
   directory like any denied file call, so one process costs one directory key. M1-072 should stop at the
   first match and list only the pids it needs.
-- The fixture run's manifest audit counts an fd link or listing as declared only under `FD_WALK`.
+- The declaration is skipped as a prefix, so it never covers a read of the literal text
+  `/proc/<pid>/fd/x` (SEC-153-3). The fixture run's manifest audit counts an fd link or listing as
+  declared only under `FD_WALK`, with the path shape tied to the call (three names for a listing, four for
+  a link), and `cargo xtask checks` flags any check other than `host.ports` that lists it.
+- Windows has no file reads in M1, so `/proc/self/ns/net` is `Denied` there (the Windows file rule), not
+  `NotFound`. It is `NotFound` on macOS, which has no `/proc`.
 - The result schema gained a `kind` value and the reference page changed. Readers that keep unknown kinds
   are unaffected.
 - A future M2 collector that wants the fd directory of another process for a bundle needs its own decision.

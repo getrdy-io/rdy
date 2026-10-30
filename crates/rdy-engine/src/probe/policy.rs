@@ -62,7 +62,11 @@
 //!   returned or logged. `read_dir` ([`ReadGuard::listing`]) may list `/proc/<pid>/fd` under the same
 //!   declaration. `read`, `stat` and `Statvfs` of anything in an fd directory stay refused, so
 //!   `/proc/1/fd/3` cannot reach the file behind the link, and `task/<tid>/fd` and `thread-self` stay
-//!   refused.
+//!   refused. [`FD_WALK`] is not a prefix: as text it covers no read of `/proc/<pid>/fd/x`.
+//!
+//! "Rdy's own process" is the process id of rdy. The live backend reads `/proc/self` once when it is
+//! built, and when that is another number (the procfs of another pid namespace) it closes the
+//! own-process grants, `/proc/self/ns/net` and `auxv` (`ReadGuard::with_own_proc`).
 //!
 //! **`/dev`** is refused for `stat` and `read_dir` as well as `read`, because a device node name says
 //! which hardware a machine has. M4 (GPU checks) adds a closed, stat-only list: `/dev/nvidia*`,
@@ -212,6 +216,10 @@ pub struct ReadGuard {
     /// What the call does with the path. The `/proc/<pid>/fd` rule and the `ns/net` link are open to one
     /// kind of call each.
     access: Access,
+    /// False when the `/proc` this machine shows is not the procfs of rdy's own process id. The
+    /// `auxv` and `ns/net` grants, which are for rdy's own process only, are then closed. The live
+    /// backend sets it once, when it is built (`ReadGuard::with_own_proc`).
+    own_proc: bool,
 }
 
 /// What a file call does with a path. It decides which `/proc/<pid>/` entries the guard opens.
@@ -236,7 +244,19 @@ impl ReadGuard {
             machine_id: false,
             statfs: false,
             access: Access::Content,
+            own_proc: true,
         }
+    }
+
+    /// This guard, told whether `/proc/self` is rdy's own process (see the `own_proc` field). A guard
+    /// starts out saying yes. The replay backend has no process of its own, so only the live backend
+    /// calls this.
+    #[cfg_attr(
+        not(any(test, all(feature = "runtime", unix))),
+        expect(dead_code, reason = "only the Unix live backend knows its own /proc")
+    )]
+    pub(crate) fn with_own_proc(self, own_proc: bool) -> Self {
+        Self { own_proc, ..self }
     }
 
     /// The guard of `read_dir`: [`ReadGuard::new`], and `/proc/<pid>/fd` may be listed by a check that
@@ -282,6 +302,7 @@ impl ReadGuard {
             machine_id: true,
             statfs: false,
             access: Access::Content,
+            own_proc: true,
         }
     }
 
@@ -314,7 +335,7 @@ impl ReadGuard {
 
     /// Judges what a link says, after the backend read it. `real` is the link's own real path (its
     /// parent resolved, the link not followed). A link in `/proc/<pid>/fd` may lead to a socket only
-    /// (`socket:[8841]`): a file, a pipe or anything else is refused with the rule "only socket links are read from a process's fd directory", and the
+    /// (`socket:[8841]`): a file, a pipe or anything else is refused with `RULE_FD_TARGET`, and the
     /// target is not kept. Any other link is judged by where it sits and says what it says.
     ///
     /// # Errors
@@ -365,12 +386,16 @@ impl ReadGuard {
         let pid = std::process::id().to_string();
         let names = proc_form(names, &pid, self_pid.is_some());
         // The fd walk declaration covers the fd directory and its links, whatever the process id. It is
-        // no prefix: `/proc/<pid>/fd` names no real path.
+        // no prefix and is skipped below: `/proc/<pid>/fd` names no real path, and as text it would
+        // cover a read of `/proc/<pid>/fd/x`.
         let covered = (grant.fd && is_fd_path(&names))
-            || reads.iter().any(|prefix| {
-                split(Path::new(prefix), mac)
-                    .is_ok_and(|prefix| names.starts_with(&proc_form(prefix, &pid, true)))
-            });
+            || reads
+                .iter()
+                .filter(|prefix| **prefix != FD_WALK)
+                .any(|prefix| {
+                    split(Path::new(prefix), mac)
+                        .is_ok_and(|prefix| names.starts_with(&proc_form(prefix, &pid, true)))
+                });
         if covered {
             Ok(())
         } else if self.statfs {
@@ -389,6 +414,7 @@ impl ReadGuard {
             fd: walk && self.access != Access::Content,
             list: self.access == Access::List,
             ns_net: self.access == Access::Link,
+            own_proc: self.own_proc,
         }
     }
 }
@@ -403,6 +429,8 @@ struct Grant {
     list: bool,
     /// The call reads a link, so `/proc/self/ns/net` is open.
     ns_net: bool,
+    /// `/proc/self` is rdy's own process. When false, `auxv` and `ns/net` stay closed.
+    own_proc: bool,
 }
 
 impl Grant {
@@ -412,6 +440,7 @@ impl Grant {
         fd: false,
         list: false,
         ns_net: false,
+        own_proc: true,
     };
 }
 
@@ -430,8 +459,14 @@ pub(crate) fn is_fd_path<S: AsRef<str>>(names: &[S]) -> bool {
 }
 
 /// Whether `names` is a link in an fd directory: `proc/<pid>/fd/<n>`.
-fn is_fd_link(names: &[String]) -> bool {
+pub(crate) fn is_fd_link<S: AsRef<str>>(names: &[S]) -> bool {
     is_fd_path(names) && names.len() == 4
+}
+
+/// Whether `names` is an fd directory: `proc/<pid>/fd`.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn is_fd_dir<S: AsRef<str>>(names: &[S]) -> bool {
+    is_fd_path(names) && names.len() == 3
 }
 
 /// A process directory a walk may use: a number or `self`. `thread-self` is not one: it resolves into
@@ -657,10 +692,10 @@ fn pid_entry_allowed(
     let own = pid == "self" || self_pid == Some(pid);
     match tail {
         [] | ["task"] => true,
-        ["auxv"] => root && own,
+        ["auxv"] => root && own && grant.own_proc,
         // The network namespace link of rdy's own process, for a `read_link` that the check's `reads`
         // cover. Another process's namespace links are not on any list.
-        ["ns", "net"] => root && own && grant.ns_net,
+        ["ns", "net"] => root && own && grant.ns_net && grant.own_proc,
         // The fd walk (M1-169): the directory for a listing, the links in it for a `read_link`.
         // `fd_pid` keeps `thread-self` out, and `task/<tid>/fd` stays refused below.
         ["fd"] => root && grant.fd && grant.list && fd_pid(pid),
@@ -803,6 +838,63 @@ mod tests {
         static BOTH: &[&str] = &["/etc", FD_WALK];
         assert_eq!(verdict(&link(BOTH), "/etc/os-release"), Ok(()));
         assert_eq!(verdict(&link(BOTH), "/proc/1234/fd/9"), Ok(()));
+    }
+
+    #[test]
+    fn the_fd_walk_text_is_no_prefix() {
+        // `/proc/<pid>/fd` as text names no real path. Used as a prefix it would admit a read of
+        // `/proc/<pid>/fd/x`, which no real process directory has (SEC-153-3).
+        for path in ["/proc/<pid>/fd/x", "/proc/<pid>/fd", "/proc/<pid>/fd/3"] {
+            for guard in [content(WALK), list(WALK), link(WALK)] {
+                assert_eq!(verdict(&guard, path), Err(RULE_OUTSIDE_READS), "{path}");
+            }
+            assert_eq!(
+                content(WALK).admit_real(Path::new(path)),
+                Err(Refused {
+                    rule: RULE_OUTSIDE_READS
+                }),
+                "{path}"
+            );
+        }
+        // A real fd path is no content read either, with the declaration or without it.
+        for path in ["/proc/1234/fd/3", "/proc/self/fd/3"] {
+            assert!(verdict(&content(WALK), path).is_err(), "{path}");
+            assert!(content(WALK).admit_real(Path::new(path)).is_err(), "{path}");
+        }
+        // The other entries of a check with the walk are still prefixes.
+        static BOTH: &[&str] = &["/etc", FD_WALK];
+        assert_eq!(verdict(&content(BOTH), "/etc/os-release"), Ok(()));
+        assert_eq!(
+            verdict(&content(BOTH), "/proc/<pid>/fd/x"),
+            Err(RULE_OUTSIDE_READS)
+        );
+    }
+
+    #[test]
+    fn the_own_process_grants_close_when_proc_is_not_rdys_own() {
+        // The pid of the real path is ours only when this machine's `/proc/self` says so (SEC-153-4).
+        let own = format!("/proc/{}/ns/net", std::process::id());
+        let auxv = format!("/proc/{}/auxv", std::process::id());
+        for guard in [link(PROC), link(NS)] {
+            assert_eq!(guard.admit_real(Path::new(&own)), Ok(()));
+            let foreign = guard.with_own_proc(false);
+            assert_eq!(
+                foreign.admit_real(Path::new(&own)),
+                Err(Refused { rule: RULE_PROC })
+            );
+        }
+        let reader = content(PROC);
+        assert_eq!(reader.admit_real(Path::new(&auxv)), Ok(()));
+        assert_eq!(
+            reader.with_own_proc(false).admit_real(Path::new(&auxv)),
+            Err(Refused { rule: RULE_PROC })
+        );
+        // The rest of the allowlist does not depend on it.
+        let status = format!("/proc/{}/status", std::process::id());
+        assert_eq!(
+            reader.with_own_proc(false).admit_real(Path::new(&status)),
+            Ok(())
+        );
     }
 
     #[test]

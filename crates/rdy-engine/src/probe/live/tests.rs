@@ -1152,9 +1152,10 @@ async fn read_link_says_not_found_and_not_a_link() {
     ));
 }
 
+#[cfg(any(target_os = "linux", target_vendor = "apple"))]
 #[test]
 fn the_portable_read_link_gives_the_same_answers() {
-    // Linux uses O_PATH; macOS uses this. It is compiled everywhere, so it is tested here.
+    // Linux uses O_PATH; macOS uses this. It is compiled on both, so it is tested here.
     let sandbox = Sandbox::new();
     sandbox.write("real/placeholder", b"x");
     symlink("target-name", sandbox.path("real/inner")).expect("symlink");
@@ -1186,6 +1187,28 @@ fn the_portable_read_link_gives_the_same_answers() {
     );
 }
 
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn the_net_namespace_link_is_not_found_on_macos() {
+    // There is no /proc here. The grant is for Linux, and the answer is the one a missing file gives.
+    let sandbox = Sandbox::new();
+    let probe = sandbox.probe(&[Path::new("/proc/self/ns/net")], &[]);
+    assert_eq!(
+        probe.read_link(Path::new("/proc/self/ns/net")).await,
+        Err(ProbeError::NotFound)
+    );
+}
+
+#[test]
+fn the_text_of_proc_self_names_our_pid_or_it_is_not_ours() {
+    assert!(files::names_pid(b"1234", 1234));
+    assert!(!files::names_pid(b"1235", 1234));
+    assert!(!files::names_pid(b"", 1234));
+    assert!(!files::names_pid(b"1234\n", 1234));
+    assert!(!files::names_pid(b"self", 1234));
+    assert!(!files::names_pid(b"12340", 1234));
+}
+
 #[cfg(target_os = "linux")]
 mod proc_links {
     use super::*;
@@ -1195,6 +1218,104 @@ mod proc_links {
 
     fn walker(sandbox: &Sandbox) -> Probe {
         sandbox.probe(&[Path::new(FD_WALK), Path::new("/proc/self/ns/net")], &[])
+    }
+
+    /// A backend whose `/proc/self` is not rdy's own process, as under another pid namespace's procfs.
+    fn foreign_proc_hub() -> ProbeHub {
+        let backend = Live {
+            secrets: files::Secrets::default(),
+            own_proc: false,
+        };
+        ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])))
+    }
+
+    #[test]
+    fn this_machines_proc_self_is_rdys_own_process() {
+        assert!(files::proc_self_is_own());
+    }
+
+    #[tokio::test]
+    async fn the_own_process_grants_close_when_proc_self_is_not_rdys_own() {
+        let hub = foreign_proc_hub();
+        let probe = hub.check_probe(
+            "host.fixture",
+            Os::Linux,
+            Some(manifest(&[Path::new("/proc")], &[])),
+        );
+        let error = probe
+            .read_link(Path::new("/proc/self/ns/net"))
+            .await
+            .expect_err("closed");
+        assert_eq!(rule_of(&error), RULE_PROC);
+        let error = probe
+            .read(Path::new("/proc/self/auxv"))
+            .await
+            .expect_err("closed");
+        assert_eq!(rule_of(&error), RULE_PROC);
+        // What is not tied to the own process still reads.
+        probe
+            .read(Path::new("/proc/self/status"))
+            .await
+            .expect("status");
+    }
+
+    #[test]
+    fn a_parent_named_through_another_mount_is_not_trusted() {
+        use crate::probe::Refused;
+        use rustix::fs::{AtFlags, CWD, stat, statat};
+        let rule = |result: io::Result<()>| {
+            Refused::from_io(&result.expect_err("refused")).map(|refusal| refusal.rule)
+        };
+        let anchor = stat("/").expect("stat /");
+        let mut other = anchor;
+        other.st_ino = other.st_ino.wrapping_add(1);
+
+        // The name leads to the same inode, on a file system that is no procfs: fine.
+        let confirm = |named: rustix::io::Result<rustix::fs::Stat>, on_proc: bool, parent: &str| {
+            files::confirm_real_parent(&anchor, named, on_proc, Path::new(parent))
+        };
+        confirm(Ok(anchor), false, "/mnt/anywhere").expect("same inode");
+        // A procfs seen as /proc, deep or not, is fine.
+        confirm(Ok(anchor), true, "/proc").expect("proc root");
+        confirm(Ok(anchor), true, "/proc/1234/fd").expect("fd directory");
+        // The name leads to another inode, or nowhere: it came from another mount namespace.
+        assert_eq!(
+            rule(confirm(Ok(other), false, "/mnt/p/1")),
+            Some(RULE_CHANGED)
+        );
+        assert_eq!(
+            rule(confirm(Err(rustix::io::Errno::NOENT), false, "/mnt/p/1")),
+            Some(RULE_CHANGED)
+        );
+        // A procfs under another name (a bind mount, or a procfs mounted elsewhere): the `/proc/<pid>`
+        // rules match on the name `proc`, so the directory is refused.
+        for parent in ["/mnt/p/1/fd", "/mnt/hostproc/1234/fd", "/procfs/1/fd", "/"] {
+            assert_eq!(
+                rule(confirm(Ok(anchor), true, parent)),
+                Some(RULE_PROC),
+                "{parent}"
+            );
+        }
+        // The real thing: the directory of the namespace links, as the live call sees it.
+        let ns = stat("/proc/self/ns").expect("stat ns");
+        let named = statat(CWD, "/proc/self/ns", AtFlags::SYMLINK_NOFOLLOW);
+        files::confirm_real_parent(&ns, named, true, Path::new("/proc/self/ns")).expect("proc");
+    }
+
+    #[tokio::test]
+    async fn the_fd_walk_text_is_no_prefix_for_a_read() {
+        let sandbox = Sandbox::new();
+        let probe = walker(&sandbox);
+        for path in ["/proc/<pid>/fd/x", "/proc/<pid>/fd/3"] {
+            let error = probe.read(Path::new(path)).await.expect_err(path);
+            assert_eq!(rule_of(&error), RULE_OUTSIDE_READS, "{path}");
+        }
+        // A real fd is closed to a content read, as before.
+        let error = probe
+            .read(Path::new("/proc/self/fd/0"))
+            .await
+            .expect_err("closed");
+        assert_eq!(rule_of(&error), RULE_PROC);
     }
 
     #[tokio::test]
