@@ -419,7 +419,7 @@ impl Check for Firewall {
 
 /// A probe error the check can work around. A refusal by rdy's own policy is a bug in the check's
 /// manifest or command, and ends the check.
-fn soft(error: ProbeError) -> Result<ProbeError, CheckError> {
+pub(crate) fn soft(error: ProbeError) -> Result<ProbeError, CheckError> {
     match error {
         ProbeError::Denied { .. } | ProbeError::Policy(_) | ProbeError::Table(_) => {
             Err(CheckError::Probe(error))
@@ -429,7 +429,7 @@ fn soft(error: ProbeError) -> Result<ProbeError, CheckError> {
 }
 
 /// A short reason for a probe failure, for a note.
-fn short(error: &ProbeError) -> String {
+pub(crate) fn short(error: &ProbeError) -> String {
     match error {
         ProbeError::NotFound => "not found".to_owned(),
         ProbeError::PermissionDenied => "permission denied".to_owned(),

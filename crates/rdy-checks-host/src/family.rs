@@ -11,6 +11,7 @@ use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::cpu::{self, CpuCheck};
 use crate::firewall::{self, Firewall};
 
 #[cfg(test)]
@@ -126,16 +127,6 @@ static TIME_SYNC: CheckInfo = info(
     5,
     &[],
 );
-static CPU: CheckInfo = info(
-    "host.cpu",
-    "Cores, arch, CPU flags, virtualization",
-    CheckMeta {
-        title: "CPU",
-        remediation: "Resize the instance to get more vCPUs or the right architecture. If a CPU flag is missing on a VM, set the VM CPU model to host passthrough or turn off CPU feature masking on the hypervisor.",
-    },
-    2,
-    &[],
-);
 static HOST_OS: CheckInfo = info(
     "host.os",
     "Distro, version, arch, FIPS",
@@ -198,7 +189,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &SECURITY_AGENTS,
     &firewall::INFO,
     &TIME_SYNC,
-    &CPU,
+    &cpu::INFO,
     &SYSCTL,
     &CONTAINER_RUNTIME,
     &CGROUPS,
@@ -210,7 +201,7 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.firewall` is real ([`Firewall`]). The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.firewall` ([`Firewall`]) and `host.cpu` ([`CpuCheck`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -231,14 +222,13 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 12] = [
+static STUBS: [&str; 11] = [
     "host.disk",
     "host.memory",
     "host.ports",
     "host.lsm",
     "host.security_agents",
     "host.time_sync",
-    "host.cpu",
     "host.sysctl",
     "host.container_runtime",
     "host.cgroups",
@@ -263,6 +253,9 @@ impl Family for HostFamily {
                 .flatten()
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
+        if let CheckParams::HostCpu(cpu) = params {
+            return Ok(Built::new(Box::new(CpuCheck::from_params(&cpu))));
         }
         let info = CHECKS
             .iter()
