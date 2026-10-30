@@ -154,7 +154,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-070 | todo | | Terminal styling layer: colour choice, width, escaping and ASCII text | backlog corrected 2026-10-29 (correction-16): moved from week 13 to week 14
 
-- M1-071 | todo | | host.cpu (cores with quota, arch, flags through std macros, levels, Rosetta)
+- M1-071 | [#126](https://github.com/getrdy-io/rdy/pull/126) | 2026-10-30 | Built as `rdy_checks_host::CpuCheck` (Linux). Deferrals: (1) flags through `std::is_x86_feature_detected!` and `native/cpu_flags.json`: the closed `NativeCall` list has no CPU variant and adding one touches the engine, the threat model table and the files M1-068 changes, so `/proc/cpuinfo` is the only flag source; filed as backlog correction-23: M1-071 is retitled to drop "flags through std macros" and the CPU feature variant goes to M2-004. (2) Rosetta detection moves to M2-007 and the macOS and Windows counts to M2-005. (3) Physical cores come from `cpuinfo` lines, not the `topology` files (one action-log entry per file per CPU is too noisy). (4) No `REQUIRED` row in `fixture_lint.rs` for `host.cpu/pass`: M1-068 edits that list at the same time and M1-075 owns the completeness rule. (5) `host.cpu` uses the shared `soft` and `short` in `crate::text`; `host.os` keeps its own `short`, whose wording differs.
 
 - M1-072 | todo | | host.ports (Linux /proc/net TCP and UDP, lazy owner lookup, ephemeral overlap) | backlog corrected 2026-10-29 (correction-14): depends on M1-169 (facade `read_link`) too and runs in week 19, not week 14 (PR #88 review)
 
