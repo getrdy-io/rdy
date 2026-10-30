@@ -356,10 +356,11 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
   - What the renderer must keep true: nothing switches escaping off (M1-078, two layers). The root
     `clippy.toml` and the three check crates' (the lint wall, whose `tests/lint-wall` uses prove each entry fires; the
     wall crate is the only other crate `deny.toml` lets name askama) ban the types `askama::filters::Safe`, `Unsafe`, `MaybeSafe`, `HtmlSafe` and
-    `HtmlSafeOutput` and the functions `safe`, `escape` and `e`, so any spelling of them (a glob import, an
-    alias, a lowercase call) fails to compile. Clippy does not read the trait in an `impl` header, so
-    `scripts/check-html-escapes.sh` (a lint-job step) is the second layer: it fails on the filters
-    `|safe`, `|unsafe`, `|e(`, `|escape(`, `|json`, `|json_pretty`, `|tojson`, `|urlencode` and `|urlencode_strict`, and unless `{{ json }}` appears exactly once, on the script line
+    `HtmlSafeOutput` and the functions `safe`, `escape` and `e`. A single-name `use`, a type position, a
+    bound and a call of the lowercase functions fail to compile. A glob import, a tuple-struct constructor
+    such as `Safe(x)` and the trait in an `impl` header do not, so
+    `scripts/check-html-escapes.sh` (a lint-job step) is the second layer and the guard for those: it fails on the filters
+    `|safe`, `|unsafe`, `|e(`, `|escape(`, `|json`, `|json_pretty`, `|tojson`, `|urlencode` and `|urlencode_strict`, and unless `{{ json }}` appears exactly once, on the script line. Known limit: a string literal holding `}}` or `%}` inside a tag hides a path call from the `::` rule, and the clippy layer may not see the generated code, so this is a known limit that review covers (a test pins it)
     (templates are read with their newlines joined), on `{% filter safe %}`, on any `::` inside a tag (a path
     call works in askama 0.16.1), on `escape =`, on the words `filters`, `Safe` and `Unsafe` in a Rust file
     that names askama, on a `#[template]` (also inside `cfg_attr`) that is not `path = "*.html"` or has

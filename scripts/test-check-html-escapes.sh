@@ -112,6 +112,24 @@ fresh
 printf '%s\n' '<p>{{ name }}</p>' >"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: no embedded result at all" 1 "exactly once"
 fresh
+printf '%s\n' '<a href="{{json}}">x</a>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: {{json}} with no space, in an attribute" 1 "exactly once"
+fresh
+printf '%s\n' '<p>{{json|lower}}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: {{json|lower}} with no space" 1 "exactly once"
+fresh
+printf '%s\n' '<p>{{-json-}}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: {{-json-}} with trim marks" 1 "exactly once"
+fresh
+printf '%s\n' '{% let a = json %}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: json in a block tag" 1 "exactly once"
+fresh
+printf '%s\n' '<p>{{json_sha256}} {{ x.json_len }}</p>' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: names that only start with json pass" 0 "ok:"
+fresh
+printf '%s\n' '{{ "}}" ~ askama::filters::Safe(name) }}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
+expect "template: KNOWN LIMIT, a }} inside a string hides a path call (a known limit)" 0 "ok:"
+fresh
 printf '%s\n' '{{ json_sha256 }} {{ json.len() }}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: json.len() counts as a second use" 1 "exactly once"
 fresh

@@ -24,6 +24,12 @@
 #               `workspace = true` nor `default-features = false`, or has `default-features = true`
 #   files       any file named `askama.toml`
 #
+# Known limit of the `::` rule: a string literal that holds `}}` or `%}` inside a tag ends the scan of that
+# tag early, so `{{ "}}" ~ askama::filters::Safe(x) }}` is not seen by the script. The clippy.toml entries
+# ban the Safe types and the safe, escape and e functions, but clippy may not report code that the template
+# derive generates, so this is a known limit and not a guarantee. The template is one file that review
+# reads. test-check-html-escapes.sh pins this behaviour, so a change to it is a deliberate one.
+#
 # One line is allowed, once: `impl askama::filters::HtmlSafe for EmbeddedJson {}` in
 # crates/rdy-engine/src/report/html/view.rs. A second marker, or that line in another file, fails.
 #
@@ -141,7 +147,7 @@ first_template=""
 while IFS= read -r file; do
   [ -n "$file" ] || continue
   [ -n "$first_template" ] || first_template=$file
-  n=$(tr '\n\r\t' '   ' <"$file" | grep -Eo "[{][{%]([^}]|[}][^}])*(^|[^A-Za-z0-9_])json($word)" | grep -c .)
+  n=$(tr '\n\r\t' '   ' <"$file" | grep -Eo "[{][{%][-+~]?(([^}]|[}][^}])*[^A-Za-z0-9_])?json$word" | grep -c .)
   json_uses=$((json_uses + n))
   if grep -Fxq -- "$JSON_LINE" "$file"; then
     json_line_found=$((json_line_found + 1))
