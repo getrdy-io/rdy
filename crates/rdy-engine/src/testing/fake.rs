@@ -61,6 +61,11 @@ pub enum Fake {
     /// outlives an abort of the check, as a real stuck read does.
     Block(Mutex<Option<Receiver<()>>>),
     /// Holds its worker thread, never yielding, until the test releases it ([`FakeCheck::spin`]).
+    ///
+    /// It needs a multi-thread runtime (`#[tokio::test(flavor = "multi_thread", worker_threads = 2)]`).
+    /// On the current-thread runtime that `#[tokio::test]` builds by default, the spin would hold the
+    /// only thread, the scheduler's timer could never fire and the test would hang. Running it there
+    /// panics with that advice instead.
     Spin(Arc<AtomicBool>),
 }
 
@@ -80,7 +85,11 @@ impl std::fmt::Debug for Fake {
 
 /// Lets a [`Fake::Block`] or [`Fake::Spin`] go. Dropping it lets it go too, so a test that fails an
 /// assert before it releases does not leave a thread behind for ever.
+///
+/// Bind it to a name that lives as long as the test: `let (check, release) = FakeCheck::block();`.
+/// `let (check, _) = ...` drops it at once and frees the fake before it runs, which defeats the test.
 #[derive(Debug)]
+#[must_use = "dropping a Release frees the fake at once; bind it to a name and keep it until the test is done"]
 pub struct Release(Hold);
 
 #[derive(Debug)]
@@ -158,7 +167,9 @@ impl FakeCheck {
     }
 
     /// A fake that waits on a blocking-pool thread until the returned [`Release`] is used or dropped.
-    #[must_use]
+    ///
+    /// Bind the [`Release`] to a name (not `_`), or the fake is freed before it runs. The fake can run
+    /// once: its receiver goes to the blocking thread, and a second run panics.
     pub fn block() -> (Self, Release) {
         let (sender, receiver) = mpsc::channel();
         let fake = Self::new(Fake::Block(Mutex::new(Some(receiver))));
@@ -166,7 +177,9 @@ impl FakeCheck {
     }
 
     /// A fake that spins on its worker until the returned [`Release`] is used or dropped.
-    #[must_use]
+    ///
+    /// Bind the [`Release`] to a name (not `_`), or the fake is freed before it runs. It needs a
+    /// multi-thread runtime, as [`Fake::Spin`] says.
     pub fn spin() -> (Self, Release) {
         let flag = Arc::new(AtomicBool::new(false));
         let fake = Self::new(Fake::Spin(Arc::clone(&flag)));
@@ -194,13 +207,23 @@ impl Check for FakeCheck {
                 Fake::Panic(text) => panic!("{text}"),
                 Fake::Block(slot) => {
                     let receiver = slot.lock().unwrap_or_else(PoisonError::into_inner).take();
-                    if let Some(receiver) = receiver {
-                        // Ends when the test sends, or drops its `Release`. If the task is aborted
-                        // first, the thread stays here until then, which is what the test is for.
-                        drop(tokio::task::spawn_blocking(move || receiver.recv()).await);
-                    }
+                    let Some(receiver) = receiver else {
+                        panic!(
+                            "this FakeCheck::block() fake has already run once and cannot block \
+                             again. Fix: make a new one with FakeCheck::block() for each run."
+                        );
+                    };
+                    // Ends when the test sends, or drops its `Release`. If the task is aborted
+                    // first, the thread stays here until then, which is what the test is for.
+                    drop(tokio::task::spawn_blocking(move || receiver.recv()).await);
                 }
                 Fake::Spin(flag) => {
+                    assert!(
+                        tokio::runtime::Handle::current().runtime_flavor()
+                            != tokio::runtime::RuntimeFlavor::CurrentThread,
+                        "FakeCheck::spin() needs a multi-thread runtime, or the timeout can never \
+                         fire. Fix: use #[tokio::test(flavor = \"multi_thread\", worker_threads = 2)]."
+                    );
                     while !flag.load(Ordering::SeqCst) {
                         std::hint::spin_loop();
                     }

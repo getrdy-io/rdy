@@ -105,7 +105,7 @@ async fn a_check_runs_against_the_fixture_and_stays_inside_its_manifest() {
     assert_eq!(reads.len(), 1, "{:?}", run.log());
     assert_eq!(reads[0].outcome, ActionOutcome::Ok);
     assert_eq!(reads[0].check.as_deref(), Some("host.memory"));
-    assert!(manifest_violations(run.log()).is_empty());
+    assert!(manifest_violations(run.info(), run.log()).is_empty());
     run.assert_within_manifest();
 }
 
@@ -164,7 +164,7 @@ async fn assert_within_manifest_fails_on_a_check_that_reads_an_undeclared_path()
 async fn the_violation_names_the_entry_the_path_and_the_rule() {
     let check = Reader::new(&MEMORY, &["/proc/meminfo", "/etc/hostname"]);
     let run = run_fixture(&check, CASE).await.expect("the fixture loads");
-    let violations = manifest_violations(run.log());
+    let violations = manifest_violations(run.info(), run.log());
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(
         violations[0].contains("read /etc/hostname"),
@@ -192,6 +192,47 @@ async fn a_refusal_by_the_deny_list_is_not_a_manifest_violation() {
         run.log()
     );
     run.assert_within_manifest();
+}
+
+#[tokio::test]
+#[should_panic(expected = "etc/shadow")]
+async fn assert_within_manifest_fails_on_a_deny_listed_path_the_check_did_not_declare() {
+    // The deny list refuses `/etc/shadow` before the manifest is looked at, so the log holds the
+    // deny-list rule. The check declares only `/proc/meminfo`, so this is still a violation.
+    let check = Reader::new(&MEMORY, &["/proc/meminfo", "/etc/shadow"]);
+    let run = run_fixture(&check, CASE).await.expect("the fixture loads");
+    assert!(run.outcome().is_ok(), "the check hid the refusal");
+    run.assert_within_manifest();
+}
+
+#[tokio::test]
+async fn paths_that_the_earlier_read_rules_refuse_are_violations_when_not_declared() {
+    let check = Reader::new(
+        &MEMORY,
+        &[
+            "/proc/meminfo",
+            "/etc/shadow",
+            "/dev/null",
+            "proc/meminfo",
+            "/proc/../etc/hostname",
+        ],
+    );
+    let run = run_fixture(&check, CASE).await.expect("the fixture loads");
+    let violations = manifest_violations(run.info(), run.log());
+    assert_eq!(violations.len(), 4, "{violations:?}");
+    for path in [
+        "/etc/shadow",
+        "/dev/null",
+        "proc/meminfo",
+        "/proc/../etc/hostname",
+    ] {
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.contains(&format!("read {path})"))),
+            "{path} in {violations:?}"
+        );
+    }
 }
 
 // ---- normalize -----------------------------------------------------------------------------------
@@ -326,11 +367,40 @@ fn normalize_orders_the_action_log_by_check_position_then_write_order_and_renumb
 }
 
 #[cfg(feature = "runtime")]
+mod fakes {
+    use super::*;
+    use crate::check::Os;
+
+    #[tokio::test]
+    #[should_panic(expected = "has already run once")]
+    async fn a_block_fake_runs_once_and_a_second_run_panics_instead_of_returning() {
+        let run = TestRun::new(Replay::new());
+        let ctx = run.context("fake.plain", Os::Linux, []);
+        let (check, release) = FakeCheck::block();
+        release.release();
+        check.run(&ctx).await.expect("the first run passes");
+        drop(check.run(&ctx).await);
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "needs a multi-thread runtime")]
+    async fn a_spin_fake_on_the_current_thread_runtime_panics_instead_of_hanging() {
+        let run = TestRun::new(Replay::new());
+        let ctx = run.context("fake.plain", Os::Linux, []);
+        let (check, release) = FakeCheck::spin();
+        drop(check.run(&ctx).await);
+        release.release();
+    }
+}
+
+#[cfg(feature = "runtime")]
 mod across_jobs {
     use std::time::Duration;
 
     use super::*;
-    use crate::outcome::timeout_result;
+    use rdy_spec::spec::CheckSpec;
+
+    use crate::outcome::{map_outcome, timeout_result};
     use crate::sched::{End, Planned, Ran, Scheduler};
 
     /// Runs the same four fakes at `jobs` on paused time and builds the report a run would write.
@@ -341,7 +411,7 @@ mod across_jobs {
             Planned::new(Arc::new(FakeCheck::sleep(Duration::from_secs(3))), keys[0]),
             Planned::new(Arc::new(FakeCheck::sleep(Duration::from_secs(1))), keys[1]),
             Planned::new(
-                Arc::new(FakeCheck::outcome(FakeCheck::passed("c"))),
+                Arc::new(FakeCheck::outcome(Ok(Finding::warn("close")))),
                 keys[2],
             ),
             Planned::new(Arc::new(FakeCheck::forever()), keys[3])
@@ -376,16 +446,27 @@ mod across_jobs {
         report
     }
 
+    /// The result the report writer would make: `map_outcome` gives each check its own status and
+    /// message, so the reports at one job and eight differ by check and not only by timing.
     fn to_result(one: &Ran) -> CheckResult {
-        let started = one.started;
-        let template = result(&one.key, 0, 0);
+        let started_ms = u64::try_from(one.started.as_millis()).expect("small");
+        let duration_ms = u64::try_from(one.elapsed.as_millis()).expect("small");
         match &one.end {
-            End::Done(_) => result(
-                &one.key,
-                u64::try_from(started.as_millis()).expect("small"),
-                u64::try_from(one.elapsed.as_millis()).expect("small"),
-            ),
-            End::TimedOut { after } => timeout_result(&template, *after, started),
+            End::Done(outcome) => {
+                let ctx = CheckContext::new(&one.key, crate::check::Os::Linux, []);
+                map_outcome(
+                    &FAKE_INFO,
+                    &CheckSpec::new("fake.plain"),
+                    &ctx,
+                    (**outcome).clone(),
+                    started_ms,
+                    duration_ms,
+                )
+            }
+            End::TimedOut { after } => {
+                let template = result(&one.key, 0, 0);
+                timeout_result(&template, *after, one.started)
+            }
             other => panic!("unexpected end {other:?}"),
         }
     }
@@ -394,6 +475,14 @@ mod across_jobs {
     async fn normalized_reports_are_equal_at_one_job_and_eight() {
         let mut one = run_at(1).await;
         let mut eight = run_at(8).await;
+
+        // The checks differ from each other: a pass, a pass, a warn and a timeout.
+        let statuses: Vec<Status> = one.checks.iter().map(|c| c.status.clone()).collect();
+        assert_eq!(
+            statuses,
+            [Status::Pass, Status::Pass, Status::Warn, Status::Timeout]
+        );
+        assert_ne!(one.checks[0].message, one.checks[1].message);
 
         // The reports differ for real: timing, job count and the order of the log.
         assert_ne!(one, eight);

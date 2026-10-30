@@ -6,10 +6,14 @@
 //! and a hard need the fixture does not offer gives `MissingNeed` without running the check. There is
 //! no timer. A hang is a fixture with a `delay_ms` or `blackhole` past the facade's limit, which the
 //! probe turns into `Timeout` itself.
+//!
+//! So a check that hangs outside the probe (a loop that never awaits, a lock) hangs the test too, until
+//! the test runner kills it. Wrap the call in `tokio::time::timeout` if the check could do that. In a
+//! real run the scheduler's timeout ends such a check.
 
-use std::path::Path;
+use std::path::{Component, Path};
 
-use rdy_spec::result::ActionOutcome;
+use rdy_spec::result::{Action, ActionKind, ActionOutcome};
 use serde_json::Value;
 
 use super::{Fixture, FixtureError, TestRun, fixtures_dir};
@@ -104,9 +108,10 @@ impl FixtureRun {
     ///
     /// # Panics
     ///
-    /// When the log holds a refusal by the check's manifest.
+    /// When the log holds a refusal by the check's manifest, or a refused file call outside its declared
+    /// reads.
     pub fn assert_within_manifest(&self) {
-        assert_within_manifest(self.fixture.name(), &self.log);
+        assert_within_manifest(self.fixture.name(), self.info, &self.log);
     }
 }
 
@@ -168,14 +173,20 @@ pub async fn run_loaded(check: &dyn Check, fixture: Fixture) -> Result<FixtureRu
 /// A probe bound to a `CheckInfo` refuses a read, `stat`, listing, command, environment variable or
 /// peer that the info does not declare, and logs the refusal as `denied` with the rule. A check that
 /// swallows the error still leaves the entry, so this finds it.
+///
+/// The read policy runs other rules first: the deny list (`/etc/shadow`, `~/.ssh`, `/dev`), the
+/// relative path and `..` rules, and the Windows rule. A file entry refused by one of those hides the
+/// manifest rule. So a refused file entry also counts when its logged path is not covered by the info's
+/// `reads` (or `statfs`, for a `statvfs` call). A declared prefix that covers a denied path is the
+/// check's own bug and is not reported here.
 #[must_use]
-pub fn manifest_violations(log: &ActionLogOutput) -> Vec<String> {
+pub fn manifest_violations(info: &CheckInfo, log: &ActionLogOutput) -> Vec<String> {
     log.actions
         .iter()
         .filter(|action| action.outcome == ActionOutcome::Denied)
         .filter_map(|action| {
             let rule = action.fields.get("rule").and_then(Value::as_str)?;
-            if !MANIFEST_RULES.contains(&rule) {
+            if !MANIFEST_RULES.contains(&rule) && !undeclared_file(info, action) {
                 return None;
             }
             let kind = serde_json::to_value(&action.kind)
@@ -191,15 +202,40 @@ pub fn manifest_violations(log: &ActionLogOutput) -> Vec<String> {
         .collect()
 }
 
-/// Fails the test if the check in `log` went beyond what its `CheckInfo` declares.
+/// A file call (read, listing, `stat`, `statvfs`) whose logged path no declared prefix covers.
+fn undeclared_file(info: &CheckInfo, action: &Action) -> bool {
+    let declared: &[&str] = if action.kind == ActionKind::Read
+        || action.kind == ActionKind::ReadDir
+        || action.kind == ActionKind::Stat
+    {
+        info.reads
+    } else if action.kind == ActionKind::Native
+        && action.fields.get("api").and_then(Value::as_str) == Some("statvfs")
+    {
+        info.statfs
+    } else {
+        return false;
+    };
+    let Some(path) = action.fields.get("path").and_then(Value::as_str) else {
+        return false;
+    };
+    let path = Path::new(path);
+    // Compared as written, by whole components. A relative path, `..` or the `~` the log shows for a
+    // home directory is never inside an absolute prefix, so `/etc/../etc/shadow` does not pass for
+    // `/etc`.
+    let plain = path.is_absolute() && path.components().all(|c| c != Component::ParentDir);
+    !(plain && declared.iter().any(|prefix| path.starts_with(prefix)))
+}
+
+/// Fails the test if the check in `log` went beyond what `info` declares.
 ///
 /// `what` names the fixture or case in the failure text.
 ///
 /// # Panics
 ///
 /// When [`manifest_violations`] is not empty. The message lists each refusal.
-pub fn assert_within_manifest(what: &str, log: &ActionLogOutput) {
-    let violations = manifest_violations(log);
+pub fn assert_within_manifest(what: &str, info: &CheckInfo, log: &ActionLogOutput) {
+    let violations = manifest_violations(info, log);
     assert!(
         violations.is_empty(),
         "{what}: the check went beyond its declared manifest. Fix: declare the read, command, \

@@ -84,7 +84,10 @@ A check case and an environment use the same format. A case is a small environme
 `ensure_answers` for the check (a case that does not list the check fails with the check named, before
 the check runs), binds the probe to the check's `CheckInfo` and returns the outcome and the action log.
 `FixtureRun::assert_within_manifest()` then fails if the check tried a read, command, variable or peer
-that its `CheckInfo` does not declare, even when the check swallowed the refusal. The loader is behind the `testing` feature of `rdy-engine`, which a release
+that its `CheckInfo` does not declare, even when the check swallowed the refusal. That includes a
+read that the deny list (`/etc/shadow`, `~/.ssh`, `/dev`), the relative path rule or the `..` rule refused
+first: if no declared `reads` prefix covers the path, it counts. `run_fixture` has no timer, so a check
+that hangs outside the probe hangs the test. The loader is behind the `testing` feature of `rdy-engine`, which a release
 build never turns on.
 
 ## An environment or case
