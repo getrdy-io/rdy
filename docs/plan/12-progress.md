@@ -119,7 +119,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-053 | todo | | Add bucket to CheckResult and sort by it in terminal and HTML
 
-- M1-054 | PR #TBD | | Built `rdy_engine::summary` (`summary_line`, `last_line`, `verdict_line`), not in rdy-spec, because the golden helper lives in rdy-engine. Goldens are nine two-line files under `tests/fixtures/summary/`, and `xtask goldens check` now counts `summary/<case>.txt` as goldens. The `(N timed out)` and `(N failed)` suffixes follow the 07 section 2.4 wording and are counted per severity, apart from `Summary`, which has no severity split. Deferrals: none
+- M1-054 | [#138](https://github.com/getrdy-io/rdy/pull/138) | 2026-10-30 | Built `rdy_engine::summary` (`summary_line`, `last_line`, `verdict_line`), not in rdy-spec, because the golden helper lives in rdy-engine. Goldens are nine two-line files under `tests/fixtures/summary/`, and `xtask goldens check` now counts `summary/<case>.txt` as goldens. The `(N timed out)` and `(N failed)` suffixes follow the 07 section 2.4 wording and are counted per severity, apart from `Summary`, which has no severity split. Deferrals: none
 
 - M1-055 | todo | | HTML-safe deterministic JSON writer with size caps | backlog corrected 2026-10-29 (correction-14): the writer truncates lists past their schema caps, `observed` and `expected` past three levels and past 64 keys, and sets `truncated`; depends on M1-041 too (PR #83 review, PR #90 review)
 
