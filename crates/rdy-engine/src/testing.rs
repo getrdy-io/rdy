@@ -17,7 +17,7 @@
 //! For a whole check against a recorded machine, [`run_fixture`] loads a fixture, refuses one that does
 //! not answer the check, runs the check against it and returns a [`FixtureRun`]. Then
 //! [`FixtureRun::assert_within_manifest`] proves the check stayed inside its declaration.
-//! [`FakeCheck`] is a scripted check for scheduler tests, and [`normalize`] scrubs a report so two runs
+//! `FakeCheck` (feature `runtime`) is a scripted check for scheduler tests, and [`normalize`] scrubs a report so two runs
 //! of one environment compare equal.
 
 use std::path::PathBuf;
