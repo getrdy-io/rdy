@@ -40,11 +40,12 @@
 //!
 //! **What is here, and what is not.** The handle, the log, the read policy, `read`, `read_tail`,
 //! `read_dir`, `stat`, `env`, `exec`, `native`, `udp_exchange` and `unix_get` (M1-144, policy in `sock`),
-//! and the live backend (`live_backend`, feature `runtime`). Still to come, each in its own ticket:
+//! `tcp` with the proxy `CONNECT` (M1-091, policy in `net`, needs feature `runtime` or `loopback`), and
+//! the live backend (`live_backend`, feature `runtime`). Still to come, each in its own ticket:
 //!
-//! - names, TCP, TLS and HTTP: the network tickets. They open their entries
-//!   with the crate-private `Probe::begin`, the same way the methods here do. Each tcp, http and kube
-//!   call writes exactly one entry (M1-091, M1-103). A kube request writes its entry through
+//! - TLS and HTTP: the network tickets (M1-092, M1-093). They open their entries
+//!   with the crate-private `Probe::begin`, the same way the methods here do. Each tls, http and kube
+//!   call writes exactly one entry (M1-092, M1-093, M1-103). A kube request writes its entry through
 //!   [`Probe::kube_call`], which the read-only guard of `rdy-checks-k8s` calls;
 //! - `read_link`: `host.ports` (M1-072) needs it for `/proc/self/ns/net` and `/proc/<pid>/fd`, and the
 //!   action log has no kind for it yet. M1-169 adds both (plan correction 14).
@@ -54,8 +55,8 @@ use std::future::Future;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use rdy_spec::result::{ActionKind, ActionOutcome};
@@ -82,6 +83,10 @@ pub use native::{
     UnameInfo,
 };
 pub use policy::{ReadGuard, Refused};
+pub use proxy::{
+    DEFAULT_PROXY_PORT, MAX_CONNECT_HEAD, NetFailure, ProxyChallenge, ProxyError, ProxyUrl,
+    ProxyUrlError,
+};
 
 use log::{ActionLog, Limits, Pending};
 
@@ -90,7 +95,10 @@ mod addr;
 mod live;
 mod log;
 mod native;
+#[cfg(any(feature = "runtime", feature = "loopback"))]
+pub mod net;
 mod policy;
+mod proxy;
 #[cfg(any(test, feature = "testing"))]
 pub(crate) mod replay;
 pub mod sock;
@@ -123,8 +131,8 @@ pub const RULE_ENV_BAD_NAME: &str = "not a valid environment variable name";
 
 /// Why a probe call did not give a value.
 ///
-/// It is `Clone`, `PartialEq` and `Eq` because [`CheckError`](crate::check::CheckError) is. The
-/// variants the network ticket adds (`Net`) must keep that.
+/// It is `Clone`, `PartialEq` and `Eq` because [`CheckError`](crate::check::CheckError) is, and
+/// [`NetFailure`] keeps that.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ProbeError {
@@ -179,6 +187,10 @@ pub enum ProbeError {
         "the replay fixture has no recorded answer for {0}. Fix: record the answer in the fixture (commands/, native/ or the file tree), or correct the test"
     )]
     NotRecorded(String),
+    /// A network step failed in a way the facade names: a name that did not resolve, or a proxy that
+    /// refused, wanted credentials or sent something that is not HTTP. The text ends with what to do.
+    #[error("{0}")]
+    Net(#[from] NetFailure),
     /// Any other I/O failure. The text is the OS message.
     #[error("{0}. Fix: check the message above and the state of the machine, then run again")]
     Io(String),
@@ -242,6 +254,7 @@ impl ProbeError {
             | Self::PermissionDenied
             | Self::Unsupported(_)
             | Self::NotRecorded(_)
+            | Self::Net(_)
             | Self::Io(_) => ActionOutcome::Failed,
         }
     }
@@ -573,6 +586,16 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
         Box::pin(async { Err(ProbeError::Io(NO_SOCKETS.to_owned())) })
     }
 
+    /// Opens a TCP stream to `addr`. The probe has already applied the peer and address policy, and it
+    /// bounds the wait with its own timeout. The live backend connects a socket. The replay backend
+    /// follows `net.json`: `refused`, `reset`, `blackhole`, or `serve`, which connects the in-process
+    /// server the test registered under that name. The provided body refuses.
+    #[cfg(any(feature = "runtime", feature = "loopback"))]
+    fn connect<'a>(&'a self, addr: SocketAddr) -> BoxFuture<'a, io::Result<net::BoxedStream>> {
+        let _ = addr;
+        Box::pin(async { Err(no_sockets_io()) })
+    }
+
     /// The process's real and effective user and group ids, for the privilege snapshot on macOS.
     ///
     /// Linux reads all four of each from `/proc/self/status` through `read`, and Windows has none. The
@@ -611,6 +634,8 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
 pub struct ProbeHub {
     backend: Arc<dyn Backend>,
     log: ActionLog,
+    /// The run's proxy, set once before the checks start. Clones of the hub share it.
+    proxy: Arc<OnceLock<ProxyUrl>>,
 }
 
 impl fmt::Debug for ProbeHub {
@@ -626,6 +651,7 @@ impl ProbeHub {
         Self {
             backend,
             log: ActionLog::new(redactor, None, Limits::default()),
+            proxy: Arc::new(OnceLock::new()),
         }
     }
 
@@ -685,6 +711,43 @@ impl ProbeHub {
             self.log.count(KNOWN_SECRET_REFUSED);
         }
         accepted
+    }
+
+    /// Sets the proxy the run's checks reach through `Probe::tcp` with `Route::ViaProxy`, once.
+    ///
+    /// The password is added to the run-scoped known-secret set first, as written, percent-decoded and
+    /// as the base64 `Proxy-Authorization` pair, so no later string can carry it into the log or the
+    /// report. If the set refuses any of them, the proxy is not set and the call fails: the run cannot
+    /// promise to hide the password, and the caller ends it with exit code 70 (PR #96 reviews). Call it
+    /// before the first probe call and before anything is printed or written.
+    ///
+    /// # Errors
+    ///
+    /// [`ProxyError::SecretRefused`] when the set refused the password, and [`ProxyError::AlreadySet`]
+    /// when a proxy was already set.
+    pub fn set_proxy(&self, proxy: ProxyUrl) -> Result<(), ProxyError> {
+        if self.proxy.get().is_some() {
+            return Err(ProxyError::AlreadySet);
+        }
+        // Every form is tried even after a refusal, so what fits is in the set when the run stops.
+        let mut accepted = true;
+        for secret in proxy.secrets() {
+            accepted &= self.add_known_secret(&secret);
+        }
+        if !accepted {
+            return Err(ProxyError::SecretRefused);
+        }
+        self.proxy.set(proxy).map_err(|_| ProxyError::AlreadySet)
+    }
+
+    /// Reads a proxy URL and sets it as [`ProbeHub::set_proxy`] does.
+    ///
+    /// # Errors
+    ///
+    /// [`ProxyError::Url`] for text that is not a usable proxy URL, then the errors of
+    /// [`ProbeHub::set_proxy`]. No error holds any part of the text.
+    pub fn set_proxy_text(&self, text: &str) -> Result<(), ProxyError> {
+        self.set_proxy(ProxyUrl::parse(text)?)
     }
 
     /// The probe for run-level work on this OS, which the log records with `check: null`. The
