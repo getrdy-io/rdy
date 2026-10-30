@@ -81,6 +81,32 @@ fn a_pem_key_across_the_64_kib_cap_is_fully_redacted() {
     assert!(counts.total() >= 1);
 }
 
+/// The same with a bare block, which no key name introduces: the PEM rule alone takes it (M1-060).
+#[test]
+fn a_bare_pem_key_across_the_64_kib_cap_is_fully_redacted() {
+    let key = pem(8);
+    for lead in [100, 10, 1] {
+        let pad = "a".repeat(FREE_FORM_CAP - lead - 40);
+        let mut result = check("host.cpu");
+        result.observed = Some(observed(json!({
+            "stderr": format!("{pad}\n{key}\ntail"),
+            "log": format!("loaded: {}", key.replace('\n', "\\n")),
+        })));
+        let mut counts = RuleCounts::default();
+        let out = redactor()
+            .redact_check(result, &mut counts)
+            .expect("redacts");
+        let text = serde_json::to_string(&*out).expect("serializes");
+        assert!(!text.contains("QUJDREVG"), "key body survived at {lead}");
+        assert!(
+            !text.contains("BEGIN PRIVATE"),
+            "key header survived at {lead}"
+        );
+        assert!(text.contains("[REDACTED:pem_private_key:"), "{lead}");
+        assert_eq!(counts.get("pem_private_key"), 2, "{lead}");
+    }
+}
+
 #[test]
 fn a_pem_key_in_a_value_that_is_still_too_big_is_redacted_and_the_cut_keeps_the_marker() {
     let key = pem(8);
