@@ -342,6 +342,25 @@ fn a_hostile_context_name_never_reaches_a_command() {
 }
 
 #[test]
+fn a_context_part_that_starts_with_a_dash_never_reaches_a_command() {
+    let guess = guess_for(
+        "arn:aws:eks:--profile:111122223333:cluster/-x",
+        "https://k8s.acme.example",
+        TOKEN,
+    );
+    assert_eq!(guess.region, None);
+    assert_eq!(guess.cluster, None);
+    let guess = guess_for("gke_-proj_-region_-c1", "https://k8s.acme.example", TOKEN);
+    assert_eq!(
+        (guess.project, guess.region, guess.cluster),
+        (None, None, None)
+    );
+    // A dash inside the name is fine.
+    let guess = guess_for("gke_a-proj_eu-west1_c-1", "https://k8s.acme.example", TOKEN);
+    assert_eq!(guess.cluster.as_deref(), Some("c-1"));
+}
+
+#[test]
 fn anonymous_with_credentials_says_none_were_sent_and_does_not_claim_a_fallback() {
     let guess = guess(None);
     let text = anonymous(&guess, true);

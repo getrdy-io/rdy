@@ -964,7 +964,7 @@ impl Probe {
     pub async fn tls_chain(&self, target: &Target) -> Result<TlsChain, ProbeError>;
     pub async fn http(&self, req: HttpProbe) -> Result<HttpOutcome, ProbeError>;
     pub async fn native(&self, call: NativeCall) -> Result<NativeValue, ProbeError>;
-    pub fn kube_call(&self, method: &str, path: &str) -> Result<KubeCall, ProbeError>;  // M1-103; the guard's door to the log
+    pub fn kube_call(&self, method: &str, path: &str, via_proxy: Option<&str>) -> Result<KubeCall, ProbeError>;  // M1-103; the guard's door to the log
 }
 // One Cmd type: rdy_engine::exec::policy::Cmd { program: &'static str, args, extra_dirs, env names, timeout, stdout_cap }.
 // Build it with CommandEntry::cmd (the command table, ADR 0028). Probe::exec applies the check's

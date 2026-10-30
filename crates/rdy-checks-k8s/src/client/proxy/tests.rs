@@ -385,6 +385,30 @@ fn a_user_info_rdy_cannot_send_exactly_is_refused_and_never_shown() {
     }
 }
 
+/// No whole word of `words` in `shown`: the error texts hold the letter `w` inside other words.
+fn assert_no_word(shown: &str, words: &[&str]) {
+    for word in shown.split(|c: char| !c.is_ascii_alphanumeric()) {
+        assert!(!words.contains(&word), "{word}: {shown}");
+    }
+}
+
+#[test]
+fn a_refused_proxy_with_a_user_and_password_before_the_scheme_separator_shows_none_of_them() {
+    // `svc:p://w@proxy:3128` reads as scheme `svc:p`, so the text before `://` holds a user and a
+    // password. The scheme is shown only when it is a scheme.
+    let raw = "svc:p://w@proxy.acme.example:3128";
+    let error = resolve_api(Some(raw), &Env::empty()).expect_err("kubeconfig");
+    let shown = format!("{error} | {error:?} | {}", error.hint());
+    assert_no_word(&shown, &["svc", "p", "w"]);
+    assert!(
+        matches!(&error, KubeError::ProxyUnsupported { proxy, .. } if proxy == "(not a valid URL)"),
+        "{error:?}"
+    );
+    let error = resolve_api(None, &env_with(raw)).expect_err("environment");
+    let shown = format!("{error} | {error:?} | {}", error.hint());
+    assert_no_word(&shown, &["svc", "p", "w"]);
+}
+
 #[test]
 fn a_proxy_without_user_info_has_no_secrets() {
     let resolved = resolve_api(Some("http://proxy.acme.example:3128"), &Env::empty()).expect("ok");

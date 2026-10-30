@@ -325,6 +325,10 @@ fn a_proxy_url_is_shown_as_scheme_host_and_port_only() {
         ("socks5://h.example:1080", "socks5://h.example:1080"),
         ("http://a@b@h.example", "http://h.example"),
         ("not a url", "(not a valid URL)"),
+        ("svc:p://w@proxy.example:3128", "(not a valid URL)"),
+        ("-x://h.example", "(not a valid URL)"),
+        ("://h.example", "(not a valid URL)"),
+        ("a+b.c-1://h.example:1", "a+b.c-1://h.example:1"),
     ] {
         assert_eq!(proxy_display(raw), want, "{raw}");
     }

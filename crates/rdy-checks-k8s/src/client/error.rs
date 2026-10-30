@@ -632,10 +632,19 @@ pub(crate) fn cause_words(seen: &str, kind: Option<io::ErrorKind>) -> &'static s
 /// The user info ends at the last `@` of the whole text, because a password may hold a raw `/`, `?` or `#`
 /// (such a URL is refused before any secret is registered, so nothing else would hide it). So everything
 /// up to the last `@` is dropped first, and only then is the rest cut at the first `/`, `?` or `#`.
+///
+/// The scheme is shown only when it looks like one (`[A-Za-z][A-Za-z0-9+.-]*`). Text such as `svc:p://w@h`
+/// has a user name and a password before the `://`, so none of it is shown.
 pub(crate) fn proxy_display(raw: &str) -> String {
     let Some((scheme, rest)) = raw.split_once("://") else {
         return "(not a valid URL)".to_owned();
     };
+    let mut chars = scheme.chars();
+    let scheme_ok = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'));
+    if !scheme_ok {
+        return "(not a valid URL)".to_owned();
+    }
     let after_userinfo = rest.rsplit_once('@').map_or(rest, |(_, host)| host);
     let host_port = after_userinfo.split(['/', '?', '#']).next().unwrap_or("");
     escape_capped(&format!("{scheme}://{host_port}"), CAUSE_CAP)

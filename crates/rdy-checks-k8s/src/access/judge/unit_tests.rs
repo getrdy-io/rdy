@@ -221,14 +221,13 @@ fn an_ended_credential_blocks_only_when_the_server_says_401() {
 }
 
 #[test]
-fn an_ended_credential_the_server_accepted_is_a_clock_warning_for_every_other_answer() {
+fn an_ended_credential_the_server_accepted_is_a_clock_warning_for_every_answer_of_the_review() {
     let facts = expired_token_facts();
     let version = version();
     for who in [
         who_from_user("jane", &["system:authenticated".to_owned()]),
+        who_from_user("system:anonymous", &[]),
         Who::NotVerified(NotVerified::Before128 { v1beta1: false }),
-        Who::Other { code: 500 },
-        Who::Silent,
     ] {
         let finding = judge(&rules(), &seen(&facts, &version, who));
         assert_eq!(finding.level, Level::Warn, "{}", finding.message);
@@ -239,6 +238,49 @@ fn an_ended_credential_the_server_accepted_is_a_clock_warning_for_every_other_an
         );
         assert!(finding.message.contains("yet the server did not reject it"));
         assert!(finding.fix.expect("a fix").contains("`timedatectl`"));
+    }
+    // A 403 on the review is a block of its own, and the server still did not say 401.
+    let finding = judge(&rules(), &seen(&facts, &version, Who::Forbidden));
+    assert_eq!(finding.level, Level::Fail);
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|note| note.contains("clock is probably wrong")),
+        "{:?}",
+        finding.notes
+    );
+}
+
+#[test]
+fn an_ended_credential_without_an_answer_is_a_plain_warning_that_blames_no_clock() {
+    let facts = expired_token_facts();
+    let version = version();
+    for who in [
+        Who::Broken(KubeError::Timeout {
+            server: "https://k8s.acme.example".to_owned(),
+            proxied: false,
+        }),
+        Who::Other { code: 500 },
+        Who::Silent,
+    ] {
+        let finding = judge(&rules(), &seen(&facts, &version, who));
+        let text = format!(
+            "{} {:?} {}",
+            finding.message,
+            finding.notes,
+            finding.fix.unwrap_or_default()
+        );
+        // A broken connection blocks on its own and lists the ended credential under "Also".
+        assert!(
+            text.contains(
+                "The token in the kubeconfig ended 1 minute ago by this machine's clock."
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("did not reject"), "{text}");
+        assert!(!text.contains("clock is probably wrong"), "{text}");
+        assert!(!text.contains("timedatectl"), "{text}");
     }
 }
 

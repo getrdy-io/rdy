@@ -114,16 +114,21 @@ pub fn guarded_service_via<S>(inner: S, probe: &Probe, via_proxy: Option<&str>) 
     .layer(inner)
 }
 
-/// Like [`guarded_service`], and the two access review POSTs may carry `Impersonate-User: <user>`.
+/// Like [`guarded_service_via`], and the two access review POSTs may carry `Impersonate-User: <user>`.
 ///
 /// `user` is the spec's `as:` value, already checked by [`ImpersonateAs::new`]. The header passes only on
 /// `selfsubjectaccessreviews` and `selfsubjectrulesreviews`, only once and only with exactly this value.
 /// On any other request it is refused, as is every other `Impersonate-*` header (02 Appendix B rule 8).
-pub fn guarded_service_as<S>(inner: S, probe: &Probe, user: ImpersonateAs) -> Guarded<S> {
+pub fn guarded_service_as<S>(
+    inner: S,
+    probe: &Probe,
+    user: ImpersonateAs,
+    via_proxy: Option<&str>,
+) -> Guarded<S> {
     GuardLayer {
         probe: probe.clone(),
         impersonate: Some(Arc::new(user)),
-        via_proxy: None,
+        via_proxy: via_proxy.map(Arc::from),
     }
     .layer(inner)
 }

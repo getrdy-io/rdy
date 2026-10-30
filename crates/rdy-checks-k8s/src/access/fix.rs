@@ -52,10 +52,12 @@ impl Guess {
 }
 
 /// A name from the context that is safe to put in a command the customer copies: letters, digits, `.`,
-/// `_` and `-`. A context name is free text, and `;curl ...|sh` must not get into a fix.
+/// `_` and `-`, and not starting with `-` (it would read as a flag). A context name is free text, and
+/// `;curl ...|sh` must not get into a fix.
 fn safe(text: &str) -> Option<String> {
     (!text.is_empty()
         && text.len() <= 128
+        && !text.starts_with('-')
         && text
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))

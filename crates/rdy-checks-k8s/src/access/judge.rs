@@ -227,6 +227,13 @@ pub(super) fn judge(rules: &Rules, seen: &Seen<'_>) -> Finding {
     // that did not answer 401 to a credential whose end date has passed says this machine's clock is wrong:
     // that is a warning, not a block.
     let rejected = matches!(seen.who, Who::Unauthorized);
+    // The identity review reached the server and the server did not answer 401: only then does an ended
+    // credential point at this machine's clock. After a broken connection, another status or an answer
+    // without a user, it is a plain warning.
+    let answered = matches!(
+        seen.who,
+        Who::Verified { .. } | Who::NotVerified(_) | Who::Forbidden
+    );
     let mut credential_ended = false;
     for credential in facts.credentials() {
         let Some(left) = credential.expires_in() else {
@@ -240,7 +247,7 @@ pub(super) fn judge(rules: &Rules, seen: &Seen<'_>) -> Finding {
                 text: ended_text(credential, left),
                 fix: fix::renew(&guess, credential),
             });
-        } else if left < 0 {
+        } else if left < 0 && answered {
             issues.push(Issue {
                 level: Level::Warn,
                 text: format!(
@@ -248,6 +255,17 @@ pub(super) fn judge(rules: &Rules, seen: &Seen<'_>) -> Finding {
                     span(left)
                 ),
                 fix: fix::clock(),
+            });
+        } else if left < 0 {
+            // The server gave no verdict on the credential (the connection broke, or the answer was
+            // not usable), so nothing says the clock is wrong.
+            issues.push(Issue {
+                level: Level::Warn,
+                text: format!(
+                    "The {kind} in the kubeconfig ended {} ago by this machine's clock.",
+                    span(left)
+                ),
+                fix: fix::renew(&guess, credential),
             });
         } else if left < EXPIRY_WARN_SECS {
             issues.push(Issue {
