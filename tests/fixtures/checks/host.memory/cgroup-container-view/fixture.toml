@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-cgroup-container-view"
+summary = "Container whose cgroup mount root is its own subtree, no limit visible"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false

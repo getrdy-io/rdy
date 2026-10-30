@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-low-available"
+summary = "16 GiB class VM that is busy: 2.3 GiB available"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false
