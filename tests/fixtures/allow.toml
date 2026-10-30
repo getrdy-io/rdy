@@ -1,0 +1,24 @@
+# Exceptions to the fixture lint (crates/rdy-engine/tests/fixture_lint.rs, 08 section 2).
+#
+# One [[allow]] table per exception. Keys:
+#
+#   rule    "crlf", "host" or "ip".
+#   path    A file from the repo root. Required for "crlf". For "host" and "ip" it limits the entry
+#           to that one file; leave it out to allow the value everywhere.
+#   value   For "host": a name, which also allows its subdomains. For "ip": one address.
+#   reason  One line that says why the exception is safe. Required.
+#
+# An entry that matches nothing fails the lint, so delete an entry when its fixture goes.
+# Keep this file short. Prefer a documentation address (192.0.2.0/24, 2001:db8::/32) or a name that ends
+# in .example.
+
+[[allow]]
+rule = "crlf"
+path = "tests/fixtures/canary/netstat-crlf.txt"
+reason = "The Windows line-ending canary carries CRLF on purpose (README, Line endings)"
+
+[[allow]]
+rule = "host"
+path = "tests/fixtures/wycheproof/ed25519_test.json"
+value = "rfc-editor.org"
+reason = "Third-party test vectors, never edited; a reference link in the vector notes, not a host a test contacts"
