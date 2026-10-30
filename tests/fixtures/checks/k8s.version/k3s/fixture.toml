@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-version-k3s"
+summary = "k3s 1.29 with no provider id"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.version"]
+
+[caps]
+root = false
+network = true
+kube = true
