@@ -250,7 +250,37 @@ Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
    - The PEM rule matches an unterminated private key block to the end of the buffer.
    - The run-scoped known-secret set (kubeconfig token and client key data, proxy password, values of
      declared env names that match the secret-name rule) is removed by exact match, and by any
-     8-character or longer prefix or suffix at a truncated edge.
+     8-byte or longer prefix or suffix at a truncated edge.
+   - How it is built (M1-061). `Redactor::redact_buffer(bytes, Cut)` does the edge drop, the unterminated
+     key guard and the edge match for one buffer. `Probe::file_text`, `stdout_text` and `stderr_text`
+     call it with the flags the facade set (`FileBytes::cut`, `Output::stdout_cut`, `Output::stderr_cut`)
+     and add what it did to the action log's counts, so they reach `redaction.by_rule`. A check puts
+     evidence text in a `Finding` only through them; it parses numbers from `.bytes`. The set is inside
+     the `Redactor`, which clones share. `Redactor::add_known_secret` and `ProbeHub::add_known_secret`
+     add to it. `Probe::env` adds the value of a declared name that `is_secret_name`. The caller of
+     `Loaded::known_secrets()` (M1-057) and the proxy builder add the kubeconfig and proxy secrets.
+     A value under 6 bytes is refused (it would match common words), and so is one over 64 KiB or one
+     that does not fit in the set's 512 KiB budget (the budget is bytes, and 4,096 entries is a backstop).
+     A refusal is never silent: `ProbeHub::add_known_secret` logs a warning with no value and counts
+     `known_secret_refused` in `redaction.by_rule`, and the caller of `Redactor::add_known_secret`
+     (`#[must_use]`) decides whether it can go on. A value is stored as given, percent-encoded and
+     JSON-escaped, and a value of several lines is also added line by line (PEM armor lines are not).
+     `Probe::env` skips a value the key rule leaves alone (`null`, `required`, `${NAME}`, a path under
+     `/run/secrets/`) and config words such as `enabled` or `password`. A match inside a placeholder
+     the redactor wrote is skipped, so a second pass changes nothing.
+     Known secrets are removed by exact match in every string: results, actions, logs and errors.
+     Known-secret placeholders use the rule name `known_secret`.
+   - The partial edge line is the text after the last newline (before the first one at a cut head). With
+     no newline in the buffer, the last (first) 4 KiB go, and then the boundary moves to the nearest
+     separator (NUL, white space, `,` `;` `&` `"` `'`) within another 4 KiB so that it does not split a
+     value; with none there, the whole buffer goes. A known secret that crosses the boundary on the full
+     text moves the boundary to its start (tail) or end (head). A buffer that ends on a newline has no
+     partial line at its tail. At a cut tail, a `-----BEGIN ... PRIVATE KEY-----` with no `-----END` of
+     the same label is removed to the end of the kept text, and at a cut head, an
+     `-----END ... PRIVATE KEY-----` with no `BEGIN` of the same label before it is removed from the
+     start through its END line (rule name `pem_private_key`, 04 Appendix B; the full PEM rule is
+     M1-060). A tail read of a file past the scan budget is cut at both ends; there, a run of two or
+     more base64 lines of 40 bytes or more with no armor is removed too.
    - Then the caps, on char boundaries with a marker: message 1 KiB, fix 4 KiB, `observed` and
      `expected` 64 KiB, lists 200 items. The marker is ` [truncated]` and the cut never lands inside a
      placeholder. `Redactor::redact_check` and `redact_action` do this step for one entry,
@@ -849,7 +879,12 @@ impl Probe {
     // read_link: M1-169 (plan correction 14). host.ports needs it for /proc/self/ns/net and /proc/<pid>/fd,
     // and the action log needs a kind for it.
     pub async fn stat(&self, path: &Path) -> Result<Option<FileMeta>, ProbeError>;
-    pub fn env(&self, name: &str) -> Result<Option<String>, ProbeError>;
+    pub fn env(&self, name: &str) -> Result<Option<String>, ProbeError>;   // a secret-looking name joins the known secrets (M1-061)
+    // Evidence text from a facade buffer, redacted with its cut flags (M1-061). Parse numbers from
+    // `.bytes`; put text in a Finding only through these.
+    pub fn file_text(&self, f: &FileBytes) -> Result<Redacted<String>, ProbeError>;
+    pub fn stdout_text(&self, o: &Output) -> Result<Redacted<String>, ProbeError>;
+    pub fn stderr_text(&self, o: &Output) -> Result<Redacted<String>, ProbeError>;
     pub async fn exec(&self, cmd: Cmd) -> Result<Output, ProbeError>;
     pub async fn lookup(&self, host: &str) -> Result<Vec<IpAddr>, ProbeError>;
     pub async fn tcp(&self, target: &Target) -> Result<TcpReport, ProbeError>;     // attempts per address
