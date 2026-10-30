@@ -43,6 +43,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0036](0036-security-agents-process-names-and-shipped-data.md) | host.security_agents matches the kernel's cut process name and never reads `cmdline`; a check crate may embed its own shipped data by exact lint-wall entry | Accepted, security-reviewed (PR #119) |
 | [0037](0037-kube-proxy-and-access-facts.md) | The kube client uses an `http://` proxy the way kubectl does, and k8s.access reads the connection attempt, not a connected cluster | Accepted, security-reviewed (PR #130); amends 0031 decision 6 |
 | [0038](0038-rbac-impersonation-and-spec-keys.md) | k8s.rbac tests as the spec's `as:` service account through a layer above the guard, refuses a kubeconfig that already impersonates, and takes URL items | Accepted, security-reviewed (PR #135) |
+| [0039](0039-kind-job-supported-minors-and-gate.md) | The kind job runs the oldest and newest Kubernetes minors that upstream still patches, in a separate workflow that does not gate merges | Proposed, for the founder to decide the gate |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.
