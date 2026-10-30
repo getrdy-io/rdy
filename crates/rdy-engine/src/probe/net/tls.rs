@@ -48,14 +48,19 @@ use tokio::time::{Instant, timeout};
 use tokio_rustls::TlsConnector;
 
 use self::record::{Seen, Trust, recording_client};
+use self::strict::{StrictError, strict_client};
+use super::BoxedStream;
 use super::{Dialed, NetFailure, Probe, ProbeError, ProbeHub, Route, TcpReport};
 use super::{fail_net, proxy_for, settle};
 use crate::probe::log::Pending;
 use crate::probe::proxy::ProxyUrl;
 use crate::probe::sock::host_port;
-use crate::probe::{NativeCall, NativeValue, refuse};
+use crate::probe::{NativeCall, NativeValue, StoreSource, refuse};
+
+pub use crate::probe::{NoRoots, TrustFailure};
 
 mod record;
+mod strict;
 #[cfg(test)]
 mod tests;
 
@@ -83,34 +88,6 @@ pub enum Roots {
     Bundled,
 }
 
-/// Why a chain did not validate against a set of roots.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TrustFailure {
-    /// No root in the set signed the chain: the issuer's CA is not installed here.
-    UnknownIssuer,
-    /// A certificate in the chain has expired. Report it as clock or expiry, not as interception.
-    Expired,
-    /// A certificate in the chain is not valid yet. Report it as clock or expiry too.
-    NotYetValid,
-    /// The leaf is not valid for the name asked for.
-    NameMismatch,
-    /// A certificate's signature did not verify.
-    BadSignature,
-    /// rustls policy refused the chain for another reason: no subject alternative name, a SHA-1
-    /// signature, a key usage that does not fit, a malformed certificate.
-    Policy,
-}
-
-impl TrustFailure {
-    /// `true` for the two failures that point at a wrong clock or an old certificate and not at the
-    /// issuer: `Expired` and `NotYetValid`.
-    #[must_use]
-    pub fn is_clock_or_expiry(self) -> bool {
-        matches!(self, Self::Expired | Self::NotYetValid)
-    }
-}
-
 /// Whether a chain validates against one set of roots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -121,22 +98,6 @@ pub enum TrustVerdict {
     Rejected(TrustFailure),
     /// The set has no roots to judge against, for this reason.
     Unavailable(NoRoots),
-}
-
-/// Why there are no OS roots to judge a chain against.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum NoRoots {
-    /// The OS has no trust store rdy can see, or the store holds no certificate. A check reports "no OS
-    /// trust store found".
-    Empty,
-    /// The OS has a store but it could not be read: a file the operator named with `SSL_CERT_FILE` or
-    /// `SSL_CERT_DIR` was missing or refused, or the OS gave an error. A check reports "the OS trust store
-    /// could not be read" and not "no store found".
-    Unreadable,
-    /// `SSL_CERT_FILE` or `SSL_CERT_DIR` is set and rdy may not read what it names on this OS (Windows,
-    /// in this version). A check reports that and says to unset the variable.
-    Overridden,
 }
 
 /// What one TLS call found.
@@ -253,16 +214,15 @@ impl Probe {
         // Connect first: a host that cannot be reached does not cost a read of the OS store.
         let Dialed { report, stream } = self.dial(hub, target, proxy).await?;
         let Some(stream) = stream else {
-            return Err(ProbeError::Net(NetFailure::NotConnected {
-                target: what.clone(),
-                reason: report.failure(),
-            }));
+            return Err(ProbeError::Net(report.not_connected(&what)));
         };
         let (system, bundled) = self.trust(hub, &provider).await?;
 
         let system_roots = system.roots();
-        let (config, recorder) = recording_client(system, bundled, provider)
+        let (mut config, recorder) = recording_client(system, bundled, provider)
             .map_err(|_| failed("rustls could not build a client configuration"))?;
+        // A test pins the clock here, and the verdicts of both root sets see the pinned time.
+        pin_clock(hub, &mut config);
         let connector = TlsConnector::from(Arc::new(config));
 
         let started = Instant::now();
@@ -304,15 +264,26 @@ impl Probe {
     }
 
     /// The two trust stores, built on first use and kept for the run.
-    ///
-    /// The run keeps what is a fact about the machine: the roots, an empty store, an OS with no source
-    /// and a store that did not read. A timeout, a refusal by policy or any other error is not a fact
-    /// about the store: this call gets an `Unreadable` set and the next call asks again.
     async fn trust(
         &self,
         hub: &ProbeHub,
         provider: &Arc<CryptoProvider>,
     ) -> Result<(Arc<Trust>, Arc<Trust>), ProbeError> {
+        let system = self.system_trust(hub, provider).await?;
+        let bundled = self.bundled_trust(hub, provider).await;
+        Ok((system, bundled))
+    }
+
+    /// The OS roots, asked once for the run.
+    ///
+    /// The run keeps what is a fact about the machine: the roots, an empty store, an OS with no source
+    /// and a store that did not read. A timeout, a refusal by policy or any other error is not a fact
+    /// about the store: this call gets an `Unreadable` set and the next call asks again.
+    async fn system_trust(
+        &self,
+        hub: &ProbeHub,
+        provider: &Arc<CryptoProvider>,
+    ) -> Result<Arc<Trust>, ProbeError> {
         let asked = hub
             .tls
             .system
@@ -324,8 +295,8 @@ impl Probe {
                     .native(NativeCall::SystemRoots)
                     .await;
                 match asked {
-                    Ok(NativeValue::SystemRoots(certs)) => {
-                        Ok(Arc::new(Trust::from_der(&certs, provider)))
+                    Ok(NativeValue::SystemRoots(found)) => {
+                        Ok(Arc::new(Trust::from_der(&found, provider)))
                     }
                     // No source on this OS.
                     Err(ProbeError::Unsupported(_)) => {
@@ -348,17 +319,179 @@ impl Probe {
                 }
             })
             .await;
-        let system = match asked {
-            Ok(system) => Arc::clone(system),
-            Err(error @ ProbeError::NotRecorded(_)) => return Err(error),
-            Err(_) => Arc::new(Trust::unavailable(NoRoots::Unreadable)),
-        };
+        match asked {
+            Ok(system) => Ok(Arc::clone(system)),
+            Err(error @ ProbeError::NotRecorded(_)) => Err(error),
+            Err(_) => Ok(Arc::new(Trust::unavailable(NoRoots::Unreadable))),
+        }
+    }
+
+    /// The bundled Mozilla roots, built once for the run. Nothing is read from the machine.
+    async fn bundled_trust(&self, hub: &ProbeHub, provider: &Arc<CryptoProvider>) -> Arc<Trust> {
         let bundled = hub
             .tls
             .bundled
             .get_or_init(|| async { Arc::new(Trust::bundled(provider)) })
             .await;
-        Ok((system, Arc::clone(bundled)))
+        Arc::clone(bundled)
+    }
+
+    /// Builds the strict client configuration for `target` (M1-093): the roots of `roots` accept the
+    /// server's chain for the spec host, or the handshake fails and nothing is sent. The caller builds it
+    /// before it dials, so a store that is missing or a name TLS cannot carry costs no connection. The
+    /// ALPN offer is `http/1.1` only.
+    ///
+    /// `Roots::System` asks for the OS store, once for the run; `Roots::Bundled` never touches the
+    /// machine.
+    pub(super) async fn strict_tls(
+        &self,
+        hub: &ProbeHub,
+        target: &Target,
+        roots: Roots,
+    ) -> Result<StrictTls, ProbeError> {
+        let what = host_port(target);
+        let failed = |reason: &'static str| {
+            ProbeError::Net(NetFailure::TlsFailed {
+                target: what.clone(),
+                reason,
+            })
+        };
+        let name = server_name(target)
+            .ok_or_else(|| failed("the host is not a name TLS can carry in a ClientHello"))?;
+        let provider = provider();
+        let trust = match roots {
+            Roots::System => self.system_trust(hub, &provider).await?,
+            Roots::Bundled => self.bundled_trust(hub, &provider).await,
+        };
+        let mut config = strict_client(&trust, provider).map_err(|error| match error {
+            StrictError::NoRoots(reason) => ProbeError::Net(NetFailure::NoTrustRoots {
+                target: what.clone(),
+                reason,
+            }),
+            StrictError::Config => failed("rustls could not build a client configuration"),
+        })?;
+        pin_clock(hub, &mut config);
+        Ok(StrictTls {
+            connector: TlsConnector::from(Arc::new(config)),
+            name,
+        })
+    }
+
+    /// Wraps `stream` in the TLS session of `strict`. The handshake verifies strictly: a chain the roots
+    /// do not accept fails it and no request byte is written. The caller speaks HTTP/1.1 on the result.
+    pub(super) async fn secure(
+        &self,
+        strict: StrictTls,
+        target: &Target,
+        stream: BoxedStream,
+    ) -> Result<Secured, ProbeError> {
+        let what = host_port(target);
+        let StrictTls { connector, name } = strict;
+        let started = Instant::now();
+        let limit = self.scope.peers.timeout(HANDSHAKE_TIMEOUT);
+        let tls = match timeout(limit, connector.connect(name, stream)).await {
+            Err(_elapsed) => return Err(ProbeError::Timeout),
+            Ok(Err(error)) => return Err(strict_failure(&error, &what)),
+            Ok(Ok(tls)) => tls,
+        };
+        let handshake = started.elapsed();
+        let (protocol, alpn) = {
+            let (_, connection) = tls.get_ref();
+            (
+                connection.protocol_version().and_then(protocol_name),
+                connection.alpn_protocol().and_then(alpn_name),
+            )
+        };
+        Ok(Secured {
+            stream: tls,
+            protocol,
+            alpn,
+            handshake,
+        })
+    }
+
+    /// The OS trust store as the run found it: where it was read from and the SHA-256 of each root.
+    /// The store is asked once for the run, as for [`Probe::tls_chain`], and the answer is kept.
+    ///
+    /// The call writes one `native` entry with `api: system_roots` and the check's id, closed `ok` or
+    /// `denied`, as every probe call does; a call after the check ended is refused and logged. The
+    /// run-level `native` entry with `check: null` still records the question to the OS. An empty or
+    /// unreadable store is not an error: it is [`TrustStore::missing`], so a check can say "no OS trust
+    /// store found".
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] after the check ended or on a probe with no hub, and
+    /// [`ProbeError::NotRecorded`] on a replay backend with no `system_roots` answer recorded.
+    pub async fn trust_store(&self) -> Result<TrustStore, ProbeError> {
+        let mut fields = Map::new();
+        fields.insert("api".to_owned(), "system_roots".into());
+        let (hub, entry) = self.begin(ActionKind::Native, fields, "trust store")?;
+        let provider = provider();
+        let result = self
+            .unless_ended("trust store", self.system_trust(hub, &provider))
+            .await
+            .map(|trust| TrustStore {
+                missing: trust.verifier.is_none().then(|| trust.missing()),
+                sources: trust.sources().to_vec(),
+                roots: trust.hashes().to_vec(),
+            });
+        settle(entry, result, |_, _| {})
+    }
+}
+
+/// The strict client configuration and the server name of one call, built before the connection opens.
+pub(super) struct StrictTls {
+    connector: TlsConnector,
+    name: ServerName<'static>,
+}
+
+/// A TLS session that passed strict verification, and what its handshake showed.
+pub(super) struct Secured {
+    pub(super) stream: tokio_rustls::client::TlsStream<BoxedStream>,
+    pub(super) protocol: Option<&'static str>,
+    pub(super) alpn: Option<&'static str>,
+    pub(super) handshake: Duration,
+}
+
+/// The OS trust store as the run found it (M1-093, for the trust-store report of `net.tls_intercept`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TrustStore {
+    /// Why there is no store to verify against, when there is none: [`NoRoots::Empty`] for "no OS trust
+    /// store found", [`NoRoots::Unreadable`] and [`NoRoots::Overridden`].
+    pub missing: Option<NoRoots>,
+    /// The files, directories or OS store the roots were read from. Raw: redact before showing.
+    pub sources: Vec<StoreSource>,
+    /// The SHA-256 of the DER of each root the verifier uses, in store order.
+    pub roots: Vec<[u8; 32]>,
+}
+
+impl TrustStore {
+    /// Whether a root with this SHA-256 is in the store.
+    #[must_use]
+    pub fn contains(&self, sha256: &[u8; 32]) -> bool {
+        self.roots.contains(sha256)
+    }
+
+    /// The SHA-256 of `der`, the form `roots` holds. A check hashes a certificate of a chain with this
+    /// to look it up with [`TrustStore::contains`].
+    #[must_use]
+    pub fn hash(der: &[u8]) -> [u8; 32] {
+        record::sha256(der)
+    }
+
+    /// `sha256` as 64 lowercase hex digits, the form a report shows.
+    #[must_use]
+    pub fn hex(sha256: &[u8; 32]) -> String {
+        use std::fmt::Write as _;
+        sha256
+            .iter()
+            .fold(String::with_capacity(64), |mut out, byte| {
+                // Writing to a String does not fail.
+                let _ = write!(out, "{byte:02x}");
+                out
+            })
     }
 }
 
@@ -439,5 +572,75 @@ fn handshake_failure(error: &io::Error, what: &str) -> ProbeError {
         | io::ErrorKind::BrokenPipe
         | io::ErrorKind::UnexpectedEof => ProbeError::Net(NetFailure::TlsReset { target }),
         _ => ProbeError::from_io(error),
+    }
+}
+
+/// Types a failure of the strict handshake. A certificate the roots refused is [`NetFailure::TlsUntrusted`],
+/// with the class `net.egress` reports; every other failure is typed as for the recording handshake.
+fn strict_failure(error: &io::Error, what: &str) -> ProbeError {
+    let tls = error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<rustls::Error>());
+    if let Some(tls @ rustls::Error::InvalidCertificate(_)) = tls {
+        return ProbeError::Net(NetFailure::TlsUntrusted {
+            target: what.to_owned(),
+            failure: record::failure_of(tls),
+        });
+    }
+    handshake_failure(error, what)
+}
+
+/// Gives `config` the hub's pinned clock, when a test pinned one. Both the recording and the strict
+/// configuration pass through here, so the verdicts of `tls_chain` and the HTTP probe agree on the time.
+/// A build without the `testing` feature has no clock to pin and keeps the real one.
+#[cfg_attr(not(feature = "testing"), expect(unused_variables))]
+fn pin_clock(hub: &ProbeHub, config: &mut rustls::ClientConfig) {
+    #[cfg(feature = "testing")]
+    if let Some(now) = hub.pinned_clock() {
+        config.time_provider = Arc::new(Pinned(now));
+    }
+}
+
+/// A time provider that always says the same time (feature `testing`).
+#[cfg(feature = "testing")]
+#[derive(Debug)]
+struct Pinned(Duration);
+
+#[cfg(feature = "testing")]
+impl rustls::time_provider::TimeProvider for Pinned {
+    fn current_time(&self) -> Option<rustls::pki_types::UnixTime> {
+        Some(rustls::pki_types::UnixTime::since_unix_epoch(self.0))
+    }
+}
+
+#[cfg(feature = "testing")]
+impl ProbeHub {
+    /// Pins the clock that every TLS verdict of this hub sees, as time since the Unix epoch, for both
+    /// `Probe::tls_chain` (the recording handshake) and `Probe::http` (the strict one). Without it
+    /// they read the real clock. A test uses it to put "now" before or after a generated leaf's dates
+    /// (`clock_or_expiry`), whatever the real date is. Call it before the calls it should affect: a
+    /// handshake reads the pin once, when it starts.
+    ///
+    /// Only the feature `testing` builds it; a release build has no way to move the clock.
+    pub fn pin_clock(&self, since_epoch: Duration) {
+        *self
+            .clock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(since_epoch);
+    }
+
+    /// Puts the real clock back.
+    pub fn unpin_clock(&self) {
+        *self
+            .clock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    fn pinned_clock(&self) -> Option<Duration> {
+        *self
+            .clock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }

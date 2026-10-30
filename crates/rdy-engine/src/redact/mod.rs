@@ -26,8 +26,12 @@
 //!   the redactor removes, wherever it appears (M1-061).
 //!
 //! This is the M1-048 core (the engine, the key, the gate and the first rule, `secret_by_key`), the
-//! M1-062 report walk and the M1-061 cut buffers and known secrets. M1-060 adds the other M1 rules.
-//! M1-056 wires the tracing writer, panic hook and CLI errors.
+//! M1-062 report walk, the M1-061 cut buffers and known secrets, and the M1-060 rules (04 Appendix B):
+//! private keys, AWS key ids and secret keys, JWTs, rdy share tokens, authorization and API key headers,
+//! URL userinfo and kubeconfig credentials. M1-056 wires the tracing writer, panic hook and CLI errors.
+//!
+//! [`evidence_url`] is the other half of URL hygiene: a check stores `scheme://host:port/path` and never
+//! the URL it was given.
 
 // `TagKey::fixed` makes tags predictable. It is for tests only, so a release build with the `testing`
 // feature is refused. A debug build is allowed so `cargo test` and `cargo clippy --features testing` work.
@@ -39,11 +43,14 @@
 compile_error!("the `testing` feature of rdy-engine must not be enabled in a release build");
 
 mod buffer;
+mod headers;
 mod key;
 mod known;
 mod report;
 mod rules;
+mod shapes;
 mod span;
+mod url;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -58,6 +65,7 @@ pub use known::MIN_LEN as KNOWN_SECRET_MIN_LEN;
 pub(crate) use known::REFUSED_RULE as KNOWN_SECRET_REFUSED;
 /// Cuts a redacted text to a byte cap with the ` [truncated]` marker, as the report walk does.
 pub(crate) use report::cap as cap_text;
+pub use url::evidence_url;
 
 use rules::{BUILT_IN, Rule};
 use span::{Span, merge};
