@@ -31,6 +31,7 @@
 )]
 #![warn(missing_docs)]
 
+pub mod cgroup;
 mod family;
 mod firewall;
 

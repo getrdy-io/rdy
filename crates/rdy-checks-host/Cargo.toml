@@ -13,6 +13,7 @@ include = ["src/**", "Cargo.toml", "LICENSE", "clippy.toml"]
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
 serde_json = { workspace = true, features = ["std"] }
+thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 # The test run (`TestRun`) applies the real read policy and writes the real action log (M1-147).
