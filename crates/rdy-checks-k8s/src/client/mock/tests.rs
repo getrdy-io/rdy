@@ -16,8 +16,7 @@ use serde_json::json;
 
 use super::*;
 use crate::client::guard::{
-    GuardError, RULE_PATH_SHAPE, RULE_QUERY, RULE_REVIEW_BODY, RULE_SECRETS,
-    SELF_SUBJECT_REVIEW_BODY,
+    GuardError, RULE_PATH_SHAPE, RULE_REVIEW_BODY, RULE_SECRETS, SELF_SUBJECT_REVIEW_BODY,
 };
 
 const CLUSTER: &str = "checks/_kube/cluster";
@@ -372,28 +371,38 @@ async fn the_aggregated_discovery_document_is_not_recorded_so_the_mock_refuses_i
 async fn a_discovery_route_with_a_hostile_group_is_refused_before_anything_is_sent() {
     let harness = cluster();
     let client = harness.client_for("k8s.version");
+    // A well-formed group named `secrets` reaches the guard, which refuses it and logs the refusal.
     let secrets = client
         .group_resources("secrets", "v1")
         .await
         .expect_err("refused");
     assert_eq!(refusal(&secrets), Some(RULE_SECRETS));
-    let query = client
-        .group_resources("evil?x=1", "v1")
-        .await
-        .expect_err("refused");
-    assert_eq!(refusal(&query), Some(RULE_QUERY));
-    let shape = client
-        .group_resources("a%2fb", "v1")
-        .await
-        .expect_err("refused");
-    assert_eq!(refusal(&shape), Some(RULE_PATH_SHAPE));
+    // These are not a group and a version, so the route refuses them before the guard: nothing is sent
+    // and no entry is written. Each one would have built a path other than a discovery path.
+    for (group, version) in [
+        ("evil?x=1", "v1"),
+        ("a%2fb", "v1"),
+        ("apps", "v1/deployments"),
+        ("apps/v1", "x"),
+        ("storage.k8s.io", "v1/csinodes"),
+        ("apps", "v"),
+        ("", "v1"),
+        ("apps", ""),
+    ] {
+        let error = client
+            .group_resources(group, version)
+            .await
+            .expect_err("refused");
+        assert_eq!(
+            refusal(&error),
+            Some(RULE_PATH_SHAPE),
+            "({group:?}, {version:?})"
+        );
+    }
     assert!(harness.mock().seen().is_empty());
     let log = harness.run().action_log().actions;
-    assert_eq!(log.len(), 3);
-    assert!(
-        log.iter()
-            .all(|entry| entry.outcome == ActionOutcome::Denied)
-    );
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].outcome, ActionOutcome::Denied);
     harness
         .audit()
         .expect("denied requests are not sent, so nothing is recorded");
@@ -694,6 +703,53 @@ async fn a_request_that_reached_the_mock_without_the_guard_fails_the_count() {
         "{}",
         violations[0]
     );
+}
+
+#[tokio::test]
+async fn an_unguarded_request_is_not_hidden_by_a_guarded_one_that_never_reached_the_mock() {
+    let harness = cluster();
+    // A guarded request for `/api` that is dropped before it is sent: the probe logs it as a timeout.
+    let probe = harness.run().run_probe(Os::Linux);
+    drop(probe.kube_call("GET", "/api").expect("an open probe"));
+    // An unguarded request for `/version`. One request and one sent entry: a count would call it clean.
+    assert_eq!(
+        raw(harness.mock(), Method::GET, "/version", &[], b"").await,
+        200
+    );
+    let log = harness.run().action_log().actions;
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].outcome, ActionOutcome::Timeout);
+
+    let violations = harness.audit().expect_err("the two do not pair");
+    assert_eq!(violations.len(), 2, "{violations:?}");
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("`GET /version`") && v.contains("without the guard")),
+        "{violations:?}"
+    );
+    assert!(
+        violations
+            .iter()
+            .any(|v| v.contains("`GET /api`") && v.contains("never recorded")),
+        "{violations:?}"
+    );
+}
+
+#[tokio::test]
+#[should_panic(expected = "INV-14")]
+async fn a_clean_audit_does_not_switch_off_the_audit_at_drop() {
+    let harness = cluster();
+    harness.audit().expect("nothing yet");
+    raw(
+        harness.mock(),
+        Method::GET,
+        "/api/v1/namespaces/app/configmaps",
+        &[],
+        b"",
+    )
+    .await;
+    // Dropped: the later request is audited.
 }
 
 #[tokio::test]

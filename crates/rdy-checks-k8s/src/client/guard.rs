@@ -40,6 +40,8 @@ mod rules;
 mod tests;
 
 use rules::SELF_SUBJECT_REVIEW_PATH;
+#[cfg(not(test))]
+use rules::log_path;
 pub use rules::{
     ALLOWED, Access, Allowed, FieldSelector, ImpersonateAs, ImpersonateError, Only, RULE_BODY,
     RULE_GET_BODY, RULE_HEADER, RULE_IMPERSONATE, RULE_METHOD, RULE_NOT_ALLOWED, RULE_PATH_SHAPE,
@@ -47,10 +49,10 @@ pub use rules::{
     RULE_SUBRESOURCE, RULE_UPGRADE, SELF_SUBJECT_REVIEW_BODY,
 };
 pub(super) use rules::{BodyView, judge};
-use rules::{bad_header, impersonation_allowed, log_path};
+use rules::{bad_header, impersonation_allowed, is_group, is_version};
 // What the mock harness (`client::mock`) needs to judge the requests it recorded the way the guard does.
 #[cfg(test)]
-pub(super) use rules::{Target, decode_query_value, target_of};
+pub(super) use rules::{Target, decode_query_value, log_path, target_of};
 
 use super::text::escape_capped;
 
@@ -348,8 +350,11 @@ impl ReadOnlyClient {
     /// The resources a group version serves, `GET /apis/<group>/<version>`. A 404 means the server does
     /// not serve it, and is the answer a check reads as "not installed".
     ///
-    /// `group` and `version` are put in the path as given. The guard judges the path, so a value that is
-    /// not a DNS-1123 group and a version such as `v2` or `v1beta1` is refused before anything is sent.
+    /// `group` and `version` are put in the path only if they have the shape of a group and a version
+    /// (a DNS-1123 subdomain, and `v1`, `v2`, `v1beta1`, `v1alpha2`). Anything else, a `/` or a `?` in
+    /// either, is refused as [`RULE_PATH_SHAPE`] before anything is sent: such a value could build a
+    /// different path than a discovery path. This refusal is not a request, so it writes no log entry.
+    /// The guard then judges the path itself, as for every request.
     ///
     /// # Errors
     ///
@@ -359,6 +364,14 @@ impl ReadOnlyClient {
         group: &str,
         version: &str,
     ) -> Result<APIResourceList, kube::Error> {
+        if !(is_group(group) && is_version(version)) {
+            return Err(kube::Error::Service(
+                GuardError {
+                    rule: RULE_PATH_SHAPE,
+                }
+                .into(),
+            ));
+        }
         self.client
             .list_api_group_resources(&format!("{group}/{version}"))
             .await

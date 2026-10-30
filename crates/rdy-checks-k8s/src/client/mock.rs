@@ -35,11 +35,12 @@
 //!    [`ALLOWED`](super::guard::ALLOWED) entry or is discovery, `/version` or a review;
 //! 2. every action-log entry that was sent, if its path names an `ALLOWED` entry, is logged under a check
 //!    id that the entry cites in `checks` (a `None` check id cites nothing);
-//! 3. the log holds one sent entry per recorded request, so no request reached the mock without the guard;
+//! 3. each recorded request pairs with one sent log entry of the same method and path (a multiset), so no
+//!    request reached the mock without the guard, and no sent entry is left without a request;
 //! 4. the fixture answered every request.
 //!
 //! The harness runs the audit when it is dropped, so no fixture test can forget it. A test that expects a
-//! failing audit calls [`Harness::audit`] itself, which turns the drop audit off.
+//! failing audit calls [`Harness::audit`] itself, and a failing audit turns the drop audit off.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -63,7 +64,8 @@ use serde_json::{Value, json};
 use tower_service::Service;
 
 use super::ReadOnlyClient;
-use super::guard::{BodyView, Target, decode_query_value, judge, target_of};
+use super::guard::{BodyView, Target, decode_query_value, judge, log_path, target_of};
+use super::text::escape_capped;
 
 #[cfg(test)]
 mod tests;
@@ -451,6 +453,10 @@ pub(crate) fn audit(seen: &[Seen], log: &[Action], unrecorded: &[String]) -> Vec
             BodyView::Bytes(&request.body)
         };
         let line = request.line();
+        // The `else if` below (a request `judge` passes whose target is `Unknown`) is not reachable
+        // today: a GET that `judge` passes is discovery, `/version` or an `ALLOWED` entry, and a review
+        // POST is exempt. No test makes it happen. It stays so the audit fails closed if `judge` and
+        // `target_of` ever drift apart.
         if let Err(rule) = judge(&request.method, &request.uri, &request.headers, body, None) {
             violations.push(format!(
                 "INV-14: the mock recorded `{line}`, which the guard refuses ({rule})"
@@ -462,20 +468,40 @@ pub(crate) fn audit(seen: &[Seen], log: &[Action], unrecorded: &[String]) -> Vec
         }
     }
 
-    let mut sent = 0_usize;
-    for entry in log.iter().filter(|entry| entry.kind == ActionKind::Kube) {
-        if entry.outcome == ActionOutcome::Denied {
+    // Pair each recorded request with one sent log entry of the same method and path, as a multiset.
+    // A count alone would let an unguarded request hide behind a guarded entry that never reached the
+    // mock (a timeout before the send). What is left on either side is a violation, and the citation is
+    // proven for every pair.
+    let mut sent: Vec<(String, String, Option<&str>)> = log
+        .iter()
+        .filter(|entry| entry.kind == ActionKind::Kube && entry.outcome != ActionOutcome::Denied)
+        .map(|entry| {
+            let field = |name: &str| {
+                entry
+                    .fields
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            (field("method"), field("path"), entry.check.as_deref())
+        })
+        .collect();
+    for request in seen {
+        let method = escape_capped(request.method.as_str(), 16);
+        let path = log_path(&request.uri);
+        let Some(index) = sent.iter().position(|(m, p, _)| *m == method && *p == path) else {
+            violations.push(format!(
+                "INV-14: the mock recorded `{}` but the log holds no sent entry for it; a request reached the mock without the guard",
+                request.line()
+            ));
             continue;
-        }
-        sent += 1;
-        let path = entry
-            .fields
-            .get("path")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let check = entry.check.as_deref();
-        match target_of(path) {
+        };
+        let (_, path, check) = sent.swap_remove(index);
+        match target_of(&path) {
             Target::Exempt => {}
+            // Not reachable today, for the reason given at the first loop. It keeps the match total and
+            // fails closed.
             Target::Unknown => violations.push(format!(
                 "INV-14: the log holds a sent request for `{path}`, which no entry of ALLOWED names"
             )),
@@ -491,10 +517,9 @@ pub(crate) fn audit(seen: &[Seen], log: &[Action], unrecorded: &[String]) -> Vec
             }
         }
     }
-    if sent != seen.len() {
+    for (method, path, _) in sent {
         violations.push(format!(
-            "INV-14: the mock recorded {} requests but the log holds {sent} sent entries; a request reached the mock without the guard",
-            seen.len()
+            "INV-14: the log holds a sent entry `{method} {path}` that the mock never recorded; the request did not reach the mock, or the log and the mock disagree"
         ));
     }
 
@@ -571,13 +596,13 @@ impl Harness {
         self.client(&self.run.run_probe(Os::Linux))
     }
 
-    /// Audits the run so far ([`audit`]). Calling it turns off the audit at drop.
+    /// Audits the run so far ([`audit`]). A failing audit turns off the audit at drop, so the test does not
+    /// panic twice; a clean one leaves it on, so requests made later are still audited.
     ///
     /// # Errors
     ///
     /// One sentence per violation.
     pub(crate) fn audit(&self) -> Result<(), Vec<String>> {
-        self.audited.store(true, Ordering::SeqCst);
         let violations = audit(
             &self.mock.seen(),
             &self.run.action_log().actions,
@@ -586,6 +611,7 @@ impl Harness {
         if violations.is_empty() {
             Ok(())
         } else {
+            self.audited.store(true, Ordering::SeqCst);
             Err(violations)
         }
     }
@@ -621,7 +647,7 @@ pub(crate) struct Listed<K> {
 /// returned as the error. `params` carries the limit and the selectors.
 ///
 /// This is the paging contract of 03, written for the harness. The 5000 object cap and the "partial"
-/// mark belong to the check code that M1-106 and later build.
+/// mark belong to the production paging helper that M1-107 builds.
 ///
 /// # Errors
 ///

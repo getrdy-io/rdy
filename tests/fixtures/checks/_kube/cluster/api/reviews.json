@@ -9,7 +9,7 @@
       },
       "status": {
         "allowed": true,
-        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"installer/acme-system\""
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
       }
     },
     {

@@ -823,7 +823,7 @@ fn is_discovery(segments: &[&str]) -> bool {
 
 /// A DNS-1123 subdomain: labels of lower case letters, digits and `-`, each starting and ending with a
 /// letter or digit, at most 63 characters, at most 253 in all.
-fn is_group(group: &str) -> bool {
+pub(super) fn is_group(group: &str) -> bool {
     group.len() <= 253
         && group.split('.').all(|label| {
             let bytes = label.as_bytes();
@@ -843,7 +843,7 @@ fn is_label(label: &str) -> bool {
 }
 
 /// `^v[0-9]+((alpha|beta)[0-9]+)?$`.
-fn is_version(version: &str) -> bool {
+pub(super) fn is_version(version: &str) -> bool {
     let Some(rest) = version.strip_prefix('v') else {
         return false;
     };
