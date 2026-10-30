@@ -1,0 +1,13 @@
+schema = 1
+name = "firewalld-rich-rule"
+summary = "6443 is open by port number and a rich rule drops traffic to it from one network"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-firewalld"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false

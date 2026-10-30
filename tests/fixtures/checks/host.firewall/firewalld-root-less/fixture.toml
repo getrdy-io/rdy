@@ -1,0 +1,13 @@
+schema = 1
+name = "firewalld-root-less"
+summary = "firewalld is running and rdy has no root"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-firewalld"
+answers = ["host.firewall"]
+
+[caps]
+root = false
+network = true
+kube = false

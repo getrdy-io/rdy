@@ -1,0 +1,13 @@
+schema = 1
+name = "ufw-comment-and-log"
+summary = "ufw allows 6443 and 10250 with logging and comments on the rules"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-ufw"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false

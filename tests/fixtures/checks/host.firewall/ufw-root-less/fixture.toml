@@ -1,0 +1,13 @@
+schema = 1
+name = "ufw-root-less"
+summary = "ufw is enabled and rdy has no root, so user.rules is not read"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-ufw"
+answers = ["host.firewall"]
+
+[caps]
+root = false
+network = true
+kube = false

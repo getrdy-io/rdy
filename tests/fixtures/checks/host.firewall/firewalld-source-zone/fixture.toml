@@ -1,0 +1,13 @@
+schema = 1
+name = "firewalld-source-zone"
+summary = "6443 is closed in the default-route zone, and another active zone is bound to a source network"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+base = "base-firewalld"
+answers = ["host.firewall"]
+
+[caps]
+root = true
+network = true
+kube = false
