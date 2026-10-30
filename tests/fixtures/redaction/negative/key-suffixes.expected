@@ -1,6 +1,6 @@
 secretName: acme-tls
-tokenName: ci
+tokenName: ci-runner
 passwordRef: acme-db-creds
 db_password_file: /etc/acme/db-pass
 private_key_path: /etc/acme/tls.pem
-secretNamespace: acme
+secretNamespace: acme-ns

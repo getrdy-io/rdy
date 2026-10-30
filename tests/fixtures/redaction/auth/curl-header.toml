@@ -4,4 +4,4 @@ rulesets = ["report"]
 rules = ["auth_header"]
 forms = ["curl_header"]
 secrets = ["canaryCurlTok0042"]
-note = "The header is last on its line. A word after it would be redacted too: that over-redaction is a known M1-060 gap and is not pinned here."
+note = "The header is last on its line. A word after it would be redacted too: that over-redaction is a known M1-060 gap and is not pinned here. The closing quote is lost for the same reason (the rest of the line goes), so .expected pins that M1 over-redaction. An M2 fix to it must re-bless this file on purpose."

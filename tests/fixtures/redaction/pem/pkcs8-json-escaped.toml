@@ -3,5 +3,5 @@ since = "m1"
 rulesets = ["report"]
 rules = ["pem_private_key"]
 forms = ["json_escaped"]
-secrets = ["${SYN:pem_pkcs8_begin}", "${SYN:pkcs8_body}"]
+secrets = ["${SYN:pem_pkcs8_begin}", "${SYN:pkcs8_body}", "${SYN:pem_pkcs8_end}"]
 note = "The newlines inside the JSON string are the two characters backslash and n."

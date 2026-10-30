@@ -7,8 +7,9 @@ secrets = []
 # Each control drops the suffix from the key and keeps the value. The redactor must then hide it.
 controls = [
   ["suffix_name", "secretName: acme-tls", "secret: acme-tls", "acme-tls"],
+  ["suffix_name", "tokenName: ci-runner", "token: ci-runner", "ci-runner"],
   ["suffix_ref", "passwordRef: acme-db-creds", "password: acme-db-creds", "acme-db-creds"],
   ["suffix_file", "db_password_file: /etc/acme/db-pass", "db_password: /etc/acme/db-pass", "/etc/acme/db-pass"],
   ["suffix_path", "private_key_path: /etc/acme/tls.pem", "private_key: /etc/acme/tls.pem", "/etc/acme/tls.pem"],
-  ["suffix_namespace", "secretNamespace: acme", "secret: acme", "secret: acme"],
+  ["suffix_namespace", "secretNamespace: acme-ns", "secret: acme-ns", "acme-ns"],
 ]

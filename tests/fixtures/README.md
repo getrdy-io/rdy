@@ -467,6 +467,8 @@ that must not survive) and an optional `note`. An unknown key fails the load.
 - The form list follows 04 Appendix B too. The `MATCHES` table in the test holds every backticked item of an
   M1 row's Matches cell with the forms that cover it. An item added to the appendix fails the gate until it
   has a case, or is marked as not claimed with a reason. An item removed or renamed fails it as well.
+  The "Key-name exclusions" paragraph is read the same way (`EXCLUSION_ITEMS`), with `valueFrom` mapped to not
+  claimed. Prose in a Matches cell ("connection strings") is not an item and is not gated.
 - 04 Appendix D lists 28 cases (23 positive, 5 negative). The corpus has 44. The extra cases are coverage the
   gate asks for: every form Appendix B claims (STS `SecretAccessKey`, `aws_session_token`, the
   `x-amz-security-token` header, `X-Auth-Token`, `-H 'Authorization: ...'`, a bare `Bearer`, systemd
@@ -491,10 +493,12 @@ Left to M2 by M1-060:
 - a crafted `BEGIN` line (a `BEGIN B` inside a closed `A` block, with B's body after `END A`).
 - a PEM block split over log events.
 - a Kubernetes env list: `- name: DB_PASSWORD` then `value: x`, and its JSON form
-  `{"name":"DB_PASSWORD","value":"x"}`. `redact_str` leaves both as they are. This one is a leak.
+  `{"name":"DB_PASSWORD","value":"x"}`. `redact_str` leaves both as they are. This one is a leak; owner: M2-113 (correction-33).
 - `Authorization header: Basic <b64>` in prose, and crafted bracket and quote escapes (stray apostrophes).
+- connection strings (Appendix D: M2). The `secret_by_key` row of 04 Appendix B says "connection strings" in
+  prose, which the `MATCHES` gate does not read. A prose claim is not gated, so it is listed here.
 
-Never handled by the redactor, no ticket yet:
+Never handled by the redactor, owner: M2-113 (correction-33):
 
 - `MYSQL_PWD=` and `pwd=`: no key stem matches `pwd`. Both come out unchanged. This one is a leak.
 - `valueFrom` and `secretKeyRef`: 04 Appendix B lists them as key-name exclusions, but the redactor has no

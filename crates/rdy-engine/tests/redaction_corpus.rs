@@ -51,6 +51,8 @@
 //!   as it is; `-H '...' url` and `--password=x` followed by another flag (the rest of the line goes too);
 //!   `Authorization header: Basic <b64>` in prose; crafted bracket and quote escapes and stray apostrophes.
 //! - Never handled: `MYSQL_PWD=` and `pwd=` (no stem matches `pwd`).
+//! - Connection strings: the `secret_by_key` row of 04 Appendix B says "connection strings" in prose, which
+//!   the `MATCHES` gate does not read. Appendix D plans their cases for M2, so M1 does not claim them.
 //! - `valueFrom` and `secretKeyRef`: the redactor has no such exclusion. `DB_PASSWORD:` then `valueFrom:`
 //!   then `secretKeyRef:` comes out as one placeholder. That fails safe, and it is not claimed.
 //! - Known over-redactions for M2-061 (no failing case): `max_tokens: 4096`, `secretary: bob` and
@@ -137,8 +139,10 @@ enum Claim {
 
 /// Every backticked item in the "Matches" cell of an M1 row of 04 Appendix B, with the forms that cover
 /// it. The items are compared with the document, so an item added there fails the gate until it has a row
-/// here, and an item removed or renamed there fails it too. Prose in the cell (`percent-encoded`, `any
-/// scheme`) is not an item: its forms are in `CLAIMS` all the same.
+/// here, and an item removed or renamed there fails it too. Prose in a Matches cell (`percent-encoded`,
+/// `any scheme`, `connection strings`) is not an item and is not gated: its forms are in `CLAIMS` all the
+/// same, and a prose claim with no form there is not tested. `connection strings` is such a claim, and
+/// `NOT_CLAIMED` says so.
 const MATCHES: &[(&str, &str, Claim)] = &[
     (
         "url_userinfo",
@@ -304,6 +308,7 @@ const NOT_CLAIMED: &[&str] = &[
     "`--password=x` followed by another flag",
     "`Authorization header: Basic <b64>`",
     "crafted bracket and quote escapes",
+    "connection strings (Appendix D: M2)",
     "`MYSQL_PWD=`",
     "`pwd=`",
     "`valueFrom` and `secretKeyRef`",
@@ -331,6 +336,34 @@ const EXCLUSIONS: &[&str] = &[
     "suffix_path",
     "suffix_namespace",
     "run_secrets",
+];
+
+/// Every item of the "Key-name exclusions" paragraph of 04 Appendix B (backticks removed), with the
+/// `EXCLUSIONS` ids that cover it. The items are compared with the document, so an exclusion added there
+/// fails the gate until it is mapped here, and one removed or renamed there fails it too. `Claim::Forms`
+/// holds exclusion ids in this table.
+const EXCLUSION_ITEMS: &[(&str, Claim)] = &[
+    ("empty", Claim::Forms(&["empty"])),
+    ("null", Claim::Forms(&["null"])),
+    ("true", Claim::Forms(&["true"])),
+    ("false", Claim::Forms(&["false"])),
+    ("none", Claim::Forms(&["none"])),
+    ("required", Claim::Forms(&["required"])),
+    ("${X}", Claim::Forms(&["shell_reference"])),
+    ("$(...)", Claim::Forms(&["command_substitution"])),
+    ("{{ ... }}", Claim::Forms(&["template"])),
+    (
+        "valueFrom and secretKeyRef blocks",
+        Claim::Not(
+            "the redactor has no such exclusion; a block comes out redacted, which fails safe",
+        ),
+    ),
+    ("keys ending in name", Claim::Forms(&["suffix_name"])),
+    ("ref", Claim::Forms(&["suffix_ref"])),
+    ("file", Claim::Forms(&["suffix_file"])),
+    ("path", Claim::Forms(&["suffix_path"])),
+    ("namespace", Claim::Forms(&["suffix_namespace"])),
+    ("paths under /run/secrets/", Claim::Forms(&["run_secrets"])),
 ];
 
 /// The keys a case `.toml` may hold. Anything else is a typo and fails.
@@ -1083,6 +1116,87 @@ fn appendix_b_m1_rules(doc: &str) -> Vec<String> {
         .collect()
 }
 
+/// The items of the "Key-name exclusions" paragraph of 04 Appendix B, backticks removed. The paragraph
+/// starts at `Key-name exclusions (`, the list follows `): ` and ends before `Stems match`. Commas and
+/// semicolons separate items.
+fn appendix_b_exclusion_items(doc: &str) -> Vec<String> {
+    let mut paragraph = String::new();
+    let mut in_paragraph = false;
+    for line in doc.lines() {
+        if line.starts_with("Key-name exclusions (") {
+            in_paragraph = true;
+        } else if line.trim().is_empty() {
+            in_paragraph = false;
+        }
+        if in_paragraph {
+            paragraph.push_str(line.trim());
+            paragraph.push(' ');
+        }
+    }
+    let Some((_, list)) = paragraph.split_once("): ") else {
+        return Vec::new();
+    };
+    let list = list.split("Stems match").next().unwrap_or(list);
+    list.trim()
+        .trim_end_matches('.')
+        .split([',', ';'])
+        .map(|item| item.replace('`', "").trim().to_owned())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+/// Compares the exclusion items of the document with `items`, and the ids they name with `exclusions`.
+fn exclusion_gaps(
+    doc_items: &[String],
+    items: &[(&str, Claim)],
+    exclusions: &[&str],
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    for item in doc_items {
+        if !items.iter().any(|(text, _)| text == item) {
+            problems.push(format!(
+                "04 Appendix B lists the key-name exclusion `{item}` and EXCLUSION_ITEMS has no entry for it. \
+                 Give it a negative case with a control and an id in EXCLUSIONS, or mark it Claim::Not with the reason"
+            ));
+        }
+    }
+    let mut named: BTreeSet<&str> = BTreeSet::new();
+    for (text, claim) in items {
+        if !doc_items.iter().any(|item| item == text) {
+            problems.push(format!(
+                "EXCLUSION_ITEMS names `{text}`, which 04 Appendix B does not list (renamed or removed?)"
+            ));
+        }
+        match claim {
+            Claim::Not("") => problems.push(format!(
+                "EXCLUSION_ITEMS marks `{text}` as not claimed with no reason"
+            )),
+            Claim::Not(_) => {}
+            Claim::Forms(ids) => {
+                if ids.is_empty() {
+                    problems.push(format!("EXCLUSION_ITEMS maps `{text}` to no exclusion id"));
+                }
+                for id in *ids {
+                    if !exclusions.contains(id) {
+                        problems.push(format!(
+                            "EXCLUSION_ITEMS maps `{text}` to `{id}`, which is not in EXCLUSIONS"
+                        ));
+                    }
+                    named.insert(id);
+                }
+            }
+        }
+    }
+    for id in exclusions {
+        if !named.contains(id) {
+            problems.push(format!(
+                "EXCLUSIONS lists `{id}`, which no item of 04 Appendix B maps to"
+            ));
+        }
+    }
+    problems
+}
+
 /// Compares the items of the Matches cells with `matches` and the forms with `claims`.
 fn matches_gaps(
     rows: &[AppendixRow],
@@ -1217,6 +1331,24 @@ fn appendix_b_matches_are_all_claimed_or_listed_as_not_claimed() {
     assert!(
         problems.is_empty(),
         "04 Appendix B and the form gate disagree:\n  {}",
+        problems.join("\n  ")
+    );
+}
+
+#[test]
+fn appendix_b_key_name_exclusions_are_all_mapped_or_listed_as_not_claimed() {
+    let path = fixtures_dir().join("../../docs/plan/04-bundle-and-redaction.md");
+    let doc = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let doc_items = appendix_b_exclusion_items(&doc);
+    assert!(
+        doc_items.len() >= EXCLUSION_ITEMS.len(),
+        "found {} key-name exclusions in 04 Appendix B (did the paragraph change shape?): {doc_items:?}",
+        doc_items.len()
+    );
+    let problems = exclusion_gaps(&doc_items, EXCLUSION_ITEMS, EXCLUSIONS);
+    assert!(
+        problems.is_empty(),
+        "04 Appendix B and the exclusion gate disagree:\n  {}",
         problems.join("\n  ")
     );
 }
@@ -1485,6 +1617,53 @@ fn a_value_from_block_is_not_a_claimed_exclusion() {
     // The redactor has no `valueFrom` exclusion, so the gate must not pretend to test one.
     assert!(!EXCLUSIONS.contains(&"value_from"));
     assert!(NOT_CLAIMED.contains(&"`valueFrom` and `secretKeyRef`"));
+}
+
+#[test]
+fn the_exclusion_reader_takes_the_items_of_the_paragraph() {
+    let doc = "Intro.\n\nKey-name exclusions (each has a negative): empty, `null`; `${X}`, `{{ ... }}`;\n`valueFrom` and `secretKeyRef` blocks; keys ending in `name`, `ref`; paths under `/run/secrets/`.\nStems match only in free-form text.\n\nOther text, here.\n";
+    assert_eq!(
+        appendix_b_exclusion_items(doc),
+        [
+            "empty",
+            "null",
+            "${X}",
+            "{{ ... }}",
+            "valueFrom and secretKeyRef blocks",
+            "keys ending in name",
+            "ref",
+            "paths under /run/secrets/"
+        ]
+    );
+}
+
+#[test]
+fn a_new_key_name_exclusion_in_the_appendix_fails_the_exclusion_gate() {
+    let items = [("empty", Claim::Forms(&["empty"]))];
+    let doc: Vec<String> = ["empty", "brand new"].map(str::to_owned).to_vec();
+    let problems = exclusion_gaps(&doc, &items, &["empty"]);
+    assert!(
+        has(&problems, "lists the key-name exclusion `brand new`"),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn a_dropped_exclusion_or_an_unmapped_id_fails_the_exclusion_gate() {
+    let items = [
+        ("empty", Claim::Forms(&["empty"])),
+        ("gone", Claim::Forms(&["missing_id"])),
+        ("bare", Claim::Not("")),
+    ];
+    let doc: Vec<String> = vec!["empty".to_owned(), "bare".to_owned()];
+    let problems = exclusion_gaps(&doc, &items, &["empty", "orphan"]);
+    assert!(has(&problems, "names `gone`"), "{problems:?}");
+    assert!(has(&problems, "to `missing_id`"), "{problems:?}");
+    assert!(has(&problems, "`orphan`, which no item"), "{problems:?}");
+    assert!(
+        has(&problems, "`bare` as not claimed with no reason"),
+        "{problems:?}"
+    );
 }
 
 // ---- the form gate follows 04 Appendix B ----
