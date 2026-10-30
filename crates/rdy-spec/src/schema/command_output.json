@@ -70,7 +70,7 @@
         "type": "null"
       },
       "complete": {
-        "description": "Always false. rdy did not finish the report.",
+        "description": "Always false. No complete report was written.",
         "const": false
       }
     }

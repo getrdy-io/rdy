@@ -135,7 +135,7 @@ The version picker is part of the header, not a page. The site has no pricing, r
 - Each property gets a row: name, type, required, default, description, example. Descriptions come from doc comments through schemars, so the rule "every public item documented" carries over.
 - A property with no description fails `cargo xtask docs`, and the error names the property path.
 - `oneOf` or `allOf` if/then variants render one subsection per variant. Check parameters use `allOf` with if/then, so each check kind shows its own fields.
-- Examples are stored as JSON in the schema. The renderer validates each example against its schema, then shows it as YAML.
+- Examples are stored as JSON in the schema. The test suite validates each check example against the schema node it sits under, and decodes it with the rdy-spec parser. The render shows each example as YAML, checks that the YAML reads back as the same value, and checks that a variant example carries the value that selects its variant (ADR 0034).
 - Output is deterministic. It depends only on committed files: no timestamps, no git history, schema key order, LF line endings. Checkouts stay shallow.
 
 **CI check.** The `docs-gen` job runs `cargo xtask schema --check` and `cargo xtask docs --check`. A stale file fails the job, and the message names the file and the command to run.

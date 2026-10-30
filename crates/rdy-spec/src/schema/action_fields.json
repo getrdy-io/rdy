@@ -1,19 +1,13 @@
 {
   "properties": {
     "rule": {
-      "description": "For a denied call, the rule that refused it. Null otherwise.",
-      "type": [
-        "string",
-        "null"
-      ],
+      "description": "For a denied call, the rule that refused it. Absent otherwise.",
+      "type": "string",
       "maxLength": 4096
     },
     "error": {
-      "description": "For a failed file call, why it failed. Null otherwise.",
-      "type": [
-        "string",
-        "null"
-      ],
+      "description": "Why the call failed, as a fixed phrase. Absent otherwise.",
+      "type": "string",
       "maxLength": 4096
     },
     "program": {
