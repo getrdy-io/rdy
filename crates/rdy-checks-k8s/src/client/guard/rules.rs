@@ -318,6 +318,33 @@ pub enum ImpersonateError {
         "the `as` value starts with system:serviceaccount: but is not system:serviceaccount:<namespace>:<name>. Fix: name the namespace and the service account, both in DNS-1123 form"
     )]
     BadServiceAccount,
+    /// A value that is not a service account. M1 tests as a service account only: the server derives the
+    /// groups of a service account, and `Impersonate-Group` is refused by the guard, so a plain user would
+    /// lose the grants it holds through groups.
+    #[error(
+        "the `as` value is not a service account. Fix: use system:serviceaccount:<namespace>:<name>. M1 tests as a service account only"
+    )]
+    NotServiceAccount,
+}
+
+impl ImpersonateError {
+    /// What to change, without the `Fix:` lead the display text has, for a place that adds its own.
+    #[must_use]
+    pub fn hint(&self) -> &'static str {
+        match self {
+            Self::Empty => "Give a service account such as system:serviceaccount:app:installer.",
+            Self::TooLong => "Use a shorter service account name.",
+            Self::BadCharacter => {
+                "Use only letters, digits and punctuation in the service account name, with no space at either end."
+            }
+            Self::BadServiceAccount => {
+                "Write system:serviceaccount:<namespace>:<name>, with the namespace and the service account both in DNS-1123 form."
+            }
+            Self::NotServiceAccount => {
+                "Use system:serviceaccount:<namespace>:<name>. M1 tests as a service account only: the server derives its groups, and rdy sends no Impersonate-Group."
+            }
+        }
+    }
 }
 
 /// The user the two access review POSTs may impersonate: the spec's `as:` value, checked once.
@@ -325,8 +352,9 @@ pub enum ImpersonateError {
 /// A value is 1 to 253 bytes, uses only the bytes 0x20 to 0x7E (printable ASCII, so no control character,
 /// no non-ASCII letter and no Unicode format character such as a right-to-left override, which could
 /// spoof the user shown in a report and which an HTTP header value cannot carry anyway), and has no space
-/// at either end. A value that starts with `system:serviceaccount:` must be exactly
-/// `system:serviceaccount:<namespace>:<name>`, a DNS-1123 label and a DNS-1123 subdomain.
+/// at either end. It must be exactly `system:serviceaccount:<namespace>:<name>`, a DNS-1123 label and a
+/// DNS-1123 subdomain. M1 takes no other user: the server derives the groups of a service account, and the
+/// guard refuses `Impersonate-Group`, so a plain user would lose the grants it holds through groups.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ImpersonateAs(String);
 
@@ -349,13 +377,14 @@ impl ImpersonateAs {
         {
             return Err(ImpersonateError::BadCharacter);
         }
-        if let Some(rest) = value.strip_prefix(SERVICE_ACCOUNT_PREFIX) {
-            let valid = rest
-                .split_once(':')
-                .is_some_and(|(namespace, name)| is_label(namespace) && is_group(name));
-            if !valid {
-                return Err(ImpersonateError::BadServiceAccount);
-            }
+        let Some(rest) = value.strip_prefix(SERVICE_ACCOUNT_PREFIX) else {
+            return Err(ImpersonateError::NotServiceAccount);
+        };
+        let valid = rest
+            .split_once(':')
+            .is_some_and(|(namespace, name)| is_label(namespace) && is_group(name));
+        if !valid {
+            return Err(ImpersonateError::BadServiceAccount);
         }
         Ok(Self(value.to_owned()))
     }

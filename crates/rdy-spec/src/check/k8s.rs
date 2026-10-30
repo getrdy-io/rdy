@@ -272,7 +272,7 @@ impl<'de> Deserialize<'de> for ApiGroup {
 ///
 /// In a spec it is a string like `create namespaces` or `get pods/log`, or an object. The string is
 /// `verb resource[.group][/subresource]`, as in `kubectl auth can-i`. A string cannot carry a
-/// namespace or a name: it uses the `namespace` of the entry.
+/// namespace or a name: it uses the `namespace` of the entry, unless it names a cluster-scoped resource.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct RbacRule {
@@ -284,16 +284,27 @@ pub struct RbacRule {
     pub resource: RbacResource,
     /// The subresource, such as `log`.
     pub subresource: Option<RbacSubresource>,
-    /// The namespace of the object. For a string item this is the `namespace` of the entry.
+    /// The namespace of the object. A string item cannot name one: it takes the `namespace` of the entry
+    /// (see [`RbacRule::from_text`]), and this is `None`.
     pub namespace: Option<K8sName>,
     /// The name of the object.
     pub name: Option<K8sName>,
+    /// True when the item was written as a string such as `create namespaces`. Only a string item takes
+    /// the `namespace` of the entry. An object item names its own namespace or none.
+    pub from_text: bool,
 }
 
 /// Splits `verb resource[.group][/subresource]` into the keys of the object form, or `None` when the
 /// text has another shape. The values are checked by their own types afterwards.
 fn rbac_string_to_object(text: &str) -> Option<Map<String, Value>> {
     let (verb, rest) = text.split_once(' ')?;
+    if rest.starts_with('/') {
+        // `get /healthz`: a non-resource URL.
+        let mut map = Map::new();
+        map.insert("verb".to_owned(), Value::from(verb));
+        map.insert("path".to_owned(), Value::from(rest));
+        return Some(map);
+    }
     let (resource_group, subresource) = match rest.split_once('/') {
         Some((head, sub)) => (head, Some(sub)),
         None => (rest, None),
@@ -315,6 +326,110 @@ fn rbac_string_to_object(text: &str) -> Option<Map<String, Value>> {
     Some(map)
 }
 
+/// A non-resource URL such as `/healthz` or `/metrics`, or a prefix that ends in `*` such as `/logs/*`.
+///
+/// It starts with `/`, has 1 to 253 characters from `A-Z`, `a-z`, `0-9`, `-`, `.`, `_`, `~` and `/`,
+/// may end in one `*` (the `*` is one of the 253), and has no `//` and no `..`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NonResourcePath(String);
+
+impl NonResourcePath {
+    /// The path as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for NonResourcePath {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        let body = text.strip_suffix('*').unwrap_or(&text);
+        let fits = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~' | '/');
+        if text.starts_with('/')
+            && text.chars().count() <= 253
+            && body.chars().all(fits)
+            && !text.contains("//")
+            && !text.contains("..")
+        {
+            Ok(Self(text))
+        } else {
+            Err(bad(format!(
+                "'{}' is not a non-resource path: start with /, use up to 253 characters from \
+                 letters, digits, - . _ ~ and /, and end with * only for a prefix",
+                echo_safe(&text)
+            )))
+        }
+    }
+}
+
+/// A non-resource URL the install identity must be allowed to reach, such as `get /healthz`.
+///
+/// In a spec it is a string like `get /metrics` or an object `{verb, path}`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct NonResourceRule {
+    /// The verb, usually `get`.
+    pub verb: RbacVerb,
+    /// The URL path.
+    pub path: NonResourcePath,
+}
+
+/// One thing the install identity must be allowed to do: a verb on a resource ([`RbacRule`]) or on a
+/// URL that is not a resource ([`NonResourceRule`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum RbacItem {
+    /// A verb on a resource.
+    Resource(RbacRule),
+    /// A verb on a URL that is not a resource.
+    NonResource(NonResourceRule),
+}
+
+impl RbacItem {
+    /// The resource rule, if this item is one.
+    #[must_use]
+    pub fn as_resource(&self) -> Option<&RbacRule> {
+        match self {
+            Self::Resource(rule) => Some(rule),
+            Self::NonResource(_) => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RbacItem {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct NonResource {
+            verb: RbacVerb,
+            path: NonResourcePath,
+        }
+        let value = Value::deserialize(deserializer)?;
+        let non_resource = match &value {
+            Value::Object(map) => map.contains_key("path"),
+            Value::String(text) => text
+                .split_once(' ')
+                .is_some_and(|(_, rest)| rest.starts_with('/')),
+            _ => false,
+        };
+        if !non_resource {
+            return from_value(value).map(Self::Resource);
+        }
+        let object = match value {
+            Value::String(text) => rbac_string_to_object(&text)
+                .map(Value::Object)
+                .ok_or_else(|| bad("a non-resource permission is written like 'get /healthz'"))?,
+            other => other,
+        };
+        let full: NonResource = from_value(object)?;
+        Ok(Self::NonResource(NonResourceRule {
+            verb: full.verb,
+            path: full.path,
+        }))
+    }
+}
+
 impl<'de> Deserialize<'de> for RbacRule {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
@@ -328,15 +443,17 @@ impl<'de> Deserialize<'de> for RbacRule {
             namespace: Option<K8sName>,
             name: Option<K8sName>,
         }
+        let mut from_text = false;
         let object = match Value::deserialize(deserializer)? {
             value @ Value::Object(_) => value,
             Value::String(text) => {
+                from_text = true;
                 rbac_string_to_object(&text)
                     .map(Value::Object)
                     .ok_or_else(|| {
                         bad(format!(
                             "'{}' is not a permission: write it like 'create namespaces' \
-                     or 'create clusterroles.rbac.authorization.k8s.io'",
+                     or 'create clusterroles.rbac.authorization.k8s.io' or 'get /healthz'",
                             echo_safe(&text)
                         ))
                     })?
@@ -361,6 +478,7 @@ impl<'de> Deserialize<'de> for RbacRule {
             subresource: full.subresource,
             namespace: full.namespace,
             name: full.name,
+            from_text,
         })
     }
 }
@@ -373,14 +491,67 @@ impl<'de> Deserialize<'de> for RbacRule {
 #[non_exhaustive]
 pub struct K8sRbac {
     /// The permissions to test, 1 to 100. Each one is an entry in the audit log of the cluster.
-    pub can: BoundedList<RbacRule, 100, false, 1>,
-    /// The namespace for the string items. The default is cluster scope.
+    pub can: BoundedList<RbacItem, 100, false, 1>,
+    /// The namespace for the string items. An object item names its own namespace. A string item that
+    /// names a well-known cluster-scoped resource (`namespaces`, `nodes`, `clusterroles`) does not take
+    /// it. The default is cluster scope.
     pub namespace: Option<K8sName>,
+    /// The service account to test as (`as:`), `system:serviceaccount:<namespace>:<name>`, for example
+    /// `system:serviceaccount:acme-system:installer`. The reviews are sent with `Impersonate-User` when the
+    /// identity in the kubeconfig may impersonate it, so the check answers for the install identity before
+    /// it exists as a kubeconfig. M1 takes a service account only.
+    #[serde(rename = "as")]
+    pub as_user: Option<ImpersonatedUser>,
 }
 
 impl ParamSet for K8sRbac {
-    const FIELDS: &'static [&'static str] = &["can", "namespace"];
+    const FIELDS: &'static [&'static str] = &["can", "namespace", "as"];
     const THRESHOLD: &'static [&'static str] = &["can"];
+}
+
+/// The service account a `k8s.rbac` entry tests as: `system:serviceaccount:<namespace>:<name>`.
+///
+/// The namespace has 1 to 63 characters from `a-z`, `0-9` and `-`, the name 1 to 253 from `a-z`, `0-9`, `-`
+/// and `.`, and the whole is 253 characters at most. The check applies the exact DNS-1123 rules. M1 takes
+/// a service account only: the server derives its groups, and rdy sends no `Impersonate-Group`, so a plain
+/// user would lose the grants it holds through groups.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ImpersonatedUser(String);
+
+impl ImpersonatedUser {
+    /// The user as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for ImpersonatedUser {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        let fits = text
+            .strip_prefix("system:serviceaccount:")
+            .and_then(|rest| rest.split_once(':'))
+            .is_some_and(|(namespace, name)| {
+                (1..=63).contains(&namespace.len())
+                    && namespace
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+                    && (1..=253).contains(&name.len())
+                    && name.bytes().all(|b| {
+                        b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'.')
+                    })
+            });
+        if fits && text.len() <= 253 {
+            Ok(Self(text))
+        } else {
+            Err(bad(format!(
+                "'{}' is not a service account: write system:serviceaccount:<namespace>:<name>. \
+                 M1 takes no other user",
+                echo_safe(&text)
+            )))
+        }
+    }
 }
 
 /// A Pod Security level.

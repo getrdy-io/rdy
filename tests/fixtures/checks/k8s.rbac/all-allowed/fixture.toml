@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-rbac-all-allowed"
+summary = "The install identity may do everything the spec lists, one item of each shape"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.rbac"]
+
+[caps]
+root = false
+network = true
+kube = true

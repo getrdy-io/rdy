@@ -16,8 +16,8 @@ use rdy_spec::spec::CheckSpec;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::client::ServerVersion;
 use crate::client::mock::Harness;
+use crate::client::{ImpersonateAs, ImpersonationError, ServerVersion};
 
 /// A cluster over the mock: the `/version` answer the fixture records, and the harness for the rest.
 struct Fixtured {
@@ -32,6 +32,15 @@ impl Cluster for Fixtured {
 
     fn read_only(&self, probe: &Probe) -> ReadOnlyClient {
         self.harness.client(probe)
+    }
+
+    fn read_only_as(
+        &self,
+        _probe: &Probe,
+        _user: ImpersonateAs,
+    ) -> Result<ReadOnlyClient, ImpersonationError> {
+        // This check never impersonates.
+        Err(ImpersonationError::Conflict)
     }
 }
 

@@ -1,0 +1,28 @@
+{
+  "access": [
+    {
+      "spec": {
+        "nonResourceAttributes": {
+          "verb": "get",
+          "path": "/healthz"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-installer\" of ClusterRole \"acme-installer\" to ServiceAccount \"acme-system/installer\""
+      }
+    },
+    {
+      "spec": {
+        "nonResourceAttributes": {
+          "verb": "get",
+          "path": "/metrics"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": ""
+      }
+    }
+  ]
+}
