@@ -90,7 +90,7 @@ make_archive() {
     rm -rf "$stage"
     mkdir -p "$stage/rdy-$t"
     cp "$src" "$stage/rdy-$t/$name"
-    for f in LICENSE README.md CHANGELOG.md; do echo "synthetic $f" > "$stage/rdy-$t/$f"; done
+    for f in LICENSE NOTICE README.md CHANGELOG.md; do echo "synthetic $f" > "$stage/rdy-$t/$f"; done
     case $t in
         *-windows-*) (cd "$stage" && zip -q -r "$d/rdy-$t.zip" "rdy-$t") ;;
         *) tar -czf "$d/rdy-$t.tar.gz" -C "$stage" "rdy-$t" ;;
@@ -205,6 +205,15 @@ cp "$tmp/macho-x64" "$tmp/nolicense-stage/rdy-x86_64-apple-darwin/rdy"
 tar -czf "$tmp/nolicense/rdy-x86_64-apple-darwin.tar.gz" -C "$tmp/nolicense-stage" rdy-x86_64-apple-darwin
 hash_all "$tmp/nolicense"
 check "an archive without LICENSE fails" 1 "FAIL rdy-x86_64-apple-darwin.tar.gz holds its files" "$tmp/nolicense"
+
+fresh nonotice
+mkdir "$tmp/nonotice-stage"
+mkdir "$tmp/nonotice-stage/rdy-x86_64-apple-darwin"
+cp "$tmp/macho-x64" "$tmp/nonotice-stage/rdy-x86_64-apple-darwin/rdy"
+for f in LICENSE README.md CHANGELOG.md; do echo "synthetic $f" > "$tmp/nonotice-stage/rdy-x86_64-apple-darwin/$f"; done
+tar -czf "$tmp/nonotice/rdy-x86_64-apple-darwin.tar.gz" -C "$tmp/nonotice-stage" rdy-x86_64-apple-darwin
+hash_all "$tmp/nonotice"
+check "an archive without NOTICE fails" 1 "FAIL rdy-x86_64-apple-darwin.tar.gz holds its files" "$tmp/nonotice"
 
 # 3. Format and CPU.
 fresh wrongcpu

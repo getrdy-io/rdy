@@ -345,7 +345,7 @@ Key names were confirmed in M1-007 by running `dist generate` 0.33.0. The live f
 
 | Asset | Contents |
 | --- | --- |
-| `rdy-<triple>.tar.gz` (`.zip` on Windows) | `rdy-<triple>/` with `rdy` (`rdy.exe`), `LICENSE`, `README.md`, `CHANGELOG.md` |
+| `rdy-<triple>.tar.gz` (`.zip` on Windows) | `rdy-<triple>/` with `rdy` (`rdy.exe`), `LICENSE`, `NOTICE`, `README.md`, `CHANGELOG.md` |
 | `rdy-<triple>.tar.gz.sha256`, `sha256.sum` | dist's checksums, checked by `sign-release` |
 | SBOM | the CycloneDX file dist makes for `rdy` |
 | `install.sh` | this tag's copy, version stamped in |
