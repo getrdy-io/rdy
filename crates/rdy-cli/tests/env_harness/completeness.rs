@@ -9,10 +9,11 @@
 //! | `Pass` | always | a case whose `expect.json` has `result.level` `pass` |
 //! | `NonPass` | always | a case whose `result.level` is `warn` or `fail` |
 //! | `Partial` | the check has a `Root` want | a case with `caps.root = false` and `result.partial` set |
-//! | `Timeout` | the check declares a command, a peer or a `statfs` prefix | a case with `result.timed_out_ms` whose files hold a `delay_ms` or `blackhole` entry |
+//! | `Timeout` | the check declares a command, a peer or a `statfs` prefix | a case with `result.timed_out_ms` whose `native`, `commands`, `api` or `net.json` files hold a `blackhole` or a `delay_ms` of at least the check's timeout |
 //!
 //! A case counts only through its `expect.json`, the reviewed result. A case that loads but has no
-//! `expect.json` proves nothing about what the check says, so it is not counted.
+//! `expect.json` proves nothing about what the check says, so it is not counted. The shape of the `result`
+//! object that this rule reads is in `tests/fixtures/README.md`.
 //!
 //! `PENDING` lists what is still owed, per check and class, with the ticket that owes it. A class that is
 //! missing and not listed is a finding, so a new check cannot ship without its cases. A listed class that
@@ -21,6 +22,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;
+use std::time::Duration;
 
 use rdy_engine::check::{CheckInfo, Need};
 use rdy_engine::testing::Fixture;
@@ -50,7 +52,7 @@ impl fmt::Display for Class {
                 "a no-privilege partial case (caps.root false, result.partial set)"
             }
             Self::Timeout => {
-                "a Timeout case (result.timed_out_ms, and a delay_ms or blackhole entry in its files)"
+                "a Timeout case (result.timed_out_ms, and a blackhole or a delay_ms at the check's timeout in its files)"
             }
         })
     }
@@ -66,6 +68,15 @@ pub struct Pending {
     pub owner: &'static str,
     /// Why they are not there.
     pub why: &'static str,
+}
+
+/// The time the engine gives `info` before it ends the check: its own default, or 10 s, and never more
+/// than 60 s (`CheckInfo::default_timeout`).
+fn timeout_ms(info: &CheckInfo) -> u128 {
+    info.default_timeout
+        .unwrap_or(Duration::from_secs(10))
+        .min(Duration::from_secs(60))
+        .as_millis()
 }
 
 /// The classes `info` needs.
@@ -131,7 +142,7 @@ pub fn findings(rows: &[Row], fixtures: &Path, pending: &[Pending]) -> Result<Ve
                 ));
                 continue;
             }
-            let have = classes_of(fixtures, info.id, &mut found)?;
+            let have = classes_of(fixtures, info.id, timeout_ms(info), &mut found)?;
             let missing: BTreeSet<Class> = required(info).difference(&have).copied().collect();
             for class in missing.difference(&owed) {
                 found.push(format!(
@@ -172,10 +183,11 @@ pub fn findings(rows: &[Row], fixtures: &Path, pending: &[Pending]) -> Result<Ve
 }
 
 /// The classes the cases of `id` cover, from their `expect.json`. A case that does not load, or does not
-/// answer `id`, is a finding.
+/// answer `id`, is a finding. `timeout_ms` is what a hang has to reach.
 fn classes_of(
     fixtures: &Path,
     id: &str,
+    timeout_ms: u128,
     found: &mut Vec<String>,
 ) -> Result<BTreeSet<Class>, String> {
     let dir = fixtures.join("checks").join(id);
@@ -231,7 +243,7 @@ fn classes_of(
             have.insert(Class::Partial);
         }
         if result.get("timed_out_ms").is_some_and(Value::is_number)
-            && holds_a_hang(&case_dir).map_err(|e| format!("{}: {e}", case_dir.display()))?
+            && holds_a_hang(&case_dir, timeout_ms)?
         {
             have.insert(Class::Timeout);
         }
@@ -239,20 +251,56 @@ fn classes_of(
     Ok(have)
 }
 
-/// Whether a file below `dir` holds a `delay_ms` or a `blackhole` entry.
-fn holds_a_hang(dir: &Path) -> std::io::Result<bool> {
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            if holds_a_hang(&path)? {
-                return Ok(true);
-            }
-        } else if path.file_name().is_some_and(|name| name != "expect.json") {
-            let text = String::from_utf8_lossy(&std::fs::read(&path)?).into_owned();
-            if text.contains("\"delay_ms\"") || text.contains("blackhole") {
+/// Whether the case in `dir` scripts a hang: a `delay_ms` of at least `timeout_ms` in a `native`,
+/// `commands` or `api` file, or a `blackhole` entry in `net.json`. A shorter delay lets the check finish,
+/// and a `delay_ms` of 0 is what a recording writes by default, so neither is a hang. Every file is parsed,
+/// so a text that only mentions the word does not count.
+fn holds_a_hang(dir: &Path, timeout_ms: u128) -> Result<bool, String> {
+    for sub in ["native", "commands", "api"] {
+        let sub_dir = dir.join(sub);
+        if !sub_dir.is_dir() {
+            continue;
+        }
+        for path in json_files(&sub_dir)? {
+            if has_delay(&read_json(&path)?, timeout_ms) {
                 return Ok(true);
             }
         }
     }
-    Ok(false)
+    let net = dir.join("net.json");
+    Ok(net.is_file() && has_blackhole(&read_json(&net)?))
+}
+
+/// Every `.json` file below `dir`, in name order.
+fn json_files(dir: &Path) -> Result<Vec<std::path::PathBuf>, String> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let path = entry.map_err(|e| format!("{}: {e}", dir.display()))?.path();
+        if path.is_dir() {
+            files.extend(json_files(&path)?);
+        } else if path.extension().is_some_and(|ext| ext == "json") {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn read_json(path: &Path) -> Result<Value, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("{}: not JSON: {e}", path.display()))
+}
+
+/// A `delay_ms` of at least `timeout_ms` on the file's own object.
+fn has_delay(file: &Value, timeout_ms: u128) -> bool {
+    file.get("delay_ms")
+        .and_then(Value::as_u64)
+        .is_some_and(|delay| u128::from(delay) >= timeout_ms)
+}
+
+/// A `blackhole` as the value of a `tcp` address in a `net.json`.
+fn has_blackhole(net: &Value) -> bool {
+    net.get("tcp")
+        .and_then(Value::as_object)
+        .is_some_and(|tcp| tcp.values().any(|v| v.as_str() == Some("blackhole")))
 }

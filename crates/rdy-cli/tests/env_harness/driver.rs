@@ -5,10 +5,10 @@
 //! `Report` with the engine's own mapping (`map_outcome`, `timeout_result`, the verdict rule of
 //! `Report::new`). Nothing here reads the real machine: the environment is a `Replay`.
 //!
-//! It stands where `rdy_cli::run` will stand. `rdy run` is not wired yet (M1-057), so the harness
-//! cannot call it, and there is no terminal renderer (M1-086), so there is no `terminal.txt`. When
-//! M1-057 lands, `run_env` calls `rdy_cli::run` with the same `Replay` and returns the report from
-//! `--json`; the tests in `main` do not change. Until then the mapping below is the engine's, and the
+//! It stands where `rdy_cli::run` will stand. `rdy run` is not wired yet, so the harness cannot call it.
+//! M1-057 swaps the body of `run_env` for `rdy_cli::run` with the same `Replay`, reads the report from
+//! `--json` stdout and regenerates host-min's golden from it. M1-086 adds `golden/terminal.txt` (backlog
+//! correction-29). The tests in `main` do not change. Until then the mapping below is the engine's, and the
 //! three things it does not map (a panic, a cancel, a per-check `timeout:` in the spec) stop the
 //! driver with a message instead of guessing.
 
@@ -42,12 +42,13 @@ pub struct EnvRun {
     pub violations: Vec<String>,
 }
 
-/// The names of the environments under `tests/fixtures/envs` that carry a spec, in order.
+/// The names of the environments under `<root>/envs` that carry a spec, in order. `root` is the fixtures
+/// directory, `fixtures_dir()` for the real tree.
 ///
 /// A directory with no `spec` in its manifest is a base other environments build on (08 section 2), so it
 /// is not an environment to run. Adding a directory with a spec adds a run, with no code change.
-pub fn env_names() -> Result<Vec<String>, String> {
-    let dir = fixtures_dir().join("envs");
+pub fn env_names(root: &Path) -> Result<Vec<String>, String> {
+    let dir = root.join("envs");
     let mut names = Vec::new();
     let entries = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for entry in entries {
@@ -56,7 +57,7 @@ pub fn env_names() -> Result<Vec<String>, String> {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        let fixture = Fixture::load(&fixtures_dir(), &format!("envs/{name}"))
+        let fixture = Fixture::load(root, &format!("envs/{name}"))
             .map_err(|e| format!("envs/{name}: {e}"))?;
         if fixture.manifest().spec.is_some() {
             names.push(name);

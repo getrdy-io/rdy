@@ -8,8 +8,9 @@
 //! `jobs = 8`. Adding a directory adds a run, with no code change. A directory with no `spec` is a base
 //! that other environments build on and is skipped.
 //!
-//! Not here yet: `terminal.txt` (the human renderer is M1-086) and `report.html` (M1-077), and the call
-//! to `rdy_cli::run` itself (`rdy run` is wired by M1-057). `driver` says where they plug in.
+//! Not here yet: `terminal.txt` (the human renderer, M1-086), `report.html` (M1-077) and the call to
+//! `rdy_cli::run` itself (M1-057, which also regenerates the golden from `--json` stdout). `driver` says
+//! where they plug in.
 //!
 //! Completeness. `completeness` walks the registered families and fails when an implemented check has no
 //! fixture case for a class 08 names. The rule is proven on a planted family below.
@@ -48,8 +49,8 @@ fn report_validator() -> TestResult<Validator> {
 }
 
 #[test]
-fn host_min_is_found_and_a_base_without_a_spec_is_not_an_env() -> TestResult {
-    let names = driver::env_names()?;
+fn host_min_is_found() -> TestResult {
+    let names = driver::env_names(&fixtures_dir())?;
     assert!(
         names.iter().any(|name| name == "host-min"),
         "env_names found {names:?}"
@@ -58,9 +59,27 @@ fn host_min_is_found_and_a_base_without_a_spec_is_not_an_env() -> TestResult {
 }
 
 #[test]
+fn a_base_without_a_spec_is_not_an_env() -> TestResult {
+    let root = tempfile::tempdir()?;
+    for (name, spec) in [("a-base", ""), ("an-env", "spec = \"spec.yaml\"\n")] {
+        let dir = root.path().join("envs").join(name);
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(
+            dir.join("fixture.toml"),
+            format!(
+                "schema = 1\nname = \"{name}\"\nsummary = \"planted\"\norigin = \"hand\"\nos = \"linux\"\n\
+                 arch = \"x86_64\"\nanswers = []\n{spec}\n[caps]\nroot = false\nnetwork = false\nkube = false\n"
+            ),
+        )?;
+    }
+    assert_eq!(driver::env_names(root.path())?, ["an-env"]);
+    Ok(())
+}
+
+#[test]
 fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs() -> TestResult {
     let validator = report_validator()?;
-    for env in driver::env_names()? {
+    for env in driver::env_names(&fixtures_dir())? {
         let fixture = Fixture::load(&fixtures_dir(), &format!("envs/{env}"))?;
         let manifest = fixture.manifest();
         let jobs = manifest.run.jobs.map_or(1, |jobs| jobs as usize);
@@ -101,7 +120,8 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
             text,
         );
 
-        // The same environment at one job and at eight gives the same report.
+        // The same environment at one job and at eight gives the same report. With one check this proves
+        // little; M1-117's all-pass env is what gives it something to order.
         let mut serial = driver::run_env(&env, 1)?.report;
         let mut parallel = driver::run_env(&env, 8)?.report;
         normalize_across_jobs(&mut serial);
@@ -120,45 +140,44 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
 /// What the implemented checks still owe, by check. See `completeness`.
 ///
 /// A case counts only through its `expect.json`. The checks below were merged with cases that their own
-/// Rust tests assert by hand, so the goldens are owed, not the cases. M1-069 and M1-147 named theirs in
-/// the review of PR #110 (correction-21). The other four have no ticket yet; `owner` says so, and the
-/// coordinator files one. Each row shrinks when its `expect.json` files land, and the stale-row finding
+/// Rust tests assert by hand, so the goldens are owed, not the cases. M1-174 (backlog correction-29) writes
+/// the `expect.json` files for all six. Each row shrinks when its files land, and the stale-row finding
 /// forces the edit.
 const PENDING: &[Pending] = &[
     Pending {
         check: "host.cpu",
         classes: &[Class::Pass, Class::NonPass],
-        owner: "none filed (host.cpu was built by M1-071)",
+        owner: "M1-174",
         why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
     },
     Pending {
         check: "host.firewall",
         classes: &[Class::Pass, Class::NonPass, Class::Partial, Class::Timeout],
-        owner: "M1-147",
+        owner: "M1-174",
         why: "no expect.json, and Replay cannot yet hang or deny the firewall reads (PR #98)",
     },
     Pending {
         check: "host.lsm",
         classes: &[Class::Pass, Class::NonPass, Class::Partial],
-        owner: "none filed (host.lsm was built by M1-145)",
+        owner: "M1-174",
         why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
     },
     Pending {
         check: "host.memory",
         classes: &[Class::Pass, Class::NonPass],
-        owner: "M1-069",
+        owner: "M1-174",
         why: "expect.json goldens were deferred in PR #116",
     },
     Pending {
         check: "host.os",
         classes: &[Class::Pass, Class::NonPass],
-        owner: "none filed (host.os was built by M1-073)",
+        owner: "M1-174",
         why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
     },
     Pending {
         check: "host.security_agents",
         classes: &[Class::Pass, Class::NonPass, Class::Partial],
-        owner: "none filed (host.security_agents was built by M1-146)",
+        owner: "M1-174",
         why: "its cases are asserted in rdy-checks-host tests and have no expect.json",
     },
 ];
@@ -437,6 +456,58 @@ fn a_partial_case_that_ran_as_root_and_a_timeout_without_a_hung_source_do_not_co
             .any(|f| f.contains("a no-privilege partial case"))
     );
     assert!(found.iter().any(|f| f.contains("a Timeout case")));
+    Ok(())
+}
+
+/// The findings for `plant.full` when only its hung case is changed by `edit`.
+fn hung_case_findings(edit: impl FnOnce(&Path) -> TestResult) -> TestResult<Vec<String>> {
+    let tree = plant_tree(&all_cases())?;
+    edit(&tree.path().join("checks/plant.full/hung"))?;
+    Ok(findings(&plant_rows(STUBBED), tree.path(), &[])?)
+}
+
+#[test]
+fn a_delay_below_the_check_timeout_or_a_stray_word_is_not_a_hang() -> TestResult {
+    // plant.full has no default timeout, so the engine gives it 10 s. A delay of 9.999 s lets it finish.
+    let found = hung_case_findings(|dir| {
+        let file = dir.join("native/0-hang.json");
+        let text = std::fs::read_to_string(&file)?.replace("3600000", "9999");
+        Ok(std::fs::write(file, text)?)
+    })?;
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert!(found.iter().all(|f| f.contains("a Timeout case")));
+
+    // The word `blackhole` in a host name, or a `delay_ms` of 0 in a recording, is not a hang.
+    let found = hung_case_findings(|dir| {
+        let file = dir.join("native/0-hang.json");
+        let text = std::fs::read_to_string(&file)?.replace("3600000", "0");
+        std::fs::write(file, text)?;
+        Ok(std::fs::write(
+            dir.join("net.json"),
+            r#"{"dns": {"blackhole.acme.example": ["192.0.2.10"]}}"#,
+        )?)
+    })?;
+    assert_eq!(found.len(), 1, "{found:#?}");
+    Ok(())
+}
+
+#[test]
+fn a_delay_at_the_check_timeout_and_a_blackhole_in_net_json_are_hangs() -> TestResult {
+    let found = hung_case_findings(|dir| {
+        let file = dir.join("native/0-hang.json");
+        let text = std::fs::read_to_string(&file)?.replace("3600000", "10000");
+        Ok(std::fs::write(file, text)?)
+    })?;
+    assert!(found.is_empty(), "{found:#?}");
+
+    let found = hung_case_findings(|dir| {
+        std::fs::remove_dir_all(dir.join("native"))?;
+        Ok(std::fs::write(
+            dir.join("net.json"),
+            r#"{"tcp": {"192.0.2.12:443": "blackhole"}}"#,
+        )?)
+    })?;
+    assert!(found.is_empty(), "{found:#?}");
     Ok(())
 }
 

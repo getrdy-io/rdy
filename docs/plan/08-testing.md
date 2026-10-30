@@ -192,7 +192,7 @@ command. It fails on:
   `cluster.local` or on the built-in allow-list of vendors Rdy checks (OS vendors, `k8s.io`,
   `nvidia.com`); any publicly routable IP address. Other entries need `allow.toml` with a reason
   (`169.254.169.254` for the metadata tests is the first);
-- (M1-075, in `crates/rdy-cli/tests/env_harness/main.rs`, not in the lint file) a registered, implemented check
+- (M1-075, in `crates/rdy-cli/tests/env_harness/completeness.rs`, not in the lint file) a registered, implemented check
   (registered by a family and not on its stub list) with no `checks/<id>/` directory, or without a passing
   case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout`
   case where it declares a command, a peer or a `statfs` prefix. A case counts through its `expect.json`

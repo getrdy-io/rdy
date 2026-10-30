@@ -497,9 +497,22 @@ with no `spec` is a base that other environments build on, and is skipped. Not b
 | passing | always | `result.level` is `pass` |
 | non-passing | always | `result.level` is `warn` or `fail` |
 | no-privilege partial | the check has a `Root` want | `caps.root = false` and `result.partial` set |
-| Timeout | the check declares a command, a peer or a `statfs` prefix | `result.timed_out_ms`, and a `delay_ms` or `blackhole` entry in the case |
+| Timeout | the check declares a command, a peer or a `statfs` prefix | `result.timed_out_ms`, and a `blackhole` or a `delay_ms` of at least the check's timeout in the case |
 
-A missing class that `PENDING` (in the test file) does not list is a failure. Each `PENDING` row names the
+The `result` object of an `expect.json` is what the check returned in the case: its finding, or the end the
+scheduler gave it. The rule reads three fields and ignores the rest (`host.disk` writes the rest, and a
+Rust test compares it):
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `result.level` | `"pass"`, `"warn"` or `"fail"` | The finding's level. Decides the passing and non-passing classes. A timeout case has no `level`. |
+| `result.partial` | object or `null` | Set (not `null`) when the check ran with less than it asked for. Counts only in a case with `caps.root = false`. |
+| `result.timed_out_ms` | number | Present only when the scheduler ended the check at its deadline, in milliseconds. Counts only when the case also holds a hang. |
+
+A hang is a `blackhole`, or a `delay_ms` at or above the check's default timeout, in one of the case's
+`native`, `commands` or `net` files. A shorter delay lets the check finish, so it does not count.
+
+A missing class that `PENDING` (in `main.rs`) does not list is a failure. Each `PENDING` row names the
 check, the classes and the ticket that owes them. A row for a class that is no longer missing is a failure
 too. A new family adds its row in `crates/rdy-cli/tests/env_harness/families.rs`.
 
