@@ -208,7 +208,6 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
         HostFamily::stub_ids(),
         [
             "host.ports",
-            "host.lsm",
             "host.time_sync",
             "host.cpu",
             "host.sysctl",
@@ -254,6 +253,23 @@ fn host_firewall_builds_the_real_check_from_a_spec_entry() {
         "Host firewall active, inbound ports allowed"
     );
     assert!(!HostFamily::stub_ids().contains(&"host.firewall"));
+}
+
+#[test]
+fn host_lsm_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec =
+        serde_json::from_value(json!({"id": "host.lsm", "selinux": {"allow": ["enforcing"]}}))
+            .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.lsm");
+    assert_eq!(
+        built.check.info().summary,
+        "SELinux and AppArmor state, recent denials"
+    );
+    assert!(!HostFamily::stub_ids().contains(&"host.lsm"));
 }
 
 #[test]

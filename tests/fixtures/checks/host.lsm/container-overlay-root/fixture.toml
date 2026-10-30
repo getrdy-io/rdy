@@ -1,0 +1,12 @@
+schema = 1
+name = "container-overlay-root"
+summary = "Container from containerd or CRI-O: overlay root, no mount line for /sys/fs/selinux, no marker file"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.lsm"]
+
+[caps]
+root = true
+network = false
+kube = false
