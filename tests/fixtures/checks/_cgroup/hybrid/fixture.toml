@@ -1,0 +1,12 @@
+schema = 1
+name = "hybrid"
+summary = "Ubuntu 20.04 style hybrid host: v2 at unified without controllers, memory capped at 1 GiB in v1"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory", "host.cpu", "host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,12 @@
+schema = 1
+name = "v1-unlimited"
+summary = "RHEL 8 host on cgroup v1, service with no limit at any level"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory", "host.cpu", "host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false
