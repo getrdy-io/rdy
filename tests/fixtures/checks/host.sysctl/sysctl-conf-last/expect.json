@@ -1,0 +1,35 @@
+{
+  "entry": {
+    "expect": {
+      "vm.max_map_count": ">=262144"
+    },
+    "id": "host.sysctl"
+  },
+  "result": {
+    "expected": {
+      "parameters": {
+        "vm.max_map_count": ">=262144"
+      }
+    },
+    "fix": "Change the line for `vm.max_map_count` in `/etc/sysctl.conf` to `vm.max_map_count = 262144`. Then run `sysctl --system` to apply the files. `sysctl -p` does not read `sysctl.d`.",
+    "level": "warn",
+    "message": "`vm.max_map_count` is `262144`, as needed, but `/etc/sysctl.conf` sets it to `65530` at boot, so a reboot changes it.",
+    "notes": [
+      "Read 2 sysctl configuration file(s), in boot order.",
+      "`/etc/sysctl.conf` is read by `sysctl --system`. The boot service, systemd-sysctl, reads it only when a file in a sysctl.d directory links to it, so put the setting in `/etc/sysctl.d/` to be sure."
+    ],
+    "observed": {
+      "parameters": {
+        "vm.max_map_count": {
+          "live": "262144",
+          "persisted": {
+            "file": "/etc/sysctl.conf",
+            "value": "65530"
+          },
+          "state": "persisted_wrong"
+        }
+      }
+    },
+    "partial": null
+  }
+}

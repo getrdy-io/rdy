@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "expect": {
+      "vm.max_map_count": ">=262144"
+    },
+    "id": "host.sysctl"
+  },
+  "result": {
+    "expected": {
+      "parameters": {
+        "vm.max_map_count": ">=262144"
+      }
+    },
+    "fix": "Run rdy as root, or read it by hand with `sysctl -n vm.max_map_count`.",
+    "level": "warn",
+    "message": "`vm.max_map_count` could not be read (permission denied), so it is not verified.",
+    "notes": [],
+    "observed": {
+      "parameters": {
+        "vm.max_map_count": {
+          "live": null,
+          "persisted": null,
+          "state": "unreadable"
+        }
+      }
+    },
+    "partial": {
+      "missing": [],
+      "note": "Not verified: vm.max_map_count could not be read (permission denied)."
+    }
+  }
+}

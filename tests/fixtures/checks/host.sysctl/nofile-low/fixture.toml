@@ -1,0 +1,12 @@
+schema = 1
+name = "nofile-low"
+summary = "A drop-in sets DefaultLimitNOFILE to 1024:524288"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

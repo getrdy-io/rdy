@@ -1,0 +1,12 @@
+schema = 1
+name = "null-mask"
+summary = "A link to /dev/null in /etc/sysctl.d hides the file of the same name in /usr/lib"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,12 @@
+schema = 1
+name = "glob-and-exclusion"
+summary = "A wildcard line covers eth0 and a minus line leaves lo out"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false
