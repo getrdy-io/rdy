@@ -13,6 +13,7 @@ use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::disk::{self, Disk};
 use crate::firewall::{self, Firewall};
+use crate::memory::{self, Memory};
 use crate::os::{self, OsCheck};
 
 #[cfg(test)]
@@ -68,16 +69,6 @@ const fn info(
 // Titles and remediation follow the Fix lines of 03 section 2, with the measured values taken out.
 // The check that replaces each stub may sharpen its text. Its findings carry the specific fix.
 
-static MEMORY: CheckInfo = info(
-    "host.memory",
-    "RAM, swap, cgroup limit",
-    CheckMeta {
-        title: "Memory",
-        remediation: "Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number. On Linux, if the spec forbids swap, run `swapoff -a` and comment out the swap lines in `/etc/fstab`.",
-    },
-    2,
-    &[],
-);
 static PORTS: CheckInfo = info(
     "host.ports",
     "Required ports free",
@@ -173,7 +164,7 @@ static KERNEL: CheckInfo = info(
 /// Every host check this build lists, in catalog order.
 static CHECKS: [&CheckInfo; 13] = [
     &disk::INFO,
-    &MEMORY,
+    &memory::INFO,
     &PORTS,
     &LSM,
     &SECURITY_AGENTS,
@@ -191,7 +182,8 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]) and `host.os` ([`OsCheck`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.memory` ([`Memory`]) and `host.os`
+/// ([`OsCheck`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -212,8 +204,7 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 10] = [
-    "host.memory",
+static STUBS: [&str; 9] = [
     "host.ports",
     "host.lsm",
     "host.security_agents",
@@ -245,6 +236,9 @@ impl Family for HostFamily {
                 .flatten()
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
+        if let CheckParams::HostMemory(memory) = params {
+            return Ok(Built::new(Box::new(Memory::from_params(&memory))));
         }
         if let CheckParams::HostOs(os) = &params {
             return Ok(Built::new(Box::new(OsCheck::from_params(os))));

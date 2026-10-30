@@ -1,0 +1,12 @@
+schema = 1
+name = "host-memory-cgroup-v1-limit"
+summary = "RHEL 8 host with 15.6 GiB on cgroup v1, acme.slice caps memory at 2 GiB"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.memory"]
+
+[caps]
+root = false
+network = false
+kube = false
