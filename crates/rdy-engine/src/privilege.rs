@@ -6,8 +6,11 @@
 //! what it read. Nothing else in rdy asks the OS who it is.
 //!
 //! - **Linux.** The four values on the `Uid:` and `Gid:` lines of `/proc/self/status` (real,
-//!   effective, saved, filesystem), `CapEff` and `CapAmb` from the same file, and `AT_SECURE` (type 23)
-//!   from `/proc/self/auxv`. The auxv parser keeps that one flag. It copies no other value, so no
+//!   effective, saved, filesystem), `CapEff`, `CapPrm` and `CapAmb` from the same file, and `AT_SECURE`
+//!   (type 23) from `/proc/self/auxv`. The status file is judged first. A process that started with a
+//!   file capability or the setuid bit is not dumpable, so the kernel hides its own auxv from the user.
+//!   If the status is clean and only the auxv is refused with `PermissionDenied`, that is a refusal
+//!   too ([`PrivilegeError::NotDumpable`]), with its own hint. The auxv parser keeps that one flag. It copies no other value, so no
 //!   load address or pointer can reach a report.
 //! - **macOS.** The real and effective ids through the probe (a `native` call). The OS has no call for
 //!   the saved id and no filesystem id, so those two are reported as the effective one, and the
@@ -106,6 +109,9 @@ pub struct Privilege {
     pub ids: Option<ProcessIds>,
     /// `CapEff`. Zero where the OS has no such mask.
     pub cap_eff: u64,
+    /// `CapPrm`. Zero where the OS has no such mask. A file capability with only `+p` shows here and
+    /// not in `CapEff`.
+    pub cap_prm: u64,
     /// `CapAmb`. Zero where the OS has no such mask, and on a kernel before 4.3 that does not list it.
     pub cap_amb: u64,
     /// `AT_SECURE`. `false` where the OS has no such flag.
@@ -122,7 +128,7 @@ pub enum Refusal {
     UidMismatch,
     /// A group id differs from the real one.
     GidMismatch,
-    /// `CapEff` or `CapAmb` is not zero for a non-root user.
+    /// `CapEff`, `CapPrm` or `CapAmb` is not zero for a non-root user.
     Capabilities,
     /// The kernel started rdy as setuid, setgid or with file capabilities (`AT_SECURE`).
     AtSecure,
@@ -163,6 +169,13 @@ pub enum PrivilegeError {
         PrivilegeError::HINT_REFUSED
     )]
     Refused(Vec<Refusal>),
+    /// The status file is clean, but the kernel refused rdy its own `/proc/self/auxv`. That is how a
+    /// process that is not dumpable looks: it started setuid or with a file capability (INV-10).
+    #[error(
+        "rdy will not run with more privilege than the user who started it: the kernel hides /proc/self/auxv from it, which happens when it started setuid or with a file capability. Fix: {}",
+        PrivilegeError::HINT_NOT_DUMPABLE
+    )]
+    NotDumpable,
     /// A source of the snapshot could not be read. The probe's error is the `source()`.
     #[error(transparent)]
     Unreadable(Unreadable),
@@ -218,6 +231,8 @@ impl Source {
 impl PrivilegeError {
     /// The fix for a refusal. It names the ways a binary gets privilege.
     pub const HINT_REFUSED: &'static str = "run rdy without the setuid or setgid bit (`chmod u-s,g-s <path to rdy>`), without file capabilities (`setcap -r <path to rdy>`), without ambient capabilities and without an SELinux or AppArmor domain change on exec, as the user who should run it, then run rdy again";
+    /// The fix for a process that is not dumpable.
+    pub const HINT_NOT_DUMPABLE: &'static str = "not dumpable: setuid or file capability. Check `ls -l <path to rdy>` for an s in the mode and `getcap <path to rdy>` for a capability, remove it (`chmod u-s,g-s <path to rdy>` or `setcap -r <path to rdy>`), then run rdy again";
     /// The fix for a /proc source that could not be read.
     pub const HINT_UNREADABLE: &'static str = "check that /proc is mounted and readable by this user (rdy needs it to prove it is not running with extra privilege), then run rdy again";
     /// The fix for process ids the OS did not give (macOS).
@@ -233,6 +248,7 @@ impl PrivilegeError {
                 "rdy will not run with more privilege than the user who started it: {}",
                 join_reasons(reasons)
             ),
+            Self::NotDumpable => "rdy will not run with more privilege than the user who started it: the kernel hides /proc/self/auxv from it, which happens when it started setuid or with a file capability".to_owned(),
             Self::Unreadable(u) => format!("rdy could not read {}", u.what.name()),
             Self::Malformed(source) => format!("rdy could not understand {}", source.name()),
         }
@@ -243,6 +259,7 @@ impl PrivilegeError {
     pub fn hint(&self) -> &'static str {
         match self {
             Self::Refused(_) => Self::HINT_REFUSED,
+            Self::NotDumpable => Self::HINT_NOT_DUMPABLE,
             Self::Unreadable(u) => u.what.unreadable_hint(),
             Self::Malformed(_) => Self::HINT_MALFORMED,
         }
@@ -257,7 +274,8 @@ impl Privilege {
     ///
     /// # Errors
     ///
-    /// [`PrivilegeError::Unreadable`] or [`PrivilegeError::Malformed`].
+    /// [`PrivilegeError::Unreadable`], [`PrivilegeError::Malformed`] or
+    /// [`PrivilegeError::NotDumpable`].
     pub async fn snapshot(probe: &Probe) -> Result<Self, PrivilegeError> {
         match probe.os() {
             Os::Windows => Ok(Self::windows(probe).await),
@@ -273,19 +291,32 @@ impl Privilege {
             .map_err(|cause| unreadable(Source::ProcStatus, cause))?;
         let parsed = parse_status(&String::from_utf8_lossy(&status.bytes))
             .ok_or(PrivilegeError::Malformed(Source::ProcStatus))?;
-        let auxv = probe
-            .read(std::path::Path::new("/proc/self/auxv"))
-            .await
-            .map_err(|cause| unreadable(Source::ProcAuxv, cause))?;
-        let at_secure =
-            parse_at_secure(&auxv.bytes).ok_or(PrivilegeError::Malformed(Source::ProcAuxv))?;
-        Ok(Self {
+        let mut found = Self {
             elevation: elevation_of(Some(parsed.ids)),
             ids: Some(parsed.ids),
             cap_eff: parsed.cap_eff,
+            cap_prm: parsed.cap_prm,
             cap_amb: parsed.cap_amb,
-            at_secure,
-        })
+            at_secure: false,
+        };
+        let auxv = probe.read(std::path::Path::new("/proc/self/auxv")).await;
+        // The status file decides first. If it already shows extra privilege, the run is refused by
+        // `check` whatever the auxv says, so a failing auxv read cannot change the answer.
+        if !found.refusals().is_empty() {
+            if let Ok(auxv) = auxv {
+                found.at_secure = parse_at_secure(&auxv.bytes).unwrap_or(false);
+            }
+            return Ok(found);
+        }
+        let auxv = match auxv {
+            Ok(auxv) => auxv,
+            // Only the refusal of our own auxv: a process that is not dumpable cannot read it.
+            Err(ProbeError::PermissionDenied) => return Err(PrivilegeError::NotDumpable),
+            Err(cause) => return Err(unreadable(Source::ProcAuxv, cause)),
+        };
+        found.at_secure =
+            parse_at_secure(&auxv.bytes).ok_or(PrivilegeError::Malformed(Source::ProcAuxv))?;
+        Ok(found)
     }
 
     async fn macos(probe: &Probe) -> Result<Self, PrivilegeError> {
@@ -297,6 +328,7 @@ impl Privilege {
             elevation: elevation_of(Some(ids)),
             ids: Some(ids),
             cap_eff: 0,
+            cap_prm: 0,
             cap_amb: 0,
             at_secure: false,
         })
@@ -318,6 +350,7 @@ impl Privilege {
         Self {
             ids: None,
             cap_eff: 0,
+            cap_prm: 0,
             cap_amb: 0,
             at_secure: false,
             elevation,
@@ -327,7 +360,7 @@ impl Privilege {
     /// Every reason INV-10 gives to refuse, empty when the process is clean.
     ///
     /// Any of the four user ids or group ids that differs from the real one is a refusal. A nonzero
-    /// `CapEff` or `CapAmb` is a refusal for a real uid other than 0. `AT_SECURE` is always one.
+    /// `CapEff`, `CapPrm` or `CapAmb` is a refusal for a real uid other than 0. `AT_SECURE` is always one.
     #[must_use]
     pub fn refusals(&self) -> Vec<Refusal> {
         let mut found = Vec::new();
@@ -339,7 +372,7 @@ impl Privilege {
             if !gid_same {
                 found.push(Refusal::GidMismatch);
             }
-            if ids.uid[0] != 0 && (self.cap_eff != 0 || self.cap_amb != 0) {
+            if ids.uid[0] != 0 && (self.cap_eff != 0 || self.cap_prm != 0 || self.cap_amb != 0) {
                 found.push(Refusal::Capabilities);
             }
         }
@@ -416,12 +449,13 @@ fn system_root_is_standard(probe: &Probe) -> bool {
 struct Status {
     ids: ProcessIds,
     cap_eff: u64,
+    cap_prm: u64,
     cap_amb: u64,
 }
 
-/// Parses the `Uid:`, `Gid:`, `CapEff:` and `CapAmb:` lines of `/proc/self/status`.
+/// Parses the `Uid:`, `Gid:`, `CapEff:`, `CapPrm:` and `CapAmb:` lines of `/proc/self/status`.
 ///
-/// `Uid`, `Gid` and `CapEff` must be there and well formed. `CapAmb` is missing on a kernel before
+/// `Uid`, `Gid`, `CapEff` and `CapPrm` must be there and well formed. `CapAmb` is missing on a kernel before
 /// 4.3, which has no ambient capabilities, so a missing line is zero. A line that is there and does
 /// not parse is `None`. The kernel writes each line once, so a repeated line is not a status file
 /// rdy trusts: it is `None` too.
@@ -429,6 +463,7 @@ fn parse_status(text: &str) -> Option<Status> {
     let mut uid = None;
     let mut gid = None;
     let mut cap_eff = None;
+    let mut cap_prm = None;
     let mut cap_amb = None;
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("Uid:") {
@@ -437,6 +472,8 @@ fn parse_status(text: &str) -> Option<Status> {
             set_once(&mut gid, four_ids(rest)?)?;
         } else if let Some(rest) = line.strip_prefix("CapEff:") {
             set_once(&mut cap_eff, hex_mask(rest)?)?;
+        } else if let Some(rest) = line.strip_prefix("CapPrm:") {
+            set_once(&mut cap_prm, hex_mask(rest)?)?;
         } else if let Some(rest) = line.strip_prefix("CapAmb:") {
             set_once(&mut cap_amb, hex_mask(rest)?)?;
         }
@@ -444,6 +481,7 @@ fn parse_status(text: &str) -> Option<Status> {
     Some(Status {
         ids: ProcessIds::new(uid?, gid?),
         cap_eff: cap_eff?,
+        cap_prm: cap_prm?,
         cap_amb: cap_amb.unwrap_or(0),
     })
 }
