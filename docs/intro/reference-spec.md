@@ -1,0 +1,1 @@
+You can use this page to look up each field of a `rdy/v1` spec. Each table shows the type, whether the field is required, its default, what the field does and an example. Each example is a valid value for its field. A field that takes an object in one of its forms has a section below for that form.
