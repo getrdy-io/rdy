@@ -119,7 +119,16 @@ fn trace_level_output_matches_the_golden_file_and_holds_no_canary() {
     for canary in CANARIES {
         assert!(!out.contains(canary), "{canary} leaked:\n{out}");
     }
-    assert_eq!(out.matches("[REDACTED:secret_by_key:").count(), 5, "{out}");
+    // Five secrets, three rules: the key-name rule, the kubeconfig rule (a `users:` list around the
+    // token) and the header rule.
+    assert_eq!(out.matches("[REDACTED:").count(), 5, "{out}");
+    assert_eq!(out.matches("[REDACTED:secret_by_key:").count(), 2, "{out}");
+    assert_eq!(
+        out.matches("[REDACTED:kubeconfig_credential:").count(),
+        1,
+        "{out}"
+    );
+    assert_eq!(out.matches("[REDACTED:auth_header:").count(), 2, "{out}");
     let got = normalize_tags(&out);
     let want = include_str!("snapshots/log-trace-redacted.txt");
     assert_eq!(got, want, "golden mismatch. Got:\n{got}");
@@ -328,10 +337,8 @@ fn a_tab_indented_continuation_line_is_redacted_and_no_raw_tab_is_written() {
 }
 
 /// A `&str` field is written with `Debug`, so a tab in the value reaches the redactor as the two
-/// characters backslash and `t`, which the key-name rule does not treat as a blank. M1-060 teaches
-/// `ASSIGNMENT` to accept `\\+t` as a blank.
+/// characters backslash and `t`. `ASSIGNMENT` accepts `\\+t` as a blank before the separator.
 #[test]
-#[ignore = "M1-060"]
 fn a_tab_inside_a_str_field_value_does_not_hide_a_secret() {
     let out = captured(Some("trace"), || {
         tracing::info!(note = "password\t= canary-tab-3", "field with a tab");
@@ -392,13 +399,66 @@ fn redact_text_drops_the_whole_text_when_the_redactor_panics() {
     assert_eq!(got, "[REDACTED:redactor_error:00000000]");
 }
 
-/// A proxy URL with userinfo needs the URL rule of M1-060. Until then only the key-name rule exists, so
-/// the password of `http://user:pass@host` is not found. M1-060 removes the `ignore` (13 correction).
+/// A proxy URL with userinfo is found by the URL userinfo rule, not by a key name (13 correction PC-43).
 #[test]
-#[ignore = "M1-060"]
 fn a_proxy_url_with_userinfo_never_reaches_the_log() {
     let out = captured(Some("trace"), || {
         tracing::debug!(proxy = %"http://synthetic:canary-proxy-url-1@proxy.example:3128", "using proxy");
     });
     assert!(!out.contains("canary-proxy-url-1"), "{out}");
+}
+
+/// Bare tokens with no key name around them: a key id, a JWT, a bearer credential, a share token, a
+/// private key and a URL password, in a message and in a field (M1-060).
+#[test]
+fn bare_tokens_never_reach_the_log() {
+    let key_id = ["AKIA", "Z3Q7XK2MCANARY4B"].concat();
+    let jwt = [
+        "eyJh",
+        "bGciOiJIUzI1NiJ9.",
+        "eyJzdWIiOiJjYW5hcnktand0LTEifQ.",
+        "c2lnbmF0dXJlY2FuYXJ5",
+    ]
+    .concat();
+    let share = ["rdy_st_", "canaryShareToken0123456789"].concat();
+    let pem = [
+        "-----BEGIN RSA PRIVATE KEY-----\n",
+        "Y2FuYXJ5LXBlbS1ib2R5LTE=\n",
+        "-----END RSA PRIVATE KEY-----",
+    ]
+    .concat();
+    let out = captured(Some("trace"), || {
+        tracing::info!("aws said no to {key_id}");
+        tracing::debug!(why = %format!("rejected {jwt}"), "service account");
+        tracing::trace!("sent bearer canarybearer0123456789 to the proxy");
+        tracing::info!(share = %share, "share link");
+        tracing::warn!("loaded\n{pem}\nfrom disk");
+        tracing::debug!("fetching https://svc:canary-url-pw-2@dl.example.test/pkg");
+    });
+    for canary in [
+        "Z3Q7XK2MCANARY4B",
+        "c2lnbmF0dXJlY2FuYXJ5",
+        "eyJzdWIiOiJjYW5hcnktand0LTEifQ",
+        "canaryShareToken0123456789",
+        "canarybearer0123456789",
+        "Y2FuYXJ5LXBlbS1ib2R5LTE=",
+        "canary-url-pw-2",
+    ] {
+        assert!(!out.contains(canary), "{canary} leaked:\n{out}");
+    }
+    for rule in [
+        "aws_access_key_id",
+        "jwt",
+        "auth_header",
+        "rdy_share_token",
+        "pem_private_key",
+        "url_userinfo",
+    ] {
+        assert!(
+            out.contains(&format!("[REDACTED:{rule}:")),
+            "{rule} did not fire:\n{out}"
+        );
+    }
+    // The host is what a fix needs, and it stays.
+    assert!(out.contains("@dl.example.test/pkg"), "{out}");
 }

@@ -122,10 +122,13 @@ fn an_unterminated_private_key_goes_to_the_end_of_a_cut_tail() {
 }
 
 #[test]
-fn a_private_key_with_its_end_is_not_the_guard_s_business() {
+fn a_private_key_with_its_end_is_removed_whole_by_the_pem_rule() {
     let text = "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\nrest\n";
     let out = red(text, TAIL);
-    assert!(!out.contains("pem_private_key"), "{out}");
+    assert!(
+        out.starts_with("[REDACTED:pem_private_key:") && out.ends_with("]\nrest\n[truncated]"),
+        "{out}"
+    );
     // A public certificate with no end is not a key.
     let out = red("-----BEGIN CERTIFICATE-----\nMIIC\nMIID\nMII", TAIL);
     assert!(!out.contains("pem_private_key"), "{out}");
@@ -144,9 +147,16 @@ fn a_private_key_whose_start_was_cut_goes_from_the_start_through_its_end_line() 
 }
 
 #[test]
-fn a_complete_block_after_a_begin_in_a_cut_head_is_left_to_the_pem_rule() {
+fn a_complete_block_after_a_cut_head_is_taken_by_the_pem_rule_alone() {
     let text = "cut\n-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n";
-    assert!(!red(text, HEAD).contains("pem_private_key"));
+    let out = red(text, HEAD);
+    // One placeholder, from the rule. The head guard does not take the BEGIN line a second time.
+    assert_eq!(
+        out.matches("[REDACTED:pem_private_key:").count(),
+        1,
+        "{out}"
+    );
+    assert!(!out.contains("AAAA") && !out.contains("BEGIN"), "{out}");
 }
 
 #[test]
@@ -189,4 +199,40 @@ fn the_output_of_a_cut_buffer_is_stable_under_a_second_pass() {
     );
     let twice = r.redact_str(&once);
     assert_eq!(*once, *twice);
+}
+
+/// A planted 1 MiB buffer with no newline and thousands of armor markers must not cost quadratic time.
+/// The guards read each label from a bounded window and go on after a matched END.
+#[test]
+fn many_armor_markers_with_no_newline_cost_linear_time() {
+    let budget = std::time::Duration::from_secs(10);
+    let r = redactor();
+    let both = Cut::new(true, true);
+    // Non-private labels, private blocks that close, and ENDs with their BEGIN before them.
+    let inputs = [
+        "-----BEGIN CERTIFICATE----- ".repeat(40_000),
+        "-----BEGIN PRIVATE KEY-----QUJD-----END PRIVATE KEY----- ".repeat(20_000),
+        "-----END CERTIFICATE----- ".repeat(40_000),
+        format!(
+            "-----BEGIN PRIVATE KEY----- {}",
+            "-----END PRIVATE KEY----- ".repeat(40_000)
+        ),
+        "-----BEGIN ".repeat(90_000),
+    ];
+    for text in &inputs {
+        assert!(text.len() > 900_000);
+        let started = std::time::Instant::now();
+        let shown = r.redact_buffer(text.as_bytes(), both).to_string();
+        assert!(started.elapsed() < budget, "{}", &text[..40]);
+        assert!(shown.len() < text.len() + 64);
+    }
+}
+
+/// A closed block is skipped, and a later BEGIN with no END is still found.
+#[test]
+fn an_unterminated_key_after_a_closed_one_still_goes_to_the_end() {
+    let text = "a\n-----BEGIN PRIVATE KEY-----\nQUJD\n-----END PRIVATE KEY-----\nb\n-----BEGIN PRIVATE KEY-----\nSECRETBODY\nlast\nx";
+    let shown = red(text, TAIL);
+    assert!(!shown.contains("SECRETBODY"), "{shown}");
+    assert!(!shown.contains("QUJD"), "{shown}");
 }
