@@ -26,7 +26,7 @@ fn params(spec: Value) -> K8sVersion {
     serde_json::from_value(spec).expect("parameters")
 }
 
-/// What `Cluster::map_error` does by default: no plugin, no proxy variable, no CA setting.
+/// What `Cluster::map_error` does by default: no plugin, no proxy, no CA setting.
 fn plain(error: &kube::Error) -> KubeError {
     from_kube_error(error, "the API server", None, false, false)
 }

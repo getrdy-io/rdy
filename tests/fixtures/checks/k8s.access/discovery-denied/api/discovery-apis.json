@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "forbidden: User \"jane@acme.example\" cannot get path \"/apis\"",
+    "reason": "Forbidden",
+    "code": 403
+  }
+}

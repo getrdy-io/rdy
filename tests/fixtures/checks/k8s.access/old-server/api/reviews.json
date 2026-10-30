@@ -1,0 +1,16 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "get",
+          "resource": "namespaces"
+        }
+      },
+      "status": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"acme-viewer\""
+      }
+    }
+  ]
+}

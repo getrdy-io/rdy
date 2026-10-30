@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/apis/authentication.k8s.io/v1/selfsubjectreviews"
+  },
+  "status": 201,
+  "body": {
+    "apiVersion": "authentication.k8s.io/v1",
+    "kind": "SelfSubjectReview",
+    "metadata": {
+      "creationTimestamp": null
+    },
+    "status": {}
+  }
+}
