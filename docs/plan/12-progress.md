@@ -288,7 +288,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-137 | todo | | README draft from 10 section 1
 
-- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review); backlog corrected 2026-10-30 (correction-29): depends on M1-174 (PR #146 review)
+- M1-138 | todo | | Tag and release 0.1.0 | backlog corrected 2026-10-29 (correction-13): depends on M1-074 too (PR #84 reviews); backlog corrected 2026-10-30 (correction-21): checks archives for the Replay-only marker string (PR #113 review); backlog corrected 2026-10-30 (correction-29): depends on M1-174 (PR #146 review); backlog corrected 2026-10-30 (correction-32): depends on M1-175 (PR #151 review)
 
 - M1-139 | todo | | Alpha announcement to design partners | backlog corrected 2026-10-28: human steps moved to Founder hand steps
 
@@ -332,7 +332,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-159 | todo | | k8s.nodes free capacity from pod requests (cut 2)
 
-- M1-160 | todo | | k8s.admission webhooks, validating admission policies and the dry-run guard test (M1-late)
+- M1-160 | todo | | k8s.admission webhooks, validating admission policies and the dry-run guard test (M1-late) | backlog corrected 2026-10-30 (correction-32): lists the engines' own policies with `ALLOWED` entries (PR #151 review)
 
 - M1-161 | todo | | k8s.namespace (existence, terminating, quota, limit range, project request) (M1-late) | backlog corrected 2026-10-29 (correction-17): depends on M1-172 (parameter type, PR #98 review)
 
@@ -361,6 +361,8 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-173 | todo | | Agent catalog staleness gate and lint-wall include gaps | added 2026-10-30 (correction-22, PR #119 reviews)
 
 - M1-174 | todo | | Expected results for the host check fixture cases | added 2026-10-30 (correction-29, PR #145 review)
+
+- M1-175 | todo | | Kubernetes family builds every k8s check from its parameters | added 2026-10-30 (correction-32, PR #151 review)
 
 ## Summary
 
