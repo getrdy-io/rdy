@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-kyverno-legacy-only"
+summary = "Kyverno: only the legacy group is served"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

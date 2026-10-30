@@ -77,6 +77,13 @@ cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 1
 `evaluation-error`, `non-resource`, `reviews-forbidden`, `rules-forbidden`, `old-server`, `identity-forbidden`,
 `as-allowed`, `as-forbidden`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`,
 `as-at-the-cap`, `hostile-reasons`), `generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on
+drift and on a file the script did not write).
+`checks/k8s.admission/` holds 25 clusters (`restricted`, `baseline`, `privileged`, `warn-audit`, `no-labels`,
+`no-metadata-labels`, `invalid-labels`, `invalid-warn`, `namespace-missing`, `namespace-forbidden`,
+`no-namespace`, `apis-forbidden`, the OpenShift cases `openshift`, `openshift-enforce`,
+`openshift-scc-forbidden`, `openshift-scc-cut`, `openshift-hostile-range`, `openshift-and-engine`, and the
+policy engine cases `kyverno`, `kyverno-legacy-only`, `gatekeeper`, `both-engines`, `engine-forbidden`,
+`many-kinds`, `hostile-kinds`), `generated` by `scripts/gen-k8s-admission-fixtures.py` (`--check` fails on
 drift and on a file the script did not write). The rest
 arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-openshift"
+summary = "OpenShift: warn and audit labels synced to restricted, a UID range, the SCCs listable"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true
