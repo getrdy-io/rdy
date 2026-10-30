@@ -233,17 +233,31 @@ async fn every_resource_in_the_closed_list_can_be_read() {
 }
 
 #[tokio::test]
-async fn the_os_trust_roots_are_not_read_yet() {
+async fn the_os_trust_roots_are_read_within_the_caps_and_the_log_holds_no_certificate() {
     let sandbox = Sandbox::new();
-    let error = sandbox
+    let value = sandbox
         .check()
         .native(NativeCall::SystemRoots)
         .await
-        .expect_err("M1-092 owns this");
-    assert!(matches!(error, ProbeError::Unsupported(_)), "{error:?}");
-    assert_eq!(
-        sandbox.hub.action_log().actions[0].outcome,
-        ActionOutcome::Failed
+        .expect("the store reads, or is empty");
+    let NativeValue::SystemRoots(certs) = value else {
+        panic!("the wrong kind of answer");
+    };
+    // A machine with no `ca-certificates` has an empty store, which is an answer.
+    assert!(certs.len() <= crate::probe::MAX_SYSTEM_ROOTS);
+    assert!(
+        certs
+            .iter()
+            .all(|der| !der.is_empty() && der.len() <= crate::probe::MAX_ROOT_BYTES)
+    );
+    let log = sandbox.hub.action_log().actions;
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].outcome, ActionOutcome::Ok);
+    let text = serde_json::to_string(&log).expect("json");
+    assert!(text.contains("system_roots"));
+    assert!(
+        !text.contains("CERTIFICATE") && !text.contains("MII"),
+        "{text}"
     );
 }
 

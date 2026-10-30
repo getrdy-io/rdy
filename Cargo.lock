@@ -1815,6 +1815,8 @@ dependencies = [
  "regex",
  "ring",
  "rustix",
+ "rustls",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "socket2",
@@ -1825,6 +1827,7 @@ dependencies = [
  "toml",
  "tracing",
  "trybuild",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -1835,6 +1838,7 @@ dependencies = [
  "proc-macro2",
  "rdy-engine",
  "rdy-spec",
+ "rustls",
  "serde_json",
  "socket2",
  "syn 2.0.119",

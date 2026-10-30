@@ -461,3 +461,14 @@ fn probe_hub_run_probe() {
 fn probe_kube_call() {
     let _ = rdy_engine::probe::Probe::kube_call;
 }
+
+// ---- rustls --------------------------------------------------------------------------------------
+// `dangerous()` takes a certificate verifier that can accept anything. Only the recording verifier of
+// the TLS facade (M1-092) may call it.
+
+fn rustls_config_builder_dangerous() {
+    let _ = rustls::ConfigBuilder::<rustls::ClientConfig, rustls::WantsVerifier>::dangerous;
+}
+fn rustls_client_config_dangerous() {
+    let _ = rustls::ClientConfig::dangerous;
+}
