@@ -17,6 +17,7 @@ test reads it), `api/group-<group>-<version>.json` (the kinds an engine group se
 
 import json
 import os
+import re
 import sys
 
 ARGS = [a for a in sys.argv[1:] if a != "--check"]
@@ -83,11 +84,23 @@ def status(code, reason, message):
     }
 
 
+def version_priority(version):
+    """Sort key of a version by Kubernetes version priority: GA above beta above alpha, then the higher
+    major, then the higher minor. So v2 > v1 > v2beta1 > v1beta1 > v2alpha1 > v1alpha1."""
+    found = re.fullmatch(r"v(\d+)(?:(alpha|beta)(\d+))?", version)
+    assert found, version
+    stage = {None: 2, "beta": 1, "alpha": 0}[found.group(2)]
+    return (stage, int(found.group(1)), int(found.group(3) or 0))
+
+
 def group(name, versions):
+    # The API server lists the versions of a group newest first and prefers the first, whatever order a
+    # file lists them in.
+    ordered = sorted(versions, key=version_priority, reverse=True)
     return {
         "name": name,
-        "versions": [{"groupVersion": f"{name}/{v}", "version": v} for v in versions],
-        "preferredVersion": {"groupVersion": f"{name}/{versions[0]}", "version": versions[0]},
+        "versions": [{"groupVersion": f"{name}/{v}", "version": v} for v in ordered],
+        "preferredVersion": {"groupVersion": f"{name}/{ordered[0]}", "version": ordered[0]},
     }
 
 
@@ -353,31 +366,52 @@ scc_list("openshift-hostile-range", SCCS)
 
 # ---- Policy engines ------------------------------------------------------------------------------------------
 
-KYVERNO = [("kyverno.io", ["v1", "v2"]), ("policies.kyverno.io", ["v1", "v1beta1"])]
+# Kyverno 1.12 to 1.19 serve kyverno.io as v2, v1 and v2beta1. The server prefers v2, which holds
+# PolicyException, the cleanup kinds and UpdateRequest; ClusterPolicy and Policy live in v1 (and v2beta1).
+KYVERNO = [
+    ("kyverno.io", ["v2", "v1", "v2beta1"]),
+    ("policies.kyverno.io", ["v1", "v1beta1"]),
+]
+KYVERNO_LEGACY_GROUP = [("kyverno.io", ["v1"])]
+KYVERNO_V2_ONLY = [("kyverno.io", ["v2"]), ("policies.kyverno.io", ["v1", "v1beta1"])]
 GATEKEEPER = [
     ("templates.gatekeeper.sh", ["v1", "v1beta1", "v1alpha1"]),
     ("constraints.gatekeeper.sh", ["v1beta1", "v1alpha1"]),
 ]
 KYVERNO_LEGACY = [("ClusterPolicy", "clusterpolicies"), ("Policy", "policies")]
+KYVERNO_V2 = [
+    ("PolicyException", "policyexceptions"),
+    ("CleanupPolicy", "cleanuppolicies"),
+    ("ClusterCleanupPolicy", "clustercleanuppolicies"),
+    ("UpdateRequest", "updaterequests"),
+]
+EXCEPTION = [("PolicyException", "policyexceptions")]
 KYVERNO_CEL = [("ValidatingPolicy", "validatingpolicies"), ("MutatingPolicy", "mutatingpolicies")]
 CONSTRAINTS = [("K8sAllowedRepos", "k8sallowedrepos"), ("K8sRequiredLabels", "k8srequiredlabels")]
 
-case("kyverno", "Kyverno: the legacy group and the CEL group are served")
+case("kyverno", "Kyverno 1.12 to 1.19: kyverno.io prefers v2 and keeps ClusterPolicy in v1, and the CEL group is served")
 apis("kyverno", KYVERNO)
 namespace("kyverno", {PSA + "enforce": "baseline"})
+kinds("kyverno", "kyverno.io", "v2", KYVERNO_V2)
 kinds("kyverno", "kyverno.io", "v1", KYVERNO_LEGACY)
 kinds("kyverno", "policies.kyverno.io", "v1", KYVERNO_CEL)
 
-case("kyverno-legacy-only", "Kyverno: only the legacy group is served")
-apis("kyverno-legacy-only", KYVERNO[:1])
+case("kyverno-legacy-only", "Kyverno: only the legacy group is served, as v1")
+apis("kyverno-legacy-only", KYVERNO_LEGACY_GROUP)
 namespace("kyverno-legacy-only", {PSA + "enforce": "baseline"})
 kinds("kyverno-legacy-only", "kyverno.io", "v1", KYVERNO_LEGACY)
 
-case("kyverno-no-legacy", "Kyverno after the legacy kinds are removed: kyverno.io serves only PolicyException")
-apis("kyverno-no-legacy", KYVERNO)
+case("kyverno-no-legacy", "Kyverno 1.20 shape: kyverno.io serves only v2, with PolicyException")
+apis("kyverno-no-legacy", KYVERNO_V2_ONLY)
 namespace("kyverno-no-legacy", {PSA + "enforce": "baseline"})
-kinds("kyverno-no-legacy", "kyverno.io", "v1", [("PolicyException", "policyexceptions")])
+kinds("kyverno-no-legacy", "kyverno.io", "v2", EXCEPTION)
 kinds("kyverno-no-legacy", "policies.kyverno.io", "v1", KYVERNO_CEL)
+
+case("kyverno-v1-forbidden", "Kyverno: kyverno.io prefers v2 and can be read, but v1 may not be, so the legacy kinds are unknown")
+apis("kyverno-v1-forbidden", KYVERNO[:1])
+namespace("kyverno-v1-forbidden", {PSA + "enforce": "baseline"})
+kinds("kyverno-v1-forbidden", "kyverno.io", "v2", KYVERNO_V2)
+kinds("kyverno-v1-forbidden", "kyverno.io", "v1", [], code=403)
 
 case("gatekeeper", "Gatekeeper: templates and two constraint kinds")
 apis("gatekeeper", GATEKEEPER)
@@ -388,6 +422,7 @@ kinds("gatekeeper", "constraints.gatekeeper.sh", "v1beta1", CONSTRAINTS)
 case("both-engines", "Kyverno and Gatekeeper are both installed")
 apis("both-engines", KYVERNO + GATEKEEPER)
 namespace("both-engines", {PSA + "enforce": "baseline"})
+kinds("both-engines", "kyverno.io", "v2", KYVERNO_V2)
 kinds("both-engines", "kyverno.io", "v1", KYVERNO_LEGACY)
 kinds("both-engines", "policies.kyverno.io", "v1", KYVERNO_CEL)
 kinds("both-engines", "templates.gatekeeper.sh", "v1", [("ConstraintTemplate", "constrainttemplates")])
@@ -396,6 +431,7 @@ kinds("both-engines", "constraints.gatekeeper.sh", "v1beta1", CONSTRAINTS)
 case("engine-forbidden", "Kyverno is served but its group versions may not be read")
 apis("engine-forbidden", KYVERNO)
 namespace("engine-forbidden", {PSA + "enforce": "baseline"})
+kinds("engine-forbidden", "kyverno.io", "v2", [], code=403)
 kinds("engine-forbidden", "kyverno.io", "v1", [], code=403)
 kinds("engine-forbidden", "policies.kyverno.io", "v1", [], code=403)
 
@@ -420,7 +456,7 @@ kinds("many-kinds", "templates.gatekeeper.sh", "v1", [("ConstraintTemplate", "co
 kinds("many-kinds", "constraints.gatekeeper.sh", "v1beta1", MANY + HOSTILE)
 
 case("hostile-kinds", "Kyverno serving kinds with escape bytes, a backtick and an overlong name")
-apis("hostile-kinds", KYVERNO[:1])
+apis("hostile-kinds", KYVERNO_LEGACY_GROUP)
 namespace("hostile-kinds", {PSA + "enforce": "baseline"})
 kinds("hostile-kinds", "kyverno.io", "v1", HOSTILE)
 

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use rdy_engine::check::{Finding, Level};
 use serde_json::{Value, json};
 
-use super::engines::{self, Found, FoundGroup};
+use super::engines::{self, Found, FoundGroup, Group};
 use super::judge::{Gathered, NsFacts, Openshift, judge, shown};
 use super::level::{Label, Labels, Need, Standard, Version, need_of};
 use super::scc::uid_range;
@@ -210,7 +210,7 @@ fn a_range_annotation_has_two_numbers() {
 
 #[test]
 fn the_groups_of_an_engine_are_found_by_name() {
-    let groups: Vec<(String, Option<String>)> = [
+    let groups: Vec<Group> = [
         "apps",
         "policies.kyverno.io",
         "constraints.gatekeeper.sh",
@@ -218,7 +218,11 @@ fn the_groups_of_an_engine_are_found_by_name() {
         "x.kyverno.io",
     ]
     .iter()
-    .map(|name| ((*name).to_owned(), Some("v1".to_owned())))
+    .map(|name| Group {
+        name: (*name).to_owned(),
+        preferred: Some("v1".to_owned()),
+        versions: vec!["v1".to_owned()],
+    })
     .collect();
     assert_eq!(
         engines::served(&groups),
@@ -275,6 +279,50 @@ fn the_legacy_kyverno_kinds_are_found_before_the_cut() {
 }
 
 #[test]
+fn the_second_kyverno_version_is_read_only_when_v1_is_listed_and_not_preferred() {
+    let group = |name: &str, preferred: &str, versions: &[&str]| Group {
+        name: name.to_owned(),
+        preferred: Some(preferred.to_owned()),
+        versions: versions.iter().map(|v| (*v).to_owned()).collect(),
+    };
+    // The shape of Kyverno 1.12 to 1.19: the server prefers v2, and ClusterPolicy is in v1.
+    assert_eq!(
+        engines::legacy_version(&group("kyverno.io", "v2", &["v2", "v1", "v2beta1"])),
+        Some("v1")
+    );
+    // v1 is the preferred version, so it is read anyway.
+    assert_eq!(
+        engines::legacy_version(&group("kyverno.io", "v1", &["v1"])),
+        None
+    );
+    // The 1.20 shape: v1 is not served.
+    assert_eq!(
+        engines::legacy_version(&group("kyverno.io", "v2", &["v2"])),
+        None
+    );
+    // Another group is never asked.
+    assert_eq!(
+        engines::legacy_version(&group("policies.kyverno.io", "v1beta1", &["v1beta1", "v1"])),
+        None
+    );
+}
+
+#[test]
+fn a_name_longer_than_a_kind_can_be_sorts_with_the_hostile_names() {
+    let (kinds, more) = engines::cut_kinds(vec![
+        "L".repeat(64),
+        "Zed".to_owned(),
+        "L".repeat(63),
+        "A\u{202e}B".to_owned(),
+    ]);
+    assert_eq!(more, 0);
+    assert_eq!(kinds[0], "L".repeat(63), "{kinds:?}");
+    assert_eq!(kinds[1], "Zed", "{kinds:?}");
+    assert_eq!(kinds[2], "A\u{202e}B", "{kinds:?}");
+    assert_eq!(kinds[3], "L".repeat(64), "{kinds:?}");
+}
+
+#[test]
 fn a_server_text_is_made_safe_before_it_reaches_a_sentence() {
     assert_eq!(shown("ClusterPolicy"), "ClusterPolicy");
     assert_eq!(shown("a`b`"), "a'b'");
@@ -314,7 +362,7 @@ fn the_worst_finding_is_the_message_and_the_rest_are_notes() {
             version: Some("v1".to_owned()),
             kinds: vec!["ClusterPolicy".to_owned()],
             more: 0,
-            legacy_policies: true,
+            legacy_policies: Some(true),
         }],
     }];
     let spec = json!({"uses": ["hostPath"]});

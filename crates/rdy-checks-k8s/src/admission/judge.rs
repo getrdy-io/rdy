@@ -19,7 +19,7 @@ use rdy_spec::check::K8sAdmission;
 use serde_json::{Value, json};
 
 use super::Read;
-use super::engines::Found;
+use super::engines::{Found, KYVERNO_GROUP};
 use super::fix;
 use super::level::{Label, Labels, Need, Standard};
 
@@ -225,11 +225,14 @@ pub(super) fn judge(params: &K8sAdmission, need: Option<&Need>, found: &Gathered
                 format!("{} ({})", engine.engine, groups.join(", "))
             })
             .collect();
+        // The command is dropped only when `kyverno.io` is not served or its kinds showed no legacy kind.
+        // A read that failed (`None`) leaves it in.
         let legacy_policies = found
             .engines
             .iter()
             .flat_map(|engine| &engine.groups)
-            .any(|group| group.group == "kyverno.io" && group.legacy_policies);
+            .find(|group| group.group == KYVERNO_GROUP)
+            .map_or(Some(false), |group| group.legacy_policies);
         let possessive = if found.engines.len() == 1 {
             "Its"
         } else {

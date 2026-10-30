@@ -78,11 +78,11 @@ cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 1
 `as-allowed`, `as-forbidden`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`,
 `as-at-the-cap`, `hostile-reasons`), `generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on
 drift and on a file the script did not write).
-`checks/k8s.admission/` holds 27 clusters (`restricted`, `baseline`, `privileged`, `warn-audit`, `no-labels`,
+`checks/k8s.admission/` holds 28 clusters (`restricted`, `baseline`, `privileged`, `warn-audit`, `no-labels`,
 `no-metadata-labels`, `invalid-labels`, `invalid-warn`, `namespace-missing`, `namespace-forbidden`,
 `no-namespace`, `apis-forbidden`, the OpenShift cases `openshift`, `openshift-enforce`,
 `openshift-sync-off`, `openshift-scc-forbidden`, `openshift-scc-cut`, `openshift-hostile-range`, `openshift-and-engine`, and the
-policy engine cases `kyverno`, `kyverno-legacy-only`, `kyverno-no-legacy`, `gatekeeper`, `both-engines`, `engine-forbidden`,
+policy engine cases `kyverno`, `kyverno-legacy-only`, `kyverno-no-legacy`, `kyverno-v1-forbidden`, `gatekeeper`, `both-engines`, `engine-forbidden`,
 `many-kinds`, `hostile-kinds`), `generated` by `scripts/gen-k8s-admission-fixtures.py` (`--check` fails on
 drift and on a file the script did not write). `envs/host-min/` is the smallest environment (M1-075): a
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id and a `golden/report.json`. The rest

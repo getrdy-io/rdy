@@ -9,11 +9,13 @@
 //!   (`kyverno.io`, `policies.kyverno.io`) and Gatekeeper (`templates.gatekeeper.sh`,
 //!   `constraints.gatekeeper.sh`) mean the engine is installed (see [`engines`]);
 //! - `GET /apis/<group>/<version>` for each engine group that is served, to name the kinds it serves
-//!   (at most four requests);
+//!   (at most four requests), and `GET /apis/kyverno.io/v1` when that group lists `v1`, `v1` is not the
+//!   preferred version and the preferred version did not show `ClusterPolicy` or `Policy` (one more
+//!   request): the server prefers `v2`, which holds `PolicyException` and never the legacy kinds;
 //! - on OpenShift, when the spec names an `scc`: the `SecurityContextConstraints` list, one page, for the
 //!   names only.
 //!
-//! That is at most seven requests. Nothing is created and no pod is tried: the dry-run `POST` of 03 is an
+//! That is at most eight requests. Nothing is created and no pod is tried: the dry-run `POST` of 03 is an
 //! M2 mode behind its own ADR, and the guard refuses it.
 //!
 //! How the spec's bounds apply (`pod_security`, `uses`, `namespace`, `scc`):
@@ -63,7 +65,7 @@ mod tests;
 #[cfg(test)]
 mod unit_tests;
 
-use engines::{FoundGroup, OPENSHIFT_GROUP};
+use engines::{FoundGroup, Group, OPENSHIFT_GROUP};
 use judge::{Gathered, NsFacts, Openshift};
 use level::{Labels, need_of};
 use scc::Scc;
@@ -222,9 +224,6 @@ fn out_of_time(ctx: &CheckContext) -> bool {
     ctx.remaining() < MIN_LEFT
 }
 
-/// One group of `/apis`: its name and the version discovery should be asked for (the preferred one).
-type Group = (String, Option<String>);
-
 impl AdmissionCheck {
     async fn gather(&self, ctx: &CheckContext) -> Result<Gathered, CheckError> {
         let client = self.cluster.read_only(ctx.probe());
@@ -249,18 +248,24 @@ impl AdmissionCheck {
                 list.groups
                     .into_iter()
                     .map(|group| {
+                        let versions: Vec<String> =
+                            group.versions.iter().map(|v| v.version.clone()).collect();
                         let preferred = group
                             .preferred_version
                             .map(|version| version.version)
-                            .or_else(|| group.versions.first().map(|v| v.version.clone()));
-                        (group.name, preferred)
+                            .or_else(|| versions.first().cloned());
+                        Group {
+                            name: group.name,
+                            preferred,
+                            versions,
+                        }
                     })
                     .collect()
             })?
         };
         let (openshift, groups_read, engines) = match &listed {
             Read::Ok(groups) => {
-                let openshift = if groups.iter().any(|(name, _)| name == OPENSHIFT_GROUP) {
+                let openshift = if groups.iter().any(|group| group.name == OPENSHIFT_GROUP) {
                     Openshift::Yes
                 } else {
                     Openshift::No
@@ -305,33 +310,39 @@ impl AdmissionCheck {
     ) -> Result<Vec<engines::Found>, CheckError> {
         let mut read_groups: Vec<(&'static str, FoundGroup)> = Vec::new();
         for (engine, group) in engines::served(groups) {
-            let version = groups
-                .iter()
-                .find(|(name, _)| name == group)
-                .and_then(|(_, version)| version.clone());
+            let entry = groups.iter().find(|entry| entry.name == group);
+            let version = entry.and_then(|entry| entry.preferred.clone());
             let kinds = match &version {
-                Some(version) if !out_of_time(ctx) => read(
-                    mapper,
-                    client.group_resources(group, version).await,
-                    true,
-                    |list| {
-                        list.resources
-                            .into_iter()
-                            .filter(|resource| !resource.name.contains('/'))
-                            .map(|resource| resource.kind)
-                            .collect::<Vec<String>>()
-                    },
-                )?,
+                Some(version) if !out_of_time(ctx) => {
+                    read_kinds(mapper, client, group, version).await?
+                }
                 _ => Read::OutOfTime,
             };
-            let (kinds, more, legacy_policies) = match kinds {
+            let (kinds, more, mut legacy_policies) = match kinds {
                 Read::Ok(kinds) => {
                     let legacy = engines::has_legacy_policies(&kinds);
                     let (kinds, more) = engines::cut_kinds(kinds);
-                    (kinds, more, legacy)
+                    (kinds, more, Some(legacy))
                 }
-                _ => (Vec::new(), 0, false),
+                _ => (Vec::new(), 0, None),
             };
+            // The preferred version of `kyverno.io` is `v2` on every Kyverno from 1.12 to 1.19, and the
+            // legacy kinds live in `v1`. Without them in the preferred version, ask `v1` as well. If that
+            // read fails, the state is unknown, not "no".
+            if legacy_policies != Some(true)
+                && let Some(other) = entry.and_then(engines::legacy_version)
+            {
+                let more_kinds = if out_of_time(ctx) {
+                    Read::OutOfTime
+                } else {
+                    read_kinds(mapper, client, group, other).await?
+                };
+                legacy_policies = match more_kinds {
+                    Read::Ok(kinds) if engines::has_legacy_policies(&kinds) => Some(true),
+                    Read::Ok(_) => legacy_policies,
+                    _ => None,
+                };
+            }
             read_groups.push((
                 engine,
                 FoundGroup {
@@ -345,6 +356,27 @@ impl AdmissionCheck {
         }
         Ok(engines::found(read_groups))
     }
+}
+
+/// `GET /apis/<group>/<version>`: the kinds it serves, subresources left out.
+async fn read_kinds(
+    mapper: Mapper<'_>,
+    client: &ReadOnlyClient,
+    group: &str,
+    version: &str,
+) -> Result<Read<Vec<String>>, CheckError> {
+    read(
+        mapper,
+        client.group_resources(group, version).await,
+        true,
+        |list| {
+            list.resources
+                .into_iter()
+                .filter(|resource| !resource.name.contains('/'))
+                .map(|resource| resource.kind)
+                .collect::<Vec<String>>()
+        },
+    )
 }
 
 /// `GET` of the namespace: its Pod Security labels and, on OpenShift, its UID range.

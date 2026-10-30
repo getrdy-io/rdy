@@ -314,7 +314,9 @@ async fn gatekeeper_and_kyverno_discovery_warn_with_names() {
     );
     let notes = notes(&finding);
     assert!(
-        notes.contains("Kyverno serves these kinds in kyverno.io: ClusterPolicy, Policy."),
+        notes.contains(
+            "Kyverno serves these kinds in kyverno.io: CleanupPolicy, ClusterCleanupPolicy, PolicyException, UpdateRequest."
+        ),
         "{notes}"
     );
     assert!(
@@ -332,12 +334,14 @@ async fn gatekeeper_and_kyverno_discovery_warn_with_names() {
     let engines = &finding.observed["policy_engines"];
     assert_eq!(engines[0]["name"], "Kyverno");
     assert_eq!(engines[1]["name"], "Gatekeeper");
-    // The namespace, the group list, then one read per engine group, never a policy.
+    // The namespace, the group list, one read per engine group (kyverno.io twice: its preferred version
+    // v2 and then v1, where ClusterPolicy lives), never a policy.
     assert_eq!(
         rig.paths(),
         [
             NAMESPACE,
             APIS,
+            "/apis/kyverno.io/v2",
             "/apis/kyverno.io/v1",
             "/apis/policies.kyverno.io/v1",
             "/apis/templates.gatekeeper.sh/v1",
@@ -956,6 +960,51 @@ async fn kyverno_alone_is_named_with_its_groups() {
 }
 
 #[tokio::test]
+async fn kyverno_that_prefers_v2_and_keeps_clusterpolicy_in_v1_gets_the_legacy_command() {
+    // Kyverno 1.12 to 1.19: the server prefers kyverno.io/v2, which has no ClusterPolicy. The check reads
+    // v1 as well.
+    let rig = rig("kyverno");
+    let finding = rig.finding(json!({"pod_security": "baseline"})).await;
+    let fix = finding.fix.expect("a fix");
+    assert!(fix.contains("clusterpolicies.kyverno.io"), "{fix}");
+    assert!(
+        fix.contains("`kubectl get validatingpolicies.policies.kyverno.io`"),
+        "{fix}"
+    );
+    assert_eq!(
+        rig.paths(),
+        [
+            NAMESPACE,
+            APIS,
+            "/apis/kyverno.io/v2",
+            "/apis/kyverno.io/v1",
+            "/apis/policies.kyverno.io/v1",
+        ]
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn kyverno_whose_v1_cannot_be_read_is_unknown_and_keeps_the_command() {
+    let rig = rig("kyverno-v1-forbidden");
+    let finding = rig.finding(json!({"pod_security": "baseline"})).await;
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    let fix = finding.fix.expect("a fix");
+    assert!(fix.contains("clusterpolicies.kyverno.io"), "{fix}");
+    assert!(finding.partial.is_none());
+    assert_eq!(
+        rig.paths(),
+        [
+            NAMESPACE,
+            APIS,
+            "/apis/kyverno.io/v2",
+            "/apis/kyverno.io/v1"
+        ]
+    );
+    rig.audit();
+}
+
+#[tokio::test]
 async fn kyverno_without_the_legacy_kinds_gets_no_command_for_them() {
     let rig = rig("kyverno-no-legacy");
     let finding = rig.finding(json!({"pod_security": "baseline"})).await;
@@ -969,6 +1018,16 @@ async fn kyverno_without_the_legacy_kinds_gets_no_command_for_them() {
     assert!(
         fix.contains("`kubectl get validatingpolicies.policies.kyverno.io`"),
         "{fix}"
+    );
+    // v1 is not served, so it is not asked.
+    assert_eq!(
+        rig.paths(),
+        [
+            NAMESPACE,
+            APIS,
+            "/apis/kyverno.io/v2",
+            "/apis/policies.kyverno.io/v1",
+        ]
     );
     rig.audit();
 }
@@ -1015,6 +1074,12 @@ async fn an_engine_whose_groups_cannot_be_read_is_still_found() {
     );
     // Not being able to name the kinds is not a gap in what the check measures.
     assert!(finding.partial.is_none());
+    // Whether the legacy kinds exist is unknown, so the command stays.
+    let fix = finding.fix.clone().expect("a fix");
+    assert!(
+        fix.contains("`kubectl get clusterpolicies.kyverno.io,policies.kyverno.io -A`"),
+        "{fix}"
+    );
     assert!(
         !notes(&finding).contains("serves these kinds"),
         "{finding:?}"
@@ -1027,8 +1092,9 @@ async fn an_engine_whose_groups_cannot_be_read_is_still_found() {
 async fn kinds_are_sorted_cut_at_eight_and_counted() {
     let rig = rig("many-kinds");
     let finding = rig.finding(json!({"pod_security": "baseline"})).await;
-    // 16 kinds: the names shaped like a kind come first in byte order, so the four hostile names sort
-    // after the twelve real ones and are the ones counted in "more".
+    // 16 kinds: a name shaped like a kind (a letter, then letters and digits, at most 63 characters) comes
+    // first. The four hostile names (escape bytes, backticks, a bidi mark, 100 characters) are not shaped
+    // like one, so they sort after the twelve real ones whatever their bytes, and are counted in "more".
     assert!(
         notes(&finding).contains(
             "Gatekeeper serves these kinds in constraints.gatekeeper.sh: K8sCheck00, K8sCheck01, K8sCheck02, K8sCheck03, K8sCheck04, K8sCheck05, K8sCheck06, K8sCheck07 and 8 more."
@@ -1089,8 +1155,8 @@ async fn a_hostile_kind_name_never_reaches_a_sentence_raw() {
 #[tokio::test]
 async fn every_request_is_a_get_and_every_cluster_is_audited() {
     // The cases are the directories of the fixture folder, so a new case cannot skip the audit.
-    let cases = crate::client::mock::fixture_cases("k8s.admission");
-    assert!(cases.len() >= 25, "the cases were found: {cases:?}");
+    let cases = rdy_engine::testing::fixture_cases("k8s.admission");
+    assert!(cases.len() >= 28, "the cases were found: {cases:?}");
     for case in cases.iter().map(String::as_str) {
         let rig = rig(case);
         let spec = if case == "no-namespace" {
@@ -1110,8 +1176,8 @@ async fn every_request_is_a_get_and_every_cluster_is_audited() {
         );
         let paths = rig.paths();
         assert!(
-            paths.len() <= 7,
-            "{case}: at most seven requests: {paths:?}"
+            paths.len() <= 8,
+            "{case}: at most eight requests: {paths:?}"
         );
         assert!(
             !paths.iter().any(|path| path.contains("secrets")),

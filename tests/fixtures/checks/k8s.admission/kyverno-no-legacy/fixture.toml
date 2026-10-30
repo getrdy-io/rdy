@@ -1,6 +1,6 @@
 schema = 1
 name = "k8s-admission-kyverno-no-legacy"
-summary = "Kyverno after the legacy kinds are removed: kyverno.io serves only PolicyException"
+summary = "Kyverno 1.20 shape: kyverno.io serves only v2, with PolicyException"
 origin = "generated"
 os = "linux"
 arch = "x86_64"

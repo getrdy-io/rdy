@@ -1,13 +1,13 @@
 {
   "request": {
     "method": "GET",
-    "path": "/apis/kyverno.io/v1"
+    "path": "/apis/kyverno.io/v2"
   },
   "status": 200,
   "body": {
     "kind": "APIResourceList",
     "apiVersion": "v1",
-    "groupVersion": "kyverno.io/v1",
+    "groupVersion": "kyverno.io/v2",
     "resources": [
       {
         "name": "policyexceptions",

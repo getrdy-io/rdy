@@ -1,6 +1,6 @@
 schema = 1
 name = "k8s-admission-kyverno-legacy-only"
-summary = "Kyverno: only the legacy group is served"
+summary = "Kyverno: only the legacy group is served, as v1"
 origin = "generated"
 os = "linux"
 arch = "x86_64"

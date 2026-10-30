@@ -77,17 +77,13 @@
         "name": "kyverno.io",
         "versions": [
           {
-            "groupVersion": "kyverno.io/v1",
-            "version": "v1"
-          },
-          {
             "groupVersion": "kyverno.io/v2",
             "version": "v2"
           }
         ],
         "preferredVersion": {
-          "groupVersion": "kyverno.io/v1",
-          "version": "v1"
+          "groupVersion": "kyverno.io/v2",
+          "version": "v2"
         }
       },
       {
