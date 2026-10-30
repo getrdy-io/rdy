@@ -328,12 +328,74 @@ fn a_nested_v2_limit_below_min_blocks_and_the_fix_names_the_cgroup() {
 }
 
 #[test]
-fn a_swap_limit_in_the_cgroup_is_evidence_and_not_a_pass_for_swap_forbid() {
-    // The host has swap; the slice limit of 1 GiB does not make the machine swapless.
+fn a_binding_limit_has_no_nominal_band() {
+    // A 4 GiB slice limit against a 4200 MiB min is a fail, not "inside the tolerance".
+    let ran = run("cgroup-v2-nested", &json!({"min": "4200Mi"}));
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Fail);
+    assert!(!has_note(f, "nominal size"), "{:?}", f.notes);
+    assert!(!f.message.contains("tolerance"), "{}", f.message);
+    assert_eq!(f.expected["band_bytes"], json!(0));
+    assert!(
+        f.fix
+            .as_deref()
+            .is_some_and(|fix| fix.contains("cgroup /system.slice/acme.slice")),
+        "{:?}",
+        f.fix
+    );
+}
+
+#[test]
+fn on_cgroup_v1_the_unit_fix_uses_the_older_systemd_setting() {
+    let ran = run("cgroup-v1-limit", &json!({"min": "4Gi"}));
+    let fix = ran.finding().fix.as_deref().expect("a fix").to_owned();
+    assert!(
+        fix.contains("set-property acme.slice MemoryLimit=4G"),
+        "{fix}"
+    );
+    assert!(!fix.contains("MemoryMax"), "{fix}");
+}
+
+#[test]
+fn a_cgroup_swap_limit_on_a_machine_without_swap_is_just_evidence() {
+    // No swap on this host (SwapTotal 0). The slice limit of 1 GiB is recorded and nothing fails.
     let ran = run("cgroup-v2-nested", &json!({"min": "2Gi", "swap": "forbid"}));
     assert_eq!(ran.finding().level, Level::Pass, "no swap on this host");
+    assert_eq!(ran.observed("cgroup_swap_limit_bytes"), &json!(GIB));
     let ran = run("swap-on", &json!({"min": "32Gi", "swap": "forbid"}));
     assert_eq!(ran.observed("cgroup_swap_limit_bytes"), &Value::Null);
+}
+
+#[test]
+fn a_zero_cgroup_swap_limit_does_not_make_a_machine_with_swap_pass_swap_forbid() {
+    // The host has a 4 GiB swap partition. memory.swap.max is 0 for the slice, but swap is still on
+    // for the machine, and the spec asks for it to be off.
+    let ran = run(
+        "cgroup-swap-limit",
+        &json!({"min": "2Gi", "swap": "forbid"}),
+    );
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Fail);
+    assert!(f.message.contains("swap is on (4 GiB)"), "{}", f.message);
+    assert!(has_note(f, "judged for the whole machine"), "{:?}", f.notes);
+    assert!(
+        has_note(
+            f,
+            "cgroup swap limit is 0 bytes at /system.slice/acme.slice"
+        ),
+        "{:?}",
+        f.notes
+    );
+    assert_eq!(ran.observed("cgroup_swap_limit_bytes"), &json!(0));
+    assert_eq!(
+        ran.observed("swap_total_bytes"),
+        &json!(4_194_300_u64 * 1024)
+    );
+    let fix = f.fix.as_deref().expect("a fix");
+    assert!(fix.contains("swapoff -a"), "{fix}");
+    // With swap allowed the same machine passes.
+    let ran = run("cgroup-swap-limit", &json!({"min": "2Gi"}));
+    assert_eq!(ran.finding().level, Level::Pass);
 }
 
 #[test]
@@ -347,6 +409,29 @@ fn a_v1_limit_is_found_and_swap_stays_empty() {
     );
     assert_eq!(ran.observed("cgroup_hierarchy"), &json!("v1"));
     assert_eq!(ran.observed("cgroup_swap_limit_bytes"), &Value::Null);
+}
+
+#[test]
+fn a_policy_refusal_ends_the_check_and_is_not_a_note() {
+    // A check that did not declare the cgroup reads is a bug in the manifest. It must not be
+    // reported as "a limit may have been missed" and then pass.
+    static NARROW: CheckInfo = CheckInfo {
+        reads: &[MEMINFO],
+        ..INFO
+    };
+    let fixture = Fixture::load(&fixtures_dir(), "checks/host.memory/cgroup-v2-nested")
+        .expect("the fixture loads");
+    let run = TestRun::for_fixture(&fixture);
+    let ctx = run.context_for(&NARROW, "host.memory", Os::Linux, fixture.available_needs());
+    let outcome = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime")
+        .block_on(memory(&json!({"min": "2Gi"})).run(&ctx));
+    assert!(
+        matches!(outcome, Err(CheckError::Probe(ProbeError::Denied { .. }))),
+        "{outcome:?}"
+    );
 }
 
 #[test]
@@ -448,6 +533,7 @@ fn every_run_stays_inside_the_manifest() {
         "pass",
         "swap-on",
         "cgroup-v2-nested",
+        "cgroup-swap-limit",
         "cgroup-v1-limit",
         "cgroup-unreadable",
         "cgroup-container-view",
@@ -481,6 +567,7 @@ fn every_fix_passes_the_fix_text_audit() {
         ("low-available", json!({"min": "8Gi"})),
         ("cgroup-v2-nested", json!({"min": "8Gi"})),
         ("cgroup-v1-limit", json!({"min": "4Gi"})),
+        ("cgroup-swap-limit", json!({"min": "2Gi", "swap": "forbid"})),
     ] {
         let ran = run(case, &params);
         let fix = ran.finding().fix.clone().expect("a fix");
@@ -489,7 +576,7 @@ fn every_fix_passes_the_fix_text_audit() {
         }
         seen += 1;
     }
-    assert_eq!(seen, 5);
+    assert_eq!(seen, 6);
     if let Err(error) = rdy_engine::fixtext::check(INFO.meta.remediation) {
         panic!("{error}");
     }

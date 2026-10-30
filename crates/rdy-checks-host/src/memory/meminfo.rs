@@ -22,21 +22,20 @@ pub(super) struct Available {
     pub estimated: bool,
 }
 
-/// The first value of `key` in kilobytes, as bytes. A line without the `kB` unit, or whose number does
-/// not fit, is not a value. The kernel does not repeat a key, and the first one wins.
+/// The value of `key` in kilobytes, as bytes. The first line with that key decides: a line without
+/// the `kB` unit, or whose number does not fit, is not a value, and a later line with the same key
+/// is not looked at (the kernel does not repeat a key).
 fn value(text: &str, key: &str) -> Option<u64> {
-    text.lines().find_map(|line| {
+    let (_, rest) = text.lines().find_map(|line| {
         let (name, rest) = line.split_once(':')?;
-        if name.trim() != key {
-            return None;
-        }
-        let mut words = rest.split_whitespace();
-        let number: u64 = words.next()?.parse().ok()?;
-        if !words.next()?.eq_ignore_ascii_case("kB") || words.next().is_some() {
-            return None;
-        }
-        number.checked_mul(1024)
-    })
+        (name.trim() == key).then_some((name, rest))
+    })?;
+    let mut words = rest.split_whitespace();
+    let number: u64 = words.next()?.parse().ok()?;
+    if !words.next()?.eq_ignore_ascii_case("kB") || words.next().is_some() {
+        return None;
+    }
+    number.checked_mul(1024)
 }
 
 /// Reads the text of `/proc/meminfo`.

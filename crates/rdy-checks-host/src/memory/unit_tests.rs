@@ -118,10 +118,14 @@ fn a_meminfo_without_a_usable_total_is_refused() {
 }
 
 #[test]
-fn a_bad_line_does_not_hide_a_good_one_and_the_first_total_wins() {
+fn a_bad_line_does_not_hide_a_good_one_and_the_first_line_of_a_key_decides() {
     let info = meminfo::parse("MemAvailable: x kB\nMemTotal: 7 kB\nMemTotal: 9 kB\n").expect("ok");
     assert_eq!(info.total, 7 * KIB);
     assert_eq!(info.available, None);
+    // A malformed first MemTotal is not rescued by a later one.
+    assert!(meminfo::parse("MemTotal: x kB\nMemTotal: 9 kB\n").is_err());
+    let info = meminfo::parse("MemTotal: 9 kB\nSwapTotal: x kB\nSwapTotal: 5 kB\n").expect("ok");
+    assert_eq!(info.swap_total, None);
 }
 
 proptest! {
@@ -231,6 +235,33 @@ fn the_fix_for_a_limit_depends_on_who_set_it() {
     let hostile = fix("/system.slice/a;b.service");
     assert!(!hostile.contains("set-property"), "{hostile}");
     assert!(hostile.contains("run rdy outside the cgroup"));
+}
+
+#[test]
+fn a_limit_is_exact_and_the_fix_on_cgroup_v1_says_memory_limit() {
+    let r = rules("32Gi");
+    // 31.5 GiB is inside the 5% band for hardware, but this is a cgroup limit.
+    let mut f = limited(
+        64 * GIB,
+        31 * GIB + GIB / 2,
+        "/system.slice/acme-api.service",
+    );
+    let found = judge(&r, &f);
+    assert_eq!(found.level, Level::Fail);
+    assert!(
+        found.notes.iter().all(|n| !n.contains("nominal size")),
+        "{:?}",
+        found.notes
+    );
+    assert_eq!(found.expected["band_bytes"], 0);
+    assert!(found.fix.as_deref().expect("fix").contains("MemoryMax=32G"));
+    f.cgroup.hierarchy = Some("v1");
+    let fix = judge(&r, &f).fix.expect("a fix");
+    assert!(
+        fix.contains("set-property acme-api.service MemoryLimit=32G"),
+        "{fix}"
+    );
+    assert!(!fix.contains("MemoryMax"), "{fix}");
 }
 
 #[test]

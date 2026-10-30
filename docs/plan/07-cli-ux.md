@@ -1176,7 +1176,7 @@ order. The action logs are short because the specs have few checks.
         "swap_total_bytes": 0,
         "cgroup_limit_bytes": null
       },
-      "expected": {"min_bytes": 8589934592, "tolerance_bytes": 429496730},
+      "expected": {"min_bytes": 8589934592, "band_bytes": 429496729},
       "needs": [],
       "partial": null,
       "truncated": false,
@@ -1541,7 +1541,7 @@ applied to B.1 gives it exactly.
         "swap_total_bytes": 0,
         "cgroup_limit_bytes": null
       },
-      "expected": {"min_bytes": 34359738368, "tolerance_bytes": 1717986918},
+      "expected": {"min_bytes": 34359738368, "band_bytes": 1717986918},
       "needs": [],
       "partial": null,
       "truncated": false,
@@ -1856,7 +1856,7 @@ needs   network: available
                              observed  logical_cores=8 physical_cores=4 arch=x86_64 hypervisor=true
                              took      2 ms
   PASS     host.memory       15.4 GiB found, 8 GiB needed
-                             expected  min_bytes=8589934592 tolerance_bytes=429496730
+                             expected  min_bytes=8589934592 band_bytes=429496729
                              observed  total_bytes=16496934912 available_bytes=12884901888
                                        swap_total_bytes=0 cgroup_limit_bytes=null
                              took      1 ms

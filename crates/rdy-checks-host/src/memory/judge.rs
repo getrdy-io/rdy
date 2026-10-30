@@ -4,7 +4,7 @@
 //!
 //! - the total (the smaller of the host's `MemTotal` and the cgroup limit) below `min` by more than
 //!   the nominal band is a fail, inside the band it is a pass with a note (or a warn with
-//!   `tolerance_result: warn`);
+//!   `tolerance_result: warn`). A binding cgroup limit has no band: it is exact;
 //! - available memory below `min_available` is a warn;
 //! - swap on when the spec forbids it is a fail.
 
@@ -86,7 +86,7 @@ fn shown(at: &str) -> String {
     }
 }
 
-/// The size for `MemoryMax=`: whole GiB when it is, otherwise MiB rounded up.
+/// The size for `MemoryMax=` (or `MemoryLimit=`): whole GiB when it is, otherwise MiB rounded up.
 fn systemd_size(bytes: u64) -> String {
     if bytes.is_multiple_of(GIB) {
         format!("{}G", bytes / GIB)
@@ -108,7 +108,7 @@ fn unit_of(at: &str) -> Option<&str> {
 }
 
 /// How to raise the limit set at `at`, as one sentence.
-fn raise(at: &str, need: u64) -> String {
+fn raise(at: &str, need: u64, hierarchy: Option<&str>) -> String {
     let last = at.rsplit('/').next().unwrap_or_default();
     if at.contains("kubepods") {
         return "Raise the memory limit of the pod in its Kubernetes spec.".to_owned();
@@ -127,10 +127,18 @@ fn raise(at: &str, need: u64) -> String {
         return "Raise the memory limit of the container (--memory for docker and podman) and start it again.".to_owned();
     }
     match unit_of(at) {
-        Some(unit) => format!(
-            "Raise it with `systemctl set-property {unit} MemoryMax={}`.",
-            systemd_size(need)
-        ),
+        Some(unit) => {
+            // systemd before 231 (RHEL 7, cgroup v1) has no MemoryMax=.
+            let setting = if hierarchy == Some("v1") {
+                "MemoryLimit"
+            } else {
+                "MemoryMax"
+            };
+            format!(
+                "Raise it with `systemctl set-property {unit} {setting}={}`.",
+                systemd_size(need)
+            )
+        }
         None => "Raise that limit, or run rdy outside the cgroup.".to_owned(),
     }
 }
@@ -143,7 +151,14 @@ pub(super) fn judge(rules: &Rules, facts: &Facts) -> Finding {
     let limit = facts.cgroup.limit.as_ref().filter(|l| l.bytes < host);
     let effective = limit.map_or(host, |l| l.bytes);
 
-    let fit = rules.band.assess(effective, min);
+    // The nominal-size band is for hardware. A cgroup limit is a number someone set, so it has no
+    // band.
+    let band = if limit.is_some() {
+        Band::off()
+    } else {
+        rules.band
+    };
+    let fit = band.assess(effective, min);
     let total_level = fit.level(rules.in_band);
     let mut level = total_level;
     let mut message = Vec::new();
@@ -180,7 +195,7 @@ pub(super) fn judge(rules: &Rules, facts: &Facts) -> Finding {
                 format_bytes(l.bytes),
                 format_bytes(min.bytes()),
                 format_bytes(host),
-                raise(&l.at, min.bytes())
+                raise(&l.at, min.bytes(), facts.cgroup.hierarchy)
             ),
             None => format!(
                 "{} RAM, {} needed. Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number.",
@@ -273,7 +288,7 @@ pub(super) fn judge(rules: &Rules, facts: &Facts) -> Finding {
         .with_expected(json!({
             "min_bytes": min.bytes(),
             "min_available_bytes": rules.min_available,
-            "band_bytes": rules.band.width(min),
+            "band_bytes": band.width(min),
             "swap": match rules.swap {
                 SwapPolicy::Forbid => "forbid",
                 _ => "any",

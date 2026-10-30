@@ -201,7 +201,8 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.firewall` ([`Firewall`]) and `host.memory` ([`Memory`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.firewall` ([`Firewall`]) and `host.memory` ([`Memory`]) are real. The others are stubs for
+/// now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
