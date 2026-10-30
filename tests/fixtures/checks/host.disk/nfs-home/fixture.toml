@@ -1,0 +1,12 @@
+schema = 1
+name = "nfs-home"
+summary = "The install path is on an NFS home directory"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -47,6 +47,8 @@ mod unit_tests;
 
 pub use parse::CpuQuota;
 use parse::{ProcLine, components, parse_proc_cgroup};
+// `host.disk` reads the same file and decodes its octal escapes the same way.
+pub(crate) use parse::unescape;
 
 /// The paths the helper reads. A check that uses it lists these in `CheckInfo::reads`.
 pub const READS: [&str; 3] = [

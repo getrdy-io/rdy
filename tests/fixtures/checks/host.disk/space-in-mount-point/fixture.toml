@@ -1,0 +1,12 @@
+schema = 1
+name = "space-in-mount-point"
+summary = "The volume is mounted at /mnt/acme data, and a bind mount of the same volume sits at /mnt/acme"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.disk"]
+
+[caps]
+root = false
+network = false
+kube = false
