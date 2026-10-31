@@ -78,6 +78,10 @@ fn every_cli_error() -> Vec<CliError> {
             path: s("rdy-report-x"),
             reason: IoReason::DiskFull.into(),
         },
+        CliError::ReportWriter {
+            message: s("the report is too big"),
+            fix: s("send this to the vendor"),
+        },
         CliError::Interrupted,
         CliError::Internal(InternalKind::Bug),
         CliError::Internal(InternalKind::OutputClosed),
@@ -87,6 +91,9 @@ fn every_cli_error() -> Vec<CliError> {
             reason: IoReason::DiskFull,
         }),
         CliError::Internal(InternalKind::NotImplemented { command: "run" }),
+        CliError::Internal(InternalKind::SecretRefused {
+            names: vec![s("API_TOKEN")],
+        }),
         CliError::Internal(InternalKind::Privilege(PrivilegeError::Refused(vec![
             Refusal::AtSecure,
         ]))),
@@ -105,6 +112,7 @@ fn check_variant(e: &CliError) -> ErrorCode {
         | CliError::Prompt(_)
         | CliError::TrustStore(_)
         | CliError::ReportWrite { .. }
+        | CliError::ReportWriter { .. }
         | CliError::Interrupted
         | CliError::Internal(_) => {
             let r = e.render();

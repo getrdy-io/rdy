@@ -28,6 +28,7 @@ clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-
 ct-codecs = { workspace = true }
 ed25519-dalek = { workspace = true, features = ["zeroize"] }
 getrandom = { workspace = true }
+rdy-checks-host = { path = "../rdy-checks-host", version = "0.1.0-alpha.0" }
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
 rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
 scrypt = { workspace = true }
