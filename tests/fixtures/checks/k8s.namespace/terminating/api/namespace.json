@@ -1,0 +1,53 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "Namespace",
+    "metadata": {
+      "name": "acme-system",
+      "deletionTimestamp": "2026-10-01T12:00:00Z"
+    },
+    "spec": {
+      "finalizers": [
+        "kubernetes"
+      ]
+    },
+    "status": {
+      "phase": "Terminating",
+      "conditions": [
+        {
+          "type": "NamespaceDeletionDiscoveryFailure",
+          "status": "False",
+          "lastTransitionTime": "2026-10-01T12:00:05Z",
+          "reason": "ResourcesDiscovered",
+          "message": "All resources successfully discovered"
+        },
+        {
+          "type": "NamespaceDeletionContentFailure",
+          "status": "True",
+          "lastTransitionTime": "2026-10-01T12:00:05Z",
+          "reason": "ContentDeletionFailed",
+          "message": "Some resources are remaining"
+        },
+        {
+          "type": "NamespaceContentRemaining",
+          "status": "True",
+          "lastTransitionTime": "2026-10-01T12:00:05Z",
+          "reason": "SomeResourcesRemain",
+          "message": "Some resources are remaining: pods. has 2 resource instances"
+        },
+        {
+          "type": "NamespaceFinalizersRemaining",
+          "status": "False",
+          "lastTransitionTime": "2026-10-01T12:00:05Z",
+          "reason": "ContentHasNoFinalizers",
+          "message": "All content-preserving finalizers finished"
+        }
+      ]
+    }
+  }
+}

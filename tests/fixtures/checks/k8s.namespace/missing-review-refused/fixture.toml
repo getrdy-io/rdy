@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-missing-review-refused"
+summary = "A missing namespace; the access review itself is refused"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

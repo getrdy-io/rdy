@@ -1275,10 +1275,12 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 
 | Group, resource | Verbs and scope | Check: what it reads |
 | --- | --- | --- |
-| core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`: namespace exists |
+| core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`, `k8s.namespace`: namespace exists; `k8s.namespace`: phase and deletion conditions |
 | core `nodes` | LIST | `k8s.nodes`: allocatable, conditions, taints, labels; `k8s.version`: `providerID`, `kubeletVersion` |
 | core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only |
 | core `persistentvolumeclaims` | LIST in the target namespace | `k8s.storageclass`: Pending claims older than 5 minutes |
+| core `resourcequotas` | LIST in the target namespace | `k8s.namespace`: `hard`, `used` and scopes |
+| core `limitranges` | LIST in the target namespace | `k8s.namespace`: memory `max`, `min` and `default` of `Container` and `Pod` items |
 | core `events` | LIST in the target namespace, `fieldSelector` must include `involvedObject.kind=PersistentVolumeClaim` | `k8s.storageclass`: `ProvisioningFailed`, `WaitForFirstConsumer` reasons |
 | `storage.k8s.io` `storageclasses` | LIST, GET by name | `k8s.storageclass`: classes, default marker, provisioner |
 | `storage.k8s.io` `csinodes` | LIST | `k8s.storageclass`: `spec.drivers[].name` |
@@ -1290,7 +1292,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 5. **`M1_LATE`**, enabled only with the checks that need it: `admissionregistration.k8s.io` webhook
    configurations, `validatingadmissionpolicies` and bindings; core `services`; `discovery.k8s.io`
    `endpointslices`; Kyverno and Gatekeeper policy objects; ConfigMap GET of `kube-system/kubeadm-config`
-   by name; the resources of `k8s.namespace`, `k8s.crds`, `k8s.ingress`, `k8s.cni`, `k8s.dns` and
+   by name; the resources of `k8s.crds`, `k8s.ingress`, `k8s.cni`, `k8s.dns` and
    `k8s.device_plugins`. Each joins with the same citation rule.
 6. **Projections.** `pods`, `events` and `deployments` deserialize into minimal structs (resources,
    `nodeName`, phase, reason, name), so env values and args are never even held as strings. ConfigMap

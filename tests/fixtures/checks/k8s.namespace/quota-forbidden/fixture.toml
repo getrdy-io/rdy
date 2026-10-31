@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-quota-forbidden"
+summary = "The identity may not list quotas"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

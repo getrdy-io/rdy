@@ -1,0 +1,17 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "projectrequests",
+          "group": "project.openshift.io"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": "RBAC: no rule allows \"create\" on \"projectrequests.project.openshift.io\" for User \"acme-installer\""
+      }
+    }
+  ]
+}

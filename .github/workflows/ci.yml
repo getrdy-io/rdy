@@ -98,6 +98,8 @@ jobs:
         run: python3 -I scripts/gen-k8s-storageclass-fixtures.py --check
       - name: k8s.admission fixtures are current
         run: python3 -I scripts/gen-k8s-admission-fixtures.py --check
+      - name: k8s.namespace fixtures are current
+        run: python3 -I scripts/gen-k8s-namespace-fixtures.py --check
       # The schema generator is the optional `schema` feature of rdy-spec. It pulls in schemars and
       # serde_json/preserve_order, which must stay out of the shipped binary (ADR 0019).
       - name: The binary does not build the schema generator

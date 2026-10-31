@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-limit-hostile"
+summary = "A limit range with a hostile name, one amount that is not one, and a cap of 8Gi"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true
