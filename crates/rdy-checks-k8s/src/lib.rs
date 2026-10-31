@@ -7,8 +7,9 @@
 //! shows which cluster rdy is about to touch. The read-only guard ([`client::guard`], M1-103) sits in front
 //! of every request and logs each one. The checks build on both: `k8s.version` ([`VersionCheck`], M1-106),
 //! `k8s.access` ([`AccessCheck`], M1-109, which reads a [`Dial`] because it must report a connection
-//! that failed), `k8s.storageclass` ([`StorageClassCheck`], M1-110) and `k8s.rbac` ([`RbacCheck`], M1-111,
-//! which can test as the spec's `as:` user) are built, and the others follow.
+//! that failed), `k8s.storageclass` ([`StorageClassCheck`], M1-110), `k8s.rbac` ([`RbacCheck`], M1-111,
+//! which can test as the spec's `as:` user) and `k8s.admission` ([`AdmissionCheck`], M1-114, the Pod
+//! Security, policy engine and SCC half) are built, and the others follow.
 
 #![forbid(unsafe_code)]
 // A check writes its answer in a Finding, never to the terminal (M1-044, 02 "Lint wall"). The print macros
@@ -29,6 +30,12 @@
     clippy::disallowed_macros
 )]
 mod access;
+#[forbid(
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::disallowed_macros
+)]
+mod admission;
 pub mod client;
 #[forbid(
     clippy::disallowed_methods,
@@ -68,6 +75,7 @@ mod storageclass;
 mod version;
 
 pub use access::{AccessCheck, Dial, DialOutcome, Dialed, PatternError};
+pub use admission::AdmissionCheck;
 pub use cluster::Cluster;
 pub use rbac::RbacCheck;
 pub use storageclass::StorageClassCheck;

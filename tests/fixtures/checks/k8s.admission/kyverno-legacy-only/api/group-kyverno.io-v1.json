@@ -1,0 +1,54 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/kyverno.io/v1"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIResourceList",
+    "apiVersion": "v1",
+    "groupVersion": "kyverno.io/v1",
+    "resources": [
+      {
+        "name": "clusterpolicies",
+        "singularName": "clusterpolicie",
+        "namespaced": false,
+        "kind": "ClusterPolicy",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "clusterpolicies/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "ClusterPolicy",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "policies",
+        "singularName": "policie",
+        "namespaced": false,
+        "kind": "Policy",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "policies/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "Policy",
+        "verbs": [
+          "get"
+        ]
+      }
+    ]
+  }
+}

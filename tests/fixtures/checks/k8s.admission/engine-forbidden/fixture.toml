@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-engine-forbidden"
+summary = "Kyverno is served but its group versions may not be read"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

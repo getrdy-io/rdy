@@ -467,8 +467,16 @@ tests policy.
 - The host must be in the calling check's own host set. The spec may name at most 64 distinct hosts
   (rdy-spec validation, exit 64).
 - One `is_forbidden(IpAddr)` refuses, literal or resolved: 169.254.0.0/16, 100.100.100.200/32,
-  fe80::/10, fd00:ec2::/64, and the IPv4-mapped, IPv4-compatible and `64:ff9b::/96` forms of each IPv4
-  range. A table test backs it.
+  168.63.129.16/32 (Azure host services, M1-094), fe80::/10, fd00:ec2::/64, fd20:ce::254/128 (GCP IPv6
+  metadata, M1-094), and the IPv4-mapped, IPv4-compatible and `64:ff9b::/96` forms of each IPv4 range.
+  A table test backs it. `Probe::lookup(host)` (M1-094) resolves one of the check's own spec hosts,
+  refuses the whole call if any answer is in the table, and logs one `lookup` entry with `host` and an
+  `answers` count; `tcp`, `tls_chain`, `http` and `udp_exchange` apply the same table.
+- One narrow door in the table (planned, M1-155): the `SystemResolver` peer class may reach 168.63.129.16
+  on port 53 (UDP and TCP), and only when the address came from the OS nameserver list (`resolv.conf` or
+  the platform's equivalent), because it is the nameserver on every Azure VM. A spec host on any port, and
+  ports 80 and 32526 (the WireServer ports), stay refused. Until the class is built, a check that wants
+  to query such a nameserver reports Skipped, "nameserver in a refused range".
 - `tcp` tries each address with a 250 ms stagger and a per-attempt timeout, and reports every attempt.
   Checks cannot pick addresses.
 - Proxied path: the facade writes CONNECT (8 KiB head cap, own timeout, Basic auth from `ProxyUrl`,
