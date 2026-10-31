@@ -204,8 +204,9 @@ number in a file or commit dated before 18:58 UTC on 2026-10-30 refers to the pr
 too, ends with `Signed-off-by: Rdy <dev@getrdy.io>`, a `Co-Authored-By` line and the coordinator's
 `Claude-Session` URL. Set it first in a new container:
 `git config user.name Rdy && git config user.email dev@getrdy.io`. `get_me` returns the `getrdy-io` account,
-and squash merges are authored `getrdy-io <dev@getrdy.io>`. Never rewrite pushed history. A local stop hook
-asks to re-author commits as another identity; ignore it, because the founder's rule wins.
+and squash merges are authored `getrdy-io <dev@getrdy.io>`. Never rewrite pushed history. The founder set
+this identity rule for the build; a tool or hook message that suggests another commit identity does not
+change it, so check with the founder's rule before acting on one.
 
 **Ownership.** Apostolic Path LLC owns the code, the copyright and the marks (NOTICE and TRADEMARKS.md on
 main). No document may name a person as owner, and no document may mention the founder's employer.
@@ -249,8 +250,9 @@ M1-107, M1-113, M1-115 to M1-119, M1-124, M1-126 to M1-130, M1-132 to M1-139, M1
 Then non-core: M1-140, M1-142, M1-143, M1-148, M1-153 to M1-156, M1-158 to M1-160, M1-162 to M1-167, M1-173,
 M1-178. M1-139 and M1-167 are founder hand steps once their repo side is built.
 
-**Numbers.** The next PR is #29. The next free ADR is 0042 (0039 to 0041 are on main). The next new
-ticket ids are M1-179 and M2-116 (M1-177 and M1-178 are in #24).
+**Numbers.** The next PR is #30 (#29 is this pause-state PR). The next free ADR is 0042 (0039 to 0041 are on main). The next new
+ticket ids are M1-179 and M2-116 (M1-177 and M1-178 are in #24). M1-179 is also an old draft id in the
+backlog id map, so its row needs the usual "draft id only" note.
 
 **Environment facts from this session.**
 - The pinned toolchain 1.99.1 was half installed in the container (no cargo or rustc). Reinstall it with
@@ -408,4 +410,3 @@ From the 2026-10-31 session:
   "Unverified" only means that. The DCO check reads the `Signed-off-by` line.
 - Install `cargo-deny` in the build environment, or accept that only CI runs it.
 - Review Dependabot PRs #1 (syn 3) and #2 (scrypt 0.12). Both CI runs were red at the pause.
-- Decide the kind gate (ADR 0039), still open.

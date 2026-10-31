@@ -74,5 +74,3 @@ not listed here were fixed in the PR or carried to a ticket named below.
 - README after M1-057 (founder ask). Nothing was pushed. Rerun devrel: say that `rdy run` works on main,
   link NOTICE and TRADEMARKS.md, and list only the checks a real main build runs (pr-154-fix1.md items 16
   and 17).
-</content>
-</invoke>

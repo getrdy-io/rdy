@@ -55,7 +55,6 @@ deferrals, and anything the reviewer should look at hard.
   `cargo clean` in your worktree. If a write fails with "no space left", run `cargo clean` and retry.
 - Before any cargo command run `export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
   A full debug build otherwise takes 6 GB per worktree and the shared disk fills.
-- `cargo-deny` and `cargo-nextest` are installed. `sccache` is not.
 - The machine has 4 CPUs and other agents build at the same time. Use `cargo test --workspace -j 2` if builds are slow.
 - If `cargo deny` or `cargo nextest` is missing, say so in your reply; do not download binaries.
 - When your branch is behind main, merge origin/main (never rebase a pushed branch) and rerun every check.
