@@ -173,6 +173,11 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &str, &str)] = &[
         "embeds recorded text from tests/fixtures/checks/host.firewall for the parser tests",
     ),
     (
+        "crates/rdy-checks-host/src/ports/tests.rs",
+        "../../../../tests/fixtures/checks/host.ports/",
+        "embeds the expect.json goldens of tests/fixtures/checks/host.ports, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-k8s/src/client/guard/tests/parser.rs",
         "../../../../../../docs/plan/03-check-catalog.md",
         "embeds docs/plan/03-check-catalog.md so a test can check the check ids that ALLOWED cites",
