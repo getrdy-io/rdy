@@ -174,11 +174,11 @@ Linux is the first-class target. On macOS and Windows, M1 ships a sysinfo-only s
 
 ### host.cgroups (M1-late)
 - **Measures:** cgroup state (v1, hybrid, v2), controllers available and delegated, kernel boot options.
-- **Source:** L: `statfs` magic of `/sys/fs/cgroup` through `native` (cgroup2 is `0x63677270`; `/sys/fs/cgroup/unified` present means hybrid), `/sys/fs/cgroup/cgroup.controllers`, `cgroup.subtree_control`, `/proc/cgroups` (v1 `enabled` column), `/proc/self/mountinfo`, `/proc/cmdline`. M, W: not applicable.
+- **Source:** L: the cgroup helper (`rdy_checks_host::cgroup`), which reads `/proc/self/cgroup` and `/proc/self/mountinfo` (a `cgroup2` mount is v2, a `cgroup` mount is v1, both together are hybrid) and then `cgroup.controllers` and `cgroup.subtree_control` at the top of the v2 tree; `/proc/cgroups` (the `enabled` column says a controller is off); `/proc/cmdline` (only the cgroup words, such as `cgroup_disable=memory`, are kept); `/etc/os-release` and `/proc/device-tree/model` (to pick the fix text). No `statfs` call is made: the mount table gives the same answer (M1-151). M, W: not applicable.
 - **Needs:** none, timeout 2s.
-- **Thresholds:** spec `version: v2|v1|any`, `controllers: [cpu, memory, io, pids]`. A required controller missing: block. Wrong state: block.
+- **Thresholds:** spec `version: v2|v1|any`, `controllers: [cpu, memory, io, pids]`. A required controller missing: block. Wrong state: block. A hybrid host meets `v1` (its controllers are in v1) and fails `v2`. A controller that cannot be confirmed (an unreadable list, or a v1 hierarchy that `/proc/cgroups` lists but no mount shows) is warn, not block. `blkio` and `io` are the same controller. With neither key set the check reports and passes.
 - **Fix (chosen from `host.os`):** RHEL family: "`grubby --update-kernel=ALL --args=\"systemd.unified_cgroup_hierarchy=1\"`, then reboot." Debian and Ubuntu: "add it to `GRUB_CMDLINE_LINUX` in `/etc/default/grub`, run `update-grub`, reboot." Raspberry Pi OS: "add `cgroup_memory=1 cgroup_enable=memory` to `/boot/firmware/cmdline.txt`."
-- **Fixture:** fake `/sys/fs/cgroup` trees (v1, hybrid, v2, memory controller off), `/proc/cgroups`, `/proc/cmdline`.
+- **Fixture:** fake `/sys/fs/cgroup` trees (v1, hybrid, v2, memory controller off), `/proc/cgroups`, `/proc/cmdline`: `tests/fixtures/checks/host.cgroups/` (12 cases).
 
 ### host.os (M1)
 - **Measures:** distro, version, architecture, init system, container or WSL, FIPS mode.

@@ -153,6 +153,11 @@ const INCLUDE_SHIPPED_DATA_ALLOWED: &[(&str, &str, &str)] = &[
 /// be a test module: it, or a module above it, is declared under `#[cfg(test)]`.
 const INCLUDE_DATA_ALLOWED: &[(&str, &str, &str)] = &[
     (
+        "crates/rdy-checks-host/src/cgroups/tests.rs",
+        "../../../../tests/fixtures/checks/host.cgroups/",
+        "embeds the expect.json goldens of tests/fixtures/checks/host.cgroups, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-host/src/disk/tests.rs",
         "../../../../tests/fixtures/checks/host.disk/",
         "embeds the expect.json goldens of tests/fixtures/checks/host.disk, because a check crate test may not read files",

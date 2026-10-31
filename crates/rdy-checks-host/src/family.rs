@@ -11,6 +11,7 @@ use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::cgroups::{self, CgroupsCheck};
 use crate::cpu::{self, CpuCheck};
 use crate::disk::{self, Disk};
 use crate::firewall::{self, Firewall};
@@ -112,17 +113,6 @@ static CONTAINER_RUNTIME: CheckInfo = info(
     5,
     ROOT,
 );
-static CGROUPS: CheckInfo = info(
-    "host.cgroups",
-    "cgroup version and controllers",
-    CheckMeta {
-        title: "cgroups",
-        remediation: "Boot with the cgroup version the vendor needs. On the RHEL family, run `grubby --update-kernel=ALL --args=\"systemd.unified_cgroup_hierarchy=1\"` and reboot. On Debian and Ubuntu, add the argument to `GRUB_CMDLINE_LINUX` in `/etc/default/grub`, run `update-grub` and reboot.",
-    },
-    2,
-    &[],
-);
-
 static KERNEL: CheckInfo = info(
     "host.kernel",
     "Kernel version and modules",
@@ -146,7 +136,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &cpu::INFO,
     &SYSCTL,
     &CONTAINER_RUNTIME,
-    &CGROUPS,
+    &cgroups::INFO,
     &os::INFO,
     &KERNEL,
 ];
@@ -155,7 +145,7 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
+/// `host.cgroups` ([`CgroupsCheck`]), `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
 /// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]) and `host.security_agents` ([`SecurityAgents`]) are
 /// real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
@@ -178,12 +168,11 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 6] = [
+static STUBS: [&str; 5] = [
     "host.ports",
     "host.time_sync",
     "host.sysctl",
     "host.container_runtime",
-    "host.cgroups",
     "host.kernel",
 ];
 
@@ -207,6 +196,9 @@ impl Family for HostFamily {
                 .flatten()
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
+        if let CheckParams::HostCgroups(cgroups) = &params {
+            return Ok(Built::new(Box::new(CgroupsCheck::from_params(cgroups))));
         }
         if let CheckParams::HostCpu(cpu) = &params {
             return Ok(Built::new(Box::new(CpuCheck::from_params(cpu))));

@@ -211,7 +211,6 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
             "host.time_sync",
             "host.sysctl",
             "host.container_runtime",
-            "host.cgroups",
             "host.kernel",
         ]
     );
@@ -252,6 +251,51 @@ fn host_firewall_builds_the_real_check_from_a_spec_entry() {
         "Host firewall active, inbound ports allowed"
     );
     assert!(!HostFamily::stub_ids().contains(&"host.firewall"));
+}
+
+#[test]
+fn host_cgroups_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "host.cgroups", "version": "v2", "controllers": ["cpu", "memory"]}),
+    )
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.cgroups");
+    assert_eq!(built.check.info().summary, "cgroup version and controllers");
+    assert!(!HostFamily::stub_ids().contains(&"host.cgroups"));
+    // The helper's reads are declared, or the cgroup files would be refused at run time.
+    for path in crate::cgroup::READS {
+        assert!(built.check.info().reads.contains(&path), "{path}");
+    }
+
+    // A stub reports the same id, so run it: only the real check ends in a finding.
+    let fixture = rdy_engine::testing::Fixture::load(
+        &rdy_engine::testing::fixtures_dir(),
+        "checks/host.cgroups/v2-ok",
+    )
+    .expect("the fixture loads");
+    let run = rdy_engine::testing::TestRun::for_fixture(&fixture);
+    let ctx = run.context_for(
+        built.check.info(),
+        "host.cgroups",
+        Os::Linux,
+        Vec::<rdy_engine::check::Need>::new(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    let finding = runtime
+        .block_on(built.check.run(&ctx))
+        .expect("the real check ends in a finding, not an error");
+    assert_eq!(finding.level, rdy_engine::check::Level::Pass);
+    assert_eq!(
+        finding.message,
+        "cgroup v2 in use, controllers `cpu` and `memory` available"
+    );
 }
 
 #[test]

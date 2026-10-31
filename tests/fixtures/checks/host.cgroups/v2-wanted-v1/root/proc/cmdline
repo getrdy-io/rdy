@@ -1,0 +1,1 @@
+BOOT_IMAGE=/boot/vmlinuz-5.14.21-150500.55.39-default root=UUID=0a1b2c3d-0000-4000-8000-000000000002 splash=silent quiet
