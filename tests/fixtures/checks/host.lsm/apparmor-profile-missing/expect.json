@@ -1,0 +1,52 @@
+{
+  "entry": {
+    "apparmor": {
+      "allow": [
+        "enabled"
+      ],
+      "require_profiles": [
+        "acme-agent"
+      ]
+    },
+    "id": "host.lsm"
+  },
+  "result": {
+    "expected": {
+      "apparmor": {
+        "allow": [
+          "enabled"
+        ],
+        "require_profiles": [
+          "acme-agent"
+        ]
+      }
+    },
+    "fix": "Ask the vendor for the profile, load it with `apparmor_parser -r <profile file>`, and check it with `aa-status`.",
+    "level": "fail",
+    "message": "The AppArmor profile acme-agent is not loaded.",
+    "notes": [],
+    "observed": {
+      "apparmor": {
+        "profiles": {
+          "complain": 1,
+          "enforce": 2,
+          "loaded": 3
+        },
+        "required_profiles": {
+          "missing": [
+            "acme-agent"
+          ],
+          "required": [
+            "acme-agent"
+          ]
+        },
+        "state": "enabled"
+      },
+      "selinux": {
+        "configured": null,
+        "state": "disabled"
+      }
+    },
+    "partial": null
+  }
+}

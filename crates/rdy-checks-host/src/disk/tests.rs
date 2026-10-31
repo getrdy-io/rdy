@@ -1,10 +1,10 @@
 //! Tests of `host.disk` against the synthetic machines under `tests/fixtures/checks/host.disk/`.
 //!
 //! Every case loads with the real fixture loader and runs through the real scheduler, so the check
-//! timeout, the manifest (`statfs` and `reads`) and the action log are the ones a run has. Each case
-//! has an `expect.json` with the spec entry and the reviewed result. The test crate may not read files,
-//! so the goldens are compiled in with `include_str!` to read the spec entry. `assert_golden` compares
-//! the bytes: a mismatch fails with a diff, and `UPDATE_GOLDENS=1` rewrites the file for review.
+//! timeout, the manifest (`statfs` and `reads`) and the action log are the ones a run has. The
+//! comparison of every case with its `expect.json` is in `crate::expect_cases`. The goldens are also
+//! compiled in with `include_str!` below, because a check crate test may not read files, to read the
+//! spec entry that the other tests in this file reuse.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,7 +12,6 @@ use std::time::Duration;
 use rdy_engine::check::{Check, CheckOutcome, Finding, Level, Need, Os};
 use rdy_engine::probe::ActionLogOutput;
 use rdy_engine::sched::{End, Planned};
-use rdy_engine::testing::golden::assert_golden;
 use rdy_engine::testing::{Fixture, TestRun, assert_within_manifest, fixtures_dir};
 use rdy_spec::check::CheckParams;
 use rdy_spec::result::{Action, ActionKind, ActionOutcome};
@@ -104,68 +103,6 @@ fn run(fixture: &Fixture, disk: Disk) -> Run {
     Run {
         end: ran.remove(0).end,
         log: test_run.action_log(),
-    }
-}
-
-fn level_word(level: Level) -> &'static str {
-    match level {
-        Level::Pass => "pass",
-        Level::Warn => "warn",
-        Level::Fail => "fail",
-    }
-}
-
-/// The result as the goldens hold it.
-fn render(end: &End) -> Value {
-    match end {
-        End::TimedOut { after } => json!({ "timed_out_ms": after.as_millis() }),
-        End::Done(done) => match done.as_ref() {
-            Ok(finding) => json!({
-                "level": level_word(finding.level),
-                "message": finding.message,
-                "observed": finding.observed,
-                "expected": finding.expected,
-                "fix": finding.fix,
-                "notes": finding.notes,
-                "partial": finding.partial.as_ref().map(|p| json!({
-                    "missing": p.missing.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>(),
-                    "note": p.note,
-                })),
-            }),
-            Err(error) => json!({ "error": error.to_string() }),
-        },
-        other => panic!("unexpected end: {other:?}"),
-    }
-}
-
-/// The value with every object's keys in order. The goldens have sorted keys, and a build where
-/// another crate turns on serde_json's `preserve_order` would otherwise write them in insertion order.
-fn sorted(value: Value) -> Value {
-    match value {
-        Value::Object(map) => {
-            let mut entries: Vec<(String, Value)> = map.into_iter().collect();
-            entries.sort_by(|a, b| a.0.cmp(&b.0));
-            Value::Object(entries.into_iter().map(|(k, v)| (k, sorted(v))).collect())
-        }
-        Value::Array(items) => Value::Array(items.into_iter().map(sorted).collect()),
-        other => other,
-    }
-}
-
-#[test]
-fn every_case_matches_its_golden() {
-    for (case, text) in CASES {
-        // The compiled-in golden is only read for the spec entry the case runs with.
-        let golden: Value = serde_json::from_str(text).unwrap_or_else(|e| panic!("{case}: {e}"));
-        let entry = &golden["entry"];
-        let result = run(&load(case), disk(entry));
-        let actual = json!({ "entry": entry, "result": render(&result.end) });
-        let mut bytes = serde_json::to_string_pretty(&sorted(actual)).expect("json");
-        bytes.push('\n');
-        assert_golden(
-            fixtures_dir().join(format!("checks/host.disk/{case}/expect.json")),
-            bytes,
-        );
     }
 }
 

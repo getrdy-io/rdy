@@ -1,0 +1,52 @@
+{
+  "entry": {
+    "id": "host.lsm",
+    "selinux": {
+      "allow": [
+        "enforcing"
+      ],
+      "watch": [
+        "acme_t"
+      ]
+    }
+  },
+  "result": {
+    "expected": {
+      "selinux": {
+        "allow": [
+          "enforcing"
+        ],
+        "denials_max": 0,
+        "denials_window": "24h",
+        "watch": [
+          "acme_t"
+        ]
+      }
+    },
+    "fix": "Run `setenforce 1`, and set `SELINUX=enforcing` in `/etc/selinux/config` so it stays.",
+    "level": "fail",
+    "message": "SELinux is permissive, and the spec allows enforcing.",
+    "notes": [
+      "SELinux is permissive now, and /etc/selinux/config sets enforcing. The next boot applies the configured mode."
+    ],
+    "observed": {
+      "apparmor": {
+        "state": "disabled"
+      },
+      "selinux": {
+        "configured": "enforcing",
+        "denials": {
+          "count": 0,
+          "groups": [],
+          "inspected": true,
+          "permissive": 0,
+          "watched": {},
+          "window": "24h",
+          "window_truncated": false
+        },
+        "state": "permissive"
+      }
+    },
+    "partial": null
+  }
+}

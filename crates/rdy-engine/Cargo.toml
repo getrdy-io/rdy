@@ -13,7 +13,7 @@ include = ["src/**", "templates/**", "Cargo.toml", "LICENSE", "NOTICE"]
 # Test-only helpers (`TagKey::fixed`) and the replay backend with its fixture loader (M1-049). A release
 # build with this feature does not compile (see `rdy_engine::redact`). CI also keeps it out of the release
 # binary (04 section 3.3). `toml` reads `fixture.toml` and is in no other engine build.
-testing = ["dep:toml"]
+testing = ["dep:toml", "tokio?/test-util"]
 # Loopback servers for the network tests (M1-090, ADR 0035): a TLS server with a generated CA, CONNECT
 # proxy modes, a closed port, a listener that never accepts, a reset after the ClientHello, a 302 server
 # and a dual-stack case. Test-only like `testing`, which it implies. It needs tokio for sockets but not

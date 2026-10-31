@@ -1,0 +1,42 @@
+{
+  "entry": {
+    "arch": [
+      "arm64"
+    ],
+    "flags": [
+      "asimd"
+    ],
+    "id": "host.cpu",
+    "min": 2
+  },
+  "result": {
+    "expected": {
+      "arch": [
+        "aarch64"
+      ],
+      "flags": [
+        "asimd"
+      ],
+      "min": 2
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "4 vCPUs found, 2 needed; arch aarch64; flags present: asimd",
+    "notes": [],
+    "observed": {
+      "allowed_cores": 4,
+      "arch": "aarch64",
+      "effective_cores": 4.0,
+      "flags": {
+        "asimd": true
+      },
+      "hypervisor": true,
+      "logical_cores": 4,
+      "physical_cores": null,
+      "quota_cores": null,
+      "virtualization": "vm",
+      "x86_64_level": null
+    },
+    "partial": null
+  }
+}

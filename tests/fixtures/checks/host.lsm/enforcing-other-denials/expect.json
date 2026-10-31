@@ -1,0 +1,65 @@
+{
+  "entry": {
+    "id": "host.lsm",
+    "selinux": {
+      "allow": [
+        "enforcing"
+      ],
+      "watch": [
+        "acme_t"
+      ]
+    }
+  },
+  "result": {
+    "expected": {
+      "selinux": {
+        "allow": [
+          "enforcing"
+        ],
+        "denials_max": 0,
+        "denials_window": "24h",
+        "watch": [
+          "acme_t"
+        ]
+      }
+    },
+    "fix": "Read them with `ausearch -m avc -ts yesterday`. Install the vendor policy module, or label the volume with `chcon -Rt container_file_t <volume path>` or the `:Z` mount option. The `chcon` label does not survive a relabel. Ask the vendor for the persistent rule. Last resort: run `setenforce 0` now and set `SELINUX=permissive` in `/etc/selinux/config`. This turns SELinux protection off, so ask the security team first.",
+    "level": "warn",
+    "message": "SELinux is enforcing and denied 3 actions in the last 24h for container_t.",
+    "notes": [
+      "1 of the denials were logged in permissive mode, so they were not blocked."
+    ],
+    "observed": {
+      "apparmor": {
+        "state": "disabled"
+      },
+      "selinux": {
+        "configured": "enforcing",
+        "denials": {
+          "count": 3,
+          "groups": [
+            {
+              "class": "file",
+              "count": 2,
+              "source": "container_t",
+              "target": "var_lib_t"
+            },
+            {
+              "class": "dir",
+              "count": 1,
+              "source": "container_t",
+              "target": "tmp_t"
+            }
+          ],
+          "inspected": true,
+          "permissive": 1,
+          "watched": {},
+          "window": "24h",
+          "window_truncated": false
+        },
+        "state": "enforcing"
+      }
+    },
+    "partial": null
+  }
+}

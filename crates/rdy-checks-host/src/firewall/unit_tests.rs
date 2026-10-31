@@ -7,7 +7,14 @@ use super::route;
 use super::service::{self, Cover, Services, Svc};
 use super::ufw::{self, Policy};
 
+/// A file of a case or of the `base-firewalld` environment under `tests/fixtures/envs/`.
 macro_rules! fx {
+    (firewalld $file:literal) => {
+        include_str!(concat!(
+            "../../../../tests/fixtures/envs/base-firewalld/",
+            $file
+        ))
+    };
     ($case:literal, $file:literal) => {
         include_str!(concat!(
             "../../../../tests/fixtures/checks/host.firewall/",
@@ -18,7 +25,7 @@ macro_rules! fx {
     };
 }
 
-const ROUTE: &str = fx!("base-firewalld", "root/proc/net/route");
+const ROUTE: &str = fx!(firewalld "root/proc/net/route");
 const RICH: &str = fx!("firewalld-rich-rule", "commands/list-all-public.json");
 const USER_RULES: &str = fx!("ufw-allowed", "root/etc/ufw/user.rules");
 const SERVICE: &str = fx!(

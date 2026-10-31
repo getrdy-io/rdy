@@ -1,0 +1,28 @@
+{
+  "entry": {
+    "id": "host.cpu",
+    "min": 8
+  },
+  "result": {
+    "expected": {
+      "min": 8
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "8 vCPUs found, 8 needed",
+    "notes": [],
+    "observed": {
+      "allowed_cores": 8,
+      "arch": "x86_64",
+      "effective_cores": 8.0,
+      "flags": {},
+      "hypervisor": true,
+      "logical_cores": 8,
+      "physical_cores": 4,
+      "quota_cores": null,
+      "virtualization": "vm",
+      "x86_64_level": 4
+    },
+    "partial": null
+  }
+}

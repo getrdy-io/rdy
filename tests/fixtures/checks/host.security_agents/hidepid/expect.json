@@ -1,0 +1,35 @@
+{
+  "entry": {
+    "forbid": [
+      "falco"
+    ],
+    "id": "host.security_agents"
+  },
+  "result": {
+    "expected": {
+      "allow": [],
+      "forbid": [
+        "falco"
+      ]
+    },
+    "fix": "Run rdy as root so it can see every process.",
+    "level": "warn",
+    "message": "No known security software process was detected among the 4 processes rdy could read (limited view). Cannot confirm that the forbidden software is absent.",
+    "notes": [
+      "rdy sees the processes of the machine it runs on. In a container, host processes are not visible."
+    ],
+    "observed": {
+      "detected": [],
+      "limited_view": true,
+      "list_cut": false,
+      "processes_read": 4,
+      "processes_unreadable": 0
+    },
+    "partial": {
+      "missing": [
+        "Root"
+      ],
+      "note": "Other users' processes may be hidden from rdy, so absence is not proven."
+    }
+  }
+}

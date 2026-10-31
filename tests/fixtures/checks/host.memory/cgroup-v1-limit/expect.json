@@ -1,0 +1,34 @@
+{
+  "entry": {
+    "id": "host.memory",
+    "min": "4Gi"
+  },
+  "result": {
+    "expected": {
+      "band_bytes": 0,
+      "min_available_bytes": 2147483648,
+      "min_bytes": 4294967296,
+      "swap": "any"
+    },
+    "fix": "The memory limit of cgroup /system.slice/acme.slice is 2 GiB, 4 GiB needed (the host has 15.6 GiB). Raise it with `systemctl set-property acme.slice MemoryLimit=4G`.",
+    "level": "fail",
+    "message": "2 GiB found, 4 GiB needed, limited by cgroup /system.slice/acme.slice, host has 15.6 GiB",
+    "notes": [
+      "Available memory is the host's figure capped at the cgroup limit. Use inside the cgroup is not measured."
+    ],
+    "observed": {
+      "available_bytes": 12288000000,
+      "available_effective_bytes": 2147483648,
+      "available_estimated": false,
+      "cgroup_hierarchy": "v1",
+      "cgroup_limit_at": "/system.slice/acme.slice",
+      "cgroup_limit_bytes": 2147483648,
+      "cgroup_swap_limit_bytes": null,
+      "effective_bytes": 2147483648,
+      "swap_total_bytes": 0,
+      "swap_used_bytes": 0,
+      "total_bytes": 16786862080
+    },
+    "partial": null
+  }
+}

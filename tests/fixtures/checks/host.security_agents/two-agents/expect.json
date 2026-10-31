@@ -1,0 +1,53 @@
+{
+  "entry": {
+    "id": "host.security_agents"
+  },
+  "result": {
+    "expected": {
+      "allow": [],
+      "forbid": []
+    },
+    "fix": "Software in this category often inspects file opens and process launches. If the install is slow or fails, ask the security team to review exclusions for the product's paths, then run rdy again. Detected: Microsoft Defender for Endpoint on Linux (EDR), Falco (EDR) and Veeam Agent for Linux (backup). The vendor's own page on exclusions: Microsoft Defender for Endpoint on Linux: https://learn.microsoft.com/defender-endpoint/linux-exclusions.",
+    "level": "warn",
+    "message": "Detected Microsoft Defender for Endpoint on Linux (EDR), Falco (EDR) and Veeam Agent for Linux (backup).",
+    "notes": [
+      "A match means a process with this name is running. It does not show that the product is installed."
+    ],
+    "observed": {
+      "detected": [
+        {
+          "category": "edr",
+          "count": 2,
+          "display_name": "Microsoft Defender for Endpoint on Linux",
+          "id": "microsoft-defender-endpoint-linux",
+          "processes": [
+            "wdavdaemon"
+          ]
+        },
+        {
+          "category": "edr",
+          "count": 1,
+          "display_name": "Falco",
+          "id": "falco",
+          "processes": [
+            "falco"
+          ]
+        },
+        {
+          "category": "backup",
+          "count": 1,
+          "display_name": "Veeam Agent for Linux",
+          "id": "veeam-agent-linux",
+          "processes": [
+            "veeamservice"
+          ]
+        }
+      ],
+      "limited_view": false,
+      "list_cut": false,
+      "processes_read": 7,
+      "processes_unreadable": 0
+    },
+    "partial": null
+  }
+}

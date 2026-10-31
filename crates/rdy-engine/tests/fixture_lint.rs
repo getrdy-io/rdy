@@ -649,9 +649,6 @@ fn loader_findings(fixtures_root: &Path, dirs: &[String]) -> Vec<Finding> {
         let Err(error) = Fixture::load(fixtures_root, dir) else {
             continue;
         };
-        if loader_pending(dir) && is_missing_base(&error) {
-            continue;
-        }
         let of = |fixture: &str, path: &str| {
             if path.is_empty() || path == "." || path.starts_with('(') {
                 format!("{FIXTURES}/{fixture}")
@@ -670,49 +667,8 @@ fn loader_findings(fixtures_root: &Path, dirs: &[String]) -> Vec<Finding> {
     found
 }
 
-/// Fixture directories (from the repo root) that cannot finish loading yet, with the reason. Only one loader
-/// error is excused for them: the `base` is not found. Every other lint rule still covers them, and a bad
-/// manifest still fails. The loader stops at the missing base before it checks commands, so a duplicate argv
-/// or bad command JSON in these cases is not seen until the base is where the loader looks. The test
-/// `a_pending_case_fails_on_a_duplicate_argv_once_its_base_is_found` proves those checks run on a real
-/// `host.firewall` case with its base under `envs/`. The `host.firewall`
-/// cases were written before the loader (M1-147) and name a `base` that is a sibling directory, while the
-/// loader looks a base up under `envs/`. M1-117 builds the fixture environments under `envs/`. It moves these
-/// bases there and removes this row. A row that matches no fixture is a finding, so the list cannot outlive
-/// its cases.
-const LOADER_PENDING: &[(&str, &str)] = &[(
-    "tests/fixtures/checks/host.firewall/",
-    "the cases name a sibling `base`; M1-117 moves the bases to envs/",
-)];
-
-/// The loader's "base not found" error. The case itself is read first, so a `Read` error on a fixture below
-/// `envs/` is always the base.
-fn is_missing_base(error: &FixtureError) -> bool {
-    matches!(error, FixtureError::Read { fixture, .. } if fixture.starts_with("envs/"))
-}
-
-/// Whether `dir` (a name below `tests/fixtures`) is covered by a `LOADER_PENDING` row.
-fn loader_pending(dir: &str) -> bool {
-    let full = format!("{FIXTURES}/{dir}/");
-    LOADER_PENDING
-        .iter()
-        .any(|(prefix, _)| full.starts_with(prefix))
-}
-
-/// The fixture directories the loader rule covers, as names below `tests/fixtures`, and the findings
-/// for pending rows that match nothing.
-fn loadable(dirs: &BTreeSet<String>, found: &mut Vec<Finding>) -> Vec<String> {
-    for (prefix, why) in LOADER_PENDING {
-        if !dirs.iter().any(|dir| dir.starts_with(prefix)) {
-            found.push(finding(
-                prefix.trim_end_matches('/'),
-                "loader",
-                format!(
-                    "LOADER_PENDING names a directory with no fixtures ({why}). Fix: remove the row"
-                ),
-            ));
-        }
-    }
+/// The fixture directories the loader rule covers, as names below `tests/fixtures`.
+fn loadable(dirs: &BTreeSet<String>) -> Vec<String> {
     dirs.iter()
         .filter_map(|dir| dir.strip_prefix(&format!("{FIXTURES}/")))
         .map(str::to_owned)
@@ -1090,7 +1046,7 @@ fn lint_disk(repo: &Path) -> io::Result<Vec<Finding>> {
         repo: repo.to_owned(),
     };
     let mut found = lint_tree(&tree)?;
-    let dirs = loadable(&fixture_dirs(&tree.entries()?), &mut found);
+    let dirs = loadable(&fixture_dirs(&tree.entries()?));
     found.extend(loader_findings(&repo.join(FIXTURES), &dirs));
     found.sort();
     found.dedup();
@@ -1712,23 +1668,12 @@ fn a_repeated_json_key_fails_with_the_file_named() -> TestResult {
 }
 
 #[test]
-fn a_pending_case_is_excused_only_for_its_missing_base() -> TestResult {
-    let pending = "checks/host.firewall/ufw-planted";
-    assert!(loader_pending(pending));
-    assert!(!loader_pending("checks/host.memory/pass"));
-    assert!(!loader_pending("checks/host.firewall-other/x"));
-
+fn a_case_whose_base_is_missing_is_a_finding() -> TestResult {
     let dir = tempfile::tempdir()?;
     let manifest = MANIFEST.replace("answers", "base = \"base-ufw\"\nanswers");
-    write(dir.path(), &format!("{pending}/fixture.toml"), &manifest)?;
-    // The base is a sibling, not under envs/: the one excused error.
-    let found = loader_findings(dir.path(), &[pending.to_owned()]);
-    assert!(found.is_empty(), "{}", render(&found));
-
-    // The same missing base in a case that is not pending is a finding.
-    let other = "checks/host.test/needs-base";
-    write(dir.path(), &format!("{other}/fixture.toml"), &manifest)?;
-    let found = loader_findings(dir.path(), &[other.to_owned()]);
+    let case = "checks/host.test/needs-base";
+    write(dir.path(), &format!("{case}/fixture.toml"), &manifest)?;
+    let found = loader_findings(dir.path(), &[case.to_owned()]);
     assert_eq!(found.len(), 1, "{}", render(&found));
     assert!(
         found[0].path.ends_with("envs/base-ufw/fixture.toml"),
@@ -1736,13 +1681,13 @@ fn a_pending_case_is_excused_only_for_its_missing_base() -> TestResult {
         found[0]
     );
 
-    // A bad manifest in a pending case still fails: the manifest is read before the base.
+    // A bad manifest is reported before the base is looked up.
     write(
         dir.path(),
-        &format!("{pending}/fixture.toml"),
+        &format!("{case}/fixture.toml"),
         &manifest.replace("origin = \"hand\"", "origin = \"laptop\""),
     )?;
-    let found = loader_findings(dir.path(), &[pending.to_owned()]);
+    let found = loader_findings(dir.path(), &[case.to_owned()]);
     assert_eq!(found.len(), 1, "{}", render(&found));
     assert!(found[0].detail.contains("laptop"), "{}", found[0]);
     Ok(())
@@ -1763,18 +1708,20 @@ fn copy_dir(from: &Path, to: &Path) -> TestResult {
 }
 
 #[test]
-fn a_pending_case_fails_on_a_duplicate_argv_once_its_base_is_found() -> TestResult {
-    // A real case that names a `base`, with that sibling base copied to `envs/<base>`, where the loader looks.
-    let real = repo_root().join(FIXTURES).join("checks/host.firewall");
+fn a_case_with_a_base_fails_on_a_duplicate_argv() -> TestResult {
+    // A real case that names a `base`, with its base under `envs/<base>` as in the tree.
+    let real = repo_root().join(FIXTURES);
     let case = "checks/host.firewall/ufw-closed";
     let dir = tempfile::tempdir()?;
-    copy_dir(&real.join("ufw-closed"), &dir.path().join(case))?;
-    copy_dir(&real.join("base-ufw"), &dir.path().join("envs/base-ufw"))?;
-    assert!(loader_pending(case));
+    copy_dir(&real.join(case), &dir.path().join(case))?;
+    copy_dir(
+        &real.join("envs/base-ufw"),
+        &dir.path().join("envs/base-ufw"),
+    )?;
     let found = loader_findings(dir.path(), &[case.to_owned()]);
     assert!(found.is_empty(), "{}", render(&found));
 
-    // The same case with a duplicate argv: the finding is not excused, because the base was found.
+    // The same case with a duplicate argv.
     write(
         dir.path(),
         &format!("{case}/commands/one.json"),
@@ -1791,17 +1738,4 @@ fn a_pending_case_fails_on_a_duplicate_argv_once_its_base_is_found() -> TestResu
     assert!(found[0].detail.contains("again.json"), "{}", found[0]);
     assert!(found[0].detail.contains("one.json"), "{}", found[0]);
     Ok(())
-}
-
-#[test]
-fn a_pending_row_with_no_fixtures_is_a_finding() {
-    let mut found = Vec::new();
-    let dirs = loadable(&BTreeSet::new(), &mut found);
-    assert!(dirs.is_empty());
-    assert_eq!(found.len(), LOADER_PENDING.len(), "{}", render(&found));
-    assert!(
-        found.iter().all(|f| f.rule == "loader"),
-        "{}",
-        render(&found)
-    );
 }
