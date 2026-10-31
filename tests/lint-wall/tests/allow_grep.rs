@@ -158,6 +158,11 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &str, &str)] = &[
         "embeds the expect.json goldens of tests/fixtures/checks/host.disk, because a check crate test may not read files",
     ),
     (
+        "crates/rdy-checks-host/src/container_runtime/tests.rs",
+        "../../../../tests/fixtures/checks/host.container_runtime/",
+        "embeds the expect.json goldens of tests/fixtures/checks/host.container_runtime, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-host/src/family/tests.rs",
         "../../../../examples/specs/acme-platform.yaml",
         "embeds examples/specs/acme-platform.yaml for a test",

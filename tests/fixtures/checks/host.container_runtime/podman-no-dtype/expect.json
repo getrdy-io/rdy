@@ -1,0 +1,48 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "podman"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "podman"
+      ],
+      "storage_driver": null
+    },
+    "fix": "Move `graphroot` under [storage] in /etc/containers/storage.conf (default /var/lib/containers/storage) to an ext4 volume, or to an XFS volume made with ftype=1. Containers made in the old place are not moved.",
+    "level": "fail",
+    "message": "podman 4.9.4 keeps its images on a file system without d_type support, which overlay storage needs.",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "read",
+          "cgroup_driver": "systemd",
+          "cgroup_driver_source": "podman info",
+          "config_version": null,
+          "d_type": false,
+          "installed": false,
+          "proxy": null,
+          "rootless": false,
+          "rootless_socket": false,
+          "runtime": "podman",
+          "socket": "/run/podman/podman.sock",
+          "socket_present": true,
+          "storage_driver": "overlay",
+          "storage_driver_source": "podman info",
+          "version": "4.9.4"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

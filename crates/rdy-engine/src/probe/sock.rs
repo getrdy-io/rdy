@@ -312,7 +312,24 @@ impl Probe {
     /// [`ProbeError::PermissionDenied`] when the socket is missing or the user may not open it;
     /// [`ProbeError::Timeout`]; the other variants for a reply that is not HTTP.
     pub async fn unix_get(&self, socket: &Path, path: &str) -> Result<UnixResponse, ProbeError> {
-        self.unix_request("GET", socket, path).await
+        self.unix_request("GET", socket, path, None).await
+    }
+
+    /// Like [`Probe::unix_get`], with a shorter limit than [`UNIX_TIMEOUT`]. The limit can only be
+    /// lowered: a longer `within` is cut to [`UNIX_TIMEOUT`]. A check that asks several daemons uses it
+    /// so one that hangs cannot use the whole check budget (M1-150).
+    ///
+    /// # Errors
+    ///
+    /// The same as [`Probe::unix_get`]. A daemon that does not answer within `within` is
+    /// [`ProbeError::Timeout`].
+    pub async fn unix_get_within(
+        &self,
+        socket: &Path,
+        path: &str,
+        within: Duration,
+    ) -> Result<UnixResponse, ProbeError> {
+        self.unix_request("GET", socket, path, Some(within)).await
     }
 
     /// The one path every unix socket request takes. The method is a parameter so the guard has a
@@ -322,6 +339,7 @@ impl Probe {
         method: &str,
         socket: &Path,
         path: &str,
+        within: Option<Duration>,
     ) -> Result<UnixResponse, ProbeError> {
         let shown = self.shown(socket);
         let mut fields = Map::new();
@@ -344,7 +362,10 @@ impl Probe {
                 if !self.socket_declared(socket, uid) {
                     return Err(refuse(entry, RULE_UNIX_UNDECLARED, &what));
                 }
-                let timeout = self.scope.peers.timeout(UNIX_TIMEOUT);
+                let timeout = self
+                    .scope
+                    .peers
+                    .timeout(within.map_or(UNIX_TIMEOUT, |w| w.min(UNIX_TIMEOUT)));
                 self.unless_ended(&what, hub.backend.unix_get(socket, path, timeout))
                     .await
             }

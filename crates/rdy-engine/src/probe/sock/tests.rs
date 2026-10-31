@@ -423,11 +423,111 @@ fn docker_fixture() -> Replay {
 }
 
 #[tokio::test]
+async fn an_unreadable_socket_gives_permission_denied_and_a_failed_entry() {
+    // A socket the fixture marks unreadable stands for one the user may not open (M1-150).
+    let hub = hub(docker_fixture().unreadable(DOCKER));
+    let probe = probe(&hub, runtime(), Os::Linux, &[]);
+    let error = probe
+        .unix_get(Path::new(DOCKER), "/version")
+        .await
+        .expect_err("not in the group");
+    assert_eq!(error, ProbeError::PermissionDenied);
+    assert_eq!(request_entry(&hub).outcome, ActionOutcome::Failed);
+
+    // A directory above it does the same.
+    let hub = self::hub(docker_fixture().unreadable("/var/run"));
+    let probe = self::probe(&hub, runtime(), Os::Linux, &[]);
+    let error = probe
+        .unix_get(Path::new(DOCKER), "/version")
+        .await
+        .expect_err("hidden");
+    assert_eq!(error, ProbeError::PermissionDenied);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_delayed_unix_reply_arrives_after_its_delay_and_a_huge_one_is_a_hang() {
+    use std::time::Duration;
+
+    // M1-150: a fixture `delay_ms` on a Docker reply. Under a paused clock it costs no real time.
+    let hub = hub(Replay::new().unix_get_after(
+        DOCKER,
+        "/version",
+        200,
+        r#"{"Version":"27.0.1"}"#,
+        Duration::from_secs(2),
+    ));
+    let probe = probe(&hub, runtime(), Os::Linux, &[]);
+    let started = tokio::time::Instant::now();
+    let reply = probe
+        .unix_get(Path::new(DOCKER), "/version")
+        .await
+        .expect("answered");
+    assert_eq!(reply.status, 200);
+    assert_eq!(started.elapsed(), Duration::from_secs(2));
+
+    let hub = self::hub(Replay::new().unix_get_after(
+        DOCKER,
+        "/version",
+        200,
+        "{}",
+        Duration::from_secs(3600),
+    ));
+    let probe = self::probe(&hub, runtime(), Os::Linux, &[]);
+    let started = tokio::time::Instant::now();
+    let error = probe
+        .unix_get(Path::new(DOCKER), "/version")
+        .await
+        .expect_err("the daemon never answered");
+    assert_eq!(error, ProbeError::Timeout);
+    assert_eq!(started.elapsed(), UNIX_TIMEOUT);
+    assert_eq!(request_entry(&hub).outcome, ActionOutcome::Timeout);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unix_get_within_can_only_shorten_the_limit() {
+    use std::time::Duration;
+
+    let slow =
+        || Replay::new().unix_get_after(DOCKER, "/version", 200, "{}", Duration::from_secs(3));
+    let hub = hub(slow());
+    let probe = probe(&hub, runtime(), Os::Linux, &[]);
+    let started = tokio::time::Instant::now();
+    let error = probe
+        .unix_get_within(Path::new(DOCKER), "/version", Duration::from_secs(1))
+        .await
+        .expect_err("too slow for the short limit");
+    assert_eq!(error, ProbeError::Timeout);
+    assert_eq!(started.elapsed(), Duration::from_secs(1));
+    // A longer `within` than the facade limit is cut to the facade limit, and a reply inside it arrives.
+    let reply = probe
+        .unix_get_within(Path::new(DOCKER), "/version", Duration::from_secs(600))
+        .await
+        .expect("inside the facade limit");
+    assert_eq!(reply.status, 200);
+    // The path rules are the same ones.
+    let error = probe
+        .unix_get_within(
+            Path::new(DOCKER),
+            "/containers/json",
+            Duration::from_secs(1),
+        )
+        .await
+        .expect_err("not on the allowlist");
+    assert_eq!(denied_rule(&error), RULE_UNIX_API_PATH);
+}
+
+#[test]
+fn a_refused_connection_has_its_own_error_kind() {
+    let error = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+    assert_eq!(ProbeError::from_io(&error), ProbeError::ConnectionRefused);
+}
+
+#[tokio::test]
 async fn a_post_on_the_docker_socket_is_refused_and_logged() {
     let hub = hub(docker_fixture());
     let probe = probe(&hub, runtime(), Os::Linux, &[]);
     let error = probe
-        .unix_request("POST", Path::new(DOCKER), "/containers/create")
+        .unix_request("POST", Path::new(DOCKER), "/containers/create", None)
         .await
         .expect_err("a POST");
     assert_eq!(denied_rule(&error), RULE_UNIX_METHOD);
@@ -452,7 +552,7 @@ async fn no_other_method_gets_through_even_on_an_allowed_path() {
         "POST", "PUT", "DELETE", "PATCH", "HEAD", "get", "GET ", "CONNECT", "",
     ] {
         let error = probe
-            .unix_request(method, Path::new(DOCKER), "/info")
+            .unix_request(method, Path::new(DOCKER), "/info", None)
             .await
             .expect_err(method);
         assert_eq!(denied_rule(&error), RULE_UNIX_METHOD, "{method:?}");
@@ -1052,7 +1152,7 @@ mod live {
             // A POST never reaches the socket.
             let before = seen.connections.load(Ordering::SeqCst);
             let error = probe
-                .unix_request("POST", socket, "/containers/create")
+                .unix_request("POST", socket, "/containers/create", None)
                 .await
                 .expect_err("a POST");
             assert_eq!(denied_rule(&error), RULE_UNIX_METHOD);

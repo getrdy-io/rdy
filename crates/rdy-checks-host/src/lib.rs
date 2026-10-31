@@ -3,7 +3,7 @@
 //! Internal to rdy. No API stability promise.
 //!
 //! So far this crate holds the OS support table, a stub for each host check that is not written yet
-//! (M1-067), [`CpuCheck`] (`host.cpu`, M1-071), [`Disk`] (`host.disk`, M1-068), [`Firewall`]
+//! (M1-067), [`ContainerRuntimeCheck`] (`host.container_runtime`, M1-150), [`CpuCheck`] (`host.cpu`, M1-071), [`Disk`] (`host.disk`, M1-068), [`Firewall`]
 //! (`host.firewall`, M1-147), [`Lsm`] (`host.lsm`, M1-145), [`Memory`] (`host.memory`, M1-069),
 //! [`OsCheck`] (`host.os`, M1-073) and [`SecurityAgents`] (`host.security_agents`, M1-146), which the
 //! family builds from their spec entries (M1-172), the security-software catalog ([`agents`]), and the
@@ -37,6 +37,7 @@
 
 pub mod agents;
 pub mod cgroup;
+mod container_runtime;
 mod cpu;
 mod disk;
 mod family;
@@ -48,6 +49,7 @@ mod reads;
 mod security_agents;
 mod text;
 
+pub use container_runtime::ContainerRuntimeCheck;
 pub use cpu::CpuCheck;
 pub use disk::Disk;
 pub use family::HostFamily;

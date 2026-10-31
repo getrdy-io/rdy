@@ -210,7 +210,6 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
             "host.ports",
             "host.time_sync",
             "host.sysctl",
-            "host.container_runtime",
             "host.cgroups",
             "host.kernel",
         ]

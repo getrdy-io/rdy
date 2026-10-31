@@ -1,0 +1,12 @@
+schema = 1
+name = "docker-and-containerd"
+summary = "Docker on cgroupfs and containerd on systemd, kubelet on systemd"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

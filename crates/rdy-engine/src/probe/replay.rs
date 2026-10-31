@@ -260,7 +260,9 @@ impl Replay {
 
     /// Makes a file or directory unreadable: a read of it fails with permission denied, as it does for
     /// a user without the right. `stat` of the path itself still works. On a directory it also hides
-    /// everything below it: a read or `stat` of a path under it fails with permission denied.
+    /// everything below it: a read or `stat` of a path under it fails with permission denied. On a
+    /// unix socket a `unix_get` fails with permission denied, as it does for a user outside the
+    /// socket's group.
     #[must_use]
     pub fn unreadable(mut self, path: impl AsRef<Path>) -> Self {
         let key = self.key(path.as_ref());
@@ -711,6 +713,10 @@ impl Backend for Replay {
         Box::pin(async move {
             let real = match self.judge(path, guard)? {
                 Judged::Special => {
+                    // A socket below a directory the user may not search cannot be looked at.
+                    if self.hidden_by_parent(&self.key(path)) {
+                        return Err(io::ErrorKind::PermissionDenied.into());
+                    }
                     return Ok(Some(FileMeta {
                         is_file: false,
                         is_dir: false,
@@ -840,9 +846,24 @@ impl Backend for Replay {
         &'a self,
         socket: &'a Path,
         path: &'a str,
-        _timeout: Duration,
+        timeout: Duration,
     ) -> BoxFuture<'a, Result<UnixResponse, ProbeError>> {
-        Box::pin(async move { self.net.unix(socket, path) })
+        Box::pin(async move {
+            // A socket the fixture marks unreadable (`root.manifest.json`), or one below an unreadable
+            // directory, cannot be opened: the user is not in the socket's group (M1-150).
+            let real = self.key(socket);
+            if self.unreadable.contains(&real) || self.hidden_by_parent(&real) {
+                return Err(ProbeError::PermissionDenied);
+            }
+            let (reply, delay) = self.net.unix(socket, path)?;
+            // A server that answers after the limit is a timeout at the limit, as the live backend has it.
+            if delay >= timeout {
+                pause(timeout).await.map_err(|e| ProbeError::from_io(&e))?;
+                return Err(ProbeError::Timeout);
+            }
+            pause(delay).await.map_err(|e| ProbeError::from_io(&e))?;
+            Ok(reply)
+        })
     }
 
     fn process_ids(&self) -> BoxFuture<'_, Result<ProcessIds, ProbeError>> {

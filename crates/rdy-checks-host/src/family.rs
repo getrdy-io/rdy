@@ -11,6 +11,7 @@ use rdy_engine::plan::NEWER_RDY;
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 
+use crate::container_runtime::{self, ContainerRuntimeCheck};
 use crate::cpu::{self, CpuCheck};
 use crate::disk::{self, Disk};
 use crate::firewall::{self, Firewall};
@@ -102,16 +103,6 @@ static SYSCTL: CheckInfo = info(
     2,
     &[],
 );
-static CONTAINER_RUNTIME: CheckInfo = info(
-    "host.container_runtime",
-    "Docker, containerd, Podman, CRI-O",
-    CheckMeta {
-        title: "Container runtime",
-        remediation: "Install a container runtime the vendor supports, and make its socket readable by adding the user to the `docker` group or by running as root. The runtime and the kubelet must use the same cgroup driver. For containerd, set `SystemdCgroup = true` in `/etc/containerd/config.toml`, then run `systemctl restart containerd`.",
-    },
-    5,
-    ROOT,
-);
 static CGROUPS: CheckInfo = info(
     "host.cgroups",
     "cgroup version and controllers",
@@ -145,7 +136,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &TIME_SYNC,
     &cpu::INFO,
     &SYSCTL,
-    &CONTAINER_RUNTIME,
+    &container_runtime::INFO,
     &CGROUPS,
     &os::INFO,
     &KERNEL,
@@ -155,7 +146,7 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.firewall`, `host.time_sync`, `host.cpu`, `host.sysctl`, `host.container_runtime`,
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
-/// `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
+/// `host.container_runtime` ([`ContainerRuntimeCheck`]), `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
 /// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]) and `host.security_agents` ([`SecurityAgents`]) are
 /// real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
@@ -178,11 +169,10 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 6] = [
+static STUBS: [&str; 5] = [
     "host.ports",
     "host.time_sync",
     "host.sysctl",
-    "host.container_runtime",
     "host.cgroups",
     "host.kernel",
 ];
@@ -207,6 +197,11 @@ impl Family for HostFamily {
                 .flatten()
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
+        if let CheckParams::HostContainerRuntime(runtime) = &params {
+            return Ok(Built::new(Box::new(ContainerRuntimeCheck::from_params(
+                runtime,
+            ))));
         }
         if let CheckParams::HostCpu(cpu) = &params {
             return Ok(Built::new(Box::new(CpuCheck::from_params(cpu))));

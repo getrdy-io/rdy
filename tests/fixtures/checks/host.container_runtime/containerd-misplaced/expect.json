@@ -1,0 +1,50 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "containerd"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "containerd"
+      ],
+      "storage_driver": null
+    },
+    "fix": "SystemdCgroup is set under plugins.\"io.containerd.grpc.v1.cri\", which a version 3 file does not read. Move it to [plugins.\"io.containerd.cri.v1.runtime\".containerd.runtimes.runc.options]. Then run `systemctl restart containerd`.",
+    "level": "fail",
+    "message": "containerd 2.0.1 uses the cgroupfs cgroup driver but the kubelet uses systemd.",
+    "notes": [
+      "containerd: SystemdCgroup is set under plugins.\"io.containerd.grpc.v1.cri\", which a version 3 file does not read"
+    ],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "not asked",
+          "cgroup_driver": "cgroupfs",
+          "cgroup_driver_source": "/etc/containerd/config.toml",
+          "config_version": 3,
+          "d_type": null,
+          "installed": true,
+          "proxy": null,
+          "rootless": null,
+          "rootless_socket": false,
+          "runtime": "containerd",
+          "socket": "/run/containerd/containerd.sock",
+          "socket_present": true,
+          "storage_driver": "overlayfs",
+          "storage_driver_source": "/etc/containerd/config.toml",
+          "version": "2.0.1"
+        }
+      ]
+    },
+    "partial": null
+  }
+}
