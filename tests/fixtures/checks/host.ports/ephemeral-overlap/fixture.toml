@@ -1,0 +1,12 @@
+schema = 1
+name = "ephemeral-overlap"
+summary = "6443 is outside the ephemeral range, 32800 is inside and 40000 is already reserved"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.ports"]
+
+[caps]
+root = true
+network = false
+kube = false

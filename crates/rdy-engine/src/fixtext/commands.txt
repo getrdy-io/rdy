@@ -43,6 +43,7 @@ rancher
 rdy
 rmmod
 setenforce
+ss
 swapoff
 sysctl
 systemctl

@@ -1,0 +1,65 @@
+{
+  "entry": {
+    "free": [
+      6443
+    ],
+    "id": "host.ports",
+    "udp_free": [
+      8472
+    ]
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 6443
+        }
+      ],
+      "udp_free": [
+        8472
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "6443/tcp and 8472/udp are free.",
+    "notes": [
+      "/proc/net/tcp6 is absent, so IPv6 is off or hidden on this machine.",
+      "/proc/net/udp6 is absent, so IPv6 is off or hidden on this machine."
+    ],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 0,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "free",
+          "unverified": null
+        }
+      ],
+      "udp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 8472,
+          "state": "free",
+          "unverified": null
+        }
+      ]
+    },
+    "partial": null
+  }
+}

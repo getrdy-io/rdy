@@ -1,0 +1,12 @@
+schema = 1
+name = "held-by-named-process"
+summary = "kube-apiserver (a systemd service) holds 6443; pids after it must not be walked"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.ports"]
+
+[caps]
+root = true
+network = false
+kube = false

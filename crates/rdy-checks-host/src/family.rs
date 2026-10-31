@@ -17,6 +17,7 @@ use crate::firewall::{self, Firewall};
 use crate::lsm::{self, Lsm};
 use crate::memory::{self, Memory};
 use crate::os::{self, OsCheck};
+use crate::ports::{self, Ports};
 use crate::security_agents::{self, SecurityAgents};
 
 #[cfg(test)]
@@ -72,16 +73,6 @@ const fn info(
 // Titles and remediation follow the Fix lines of 03 section 2, with the measured values taken out.
 // The check that replaces each stub may sharpen its text. Its findings carry the specific fix.
 
-static PORTS: CheckInfo = info(
-    "host.ports",
-    "Required ports free",
-    CheckMeta {
-        title: "Free ports",
-        remediation: "Stop the process that holds the port, or change the product's port setting. If the port is in the ephemeral range, reserve it with `net.ipv4.ip_local_reserved_ports` in a file under `/etc/sysctl.d/` as root, then run `sysctl --system`.",
-    },
-    5,
-    ROOT,
-);
 static TIME_SYNC: CheckInfo = info(
     "host.time_sync",
     "Clock sync state and offset",
@@ -138,7 +129,7 @@ static KERNEL: CheckInfo = info(
 static CHECKS: [&CheckInfo; 13] = [
     &disk::INFO,
     &memory::INFO,
-    &PORTS,
+    &ports::INFO,
     &lsm::INFO,
     &security_agents::INFO,
     &firewall::INFO,
@@ -156,8 +147,8 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
 /// `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
-/// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]) and `host.security_agents` ([`SecurityAgents`]) are
-/// real. The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]), `host.ports` ([`Ports`]) and
+/// `host.security_agents` ([`SecurityAgents`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
 /// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
@@ -178,8 +169,7 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 6] = [
-    "host.ports",
+static STUBS: [&str; 5] = [
     "host.time_sync",
     "host.sysctl",
     "host.container_runtime",
@@ -207,6 +197,9 @@ impl Family for HostFamily {
                 .flatten()
                 .map(|port| port.get());
             return Ok(Built::new(Box::new(Firewall::new(ports))));
+        }
+        if let CheckParams::HostPorts(ports) = &params {
+            return Ok(Built::new(Box::new(Ports::from_params(ports))));
         }
         if let CheckParams::HostCpu(cpu) = &params {
             return Ok(Built::new(Box::new(CpuCheck::from_params(cpu))));

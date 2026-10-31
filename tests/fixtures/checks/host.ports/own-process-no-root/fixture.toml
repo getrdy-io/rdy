@@ -1,0 +1,12 @@
+schema = 1
+name = "own-process-no-root"
+summary = "A non-root run: 8080 is held by the user's own process, whose fd directory the user may list"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.ports"]
+
+[caps]
+root = false
+network = false
+kube = false

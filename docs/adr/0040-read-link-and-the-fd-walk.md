@@ -64,8 +64,10 @@ Two choices were open: how a check declares the walk, and what a link read may r
   `/proc/<pid>/cgroup` as before. The process name comes from `comm`, not `cmdline`, which the
   allowlist refuses (ADR 0036; the catalog says so).
 - A walk over many processes makes many `denied` link entries (every file and pipe fd). They fold per
-  directory like any denied file call, so one process costs one directory key. M1-072 should stop at the
-  first match and list only the pids it needs.
+  directory like any denied file call, so one process costs one directory key. M1-072 stops at the
+  first match. A walk over hundreds of processes would still fill the quota of a check, so the log folds
+  the refusals of non-socket fd links (`RULE_FD_TARGET`, now public in `rdy_engine::probe`) under one key
+  per check (21 entries), not one per directory.
 - The declaration is skipped as a prefix, so it never covers a read of the literal text
   `/proc/<pid>/fd/x` (SEC-153-3). The fixture run's manifest audit counts an fd link or listing as
   declared only under `FD_WALK`, with the path shape tied to the call (three names for a listing, four for

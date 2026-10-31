@@ -1,0 +1,104 @@
+{
+  "entry": {
+    "free": [
+      80,
+      443,
+      6443,
+      10250
+    ],
+    "id": "host.ports",
+    "udp_free": [
+      8472
+    ]
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 80
+        },
+        {
+          "bind": "public",
+          "port": 443
+        },
+        {
+          "bind": "public",
+          "port": 6443
+        },
+        {
+          "bind": "public",
+          "port": 10250
+        }
+      ],
+      "udp_free": [
+        8472
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "80/tcp, 443/tcp, 6443/tcp, 10250/tcp and 8472/udp are free.",
+    "notes": [],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 0,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 80,
+          "state": "free",
+          "unverified": null
+        },
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 443,
+          "state": "free",
+          "unverified": null
+        },
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "free",
+          "unverified": null
+        },
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 10250,
+          "state": "free",
+          "unverified": null
+        }
+      ],
+      "udp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [],
+          "holders_not_shown": 0,
+          "port": 8472,
+          "state": "free",
+          "unverified": null
+        }
+      ]
+    },
+    "partial": null
+  }
+}

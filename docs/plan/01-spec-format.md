@@ -745,7 +745,7 @@ Threat model R1 and INV-07: every side effect goes through the probe facade, whi
 | `connect`, `tls` | `host`, `port`, `addr`, `via_proxy`; or `host`, `sni`. A UDP exchange is a `connect` with `proto: udp` and `bytes` (the reply) |
 | `http`, `kube` | `method`, `url` (no query string) or `path`, `status`. A unix socket `GET` is an `http` with `path` (the socket) and `url` (the API path); a `kube` entry refused for a request header also has `header` (the name, never the value); a `kube` entry always has `via_proxy` (the proxy origin without user info, or `null`), and one sent with `Impersonate-User` has `impersonated: true` (never the user name), and the run-level `GET /version` of a kubeconfig whose user sets an `as*` field has `kubeconfig_impersonates: true` |
 | `native` | `api`, `path` |
-| `coalesced` | `of` (the kind), `under` (the directory of a file call, or the program, host or path of another denied call, or `*` for the calls past 100 targets), `count`; with `rule` or `error` when the calls were `denied` or `failed`, and with neither when they were `ok` |
+| `coalesced` | `of` (the kind), `under` (the directory of a file call, or the program, host or path of another denied call, or `*` for the calls past 100 targets; the refused non-socket links of a `/proc/<pid>/fd` walk are one entry per check with the placeholder `/proc/<pid>/fd`), `count`; with `rule` or `error` when the calls were `denied` or `failed`, and with neither when they were `ok` |
 
 Every string passes the redactor. Bodies are never recorded. **Retention:** `exec`, `connect`, `tls`,
 `http`, `dns`, `lookup` and `kube` entries are kept except in the last resort below; they are bounded already by the 256 host and
@@ -753,7 +753,7 @@ port pairs a spec may name (2.1) and the fixed command set. A `denied` entry is 
 of entry. A `denied` or `failed` `read`, `read_dir`, `read_link` or `stat` is written as it happens up to 20 times per check,
 kind, rule or error and parent directory, and a `denied` call of any other kind up to 20 times per check, kind,
 rule and target (program, host or path); the calls after that fold into one `coalesced` entry that carries a `count` and the `rule` or
-`error` (the entry takes the `seq` of the first call it folds, so `seq` has a gap). A check holds at most 1000
+`error`. The one exception is a `denied` `read_link` of a link in a process's fd directory that does not lead to a socket (ADR 0040): all of them fold under one key per check, with `under` set to `/proc/<pid>/fd`, so a walk over hundreds of processes costs 21 entries. The `coalesced` entry takes the `seq` of the first call it folds, so `seq` has a gap. A check holds at most 1000
 entries. When a check reaches that quota, the log reaches 5000 entries, or the document its size cap,
 retention drops, in order: a new `ok` `read`, `read_dir`, `read_link` or `stat`, then the `ok` ones already held, then
 `failed` `read`, `read_dir`, `read_link`, `stat` and `coalesced` entries; `actions_truncated` is true, and `actions_dropped`
