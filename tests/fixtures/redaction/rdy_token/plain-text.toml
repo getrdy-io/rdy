@@ -1,0 +1,6 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["rdy_share_token"]
+forms = ["text"]
+secrets = ["${SYN:share_token}"]

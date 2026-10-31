@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "Namespace",
+    "metadata": {
+      "name": "acme-system",
+      "labels": {
+        "pod-security.kubernetes.io/audit": "restricted",
+        "pod-security.kubernetes.io/warn": "restricted"
+      },
+      "annotations": {
+        "openshift.io/sa.scc.uid-range": "1000680000/10000"
+      }
+    },
+    "status": {
+      "phase": "Active"
+    }
+  }
+}

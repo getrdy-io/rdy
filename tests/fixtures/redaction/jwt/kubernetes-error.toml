@@ -1,0 +1,6 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["jwt"]
+forms = ["text"]
+secrets = ["${SYN:jwt}", "${SYN:jwt_signature}"]

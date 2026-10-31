@@ -1,0 +1,7 @@
+password:
+token: null
+secret: true
+api_key: false
+credential: none
+auth: required
+DB_PASSWORD=

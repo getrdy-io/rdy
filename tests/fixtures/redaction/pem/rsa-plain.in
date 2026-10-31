@@ -1,0 +1,6 @@
+key follows
+${SYN:pem_rsa_begin}
+${SYN:rsa_body_1}
+${SYN:rsa_body_2}
+${SYN:pem_rsa_end}
+after the key

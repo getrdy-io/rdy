@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-warn-audit"
+summary = "A namespace that enforces baseline and warns and audits restricted"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

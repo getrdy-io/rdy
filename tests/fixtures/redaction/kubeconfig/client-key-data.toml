@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["kubeconfig_credential"]
+forms = ["client_key_data"]
+secrets = ["${SYN:client_key_data}"]
+note = "The public certificate beside the key stays."
