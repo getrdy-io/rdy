@@ -763,6 +763,66 @@ impl ProbeHub {
         accepted
     }
 
+    /// Adds the value of every environment variable in `names` whose name looks like a secret
+    /// ([`is_secret_name`]) and that is set to a value worth registering, to the known-secret set.
+    ///
+    /// `names` are the variables the registered checks declare in `CheckInfo::env`. The run calls this
+    /// before its first log event and before any check starts, so a value is in the set before any
+    /// string that could hold it exists (ADR 0015 decision 3, M1-057). It reads the backend directly,
+    /// because the reads belong to the run and not to a check, and it records them as one run-level
+    /// `env` entry (`check: null`) whose `name` lists the declared secret-named variables it looked
+    /// at, never a value. That entry is a set-up entry: it does not count for [`ProbeHub::set_proxy`],
+    /// so the proxy can still be set after it. `Probe::env` still registers the value when a check
+    /// reads it, which changes nothing here.
+    ///
+    /// Returns the names whose value the set refused (too short, too long or no room), each once, in
+    /// the order given. Never a value. The refusal is logged and counted as
+    /// [`ProbeHub::add_known_secret`] does, and the caller decides whether it can go on: `rdy run` exits
+    /// 70. A name that is not a secret name, an unset variable and a plain word register nothing and are
+    /// not refusals.
+    pub fn add_declared_env_secrets<'a>(
+        &self,
+        names: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<String> {
+        let mut refused: Vec<String> = Vec::new();
+        let mut read: Vec<&str> = Vec::new();
+        for name in names {
+            if name.is_empty() || name.contains(['=', '\0']) || !is_secret_name(name) {
+                continue;
+            }
+            if !read.contains(&name) {
+                read.push(name);
+            }
+            if let Some(value) = self.backend.env(name)
+                && worth_registering(&value)
+                && !self.add_known_secret(&value)
+                && !refused.iter().any(|seen| seen == name)
+            {
+                refused.push(name.to_owned());
+            }
+        }
+        // One run-level entry names what was read: the names the checks declared, never a value. It
+        // is a set-up entry, so a proxy can still be set after it.
+        if !read.is_empty() {
+            read.sort_unstable();
+            let mut fields = Map::new();
+            fields.insert("name".to_owned(), cut_names(&read).into());
+            self.log
+                .begin_setup(ActionKind::Env, fields)
+                .finish(if refused.is_empty() {
+                    ActionOutcome::Ok
+                } else {
+                    ActionOutcome::Failed
+                });
+        }
+        refused
+    }
+
+    /// The redactor every string of this hub's log passes.
+    pub(crate) fn redactor(&self) -> &Redactor {
+        self.log.redactor()
+    }
+
     /// Sets the proxy the run's checks reach through `Probe::tcp` with `Route::ViaProxy`, once.
     ///
     /// The password is added to the run-scoped known-secret set first, as written, percent-decoded and
@@ -1469,4 +1529,24 @@ fn settle<T>(
         }
     }
     result
+}
+
+/// The longest `name` of the run-level entry that lists the declared variables, in characters. The
+/// result schema allows 4096.
+const MAX_NAMES_CHARS: usize = 4000;
+
+/// The names as one text, `A, B, C`, cut at a name boundary to [`MAX_NAMES_CHARS`].
+fn cut_names(names: &[&str]) -> String {
+    let mut text = String::new();
+    for name in names {
+        let add = name.chars().count() + if text.is_empty() { 0 } else { 2 };
+        if text.chars().count() + add > MAX_NAMES_CHARS {
+            break;
+        }
+        if !text.is_empty() {
+            text.push_str(", ");
+        }
+        text.push_str(name);
+    }
+    text
 }

@@ -14,7 +14,7 @@
 //! | 2 | The `os` list is empty | `unsupported_spec` |
 //! | 3 | The id is on the reserved list and this build lacks it | `not_in_build` |
 //! | 4 | The id is not reserved | `unknown_check` |
-//! | 5 | A known id that no registered family builds | `not_in_build` |
+//! | 5 | A known id that no registered family builds, or that its family lists in [`Family::not_built`] | `not_in_build` |
 //! | 6 | A known id with a field or value this rdy cannot read | `unsupported_spec` |
 //! | 7 | The family refuses to build it | `unsupported_spec` |
 //! | 8 | [`CheckInfo::os`](crate::check::CheckInfo::os) is `NotYet` here | `not_yet_on_os` |
@@ -29,15 +29,19 @@
 //!
 //! The reserved-id list is `rdy_spec::reserved`.
 //!
-//! The words here follow 01 section 5.2. M1-057 reconciles them with `SkipWhy` in `rdy-cli`, which also
-//! adds the did-you-mean hint.
+//! The words here follow 01 section 5.2, did-you-mean hint included (M1-057). `SkipWhy` in `rdy-cli` holds
+//! a second copy of the words. A test in `rdy-cli` compares the two for the typo cases, so they cannot
+//! drift.
 
-use rdy_spec::check::{CheckParams, UnsupportedReason};
+use rdy_spec::check::{CheckParams, UnsupportedReason, known_fields};
+use rdy_spec::did_you_mean;
 use rdy_spec::reserved::{RESERVED_IDS, UnknownKind};
 use rdy_spec::result::{CheckResult, FixSource, Severity, SkipKind};
 use rdy_spec::spec::{CheckSpec, Lenient, OsFamily, Spec};
 
 use crate::check::Os;
+#[cfg(doc)]
+use crate::family::Family;
 use crate::family::{Built, HostSet, Registry};
 use crate::outcome::os_name;
 
@@ -156,6 +160,12 @@ impl RunPlan {
         &self.entries
     }
 
+    /// Gives up the entries, in spec order. The engine takes the built checks out of them.
+    #[must_use]
+    pub fn into_entries(self) -> Vec<PlanEntry> {
+        self.entries
+    }
+
     /// The entries that run.
     pub fn runnable(&self) -> impl Iterator<Item = &PlanEntry> {
         self.entries
@@ -261,6 +271,10 @@ impl Registry {
         let Some((family, info)) = self.check(&id) else {
             return Err(not_in_build(self, &id));
         };
+        // The family lists the id but has no code for it yet (a stub). Same rule and words as above.
+        if family.not_built().contains(&id.as_str()) {
+            return Err(not_in_build(self, &id));
+        }
         // Rule 6.
         if let CheckParams::Unsupported { reason, .. } = &params {
             return Err(unsupported(&id, reason, &version));
@@ -322,13 +336,16 @@ fn unknown(registry: &Registry, params: &CheckParams, id: &str, version: &str) -
         // points the customer at a newer rdy and is the safe wording.
         _ => return not_in_build(registry, id),
     }
+    // The near id comes from the reserved list, so it is fixed text and needs no escaping.
+    let near = did_you_mean(id, RESERVED_IDS);
     let id = echo(id);
     match id.split_once('.') {
         Some((family, _)) if family_is_reserved(family) => PlanSkip::new(
             SkipKind::UnknownCheck,
             format!("Not run. rdy {version} does not know the check '{id}'."),
             &format!(
-                "Tell the vendor. The spec may have a typo, or it may need a newer rdy than {version}."
+                "Tell the vendor. The spec may have a typo{}, or it may need a newer rdy than {version}.",
+                suggestion(near)
             ),
         ),
         other => PlanSkip::new(
@@ -337,9 +354,17 @@ fn unknown(registry: &Registry, params: &CheckParams, id: &str, version: &str) -
                 "Not run. No version of rdy has checks named {}.",
                 other.map_or(id.as_str(), |(family, _)| family)
             ),
-            "Tell the vendor. The spec may have a typo.",
+            &format!(
+                "Tell the vendor. The spec may have a typo{}.",
+                suggestion(near)
+            ),
         ),
     }
+}
+
+/// ` (did you mean 'x'?)`, or nothing.
+fn suggestion(near: Option<&str>) -> String {
+    near.map_or_else(String::new, |near| format!(" (did you mean '{near}'?)"))
 }
 
 /// Whether some reserved id has this family prefix, so a newer rdy may know the check.
@@ -363,13 +388,18 @@ fn not_in_build(registry: &Registry, id: &str) -> PlanSkip {
 fn unsupported(id: &str, reason: &UnsupportedReason, version: &str) -> PlanSkip {
     let id = echo(id);
     match reason {
-        UnsupportedReason::UnknownField { field } => PlanSkip::new(
-            SkipKind::UnsupportedSpec,
-            format!("Not run. rdy {version} cannot read '{field}' in {id}."),
-            &format!(
-                "Tell the vendor. The spec may have a typo, or it may need a newer rdy than {version}."
-            ),
-        ),
+        UnsupportedReason::UnknownField { field } => {
+            // The near field comes from the check's own field list, so it is fixed text.
+            let near = known_fields(&id).and_then(|known| did_you_mean(field, known));
+            PlanSkip::new(
+                SkipKind::UnsupportedSpec,
+                format!("Not run. rdy {version} cannot read '{field}' in {id}."),
+                &format!(
+                    "Tell the vendor. The spec may have a typo{}, or it may need a newer rdy than {version}.",
+                    suggestion(near)
+                ),
+            )
+        }
         // The reason's own text is already cut and escaped by rdy-spec.
         other => PlanSkip::new(
             SkipKind::UnsupportedSpec,
