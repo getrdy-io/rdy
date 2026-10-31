@@ -1,0 +1,12 @@
+users:
+- name: sso
+  user:
+    auth-provider:
+      name: oidc
+      config:
+        client-id: rdy-cli
+        client-secret: ${SYN:oidc_client_secret}
+        id-token: ${SYN:oidc_id_token}
+        refresh-token: ${SYN:oidc_refresh_token}
+        access-token: ${SYN:oidc_access_token}
+        idp-issuer-url: https://idp.acme.test

@@ -27,6 +27,9 @@ installers = []
 unix-archive = ".tar.gz"
 windows-archive = ".zip"
 checksum = "sha256"
+# dist adds LICENSE, README.md and CHANGELOG.md to each archive on its own. NOTICE it does not, and
+# Apache-2.0 section 4(d) wants it with every redistribution. Paths are relative to the workspace root.
+include = ["NOTICE"]
 # Embed the dependency list in every binary, so `cargo audit bin ./rdy` works on a shipped file.
 cargo-auditable = true
 # One CycloneDX SBOM for the `rdy` package.

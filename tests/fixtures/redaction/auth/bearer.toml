@@ -1,0 +1,6 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["auth_header"]
+forms = ["bearer"]
+secrets = ["${SYN:bearer}"]

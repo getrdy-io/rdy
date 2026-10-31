@@ -137,4 +137,6 @@ Be kind and be direct. See `CODE_OF_CONDUCT.md`.
 
 ## License
 
-By contributing you agree that your work is licensed under Apache-2.0.
+By contributing you agree that your work is licensed under Apache-2.0, and you certify that with the
+DCO sign-off on every commit (see Pull requests above). The name and the logo are covered by
+`TRADEMARKS.md`, not by the license.

@@ -159,18 +159,18 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]) and `host.security_agents` ([`SecurityAgents`]) are
 /// real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
-/// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
-/// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
-/// registers it (M1-057, `rdy run` end to end) must first drop the stubs, or have the engine add a
-/// `not_in_build` skip for them. Tests may register it freely.
+/// On Linux a stub that ran would report `error` with `check_failed`, which reads as a fault on the
+/// customer's machine. So the family lists its stubs in [`Family::not_built`] and the planner skips each
+/// as `not_in_build` before it builds anything (M1-057): `rdy run` registers the family, and a stub never
+/// runs outside a test. Ids leave [`HostFamily::stub_ids`] as their real checks arrive.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HostFamily;
 
 impl HostFamily {
     /// The ids of the checks that are still stubs, in catalog order.
     ///
-    /// Each ticket that writes a real check removes its id here. The family may be registered in the
-    /// CLI only when this is empty.
+    /// Each ticket that writes a real check removes its id here. The planner skips these ids as
+    /// `not_in_build` ([`Family::not_built`]).
     #[must_use]
     pub fn stub_ids() -> &'static [&'static str] {
         &STUBS
@@ -194,6 +194,10 @@ impl Family for HostFamily {
 
     fn checks(&self) -> &'static [&'static CheckInfo] {
         &CHECKS
+    }
+
+    fn not_built(&self) -> &'static [&'static str] {
+        &STUBS
     }
 
     fn build(&self, entry: &CheckSpec, params: CheckParams, _: &Spec) -> Result<Built, BuildError> {

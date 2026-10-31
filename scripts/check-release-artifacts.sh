@@ -22,7 +22,7 @@
 #      checks the hashes, not the signature: the signing job verified that with the exact identity.
 #   1. All five archives exist, each with its .sha256 file, and the hashes match. If dist's
 #      sha256.sum exists, it must agree too.
-#   2. Each archive holds only safe paths and rdy-<triple>/{rdy|rdy.exe,LICENSE,README.md,CHANGELOG.md}.
+#   2. Each archive holds only safe paths and rdy-<triple>/{rdy|rdy.exe,LICENSE,NOTICE,README.md,CHANGELOG.md}.
 #   3. Each binary has the format and CPU its file name says (ELF, Mach-O or PE).
 #   4. Both Linux binaries pass scripts/check-static.sh (ADR 0006, decision 2). A linker override
 #      such as cargo-zigbuild would bypass scripts/musl-pie-linker.sh. This catches it.
@@ -309,7 +309,7 @@ for t in $targets; do
     binname=rdy
     case $t in *-windows-*) binname=rdy.exe ;; esac
     missing=""
-    for f in "$binname" LICENSE README.md CHANGELOG.md; do
+    for f in "$binname" LICENSE NOTICE README.md CHANGELOG.md; do
         if ! printf '%s\n' "$listing" | grep -Fxq "rdy-$t/$f"; then
             missing="$missing $f"
         fi

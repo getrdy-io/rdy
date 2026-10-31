@@ -13,19 +13,21 @@
 //!
 //! **Retention.** These limits keep the log bounded and the entries that matter in it.
 //!
-//! - *Coalescing.* A `denied` or `failed` `read`, `read_dir` or `stat` is written as it happens, up to
-//!   [`COALESCE_AFTER`] times for one (check, kind, rule or error, parent directory). A `denied` call of
-//!   any other kind (`exec`, `connect`, `tls`, `http`, `kube`, a late call) folds the same way per
-//!   (check, kind, rule, program or host or path). The calls after that fold into one `coalesced` entry
-//!   that carries a `count`. It takes the `seq` of the first call it folded, and the folded calls leave
-//!   a gap in `seq`. The limit is per key, so a flood of calls at one target costs 21 entries, and the
-//!   first denied calls are in the log.
-//! - *Ok reads.* An `ok` `read`, `read_dir` or `stat` folds the same way per (check, kind, parent
-//!   directory), but only after [`COALESCE_OK_AFTER`] calls. The `coalesced` entry has outcome `ok`, no
-//!   `rule` or `error`, and counts as an `ok` file entry when retention picks what to drop.
+//! - *Coalescing.* A `denied` or `failed` `read`, `read_dir`, `read_link` or `stat` is written as it
+//!   happens, up to [`COALESCE_AFTER`] times for one (check, kind, rule or error, parent directory). A
+//!   `denied` call of any other kind (`exec`, `connect`, `tls`, `http`, `kube`, a late call) folds
+//!   the same way per (check, kind, rule, program or host or path). The calls after that fold into one
+//!   `coalesced` entry that carries a `count`. It takes the `seq` of the first call it folded, and the
+//!   folded calls leave a gap in `seq`. The limit is per key, so a flood of calls at one target costs
+//!   21 entries, and the first denied calls are in the log.
+//! - *Ok reads.* An `ok` `read`, `read_dir`, `read_link` or `stat` folds the same way per (check,
+//!   kind, parent directory), but only after [`COALESCE_OK_AFTER`] calls. The `coalesced` entry has
+//!   outcome `ok`, no `rule` or `error`, and counts as an `ok` file entry when retention picks what
+//!   to drop.
 //! - *Quota.* A check may hold [`CHECK_QUOTA`] entries, and the log [`MAX_ENTRIES`]. At either limit
-//!   the log drops, in this order: a new `ok` `read`, `read_dir` or `stat` (the oldest are kept), then
-//!   `ok` ones already held, then `failed` ones (`read`, `read_dir`, `stat` and `coalesced`).
+//!   the log drops, in this order: a new `ok` `read`, `read_dir`, `read_link` or `stat` (the oldest
+//!   are kept), then `ok` ones already held, then `failed` ones (`read`, `read_dir`, `read_link`,
+//!   `stat` and `coalesced`).
 //!   `actions_dropped` counts them by kind.
 //! - *Last resort.* A `denied` entry is never dropped to make room for another kind of entry, and
 //!   repeated denials fold, so the log holds one per distinct (check, kind, rule, target). A check keeps
@@ -114,9 +116,10 @@ struct Shared {
 /// entries in the same order when the document is too big (`report::json`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tier {
-    /// `ok` `read`, `read_dir` and `stat`, and the `coalesced` entry that stands for more of them.
+    /// `ok` `read`, `read_dir`, `read_link` and `stat`, and the `coalesced` entry that stands for more
+    /// of them.
     Ok = 0,
-    /// `failed` `read`, `read_dir`, `stat` and `coalesced`.
+    /// `failed` `read`, `read_dir`, `read_link`, `stat` and `coalesced`.
     Failed = 1,
     /// Everything else that is not `denied`. Only a last resort drops it.
     Spare = 2,
@@ -203,6 +206,9 @@ struct Folded {
 #[derive(Default)]
 struct State {
     next_seq: u64,
+    /// How many of the entries begun were set-up entries ([`ActionLog::begin_setup`]), which do not
+    /// count for [`ActionLog::has_entries`].
+    setup: u64,
     entries: BTreeMap<u64, Action>,
     all: Tiers,
     checks: HashMap<Option<String>, CheckSlots>,
@@ -331,9 +337,21 @@ impl ActionLog {
         }
     }
 
-    /// Whether any entry was begun, finished or not. `ProbeHub::set_proxy` refuses once this is true.
+    /// Opens a set-up entry: a run-level entry that the engine writes itself, from fixed text, before
+    /// the run starts. It is a normal entry in every way but one: [`ActionLog::has_entries`] does not
+    /// count it, so `ProbeHub::set_proxy` still works after it. Its fields must be text the engine
+    /// owns (a declared variable name), never text from a spec, a file or the network, because it can be
+    /// written before the proxy password joins the known-secret set.
+    pub(crate) fn begin_setup(&self, kind: ActionKind, fields: Map<String, Value>) -> Pending {
+        self.state().setup += 1;
+        self.begin(None, kind, fields)
+    }
+
+    /// Whether any entry but a set-up one was begun, finished or not. `ProbeHub::set_proxy` refuses
+    /// once this is true.
     pub(crate) fn has_entries(&self) -> bool {
-        self.state().next_seq > 0
+        let state = self.state();
+        state.next_seq > state.setup
     }
 
     /// The path as the log shows it: `~/rest` under the home directory, else as given. Use it for every
@@ -464,7 +482,11 @@ fn is_secret_flag(redactor: &Redactor, flag: &str) -> bool {
 pub(crate) fn tier(action: &Action) -> Tier {
     let files = matches!(
         action.kind,
-        ActionKind::Read | ActionKind::ReadDir | ActionKind::Stat | ActionKind::Coalesced
+        ActionKind::Read
+            | ActionKind::ReadDir
+            | ActionKind::ReadLink
+            | ActionKind::Stat
+            | ActionKind::Coalesced
     );
     match action.outcome {
         ActionOutcome::Denied => Tier::Denied,
@@ -480,7 +502,7 @@ pub(crate) fn tier(action: &Action) -> Tier {
 fn fold_key(action: &Action) -> Option<FoldKey> {
     let files = matches!(
         action.kind,
-        ActionKind::Read | ActionKind::ReadDir | ActionKind::Stat
+        ActionKind::Read | ActionKind::ReadDir | ActionKind::ReadLink | ActionKind::Stat
     );
     let (class, reason_field) = match action.outcome {
         ActionOutcome::Denied if action.kind != ActionKind::Coalesced => (Class::Denied, "rule"),

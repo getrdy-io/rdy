@@ -91,8 +91,8 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 174 | 384.5 |
-| M1, core | 145 | 323 |
+| M1, all | 176 | 387 |
+| M1, core | 147 | 325.5 |
 | M1, `core: no` (the cut list) | 29 | 61.5 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
@@ -117,7 +117,7 @@ and Dec 28 run at half capacity.
 | 9 | Jan 18 to Jan 24, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core | M1-038 to M1-042 | `v0.1.0-alpha.8`: commands only through the mediated runner; action log; privilege snapshot |
 | 10 | Jan 25 to Jan 31, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-043 to M1-048 | `v0.1.0-alpha.9`: run deadline and watchdog; facade file policy; redactor core |
 | 11 | Feb 1 to Feb 7, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-049 to M1-056 | `v0.1.0-alpha.10`: replay fixtures, fixture lint and golden helpers; logs redacted |
-| 12 | Feb 8 to Feb 14, 2027 | 13 | 13.5 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-057 to M1-062 | `v0.1.0-alpha.11`: `rdy run <file> --allow-unsigned --json` writes a 0700 report dir, every check SKIP; Ctrl-C exits 70; `--no-network` |
+| 12 | Feb 8 to Feb 14, 2027 | 13 | 15 | 2 Spec parser, result model, engine core; 3 Host checks, HTML report | M1-057 to M1-062, M1-176 | `v0.1.0-alpha.11`: `rdy run <file> --allow-unsigned --json` writes a 0700 report dir, every check SKIP; `rdy run` exits 70 on a hang; Ctrl-C exits 70; `--no-network` |
 | 13 | Feb 15 to Feb 21, 2027 | 13 | 14 | 3 Host checks, HTML report | M1-063 to M1-069, M1-171 | `v0.1.0-alpha.12`: every report string redacted, 28-case corpus gates CI; host.memory and host.disk |
 | 14 | Feb 22 to Feb 28, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-070, M1-071, M1-074 to M1-076, M1-169, M1-170 | `v0.1.0-alpha.13`: host.cpu on Linux; facade `read_link`; machine identity files denied; terminal styling; in-process env harness |
 | 15 | Mar 1 to Mar 7, 2027 | 13 | 13.5 | 3 Host checks, HTML report | M1-077 to M1-085 | `v0.1.0-alpha.14`: HTML report next to the JSON, with golden reports; generated spec reference |
@@ -128,7 +128,7 @@ and Dec 28 run at half capacity.
 | 20 | Apr 5 to Apr 11, 2027 | 13 | 14 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |
 | 21 | Apr 12 to Apr 18, 2027 | 13 | 13.5 | 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-110 to M1-115 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed |
 | 22 | Apr 19 to Apr 25, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-116 to M1-120 | `v0.1.0-alpha.21`: family pages; fixture envs for every verdict; timeouts env; signatures verified before parsing |
-| 23 | Apr 26 to May 2, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-121 to M1-125, M1-174 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign` |
+| 23 | Apr 26 to May 2, 2027 | 13 | 14.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-121 to M1-125, M1-174, M1-175 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign` |
 | 24 | May 3 to May 9, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-126 to M1-131 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove` |
 | 25 | May 10 to May 16, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-132 to M1-139 | **`v0.1.0`**: signing review closed; install and sign pages; README ready, core done, announcement sent to design partners |
 | 26 | May 17 to May 23, 2027 | 13 | 12 | Non-core, steps 2 and 3 | M1-140, M1-142, M1-144, M1-145, M1-172 | `v0.1.1`: progress line, HTML wording; UDP and unix socket facade; host.lsm; parameters for the M1-late check ids |

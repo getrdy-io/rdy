@@ -1,0 +1,5 @@
+# PR #147 M1-108 fix round 2: CI red on every test leg. Branch m1/108-kind-job, head f34462a.
+- `rdy-lint-wall::wall_intact::no_workflow_sets_flags_and_the_clippy_steps_are_the_three_pinned_ones` fails: the musl change in .github/workflows/kind.yml sets build flags in the workflow env (CARGO_BUILD_TARGET / CC_* or similar), which the lint wall forbids. Read the test (tests/lint-wall/tests/wall_intact.rs) and fix the workflow so it passes as written (for example pass `--target x86_64-unknown-linux-musl` on the cargo command line and set the linker/CC through the mechanism the wall allows, as ci.yml's musl legs do). Do not weaken the wall test. Run `cargo test -p rdy-lint-wall` and the full workspace tests before pushing.
+- Also SEC-147-8 nit: name the ClusterRole (system:cluster-trust-bundle-discovery), the group (system:serviceaccounts) and the feature gate in the SERVER_DEFAULTS comment.
+- 12-progress M1-108 line: record the newest green kind job ids.
+First git merge origin/main. Every commit, merges included, carries `Signed-off-by: Rdy <dev@getrdy.io>`.

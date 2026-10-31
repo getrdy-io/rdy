@@ -64,20 +64,25 @@ macro_rules! info {
 }
 
 /// A check that reaches its spec hosts, direct or through the proxy.
-fn egress() -> &'static CheckInfo {
+pub(super) fn egress() -> &'static CheckInfo {
     info!("net.egress", &[PeerClass::SpecHosts, PeerClass::Proxy])
 }
 
+/// A check that declares no peer class at all.
+pub(super) fn no_peers() -> &'static CheckInfo {
+    info!("net.none", &[])
+}
+
 /// A check that reaches its spec hosts and declares no proxy.
-fn direct_only() -> &'static CheckInfo {
+pub(super) fn direct_only() -> &'static CheckInfo {
     info!("net.direct", &[PeerClass::SpecHosts])
 }
 
-fn hub_over(backend: impl Backend) -> ProbeHub {
+pub(super) fn hub_over(backend: impl Backend) -> ProbeHub {
     ProbeHub::new(Arc::new(backend), Redactor::new(TagKey::fixed([5; 32])))
 }
 
-fn target(text: &str) -> Target {
+pub(super) fn target(text: &str) -> Target {
     Target::parse(text).expect("a valid target")
 }
 
@@ -85,29 +90,34 @@ fn addr(text: &str) -> SocketAddr {
     text.parse().expect("a socket address")
 }
 
-fn ip(text: &str) -> IpAddr {
+pub(super) fn ip(text: &str) -> IpAddr {
     text.parse().expect("an address")
 }
 
-fn probe_with(hub: &ProbeHub, info: &'static CheckInfo, key: &str, hosts: &[&str]) -> Probe {
+pub(super) fn probe_with(
+    hub: &ProbeHub,
+    info: &'static CheckInfo,
+    key: &str,
+    hosts: &[&str],
+) -> Probe {
     let probe = hub.check_probe(key, Os::Linux, Some(info));
     probe.permit_hosts(HostSet::new(hosts.iter().map(|t| target(t))));
     probe
 }
 
-fn probe(hub: &ProbeHub, hosts: &[&str]) -> Probe {
+pub(super) fn probe(hub: &ProbeHub, hosts: &[&str]) -> Probe {
     probe_with(hub, egress(), "net.egress", hosts)
 }
 
-fn entries(hub: &ProbeHub) -> Vec<Action> {
+pub(super) fn entries(hub: &ProbeHub) -> Vec<Action> {
     hub.action_log().actions
 }
 
-fn field<'a>(action: &'a Action, name: &str) -> Option<&'a Value> {
+pub(super) fn field<'a>(action: &'a Action, name: &str) -> Option<&'a Value> {
     action.fields.get(name)
 }
 
-fn denied_rule(error: &ProbeError) -> &'static str {
+pub(super) fn denied_rule(error: &ProbeError) -> &'static str {
     match error {
         ProbeError::Denied { rule, .. } => rule,
         other => panic!("expected a denial, got {other:?}"),
@@ -241,6 +251,20 @@ async fn a_probe_with_no_hosts_or_no_declaration_can_reach_nothing() {
 
 // ---- the address rule ---------------------------------------------------------------------------
 
+#[test]
+fn a_mapped_or_compatible_ipv4_literal_never_becomes_a_target() {
+    // The spec parser is the first door: these forms do not parse, so no check holds one as a
+    // `Target`. The facade's rule decodes them as well, for answers (see the lookup tests).
+    for text in [
+        "[::ffff:169.254.169.254]:443",
+        "[::ffff:a9fe:a9fe]:443",
+        "[::ffff:168.63.129.16]:80",
+        "[::169.254.169.254]:443",
+    ] {
+        assert!(Target::parse(text).is_err(), "{text} must not parse");
+    }
+}
+
 #[tokio::test]
 async fn a_connect_to_a_literal_metadata_address_sends_no_byte() {
     let server = HttpServer::start(HttpOptions::plain())
@@ -259,6 +283,10 @@ async fn a_connect_to_a_literal_metadata_address_sends_no_byte() {
         "100.100.100.200:443",
         "[fe80::1]:443",
         "[fd00:ec2::254]:443",
+        "[fd20:ce::254]:443",
+        "168.63.129.16:80",
+        "[64:ff9b::a9fe:a9fe]:443",
+        "[64:ff9b::a83f:8110]:80",
         "0.0.0.0:443",
     ];
     let mut hosts = literals.to_vec();
@@ -342,6 +370,9 @@ async fn a_name_that_resolves_to_a_forbidden_address_is_refused_for_the_whole_ca
         .host("nat64.acme.test", [ip("64:ff9b::a9fe:a9fe")])
         .host("linklocal.acme.test", [ip("fe80::1")])
         .host("aliyun.acme.test", [ip("100.100.100.200")])
+        .host("gcp6.acme.test", [ip("fd20:ce::254")])
+        .host("azure.acme.test", [ip("168.63.129.16")])
+        .host("azure-mapped.acme.test", [ip("::ffff:168.63.129.16")])
         // One good answer does not save a bad one.
         .host("mixed.acme.test", [ip("192.0.2.7"), ip("169.254.169.254")])
         .host("zero.acme.test", [ip("0.0.0.0")]);
@@ -353,6 +384,9 @@ async fn a_name_that_resolves_to_a_forbidden_address_is_refused_for_the_whole_ca
         "nat64",
         "linklocal",
         "aliyun",
+        "gcp6",
+        "azure",
+        "azure-mapped",
         "mixed",
         "zero",
     ];
@@ -491,7 +525,7 @@ async fn a_check_connects_through_a_net_json_serve_entry() {
     assert_eq!(log[1].outcome, ActionOutcome::Failed);
 }
 
-fn load_net(net_json: &str) -> Fixture {
+pub(super) fn load_net(net_json: &str) -> Fixture {
     let dir = TempDir::new().expect("temp dir");
     let base = dir.path().join("envs/x");
     std::fs::create_dir_all(&base).expect("dirs");

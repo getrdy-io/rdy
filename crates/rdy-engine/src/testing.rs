@@ -66,6 +66,32 @@ pub fn fixtures_dir() -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
 }
 
+/// The names of the fixture cases of one check, read from its folder under `checks/` in [`fixtures_dir`],
+/// sorted.
+///
+/// A test that runs every case of a check reads the list here, so a new case cannot skip it. A test is
+/// not a check, so it may read the directory itself.
+///
+/// # Panics
+///
+/// When the check has no fixture folder or it cannot be read.
+#[must_use]
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a missing fixture folder fails the test with a message"
+)]
+pub fn fixture_cases(check: &str) -> Vec<String> {
+    let folder = fixtures_dir().join("checks").join(check);
+    let mut cases: Vec<String> = std::fs::read_dir(&folder)
+        .expect("the fixture folder reads")
+        .map(|entry| entry.expect("a directory entry"))
+        .filter(|entry| entry.file_type().expect("a file type").is_dir())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    cases.sort();
+    cases
+}
+
 /// One fixture run: a replay backend, a probe hub and the action log they write.
 #[derive(Debug, Clone)]
 pub struct TestRun {
