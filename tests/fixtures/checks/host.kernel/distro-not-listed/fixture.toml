@@ -1,0 +1,12 @@
+schema = 1
+name = "distro-not-listed"
+summary = "Ubuntu with a distro_min that lists only rhel and no min: the spec sets no minimum here"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

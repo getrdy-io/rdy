@@ -8,6 +8,7 @@
 Set-VMProcessor
 aa-status
 apparmor_parser
+apt
 ausearch
 aws
 az
@@ -38,6 +39,7 @@ mount
 nvidia-ctk
 nvidia-smi
 oc
+printf
 pro
 rancher
 rdy
@@ -49,6 +51,7 @@ systemctl
 tee
 timedatectl
 ufw
+uname
 update-ca-certificates
 update-ca-trust
 update-grub

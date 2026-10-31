@@ -1,0 +1,12 @@
+schema = 1
+name = "hostile-release"
+summary = "A release string that tries to leave /lib/modules: no module file is read"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

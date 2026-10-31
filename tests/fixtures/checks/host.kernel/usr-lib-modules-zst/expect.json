@@ -1,0 +1,28 @@
+{
+  "entry": {
+    "id": "host.kernel",
+    "modules": [
+      "br_netfilter"
+    ]
+  },
+  "result": {
+    "expected": {
+      "modules": [
+        "br_netfilter"
+      ]
+    },
+    "fix": "Load now with `sudo modprobe -a br_netfilter`. Load at every boot with `printf '%s\\n' br_netfilter | sudo tee -a /etc/modules-load.d/vendor.conf`.",
+    "level": "warn",
+    "message": "Module `br_netfilter` is installed but not loaded.",
+    "notes": [],
+    "observed": {
+      "base": "6.8.0",
+      "build": "1021",
+      "modules": {
+        "br_netfilter": "available"
+      },
+      "release": "6.8.0-1021-aws"
+    },
+    "partial": null
+  }
+}
