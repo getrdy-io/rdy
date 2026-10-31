@@ -1,0 +1,12 @@
+users:
+- name: sso
+  user:
+    auth-provider:
+      name: oidc
+      config:
+        client-id: rdy-cli
+        client-secret: [REDACTED:kubeconfig_credential:~1]
+        id-token: [REDACTED:kubeconfig_credential:~2]
+        refresh-token: [REDACTED:kubeconfig_credential:~3]
+        access-token: [REDACTED:kubeconfig_credential:~4]
+        idp-issuer-url: https://idp.acme.test

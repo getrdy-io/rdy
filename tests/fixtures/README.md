@@ -52,7 +52,7 @@ tests/fixtures/
   redaction/<category>/<case>.{in,expected,toml}
   results/<rdy-version>/*.json   result files from released versions, append only
   reports/*.json                 sample reports that engine tests put their own action log into
-  reports/golden/*.json          reports as the JSON writer emits them, compared byte for byte
+  reports/golden/*.{json,html}   reports as the JSON writer and the HTML renderer emit them, compared byte for byte
   specs/{valid,malformed}/       parser corpus
   signed/                        one signed spec, its .minisig and public key, never edited
   minisign-c/                    a key and a signature made by the C minisign tool, never edited
@@ -62,7 +62,7 @@ tests/fixtures/
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `summary/` (nine cases), `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (12 cases), `host.firewall/` (18 cases), `host.disk/` (15 cases), the twelve machines of
-`host.os/`, `host.security_agents/` (18 cases), the `host.lsm/` cases, `_policy/symlink-to-shadow`, `_loader/manifest-entries`, the `_cgroup`
+`host.os/`, `host.security_agents/` (18 cases), the `host.lsm/` cases, `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
@@ -85,14 +85,15 @@ drift and on a file the script did not write).
 policy engine cases `kyverno`, `kyverno-legacy-only`, `kyverno-no-legacy`, `kyverno-v1-forbidden`, `gatekeeper`, `both-engines`, `engine-forbidden`,
 `many-kinds`, `hostile-kinds`), `generated` by `scripts/gen-k8s-admission-fixtures.py` (`--check` fails on
 drift and on a file the script did not write). `envs/host-min/` is the smallest environment (M1-075): a
-RHEL 9 VM, `host.memory` only, with a pinned clock and run id and a `golden/report.json`. The rest
-arrives with the tickets that need it. The names above are fixed now so nobody invents another.
+RHEL 9 VM, `host.memory` only, with a pinned clock and run id and a `golden/report.json`.
+`redaction/` holds the M1 corpus: 44 cases in ten categories, `FLOOR` (28) and `synthetic.toml` (M1-063).
+The rest arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
 | --- | --- | --- |
 | `allow.toml` | Lint exceptions: the CRLF canary, a reference link in the third-party vectors, the four-part WSL kernel version. The metadata address `169.254.169.254` gets its entry with the first test that uses it. The format is in the file header | By hand, with a reason per entry |
 | `checks/<check-id>/<case>/` | A small environment for one check. Each registered check needs a passing case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout` case where it runs a command, opens a socket or makes a native call that can hang (`host.disk/hung-nfs`) | By hand, with the check ticket |
-| `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied`. The expectation of a policy or loader case lives in its Rust test until the fixture lint has a format for it | By hand |
+| `checks/_policy/<case>/` | Engine policy cases. `symlink-to-shadow` is required and expects `Denied`. `fd-walk` holds the links `host.ports` reads (`proc/self/ns/net`, socket, file, pipe and eventpoll fds of pid 1234, a socket in a pid whose fd directory is unreadable) and serves `read_link`. The expectation of a policy or loader case lives in its Rust test until the fixture lint has a format for it | By hand |
 | `checks/_cgroup/<case>/` | Machines for the cgroup helper that `host.memory`, `host.cpu` and `host.cgroups` share: `/proc/self/cgroup`, `/proc/self/mountinfo` and a `/sys/fs/cgroup` tree. Cases: `v2-nested`, `v2-unlimited`, `v2-memory-off`, `v1-tree`, `v1-unlimited`, `hybrid`. A check's own cases carry their own trees | By hand |
 | `checks/_kube/<case>/` | Synthetic clusters for the kube mock harness: `cluster` (paged nodes, a stale token, a pod selector, legacy discovery, an identity review, a review table) and `denied` (401 and 403). The k8s check tickets add their own cases under `checks/<check-id>/` and reuse the harness | By hand |
 | `checks/_loader/<case>/` | Cases that exercise the loader and the replay, such as every kind of manifest entry. Their expectation is in the Rust test too | By hand |
@@ -101,7 +102,7 @@ arrives with the tickets that need it. The names above are fixed now so nobody i
 | `summary/<case>.txt` | Two lines: the summary line and the last line a set of check results gets (01 section 5.3). Compared by `rdy_engine::summary` unit tests | By hand, or `UPDATE_GOLDENS=1` |
 | `results/<rdy-version>/*.json` | Result files written by released versions. They must stay parseable | Append only. Never edited |
 | `reports/*.json` | A valid sample report (`not-ready-7.2.json` is the 01 section 7.2 sample). A test replaces its `actions` and checks the result against the schema | By hand, when the sample in 01 changes |
-| `reports/golden/*.json` | A report exactly as `rdy_engine::report::write_json` writes it (`not-ready-hostile-host.json`: the sample with a `</script>` hostname and out-of-order maps). Compared on the linux-x64 leg, and the goldens check lists it | `UPDATE_GOLDENS=1`, then read the diff |
+| `reports/golden/*.json`, `reports/golden/*.html` | A report exactly as `rdy_engine::report::write_json` writes it (`not-ready-hostile-host.json`: the sample with a `</script>` hostname and out-of-order maps), or as `render_html` renders it (`not-ready-7.2.html`: the 01 section 7.2 sample; `five-sections-exec-plugin.html`: the sample plus a check that does not apply here, so all five sections show, and `identity.kube.exec_plugin` set to `aws`). Compared byte for byte, and the goldens check lists them. The linux-x64 CI leg also runs every `*.html` golden through the Nu HTML Checker (`scripts/validate-html.sh`, `--Werror`) | `UPDATE_GOLDENS=1`, then read the diff |
 | `specs/valid/`, `specs/malformed/` | Parser corpus. Each malformed file is one way a spec can be wrong | By hand |
 | `signed/` | One signed spec. See `signed/README.md` | Never. New cases get new files |
 | `minisign-c/` | A key with a published test password and a signature, both made by C minisign 0.11. See `minisign-c/README.md` | Never |
@@ -214,7 +215,7 @@ as on a machine where the user may not search the directory.
 Replay follows the symlinks when it applies the deny list, so a link to `/etc/shadow` is `Denied` (that is
 `checks/_policy/symlink-to-shadow`). A relative target is read from the directory of the link. A target that
 is not a path (`socket:[8841]`, what `/proc/<pid>/fd` shows) makes a special file that is neither a regular
-file nor a directory. `modes` are kept for the check that needs them; no facade call reports a mode yet.
+file nor a directory. `read_link` serves the same map (M1-169): it resolves the parent, judges the link's real path, and returns the target text as recorded. In an fd directory only a `socket:[N]` target comes back (`checks/_policy/fd-walk`). `modes` are kept for the check that needs them; no facade call reports a mode yet.
 Every path in `unreadable` and `modes` must be in the tree. The paths of `symlinks` and `dirs` create
 entries.
 
@@ -429,6 +430,90 @@ makes every other package's goldens look orphaned. CI does both on linux-x64.
 CI scope: the check only counts what ran on linux-x64. So a golden must be compared by a test that is not
 `root_*`, not `#[ignore]`, not behind a non-default feature and not gated to another OS. Otherwise the check
 calls it an orphan. If nextest is ever sharded, run `goldens check` on the combined records of all shards.
+
+## The redaction corpus
+
+`redaction/` is the M1 gate for the redactor (04 section 4, SEC-26). The test is
+`crates/rdy-engine/tests/redaction_corpus.rs`, so it runs in `cargo test` on all five legs.
+
+```text
+redaction/FLOOR                       the minimum case count (28; it may rise, never fall)
+redaction/synthetic.toml              secrets as parts, joined by the harness
+redaction/<category>/<case>.in        the input
+redaction/<category>/<case>.expected  the output with each tag shown as its ordinal: ~1, ~2, ...
+redaction/<category>/<case>.toml      what the case is
+```
+
+A case `.toml` has `polarity` (`positive` or `negative`), `since` (`m1`), `rulesets` (`["report"]`), `rules`
+(rules that must fire), `forms` (positive: the syntax form the case covers), `exclusions` (negative: the
+key-name exclusions it proves), `controls` (negative: one edit per exclusion, see below), `secrets` (strings
+that must not survive) and an optional `note`. An unknown key fails the load.
+
+- `${SYN:name}` in `.in` and in `secrets` joins the parts of `synthetic.toml`. A part has at least two
+  pieces and none is empty, so a scanner never sees a whole token. `.expected` never holds a reference. The
+  vendor-documented `AKIAIOSFODNN7EXAMPLE` is used as it is. The loader fails when the raw `.in`, `.toml` or
+  `.expected` text holds a PEM private-key header, a JWT, `rdy_st_` or any other AWS key id, and when
+  `synthetic.toml` holds one of them in a single piece.
+- `.expected` is blessed by hand and compared with `assert_golden`, which never writes here. A failed compare
+  parks the output in `target/goldens-actual/`. A negative has `.expected` equal to `.in`.
+- A tag is shown as its ordinal in the file: the first distinct tag is `~1`, the next `~2`, and the same
+  secret keeps its number wherever it stands. `url/token-userinfo-and-env` has the same token in a URL and in
+  an env var and shows `~1` twice. A golden therefore pins which spans share a secret.
+- The `hostile/ansi-password` case holds real ESC bytes (0x1b), as a terminal wrote them.
+- The harness also checks that no `secrets` entry survives (and that each one is in the input, so it proves
+  something), that no run of six characters of one survives once the placeholders are cut out (a prefix or a
+  suffix left behind), that every `rules` entry fired, that a second pass changes nothing and finds no span
+  outside a placeholder, and that a placeholder is well formed.
+- A negative case lists a control for each exclusion: `["suffix_name", "secretName: acme-tls", "secret:
+  acme-tls", "acme-tls"]` edits that text in the input, and the redactor must then hide the last item. That
+  shows the key rule reads the key and the exclusion is what kept the original value.
+- The gate is coverage. It fails on a rule of the engine with no positive case, a syntax form that a rule
+  claims (the `CLAIMS` table in the test) with no positive case, a key-name exclusion with no negative, a
+  rule list that differs from the M1 rows of 04 Appendix B, a part nobody uses, a stray file, or fewer cases
+  than `FLOOR`. A new rule fails the gate until it has cases and a row in `CLAIMS`.
+- The form list follows 04 Appendix B too. The `MATCHES` table in the test holds every backticked item of an
+  M1 row's Matches cell with the forms that cover it. An item added to the appendix fails the gate until it
+  has a case, or is marked as not claimed with a reason. An item removed or renamed fails it as well.
+  The "Key-name exclusions" paragraph is read the same way (`EXCLUSION_ITEMS`), with `valueFrom` mapped to not
+  claimed. Prose in a Matches cell ("connection strings") is not an item and is not gated.
+- 04 Appendix D lists 28 cases (23 positive, 5 negative). The corpus has 44. The extra cases are coverage the
+  gate asks for: every form Appendix B claims (STS `SecretAccessKey`, `aws_session_token`, the
+  `x-amz-security-token` header, `X-Auth-Token`, `-H 'Authorization: ...'`, a bare `Bearer`, systemd
+  `Environment=`, the kubeconfig `password`, `client-secret`, `id-token`, `refresh-token` and `access-token`,
+  a PEM block with no END line, the `ABIA` and `ACCA` prefixes, each key stem), an INI `password =`, and one
+  negative for each group of key-name exclusions.
+
+What the corpus does not claim. No case here passes for these and none is blessed as handled. M2-061 adds
+`known_gap` cases and a ledger; until then a `known_gap` case fails the load. A test checks that the harness
+header and this list name the same forms.
+
+Left to M2 by M1-060:
+
+- `Cookie` and `Set-Cookie`, and a 40-character secret by proximity.
+- a one-line JSON object after a secret key (`{"password":"x","user":"y"}` loses the rest of its line).
+- `--password=x` followed by another flag, and `-H '...' url` (the rest of the line goes too: an
+  over-redaction, not a leak).
+- a space in URL userinfo, and `app:1234/x@db` (a URL password with a raw `/` after an all-digit head).
+- `curl -u` and `--user`, and `-pPASS`.
+- base64-armored keys (`LS0tLS1CRUdJTi`), bare DER keys (`MIIEvQIBADANBg`) and SSH2 keys
+  (`---- BEGIN SSH2 ... PRIVATE KEY ----`).
+- a crafted `BEGIN` line (a `BEGIN B` inside a closed `A` block, with B's body after `END A`).
+- a PEM block split over log events.
+- a Kubernetes env list: `- name: DB_PASSWORD` then `value: x`, and its JSON form
+  `{"name":"DB_PASSWORD","value":"x"}`. `redact_str` leaves both as they are. This one is a leak; owner: M2-113 (correction-33).
+- `Authorization header: Basic <b64>` in prose, and crafted bracket and quote escapes (stray apostrophes).
+- connection strings (Appendix D: M2). The `secret_by_key` row of 04 Appendix B says "connection strings" in
+  prose, which the `MATCHES` gate does not read. A prose claim is not gated, so it is listed here.
+
+Never handled by the redactor, owner: M2-113 (correction-33):
+
+- `MYSQL_PWD=` and `pwd=`: no key stem matches `pwd`. Both come out unchanged. This one is a leak.
+- `valueFrom` and `secretKeyRef`: 04 Appendix B lists them as key-name exclusions, but the redactor has no
+  such exclusion. `DB_PASSWORD:` then `valueFrom:` then `secretKeyRef:` comes out as one placeholder. That
+  fails safe, so there is no `value_from` exclusion and no case for it.
+
+Known over-redactions, for M2-061 to settle (no failing case): `max_tokens: 4096`, `secretary: bob` and
+`compass: north` are all redacted, because the stems `token`, `secret` and `pass` match inside the key.
 
 ## Line endings
 

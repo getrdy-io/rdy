@@ -373,7 +373,7 @@ The product is Rdy. The command is `rdy`. The site is getrdy.io, bought 2026-10-
 
 | Asset | Value | Status |
 | --- | --- | --- |
-| Product and company name | Rdy (Rdy Labs LLC or similar for the Wisconsin entity) | LLC name check pending |
+| Product name and legal owner | Rdy. The legal entity that owns the code, the copyright and the marks is Apostolic Path LLC | Founder decision 2026-10-30. Trademark search pending |
 | CLI command | `rdy` | Decided |
 | Primary domain | getrdy.io | Owned |
 | Install script | M1: the pinned release `install.sh`. From M2: `curl --proto '=https' --tlsv1.2 -sSf https://getrdy.io/install \| sh` | To build |

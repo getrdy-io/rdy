@@ -1,0 +1,6 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["aws_session_token"]
+forms = ["header"]
+secrets = ["${SYN:aws_session}"]
