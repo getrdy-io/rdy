@@ -1,0 +1,40 @@
+{
+  "entry": {
+    "id": "net.mtu"
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": null,
+      "overhead": null,
+      "overlay": null,
+      "underlay": "ipv4",
+      "warn_below": 1400
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "`eth0` has MTU 1500.",
+    "notes": [],
+    "observed": {
+      "container_interfaces": 0,
+      "default_family": "ipv4",
+      "default_interface": "eth0",
+      "default_mtu": 1500,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": 1500,
+          "name": "eth0",
+          "state": "up"
+        }
+      ],
+      "interfaces_down": 0,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": null,
+      "overlay": null,
+      "pod_mtu": null
+    },
+    "partial": null
+  }
+}

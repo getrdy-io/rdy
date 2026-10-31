@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-vxlan-too-tight"
+summary = "eth0 at 1450 leaves 1400 after VXLAN, and the spec asks for 1450"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false

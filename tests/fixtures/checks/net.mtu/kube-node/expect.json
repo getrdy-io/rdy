@@ -1,0 +1,60 @@
+{
+  "entry": {
+    "id": "net.mtu",
+    "min_mtu": 1400,
+    "overlay": "vxlan"
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": 1400,
+      "overhead": 50,
+      "overlay": "vxlan",
+      "underlay": "ipv4",
+      "warn_below": null
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "`eth0` has MTU 1500, which leaves 1450 for the pod network after 50 bytes of VXLAN, and 1400 is needed.",
+    "notes": [],
+    "observed": {
+      "container_interfaces": 5,
+      "default_family": "ipv4",
+      "default_interface": "eth0",
+      "default_mtu": 1500,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": 1450,
+          "name": "cni0",
+          "state": "up"
+        },
+        {
+          "kind": "ethernet",
+          "mtu": 1500,
+          "name": "docker0",
+          "state": "up"
+        },
+        {
+          "kind": "ethernet",
+          "mtu": 1500,
+          "name": "eth0",
+          "state": "up"
+        },
+        {
+          "kind": "ethernet",
+          "mtu": 1450,
+          "name": "flannel.1",
+          "state": "unknown"
+        }
+      ],
+      "interfaces_down": 1,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": 50,
+      "overlay": "vxlan",
+      "pod_mtu": 1450
+    },
+    "partial": null
+  }
+}

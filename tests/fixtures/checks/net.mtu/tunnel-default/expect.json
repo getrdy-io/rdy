@@ -1,0 +1,48 @@
+{
+  "entry": {
+    "id": "net.mtu"
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": null,
+      "overhead": null,
+      "overlay": null,
+      "underlay": "ipv4",
+      "warn_below": 1400
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "`wg0` has MTU 1420.",
+    "notes": [
+      "The default route goes through the tunnel interface `wg0`. Its MTU is usually lower than the MTU of the physical link under it."
+    ],
+    "observed": {
+      "container_interfaces": 0,
+      "default_family": "ipv4",
+      "default_interface": "wg0",
+      "default_mtu": 1420,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": 1500,
+          "name": "eth0",
+          "state": "up"
+        },
+        {
+          "kind": "tunnel",
+          "mtu": 1420,
+          "name": "wg0",
+          "state": "unknown"
+        }
+      ],
+      "interfaces_down": 0,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": null,
+      "overlay": null,
+      "pod_mtu": null
+    },
+    "partial": null
+  }
+}

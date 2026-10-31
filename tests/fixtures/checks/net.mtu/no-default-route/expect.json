@@ -1,0 +1,41 @@
+{
+  "entry": {
+    "id": "net.mtu",
+    "min_mtu": 1400
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": 1400,
+      "overhead": null,
+      "overlay": null,
+      "underlay": "ipv4",
+      "warn_below": null
+    },
+    "fix": "Check the routing table for a default route. If there is none, add it, or tell the vendor which interface carries the traffic.",
+    "level": "warn",
+    "message": "No default route was found, so rdy cannot tell which interface carries the pod network.",
+    "notes": [],
+    "observed": {
+      "container_interfaces": 0,
+      "default_family": null,
+      "default_interface": null,
+      "default_mtu": null,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": 1500,
+          "name": "eth0",
+          "state": "up"
+        }
+      ],
+      "interfaces_down": 0,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": null,
+      "overlay": null,
+      "pod_mtu": null
+    },
+    "partial": null
+  }
+}

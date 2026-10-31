@@ -1,0 +1,43 @@
+{
+  "entry": {
+    "id": "net.mtu",
+    "min_mtu": 1420,
+    "overlay": "wireguard",
+    "underlay": "ipv6"
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": 1420,
+      "overhead": 80,
+      "overlay": "wireguard",
+      "underlay": "ipv6",
+      "warn_below": null
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "`eth0` has MTU 1500, which leaves 1420 for the pod network after 80 bytes of WireGuard, and 1420 is needed.",
+    "notes": [],
+    "observed": {
+      "container_interfaces": 0,
+      "default_family": "ipv6",
+      "default_interface": "eth0",
+      "default_mtu": 1500,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": 1500,
+          "name": "eth0",
+          "state": "up"
+        }
+      ],
+      "interfaces_down": 0,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": 80,
+      "overlay": "wireguard",
+      "pod_mtu": 1420
+    },
+    "partial": null
+  }
+}

@@ -22,6 +22,7 @@ path = "src/main.rs"
 anyhow = { workspace = true, features = ["std"] }
 clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
 rdy-checks-host = { path = "../rdy-checks-host", version = "0.1.0-alpha.0" }
+rdy-checks-net = { path = "../rdy-checks-net", version = "0.1.0-alpha.0" }
 # A guard, not a saving: rdy-checks-host turns `runtime` on today, so this changes nothing yet. xtask
 # reads only `CheckInfo` and the registry, and asks for no more of the engine than that.
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", default-features = false }

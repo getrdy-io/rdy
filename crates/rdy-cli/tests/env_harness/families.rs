@@ -5,6 +5,7 @@
 //! completeness rule starts to cover its checks in the same change.
 
 use rdy_checks_host::HostFamily;
+use rdy_checks_net::NetFamily;
 use rdy_engine::check::CheckInfo;
 use rdy_engine::family::{BuildError, Built, Family, Registry, RegistryError};
 use rdy_spec::check::CheckParams;
@@ -25,10 +26,17 @@ pub struct Row {
 ///
 /// `k8s` is not here: its checks exist but `K8sFamily` does not (M1-107), so nothing registers them yet.
 pub fn rows() -> Vec<Row> {
-    vec![Row {
-        family: &HostFamily,
-        stubs: HostFamily::stub_ids(),
-    }]
+    vec![
+        Row {
+            family: &HostFamily,
+            stubs: HostFamily::stub_ids(),
+        },
+        // `net` lists only the checks that are written, so it has no stubs (M1-157).
+        Row {
+            family: &NetFamily,
+            stubs: &[],
+        },
+    ]
 }
 
 /// A registry with every family of [`rows`].

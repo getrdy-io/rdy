@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-geneve-ovn"
+summary = "eth0 at 1500 under Geneve, which OVN-Kubernetes sizes at 100 bytes"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false

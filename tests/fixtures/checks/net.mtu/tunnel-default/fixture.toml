@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-tunnel-default"
+summary = "Laptop on a VPN, the default route goes through wg0 at 1420"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false
