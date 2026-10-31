@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["secret_by_key"]
+forms = ["placeholder_prefix"]
+secrets = ["hunter2"]
+note = "A fake placeholder in front of the secret must not hide it (04 section 3.2, Structure is kept)."

@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["url_userinfo", "secret_by_key"]
+forms = ["token_userinfo", "env"]
+secrets = ["${SYN:git_token}"]
+note = "The same token in a URL and in an env var. Two rules take it and both write the same tag, so a reader can see it is one secret. The golden pins that with the same ordinal twice."

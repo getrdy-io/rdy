@@ -1,0 +1,4 @@
+users:
+- name: admin
+  user:
+    token: [REDACTED:kubeconfig_credential:~1]
