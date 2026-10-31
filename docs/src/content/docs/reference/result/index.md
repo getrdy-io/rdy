@@ -286,7 +286,7 @@ One side effect, recorded as it happened. Fields beyond the required ones depend
 | `rtype` | string | no |  | dns |  |
 | `api` | string | no |  | native, for example statvfs |  |
 | `of` | string | no |  | coalesced: the kind that was coalesced |  |
-| `under` | string | no |  | coalesced: the parent directory the file calls were under, or the program, host or path the other denied calls named, or * for denied calls past 100 targets |  |
+| `under` | string | no |  | coalesced: the parent directory the file calls were under, or the program, host or path the other denied calls named, or * for denied calls past 100 targets; for denied read_link calls that refused a non-socket link in a process fd directory it is the placeholder /proc/<pid>/fd, one entry for all processes of the check |  |
 | `count` | integer | no |  | coalesced: how many calls the entry stands for. Reads past 200 per directory, or denied calls and failed file calls past 20 per parent directory (file calls) or target (other denied calls) and reason. |  |
 | `truncated` | boolean | no |  | exec, read, connect (udp), http (unix socket) |  |
 

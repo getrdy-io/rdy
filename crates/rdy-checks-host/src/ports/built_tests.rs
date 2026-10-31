@@ -174,3 +174,62 @@ fn a_walk_that_finds_a_socket_late_still_gets_its_owner() {
         f.message
     );
 }
+
+#[test]
+fn an_unreadable_reserved_file_is_not_called_too_long() {
+    let replay = Replay::new()
+        .file("/proc/net/tcp", format!("{HEAD}{}", row(22, "0A", 5)))
+        .file("/proc/sys/net/ipv4/ip_local_port_range", "32768\t60999\n")
+        .file("/proc/sys/net/ipv4/ip_local_reserved_ports", "6443\n")
+        .unreadable("/proc/sys/net/ipv4/ip_local_reserved_ports");
+    let (outcome, _) = execute(replay, true, &json!({"id": "host.ports", "free": [40000]}));
+    let f = outcome.expect("a finding");
+    assert!(
+        f.notes.iter().any(|n| n.contains("could not be read")),
+        "{:?}",
+        f.notes
+    );
+    assert!(
+        !f.notes.iter().any(|n| n.contains("more items")),
+        "{:?}",
+        f.notes
+    );
+    // The value is not known, so the fix tells the user to append and does not claim to keep it.
+    let fix = f.fix.expect("a fix");
+    assert!(fix.contains("append 40000"), "{fix}");
+    assert!(!fix.contains("keeps the ports"), "{fix}");
+}
+
+#[test]
+fn a_reserved_list_over_the_limit_says_so_and_an_empty_one_leaves_no_comma() {
+    let long = (1..=1100u16)
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let base = || {
+        Replay::new()
+            .file("/proc/net/tcp", format!("{HEAD}{}", row(22, "0A", 5)))
+            .file("/proc/sys/net/ipv4/ip_local_port_range", "32768\t60999\n")
+    };
+    let entry = json!({"id": "host.ports", "free": [40000]});
+    let (outcome, _) = execute(
+        base().file("/proc/sys/net/ipv4/ip_local_reserved_ports", long),
+        true,
+        &entry,
+    );
+    let f = outcome.expect("a finding");
+    assert!(
+        f.notes.iter().any(|n| n.contains("more items")),
+        "{:?}",
+        f.notes
+    );
+    assert!(f.fix.expect("a fix").contains("append 40000"));
+    // An empty value: the line holds only the new port.
+    let (outcome, _) = execute(
+        base().file("/proc/sys/net/ipv4/ip_local_reserved_ports", "\n"),
+        true,
+        &entry,
+    );
+    let fix = outcome.expect("a finding").fix.expect("a fix");
+    assert!(fix.contains("ip_local_reserved_ports = 40000'"), "{fix}");
+}

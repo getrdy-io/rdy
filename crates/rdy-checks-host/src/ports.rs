@@ -374,7 +374,15 @@ async fn ephemeral(
         }
     };
     let (reserved, known) = match read_text(ctx, RESERVED).await? {
-        Read::Text(text) => range::parse_reserved(&text),
+        Read::Text(text) => {
+            let (spans, complete) = range::parse_reserved(&text);
+            if !complete {
+                notes.push(format!(
+                    "{RESERVED} lists more items than rdy reads, so a reserved port may be missed."
+                ));
+            }
+            (spans, complete)
+        }
         Read::Absent => (Vec::new(), true),
         Read::Unreadable(why) => {
             notes.push(format!(
@@ -383,11 +391,6 @@ async fn ephemeral(
             (Vec::new(), false)
         }
     };
-    if !known {
-        notes.push(format!(
-            "{RESERVED} lists more items than rdy reads, so a reserved port may be missed."
-        ));
-    }
     Ok((span, reserved, known))
 }
 

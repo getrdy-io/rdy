@@ -269,7 +269,8 @@ pub(super) fn assemble(facts: &Facts<'_>, expected: Value) -> Finding {
         } else {
             let added: Vec<String> = numbers.iter().map(u16::to_string).collect();
             fixes.push(format!(
-                "Reserve {what} for the product. rdy could not read the ports that are reserved now, so read them with `sysctl -n net.ipv4.ip_local_reserved_ports`, append {} to that value, and write `net.ipv4.ip_local_reserved_ports = <that value>,{}` to {SYSCTL_FILE}. Then run `sudo sysctl --system`. If `/etc/sysctl.conf` sets this value, edit that line instead. {check}",
+                "Reserve {what} for the product. rdy could not read the ports that are reserved now, so read them with `sysctl -n net.ipv4.ip_local_reserved_ports`, append {} to that value, and write `net.ipv4.ip_local_reserved_ports = <that value>,{}` to {SYSCTL_FILE} (just `{}` if the value is empty). Then run `sudo sysctl --system`. If `/etc/sysctl.conf` sets this value, edit that line instead. {check}",
+                added.join(","),
                 added.join(","),
                 added.join(","),
             ));

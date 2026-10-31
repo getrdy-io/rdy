@@ -693,3 +693,25 @@ fn a_held_port_without_root_still_blocks() {
     let result = mapped("held-by-named-process", vec![Need::Root]);
     assert_eq!(result.status, Status::Block, "{result:?}");
 }
+
+#[test]
+fn every_message_and_fix_the_cases_produce_passes_the_fix_text_audit() {
+    if let Err(error) = rdy_engine::fixtext::check(INFO.meta.remediation) {
+        panic!("remediation: {error}");
+    }
+    // Each case as written, and with an allow list and a loopback bind, so every template is built.
+    for (case, _) in CASES {
+        let entry = entry_of(case);
+        let mut with_allow = entry.clone();
+        with_allow["allow_owner"] = json!(["acme-agent"]);
+        for entry in [entry, with_allow] {
+            let result = run(&load(case), ports(&entry));
+            let f = result.finding();
+            for text in f.fix.iter().chain(std::iter::once(&f.message)) {
+                if let Err(error) = rdy_engine::fixtext::check(text) {
+                    panic!("{case}: {error}");
+                }
+            }
+        }
+    }
+}
