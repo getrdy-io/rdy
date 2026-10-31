@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "controllers": [
+      "io"
+    ],
+    "id": "host.cgroups",
+    "version": "v1"
+  },
+  "result": {
+    "expected": {
+      "controllers": [
+        "io"
+      ],
+      "version": "v1"
+    },
+    "fix": "If rdy runs in a container, run it on the host so every controller is visible. On the host, check that each one is mounted under `/sys/fs/cgroup`.",
+    "level": "warn",
+    "message": "cgroup v1 in use, could not confirm `io`",
+    "notes": [
+      "`io` was not confirmed: it is enabled in the kernel but its hierarchy is not mounted where rdy can see it."
+    ],
+    "observed": {
+      "cmdline": [],
+      "controllers": {
+        "io": "not_confirmed"
+      },
+      "controllers_available": [
+        "cpu",
+        "cpuacct",
+        "memory",
+        "pids"
+      ],
+      "controllers_enabled": null,
+      "layout": "v1",
+      "proc_cgroups": {
+        "io": {
+          "enabled": true,
+          "hierarchy": 4
+        }
+      }
+    },
+    "partial": null
+  }
+}

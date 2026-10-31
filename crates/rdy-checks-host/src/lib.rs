@@ -4,7 +4,7 @@
 //!
 //! So far this crate holds the OS support table, a stub for each host check that is not written yet
 //! (M1-067), [`CpuCheck`] (`host.cpu`, M1-071), [`Disk`] (`host.disk`, M1-068), [`Firewall`]
-//! (`host.firewall`, M1-147), [`Lsm`] (`host.lsm`, M1-145), [`Memory`] (`host.memory`, M1-069),
+//! (`host.firewall`, M1-147), [`CgroupsCheck`] (`host.cgroups`, M1-151), [`Lsm`] (`host.lsm`, M1-145), [`Memory`] (`host.memory`, M1-069),
 //! [`OsCheck`] (`host.os`, M1-073) and [`SecurityAgents`] (`host.security_agents`, M1-146), which the
 //! family builds from their spec entries (M1-172), the security-software catalog ([`agents`]), and the
 //! cgroup helper ([`cgroup`], M1-065) that `host.memory`, `host.cpu` and `host.cgroups` share. The real
@@ -37,6 +37,7 @@
 
 pub mod agents;
 pub mod cgroup;
+mod cgroups;
 mod cpu;
 mod disk;
 mod family;
@@ -48,6 +49,7 @@ mod reads;
 mod security_agents;
 mod text;
 
+pub use cgroups::CgroupsCheck;
 pub use cpu::CpuCheck;
 pub use disk::Disk;
 pub use family::HostFamily;

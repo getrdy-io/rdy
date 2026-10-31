@@ -1,0 +1,50 @@
+{
+  "entry": {
+    "controllers": [
+      "cpu",
+      "memory"
+    ],
+    "id": "host.cgroups",
+    "version": "v1"
+  },
+  "result": {
+    "expected": {
+      "controllers": [
+        "cpu",
+        "memory"
+      ],
+      "version": "v1"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "cgroup hybrid layout in use, controllers `cpu` and `memory` available",
+    "notes": [
+      "Hybrid layout: the controllers are in cgroup v1 hierarchies, and a v2 hierarchy is mounted beside them."
+    ],
+    "observed": {
+      "cmdline": [],
+      "controllers": {
+        "cpu": "ok",
+        "memory": "ok"
+      },
+      "controllers_available": [
+        "cpu",
+        "cpuacct",
+        "memory"
+      ],
+      "controllers_enabled": [],
+      "layout": "hybrid",
+      "proc_cgroups": {
+        "cpu": {
+          "enabled": true,
+          "hierarchy": 7
+        },
+        "memory": {
+          "enabled": true,
+          "hierarchy": 5
+        }
+      }
+    },
+    "partial": null
+  }
+}

@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cgroups-v2-memory-off-pi"
+summary = "Raspberry Pi OS on cgroup v2 where the memory controller is off by default"
+origin = "hand"
+os = "linux"
+arch = "aarch64"
+answers = ["host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false

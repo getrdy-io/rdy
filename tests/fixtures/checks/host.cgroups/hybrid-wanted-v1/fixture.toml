@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cgroups-hybrid-wanted-v1"
+summary = "Ubuntu 20.04 hybrid layout where the spec needs v1: the controllers are in v1"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false
