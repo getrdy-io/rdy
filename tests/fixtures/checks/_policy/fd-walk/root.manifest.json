@@ -1,0 +1,12 @@
+{
+  "symlinks": {
+    "proc/self/ns/net": "net:[4026531840]",
+    "proc/1234/fd/3": "socket:[8841]",
+    "proc/1234/fd/4": "/var/lib/acme/state.db",
+    "proc/1234/fd/5": "pipe:[17]",
+    "proc/1234/fd/6": "socket:[9012]",
+    "proc/1234/fd/7": "anon_inode:[eventpoll]",
+    "proc/5678/fd/3": "socket:[7777]"
+  },
+  "unreadable": ["proc/5678/fd"]
+}

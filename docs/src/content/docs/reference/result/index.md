@@ -7,7 +7,7 @@ description: "Look up each field of the JSON that rdy prints, its type and what 
 
 You can use this page to read the JSON that rdy prints with `--json`, and know what each field means. The first section is the result of a run, which `rdy run --json` prints. The other sections cover the objects that `rdy verify --json`, `rdy spec lint --json` and `rdy version --json` print. The error object has a section too. rdy prints it with `--json` when it exits without a verdict.
 
-In this release, `rdy run` and `rdy verify` are not built yet. With `--json`, each one prints the error object and exits 70. Their sections show the objects they will print.
+In this release, `rdy verify` is not built yet. With `--json`, it prints the error object and exits 70. Its section shows the object it will print.
 
 Each table has one row per field. An object that more than one field names has one section. A row that names the same object links to that section.
 
@@ -33,8 +33,8 @@ The JSON report rdy writes and Rdy Cloud reads. Ignore fields you do not know. A
 | `summary` | object | yes |  | Counts of the results. |  |
 | `checks` | array of object | yes |  | One entry per spec check, in spec order, at most 256. Sort by bucket for display. |  |
 | `actions` | array of object | yes |  | Every file read, command, lookup, connection and API request, in order. At most 5000 entries. |  |
-| `actions_truncated` | boolean | yes |  | `true` when the log dropped an entry: at the 5000 entry cap or a check's 1000 entry quota. `ok` then `failed` `read`, `read_dir` and `stat` entries go first. A `denied` entry is never dropped for another kind of entry, and repeated denials fold into one `coalesced` entry per parent directory (file calls) or per target (other calls). |  |
-| `actions_dropped` | object | yes |  | How many entries of each kind were dropped. `read`, `read_dir`, `stat` and `coalesced` entries are dropped first; any other kind only as a last resort. |  |
+| `actions_truncated` | boolean | yes |  | `true` when the log dropped an entry: at the 5000 entry cap or a check's 1000 entry quota. `ok` then `failed` `read`, `read_dir`, `read_link` and `stat` entries go first. A `denied` entry is never dropped for another kind of entry, and repeated denials fold into one `coalesced` entry per parent directory (file calls) or per target (other calls). |  |
+| `actions_dropped` | object | yes |  | How many entries of each kind were dropped. `read`, `read_dir`, `read_link`, `stat` and `coalesced` entries are dropped first; any other kind only as a last resort. |  |
 | `redaction` | object | yes |  | What the redactor changed in this report. |  |
 | `complete` | boolean | yes |  | `false` when rdy could not finish or write the report (exit 70). |  |
 | `interrupted` | boolean | yes |  | `true` when the run was cancelled (Ctrl-C). |  |
@@ -257,7 +257,7 @@ One side effect, recorded as it happened. Fields beyond the required ones depend
 | `check` | string or null | yes |  | Check key, or `null` for run level probes. |  |
 | `at_ms` | integer | yes |  | Milliseconds after `run.started_at`. |  |
 | `duration_ms` | integer | yes |  | How long it took. |  |
-| `kind` | one of `exec`, `read`, `read_dir`, `stat`, `env`, `lookup`, `connect`, `tls`, `http`, `dns`, `kube`, `native`, `coalesced`, or another value | yes |  | What kind of effect. |  |
+| `kind` | one of `exec`, `read`, `read_dir`, `read_link`, `stat`, `env`, `lookup`, `connect`, `tls`, `http`, `dns`, `kube`, `native`, `coalesced`, or another value | yes |  | What kind of effect. |  |
 | `outcome` | one of `ok`, `denied`, `failed`, `timeout`, or another value | yes |  | How it ended. |  |
 | `rule` | string | no |  | For a denied call, the rule that refused it. Absent otherwise. |  |
 | `error` | string | no |  | Why the call failed, as a fixed phrase. Absent otherwise. |  |
@@ -265,7 +265,7 @@ One side effect, recorded as it happened. Fields beyond the required ones depend
 | `argv` | array of string | no |  | exec, after redaction |  |
 | `exit` | integer or null | no |  | exec |  |
 | `stdout_bytes` | integer | no |  | exec |  |
-| `path` | string | no |  | read, read_dir, stat, native, kube. Paths under a home directory start with ~. |  |
+| `path` | string | no |  | read, read_dir, read_link, stat, native, kube. Paths under a home directory start with ~. For read_link it is the link, never what the link points to. |  |
 | `bytes` | integer | no |  | read, connect (the udp reply), http (the unix socket body) |  |
 | `entries` | integer | no |  | read_dir |  |
 | `name` | string | no |  | env (the name only, never the value), dns |  |

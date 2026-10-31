@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["url_userinfo"]
+forms = ["proxy"]
+secrets = ["svc:${SYN:proxy_pw}", "${SYN:proxy_pw}"]
+note = "The proxy URL of 04 Appendix D. The host stays, so a reader sees which proxy."

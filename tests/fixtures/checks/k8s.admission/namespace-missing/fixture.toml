@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-namespace-missing"
+summary = "The target namespace does not exist"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

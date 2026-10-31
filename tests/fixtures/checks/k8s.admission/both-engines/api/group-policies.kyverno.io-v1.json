@@ -1,0 +1,54 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/policies.kyverno.io/v1"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIResourceList",
+    "apiVersion": "v1",
+    "groupVersion": "policies.kyverno.io/v1",
+    "resources": [
+      {
+        "name": "validatingpolicies",
+        "singularName": "validatingpolicie",
+        "namespaced": false,
+        "kind": "ValidatingPolicy",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "validatingpolicies/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "ValidatingPolicy",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "mutatingpolicies",
+        "singularName": "mutatingpolicie",
+        "namespaced": false,
+        "kind": "MutatingPolicy",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "mutatingpolicies/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "MutatingPolicy",
+        "verbs": [
+          "get"
+        ]
+      }
+    ]
+  }
+}

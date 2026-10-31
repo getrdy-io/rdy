@@ -1,0 +1,17 @@
+polarity = "negative"
+since = "m1"
+rulesets = ["report"]
+rules = []
+exclusions = ["empty", "null", "true", "false", "none", "required"]
+secrets = []
+# Each control swaps one excluded value for a canary. The redactor must then hide the canary, which
+# shows the key rule reads that key and the exclusion is what kept the original value.
+controls = [
+  ["empty", "password:\ntoken", "password: canaryCtl01\ntoken", "canaryCtl01"],
+  ["empty", "DB_PASSWORD=\n", "DB_PASSWORD=canaryCtl02\n", "canaryCtl02"],
+  ["null", "token: null", "token: canaryCtl03", "canaryCtl03"],
+  ["true", "secret: true", "secret: canaryCtl04", "canaryCtl04"],
+  ["false", "api_key: false", "api_key: canaryCtl05", "canaryCtl05"],
+  ["none", "credential: none", "credential: canaryCtl06", "canaryCtl06"],
+  ["required", "auth: required", "auth: canaryCtl07", "canaryCtl07"],
+]
