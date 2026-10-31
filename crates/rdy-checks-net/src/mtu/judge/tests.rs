@@ -36,7 +36,7 @@ fn rules(min_mtu: Option<u32>, overlay: Option<Overlay>) -> Rules {
 fn the_overhead_table_is_the_published_header_sizes() {
     let table = [
         (Overlay::Ipip, Underlay::Ipv4, 20),
-        (Overlay::Ipip, Underlay::Ipv6, 40),
+        (Overlay::Ipip, Underlay::Ipv6, 48),
         (Overlay::Vxlan, Underlay::Ipv4, 50),
         (Overlay::Vxlan, Underlay::Ipv6, 70),
         (Overlay::Wireguard, Underlay::Ipv4, 60),
@@ -57,11 +57,13 @@ fn the_overhead_table_is_the_published_header_sizes() {
 fn the_boundary_is_inclusive_for_every_overlay() {
     for (overlay, underlay) in [
         (Overlay::Ipip, Underlay::Ipv4),
+        (Overlay::Ipip, Underlay::Ipv6),
         (Overlay::Vxlan, Underlay::Ipv4),
         (Overlay::Vxlan, Underlay::Ipv6),
         (Overlay::Wireguard, Underlay::Ipv4),
         (Overlay::Wireguard, Underlay::Ipv6),
         (Overlay::Geneve, Underlay::Ipv4),
+        (Overlay::Geneve, Underlay::Ipv6),
     ] {
         let over = overhead(overlay, underlay).expect("known");
         let rules = Rules {
@@ -107,6 +109,23 @@ fn the_exact_1500_is_not_jumbo() {
 fn the_small_mtu_line_is_1400() {
     assert_eq!(judge(facts(1399), &rules(None, None)).level, Level::Warn);
     assert_eq!(judge(facts(1400), &rules(None, None)).level, Level::Pass);
+}
+
+#[test]
+fn a_minimum_above_the_mtu_asks_to_raise_it_even_when_the_mtu_is_above_1500() {
+    // min_mtu 9000 with MTU 1600 and no overlay: never "set the MTU to 1500".
+    let finding = judge(facts(1600), &rules(Some(9000), None));
+    assert_eq!(finding.level, Level::Warn);
+    assert_eq!(finding.message, "`eth0` has MTU 1600, and 9000 is needed.");
+    let fix = finding.fix.expect("a fix");
+    assert!(fix.contains("to 9000 or more"), "{fix}");
+    assert!(!fix.contains("1500"), "{fix}");
+    // Once the minimum is met the clamp warning applies again.
+    assert!(
+        judge(facts(9001), &rules(Some(9000), None))
+            .message
+            .contains("clamped")
+    );
 }
 
 #[test]

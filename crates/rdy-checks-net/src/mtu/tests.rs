@@ -9,12 +9,13 @@
 use std::sync::Arc;
 
 use rdy_engine::check::{Check, CheckError, CheckOutcome, Finding, Level, Need, Os};
+use rdy_engine::outcome::map_outcome;
 use rdy_engine::probe::ActionLogOutput;
 use rdy_engine::sched::{End, Planned};
 use rdy_engine::testing::golden::assert_golden;
 use rdy_engine::testing::{Fixture, TestRun, assert_within_manifest, fixtures_dir};
 use rdy_spec::check::CheckParams;
-use rdy_spec::result::{ActionKind, ActionOutcome};
+use rdy_spec::result::{ActionKind, ActionOutcome, Status};
 use rdy_spec::spec::CheckSpec;
 use serde_json::{Value, json};
 
@@ -52,6 +53,7 @@ const CASES: &[(&str, &str)] = &[
     expect!("geneve-ovn"),
     expect!("dual-stack-split"),
     expect!("no-sysfs"),
+    expect!("symlinked-sysfs"),
 ];
 
 fn load(case: &str) -> Fixture {
@@ -225,6 +227,7 @@ fn the_levels_are_what_the_catalog_says() {
     assert_eq!(level_of("two-default-routes"), Level::Warn);
     assert_eq!(level_of("geneve-ovn"), Level::Pass);
     assert_eq!(level_of("dual-stack-split"), Level::Pass);
+    assert_eq!(level_of("symlinked-sysfs"), Level::Pass);
 }
 
 #[test]
@@ -517,12 +520,7 @@ fn a_run_stays_inside_the_manifest_and_reads_a_bounded_number_of_files() {
     }
     assert_eq!(
         INFO.reads,
-        [
-            "/sys/class/net",
-            "/sys/devices",
-            "/proc/net/route",
-            "/proc/net/ipv6_route"
-        ]
+        ["/sys/class/net", "/proc/net/route", "/proc/net/ipv6_route"]
     );
     assert!(INFO.statfs.is_empty() && INFO.commands.is_empty());
     assert!(INFO.env.is_empty() && INFO.peers.is_empty());
@@ -570,4 +568,66 @@ fn every_fix_a_case_gives_passes_the_fix_text_audit_and_is_one_plain_line() {
     if let Err(error) = rdy_engine::fixtext::check(INFO.meta.remediation) {
         panic!("the remediation is not on the lists: {error}");
     }
+}
+
+/// What the engine makes of the finding of `case`, for its own spec entry.
+fn status_of(case: &str) -> Status {
+    let entry = entry_of(case);
+    let ran = run(&load(case), check(&entry));
+    let fixture = load(case);
+    let test_run = TestRun::for_fixture(&fixture);
+    let ctx = test_run.context_for(&INFO, "net.mtu", Os::Linux, Vec::<Need>::new());
+    let spec: CheckSpec = serde_json::from_value(entry).expect("a check entry");
+    let outcome = ran.outcome().clone();
+    map_outcome(&INFO, &spec, &ctx, outcome, 0, 0).status
+}
+
+#[test]
+fn the_engine_maps_the_levels_to_the_statuses_the_catalog_names() {
+    // The ticket cases: a fail is a block for a required check, a jumbo MTU alone passes.
+    assert_eq!(status_of("vxlan-too-tight"), Status::Block);
+    assert_eq!(status_of("ec2-jumbo"), Status::Pass);
+    assert_eq!(status_of("vxlan-room-exact"), Status::Pass);
+    assert_eq!(status_of("small-1280"), Status::Warn);
+    assert_eq!(status_of("jumbo-geneve"), Status::Warn);
+    assert_eq!(status_of("no-default-route"), Status::Warn);
+}
+
+#[test]
+fn a_link_into_sys_devices_is_read_through_and_nothing_else_there_is_readable() {
+    // SEC-28-2: `/sys/class/net/eth0` is a link to `/sys/devices/platform/acme-nic0/net/eth0`.
+    let ran = run_case("symlinked-sysfs");
+    let finding = ran.finding();
+    assert_eq!(finding.observed["default_mtu"], 1500);
+    assert_eq!(finding.observed["default_interface"], "eth0");
+    assert!(finding.notes.is_empty(), "{:?}", finding.notes);
+
+    let fixture = load("symlinked-sysfs");
+    let test_run = TestRun::for_fixture(&fixture);
+    let ctx = test_run.context_for(&INFO, "net.mtu", Os::Linux, Vec::<Need>::new());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    let probe = ctx.probe();
+    // The file exists in the tree, and a text read of it is refused: `/sys/devices` is not declared.
+    for path in [
+        "/sys/devices/virtual/dmi/id/board_asset_tag",
+        "/sys/devices/platform/acme-nic0/net/eth0/mtu",
+    ] {
+        let refused = runtime.block_on(probe.read(Path::new(path)));
+        assert!(
+            matches!(refused, Err(ProbeError::Denied { .. })),
+            "{path}: {refused:?}"
+        );
+    }
+    // Reading through the link still works.
+    let mtu = runtime
+        .block_on(probe.read(Path::new("/sys/class/net/eth0/mtu")))
+        .expect("the link is followed");
+    assert_eq!(mtu.bytes, b"1500\n");
+    // A path through the link to a file of another shape is refused by the real-path rule.
+    let other =
+        runtime.block_on(probe.read(Path::new("/sys/class/net/eth0/../../virtual/dmi/id/x")));
+    assert!(other.is_err());
 }

@@ -32,8 +32,9 @@ const OVN_GENEVE_RESERVE: u32 = 100;
 ///
 /// The values are the header sizes of the published formats, counted from the outer IP header:
 ///
-/// - IP in IP: one IPv4 header, 20 bytes (RFC 2003 section 3). Over an IPv6 underlay the outer header is
-///   40 bytes (RFC 2473 section 3.3). 03 lists only the 20.
+/// - IP in IP: one IPv4 header, 20 bytes (RFC 2003 section 3). Over an IPv6 underlay (`ip6tnl`) the
+///   outer header is 40 bytes plus the 8-byte Tunnel Encapsulation Limit option that Linux adds by
+///   default, 48 in all (RFC 2473 sections 3.3 and 4.1.1). 03 lists only the 20.
 /// - VXLAN: outer IP (20, or 40 for IPv6) + UDP 8 + VXLAN 8 + inner Ethernet 14 = 50 or 70
 ///   (RFC 7348 section 4.3).
 /// - WireGuard: outer IP (20 or 40) + UDP 8 + WireGuard data header and tag 32 = 60 or 80. The default
@@ -44,7 +45,7 @@ const OVN_GENEVE_RESERVE: u32 = 100;
 pub(super) fn overhead(overlay: Overlay, underlay: Underlay) -> Option<u32> {
     match (overlay, underlay) {
         (Overlay::Ipip, Underlay::Ipv4) => Some(20),
-        (Overlay::Ipip, Underlay::Ipv6) => Some(40),
+        (Overlay::Ipip, Underlay::Ipv6) => Some(48),
         (Overlay::Vxlan | Overlay::Geneve, Underlay::Ipv4) => Some(50),
         (Overlay::Vxlan | Overlay::Geneve, Underlay::Ipv6) => Some(70),
         (Overlay::Wireguard, Underlay::Ipv4) => Some(60),
@@ -317,7 +318,16 @@ fn verdict(
         }
     }
 
-    // 2. Above 1500: informational, unless the spec asks about the MTU.
+    // 2. Below the minimum with no overlay: warn. This runs before the jumbo rule, so a minimum above
+    // 1500 does not get advice to lower the MTU.
+    if let Some(min) = rules.min_mtu.filter(|min| known.is_none() && mtu < *min) {
+        let finding = Finding::warn(format!("{name} has MTU {mtu}, and {min} is needed."))
+            .with_fix(format!(
+                "Raise the MTU of {name} and of the switch ports it connects to, to {min} or more. Set it in your network configuration (netplan, NetworkManager or the ifcfg files) so it survives a reboot."
+            ));
+        return (finding, notes);
+    }
+    // 3. Above 1500: informational, unless the spec asks about the MTU.
     if mtu > ETHERNET_MTU && wants {
         let finding = Finding::warn(format!(
             "{name} has MTU {mtu}, and traffic that leaves the network is clamped to {ETHERNET_MTU}."
@@ -329,14 +339,6 @@ fn verdict(
         return (finding, notes);
     }
 
-    // 3. Below the minimum with no overlay, or small with no minimum: warn.
-    if let Some(min) = rules.min_mtu.filter(|min| known.is_none() && mtu < *min) {
-        let finding = Finding::warn(format!("{name} has MTU {mtu}, and {min} is needed."))
-            .with_fix(format!(
-                "Raise the MTU of {name} and of the switch ports it connects to, to {min} or more. Set it in your network configuration (netplan, NetworkManager or the ifcfg files) so it survives a reboot."
-            ));
-        return (finding, notes);
-    }
     if rules.min_mtu.is_none() && mtu < SMALL_MTU {
         let finding = Finding::warn(format!(
             "{name} has MTU {mtu}, which is below {SMALL_MTU}. Most networks use {ETHERNET_MTU} or more."

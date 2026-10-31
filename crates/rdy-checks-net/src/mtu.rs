@@ -59,23 +59,24 @@ const OS: OsSupport = OsSupport {
 
 /// The static facts about `net.mtu` (03 section 3).
 ///
-/// `/sys/class/net/<if>` is a link into `/sys/devices`, so both are declared: a path and the real path
-/// it resolves to must each sit under a declared prefix. `/sys/devices` is wide, but the check reads
-/// only the three files above, the read denylist still covers the DMI serial files under it, and
-/// nothing there is a secret.
+/// `/sys/class/net/<if>` is a link into `/sys/devices`. The check declares only `/sys/class/net`. The
+/// read policy admits the resolved path of such a link when it ends with `net/<if>/<file>` under
+/// `/sys/devices/`, and no other path there (SEC-28-1), so a disk serial, a `vpd` page, `wwid` or a DMI
+/// asset tag under `/sys/devices` stays unreadable. Files in the class directory, such as the MAC
+/// `address`, are readable by the prefix, but this check reads only `mtu`, `operstate` and `type`.
 pub(crate) static INFO: CheckInfo = CheckInfo {
     id: "net.mtu",
     family: "net",
     summary: "Interface MTU and overlay headroom",
     meta: CheckMeta {
         title: "Network MTU",
-        remediation: "Set the MTU of the default interface to match the network, and the CNI MTU to the interface MTU less the overlay header (50 for VXLAN, 60 for WireGuard). Set it in your network configuration (netplan, NetworkManager or the ifcfg files) so it survives a reboot. If the network is above 1500, allow ICMP \"fragmentation needed\" through every firewall on the path.",
+        remediation: "Set the MTU of the default interface to match the network, and the CNI MTU to the interface MTU less the overlay header (on IPv4, 50 for VXLAN and Geneve, 60 for WireGuard, 20 for IPIP). Set it in your network configuration (netplan, NetworkManager or the ifcfg files) so it survives a reboot. If the network is above 1500, allow ICMP \"fragmentation needed\" through every firewall on the path.",
     },
     needs: &[],
     wants: &[],
     default_timeout: Some(Duration::from_secs(3)),
     os: OS,
-    reads: &[SYS_NET, "/sys/devices", ROUTE_V4, ROUTE_V6],
+    reads: &[SYS_NET, ROUTE_V4, ROUTE_V6],
     statfs: &[],
     env: &[],
     commands: &[],

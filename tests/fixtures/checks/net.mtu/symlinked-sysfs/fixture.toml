@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-symlinked-sysfs"
+summary = "eth0 under /sys/class/net is a link into /sys/devices, as on a real machine"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false
