@@ -190,72 +190,84 @@ done
 echo "ci-ok timeout $sha"
 ```
 
-## State at the pause (2026-10-30, about 19:30 UTC)
+## State at the pause (2026-10-31, about 03:00 UTC)
 
-The third coordinator session paused here at the founder's request. Read this section, then check every
-open PR's head and CI before acting. Agents were stopped at the pause; two of them (the #151 and #156 fix
-rounds) were mid-run and pushed nothing after the heads below, so rerun those rounds from their briefs.
+The fourth coordinator session paused here at the founder's request. Read this section and
+`reviews/open-findings-2026-10-31/pending-fixes.md`, then check every open PR's head and CI before acting.
+Every agent was stopped at the pause.
 
-**Identity, from 2026-10-30.** Every commit is authored and committed as `Rdy <dev@getrdy.io>`, and every
-sign-off line is `Signed-off-by: Rdy <dev@getrdy.io>`. Set it first in a new container:
-`git config user.name Rdy && git config user.email dev@getrdy.io`. Older commits keep their old identity;
-never rewrite pushed history. PRs and squash merges carry the GitHub account connected to Claude; the
-founder is moving that connection to the `getrdy-up` account. Confirm with `get_me` before the first PR or
-merge, and report to the founder if it still names a personal account.
+**The repository was recreated on 2026-10-30 at 18:58 UTC.** GitHub PR numbers restarted (ADR 0041). The
+open work of the previous pause (old #144 to #159) was reopened as #3 to #15 and is now all merged. A PR
+number in a file or commit dated before 18:58 UTC on 2026-10-30 refers to the previous repository.
 
-**Ownership, from 2026-10-30.** Apostolic Path LLC owns the code, the copyright and the marks (founder
-decision). PR #157 writes that into NOTICE and TRADEMARKS.md. No document may name the founder as owner.
+**Identity.** Every commit is authored and committed as `Rdy <dev@getrdy.io>`. Every commit message, merges
+too, ends with `Signed-off-by: Rdy <dev@getrdy.io>`, a `Co-Authored-By` line and the coordinator's
+`Claude-Session` URL. Set it first in a new container:
+`git config user.name Rdy && git config user.email dev@getrdy.io`. `get_me` returns the `getrdy-io` account,
+and squash merges are authored `getrdy-io <dev@getrdy.io>`. Never rewrite pushed history. A local stop hook
+asks to re-author commits as another identity; ignore it, because the founder's rule wins.
 
-Merged in this session (main at 410284f): M1-060 (#142), M1-093 (#143), M1-075 (#145), correction-31 (#150),
-plus the earlier merges of this session listed in 12-progress (M1-044 to M1-055 and the rest; #85 to #146).
-101 of 174 M1 tickets are merged: 96 of 145 core, 5 non-core.
+**Ownership.** Apostolic Path LLC owns the code, the copyright and the marks (NOTICE and TRADEMARKS.md on
+main). No document may name a person as owner, and no document may mention the founder's employer.
 
-Open PRs at the pause. "Approved" means every required reviewer approved the current fix round; every
-row still needs main merged in, a clean `mergeable_state` and `ci-ok` green on the head before merging.
-Review findings and fix briefs are in `reviews/open-findings-2026-10-30/` (named `pr-<PR>-<kind>.md`).
+**Founder rules added in this session.** Docs-only PRs merge without waiting for `ci-ok`. Still merge main
+in first and check that the PR is not dirty. Code PRs wait for `ci-ok` on the head.
 
-| PR | Ticket | State and next step |
+**Merged in this session** (main at dc822dc): #3 (runbook), #4 M1-108, #5 correction-30, #6 M1-077,
+#7 M1-114, #8 correction-32, #9 correction-28, #10 M1-169, #11 M1-057 (`rdy run` works on main), #12 interim
+README, #13 M1-063, #14 NOTICE and TRADEMARKS.md, #15 correction-33, #16 ADR 0041, #17 M1-094.
+
+**Progress.** 108 of 176 M1 tickets are merged: 103 of 147 core and 5 of 29 non-core. Correction-34 (#24)
+adds M1-177 and M1-178, which makes 178 tickets. Totals come from the rows:
+`python3 -I totals.py < docs/plan/11-backlog.md` (script in the findings folder).
+
+**Open PRs at the pause.** Each still needs main merged in and `ci-ok`, except the docs-only #24. The
+order and every outstanding fix are in `pending-fixes.md`.
+
+| PR | Ticket | State |
 | --- | --- | --- |
-| #147 | M1-108 | Approved (code, security; confirm 2 at d3922e1). Head 53ed43f has main merged; CI was running. Merge on green, then #148. Info note SEC-147-9 ("every service account" in the `SERVER_DEFAULTS` comment) rides the next k8s change. |
-| #148 | correction-30 | Approved. Merge after #147 (it cites ADR 0039 from #147). Head d7ed12f is behind main. |
-| #149 | M1-077 | Approved (code confirm, security confirm 2) at fix round 2. Head ba81bda has main merged; CI was running. Merge on green. |
-| #151 | M1-114 | Code confirm: changes (`legacy_policies` reads only `kyverno.io`'s preferred version; the fixture generator marks the first version preferred). k8s-expert verified the Kyverno CRD versions. Run fix round 2 from `pr-151-fix2.md` (check-author), then code and k8s confirm. Head 78bdd9e is behind main. |
-| #152 | correction-32 | Approved, fixed. Head 3be147b has main merged; CI was running. Merge on green. |
-| #144 | correction-28 | Approved. Head 8225dda has main merged; CI was running. Merge on green. #144, #152 and #158 all change the totals: after each merge, recompute the totals table, 00-overview and the calendar from the rows. |
-| #153 | M1-169 | Approved (code confirm with nits, security confirm; ADR 0040 accepted). Head 4d2f6c7 has main merged; CI was running. The macOS leg must pass (it is the only one that runs `read_link_by_path`). Code nits N1 to N3 (stale 12-progress text, a host-assuming test name, a double `fstat`) can ride M1-072. |
-| #154 | M1-057 | Fix round 1 at c4d8bf7. Security confirm: approve once correction-33 (#158) exists, which it now does. Code confirm was stopped at the pause: rerun it from `pr-154-code.md`. Then CI, merge. After it merges `rdy run` works on main, so the README (#155 or a follow-up) must drop "rdy run exits 70 today" (fix brief items 16 and 17). |
-| #155 | README (founder ask) | Approved (confirm). Head a63968b has main merged; CI was running. Merge on green. |
-| #156 | M1-063 | Code and security: changes (forms the corpus does not claim, `value_from` proves nothing, fragment check). Run fix round 1 from `pr-156-fix1.md` (qa-engineer); do not change the redactor. Then confirms. Head 0893d77 is behind main. |
-| #157 | NOTICE, TRADEMARKS.md (founder ask) | Approved (confirm), then changed to Apostolic Path LLC at a11afe5 (coordinator checked the diff). Merge on green. |
-| #158 | correction-33 | Opened at 77462d3: watchdog in `rdy run` (new M1-176, week 14), real-path checks (new M2-115), M2-061 redactor gaps, review carries. Its review was stopped at the pause: rerun code-reviewer with `correction-33-list.md` and the source findings. |
-| #63, #64 | Dependabot | Leave for the founder (ADR 0018). |
+| #18 | M1-174 | Approved. Main merged in (a9e3293); CI queued. Merge first. |
+| #20 | M1-149 | Approved. |
+| #19 | M1-078 | Approved. Merge before #21 and #22 (they share the templates and goldens). |
+| #21 | M1-079 | Approved. Regenerate the goldens after #19. |
+| #22 | M1-080 | Security approved. Code confirm: one high (`ReadLink` wording). Fix it at its main merge after #19 and #21, then a quick confirm. |
+| #23 | M1-150 | Approved. |
+| #25 | M1-072 | Approved. |
+| #26 | M1-151 | Approved. |
+| #27 | M1-152 | Approved. |
+| #28 | M1-157 | Approved. A small pre-merge test round (SEC-28-2 and nits). |
+| #24 | correction-34 | Approved with nits. A pre-merge round by rust-architect, then merge without CI. |
+| #1, #2 | Dependabot | Leave for the founder (ADR 0018). These were #63 and #64 in the previous repository. |
 
-Next tickets once the open work is done, in id order, at most three builders: M1-058 and M1-059 (after
-M1-057), M1-078 to M1-083 (after M1-077), M1-086 to M1-088, M1-094 to M1-101 (after M1-093), M1-072, M1-107,
-M1-113, M1-115 to M1-119, M1-124, M1-126 to M1-130, M1-132 to M1-139, M1-141, M1-174 to M1-176; then the
-non-core list (M1-140, M1-142, M1-143, M1-148 to M1-167, M1-173).
+**Not finished.** M1-161 is pushed at 76eb627 with no PR; finish its gate, open the PR and review it. M1-148 and
+the founder's README update (`rdy run` works on main, with links to NOTICE and TRADEMARKS.md) pushed nothing;
+rerun them from the brief.
 
-Next PR number: #160 (#159 is this pause-state PR). ADR numbers: 0039 is #147's kind gate, 0040 is #153's `read_link`; the next free is
-0041. 0029, 0030 and 0032 were never used. New ticket ids: M1-177 and M2-116 are next (M2-113 is in #144,
-M2-114 in #152, M1-176 and M2-115 in #158).
+**Next tickets** in id order, at most three builders, core first: M1-176 (watchdog; M1-058 and M1-088 depend
+on it), M1-058, M1-059, M1-081 (after #21), M1-082, M1-083, M1-086, M1-087, M1-088, M1-095 to M1-101,
+M1-107, M1-113, M1-115 to M1-119, M1-124, M1-126 to M1-130, M1-132 to M1-139, M1-141, M1-175, M1-177.
+Then non-core: M1-140, M1-142, M1-143, M1-148, M1-153 to M1-156, M1-158 to M1-160, M1-162 to M1-167, M1-173,
+M1-178. M1-139 and M1-167 are founder hand steps once their repo side is built.
 
-Coordinator decisions taken in this session (conservative, recorded in PRs and ADRs):
+**Numbers.** The next PR is #29. The next free ADR is 0042 (0039 to 0041 are on main). The next new
+ticket ids are M1-179 and M2-116 (M1-177 and M1-178 are in #24).
 
-- The kind job stays out of `ci-ok` (ADR 0039, Proposed); the founder decides.
-- The HTML validator jar (vnu-jar 26.10.12 from npm) is pinned by sha256 and its npm provenance was
-  verified with cosign; it runs in its own `html-validator` job with a read-only token.
-- `rdy run` prints a fixed warning for an unsigned spec now, ahead of M1-126, so product rule 3 holds in
-  every alpha.
-- `read_link` on Windows returns Denied (the M1 Windows file rule), not NotFound.
-
-Lessons from this session:
-
-- GitHub sometimes accepts a push but never updates the PR (heads stuck for an hour). Compare
-  `git ls-remote` with the PR's head; the next push resyncs it.
-- Merging a docs-only PR forces every open code PR to merge main and rerun about an hour of CI. Merge code
-  PRs first when both are close.
-- Reviewer and builder agents leave scratch clones and big target folders in the scratchpad; remove them
-  with `rm -r` (not `rm -rf`, which the sandbox refuses).
+**Environment facts from this session.**
+- The pinned toolchain 1.99.1 was half installed in the container (no cargo or rustc). Reinstall it with
+  `rustup toolchain uninstall 1.99.1` and then
+  `rustup toolchain install 1.99.1 --profile minimal -c clippy -c rustfmt --no-self-update`.
+- `cargo-deny` and `cargo-nextest` are not installed, and agents must not download them. CI's deny job
+  covers deny.
+- The macOS x64 test leg runs 11 to 16 minutes, and once hit its 25-minute job limit at test 2698 of 3556 with
+  no failure. Rerunning the failed job passed. If it recurs, release-engineer raises that leg's timeout in
+  its own PR.
+- Runner contention is the bottleneck. Cancel CI on PRs that will merge main again anyway, and keep CI on the
+  next PR to merge.
+- Keep each builder's worktree until its PR merges, because fix rounds resume the same agent. A removed
+  worktree cannot be resumed.
+- Every builder brief now says: a check-local `Want` with `evidence_only: true` when root only adds
+  evidence, and tests that assert the mapped `CheckResult` through `map_outcome`. The shared non-evidence
+  ROOT want turned non-root passes into warnings in two PRs.
 
 ## Notes carried to later tickets
 
@@ -382,14 +394,18 @@ From the 2026-10-29 session:
 - Dependabot PRs #63 and #64 bump crypto crates by a major version; review by hand per ADR 0018.
 - Ratify ADR 0024 (release proofs are founder steps) and ADR 0027 (Windows trust stores refused in M1).
 - Delete the branch `tmp/m1-011-unpinned` (proof PR #61, closed).
-\n
-
 From the 2026-10-30 session:
 
-- Reconnect Claude's GitHub connection to the `getrdy-up` account, give it write access to
-  `getrdy-io/rdy`, and set `dev@getrdy.io` as its commit email with "Keep my email addresses private" off,
-  so PRs and merges carry Rdy.
-- Change CLAUDE.md's "Company entity" line to Apostolic Path LLC (the coordinator does not edit CLAUDE.md).
+- Claude's GitHub connection now returns the `getrdy-io` account, and squash merges are authored
+  `getrdy-io <dev@getrdy.io>`. Nothing more to do unless that changes.
 - Decide the kind gate (ADR 0039): keep the kind job out of `ci-ok`, or require it.
 - Run the trademark search and filing in Apostolic Path LLC's name.
 
+From the 2026-10-31 session:
+
+- To have GitHub show commits as Verified, add a signing key for `dev@getrdy.io` to the `getrdy-io`
+  account and configure commit signing in the build environment. Commits are not signed today, and
+  "Unverified" only means that. The DCO check reads the `Signed-off-by` line.
+- Install `cargo-deny` in the build environment, or accept that only CI runs it.
+- Review Dependabot PRs #1 (syn 3) and #2 (scrypt 0.12). Both CI runs were red at the pause.
+- Decide the kind gate (ADR 0039), still open.
