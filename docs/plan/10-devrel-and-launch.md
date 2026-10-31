@@ -562,7 +562,7 @@ The launch is an announcement, not a first exposure. The repo and releases are p
 - [ ] The founder's HN account has a comment history. The founder's Reddit accounts have history on each of r/devops, r/rust and r/kubernetes. The current rules of each sub were read this week.
 - [ ] Release is signed, `cosign verify-blob` on `SHA256SUMS` passes from a clean machine, the hashes in `SHA256SUMS` match the archives, SBOM is attached, `cargo deny check` and `cargo audit` are clean.
 - [ ] `install.sh` tested on Ubuntu LTS, Debian, RHEL-family, Alpine, macOS arm64 and macOS x86_64. Windows zip tested by hand. `install.ps1` is M3 and is checked here too. The script refuses root without `--allow-root`, stops without cosign, and the signature-only override still checks the SHA-256.
-- [ ] Repo hygiene: `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and PR templates, `CHANGELOG.md`, topics set, social preview image, Discussions on, private vulnerability reporting on.
+- [ ] Repo hygiene: `LICENSE`, `NOTICE`, `TRADEMARKS.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and PR templates, `CHANGELOG.md`, topics set, social preview image, Discussions on, private vulnerability reporting on.
 - [ ] Ten issues labelled `good first issue` or `check request`, each with a clear exit test.
 - [ ] docs.getrdy.io has install, first run, spec reference and one page per shipped check family, and the page at `/unsigned` that the signing refusal links to.
 - [ ] Every terminal transcript in the posts equals a golden file in 07's format, exit code included, or says "output trimmed" and drops only the banner, header and report lines.

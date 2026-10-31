@@ -4,13 +4,17 @@
 //! rows follow the registry's families in registration order and each family's checks in catalog
 //! order, which is the order the docs pages use (docs/plan/09-docs-site.md, section 6).
 //!
-//! A title or remediation that is blank or holds a control character is a problem. Each problem goes
-//! to stderr with the check id, and the command exits 1. `cargo xtask docs-lint` runs the same
-//! validation.
+//! A title or remediation that is blank or holds a control character is a problem. So is a check other
+//! than `host.ports` that lists `FD_WALK` in `reads`: only the port check may walk the fd directory of
+//! another process (ADR 0040). Each problem goes to stderr with the check id, and the command exits 1.
+//! `cargo xtask docs-lint` runs the same validation.
 
 use anyhow::{Result, anyhow};
-use rdy_engine::check::CheckInfo;
+use rdy_engine::check::{CheckInfo, FD_WALK};
 use rdy_engine::family::Registry;
+
+/// The one check that may declare the fd walk (ADR 0040).
+const FD_WALK_CHECK: &str = "host.ports";
 
 /// The header row of the listing.
 const HEADER: &str = "id\tfamily\ttitle\tremediation";
@@ -41,10 +45,17 @@ pub fn render(infos: &[&CheckInfo]) -> String {
     out
 }
 
-/// What is wrong with the `CheckMeta` of each check, one line per problem, each naming the check.
+/// What is wrong with the `CheckMeta` and the declared `reads` of each check, one line per problem,
+/// each naming the check.
 pub fn problems(infos: &[&CheckInfo]) -> Vec<String> {
     let mut found = Vec::new();
     for info in infos {
+        if info.id != FD_WALK_CHECK && info.reads.contains(&FD_WALK) {
+            found.push(format!(
+                "check {} lists the fd walk ({FD_WALK}) in its reads. Only {FD_WALK_CHECK} may. Remove it.",
+                info.id
+            ));
+        }
         for (field, text) in [
             ("title", info.meta.title),
             ("remediation", info.meta.remediation),
@@ -126,6 +137,26 @@ mod tests {
     static BLANK_REMEDIATION: CheckInfo = fake("host.blank", "Blank", "  ");
     static NO_TITLE: CheckInfo = fake("host.untitled", "", "Do the thing.");
     static TWO_LINES: CheckInfo = fake("host.wrapped", "Wrapped", "Do this.\nThen that.");
+
+    static WALKS: CheckInfo = CheckInfo {
+        reads: &[FD_WALK],
+        ..fake("host.nosy", "Nosy", "Do the thing.")
+    };
+    static PORTS: CheckInfo = CheckInfo {
+        reads: &["/proc/net", FD_WALK],
+        ..fake("host.ports", "Ports", "Do the thing.")
+    };
+
+    #[test]
+    fn only_the_port_check_may_declare_the_fd_walk() {
+        assert!(problems(&[&PORTS]).is_empty());
+        assert_eq!(
+            problems(&[&WALKS]),
+            [
+                "check host.nosy lists the fd walk (/proc/<pid>/fd) in its reads. Only host.ports may. Remove it."
+            ]
+        );
+    }
 
     #[test]
     fn a_valid_check_has_no_problem() {

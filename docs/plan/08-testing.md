@@ -35,7 +35,7 @@ the testing seams), 01-spec-format.md (result names), 03-check-catalog.md (fixtu
 | Golden | Plain files compared byte for byte | JSON and HTML reports, terminal text, redaction output | All five legs |
 | CLI, in process | `crates/rdy-cli/tests`, calling `rdy_cli::run` | Exit codes, report files and terminal text for each fixture environment | All five legs |
 | CLI, real binary | `assert_cmd`, Live backend only | `rdy --bogus` gives 64, an unwritable `--out-dir` gives 70, the signed spec flow, the real-OS smoke | All five legs |
-| Live CI jobs | `ci.yml` | Kind cluster, `sudo` paths, no phone home under `unshare -n` | linux-x64 |
+| Live CI jobs | `ci.yml`; the kind job is `kind.yml` (M1-108, ADR 0039, not a gate) | Kind cluster, `sudo` paths, no phone home under `unshare -n` | linux-x64 |
 | Doc tests | `cargo test --doc` on the host target | Public examples in `rdy-spec` and `rdy-engine` run | linux-x64 |
 
 Tooling. `cargo nextest` does not run doc tests, so CI also runs `cargo test --doc --workspace --locked`.
@@ -340,7 +340,7 @@ Rules that keep these stable:
 
 | Leg | Runner | Runs |
 | --- | --- | --- |
-| linux-x64 | `ubuntu-24.04`, musl | Everything, plus the Linux-only jobs: `root` (the `root_*` tests as a prebuilt nextest archive run under `sudo`, so `target/` stays user-owned), `kind`, doc tests, 10,000-case parser properties, `cargo xtask goldens check` |
+| linux-x64 | `ubuntu-24.04`, musl | Everything, plus the Linux-only jobs: `root` (the `root_*` tests as a prebuilt nextest archive run under `sudo`, so `target/` stays user-owned), doc tests, 10,000-case parser properties, `cargo xtask goldens check` |
 | linux-arm64 | `ubuntu-24.04-arm`, musl | Unit, property, fixtures, goldens, in-process CLI, real-binary tests |
 | macos-arm64, macos-x64 | `macos-15`, `macos-15-intel` | Same, with the Unix process tests |
 | windows-x64 | `windows-2022` | Same, with `core.autocrlf true`, minus Unix-only tests, plus Windows-only ones |
@@ -464,6 +464,8 @@ and a golden diff that code-reviewer has read first.
 ```
 
 Built in memory. The tree holds no symlinks, no special modes and no name with `:`, `[` or `]`.
+`Probe::read_link` serves `symlinks` (M1-169): it returns the target text as recorded, applies the read policy to the
+link's real path, and in `/proc/<pid>/fd` returns only a `socket:[N]` target. `checks/_policy/fd-walk` is the case.
 `unreadable` simulates a no-privilege run.
 
 **`commands/*.json`** (any slug): `{ "argv": ["/usr/bin/chronyc", "-n", "-c", "tracking"], "stdout": "...",
@@ -566,7 +568,7 @@ Day-one rows, the target for `0.1.0`. Everything else is `none`.
 | OS | macOS 15 arm64 and x86_64 | net | `live` | macos-15 and macos-15-intel legs. Host checks are `not_yet_on_os` |
 | OS | Windows Server 2022 x86_64 | net | `live` | windows-2022 leg. Host checks are `not_yet_on_os` |
 | Container runtime | Docker, containerd, Podman, CRI-O | host.container_runtime (M1-late) | `none` | |
-| Kubernetes | kind, newest upstream minor | k8s | `live` | kind job |
+| Kubernetes | kind, oldest and newest minor upstream still patches (1.35 and 1.37 on 2026-10-30) | k8s | `live` | kind job |
 | Kubernetes | kubeadm vanilla, three newest minors | k8s | `fixture` | env `all-pass`, `version.json` cases (`hand`) |
 | Kubernetes | OpenShift 4, EKS, GKE, AKS, RKE2, k3s | k8s | `none` | Distro set is M2 |
 | Proxy | Direct | net | `fixture` | env `all-pass` |
@@ -732,7 +734,7 @@ below are coarse and move to 11-backlog.md when it is merged.
 - [M1] Fixture envs warnings-only, all-block and no-privileges | owner: qa-engineer | est: 3h | depends on: Fixture env all-pass | exit test: exit codes 1, 2 and 2 with goldens, `no-privileges` shows `partial` results and `missing_need` skips, and its verdict reason is `required_check_not_run`.
 - [M1] Timeouts env and scheduler timeout, deadline and cancellation tests under paused time | owner: qa-engineer | est: 4h | depends on: Fixture env all-pass; Family limits, run deadline and Ctrl-C cancellation | exit test: the `timeouts` env runs in process under paused time at `jobs = 1` and `jobs = 8`, every hung source gives `Timeout`, the run ends inside `deadline_ms` in virtual time, cancellation gives `interrupted: true` with `skip_kind: cancelled`, and only the `Fake::Block` test uses real time with a 1 s upper bound.
 - [M1] Property tests for rdy_spec::parse | owner: qa-engineer | est: 3h | depends on: Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits | exit test: the section 4 table holds, 10,000 cases for never-panics and limits and 256 for the rest, with a fixed seed on PRs, committed regressions, `max_shrink_time` 30 s and the suite under 60 s on linux-x64.
-- [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: SEC-25 Build minimal redactor for reports and evidence; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: 60 synthetic cases across the M1 categories pass with zero misses, secrets built from parts, and `UPDATE_GOLDENS=1` leaves `tests/fixtures/redaction/**` untouched.
+- [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: SEC-25 Build minimal redactor for reports and evidence; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: 28 synthetic cases (04 Appendix D; the rest of SEC-26 moves to SEC-44, M2-061) pass with zero misses, secrets built from parts, and `UPDATE_GOLDENS=1` leaves `tests/fixtures/redaction/**` untouched.
 - [M1] Keep golden result files per released version and parse them in CI | owner: qa-engineer | est: 1h | depends on: Golden tests for JSON and HTML reports | exit test: `tests/fixtures/results/0.1.0-alpha.1/` parses with the current rdy-engine on every leg, and a modified file under an older version directory fails the lint.
 - [M1] Nextest ci profile, cargo test --doc in CI and PR template | owner: qa-engineer | est: 1h | depends on: CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006) | exit test: a test that fails once in three runs is not retried, `cargo test --doc` runs on linux-x64, and `.github/pull_request_template.md` carries Appendix E.
 - [M1] Hand-written compatibility page with the day-one rows | owner: docs-writer | est: 1h | depends on: Fixture env all-pass | exit test: `docs/compatibility.md` lists the Appendix B rows with the four state words and each fixture row shows its origin.

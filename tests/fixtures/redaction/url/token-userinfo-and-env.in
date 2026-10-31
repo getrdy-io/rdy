@@ -1,0 +1,2 @@
+GIT_REMOTE=https://${SYN:git_token}@git.acme.test/acme/repo.git
+GIT_TOKEN=${SYN:git_token}

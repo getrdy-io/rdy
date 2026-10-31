@@ -227,8 +227,8 @@ A case's `.toml` holds `polarity` (`positive`, `negative` or `known_gap`), the `
 
 - `${SYN:name}` in `.in` and `secrets` expands from `synthetic.toml`, stored as parts, so push protection never
   sees a whole token. The vendor-documented `AKIAIOSFODNN7EXAMPLE` is used as is.
-- The harness redacts `.in` with a fixed key, replaces every tag with `~`, and compares with `.expected` byte
-  for byte (negatives: `.expected` equals `.in`). `.expected` is blessed by hand; `UPDATE_GOLDENS=1` never
+- The harness redacts `.in` with a fixed key, replaces each tag with its ordinal in the file (`~1`, `~2`),
+  and compares with `.expected` byte for byte (negatives: `.expected` equals `.in`). `.expected` is blessed by hand; `UPDATE_GOLDENS=1` never
   touches this directory (08). It also checks on its own that no `secrets` string survives (the oracle that
   catches a wrongly blessed file), that `redact(output) == output`, and that the rules find no span outside
   placeholders.

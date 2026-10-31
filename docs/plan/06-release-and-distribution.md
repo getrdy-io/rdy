@@ -91,6 +91,8 @@ Rules:
 | `test` (5 legs) | yes | build, `cargo nextest run --locked`. Linux legs also prove the binary is static (below) |
 | `root` | yes | linux-x64 only. Installs `strace`, builds a nextest archive as the runner user, runs the `root_*` tests from it under `sudo` with the nextest `root` profile (`docs/plan/08-testing.md`, section 6) |
 | `install-sh` | yes | `shellcheck`, then the shell test suite with a stub `curl` and stub cosign |
+| `html-validator` | yes | M1-077: `scripts/validate-html.sh` runs the pinned Nu HTML Checker over the HTML goldens with `--Werror`. Checkout and Java only, no cargo, no cache, read-only token |
+| `kind` (own workflow, `kind.yml`) | no | M1-108, ADR 0039. The ignored tests of `crates/rdy-checks-k8s/tests/live_cluster.rs` against a kind cluster on the oldest and newest Kubernetes minors upstream still patches, with a `restricted` namespace and the `rdy-readonly` role. Runs on PRs, on main, nightly and by hand. Not in `ci-ok`: it depends on Docker Hub, and an outage must not block merges |
 | `ci-ok` | the only required check | `needs:` exactly the gating jobs above; fails on any result other than `success` |
 
 `ci-ok` lists only gating jobs. A job skipped on PRs must never sit in its `needs:`. A renamed matrix leg would otherwise block every PR.
@@ -345,7 +347,7 @@ Key names were confirmed in M1-007 by running `dist generate` 0.33.0. The live f
 
 | Asset | Contents |
 | --- | --- |
-| `rdy-<triple>.tar.gz` (`.zip` on Windows) | `rdy-<triple>/` with `rdy` (`rdy.exe`), `LICENSE`, `README.md`, `CHANGELOG.md` |
+| `rdy-<triple>.tar.gz` (`.zip` on Windows) | `rdy-<triple>/` with `rdy` (`rdy.exe`), `LICENSE`, `NOTICE`, `README.md`, `CHANGELOG.md` |
 | `rdy-<triple>.tar.gz.sha256`, `sha256.sum` | dist's checksums, checked by `sign-release` |
 | SBOM | the CycloneDX file dist makes for `rdy` |
 | `install.sh` | this tag's copy, version stamped in |

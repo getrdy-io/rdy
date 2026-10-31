@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-openshift-scc-forbidden"
+summary = "OpenShift where the identity may not list the SCCs"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

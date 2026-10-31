@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-baseline"
+summary = "A namespace that enforces baseline and sets no warn or audit label"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

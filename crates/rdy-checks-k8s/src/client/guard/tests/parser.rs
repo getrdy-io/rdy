@@ -1055,7 +1055,7 @@ fn the_selector_a_list_needs_is_still_checked_after_the_value_rules() {
 /// Check ids that `ALLOWED` cites and that no `CheckInfo` exists for yet. A check ticket removes its id
 /// when it registers its info in `crate::registry::infos`; the test fails if an id is in both places or
 /// in neither. M1-115 requires this list to be empty.
-const NOT_BUILT_YET: &[&str] = &["k8s.admission", "k8s.nodes"];
+const NOT_BUILT_YET: &[&str] = &["k8s.nodes"];
 
 /// The ids `ALLOWED` cites that no info in `infos` has.
 fn uncited<'a>(
