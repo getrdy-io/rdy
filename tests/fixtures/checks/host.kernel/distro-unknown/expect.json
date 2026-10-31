@@ -1,0 +1,33 @@
+{
+  "entry": {
+    "distro_min": {
+      "rhel": "4.18.0-305"
+    },
+    "id": "host.kernel",
+    "min": "5.4"
+  },
+  "result": {
+    "expected": {
+      "applied": {
+        "source": "min",
+        "version": "5.4"
+      },
+      "distro_min": {
+        "rhel": "4.18.0-305"
+      },
+      "min": "5.4"
+    },
+    "fix": "Install a newer kernel from the OS vendor, reboot into it and confirm with `uname -r`.",
+    "level": "warn",
+    "message": "Kernel `4.18.0-348.el8.x86_64` is older than the minimum of 5.4.",
+    "notes": [
+      "The distribution could not be identified, so distro_min was not applied. A kernel below min is reported as a warning for that reason."
+    ],
+    "observed": {
+      "base": "4.18.0",
+      "build": "348",
+      "release": "4.18.0-348.el8.x86_64"
+    },
+    "partial": null
+  }
+}

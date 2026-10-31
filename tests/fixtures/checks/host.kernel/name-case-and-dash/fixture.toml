@@ -1,0 +1,12 @@
+schema = 1
+name = "name-case-and-dash"
+summary = "xt_TCPMSS is loaded but xt_tcpmss is a different module, and a dash in the spec matches an underscore on the machine"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false
