@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-openshift-scc-cut"
+summary = "OpenShift with an SCC list that has a second page"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

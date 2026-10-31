@@ -70,3 +70,13 @@ reason = "The ceph-csi rbd driver name (openshift-storage.rbd.csi.ceph.com), not
 rule = "host"
 value = "cephfs.csi.ceph.com"
 reason = "The ceph-csi CephFS driver name (openshift-storage.cephfs.csi.ceph.com), not a host a test contacts (k8s.storageclass)"
+
+[[allow]]
+rule = "host"
+value = "kyverno.io"
+reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"
+
+[[allow]]
+rule = "host"
+value = "policies.kyverno.io"
+reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"

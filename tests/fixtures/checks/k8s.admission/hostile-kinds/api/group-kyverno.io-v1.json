@@ -1,0 +1,94 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/kyverno.io/v1"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIResourceList",
+    "apiVersion": "v1",
+    "groupVersion": "kyverno.io/v1",
+    "resources": [
+      {
+        "name": "evil1",
+        "singularName": "evil1",
+        "namespaced": false,
+        "kind": "Evil\u001b[2JKind",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "evil1/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "Evil\u001b[2JKind",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "evil2",
+        "singularName": "evil2",
+        "namespaced": false,
+        "kind": "`rm -rf /`",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "evil2/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "`rm -rf /`",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "evil3",
+        "singularName": "evil3",
+        "namespaced": false,
+        "kind": "A\u202eB",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "evil3/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "A\u202eB",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "evil4",
+        "singularName": "evil4",
+        "namespaced": false,
+        "kind": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "evil4/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "verbs": [
+          "get"
+        ]
+      }
+    ]
+  }
+}

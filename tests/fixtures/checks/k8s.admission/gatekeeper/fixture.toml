@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-gatekeeper"
+summary = "Gatekeeper: templates and two constraint kinds"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true
