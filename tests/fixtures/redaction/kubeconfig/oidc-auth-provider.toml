@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["kubeconfig_credential"]
+forms = ["client_secret", "id_token", "refresh_token", "access_token"]
+secrets = ["${SYN:oidc_client_secret}", "${SYN:oidc_id_token}", "${SYN:oidc_refresh_token}", "${SYN:oidc_access_token}"]
+note = "The client id and the issuer URL stay."

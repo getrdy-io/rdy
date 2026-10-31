@@ -1,0 +1,3 @@
+[db]
+password = hunter2
+host = db.acme.test

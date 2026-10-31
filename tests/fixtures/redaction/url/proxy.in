@@ -1,0 +1,1 @@
+HTTPS_PROXY=http://svc:${SYN:proxy_pw}@proxy.acme.test:3128
