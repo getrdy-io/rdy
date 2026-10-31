@@ -6,8 +6,8 @@
 
 use askama::Template;
 use rdy_spec::result::{
-    Bucket, BucketGroup, CheckResult, Need, NeedState, Report, SignatureState, SkipKind, Status,
-    TrustSource, Verdict, group_by_bucket,
+    Bucket, BucketGroup, CheckResult, FixSource, Need, NeedState, Report, SignatureState, SkipKind,
+    Status, TrustSource, Verdict, group_by_bucket,
 };
 
 use crate::summary::{summary_line, verdict_line};
@@ -63,6 +63,10 @@ impl Span {
     }
 }
 
+mod actions;
+
+use actions::ActionLog;
+
 /// One section of checks, from one [`BucketGroup`].
 pub(super) struct Section {
     /// The element id, and the target of the link in the page index.
@@ -83,6 +87,13 @@ pub(super) struct PartialView {
     pub note: String,
 }
 
+/// A fix and who it is from.
+pub(super) struct FixView {
+    /// "From acme-platform", "From the spec file (not verified)" or "From rdy". The product is untrusted.
+    pub label: Vec<Span>,
+    pub text: String,
+}
+
 /// One check.
 pub(super) struct CheckView {
     /// The position in the report, which makes the element id.
@@ -96,7 +107,7 @@ pub(super) struct CheckView {
     pub message: String,
     /// Why a check that did not run did not run.
     pub not_run_reason: Option<Vec<Span>>,
-    pub fix: Option<String>,
+    pub fix: Option<FixView>,
     pub builtin_fix: Option<String>,
     /// `root (not available)` and so on, one list of spans per need.
     pub requires: Vec<Vec<Span>>,
@@ -141,6 +152,8 @@ pub(super) struct View {
     pub sections: Vec<Section>,
     pub capabilities: Vec<CapabilityView>,
     pub details: Vec<Row>,
+    /// What rdy read and contacted, one table.
+    pub actions: ActionLog,
 }
 
 impl View {
@@ -189,6 +202,7 @@ impl View {
                 })
                 .collect(),
             details: details(report),
+            actions: ActionLog::new(report),
         }
     }
 }
@@ -197,12 +211,7 @@ impl View {
 fn banners(report: &Report) -> Vec<Banner> {
     let mut out = Vec::new();
     let sig = &report.signature;
-    let pinned = matches!(sig.state, SignatureState::Verified)
-        && matches!(
-            sig.trust_source,
-            Some(TrustSource::System | TrustSource::User)
-        );
-    if !pinned {
+    if !key_is_pinned(report) {
         if matches!(sig.state, SignatureState::Verified) {
             let mut first = vec![Span::own(
                 "This spec was checked with a key given on the command line",
@@ -251,6 +260,34 @@ fn banners(report: &Report) -> Vec<Banner> {
         });
     }
     out
+}
+
+/// `true` when the spec's signature verified and the key is one the user or the system pinned. Only then
+/// is the vendor's name on its fix text (01 section 2.6).
+fn key_is_pinned(report: &Report) -> bool {
+    let sig = &report.signature;
+    matches!(sig.state, SignatureState::Verified)
+        && matches!(
+            sig.trust_source,
+            Some(TrustSource::System | TrustSource::User)
+        )
+}
+
+/// The fix with its label. The vendor's product name labels spec text only when the key is pinned. Every
+/// other case is "the spec file (not verified)": a spec that was not verified, a `fix_source` this version
+/// does not know and a fix with no `fix_source` at all (only another producer writes that). Unknown means
+/// not verified (01 section 2.6), and the raw value is never shown, so a reader does not take commands
+/// for the vendor's.
+fn fix_view(report: &Report, check: &CheckResult) -> Option<FixView> {
+    let text = check.fix.clone()?;
+    let label = match &check.fix_source {
+        Some(FixSource::Rdy) => vec![Span::own("From rdy")],
+        Some(FixSource::FromSpec) if key_is_pinned(report) => {
+            vec![Span::own("From "), Span::untrusted(&report.spec.product)]
+        }
+        _ => vec![Span::own("From the spec file (not verified)")],
+    };
+    Some(FixView { label, text })
 }
 
 /// `4d2a7c0e...0a1c`: the first eight and last four characters, as the terminal banner shows it.
@@ -316,7 +353,7 @@ fn check_view(report: &Report, check: &CheckResult) -> CheckView {
         name: check.name.clone(),
         message: check.message.clone(),
         not_run_reason: not_run_reason(check),
-        fix: check.fix.clone(),
+        fix: fix_view(report, check),
         builtin_fix: check.builtin_fix.clone(),
         requires: check
             .needs

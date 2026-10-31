@@ -346,13 +346,12 @@ fn untrusted_text_is_shown_as_text() -> TestResult {
 /// The HTML half of the M1-056 exit test (PC-43, carried by M1-062): the canaries of the JSON test never
 /// reach the page, and neither do canaries planted in the free text the page does show.
 ///
-/// The page does not show `observed`, `expected` or the action log yet (M1-080 and M1-081 add them), so
-/// the first group is a check on those two tickets as much as on this one: it must keep passing when they
-/// land. A password inside a proxy URL is not planted: the URL rule is M1-060's and the known-secret
+/// The page shows the action log (M1-080) but not `observed` or `expected` yet (M1-081 adds them), so the
+/// `observed` canaries are vacuous until then: that test must keep passing when it lands. A password inside a proxy URL is not planted: the URL rule is M1-060's and the known-secret
 /// registration of the proxy password is M1-091's.
 #[test]
 fn canaries_never_reach_the_page() -> TestResult {
-    const CANARIES: [&str; 11] = [
+    const CANARIES: [&str; 12] = [
         "canary-env-token-2",
         "canary-kube-token-3",
         "canary-kube-text-3b",
@@ -364,6 +363,7 @@ fn canaries_never_reach_the_page() -> TestResult {
         "canary-Zk3v9Qx7-note",
         "canary-Zk3v9Qx7-fix",
         "canary-Zk3v9Qx7-part",
+        "canary-Zk3v9Qx7-act",
     ];
     let mut doc = five_buckets_doc()?;
     doc["checks"][0]["observed"] = json!({
@@ -377,7 +377,21 @@ fn canaries_never_reach_the_page() -> TestResult {
         "stdout": "Authorization: Bearer canary-output-hdr-4\nok",
         "cmdline": ["kubectl", "--token", "canary-argv-5"],
     });
-    doc["actions"][0]["argv"] = json!(["/usr/bin/tool", "--password", "canary-action-argv-6"]);
+    // A command in the action log, whose argument after `--password` is a secret, and a failed call whose
+    // error text holds one (M1-080).
+    let mut command = doc["actions"][0].clone();
+    command["kind"] = json!("exec");
+    command["program"] = json!("/usr/bin/tool");
+    command["argv"] = json!(["--password", "canary-action-argv-6", "--verbose"]);
+    command["exit"] = json!(0);
+    let mut failure = doc["actions"][0].clone();
+    failure["outcome"] = json!("failed");
+    failure["error"] = json!("refused, token=canary-Zk3v9Qx7-act");
+    let actions = doc["actions"]
+        .as_array_mut()
+        .ok_or("actions is not a list")?;
+    actions.push(command);
+    actions.push(failure);
     doc["host"]["hostname"] = json!("web-01 password=canary-Zk3v9Qx7-host");
     doc["checks"][1]["message"] = json!("failed, token=canary-Zk3v9Qx7-msg was sent");
     doc["checks"][1]["notes"] = json!(["secret=canary-Zk3v9Qx7-note"]);
@@ -399,6 +413,11 @@ fn canaries_never_reach_the_page() -> TestResult {
     assert!(html.contains("<bdi>secret="));
     assert!(html.contains("<bdi>run it with password="));
     assert!(html.contains("<bdi>token="));
+    // The action log shows the command with the secret replaced, not only without it (M1-080). The
+    // placeholder keeps the flag and the argument after it.
+    assert!(html.contains("<bdi>/usr/bin/tool</bdi> <bdi>--password</bdi> <bdi>[REDACTED:"));
+    assert!(html.contains("]</bdi> <bdi>--verbose</bdi>"));
+    assert!(html.contains("Failed: <bdi>refused, token=[REDACTED:"));
     Ok(())
 }
 
@@ -529,5 +548,267 @@ fn all_five_sections_match_their_golden() -> TestResult {
         fixtures_dir().join("reports/golden/five-sections-exec-plugin.html"),
         html_of(five_buckets_doc()?)?.as_bytes(),
     );
+    Ok(())
+}
+
+/// The vendor's fix is labelled with who wrote it. Only a verified signature with a pinned key puts the
+/// product's name on it (01 section 2.6).
+#[test]
+fn a_spec_fix_is_labelled_with_the_product_when_pinned() -> TestResult {
+    let html = html_of(sample()?)?;
+    assert!(html.contains(
+        "<span class=\"label\">From <bdi>acme-platform</bdi>:</span> <bdi>Add RAM or choose a larger node class.</bdi>"
+    ));
+    // rdy's own text for a check that did not run says so, and the extra text below a vendor fix too.
+    assert!(html.contains("<span class=\"label\">From rdy:</span>"));
+    assert!(html.contains("<span class=\"label\">More from rdy:</span>"));
+    assert!(!html.contains("Fix:"));
+    Ok(())
+}
+
+#[test]
+fn a_spec_fix_that_was_not_verified_does_not_carry_the_product_name() -> TestResult {
+    let mut unsigned = sample()?;
+    unsigned["signature"] = json!({"state": "unsigned"});
+    let mut one_run_key = sample()?;
+    one_run_key["signature"]["trust_source"] = json!("flag");
+    for doc in [unsigned, one_run_key] {
+        let html = html_of(doc)?;
+        assert!(html.contains(
+            "<span class=\"label\">From the spec file (not verified):</span> <bdi>Add RAM or choose a larger node class.</bdi>"
+        ));
+        assert!(!html.contains("From <bdi>acme-platform</bdi>"));
+        // rdy's own text keeps its label.
+        assert!(html.contains("<span class=\"label\">From rdy:</span>"));
+    }
+    Ok(())
+}
+
+/// A `fix_source` this version does not know, and a fix with none, are not verified (SEC-22-3). The raw
+/// value is never shown, and the product name is not put on it even when the key is pinned.
+#[test]
+fn an_unknown_or_missing_fix_source_is_labelled_not_verified() -> TestResult {
+    let mut unknown = sample()?;
+    unknown["checks"][1]["fix_source"] = json!("future_source");
+    let mut missing = sample()?;
+    missing["checks"][1]["fix_source"] = Value::Null;
+    for doc in [unknown, missing] {
+        let html = html_of(doc)?;
+        assert!(html.contains(
+            "<span class=\"label\">From the spec file (not verified):</span> <bdi>Add RAM or choose a larger node class.</bdi>"
+        ));
+        assert!(!html.contains("future_source"));
+        assert!(!html.contains("unknown source"));
+        // The other vendor fix on the page, whose source is known, keeps the product label.
+        assert!(html.contains(
+            "<span class=\"label\">From <bdi>acme-platform</bdi>:</span> <bdi>Ask your network team"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_product_name_in_a_fix_label_is_shown_as_text() -> TestResult {
+    let mut doc = sample()?;
+    doc["spec"]["product"] = json!("<b>x</b>");
+    let html = html_of(doc)?;
+    assert!(
+        html.contains("<span class=\"label\">From <bdi>&#60;b&#62;x&#60;/b&#62;</bdi>:</span>")
+    );
+    Ok(())
+}
+
+/// The part of the page that is the action log: from its section to the end of the section.
+fn action_section(html: &str) -> TestResult<&str> {
+    let start = at(html, "<section aria-labelledby=\"actions\">")?;
+    let end = at(&html[start..], "</section>")? + start;
+    Ok(&html[start..end])
+}
+
+#[test]
+fn the_action_log_is_one_table_with_no_details_element() -> TestResult {
+    for doc in [sample()?, five_buckets_doc()?] {
+        let html = html_of(doc)?;
+        assert!(!html.contains("<details"));
+        let section = action_section(&html)?;
+        assert_eq!(section.matches("<table>").count(), 1);
+        assert!(section.contains("<h2 id=\"actions\">What rdy read and contacted</h2>"));
+        assert!(section.contains("<caption>"));
+        assert!(section.contains("<th scope=\"col\">Detail</th>"));
+        // The sample has 15 entries, and the header row is one more.
+        assert_eq!(section.matches("<tr>").count(), 16);
+        assert!(html.contains("<li><a href=\"#actions\">What rdy read and contacted</a></li>"));
+        // It comes after the run and spec details.
+        assert!(at(&html, "<h2 id=\"details\">")? < at(&html, "<h2 id=\"actions\">")?);
+        assert_eq!(well_formed(&html), Vec::<String>::new());
+    }
+    Ok(())
+}
+
+#[test]
+fn an_action_row_says_what_was_done_to_what_and_how_it_ended() -> TestResult {
+    let html = html_of(sample()?)?;
+    let section = action_section(&html)?;
+    assert!(section.contains(
+        "<tr><th scope=\"row\">1</th><td>the run itself</td><td>Read a file</td><td><bdi>~/.kube/config</bdi></td><td>Done, 5412 bytes</td></tr>"
+    ));
+    assert!(section.contains(
+        "<td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/cpuinfo</bdi></td>"
+    ));
+    assert!(section.contains(
+        "<td>Sent a Kubernetes API request</td><td><bdi>GET</bdi> <bdi>/version</bdi></td><td>Done, status 200</td>"
+    ));
+    assert!(section.contains(
+        "<td>Opened a connection</td><td><bdi>license.acme.example:443</bdi> through <bdi>http://proxy.corp.example:3128</bdi></td><td>Failed: <bdi>proxy answered 403 to CONNECT</bdi></td>"
+    ));
+    // No raw JSON key or engine word is visible text.
+    for raw in [
+        "read_dir",
+        "via_proxy",
+        "duration_ms",
+        "at_ms",
+        "outcome",
+        "denied",
+    ] {
+        assert!(
+            !section.contains(raw),
+            "{raw:?} is visible in the action log"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn action_text_from_the_report_is_shown_as_text() -> TestResult {
+    let mut doc = sample()?;
+    doc["actions"][0]["path"] = json!("</td><script>x</script>");
+    doc["actions"][1]["kind"] = json!("<i>kind</i>");
+    let html = html_of(doc)?;
+    assert!(html.contains("<bdi>&#60;/td&#62;&#60;script&#62;x&#60;/script&#62;</bdi>"));
+    assert!(html.contains("<td><bdi>&#60;i&#62;kind&#60;/i&#62;</bdi></td>"));
+    assert!(!html.contains("<script>x"));
+    assert_eq!(well_formed(&html), Vec::<String>::new());
+    Ok(())
+}
+
+/// A sample whose action log is `count` copies of its first entry, numbered from 1.
+fn doc_with_actions(count: u64) -> TestResult<Value> {
+    let mut doc = sample()?;
+    let template = doc["actions"][0].clone();
+    let actions = doc["actions"]
+        .as_array_mut()
+        .ok_or("actions is not a list")?;
+    actions.clear();
+    for seq in 1..=count {
+        let mut entry = template.clone();
+        entry["seq"] = json!(seq);
+        actions.push(entry);
+    }
+    Ok(doc)
+}
+
+/// The page lists the first 1000 entries and counts the rest (01 section 6, item 7). The 5 MiB cap on the
+/// whole page is not here: it is measured with the embedded JSON in it (M1-078).
+#[test]
+fn the_action_log_stops_at_1000_rows_and_counts_the_rest() -> TestResult {
+    let html = html_of(doc_with_actions(1003)?)?;
+    let section = action_section(&html)?;
+    assert_eq!(section.matches("<tr><th scope=\"row\">").count(), 1000);
+    assert!(section.contains("<th scope=\"row\">1000</th>"));
+    assert!(!section.contains("<th scope=\"row\">1001</th>"));
+    assert!(section.contains("<p>3 more entries are in the embedded JSON."));
+    Ok(())
+}
+
+#[test]
+fn one_entry_left_out_reads_as_one_entry() -> TestResult {
+    let html = html_of(doc_with_actions(1001)?)?;
+    assert!(action_section(&html)?.contains("<p>1 more entry is in the embedded JSON."));
+    Ok(())
+}
+
+/// A refusal is never left to the JSON: every `denied` entry past the cut is a row too (SEC-22-1).
+#[test]
+fn a_refusal_past_the_row_limit_is_still_listed() -> TestResult {
+    let mut doc = doc_with_actions(1010)?;
+    for index in [1004, 1008] {
+        doc["actions"][index]["outcome"] = json!("denied");
+        doc["actions"][index]["rule"] = json!("read_denylist");
+    }
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert_eq!(section.matches("<tr><th scope=\"row\">").count(), 1002);
+    assert!(section.contains("<th scope=\"row\">1005</th>"));
+    assert!(section.contains("<th scope=\"row\">1009</th>"));
+    assert!(!section.contains("<th scope=\"row\">1006</th>"));
+    assert_eq!(
+        section
+            .matches("Refused by rdy: <bdi>read_denylist</bdi>")
+            .count(),
+        2
+    );
+    assert!(section.contains("<p>8 more entries are in the embedded JSON. Every refused call in the log is listed above.</p>"));
+    Ok(())
+}
+
+/// A log the engine cut says so and counts what it dropped, and the caption never claims to be complete
+/// (SEC-22-2).
+#[test]
+fn a_cut_log_says_what_was_dropped() -> TestResult {
+    let plain_html = html_of(sample()?)?;
+    let plain_section = action_section(&plain_html)?;
+    assert!(plain_section.contains("<caption>What rdy recorded, in order</caption>"));
+    assert!(!plain_section.contains("Every "));
+    assert!(!plain_section.contains("left some entries out"));
+
+    let mut doc = sample()?;
+    doc["actions_truncated"] = json!(true);
+    doc["actions_dropped"] = json!({"read": 120, "read_dir": 5, "future_kind": 2});
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert!(section.contains("<caption>What rdy recorded, in order</caption>"));
+    assert!(section.contains(
+        "<p>rdy left some entries out of its own log to stay within its size limits: 2 <bdi>future_kind</bdi>, 120 file reads, 5 folder listings.</p>"
+    ));
+    assert!(!section.contains("read_dir"));
+    Ok(())
+}
+
+#[test]
+fn a_folded_row_uses_plain_words() -> TestResult {
+    let mut doc = sample()?;
+    let mut entry = doc["actions"][0].clone();
+    entry["seq"] = json!(16);
+    entry["kind"] = json!("coalesced");
+    entry["outcome"] = json!("failed");
+    entry["error"] = json!("permission denied");
+    entry["of"] = json!("read_dir");
+    entry["under"] = json!("/var/lib");
+    entry["count"] = json!(12);
+    for key in ["path", "bytes", "truncated"] {
+        entry[key] = Value::Null;
+    }
+    doc["actions"]
+        .as_array_mut()
+        .ok_or("actions is not a list")?
+        .push(entry);
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert!(section.contains(
+        "<td>Many calls shown as one row</td><td>12 folder listings under <bdi>/var/lib</bdi></td>"
+    ));
+    assert!(!section.contains("read_dir"));
+    Ok(())
+}
+
+#[test]
+fn an_empty_action_log_says_so() -> TestResult {
+    let mut doc = sample()?;
+    doc["actions"] = json!([]);
+    let html = html_of(doc)?;
+    let section = action_section(&html)?;
+    assert!(section.contains("<p>rdy recorded nothing in this run.</p>"));
+    assert!(!section.contains("<table>"));
+    assert_eq!(well_formed(&html), Vec::<String>::new());
     Ok(())
 }
