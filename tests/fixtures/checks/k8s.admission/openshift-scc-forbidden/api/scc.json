@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/security.openshift.io/v1/securitycontextconstraints",
+    "query": "limit=500"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "securitycontextconstraints.security.openshift.io is forbidden: User \"acme-reader\" cannot list resource \"securitycontextconstraints\" in API group \"security.openshift.io\" at the cluster scope",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}

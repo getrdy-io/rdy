@@ -318,7 +318,7 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
 - The kube exec credential plugin gets an `exec` entry with the resolved plugin path and redacted args,
   outcome `delegated`, note "run by the kube client, output not captured, may run again on token
   refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01.)
-- Coalescing (past 200 per check, per directory) folds only `read`, `read_dir` and `stat` entries with
+- Coalescing (past 200 per check, per directory) folds only `read`, `read_dir`, `read_link` and `stat` entries with
   outcome `ok`, `failed` or `denied`. The 2 MiB truncation (the JSON writer, M1-055) sheds `ok` file
   entries first, then `failed` ones, then `exec`, `connect`, `tls`, `http`, `dns`, `kube` and `native`
   entries as a last resort (a warning in the log). Every `denied` entry is always kept: the writer never
@@ -434,7 +434,8 @@ tests policy.
   `secrets/kubernetes.io/*`). `/proc/<pid>/` is an allowlist (`status`, `stat`, `statm`, `comm`,
   `cgroup`, `mountinfo`, `mounts`, `limits`, `net`, and the same under `task/<tid>/`, plus `auxv` for
   `self` only, which M1-042 reads for `AT_SECURE`), so `cwd`,
-  `exe`, `root`, `fd`, `environ`, `cmdline`, `mem`, `maps` and `ns` are refused. At the root: `/proc/kcore`,
+  `exe`, `root`, `fd`, `environ`, `cmdline`, `mem`, `maps` and `ns` are refused, except the two entries
+  that `read_link` opens (see Links below). At the root: `/proc/kcore`,
   `kmsg`, `vmcore`, `kallsyms`, `kpage*`, `/sys/kernel/debug`, `/sys/kernel/tracing`, and `/dev/*` for
   `stat` and `read_dir` as well as `read` (M4 adds a closed stat-only list: `/dev/nvidia*`, `/dev/dri/*`,
   `/dev/kfd`).
@@ -442,6 +443,18 @@ tests policy.
   `rdy-checks-k8s` client module reads the file the operator chose (`--kubeconfig`, `KUBECONFIG` or
   `~/.kube/config`), and the probe hook logs it as a `read` entry with no check id from
   `Loaded::files()` (ADR 0031, M1-102).
+- Links (`read_link`, M1-169, ADR 0040): the link is judged where it sits and never followed. The path as
+  written, and its real path (the real parent plus its own name), must be off the deny list and under
+  `reads`. Linux opens the parent with `O_PATH` and calls `readlinkat` on that descriptor, after it checks
+  that the real path of the parent leads to that inode and that a procfs is seen as `/proc` (a directory
+  from another mount namespace is refused). Another Unix that is not macOS answers `Unsupported`. The target is
+  returned raw and is not judged or logged: the entry holds `path` only. Two entries of `/proc/<pid>/` are open
+  to it: `/proc/self/ns/net` (rdy's own process, when `reads` cover it and `/proc/self` is rdy's own pid, read once when the live backend is built) and, for a check that declares
+  `check::FD_WALK` in `reads`, `/proc/<pid>/fd/<n>` (and `read_dir` of `/proc/<pid>/fd`). A link whose real
+  path is `/proc/<pid>/fd/<n>` returns only a `socket:[digits]` target; any other target is refused with a
+  fixed rule, and neither the error nor the log holds it. `read`, `stat` and `Statvfs` of an fd path stay
+  refused. `thread-self`, `task/<tid>/fd` and a `proc` that is not at the root stay refused. The
+  declaration is no prefix: it never covers a read of the text `/proc/<pid>/fd/x`.
 - 1 MiB cap (`MAX_READ`); a longer file sets `truncated_tail`, and `read_tail` sets `truncated_head`.
   A directory listing holds at most 65,536 entries and a longer one is an error. Reads run on
   `spawn_blocking`.
@@ -452,8 +465,16 @@ tests policy.
 - The host must be in the calling check's own host set. The spec may name at most 64 distinct hosts
   (rdy-spec validation, exit 64).
 - One `is_forbidden(IpAddr)` refuses, literal or resolved: 169.254.0.0/16, 100.100.100.200/32,
-  fe80::/10, fd00:ec2::/64, and the IPv4-mapped, IPv4-compatible and `64:ff9b::/96` forms of each IPv4
-  range. A table test backs it.
+  168.63.129.16/32 (Azure host services, M1-094), fe80::/10, fd00:ec2::/64, fd20:ce::254/128 (GCP IPv6
+  metadata, M1-094), and the IPv4-mapped, IPv4-compatible and `64:ff9b::/96` forms of each IPv4 range.
+  A table test backs it. `Probe::lookup(host)` (M1-094) resolves one of the check's own spec hosts,
+  refuses the whole call if any answer is in the table, and logs one `lookup` entry with `host` and an
+  `answers` count; `tcp`, `tls_chain`, `http` and `udp_exchange` apply the same table.
+- One narrow door in the table (planned, M1-155): the `SystemResolver` peer class may reach 168.63.129.16
+  on port 53 (UDP and TCP), and only when the address came from the OS nameserver list (`resolv.conf` or
+  the platform's equivalent), because it is the nameserver on every Azure VM. A spec host on any port, and
+  ports 80 and 32526 (the WireServer ports), stay refused. Until the class is built, a check that wants
+  to query such a nameserver reports Skipped, "nameserver in a refused range".
 - `tcp` tries each address with a 250 ms stagger and a per-attempt timeout, and reports every attempt.
   Checks cannot pick addresses.
 - Proxied path: the facade writes CONNECT (8 KiB head cap, own timeout, Basic auth from `ProxyUrl`,
@@ -1040,8 +1061,10 @@ impl Probe {
     pub async fn read(&self, path: &Path) -> Result<FileBytes, ProbeError>;
     pub async fn read_tail(&self, path: &Path, max: usize) -> Result<FileBytes, ProbeError>;
     pub async fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, ProbeError>;
-    // read_link: M1-169 (plan correction 14). host.ports needs it for /proc/self/ns/net and /proc/<pid>/fd,
-    // and the action log needs a kind for it.
+    // As built in M1-169 (ADR 0040): returns the raw target, never logged. The link is judged where it sits.
+    // `check::FD_WALK` in `reads` opens `read_dir` of /proc/<pid>/fd and `read_link` of its links, and only
+    // a `socket:[N]` target comes back. /proc/self/ns/net is open when `reads` cover it.
+    pub async fn read_link(&self, path: &Path) -> Result<FileBytes, ProbeError>;
     pub async fn stat(&self, path: &Path) -> Result<Option<FileMeta>, ProbeError>;
     pub fn env(&self, name: &str) -> Result<Option<String>, ProbeError>;   // a secret-looking name joins the known secrets (M1-061)
     // Evidence text from a facade buffer, redacted with its cut flags (M1-061). Parse numbers from
@@ -1085,6 +1108,9 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {   // Live and Replay
     fn open_read<'a>(&'a self, path: &'a Path, range: ReadRange, guard: &'a ReadGuard) -> BoxFuture<'a, io::Result<FileBytes>>;
     fn read_dir<'a>(&'a self, path: &'a Path, guard: &'a ReadGuard) -> BoxFuture<'a, io::Result<Vec<DirEntry>>>;
     fn stat<'a>(&'a self, path: &'a Path, guard: &'a ReadGuard) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
+    // M1-169. Resolves the parent, judges the link's real path with `guard.admit_real`, reads the link without
+    // following it, then `guard.admit_link(real, target)`. The provided body reports `Unsupported`.
+    fn read_link<'a>(&'a self, path: &'a Path, guard: &'a ReadGuard) -> BoxFuture<'a, io::Result<Vec<u8>>>;
     fn env(&self, name: &str) -> Option<String>;
     // Provided: the live path, exec::table::run (the only public runner). Replay overrides it. (PC-44)
     fn spawn<'a>(&'a self, cmd: Cmd) -> BoxFuture<'a, Result<Output, ProbeError>> { /* table::run */ }

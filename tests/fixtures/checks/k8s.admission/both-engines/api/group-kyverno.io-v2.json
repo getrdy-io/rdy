@@ -1,0 +1,94 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/kyverno.io/v2"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIResourceList",
+    "apiVersion": "v1",
+    "groupVersion": "kyverno.io/v2",
+    "resources": [
+      {
+        "name": "policyexceptions",
+        "singularName": "policyexception",
+        "namespaced": false,
+        "kind": "PolicyException",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "policyexceptions/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "PolicyException",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "cleanuppolicies",
+        "singularName": "cleanuppolicie",
+        "namespaced": false,
+        "kind": "CleanupPolicy",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "cleanuppolicies/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "CleanupPolicy",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "clustercleanuppolicies",
+        "singularName": "clustercleanuppolicie",
+        "namespaced": false,
+        "kind": "ClusterCleanupPolicy",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "clustercleanuppolicies/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "ClusterCleanupPolicy",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "updaterequests",
+        "singularName": "updaterequest",
+        "namespaced": false,
+        "kind": "UpdateRequest",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "updaterequests/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "UpdateRequest",
+        "verbs": [
+          "get"
+        ]
+      }
+    ]
+  }
+}

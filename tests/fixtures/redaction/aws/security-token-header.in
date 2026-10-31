@@ -1,0 +1,2 @@
+x-amz-security-token: ${SYN:aws_session}
+x-amz-date: 20261104T101500Z

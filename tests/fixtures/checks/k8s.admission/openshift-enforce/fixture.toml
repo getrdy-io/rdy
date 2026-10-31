@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-openshift-enforce"
+summary = "OpenShift where someone set enforce to restricted by hand"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true
