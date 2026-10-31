@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-many-kinds"
+summary = "Gatekeeper serving twelve constraint kinds and four with hostile names"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -444,6 +444,38 @@ fn a_udp_connect_entry_validates_against_the_action_schema() -> TestResult {
     Ok(())
 }
 
+/// A `read_link` entry as `Probe::read_link` logs it (M1-169) satisfies the action schema. The kind
+/// is a known value, and a producer that sends another kind still validates (the kind is open).
+#[test]
+fn a_read_link_entry_validates_against_the_action_schema() -> TestResult {
+    let action = validator(Some("Action"))?;
+    let entry = serde_json::json!({
+        "seq": 4,
+        "check": "host.ports",
+        "at_ms": 30,
+        "duration_ms": 1,
+        "kind": "read_link",
+        "outcome": "ok",
+        "path": "/proc/self/ns/net"
+    });
+    assert_valid(&action, &entry, "a read_link entry");
+    let parsed: rdy_spec::result::Action = serde_json::from_value(entry)?;
+    assert_eq!(parsed.kind, rdy_spec::result::ActionKind::ReadLink);
+    assert!(!parsed.kind.is_unknown(), "read_link is a known kind");
+    let denied = serde_json::json!({
+        "seq": 5,
+        "check": "host.ports",
+        "at_ms": 31,
+        "duration_ms": 0,
+        "kind": "read_link",
+        "outcome": "denied",
+        "path": "/proc/1234/fd/9",
+        "rule": "only socket links are read from a process's fd directory"
+    });
+    assert_valid(&action, &denied, "a denied read_link entry");
+    Ok(())
+}
+
 #[test]
 fn closed_and_constant_fields_are_enforced() -> TestResult {
     let base = sample("7.3 ")?;

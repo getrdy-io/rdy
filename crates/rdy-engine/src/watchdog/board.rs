@@ -20,7 +20,8 @@ use crate::redact::{Redactor, RuleCounts};
 use crate::sched::{Observer, Ran};
 
 /// How the board turns an end into a result. It gets the check's index and what the scheduler saw.
-/// M1-057 gives it `map_outcome` for a finished check and `timeout_result` for a timeout.
+/// The engine ([`crate::engine`], M1-057) maps ends itself and does not use the board yet. The watchdog
+/// wiring gives it the same mapping.
 pub type MapRan = Box<dyn Fn(usize, &Ran) -> CheckResult + Send + Sync>;
 
 /// How long `snapshot` sleeps between two `try_lock` calls.

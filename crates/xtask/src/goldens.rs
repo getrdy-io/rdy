@@ -10,7 +10,8 @@
 //! - `envs/<env>/golden/<file>`: the reports and terminal text of an environment run;
 //! - `checks/<check-id>/<case>/expect.json`: the reviewed result of a check case;
 //! - `redaction/<category>/<case>.expected`: a redaction expectation;
-//! - `reports/golden/<file>`: a report as the JSON writer emits it (M1-055).
+//! - `reports/golden/<file>`: a report as the JSON writer emits it (M1-055) or as the HTML renderer
+//!   renders it (M1-077).
 //! - `summary/<case>.txt`: the summary line and last line of a result set (M1-054).
 //!
 //! A `<file>.actual` is a local failure output, git ignores it, and it is never a golden. Files under

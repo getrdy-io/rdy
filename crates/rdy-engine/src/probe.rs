@@ -39,16 +39,14 @@
 //! opaque and run-level only (see the `native` module, ADR 0014).
 //!
 //! **What is here, and what is not.** The handle, the log, the read policy, `read`, `read_tail`,
-//! `read_dir`, `stat`, `env`, `exec`, `native`, `udp_exchange` and `unix_get` (M1-144, policy in `sock`),
-//! `tcp` with the proxy `CONNECT` (M1-091), `tls_chain` (M1-092), `http` and `trust_store` (M1-093), all
-//! three in `net` and needing feature `runtime` or `loopback`, and the live backend (`live_backend`,
-//! feature `runtime`). Each tcp, tls and http call writes exactly one entry through the crate-private
-//! `Probe::begin`. Still to come, each in its own ticket:
+//! `read_dir`, `read_link` (M1-169), `stat`, `env`, `exec`, `native`, `udp_exchange` and `unix_get`
+//! (M1-144, policy in `sock`), `tcp` with the proxy `CONNECT` (M1-091), `tls_chain` (M1-092), `http`
+//! and `trust_store` (M1-093), all three in `net` and needing feature `runtime` or `loopback`, and the
+//! live backend (`live_backend`, feature `runtime`). Each tcp, tls and http call writes exactly one
+//! entry through the crate-private `Probe::begin`. Still to come, each in its own ticket:
 //!
 //! - Kube requests (M1-103): a request writes its entry through [`Probe::kube_call`], which the
-//!   read-only guard of `rdy-checks-k8s` calls;
-//! - `read_link`: `host.ports` (M1-072) needs it for `/proc/self/ns/net` and `/proc/<pid>/fd`, and the
-//!   action log has no kind for it yet. M1-169 adds both (plan correction 14).
+//!   read-only guard of `rdy-checks-k8s` calls.
 
 use std::fmt;
 use std::future::Future;
@@ -83,7 +81,7 @@ pub use native::{
     Resource, RlimitInfo, StatvfsInfo, StoreKind, StoreOrigin, StoreSource, SystemRoots, UnameInfo,
 };
 #[cfg(feature = "testing")]
-pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS};
+pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, is_fd_dir, is_fd_link};
 pub use policy::{ReadGuard, Refused};
 pub use proxy::{
     DEFAULT_PROXY_PORT, MAX_CONNECT_HEAD, NetFailure, ProxyChallenge, ProxyError, ProxyUrl,
@@ -512,6 +510,26 @@ pub trait Backend: sealed::Sealed + Send + Sync + 'static {
         path: &'a Path,
         guard: &'a ReadGuard,
     ) -> BoxFuture<'a, io::Result<Option<FileMeta>>>;
+    /// Reads where the symbolic link at `path` points, without following it (M1-169). The raw target
+    /// bytes come back: a path, or a name such as `socket:[8841]`. A backend resolves the links in the
+    /// parent directory, applies [`ReadGuard::admit_real`] to the link's real path (the real parent
+    /// plus the link's own name) before it reads anything, and then [`ReadGuard::admit_link`] to what
+    /// it read. A refusal is [`Refused`] inside an `io::Error` of kind `PermissionDenied`. A path that
+    /// is not a link is an `io::Error` of kind `InvalidInput`. The provided body is for a backend with
+    /// no links: it reports `Unsupported`.
+    fn read_link<'a>(
+        &'a self,
+        path: &'a Path,
+        guard: &'a ReadGuard,
+    ) -> BoxFuture<'a, io::Result<Vec<u8>>> {
+        let _ = (path, guard);
+        Box::pin(async {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "this backend cannot read links",
+            ))
+        })
+    }
     /// The value of one environment variable of this process, or `None` when it is not set. The probe
     /// has already checked the name: a check's probe reads only names it declared (`Probe::env`), and
     /// the run-level probe reads the few the engine needs (`Probe::run_env`). The live backend reads the
@@ -743,6 +761,66 @@ impl ProbeHub {
             self.log.count(KNOWN_SECRET_REFUSED);
         }
         accepted
+    }
+
+    /// Adds the value of every environment variable in `names` whose name looks like a secret
+    /// ([`is_secret_name`]) and that is set to a value worth registering, to the known-secret set.
+    ///
+    /// `names` are the variables the registered checks declare in `CheckInfo::env`. The run calls this
+    /// before its first log event and before any check starts, so a value is in the set before any
+    /// string that could hold it exists (ADR 0015 decision 3, M1-057). It reads the backend directly,
+    /// because the reads belong to the run and not to a check, and it records them as one run-level
+    /// `env` entry (`check: null`) whose `name` lists the declared secret-named variables it looked
+    /// at, never a value. That entry is a set-up entry: it does not count for [`ProbeHub::set_proxy`],
+    /// so the proxy can still be set after it. `Probe::env` still registers the value when a check
+    /// reads it, which changes nothing here.
+    ///
+    /// Returns the names whose value the set refused (too short, too long or no room), each once, in
+    /// the order given. Never a value. The refusal is logged and counted as
+    /// [`ProbeHub::add_known_secret`] does, and the caller decides whether it can go on: `rdy run` exits
+    /// 70. A name that is not a secret name, an unset variable and a plain word register nothing and are
+    /// not refusals.
+    pub fn add_declared_env_secrets<'a>(
+        &self,
+        names: impl IntoIterator<Item = &'a str>,
+    ) -> Vec<String> {
+        let mut refused: Vec<String> = Vec::new();
+        let mut read: Vec<&str> = Vec::new();
+        for name in names {
+            if name.is_empty() || name.contains(['=', '\0']) || !is_secret_name(name) {
+                continue;
+            }
+            if !read.contains(&name) {
+                read.push(name);
+            }
+            if let Some(value) = self.backend.env(name)
+                && worth_registering(&value)
+                && !self.add_known_secret(&value)
+                && !refused.iter().any(|seen| seen == name)
+            {
+                refused.push(name.to_owned());
+            }
+        }
+        // One run-level entry names what was read: the names the checks declared, never a value. It
+        // is a set-up entry, so a proxy can still be set after it.
+        if !read.is_empty() {
+            read.sort_unstable();
+            let mut fields = Map::new();
+            fields.insert("name".to_owned(), cut_names(&read).into());
+            self.log
+                .begin_setup(ActionKind::Env, fields)
+                .finish(if refused.is_empty() {
+                    ActionOutcome::Ok
+                } else {
+                    ActionOutcome::Failed
+                });
+        }
+        refused
+    }
+
+    /// The redactor every string of this hub's log passes.
+    pub(crate) fn redactor(&self) -> &Redactor {
+        self.log.redactor()
     }
 
     /// Sets the proxy the run's checks reach through `Probe::tcp` with `Route::ViaProxy`, once.
@@ -1159,6 +1237,45 @@ impl Probe {
         })
     }
 
+    /// Reads where a symbolic link points, without following it. The answer is the raw target, as
+    /// [`FileBytes`]: parse numbers from `.bytes` and put text in a finding only through
+    /// [`Probe::file_text`], because a target is a path and may name a home directory.
+    ///
+    /// The link is judged where it sits: the path as written and its real path (the parent resolved)
+    /// must be off the denylist and under one of the check's `reads` prefixes. Where it points is not
+    /// judged and not logged. The log gets one `read_link` entry with the link's path.
+    ///
+    /// Two links are special. `/proc/self/ns/net` is readable when the check's `reads` cover it, and is
+    /// not found where there is no `/proc`. A link in `/proc/<pid>/fd` is readable only by a check that
+    /// declared [`FD_WALK`](crate::check::FD_WALK), and only a target that is a socket
+    /// (`socket:[8841]`) is returned: any other target is refused and logged without it. List the
+    /// directory with [`Probe::read_dir`], which the same declaration allows.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] for a link on the denylist or outside the check's `reads`, a relative or
+    /// `..` path, a non-socket target in an fd directory, or a call after the check ended;
+    /// [`ProbeError::NotFound`] for a link that is not there; `Io` for a path that is not a link; the
+    /// other variants when the backend fails.
+    pub async fn read_link(&self, path: &Path) -> Result<FileBytes, ProbeError> {
+        let Gate {
+            hub,
+            entry,
+            what,
+            guard,
+        } = self.gate_file(ActionKind::ReadLink, path)?;
+        let result = self
+            .unless_ended(&what, async {
+                hub.backend
+                    .read_link(path, &guard)
+                    .await
+                    .map(FileBytes::new)
+                    .map_err(|e| ProbeError::from_file_io(&e, &what))
+            })
+            .await;
+        settle(entry, result, |_, _| {})
+    }
+
     /// Inspects a path. `Ok(None)` means it does not exist.
     ///
     /// # Errors
@@ -1351,8 +1468,13 @@ impl Probe {
         );
         let mut fields = Map::new();
         fields.insert("path".to_owned(), what.clone().into());
+        let reads = self.scope.info.map(|info| info.reads);
+        let guard = match kind {
+            ActionKind::ReadDir => ReadGuard::listing(self.scope.os, reads),
+            ActionKind::ReadLink => ReadGuard::link(self.scope.os, reads),
+            _ => ReadGuard::new(self.scope.os, reads),
+        };
         let (hub, entry) = self.begin(kind, fields, &what)?;
-        let guard = ReadGuard::new(self.scope.os, self.scope.info.map(|info| info.reads));
         match guard.admit(path) {
             Ok(()) => Ok(Gate {
                 hub,
@@ -1407,4 +1529,24 @@ fn settle<T>(
         }
     }
     result
+}
+
+/// The longest `name` of the run-level entry that lists the declared variables, in characters. The
+/// result schema allows 4096.
+const MAX_NAMES_CHARS: usize = 4000;
+
+/// The names as one text, `A, B, C`, cut at a name boundary to [`MAX_NAMES_CHARS`].
+fn cut_names(names: &[&str]) -> String {
+    let mut text = String::new();
+    for name in names {
+        let add = name.chars().count() + if text.is_empty() { 0 } else { 2 };
+        if text.chars().count() + add > MAX_NAMES_CHARS {
+            break;
+        }
+        if !text.is_empty() {
+            text.push_str(", ");
+        }
+        text.push_str(name);
+    }
+    text
 }

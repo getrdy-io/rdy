@@ -1,0 +1,1 @@
+- The README now says what rdy does, why it is safe to run, and what works today. rdy is pre-release, and the page says so and has no install command yet.

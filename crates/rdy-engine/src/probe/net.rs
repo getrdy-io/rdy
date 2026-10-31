@@ -33,6 +33,11 @@
 //! attempted. `Proxy-Authorization` is never logged, and the password is in the known-secret set
 //! before the proxy can be used.
 //!
+//! **Lookup.** [`Probe::lookup`] resolves one of the check's spec hosts (any port) and returns its addresses.
+//! The check must declare [`PeerClass::SpecHosts`]. If any answer is in a refused range, the whole call is
+//! refused and the check gets no address. The log has one `lookup` entry with `host` and an `answers`
+//! count, and no address (M1-094).
+//!
 //! **TLS.** [`Probe::tls_chain`] takes the same policy and the same stream and runs one handshake that
 //! sends no application data (the `tls` module, M1-092).
 //!
@@ -68,6 +73,7 @@ use super::{Backend, NetFailure, Probe, ProbeError, ProbeHub, refuse, settle};
 use crate::check::PeerClass;
 
 mod http;
+mod lookup;
 #[cfg(any(test, feature = "testing"))]
 pub(super) mod replay;
 #[cfg(test)]
@@ -79,6 +85,7 @@ pub use http::{
     BODY_TIMEOUT, HttpMethod, HttpOutcome, HttpProbe, HttpTiming, HttpTls, MAX_BODY,
     REPORTED_HEADERS, RESPONSE_TIMEOUT, RULE_HTTP_NOT_URL, RULE_HTTP_PLAIN_VIA_PROXY,
 };
+pub use lookup::{MAX_ANSWERS, RULE_LOOKUP_HOST};
 pub(super) use tls::TlsState;
 pub use tls::{
     ALPN_PROTOCOLS, HANDSHAKE_TIMEOUT, NoRoots, REVOCATION_NOTE, Roots, TlsChain, TrustFailure,
@@ -373,21 +380,7 @@ impl Probe {
         rule: &'static str,
     ) -> Result<Vec<IpAddr>, ProbeError> {
         let answers = match host {
-            Host::Name(name) => {
-                let timeout = self.scope.peers.timeout(RESOLVE_TIMEOUT);
-                let found = hub
-                    .backend
-                    .resolve(name, port, timeout)
-                    .await
-                    .map_err(|error| match ProbeError::from_io(&error) {
-                        failure @ (ProbeError::NotRecorded(_) | ProbeError::Timeout) => failure,
-                        _ => ProbeError::Net(NetFailure::Dns { host: name.clone() }),
-                    })?;
-                if found.is_empty() {
-                    return Err(ProbeError::Net(NetFailure::Dns { host: name.clone() }));
-                }
-                found
-            }
+            Host::Name(name) => self.answers_of(hub, name, port).await?,
             literal_host => literal(literal_host)
                 .map(|ip| vec![ip])
                 .ok_or_else(|| ProbeError::denied(RULE_TCP_HOST, what))?,

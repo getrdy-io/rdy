@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["aws_access_key_id"]
+forms = ["log_line"]
+secrets = ["AKIAIOSFODNN7EXAMPLE"]
+note = "The key id is the vendor-documented example, used as it is."
