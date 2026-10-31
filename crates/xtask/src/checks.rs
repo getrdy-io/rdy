@@ -28,6 +28,9 @@ pub fn registry() -> Result<Registry> {
     registry
         .register(rdy_checks_host::HostFamily)
         .map_err(|err| anyhow!("cannot build the check registry: {err}"))?;
+    registry
+        .register(rdy_checks_net::NetFamily)
+        .map_err(|err| anyhow!("cannot build the check registry: {err}"))?;
     Ok(registry)
 }
 

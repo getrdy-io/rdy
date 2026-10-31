@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-no-sysfs"
+summary = "A chroot with /proc and no /sys"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -54,6 +54,7 @@ proptest = { workspace = true, features = ["std"] }
 # The env harness (M1-075) runs the real host family over fixture environments, in process. `rdy run`
 # will depend on the families for real in M1-057.
 rdy-checks-host = { path = "../rdy-checks-host", version = "0.1.0-alpha.0" }
+rdy-checks-net = { path = "../rdy-checks-net", version = "0.1.0-alpha.0" }
 # `testing` adds the panicking-redactor seam. It is a dev-dependency feature, so the shipped binary
 # never has it (rdy-engine refuses a release build with it).
 rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing"] }

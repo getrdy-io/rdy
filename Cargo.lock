@@ -1789,6 +1789,7 @@ dependencies = [
  "minisign",
  "proptest",
  "rdy-checks-host",
+ "rdy-checks-net",
  "rdy-engine",
  "rdy-spec",
  "rexpect",
@@ -1851,6 +1852,13 @@ dependencies = [
 [[package]]
 name = "rdy-checks-net"
 version = "0.1.0-alpha.0"
+dependencies = [
+ "proptest",
+ "rdy-engine",
+ "rdy-spec",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "rdy-engine"
@@ -3189,6 +3197,7 @@ dependencies = [
  "clap",
  "jsonschema",
  "rdy-checks-host",
+ "rdy-checks-net",
  "rdy-engine",
  "rdy-spec",
  "serde-saphyr 2.0.0",

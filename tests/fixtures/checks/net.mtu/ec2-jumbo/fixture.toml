@@ -1,0 +1,12 @@
+schema = 1
+name = "net-mtu-ec2-jumbo"
+summary = "EC2 instance, ens5 at the default 9001, no overlay in the spec"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["net.mtu"]
+
+[caps]
+root = false
+network = false
+kube = false

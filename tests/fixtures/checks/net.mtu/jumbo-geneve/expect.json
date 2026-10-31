@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "id": "net.mtu",
+    "overlay": "geneve"
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": null,
+      "overhead": 50,
+      "overlay": "geneve",
+      "underlay": "ipv4",
+      "warn_below": 1400
+    },
+    "fix": "Make sure ICMP \"fragmentation needed\" (type 3 code 4, and \"packet too big\", type 2, for IPv6) is not filtered between this host and its peers, or set the MTU of `ens5` to 1500 in your network configuration.",
+    "level": "warn",
+    "message": "`ens5` has MTU 9001, and traffic that leaves the network is clamped to 1500.",
+    "notes": [
+      "Geneve takes 50 bytes, so the pod network must use 8951 or less. Set the CNI MTU to 8951 or less.",
+      "OVN-Kubernetes reserves 100 bytes for Geneve, which would leave 8901 for the pod network."
+    ],
+    "observed": {
+      "container_interfaces": 0,
+      "default_family": "ipv4",
+      "default_interface": "ens5",
+      "default_mtu": 9001,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": 9001,
+          "name": "ens5",
+          "state": "up"
+        }
+      ],
+      "interfaces_down": 0,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": 50,
+      "overlay": "geneve",
+      "pod_mtu": 8951
+    },
+    "partial": null
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "entry": {
+    "id": "net.mtu",
+    "min_mtu": 1450,
+    "overlay": "vxlan"
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": 1450,
+      "overhead": 50,
+      "overlay": "vxlan",
+      "underlay": "ipv4",
+      "warn_below": null
+    },
+    "fix": "Raise the MTU of `eth0` and of the switch ports it connects to, to 1500 or more. Set it in your network configuration (netplan, NetworkManager or the ifcfg files) so it survives a reboot. If the network cannot carry that, set the CNI MTU to 1400 or less and ask the vendor if 1400 is enough.",
+    "level": "fail",
+    "message": "`eth0` has MTU 1450 and VXLAN needs 50 bytes, so the pod network must use 1400 or less, and 1450 is needed.",
+    "notes": [],
+    "observed": {
+      "container_interfaces": 0,
+      "default_family": "ipv4",
+      "default_interface": "eth0",
+      "default_mtu": 1450,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": 1450,
+          "name": "eth0",
+          "state": "up"
+        }
+      ],
+      "interfaces_down": 0,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": 50,
+      "overlay": "vxlan",
+      "pod_mtu": 1400
+    },
+    "partial": null
+  }
+}
