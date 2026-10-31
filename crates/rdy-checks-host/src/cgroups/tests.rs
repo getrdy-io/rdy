@@ -42,6 +42,7 @@ const CASES: &[(&str, &str)] = &[
     expect!("v2-ok"),
     expect!("v2-idle-top"),
     expect!("v2-no-demand"),
+    expect!("v2-named-v1"),
     expect!("v1-wanted-v2-rhel"),
     expect!("v1-hinted-command-line"),
     expect!("hybrid-wanted-v2-ubuntu"),
@@ -218,6 +219,7 @@ fn the_levels_are_what_the_catalog_says() {
         ("v2-ok", Level::Pass),
         ("v2-idle-top", Level::Pass),
         ("v2-no-demand", Level::Pass),
+        ("v2-named-v1", Level::Pass),
         ("v1-wanted-v2-rhel", Level::Fail),
         ("v1-hinted-command-line", Level::Fail),
         ("hybrid-wanted-v2-ubuntu", Level::Fail),
@@ -241,8 +243,10 @@ fn the_mapped_status_of_a_required_check_blocks_on_a_fail_and_passes_on_a_pass()
         ("v2-ok", Status::Pass),
         ("v2-idle-top", Status::Pass),
         ("v2-no-demand", Status::Pass),
+        ("v2-named-v1", Status::Pass),
         ("hybrid-wanted-v1", Status::Pass),
         ("v1-wanted-v2-rhel", Status::Block),
+        ("v1-hinted-command-line", Status::Block),
         ("hybrid-wanted-v2-ubuntu", Status::Block),
         ("v2-wanted-v1", Status::Block),
         ("v2-memory-off", Status::Block),
@@ -309,6 +313,18 @@ fn the_version_cases_say_what_they_found_and_what_is_needed() {
         fix.contains("SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1"),
         "{fix}"
     );
+}
+
+#[test]
+fn a_named_v1_hierarchy_beside_a_unified_tree_is_v2_not_hybrid() {
+    let ran = run_case("v2-named-v1");
+    let f = ran.finding();
+    assert_eq!(
+        f.message,
+        "cgroup v2 in use, controllers `cpu` and `memory` available"
+    );
+    assert_eq!(f.observed["layout"], "v2");
+    assert!(f.notes.is_empty(), "{:?}", f.notes);
 }
 
 #[test]

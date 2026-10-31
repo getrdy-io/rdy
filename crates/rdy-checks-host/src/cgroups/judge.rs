@@ -194,6 +194,8 @@ fn verdict(name: &str, ctl: &Controllers, facts: &Facts) -> Verdict {
                 Some(Some(row)) if !row.enabled => {
                     Verdict::Missing(disabled(Some(row)).unwrap_or(Why::Disabled(None)))
                 }
+                // Enabled and attached to nothing: no mount namespace can hide it, so it is not offered.
+                Some(Some(row)) if row.hierarchy == 0 => Verdict::Missing(Why::NotOffered),
                 Some(Some(_)) => Verdict::Unseen(
                     "it is enabled in the kernel but its hierarchy is not mounted where rdy can see it",
                 ),
@@ -204,8 +206,19 @@ fn verdict(name: &str, ctl: &Controllers, facts: &Facts) -> Verdict {
 
 /// Judges the machine against the rules.
 pub(super) fn judge(rules: &Rules, facts: &Facts) -> Finding {
-    let Some(ctl) = facts.controllers.as_ref() else {
+    let Some(raw) = facts.controllers.as_ref() else {
         return unknown(rules, facts);
+    };
+    // A v1 mount with no controller in it (`name=systemd` beside a unified tree) is not a hybrid host.
+    let unified;
+    let ctl = if raw.layout == Layout::Hybrid && raw.v1.is_empty() {
+        unified = Controllers {
+            layout: Layout::V2,
+            ..raw.clone()
+        };
+        &unified
+    } else {
+        raw
     };
     let Some(layout) = layout_word(ctl.layout) else {
         return unknown(rules, facts);
@@ -349,7 +362,11 @@ fn fix_text(
     let boot = fix::boot_for(facts.release.as_ref(), facts.raspberry_pi);
     let mut parts = Vec::new();
     if !version_ok {
-        parts.push(fix::version_fix(boot, rules.version == Wanted::V2));
+        parts.push(fix::version_fix(
+            boot,
+            rules.version == Wanted::V2,
+            facts.release.as_ref(),
+        ));
     }
     let disabled: Vec<Disabled> = missing
         .iter()

@@ -365,3 +365,79 @@ fn a_hostile_cgroup_word_cannot_reach_the_fix_text() {
     assert!(!fix.contains(';') && !fix.contains("reboot`"), "{fix}");
     assert!(fix.contains("cgroup_enable=memory"), "{fix}");
 }
+
+// ---- review round 1 ------------------------------------------------------------------------------
+
+#[test]
+fn a_hybrid_layout_with_no_v1_controller_is_v2() {
+    let mut host = v2_host(&["cpu", "memory"], &["cpu", "memory"]);
+    host.layout = Layout::Hybrid;
+    let f = judge(&rules(Wanted::V2, &["memory"]), &facts(host));
+    assert_eq!(f.level, Level::Pass);
+    assert_eq!(f.observed["layout"], "v2");
+    assert!(f.notes.is_empty(), "{:?}", f.notes);
+}
+
+#[test]
+fn a_controller_enabled_and_attached_to_nothing_is_not_offered_on_v1() {
+    let mut machine = facts(v1_host(&["cpu"]));
+    machine.proc_cgroups = Some(vec![proc_row("pids", 0, true)]);
+    let f = judge(&rules(Wanted::Any, &["pids"]), &machine);
+    assert_eq!(f.level, Level::Fail);
+    assert_eq!(f.observed["controllers"]["pids"], "missing");
+
+    // Attached to a v1 hierarchy that rdy cannot see: only a warning.
+    machine.proc_cgroups = Some(vec![proc_row("pids", 6, true)]);
+    let f = judge(&rules(Wanted::Any, &["pids"]), &machine);
+    assert_eq!(f.level, Level::Warn);
+}
+
+#[test]
+fn the_device_tree_decides_only_for_a_debian_like_or_unknown_release() {
+    assert_eq!(boot_of("ID=fedora\n", true), Boot::Grubby);
+    assert_eq!(boot_of("ID=rhel\nID_LIKE=fedora\n", true), Boot::Grubby);
+    assert_eq!(
+        boot_of("ID=ubuntu\nID_LIKE=debian\n", true),
+        Boot::CmdlineTxt
+    );
+    assert_eq!(boot_of("ID=sles\nID_LIKE=suse\n", true), Boot::Other);
+}
+
+#[test]
+fn the_v1_fix_says_where_v1_is_gone() {
+    let rhel9 = release::parse("ID=rhel\nVERSION_ID=\"9.3\"\n");
+    let text = fix::version_fix(Boot::Grubby, false, rhel9.as_ref());
+    assert!(text.contains("`grubby"), "{text}");
+    assert!(text.contains("systemd 256 and 257"), "{text}");
+    assert!(
+        text.contains("systemd 258 and later, and RHEL 10, have no cgroup v1."),
+        "{text}"
+    );
+    let rhel10 = release::parse("ID=rhel\nVERSION_ID=\"10.0\"\n");
+    let text = fix::version_fix(Boot::Grubby, false, rhel10.as_ref());
+    assert!(!text.contains("grubby"), "{text}");
+    assert!(text.contains("no cgroup v1"), "{text}");
+    // Fedora's version numbers are not RHEL's.
+    let fedora = release::parse("ID=fedora\nVERSION_ID=40\n");
+    assert!(fix::version_fix(Boot::Grubby, false, fedora.as_ref()).contains("`grubby"));
+    for text in [
+        fix::version_fix(Boot::Grub, false, None),
+        fix::version_fix(Boot::Grubby, true, None),
+    ] {
+        if let Err(error) = rdy_engine::fixtext::check(&text) {
+            panic!("{error}");
+        }
+    }
+}
+
+#[test]
+fn after_a_cgroup_prefix_only_lowercase_digits_and_list_marks_stay() {
+    let kept = parse_cmdline(
+        "cgroup_disable=memory,pids cgroup_enable=cpu_x systemd.unified_cgroup_hierarchy=1 cgroup_memory=1 SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1 cgroup.memory=nokmem,nosocket",
+    );
+    assert_eq!(kept.len(), 6);
+    let dropped = parse_cmdline(
+        "cgroup_disable=Memory cgroup_enable=a.b cgroup_no_v1=a:b systemd.unified_cgroup_hierarchy=1,0 systemd.unified_cgroup_hierarchy=a_b cgroup_memory=a-b SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1=",
+    );
+    assert!(dropped.is_empty(), "{dropped:?}");
+}

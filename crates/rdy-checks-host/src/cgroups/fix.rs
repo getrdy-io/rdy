@@ -34,7 +34,6 @@ const RHEL_LIKE: &[&str] = &[
     "ol",
     "amzn",
 ];
-const DEBIAN_LIKE: &[&str] = &["debian", "ubuntu"];
 
 /// Picks the way to edit the command line from `os-release` and, when it is known, from the device
 /// tree model (a Raspberry Pi running a plain Debian image says `debian` in `os-release`).
@@ -53,11 +52,13 @@ pub(super) fn boot_for(release: Option<&Release>, raspberry_pi: bool) -> Boot {
                 .iter()
                 .any(|like| names.contains(&like.as_str()))
     };
-    if raspberry_pi || has(&["raspbian"]) {
+    // The device tree decides only for a Debian-like system. Fedora and RHEL on a Pi use `grubby`.
+    let debian_like = has(&["debian", "ubuntu", "raspbian"]);
+    if has(&["raspbian"]) || (raspberry_pi && debian_like) {
         Boot::CmdlineTxt
     } else if has(RHEL_LIKE) {
         Boot::Grubby
-    } else if has(DEBIAN_LIKE) {
+    } else if debian_like {
         Boot::Grub
     } else {
         Boot::Other
@@ -95,20 +96,31 @@ pub(super) fn edit_cmdline(boot: Boot, edit: Edit, args: &str) -> String {
     }
 }
 
-/// The fix for the wrong cgroup version. `v2` is the version the vendor wants.
-pub(super) fn version_fix(boot: Boot, v2: bool) -> String {
-    let arg = if v2 {
-        "systemd.unified_cgroup_hierarchy=1"
-    } else {
-        "systemd.unified_cgroup_hierarchy=0"
-    };
-    let mut text = edit_cmdline(boot, Edit::Add, arg);
-    if !v2 {
-        text.push_str(
-            " systemd 256 and later also needs `SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1` on the command line.",
-        );
+/// The fix for the wrong cgroup version. `v2` is the version the vendor wants. `release` is
+/// `os-release`, used to see that an EL 10 or later system cannot run v1 at all.
+pub(super) fn version_fix(boot: Boot, v2: bool, release: Option<&Release>) -> String {
+    if v2 {
+        return edit_cmdline(boot, Edit::Add, "systemd.unified_cgroup_hierarchy=1");
     }
+    if release.is_some_and(no_v1_release) {
+        return "This OS release (EL 10 and later) has no cgroup v1. Use an OS release that still has it.".to_owned();
+    }
+    let mut text = edit_cmdline(boot, Edit::Add, "systemd.unified_cgroup_hierarchy=0");
+    text.push_str(
+        " systemd 256 and 257 also need `SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1` on the command line. systemd 258 and later, and RHEL 10, have no cgroup v1. Use an OS release that still has it.",
+    );
     text
+}
+
+/// RHEL and its rebuilds from version 10 on.
+fn no_v1_release(release: &Release) -> bool {
+    let el = ["rhel", "centos", "rocky", "almalinux", "ol"].contains(&release.id.as_str());
+    let major = release
+        .version_id
+        .as_deref()
+        .and_then(|v| v.split('.').next())
+        .and_then(|v| v.parse::<u32>().ok());
+    el && major.is_some_and(|m| m >= 10)
 }
 
 /// A controller the kernel has turned off, and the `cgroup_disable=` word that did it when the

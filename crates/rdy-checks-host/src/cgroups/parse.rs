@@ -11,17 +11,26 @@ const MAX_KEPT: usize = 16;
 /// The longest kept word, in characters.
 const MAX_WORD: usize = 96;
 
-/// The start of every kernel command line word that bears on cgroups. Nothing else is kept, so an
-/// `ip=` or `root=` word with a secret in it never reaches the report.
-const CGROUP_WORDS: &[&str] = &[
-    "cgroup_disable=",
-    "cgroup_enable=",
-    "cgroup_memory=",
-    "cgroup_no_v1=",
-    "cgroup.memory=",
-    "systemd.unified_cgroup_hierarchy=",
-    "systemd.legacy_systemd_cgroup_controller=",
-    "SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=",
+/// What may follow a cgroup prefix.
+#[derive(Clone, Copy)]
+enum Value {
+    /// A controller list: `a-z`, `0-9`, `_` and `,`.
+    List,
+    /// A word or a boolean: `0-9` and `a-z`.
+    Word,
+}
+
+/// The start of every kernel command line word that bears on cgroups, and what may follow it. Nothing
+/// else is kept, so an `ip=` or `root=` word with a secret in it never reaches the report.
+const CGROUP_WORDS: &[(&str, Value)] = &[
+    ("cgroup_disable=", Value::List),
+    ("cgroup_enable=", Value::List),
+    ("cgroup_memory=", Value::Word),
+    ("cgroup_no_v1=", Value::List),
+    ("cgroup.memory=", Value::List),
+    ("systemd.unified_cgroup_hierarchy=", Value::Word),
+    ("systemd.legacy_systemd_cgroup_controller=", Value::Word),
+    ("SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=", Value::Word),
 ];
 
 /// One row of `/proc/cgroups`: a controller the kernel was built with (v1 names, so `blkio` for what v2
@@ -63,16 +72,21 @@ pub(super) fn parse_proc_cgroups(text: &str) -> Vec<ProcController> {
         .collect()
 }
 
-/// The cgroup-related words of `/proc/cmdline`, in order. A word with a character outside
-/// `a-z A-Z 0-9 _ . , = : -`, or one longer than 96 characters, is dropped.
+/// The cgroup-related words of `/proc/cmdline`, in order. After its prefix a word may hold only the
+/// characters in [`Value`]; any other word, or one longer than 96 characters, is dropped.
 pub(super) fn parse_cmdline(text: &str) -> Vec<String> {
     text.split_whitespace()
         .take(MAX_WORDS)
-        .filter(|word| CGROUP_WORDS.iter().any(|start| word.starts_with(start)))
         .filter(|word| {
             word.chars().count() <= MAX_WORD
-                && word.chars().all(|c| {
-                    c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ',' | '=' | ':' | '-')
+                && CGROUP_WORDS.iter().any(|(start, kind)| {
+                    word.strip_prefix(start).is_some_and(|rest| {
+                        rest.chars().all(|c| {
+                            c.is_ascii_digit()
+                                || c.is_ascii_lowercase()
+                                || (matches!(kind, Value::List) && matches!(c, '_' | ','))
+                        })
+                    })
                 })
         })
         .take(MAX_KEPT)
