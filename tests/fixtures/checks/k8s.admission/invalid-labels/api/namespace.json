@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "Namespace",
+    "metadata": {
+      "name": "acme-system",
+      "labels": {
+        "pod-security.kubernetes.io/enforce": "Restricted",
+        "pod-security.kubernetes.io/enforce-version": "v1.x",
+        "pod-security.kubernetes.io/audit": "\u001b[2Jstrict",
+        "pod-security.kubernetes.io/warn": "`rm -rf`"
+      }
+    },
+    "status": {
+      "phase": "Active"
+    }
+  }
+}

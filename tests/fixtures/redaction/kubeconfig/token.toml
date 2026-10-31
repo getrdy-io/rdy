@@ -1,0 +1,6 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["kubeconfig_credential"]
+forms = ["token"]
+secrets = ["${SYN:kube_token}"]

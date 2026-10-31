@@ -1,0 +1,5 @@
+users:
+- name: admin
+  user:
+    client-certificate-data: Y2VydC1wdWJsaWM=
+    client-key-data: [REDACTED:kubeconfig_credential:~1]

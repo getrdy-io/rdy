@@ -1,0 +1,91 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/security.openshift.io/v1/securitycontextconstraints",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "security.openshift.io/v1",
+    "kind": "SecurityContextConstraintsList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "metadata": {
+          "name": "anyuid"
+        },
+        "allowHostDirVolumePlugin": false,
+        "allowPrivilegedContainer": false,
+        "users": [],
+        "groups": [],
+        "volumes": [
+          "configMap",
+          "secret",
+          "emptyDir"
+        ]
+      },
+      {
+        "metadata": {
+          "name": "hostmount-anyuid"
+        },
+        "allowHostDirVolumePlugin": true,
+        "allowPrivilegedContainer": false,
+        "users": [],
+        "groups": [],
+        "volumes": [
+          "configMap",
+          "secret",
+          "emptyDir"
+        ]
+      },
+      {
+        "metadata": {
+          "name": "nonroot-v2"
+        },
+        "allowHostDirVolumePlugin": false,
+        "allowPrivilegedContainer": false,
+        "users": [],
+        "groups": [],
+        "volumes": [
+          "configMap",
+          "secret",
+          "emptyDir"
+        ]
+      },
+      {
+        "metadata": {
+          "name": "privileged"
+        },
+        "allowHostDirVolumePlugin": true,
+        "allowPrivilegedContainer": true,
+        "users": [
+          "system:admin"
+        ],
+        "groups": [],
+        "volumes": [
+          "configMap",
+          "secret",
+          "emptyDir"
+        ]
+      },
+      {
+        "metadata": {
+          "name": "restricted-v2"
+        },
+        "allowHostDirVolumePlugin": false,
+        "allowPrivilegedContainer": false,
+        "users": [],
+        "groups": [
+          "system:authenticated"
+        ],
+        "volumes": [
+          "configMap",
+          "secret",
+          "emptyDir"
+        ]
+      }
+    ]
+  }
+}
