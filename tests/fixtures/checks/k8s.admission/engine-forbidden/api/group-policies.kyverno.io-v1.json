@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/policies.kyverno.io/v1"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "forbidden: User \"acme-reader\" cannot get path \"/apis/policies.kyverno.io/v1\"",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}
