@@ -25,7 +25,7 @@
     "level": "pass",
     "message": "6443/tcp is free or held by a process the spec allows.",
     "notes": [
-      "Held by a process the spec allows: 6443/tcp by `acme-controller` (pid 1500)."
+      "Held by a process the spec allows: 6443/tcp by `acme-controller` (pid 1500, unit `acme.service`). rdy matches the process name, which any local process can set, so the name alone does not show that the product's own service holds the port."
     ],
     "observed": {
       "container": null,

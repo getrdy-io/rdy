@@ -20,10 +20,14 @@ pub(crate) fn parse_range(text: &str) -> Option<Span> {
 }
 
 /// The ports in the text of `ip_local_reserved_ports`: items split by commas, each `6443` or
-/// `8000-8010`. An item that is not one of those is left out.
-pub(crate) fn parse_reserved(text: &str) -> Vec<Span> {
-    text.trim()
-        .split(',')
+/// `8000-8010`. An item that is not one of those is left out. The flag says the whole value was read:
+/// it is `false` when there are more than [`MAX_ITEMS`] items, and then a line built from the spans
+/// would drop some of the reserved ports.
+pub(crate) fn parse_reserved(text: &str) -> (Vec<Span>, bool) {
+    let items: Vec<&str> = text.trim().split(',').collect();
+    let complete = items.len() <= MAX_ITEMS;
+    let spans = items
+        .into_iter()
         .take(MAX_ITEMS)
         .filter_map(|item| {
             let item = item.trim();
@@ -36,7 +40,8 @@ pub(crate) fn parse_reserved(text: &str) -> Vec<Span> {
                 None => item.parse::<u16>().ok().map(|port| (port, port)),
             }
         })
-        .collect()
+        .collect();
+    (spans, complete)
 }
 
 /// Whether `port` is in one of the spans.

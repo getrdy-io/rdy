@@ -8,8 +8,8 @@
 //! ```
 //!
 //! An address is hex, one 32-bit word at a time in the byte order of the machine, so `0100007F` is
-//! 127.0.0.1 on a little-endian machine. Every release target of rdy is little-endian. The parser never
-//! panics on odd text: a row it cannot read is counted and left out.
+//! 127.0.0.1 on a little-endian machine and `7F000001` on a big-endian one. `u32::from_be` turns both
+//! into the address. The parser never panics on odd text: a row it cannot read is counted and left out.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -151,5 +151,5 @@ fn address(text: &str, v6_table: bool) -> Option<(IpAddr, u16)> {
 
 /// One 8-digit word, turned from the machine's byte order into network order.
 fn word(hex: &str) -> Option<u32> {
-    u32::from_str_radix(hex, 16).ok().map(u32::swap_bytes)
+    u32::from_str_radix(hex, 16).ok().map(u32::from_be)
 }

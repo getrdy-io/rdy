@@ -144,9 +144,17 @@ fn the_ephemeral_range_is_two_numbers_in_order() {
 fn reserved_ports_are_items_and_ranges() {
     assert_eq!(
         range::parse_reserved("6443, 8000-8010,x,9-3\n"),
-        [(6443, 6443), (8000, 8010)]
+        (vec![(6443, 6443), (8000, 8010)], true)
     );
-    assert!(range::parse_reserved("\n").is_empty());
+    assert_eq!(range::parse_reserved("\n"), (Vec::new(), true));
+    // More than 1,024 items: the first are kept and the value is not complete.
+    let long = (1..=1100u16)
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let (spans, complete) = range::parse_reserved(&long);
+    assert_eq!(spans.len(), 1024);
+    assert!(!complete);
     assert!(range::contains(&[(8000, 8010)], 8005));
     assert!(!range::contains(&[(8000, 8010)], 8011));
 }
@@ -209,6 +217,11 @@ fn the_effective_uid_is_the_second_number() {
         Some(0)
     );
     assert_eq!(owner::effective_uid("Uid: 5 6 7 8"), Some(6));
+    assert!(owner::owned_by("Uid:\t1000\t1000\t1000\t1000\n", 1000));
+    // A process that changed any of the three ids is not listed by another user.
+    assert!(!owner::owned_by("Uid:\t1000\t1000\t0\t1000\n", 1000));
+    assert!(!owner::owned_by("Uid:\t0\t0\t0\t0\n", 1000));
+    assert!(!owner::owned_by("Name:\tx\n", 1000));
     assert_eq!(owner::effective_uid("Gid:\t1\t2\t3\t4\n"), None);
     assert_eq!(owner::effective_uid("Uid:\t1000\n"), None);
 }
@@ -224,6 +237,22 @@ fn the_unit_is_the_deepest_plain_service() {
         unit("0::/system.slice/kubelet.service/init.scope\n").as_deref(),
         Some("kubelet.service")
     );
+    // The first component that is not a slice decides, and only a service counts.
+    assert_eq!(
+        unit("0::/machine.slice/machine-web.scope/system.slice/inner.service\n"),
+        None
+    );
+    assert_eq!(
+        unit(
+            "0::/kubepods.slice/kubepods-burstable.slice/cri-containerd-abc.scope/system.slice/x.service\n"
+        ),
+        None
+    );
+    assert_eq!(unit("0::/system.slice/docker-abc.scope/x.service\n"), None);
+    assert_eq!(unit("0::/init.scope/x.service\n"), None);
+    // A name that starts with a dash would read as an option.
+    assert_eq!(unit("0::/system.slice/-evil.service\n"), None);
+    assert_eq!(unit("0::/system.slice/.hidden.service\n"), None);
     // Version 1: the systemd hierarchy.
     assert_eq!(
         unit("12:pids:/system.slice/x.service\n1:name=systemd:/system.slice/docker.service\n")
@@ -319,6 +348,7 @@ fn facts<'a>(ports: Vec<PortState>, allow: &'a [String], root: bool) -> Facts<'a
         root,
         range: Some((32768, 60999)),
         reserved: Vec::new(),
+        reserved_known: true,
         netns: None,
         container: None,
         notes: Vec::new(),
@@ -384,7 +414,49 @@ fn a_name_in_the_message_cannot_break_the_sentence() {
     )];
     let f = report::assemble(&facts(ports, &[], true), Value::Null);
     assert!(!f.message.contains('\u{1b}'), "{:?}", f.message);
-    assert!(f.message.contains("\\x1b"), "{}", f.message);
+    // Always in a code span, with the backtick escaped so it cannot close the span.
+    assert!(
+        f.message.contains("held by `a\\x60b\\x1b[2J` (pid 9)"),
+        "{}",
+        f.message
+    );
+    assert_eq!(f.message.matches('`').count(), 2, "{}", f.message);
+}
+
+#[test]
+fn an_allowed_holder_is_shown_with_its_unit_and_the_note_says_the_name_is_not_proof() {
+    let owner = Owner {
+        pid: 9,
+        name: Some("acme-agent".to_owned()),
+        unit: Some("acme.service".to_owned()),
+    };
+    let allow = vec!["acme-agent".to_owned()];
+    let ports = vec![port(6443, vec![held(Some(owner), None, "0.0.0.0")])];
+    let f = report::assemble(&facts(ports, &allow, true), Value::Null);
+    assert_eq!(f.level, Level::Pass);
+    let note = f.notes.join(" ");
+    assert!(note.contains("(pid 9, unit `acme.service`)"), "{note}");
+    assert!(note.contains("any local process can set"), "{note}");
+}
+
+#[test]
+fn the_ephemeral_fix_tells_the_user_to_append_when_the_reserved_ports_are_not_known() {
+    let mut exposed = port(40000, Vec::new());
+    exposed.ephemeral = true;
+    let mut f = facts(vec![exposed], &[], true);
+    f.reserved_known = false;
+    let finding = report::assemble(&f, Value::Null);
+    let fix = finding.fix.expect("a fix");
+    assert!(
+        !fix.contains("keeps the ports that are reserved now"),
+        "{fix}"
+    );
+    assert!(
+        fix.contains("`sysctl -n net.ipv4.ip_local_reserved_ports`"),
+        "{fix}"
+    );
+    assert!(fix.contains("<that value>,40000"), "{fix}");
+    assert!(fix.contains("99-zz-reserved-ports.conf"), "{fix}");
 }
 
 #[test]

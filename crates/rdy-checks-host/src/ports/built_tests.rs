@@ -19,13 +19,14 @@ fn row(port: u16, state: &str, inode: u64) -> String {
     )
 }
 
-/// The entries `0` to `count - 1` of an fd directory. The last one of a longer list is added by hand.
+/// The entries `0` to `count - 1` of an fd directory. A `count` of 31 or more adds the fd `31`, which the
+/// tests make a socket.
 fn fds(count: u32) -> Vec<DirEntry> {
-    let mut entries: Vec<DirEntry> = (0..count.min(50))
+    let mut entries: Vec<DirEntry> = (0..count.min(30))
         .map(|fd| DirEntry::new(fd.to_string(), false))
         .collect();
-    if count > 50 {
-        entries.push(DirEntry::new("60", false));
+    if count > 30 {
+        entries.push(DirEntry::new("31", false));
     }
     entries
 }
@@ -103,42 +104,47 @@ fn a_table_cut_among_the_established_rows_loses_no_listener() {
 }
 
 #[test]
-fn a_walk_over_busy_processes_stops_before_it_fills_the_log() {
-    // 40 processes with 50 files and pipes each. The holder is the last one.
+fn a_walk_over_a_busy_control_plane_node_finds_the_holder_without_filling_the_log() {
+    // 200 processes with 30 files and pipes each, 6,000 refused links. The holder is the last process.
     let mut replay = Replay::new().file(
         "/proc/net/tcp",
         format!("{HEAD}{}", row(6443, "0A", 424_242)),
     );
-    for pid in 1..=40u32 {
+    for pid in 1..=200u32 {
         replay = replay.file(format!("/proc/{pid}/comm"), format!("p{pid}\n"));
-        for fd in 0..50u32 {
+        for fd in 0..30u32 {
             replay = replay.symlink(format!("/proc/{pid}/fd/{fd}"), "/dev/null");
         }
-        if pid < 40 {
-            replay = replay.dir(format!("/proc/{pid}/fd"), fds(50));
-        }
+        replay = replay.dir(format!("/proc/{pid}/fd"), fds(30));
     }
-    replay = replay.symlink("/proc/40/fd/60", "socket:[424242]");
-    replay = replay.dir("/proc/40/fd", fds(51));
-    replay = listed(replay, 40);
+    replay = replay.symlink("/proc/200/fd/31", "socket:[424242]");
+    replay = replay.dir("/proc/200/fd", fds(31));
+    replay = listed(replay, 200);
     let (outcome, log) = execute(replay, true, &json!({"id": "host.ports", "free": [6443]}));
     let f = outcome.expect("a finding");
     assert_eq!(f.level, Level::Fail);
-    assert!(f.message.contains("stopped early"), "{}", f.message);
-    let denied = log
+    assert!(
+        f.message.contains("held by `p200` (pid 200)"),
+        "{}",
+        f.message
+    );
+    assert!(f.partial.is_none(), "{:?}", f.partial);
+    // The refusals fold under one key for the check: 20 written and one entry that counts the rest.
+    let denied: Vec<_> = log
         .actions
         .iter()
         .filter(|a| a.outcome == ActionOutcome::Denied)
-        .count();
-    assert!(denied < 500, "{denied} denied entries");
+        .collect();
+    assert_eq!(denied.len(), 21, "{} denied entries", denied.len());
+    assert_eq!(log.last_resort_drops, 0);
     assert!(log.actions.len() < 1000, "{} entries", log.actions.len());
-    // 800 refusals at 50 per process is 16 processes, and no more are listed.
+    // Every process up to the holder was listed.
     let listed = log
         .actions
         .iter()
         .filter(|a| a.kind == ActionKind::ReadDir)
         .count();
-    assert_eq!(listed, 1 + 16);
+    assert_eq!(listed, 1 + 200);
 }
 
 #[test]

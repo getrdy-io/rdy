@@ -21,13 +21,13 @@ use std::time::Duration;
 
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, FD_WALK, Need,
-    Os,
+    Os, Want,
 };
 use rdy_engine::probe::ProbeError;
 use rdy_spec::check::{Bind, HostPorts};
 use serde_json::json;
 
-use crate::family::{OS, ROOT};
+use crate::family::OS;
 use crate::reads::{Read, read_text};
 use crate::text::{short, soft};
 
@@ -62,6 +62,14 @@ const RESERVED: &str = "/proc/sys/net/ipv4/ip_local_reserved_ports";
 const CONTAINER_MARKERS: [&str; 2] = ["/.dockerenv", "/run/.containerenv"];
 const KUBE_HOST: &str = "KUBERNETES_SERVICE_HOST";
 
+/// Root only adds evidence. `/proc/net` is readable by everyone, so a port that no listener holds is
+/// proven free without root, and a held port is found. Without root the owner of a socket that belongs to
+/// another user is unknown, which `partial` says, but the level does not change (02 "Verdict").
+const WANTS: &[Want] = &[Want {
+    need: Need::Root,
+    evidence_only: true,
+}];
+
 /// The static facts about `host.ports` (03 section 2).
 ///
 /// `/proc` covers the socket tables, the sysctl files, the process list and `comm` and `cgroup` of one
@@ -77,7 +85,7 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
         remediation: "Stop the process that holds the port, or change the product's port setting. If the port is in the ephemeral range, reserve it with `net.ipv4.ip_local_reserved_ports` in a file under `/etc/sysctl.d/` as root, then run `sysctl --system`.",
     },
     needs: &[],
-    wants: ROOT,
+    wants: WANTS,
     default_timeout: Some(Duration::from_secs(5)),
     os: OS,
     reads: &[PROC, FD_WALK, CONTAINER_MARKERS[0], CONTAINER_MARKERS[1]],
@@ -151,8 +159,8 @@ impl Ports {
 
         let tcp = self.sockets(ctx, Proto::Tcp, &mut notes).await?;
         let udp = self.sockets(ctx, Proto::Udp, &mut notes).await?;
-        let (range, reserved) = if self.tcp.is_empty() && self.udp.is_empty() {
-            (None, Vec::new())
+        let (range, reserved, reserved_known) = if self.tcp.is_empty() && self.udp.is_empty() {
+            (None, Vec::new(), true)
         } else {
             ephemeral(ctx, &mut notes).await?
         };
@@ -199,6 +207,7 @@ impl Ports {
             root,
             range,
             reserved,
+            reserved_known,
             netns,
             container,
             notes,
@@ -345,7 +354,7 @@ fn port_state(
 async fn ephemeral(
     ctx: &CheckContext,
     notes: &mut Vec<String>,
-) -> Result<(Option<range::Span>, Vec<range::Span>), CheckError> {
+) -> Result<(Option<range::Span>, Vec<range::Span>, bool), CheckError> {
     let span = match read_text(ctx, PORT_RANGE).await? {
         Read::Text(text) => {
             let span = range::parse_range(&text);
@@ -364,17 +373,22 @@ async fn ephemeral(
             None
         }
     };
-    let reserved = match read_text(ctx, RESERVED).await? {
+    let (reserved, known) = match read_text(ctx, RESERVED).await? {
         Read::Text(text) => range::parse_reserved(&text),
-        Read::Absent => Vec::new(),
+        Read::Absent => (Vec::new(), true),
         Read::Unreadable(why) => {
             notes.push(format!(
                 "{RESERVED} could not be read ({why}), so reserved ports may be missed."
             ));
-            Vec::new()
+            (Vec::new(), false)
         }
     };
-    Ok((span, reserved))
+    if !known {
+        notes.push(format!(
+            "{RESERVED} lists more items than rdy reads, so a reserved port may be missed."
+        ));
+    }
+    Ok((span, reserved, known))
 }
 
 /// The network namespace of rdy, as `net:[4026531840]`.

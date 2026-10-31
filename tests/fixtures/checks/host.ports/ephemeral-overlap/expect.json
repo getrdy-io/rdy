@@ -26,7 +26,7 @@
         40000
       ]
     },
-    "fix": "Reserve the port for the product: `echo 'net.ipv4.ip_local_reserved_ports = 8000-8010,32800,40000' | sudo tee /etc/sysctl.d/90-reserved-ports.conf && sudo sysctl --system`. The value keeps the ports that are reserved now.",
+    "fix": "Reserve the port for the product: `echo 'net.ipv4.ip_local_reserved_ports = 8000-8010,32800,40000' | sudo tee /etc/sysctl.d/99-zz-reserved-ports.conf && sudo sysctl --system`. The value keeps the ports that are reserved now. If `/etc/sysctl.conf` sets this value, edit that line instead. Confirm with `sysctl net.ipv4.ip_local_reserved_ports`.",
     "level": "warn",
     "message": "32800/tcp is inside the ephemeral port range 32768-60999, so an outgoing connection can take it.",
     "notes": [],

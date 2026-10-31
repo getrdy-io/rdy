@@ -9,12 +9,14 @@
 use std::sync::Arc;
 
 use rdy_engine::check::{Finding, Level, Need};
+use rdy_engine::outcome::map_outcome;
 use rdy_engine::probe::ActionLogOutput;
+use rdy_engine::probe::RULE_FD_TARGET;
 use rdy_engine::sched::{End, Planned};
 use rdy_engine::testing::golden::assert_golden;
 use rdy_engine::testing::{Fixture, TestRun, assert_within_manifest, fixtures_dir};
 use rdy_spec::check::CheckParams;
-use rdy_spec::result::{Action, ActionKind, ActionOutcome};
+use rdy_spec::result::{Action, ActionKind, ActionOutcome, Status};
 use rdy_spec::spec::CheckSpec;
 use serde_json::{Value, json};
 
@@ -48,6 +50,7 @@ const CASES: &[(&str, &str)] = &[
     expect!("comm-cut-not-cmdline"),
     expect!("container-view"),
     expect!("owner-elsewhere"),
+    expect!("no-root-unknown-uid"),
     expect!("no-ipv6"),
     expect!("table-unreadable"),
 ];
@@ -220,6 +223,7 @@ fn the_levels_are_what_the_catalog_says() {
         ("comm-cut-not-cmdline", Level::Fail),
         ("container-view", Level::Warn),
         ("owner-elsewhere", Level::Fail),
+        ("no-root-unknown-uid", Level::Fail),
         ("no-ipv6", Level::Pass),
         ("table-unreadable", Level::Warn),
     ] {
@@ -267,7 +271,12 @@ fn the_walk_stops_at_the_first_match_and_lists_only_the_pids_it_needs() {
             .iter()
             .any(|p| p.contains("/2000/") || p.contains("/2001/"))
     );
-    // The refused links (files and pipes) are logged without their targets.
+    // The refused links (files and pipes) are logged without their targets, and fold under one key.
+    assert!(
+        ran.log.actions.len() < 40,
+        "{} entries",
+        ran.log.actions.len()
+    );
     let json = serde_json::to_string(&ran.log.actions).expect("json");
     assert!(
         !json.contains("/dev/null") && !json.contains("pipe:["),
@@ -336,8 +345,16 @@ fn without_root_the_users_own_process_is_still_found() {
         f.message
     );
     assert!(f.partial.is_none(), "{:?}", f.partial);
-    // The other users' fd directories were tried and refused: that is not a gap, the socket was found.
-    assert_eq!(ran.paths(ActionKind::ReadDir)[0], "/proc");
+    // Only the user's own process is listed. The other users' fd directories are never asked for, so
+    // the machine's audit log gets no denials from rdy.
+    assert_eq!(ran.paths(ActionKind::ReadDir), ["/proc", "/proc/3100/fd"]);
+    assert!(
+        !ran.all_paths()
+            .iter()
+            .any(|p| p.starts_with("/proc/1/fd") || p.starts_with("/proc/640/fd")),
+        "{:?}",
+        ran.all_paths()
+    );
 }
 
 #[test]
@@ -412,8 +429,15 @@ fn the_ephemeral_overlap_names_ip_local_reserved_ports_and_keeps_the_reserved_on
     let fix = f.fix.as_deref().expect("a fix");
     assert!(
         fix.contains(
-            "echo 'net.ipv4.ip_local_reserved_ports = 8000-8010,32800,40000' | sudo tee /etc/sysctl.d/90-reserved-ports.conf && sudo sysctl --system"
+            "echo 'net.ipv4.ip_local_reserved_ports = 8000-8010,32800,40000' | sudo tee /etc/sysctl.d/99-zz-reserved-ports.conf && sudo sysctl --system"
         ),
+        "{fix}"
+    );
+    // `99-sysctl.conf` and `/etc/sysctl.conf` are read after a `90-` file, so the name sorts after them,
+    // and the fix says where else the value may be set and how to confirm.
+    assert!(fix.contains("edit that line instead"), "{fix}");
+    assert!(
+        fix.contains("`sysctl net.ipv4.ip_local_reserved_ports`"),
         "{fix}"
     );
     assert_eq!(f.observed["tcp"][1]["ephemeral"], true);
@@ -557,7 +581,7 @@ fn a_run_stays_inside_the_manifest() {
                 assert_eq!(action.kind, ActionKind::ReadLink, "{case}: {action:?}");
                 assert_eq!(
                     action.fields.get("rule").and_then(Value::as_str),
-                    Some(owner::FD_TARGET_RULE),
+                    Some(RULE_FD_TARGET),
                     "{case}"
                 );
             }
@@ -587,7 +611,7 @@ fn the_facade_still_says_the_rule_the_walk_matches() {
     for action in refused {
         assert_eq!(
             action.fields.get("rule").and_then(Value::as_str),
-            Some(owner::FD_TARGET_RULE)
+            Some(RULE_FD_TARGET)
         );
     }
 }
@@ -611,4 +635,61 @@ fn the_other_os_is_not_yet() {
         matches!(outcome, Err(CheckError::Unsupported(_))),
         "{outcome:?}"
     );
+}
+
+#[test]
+fn a_non_root_run_that_cannot_read_its_own_uid_lists_no_process() {
+    let ran = run_case("no-root-unknown-uid");
+    let f = ran.finding();
+    assert_eq!(f.level, Level::Fail);
+    assert!(
+        f.message
+            .contains("some process directories could not be read without root"),
+        "{}",
+        f.message
+    );
+    assert_eq!(f.partial.as_ref().expect("partial").missing, [Need::Root]);
+    assert_eq!(ran.paths(ActionKind::ReadDir), Vec::<String>::new());
+}
+
+// ---- root only adds evidence (02 "Verdict") ------------------------------------------------------------
+
+/// Runs the case with `needs` and maps the outcome the way the engine does.
+fn mapped(case: &str, needs: Vec<Need>) -> rdy_spec::result::CheckResult {
+    let fixture = load(case);
+    let entry = entry_of(case);
+    let spec: CheckSpec = serde_json::from_value(entry.clone()).expect("a check entry");
+    let test_run = TestRun::for_fixture(&fixture);
+    let ctx = test_run.context_for(&INFO, "host.ports", rdy_engine::check::Os::Linux, needs);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    let outcome = runtime.block_on(ports(&entry).run(&ctx));
+    map_outcome(&INFO, &spec, &ctx, outcome, 0, 0)
+}
+
+#[test]
+fn root_is_evidence_only_so_ports_read_without_root_are_proven_free() {
+    assert_eq!(INFO.wants.len(), 1);
+    assert_eq!(INFO.wants[0].need, Need::Root);
+    assert!(INFO.wants[0].evidence_only);
+    // Free ports, no root: /proc/net is world readable, so this is a pass. The engine still records
+    // that root was not there.
+    let result = mapped("free", Vec::new());
+    assert_eq!(result.status, Status::Pass, "{result:?}");
+    assert!(result.partial.is_some(), "{result:?}");
+    // The same with root.
+    let result = mapped("free", vec![Need::Root]);
+    assert_eq!(result.status, Status::Pass, "{result:?}");
+    assert!(result.partial.is_none(), "{result:?}");
+}
+
+#[test]
+fn a_held_port_without_root_still_blocks() {
+    let result = mapped("held-no-root", Vec::new());
+    assert_eq!(result.status, Status::Block, "{result:?}");
+    assert!(result.partial.is_some());
+    let result = mapped("held-by-named-process", vec![Need::Root]);
+    assert_eq!(result.status, Status::Block, "{result:?}");
 }

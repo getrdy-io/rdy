@@ -10,15 +10,16 @@ use super::net::{Scope, Socket};
 use super::owner::{Gap, Owner};
 use super::range::{self, Span};
 use crate::agents::comm_matches;
-use crate::text::code;
+use rdy_engine::text::escape_untrusted;
 
 /// The most ports named in one sentence before the rest are counted.
 const LIST: usize = 8;
 /// The most holders shown for one port. Others are counted.
 const HOLDERS: usize = 8;
 
-/// The file the fix writes. It sorts after the distribution's own files, so its value wins.
-const SYSCTL_FILE: &str = "/etc/sysctl.d/90-reserved-ports.conf";
+/// The file the fix writes. `sysctl --system` reads the files of `/etc/sysctl.d` in name order, and
+/// distributions ship `99-sysctl.conf` (a link to `/etc/sysctl.conf`), so the name must sort after it.
+const SYSCTL_FILE: &str = "/etc/sysctl.d/99-zz-reserved-ports.conf";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Proto {
@@ -78,6 +79,9 @@ pub(super) struct Facts<'a> {
     pub root: bool,
     pub range: Option<Span>,
     pub reserved: Vec<Span>,
+    /// The whole value of `ip_local_reserved_ports` was read. When it was not, the fix tells the user to
+    /// append to the current value instead of giving a complete line.
+    pub reserved_known: bool,
     pub netns: Option<String>,
     /// The file or variable that shows rdy is in a container.
     pub container: Option<String>,
@@ -128,10 +132,28 @@ pub(super) fn conflicts(socket: &Socket, bind: Bind) -> bool {
     }
 }
 
+/// A process name from the machine, always in a code span. Control and invisible characters are
+/// escaped, and a backtick is written `\x60`, so a name cannot close the span.
+fn name(text: &str) -> String {
+    let shown = escape_untrusted(text)
+        .replace('\u{FFFD}', "\\u{fffd}")
+        .replace('`', "\\x60");
+    format!("`{shown}`")
+}
+
 fn who(owner: &Owner) -> String {
     match &owner.name {
-        Some(name) => format!("{} (pid {})", code(name), owner.pid),
+        Some(text) => format!("{} (pid {})", name(text), owner.pid),
         None => format!("pid {}", owner.pid),
+    }
+}
+
+/// The holder of a port that the spec allows, with its unit. The name is set by the process itself, so
+/// the unit is what lets a reader see that it is the product's own service.
+fn who_allowed(owner: &Owner) -> String {
+    match (&owner.name, &owner.unit) {
+        (Some(text), Some(unit)) => format!("{} (pid {}, unit `{unit}`)", name(text), owner.pid),
+        _ => who(owner),
     }
 }
 
@@ -195,7 +217,7 @@ pub(super) fn assemble(facts: &Facts<'_>, expected: Value) -> Finding {
             let label = port.label();
             match (sev, &held.owner) {
                 (Sev::Allowed, owner) => {
-                    let by = owner.as_ref().map_or_else(String::new, who);
+                    let by = owner.as_ref().map_or_else(String::new, who_allowed);
                     push_once(&mut allowed_ports, format!("{label} by {by}"));
                 }
                 (sev, owner) => {
@@ -233,11 +255,25 @@ pub(super) fn assemble(facts: &Facts<'_>, expected: Value) -> Finding {
         let mut numbers: Vec<u16> = exposed.iter().map(|p| p.port).collect();
         numbers.sort_unstable();
         numbers.dedup();
-        fixes.push(format!(
-            "Reserve {} for the product: `echo 'net.ipv4.ip_local_reserved_ports = {}' | sudo tee {SYSCTL_FILE} && sudo sysctl --system`. The value keeps the ports that are reserved now.",
-            if numbers.len() == 1 { "the port" } else { "the ports" },
-            range::merged_value(&facts.reserved, &numbers),
-        ));
+        let what = if numbers.len() == 1 {
+            "the port"
+        } else {
+            "the ports"
+        };
+        let check = "Confirm with `sysctl net.ipv4.ip_local_reserved_ports`.";
+        if facts.reserved_known {
+            fixes.push(format!(
+                "Reserve {what} for the product: `echo 'net.ipv4.ip_local_reserved_ports = {}' | sudo tee {SYSCTL_FILE} && sudo sysctl --system`. The value keeps the ports that are reserved now. If `/etc/sysctl.conf` sets this value, edit that line instead. {check}",
+                range::merged_value(&facts.reserved, &numbers),
+            ));
+        } else {
+            let added: Vec<String> = numbers.iter().map(u16::to_string).collect();
+            fixes.push(format!(
+                "Reserve {what} for the product. rdy could not read the ports that are reserved now, so read them with `sysctl -n net.ipv4.ip_local_reserved_ports`, append {} to that value, and write `net.ipv4.ip_local_reserved_ports = <that value>,{}` to {SYSCTL_FILE}. Then run `sudo sysctl --system`. If `/etc/sysctl.conf` sets this value, edit that line instead. {check}",
+                added.join(","),
+                added.join(","),
+            ));
+        }
     }
 
     if !unverified.is_empty() {
@@ -285,9 +321,9 @@ pub(super) fn assemble(facts: &Facts<'_>, expected: Value) -> Finding {
             "A listener on [::] is counted as holding the IPv4 port too. rdy cannot see whether the socket is IPv6 only.".to_owned(),
         );
     }
-    if !allowed_ports.is_empty() && level == Level::Pass {
+    if !allowed_ports.is_empty() {
         notes.push(format!(
-            "Held by a process the spec allows: {}.",
+            "Held by a process the spec allows: {}. rdy matches the process name, which any local process can set, so the name alone does not show that the product's own service holds the port.",
             list(&allowed_ports)
         ));
     }
