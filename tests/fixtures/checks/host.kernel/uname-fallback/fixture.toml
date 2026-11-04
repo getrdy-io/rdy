@@ -1,0 +1,12 @@
+schema = 1
+name = "uname-fallback"
+summary = "uname is not available, so the release comes from /proc/sys/kernel/osrelease"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

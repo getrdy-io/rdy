@@ -163,6 +163,11 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &str, &str)] = &[
         "embeds examples/specs/acme-platform.yaml for a test",
     ),
     (
+        "crates/rdy-checks-host/src/kernel/tests.rs",
+        "../../../../tests/fixtures/checks/host.kernel/",
+        "embeds the expect.json goldens of tests/fixtures/checks/host.kernel, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-host/src/firewall/tests.rs",
         "../../../../tests/fixtures/checks/host.firewall/",
         "embeds the synthetic cases of tests/fixtures/checks/host.firewall until the Replay loader (M1-049) reads them",

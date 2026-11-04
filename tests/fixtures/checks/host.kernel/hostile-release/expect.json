@@ -1,0 +1,35 @@
+{
+  "entry": {
+    "id": "host.kernel",
+    "min": "5.4",
+    "modules": [
+      "br_netfilter"
+    ]
+  },
+  "result": {
+    "expected": {
+      "applied": {
+        "source": "min",
+        "version": "5.4"
+      },
+      "min": "5.4",
+      "modules": [
+        "br_netfilter"
+      ]
+    },
+    "fix": "Reboot into the newest installed kernel, or install the kernel modules package for the running kernel, then run rdy again. To check by hand, run `sudo modprobe -n -v br_netfilter`.",
+    "level": "warn",
+    "message": "Could not tell whether module `br_netfilter` is available: the kernel release is unknown or has characters rdy does not put in a path.",
+    "notes": [],
+    "observed": {
+      "base": "5.14.0",
+      "build": "1",
+      "distro": "rhel",
+      "modules": {
+        "br_netfilter": "unknown"
+      },
+      "release": "5.14.0-1/../../../etc"
+    },
+    "partial": null
+  }
+}

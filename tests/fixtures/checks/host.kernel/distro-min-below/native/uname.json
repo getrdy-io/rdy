@@ -1,0 +1,9 @@
+{
+  "call": "uname",
+  "value": {
+    "sysname": "Linux",
+    "release": "4.18.0-193.el8.x86_64",
+    "version": "#1 SMP",
+    "machine": "x86_64"
+  }
+}

@@ -1,0 +1,12 @@
+schema = 1
+name = "btf-missing"
+summary = "A 4.18 kernel with no /sys/kernel/btf/vmlinux"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

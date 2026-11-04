@@ -1,0 +1,12 @@
+schema = 1
+name = "dependency-only"
+summary = "nf_defrag_ipv6 appears only in dependency lists, so it is not an installed module of its own here"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

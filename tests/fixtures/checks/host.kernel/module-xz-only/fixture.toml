@@ -1,0 +1,12 @@
+schema = 1
+name = "module-xz-only"
+summary = "br_netfilter is not loaded and exists only in modules.dep as a .ko.xz file"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

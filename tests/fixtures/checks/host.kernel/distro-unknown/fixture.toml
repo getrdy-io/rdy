@@ -1,0 +1,12 @@
+schema = 1
+name = "distro-unknown"
+summary = "No os-release file, so distro_min cannot be chosen and a kernel below min only warns"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,26 @@
+{
+  "entry": {
+    "id": "host.kernel",
+    "min": "5.15"
+  },
+  "result": {
+    "expected": {
+      "applied": {
+        "source": "min",
+        "version": "5.15"
+      },
+      "min": "5.15"
+    },
+    "fix": "Install a newer kernel with `sudo apt update && sudo apt full-upgrade`, reboot into it and confirm with `uname -r`. If the newest kernel for this release is still too old, use a newer OS release.",
+    "level": "fail",
+    "message": "Kernel `5.10.0-28-amd64` is older than the minimum of 5.15.",
+    "notes": [],
+    "observed": {
+      "base": "5.10.0",
+      "build": "28",
+      "distro": "debian",
+      "release": "5.10.0-28-amd64"
+    },
+    "partial": null
+  }
+}

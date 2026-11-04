@@ -1,0 +1,12 @@
+schema = 1
+name = "distro-min-below"
+summary = "RHEL 8 kernel 4.18.0-193 is below the RHEL minimum 4.18.0-305"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

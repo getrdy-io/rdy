@@ -1,0 +1,2 @@
+kernel/net/bridge/br_netfilter.ko.zst: kernel/net/bridge/bridge.ko.zst
+kernel/net/bridge/bridge.ko.zst:
