@@ -488,6 +488,13 @@ impl Watchdog {
         let _ = self.thread.join();
     }
 
+    /// Ends the watchdog without it acting, from a shared handle, and does not wait for the thread.
+    /// For a run that is not the process's last (the library `run`, in a test): the binary never calls
+    /// it, because the backstop after [`WriteState::finish`] must stay.
+    pub fn disarm(&self) {
+        self.shared.stop.stop();
+    }
+
     /// Waits for the thread to end on its own. For tests: in a real run the thread ends the process.
     #[doc(hidden)]
     pub fn join(self) {

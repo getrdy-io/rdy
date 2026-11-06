@@ -473,6 +473,26 @@ fn rustls_client_config_dangerous() {
     let _ = rustls::ClientConfig::dangerous;
 }
 
+// ---- anstream ------------------------------------------------------------------------------------
+// Colour is decided once, in `rdy_cli::style::use_color`. These make a second decision from the
+// environment or the stream, or set one for the whole process (M1-086).
+
+fn anstream_auto_stream_auto() {
+    let _ = anstream::AutoStream::<std::io::Stderr>::auto;
+}
+fn anstream_auto_stream_new() {
+    let _ = anstream::AutoStream::<std::io::Stderr>::new;
+}
+fn anstream_stdout() {
+    let _ = anstream::stdout;
+}
+fn anstream_stderr() {
+    let _ = anstream::stderr;
+}
+fn colorchoice_write_global() {
+    let _ = colorchoice::ColorChoice::write_global;
+}
+
 // ---- askama --------------------------------------------------------------------------------------
 // These print a value without escaping it. Only the `EmbeddedJson` marker of the HTML report may (M1-078).
 

@@ -141,14 +141,21 @@ fn call(
         .expect("a runtime");
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let argv = std::iter::once("rdy").chain(args.iter().copied());
+    let rig = crate::Rig::start(
+        std::time::Instant::now(),
+        rdy_engine::sched::DEFAULT_DEADLINE,
+    )
+    .expect("a watchdog");
     let code = runtime.block_on(crate::run_code(
         argv,
         Arc::new(machine),
         RunHooks::default(),
+        rig.clone(),
         make,
         &mut out,
         &mut err,
     ));
+    rig.disarm();
     (
         code,
         String::from_utf8(out).expect("utf-8 stdout"),
@@ -317,14 +324,14 @@ fn an_empty_report_folder_is_removed_and_one_with_a_file_stays() {
 
     let empty = made("20270309T101502Z");
     let empty_path = empty.path().to_owned();
-    super::discard_if_empty(Some(empty));
+    super::discard_if_empty(Some(std::sync::Arc::new(empty)));
     assert!(!empty_path.exists(), "the empty folder stayed");
 
     let full = made("20270309T101503Z");
     let full_path = full.path().to_owned();
     let redacted = redactor().redact_report(small_report()).expect("redacts");
     full.write_json(&redacted).expect("a file");
-    super::discard_if_empty(Some(full));
+    super::discard_if_empty(Some(std::sync::Arc::new(full)));
     assert!(full_path.exists(), "the folder with a file went");
     assert!(std::fs::read_dir(&full_path).expect("a folder").count() > 0);
 
@@ -507,9 +514,8 @@ fn write_failed() -> CliError {
     }
 }
 
-fn fail(json: bool, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
-    let output = super::Out {
-        json,
+fn plain_out() -> super::Out {
+    super::Out {
         look: super::Look {
             color: false,
             width: 100,
@@ -517,13 +523,19 @@ fn fail(json: bool, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
         spec: "acme.yaml".to_owned(),
         kubeconfig: None,
         out_dir_given: false,
-    };
+    }
+}
+
+fn fail(json: bool, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+    let output = plain_out();
     super::fail_after_verdict(
         &write_failed(),
         small_report(),
         rdy_engine::redact::RuleCounts::default(),
         &redactor(),
         &output,
+        json,
+        false,
         out,
         err,
     )
@@ -567,4 +579,46 @@ fn a_report_that_cannot_be_printed_either_still_ends_with_the_error_on_stderr() 
     assert_eq!(fail(true, &mut Closed, &mut err), 70);
     let stderr = String::from_utf8(err).expect("utf-8");
     assert!(stderr.contains("error: cannot write the report files"));
+}
+
+#[test]
+fn a_failed_file_write_after_a_printed_report_says_so_plainly_on_stderr() {
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = super::fail_after_verdict(
+        &write_failed(),
+        small_report(),
+        rdy_engine::redact::RuleCounts::default(),
+        &redactor(),
+        &plain_out(),
+        false,
+        true,
+        &mut out,
+        &mut err,
+    );
+    assert_eq!(code, 70);
+    assert!(
+        out.is_empty(),
+        "the document is already on stdout; no second one"
+    );
+    let stderr = String::from_utf8(err).expect("utf-8");
+    let note = "error: report files not written. The JSON on stdout is complete but the exit code is 70.\n";
+    assert!(stderr.contains(note), "{stderr}");
+    // The note sits between the summary and the usual error, which keeps its fix line.
+    let at_note = stderr.find(note).expect("note");
+    assert!(stderr.find("0 blocks").expect("summary") < at_note);
+    assert!(
+        stderr
+            .find("error: cannot write the report files")
+            .expect("error")
+            > at_note
+    );
+    assert!(stderr.contains("\nfix: make room"), "{stderr}");
+}
+
+#[test]
+fn the_plain_note_is_not_printed_when_nothing_is_on_stdout() {
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    assert_eq!(fail(false, &mut out, &mut err), 70);
+    let stderr = String::from_utf8(err).expect("utf-8");
+    assert!(!stderr.contains("report files not written"), "{stderr}");
 }

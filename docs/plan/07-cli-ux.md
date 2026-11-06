@@ -78,7 +78,7 @@ On Windows `rdy trust add` exits 64 and is not supported in M1 (ADR 0027).
 | `--out-dir <dir>` | M1 | Parent folder for the report folder. Default `.` on Unix, `%USERPROFILE%\rdy-reports` on Windows (made if missing, and refused if it is a link or junction or on a network share). Windows keeps the ACL the folder inherits, and `--out-dir C:\` lets other local users read the report, so keep the default |
 | `--no-report` | M1 | Write no files |
 | `--kubeconfig <file>`, `--kube-context <name>` | M1 | Kubernetes access. Help warns that a kubeconfig from someone else can run programs |
-| `--no-network` | M1 | Open no sockets. Network and Kubernetes checks are skipped as `missing_need`. With a kube flag, the `cluster` header line says the flag is ignored; it is not a usage error |
+| `--no-network` | M1 | Open no network sockets: rdy and its children open only `AF_UNIX` sockets. That local IPC still runs: the commands 05 INV-11 names (`timedatectl` and `firewall-cmd` to the system bus) and the sockets a check declares (INV-28, such as the Docker or containerd socket). `chronyc` is not run. Network and Kubernetes checks are skipped as `missing_need`. With a kube flag, the `cluster` header line says the flag is ignored; it is not a usage error |
 | `--jobs <n>` | M1 | Checks at once. Default 8. Above 32 is capped with a note. 0 is a usage error |
 | `--timeout <time>` | M2 | See below |
 | `--dry-run` | M2 | Print what each check would read, contact and need. Runs nothing. One ticket with SEC-40 |
@@ -305,7 +305,7 @@ With `--json`, stdout holds one JSON document and a final newline: UTF-8, no BOM
 | --- | --- |
 | `run` exits 0, 1 or 2 | The Report (`kind: Report`) |
 | exit 64 | An ErrorOutput (`kind: Error`, `verdict: null`, `complete: false`), with `file`, `line`, `column` where known |
-| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report with `complete: false`. The error text is on stderr. There is no `.json` file |
+| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report as printed before the files were written (M1-176, PC-50): it can say `complete: true`, and the exit code 70 is the authority. Without `--json`, nothing. The error text is on stderr. There is no `.json` file. `complete: true` here does not mean the files were written. In a script, check the exit code (`set -o pipefail`, or write stdout to a file and test `$?`). Do not trust the document alone. stderr says `error: report files not written. The JSON on stdout is complete but the exit code is 70.` before the usual error and its fix |
 | exit 70, the watchdog fired | Nothing, or a cut-off document. Do not parse it. The Report with `complete: false` is in the report folder, if the folder exists and `--no-report` was not given (5.2) |
 | exit 70, no verdict (`internal`, `interrupted`, `report_write` before any check, or from `report` or `bundle`) | An ErrorOutput |
 | `verify` accepts the spec / `spec lint` / `version` | Verification / LintReport (`kind: Lint`, exit 0, 1 or 2) / version object (4.3) |
@@ -437,6 +437,10 @@ $ wc -c < result.json
 Stdout can be empty, as here, or cut short. It is never promised to be a document. With `--no-report`, or
 before the folder exists, there is no partial report at all. A script that sees exit 70 and an empty file
 reads the newest `rdy-report-*` folder, or just runs again.
+
+A partial report is marked by `complete: false`. Whenever `complete` is false, a host name of `unknown` means the
+host was not read before the run stopped, not that the machine is called that (the report has the arch of the
+build and nothing else of the host). The report also has no `capabilities` and no action log.
 
 ## 6. Colour, symbols and Windows
 

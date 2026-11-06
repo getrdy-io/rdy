@@ -89,6 +89,14 @@ disallowed-methods = [
     { path = "clap::Parser::update_from", reason = "exits 2 on a usage error; use try_update_from and map the error (rdy_cli::run)", allow-invalid = true },
     { path = "clap::error::Error::print", reason = "prints clap's own text, which can echo what was typed; render the error with rdy_cli::error::emit", allow-invalid = true },
     { path = "clap::error::Error::exit", reason = "exits 2; print the error with rdy_cli::error::emit and return exit code 64", allow-invalid = true },
+    # Colour is decided once, in `rdy_cli::style::use_color`, and anstream is only ever given the choice
+    # `Always` or `Never` (M1-086). These calls read the environment or the stream, or set a global
+    # choice, and so could make a second decision. `AutoStream::always` and `AutoStream::never` are fine.
+    { path = "anstream::AutoStream::auto", reason = "reads NO_COLOR and the stream; colour is decided once in rdy_cli::style::use_color", allow-invalid = true },
+    { path = "anstream::AutoStream::new", reason = "takes a ColorChoice that may be Auto; use AutoStream::always or AutoStream::never after use_color", allow-invalid = true },
+    { path = "anstream::stdout", reason = "chooses colour itself; stdout is data and is never coloured", allow-invalid = true },
+    { path = "anstream::stderr", reason = "chooses colour itself; use AutoStream::always or never after use_color", allow-invalid = true },
+    { path = "colorchoice::ColorChoice::write_global", reason = "sets a process-wide colour choice that anstream would read; colour is decided once in use_color", allow-invalid = true },
     { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
     # Process.
     { path = "std::process::Command::new", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration (ADR 0014)" },

@@ -19,7 +19,7 @@
 //!
 //! **Run-time text.** [`Styler::paint`] takes `&'static str`, so a line with a count or a product name
 //! in it cannot go through it. [`Built`] is the second path (M1-086). It can only be made by two
-//! functions, [`Built::verdict`] for the verdict line of `rdy_engine::summary` and
+//! functions, `Built::verdict` for the verdict line of `rdy_engine::summary` and
 //! [`Built::product`] for a product name that passed the name rule, and [`Styler::paint_built`] styles
 //! it. Nothing else can be styled.
 //!

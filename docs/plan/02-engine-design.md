@@ -233,8 +233,16 @@ Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
     non-blocking write, or nothing.
   - **Too early.** Before the output directory exists, it exits 70 with no report.
   - **Exit bound.** Worst case: deadline plus 22 s.
-  - On the normal path the CLI moves the state to `Writing`, writes, flushes, sets `Done`, kills any
-    leftover process groups and calls `std::process::exit(code)`; nothing waits on a runtime drop. The
+  - On the normal path the CLI prints `--json` stdout and flushes it (the one write that can block for
+    good, so the state is still `Running` and the watchdog still owns the report), moves the state to
+    `Writing`, writes the files, sets `Done` with the exit code, prints the stderr summary, kills any
+    leftover process groups (`entry::run_live`) and exits; nothing waits on a runtime drop. `rdy run`
+    gets a watchdog that `entry::run_live` started before the runtime. It plans first (pure), makes the
+    folder, builds the `Board` with `Engine::board` (one slot per spec entry, plan skips already in it)
+    and arms the watchdog right after the folder exists, before the host and needs probes, so a hang
+    anywhere after the folder leaves a `complete: false` report (M1-176). `Engine::execute` then gives
+    the board its way to map an end (`RunOptions::board`). The library `run` used by tests starts its
+    own watchdog and disarms it when it returns; commands other than `run` disarm it at once.
     kube exec plugin is not ours to track (residual).
 - **Ctrl-C in M1.** The first Ctrl-C cancels the run token: checks abort, child process groups are
   killed, and the CLI exits 70 with "interrupted, no report written". Writing the partial report with
@@ -1291,10 +1299,12 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 
 | Group, resource | Verbs and scope | Check: what it reads |
 | --- | --- | --- |
-| core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`: namespace exists |
+| core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`, `k8s.namespace`: namespace exists; `k8s.namespace`: phase and deletion conditions |
 | core `nodes` | LIST | `k8s.nodes`: allocatable, conditions, taints, labels; `k8s.version`: `providerID`, `kubeletVersion` |
 | core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only |
 | core `persistentvolumeclaims` | LIST in the target namespace | `k8s.storageclass`: Pending claims older than 5 minutes |
+| core `resourcequotas` | LIST in the target namespace | `k8s.namespace`: `hard`, `used` and scopes |
+| core `limitranges` | LIST in the target namespace | `k8s.namespace`: memory `max`, `default` and `defaultRequest` of `Container` and `Pod` items |
 | core `events` | LIST in the target namespace, `fieldSelector` must include `involvedObject.kind=PersistentVolumeClaim` | `k8s.storageclass`: `ProvisioningFailed`, `WaitForFirstConsumer` reasons |
 | `storage.k8s.io` `storageclasses` | LIST, GET by name | `k8s.storageclass`: classes, default marker, provisioner |
 | `storage.k8s.io` `csinodes` | LIST | `k8s.storageclass`: `spec.drivers[].name` |
@@ -1306,7 +1316,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 5. **`M1_LATE`**, enabled only with the checks that need it: `admissionregistration.k8s.io` webhook
    configurations, `validatingadmissionpolicies` and bindings; core `services`; `discovery.k8s.io`
    `endpointslices`; Kyverno and Gatekeeper policy objects; ConfigMap GET of `kube-system/kubeadm-config`
-   by name; the resources of `k8s.namespace`, `k8s.crds`, `k8s.ingress`, `k8s.cni`, `k8s.dns` and
+   by name; the resources of `k8s.crds`, `k8s.ingress`, `k8s.cni`, `k8s.dns` and
    `k8s.device_plugins`. Each joins with the same citation rule.
 6. **Projections.** `pods`, `events` and `deployments` deserialize into minimal structs (resources,
    `nodeName`, phase, reason, name), so env values and args are never even held as strings. ConfigMap

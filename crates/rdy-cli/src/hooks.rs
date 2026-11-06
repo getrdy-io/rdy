@@ -7,8 +7,9 @@
 //! The fields so far are the ones `rdy run` reads (M1-057): the wall clock of the run record and of
 //! the report folder name, the run id, the run deadline and the check families. None of them reaches
 //! the spec loader, so a pinned clock cannot defeat `metadata.expires`, and none touches the privilege
-//! gate, the redactor or the output folder rules. The watchdog action arrives with the watchdog wiring. The privilege ids
-//! need no field: the privilege snapshot reads them through the backend, so a replay backend that
+//! gate, the redactor or the output folder rules. The watchdog needs no field: the binary starts it in
+//! `entry`, and a test that calls `run` gets one that is disarmed when `run` returns (M1-176). The
+//! privilege ids need no field: the privilege snapshot reads them through the backend, so a replay backend that
 //! records `/proc/self/status` supplies them (02, "Privilege and needs").
 
 use std::time::{Duration, SystemTime};
@@ -51,12 +52,26 @@ pub struct RunHooks {
 mod tests {
     use super::RunHooks;
 
-    /// The binary passes the default, and the default steers nothing about how output looks.
+    /// The default is "no hook": every field is `None`, so the shipped binary (which passes the default
+    /// and nothing else, SEC-154) changes nothing about a run. The pattern names every field, so a new
+    /// one does not compile until it is listed here.
     #[test]
-    fn the_output_hooks_default_to_none() {
-        let hooks = RunHooks::default();
-        assert!(hooks.stderr_terminal.is_none());
-        assert!(hooks.stderr_columns.is_none());
-        assert!(hooks.style_env.is_none());
+    fn every_field_of_the_default_hooks_is_none() {
+        let RunHooks {
+            clock,
+            run_id,
+            deadline,
+            families,
+            stderr_terminal,
+            stderr_columns,
+            style_env,
+        } = RunHooks::default();
+        assert!(clock.is_none());
+        assert!(run_id.is_none());
+        assert!(deadline.is_none());
+        assert!(families.is_none());
+        assert!(stderr_terminal.is_none());
+        assert!(stderr_columns.is_none());
+        assert!(style_env.is_none());
     }
 }

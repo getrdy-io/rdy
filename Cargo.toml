@@ -133,6 +133,8 @@ unicode-width = { version = "0.2", default-features = false }
 # console before it turns codes into console calls. rdy never passes `ColorChoice::Auto` or calls `AutoStream::auto`:
 # it decides with `style::use_color` alone, and the choice is always yes or no.
 anstream = { version = "1", default-features = false }
+# Named by the lint wall only, so the entry for `ColorChoice::write_global` can fire (M1-086).
+colorchoice = { version = "1", default-features = false }
 
 # The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field
 # name and `=` would hide `password=hunter2` from the key-name rule (04 section 3.4).

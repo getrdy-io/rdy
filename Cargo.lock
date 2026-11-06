@@ -1950,8 +1950,10 @@ dependencies = [
 name = "rdy-lint-wall"
 version = "0.0.0"
 dependencies = [
+ "anstream",
  "askama",
  "clap",
+ "colorchoice",
  "proc-macro2",
  "rdy-engine",
  "rdy-spec",
