@@ -144,7 +144,9 @@ impl Class {
             _ => "`/etc/hosts`",
         };
         let sclient = match os {
-            Os::Windows => String::new(),
+            Os::Windows => format!(
+                " Where openssl is installed, run `openssl s_client -connect {at} -servername {host}` to see the chain."
+            ),
             _ => format!(
                 " Run `openssl s_client -connect {at} -servername {host}` to see the chain."
             ),
@@ -219,7 +221,7 @@ impl Class {
                 "rdy will not contact {at}: the name or address is link-local, metadata, unspecified, multicast or broadcast. Put the real endpoint address in the spec."
             ),
             Self::Timeout => format!(
-                "A step for {at} ran out of its time (10s per endpoint). Run again, and if it repeats check the nameservers this machine uses and the path to {host}."
+                "A step for {at} ran out of time. Run again, and if it repeats check the nameservers this machine uses and the path to {host}."
             ),
         }
     }

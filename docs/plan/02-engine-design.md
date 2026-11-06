@@ -1030,7 +1030,13 @@ pub struct CheckContext { /* private: key, os, caps, probe, deadline */ }
 impl CheckContext {
     pub fn key(&self) -> &str; pub fn os(&self) -> Os; pub fn has(&self, need: &Need) -> bool;
     pub fn probe(&self) -> &Probe; pub fn remaining(&self) -> Duration;
+    /// Runs `work` for at most `limit`; `None` when the limit passed first (M1-095: one budget per endpoint).
+    pub async fn within<F: Future>(&self, limit: Duration, work: F) -> Option<F::Output>;
 }
+// Replay test helpers added by M1-095 (feature `testing`):
+//   Replay::host_rebinding(name, first, later)  // answers change after the first lookup
+//   Replay::lookup_delay(name, delay)           // a lookup waits on the tokio clock
+//   Replay::system_roots_overridden()           // SSL_CERT_FILE or SSL_CERT_DIR replaced the OS store
 
 // family.rs
 pub trait Family: Send + Sync + 'static {

@@ -823,11 +823,14 @@ async fn sixty_four_blackholed_tls_endpoints_fail_with_a_list_and_do_not_time_ou
     assert_eq!(finding.level, Level::Fail);
     let list = finding.observed["endpoints"].as_array().expect("a list");
     assert_eq!(list.len(), 64, "every endpoint is in the result");
+    // On the paused clock the count is exact: every endpoint reaches its blackhole class.
     let blackholes = list.iter().filter(|e| e["class"] == "blackhole").count();
-    assert!(
-        blackholes >= 32,
-        "the early rounds name the blackhole: {blackholes}"
-    );
+    assert_eq!(blackholes, 64, "{}", finding.message);
+    let run = TestRun::new(Replay::new());
+    let ctx = run.context_for(&INFO, "net.egress", Os::Linux, [Need::Network]);
+    let spec = entry(&json!(["a.acme.test:443"]), &json!({}));
+    let result = map_outcome(&INFO, &spec, &ctx, Ok(finding.clone()), 0, 0);
+    assert_eq!(result.status, Status::Block);
     for e in list {
         let result = e["result"].as_str().unwrap_or_default();
         assert!(matches!(result, "failed" | "not_tried"), "{e}");
@@ -993,8 +996,12 @@ fn every_fix_text_on_every_os_names_only_listed_commands_and_no_foreign_paths() 
             if os == Os::Windows {
                 assert!(!text.contains("/etc/hosts"), "{}: {text}", class.id());
             }
-            if os == Os::Windows {
-                assert!(!text.contains("openssl"), "{}: {text}", class.id());
+            if os == Os::Windows && text.contains("openssl") {
+                assert!(
+                    text.contains("Where openssl is installed"),
+                    "{}: {text}",
+                    class.id()
+                );
             }
         }
     }

@@ -162,8 +162,12 @@ impl EgressCheck {
         let mut warns: Vec<String> = Vec::new();
         let mut notes: Vec<String> = Vec::new();
         for p in probed {
+            // The reason is the same for every endpoint on this machine, so it is noted once.
             if let Some(why) = p.tls.as_ref().and_then(|t| t.fallback.as_ref()) {
-                notes.push(format!("{}: {why}", p.label()));
+                let note = format!("TLS trust: {why}");
+                if !notes.contains(&note) {
+                    notes.push(note);
+                }
             }
             match &p.ending {
                 Ending::Reached => {
