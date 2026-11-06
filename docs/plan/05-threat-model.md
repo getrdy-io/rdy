@@ -453,7 +453,7 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
 - `anstream` 1.0.0 with `anstyle` 1.0.14, `anstyle-parse` 1.0.0, `anstyle-query` 1.1.5, `anstyle-wincon`
   3.0.11 (Windows only), `colorchoice` 1.0.5, `utf8parse` 0.2.2 and `is_terminal_polyfill` 1.70.2 (M1-086,
   07 D.5). A direct dependency of the `rdy` binary crate only (`rdy-cli`), with features `auto` and `wincon`
-  and no default features. **Needs security-reviewer approval on the M1-086 PR (D.5 review).** The check
+  and no default features. **Approved by security-reviewer, PR #42 (S1 to S5 fixed).** The check
   crates and the engine do not use it. New packages in the lock file: `anstream`, `anstyle-parse`,
   `anstyle-query`, `anstyle-wincon`, `colorchoice`, `utf8parse`, `is_terminal_polyfill` and, for Windows,
   `once_cell_polyfill`; `anstyle` and `windows-sys` were there already.

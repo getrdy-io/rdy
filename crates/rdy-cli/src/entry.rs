@@ -84,10 +84,24 @@ pub fn main_code() -> u8 {
 /// Whether stderr should be set up for colour: `--color` (the last one wins), else the variables and the
 /// stream, by [`style::use_color`].
 fn wants_color(args: &[OsString]) -> bool {
+    use_color(
+        color_choice(args),
+        &StyleEnv::from_process(),
+        io::IsTerminal::is_terminal(&io::stderr()),
+    )
+}
+
+/// The `--color` value in `args`: the last one wins, `--color=x` and `--color x` both count, and nothing
+/// after a bare `--` is read as a flag. A trailing `--color` with no value, or a value rdy does not know,
+/// changes nothing (clap refuses it later).
+fn color_choice(args: &[OsString]) -> ColorChoice {
     let mut choice = ColorChoice::Auto;
-    let mut at = 0;
+    let mut at = 1;
     while let Some(arg) = args.get(at) {
         let text = arg.to_string_lossy();
+        if text == "--" {
+            break;
+        }
         let value = if let Some(value) = text.strip_prefix("--color=") {
             Some(value.to_owned())
         } else if text == "--color" {
@@ -104,11 +118,61 @@ fn wants_color(args: &[OsString]) -> bool {
         }
         at += 1;
     }
-    use_color(
-        choice,
-        &StyleEnv::from_process(),
-        io::IsTerminal::is_terminal(&io::stderr()),
-    )
+    choice
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<OsString> {
+        list.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn the_color_flag_is_read_in_both_forms_and_the_last_one_wins() {
+        assert_eq!(color_choice(&args(&["rdy", "run", "x"])), ColorChoice::Auto);
+        assert_eq!(
+            color_choice(&args(&["rdy", "run", "--color=never", "x"])),
+            ColorChoice::Never
+        );
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color", "always", "run"])),
+            ColorChoice::Always
+        );
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color", "always", "run", "--color=never"])),
+            ColorChoice::Never
+        );
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color=never", "--color", "auto"])),
+            ColorChoice::Auto
+        );
+    }
+
+    #[test]
+    fn a_trailing_or_unknown_color_changes_nothing() {
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color=never", "run", "--color"])),
+            ColorChoice::Never
+        );
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color", "always", "--color=purple"])),
+            ColorChoice::Always
+        );
+    }
+
+    #[test]
+    fn nothing_after_a_double_dash_is_a_flag() {
+        assert_eq!(
+            color_choice(&args(&["rdy", "run", "--", "--color=always"])),
+            ColorChoice::Auto
+        );
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color=never", "--", "--color", "always"])),
+            ColorChoice::Never
+        );
+    }
 }
 
 /// Builds the live backend and the runtime, runs the command and returns its exit code.

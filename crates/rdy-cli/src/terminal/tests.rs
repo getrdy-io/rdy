@@ -488,11 +488,19 @@ fn a_payload_in_the_tip_and_the_unsigned_banner_prints_as_text() {
         "0.1.0",
         vec![needs_root(PAYLOAD), needs_root("host.lsm")],
     );
-    report.signature.trust_source = Some(TrustSource::User);
-    report.signature.product = Some(PAYLOAD.to_owned());
+    let pinned = {
+        let mut sig = report.signature.clone();
+        sig.trust_source = Some(TrustSource::User);
+        sig.product = Some(PAYLOAD.to_owned());
+        sig
+    };
     for enabled in [false, true] {
         let styler = Styler::new(enabled);
-        assert_safe(&full(&report, PAYLOAD, "./f", false, styler, 100));
+        // Each pass starts from the user-pinned signature, so the Tip is covered with colour on too.
+        report.signature = pinned.clone();
+        let out = full(&report, PAYLOAD, "./f", false, styler, 100);
+        assert!(out.contains("Tip:"), "{out}");
+        assert_safe(&out);
         report.signature = Signature::unsigned();
         assert_safe(&banner(&report.signature, PAYLOAD, styler).unwrap_or_default());
     }
