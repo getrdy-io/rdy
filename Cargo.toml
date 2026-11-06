@@ -128,6 +128,13 @@ askama = { version = "=0.16.1", default-features = false }
 # annotate-snippets (ADR 0001). No default features: the `cjk` feature only adds `width_cjk()` and does not
 # change `width()`.
 unicode-width = { version = "0.2", default-features = false }
+# Colour for stderr (M1-086, 07 section 6 and D.5). Strips the codes when colour is off and handles the Windows
+# console when it is on. The `auto` feature is on only so that `AutoStream::always` can check that the stream is a
+# console before it turns codes into console calls. rdy never passes `ColorChoice::Auto` or calls `AutoStream::auto`:
+# it decides with `style::use_color` alone, and the choice is always yes or no.
+anstream = { version = "1", default-features = false }
+# Named by the lint wall only, so the entry for `ColorChoice::write_global` can fire (M1-086).
+colorchoice = { version = "1", default-features = false }
 
 # The redacting log writer (M1-056, ADR 0015 decision 5). No ANSI colour: colour codes between a field
 # name and `=` would hide `password=hunter2` from the key-name rule (04 section 3.4).

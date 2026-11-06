@@ -1,0 +1,21 @@
+rdy 0.1.0
+spec    acme-quickstart >=1.0   (acme-quickstart.yaml)
+sig     verified, key 9F3A6C21D4E87B05, trusted by you, signed 2027-03-02
+host    acme-vm-03.corp.example   rhel 9.4   x86_64
+user    jdoe (not root)
+proxy   http://proxy.corp.example:3128
+
+  PASS     host.cpu          8 vCPUs found, 4 needed
+  PASS     host.memory       15.4 GiB found, 8 GiB needed
+  PASS     host.disk/root    60.0 GiB free on /, 20 GiB needed
+  PASS     net.egress        2 of 2 endpoints reachable through the proxy
+  SKIP     host.disk/system  Does not apply here. This check is for windows only.
+
+0 blocks, 0 warnings, 4 passed, 1 not applicable
+
+Report written to ./rdy-report-acme-quickstart-20270309T101502Z/
+  rdy-report-acme-quickstart-20270309T101502Z.html
+  rdy-report-acme-quickstart-20270309T101502Z.json
+  spec.yaml
+  spec.yaml.minisig
+READY

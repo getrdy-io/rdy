@@ -1,0 +1,45 @@
+WARNING: UNSIGNED SPEC
+acme-platform.yaml has no signature. rdy cannot tell who wrote it or whether it was changed.
+The spec decides which files rdy reads and which hosts it contacts.
+Run it only if you wrote it yourself or got it from the vendor in a way you trust.
+Every report from this run is marked UNSIGNED SPEC.
+
+rdy 0.1.0
+spec    acme-platform >=4.2   (acme-platform.yaml)
+sig     UNSIGNED (allowed by --allow-unsigned)
+host    acme-node-01.corp.example   rhel 9.4   x86_64
+user    jdoe (not root)
+proxy   http://proxy.corp.example:3128
+cluster no kubeconfig found
+
+  BLOCK    host.memory       15.4 GiB found, 32 GiB needed
+                             fix from the spec file (not verified): Add RAM or choose a larger node
+                             class.
+  TIMEOUT  net.egress        Timed out after 10 s. (required)
+                             fix from rdy: Run again. If it times out again, tell the vendor which
+                             check it was.
+  SKIP     k8s.version       Not run. No Kubernetes cluster was reachable. (required)
+                             fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                             again.
+  SKIP     gpu.cuda          Not run. This version of rdy has no gpu checks yet. (required)
+                             fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
+                             how to go on.
+  SKIP     aws.iam           Not run. This version of rdy has no aws checks yet. (required)
+                             fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
+                             how to go on.
+  WARN     host.disk         60.0 GiB free on / for /var/lib, 100 GiB needed
+                             fix from the spec file (not verified): Mount a larger volume at
+                             /var/lib before install.
+  SKIP     k8s.storageclass  Not run. No Kubernetes cluster was reachable.
+                             fix from rdy: Set a kubeconfig, or pass --kube-context <name>, then run
+                             again.
+  PASS     host.cpu          8 vCPUs found, 8 needed
+
+1 block, 1 warning, 1 passed, 4 required checks not run (1 timed out), 1 optional check not run
+
+Report written to ./rdy-report-acme-platform-20270309T143005Z/
+  rdy-report-acme-platform-20270309T143005Z.html
+  rdy-report-acme-platform-20270309T143005Z.json
+  spec.yaml
+WARNING: UNSIGNED SPEC
+NOT READY

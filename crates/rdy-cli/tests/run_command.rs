@@ -86,6 +86,9 @@ fn pinned() -> RunHooks {
     // 2027-03-09T10:15:02.123Z
     hooks.clock = Some(UNIX_EPOCH + Duration::from_millis(1_804_587_302_123));
     hooks.run_id = Some("00000000-0000-4000-8000-000000000001".to_owned());
+    // A developer's terminal must not colour or narrow a comparison.
+    hooks.stderr_terminal = Some(false);
+    hooks.stderr_columns = Some(100);
     hooks
 }
 
@@ -358,6 +361,7 @@ fn rdy(args: &[&str]) -> Output {
             .args(args)
             .env_remove("RDY_PROGRESS")
             .env_remove("RUST_LOG")
+            .env_remove("CLICOLOR_FORCE")
             .output()
             .unwrap_or_else(|e| panic!("the rdy binary did not start: {e}")),
     )
@@ -481,8 +485,7 @@ fn the_binary_runs_a_signed_spec_whose_key_the_user_pinned() {
 
 // --- the unsigned warning (product rule 3) ---
 
-const UNSIGNED_WARNING: &str =
-    "warning: this spec is not signed. rdy cannot tell who wrote it or if it was changed.";
+const UNSIGNED_WARNING: &str = "WARNING: UNSIGNED SPEC";
 
 fn warning_lines(stderr: &str) -> usize {
     stderr
@@ -492,7 +495,7 @@ fn warning_lines(stderr: &str) -> usize {
 }
 
 #[test]
-fn the_binary_warns_once_on_stderr_when_it_runs_an_unsigned_spec() {
+fn the_binary_prints_the_banner_first_and_again_above_the_verdict_for_an_unsigned_spec() {
     let out = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let output = rdy(&[
         "run",
@@ -503,12 +506,26 @@ fn the_binary_warns_once_on_stderr_when_it_runs_an_unsigned_spec() {
         &out.path().to_string_lossy(),
     ]);
     let stderr = text(output.stderr.clone());
-    assert_eq!(warning_lines(&stderr), 1, "{stderr}");
-    // It comes first, above everything else the run prints, and nothing of it is on stdout.
+    // The title comes first, above everything else the run prints, and again above the verdict (01
+    // section 4.7). Nothing of it is on stdout.
+    assert_eq!(warning_lines(&stderr), 2, "{stderr}");
     assert_eq!(stderr.lines().next(), Some(UNSIGNED_WARNING), "{stderr}");
-    assert!(!text(output.stdout.clone()).contains("not signed"));
-    // The warning names no flag.
-    assert!(!UNSIGNED_WARNING.contains("--"));
+    let lines: Vec<&str> = stderr.lines().collect();
+    assert_eq!(lines[lines.len() - 2], UNSIGNED_WARNING, "{stderr}");
+    assert!(
+        lines[lines.len() - 1].starts_with("NOT READY")
+            || lines[lines.len() - 1].starts_with("READY"),
+        "{stderr}"
+    );
+    assert!(!text(output.stdout.clone()).contains("UNSIGNED"));
+    // The banner names no flag. The sig line names the flag that allowed the run, as the plan sample does.
+    let banner: Vec<&str> = lines
+        .iter()
+        .copied()
+        .take_while(|l| !l.is_empty())
+        .collect();
+    assert_eq!(banner.len(), 5, "{stderr}");
+    assert!(banner.iter().all(|l| !l.contains("--")), "{stderr}");
 }
 
 #[test]
@@ -527,6 +544,12 @@ fn the_warning_does_not_wait_for_the_report_folder() {
     );
     assert_eq!(ran.code, 70, "{}", ran.stderr);
     assert_eq!(ran.stderr.lines().next(), Some(UNSIGNED_WARNING));
+    assert_eq!(
+        warning_lines(&ran.stderr),
+        1,
+        "no verdict follows the error: {}",
+        ran.stderr
+    );
 }
 
 #[test]
