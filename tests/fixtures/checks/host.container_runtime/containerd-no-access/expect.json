@@ -1,0 +1,53 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "containerd"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "containerd"
+      ],
+      "storage_driver": null
+    },
+    "fix": "Run rdy as root, or as a user who may open the socket. Run rdy as root, or check by hand that cgroupDriver in /var/lib/kubelet/config.yaml is systemd.",
+    "level": "warn",
+    "message": "containerd 1.7.13 is present, but this user may not open its socket /run/containerd/containerd.sock, so rdy could not read its settings. The kubelet config /var/lib/kubelet/config.yaml could not be read (permission denied), so the cgroup driver of containerd was not compared with the kubelet's.",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": null,
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "permission denied",
+          "cgroup_driver": "systemd",
+          "cgroup_driver_source": "/etc/containerd/config.toml",
+          "config_version": 2,
+          "d_type": null,
+          "installed": true,
+          "proxy": null,
+          "rootless": null,
+          "rootless_socket": false,
+          "runtime": "containerd",
+          "socket": "/run/containerd/containerd.sock",
+          "socket_present": true,
+          "storage_driver": "overlayfs",
+          "storage_driver_source": "/etc/containerd/config.toml",
+          "version": "1.7.13"
+        }
+      ]
+    },
+    "partial": {
+      "missing": [
+        "Root"
+      ],
+      "note": "Runtime present, socket not readable; run as root."
+    }
+  }
+}

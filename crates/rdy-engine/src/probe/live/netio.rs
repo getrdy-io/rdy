@@ -75,8 +75,19 @@ pub(super) async fn udp(
             reply.truncated = truncated;
             Ok(reply)
         }
-        Ok(Err(error)) => Err(ProbeError::from_io(&error)),
+        Ok(Err(error)) => Err(udp_error(&error)),
         Err(_elapsed) => Err(ProbeError::Timeout),
+    }
+}
+
+/// The error of a failed UDP exchange. ICMP port unreachable on a connected UDP socket is
+/// `ECONNREFUSED` on Unix and `WSAECONNRESET` on Windows, which is `ConnectionReset`. Both read as a
+/// refusal, so the answer is the same on every OS. TCP does not use this and is unchanged.
+fn udp_error(error: &io::Error) -> ProbeError {
+    if error.kind() == io::ErrorKind::ConnectionReset {
+        ProbeError::ConnectionRefused
+    } else {
+        ProbeError::from_io(error)
     }
 }
 
@@ -146,5 +157,22 @@ pub(super) async fn unix_get(
     match tokio::time::timeout(timeout, exchange).await {
         Ok(result) => result,
         Err(_elapsed) => Err(ProbeError::Timeout),
+    }
+}
+
+#[cfg(test)]
+mod udp_error_tests {
+    use super::*;
+
+    #[test]
+    fn a_reset_from_the_udp_path_reads_as_a_refusal() {
+        let reset = io::Error::from(io::ErrorKind::ConnectionReset);
+        assert_eq!(udp_error(&reset), ProbeError::ConnectionRefused);
+        // The other kinds keep their usual mapping, and the shared mapping itself is unchanged.
+        let refused = io::Error::from(io::ErrorKind::ConnectionRefused);
+        assert_eq!(udp_error(&refused), ProbeError::ConnectionRefused);
+        let other = io::Error::from(io::ErrorKind::BrokenPipe);
+        assert_eq!(udp_error(&other), ProbeError::from_io(&other));
+        assert!(matches!(ProbeError::from_io(&reset), ProbeError::Io(_)));
     }
 }

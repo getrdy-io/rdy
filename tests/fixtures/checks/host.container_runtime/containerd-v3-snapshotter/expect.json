@@ -1,0 +1,49 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "containerd"
+    ],
+    "storage_driver": "overlay2"
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "containerd"
+      ],
+      "storage_driver": "overlay2"
+    },
+    "fix": "Set `snapshotter = \"overlayfs\"` under `[plugins.\"io.containerd.cri.v1.images\"]` in /etc/containerd/config.toml, then run `systemctl restart containerd`. Existing images are not moved.",
+    "level": "fail",
+    "message": "containerd 2.0.1 uses the native storage driver, the spec needs overlay2.",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "not asked",
+          "cgroup_driver": "systemd",
+          "cgroup_driver_source": "/etc/containerd/config.toml",
+          "config_version": 3,
+          "d_type": null,
+          "installed": true,
+          "proxy": null,
+          "rootless": null,
+          "rootless_socket": false,
+          "runtime": "containerd",
+          "socket": "/run/containerd/containerd.sock",
+          "socket_present": true,
+          "storage_driver": "native",
+          "storage_driver_source": "/etc/containerd/config.toml",
+          "version": "2.0.1"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

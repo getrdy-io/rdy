@@ -213,7 +213,6 @@ fn these_ids_are_still_stubs_and_the_planner_skips_them() {
         [
             "host.ports",
             "host.time_sync",
-            "host.container_runtime",
             "host.cgroups",
             "host.kernel",
         ]
