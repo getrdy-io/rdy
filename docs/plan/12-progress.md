@@ -365,11 +365,11 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-174 | todo | | Expected results for the host check fixture cases | added 2026-10-30 (correction-29, PR #145 review)
 
-- M1-175 | todo | | Kubernetes family builds every k8s check from its parameters | added 2026-10-30 (correction-32, PR #151 review)
+- M1-175 | todo | | Kubernetes family builds every k8s check from its parameters | added 2026-10-30 (correction-32, PR #151 review); backlog corrected 2026-10-30 (correction-34): moved from week 23 to week 22 (PR #24 review)
 
 - M1-176 | todo | | The watchdog in `rdy run` | added 2026-10-30 (correction-33, PR #154 reviews)
 
-- M1-177 | todo | | Host check fixes from the M1-174 and M1-149 reviews | added 2026-10-30 (correction-34, PR #18 and PR #20 reviews)
+- M1-177 | todo | | Host check fixes from the M1-174 and M1-149 to M1-152 reviews | added 2026-10-30 (correction-34, PR #18, PR #20, PR #23, PR #24, PR #26 and PR #27 reviews); 3 h; an item whose ticket is not merged when M1-177 starts moves to that ticket's exit test
 
 - M1-178 | todo | | `SysctlName::canonical` by the first separator | added 2026-10-30 (correction-34, PR #20 review)
 
