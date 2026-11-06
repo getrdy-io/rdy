@@ -6,10 +6,10 @@ Good contributions keep it small, safe and boring.
 
 ## Before you start
 
-- **Bugs and ideas:** open an issue first for anything bigger than a typo. Use the
-  templates. A bug report with the `rdy version` output and the JSON report is
-  worth ten paragraphs.
-- **New checks:** open a "check request" issue. We need the id, what it measures,
+- **Bugs and ideas:** open an issue first for anything bigger than a typo. A bug
+  report with the `rdy version` output and the JSON report is worth ten paragraphs.
+  Issue forms are not set up yet, so write the title and the steps yourself.
+- **New checks:** open an issue titled "check request: `family.name`". We need the id, what it measures,
   where the data comes from on each OS, what privilege it needs, the
   pass/warn/block thresholds, and the fix text. `docs/plan/03-check-catalog.md`
   shows the format. The id is `family.name`, in a family `docs/plan/01-spec-format.md`
@@ -37,6 +37,31 @@ Good contributions keep it small, safe and boring.
    documented in `--help` and at docs.getrdy.io, not suggested. A hint may name
    `rdy trust add ... --key`, which pins a key. Secrets never go on argv.
 
+## Set up
+
+You need git and [rustup](https://rustup.rs). Nothing else is needed to build.
+
+```sh
+git clone https://github.com/getrdy-io/rdy.git
+cd rdy
+cargo build --workspace
+```
+
+`rust-toolchain.toml` pins the exact stable Rust (1.99.1 today, with clippy and rustfmt).
+rustup installs it the first time you run cargo in the folder. The minimum Rust version
+for people who depend on our crates (`rust-version` in `Cargo.toml`) is older: stable minus
+two minors. Develop on the pinned one. Do not pass `+stable` or `+nightly`.
+
+Your commits need a name and an email, because the DCO line carries them (see Pull requests):
+
+```sh
+git config user.name "Your Name"
+git config user.email "you@example.com"
+```
+
+`cargo deny` is a separate install: `cargo install cargo-deny --locked`. CI uses the version
+pinned in `.github/workflows/ci.yml`.
+
 ## Build and test
 
 ```sh
@@ -46,9 +71,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo deny check
 cargo doc --workspace --no-deps
+cargo xtask docs --check
+cargo xtask docs-lint
 ```
 
-`cargo doc` treats rustdoc warnings as errors (`.cargo/config.toml`). All of these must pass before a PR is reviewed. CI also runs on native
+`cargo doc` treats rustdoc warnings as errors (`.cargo/config.toml`). All of these must pass before a PR is reviewed.
+The first build takes a few minutes. Some tests make a key with a 1 GiB password hash, so
+give the test run memory. CI also runs on native
 runners for every PR (Linux x86_64 and aarch64 on musl, macOS x86_64, Windows x86_64),
 and it compiles the macOS arm64 target without running its tests. The full macOS arm64
 tests run nightly and on `main` in a separate workflow, until the org has arm64 runners.
@@ -59,7 +88,8 @@ doc tests on Linux x86_64 only. A test that fails once in three runs is a bug. F
 the suite the way CI does, install `cargo-nextest` and run `cargo nextest run --workspace --profile ci`
 and `cargo test --doc --workspace`. A test named `root_*` needs uid 0. Nextest skips it unless you pass
 `--profile root`, and CI runs it in the `root` job under `sudo`. On Linux, CI also builds the musl binary and checks it with
-`scripts/check-static.sh target/<triple>/debug/rdy`.
+`scripts/check-static.sh target/<triple>/debug/rdy`. To do that yourself, add the target first
+(`rustup target add x86_64-unknown-linux-musl`) and build with `--target`.
 
 Property tests use `proptest`. Each test sets its own case count (10,000 for "never panics" and
 limits, 256 for the rest), so do not set `PROPTEST_CASES`. Pull requests use a fixed seed, so a
@@ -67,7 +97,7 @@ test never fails on an unrelated change. To try other draws, set `PROPTEST_RNG_S
 failure is saved in `crates/rdy-spec/proptest-regressions/`. Commit that file with the fix, and add
 a plain test with the smallest input next to the fix.
 
-Repo tasks run through `cargo xtask`, from `crates/xtask`. Run these when you change docs or generated files:
+Repo tasks run through `cargo xtask`, from any folder in the checkout (an alias in `.cargo/config.toml`). Run these when you change docs or generated files:
 
 ```sh
 cargo xtask docs
@@ -77,20 +107,25 @@ cargo xtask docs-lint
 cargo xtask checks
 ```
 
-`cargo xtask docs` writes the generated pages under `docs/`. Never edit those pages by hand. Change the generator, then run the command again. `docs-lint` reads only the files that git tracks. Run `git add` on a new file before you lint it. `dist` and `publish` are off in this build.
+`cargo xtask docs` writes the generated reference pages under `docs/src/content/docs/reference/`.
+Never edit those pages by hand. Change the generator, then run the command again. `docs-lint` reads only the files that git tracks. Run `git add` on a new file before you lint it. `dist` and `publish` are off in this build.
 
 `cargo xtask checks` lists every registered check with its id, family, title and remediation, one tab-separated row each. It fails when a title or remediation is empty. A new check fills in the `meta` field of its `CheckInfo` (ADR 0026). `docs-lint` runs the same test.
 
 To try your change by hand:
 
 ```sh
-cargo run -p rdy -- run examples/specs/acme-quickstart.yaml --allow-unsigned --out-dir /tmp
+mkdir -p /tmp/rdy-try
+cargo run -p rdy -- run examples/specs/acme-quickstart.yaml --allow-unsigned --out-dir /tmp/rdy-try
 ```
 
-The example spec has no signature, so rdy prints a red `UNSIGNED SPEC` banner
-before the checks and again above the verdict. That is expected. The exit code is
-not the point here. It is 2 on most machines, because the example's endpoints do
-not exist. Exit codes are 0 ready, 1 ready with warnings, 2 not ready, 64 usage
+The folder for `--out-dir` must exist. The example spec has no signature, so rdy
+prints `warning: this spec is not signed` on stderr before the checks, and the JSON
+report records it. The full red UNSIGNED SPEC banner on the terminal comes with M1-126.
+That is expected. The exit code is not the point here. It is 2 today: `net.egress`
+is not built yet, so the run ends with `NOT READY: 1 required check was not run`.
+Once it is built, the made-up endpoints in the example make it a blocker, and the
+exit stays 2. Exit codes are 0 ready, 1 ready with warnings, 2 not ready, 64 usage
 error and 70 internal error. Each run writes a new `rdy-report-...` folder, so
 use `--out-dir` or `--no-report` to keep your checkout clean.
 
@@ -98,6 +133,9 @@ use `--out-dir` or `--no-report` to keep your checkout clean.
 
 - A new check goes in the `rdy-checks-<family>` crate for its family, one module
   per check, with its fixture and golden test.
+- Docs: hand-written intros are in `docs/intro/`. The published site is
+  `docs/src/content/docs/`. `docs/plan/` and `docs/adr/` are design notes and are
+  never published. The README is the front page.
 - Golden files live under `tests/fixtures/`. The testing docs say how to
   regenerate them. Read the diff before you commit it.
 - Anything a user reads (output, errors, help) follows `docs/plan/07-cli-ux.md`.
@@ -109,15 +147,18 @@ use `--out-dir` or `--no-report` to keep your checkout clean.
 
 - One change per PR. Small is good. Imperative commit summary, one line.
 - Add tests. Update docs in the same PR.
-- Add a changelog fragment. Create `changelog.d/<ticket>.md` (for example `changelog.d/M1-003.md`) with
-  one or two bullet lines in plain, user-facing words. Do not edit `CHANGELOG.md` itself, so parallel PRs
-  never conflict. The release ticket collects the fragments into `CHANGELOG.md`. The PR template has the box.
+- Add a changelog fragment when a user can see the change (ADR 0017, `docs/adr/0017-changelog-fragments.md`).
+  Create `changelog.d/<ticket>.md` (for example `changelog.d/M1-003.md`) with one or two bullet lines in
+  plain, user-facing words. With no ticket, use a short slug, such as `changelog.d/fix-disk-units.md`. A
+  docs-only or plan-only PR needs none. Do not edit `CHANGELOG.md` itself, so parallel PRs never conflict.
+  The release step collects the fragments into `CHANGELOG.md`. The PR template has the box.
 - Sign off your commits (`git commit -s`). This is the
   [Developer Certificate of Origin](https://developercertificate.org/): you wrote
   it, or you have the right to submit it, under Apache-2.0. CI fails a PR with a commit that has no
   `Signed-off-by:` line. To fix the last commit run `git commit --amend -s`. For a whole branch run
   `git rebase --signoff origin/main`, then force-push. The check accepts any well-formed
   `Signed-off-by: Name <email>` line. It does not compare the name or email with the commit author.
+  To run the same check yourself: `scripts/check-dco.sh origin/main HEAD`.
 - If an AI tool wrote most of the change, say so in the PR description. That is
   fine. You are still responsible for reading it and understanding it.
 - Reviews are direct and about the code. Expect questions about privileges,
@@ -133,10 +174,12 @@ New optional fields are fine. Anything else needs `rdy/v2` and an ADR.
 
 ## Conduct
 
-Be kind and be direct. See `CODE_OF_CONDUCT.md`.
+Be kind and be direct. Assume good faith and argue about the code, not the person.
+A formal `CODE_OF_CONDUCT.md` is planned and will be linked here.
 
 ## License
 
 By contributing you agree that your work is licensed under Apache-2.0, and you certify that with the
-DCO sign-off on every commit (see Pull requests above). The name and the logo are covered by
-`TRADEMARKS.md`, not by the license.
+DCO sign-off on every commit (see Pull requests above). `NOTICE` says who owns the code and
+the marks (Apostolic Path LLC). The name and the logo are covered by `TRADEMARKS.md`, not by
+the license.
