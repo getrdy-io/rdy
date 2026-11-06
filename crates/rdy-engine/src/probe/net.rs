@@ -69,11 +69,13 @@ use super::addr::is_unusable_peer;
 use super::log::Pending;
 use super::proxy::{ProxyUrl, parse_connect_head};
 use super::sock::host_port;
-use super::{Backend, NetFailure, Probe, ProbeError, ProbeHub, refuse, settle};
+use super::{Backend, NetFailure, Probe, ProbeError, ProbeHub, RULE_NO_NETWORK, refuse, settle};
 use crate::check::PeerClass;
 
 mod http;
 mod lookup;
+#[cfg(test)]
+mod offline_tests;
 #[cfg(any(test, feature = "testing"))]
 pub(super) mod replay;
 #[cfg(test)]
@@ -284,6 +286,9 @@ impl Probe {
                 .info
                 .is_some_and(|info| info.peers.contains(&class))
         };
+        if self.offline() {
+            return Err(RULE_NO_NETWORK);
+        }
         if !declared(PeerClass::SpecHosts) {
             return Err(RULE_TCP_UNDECLARED);
         }

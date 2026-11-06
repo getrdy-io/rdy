@@ -320,7 +320,7 @@ static KUBE_CHECK: CheckInfo = CheckInfo {
 static NET_CHECKS: [&CheckInfo; 1] = [&NET_CHECK];
 static KUBE_CHECKS: [&CheckInfo; 1] = [&KUBE_CHECK];
 
-/// Counts the checks of `NetFamily` that ran.
+/// Counts the checks that ran in both test families, net and k8s.
 static NET_RAN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 struct Counting(&'static CheckInfo);
@@ -423,6 +423,81 @@ async fn no_network_skips_network_and_kubernetes_checks_as_missing_need_with_no_
         "{:?}",
         done.log.actions
     );
+}
+
+/// Declares a network peer and no network need, then dials. Only the facade stops it.
+static DIALS: CheckInfo = CheckInfo {
+    family: "net",
+    peers: &[crate::check::PeerClass::SpecHosts],
+    ..info("net.egress", &[])
+};
+static DIAL_CHECKS: [&CheckInfo; 1] = [&DIALS];
+
+struct Dials;
+
+impl Check for Dials {
+    fn info(&self) -> &'static CheckInfo {
+        &DIALS
+    }
+
+    fn run<'a>(&'a self, ctx: &'a CheckContext) -> crate::check::BoxFuture<'a, CheckOutcome> {
+        Box::pin(async {
+            ctx.probe().lookup("registry.acme.example").await?;
+            Ok(Finding::pass("dialed"))
+        })
+    }
+}
+
+struct DialFamily;
+
+impl Family for DialFamily {
+    fn name(&self) -> &'static str {
+        "net"
+    }
+
+    fn checks(&self) -> &'static [&'static CheckInfo] {
+        &DIAL_CHECKS
+    }
+
+    fn build(&self, _: &CheckSpec, _: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        Ok(Built::new(Box::new(Dials)))
+    }
+}
+
+#[tokio::test]
+async fn a_check_that_dials_under_no_network_ends_as_missing_need_not_an_error() {
+    let mut registry = Registry::new();
+    registry.register(DialFamily).expect("registers");
+    let hub = ProbeHub::new(
+        Arc::new(Replay::new()),
+        Redactor::new(TagKey::fixed([7; 32])),
+    );
+    let engine = Engine::new(registry, hub);
+    let spec = loaded(
+        "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: net.egress\n    endpoints: [\"registry.acme.example:443\"]\n",
+    );
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let mut options = RunOptions::new();
+    options.network = false;
+    let done = engine
+        .execute(&spec, plan, &privilege(false), &options)
+        .await;
+    let result = find(&done, "net.egress");
+    assert_eq!(result.status, Status::Skipped, "{}", result.message);
+    assert_eq!(result.skip_kind, Some(SkipKind::MissingNeed));
+    assert_eq!(
+        result.fix.as_deref(),
+        Some("Run again without --no-network.")
+    );
+    // The refusal is in the log as a denied call, and nothing connected.
+    let lookups: Vec<_> = done
+        .log
+        .actions
+        .iter()
+        .filter(|a| a.kind == rdy_spec::result::ActionKind::Lookup)
+        .collect();
+    assert_eq!(lookups.len(), 1);
+    assert_eq!(lookups[0].outcome, rdy_spec::result::ActionOutcome::Denied);
 }
 
 #[tokio::test]

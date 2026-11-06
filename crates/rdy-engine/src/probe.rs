@@ -126,6 +126,11 @@ pub const MAX_DIR_ENTRIES: usize = 65_536;
 /// The rule of a command the check did not declare in `CheckInfo::commands`.
 pub const RULE_COMMAND_UNDECLARED: &str = "command not declared by the check";
 
+/// The rule of a network call or a network command while `--no-network` is set (SEC-01). The facade
+/// refuses it before any lookup or socket, whatever the check declared. The engine reads a check that
+/// ends on this refusal as skipped, `missing_need` for the `network` need.
+pub const RULE_NO_NETWORK: &str = "the run was started with --no-network";
+
 /// The rule of an environment name the check did not declare for that command.
 pub const RULE_ENV_UNDECLARED: &str = "environment name not declared by the check";
 
@@ -273,6 +278,12 @@ impl ProbeError {
             | Self::Net(_)
             | Self::Io(_) => ActionOutcome::Failed,
         }
+    }
+
+    /// Whether this is the refusal of a network call under `--no-network` ([`RULE_NO_NETWORK`]).
+    #[must_use]
+    pub fn is_no_network(&self) -> bool {
+        matches!(self, Self::Denied { rule, .. } if *rule == RULE_NO_NETWORK)
     }
 
     fn denied(rule: &'static str, what: impl Into<String>) -> Self {
@@ -672,6 +683,9 @@ pub struct ProbeHub {
     log: ActionLog,
     /// The run's proxy, set once before the checks start. Clones of the hub share it.
     proxy: Arc<OnceLock<ProxyUrl>>,
+    /// Whether sockets are allowed. `false` is `--no-network`: the facade refuses every lookup, TCP,
+    /// UDP and network command. Clones of the hub share it.
+    network: Arc<AtomicBool>,
     /// Set when a check's probe is opened. After that the proxy can no longer be set.
     checks_started: Arc<AtomicBool>,
     /// The trust stores of the TLS calls, built once per run.
@@ -697,12 +711,22 @@ impl ProbeHub {
             backend,
             log: ActionLog::new(redactor, None, Limits::default()),
             proxy: Arc::new(OnceLock::new()),
+            network: Arc::new(AtomicBool::new(true)),
             checks_started: Arc::new(AtomicBool::new(false)),
             #[cfg(any(feature = "runtime", feature = "loopback"))]
             tls: Arc::default(),
             #[cfg(all(feature = "testing", any(feature = "runtime", feature = "loopback")))]
             clock: Arc::default(),
         }
+    }
+
+    /// Allows or forbids the network for the whole run (`--no-network` is `false`). The default is
+    /// allowed. With `false`, every lookup, TCP, TLS, HTTP and UDP call and every command that opens an
+    /// internet or packet socket is refused with [`RULE_NO_NETWORK`] before anything is opened. A
+    /// unix socket call is local and is not affected. The engine sets it from `RunOptions::network`
+    /// before the first check.
+    pub fn set_network(&self, allowed: bool) {
+        self.network.store(allowed, Ordering::SeqCst);
     }
 
     /// Shows paths under `home` as `~/...` in the log. Call it before the first probe is made: it
@@ -1430,6 +1454,13 @@ impl Probe {
         })
     }
 
+    /// Whether the run forbids the network (`--no-network`).
+    pub(crate) fn offline(&self) -> bool {
+        self.hub
+            .as_ref()
+            .is_some_and(|hub| !hub.network.load(Ordering::SeqCst))
+    }
+
     /// Applies the check's declaration to `cmd`, then the command table. Returns the command and the
     /// id of the table form it matched.
     fn admit(&self, cmd: Cmd) -> Result<(Cmd, &'static str), ProbeError> {
@@ -1455,6 +1486,9 @@ impl Probe {
             None => cmd,
         };
         let listed = table::validate_for(self.scope.os, &cmd)?;
+        if listed.entry.network && self.offline() {
+            return Err(ProbeError::denied(RULE_NO_NETWORK, cmd.program()));
+        }
         Ok((cmd, listed.form.id))
     }
 

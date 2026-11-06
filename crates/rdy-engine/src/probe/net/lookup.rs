@@ -30,7 +30,9 @@ use rdy_spec::result::ActionKind;
 use rdy_spec::scalar::Host;
 use serde_json::Map;
 
-use super::{RESOLVE_TIMEOUT, RULE_TCP_ADDRESS, RULE_TCP_UNDECLARED, fail_net, literal};
+use super::{
+    RESOLVE_TIMEOUT, RULE_NO_NETWORK, RULE_TCP_ADDRESS, RULE_TCP_UNDECLARED, fail_net, literal,
+};
 use crate::check::PeerClass;
 use crate::probe::addr::is_unusable_peer;
 use crate::probe::log::Pending;
@@ -100,6 +102,9 @@ impl Probe {
 
     /// The policy before any lookup. Returns the matching spec host and its port.
     fn admit_lookup(&self, host: &str) -> Result<(Host, u16), &'static str> {
+        if self.offline() {
+            return Err(RULE_NO_NETWORK);
+        }
         let declared = self
             .scope
             .info

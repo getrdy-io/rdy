@@ -29,6 +29,24 @@ pub fn registry() -> Result<Registry, RegistryError> {
 mod tests {
     use super::registry;
 
+    /// Checks that reach a network peer and handle the facade's `--no-network` refusal themselves
+    /// instead of naming the `network` need. Add the id here with the reason in the check.
+    const HANDLES_REFUSAL: &[&str] = &[];
+
+    #[test]
+    fn every_check_that_reaches_the_network_gates_on_it() {
+        let registry = registry().expect("the registry builds");
+        for info in registry.infos() {
+            assert!(
+                !info.reaches_network()
+                    || info.gates_on_network()
+                    || HANDLES_REFUSAL.contains(&info.id),
+                "{} reaches the network and declares no network or kube_context need",
+                info.id
+            );
+        }
+    }
+
     #[test]
     fn the_registry_builds_and_holds_the_host_family() {
         let registry = registry().expect("the registry builds");

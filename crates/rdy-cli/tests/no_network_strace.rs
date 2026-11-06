@@ -1,19 +1,33 @@
-//! `rdy run --no-network` makes no `socket(2)` call (M1-059, threat model network rules).
+//! `rdy run --no-network` opens no network socket (M1-059, SEC-01, correction-39).
 //!
-//! The test runs the built `rdy` under `strace -f` and reads the system call log. Any `socket(` line
-//! fails it. Two controls keep an empty log from passing for the wrong reason: the log must hold the
-//! `execve` of `rdy` itself, and a child that opens a UDP socket must show a `socket(` line in the
-//! same kind of log.
+//! The test runs the built `rdy` under `strace -f` and reads the system call log. `--no-network`
+//! is an allow-list: the only sockets from rdy or its children are AF_UNIX (local IPC). Any other
+//! socket domain, and any call that names an AF_INET, AF_INET6 or AF_PACKET address, fails the test.
 //!
-//! The test is skipped, with the reason on stderr, where `strace` is missing or cannot trace (a
-//! container without `ptrace`). Set `RDY_REQUIRE_STRACE=1` in a job that installs `strace` to make a
-//! skip a failure. No job sets it yet (a deferral of M1-059).
+//! Controls keep an empty log from passing for the wrong reason. The first test runs a child that
+//! opens a UDP socket and requires the log to show it. The second requires the `execve` of `rdy`
+//! itself, and that the run really ran: exit 1 or 2 (the example spec has blockers and warnings on
+//! any machine, never a clean 0), a Report on stdout with `run.options.network == false`, and at
+//! least one check that ran.
+//!
+//! The names start with `root_`, so the nextest default and `ci` profiles skip them and the `root`
+//! job (which installs `strace`) runs them (08-testing.md, section 6). Plain `cargo test` runs them
+//! too. Where `strace` is missing or cannot trace, they skip with the reason on stderr, unless
+//! `RDY_REQUIRE_ROOT` (set by the root job) or `RDY_REQUIRE_STRACE` is set, which makes a skip a
+//! failure.
+//!
+//! The real binary registers only the host family, which opens no socket today, so this is a
+//! regression guard. The net and k8s skips are proved at engine level. M1-095 and M1-107 rerun this
+//! test once those families are registered.
 
 #![cfg(target_os = "linux")]
 #![allow(clippy::expect_used)]
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use serde_json::Value;
 
 /// The name of the child test that opens a socket. The control runs it by this exact name.
 const PROBE: &str = "strace_probe_open_socket";
@@ -34,12 +48,18 @@ fn strace_probe_open_socket() {
     drop(std::net::UdpSocket::bind("127.0.0.1:0"));
 }
 
-/// Runs `argv` under `strace -f -e trace=socket,execve` and returns the log text, or `None` (with the
+struct Traced {
+    log: String,
+    code: Option<i32>,
+    stdout: String,
+}
+
+/// Runs `argv` under `strace -f` and returns the log, the exit code and stdout, or `None` (with the
 /// reason on stderr) when `strace` is not usable here.
-fn traced(argv: &[&std::ffi::OsStr], envs: &[(&str, &str)], log: &Path) -> Option<String> {
+fn traced(argv: &[&OsStr], envs: &[(&str, &str)], log: &Path) -> Option<Traced> {
     let mut command = Command::new("strace");
     command
-        .args(["-f", "-qq", "-e", "trace=socket,execve", "-o"])
+        .args(["-f", "-qq", "-e", "trace=%network,execve", "-o"])
         .arg(log)
         .arg("--")
         .args(argv);
@@ -49,9 +69,7 @@ fn traced(argv: &[&std::ffi::OsStr], envs: &[(&str, &str)], log: &Path) -> Optio
     command.env_remove("RDY_PROGRESS").env_remove("RUST_LOG");
     let output = match command.output() {
         Ok(output) => output,
-        Err(error) => {
-            return skip_or_fail(&format!("strace did not start: {error}"));
-        }
+        Err(error) => return skip_or_fail(&format!("strace did not start: {error}")),
     };
     // `strace` exits with the traced program's code. Its own failure to trace leaves no log.
     let text = std::fs::read_to_string(log).unwrap_or_default();
@@ -61,66 +79,132 @@ fn traced(argv: &[&std::ffi::OsStr], envs: &[(&str, &str)], log: &Path) -> Optio
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    Some(text)
+    Some(Traced {
+        log: text,
+        code: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+    })
 }
 
-fn skip_or_fail(reason: &str) -> Option<String> {
+fn skip_or_fail(reason: &str) -> Option<Traced> {
     assert!(
-        std::env::var_os("RDY_REQUIRE_STRACE").is_none(),
-        "RDY_REQUIRE_STRACE is set but strace is not usable: {reason}"
+        std::env::var_os("RDY_REQUIRE_ROOT").is_none()
+            && std::env::var_os("RDY_REQUIRE_STRACE").is_none(),
+        "RDY_REQUIRE_ROOT or RDY_REQUIRE_STRACE is set but strace is not usable: {reason}"
     );
     eprintln!("skipped: {reason} (RDY_REQUIRE_STRACE=1 turns this skip into a failure)");
     None
 }
 
-fn socket_lines(log: &str) -> Vec<&str> {
-    log.lines().filter(|l| l.contains("socket(")).collect()
+/// The domain of a `socket(` line, such as `AF_UNIX`.
+fn domain(line: &str) -> Option<&str> {
+    let rest = line.split("socket(").nth(1)?;
+    Some(rest.split([',', ')']).next()?.trim())
+}
+
+/// Every line that is not local IPC: a socket of any domain but AF_UNIX, or any call that names an
+/// internet or packet address.
+fn network_lines(log: &str) -> Vec<&str> {
+    log.lines()
+        .filter(|line| {
+            let socket = line.contains("socket(") && !line.contains("socketpair(");
+            let bad_domain = socket && !matches!(domain(line), Some("AF_UNIX" | "AF_LOCAL"));
+            let bad_address = line.contains("AF_INET") || line.contains("AF_PACKET");
+            bad_domain || bad_address
+        })
+        .collect()
 }
 
 #[test]
-fn the_control_sees_a_socket_call() {
+fn root_strace_control_sees_a_socket_call() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let log = dir.path().join("control.log");
     let me = std::env::current_exe().expect("the test binary");
     let argv = [
         me.as_os_str(),
-        "--ignored".as_ref(),
-        "--exact".as_ref(),
-        PROBE.as_ref(),
-        "--nocapture".as_ref(),
+        OsStr::new("--ignored"),
+        OsStr::new("--exact"),
+        OsStr::new(PROBE),
+        OsStr::new("--nocapture"),
     ];
-    let Some(text) = traced(&argv, &[(PROBE_VAR, "1")], &log) else {
+    let Some(done) = traced(&argv, &[(PROBE_VAR, "1")], &log) else {
         return;
     };
     assert!(
-        !socket_lines(&text).is_empty(),
-        "the control opened a socket and strace did not show it:\n{text}"
+        !network_lines(&done.log).is_empty(),
+        "the control opened a UDP socket and strace did not show it:\n{}",
+        done.log
     );
 }
 
 #[test]
-fn no_network_makes_no_socket_call() {
+fn root_no_network_run_opens_no_network_socket() {
     let dir = tempfile::tempdir().expect("a temp dir");
+    let control = dir.path().join("control.log");
     let log = dir.path().join("rdy.log");
     let out = dir.path().join("reports");
     std::fs::create_dir(&out).expect("a report folder");
+
+    // The control first: if strace cannot see a socket here, the run below proves nothing.
+    let me = std::env::current_exe().expect("the test binary");
+    let probe = [
+        me.as_os_str(),
+        OsStr::new("--ignored"),
+        OsStr::new("--exact"),
+        OsStr::new(PROBE),
+        OsStr::new("--nocapture"),
+    ];
+    let Some(seen) = traced(&probe, &[(PROBE_VAR, "1")], &control) else {
+        return;
+    };
+    assert!(
+        !network_lines(&seen.log).is_empty(),
+        "the control opened a UDP socket and strace did not show it:\n{}",
+        seen.log
+    );
+
     let rdy = Path::new(env!("CARGO_BIN_EXE_rdy"));
     let spec = acme();
     let argv = [
         rdy.as_os_str(),
-        "run".as_ref(),
+        OsStr::new("run"),
         spec.as_os_str(),
-        "--allow-unsigned".as_ref(),
-        "--no-network".as_ref(),
-        "--json".as_ref(),
-        "--out-dir".as_ref(),
+        OsStr::new("--allow-unsigned"),
+        OsStr::new("--no-network"),
+        OsStr::new("--json"),
+        OsStr::new("--out-dir"),
         out.as_os_str(),
     ];
-    let Some(text) = traced(&argv, &[], &log) else {
+    let Some(done) = traced(&argv, &[], &log) else {
         return;
     };
-    // Control: the log is of this run, so it holds the start of `rdy`.
-    assert!(text.contains("execve("), "no execve in the log:\n{text}");
-    let sockets = socket_lines(&text);
-    assert!(sockets.is_empty(), "rdy opened a socket: {sockets:#?}");
+    assert!(
+        done.log.contains("execve("),
+        "no execve in the log:\n{}",
+        done.log
+    );
+
+    // The run really ran.
+    assert!(
+        matches!(done.code, Some(1 | 2)),
+        "exit {:?}, stdout:\n{}",
+        done.code,
+        done.stdout
+    );
+    let report: Value = serde_json::from_str(&done.stdout)
+        .unwrap_or_else(|e| panic!("stdout is not the Report ({e}):\n{}", done.stdout));
+    assert_eq!(report["run"]["options"]["network"], false, "{report}");
+    let ran = report["checks"].as_array().map_or(0, |checks| {
+        checks
+            .iter()
+            .filter(|c| !matches!(c["status"].as_str(), Some("skipped" | "error") | None))
+            .count()
+    });
+    assert!(ran >= 1, "no check ran:\n{}", done.stdout);
+
+    let lines = network_lines(&done.log);
+    assert!(
+        lines.is_empty(),
+        "rdy opened a socket other than AF_UNIX: {lines:#?}"
+    );
 }

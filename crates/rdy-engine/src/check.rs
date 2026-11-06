@@ -281,6 +281,32 @@ pub struct CheckInfo {
     pub peers: &'static [PeerClass],
 }
 
+impl CheckInfo {
+    /// Whether the check declared a peer class that goes over the network: spec hosts, NTP servers,
+    /// the Kubernetes API or the system resolver. A unix socket and a proxy alone do not count.
+    #[must_use]
+    pub fn reaches_network(&self) -> bool {
+        self.peers.iter().any(|peer| {
+            matches!(
+                peer,
+                PeerClass::SpecHosts
+                    | PeerClass::NtpServers
+                    | PeerClass::KubeApi
+                    | PeerClass::SystemResolver
+            )
+        })
+    }
+
+    /// Whether the check names the `network` or `kube_context` need, hard or soft. A check that
+    /// reaches the network and does not is skipped under `--no-network` only by the facade's refusal
+    /// (`RULE_NO_NETWORK`), so it has to handle that refusal itself.
+    #[must_use]
+    pub fn gates_on_network(&self) -> bool {
+        let is_net = |need: &Need| matches!(need, Need::Network | Need::KubeContext);
+        self.needs.iter().any(is_net) || self.wants.iter().any(|want| is_net(&want.need))
+    }
+}
+
 /// How a finding sits against the requirement, before severity.
 ///
 /// The engine turns `Warn` and `Fail` into `warn` or `block` using the spec's severity.
@@ -463,6 +489,8 @@ impl CheckError {
         match self {
             Self::MissingNeed(_) => Some(SkipKind::MissingNeed),
             Self::Unsupported(_) => Some(SkipKind::NotYetOnOs),
+            // The check reached for a socket under `--no-network`: the same skip as a missing need.
+            Self::Probe(error) if error.is_no_network() => Some(SkipKind::MissingNeed),
             Self::Probe(_) | Self::Failed { .. } => None,
         }
     }

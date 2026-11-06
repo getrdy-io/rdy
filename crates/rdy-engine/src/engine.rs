@@ -155,6 +155,8 @@ impl Engine {
                 wanted.extend(info.wants.iter().map(|want| want.need.clone()));
             }
         }
+        // The facade enforces the option too, so a check that skips the need gate still opens no socket.
+        self.hub.set_network(options.network);
         let found = capabilities(&self.hub.run_probe(), privilege, &wanted, options.network).await;
         let available: Vec<Need> = wanted
             .iter()
