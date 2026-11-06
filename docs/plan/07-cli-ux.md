@@ -29,7 +29,9 @@ Founder decision of 2026-10-28: M1 is extended, not cut. Every M1 ticket stays. 
 6. **clap's own errors exit 64, not 2.** In rdy, 2 means NOT READY.
 7. **No colour-only meaning, no Unicode except the spinner.** Every status is a word. Static text is ASCII.
 8. **No hint, fix or suggestion names `--allow-unsigned` or `run --key`** (01 section 4.7), including the
-   did-you-mean for a mistyped flag. Secrets never go on argv.
+   did-you-mean for a mistyped flag. The rule covers hint, fix and error lines. The banner and the `sig`
+   header line may name the flag that allowed the run (`UNSIGNED (allowed by --allow-unsigned)`), because
+   that is the loud warning of product rule 3. Secrets never go on argv.
 9. **The watchdog never touches stdout.** If a run hangs, `--json` stdout may be empty. The partial Report is
    in the report folder (5.2).
 10. **The HTML report** puts the banner, the verdict and the blocks first, reads in DOM order, prints with
