@@ -59,8 +59,8 @@ git config user.name "Your Name"
 git config user.email "you@example.com"
 ```
 
-`cargo deny` is a separate install: `cargo install cargo-deny --locked`. CI uses the version
-pinned in `.github/workflows/ci.yml`.
+`cargo deny` is a separate install: `cargo install cargo-deny --version 0.20.2 --locked`. CI pins that version
+in `.github/workflows/ci.yml`.
 
 ## Build and test
 
@@ -72,6 +72,7 @@ cargo fmt --all --check
 cargo deny check
 cargo doc --workspace --no-deps
 cargo xtask docs --check
+cargo xtask schema --check
 cargo xtask docs-lint
 ```
 
@@ -89,7 +90,7 @@ the suite the way CI does, install `cargo-nextest` and run `cargo nextest run --
 and `cargo test --doc --workspace`. A test named `root_*` needs uid 0. Nextest skips it unless you pass
 `--profile root`, and CI runs it in the `root` job under `sudo`. On Linux, CI also builds the musl binary and checks it with
 `scripts/check-static.sh target/<triple>/debug/rdy`. To do that yourself, add the target first
-(`rustup target add x86_64-unknown-linux-musl`) and build with `--target`.
+(`rustup target add x86_64-unknown-linux-musl`) and build with `--target`. On Debian or Ubuntu, `apt install musl-tools` and set `CC_x86_64_unknown_linux_musl=musl-gcc`, as CI does.
 
 Property tests use `proptest`. Each test sets its own case count (10,000 for "never panics" and
 limits, 256 for the rest), so do not set `PROPTEST_CASES`. Pull requests use a fixed seed, so a
@@ -150,7 +151,7 @@ use `--out-dir` or `--no-report` to keep your checkout clean.
 - Add a changelog fragment when a user can see the change (ADR 0017, `docs/adr/0017-changelog-fragments.md`).
   Create `changelog.d/<ticket>.md` (for example `changelog.d/M1-003.md`) with one or two bullet lines in
   plain, user-facing words. With no ticket, use a short slug, such as `changelog.d/fix-disk-units.md`. A
-  docs-only or plan-only PR needs none. Do not edit `CHANGELOG.md` itself, so parallel PRs never conflict.
+  PR that only changes `docs/plan/`, `docs/adr/` or the backlog needs none. Do not edit `CHANGELOG.md` itself, so parallel PRs never conflict.
   The release step collects the fragments into `CHANGELOG.md`. The PR template has the box.
 - Sign off your commits (`git commit -s`). This is the
   [Developer Certificate of Origin](https://developercertificate.org/): you wrote
