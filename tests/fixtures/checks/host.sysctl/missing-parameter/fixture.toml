@@ -1,0 +1,12 @@
+schema = 1
+name = "missing-parameter"
+summary = "br_netfilter is not loaded, so net.bridge.* does not exist"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

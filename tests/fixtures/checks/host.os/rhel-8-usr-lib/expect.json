@@ -1,0 +1,63 @@
+{
+  "entry": {
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "rhel",
+        "versions": [
+          "8",
+          "9"
+        ]
+      },
+      {
+        "id": "ubuntu",
+        "versions": [
+          "22.04"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "any",
+      "supported": [
+        {
+          "id": "rhel",
+          "versions": [
+            "8",
+            "9"
+          ]
+        },
+        {
+          "id": "ubuntu",
+          "versions": [
+            "22.04"
+          ]
+        }
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Red Hat Enterprise Linux 8.8 (Ootpa) on x86_64 meets the spec.",
+    "notes": [],
+    "observed": {
+      "arch": "x86_64",
+      "container": [],
+      "fips": false,
+      "init": "systemd",
+      "kernel": "4.18.0-477.el8.x86_64",
+      "os": {
+        "id": "rhel",
+        "id_like": [
+          "fedora"
+        ],
+        "name": "Red Hat Enterprise Linux",
+        "pretty_name": "Red Hat Enterprise Linux 8.8 (Ootpa)",
+        "source": "/usr/lib/os-release",
+        "version_id": "8.8"
+      },
+      "wsl": false
+    },
+    "partial": null
+  }
+}
