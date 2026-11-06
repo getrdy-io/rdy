@@ -8,7 +8,9 @@ use rdy_spec::sig::{Policy, TrustStore};
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use super::*;
-use crate::check::{CheckMeta, OsSupport, Support};
+use crate::check::{
+    Check, CheckContext, CheckInfo, CheckMeta, CheckOutcome, Finding, OsSupport, Support,
+};
 use crate::family::{BuildError, Built, Family};
 use crate::privilege::{Elevation, ProcessIds};
 use crate::redact::{Redactor, TagKey};
@@ -305,6 +307,135 @@ async fn the_run_deadline_ends_a_check_that_has_not_started() {
     let boom = find(&done, "host.cpu/boom");
     assert_eq!(boom.skip_kind, Some(SkipKind::RunDeadline));
     assert_eq!(boom.status, Status::Skipped);
+}
+
+static NET_CHECK: CheckInfo = CheckInfo {
+    family: "net",
+    ..info("net.egress", &[Need::Network])
+};
+static KUBE_CHECK: CheckInfo = CheckInfo {
+    family: "k8s",
+    ..info("k8s.version", &[Need::KubeContext])
+};
+static NET_CHECKS: [&CheckInfo; 1] = [&NET_CHECK];
+static KUBE_CHECKS: [&CheckInfo; 1] = [&KUBE_CHECK];
+
+/// Counts the checks of `NetFamily` that ran.
+static NET_RAN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+struct Counting(&'static CheckInfo);
+
+impl Check for Counting {
+    fn info(&self) -> &'static CheckInfo {
+        self.0
+    }
+
+    fn run<'a>(&'a self, _: &'a CheckContext) -> crate::check::BoxFuture<'a, CheckOutcome> {
+        Box::pin(async {
+            NET_RAN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Finding::pass("ran"))
+        })
+    }
+}
+
+struct CountingFamily(&'static str, &'static [&'static CheckInfo]);
+
+impl Family for CountingFamily {
+    fn name(&self) -> &'static str {
+        self.0
+    }
+
+    fn checks(&self) -> &'static [&'static CheckInfo] {
+        self.1
+    }
+
+    fn build(&self, entry: &CheckSpec, _: CheckParams, _: &Spec) -> Result<Built, BuildError> {
+        let info = self
+            .1
+            .iter()
+            .copied()
+            .find(|info| info.id == entry.id.as_str())
+            .ok_or_else(|| BuildError::Unsupported("not a fake".to_owned()))?;
+        Ok(Built::new(Box::new(Counting(info))))
+    }
+}
+
+const NET_SPEC: &str = "\
+apiVersion: rdy/v1
+kind: Readiness
+metadata:
+  product: acme
+checks:
+  - id: net.egress
+    endpoints: [\"registry.acme.example:443\"]
+  - id: k8s.version
+    min: \"1.28\"
+";
+
+async fn run_net(network: bool) -> Executed {
+    let mut registry = Registry::new();
+    registry
+        .register(CountingFamily("net", &NET_CHECKS))
+        .expect("registers");
+    registry
+        .register(CountingFamily("k8s", &KUBE_CHECKS))
+        .expect("registers");
+    let hub = ProbeHub::new(
+        Arc::new(Replay::new()),
+        Redactor::new(TagKey::fixed([7; 32])),
+    );
+    let engine = Engine::new(registry, hub);
+    let spec = loaded(NET_SPEC);
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let mut options = RunOptions::new();
+    options.network = network;
+    engine
+        .execute(&spec, plan, &privilege(false), &options)
+        .await
+}
+
+#[tokio::test]
+async fn no_network_skips_network_and_kubernetes_checks_as_missing_need_with_no_connect() {
+    let done = run_net(false).await;
+    assert_eq!(done.results.len(), 2);
+    for result in &done.results {
+        assert_eq!(result.status, Status::Skipped, "{}", result.key);
+        assert_eq!(
+            result.skip_kind,
+            Some(SkipKind::MissingNeed),
+            "{}",
+            result.key
+        );
+    }
+    // A skipped check never ran its body (the counter is shared with a test that runs in parallel, so
+    // the status is the proof here), so nothing was asked of the probe.
+    let net = done
+        .capabilities
+        .iter()
+        .find(|c| c.need == WireNeed::Network)
+        .expect("the network need was probed");
+    assert!(!net.available);
+    assert!(
+        done.log
+            .actions
+            .iter()
+            .all(|a| a.kind != rdy_spec::result::ActionKind::Connect),
+        "{:?}",
+        done.log.actions
+    );
+}
+
+#[tokio::test]
+async fn with_network_allowed_the_network_check_runs() {
+    let before = NET_RAN.load(std::sync::atomic::Ordering::SeqCst);
+    let done = run_net(true).await;
+    let net = done
+        .results
+        .iter()
+        .find(|r| r.key == "net.egress")
+        .expect("a result");
+    assert_eq!(net.status, Status::Pass);
+    assert!(NET_RAN.load(std::sync::atomic::Ordering::SeqCst) > before);
 }
 
 #[tokio::test]
