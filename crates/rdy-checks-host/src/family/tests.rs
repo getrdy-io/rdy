@@ -212,7 +212,6 @@ fn these_ids_are_still_stubs_and_the_planner_skips_them() {
         HostFamily::stub_ids(),
         [
             "host.ports",
-            "host.time_sync",
             "host.sysctl",
             "host.container_runtime",
             "host.cgroups",
@@ -384,4 +383,36 @@ fn host_security_agents_builds_the_real_check_from_a_spec_entry() {
     let bare: CheckSpec =
         serde_json::from_value(json!({"id": "host.security_agents"})).expect("an entry");
     assert!(HostFamily.build(&bare, bare.decode_params(), &spec).is_ok());
+}
+
+#[test]
+fn host_time_sync_builds_the_real_check_with_the_ntp_servers_as_its_hosts() {
+    let entry: CheckSpec = serde_json::from_value(json!({
+        "id": "host.time_sync",
+        "ntp_servers": ["192.0.2.10", "time.acme.example:1123"],
+    }))
+    .expect("an entry");
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.time_sync");
+    assert_eq!(
+        built.check.info().peers,
+        [rdy_engine::check::PeerClass::NtpServers]
+    );
+    let hosts: Vec<String> = built
+        .hosts
+        .iter()
+        .map(|t| format!("{}:{}", t.host(), t.port()))
+        .collect();
+    assert_eq!(hosts, ["192.0.2.10:123", "time.acme.example:1123"]);
+    // Without ntp_servers the host set is empty.
+    let plain: CheckSpec =
+        serde_json::from_value(json!({"id": "host.time_sync", "max_skew": "2s"})).expect("entry");
+    let built = HostFamily
+        .build(&plain, plain.decode_params(), &spec)
+        .expect("the entry builds");
+    assert!(built.hosts.is_empty());
+    assert!(!HostFamily::stub_ids().contains(&"host.time_sync"));
 }

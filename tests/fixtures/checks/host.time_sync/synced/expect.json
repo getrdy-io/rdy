@@ -1,0 +1,49 @@
+{
+  "entry": {
+    "id": "host.time_sync",
+    "ntp_servers": [
+      "192.0.2.10"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": false
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Clock is synchronized, 12 ms behind `192.0.2.10`.",
+    "notes": [
+      "`192.0.2.10`: stratum 2, round trip under 1 ms."
+    ],
+    "observed": {
+      "chrony": {
+        "leap": "Normal",
+        "offset_seconds": 0.000012,
+        "reference": "192.0.2.30",
+        "stratum": 3,
+        "synchronized": true
+      },
+      "chronyc": "ok",
+      "ntp_enabled": true,
+      "offset_seconds": 0.012,
+      "offset_source": "sntp",
+      "reference": "192.0.2.10",
+      "servers": [
+        {
+          "delay_seconds": 0.0,
+          "offset_seconds": 0.012,
+          "result": "ok",
+          "server": "192.0.2.10",
+          "stratum": 2
+        }
+      ],
+      "state": "synchronized",
+      "timedatectl": "ok",
+      "timezone": "Etc/UTC"
+    },
+    "partial": null,
+    "status": "pass"
+  }
+}

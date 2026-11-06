@@ -1,0 +1,12 @@
+schema = 1
+name = "not-synced"
+summary = "chronyd runs but has no source, and the spec does not require sync"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.time_sync"]
+
+[caps]
+root = false
+network = true
+kube = false

@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "/usr/bin/chronyc",
+    "-n",
+    "-c",
+    "-t",
+    "3",
+    "tracking"
+  ],
+  "stdout": "",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 60000
+}

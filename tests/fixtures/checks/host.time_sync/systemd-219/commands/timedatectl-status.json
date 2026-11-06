@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "/usr/bin/timedatectl",
+    "status"
+  ],
+  "stdout": "      Local time: Mon 2026-11-02 09:00:00 UTC\n  Universal time: Mon 2026-11-02 09:00:00 UTC\n        RTC time: Mon 2026-11-02 09:00:00\n       Time zone: UTC (UTC, +0000)\n     NTP enabled: yes\nNTP synchronized: yes\n RTC in local TZ: no\n      DST active: n/a\n",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 0
+}

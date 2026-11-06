@@ -1,0 +1,12 @@
+schema = 1
+name = "not-synced-required"
+summary = "Network time is off and the clock is not synchronized, and the spec requires sync"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.time_sync"]
+
+[caps]
+root = false
+network = true
+kube = false

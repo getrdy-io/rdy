@@ -1,0 +1,36 @@
+{
+  "entry": {
+    "id": "host.time_sync"
+  },
+  "result": {
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": false
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Clock is synchronized, under 1 ms away from chrony's reference `192.0.2.30`.",
+    "notes": [],
+    "observed": {
+      "chrony": {
+        "leap": "Normal",
+        "offset_seconds": 0.0003,
+        "reference": "192.0.2.30",
+        "stratum": 3,
+        "synchronized": true
+      },
+      "chronyc": "ok",
+      "ntp_enabled": null,
+      "offset_seconds": 0.0003,
+      "offset_source": "chronyc",
+      "reference": "192.0.2.30",
+      "servers": [],
+      "state": "synchronized",
+      "timedatectl": "not installed",
+      "timezone": null
+    },
+    "partial": null,
+    "status": "pass"
+  }
+}

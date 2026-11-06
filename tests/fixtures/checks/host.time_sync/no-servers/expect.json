@@ -1,0 +1,30 @@
+{
+  "entry": {
+    "id": "host.time_sync"
+  },
+  "result": {
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": false
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Clock is synchronized. Offset not measured: the spec lists no ntp_servers.",
+    "notes": [],
+    "observed": {
+      "chrony": null,
+      "chronyc": "not installed",
+      "ntp_enabled": true,
+      "offset_seconds": null,
+      "offset_source": null,
+      "reference": null,
+      "servers": [],
+      "state": "synchronized",
+      "timedatectl": "ok",
+      "timezone": "Etc/UTC"
+    },
+    "partial": null,
+    "status": "pass"
+  }
+}

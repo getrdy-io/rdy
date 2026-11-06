@@ -1,0 +1,8 @@
+{
+  "entry": {
+    "id": "host.time_sync"
+  },
+  "result": {
+    "timed_out_ms": 5000
+  }
+}
