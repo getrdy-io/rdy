@@ -301,17 +301,11 @@ async fn host_os(run: &TestRun, os: Os) -> HostOs {
     };
     let mut host_os = HostOs::new(family);
     let probe = run.run_probe(os);
-    if let Ok(file) = probe.read(Path::new("/etc/os-release")).await {
-        let text = String::from_utf8_lossy(&file.bytes).into_owned();
-        let field = |key: &str| {
-            text.lines().find_map(|line| {
-                let value = line.strip_prefix(key)?.strip_prefix('=')?;
-                Some(value.trim().trim_matches('"').to_owned())
-            })
-        };
-        host_os.id = field("ID");
-        host_os.version = field("VERSION_ID");
-        host_os.pretty_name = field("PRETTY_NAME");
+    // The same reader `rdy run` uses (M1-180).
+    if let Some(facts) = rdy_checks_host::read_os_facts(&probe).await {
+        host_os.id = Some(facts.id);
+        host_os.version = facts.version;
+        host_os.pretty_name = facts.pretty_name;
     }
     host_os
 }
