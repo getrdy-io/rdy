@@ -18,6 +18,7 @@ use crate::lsm::{self, Lsm};
 use crate::memory::{self, Memory};
 use crate::os::{self, OsCheck};
 use crate::security_agents::{self, SecurityAgents};
+use crate::sysctl::{self, Sysctl};
 
 #[cfg(test)]
 mod tests;
@@ -92,16 +93,6 @@ static TIME_SYNC: CheckInfo = info(
     5,
     &[],
 );
-static SYSCTL: CheckInfo = info(
-    "host.sysctl",
-    "Kernel parameters and limits",
-    CheckMeta {
-        title: "Kernel parameters and limits",
-        remediation: "Set the value now with `sysctl -w vm.max_map_count=262144`, using the parameter and value from the result. Then persist it in a file under `/etc/sysctl.d/` and run `sysctl --system`. `sysctl -p` does not read `sysctl.d`. For file limits, set `LimitNOFILE=` in the service unit.",
-    },
-    2,
-    &[],
-);
 static CONTAINER_RUNTIME: CheckInfo = info(
     "host.container_runtime",
     "Docker, containerd, Podman, CRI-O",
@@ -144,7 +135,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &firewall::INFO,
     &TIME_SYNC,
     &cpu::INFO,
-    &SYSCTL,
+    &sysctl::INFO,
     &CONTAINER_RUNTIME,
     &CGROUPS,
     &os::INFO,
@@ -156,21 +147,21 @@ static CHECKS: [&CheckInfo; 13] = [
 /// `host.cgroups`, `host.os` and `host.kernel`.
 ///
 /// `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
-/// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]) and `host.security_agents` ([`SecurityAgents`]) are
-/// real. The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]), `host.security_agents` ([`SecurityAgents`]) and
+/// `host.sysctl` ([`Sysctl`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
-/// Do not register this family in the CLI while any stub remains. On Linux a stub that runs reports
-/// `error` with `check_failed`, which reads as a fault on the customer's machine. The ticket that
-/// registers it (M1-057, `rdy run` end to end) must first drop the stubs, or have the engine add a
-/// `not_in_build` skip for them. Tests may register it freely.
+/// On Linux a stub that ran would report `error` with `check_failed`, which reads as a fault on the
+/// customer's machine. So the family lists its stubs in [`Family::not_built`] and the planner skips each
+/// as `not_in_build` before it builds anything (M1-057): `rdy run` registers the family, and a stub never
+/// runs outside a test. Ids leave [`HostFamily::stub_ids`] as their real checks arrive.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HostFamily;
 
 impl HostFamily {
     /// The ids of the checks that are still stubs, in catalog order.
     ///
-    /// Each ticket that writes a real check removes its id here. The family may be registered in the
-    /// CLI only when this is empty.
+    /// Each ticket that writes a real check removes its id here. The planner skips these ids as
+    /// `not_in_build` ([`Family::not_built`]).
     #[must_use]
     pub fn stub_ids() -> &'static [&'static str] {
         &STUBS
@@ -178,10 +169,9 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 6] = [
+static STUBS: [&str; 5] = [
     "host.ports",
     "host.time_sync",
-    "host.sysctl",
     "host.container_runtime",
     "host.cgroups",
     "host.kernel",
@@ -194,6 +184,10 @@ impl Family for HostFamily {
 
     fn checks(&self) -> &'static [&'static CheckInfo] {
         &CHECKS
+    }
+
+    fn not_built(&self) -> &'static [&'static str] {
+        &STUBS
     }
 
     fn build(&self, entry: &CheckSpec, params: CheckParams, _: &Spec) -> Result<Built, BuildError> {
@@ -216,6 +210,9 @@ impl Family for HostFamily {
         }
         if let CheckParams::HostMemory(memory) = params {
             return Ok(Built::new(Box::new(Memory::from_params(&memory))));
+        }
+        if let CheckParams::HostSysctl(sysctl) = &params {
+            return Ok(Built::new(Box::new(Sysctl::new(sysctl))));
         }
         if let CheckParams::HostOs(os) = &params {
             return Ok(Built::new(Box::new(OsCheck::from_params(os))));

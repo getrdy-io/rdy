@@ -21,14 +21,22 @@ pub fn echo(text: &str) -> String {
 ///
 /// A file name is typed by the user, so a fix line that repeats it must not turn into a second command
 /// when pasted. The result is also escaped for the terminal.
+///
+/// A word that starts with `-` gets `./` in front, so pasted after a command it is a file and never an
+/// option. The word is for a file name: the one place it is used is the spec in the root fix.
 #[must_use]
 pub fn shell_word(word: &str) -> String {
+    let word = if word.starts_with('-') {
+        format!("./{word}")
+    } else {
+        word.to_owned()
+    };
     let plain = !word.is_empty()
         && word
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "._/-:@+,=".contains(c));
     if plain {
-        word.to_owned()
+        word
     } else {
         escape_untrusted(&format!("'{}'", word.replace('\'', "'\\''")))
     }
@@ -58,6 +66,17 @@ mod tests {
         assert_eq!(shell_word("it's.yaml"), "'it'\\''s.yaml'");
         assert_eq!(shell_word(""), "''");
         assert_eq!(shell_word("a\u{1b}b"), "'a\\x1bb'");
+    }
+
+    #[test]
+    fn shell_word_keeps_a_file_name_from_being_an_option() {
+        assert_eq!(shell_word("-rf.yaml"), "./-rf.yaml");
+        assert_eq!(shell_word("--key"), "./--key");
+        assert_eq!(shell_word("-a b.yaml"), "'./-a b.yaml'");
+        assert_eq!(shell_word("-"), "./-");
+        // Only a leading dash changes.
+        assert_eq!(shell_word("a-b.yaml"), "a-b.yaml");
+        assert_eq!(shell_word("/abs/-x.yaml"), "/abs/-x.yaml");
     }
 
     #[test]

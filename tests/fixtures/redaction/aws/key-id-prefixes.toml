@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["aws_access_key_id"]
+forms = ["abia", "acca"]
+secrets = ["${SYN:abia_id}", "${SYN:acca_id}"]
+note = "Appendix B names four prefixes. AKIA and ASIA have cases above. These are the other two."

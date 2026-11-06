@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["secret_by_key"]
+forms = ["systemd"]
+secrets = ["${SYN:systemd_pw}"]
+note = "A unit file. The setting beside it stays."

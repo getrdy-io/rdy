@@ -16,15 +16,20 @@ use super::Span;
 pub(super) const MAX_ROWS: usize = 1000;
 
 /// The table, and what it leaves out.
+#[derive(Clone)]
 pub(in crate::report::html) struct ActionLog {
     pub rows: Vec<ActionRow>,
     /// Entries that are not in the table.
     pub more: usize,
     /// A sentence about entries the log itself dropped to stay within its limits, or empty.
     pub dropped: Vec<Span>,
+    /// True when the page size cap left out a row of a call rdy refused. The line under the table then
+    /// does not say that every refusal is listed.
+    pub refusals_cut: bool,
 }
 
 /// One row.
+#[derive(Clone)]
 pub(in crate::report::html) struct ActionRow {
     pub number: u64,
     /// The check's key, or `None` for a probe made by the run itself.
@@ -35,6 +40,8 @@ pub(in crate::report::html) struct ActionRow {
     pub detail: Vec<Span>,
     /// How it ended.
     pub result: Vec<Span>,
+    /// rdy's own policy refused the call.
+    pub refused: bool,
 }
 
 impl ActionLog {
@@ -54,7 +61,18 @@ impl ActionLog {
             more: actions.len().saturating_sub(rows.len()),
             rows,
             dropped: dropped_note(report),
+            refusals_cut: false,
         }
+    }
+
+    /// Keeps the first `keep` rows of `all` (the rows this log started with) and counts the rest as
+    /// left out. This is how the page stays under its size cap (07 D.4).
+    pub(in crate::report::html) fn keep_first(&mut self, all: &[ActionRow], keep: usize) {
+        let keep = keep.min(all.len());
+        let started_with = self.rows.len() + self.more;
+        self.rows = all[..keep].to_vec();
+        self.more = started_with - keep;
+        self.refusals_cut = all[keep..].iter().any(|row| row.refused);
     }
 }
 
@@ -85,6 +103,7 @@ fn row(action: &Action) -> ActionRow {
         what: what(&action.kind),
         detail: detail(&action.kind, &action.fields),
         result: result(action),
+        refused: matches!(action.outcome, ActionOutcome::Denied),
     }
 }
 
@@ -94,6 +113,7 @@ fn kind_words(kind: &ActionKind) -> Option<(&'static str, &'static str)> {
         ActionKind::Exec => ("Ran a command", "commands"),
         ActionKind::Read => ("Read a file", "file reads"),
         ActionKind::ReadDir => ("Listed a folder", "folder listings"),
+        ActionKind::ReadLink => ("Read where a link points", "link reads"),
         ActionKind::Stat => ("Looked at a path", "path checks"),
         ActionKind::Env => (
             "Checked an environment variable name",
@@ -107,6 +127,8 @@ fn kind_words(kind: &ActionKind) -> Option<(&'static str, &'static str)> {
         ActionKind::Kube => ("Sent a Kubernetes API request", "Kubernetes API requests"),
         ActionKind::Native => ("Made a system call", "system calls"),
         ActionKind::Coalesced => ("Many calls shown as one row", "folded rows"),
+        // `ActionKind` is non_exhaustive, so a new kind cannot fail the build here. The test
+        // `every_kind_in_the_schema_has_words` fails instead.
         _ => return None,
     })
 }
@@ -186,7 +208,7 @@ fn detail(kind: &ActionKind, fields: &Map<String, Value>) -> Vec<Span> {
                 }
             }
         }
-        ActionKind::Read | ActionKind::ReadDir | ActionKind::Stat => {
+        ActionKind::Read | ActionKind::ReadDir | ActionKind::ReadLink | ActionKind::Stat => {
             words.field(fields, "path");
         }
         ActionKind::Env => {
@@ -200,11 +222,19 @@ fn detail(kind: &ActionKind, fields: &Map<String, Value>) -> Vec<Span> {
             words.led("via", fields, "server");
         }
         ActionKind::Connect => {
+            // Host and port are two values, each in its own span, so a host that ends in a colon
+            // cannot pass for a host and a port.
             match (field(fields, "host"), field(fields, "port")) {
-                (Some(host), Some(port)) => words.value(&format!("{host}:{port}")),
-                (Some(only), None) | (None, Some(only)) => words.value(&only),
-                (None, None) => &mut words,
-            };
+                (Some(host), Some(port)) => {
+                    words.value(&host);
+                    words.0.push(Span::own(":"));
+                    words.0.push(Span::untrusted(&port));
+                }
+                (Some(only), None) | (None, Some(only)) => {
+                    words.value(&only);
+                }
+                (None, None) => {}
+            }
             if field(fields, "proto").as_deref() == Some("udp") {
                 words.own("(UDP)");
             }
@@ -226,6 +256,8 @@ fn detail(kind: &ActionKind, fields: &Map<String, Value>) -> Vec<Span> {
             words.field(fields, "api").field(fields, "path");
         }
         ActionKind::Coalesced => coalesced(&mut words, fields),
+        // A kind this version does not know has no fields it can read. A new known kind is caught by
+        // `every_kind_in_the_schema_has_words`.
         _ => {}
     }
     words.0
@@ -273,7 +305,7 @@ fn result(action: &Action) -> Vec<Span> {
     };
     for (key, before, after) in [
         ("exit", "exit code ", ""),
-        ("status", "status ", ""),
+        ("status", "reply code ", ""),
         ("bytes", "", " bytes"),
         ("entries", "", " entries"),
     ] {
@@ -369,7 +401,59 @@ mod tests {
             .filter(|span| !span.untrusted)
             .map(|span| span.text.as_str())
             .collect();
-        assert_eq!(own, [" ", "(UDP)", " ", "through", " "]);
+        assert_eq!(own, [":", " ", "(UDP)", " ", "through", " "]);
+        // Host and port are two untrusted spans.
+        let values: Vec<&str> = detail
+            .iter()
+            .filter(|span| span.untrusted)
+            .map(|span| span.text.as_str())
+            .collect();
+        assert_eq!(values, ["h.example", "443", "http://p.example:3128"]);
+    }
+
+    /// `ActionKind` is non_exhaustive, so the compiler cannot say when a kind has no words. The schema
+    /// lists every known kind, and each must have a phrase, a plural and a detail that shows its path or name.
+    #[test]
+    fn every_kind_in_the_schema_has_words() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../rdy-spec/schema/result.v1.schema.json");
+        let text = std::fs::read_to_string(path).expect("the result schema is in the repo");
+        let schema: Value = serde_json::from_str(&text).expect("the schema is JSON");
+        let kinds = schema["$defs"]["ActionKind"]["anyOf"][0]["enum"]
+            .as_array()
+            .expect("ActionKind lists its known values");
+        assert!(kinds.len() >= 14, "{} kinds", kinds.len());
+        for kind in kinds {
+            let kind = ActionKind::from(kind.as_str().expect("a kind is text"));
+            assert!(
+                !kind.is_unknown(),
+                "{kind} is in the schema but not in the enum"
+            );
+            assert!(kind_words(&kind).is_some(), "{kind} has no words");
+        }
+    }
+
+    #[test]
+    fn a_link_read_shows_its_path_in_plain_words() {
+        let entry = action(
+            ActionKind::ReadLink,
+            ActionOutcome::Ok,
+            &json!({"path": "/etc/localtime"}),
+        );
+        assert_eq!(
+            row_text(&entry),
+            (
+                "Read where a link points".to_owned(),
+                "/etc/localtime".to_owned(),
+                "Done".to_owned()
+            )
+        );
+        assert_eq!(row(&entry).detail.iter().filter(|s| s.untrusted).count(), 1);
+        // A count of dropped link reads is in our words too.
+        assert_eq!(
+            kind_words(&ActionKind::ReadLink),
+            Some(("Read where a link points", "link reads"))
+        );
     }
 
     #[test]

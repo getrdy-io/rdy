@@ -23,7 +23,12 @@
 <h1><span class="visually-hidden">Verdict: </span><span class="{{ verdict_class }}">{{ verdict_word }}</span></h1>
 <p>For <bdi>{{ product }}</bdi>{% if let Some(version) = version %} <bdi>{{ version }}</bdi>{% endif %}{% if let Some(serial) = serial %}, revision {{ serial }}{% endif %}, on <bdi>{{ hostname }}</bdi></p>
 <p class="summary">{{ summary_line }}</p>
+{%- if no_blocks %}
+<p class="no-blocks">No blocks.</p>
+{%- endif %}
 <p>Run <bdi>{{ run_when }}</bdi> with rdy <bdi>{{ rdy_version }}</bdi>{% if let Some(user) = user %} by <bdi>{{ user }}</bdi>{% endif %} ({{ run_as }})</p>
+<p class="legend">{{ legend }}</p>
+<p class="rule">{{ rule }}</p>
 <p class="privacy">This file lists hostnames and addresses from this machine. Read it before you send it.</p>
 </header>
 <nav aria-label="Sections">
@@ -120,7 +125,7 @@
 </tbody>
 </table>
 {%- if actions.more > 0 %}
-<p>{{ actions.more }} more {% if actions.more == 1 %}entry is{% else %}entries are{% endif %} in the embedded JSON. Every refused call in the log is listed above.</p>
+<p>{{ actions.more }} more {% if actions.more == 1 %}entry is{% else %}entries are{% endif %} in the embedded JSON.{% if !actions.refusals_cut %} Every refused call in the log is listed above.{% endif %}</p>
 {%- endif %}
 {%- endif %}
 </section>
@@ -128,5 +133,6 @@
 <footer>
 <p>rdy <bdi>{{ rdy_version }}</bdi></p>
 </footer>
+<script type="application/json" id="rdy-result" data-sha256="{{ json_sha256 }}">{{ json }}</script>
 </body>
 </html>

@@ -5,9 +5,8 @@
 //! `--out-dir`. Otherwise it makes `rdy-report-<product>-<time>/` under `--out-dir` (default `.` on
 //! Unix, `%USERPROFILE%\rdy-reports` on Windows) and returns the open handle, or the exit-70 error of 07 section 9 row 6.
 //!
-//! The M1-057 ticket wires this into `run`: call it with the parsed [`RunArgs`], the verified
-//! `metadata.product` and `SystemTime::now()`, hold the handle for the whole run, and write the report
-//! files through it.
+//! `rdy run` (M1-057) calls it with the parsed [`RunArgs`], the verified `metadata.product` and the run
+//! clock, holds the handle for the whole run, and writes the report files through it.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -93,6 +92,11 @@ pub fn report_error(step: ReportStep, shown: &Path, err: ReportError) -> CliErro
         ReportError::NoDefaultFolder => (shown.to_path_buf(), ReportReason::NoDefaultFolder),
         ReportError::NameTaken { parent } => (parent, ReportReason::NameTaken),
         ReportError::FileExists { path } => (path, ReportReason::FileExists),
+        // The writer's own refusals (a report over the cap, a broken stream) say so in its words.
+        // Any other writer error is a bug in rdy.
+        ReportError::Json(json) => {
+            return CliError::report_writer(&json).unwrap_or_else(CliError::bug);
+        }
         _ => return CliError::bug(),
     };
     let path = if path.as_os_str().is_empty() {

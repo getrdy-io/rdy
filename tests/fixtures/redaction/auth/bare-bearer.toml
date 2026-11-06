@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["auth_header"]
+forms = ["bare_bearer"]
+secrets = ["canaryBareTok0042"]
+note = "No header name in front: a log line that quotes the scheme and the token."

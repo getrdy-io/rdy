@@ -1,0 +1,9 @@
+{
+  "entry": {
+    "id": "host.memory",
+    "min": "8Gi"
+  },
+  "result": {
+    "error": "/proc/meminfo does not exist on this machine"
+  }
+}

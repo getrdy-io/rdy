@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-invalid-warn"
+summary = "A warn label that is not a level on a namespace that enforces baseline"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

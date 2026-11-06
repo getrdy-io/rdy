@@ -1,0 +1,6 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["api_key_header"]
+forms = ["header"]
+secrets = ["${SYN:api_key}"]

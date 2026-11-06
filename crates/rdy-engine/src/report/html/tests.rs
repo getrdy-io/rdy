@@ -91,3 +91,70 @@ fn a_need_name_is_the_only_untrusted_piece_of_its_label() {
     assert_eq!(plain(&spans), "the command ss\u{202e}");
     assert!(need_spans(&Need::Root, None).iter().all(|s| !s.untrusted));
 }
+
+/// The report the size cap tests cut: the 01 section 7.2 sample with `count` copies of its first action.
+fn report_with_actions(count: u64, denied: &[u64]) -> crate::redact::RedactedReport {
+    use crate::redact::{Redactor, TagKey};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/reports/not-ready-7.2.json");
+    let text = std::fs::read_to_string(path).expect("the sample report is in the repo");
+    let mut doc: serde_json::Value = serde_json::from_str(&text).expect("the sample is JSON");
+    let template = doc["actions"][0].clone();
+    let actions = doc["actions"].as_array_mut().expect("actions is a list");
+    actions.clear();
+    for seq in 1..=count {
+        let mut entry = template.clone();
+        entry["seq"] = serde_json::json!(seq);
+        if denied.contains(&seq) {
+            entry["outcome"] = serde_json::json!("denied");
+            entry["rule"] = serde_json::json!("read_denylist");
+        }
+        actions.push(entry);
+    }
+    let report = serde_json::from_value(doc).expect("the sample is a report");
+    Redactor::new(TagKey::fixed([5; 32]))
+        .redact_report(report)
+        .expect("the sample redacts")
+}
+
+fn rows_in(page: &str) -> usize {
+    let start = page.find("id=\"actions\"").expect("the action section");
+    page[start..].matches("<tr><th scope=\"row\">").count()
+}
+
+/// Past the page cap the table is cut to the rows that fit, the line under it counts the rest, and the
+/// embedded JSON is whole (07 D.4).
+#[test]
+fn a_page_over_its_cap_loses_table_rows_and_nothing_else() {
+    let report = report_with_actions(400, &[]);
+    let mut view = super::view::View::new(&report).expect("the report is fine");
+    let whole = super::fit_page(&mut view, usize::MAX).expect("renders");
+    assert_eq!(rows_in(&whole), 400);
+    let max = whole.len() - 40_000;
+    let mut view = super::view::View::new(&report).expect("the report is fine");
+    let page = super::fit_page(&mut view, max).expect("renders");
+    assert!(page.len() <= max, "{} bytes is over {max}", page.len());
+    let shown = rows_in(&page);
+    assert!(shown > 0 && shown < 400, "{shown} rows");
+    // One more row would not have fit.
+    assert!(page.len() + (whole.len() - page.len()) / (400 - shown) > max);
+    assert!(page.contains(&format!(
+        "<p>{} more entries are in the embedded JSON. Every refused call in the log is listed above.</p>",
+        400 - shown
+    )));
+    // The JSON block is the same bytes.
+    let json = |text: &str| text[text.find("id=\"rdy-result\"").expect("block")..].to_owned();
+    assert_eq!(json(&page), json(&whole));
+}
+
+/// When the cap cuts a refusal, the page does not claim that every refusal is listed.
+#[test]
+fn a_refusal_cut_by_the_page_cap_is_not_called_listed() {
+    let report = report_with_actions(300, &[300]);
+    let mut view = super::view::View::new(&report).expect("the report is fine");
+    let whole = super::fit_page(&mut view, usize::MAX).expect("renders");
+    let mut view = super::view::View::new(&report).expect("the report is fine");
+    let page = super::fit_page(&mut view, whole.len() - 20_000).expect("renders");
+    assert!(!page.contains("Every refused call"));
+    assert!(page.contains("are in the embedded JSON.</p>"));
+}
