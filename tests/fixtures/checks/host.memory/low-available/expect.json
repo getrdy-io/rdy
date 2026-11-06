@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "id": "host.memory",
+    "min": "8Gi"
+  },
+  "result": {
+    "expected": {
+      "band_bytes": 429496729,
+      "min_available_bytes": 4294967296,
+      "min_bytes": 8589934592,
+      "swap": "any"
+    },
+    "fix": "Only 2.3 GiB of RAM is available. Stop other workloads on this machine or pick a larger node class, then run rdy again.",
+    "level": "warn",
+    "message": "15.6 GiB found, 8 GiB needed; only 2.3 GiB available, 4 GiB wanted, the box is busy",
+    "notes": [],
+    "observed": {
+      "available_bytes": 2469605376,
+      "available_effective_bytes": 2469605376,
+      "available_estimated": false,
+      "cgroup_hierarchy": null,
+      "cgroup_limit_at": null,
+      "cgroup_limit_bytes": null,
+      "cgroup_swap_limit_bytes": null,
+      "effective_bytes": 16786862080,
+      "swap_total_bytes": 0,
+      "swap_used_bytes": 0,
+      "total_bytes": 16786862080
+    },
+    "partial": null
+  }
+}

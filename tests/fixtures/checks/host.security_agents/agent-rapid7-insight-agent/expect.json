@@ -1,0 +1,35 @@
+{
+  "entry": {
+    "id": "host.security_agents"
+  },
+  "result": {
+    "expected": {
+      "allow": [],
+      "forbid": []
+    },
+    "fix": "Software in this category often inspects file opens and process launches. If the install is slow or fails, ask the security team to review exclusions for the product's paths, then run rdy again. Detected: Rapid7 Insight Agent (EDR).",
+    "level": "warn",
+    "message": "Detected Rapid7 Insight Agent (EDR).",
+    "notes": [
+      "A match means a process with this name is running. It does not show that the product is installed."
+    ],
+    "observed": {
+      "detected": [
+        {
+          "category": "edr",
+          "count": 1,
+          "display_name": "Rapid7 Insight Agent",
+          "id": "rapid7-insight-agent",
+          "processes": [
+            "ir_agent"
+          ]
+        }
+      ],
+      "limited_view": false,
+      "list_cut": false,
+      "processes_read": 4,
+      "processes_unreadable": 0
+    },
+    "partial": null
+  }
+}

@@ -197,7 +197,7 @@ command. It fails on:
   case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout`
   case where it declares a command, a peer or a `statfs` prefix. A case counts through its `expect.json`
   (`result.level`, `result.partial`, `result.timed_out_ms`). A `PENDING` list in the test names what is still
-  owed and by which ticket, and a row that is no longer true is a failure; a missing
+  owed and by which ticket (empty since M1-174), and a row that is no longer true is a failure; a missing
   `checks/_policy/symlink-to-shadow` stays in the lint file.
 
 Two deviations, decided in the M1-050 review. The host rule uses a short list of country codes and common
@@ -247,7 +247,9 @@ Windows marks host checks `not_yet_on_os`, a pure unit test with no I/O.
 ## 3. Golden tests
 
 **What is golden.** Per environment: `report.json` (the `--json` stdout), `report.html` and `terminal.txt`
-(stderr with colour off and width 100), captured from the in-process run. Per check case: `expect.json`.
+(stderr with colour off and width 100), captured from the in-process run. Per check case: `expect.json`, an
+`entry` (the spec entry the check runs with) and a `result` (the finding, error or timeout), compared by
+`rdy_engine::testing::assert_cases` through the scheduler on a paused clock.
 Redaction expectations are goldens too. HTML goldens exist for `all-pass`, `warnings-only` and `all-block`
 only. Goldens sit next to what they describe, so a reviewer sees input and output in one diff.
 
