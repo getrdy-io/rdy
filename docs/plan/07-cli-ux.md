@@ -78,7 +78,7 @@ On Windows `rdy trust add` exits 64 and is not supported in M1 (ADR 0027).
 | `--out-dir <dir>` | M1 | Parent folder for the report folder. Default `.` on Unix, `%USERPROFILE%\rdy-reports` on Windows (made if missing, and refused if it is a link or junction or on a network share). Windows keeps the ACL the folder inherits, and `--out-dir C:\` lets other local users read the report, so keep the default |
 | `--no-report` | M1 | Write no files |
 | `--kubeconfig <file>`, `--kube-context <name>` | M1 | Kubernetes access. Help warns that a kubeconfig from someone else can run programs |
-| `--no-network` | M1 | Open no network sockets: rdy and its children open no `AF_INET`, `AF_INET6` or `AF_PACKET` socket. `AF_UNIX` local IPC of the commands 05 INV-11 names (`timedatectl` and `firewall-cmd` to the system bus) is not network; `chronyc` is not run. Network and Kubernetes checks are skipped as `missing_need`. With a kube flag, the `cluster` header line says the flag is ignored; it is not a usage error |
+| `--no-network` | M1 | Open no network sockets: rdy and its children open only `AF_UNIX` sockets. That local IPC still runs: the commands 05 INV-11 names (`timedatectl` and `firewall-cmd` to the system bus) and the sockets a check declares (INV-28, such as the Docker or containerd socket). `chronyc` is not run. Network and Kubernetes checks are skipped as `missing_need`. With a kube flag, the `cluster` header line says the flag is ignored; it is not a usage error |
 | `--jobs <n>` | M1 | Checks at once. Default 8. Above 32 is capped with a note. 0 is a usage error |
 | `--timeout <time>` | M2 | See below |
 | `--dry-run` | M2 | Print what each check would read, contact and need. Runs nothing. One ticket with SEC-40 |
