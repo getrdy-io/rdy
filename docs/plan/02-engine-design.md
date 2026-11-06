@@ -1294,7 +1294,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only |
 | core `persistentvolumeclaims` | LIST in the target namespace | `k8s.storageclass`: Pending claims older than 5 minutes |
 | core `resourcequotas` | LIST in the target namespace | `k8s.namespace`: `hard`, `used` and scopes |
-| core `limitranges` | LIST in the target namespace | `k8s.namespace`: memory `max`, `min` and `default` of `Container` and `Pod` items |
+| core `limitranges` | LIST in the target namespace | `k8s.namespace`: memory `max`, `default` and `defaultRequest` of `Container` and `Pod` items |
 | core `events` | LIST in the target namespace, `fieldSelector` must include `involvedObject.kind=PersistentVolumeClaim` | `k8s.storageclass`: `ProvisioningFailed`, `WaitForFirstConsumer` reasons |
 | `storage.k8s.io` `storageclasses` | LIST, GET by name | `k8s.storageclass`: classes, default marker, provisioner |
 | `storage.k8s.io` `csinodes` | LIST | `k8s.storageclass`: `spec.drivers[].name` |

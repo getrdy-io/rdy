@@ -85,12 +85,12 @@ drift and on a file the script did not write).
 policy engine cases `kyverno`, `kyverno-legacy-only`, `kyverno-no-legacy`, `kyverno-v1-forbidden`, `gatekeeper`, `both-engines`, `engine-forbidden`,
 `many-kinds`, `hostile-kinds`), `generated` by `scripts/gen-k8s-admission-fixtures.py` (`--check` fails on
 drift and on a file the script did not write).
-`checks/k8s.namespace/` holds 28 clusters (`active-plain`, `terminating`, `namespace-forbidden`,
+`checks/k8s.namespace/` holds 31 clusters (`active-plain`, `terminating`, `namespace-forbidden`,
 `namespace-named-secrets`, `no-namespace`, the missing-namespace cases `missing-creatable`, `missing-denied`,
-`missing-openshift`, `missing-openshift-denied`, `missing-apis-forbidden`, `missing-review-refused`, the quota
-cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`, `quota-scoped-and-short`,
+`missing-openshift`, `missing-openshift-denied`, `missing-openshift-namespaces`, `missing-apis-forbidden`, `missing-review-refused`, the quota
+cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`, `quota-scoped-and-short`, `quota-scoped-and-roomy`,
 `quota-unused`, `quota-forbidden`, `quota-cut`, `quota-hostile`, and the limit range cases `limit-low`,
-`limit-pod-low`, `limit-default-low`, `limit-ok`, `limit-forbidden`, `limit-cut`, `limit-hostile`), `generated`
+`limit-pod-low`, `limit-default-low`, `limit-default-request`, `limit-ok`, `limit-forbidden`, `limit-cut`, `limit-hostile`), `generated`
 by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a file the script did not write).
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
 `terminating` case without a quota list proves the check does not list one. `envs/host-min/` is the smallest environment (M1-075): a

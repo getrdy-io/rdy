@@ -386,8 +386,8 @@ fn limit(kind: &str, max: Option<&str>, default: Option<&str>) -> Limits {
             kind: kind.to_owned(),
             memory: MemoryLimits {
                 max: max.map(str::to_owned),
-                min: None,
                 default: default.map(str::to_owned),
+                default_request: None,
             },
         }],
     }

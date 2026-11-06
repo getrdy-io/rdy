@@ -82,9 +82,10 @@ pub(super) fn quota_of(quota: ResourceQuota) -> Quota {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(super) struct MemoryLimits {
     pub(super) max: Option<String>,
-    pub(super) min: Option<String>,
     /// The limit given to a container that sets none.
     pub(super) default: Option<String>,
+    /// The request given to a container that sets none. When unset, the API server uses the default limit.
+    pub(super) default_request: Option<String>,
 }
 
 /// One item of a limit range: its type and its memory amounts.
@@ -122,8 +123,8 @@ pub(super) fn limits_of(range: LimitRange) -> Limits {
                 kind: item.type_,
                 memory: MemoryLimits {
                     max: memory(item.max),
-                    min: memory(item.min),
                     default: memory(item.default),
+                    default_request: memory(item.default_request),
                 },
             }
         })

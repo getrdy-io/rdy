@@ -11,9 +11,10 @@
 //!   the `Container` and `Pod` items;
 //! - only when the namespace does not exist: `GET /apis` (does the cluster serve `project.openshift.io`?)
 //!   and one `SelfSubjectAccessReview`, `create namespaces`, or on OpenShift `create projectrequests`
-//!   in `project.openshift.io`.
+//!   in `project.openshift.io`. When that is denied on OpenShift, a second review asks `create namespaces`,
+//!   because hardened clusters drop the self-provisioner role and grant plain `create namespaces`.
 //!
-//! That is five requests at most. Nothing is created.
+//! That is six requests at most, two of them reviews (POST). Nothing is created.
 //!
 //! How the rules of 03 apply:
 //!
@@ -31,11 +32,19 @@
 //!   say whether the product sets limits, so this is not the block that 03 names, and it would turn most
 //!   clusters (a default limit of 512Mi is common) into a warning.
 //!
+//! A namespace-scoped installer (a role binding in the namespace and nothing cluster wide) gets 403 on
+//! `get namespaces` for a namespace that does not exist, as it does for one that does. The check cannot tell
+//! the two apart, so it does not ask the create review: the result is partial with the grant
+//! `get namespaces`. On OpenShift a non-admin usually cannot `get namespaces` at all (it reads projects), so
+//! a missing namespace is not detected there, and the result stays partial. M2-117 adds the fallback.
+//!
 //! Anything the identity may not read is not evaluated, never a block: a namespace it may not get (grant
 //! `get namespaces`), quotas or limit ranges it may not list (grants `list resourcequotas` and
 //! `list limitranges`). A grant missing for a list the spec has no need for is only a note.
 //!
-//! Not read: OpenShift `ClusterResourceQuota`, quotas of other namespaces, and priority-class quotas.
+//! Not read: OpenShift `ClusterResourceQuota`, quotas of other namespaces, storage-class-scoped quota keys
+//! (`<class>.storageclass.storage.k8s.io/...`), `maxLimitRequestRatio` of limit ranges, and priority-class
+//! quotas.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,7 +60,7 @@ use rdy_engine::check::{
 };
 use rdy_spec::check::{K8sName, K8sNamespace};
 
-use crate::client::guard::{RULE_PATH_SHAPE, RULE_SECRETS};
+use crate::client::guard::RULE_SECRETS;
 use crate::client::{KubeError, ReadOnlyClient};
 use crate::cluster::Cluster;
 
@@ -168,7 +177,7 @@ pub(crate) enum Read<T> {
     /// Any other status of the server.
     Unreadable(u16),
     /// The guard refused the path. The only path it refuses that rdy builds is a list in a namespace that
-    /// is called `secrets`.
+    /// is called `secrets` (a spec name is a Kubernetes name, so it never breaks the path shape rule).
     Refused,
     /// The check ran out of time before it asked.
     OutOfTime,
@@ -205,9 +214,7 @@ fn read<T, U>(
             KubeError::Forbidden { .. } => Ok(Read::Forbidden),
             KubeError::Api { code: 404, .. } => Ok(Read::Missing),
             KubeError::Api { code, .. } => Ok(Read::Unreadable(code)),
-            KubeError::Refused { rule, .. } if rule == RULE_SECRETS || rule == RULE_PATH_SHAPE => {
-                Ok(Read::Refused)
-            }
+            KubeError::Refused { rule, .. } if rule == RULE_SECRETS => Ok(Read::Refused),
             other => Err(CheckError::Failed {
                 message: other.to_string(),
                 hint: other.hint(),
@@ -356,7 +363,9 @@ fn has_more(meta: &k8s_openapi::apimachinery::pkg::apis::meta::v1::ListMeta) -> 
         .is_some_and(|token| !token.is_empty())
 }
 
-/// Can the identity create the namespace? On OpenShift the question is `create projectrequests`.
+/// Can the identity create the namespace? On OpenShift the first question is `create projectrequests`. A
+/// hardened cluster drops that right (the self-provisioner role) and grants plain `create namespaces`, so a
+/// denied project request asks the second question, and blocks only when both are denied.
 async fn read_create(
     mapper: Mapper<'_>,
     client: &ReadOnlyClient,
@@ -369,6 +378,7 @@ async fn read_create(
             list.groups.iter().any(|group| group.name == PROJECT_GROUP)
         })?
     };
+    let openshift = matches!(projects, Read::Ok(true));
     let via = match projects {
         Read::Ok(true) => Via::ProjectRequests,
         Read::Ok(false) => Via::Namespaces { sure: true },
@@ -378,18 +388,62 @@ async fn read_create(
         return Ok(Create {
             via,
             answer: Answer::Unknown(Read::<()>::OutOfTime.why()),
+            openshift,
         });
     }
-    let (group, resource) = match via {
-        Via::ProjectRequests => (Some(PROJECT_GROUP.to_owned()), "projectrequests"),
-        Via::Namespaces { .. } => (None, "namespaces"),
+    let first = match via {
+        Via::ProjectRequests => {
+            review(mapper, client, Some(PROJECT_GROUP), "projectrequests").await?
+        }
+        Via::Namespaces { .. } => review(mapper, client, None, "namespaces").await?,
     };
+    if via != Via::ProjectRequests || !matches!(first, Answer::NotAllowed(_)) {
+        return Ok(Create {
+            via,
+            answer: first,
+            openshift,
+        });
+    }
+    // Project requests are denied. Plain `create namespaces` may still be granted.
+    if out_of_time(ctx) {
+        return Ok(Create {
+            via,
+            answer: Answer::Unknown(Read::<()>::OutOfTime.why()),
+            openshift,
+        });
+    }
+    Ok(match review(mapper, client, None, "namespaces").await? {
+        Answer::Allowed => Create {
+            via: Via::Namespaces { sure: true },
+            answer: Answer::Allowed,
+            openshift,
+        },
+        Answer::NotAllowed(_) => Create {
+            via,
+            answer: first,
+            openshift,
+        },
+        unknown @ Answer::Unknown(_) => Create {
+            via,
+            answer: unknown,
+            openshift,
+        },
+    })
+}
+
+/// One `SelfSubjectAccessReview` for `create` on a resource.
+async fn review(
+    mapper: Mapper<'_>,
+    client: &ReadOnlyClient,
+    group: Option<&str>,
+    resource: &str,
+) -> Result<Answer, CheckError> {
     let review = SelfSubjectAccessReview {
         metadata: ObjectMeta::default(),
         spec: SelfSubjectAccessReviewSpec {
             resource_attributes: Some(ResourceAttributes {
                 verb: Some("create".to_owned()),
-                group,
+                group: group.map(str::to_owned),
                 resource: Some(resource.to_owned()),
                 ..ResourceAttributes::default()
             }),
@@ -397,25 +451,22 @@ async fn read_create(
         },
         status: None,
     };
-    let answer = match client
+    match client
         .all::<SelfSubjectAccessReview>()
         .create(&PostParams::default(), &review)
         .await
     {
-        Ok(done) => match done.status {
+        Ok(done) => Ok(match done.status {
             Some(status) => judge::answer_of(&status),
             None => Answer::Unknown("the server sent no status".to_owned()),
-        },
+        }),
         Err(error) => match mapper(&error) {
-            KubeError::Forbidden { .. } => Answer::Unknown(Read::<()>::Forbidden.why()),
-            KubeError::Api { code, .. } => Answer::Unknown(Read::<()>::Unreadable(code).why()),
-            other => {
-                return Err(CheckError::Failed {
-                    message: other.to_string(),
-                    hint: other.hint(),
-                });
-            }
+            KubeError::Forbidden { .. } => Ok(Answer::Unknown(Read::<()>::Forbidden.why())),
+            KubeError::Api { code, .. } => Ok(Answer::Unknown(Read::<()>::Unreadable(code).why())),
+            other => Err(CheckError::Failed {
+                message: other.to_string(),
+                hint: other.hint(),
+            }),
         },
-    };
-    Ok(Create { via, answer })
+    }
 }

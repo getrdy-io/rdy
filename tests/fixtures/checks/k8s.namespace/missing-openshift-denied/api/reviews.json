@@ -12,6 +12,18 @@
         "allowed": false,
         "reason": "RBAC: no rule allows \"create\" on \"projectrequests.project.openshift.io\" for User \"acme-installer\""
       }
+    },
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "namespaces"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": "RBAC: no rule allows \"create\" on \"namespaces\" for User \"acme-installer\""
+      }
     }
   ]
 }

@@ -92,11 +92,59 @@ pub(super) fn limit_max(name: &str, namespace: &str, kind: &str, max: &str, need
 }
 
 /// The note for a limit range whose default limit is below what the product needs.
-pub(super) fn limit_default(name: &str, namespace: &str, default: &str, need: &str) -> String {
+///
+/// A container with no resources gets the default limit, and the default request, or the default limit
+/// again when `defaultRequest` is unset. So a big product is killed at runtime, not refused at admission.
+pub(super) fn limit_default(
+    name: &str,
+    namespace: &str,
+    default: &str,
+    default_request: Option<&str>,
+    need: &str,
+) -> String {
     let name = object(name);
+    let given = match default_request {
+        Some(request) => format!("a request of {request} and a limit of {default}"),
+        None => format!("a request and a limit of {default} both (its defaultRequest is unset)"),
+    };
     format!(
-        "LimitRange `{name}` in `{namespace}` gives a container with no memory limit a default limit of {default}. A container that sets a memory request of {need} and no limit gets that default as its limit, and the pod is rejected. Set a memory limit on the product's containers (ask the vendor for chart values), or ask an admin to raise the default: `kubectl edit limitrange {name} -n {namespace}`."
+        "LimitRange `{name}` in `{namespace}` gives a container that sets no memory resources {given}. A product container that needs {need} and sets nothing is OOM-killed at runtime, not refused at admission. One that sets a request of {need} and no limit gets {default} as its limit, and the pod is rejected. Set memory requests and limits on the product's containers (ask the vendor for chart values), or ask an admin to raise the default: `kubectl edit limitrange {name} -n {namespace}`."
     )
+}
+
+/// The line for a quota that could not be judged: look at it by hand.
+pub(super) fn check_quota(name: &str, namespace: &str) -> String {
+    let name = object(name);
+    format!("Check quota `{name}` by hand: `kubectl describe resourcequota {name} -n {namespace}`.")
+}
+
+/// The line for limit ranges with an amount that could not be read.
+pub(super) fn check_limit_ranges(namespace: &str) -> String {
+    format!(
+        "Check the limit ranges by hand: `kubectl describe limitrange -n {namespace}`, and look at the memory max and default."
+    )
+}
+
+/// The line for a create right that could not be checked.
+pub(super) fn check_create(namespace: &str, via: Via) -> String {
+    match via {
+        Via::ProjectRequests => format!(
+            "Check it by hand: `oc auth can-i create projectrequests`, and `kubectl auth can-i create namespaces`. Namespace `{namespace}` does not exist yet."
+        ),
+        Via::Namespaces { .. } => format!(
+            "Check it by hand: `kubectl auth can-i create namespaces`. Namespace `{namespace}` does not exist yet."
+        ),
+    }
+}
+
+/// The line for a quota amount in the spec that is not a quantity.
+pub(super) fn spec_amount() -> &'static str {
+    "Write each `quota_needs` amount as a Kubernetes quantity, such as `16`, `500m` or `64Gi`."
+}
+
+/// The line for a list that has a second page.
+pub(super) fn cut_list(namespace: &str, kind: &str) -> String {
+    format!("Read the rest by hand: `kubectl get {kind} -n {namespace}`.")
 }
 
 /// The fix for permissions the identity lacked: what to ask for, and the commands that check each.

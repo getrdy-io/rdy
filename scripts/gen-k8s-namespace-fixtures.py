@@ -357,7 +357,33 @@ reviews(
             "project.openshift.io",
             allowed=False,
             reason='RBAC: no rule allows "create" on "projectrequests.project.openshift.io" for User "acme-installer"',
-        )
+        ),
+        resource_row(
+            "create",
+            "namespaces",
+            allowed=False,
+            reason='RBAC: no rule allows "create" on "namespaces" for User "acme-installer"',
+        ),
+    ],
+)
+
+case(
+    "missing-openshift-namespaces",
+    "OpenShift: a missing namespace, project requests are denied and plain create namespaces is allowed",
+)
+namespace("missing-openshift-namespaces", code=404)
+apis("missing-openshift-namespaces", OPENSHIFT)
+reviews(
+    "missing-openshift-namespaces",
+    [
+        resource_row(
+            "create",
+            "projectrequests",
+            "project.openshift.io",
+            allowed=False,
+            reason='RBAC: no rule allows "create" on "projectrequests.project.openshift.io" for User "acme-installer"',
+        ),
+        resource_row("create", "namespaces"),
     ],
 )
 
@@ -430,6 +456,17 @@ quotas(
 )
 limits("quota-scoped-and-short")
 
+case("quota-scoped-and-roomy", "A scoped quota and an unscoped one with room")
+namespace("quota-scoped-and-roomy")
+quotas(
+    "quota-scoped-and-roomy",
+    [
+        quota("high-priority", {"requests.cpu": "32"}, {"requests.cpu": "1"}, selector=True),
+        quota("compute", ROOMY_HARD, SHORT_USED),
+    ],
+)
+limits("quota-scoped-and-roomy")
+
 case("quota-unused", "A quota the controller has not filled in yet: no status")
 namespace("quota-unused")
 quotas("quota-unused", [quota("compute", SHORT_HARD)])
@@ -493,6 +530,26 @@ limits(
         limit_range(
             "defaults",
             [{"type": "Container", "max": {"memory": "64Gi"}, "default": {"memory": "512Mi"}}],
+        )
+    ],
+)
+
+case("limit-default-request", "A default limit of 512Mi and a default request of 256Mi under a container max of 64Gi")
+namespace("limit-default-request")
+quotas("limit-default-request")
+limits(
+    "limit-default-request",
+    [
+        limit_range(
+            "defaults",
+            [
+                {
+                    "type": "Container",
+                    "max": {"memory": "64Gi"},
+                    "default": {"memory": "512Mi"},
+                    "defaultRequest": {"memory": "256Mi"},
+                }
+            ],
         )
     ],
 )

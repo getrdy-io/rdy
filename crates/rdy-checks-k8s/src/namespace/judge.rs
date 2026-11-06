@@ -62,6 +62,8 @@ pub(super) enum Answer {
 pub(super) struct Create {
     pub(super) via: Via,
     pub(super) answer: Answer,
+    /// True when the cluster serves `project.openshift.io`, so it is OpenShift.
+    pub(super) openshift: bool,
 }
 
 /// What was read, before any judgement.
@@ -148,6 +150,20 @@ struct Issue {
     level: Level,
     message: String,
     fix: String,
+    /// How much of the need the quota covers, in millionths: the lower, the tighter. `i128::MAX` when the
+    /// issue is not a quota.
+    fill: i128,
+}
+
+impl Issue {
+    fn new(level: Level, message: String, fix: String) -> Self {
+        Self {
+            level,
+            message,
+            fix,
+            fill: i128::MAX,
+        }
+    }
 }
 
 fn rank(level: Level) -> u8 {
@@ -216,6 +232,8 @@ struct Sink {
     grants: Vec<&'static Grant>,
     /// The rows of `observed.quotas.checks`.
     quota_rows: Vec<Value>,
+    /// The rows of `observed.limit_ranges.defaults`.
+    default_rows: Vec<Value>,
 }
 
 impl Sink {
@@ -257,12 +275,15 @@ pub(super) fn judge(params: &K8sNamespace, found: &Gathered) -> Finding {
         quiet,
         grants,
         quota_rows,
+        default_rows,
     } = sink;
-    notes.push(
+    notes.push(if found.create.as_ref().is_some_and(|create| create.openshift) {
         "Only the ResourceQuota and LimitRange objects of the namespace are read. An OpenShift ClusterResourceQuota is not evaluated."
-            .to_owned(),
-    );
-    issues.sort_by_key(|issue| std::cmp::Reverse(rank(issue.level)));
+            .to_owned()
+    } else {
+        "Only the ResourceQuota and LimitRange objects of the namespace are read.".to_owned()
+    });
+    issues.sort_by_key(|issue| (std::cmp::Reverse(rank(issue.level)), issue.fill));
     let level = issues.first().map_or(Level::Pass, |issue| issue.level);
     let message = match issues.first() {
         Some(first) if issues.len() > 1 => format!(
@@ -297,7 +318,7 @@ pub(super) fn judge(params: &K8sNamespace, found: &Gathered) -> Finding {
         );
     }
     finding
-        .with_observed(observed(found, quota_rows))
+        .with_observed(observed(found, quota_rows, default_rows))
         .with_expected(expected(params, found.namespace.as_deref()))
 }
 
@@ -316,13 +337,13 @@ fn pass_message(quiet: &[String]) -> String {
 fn judge_namespace(ns: &str, found: &Gathered, sink: &mut Sink) {
     match &found.ns {
         Some(Read::Ok(facts)) if facts.terminating => {
-            sink.issues.push(Issue {
-                level: Level::Fail,
-                message: format!(
+            sink.issues.push(Issue::new(
+                Level::Fail,
+                format!(
                     "Namespace {ns} is Terminating: it is being deleted and takes no new objects"
                 ),
-                fix: fix::terminating(ns),
-            });
+                fix::terminating(ns),
+            ));
             if !facts.conditions.is_empty() {
                 let shown: Vec<String> =
                     facts.conditions.iter().take(8).map(|c| shown(c)).collect();
@@ -373,31 +394,31 @@ fn judge_create(ns: &str, create: Option<&Create>, sink: &mut Sink) {
                 "namespace {ns} does not exist and this identity may not create namespaces, but the API group list could not be read, so rdy cannot tell whether this is OpenShift, where the question is project requests{}",
                 reason_suffix(reason)
             ));
-            sink.fixes_unverified.push(fix::ask_platform(ns, create.via));
+            sink.fixes_unverified
+                .push(fix::ask_platform(ns, create.via));
         }
         (Answer::NotAllowed(reason), via) => {
             let what = match via {
                 Via::ProjectRequests => "request it as a project",
                 Via::Namespaces { .. } => "create it",
             };
-            sink.issues.push(Issue {
-                level: Level::Fail,
-                message: format!(
-                    "Namespace {ns} does not exist, and this identity may not {what}"
-                ),
-                fix: fix::ask_platform(ns, via),
-            });
+            sink.issues.push(Issue::new(
+                Level::Fail,
+                format!("Namespace {ns} does not exist, and this identity may not {what}"),
+                fix::ask_platform(ns, via),
+            ));
             if !reason.is_empty() {
-                sink.notes.push(format!(
-                    "The cluster said: {}.",
-                    shown(reason)
-                ));
+                sink.notes
+                    .push(format!("The cluster said: {}.", shown(reason)));
             }
         }
-        (Answer::Unknown(why), _) => sink.unverified.push(format!(
-            "namespace {ns} does not exist and rdy could not check whether this identity may create it ({})",
-            shown(why)
-        )),
+        (Answer::Unknown(why), via) => {
+            sink.unverified.push(format!(
+                "namespace {ns} does not exist and rdy could not check whether this identity may create it ({})",
+                shown(why)
+            ));
+            sink.fixes_unverified.push(fix::check_create(ns, via));
+        }
     }
 }
 
@@ -440,6 +461,8 @@ fn judge_quotas(ns: &str, quotas: &Read<Page<Quota>>, needs: &[QuotaNeed], sink:
             ));
         } else {
             sink.unverified.push(text.to_owned());
+            sink.fixes_unverified
+                .push(fix::cut_list(ns, "resourcequotas"));
         }
     }
     // Every quota is listed, scoped ones as "not evaluated".
@@ -475,6 +498,7 @@ fn judge_quotas(ns: &str, quotas: &Read<Page<Quota>>, needs: &[QuotaNeed], sink:
 
     let mut evaluated = 0usize;
     let mut unscoped_limit = false;
+    let mut scoped_partial = false;
     for need in needs {
         let Some(wanted) = need.amount else {
             sink.unverified.push(format!(
@@ -482,6 +506,7 @@ fn judge_quotas(ns: &str, quotas: &Read<Page<Quota>>, needs: &[QuotaNeed], sink:
                 shown(&need.text),
                 shown(&need.resource)
             ));
+            sink.fixes_unverified.push(fix::spec_amount().to_owned());
             continue;
         };
         for quota in &page.items {
@@ -496,6 +521,9 @@ fn judge_quotas(ns: &str, quotas: &Read<Page<Quota>>, needs: &[QuotaNeed], sink:
                         shown(&quota.name),
                         shown(&need.resource)
                     ));
+                    sink.fixes_unverified
+                        .push(fix::check_quota(&quota.name, ns));
+                    scoped_partial = true;
                     continue;
                 }
                 unscoped_limit = true;
@@ -511,6 +539,8 @@ fn judge_quotas(ns: &str, quotas: &Read<Page<Quota>>, needs: &[QuotaNeed], sink:
                         shown(hard_text),
                         used_text.map_or_else(|| "not reported".to_owned(), |text| shown(text))
                     ));
+                    sink.fixes_unverified
+                        .push(fix::check_quota(&quota.name, ns));
                     continue;
                 };
                 evaluated += 1;
@@ -528,24 +558,45 @@ fn judge_quotas(ns: &str, quotas: &Read<Page<Quota>>, needs: &[QuotaNeed], sink:
                     "enough": enough,
                 }));
                 if !enough {
-                    sink.issues.push(Issue {
-                        level: Level::Fail,
-                        message: format!(
-                            "Quota {} in {ns} leaves {left_text} of {} ({hard_text} allowed, {} used), and the product needs {}",
+                    let used_shown = used_text.map_or("?", |text| text.as_str());
+                    let mut issue = Issue::new(
+                        Level::Fail,
+                        format!(
+                            "Quota {} in {ns} leaves {left_text} of {} ({hard_text} allowed, {used_shown} used), and the product needs {}",
                             shown(&quota.name),
                             need.resource,
-                            used_text.map_or("?", |text| text.as_str()),
                             need.text
                         ),
-                        fix: fix::quota(&quota.name, ns, &need.resource, &left_text, hard_text, used_text.map_or("?", |text| text.as_str()), &need.text),
-                    });
+                        fix::quota(
+                            &quota.name,
+                            ns,
+                            &need.resource,
+                            &left_text,
+                            hard_text,
+                            used_shown,
+                            &need.text,
+                        ),
+                    );
+                    issue.fill = left
+                        .at_least_zero()
+                        .nano()
+                        .saturating_mul(1_000_000)
+                        .checked_div(wanted.nano())
+                        .unwrap_or(i128::MAX);
+                    sink.issues.push(issue);
                 }
             }
         }
     }
     if evaluated > 0 && !sink.issues.iter().any(|issue| issue.level == Level::Fail) {
-        sink.quiet
-            .push("the quotas leave room for what the product needs".to_owned());
+        sink.quiet.push(
+            if scoped_partial {
+                "the unscoped quotas leave room for what the product needs"
+            } else {
+                "the quotas leave room for what the product needs"
+            }
+            .to_owned(),
+        );
     } else if !unscoped_limit && sink.unverified.is_empty() {
         sink.quiet
             .push("no quota in the namespace limits what the product needs".to_owned());
@@ -590,6 +641,7 @@ fn judge_limits(
                 "the namespace has more than 500 limit ranges and only the first 500 were read"
                     .to_owned(),
             );
+            sink.fixes_unverified.push(fix::cut_list(ns, "limitranges"));
         }
     }
     let Some((need_text, need)) = memory else {
@@ -615,15 +667,15 @@ fn judge_limits(
             };
             if let Some(max_text) = &item.memory.max {
                 match Amount::parse(max_text) {
-                    Some(max) if *need > max => sink.issues.push(Issue {
-                        level: Level::Fail,
-                        message: format!(
+                    Some(max) if *need > max => sink.issues.push(Issue::new(
+                        Level::Fail,
+                        format!(
                             "LimitRange {} in {ns} caps a {kind} at {} of memory, and the product's largest container needs {need_text}",
                             shown(&range.name),
                             show(max, true)
                         ),
-                        fix: fix::limit_max(&range.name, ns, kind, &show(max, true), need_text),
-                    }),
+                        fix::limit_max(&range.name, ns, kind, &show(max, true), need_text),
+                    )),
                     Some(_) => {}
                     None => unreadable = true,
                 }
@@ -636,10 +688,23 @@ fn judge_limits(
                     Some(default) if *need > default => {
                         // The spec does not say whether the product sets limits, so this is a note.
                         warned = true;
+                        let request = item
+                            .memory
+                            .default_request
+                            .as_deref()
+                            .and_then(Amount::parse)
+                            .map(|request| show(request, true));
+                        sink.default_rows.push(json!({
+                            "range": shown(&range.name),
+                            "default": show(default, true),
+                            "default_request": request,
+                            "needed": need_text,
+                        }));
                         sink.notes.push(fix::limit_default(
                             &range.name,
                             ns,
                             &show(default, true),
+                            request.as_deref(),
                             need_text,
                         ));
                     }
@@ -652,6 +717,7 @@ fn judge_limits(
     if unreadable {
         sink.unverified
             .push("a limit range holds a memory amount that rdy could not read".to_owned());
+        sink.fixes_unverified.push(fix::check_limit_ranges(ns));
     }
     if sink.issues.len() == before && !unreadable {
         sink.quiet.push(if page.items.is_empty() {
@@ -675,7 +741,7 @@ fn read_word<T>(read: &Read<T>) -> &'static str {
     }
 }
 
-fn observed(found: &Gathered, quota_rows: Vec<Value>) -> Value {
+fn observed(found: &Gathered, quota_rows: Vec<Value>, default_rows: Vec<Value>) -> Value {
     let state = match &found.ns {
         None => "not_named",
         Some(Read::Ok(facts)) if facts.terminating => "terminating",
@@ -716,6 +782,7 @@ fn observed(found: &Gathered, quota_rows: Vec<Value>) -> Value {
             "read": "read",
             "count": page.items.len(),
             "cut": page.cut,
+            "defaults": default_rows,
         }),
         other => json!({"read": read_word(other)}),
     });
