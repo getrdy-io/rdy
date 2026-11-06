@@ -1,0 +1,71 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-system/resourcequotas",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "ResourceQuotaList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "v1",
+        "kind": "ResourceQuota",
+        "metadata": {
+          "name": "compute",
+          "namespace": "acme-system"
+        },
+        "spec": {
+          "hard": {
+            "requests.cpu": "64",
+            "requests.memory": "256Gi",
+            "pods": "200",
+            "persistentvolumeclaims": "50",
+            "requests.storage": "2Ti"
+          }
+        },
+        "status": {
+          "hard": {
+            "requests.cpu": "64",
+            "requests.memory": "256Gi",
+            "pods": "200",
+            "persistentvolumeclaims": "50",
+            "requests.storage": "2Ti"
+          },
+          "used": {
+            "requests.cpu": "6",
+            "requests.memory": "20Gi",
+            "pods": "12",
+            "persistentvolumeclaims": "2",
+            "requests.storage": "100Gi"
+          }
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "kind": "ResourceQuota",
+        "metadata": {
+          "name": "object-counts",
+          "namespace": "acme-system"
+        },
+        "spec": {
+          "hard": {
+            "pods": "110"
+          }
+        },
+        "status": {
+          "hard": {
+            "pods": "110"
+          },
+          "used": {
+            "pods": "105"
+          }
+        }
+      }
+    ]
+  }
+}

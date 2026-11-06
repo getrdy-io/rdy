@@ -1,0 +1,14 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "projectrequests",
+          "group": "project.openshift.io"
+        }
+      },
+      "refuse": 403
+    }
+  ]
+}
