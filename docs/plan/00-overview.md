@@ -91,9 +91,9 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 176 | 387.5 |
-| M1, core | 147 | 326 |
-| M1, `core: no` (the cut list) | 29 | 61.5 |
+| M1, all | 177 | 389.5 |
+| M1, core | 147 | 326.5 |
+| M1, `core: no` (the cut list) | 30 | 63 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
 that. The earlier counts here (about 194 hours, then 248 in 02, then 571 in the first draft of 11) were
@@ -129,13 +129,13 @@ and Dec 28 run at half capacity.
 | 21 | Apr 12 to Apr 18, 2027 | 13 | 13.5 | 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-110 to M1-115 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed |
 | 22 | Apr 19 to Apr 25, 2027 | 13 | 13.5 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-116 to M1-120 | `v0.1.0-alpha.21`: family pages; fixture envs for every verdict; timeouts env; signatures verified before parsing |
 | 23 | Apr 26 to May 2, 2027 | 13 | 15 | 6 Signing, `rdy verify`, 0.1.0 | M1-121 to M1-125, M1-174, M1-175 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign` |
-| 24 | May 3 to May 9, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-126 to M1-131 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove` |
+| 24 | May 3 to May 9, 2027 | 13 | 14 | 6 Signing, `rdy verify`, 0.1.0 | M1-126 to M1-131 | `v0.1.0-alpha.23`: `rdy verify`; unsigned refused; real-binary smoke on five legs; first-run page; `rdy trust add\|list\|remove` |
 | 25 | May 10 to May 16, 2027 | 13 | 13.5 | 6 Signing, `rdy verify`, 0.1.0 | M1-132 to M1-139 | **`v0.1.0`**: signing review closed; install and sign pages; README ready, core done, announcement sent to design partners |
 | 26 | May 17 to May 23, 2027 | 13 | 12 | Non-core, steps 2 and 3 | M1-140, M1-142, M1-144, M1-145, M1-172 | `v0.1.1`: progress line, HTML wording; UDP and unix socket facade; host.lsm; parameters for the M1-late check ids |
 | 27 | May 24 to May 30, 2027 | 13 | 13.5 | Non-core, step 3 | M1-146 to M1-150 | `v0.1.2`: host.security_agents, host.firewall, host.time_sync, host.sysctl, host.container_runtime |
 | 28 | May 31 to Jun 6, 2027 | 13 | 13 | Non-core, steps 3 and 4 | M1-151 to M1-156 | `v0.1.3`: host.cgroups, host.kernel; net.dns; net.registry |
 | 29 | Jun 7 to Jun 13, 2027 | 13 | 12.5 | Non-core, steps 4 and 5 | M1-157 to M1-163 | `v0.1.4`: net.mtu, net.bandwidth; k8s.nodes free capacity, webhooks, namespace, dns, ingress |
-| 30 | Jun 14 to Jun 20, 2027 | 13 | 10.5 | Non-core, steps 2, 5 and 6 | M1-143, M1-164 to M1-167, M1-173 | `v0.1.5`: quiet and verbose modes; k8s.crds, k8s.cni; air-gapped fixture env; quickstart timed; agent catalog staleness gate; M1 complete |
+| 30 | Jun 14 to Jun 20, 2027 | 13 | 12 | Non-core, steps 2, 5 and 6 | M1-143, M1-164 to M1-167, M1-173, M1-179 | `v0.1.5`: quiet and verbose modes; k8s.crds, k8s.cni; air-gapped fixture env; quickstart timed; agent catalog staleness gate; M1 complete |
 
 Builds before 0.1.0 (weeks 1 to 24) are `0.1.0-alpha.N` and are not handed to design partners for real
 POCs. Until `rdy verify` lands in week 24 they run specs only with `--allow-unsigned`, so rule 3 holds
