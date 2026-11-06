@@ -202,7 +202,7 @@ This file is the corrections list.
   variant, its policy row, snapshot, 05 row, Live and Replay arms, `native/adjtimex.json` and the "`EPERM` is
   partial" clause to M2-004 (3.5 h to 5 h). M1-148 takes the sync state from `timedatectl` and `chronyc` and
   the offset from its SNTP client. Before M2-004 starts, rust-engineer names the Live source: a safe wrapper
-  in a rustix release, or another crate that passes the new-dependency review (05 T5, `deny.toml`), reviewed
+  in a rustix release, or another crate that passes the new-dependency review (05 Appendix C T5, `deny.toml`), reviewed
   by security-reviewer. If neither exists, rust-architect writes an ADR first. The review and any ADR come out
   of M2-004's 5 h. The host.time_sync half of M2-004 is check-author's work. `ci/check-crate-deps.toml`
   does not change, because the call sits in rdy-engine and host.time_sync reaches it through the Probe.
@@ -365,3 +365,17 @@ Review follow-ups collected during the build:
 - ADR 0017 (changelog fragments) added and indexed. C-4 carries the `CLAUDE.md` checklist line.
 - M1-003: the exit test says the 12 labels of 10 section 6, so "the 10 section 6 labels" cannot be read
   as a count.
+
+## Applied during the M1 build
+
+Corrections that a build review found and that were applied to the planning documents at once. Each one is also in
+the corrections log of `11-backlog.md`.
+
+- **Correction-37, host.time_sync commands and peers.** 03 named `chronyc -n -c -t 3 tracking`, but chronyc has
+  no `-t` option, so that form fails on every host. 03 now says `chronyc -n -c tracking`, and PR #35 fixes the
+  command table. A command limit equal to the check limit let a hung `timedatectl` throw away a good SNTP
+  sample. Each step is now cut to the time left in the 5 s budget minus a 250 ms margin, SNTP stops at the first
+  good reply, each command form has at most 3 s, and a timed-out command keeps the SNTP verdict with a note. 05
+  INV-11 names the local IPC of exactly two allowlisted commands as a third exception, M1-128 allows exactly
+  those destinations (both the `/run` and the `/var/run` paths), and 05 Appendix A T5 accepts unauthenticated
+  SNTP.
