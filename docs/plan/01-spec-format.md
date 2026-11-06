@@ -587,7 +587,7 @@ bounds (readers ignore unknown keys, 3.4); `findings` in a lint report 258; `ide
 
 ### 5.1 Host identity
 
-Included: `hostname` (as the OS reports it; an M2 option replaces it), `host_id`, `os` (`family`, `id`,
+Included: `hostname` (as the OS reports it; an M2 option replaces it; the stand-in `unknown` in a report with `complete: false` means the host was not read, 07 section 5.2), `host_id`, `os` (`family`, `id`,
 `version`, `pretty_name`), `kernel`, `arch`, `virtualization` (`none`, `vm`, `unknown`), `container`
 (rdy ran in a container or WSL). `identity` adds `euid`, the local login name and the kube identity (ADR
 0012), so the reader knows who ran it and against which cluster, with any kubeconfig credential plugin

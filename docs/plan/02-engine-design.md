@@ -233,8 +233,16 @@ Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
     non-blocking write, or nothing.
   - **Too early.** Before the output directory exists, it exits 70 with no report.
   - **Exit bound.** Worst case: deadline plus 22 s.
-  - On the normal path the CLI moves the state to `Writing`, writes, flushes, sets `Done`, kills any
-    leftover process groups and calls `std::process::exit(code)`; nothing waits on a runtime drop. The
+  - On the normal path the CLI prints `--json` stdout and flushes it (the one write that can block for
+    good, so the state is still `Running` and the watchdog still owns the report), moves the state to
+    `Writing`, writes the files, sets `Done` with the exit code, prints the stderr summary, kills any
+    leftover process groups (`entry::run_live`) and exits; nothing waits on a runtime drop. `rdy run`
+    gets a watchdog that `entry::run_live` started before the runtime. It plans first (pure), makes the
+    folder, builds the `Board` with `Engine::board` (one slot per spec entry, plan skips already in it)
+    and arms the watchdog right after the folder exists, before the host and needs probes, so a hang
+    anywhere after the folder leaves a `complete: false` report (M1-176). `Engine::execute` then gives
+    the board its way to map an end (`RunOptions::board`). The library `run` used by tests starts its
+    own watchdog and disarms it when it returns; commands other than `run` disarm it at once.
     kube exec plugin is not ours to track (residual).
 - **Ctrl-C in M1.** The first Ctrl-C cancels the run token: checks abort, child process groups are
   killed, and the CLI exits 70 with "interrupted, no report written". Writing the partial report with
@@ -769,7 +777,7 @@ to the three self reviews; `selfsubjectreviews` has a fixed body (ADR 0010 as am
 - **HTML.**
   - `render_html(&RedactedReport)` follows 01 section 6: content in 01's order (blockers, required not
     run, warnings, passed, not applicable, capabilities, details, action log as one plain table).
-  - No `<details>`; vendor fix text is labelled "From <product>". An INCOMPLETE banner shows when
+  - No `<details>`; vendor fix text is labelled "From <product>" only when the key is pinned, else "From the spec file (not verified)" (01 section 2.6, M1-080). An INCOMPLETE banner shows when
     `complete: false`.
   - The JSON is embedded with `data-sha256` (M1-078): `render_html` calls `json_bytes` on the same report, so
     it fails with `HtmlError::Json` when the writer refuses the report. The element text is the file's bytes,

@@ -22,6 +22,60 @@ fn registry_hands_out_each_slot_once_and_refuses_when_full() {
 }
 
 #[test]
+fn a_release_waits_for_a_kill_in_flight() {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc;
+    static REGISTRY_UNDER_TEST: Registry<2> = Registry::new();
+    static KILLING_NOW: AtomicBool = AtomicBool::new(false);
+    static LET_GO: AtomicBool = AtomicBool::new(false);
+    static RELEASED: AtomicBool = AtomicBool::new(false);
+    fn slow_kill(_pid: u32) {
+        KILLING_NOW.store(true, Ordering::SeqCst);
+        while !LET_GO.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        // The release has been trying all this time and must not have got through: the run's task
+        // would reap the leader under this kill.
+        assert!(!RELEASED.load(Ordering::SeqCst), "released under a kill");
+    }
+    let index = REGISTRY_UNDER_TEST.reserve().expect("slot");
+    REGISTRY_UNDER_TEST.set(index, 4242);
+    let killer = std::thread::spawn(|| REGISTRY_UNDER_TEST.kill_all(slow_kill));
+    while !KILLING_NOW.load(Ordering::SeqCst) {
+        std::thread::yield_now();
+    }
+    let (done, wait) = mpsc::channel();
+    let releaser = std::thread::spawn(move || {
+        REGISTRY_UNDER_TEST.release(index);
+        RELEASED.store(true, Ordering::SeqCst);
+        let _ = done.send(());
+    });
+    // The release stays blocked while the kill is in flight.
+    assert!(wait.recv_timeout(Duration::from_millis(200)).is_err());
+    LET_GO.store(true, Ordering::SeqCst);
+    killer.join().expect("killer");
+    wait.recv_timeout(Duration::from_secs(5))
+        .expect("the release goes through once the kill is done");
+    releaser.join().expect("releaser");
+    assert_eq!(REGISTRY_UNDER_TEST.live(), 0);
+}
+
+#[test]
+fn a_slot_freed_before_the_claim_is_not_killed() {
+    use std::sync::Mutex;
+    static SEEN: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+    static REGISTRY_UNDER_TEST: Registry<2> = Registry::new();
+    fn record(pid: u32) {
+        SEEN.lock().expect("lock").push(pid);
+    }
+    let index = REGISTRY_UNDER_TEST.reserve().expect("slot");
+    REGISTRY_UNDER_TEST.set(index, 4242);
+    REGISTRY_UNDER_TEST.release(index);
+    REGISTRY_UNDER_TEST.kill_all(record);
+    assert!(SEEN.lock().expect("lock").is_empty());
+}
+
+#[test]
 fn registry_kill_all_skips_free_and_reserved_slots_and_sets_the_flag_first() {
     use std::sync::Mutex;
     static SEEN: Mutex<Vec<u32>> = Mutex::new(Vec::new());
