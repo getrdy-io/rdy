@@ -1,0 +1,1 @@
+- The README now says `rdy run` works on `main`, lists the seven host checks it runs, and shows the pinned release install path.

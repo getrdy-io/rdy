@@ -19,7 +19,7 @@ install day, on a call, with the customer watching.
 
 rdy moves that discovery earlier. The vendor writes down what the product needs, as a short YAML
 file called a spec, and signs it. The customer's platform or IT engineer runs one command. They get a
-list of what is wrong, with a fix under each problem, and an HTML and JSON report to send back.
+list of what is wrong, with a fix under each problem, and a report to send back. Today the report is JSON, and HTML is next.
 
 You might be reading this because a vendor sent you a spec and asked you to run it. Or you are a
 sales engineer who is tired of finding out about the proxy on install day. Both are the audience.
@@ -27,20 +27,31 @@ sales engineer who is tired of finding out about the proxy on install day. Both 
 ## Install and first run
 
 Releases are signed. The M1 install path is the `install.sh` file attached to a pinned GitHub release.
-It checks the cosign signature and the sha256 of the archive before it installs anything, needs no
-root, and writes one file, `$HOME/.local/bin/rdy`. There is no tagged release yet. When there is one, the
-command is this, with the version filled in:
+It needs [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.1.3 or newer on your
+PATH. Without it, the script stops and installs nothing. It checks the signature of the checksum file
+and the sha256 of the archive before it installs anything. It never runs `sudo`. It writes one file,
+`rdy`, to `$HOME/.local/bin`, or to the folder in `RDY_INSTALL_DIR`. As root, it refuses unless you
+pass `--allow-root`, and then it writes `/usr/local/bin/rdy`. On Windows, download the `.zip` from the
+release page and check its sha256 by hand.
+
+There is no tagged release yet. When there is one, the command is this, with the version filled in:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -sSf \
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL \
   https://github.com/getrdy-io/rdy/releases/download/v<VERSION>/install.sh | sh
-"$HOME/.local/bin/rdy" run acme-quickstart.yaml --allow-unsigned
+"$HOME/.local/bin/rdy" run <spec-from-your-vendor>.yaml
 ```
 
-(Root shells need `sh -s -- --allow-root`. A shorter `getrdy.io/install` address comes later, in M2.)
+Root shells need `sh -s -- --allow-root` after the pipe. A shorter `getrdy.io/install` address comes
+later, in M2.
 
-Until then, build from source ([below](#build-from-source)). This is a real run from a build of `main`,
-on a Linux VM, against [`examples/specs/acme-quickstart.yaml`](examples/specs/acme-quickstart.yaml):
+Until then, build from source ([below](#build-from-source)).
+
+### Try it on an example spec
+
+This is a real run from a build of `main`, on a Linux VM, against
+[`examples/specs/acme-quickstart.yaml`](examples/specs/acme-quickstart.yaml). The example is unsigned,
+so it needs `--allow-unsigned`. A spec from your vendor does not:
 
 ```console
 $ rdy run examples/specs/acme-quickstart.yaml --allow-unsigned --no-report
@@ -67,8 +78,8 @@ are not wired into `rdy run` yet. The per-check results are in the JSON.
 ## Why it is safe to run
 
 rdy runs inside your environment, sometimes on a production host. Do not take our word for what it
-does. The code is open (Apache-2.0). These are the rules it is built to. Items marked (before 0.1.0)
-or (M2) are not in the code on `main` yet.
+does. The code is open (Apache-2.0). These are the rules it is built to. Items marked (M2) are
+not in the code yet.
 
 - **Least privilege.** Every check declares what it needs: root, a kube context, cloud credentials.
   rdy runs what it can and reports what it could not. It never asks for `sudo`. Checks only read. A
@@ -84,7 +95,8 @@ or (M2) are not in the code on `main` yet.
   `--allow-unsigned`, and then it prints a warning line. `rdy run` does this on `main` today.
 - **Offline first.** Every command works with no network. Checks connect only to the hosts the spec
   lists, your proxy, your DNS servers and the Kubernetes API server you chose. Redirects are recorded,
-  never followed (the egress policy is built, the checks that use it are coming). A vendor portal is planned, and it is optional.
+  never followed (the egress policy is built, the checks that use it are coming). A vendor portal is
+  planned, and it is optional.
 - **One static binary.** No runtime to install, no OpenSSL. musl on Linux, rustls everywhere.
 - **No telemetry.**
 
@@ -98,7 +110,8 @@ vulnerability, read [`SECURITY.md`](SECURITY.md).
   [`examples/specs/`](examples/specs/) for five made-up examples.
 - A **check** measures one thing: memory, free disk, a storage class, an RBAC permission. The check
   says what it found next to what the spec asked for.
-- A **report** is HTML and JSON in a new folder, plus a verdict. The JSON is the same data for scripts.
+- A **report** is a new folder with a JSON file and a copy of the spec, plus a verdict. HTML is next.
+  The JSON is the same data for scripts.
 - Human output goes to stderr. With `--json`, stdout carries only the JSON result, so you can use rdy
   as a CI gate.
 
