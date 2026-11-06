@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use jsonschema::Validator;
 use rdy_engine::check::Os;
-use rdy_engine::probe::MAX_READ;
+use rdy_engine::probe::{MAX_READ, NativeCall, ProbeError};
 use rdy_engine::redact::{RedactedReport, Redactor, TagKey};
 use rdy_engine::report::{json_bytes, read_report, render_html, write_json};
 use rdy_engine::testing::{Replay, TestRun, fixtures_dir, golden::assert_golden, normalize};
@@ -132,27 +132,66 @@ fn attribute(tag: &str, name: &str) -> Option<String> {
     Some(tag[start..start + end].to_owned())
 }
 
+/// The hrefs a page may hold besides `#id` links, written out in full. The footer links of 07 D.4 are
+/// added here, exactly, when the page gets a footer. Until then the page links nowhere outside itself, and
+/// a new off-file `href` fails every page check.
+const OUTSIDE_HREFS: [&str; 0] = [];
+
 /// The static checks of ADR 0003 on one page. `what` names the page in a failure.
+///
+/// The page is lower-cased first, so `<LINK` and `URL(` count. The `<svg` ban below is for text from the
+/// machine; ADR 0003's inline logo is not on the page yet, and when it lands this check names it.
 fn assert_static(what: &str, html: &str) -> TestResult {
     assert!(html.starts_with("<!DOCTYPE html>"), "{what}: no doctype");
-    assert!(html.contains("<html lang=\""), "{what}: no lang");
+    assert!(html.contains("<html lang=\"en\">"), "{what}: no lang=en");
     assert_eq!(html.matches(CSP).count(), 1, "{what}: the CSP is not exact");
     assert_eq!(
         html.matches("Content-Security-Policy").count(),
         1,
         "{what}: a second CSP"
     );
+    let head_at = html.find("<head>").ok_or("no head")?;
+    let csp_at = html.find(CSP).ok_or("no csp")?;
+    let style_at = html.find("<style").ok_or("no style")?;
+    let head_end = html.find("</head>").ok_or("no head end")?;
+    assert!(
+        head_at < csp_at && csp_at < style_at && style_at < head_end,
+        "{what}: the CSP is not inside the head before the style"
+    );
     let body_at = html.find("<body>").ok_or("no body")?;
-    let (head, body) = html.split_at(body_at);
+    assert!(head_end < body_at, "{what}: the head ends after the body");
+
+    let lower = html.to_ascii_lowercase();
+    let (head, body) = lower.split_at(lower.find("<body>").ok_or("no body")?);
     for forbidden in [
-        "<link", "<script", "@import", "url(", " src=", "http://", "https://",
+        "<link",
+        "<script",
+        "@import",
+        "url(",
+        " src=",
+        "srcset",
+        "formaction",
+        "<base",
+        "<area",
+        "xlink:href",
+        "http://",
+        "https://",
     ] {
         assert!(
             !head.contains(forbidden),
             "{what}: {forbidden:?} is in the head"
         );
     }
-    for forbidden in ["<link", " src=", "url("] {
+    for forbidden in [
+        "<link",
+        " src=",
+        "srcset",
+        "formaction",
+        "<base",
+        "<area",
+        "xlink:href",
+        "url(",
+    ] {
         assert!(
             !body.contains(forbidden),
             "{what}: {forbidden:?} is in the body"
@@ -170,15 +209,27 @@ fn assert_static(what: &str, html: &str) -> TestResult {
         "http-equiv=\"refresh",
     ] {
         assert!(
-            !html.contains(forbidden),
+            !lower.contains(forbidden),
             "{what}: {forbidden:?} is on the page"
         );
     }
-    // Every link stays inside the page or is marked as an outside link.
-    for part in html.split("<a ").skip(1) {
-        let tag = format!(" {}", &part[..part.find('>').unwrap_or(part.len())]);
+    // Every anchor is `#id` or one of the exact outside links, which say `rel="noopener noreferrer"`.
+    let mut rest = lower.as_str();
+    while let Some(at) = rest.find("<a") {
+        rest = &rest[at + 2..];
+        match rest.chars().next() {
+            Some(c) if c.is_ascii_whitespace() => {}
+            Some(c) if c.is_ascii_alphanumeric() || c == '-' => continue,
+            other => panic!("{what}: an anchor tag continues with {other:?}"),
+        }
+        let tag = format!(" {}", &rest[..rest.find('>').unwrap_or(rest.len())]);
+        let tag = tag.replace(['\t', '\n', '\r', '\u{c}'], " ");
         let href = attribute(&tag, "href").ok_or("a link has no href")?;
         if !href.starts_with('#') {
+            assert!(
+                OUTSIDE_HREFS.contains(&href.as_str()),
+                "{what}: an outside link that is not allowed: {href}"
+            );
             assert_eq!(
                 attribute(&tag, "rel").as_deref(),
                 Some("noopener noreferrer"),
@@ -187,10 +238,9 @@ fn assert_static(what: &str, html: &str) -> TestResult {
         }
     }
     // One script element, case blind, and it is the data block.
-    let lower = html.to_ascii_lowercase();
     assert_eq!(lower.matches("<script").count(), 1, "{what}: scripts");
     assert_eq!(lower.matches("</script").count(), 1, "{what}: script ends");
-    assert!(body.contains(OPEN), "{what}: no data block");
+    assert!(html[body_at..].contains(OPEN), "{what}: no data block");
     let (hash, text) = embedded(html)?;
     assert_eq!(hash, sha256_hex(text.as_bytes()), "{what}: hash");
     assert!(
@@ -217,38 +267,72 @@ fn write_json_on_each_result_fixture_matches_its_golden() -> TestResult {
         assert_valid(golden, std::str::from_utf8(&bytes)?)?;
         assert!(bytes.ends_with(b"}\n") && !bytes.contains(&b'\r'), "{stem}");
         assert_golden(golden_dir().join(format!("{golden}.json")), &bytes);
+        // The golden is the fixture in value: only the order of keys and the escapes differ.
+        let golden_text = std::fs::read_to_string(golden_dir().join(format!("{golden}.json")))?;
+        assert_eq!(
+            serde_json::from_str::<Value>(&golden_text)?,
+            serde_json::from_str::<Value>(&text)?,
+            "{stem}"
+        );
     }
     Ok(())
 }
 
-/// The three runs are the ones 07 describes: the verdicts, the exit codes and the run ids.
+/// The JSON block under the `###` heading that starts with `heading` in 07 Appendix B.
+fn appendix_b(heading: &str) -> TestResult<Value> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/plan/07-cli-ux.md");
+    let doc = std::fs::read_to_string(path)?.replace("\r\n", "\n");
+    let start = doc
+        .find(&format!("\n### {heading}"))
+        .ok_or("heading not found")?;
+    let section = &doc[start + 1..];
+    let open = section.find("```json\n").ok_or("no json block")? + "```json\n".len();
+    let body = &section[open..];
+    let close = body.find("\n```").ok_or("unterminated json block")?;
+    Ok(serde_json::from_str(&body[..close])?)
+}
+
+/// Applies the `replace` and `add` operations of the B.2 patch (RFC 6902) to `doc`.
+fn apply_patch(doc: &mut Value, patch: &Value) -> TestResult {
+    for op in patch.as_array().ok_or("the patch is a list")? {
+        let path = op["path"].as_str().ok_or("no path")?;
+        let (parent, key) = path.rsplit_once('/').ok_or("bad path")?;
+        let target = doc.pointer_mut(parent).ok_or("no such parent")?;
+        let value = op["value"].clone();
+        match op["op"].as_str() {
+            Some("replace" | "add") => match target {
+                Value::Array(items) => {
+                    *items.get_mut(key.parse::<usize>()?).ok_or("index")? = value
+                }
+                Value::Object(map) => {
+                    map.insert(key.to_owned(), value);
+                }
+                _ => return Err("the parent is a scalar".into()),
+            },
+            other => return Err(format!("unsupported op {other:?}").into()),
+        }
+    }
+    Ok(())
+}
+
+/// The fixtures are 07 Appendix B.1 to B.3 as they stand in the plan (B.2 is B.1 with the patch), so a
+/// change to the plan or to a fixture fails here. Verdicts and exit codes are 07's too.
 #[test]
 fn the_fixtures_are_the_three_runs_of_07_appendix_b() -> TestResult {
+    let b1 = appendix_b("B.1 ")?;
+    let mut b2 = b1.clone();
+    apply_patch(&mut b2, &appendix_b("B.2 ")?)?;
+    let b3 = appendix_b("B.3 ")?;
     let expect = [
-        (
-            "b1-ready",
-            "ready",
-            0,
-            "0c7e5a39-8d24-4f1b-b6e2-9a4f3d7c1e08",
-        ),
-        (
-            "b2-ready-with-warnings",
-            "ready_with_warnings",
-            1,
-            "3b9d1f70-52c6-4a8e-8c13-7e0a5d2b9f41",
-        ),
-        (
-            "b3-not-ready",
-            "not_ready",
-            2,
-            "6f8d2c4e-1b3a-4e5f-9a7b-2c1d0e9f8a6b",
-        ),
+        ("b1-ready", b1, "ready", 0),
+        ("b2-ready-with-warnings", b2, "ready_with_warnings", 1),
+        ("b3-not-ready", b3, "not_ready", 2),
     ];
-    for (stem, verdict, exit, id) in expect {
+    for (stem, plan, verdict, exit) in expect {
         let doc = fixture_doc(stem)?;
+        assert_eq!(doc, plan, "{stem} is not 07's document");
         assert_eq!(doc["verdict"], verdict, "{stem}");
         assert_eq!(doc["exit_code"], exit, "{stem}");
-        assert_eq!(doc["run"]["id"], id, "{stem}");
     }
     Ok(())
 }
@@ -276,16 +360,35 @@ fn render_html_on_each_result_fixture_matches_its_golden() -> TestResult {
 /// The checks hold on every golden page in the folder, including the ones other tests own.
 #[test]
 fn every_golden_page_passes_the_static_checks() -> TestResult {
-    let mut seen = 0;
+    let mut seen = Vec::new();
     for entry in std::fs::read_dir(golden_dir())? {
         let path = entry?.path();
         if path.extension().and_then(|e| e.to_str()) == Some("html") {
             let html = std::fs::read_to_string(&path)?;
             assert_static(&path.display().to_string(), &html)?;
-            seen += 1;
+            seen.push(
+                path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_owned(),
+            );
         }
     }
-    assert!(seen >= 7, "only {seen} golden pages");
+    seen.sort();
+    assert_eq!(
+        seen,
+        [
+            "five-sections-exec-plugin.html",
+            "not-ready-7.2.html",
+            "not-ready-hostile-host.html",
+            "not-ready-no-blocks.html",
+            "results-b1-ready.html",
+            "results-b2-ready-with-warnings.html",
+            "results-b3-not-ready.html",
+            "results-secrets-redacted.html",
+        ],
+        "a golden page was added or removed: list it here so it gets the checks on purpose"
+    );
     Ok(())
 }
 
@@ -305,9 +408,15 @@ fn a_hostile_hostname_round_trips_on_each_result_fixture() -> TestResult {
         assert_eq!(report.host.hostname, HOSTILE, "{stem}");
         let before = &html[..html.find(OPEN).ok_or("no block")?];
         let after = &html[html.find("</script>").ok_or("no end")?..];
+        let outside = format!("{before}{after}");
         for raw in ["<img", "onerror=x>", "<!--"] {
-            assert!(!format!("{before}{after}").contains(raw), "{stem}: {raw:?}");
+            assert!(!outside.contains(raw), "{stem}: {raw:?}");
         }
+        // It is on the page as visible, escaped text.
+        assert!(
+            outside.contains("&#60;/script&#62;&#60;img onerror=x&#62;&#38;amp;"),
+            "{stem}: the hostname is not shown as text"
+        );
     }
     Ok(())
 }
@@ -318,11 +427,9 @@ fn a_hostile_hostname_round_trips_on_each_result_fixture() -> TestResult {
 const MACHINE_ID: &str = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
 /// A secret the run knows, in text with no key name around it.
 const TOKEN: &str = "kt-Zk3v9Qx7canaryTOKEN";
-/// An AWS-style key id, cut by the read cap.
-const AWS_ID: &str = "AKIAZ3Q7XK2MCANARY4B";
-/// The userinfo of a URL, cut by the read cap.
-const USERINFO: &str = "svcuser:Pw7canaryZq9";
 const LOG: &str = "/var/log/synthetic.log";
+/// The evidence a check keeps from a buffer: its last 4 KiB, where the cap cut it.
+const EVIDENCE_TAIL: usize = 4096;
 
 /// Every 8 byte window of `secret`, so a fragment counts as a leak.
 fn windows(secret: &str) -> Vec<String> {
@@ -333,7 +440,25 @@ fn windows(secret: &str) -> Vec<String> {
         .collect()
 }
 
-/// A private key whose body lines are made of `i` and `j`, so no two runs agree by accident.
+/// A secret of one kind, with the text around it in a file. Only `secret` must never be shown.
+struct Secret {
+    kind: &'static str,
+    /// The redaction rule that removes it when it lies whole inside the buffer.
+    rule: &'static str,
+    prefix: String,
+    secret: String,
+    suffix: String,
+    /// One needle per 8 byte window of the secret, or of each body line of a key.
+    needles: Vec<String>,
+}
+
+impl Secret {
+    fn text(&self) -> String {
+        format!("{}{}{}", self.prefix, self.secret, self.suffix)
+    }
+}
+
+/// A private key body whose lines are made of `i` and `j`, so no two lines agree by accident.
 fn pem_body() -> Vec<String> {
     let table = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     (0..5)
@@ -346,35 +471,109 @@ fn pem_body() -> Vec<String> {
         .collect()
 }
 
-/// A file of filler lines with `canary` ending `k` bytes after the point the cap cuts at.
-fn file_cut_inside(canary: &str, k: usize) -> Vec<u8> {
-    let mut data: Vec<u8> = (0..MAX_READ - k)
+fn secrets() -> Vec<Secret> {
+    let aws = "AKIAZ3Q7XK2MCANARY4B";
+    let userinfo = "svcuser:Pw7canaryZq9";
+    let body = pem_body();
+    vec![
+        Secret {
+            kind: "aws key id",
+            rule: "aws_access_key_id",
+            prefix: "found ".to_owned(),
+            secret: aws.to_owned(),
+            suffix: "\n".to_owned(),
+            needles: windows(aws),
+        },
+        Secret {
+            kind: "url userinfo",
+            rule: "url_userinfo",
+            prefix: "proxy: https://".to_owned(),
+            secret: userinfo.to_owned(),
+            suffix: "@proxy.example.test:3128/\n".to_owned(),
+            needles: windows(userinfo),
+        },
+        Secret {
+            kind: "private key",
+            rule: "pem_private_key",
+            prefix: "-----BEGIN PRIVATE KEY-----\n".to_owned(),
+            secret: body.join("\n"),
+            suffix: "\n-----END PRIVATE KEY-----\n".to_owned(),
+            needles: body.iter().flat_map(|line| windows(line)).collect(),
+        },
+    ]
+}
+
+/// Filler lines of 63 `x` and a newline, `n` bytes of them.
+fn filler(n: usize) -> Vec<u8> {
+    (0..n)
         .map(|i| if i % 64 == 63 { b'\n' } else { b'x' })
-        .collect();
-    data.extend_from_slice(canary.as_bytes());
+        .collect()
+}
+
+/// A file in which `secret` starts `back` bytes before the read cap, so the cap cuts it, followed by
+/// 100 bytes the cap leaves out.
+fn cut_by_the_cap(secret: &Secret, back: usize) -> Vec<u8> {
+    let mut data = filler(MAX_READ - back);
+    data.extend_from_slice(secret.text().as_bytes());
+    data.truncate(MAX_READ);
     data.extend(std::iter::repeat_n(b'q', 100));
     data
 }
 
-/// A run whose machine holds a machine id, three secrets cut by the read cap at different offsets and
-/// a known secret. It returns the report document and the strings that must not appear in the page.
+/// A file in which the whole of `secret` stands on its own lines, 70 bytes before the cap.
+fn whole_before_the_cap(secret: &Secret) -> Vec<u8> {
+    let text = secret.text();
+    let start = MAX_READ - text.len() - 70;
+    let mut data = filler(MAX_READ + 100);
+    data[start - 1] = b'\n';
+    data[start..start + text.len()].copy_from_slice(text.as_bytes());
+    data
+}
+
+/// The last `EVIDENCE_TAIL` bytes of `text`, on a character boundary.
+fn evidence_of(text: &str) -> String {
+    text[text.ceil_char_boundary(text.len().saturating_sub(EVIDENCE_TAIL))..].to_owned()
+}
+
+/// A run whose machine holds a machine id on both paths, each secret cut by the read cap at several
+/// offsets and lying whole just inside it, and a known secret. It returns the report document and the
+/// strings that must not appear on the page.
 async fn leaky_doc(with_actions: bool) -> TestResult<(Value, Vec<String>)> {
-    let pem = format!(
-        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
-        pem_body().join("\n")
-    );
-    let aws = format!("id: {AWS_ID}");
-    let url = format!("proxy: https://{USERINFO}@proxy.example.test:3128/");
-    let files = [
-        ("/etc/machine-id", format!("{MACHINE_ID}\n").into_bytes()),
-        ("/var/log/pem.log", file_cut_inside(&pem, 20)),
-        ("/var/log/aws.log", file_cut_inside(&aws, 9)),
-        ("/var/log/url.log", file_cut_inside(&url, 17)),
-        (
-            LOG,
-            format!("context: staging\nsee {TOKEN} for details\n").into_bytes(),
-        ),
-    ];
+    let secrets = secrets();
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    // (file, case name, the secret's index, the number of secret bytes inside the cap, or 0 for whole)
+    let mut cases: Vec<(String, String, usize, usize)> = Vec::new();
+    for (index, secret) in secrets.iter().enumerate() {
+        let length = secret.secret.len();
+        let mut inside = vec![8, 16, length - 1];
+        if secret.rule == "pem_private_key" {
+            // Whole body lines lie inside the cap, and only the key guard can remove them.
+            inside.extend([100, 200]);
+        }
+        for k in inside {
+            let back = secret.prefix.len() + k;
+            let name = format!("{}-cut-{k}", secret.rule);
+            let path = format!("/var/log/{name}.log");
+            files.push((path.clone(), cut_by_the_cap(secret, back)));
+            cases.push((path, name, index, k));
+        }
+        let name = format!("{}-whole", secret.rule);
+        let path = format!("/var/log/{name}.log");
+        files.push((path.clone(), whole_before_the_cap(secret)));
+        cases.push((path, name, index, 0));
+    }
+    files.push((
+        "/etc/machine-id".to_owned(),
+        format!("{MACHINE_ID}\n").into_bytes(),
+    ));
+    files.push((
+        "/var/lib/dbus/machine-id".to_owned(),
+        format!("{MACHINE_ID}\n").into_bytes(),
+    ));
+    files.push((
+        LOG.to_owned(),
+        format!("context: staging\nsee {TOKEN} for details\n").into_bytes(),
+    ));
     let mut replay = Replay::new();
     for (path, data) in files {
         replay = replay.file(path, data);
@@ -384,32 +583,62 @@ async fn leaky_doc(with_actions: bool) -> TestResult<(Value, Vec<String>)> {
     let ctx = run.context("host.synthetic", Os::Linux, []);
     let probe = ctx.probe();
 
-    let mut evidence = Vec::new();
-    for path in [
-        "/var/log/pem.log",
-        "/var/log/aws.log",
-        "/var/log/url.log",
-        LOG,
-    ] {
+    let mut observed = serde_json::Map::new();
+    for (number, (path, name, index, k)) in cases.iter().enumerate() {
+        let secret = &secrets[*index];
         let file = probe.read(Path::new(path)).await?;
-        evidence.push(probe.file_text(&file)?.to_string());
+        assert!(file.truncated_tail, "{name}: the cap did not cut the file");
+        // CONTROL: the bytes the facade read hold the secret, so a clean page is the redactor's doing.
+        let raw = String::from_utf8_lossy(&file.bytes);
+        let held = if *k == 0 { secret.secret.len() } else { *k };
+        assert!(
+            raw.contains(&secret.secret[..held]),
+            "{name}: {held} bytes of the {} are not inside the cap",
+            secret.kind
+        );
+        assert!(
+            secret
+                .needles
+                .iter()
+                .any(|needle| raw.contains(needle.as_str())),
+            "{name}: no needle is inside the cap"
+        );
+        let shown = probe.file_text(&file)?;
+        // The member name is plain on purpose: a name like `key` makes the report walk replace the whole
+        // value, and the rule's own tag would never be seen.
+        observed.insert(format!("case {number}"), json!(evidence_of(&shown)));
     }
-    // What a careless check would copy: the machine id file, read as a plain file.
-    let denied = probe.read(Path::new("/etc/machine-id")).await;
-    let denied_text = match denied {
-        Ok(bytes) => String::from_utf8_lossy(&bytes.bytes).into_owned(),
-        Err(error) => error.to_string(),
-    };
+    let known = probe.read(Path::new(LOG)).await?;
+    let known_text = probe.file_text(&known)?.to_string();
+
+    // What a careless check would copy: the machine id file, read as a file or from its tail, on both
+    // paths. The policy refuses all four, and the refusal text is what a check would keep.
+    for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+        let whole = probe.read(Path::new(path)).await;
+        assert!(
+            matches!(whole, Err(ProbeError::Denied { .. })),
+            "{path}: {whole:?}"
+        );
+        let tail = probe.read_tail(Path::new(path), 4096).await;
+        assert!(
+            matches!(tail, Err(ProbeError::Denied { .. })),
+            "{path}: {tail:?}"
+        );
+        for (how, error) in [("read", whole.err()), ("tail", tail.err())] {
+            if let Some(error) = error {
+                observed.insert(format!("machine-id {path} {how}"), json!(error.to_string()));
+            }
+        }
+    }
+    // The native call is for the engine only, so a check's probe is refused.
+    let call = probe.native(NativeCall::MachineId).await;
+    assert!(matches!(call, Err(ProbeError::Denied { .. })), "{call:?}");
+    observed.insert("machine_id_call".to_owned(), json!(format!("{call:?}")));
 
     let mut doc = fixture_doc("b1-ready")?;
     doc["host"]["hostname"] = json!(format!("web-01 token={TOKEN}"));
-    doc["checks"][0]["message"] = json!(format!("read it: {}", evidence[3]));
-    doc["checks"][0]["observed"] = json!({
-        "pem": evidence[0],
-        "aws": evidence[1],
-        "url": evidence[2],
-        "machine_id_file": denied_text,
-    });
+    doc["checks"][0]["message"] = json!(format!("read it: {known_text}"));
+    doc["checks"][0]["observed"] = Value::Object(observed);
     doc["checks"][0]["notes"] = json!([format!("the known secret is {TOKEN}")]);
     doc["actions"] = if with_actions {
         serde_json::to_value(run.action_log().actions)?
@@ -417,11 +646,19 @@ async fn leaky_doc(with_actions: bool) -> TestResult<(Value, Vec<String>)> {
         json!([])
     };
 
-    let mut needles = vec![MACHINE_ID.to_owned()];
+    // CONTROL: the known secret is in the document before redaction, so the redactor has work to do.
+    assert!(doc.to_string().contains(TOKEN), "the token is not planted");
+    assert!(
+        !doc.to_string().contains(MACHINE_ID),
+        "the id reached the result before redaction"
+    );
+
+    let mut needles = windows(MACHINE_ID);
+    needles.push(MACHINE_ID.to_owned());
     needles.extend(windows(TOKEN));
-    needles.extend(windows(AWS_ID));
-    needles.extend(windows(USERINFO));
-    needles.extend(pem_body().iter().flat_map(|line| windows(line)));
+    for secret in &secrets {
+        needles.extend(secret.needles.iter().cloned());
+    }
     Ok((doc, needles))
 }
 
@@ -434,29 +671,29 @@ fn redact_normalized(doc: Value) -> TestResult<RedactedReport> {
     Ok(redactor.redact_report(report)?)
 }
 
-/// The HTML halves of M1-046 and M1-061: no machine id, no fragment of a secret the read cap cut and no
-/// known secret on the page, in the JSON it carries or in the written file. The planted fields are still
-/// shown, with the secret replaced, so the test does not pass because the page left them out.
+/// The HTML halves of M1-046 and M1-061: no machine id, no fragment of a secret the read cap cut or left
+/// whole just inside it, and no known secret on the page, in the JSON it carries or in the written file.
+/// The test can fail: the controls inside `leaky_doc` show the secrets are in the bytes the facade read,
+/// and the tags below show the page holds the replacements, so it does not pass because the page left
+/// the fields out.
 #[tokio::test(flavor = "current_thread")]
 async fn a_fixture_run_with_a_machine_id_cut_secrets_and_a_known_secret_leaves_none_on_the_page()
 -> TestResult {
     let (doc, needles) = leaky_doc(true).await?;
-    // The facade already holds the id back from a check, so it is not in the document yet.
-    assert!(
-        !doc.to_string().contains(MACHINE_ID),
-        "the id reached the result before redaction"
-    );
     let report = redact_normalized(doc)?;
     let html = render_html(&report)?;
-    let json = written(&report)?;
-    let json = String::from_utf8(json)?;
+    let json = String::from_utf8(written(&report)?)?;
     for needle in &needles {
         assert!(!html.contains(needle.as_str()), "{needle} is on the page");
         assert!(!json.contains(needle.as_str()), "{needle} is in the file");
     }
-    assert!(html.contains("[REDACTED:"), "nothing was replaced");
+    // One replacement tag per kind of secret that lay whole inside the cap, and for the known secret.
+    for secret in secrets() {
+        let tag = format!("[REDACTED:{}", secret.rule);
+        assert!(html.contains(&tag), "no {tag} for the {}", secret.kind);
+    }
+    assert!(html.contains("[REDACTED:known_secret"));
     assert!(html.contains("web-01 token="));
-    assert!(html.contains("known_secret"));
     assert_static("leaky run", &html)?;
     assert_valid("leaky run", &json)?;
     Ok(())
