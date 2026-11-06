@@ -153,7 +153,17 @@ async fn match_conditions_make_the_empty_backend_a_warning_that_says_not_evaluat
         finding.observed["webhooks"]["applying"][0]["applies"],
         "maybe"
     );
-    assert_eq!(engine(&rig, finding, None).status, Status::Warn);
+    // Warn and partial: the doubt is named as not evaluated.
+    let partial = finding.partial.clone().expect("partial");
+    assert!(
+        partial
+            .note
+            .contains("its matchConditions may exempt the pod: not evaluated"),
+        "{partial:?}"
+    );
+    let result = engine(&rig, finding, None);
+    assert_eq!(result.status, Status::Warn);
+    assert!(result.partial.is_some());
     rig.audit();
 }
 
@@ -435,7 +445,26 @@ async fn the_policies_of_both_engines_are_named() {
     ] {
         assert!(!notes.contains(left_out), "{left_out}: {notes}");
     }
-    assert!(notes.contains("Their rules were not evaluated."), "{notes}");
+    assert!(notes.contains("Their rules were not evaluated,"), "{notes}");
+    // An `exclude` block or per-namespace overrides make a Kyverno policy "may apply" (K3).
+    assert!(
+        notes.contains("Kyverno ClusterPolicy require-owner (may apply)"),
+        "{notes}"
+    );
+    assert!(
+        notes.contains("Kyverno ClusterPolicy override-enforce (may apply)"),
+        "{notes}"
+    );
+    // A scoped `deny` rejects only at the admission point (K1).
+    assert!(
+        notes.contains("Gatekeeper K8sRequiredLabels scoped-admission"),
+        "{notes}"
+    );
+    assert!(!notes.contains("scoped-audit"), "{notes}");
+    // Warn through the engine, and nothing partial.
+    let result = engine(&rig, finding.clone(), None);
+    assert_eq!(result.status, Status::Warn);
+    assert!(result.partial.is_none());
     let lists = finding.observed["engine_policies"]
         .as_array()
         .expect("lists");
@@ -461,14 +490,19 @@ async fn forbidden_policy_lists_of_the_engines_are_partial_and_never_a_block() {
     let finding = rig.finding(spec()).await;
     // The engine is still found, so the level is the engine's warn.
     assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    // One grant per list, so each constraint kind keeps its own `can-i` command (R6).
     assert_eq!(
         grants(&finding),
         [
             "list clusterpolicies.kyverno.io",
             "list validatingpolicies.policies.kyverno.io",
-            "list constraints.gatekeeper.sh"
+            "list k8sallowedrepos.constraints.gatekeeper.sh",
+            "list k8srequiredlabels.constraints.gatekeeper.sh"
         ]
     );
+    let result = engine(&rig, finding.clone(), None);
+    assert_eq!(result.status, Status::Warn);
+    assert_eq!(result.partial.expect("partial").missing_grants.len(), 4);
     let partial = finding.partial.clone().expect("partial");
     assert!(
         partial
@@ -477,10 +511,14 @@ async fn forbidden_policy_lists_of_the_engines_are_partial_and_never_a_block() {
         "{partial:?}"
     );
     let fix = finding.fix.clone().expect("a fix");
-    assert!(
-        fix.contains("`kubectl auth can-i list k8sallowedrepos.constraints.gatekeeper.sh`"),
-        "{fix}"
-    );
+    for kind in ["k8sallowedrepos", "k8srequiredlabels"] {
+        assert!(
+            fix.contains(&format!(
+                "`kubectl auth can-i list {kind}.constraints.gatekeeper.sh`"
+            )),
+            "{fix}"
+        );
+    }
     rig.audit();
 }
 
@@ -538,6 +576,33 @@ async fn at_most_six_constraint_kinds_are_listed_and_real_kinds_come_first() {
             .expect("lists")
             .len()
             == 6
+    );
+    // Sixteen kinds, six listed: the ten left out are counted in the result (K2).
+    let partial = finding.partial.expect("partial");
+    assert!(
+        partial.note.contains(
+            "rdy lists at most 6 Gatekeeper constraint kinds and 8 policy lists, so 10 more were not listed and their policies are not evaluated"
+        ),
+        "{partial:?}"
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn kyverno_cel_policies_are_read_in_v1alpha1_too() {
+    // Kyverno 1.14 and 1.15 serve `policies.kyverno.io` only as `v1alpha1`.
+    let rig = rig("kyverno-cel-alpha");
+    let finding = rig.finding(spec()).await;
+    assert!(
+        rig.every_path()
+            .iter()
+            .any(|p| p == "/apis/policies.kyverno.io/v1alpha1/validatingpolicies"),
+        "{:?}",
+        rig.every_path()
+    );
+    assert!(
+        notes(&finding).contains("Kyverno ValidatingPolicy no-host-network"),
+        "{finding:?}"
     );
     rig.audit();
 }

@@ -121,9 +121,11 @@ fn the_role_never_writes_reads_secrets_or_uses_a_wildcard() {
         r#"{"apiGroups":["constraints.gatekeeper.sh"],"resources":["*"],"verbs":["list"]}"#,
         "",
     );
-    assert_ne!(
-        text, without_gatekeeper,
-        "the Gatekeeper rule is there, as one rule"
+    let rule = r#"{"apiGroups":["constraints.gatekeeper.sh"],"resources":["*"],"verbs":["list"]}"#;
+    assert_eq!(
+        text.matches(rule).count(),
+        1,
+        "the Gatekeeper rule is there, once"
     );
     assert!(
         !without_gatekeeper.contains('*'),

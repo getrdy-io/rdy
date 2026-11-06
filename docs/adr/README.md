@@ -46,7 +46,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0039](0039-kind-job-supported-minors-and-gate.md) | The kind job runs the oldest and newest Kubernetes minors that upstream still patches, in a separate workflow that does not gate merges | Proposed, for the founder to decide the gate |
 | [0040](0040-read-link-and-the-fd-walk.md) | The facade reads links with `read_link`, judges the link where it sits, and opens `/proc/<pid>/fd` to a declared walk that returns sockets only | Accepted, security-reviewed (PR #10, was #153) |
 | [0041](0041-repository-recreated-pr-numbers-restarted.md) | Repository recreated on 2026-10-30; PR numbers restarted | Accepted, code-reviewed (PR #16) |
-| [0042](0042-guard-entry-for-every-resource-of-the-gatekeeper-constraints-group.md) | The read guard admits a list of every resource in `constraints.gatekeeper.sh/v1beta1` | Proposed, for the security-reviewer (M1-160) |
+| [0042](0042-guard-entry-for-every-resource-of-the-gatekeeper-constraints-group.md) | The read guard admits a list of every resource in `constraints.gatekeeper.sh/v1beta1` | Accepted, security-reviewed (PR #48) |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.

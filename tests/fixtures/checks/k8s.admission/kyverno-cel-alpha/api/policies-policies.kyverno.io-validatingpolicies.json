@@ -1,0 +1,53 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/policies.kyverno.io/v1alpha1/validatingpolicies",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "policies.kyverno.io/v1alpha1",
+    "kind": "ValidatingPolicyList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "policies.kyverno.io/v1",
+        "kind": "ValidatingPolicy",
+        "metadata": {
+          "name": "no-host-network"
+        },
+        "spec": {
+          "validationActions": [
+            "Deny"
+          ],
+          "matchConstraints": {
+            "resourceRules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE"
+                ],
+                "resources": [
+                  "pods"
+                ]
+              }
+            ]
+          },
+          "validations": [
+            {
+              "expression": "object.spec.hostNetwork != true",
+              "message": "no host network"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

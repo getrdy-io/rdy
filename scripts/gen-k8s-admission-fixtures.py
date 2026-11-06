@@ -776,22 +776,29 @@ def policy_list(case_name, group_name, version, kind, plural, items, code=200, m
     )
 
 
-def kyverno_policy(name, action="Enforce", kinds=("Pod",), namespaces=None, rule_action=None):
+def kyverno_policy(name, action="Enforce", kinds=("Pod",), namespaces=None, rule_action=None, exclude=None, overrides=None):
     resources = {"kinds": list(kinds)}
     if namespaces:
         resources["namespaces"] = namespaces
     validate = {"message": "needs a label", "pattern": {"metadata": {"labels": {"owner": "?*"}}}}
     if rule_action:
         validate["failureAction"] = rule_action
+    rule = {"name": "check-owner", "match": {"any": [{"resources": resources}]}, "validate": validate}
+    if exclude:
+        rule["exclude"] = exclude
+    spec = {
+        "validationFailureAction": action,
+        "background": True,
+        "admission": True,
+        "rules": [rule],
+    }
+    if overrides:
+        spec["validationFailureActionOverrides"] = overrides
     return {
         "apiVersion": "kyverno.io/v1",
         "kind": "ClusterPolicy",
         "metadata": {"name": name},
-        "spec": {
-            "validationFailureAction": action,
-            "background": True,
-            "rules": [{"name": "check-owner", "match": {"any": [{"resources": resources}]}, "validate": validate}],
-        },
+        "spec": spec,
     }
 
 
@@ -810,12 +817,14 @@ def cel_policy(name, actions=("Deny",)):
     }
 
 
-def constraint(kind, name, action=None, namespaces=None, kinds=None):
+def constraint(kind, name, action=None, namespaces=None, kinds=None, scoped=None):
     spec = {"match": {"kinds": kinds or [{"apiGroups": [""], "kinds": ["Pod"]}]}, "parameters": {"labels": ["owner"]}}
     if namespaces:
         spec["match"]["namespaces"] = namespaces
     if action:
         spec["enforcementAction"] = action
+    if scoped:
+        spec["scopedEnforcementActions"] = scoped
     return {
         "apiVersion": "constraints.gatekeeper.sh/v1beta1",
         "kind": kind,
@@ -835,7 +844,8 @@ kinds("engine-policies", "constraints.gatekeeper.sh", "v1beta1", CONSTRAINTS)
 policy_list(
     "engine-policies", "kyverno.io", "v1", "ClusterPolicy", "clusterpolicies",
     [
-        kyverno_policy("require-owner", namespaces=["acme-*"]),
+        kyverno_policy("require-owner", namespaces=["acme-*"], exclude={"any": [{"resources": {"namespaces": ["kube-system"]}}]}),
+        kyverno_policy("override-enforce", action="Audit", overrides=[{"action": "Enforce", "namespaces": ["acme-system"]}]),
         kyverno_policy("audit-only", action="Audit"),
         kyverno_policy("deployments-only", kinds=("Deployment",)),
         kyverno_policy("other-namespace", namespaces=["other-*"]),
@@ -849,7 +859,12 @@ policy_list(
 )
 policy_list(
     "engine-policies", "constraints.gatekeeper.sh", "v1beta1", "K8sRequiredLabels", "k8srequiredlabels",
-    [constraint("K8sRequiredLabels", "labels-everywhere", action="deny"), constraint("K8sRequiredLabels", "labels-other", namespaces=["other"])],
+    [
+        constraint("K8sRequiredLabels", "labels-everywhere", action="deny"),
+        constraint("K8sRequiredLabels", "labels-other", namespaces=["other"]),
+        constraint("K8sRequiredLabels", "scoped-audit", action="scoped", scoped=[{"action": "deny", "enforcementPoints": [{"name": "audit"}]}]),
+        constraint("K8sRequiredLabels", "scoped-admission", action="scoped", scoped=[{"action": "deny", "enforcementPoints": [{"name": "validation.gatekeeper.sh"}]}, {"action": "warn", "enforcementPoints": [{"name": "audit"}]}]),
+    ],
 )
 
 case("engine-policies-forbidden", "Kyverno and Gatekeeper are installed and the identity may not list their policies")
@@ -871,6 +886,13 @@ namespace("kyverno-exception-only", dict({PSA + "enforce": "baseline"}, **NS_LAB
 kinds("kyverno-exception-only", "kyverno.io", "v2", EXCEPTION)
 
 
+case("kyverno-cel-alpha", "Kyverno 1.14 or 1.15: policies.kyverno.io serves ValidatingPolicy only as v1alpha1")
+apis("kyverno-cel-alpha", [("policies.kyverno.io", ["v1alpha1"])])
+namespace("kyverno-cel-alpha", dict({PSA + "enforce": "baseline"}, **NS_LABELS))
+kinds("kyverno-cel-alpha", "policies.kyverno.io", "v1alpha1", KYVERNO_CEL)
+policy_list("kyverno-cel-alpha", "policies.kyverno.io", "v1alpha1", "ValidatingPolicy", "validatingpolicies", [cel_policy("no-host-network")])
+
+
 # ---- the lists every case needs ---------------------------------------------------------------------------------
 
 
@@ -883,7 +905,7 @@ def planned(group_name, version, resources):
     cluster = [r for r in resources if not r[2]]
     if (group_name, version) == ("kyverno.io", "v1"):
         return [r for r in cluster if (r[0], r[1]) == ("ClusterPolicy", "clusterpolicies")]
-    if group_name == "policies.kyverno.io" and version in ("v1", "v1beta1"):
+    if group_name == "policies.kyverno.io" and version in ("v1", "v1beta1", "v1alpha1"):
         return [r for r in cluster if (r[0], r[1]) in (("ValidatingPolicy", "validatingpolicies"), ("ImageValidatingPolicy", "imagevalidatingpolicies"))]
     if (group_name, version) == ("constraints.gatekeeper.sh", "v1beta1"):
         shaped = [r for r in cluster if re.fullmatch(r"[a-z0-9]{1,63}", r[1])]

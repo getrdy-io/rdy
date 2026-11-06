@@ -294,8 +294,8 @@ pub(super) fn judge(webhooks: &Webhooks, labels: &NsLabels, ns: Option<&str>) ->
         (ConfigKind::Mutating, &webhooks.mutating),
     ] {
         match read {
-            Read::Ok(listed) if listed.cut => part.notes.push(format!(
-                "Only the first {} {} webhook configurations were read. A webhook on a later page is not evaluated.",
+            Read::Ok(listed) if listed.cut => part.unverified.push(format!(
+                "only the first {} {} webhook configurations were read, so a webhook on a later page is not evaluated",
                 super::PAGE,
                 kind.word()
             )),
@@ -431,6 +431,10 @@ fn judge_service(
         } else {
             "the namespace labels, which were not read,"
         };
+        // Warn and partial: the doubt is the unread part, and the result says it was not evaluated.
+        part.unverified.push(format!(
+            "{label} fails closed and {problem}, and {why} may exempt the pod: not evaluated"
+        ));
         part.issues.push(Issue {
             level: Level::Warn,
             message: format!(

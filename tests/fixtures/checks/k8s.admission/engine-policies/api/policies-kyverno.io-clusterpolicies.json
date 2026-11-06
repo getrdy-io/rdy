@@ -21,6 +21,7 @@
         "spec": {
           "validationFailureAction": "Enforce",
           "background": true,
+          "admission": true,
           "rules": [
             {
               "name": "check-owner",
@@ -47,7 +48,64 @@
                     }
                   }
                 }
+              },
+              "exclude": {
+                "any": [
+                  {
+                    "resources": {
+                      "namespaces": [
+                        "kube-system"
+                      ]
+                    }
+                  }
+                ]
               }
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "kyverno.io/v1",
+        "kind": "ClusterPolicy",
+        "metadata": {
+          "name": "override-enforce"
+        },
+        "spec": {
+          "validationFailureAction": "Audit",
+          "background": true,
+          "admission": true,
+          "rules": [
+            {
+              "name": "check-owner",
+              "match": {
+                "any": [
+                  {
+                    "resources": {
+                      "kinds": [
+                        "Pod"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "validate": {
+                "message": "needs a label",
+                "pattern": {
+                  "metadata": {
+                    "labels": {
+                      "owner": "?*"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "validationFailureActionOverrides": [
+            {
+              "action": "Enforce",
+              "namespaces": [
+                "acme-system"
+              ]
             }
           ]
         }
@@ -61,6 +119,7 @@
         "spec": {
           "validationFailureAction": "Audit",
           "background": true,
+          "admission": true,
           "rules": [
             {
               "name": "check-owner",
@@ -98,6 +157,7 @@
         "spec": {
           "validationFailureAction": "Enforce",
           "background": true,
+          "admission": true,
           "rules": [
             {
               "name": "check-owner",
@@ -135,6 +195,7 @@
         "spec": {
           "validationFailureAction": "Enforce",
           "background": true,
+          "admission": true,
           "rules": [
             {
               "name": "check-owner",
@@ -175,6 +236,7 @@
         "spec": {
           "validationFailureAction": "Audit",
           "background": true,
+          "admission": true,
           "rules": [
             {
               "name": "check-owner",

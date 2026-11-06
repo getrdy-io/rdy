@@ -1,6 +1,6 @@
 # ADR 0042: The read guard admits a list of every resource in `constraints.gatekeeper.sh/v1beta1`
 
-- Status: Proposed, for the security-reviewer (M1-160)
+- Status: Accepted, security-reviewed (PR #48)
 - Date: 2026-11-06
 
 ## Context
@@ -21,10 +21,17 @@ well-known constraint kinds in the table, or admit the whole group.
    The guard matches it for any resource name of that group and version. No get by name, no namespaced
    list, no other version, no subresource. The `secrets` rule runs before the table and still refuses a
    path with that segment.
-2. **Why it is safe.** The group is created by Gatekeeper's `ConstraintTemplate` controller and holds
-   constraints, which are policy objects (`match`, `enforcementAction`, `parameters`). It holds no Secret
-   and no workload. The check keeps the name, kind, enforcement action and match fields, and drops
-   `parameters`.
+2. **Why it is acceptable, and what is left over.** The group is created by Gatekeeper's
+   `ConstraintTemplate` controller and holds constraints, which are policy objects (`match`,
+   `enforcementAction`, `parameters`). Nothing enforces that it holds only constraints: any cluster admin
+   can add a CRD in a group with that name. The check keeps the name, kind, enforcement action and match
+   fields, and drops `parameters` while reading. The token itself is not so limited. In the same terms as
+   the pod environment warning in the role file, a `list` returns the whole object, so this identity can
+   also see Gatekeeper `parameters`, the audit messages in `status.violations` (which can quote fields of
+   audited objects), and Kyverno `ClusterPolicy` rules, including `generate.data`, which often holds
+   registry credentials. Keep the token short lived. A reader who wants a stricter role replaces `*` with
+   the plurals from `kubectl get crd -l gatekeeper.sh/constraint=yes`; the check then reads those kinds and
+   reports the others as not evaluated.
 3. **The role grants the same.** `rdy-readonly.yaml` gets one rule with `resources: ["*"]` in the group
    `constraints.gatekeeper.sh`, verb `list`. The role test now allows `*` in exactly that rule and nowhere
    else, and it still equals the table.

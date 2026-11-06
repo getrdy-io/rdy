@@ -126,17 +126,31 @@ pub enum FieldSelector {
     Key(&'static str),
     /// This exact term, with `=` or `==` (`involvedObject.kind=PersistentVolumeClaim`).
     Equals(&'static str, &'static str),
+    /// The `labelSelector` (not the field selector) must hold a term `key=value` or `key==value` on this
+    /// key, with a value. Used for `endpointslices`, so a list names one Service and not every slice.
+    LabelEquals(&'static str),
 }
 
 impl FieldSelector {
-    /// True when `decoded` (the value of the `fieldSelector` key) meets the requirement.
-    fn met_by(self, decoded: Option<&str>) -> bool {
+    /// True when `decoded` (the value of the `fieldSelector` key) and `labels` (the value of the
+    /// `labelSelector` key) meet the requirement.
+    fn met_by(self, decoded: Option<&str>, labels: Option<&str>) -> bool {
+        if let Self::LabelEquals(key) = self {
+            return labels
+                .into_iter()
+                .flat_map(|text| text.split(','))
+                .any(|term| {
+                    term.strip_prefix(key)
+                        .and_then(|rest| rest.strip_prefix("==").or_else(|| rest.strip_prefix('=')))
+                        .is_some_and(|value| !value.is_empty())
+                });
+        }
         let mut terms = decoded
             .into_iter()
             .flat_map(|text| text.split(','))
             .filter_map(split_term);
         match self {
-            Self::NotRequired => true,
+            Self::NotRequired | Self::LabelEquals(_) => true,
             Self::Key(key) => terms.any(|(k, _, _)| k == key),
             Self::Equals(key, value) => {
                 terms.any(|(k, op, v)| k == key && matches!(op, "=" | "==") && v == value)
@@ -325,7 +339,7 @@ pub const ALLOWED: &[Allowed] = &[
         resource: "validatingadmissionpolicies",
         access: &[Access::List],
         checks: &["k8s.admission"],
-        reads: "name, match constraints, match conditions and failurePolicy; the CEL expressions are dropped",
+        reads: "name, match constraints, match conditions and whether it has validations; the CEL expressions are dropped",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -353,7 +367,7 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::ListInNamespace(Only::Any)],
         checks: &["k8s.admission"],
         reads: "the ready condition of the endpoints behind one webhook Service, found by its service-name label",
-        field_selector: FieldSelector::NotRequired,
+        field_selector: FieldSelector::LabelEquals("kubernetes.io/service-name"),
     },
     Allowed {
         group: "kyverno.io",
@@ -398,6 +412,24 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::List],
         checks: &["k8s.admission"],
         reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1alpha1",
+        resource: "validatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints (Kyverno 1.14 and 1.15)",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1alpha1",
+        resource: "imagevalidatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints (Kyverno 1.14 and 1.15)",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -585,8 +617,12 @@ pub(crate) fn judge(
         if !matches!(body, BodyView::Empty) {
             return Err(RULE_GET_BODY);
         }
-        let field_selector = check_query(uri.query())?;
-        check_get(&segments, field_selector.as_deref())
+        let (field_selector, label_selector) = check_query(uri.query())?;
+        check_get(
+            &segments,
+            field_selector.as_deref(),
+            label_selector.as_deref(),
+        )
     } else {
         check_post(&segments, uri.query(), body)
     }
@@ -728,15 +764,15 @@ fn path_segments(uri: &Uri) -> Result<Vec<&str>, &'static str> {
 /// Allows the keys `limit`, `continue`, `labelSelector` and `fieldSelector`, once each, with plain
 /// values. Every value is decoded once, as the server does, and the decoded text is checked: a `continue`
 /// token, a label selector and a field selector each have a short character set, so a `%26`, `%00`, `%25`
-/// or `%5C` cannot carry anything the raw text hid. Returns the decoded `fieldSelector` for the selector
-/// rule of the resource.
-fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
+/// or `%5C` cannot carry anything the raw text hid. Returns the decoded `fieldSelector` and `labelSelector`
+/// for the selector rule of the resource.
+fn check_query(query: Option<&str>) -> Result<(Option<String>, Option<String>), &'static str> {
     // kube writes a bare `?` when there are no parameters, and a `&` before the first one (`?&limit=5`).
     let Some(query) = query
         .map(|query| query.strip_prefix('&').unwrap_or(query))
         .filter(|query| !query.is_empty())
     else {
-        return Ok(None);
+        return Ok((None, None));
     };
     if query.len() > MAX_QUERY {
         return Err(RULE_QUERY);
@@ -747,6 +783,7 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
         return Err(RULE_QUERY);
     }
     let mut field_selector = None;
+    let mut label_selector = None;
     // A key twice is ambiguous: the server reads the first, a proxy may read the last.
     let mut seen: Vec<&str> = Vec::new();
     for pair in query.split('&') {
@@ -768,7 +805,9 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
             }
             "labelSelector" => {
                 check_query_value(value)?;
-                check_label_selector(&decode_query_value(value)?)?;
+                let decoded = decode_query_value(value)?;
+                check_label_selector(&decoded)?;
+                label_selector = Some(decoded);
             }
             "fieldSelector" => {
                 check_query_value(value)?;
@@ -779,7 +818,7 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
             _ => return Err(RULE_QUERY),
         }
     }
-    Ok(field_selector)
+    Ok((field_selector, label_selector))
 }
 
 /// The longest decoded `continue` token, label selector or field selector.
@@ -952,7 +991,11 @@ fn entry_of(info: &RequestInfo<'_>) -> Option<&'static Allowed> {
     })
 }
 
-fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'static str> {
+fn check_get(
+    segments: &[&str],
+    field_selector: Option<&str>,
+    label_selector: Option<&str>,
+) -> Result<(), &'static str> {
     if is_discovery(segments) {
         return Ok(());
     }
@@ -976,7 +1019,7 @@ fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'st
         return Err(RULE_NOT_ALLOWED);
     }
     // A list (no name) must carry the field selector its entry names. A get by name needs none.
-    if info.name.is_none() && !entry.field_selector.met_by(field_selector) {
+    if info.name.is_none() && !entry.field_selector.met_by(field_selector, label_selector) {
         return Err(RULE_SELECTOR);
     }
     Ok(())

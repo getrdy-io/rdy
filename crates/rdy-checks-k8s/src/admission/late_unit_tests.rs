@@ -12,6 +12,7 @@ use super::judge::judge;
 use super::matching::{self, Applies, NsLabels, Rule};
 use super::policies::{self, ApiKind, PolicyFact, PolicyList, PolicyRead};
 use super::unit_tests::{clean, facts, need, params, plain};
+use super::vap;
 use super::webhooks::{
     Backend, BackendState, ConfigKind, ReadGrant, ServiceRead, Webhook, safe_name,
 };
@@ -372,13 +373,13 @@ fn a_cut_webhook_list_is_said() {
         cut: true,
     });
     let finding = judged(&gathered);
+    // A cut list is partial: a webhook on the next page is not evaluated (R4).
     assert!(
         finding
-            .notes
-            .iter()
-            .any(|note| note
-                .contains("Only the first 500 validating webhook configurations were read")),
-        "{finding:?}"
+            .partial
+            .expect("partial")
+            .note
+            .contains("only the first 500 validating webhook configurations were read"),
     );
 }
 
@@ -648,7 +649,11 @@ fn the_lists_follow_the_kinds_that_discovery_showed() {
         policies::plan("policies.kyverno.io", "v1beta1", &cel).len(),
         2
     );
-    assert!(policies::plan("policies.kyverno.io", "v1alpha1", &cel).is_empty());
+    assert_eq!(
+        policies::plan("policies.kyverno.io", "v1alpha1", &cel).len(),
+        2
+    );
+    assert!(policies::plan("policies.kyverno.io", "v2", &cel).is_empty());
     // Templates are not constraints.
     assert!(
         policies::plan(
@@ -676,17 +681,11 @@ fn gatekeeper_lists_are_capped_and_a_hostile_kind_comes_last() {
     kinds.push(kind("Bad", "bad`plural", false));
     let planned = policies::plan("constraints.gatekeeper.sh", "v1beta1", &kinds);
     let plurals: Vec<&str> = planned.iter().map(|l| l.plural.as_str()).collect();
-    assert_eq!(
-        plurals,
-        [
-            "k8scheck00",
-            "k8scheck01",
-            "k8scheck02",
-            "k8scheck03",
-            "k8scheck04",
-            "k8scheck05"
-        ]
-    );
+    // The planner lists every kind, real ones first; the reader applies the cap and counts the rest.
+    assert_eq!(plurals.len(), 11, "{plurals:?}");
+    assert_eq!(plurals[0], "k8scheck00");
+    assert_eq!(plurals[9], "k8scheck09");
+    assert_eq!(plurals[10], "aaaevil");
     assert!(policies::plan("constraints.gatekeeper.sh", "v1alpha1", &kinds).is_empty());
 }
 
@@ -740,6 +739,147 @@ fn engine_lists_that_are_skipped_are_said() {
     });
     let finding = judged(&gathered);
     let notes = finding.notes.join("\n");
-    assert!(notes.contains("so 3 more were not listed"), "{notes}");
+    assert!(
+        finding
+            .partial
+            .expect("partial")
+            .note
+            .contains("so 3 more were not listed and their policies are not evaluated")
+    );
     assert!(notes.contains("none that rejects can apply"), "{notes}");
+}
+
+// ---- K1, K3, K5, K6 ---------------------------------------------------------------------------------------
+
+#[test]
+fn a_scoped_gatekeeper_deny_rejects_only_at_the_admission_point() {
+    let l = list(
+        "constraints.gatekeeper.sh",
+        "v1beta1",
+        "K8sRequiredLabels",
+        "k8srequiredlabels",
+    );
+    let known = labels(&[]);
+    let scoped = |points: Value| {
+        let mut entry = json!({"action": "deny"});
+        if !points.is_null() {
+            entry["enforcementPoints"] = points;
+        }
+        fact_of(
+            &l,
+            json!({"spec": {"enforcementAction": "scoped", "scopedEnforcementActions": [entry]}}),
+            &known,
+        )
+        .enforcing
+    };
+    assert!(scoped(json!([{"name": "validation.gatekeeper.sh"}])));
+    assert!(scoped(json!([{"name": "*"}])));
+    // No points listed is the default.
+    assert!(scoped(Value::Null));
+    assert!(scoped(json!([])));
+    assert!(!scoped(json!([{"name": "audit"}])));
+    assert!(!scoped(json!([{"name": "gator.gatekeeper.sh"}])));
+}
+
+#[test]
+fn kyverno_exclusions_overrides_names_and_switches_make_a_policy_a_maybe() {
+    let l = list("kyverno.io", "v1", "ClusterPolicy", "clusterpolicies");
+    let known = labels(&[]);
+    let base = |extra_spec: Value, extra_rule: Value| {
+        let mut spec = json!({"validationFailureAction": "Enforce", "rules": [
+            {"name": "r", "match": {"any": [{"resources": {"kinds": ["Pod"]}}]}, "validate": {}}
+        ]});
+        for (k, v) in extra_spec.as_object().into_iter().flatten() {
+            spec[k] = v.clone();
+        }
+        for (k, v) in extra_rule.as_object().into_iter().flatten() {
+            spec["rules"][0][k] = v.clone();
+        }
+        fact_of(&l, json!({"spec": spec}), &known)
+    };
+    assert_eq!(base(json!({}), json!({})).applies, Applies::Yes);
+    let exclude = json!({"exclude": {"any": [{"resources": {"namespaces": ["kube-system"]}}]}});
+    assert_eq!(base(json!({}), exclude).applies, Applies::Maybe);
+    let named = json!({"match": {"any": [{"resources": {"kinds": ["Pod"], "names": ["web-*"]}}]}});
+    assert_eq!(base(json!({}), named).applies, Applies::Maybe);
+    let off = json!({"evaluation": {"admission": {"enabled": false}}});
+    assert_eq!(base(off, json!({})).applies, Applies::Maybe);
+    // Overrides can flip Audit to Enforce in a namespace.
+    let flipped = base(
+        json!({"validationFailureAction": "Audit", "validationFailureActionOverrides": [{"action": "Enforce", "namespaces": ["acme-*"]}]}),
+        json!({}),
+    );
+    assert!(flipped.enforcing);
+    assert_eq!(flipped.applies, Applies::Maybe);
+    let audit_only = base(
+        json!({"validationFailureAction": "Audit", "validationFailureActionOverrides": [{"action": "Audit", "namespaces": ["x"]}]}),
+        json!({}),
+    );
+    assert!(!audit_only.enforcing);
+}
+
+#[test]
+fn gatekeeper_name_and_ignore_label_make_a_constraint_a_maybe() {
+    let l = list(
+        "constraints.gatekeeper.sh",
+        "v1beta1",
+        "K8sRequiredLabels",
+        "k8srequiredlabels",
+    );
+    let named = fact_of(
+        &l,
+        json!({"spec": {"match": {"name": "web-*"}}}),
+        &labels(&[]),
+    );
+    assert_eq!(named.applies, Applies::Maybe);
+    let ignored = fact_of(
+        &l,
+        json!({"spec": {}}),
+        &labels(&[("admission.gatekeeper.sh/ignore", "no-self-managing")]),
+    );
+    assert_eq!(ignored.applies, Applies::Maybe);
+}
+
+fn vap_found(policy_validations: bool, cut: bool, binding_policy: &str) -> vap::Policies {
+    let constraints: MatchResources = serde_json::from_value(json!({"resourceRules": [
+        {"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE"], "resources": ["pods"]}
+    ]}))
+    .expect("constraints");
+    vap::Policies {
+        policies: Read::Ok(Listed {
+            items: vec![vap::Policy {
+                name: "p".to_owned(),
+                constraints: Some(constraints),
+                conditions: false,
+                validations: policy_validations,
+            }],
+            cut,
+        }),
+        bindings: Some(Read::Ok(Listed {
+            items: vec![vap::Binding {
+                name: "b".to_owned(),
+                policy: binding_policy.to_owned(),
+                deny: true,
+                resources: None,
+            }],
+            cut: false,
+        })),
+    }
+}
+
+#[test]
+fn a_policy_with_no_validations_cannot_reject_and_a_binding_off_the_page_is_kept() {
+    let denying =
+        |found: &vap::Policies| vap::judge(found, &labels(&[]), Some("acme")).issues.len();
+    assert_eq!(denying(&vap_found(true, false, "p")), 1);
+    // No validations: audit annotations only, nothing to reject with.
+    assert_eq!(denying(&vap_found(false, false, "p")), 0);
+    // The policy of the binding is not on the page that was read: a maybe, and the cut is partial.
+    let off_page = vap_found(true, true, "elsewhere");
+    let part = vap::judge(&off_page, &labels(&[]), Some("acme"));
+    assert_eq!(part.issues.len(), 1);
+    assert!(part.issues[0].message.contains("(may apply)"));
+    assert!(!part.unverified.is_empty());
+    // Not cut and the policy is missing: a binding to nothing rejects nothing.
+    assert_eq!(denying(&vap_found(true, false, "elsewhere")), 0);
 }

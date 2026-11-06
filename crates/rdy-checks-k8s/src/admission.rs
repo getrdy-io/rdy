@@ -97,6 +97,14 @@ use webhooks::{BackendState, ReadGrant, ServiceRead, Webhooks};
 /// The most SCCs one read asks for. A longer list is read as its first page.
 const PAGE: u32 = 500;
 
+/// The most requests one run makes: the namespace, `/apis`, up to four group versions and the legacy
+/// Kyverno one, the SCC list (8 in all, M1-114); both webhook lists and both admission policy lists; a
+/// Service list and a slice list for each of [`webhooks::MAX_SERVICES`] Services; and the policy lists.
+#[cfg(test)]
+const MAX_REQUESTS: usize = 8 + 2 + 2 + 2 * webhooks::MAX_SERVICES + policies::MAX_LISTS;
+#[cfg(test)]
+const _: () = assert!(MAX_REQUESTS == 36);
+
 /// The most names a sentence lists from one list.
 const LISTED: usize = 8;
 
@@ -438,7 +446,7 @@ impl AdmissionCheck {
             } else if !(webhooks::safe_name(&namespace) && webhooks::safe_name(&name)) {
                 BackendState::BadName
             } else {
-                read_backend(mapper, client, &namespace, &name).await?
+                read_backend(mapper, client, ctx, &namespace, &name).await?
             };
             services.push(ServiceRead {
                 namespace,
@@ -581,6 +589,7 @@ where
 async fn read_backend(
     mapper: Mapper<'_>,
     client: &ReadOnlyClient,
+    ctx: &CheckContext,
     namespace: &str,
     name: &str,
 ) -> Result<BackendState, CheckError> {
@@ -613,6 +622,9 @@ async fn read_backend(
             Some(_) => {}
         },
         other => return Ok(unread(&other.map(|_| ()), ReadGrant::Services)),
+    }
+    if out_of_time(ctx) {
+        return Ok(BackendState::NotAsked);
     }
     let slices = read(
         mapper,
@@ -706,11 +718,30 @@ async fn read_engine_policies(
         .flat_map(|engine| &engine.groups)
         .flat_map(|group| &group.lists)
         .collect();
+    // The caps: constraint kinds first (the planner sorts real kinds first), then all lists. What is left
+    // out is counted, so the result says what it did not evaluate.
+    let mut skipped = 0;
+    let mut constraint_kinds = 0;
+    let mut chosen: Vec<&PolicyList> = Vec::new();
+    for list in planned {
+        if list.group == "constraints.gatekeeper.sh" {
+            if constraint_kinds >= policies::MAX_CONSTRAINT_KINDS {
+                skipped += 1;
+                continue;
+            }
+            constraint_kinds += 1;
+        }
+        if chosen.len() >= policies::MAX_LISTS {
+            skipped += 1;
+            continue;
+        }
+        chosen.push(list);
+    }
     let mut found = EnginePolicies {
         reads: Vec::new(),
-        skipped: planned.len().saturating_sub(policies::MAX_LISTS),
+        skipped,
     };
-    for list in planned.into_iter().take(policies::MAX_LISTS) {
+    for list in chosen {
         let resource = ApiResource::from_gvk_with_plural(
             &GroupVersionKind::gvk(list.group, &list.version, &list.kind),
             &list.plural,

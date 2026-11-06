@@ -1225,7 +1225,10 @@ async fn every_request_is_a_get_and_every_cluster_is_audited() {
             finding.message
         );
         let paths = rig.every_path();
-        assert!(paths.len() <= 36, "{case}: at most 36 requests: {paths:?}");
+        assert!(
+            paths.len() <= MAX_REQUESTS,
+            "{case}: at most {MAX_REQUESTS} requests: {paths:?}"
+        );
         assert!(
             !paths.iter().any(|path| path.contains("secrets")),
             "{case}: {paths:?}"

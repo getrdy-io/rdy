@@ -94,8 +94,12 @@ rules:
     resources: ["validatingpolicies", "imagevalidatingpolicies"]
     verbs: ["list"]
   # The one wildcard in this file (ADR 0042). Each Gatekeeper ConstraintTemplate creates a constraint kind
-  # with a name the template author chooses, so the kinds cannot be listed here. The group holds nothing
-  # but constraints.
+  # with a name the template author chooses, so the kinds cannot be listed here. Nothing stops a cluster
+  # admin adding another CRD to this group. A list returns whole objects: Gatekeeper parameters, the
+  # audit messages in status.violations (they can quote fields of audited objects) and Kyverno
+  # ClusterPolicy rules (generate.data often holds registry credentials) are readable with this token,
+  # though rdy drops them while reading. Keep the token short lived. For a stricter role, replace "*"
+  # with your plurals from: kubectl get crd -l gatekeeper.sh/constraint=yes
   - apiGroups: ["constraints.gatekeeper.sh"]
     resources: ["*"]
     verbs: ["list"]

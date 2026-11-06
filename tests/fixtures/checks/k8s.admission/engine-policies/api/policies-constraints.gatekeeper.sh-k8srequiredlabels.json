@@ -67,6 +67,88 @@
             ]
           }
         }
+      },
+      {
+        "apiVersion": "constraints.gatekeeper.sh/v1beta1",
+        "kind": "K8sRequiredLabels",
+        "metadata": {
+          "name": "scoped-audit"
+        },
+        "spec": {
+          "match": {
+            "kinds": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "kinds": [
+                  "Pod"
+                ]
+              }
+            ]
+          },
+          "parameters": {
+            "labels": [
+              "owner"
+            ]
+          },
+          "enforcementAction": "scoped",
+          "scopedEnforcementActions": [
+            {
+              "action": "deny",
+              "enforcementPoints": [
+                {
+                  "name": "audit"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "constraints.gatekeeper.sh/v1beta1",
+        "kind": "K8sRequiredLabels",
+        "metadata": {
+          "name": "scoped-admission"
+        },
+        "spec": {
+          "match": {
+            "kinds": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "kinds": [
+                  "Pod"
+                ]
+              }
+            ]
+          },
+          "parameters": {
+            "labels": [
+              "owner"
+            ]
+          },
+          "enforcementAction": "scoped",
+          "scopedEnforcementActions": [
+            {
+              "action": "deny",
+              "enforcementPoints": [
+                {
+                  "name": "validation.gatekeeper.sh"
+                }
+              ]
+            },
+            {
+              "action": "warn",
+              "enforcementPoints": [
+                {
+                  "name": "audit"
+                }
+              ]
+            }
+          ]
+        }
       }
     ]
   }

@@ -6,7 +6,8 @@
 //!
 //! - Kyverno `kyverno.io/v1` `ClusterPolicy`, only when discovery showed the kind in `v1`. A group that
 //!   serves only `PolicyException` and the cleanup kinds has no policy kind, so nothing is listed.
-//! - Kyverno `policies.kyverno.io` `ValidatingPolicy` and `ImageValidatingPolicy` (`v1` or `v1beta1`).
+//! - Kyverno `policies.kyverno.io` `ValidatingPolicy` and `ImageValidatingPolicy` (`v1`, `v1beta1` or, on
+//!   Kyverno 1.14 and 1.15, `v1alpha1`).
 //! - Gatekeeper `constraints.gatekeeper.sh/v1beta1`, one list per constraint kind the group serves, at most
 //!   [`MAX_CONSTRAINT_KINDS`] (ADR 0042).
 //!
@@ -81,7 +82,7 @@ pub(super) fn plan(group: &str, version: &str, resources: &[ApiKind]) -> Vec<Pol
             .map(|kind| list("Kyverno", "kyverno.io", kind))
             .into_iter()
             .collect(),
-        ("policies.kyverno.io", "v1" | "v1beta1") => [
+        ("policies.kyverno.io", "v1" | "v1beta1" | "v1alpha1") => [
             ("ValidatingPolicy", "validatingpolicies"),
             ("ImageValidatingPolicy", "imagevalidatingpolicies"),
         ]
@@ -100,9 +101,9 @@ pub(super) fn plan(group: &str, version: &str, resources: &[ApiKind]) -> Vec<Pol
                     .cmp(&(!super::engines::is_kind_shaped(&b.kind), &b.plural))
             });
             kinds.dedup_by(|a, b| a.plural == b.plural);
+            // The cap of [`MAX_CONSTRAINT_KINDS`] is applied by the reader, which counts what it leaves out.
             kinds
                 .into_iter()
-                .take(MAX_CONSTRAINT_KINDS)
                 .map(|kind| list("Gatekeeper", "constraints.gatekeeper.sh", kind))
                 .collect()
         }
@@ -232,6 +233,16 @@ fn kyverno_legacy(data: &Value, labels: &NsLabels, ns: Option<&str>) -> (bool, A
     };
     let default_enforce = text(spec, "validationFailureAction")
         .is_some_and(|action| action.eq_ignore_ascii_case("enforce"));
+    // `validationFailureActionOverrides` set the action per namespace and can flip Audit to Enforce.
+    let overrides = spec
+        .get("validationFailureActionOverrides")
+        .and_then(Value::as_array)
+        .filter(|list| !list.is_empty());
+    let override_enforces = overrides.is_some_and(|list| {
+        list.iter().any(|entry| {
+            text(entry, "action").is_some_and(|action| action.eq_ignore_ascii_case("enforce"))
+        })
+    });
     let mut enforcing = false;
     let mut applies = Applies::No;
     for rule in spec
@@ -249,16 +260,47 @@ fn kyverno_legacy(data: &Value, labels: &NsLabels, ns: Option<&str>) -> (bool, A
         let rule_enforces = validate
             .and_then(own)
             .or_else(|| verify.and_then(|items| items.iter().find_map(own)))
-            .unwrap_or(default_enforce);
+            .unwrap_or(default_enforce)
+            || override_enforces;
         if !rule_enforces {
             continue;
         }
         enforcing = true;
+        // Things the check does not evaluate: overrides, `exclude`, object names and a policy that is
+        // switched off for admission. PolicyException objects are not read either.
+        let uncertain = overrides.is_some()
+            || admission_off(spec)
+            || rule.get("exclude").is_some()
+            || rule.get("match").is_some_and(match_has_names);
         applies = applies.or(rule
             .get("match")
-            .map_or(Applies::Maybe, |m| kyverno_match(m, labels, ns)));
+            .map_or(Applies::Maybe, |m| kyverno_match(m, labels, ns))
+            .capped(uncertain));
     }
     (enforcing, applies)
+}
+
+/// True when `spec.evaluation.admission.enabled` is `false`: the policy does not run at admission.
+fn admission_off(spec: &Value) -> bool {
+    spec.pointer("/evaluation/admission/enabled") == Some(&Value::Bool(false))
+}
+
+/// True when a `match` block filters on object names, which a generated pod name cannot be judged against.
+fn match_has_names(block: &Value) -> bool {
+    let has = |filter: &Value| {
+        filter
+            .get("resources")
+            .and_then(|r| r.get("names"))
+            .and_then(Value::as_array)
+            .is_some_and(|names| !names.is_empty())
+    };
+    let any_of = |key: &str| {
+        block
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|list| list.iter().any(has))
+    };
+    has(block) || any_of("any") || any_of("all")
 }
 
 /// One `match` block against a pod create.
@@ -341,7 +383,7 @@ fn kyverno_cel(data: &Value, labels: &NsLabels) -> (bool, Applies) {
         .get("matchConditions")
         .and_then(Value::as_array)
         .is_some_and(|c| !c.is_empty());
-    (enforcing, applies.capped(conditions))
+    (enforcing, applies.capped(conditions || admission_off(spec)))
 }
 
 // Gatekeeper, one constraint.
@@ -356,11 +398,28 @@ fn gatekeeper(data: &Value, labels: &NsLabels, ns: Option<&str>) -> (bool, Appli
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .any(|entry| text(entry, "action") == Some("deny")),
+            .any(|entry| {
+                // A scoped `deny` rejects at admission only for the enforcement point
+                // `validation.gatekeeper.sh` (or `*`). No points listed means the default.
+                let points = entry.get("enforcementPoints").and_then(Value::as_array);
+                text(entry, "action") == Some("deny")
+                    && points.is_none_or(|points| {
+                        points.is_empty()
+                            || points.iter().any(|point| {
+                                matches!(
+                                    text(point, "name"),
+                                    Some("validation.gatekeeper.sh" | "*")
+                                )
+                            })
+                    })
+            }),
         Some(_) => false,
     };
+    let ignored = labels
+        .as_ref()
+        .is_some_and(|l| l.contains_key("admission.gatekeeper.sh/ignore"));
     let Some(m) = spec.get("match").filter(|m| m.is_object()) else {
-        return (enforcing, Applies::Yes);
+        return (enforcing, Applies::Yes.capped(ignored));
     };
     // `kinds`: entries of apiGroups and kinds. None listed means every kind.
     let kinds = m.get("kinds").and_then(Value::as_array);
@@ -392,20 +451,17 @@ fn gatekeeper(data: &Value, labels: &NsLabels, ns: Option<&str>) -> (bool, Appli
         labels,
     ));
     let pod_labels = m.get("labelSelector").is_some_and(Value::is_object);
-    (enforcing, applies.capped(pod_labels))
+    // `match.name` names the object, and a pod made by a controller has a generated name. The label
+    // `admission.gatekeeper.sh/ignore` exempts a namespace when Gatekeeper is set to honour it.
+    let by_name = text(m, "name").is_some_and(|name| !name.is_empty());
+    (enforcing, applies.capped(pod_labels || by_name || ignored))
 }
 
 // ---- judging ----------------------------------------------------------------------------------------------
 
 fn grant_of(list: &PolicyList) -> Grant {
-    if list.group == "constraints.gatekeeper.sh" {
-        Grant::new(
-            "list constraints.gatekeeper.sh".to_owned(),
-            format!("`kubectl auth can-i list {}.{}`", list.plural, list.group),
-        )
-    } else {
-        Grant::list(&list.plural, list.group)
-    }
+    // One grant per kind, so each constraint kind keeps its own `can-i` command.
+    Grant::list(&list.plural, list.group)
 }
 
 /// The finding part for the engines' policies.
@@ -419,8 +475,8 @@ pub(super) fn judge(found: &EnginePolicies, ns: Option<&str>) -> Part {
             Read::Ok(listed) => {
                 read += listed.items.len();
                 if listed.cut {
-                    part.notes.push(format!(
-                        "Only the first {} {} objects were read.",
+                    part.unverified.push(format!(
+                        "only the first {} {} objects were read, so later policies are not evaluated",
                         super::PAGE,
                         shown(&entry.list.kind)
                     ));
@@ -459,9 +515,9 @@ pub(super) fn judge(found: &EnginePolicies, ns: Option<&str>) -> Part {
         }
     }
     if found.skipped > 0 {
-        part.notes.push(format!(
-            "rdy lists at most {} policy kinds, so {} more were not listed.",
-            MAX_LISTS, found.skipped
+        part.unverified.push(format!(
+            "rdy lists at most {MAX_CONSTRAINT_KINDS} Gatekeeper constraint kinds and {MAX_LISTS} policy lists, so {} more were not listed and their policies are not evaluated",
+            found.skipped
         ));
     }
     if found.reads.is_empty() {
@@ -477,7 +533,7 @@ pub(super) fn judge(found: &EnginePolicies, ns: Option<&str>) -> Part {
     } else {
         let (names, more) = super::cut_list(blockers);
         part.notes.push(format!(
-            "Policies that reject and can apply to the product's pods{in_ns} ({enforcing} of {read} read reject): {}{more}. Their rules were not evaluated.",
+            "Policies that reject and can apply to the product's pods{in_ns} ({enforcing} of {read} read reject): {}{more}. Their rules were not evaluated, and Gatekeeper Config exemptions and Kyverno PolicyException objects are not read, so a policy may apply to fewer pods than listed.",
             names.join(", ")
         ));
     }

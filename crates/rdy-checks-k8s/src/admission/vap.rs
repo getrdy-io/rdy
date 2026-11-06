@@ -27,6 +27,8 @@ pub(super) struct Policy {
     pub(super) constraints: Option<MatchResources>,
     /// `matchConditions` is not empty: a CEL expression may exempt the request.
     pub(super) conditions: bool,
+    /// The policy has `validations`. One with none (audit annotations only) cannot reject.
+    pub(super) validations: bool,
 }
 
 /// A binding, as far as the check reads it.
@@ -56,6 +58,10 @@ pub(super) fn policy_of(policy: ValidatingAdmissionPolicy) -> Policy {
             .as_ref()
             .and_then(|s| s.match_conditions.as_ref())
             .is_some_and(|c| !c.is_empty()),
+        validations: spec
+            .as_ref()
+            .and_then(|s| s.validations.as_ref())
+            .is_some_and(|v| !v.is_empty()),
     }
 }
 
@@ -84,7 +90,16 @@ fn rejecting<'a>(found: &'a Policies, labels: &NsLabels) -> Vec<Rejecting<'a>> {
         .iter()
         .filter(|binding| binding.deny)
         .filter_map(|binding| {
-            let policy = policies.items.iter().find(|p| p.name == binding.policy)?;
+            let Some(policy) = policies.items.iter().find(|p| p.name == binding.policy) else {
+                // The policy may be on a page that was not read: the binding is kept, as a maybe.
+                let applies = matching::match_resources(binding.resources.as_ref(), labels, true)
+                    .capped(true);
+                return (policies.cut && applies != Applies::No)
+                    .then_some(Rejecting { binding, applies });
+            };
+            if !policy.validations {
+                return None;
+            }
             let applies = matching::match_resources(policy.constraints.as_ref(), labels, false)
                 .and(matching::match_resources(
                     binding.resources.as_ref(),
@@ -103,8 +118,8 @@ pub(super) fn judge(found: &Policies, labels: &NsLabels, ns: Option<&str>) -> Pa
     match &found.policies {
         Read::Ok(listed) => {
             if listed.cut {
-                part.notes.push(format!(
-                    "Only the first {} ValidatingAdmissionPolicy objects were read.",
+                part.unverified.push(format!(
+                    "only the first {} ValidatingAdmissionPolicy objects were read, so later policies are not evaluated",
                     super::PAGE
                 ));
             }
@@ -125,8 +140,8 @@ pub(super) fn judge(found: &Policies, labels: &NsLabels, ns: Option<&str>) -> Pa
         }
     }
     match &found.bindings {
-        Some(Read::Ok(listed)) if listed.cut => part.notes.push(format!(
-            "Only the first {} ValidatingAdmissionPolicyBinding objects were read.",
+        Some(Read::Ok(listed)) if listed.cut => part.unverified.push(format!(
+            "only the first {} ValidatingAdmissionPolicyBinding objects were read, so later bindings are not evaluated",
             super::PAGE
         )),
         Some(Read::Ok(_)) | None => {}
