@@ -30,7 +30,7 @@ use futures_util::StreamExt;
 use futures_util::stream;
 use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Need,
-    OsSupport, PeerClass, Support,
+    Os, OsSupport, PeerClass, Support,
 };
 use rdy_spec::check::{Endpoint, NetEgress, ViaProxy};
 use serde_json::json;
@@ -62,7 +62,7 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
     summary: "Each endpoint resolves, connects on every address family, and completes TLS",
     meta: CheckMeta {
         title: "Egress",
-        remediation: "Ask the network team to allow the endpoint from this machine: the TCP port to the host named in the result. If the name does not resolve, fix DNS or add a temporary line to `/etc/hosts`. If the certificate is not trusted, a TLS-inspecting proxy is the usual cause: bypass inspection for the host, or install the proxy's CA with `update-ca-certificates` (Debian, Ubuntu) or `update-ca-trust` (RHEL). Run `openssl s_client -connect <host>:<port> -servername <host>` to see what the server sends.",
+        remediation: "Ask the network team to allow the endpoint from this machine: the TCP port to the host named in the result. If the name does not resolve, fix DNS or add a temporary hosts file entry. If the certificate is not trusted, a TLS-inspecting proxy is the usual cause: bypass inspection for the host, or install the proxy's CA in the OS trust store. Where openssl is installed, run `openssl s_client -connect <host>:<port> -servername <host>` to see what the server sends.",
     },
     needs: &[Need::Network],
     wants: &[],
@@ -120,13 +120,17 @@ impl Check for EgressCheck {
             // (a closure that returns an async block over a reference is not `Send` for every lifetime).
             let entry_route = self.params.via_proxy;
             let trust = self.params.trust;
+            let total = self.params.endpoints.len();
             let pending: Vec<BoxFuture<'a, Result<Probed, CheckError>>> = self
                 .params
                 .endpoints
                 .iter()
-                .map(|spec| -> BoxFuture<'a, Result<Probed, CheckError>> {
+                .enumerate()
+                .map(|(at, spec)| -> BoxFuture<'a, Result<Probed, CheckError>> {
+                    // Rounds of endpoints that wait behind this one, for the budget of its extra call.
+                    let queued = (total - at - 1) / PARALLEL;
                     if routes_direct(spec, entry_route) {
-                        Box::pin(probe(ctx, spec, trust))
+                        Box::pin(probe(ctx, spec, trust, queued))
                     } else {
                         Box::pin(std::future::ready(Ok(Probed::not_tried(spec, PROXY_LATER))))
                     }
@@ -135,7 +139,7 @@ impl Check for EgressCheck {
             let probed: Vec<Result<Probed, CheckError>> =
                 stream::iter(pending).buffered(PARALLEL).collect().await;
             let probed: Vec<Probed> = probed.into_iter().collect::<Result<_, _>>()?;
-            Ok(self.judge(&probed))
+            Ok(self.judge(ctx.os(), &probed))
         })
     }
 }
@@ -150,13 +154,17 @@ fn routes_direct(spec: &Endpoint, entry: ViaProxy) -> bool {
 
 impl EgressCheck {
     /// The finding for the endpoints as probed.
-    fn judge(&self, probed: &[Probed]) -> Finding {
+    fn judge(&self, os: Os, probed: &[Probed]) -> Finding {
         let max_latency = self.max_latency();
         let mut failed: Vec<&Probed> = Vec::new();
         let mut optional_failed: Vec<&Probed> = Vec::new();
         let mut not_tried: Vec<&Probed> = Vec::new();
         let mut warns: Vec<String> = Vec::new();
+        let mut notes: Vec<String> = Vec::new();
         for p in probed {
+            if let Some(why) = p.tls.as_ref().and_then(|t| t.fallback.as_ref()) {
+                notes.push(format!("{}: {why}", p.label()));
+            }
             match &p.ending {
                 Ending::Reached => {
                     if let Some(connect) = p.connect.filter(|c| *c > max_latency) {
@@ -165,6 +173,12 @@ impl EgressCheck {
                             p.label(),
                             ms(connect),
                             ms(max_latency)
+                        ));
+                    }
+                    for (family, took) in p.slow() {
+                        notes.push(format!(
+                            "{}: the {family} address did not answer within {took} ms, so another family connected first",
+                            p.label()
                         ));
                     }
                     let fell = p.fell_through();
@@ -222,17 +236,31 @@ impl EgressCheck {
         .with_expected(expected);
 
         let unreachable: Vec<&Probed> = failed.iter().chain(&optional_failed).copied().collect();
-        if let Some(fix) = fixes(&unreachable) {
+        if let Some(fix) = fixes(os, &unreachable) {
             finding = finding.with_fix(fix);
         }
         for warn in &warns {
             finding = finding.with_note(warn.clone());
         }
+        for note in notes {
+            finding = finding.with_note(note);
+        }
         if !not_tried.is_empty() {
-            let note = format!(
-                "{} of {total} endpoints were not tried: {PROXY_LATER}",
-                not_tried.len()
-            );
+            // One sentence per reason, in the order the reasons first appear.
+            let mut reasons: Vec<(&str, usize)> = Vec::new();
+            for p in &not_tried {
+                if let Ending::NotTried(why) = p.ending {
+                    match reasons.iter_mut().find(|(r, _)| *r == why) {
+                        Some((_, n)) => *n += 1,
+                        None => reasons.push((why, 1)),
+                    }
+                }
+            }
+            let note = reasons
+                .iter()
+                .map(|(why, n)| format!("{n} of {total} endpoints were not tried: {why}"))
+                .collect::<Vec<_>>()
+                .join("; ");
             finding = finding.with_partial(rdy_engine::check::Partial::new(Vec::new(), note));
         }
         if self
@@ -274,7 +302,7 @@ fn names(list: &[&Probed], tag: &str) -> Vec<String> {
 }
 
 /// The fix text for the first endpoints of each distinct class, at most [`FIXES`] of them.
-fn fixes(list: &[&Probed]) -> Option<String> {
+fn fixes(os: Os, list: &[&Probed]) -> Option<String> {
     let mut seen: Vec<Class> = Vec::new();
     let mut parts: Vec<String> = Vec::new();
     for p in list {
@@ -285,7 +313,10 @@ fn fixes(list: &[&Probed]) -> Option<String> {
             continue;
         }
         seen.push(*class);
-        parts.push(class.fix(&p.host, p.port, ip.as_deref()));
+        parts.push(class.fix(os, &p.host, p.port, ip.as_deref()));
+        if let Some(advice) = p.override_advice() {
+            parts.push(advice.to_owned());
+        }
     }
     (!parts.is_empty()).then(|| parts.join(" "))
 }

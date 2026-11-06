@@ -4,7 +4,7 @@
 //! `Fix:` text for a class names the command or the setting to change and holds only the spec's own
 //! host text and port, never a reply from the peer.
 
-use rdy_engine::check::CheckError;
+use rdy_engine::check::{CheckError, Os};
 use rdy_engine::probe::net::TrustFailure;
 use rdy_engine::probe::{AttemptOutcome, NetFailure, ProbeError};
 
@@ -46,6 +46,27 @@ pub(crate) enum Class {
 }
 
 impl Class {
+    /// Every class, for the tests that audit all the words.
+    #[cfg(test)]
+    pub(crate) const ALL: [Class; 16] = [
+        Self::Dns,
+        Self::Refused,
+        Self::Blackhole,
+        Self::Unreachable,
+        Self::ConnectionReset,
+        Self::ConnectFailed,
+        Self::ClockOrExpiry,
+        Self::TlsUnknownIssuer,
+        Self::TlsNameMismatch,
+        Self::TlsUntrusted,
+        Self::TlsAlert,
+        Self::ResetAfterHello,
+        Self::TlsFailed,
+        Self::NoTrustStore,
+        Self::RefusedByPolicy,
+        Self::Timeout,
+    ];
+
     /// The id written to the report.
     pub(crate) fn id(self) -> &'static str {
         match self {
@@ -114,53 +135,91 @@ impl Class {
         })
     }
 
-    /// The `Fix:` text for `host` and `port`. `ip` is the address that did not answer, when one is known.
-    pub(crate) fn fix(self, host: &str, port: u16, ip: Option<&str>) -> String {
+    /// The `Fix:` text for `host` and `port` on `os`. `ip` is the address that did not answer, when one is
+    /// known. Every command in it is on the fix-text allow-list (a test audits all of them).
+    pub(crate) fn fix(self, os: Os, host: &str, port: u16, ip: Option<&str>) -> String {
         let at = format!("{host}:{port}");
+        let hosts_file = match os {
+            Os::Windows => "`%SystemRoot%\\System32\\drivers\\etc\\hosts`",
+            _ => "`/etc/hosts`",
+        };
+        let sclient = match os {
+            Os::Windows => String::new(),
+            _ => format!(
+                " Run `openssl s_client -connect {at} -servername {host}` to see the chain."
+            ),
+        };
         match self {
             Self::Dns => format!(
-                "{host} does not resolve from this machine. Check the spelling in the spec. Ask the DNS team for a record or a conditional forwarder for it, or add a temporary line to `/etc/hosts`."
+                "{host} does not resolve from this machine. Check the spelling in the spec. Ask the DNS team for a record or a conditional forwarder for it, or add a temporary line to {hosts_file}."
             ),
             Self::Refused => format!(
                 "{at} refused the connection: nothing listens there, or a firewall rejects it. Check the port in the spec, and ask the network team to allow tcp/{port} to {host} from this machine."
             ),
+            // The catalog text names the source address. rdy does not know which address the OS picked
+            // for the route, and guessing one would send the network team to the wrong rule, so the
+            // text says "from this machine" (03 "Built in M1-095").
             Self::Blackhole => format!(
                 "No reply to SYN from {} in 3s, a firewall is dropping it. Ask the network team to allow tcp/{port} to {host} from this machine.",
                 ip.unwrap_or(&at)
             ),
-            Self::Unreachable => format!(
-                "There is no route to {at}. Check the default route with `ip route` and ask the network team whether this subnet may reach {host}."
-            ),
+            Self::Unreachable => {
+                let routes = match os {
+                    Os::Windows => "`route print`",
+                    Os::Macos => "`netstat -rn`",
+                    _ => "the output of ip route",
+                };
+                format!(
+                    "There is no route to {at}. Check the default route with {routes} and ask the network team whether this subnet may reach {host}."
+                )
+            }
             Self::ConnectionReset => format!(
                 "{at} reset the connection before it opened. A firewall or the server is closing it; ask the network team to allow tcp/{port} to {host}."
             ),
             Self::ConnectFailed => format!(
                 "rdy could not open a connection to {at}. Check the host and port in the spec, and that this machine has a network interface that is up."
             ),
-            Self::ClockOrExpiry => format!(
-                "The certificate of {at} is expired or not valid yet. Check this machine's clock with `timedatectl` first. If the clock is right, the server's owner must renew the certificate."
-            ),
-            Self::TlsUnknownIssuer => format!(
-                "The certificate of {at} comes from a CA this machine does not trust. A TLS-inspecting proxy is the usual cause. Add `net.tls_intercept` to the spec to see who issued it, then ask the network team to bypass inspection for {host}, or install that CA (Debian and Ubuntu: `update-ca-certificates`; RHEL: `update-ca-trust`)."
-            ),
+            Self::ClockOrExpiry => {
+                let clock = match os {
+                    Os::Windows => "`w32tm /query /status`",
+                    Os::Macos => "`sntp time.apple.com`",
+                    _ => "`timedatectl`",
+                };
+                format!(
+                    "The certificate of {at} is expired or not valid yet. Check this machine's clock with {clock} first. If the clock is right, the server's owner must renew the certificate."
+                )
+            }
+            Self::TlsUnknownIssuer => {
+                let install = match os {
+                    Os::Windows => "import that CA into the Trusted Root Certification Authorities store with `certlm.msc`".to_owned(),
+                    Os::Macos => "install that CA with `security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ca.crt`".to_owned(),
+                    _ => "install that CA (Debian and Ubuntu: `update-ca-certificates`; RHEL: `update-ca-trust`)".to_owned(),
+                };
+                format!(
+                    "The certificate of {at} comes from a CA this machine does not trust. A TLS-inspecting proxy is the usual cause. Add `net.tls_intercept` to the spec to see who issued it, then ask the network team to bypass inspection for {host}, or {install}."
+                )
+            }
             Self::TlsNameMismatch => format!(
                 "The certificate of {at} is not valid for the name {host}. Check the name in the spec, or ask the server's owner for a certificate that names it."
             ),
             Self::TlsUntrusted => format!(
-                "The certificate of {at} was refused by the CA store rdy checked against. Run `openssl s_client -connect {at} -servername {host}` to see the chain, and ask the server's owner to fix it."
+                "The certificate of {at} was refused by the CA store rdy checked against.{sclient} Ask the server's owner to fix the chain."
             ),
             Self::TlsAlert | Self::ResetAfterHello => format!(
-                "{at} ended the TLS handshake. SNI filtering, or a server that speaks only TLS 1.0 and 1.1, does this. Run `openssl s_client -connect {at} -servername {host}` to see which, and ask the network team whether {host} is allowed."
+                "{at} ended the TLS handshake. SNI filtering, or a server that speaks only TLS 1.0 and 1.1, does this.{sclient} Ask the network team whether {host} is allowed."
             ),
             Self::TlsFailed => format!(
                 "{at} did not complete a TLS handshake. Check that it serves TLS 1.2 or 1.3 on that port and not plain HTTP. To test only the TCP connect, set `tls: false` on the endpoint."
             ),
-            Self::NoTrustStore => "This machine has no CA store rdy can read. Install it with `apt-get install ca-certificates` or `dnf install ca-certificates`, or set `trust: bundled` on the check.".to_owned(),
+            Self::NoTrustStore => match os {
+                Os::Linux => "This machine has no CA store rdy can read. Install it with `apt-get install ca-certificates` or `dnf install ca-certificates`, or set `trust: bundled` on the check.".to_owned(),
+                _ => "rdy could not read the OS certificate store. Check that the store is intact, or set `trust: bundled` on the check.".to_owned(),
+            },
             Self::RefusedByPolicy => format!(
                 "rdy will not contact {at}: the name or address is link-local, metadata, unspecified, multicast or broadcast. Put the real endpoint address in the spec."
             ),
             Self::Timeout => format!(
-                "A step for {at} ran out of time. Run again, and if it repeats check the nameservers in `/etc/resolv.conf` and the path to {host}."
+                "A step for {at} ran out of its time (10s per endpoint). Run again, and if it repeats check the nameservers this machine uses and the path to {host}."
             ),
         }
     }

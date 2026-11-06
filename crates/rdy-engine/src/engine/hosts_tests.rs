@@ -20,6 +20,7 @@ use crate::family::{BuildError, Built, Family, HostSet};
 use crate::privilege::{Elevation, ProcessIds};
 use crate::probe::ProbeError;
 use crate::probe::net::{RULE_TCP_HOST, Route};
+use crate::probe::sock::RULE_UDP_HOST;
 use crate::redact::{Redactor, TagKey};
 use crate::testing::{Replay, TcpScript};
 
@@ -43,7 +44,7 @@ static DIALER: CheckInfo = CheckInfo {
     statfs: &[],
     env: &[],
     commands: &[],
-    peers: &[PeerClass::SpecHosts],
+    peers: &[PeerClass::SpecHosts, PeerClass::NtpServers],
 };
 
 /// What each dialer saw: `(own host -> tried host, what happened)`.
@@ -70,6 +71,15 @@ impl Check for Dialer {
                     Err(other) => format!("error: {other}"),
                 };
                 let key = format!("{} -> {}", self.own, target.host());
+                self.seen.lock().expect("lock").push((key, saw));
+                // The datagram calls take the same host set (the "UDP calls" clause of the ticket).
+                let saw = match ctx.probe().udp_exchange(&target, b"ping", 16).await {
+                    Ok(reply) if reply.bytes == b"pong" => "answered".to_owned(),
+                    Ok(_) => "odd reply".to_owned(),
+                    Err(ProbeError::Denied { rule, .. }) => rule.to_owned(),
+                    Err(other) => format!("error: {other}"),
+                };
+                let key = format!("{} -> {} (udp)", self.own, target.host());
                 self.seen.lock().expect("lock").push((key, saw));
             }
             Ok(Finding::pass("dialed"))
@@ -161,7 +171,13 @@ async fn a_real_run_gives_each_entry_its_own_hosts_and_denies_the_others() {
         .host("b.acme.test", ["192.0.2.2".parse().expect("ip")])
         .tcp("192.0.2.1:443".parse().expect("addr"), web.clone())
         .tcp("192.0.2.2:443".parse().expect("addr"), web)
-        .serve_duplex("web", |_server| async {});
+        .serve_duplex("web", |_server| async {})
+        .udp_server("192.0.2.1:443".parse().expect("addr"), |_sent| {
+            b"pong".to_vec()
+        })
+        .udp_server("192.0.2.2:443".parse().expect("addr"), |_sent| {
+            b"pong".to_vec()
+        });
     let seen: Seen = Arc::default();
     let (engine, hub) = engine(replay, &seen);
     let spec = loaded();
@@ -182,9 +198,13 @@ async fn a_real_run_gives_each_entry_its_own_hosts_and_denies_the_others() {
         seen,
         vec![
             want("a.acme.test -> a.acme.test", "connected"),
+            want("a.acme.test -> a.acme.test (udp)", "answered"),
             want("a.acme.test -> b.acme.test", RULE_TCP_HOST),
+            want("a.acme.test -> b.acme.test (udp)", RULE_UDP_HOST),
             want("b.acme.test -> a.acme.test", RULE_TCP_HOST),
+            want("b.acme.test -> a.acme.test (udp)", RULE_UDP_HOST),
             want("b.acme.test -> b.acme.test", "connected"),
+            want("b.acme.test -> b.acme.test (udp)", "answered"),
         ]
     );
     let log = hub.action_log();
@@ -193,12 +213,16 @@ async fn a_real_run_gives_each_entry_its_own_hosts_and_denies_the_others() {
         .iter()
         .filter(|a| a.kind == ActionKind::Connect)
         .collect();
-    assert_eq!(connects.len(), 4);
+    // Four stream calls and four datagram calls (a datagram is a `connect` entry with a `proto`).
+    assert_eq!(connects.len(), 8);
     let denied = connects
         .iter()
         .filter(|a| a.outcome == ActionOutcome::Denied)
         .count();
-    assert_eq!(denied, 2, "the other entry's host is denied and logged");
+    assert_eq!(
+        denied, 4,
+        "the other entry's host is denied and logged, for streams and datagrams"
+    );
 }
 
 #[tokio::test(start_paused = true)]

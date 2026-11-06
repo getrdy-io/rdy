@@ -12,12 +12,15 @@
 //!
 //! **Connect and TLS.** For a TLS endpoint `Probe::tls_chain` does the connect and the handshake. When
 //! it cannot connect it returns the last outcome and not the attempts, so the failed path then calls
-//! `Probe::tcp` once to get the per-address attempts for the report. That second connect only happens
-//! when the first one failed, and only when the check has time left.
+//! `Probe::tcp` once to get the per-address attempts for the report. That second connect happens only
+//! when the first one failed and the time left covers its worst case and the endpoints still queued
+//! (a follow-up should carry the attempts in `NetFailure::NotConnected` and drop the second call).
 //!
-//! **Time.** The facade's own timeouts bound every stage: 3 s for a lookup, 3 s per address, 5 s for a
-//! handshake. The lookup is timed on the check's remaining time, which a test without a scheduler does
-//! not have, so it reads 0 ms there.
+//! **Time.** Each endpoint has a budget of [`ENDPOINT_BUDGET`] (10 s, 03 "Needs"), cut short so that
+//! [`RESERVE`] of the check's time is always left to write the result. The budget is enforced with
+//! `CheckContext::within`: when it runs out, the endpoint is a `timeout` failure that keeps the stages it
+//! had finished. The facade's own timeouts still bound each stage. The lookup is timed on the check's
+//! remaining time, which a test without a scheduler does not have, so it reads 0 ms there.
 
 use std::net::IpAddr;
 use std::time::Duration;
@@ -26,15 +29,22 @@ use rdy_engine::check::{CheckContext, CheckError};
 use rdy_engine::probe::net::{
     Roots, Route, STAGGER, TcpAttempt, TcpReport, TlsChain, TrustVerdict,
 };
-use rdy_engine::probe::{AttemptOutcome, NetFailure, ProbeError};
+use rdy_engine::probe::{AttemptOutcome, NetFailure, NoRoots, ProbeError};
 use rdy_spec::check::{Endpoint, Trust};
 use rdy_spec::scalar::Host;
 use serde_json::{Value, json};
 
 use super::class::Class;
 
-/// Below this much time left the second connect that names the attempts is skipped.
-const MIN_FOR_ATTEMPTS: Duration = Duration::from_secs(5);
+/// The most time one endpoint takes, from its lookup to the end of its handshake (03 "Needs").
+pub(super) const ENDPOINT_BUDGET: Duration = Duration::from_secs(10);
+
+/// Time of the check that is never spent on endpoints, so the result can be written.
+pub(super) const RESERVE: Duration = Duration::from_secs(2);
+
+/// The worst case of the second `tcp` call that names the attempts: four addresses, a stagger each and
+/// the attempt limit of the last (3 s + 3 x 250 ms, rounded up).
+const SECOND_CONNECT: Duration = Duration::from_secs(4);
 
 /// Below this much time left an endpoint that has not started is not tried.
 pub(super) const MIN_TO_START: Duration = Duration::from_secs(1);
@@ -105,8 +115,10 @@ pub(super) struct TlsView {
     pub(super) chain_len: usize,
     /// Which roots judged the chain: `system`, or `bundled` (by the spec or as the fallback).
     pub(super) roots: &'static str,
-    /// Set when the bundled roots stood in for an OS store that was missing.
-    pub(super) fallback: Option<&'static str>,
+    /// Set when the bundled roots stood in for an OS store that was not usable: why.
+    pub(super) fallback: Option<String>,
+    /// `true` when the OS store was replaced by `SSL_CERT_FILE` or `SSL_CERT_DIR`, which rdy did not read.
+    pub(super) overridden: bool,
 }
 
 /// Everything one endpoint showed.
@@ -152,25 +164,41 @@ impl Probed {
         format!("{}:{}", self.host, self.port)
     }
 
-    /// The addresses that did not carry the connection although a later one did, as `(family, why)`.
-    /// A dead IPv6 address in front of a working IPv4 one is the case this names. An attempt the race
-    /// cut counts only when it had been silent for the stagger or longer: a shorter one was cut
-    /// because the other family was quicker, which says nothing about its address.
+    /// The addresses that failed although a later one carried the connection, as `(family, why)`. A
+    /// dead IPv6 address in front of a working IPv4 one is the case this names. Only a refusal, a reset,
+    /// no route or a full attempt timeout counts: an attempt the race cut is slow and not known to be
+    /// dead (see [`Probed::slow`]).
     pub(super) fn fell_through(&self) -> Vec<(&'static str, String)> {
         if self.ending != Ending::Reached {
             return Vec::new();
         }
         self.attempts
             .iter()
-            .filter_map(|a| match a.outcome {
-                "connected" => None,
-                "abandoned" if a.elapsed >= STAGGER => {
-                    Some((a.family, format!("no answer after {} ms", ms(a.elapsed))))
-                }
-                "abandoned" => None,
-                other => Some((a.family, other.replace('_', " "))),
-            })
+            .filter(|a| matches!(a.outcome, "refused" | "reset" | "unreachable" | "timed_out"))
+            .map(|a| (a.family, a.outcome.replace('_', " ")))
             .collect()
+    }
+
+    /// The addresses the race cut after the stagger or longer, as `(family, ms)`. They did not answer
+    /// before another family connected. That is a note and not a warning: a slow path that works is not
+    /// a fault.
+    pub(super) fn slow(&self) -> Vec<(&'static str, u64)> {
+        if self.ending != Ending::Reached {
+            return Vec::new();
+        }
+        self.attempts
+            .iter()
+            .filter(|a| a.outcome == "abandoned" && a.elapsed >= STAGGER)
+            .map(|a| (a.family, ms(a.elapsed)))
+            .collect()
+    }
+
+    /// Extra advice for a trust failure that came after a fallback caused by an overridden OS store.
+    pub(super) fn override_advice(&self) -> Option<&'static str> {
+        let tls = self.tls.as_ref().filter(|t| t.overridden)?;
+        matches!(self.ending, Ending::Failed(..)).then_some(
+            "SSL_CERT_FILE or SSL_CERT_DIR is set, and rdy did not read what it names, so this verdict used the bundled public roots only. Unset both variables for the product and for rdy, then run again.",
+        ).filter(|_| tls.fallback.is_some())
     }
 
     /// The report entry. It holds the host and port and never the path or query of a URL.
@@ -234,7 +262,8 @@ pub(super) fn wants_tls(spec: &Endpoint) -> bool {
     }
 }
 
-/// Probes one endpoint directly and returns what each stage showed.
+/// Probes one endpoint directly and returns what each stage showed. `queued` is how many rounds of
+/// endpoints are still waiting behind this one.
 ///
 /// # Errors
 ///
@@ -244,13 +273,39 @@ pub(super) async fn probe(
     ctx: &CheckContext,
     spec: &Endpoint,
     trust: Trust,
+    queued: usize,
 ) -> Result<Probed, CheckError> {
     let tls_wanted = wants_tls(spec);
     let mut out = Probed::new(spec, tls_wanted);
-    if ctx.remaining() < MIN_TO_START {
-        out.ending = Ending::NotTried("the check ran out of time");
+    let left = ctx.remaining();
+    if left < RESERVE + MIN_TO_START {
+        out.ending = Ending::NotTried(OUT_OF_TIME);
         return Ok(out);
     }
+    let budget = ENDPOINT_BUDGET.min(left.saturating_sub(RESERVE));
+    match ctx
+        .within(budget, stages(ctx, spec, trust, queued, &mut out))
+        .await
+    {
+        Some(done) => done?,
+        // The stages it finished stay in `out`; the stage that was running is the one that ran out.
+        None => out.ending = Ending::Failed(Class::Timeout, None),
+    }
+    Ok(out)
+}
+
+/// Why an endpoint that never started was not tried.
+pub(super) const OUT_OF_TIME: &str = "the check ran out of time before it reached this endpoint";
+
+/// The stages of one endpoint, writing each result into `out` as it comes.
+async fn stages(
+    ctx: &CheckContext,
+    spec: &Endpoint,
+    trust: Trust,
+    queued: usize,
+    out: &mut Probed,
+) -> Result<(), CheckError> {
+    let tls_wanted = out.tls_wanted;
     let target = &spec.target;
 
     // Stage 1: lookup.
@@ -265,7 +320,7 @@ pub(super) async fn probe(
             }
             Err(error) => {
                 out.ending = Ending::Failed(Class::of_error(error)?, None);
-                return Ok(out);
+                return Ok(());
             }
         }
     }
@@ -273,34 +328,29 @@ pub(super) async fn probe(
     // Stages 2 and 3: connect, then TLS.
     if tls_wanted {
         match ctx.probe().tls_chain(target, Route::Direct).await {
-            Ok(chain) => {
-                finish_tls(&mut out, &chain, trust);
-                return Ok(out);
-            }
+            Ok(chain) => finish_tls(out, &chain, trust),
             Err(ProbeError::Net(NetFailure::NotConnected { outcome, .. })) => {
                 out.ending = Ending::Failed(Class::of_connect(outcome), None);
-                if ctx.remaining() >= MIN_FOR_ATTEMPTS {
-                    // The attempts are what name the dead family. A connect that now works is a
-                    // flapping path, and the first failure stands.
-                    if let Ok(report) = ctx.probe().tcp(target, Route::Direct).await {
-                        out.attempts = report.attempts.iter().map(AttemptView::of).collect();
-                    }
+                // The attempts name the dead family. Ask for them only when the worst case of the call
+                // fits in what is left after this endpoint's own budget and the rounds behind it.
+                let behind = SECOND_CONNECT * u32::try_from(queued).unwrap_or(u32::MAX);
+                if ctx.remaining() >= RESERVE + SECOND_CONNECT + behind
+                    && let Ok(report) = ctx.probe().tcp(target, Route::Direct).await
+                {
+                    out.attempts = report.attempts.iter().map(AttemptView::of).collect();
                 }
-                out.ending = Ending::Failed(Class::of_connect(outcome), first_silent(&out));
-                return Ok(out);
+                out.ending = Ending::Failed(Class::of_connect(outcome), first_silent(out));
             }
-            Err(error) => {
-                out.ending = Ending::Failed(Class::of_error(error)?, None);
-                return Ok(out);
-            }
+            Err(error) => out.ending = Ending::Failed(Class::of_error(error)?, None),
         }
+        return Ok(());
     }
 
     match ctx.probe().tcp(target, Route::Direct).await {
-        Ok(report) => finish_tcp(&mut out, &report),
+        Ok(report) => finish_tcp(out, &report),
         Err(error) => out.ending = Ending::Failed(Class::of_error(error)?, None),
     }
-    Ok(out)
+    Ok(())
 }
 
 /// The address of the first attempt that got no answer, for the blackhole text.
@@ -354,10 +404,16 @@ fn finish_tls(out: &mut Probed, chain: &TlsChain, trust: Trust) {
         // `system` is the default. When this machine has no store to judge against, the bundled public
         // roots stand in and the evidence says so.
         _ => match chain.verdict(Roots::System) {
-            TrustVerdict::Unavailable(_) => (
+            TrustVerdict::Unavailable(why) => (
                 "bundled",
                 chain.verdict(Roots::Bundled),
-                Some("no usable OS trust store, so the bundled public roots judged the chain"),
+                Some((
+                    format!(
+                        "{}, so the bundled public roots judged the chain",
+                        why.phrase()
+                    ),
+                    why == NoRoots::Overridden,
+                )),
             ),
             verdict => ("system", verdict, None),
         },
@@ -368,7 +424,8 @@ fn finish_tls(out: &mut Probed, chain: &TlsChain, trust: Trust) {
         handshake: chain.handshake,
         chain_len: chain.certs.len(),
         roots,
-        fallback,
+        overridden: fallback.as_ref().is_some_and(|(_, overridden)| *overridden),
+        fallback: fallback.map(|(text, _)| text),
     });
     out.ending = match verdict {
         TrustVerdict::Valid => Ending::Reached,

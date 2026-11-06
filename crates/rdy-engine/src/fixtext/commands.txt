@@ -8,6 +8,7 @@
 Set-VMProcessor
 aa-status
 apparmor_parser
+apt-get
 ausearch
 aws
 az
@@ -35,14 +36,19 @@ kubelogin
 lvextend
 modprobe
 mount
+netstat
 nvidia-ctk
 nvidia-smi
 oc
+openssl
 pro
 rancher
 rdy
 rmmod
+route
+security
 setenforce
+sntp
 swapoff
 sysctl
 systemctl
@@ -53,3 +59,4 @@ update-ca-certificates
 update-ca-trust
 update-grub
 update-initramfs
+w32tm

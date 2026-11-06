@@ -447,9 +447,12 @@ fn the_binary_runs_a_signed_spec_whose_key_the_user_pinned() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/signed");
     let home = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let with_home = |args: &[&str]| -> Output {
+        // Offline: the signed example lists net.egress, which must look nothing up (M1-095).
+        let offline = args.first() == Some(&"run") && !args.contains(&"--no-network");
         common::quiet(
             Command::new(env!("CARGO_BIN_EXE_rdy"))
                 .args(args)
+                .args(offline.then_some("--no-network"))
                 .env("HOME", home.path())
                 .env_remove("XDG_CONFIG_HOME")
                 .env_remove("RDY_PROGRESS")
@@ -566,9 +569,12 @@ fn a_signed_spec_prints_no_unsigned_warning() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/signed");
     let home = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let with_home = |args: &[&str]| -> Output {
+        // Offline: the signed example lists net.egress, which must look nothing up (M1-095).
+        let offline = args.first() == Some(&"run") && !args.contains(&"--no-network");
         common::quiet(
             Command::new(env!("CARGO_BIN_EXE_rdy"))
                 .args(args)
+                .args(offline.then_some("--no-network"))
                 .env("HOME", home.path())
                 .env_remove("XDG_CONFIG_HOME")
                 .env_remove("RDY_PROGRESS")

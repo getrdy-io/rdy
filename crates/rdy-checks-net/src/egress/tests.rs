@@ -173,7 +173,7 @@ async fn a_dead_ipv6_address_falls_through_to_ipv4_and_is_named() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_silent_ipv6_address_is_named_when_ipv4_carries_the_connection() {
+async fn a_silent_ipv6_address_is_a_note_and_not_a_warning_when_ipv4_carries_the_connection() {
     let ran = run_on(
         case("dual-silent-v6"),
         json!(["dual.acme.test:8080"]),
@@ -182,13 +182,15 @@ async fn a_silent_ipv6_address_is_named_when_ipv4_carries_the_connection() {
     )
     .await;
     let finding = ran.finding();
-    assert_eq!(finding.level, Level::Warn);
+    // A slow path that works is not a fault: the race cut it, so it is a note (03, C3).
+    assert_eq!(finding.level, Level::Pass, "{}", finding.message);
     assert!(
         finding
-            .message
-            .contains("the ipv6 address failed (no answer after 250 ms)"),
-        "{}",
-        finding.message
+            .notes
+            .iter()
+            .any(|n| n.contains("the ipv6 address did not answer within 250 ms")),
+        "{:?}",
+        finding.notes
     );
     let e = ran.endpoint(0);
     // IPv6 first; IPv4 starts one stagger later and wins; the silent attempt was cut.
@@ -197,6 +199,7 @@ async fn a_silent_ipv6_address_is_named_when_ipv4_carries_the_connection() {
     assert_eq!(e["attempts"][1]["family"], "ipv4");
     assert_eq!(e["attempts"][1]["started_ms"], 250);
     assert_eq!(e["connect_ms"], 250);
+    assert_eq!(ran.result().status, Status::Pass);
 }
 
 #[tokio::test(start_paused = true)]
@@ -478,12 +481,15 @@ async fn a_trusted_chain_completes_with_protocol_alpn_and_depth_and_sends_no_app
     assert!(stage["handshake_ms"].is_u64());
     assert!(ran.endpoint(0)["connect_ms"].is_u64());
     // The server notes the handshake a moment after the client has closed.
-    for _ in 0..200 {
+    let mut seen = false;
+    for _ in 0..3000 {
         if server.handshakes() == 1 && !server.sni_seen().is_empty() {
+            seen = true;
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
+    assert!(seen, "the server never recorded the handshake");
     assert_eq!(server.application_bytes(), 0, "no HTTP request is sent");
     assert_eq!(server.sni_seen(), vec![Some("web.acme.test".to_owned())]);
     assert_eq!(ran.result().status, Status::Pass);
@@ -545,7 +551,7 @@ async fn a_machine_without_a_trust_store_falls_back_to_the_bundled_roots_and_say
     assert!(
         stage["fallback"]
             .as_str()
-            .is_some_and(|s| s.contains("no usable OS trust store")),
+            .is_some_and(|s| s.contains("no OS trust store found")),
         "{stage}"
     );
     // The test CA is not a public root, so the bundled verdict rejects it.
@@ -773,4 +779,257 @@ fn the_family_builds_the_check_with_exactly_the_endpoint_hosts() {
     // The other net ids are not built, so the planner skips them as not in the build.
     let other = spec.checks.get(1).expect("net.proxy");
     assert!(family.build(other, other.decode_params(), &spec).is_err());
+}
+
+// ---- budgets, reasons, trust fallback, rebinding, words (PR #45 reviews) -------------------------
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use rdy_engine::sched::{End, Planned};
+
+/// Runs the check through the scheduler, so it has its own deadline and the paused clock moves.
+async fn run_scheduled(replay: Replay, endpoints: Value) -> CheckOutcome {
+    let entry = entry(&endpoints, &json!({}));
+    let params = params(&entry);
+    let hosts = HostSet::new(params.endpoints.iter().map(|e| e.target.clone()));
+    let check: Arc<dyn Check> = Arc::new(EgressCheck::new(params));
+    let run = TestRun::new(replay);
+    let scheduler = run.scheduler(1, Os::Linux, [Need::Network]);
+    let mut ran = scheduler
+        .run(vec![Planned::new(check, "net.egress").with_hosts(hosts)])
+        .await;
+    match ran.remove(0).end {
+        End::Done(outcome) => *outcome,
+        other => panic!("the check did not finish: {other:?}"),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn sixty_four_blackholed_tls_endpoints_fail_with_a_list_and_do_not_time_out() {
+    let mut replay = Replay::new();
+    let mut endpoints = Vec::new();
+    for n in 0..64_u8 {
+        let name = format!("b{n}.acme.test");
+        let ip: std::net::IpAddr = format!("192.0.2.{}", 100 + n).parse().expect("ip");
+        replay = replay
+            .host(&name, [ip])
+            .tcp(SocketAddr::new(ip, 443), TcpScript::Blackhole);
+        endpoints.push(format!("{name}:443"));
+    }
+    let outcome = run_scheduled(replay, json!(endpoints)).await;
+    let finding = outcome.expect("a finding and not a timeout");
+    assert_eq!(finding.level, Level::Fail);
+    let list = finding.observed["endpoints"].as_array().expect("a list");
+    assert_eq!(list.len(), 64, "every endpoint is in the result");
+    let blackholes = list.iter().filter(|e| e["class"] == "blackhole").count();
+    assert!(
+        blackholes >= 32,
+        "the early rounds name the blackhole: {blackholes}"
+    );
+    for e in list {
+        let result = e["result"].as_str().unwrap_or_default();
+        assert!(matches!(result, "failed" | "not_tried"), "{e}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_endpoint_that_runs_past_its_budget_is_a_timeout_that_keeps_its_finished_stages() {
+    // The lookup alone takes longer than the 10 s endpoint budget.
+    let replay = Replay::new()
+        .host("slow.acme.test", ["192.0.2.5".parse().expect("ip")])
+        .lookup_delay("slow.acme.test", Duration::from_secs(30));
+    let outcome = run_scheduled(replay, json!(["slow.acme.test:8080"])).await;
+    let finding = outcome.expect("a finding");
+    assert_eq!(finding.level, Level::Fail);
+    assert_eq!(finding.observed["endpoints"][0]["class"], "timeout");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_lookup_stage_reads_the_exact_delay_under_a_deadline() {
+    let replay = case("pass-plain").lookup_delay("web.acme.test", Duration::from_millis(1500));
+    let outcome = run_scheduled(replay, json!(["web.acme.test:8080"])).await;
+    let finding = outcome.expect("a finding");
+    assert_eq!(finding.level, Level::Pass);
+    assert_eq!(finding.observed["endpoints"][0]["lookup"]["ms"], 1500);
+}
+
+#[test]
+fn endpoints_not_tried_are_grouped_by_their_own_reason() {
+    let entry = entry(
+        &json!(["a.acme.test:8080", "b.acme.test:8080", "c.acme.test:8080"]),
+        &json!({}),
+    );
+    let params = params(&entry);
+    let specs: Vec<_> = params.endpoints.iter().cloned().collect();
+    let probed = vec![
+        stage::Probed::not_tried(&specs[0], PROXY_LATER),
+        stage::Probed::not_tried(&specs[1], stage::OUT_OF_TIME),
+        stage::Probed::not_tried(&specs[2], stage::OUT_OF_TIME),
+    ];
+    let finding = EgressCheck::new(params).judge(Os::Linux, &probed);
+    let note = finding.partial.expect("partial").note;
+    assert!(
+        note.contains(&format!("1 of 3 endpoints were not tried: {PROXY_LATER}")),
+        "{note}"
+    );
+    assert!(
+        note.contains(&format!(
+            "2 of 3 endpoints were not tried: {}",
+            stage::OUT_OF_TIME
+        )),
+        "{note}"
+    );
+}
+
+#[tokio::test]
+async fn an_overridden_os_store_says_so_and_names_the_variables_in_the_fix() {
+    let ca = TestCa::root("Acme Test Root");
+    let server = tls_server(&ca, "web.acme.test", Validity::Always).await;
+    let replay = Replay::new()
+        .host("web.acme.test", ["127.0.0.1".parse().expect("ip")])
+        .tcp(server.addr(), TcpScript::Serve("tls".to_owned()))
+        .serve_tcp("tls", server.addr())
+        .system_roots_overridden();
+    let ran = run_on(
+        replay,
+        tls_endpoint("web.acme.test", &server),
+        json!({}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.endpoint(0)["class"], "tls_unknown_issuer");
+    let stage = &ran.endpoint(0)["tls_stage"];
+    assert_eq!(stage["roots"], "bundled");
+    assert!(
+        stage["fallback"]
+            .as_str()
+            .is_some_and(|t| t.contains("SSL_CERT_FILE or SSL_CERT_DIR")),
+        "{stage}"
+    );
+    assert!(
+        ran.finding()
+            .notes
+            .iter()
+            .any(|n| n.contains("SSL_CERT_FILE or SSL_CERT_DIR is set")),
+        "{:?}",
+        ran.finding().notes
+    );
+    let fix = ran.finding().fix.as_deref().expect("a fix");
+    assert!(fix.contains("Unset both variables"), "{fix}");
+
+    // A store that is only empty gets its own words and no advice about the variables.
+    let replay = machine("web.acme.test", server.addr(), Some(Vec::new()));
+    let ran = run_on(
+        replay,
+        tls_endpoint("web.acme.test", &server),
+        json!({}),
+        NET,
+    )
+    .await;
+    let stage = &ran.endpoint(0)["tls_stage"];
+    assert!(
+        stage["fallback"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("no OS trust store found"))
+    );
+    assert!(
+        !ran.finding()
+            .fix
+            .as_deref()
+            .expect("fix")
+            .contains("Unset both variables")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_name_that_rebinds_to_a_metadata_address_between_lookups_is_refused_and_never_dialed() {
+    let dialed = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&dialed);
+    let replay = Replay::new()
+        // The check's own lookup sees a public address. The connect-time lookup sees the metadata one.
+        .host_rebinding(
+            "rebind.acme.test",
+            ["192.0.2.50".parse().expect("ip")],
+            ["169.254.169.254".parse().expect("ip")],
+        )
+        .tcp(
+            "192.0.2.50:8080".parse().expect("addr"),
+            TcpScript::Serve("web".to_owned()),
+        )
+        .tcp(
+            "169.254.169.254:8080".parse().expect("addr"),
+            TcpScript::Serve("web".to_owned()),
+        )
+        .serve("web", move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async { Err(std::io::Error::other("a dial that must not happen")) }
+        });
+    let ran = run_on(replay, json!(["rebind.acme.test:8080"]), json!({}), NET).await;
+    assert_eq!(ran.endpoint(0)["class"], "refused_by_policy");
+    assert_eq!(dialed.load(Ordering::SeqCst), 0, "no connection was opened");
+    assert_eq!(ran.result().status, Status::Block);
+}
+
+#[test]
+fn every_fix_text_on_every_os_names_only_listed_commands_and_no_foreign_paths() {
+    for os in [Os::Linux, Os::Macos, Os::Windows] {
+        for class in Class::ALL {
+            let text = class.fix(os, "web.acme.test", 8443, Some("192.0.2.9:8443"));
+            if let Err(error) = rdy_engine::fixtext::check(&text) {
+                panic!("{os:?} {}: {error}", class.id());
+            }
+            if os != Os::Linux {
+                for linux_only in [
+                    "timedatectl",
+                    "update-ca-certificates",
+                    "ip route",
+                    "apt-get",
+                ] {
+                    assert!(!text.contains(linux_only), "{os:?} {}: {text}", class.id());
+                }
+            }
+            if os == Os::Windows {
+                assert!(!text.contains("/etc/hosts"), "{}: {text}", class.id());
+            }
+            if os == Os::Windows {
+                assert!(!text.contains("openssl"), "{}: {text}", class.id());
+            }
+        }
+    }
+    let windows = Class::Dns.fix(Os::Windows, "h.acme.test", 443, None);
+    assert!(windows.contains("%SystemRoot%"), "{windows}");
+    assert!(
+        Class::ClockOrExpiry
+            .fix(Os::Windows, "h", 1, None)
+            .contains("w32tm /query /status")
+    );
+    assert!(
+        Class::Unreachable
+            .fix(Os::Windows, "h", 1, None)
+            .contains("route print")
+    );
+    assert!(
+        Class::TlsUnknownIssuer
+            .fix(Os::Windows, "h", 1, None)
+            .contains("certlm.msc")
+    );
+    assert!(
+        Class::ClockOrExpiry
+            .fix(Os::Macos, "h", 1, None)
+            .contains("sntp")
+    );
+    assert!(
+        Class::Unreachable
+            .fix(Os::Macos, "h", 1, None)
+            .contains("netstat -rn")
+    );
+    assert!(
+        Class::TlsUnknownIssuer
+            .fix(Os::Macos, "h", 1, None)
+            .contains("security add-trusted-cert")
+    );
+    rdy_engine::fixtext::check(INFO.meta.remediation)
+        .expect("the remediation names listed commands");
 }

@@ -104,8 +104,8 @@ pub(crate) enum NativeFailure {
     NotFound,
     Io(String),
     /// The trust store is replaced by a variable this OS may not read. Only the tests of a caller that
-    /// maps it record this.
-    #[cfg(test)]
+    /// maps it record this, and `Replay::system_roots_overridden`.
+    #[cfg(any(test, feature = "testing"))]
     Overridden,
     /// A call that ran out of time. Only the tests of a caller that maps it record this.
     #[cfg(test)]
@@ -119,7 +119,7 @@ impl NativeFailure {
             Self::PermissionDenied => io::Error::from(io::ErrorKind::PermissionDenied),
             Self::NotFound => io::Error::from(io::ErrorKind::NotFound),
             Self::Io(text) => io::Error::other(text),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             Self::Overridden => super::native::RootsOverridden::error(),
             #[cfg(test)]
             Self::TimedOut => io::Error::from(io::ErrorKind::TimedOut),
@@ -330,6 +330,21 @@ impl Replay {
             call,
             NativeAnswer {
                 result: Ok(value),
+                delay: Duration::ZERO,
+            },
+        );
+        self
+    }
+
+    /// Records that the OS trust store is replaced by `SSL_CERT_FILE` or `SSL_CERT_DIR`, which rdy may not
+    /// read on this OS. The TLS verdict against the system roots is then `Unavailable(Overridden)`.
+    #[must_use]
+    pub fn system_roots_overridden(mut self) -> Self {
+        let call = self.normal_call(&NativeCall::SystemRoots);
+        self.native.insert(
+            call,
+            NativeAnswer {
+                result: Err(NativeFailure::Overridden),
                 delay: Duration::ZERO,
             },
         );
@@ -815,7 +830,10 @@ impl Backend for Replay {
         _port: u16,
         _timeout: Duration,
     ) -> BoxFuture<'a, io::Result<Vec<IpAddr>>> {
-        Box::pin(async move { self.net.resolve(host) })
+        Box::pin(async move {
+            pause(self.net.delay(host)).await?;
+            self.net.resolve(host)
+        })
     }
 
     #[cfg(any(feature = "runtime", feature = "loopback"))]
