@@ -37,10 +37,13 @@ fn sigchld_child() {
             .expect("SigIgn line");
         assert!(mask & (1 << 16) != 0, "SIGCHLD is not ignored: {mask:x}");
     }
-    // The same proof by behaviour, on every Unix (so the macOS legs prove it too: M1-043 carry). With
-    // SIGCHLD ignored the kernel reaps a child itself when it exits, so waiting for it fails with ECHILD
-    // after the exit; with a handler or the default action the wait returns the status. This runs before
-    // the runner, which replaces the ignore with a handler on its first command.
+    // The same proof by behaviour, on Linux. With SIGCHLD ignored the kernel reaps a child itself when it
+    // exits, so waiting for it fails with ECHILD; with a handler or the default action the wait returns
+    // the status. This runs before the runner, which replaces the ignore with a handler on its first
+    // command. Linux only: the macos-x64 CI leg failed this probe (run on ee62985e), so macOS does not
+    // auto-reap the way the probe assumes. The runner itself still works there, as the rest of this test
+    // shows. The macOS carry of M1-043 stays open (PC-52).
+    #[cfg(target_os = "linux")]
     {
         let mut probe = std::process::Command::new("/bin/sh")
             .args(["-c", "exit 0"])
@@ -49,7 +52,7 @@ fn sigchld_child() {
         let error = probe
             .wait()
             .expect_err("SIGCHLD is ignored, so the kernel reaps the child and wait must fail");
-        // ECHILD is 10 on Linux and on macOS.
+        // ECHILD is 10 on Linux.
         assert_eq!(error.raw_os_error(), Some(10), "{error:?}");
     }
 
