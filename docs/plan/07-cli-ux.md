@@ -135,8 +135,10 @@ files indented under it (not with `--no-report`); (8) the banner's first line ag
 | `cluster` | `<context>, <server>, user <kubeconfig user>`, plus `, credential plugin: <name>` and `, TLS verification is OFF` when they apply. The user is the entry name in the kubeconfig. The identity the API server sees comes later (ADR 0031). Printed before the first request, so the user sees which cluster rdy is about to touch. `no kubeconfig found` when none, with the hint `Pass --kubeconfig <file> or set KUBECONFIG.` (on Linux it adds where k3s, RKE2 and kubeadm keep a root-only kubeconfig: copy it to `~/.kube/config` and `chmod 600` it; the JSON sample in appendix C shows the short form). `ignored: --no-network is set` with `--no-network`, plus `(--kube-context <name> was given)` when a kube flag was passed. Left out when the spec has no Kubernetes checks |
 | `limits` (M2) | `20 s per check (set by --timeout)`. Left out without `--timeout` |
 
-**The root Tip.** Shown when two or more checks were skipped with `missing_need: root`: `Tip: 2 checks need root:
-host.ports, host.lsm. Run rdy as root to include them. rdy never asks for sudo.` As root, rdy reads only
+**The root Tip.** Shown when two or more checks were skipped with `missing_need: root`, or ran as `partial`
+with `root` in `partial.missing` from a want that is not `evidence_only` (02 "Needs"). No M1 check has a hard
+root need, so in M1 only the second case fires it, for example a run without root: `Tip: 2 checks need root:
+host.lsm, host.firewall. Run rdy as root to include them. rdy never asks for sudo.` As root, rdy reads only
 `/etc/rdy/trust.yaml` (ADR 0002 decision 4). So when `trust_source` is `user`, the Tip adds `As root, rdy reads
 only /etc/rdy/trust.yaml. First trust the vendor key for root: sudo rdy trust add acme-platform --key <file>`;
 without it, following the Tip lands in `spec_key_unknown`. Both forms are goldens (C.16).
@@ -2436,14 +2438,14 @@ Two forms, both excerpts of the line under the check list. The first is for a ke
 with no pinned key. The second is for a key pinned as a normal user (`trust_source: user`).
 
 ```text
-Tip: 2 checks need root: host.ports, host.lsm. Run rdy as root to include them. rdy never asks for
-     sudo.
+Tip: 2 checks need root: host.lsm, host.firewall. Run rdy as root to include them. rdy never asks
+     for sudo.
 ```
 
 ```text
-Tip: 2 checks need root: host.ports, host.lsm. Run rdy as root to include them. rdy never asks for
-     sudo. As root, rdy reads only /etc/rdy/trust.yaml. First trust the vendor key for root: sudo
-     rdy trust add acme-platform --key <file>
+Tip: 2 checks need root: host.lsm, host.firewall. Run rdy as root to include them. rdy never asks
+     for sudo. As root, rdy reads only /etc/rdy/trust.yaml. First trust the vendor key for root:
+     sudo rdy trust add acme-platform --key <file>
 ```
 
 ### C.17 Sample: READY (2.5)

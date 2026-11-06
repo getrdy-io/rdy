@@ -123,7 +123,7 @@ ADR 0010 stays as a second line.
 - The IPv4 forms the rule decodes are IPv4-mapped, IPv4-compatible and `64:ff9b::/96`. A NAT64 network
   with its own prefix (macOS `getaddrinfo` synthesizes one), 6to4 `2002::/16`, Teredo `2001::/32`, the
   local-use `64:ff9b:1::/48` and `::ffff:0:a.b.c.d` are not decoded. None reaches a metadata service in
-  practice, because the service sits on a link-local address that those transition networks do not route.
+  practice, because a translator would have to sit inside that cloud network.
 - Exec plugins run whatever the operator's kubeconfig says.
 - Process escape (M1-038): `rdy` kills a timed-out command's whole process group, but a program that
   calls `setsid` or `setpgid` for a child puts that child in a new group and it survives. The M1 command
