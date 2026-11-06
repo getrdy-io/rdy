@@ -275,7 +275,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-129 | todo | | First run page and M1 example spec | backlog corrected 2026-10-30 (correction-20): owns the top-level spec example (PR #106 review)
 
-- M1-130 | todo | | SEC-59 Unsigned and unpinned-key banners and hint wording for spec loading
+- M1-130 | todo | | SEC-59 Unsigned and unpinned-key banners and hint wording for spec loading | backlog corrected 2026-11-06 (correction-38): `note:` prefix for "report files not written", the `fail_after_verdict` doc, a call-site test for `--json` to `on_stdout`; 2.5 h (PR #34 review)
 
 - M1-131 | [#77](https://github.com/getrdy-io/rdy/pull/77) | 2026-10-29 | ADR 0033. `rdy-spec` gains `TrustStore::entries`, `add`, `remove` (the pin list was private, and M1-121 left `trust add/list/remove` here). `signing::pubkey::resolve` is the shared `--key` argument reader for M1-126. Deferred: the "`run --key` leaves the store unchanged" half of the exit test runs against today's stub `run` and `verify` (exit 70) and uses the real signed spec and `--key` and asserts today's exit 70, so it turns red when M1-126 lands. Carry note: M1-126 must change this test to assert the real run result and an unchanged store. The library test shows saving a store with a one-run pin writes no trace of it; C.9 goldens use the document text with this run's key id, fingerprint, hash and paths swapped in (keygen is random), and the C.9 sign golden starts at the password prompt because `spec sign` prints lint findings without line and column today; no lock between two `trust add` runs (a small gap remains after the re-read that follows the yes; last writer wins until M2-107 adds the lock, ADR 0033); the Windows tests are written but only the Windows CI leg runs them; ADR 0033 stays Proposed until the security sign-off (M1-132).
 
@@ -368,6 +368,8 @@ The build process, the implementer brief and the state at each pause are in `m1-
 - M1-175 | todo | | Kubernetes family builds every k8s check from its parameters | added 2026-10-30 (correction-32, PR #151 review); backlog corrected 2026-11-06 (correction-36): also builds k8s.namespace from `CheckParams::K8sNamespace`, seven results, 1.5 h; that item moves to M1-161 if M1-161 is not merged first (PR #32 reviews)
 
 - M1-176 | todo | | The watchdog in `rdy run` | added 2026-10-30 (correction-33, PR #154 reviews)
+
+- M1-179 | todo | | The env harness counts a hang the check survived as the Timeout class | added 2026-11-06 (correction-38, PR #35 review)
 
 ## Summary
 
