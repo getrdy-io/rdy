@@ -63,7 +63,9 @@ use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
-use k8s_openapi::api::core::v1::{Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret};
+use k8s_openapi::api::core::v1::{
+    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret,
+};
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
 use kube::api::{DeleteParams, ListParams, PostParams};
 use rdy_checks_k8s::client::{Connected, Env, GuardError, KubeOptions, load};
@@ -398,6 +400,8 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("list", "", "pods", ""),
     ("list", "", "persistentvolumeclaims", ""),
     ("list", "", "events", ""),
+    ("list", "", "resourcequotas", ""),
+    ("list", "", "limitranges", ""),
     ("get", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "csinodes", ""),
@@ -512,6 +516,19 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "events",
         false,
         &client.namespaced::<Event>("default").list(&events).await,
+    );
+    assert_served(
+        "resourcequotas",
+        false,
+        &client
+            .namespaced::<ResourceQuota>("default")
+            .list(&all)
+            .await,
+    );
+    assert_served(
+        "limitranges",
+        false,
+        &client.namespaced::<LimitRange>("default").list(&all).await,
     );
     assert_served(
         "storageclasses",
