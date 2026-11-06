@@ -1,0 +1,433 @@
+{
+  "api_version": "rdy/v1",
+  "kind": "Report",
+  "producer": {
+    "name": "rdy",
+    "version": "0.1.0",
+    "commit": "4c1e9a2",
+    "rdy_spec": "0.1.0",
+    "target": "x86_64-unknown-linux-musl"
+  },
+  "run": {
+    "id": "6f8d2c4e-1b3a-4e5f-9a7b-2c1d0e9f8a6b",
+    "started_at": "2027-03-09T14:30:05.000Z",
+    "finished_at": "2027-03-09T14:30:15.231Z",
+    "duration_ms": 10231,
+    "options": {
+      "jobs": 8,
+      "deadline_ms": 300000,
+      "allow_unsigned": true,
+      "network": true,
+      "kube_context": null
+    }
+  },
+  "spec": {
+    "product": "acme-platform",
+    "version": ">=4.2",
+    "sha256": "231d161afdf97fb9aa5a2ea3cfbd3f4645249d218e9aaefe3f4000dc598d0d4f",
+    "file_name": "acme-platform.yaml",
+    "size_bytes": 1988,
+    "serial": null,
+    "expires": null,
+    "contact": null,
+    "annotations": {}
+  },
+  "signature": {
+    "state": "unsigned",
+    "key_id": null,
+    "key_fingerprint": null,
+    "product": null,
+    "signed_at": null,
+    "trust_note": null,
+    "trust_source": null,
+    "reason": null
+  },
+  "host": {
+    "hostname": "acme-node-01.corp.example",
+    "host_id": "a03e7d91c4b2f580",
+    "os": {
+      "family": "linux",
+      "id": "rhel",
+      "version": "9.4",
+      "pretty_name": "Red Hat Enterprise Linux 9.4 (Plow)"
+    },
+    "kernel": "5.14.0-427.13.1.el9_4.x86_64",
+    "arch": "x86_64",
+    "virtualization": "vm",
+    "container": false
+  },
+  "identity": {
+    "euid": 1000,
+    "user": "jdoe",
+    "elevated": false,
+    "kube": null
+  },
+  "proxy": {
+    "https": "http://proxy.corp.example:3128",
+    "http": "http://proxy.corp.example:3128",
+    "no_proxy": [
+      ".corp.example",
+      "10.0.0.0/8"
+    ]
+  },
+  "capabilities": [
+    {
+      "need": "kube_context",
+      "name": null,
+      "available": false,
+      "detail": "no kubeconfig found",
+      "hint": "Pass --kubeconfig <file> or set KUBECONFIG."
+    },
+    {
+      "need": "network",
+      "name": null,
+      "available": true,
+      "detail": null,
+      "hint": null
+    }
+  ],
+  "verdict": "not_ready",
+  "verdict_reason": null,
+  "exit_code": 2,
+  "summary": {
+    "total": 8,
+    "pass": 1,
+    "warn": 1,
+    "block": 1,
+    "skipped": 4,
+    "timeout": 1,
+    "error": 0,
+    "not_applicable": 0,
+    "required_not_run": 4,
+    "optional_not_run": 1
+  },
+  "checks": [
+    {
+      "key": "host.cpu",
+      "id": "host.cpu",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "8 vCPUs found, 8 needed",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "logical_cores": 8,
+        "physical_cores": 4,
+        "arch": "x86_64",
+        "hypervisor": true
+      },
+      "expected": {
+        "min": 8
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 2
+    },
+    {
+      "key": "host.memory",
+      "id": "host.memory",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "block",
+      "bucket": "blocker",
+      "message": "15.4 GiB found, 32 GiB needed",
+      "fix": "Add RAM or choose a larger node class.",
+      "fix_source": "spec",
+      "builtin_fix": "15.4 GiB RAM, 32 GiB needed. Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number.",
+      "observed": {
+        "total_bytes": 16496934912,
+        "available_bytes": 12884901888,
+        "swap_total_bytes": 0,
+        "cgroup_limit_bytes": null
+      },
+      "expected": {
+        "min_bytes": 34359738368,
+        "band_bytes": 1717986918
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 1
+    },
+    {
+      "key": "host.disk",
+      "id": "host.disk",
+      "name": null,
+      "family": "host",
+      "severity": "warn",
+      "status": "warn",
+      "bucket": "warning",
+      "message": "60.0 GiB free on / for /var/lib, 100 GiB needed",
+      "fix": "Mount a larger volume at /var/lib before install.",
+      "fix_source": "spec",
+      "builtin_fix": "/var/lib is on / with 60.0 GiB free, 100 GiB needed. Run df -h /var/lib. Grow the volume or point the install at a larger disk.",
+      "observed": {
+        "path": "/var/lib",
+        "mount": "/",
+        "fstype": "xfs",
+        "free_bytes": 64424509440,
+        "free_inodes": 31205120,
+        "options": [
+          "rw",
+          "relatime"
+        ]
+      },
+      "expected": {
+        "min_free_bytes": 107374182400,
+        "recommended_free_bytes": 128849018880
+      },
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 42,
+      "duration_ms": 3
+    },
+    {
+      "key": "net.egress",
+      "id": "net.egress",
+      "name": null,
+      "family": "net",
+      "severity": "block",
+      "status": "timeout",
+      "bucket": "required_not_run",
+      "timeout_after_ms": 10000,
+      "message": "Timed out after 10 s.",
+      "fix": "Run again. If it times out again, tell the vendor which check it was.",
+      "fix_source": "rdy",
+      "observed": null,
+      "expected": {
+        "via_proxy": "auto",
+        "reachable": [
+          "registry.acme.example:443",
+          "license.acme.example:443"
+        ]
+      },
+      "needs": [
+        {
+          "need": "network",
+          "name": null,
+          "hard": true,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 42,
+      "duration_ms": 10000
+    },
+    {
+      "key": "k8s.version",
+      "id": "k8s.version",
+      "name": null,
+      "family": "k8s",
+      "severity": "block",
+      "status": "skipped",
+      "bucket": "required_not_run",
+      "skip_kind": "missing_need",
+      "message": "Not run. No Kubernetes cluster was reachable.",
+      "fix": "Set a kubeconfig, or pass --kube-context <name>, then run again.",
+      "fix_source": "rdy",
+      "observed": null,
+      "expected": null,
+      "needs": [
+        {
+          "need": "kube_context",
+          "name": null,
+          "hard": true,
+          "met": false
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 0
+    },
+    {
+      "key": "k8s.storageclass",
+      "id": "k8s.storageclass",
+      "name": null,
+      "family": "k8s",
+      "severity": "warn",
+      "status": "skipped",
+      "bucket": "warning",
+      "skip_kind": "missing_need",
+      "message": "Not run. No Kubernetes cluster was reachable.",
+      "fix": "Set a kubeconfig, or pass --kube-context <name>, then run again.",
+      "fix_source": "rdy",
+      "observed": null,
+      "expected": null,
+      "needs": [
+        {
+          "need": "kube_context",
+          "name": null,
+          "hard": true,
+          "met": false
+        }
+      ],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 0
+    },
+    {
+      "key": "gpu.cuda",
+      "id": "gpu.cuda",
+      "name": null,
+      "family": "gpu",
+      "severity": "block",
+      "status": "skipped",
+      "bucket": "required_not_run",
+      "skip_kind": "not_in_build",
+      "message": "Not run. This version of rdy has no gpu checks yet.",
+      "fix": "Install a newer rdy. If there is none yet, ask the vendor how to go on.",
+      "fix_source": "rdy",
+      "observed": null,
+      "expected": null,
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 0
+    },
+    {
+      "key": "aws.iam",
+      "id": "aws.iam",
+      "name": null,
+      "family": "aws",
+      "severity": "block",
+      "status": "skipped",
+      "bucket": "required_not_run",
+      "skip_kind": "not_in_build",
+      "message": "Not run. This version of rdy has no aws checks yet.",
+      "fix": "Install a newer rdy. If there is none yet, ask the vendor how to go on.",
+      "fix_source": "rdy",
+      "observed": null,
+      "expected": null,
+      "needs": [],
+      "partial": null,
+      "truncated": false,
+      "notes": [],
+      "started_ms": 41,
+      "duration_ms": 0
+    }
+  ],
+  "actions": [
+    {
+      "seq": 1,
+      "check": null,
+      "at_ms": 2,
+      "duration_ms": 0,
+      "kind": "env",
+      "outcome": "ok",
+      "name": "KUBECONFIG"
+    },
+    {
+      "seq": 2,
+      "check": null,
+      "at_ms": 3,
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "failed",
+      "path": "~/.kube/config",
+      "error": "not found"
+    },
+    {
+      "seq": 3,
+      "check": "host.cpu",
+      "at_ms": 41,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/cpuinfo",
+      "bytes": 8320,
+      "truncated": false
+    },
+    {
+      "seq": 4,
+      "check": "host.cpu",
+      "at_ms": 41,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/cpu.max",
+      "bytes": 13,
+      "truncated": false
+    },
+    {
+      "seq": 5,
+      "check": "host.memory",
+      "at_ms": 41,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/meminfo",
+      "bytes": 1482,
+      "truncated": false
+    },
+    {
+      "seq": 6,
+      "check": "host.memory",
+      "at_ms": 42,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/sys/fs/cgroup/memory.max",
+      "bytes": 4,
+      "truncated": false
+    },
+    {
+      "seq": 7,
+      "check": "host.disk",
+      "at_ms": 42,
+      "duration_ms": 1,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/self/mountinfo",
+      "bytes": 2870,
+      "truncated": false
+    },
+    {
+      "seq": 8,
+      "check": "host.disk",
+      "at_ms": 43,
+      "duration_ms": 0,
+      "kind": "native",
+      "outcome": "ok",
+      "api": "statvfs",
+      "path": "/var/lib"
+    },
+    {
+      "seq": 9,
+      "check": "net.egress",
+      "at_ms": 42,
+      "duration_ms": 10000,
+      "kind": "lookup",
+      "outcome": "timeout",
+      "host": "proxy.corp.example",
+      "answers": 0
+    }
+  ],
+  "actions_truncated": false,
+  "actions_dropped": {},
+  "redaction": {
+    "ruleset": "report",
+    "total": 0,
+    "by_rule": {}
+  },
+  "complete": true,
+  "interrupted": false
+}

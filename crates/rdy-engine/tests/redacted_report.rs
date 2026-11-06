@@ -355,8 +355,7 @@ static BROAD_READS: CheckInfo = CheckInfo {
 
 /// SEC-94-4: the raw machine id is in the replay fixture, and a check with broad reads tries every way
 /// to put it in its result. It reaches neither `observed` nor the action log nor the redacted report.
-/// The JSON half of the writers is checked here; `render_html` does not exist before M1-077, and its
-/// golden test (M1-083) takes the same fixture.
+/// The JSON half of the writers is checked here; the HTML half is in `report_goldens.rs` (M1-083).
 #[tokio::test]
 async fn the_machine_id_never_reaches_the_report_even_for_a_check_with_broad_reads() -> TestResult {
     let files = ["/etc/machine-id", "/var/lib/dbus/machine-id"];
