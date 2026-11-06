@@ -1,0 +1,12 @@
+schema = 1
+name = "docker-group-user"
+summary = "A user in the docker group, not root, on a host with no kubelet"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = false
+network = false
+kube = false

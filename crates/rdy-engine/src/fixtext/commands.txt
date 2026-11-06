@@ -15,6 +15,7 @@ az
 chcon
 chmod
 chronyc
+containerd
 df
 dkms
 dnf
@@ -59,4 +60,5 @@ update-ca-certificates
 update-ca-trust
 update-grub
 update-initramfs
+usermod
 w32tm

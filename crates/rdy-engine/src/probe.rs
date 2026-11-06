@@ -168,6 +168,11 @@ pub enum ProbeError {
         "permission denied. Fix: run rdy as a user who may read it, or accept the limited result"
     )]
     PermissionDenied,
+    /// Nothing listens at the address: the socket file is there and the service behind it is not.
+    #[error(
+        "connection refused. Fix: check that the service is running, and that the socket is not left over from an earlier run"
+    )]
+    ConnectionRefused,
     /// The call ran out of time.
     #[error(
         "timed out. Fix: run again, and if it repeats check that the machine is not overloaded"
@@ -218,6 +223,7 @@ impl ProbeError {
         match error.kind() {
             io::ErrorKind::NotFound => Self::NotFound,
             io::ErrorKind::PermissionDenied => Self::PermissionDenied,
+            io::ErrorKind::ConnectionRefused => Self::ConnectionRefused,
             io::ErrorKind::TimedOut => Self::Timeout,
             _ => Self::Io(error.to_string()),
         }
@@ -267,6 +273,7 @@ impl ProbeError {
             Self::Timeout | Self::Hung { .. } => ActionOutcome::Timeout,
             Self::NotFound
             | Self::PermissionDenied
+            | Self::ConnectionRefused
             | Self::StoreOverridden
             | Self::Unsupported(_)
             | Self::NotRecorded(_)

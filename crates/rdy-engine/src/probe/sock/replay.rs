@@ -33,7 +33,7 @@ pub(crate) struct ReplayNet {
     /// Names whose lookup waits first, on the tokio clock.
     delays: HashMap<String, Duration>,
     udp: HashMap<SocketAddr, Responder>,
-    unix: HashMap<(PathBuf, String), (u16, Vec<u8>)>,
+    unix: HashMap<(PathBuf, String), (u16, Vec<u8>, Duration)>,
 }
 
 impl fmt::Debug for ReplayNet {
@@ -104,10 +104,15 @@ impl ReplayNet {
         Ok(reply)
     }
 
-    pub(crate) fn unix(&self, socket: &Path, path: &str) -> Result<UnixResponse, ProbeError> {
+    /// The recorded reply to `GET path` on `socket` and how long the server waits before it answers.
+    pub(crate) fn unix(
+        &self,
+        socket: &Path,
+        path: &str,
+    ) -> Result<(UnixResponse, Duration), ProbeError> {
         self.unix
             .get(&(socket.to_path_buf(), path.to_owned()))
-            .map(|(status, body)| UnixResponse::new(*status, body.clone()))
+            .map(|(status, body, delay)| (UnixResponse::new(*status, body.clone()), *delay))
             .ok_or(ProbeError::NotFound)
     }
 }
@@ -182,15 +187,31 @@ impl Replay {
     /// Adds the reply to `GET path` on the unix socket at `socket`.
     #[must_use]
     pub fn unix_get(
-        mut self,
+        self,
         socket: impl Into<PathBuf>,
         path: &str,
         status: u16,
         body: impl Into<Vec<u8>>,
     ) -> Self {
-        self.net
-            .unix
-            .insert((socket.into(), path.to_owned()), (status, body.into()));
+        self.unix_get_after(socket, path, status, body, Duration::ZERO)
+    }
+
+    /// Adds the reply to `GET path` on the unix socket at `socket`, sent after `delay` on the tokio
+    /// clock. A delay past the check's timeout is a daemon that hangs (a fixture `api/*.json` file with
+    /// a large `delay_ms`). It needs feature `runtime`.
+    #[must_use]
+    pub fn unix_get_after(
+        mut self,
+        socket: impl Into<PathBuf>,
+        path: &str,
+        status: u16,
+        body: impl Into<Vec<u8>>,
+        delay: Duration,
+    ) -> Self {
+        self.net.unix.insert(
+            (socket.into(), path.to_owned()),
+            (status, body.into(), delay),
+        );
         self
     }
 }
