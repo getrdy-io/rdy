@@ -1,0 +1,12 @@
+schema = 1
+name = "containerd-misplaced"
+summary = "A version 3 config with SystemdCgroup under the version 2 table, which version 3 ignores"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

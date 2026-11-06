@@ -1,0 +1,45 @@
+{
+  "entry": {
+    "forbid": [
+      "falco"
+    ],
+    "id": "host.security_agents"
+  },
+  "result": {
+    "expected": {
+      "allow": [],
+      "forbid": [
+        "falco"
+      ]
+    },
+    "fix": "The vendor's requirements do not allow Falco (EDR) on this host. Use a host without it, or ask the vendor which security software it supports, then run rdy again. Run rdy as root so it can see every process.",
+    "level": "fail",
+    "message": "The spec forbids Falco (EDR).",
+    "notes": [
+      "A match means a process with this name is running. It does not show that the product is installed."
+    ],
+    "observed": {
+      "detected": [
+        {
+          "category": "edr",
+          "count": 1,
+          "display_name": "Falco",
+          "id": "falco",
+          "processes": [
+            "falco"
+          ]
+        }
+      ],
+      "limited_view": true,
+      "list_cut": false,
+      "processes_read": 4,
+      "processes_unreadable": 1
+    },
+    "partial": {
+      "missing": [
+        "Root"
+      ],
+      "note": "Other users' processes may be hidden from rdy, so absence is not proven."
+    }
+  }
+}

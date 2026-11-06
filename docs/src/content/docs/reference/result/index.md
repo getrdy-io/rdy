@@ -7,7 +7,7 @@ description: "Look up each field of the JSON that rdy prints, its type and what 
 
 You can use this page to read the JSON that rdy prints with `--json`, and know what each field means. The first section is the result of a run, which `rdy run --json` prints. The other sections cover the objects that `rdy verify --json`, `rdy spec lint --json` and `rdy version --json` print. The error object has a section too. rdy prints it with `--json` when it exits without a verdict.
 
-In this release, `rdy run` and `rdy verify` are not built yet. With `--json`, each one prints the error object and exits 70. Their sections show the objects they will print.
+In this release, `rdy verify` is not built yet. With `--json`, it prints the error object and exits 70. Its section shows the object it will print.
 
 Each table has one row per field. An object that more than one field names has one section. A row that names the same object links to that section.
 
@@ -36,7 +36,7 @@ The JSON report rdy writes and Rdy Cloud reads. Ignore fields you do not know. A
 | `actions_truncated` | boolean | yes |  | `true` when the log dropped an entry: at the 5000 entry cap or a check's 1000 entry quota. `ok` then `failed` `read`, `read_dir`, `read_link` and `stat` entries go first. A `denied` entry is never dropped for another kind of entry, and repeated denials fold into one `coalesced` entry per parent directory (file calls) or per target (other calls). |  |
 | `actions_dropped` | object | yes |  | How many entries of each kind were dropped. `read`, `read_dir`, `read_link`, `stat` and `coalesced` entries are dropped first; any other kind only as a last resort. |  |
 | `redaction` | object | yes |  | What the redactor changed in this report. |  |
-| `complete` | boolean | yes |  | `false` when rdy could not finish or write the report (exit 70). |  |
+| `complete` | boolean | yes |  | `false` when rdy could not finish the run (exit 70). A report printed on stdout before the files were written can say `true` while the exit code is 70, because writing the files failed after it was printed. Check the exit code before you trust this field. |  |
 | `interrupted` | boolean | yes |  | `true` when the run was cancelled (Ctrl-C). |  |
 
 ## producer
@@ -286,7 +286,7 @@ One side effect, recorded as it happened. Fields beyond the required ones depend
 | `rtype` | string | no |  | dns |  |
 | `api` | string | no |  | native, for example statvfs |  |
 | `of` | string | no |  | coalesced: the kind that was coalesced |  |
-| `under` | string | no |  | coalesced: the parent directory the file calls were under, or the program, host or path the other denied calls named, or * for denied calls past 100 targets |  |
+| `under` | string | no |  | coalesced: the parent directory the file calls were under, or the program, host or path the other denied calls named, or * for denied calls past 100 targets; for denied read_link calls that refused a non-socket link in a process fd directory it is the placeholder /proc/<pid>/fd, one entry for all processes of the check |  |
 | `count` | integer | no |  | coalesced: how many calls the entry stands for. Reads past 200 per directory, or denied calls and failed file calls past 20 per parent directory (file calls) or target (other denied calls) and reason. |  |
 | `truncated` | boolean | no |  | exec, read, connect (udp), http (unix socket) |  |
 

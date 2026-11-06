@@ -1,0 +1,12 @@
+schema = 1
+name = "crio-ok"
+summary = "CRI-O healthy"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "/usr/bin/crio",
+    "--version"
+  ],
+  "stdout": "crio version 1.29.1\nVersion:        1.29.1\nGoVersion:      go1.21.6\nLinkmode:       static\n",
+  "stderr": "",
+  "exit": 0,
+  "delay_ms": 0
+}

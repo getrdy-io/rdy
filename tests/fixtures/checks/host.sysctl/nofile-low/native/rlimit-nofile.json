@@ -1,0 +1,8 @@
+{
+  "call": "rlimit",
+  "resource": "nofile",
+  "value": {
+    "soft": 1024,
+    "hard": 524288
+  }
+}

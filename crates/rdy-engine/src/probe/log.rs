@@ -20,6 +20,9 @@
 //!   `coalesced` entry that carries a `count`. It takes the `seq` of the first call it folded, and the
 //!   folded calls leave a gap in `seq`. The limit is per key, so a flood of calls at one target costs
 //!   21 entries, and the first denied calls are in the log.
+//!   One exception: a `denied` `read_link` with the rule of a non-socket fd link (`RULE_FD_TARGET`) folds
+//!   under one key per check, not one per directory, so a walk of `/proc/<pid>/fd` over many processes
+//!   costs 21 entries.
 //! - *Ok reads.* An `ok` `read`, `read_dir`, `read_link` or `stat` folds the same way per (check,
 //!   kind, parent directory), but only after [`COALESCE_OK_AFTER`] calls. The `coalesced` entry has
 //!   outcome `ok`, no `rule` or `error`, and counts as an `ok` file entry when retention picks what
@@ -52,6 +55,7 @@ use std::time::Instant;
 use rdy_spec::result::{Action, ActionKind, ActionOutcome, Report};
 use serde_json::{Map, Value};
 
+use crate::probe::policy::RULE_FD_TARGET;
 use crate::redact::{Cut, Redacted, Redactor, RuleCounts};
 
 /// The most entries a report carries. The result schema allows 5000 (01 section 5.4).
@@ -206,6 +210,9 @@ struct Folded {
 #[derive(Default)]
 struct State {
     next_seq: u64,
+    /// How many of the entries begun were set-up entries ([`ActionLog::begin_setup`]), which do not
+    /// count for [`ActionLog::has_entries`].
+    setup: u64,
     entries: BTreeMap<u64, Action>,
     all: Tiers,
     checks: HashMap<Option<String>, CheckSlots>,
@@ -334,9 +341,21 @@ impl ActionLog {
         }
     }
 
-    /// Whether any entry was begun, finished or not. `ProbeHub::set_proxy` refuses once this is true.
+    /// Opens a set-up entry: a run-level entry that the engine writes itself, from fixed text, before
+    /// the run starts. It is a normal entry in every way but one: [`ActionLog::has_entries`] does not
+    /// count it, so `ProbeHub::set_proxy` still works after it. Its fields must be text the engine
+    /// owns (a declared variable name), never text from a spec, a file or the network, because it can be
+    /// written before the proxy password joins the known-secret set.
+    pub(crate) fn begin_setup(&self, kind: ActionKind, fields: Map<String, Value>) -> Pending {
+        self.state().setup += 1;
+        self.begin(None, kind, fields)
+    }
+
+    /// Whether any entry but a set-up one was begun, finished or not. `ProbeHub::set_proxy` refuses
+    /// once this is true.
     pub(crate) fn has_entries(&self) -> bool {
-        self.state().next_seq > 0
+        let state = self.state();
+        state.next_seq > state.setup
     }
 
     /// The path as the log shows it: `~/rest` under the home directory, else as given. Use it for every
@@ -520,11 +539,23 @@ fn fold_key(action: &Action) -> Option<FoldKey> {
             .find_map(|name| text(name))
             .unwrap_or_default()
     };
+    let reason = text(reason_field).unwrap_or_default();
+    // Every refused fd link of a walk is one key for the check, whatever process it was in. A walk over
+    // hundreds of processes refuses thousands of file and pipe links, and one key per directory would
+    // fill the check's quota with entries that say the same thing (M1-072, correction-33).
+    let dir = if class == Class::Denied
+        && action.kind == ActionKind::ReadLink
+        && reason == RULE_FD_TARGET
+    {
+        crate::check::FD_WALK.to_owned()
+    } else {
+        dir
+    };
     Some(FoldKey {
         check: action.check.clone(),
         kind: action.kind.as_str().to_owned(),
         class,
-        reason: text(reason_field).unwrap_or_default(),
+        reason,
         dir,
     })
 }

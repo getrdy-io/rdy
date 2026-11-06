@@ -1,0 +1,47 @@
+{
+  "entry": {
+    "id": "host.lsm",
+    "selinux": {
+      "allow": [
+        "enforcing"
+      ],
+      "watch": [
+        "acme_t"
+      ]
+    }
+  },
+  "result": {
+    "expected": {
+      "selinux": {
+        "allow": [
+          "enforcing"
+        ],
+        "denials_max": 0,
+        "denials_window": "24h",
+        "watch": [
+          "acme_t"
+        ]
+      }
+    },
+    "fix": "Start auditd with `systemctl enable --now auditd`, or read the denials from the journal with `journalctl -k`.",
+    "level": "warn",
+    "message": "SELinux denials were not inspected: there is no audit log.",
+    "notes": [
+      "There is no /var/log/audit/audit.log, so denials were not inspected. Denials kept only in the journal are not read."
+    ],
+    "observed": {
+      "apparmor": {
+        "state": "disabled"
+      },
+      "selinux": {
+        "configured": "enforcing",
+        "denials": {
+          "inspected": false,
+          "why": "no audit log"
+        },
+        "state": "enforcing"
+      }
+    },
+    "partial": null
+  }
+}

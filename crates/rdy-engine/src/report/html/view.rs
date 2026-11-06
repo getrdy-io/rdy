@@ -6,11 +6,21 @@
 
 use askama::Template;
 use rdy_spec::result::{
-    Bucket, BucketGroup, CheckResult, Need, NeedState, Report, SignatureState, SkipKind, Status,
-    TrustSource, Verdict, group_by_bucket,
+    Bucket, BucketGroup, CheckResult, FixSource, Need, NeedState, Report, SignatureState, SkipKind,
+    Status, Summary, TrustSource, Verdict, group_by_bucket,
 };
 
+use crate::redact::RedactedReport;
+use crate::report::{HtmlSafeJson, JsonError, json_bytes, read_report};
 use crate::summary::{summary_line, verdict_line};
+
+/// What the three status words mean (01 section 6 item 2, 07 D.7). 07 D.7 requires the same sentences
+/// in `rdy run --help`; not yet.
+pub(super) const LEGEND: &str =
+    "BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it.";
+
+/// How the verdict is decided, in plain words (01 section 6 item 2, 07 D.7).
+pub(super) const RULE: &str = "NOT READY if anything blocks or a required check could not run. READY with warnings if only optional things are wrong. READY if every check ran and passed.";
 
 /// A banner at the top of the page.
 pub(super) struct Banner {
@@ -28,6 +38,7 @@ pub(super) struct Line {
 /// A piece of a line. `untrusted` text is shown in `<bdi>`, which limits how far a bidi control in it can
 /// reorder the words around it. A U+2069 inside the text can still close the isolate early, so M1-141
 /// escapes the controls (SEC-149-11). Our own words stay outside the `<bdi>`.
+#[derive(Clone)]
 pub(super) struct Span {
     pub text: String,
     pub untrusted: bool,
@@ -63,6 +74,10 @@ impl Span {
     }
 }
 
+mod actions;
+
+use actions::ActionLog;
+
 /// One section of checks, from one [`BucketGroup`].
 pub(super) struct Section {
     /// The element id, and the target of the link in the page index.
@@ -83,6 +98,13 @@ pub(super) struct PartialView {
     pub note: String,
 }
 
+/// A fix and who it is from.
+pub(super) struct FixView {
+    /// "From acme-platform", "From the spec file (not verified)" or "From rdy". The product is untrusted.
+    pub label: Vec<Span>,
+    pub text: String,
+}
+
 /// One check.
 pub(super) struct CheckView {
     /// The position in the report, which makes the element id.
@@ -96,7 +118,7 @@ pub(super) struct CheckView {
     pub message: String,
     /// Why a check that did not run did not run.
     pub not_run_reason: Option<Vec<Span>>,
-    pub fix: Option<String>,
+    pub fix: Option<FixView>,
     pub builtin_fix: Option<String>,
     /// `root (not available)` and so on, one list of spans per need.
     pub requires: Vec<Vec<Span>>,
@@ -133,6 +155,10 @@ pub(super) struct View {
     pub verdict_word: String,
     pub verdict_class: &'static str,
     pub summary_line: String,
+    /// True when no check has status block: the header then says "No blocks." (07 D.7).
+    pub no_blocks: bool,
+    pub legend: &'static str,
+    pub rule: &'static str,
     pub run_when: String,
     pub rdy_version: String,
     pub user: Option<String>,
@@ -141,13 +167,32 @@ pub(super) struct View {
     pub sections: Vec<Section>,
     pub capabilities: Vec<CapabilityView>,
     pub details: Vec<Row>,
+    /// What rdy read and contacted, one table.
+    pub actions: ActionLog,
+    /// The JSON of the report, the same bytes as the `.json` file. The one value the template prints
+    /// without escaping (M1-078).
+    pub json: EmbeddedJson,
+    /// The SHA-256 of `json`, in lowercase hex: the `data-sha256` attribute.
+    pub json_sha256: String,
 }
 
 impl View {
     /// Builds the page for `report`. The verdict and the counts come from the check results through the
     /// same rule as the terminal, never from the stored `verdict`; the sections come from
     /// [`group_by_bucket`], so the HTML, the terminal and the portal share one order (01 section 5.2).
-    pub(super) fn new(report: &Report) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`json_bytes`]: the page carries the same JSON as the `.json` file, so a report the
+    /// writer refuses cannot be rendered either.
+    pub(super) fn new(redacted: &RedactedReport) -> Result<Self, JsonError> {
+        let report: &Report = redacted;
+        let json = json_bytes(redacted)?;
+        let json_sha256 = sha256_hex(json.as_bytes());
+        // The table lists what the JSON holds, not the report before the writer cut it, so "N more
+        // entries are in the embedded JSON" is true even when the writer shed entries to fit its cap.
+        let on_page = read_report(json.as_bytes())?;
+        let json = EmbeddedJson(json);
         let judgement = rdy_spec::result::verdict(&report.checks);
         let verdict_class = match judgement.verdict {
             Verdict::Ready => "verdict-ready",
@@ -155,7 +200,7 @@ impl View {
             // `Verdict` is non_exhaustive. A verdict this version does not know is the worst case.
             _ => "verdict-not-ready",
         };
-        Self {
+        Ok(Self {
             product: report.spec.product.clone(),
             title_product: format!("\u{2068}{}\u{2069}", report.spec.product),
             version: report.spec.version.clone(),
@@ -165,6 +210,9 @@ impl View {
             verdict_word: verdict_line(judgement.verdict, None, 0),
             verdict_class,
             summary_line: summary_line(&report.checks),
+            no_blocks: Summary::from_checks(&report.checks).block == 0,
+            legend: LEGEND,
+            rule: RULE,
             run_when: utc_text(&report.run.started_at),
             rdy_version: report.producer.version.clone(),
             user: report.identity.user.clone(),
@@ -189,20 +237,45 @@ impl View {
                 })
                 .collect(),
             details: details(report),
-        }
+            actions: ActionLog::new(&on_page),
+            json,
+            json_sha256,
+        })
     }
+}
+
+/// The embedded result, printed raw. It is the one value in the page that skips askama's escaping, and
+/// the template prints it only as the text of `<script type="application/json">`. `HtmlSafeJson` has no
+/// `"`-safe form, so it cannot go in an attribute; this wrapper is private to the page, so nothing else
+/// can put it in one (M1-078, SEC-19-1). `scripts/check-html-escapes.sh` allows this one line. Clippy
+/// cannot see a trait in an `impl` header, so the script is the guard for the marker.
+pub(super) struct EmbeddedJson(HtmlSafeJson);
+
+impl std::fmt::Display for EmbeddedJson {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.as_str())
+    }
+}
+
+impl askama::filters::HtmlSafe for EmbeddedJson {}
+
+/// The SHA-256 of `bytes` as 64 lowercase hex digits.
+fn sha256_hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
+    let mut out = String::with_capacity(64);
+    for byte in digest.as_ref() {
+        out.push(char::from(DIGITS[usize::from(byte >> 4)]));
+        out.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
+    }
+    out
 }
 
 /// The banners, first the signature one and then the incomplete one (01 section 4.7, 07 D.7).
 fn banners(report: &Report) -> Vec<Banner> {
     let mut out = Vec::new();
     let sig = &report.signature;
-    let pinned = matches!(sig.state, SignatureState::Verified)
-        && matches!(
-            sig.trust_source,
-            Some(TrustSource::System | TrustSource::User)
-        );
-    if !pinned {
+    if !key_is_pinned(report) {
         if matches!(sig.state, SignatureState::Verified) {
             let mut first = vec![Span::own(
                 "This spec was checked with a key given on the command line",
@@ -251,6 +324,34 @@ fn banners(report: &Report) -> Vec<Banner> {
         });
     }
     out
+}
+
+/// `true` when the spec's signature verified and the key is one the user or the system pinned. Only then
+/// is the vendor's name on its fix text (01 section 2.6).
+fn key_is_pinned(report: &Report) -> bool {
+    let sig = &report.signature;
+    matches!(sig.state, SignatureState::Verified)
+        && matches!(
+            sig.trust_source,
+            Some(TrustSource::System | TrustSource::User)
+        )
+}
+
+/// The fix with its label. The vendor's product name labels spec text only when the key is pinned. Every
+/// other case is "the spec file (not verified)": a spec that was not verified, a `fix_source` this version
+/// does not know and a fix with no `fix_source` at all (only another producer writes that). Unknown means
+/// not verified (01 section 2.6), and the raw value is never shown, so a reader does not take commands
+/// for the vendor's.
+fn fix_view(report: &Report, check: &CheckResult) -> Option<FixView> {
+    let text = check.fix.clone()?;
+    let label = match &check.fix_source {
+        Some(FixSource::Rdy) => vec![Span::own("From rdy")],
+        Some(FixSource::FromSpec) if key_is_pinned(report) => {
+            vec![Span::own("From "), Span::untrusted(&report.spec.product)]
+        }
+        _ => vec![Span::own("From the spec file (not verified)")],
+    };
+    Some(FixView { label, text })
 }
 
 /// `4d2a7c0e...0a1c`: the first eight and last four characters, as the terminal banner shows it.
@@ -316,7 +417,7 @@ fn check_view(report: &Report, check: &CheckResult) -> CheckView {
         name: check.name.clone(),
         message: check.message.clone(),
         not_run_reason: not_run_reason(check),
-        fix: check.fix.clone(),
+        fix: fix_view(report, check),
         builtin_fix: check.builtin_fix.clone(),
         requires: check
             .needs

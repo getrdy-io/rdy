@@ -1,0 +1,5 @@
+{
+  "symlinks": {
+    "run/user/1000/docker.sock": "socket:[1000]"
+  }
+}
