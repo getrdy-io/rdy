@@ -141,14 +141,21 @@ fn call(
         .expect("a runtime");
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let argv = std::iter::once("rdy").chain(args.iter().copied());
+    let rig = crate::Rig::start(
+        std::time::Instant::now(),
+        rdy_engine::sched::DEFAULT_DEADLINE,
+    )
+    .expect("a watchdog");
     let code = runtime.block_on(crate::run_code(
         argv,
         Arc::new(machine),
         RunHooks::default(),
+        rig.clone(),
         make,
         &mut out,
         &mut err,
     ));
+    rig.disarm();
     (
         code,
         String::from_utf8(out).expect("utf-8 stdout"),

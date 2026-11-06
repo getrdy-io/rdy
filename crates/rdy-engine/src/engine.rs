@@ -62,29 +62,10 @@ pub struct RunOptions {
     pub spec_arg: String,
     /// The instant the deadline is counted from. `None` counts from the start of the run.
     pub origin: Option<std::time::Instant>,
-    /// Gives the watchdog its board (M1-176). `None` runs without one.
-    pub watch: Option<Watch>,
-}
-
-/// What the watchdog needs from a run, and where to send it (M1-176).
-///
-/// [`Engine::execute`] builds a [`Board`] once the plan is made and before the first check starts: one
-/// slot per spec entry, in spec order, with the results of the entries the plan skipped already in it.
-/// It tells the board about every start and end, and passes it to `on_board` so the caller can arm the
-/// watchdog ([`crate::watchdog::Watchdog::arm`]).
-#[derive(Clone)]
-pub struct Watch {
-    /// The report without its results: the producer, the run, the spec, the host and so on. A partial
-    /// report is this plus the board's results.
-    pub base: Report,
-    /// Called once with the board, before the first check starts.
-    pub on_board: Arc<dyn Fn(Arc<Board>) + Send + Sync>,
-}
-
-impl std::fmt::Debug for Watch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Watch").finish_non_exhaustive()
-    }
+    /// The watchdog's board for this run, made by [`Engine::board`] from the same plan before the
+    /// run started (M1-176). [`Engine::execute`] tells it about every start and end. `None` runs
+    /// without one.
+    pub board: Option<Arc<Board>>,
 }
 
 /// Sends the scheduler's positions to the board's slots. The scheduler counts only the checks it runs;
@@ -126,7 +107,7 @@ impl RunOptions {
             network: true,
             spec_arg: "<spec>".to_owned(),
             origin: None,
-            watch: None,
+            board: None,
         }
     }
 }
@@ -184,6 +165,65 @@ impl Engine {
     #[must_use]
     pub fn plan(&self, spec: &LoadedSpec, os: Os, rdy_version: &str) -> RunPlan {
         self.registry.plan(spec.spec(), os, rdy_version)
+    }
+
+    /// The watchdog's board for a run of `plan` (made from `spec`), built before the run starts so the
+    /// caller can arm the watchdog as soon as the report folder exists (M1-176). Pure: no I/O.
+    ///
+    /// One slot per spec entry, in spec order, with the results of the entries the plan skips already
+    /// in it. `base` is the report without its results. Pass the board to [`Engine::execute`] through
+    /// [`RunOptions::board`]; that call gives it the way to map an end.
+    #[must_use]
+    pub fn board(
+        &self,
+        spec: &LoadedSpec,
+        plan: &RunPlan,
+        base: Report,
+        deadline: Duration,
+        spec_arg: &str,
+    ) -> Arc<Board> {
+        let os = plan.os();
+        let mut templates: Vec<CheckResult> = Vec::with_capacity(plan.entries().len());
+        // The result an entry has before any check runs, if it has one.
+        let mut settled: Vec<Option<CheckResult>> = Vec::with_capacity(plan.entries().len());
+        for entry in plan.entries() {
+            if let Some(result) = entry.skip_result() {
+                templates.push(result.clone());
+                settled.push(Some(result));
+                continue;
+            }
+            match (&entry.action, spec.spec().checks.get(entry.index)) {
+                (PlanAction::Run(built), Some(spec_entry)) => {
+                    // Only the identity of the template is read, so the needs do not matter here.
+                    let item = Item {
+                        info: built.check.info(),
+                        spec_entry,
+                        ctx: CheckContext::new(entry.key.clone(), os, std::iter::empty()),
+                    };
+                    templates.push(item.template());
+                    settled.push(None);
+                }
+                _ => {
+                    // The same entry `execute` turns into "not finished".
+                    let template = identity(&entry.key, &entry.id, &entry.family, &entry.severity);
+                    settled.push(Some(unfinished_result(&template)));
+                    templates.push(template);
+                }
+            }
+        }
+        let board = Arc::new(Board::pending(
+            base,
+            templates,
+            self.hub.redactor().clone(),
+            deadline,
+        ));
+        for (slot, result) in settled.into_iter().enumerate() {
+            if let Some(mut result) = result {
+                fill_spec_arg(&mut result, spec_arg);
+                board.record(slot, result);
+            }
+        }
+        board
     }
 
     /// Runs `plan` (made from `spec`) and returns the redacted result of every entry.
@@ -257,20 +297,16 @@ impl Engine {
             items.push(item);
         }
 
-        // The board for the watchdog, when the caller wants one.
-        let observer = options.watch.as_ref().map(|watch| {
-            let mut templates: Vec<CheckResult> = Vec::with_capacity(slots.len());
+        // The board for the watchdog, when the caller made one: give it the way to map an end, and the
+        // scheduler's positions to its slots.
+        let observer = options.board.as_ref().map(|board| {
             let mut owned: Vec<Option<Owned>> = Vec::with_capacity(slots.len());
             let mut slot_of: Vec<usize> = Vec::new();
             let mut kept = items.iter();
             for (slot, entry) in slots.iter().enumerate() {
                 match entry {
-                    Slot::Skipped(result) => {
-                        templates.push((**result).clone());
-                        owned.push(None);
-                    }
+                    Slot::Skipped(_) => owned.push(None),
                     Slot::Ran(template) => {
-                        templates.push((**template).clone());
                         owned.push(kept.next().map(|item| Owned {
                             info: item.info,
                             spec_entry: item.spec_entry.clone(),
@@ -283,37 +319,27 @@ impl Engine {
             }
             let deadline = options.deadline;
             let spec_arg = options.spec_arg.clone();
-            let board = Arc::new(Board::new(
-                watch.base.clone(),
-                templates,
-                self.hub.redactor().clone(),
-                deadline,
-                Box::new(move |slot, ran| {
-                    let Some(Some(owned)) = owned.get(slot) else {
-                        // The scheduler only reports the slots it was given, so this cannot happen. If
-                        // it did, the entry would count as not run, never as passed.
-                        return unfinished_result(&identity("", "", "", &Severity::Block));
-                    };
-                    let mut result = map_end(
-                        owned.info,
-                        &owned.spec_entry,
-                        &owned.ctx,
-                        &owned.template,
-                        ran.clone(),
-                        deadline,
-                    );
-                    fill_spec_arg(&mut result, &spec_arg);
-                    result
-                }),
-            ));
-            for (slot, entry) in slots.iter().enumerate() {
-                if let Slot::Skipped(result) = entry {
-                    let mut result = (**result).clone();
-                    fill_spec_arg(&mut result, &options.spec_arg);
-                    board.record(slot, result);
-                }
+            board.set_map(Box::new(move |slot, ran| {
+                let Some(Some(owned)) = owned.get(slot) else {
+                    // The scheduler only reports the slots it was given, so this cannot happen. If it
+                    // did, the entry would count as not run, never as passed.
+                    return unfinished_result(&identity("", "", "", &Severity::Block));
+                };
+                let mut result = map_end(
+                    owned.info,
+                    &owned.spec_entry,
+                    &owned.ctx,
+                    &owned.template,
+                    ran.clone(),
+                    deadline,
+                );
+                fill_spec_arg(&mut result, &spec_arg);
+                result
+            }));
+            SlotObserver {
+                board: Arc::clone(board),
+                slot_of,
             }
-            (board, slot_of)
         });
 
         let mut scheduler = Scheduler::new(options.jobs, os, available)
@@ -322,16 +348,9 @@ impl Engine {
         if let Some(origin) = options.origin {
             scheduler = scheduler.with_origin(origin);
         }
-        let ran = match (&observer, options.watch.as_ref()) {
-            (Some((board, slot_of)), Some(watch)) => {
-                (watch.on_board)(Arc::clone(board));
-                let observer = SlotObserver {
-                    board: Arc::clone(board),
-                    slot_of: slot_of.clone(),
-                };
-                scheduler.run_observed(planned, Arc::new(observer)).await
-            }
-            _ => scheduler.run(planned).await,
+        let ran = match observer {
+            Some(observer) => scheduler.run_observed(planned, Arc::new(observer)).await,
+            None => scheduler.run(planned).await,
         };
 
         // One result per item, in order. A result the scheduler did not hand back is "not finished", never

@@ -10,9 +10,10 @@
 //!    The run id is made before the folder, so a failure to make it leaves no folder. A failure after the
 //!    folder exists removes it again when it is still empty.
 //! 3. Plan, probe the needs, run the checks, map and redact each result ([`Engine::execute`]). The
-//!    watchdog (M1-176) is started first of all and armed with the folder and the run board as soon as
-//!    the plan exists, so a check that never yields, or a stdout nobody reads, ends in exit 70 with a
-//!    `complete: false` report in the folder (07 section 5.2).
+//!    watchdog (M1-176) was started by the entry point before the runtime. It is armed with the folder
+//!    and the run board right after the folder is made, before the host and needs probes, so a check
+//!    that never yields, or a stdout nobody reads, ends in exit 70 with a `complete: false` report in
+//!    the folder (07 section 5.2).
 //! 4. Build the report from the results and the facts of the run (producer, run, spec, signature,
 //!    host, identity from the privilege snapshot), redact the whole of it and write it.
 //! 5. Print, then write the files: with `--json` the document goes to stdout first, then the state
@@ -33,10 +34,10 @@
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use rdy_engine::check::{Os, current_os};
-use rdy_engine::engine::{Engine, RunOptions as EngineOptions, Watch};
+use rdy_engine::engine::{Engine, RunOptions as EngineOptions};
 use rdy_engine::family::Registry;
 use rdy_engine::output::{OutputDir, ReportError, report_time};
 use rdy_engine::privilege::Privilege;
@@ -45,7 +46,7 @@ use rdy_engine::redact::{RedactedReport, Redactor, RuleCounts};
 use rdy_engine::report::{JsonError, write_json};
 use rdy_engine::sched::{DEFAULT_DEADLINE, cap_jobs};
 use rdy_engine::summary::{last_line, summary_line};
-use rdy_engine::watchdog::{Board, ReportSink, Timing, Watchdog, WatchdogConfig, WriteState};
+use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
     CheckResult, Host, HostOs, HostOsFamily, Producer, Report, Run, RunOptions, Signature, SpecRef,
 };
@@ -58,6 +59,7 @@ use crate::error::{
 };
 use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
+use crate::rig::Rig;
 use crate::signing::files::{FileError, read_public};
 use crate::trust::{self, Layout, Vars};
 use crate::{lint, redaction};
@@ -81,6 +83,8 @@ pub(crate) struct RunContext {
     pub(crate) hooks: RunHooks,
     /// The families of this build.
     pub(crate) registry: Registry,
+    /// The watchdog and the write state, started before the runtime (M1-176).
+    pub(crate) rig: Rig,
 }
 
 /// Runs the command and returns the exit code.
@@ -106,30 +110,20 @@ async fn execute(
 ) -> Result<u8, CliError> {
     // A user-supplied value in the log: the redactor has to cover it (threat model I2).
     tracing::debug!(spec = %args.spec.display(), "run requested");
-    let origin = Instant::now();
     let RunContext {
         hub,
         redactor,
         privilege,
         hooks,
         registry,
+        rig,
     } = cx;
+    // The watchdog was started before the runtime, from the first thing `main` did. The scheduler counts
+    // from the same origin (M1-176, 02 "Watchdog").
+    let origin = rig.origin;
+    let state = Arc::clone(&rig.state);
     let clock = || hooks.clock.unwrap_or_else(SystemTime::now);
     let deadline = hooks.deadline.unwrap_or(DEFAULT_DEADLINE);
-
-    // The watchdog is a plain OS thread, so a check that never yields cannot stop it, and it counts
-    // from the same origin as the scheduler (M1-176, 02 "Watchdog"). A run with no watchdog is not
-    // allowed: if the thread cannot start, the run does not either.
-    let state = Arc::new(WriteState::new());
-    let watchdog = Arc::new(
-        Watchdog::start(WatchdogConfig::new(
-            origin,
-            deadline,
-            Arc::clone(&state),
-            redactor.clone(),
-        ))
-        .map_err(|_| CliError::bug())?,
-    );
 
     if args.key.is_some() {
         // The one-run key and its banner are M1-126. Ignoring the flag would run a spec the user did
@@ -160,7 +154,6 @@ async fn execute(
     options.spec_arg = shell_word(&name);
     options.origin = Some(origin);
 
-    let host = host_facts(&hub.run_probe()).await;
     let mut run_options = RunOptions::new(
         u32::try_from(cap_jobs(options.jobs)).unwrap_or(1),
         u64::try_from(options.deadline.as_millis()).unwrap_or(u64::MAX),
@@ -170,40 +163,49 @@ async fn execute(
     // Recorded only. The flag does nothing until M1-107 builds the Kubernetes family.
     run_options.kube_context.clone_from(&args.kube_context);
 
-    // The watchdog can write a partial report only when there is a folder to write it in
-    // (`--no-report` has none, and then a hung run ends with exit 70 and no report, 07 section 5.2).
-    // It gets the folder through a weak handle, so a folder removed after a failure is not held open.
-    if let Some(dir) = &dir {
-        // The report as it stands at the watchdog's firing time: the run is over, as far as the report
-        // can tell, and the checks are whatever the board has by then.
-        let fires_at = started_at + deadline + Timing::DEFAULT.grace;
+    let engine = Engine::new(registry, hub);
+    let plan = engine.plan(&loaded, current_os(), env!("CARGO_PKG_VERSION"));
+
+    // Arm the watchdog right after the folder exists and before anything that can hang (the host
+    // probes, the needs probe, the checks), so a hang anywhere from here on leaves a `complete: false`
+    // report in the folder (07 sections 4.1 and 5.2). `--no-report` has no folder, so a hang there ends
+    // in exit 70 with no report. The watchdog gets the folder through a weak handle, so a folder
+    // removed after a failure is not held open.
+    let board = dir.as_ref().map(|dir| {
+        // The report as it stands when the watchdog fires: the run is over, as far as it can tell, and
+        // the checks are whatever the board has by then. The host is a stand-in until it is read.
+        let grace = Timing::DEFAULT.grace;
+        let fires_at = started_at
+            .checked_add(deadline + grace)
+            .unwrap_or(started_at);
         let base = assemble(
             &loaded,
             args,
             &privilege,
-            host.clone(),
+            stand_in_host(),
             make_run(
                 run_id.clone(),
                 started_at,
                 fires_at,
-                deadline + Timing::DEFAULT.grace,
+                deadline + grace,
                 run_options.clone(),
             ),
             Vec::new(),
         );
+        let board = engine.board(&loaded, &plan, base, deadline, &options.spec_arg);
         let sink: Arc<dyn ReportSink> = Arc::new(FolderSink {
             dir: Arc::downgrade(dir),
             spec: loaded.verified_bytes().clone(),
         });
-        let armed = watchdog_arm(Arc::clone(&watchdog), sink);
-        options.watch = Some(Watch {
-            base,
-            on_board: Arc::new(armed),
-        });
-    }
+        rig.watchdog.arm(Arc::clone(&board), sink);
+        board
+    });
 
-    let engine = Engine::new(registry, hub);
-    let plan = engine.plan(&loaded, current_os(), env!("CARGO_PKG_VERSION"));
+    let host = host_facts(&engine.hub().run_probe()).await;
+    if let Some(board) = &board {
+        board.set_host(host.clone());
+    }
+    options.board = board;
     let executed = engine.execute(&loaded, plan, &privilege, &options).await;
 
     let finished_at = clock();
@@ -243,12 +245,12 @@ async fn execute(
     };
     if let Err(error) = printed {
         // The report exists and stdout cannot take it. The files were still written; the error is what
-        // the user sees.
+        // the user sees, on stderr only: it must not go to the stdout that just failed (`json` false).
         if files.is_err() {
             discard_if_empty(dir);
         }
         state.finish(crate::EXIT_INTERNAL);
-        return Err(error);
+        return Ok(emit(&error, false, stdout, stderr));
     }
     match files {
         Ok(()) => {
@@ -278,6 +280,8 @@ struct FolderSink {
 
 impl ReportSink for FolderSink {
     fn write(&self, report: &RedactedReport) -> Result<(), ReportError> {
+        // The run dropped the folder, which it does only after it removed an empty one or finished with
+        // it. The watchdog has nothing to write into then, and the run is already ending.
         let Some(dir) = self.dir.upgrade() else {
             return Ok(());
         };
@@ -287,13 +291,21 @@ impl ReportSink for FolderSink {
     }
 }
 
-/// The callback for [`Watch::on_board`]: arms the watchdog with the board and the sink.
-fn watchdog_arm(
-    watchdog: Arc<Watchdog>,
-    sink: Arc<dyn ReportSink>,
-) -> impl Fn(Arc<Board>) + Send + Sync {
-    move |board| {
-        watchdog.arm(board, Arc::clone(&sink));
+/// A host to put in the report before the machine has been read: the arch of this build and a name
+/// that says so. [`rdy_engine::watchdog::Board::set_host`] replaces it once the facts are in.
+fn stand_in_host() -> Host {
+    Host::new(
+        "unknown",
+        HostOs::new(host_os_family()),
+        std::env::consts::ARCH,
+    )
+}
+
+fn host_os_family() -> HostOsFamily {
+    match current_os() {
+        Os::Macos => HostOsFamily::Macos,
+        Os::Windows => HostOsFamily::Windows,
+        _ => HostOsFamily::Linux,
     }
 }
 
@@ -533,11 +545,7 @@ async fn host_facts(probe: &Probe) -> Host {
         Ok(NativeValue::Uname(info)) => Some(info),
         _ => None,
     };
-    let family = match current_os() {
-        Os::Macos => HostOsFamily::Macos,
-        Os::Windows => HostOsFamily::Windows,
-        _ => HostOsFamily::Linux,
-    };
+    let family = host_os_family();
     let arch = uname
         .as_ref()
         .map_or_else(|| std::env::consts::ARCH.to_owned(), |u| u.machine.clone());

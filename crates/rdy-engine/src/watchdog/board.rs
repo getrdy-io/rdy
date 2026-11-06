@@ -10,10 +10,10 @@
 //! with no results, and every check is then reported as unfinished. A poisoned lock is read through
 //! `into_inner`: results are only ever replaced whole, so a poisoned board is still consistent.
 
-use std::sync::{Mutex, MutexGuard, TryLockError};
+use std::sync::{Mutex, MutexGuard, OnceLock, TryLockError};
 use std::time::{Duration, Instant};
 
-use rdy_spec::result::{CheckResult, Report};
+use rdy_spec::result::{CheckResult, Host, Report};
 
 use crate::outcome::{run_deadline_result, timeout_result, unfinished_result};
 use crate::redact::{Redactor, RuleCounts};
@@ -58,7 +58,8 @@ pub struct Board {
     base: Report,
     templates: Vec<CheckResult>,
     redactor: Redactor,
-    map: MapRan,
+    map: OnceLock<MapRan>,
+    host: OnceLock<Host>,
     deadline: Duration,
     inner: Mutex<Inner>,
 }
@@ -89,18 +90,45 @@ impl Board {
         deadline: Duration,
         map: MapRan,
     ) -> Self {
+        let board = Self::pending(base, templates, redactor, deadline);
+        board.set_map(map);
+        board
+    }
+
+    /// A board that has no way to map an end yet. The watchdog can be armed with it as soon as the
+    /// report folder exists; [`Board::set_map`] must be called before the first check ends. Until then
+    /// an end is kept as "not finished".
+    #[must_use]
+    pub fn pending(
+        base: Report,
+        templates: Vec<CheckResult>,
+        redactor: Redactor,
+        deadline: Duration,
+    ) -> Self {
         let slots = templates.iter().map(|_| Slot::Pending).collect();
         Self {
             base,
             templates,
             redactor,
-            map,
+            map: OnceLock::new(),
+            host: OnceLock::new(),
             deadline,
             inner: Mutex::new(Inner {
                 slots,
                 counts: RuleCounts::default(),
             }),
         }
+    }
+
+    /// Sets the way to map an end. True the first time, false after that.
+    pub fn set_map(&self, map: MapRan) -> bool {
+        self.map.set(map).is_ok()
+    }
+
+    /// Sets the host of the partial report, once the run has read it. The base report holds a stand-in
+    /// until then. True the first time, false after that.
+    pub fn set_host(&self, host: Host) -> bool {
+        self.host.set(host).is_ok()
     }
 
     /// Reads the results so far, waiting at most `bound` for the lock.
@@ -133,6 +161,9 @@ impl Board {
     pub fn partial_report(&self, bound: Duration) -> (Report, RuleCounts) {
         let snapshot = self.snapshot(bound);
         let mut report = self.base.clone();
+        if let Some(host) = self.host.get() {
+            report.host = host.clone();
+        }
         report.checks = snapshot.results;
         report.complete = false;
         report.refresh_verdict();
@@ -186,10 +217,15 @@ impl Observer for Board {
     }
 
     fn finished(&self, index: usize, ran: &Ran) {
-        if index >= self.templates.len() {
+        let Some(template) = self.templates.get(index) else {
             return;
-        }
-        self.record(index, (self.map)(index, ran));
+        };
+        let result = match self.map.get() {
+            Some(map) => map(index, ran),
+            // No way to map yet: the end is kept as "not finished", never as a pass.
+            None => unfinished_result(template),
+        };
+        self.record(index, result);
     }
 }
 

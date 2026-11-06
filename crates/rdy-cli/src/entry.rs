@@ -20,14 +20,19 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::panic::{self, AssertUnwindSafe};
 
+use std::time::Instant;
+
 use rdy_engine::exec;
+use rdy_engine::sched::DEFAULT_DEADLINE;
 
 use crate::error::{CliError, emit, wants_json};
-use crate::{EXIT_INTERNAL, RunHooks, logging, panic_hook, redaction, run, startup};
+use crate::{EXIT_INTERNAL, Rig, RunHooks, logging, panic_hook, redaction, run_watched, startup};
 
 /// Runs rdy as the binary does and returns the exit code.
 #[must_use]
 pub fn main_code() -> u8 {
+    // The origin of the run's clock: the watchdog and the scheduler both count from here.
+    let origin = Instant::now();
     // First, before any file is created or descriptor opened: a private umask, and the descriptors
     // the parent left open (they would reach every child command).
     exec::harden_umask();
@@ -59,7 +64,7 @@ pub fn main_code() -> u8 {
         json,
         &mut io::stdout(),
         &mut io::stderr(),
-        |stdout, stderr| run_live(args, json, stdout, stderr),
+        |stdout, stderr| run_live(args, json, origin, stdout, stderr),
     )
 }
 
@@ -67,7 +72,19 @@ pub fn main_code() -> u8 {
 ///
 /// A runtime that cannot start is an internal error. The runtime is shut down without waiting: a
 /// file read on a hung mount can leave a blocking thread, and the process is about to exit.
-fn run_live(args: Vec<OsString>, json: bool, stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
+fn run_live(
+    args: Vec<OsString>,
+    json: bool,
+    origin: Instant,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> u8 {
+    // The watchdog starts before the runtime, so a check that never yields cannot stop it. It counts
+    // from the first thing `main` did, the same origin the scheduler gets (M1-176, 02 "Watchdog"). A
+    // run with no watchdog is not allowed.
+    let Ok(rig) = Rig::start(origin, DEFAULT_DEADLINE) else {
+        return emit(&CliError::bug(), json, stdout, stderr);
+    };
     #[expect(
         clippy::disallowed_methods,
         reason = "INV-07: this is the one call of live_backend outside the engine. The binary reads the real machine, and a check only ever gets the Probe it is handed (ADR 0014)"
@@ -83,7 +100,14 @@ fn run_live(args: Vec<OsString>, json: bool, stdout: &mut dyn Write, stderr: &mu
     // A panic in `block_on` would drop the runtime on the way out, and dropping waits for its blocking
     // pool with no limit. Catch it, shut down without waiting, then let `guarded` handle the panic.
     let ran = panic::catch_unwind(AssertUnwindSafe(|| {
-        runtime.block_on(run(args, backend, RunHooks::default(), stdout, stderr))
+        runtime.block_on(run_watched(
+            args,
+            backend,
+            RunHooks::default(),
+            rig,
+            stdout,
+            stderr,
+        ))
     }));
     runtime.shutdown_background();
     // No child process outlives the run. Every command ends its own group, so this is a second line,

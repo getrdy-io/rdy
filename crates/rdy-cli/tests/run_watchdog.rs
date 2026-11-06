@@ -35,7 +35,12 @@ mod common;
 
 const CHILD_ENV: &str = "RDY_RUN_WATCHDOG_CHILD";
 const DIR_ENV: &str = "RDY_RUN_WATCHDOG_DIR";
-const DEADLINE: Duration = Duration::from_secs(1);
+/// The spin run gets time to start its sleeper before the runtime is stuck, even on a slow leg.
+const SPIN_DEADLINE: Duration = Duration::from_secs(5);
+/// The pipe run has nothing to wait for.
+const PIPE_DEADLINE: Duration = Duration::from_secs(1);
+/// A secret in the message of the pipe run's check. It must not reach the report or the pipe.
+const CANARY: &str = "canary-watchdog-pipe-9";
 /// The watchdog fires this long after the deadline (M1-043).
 const GRACE: Duration = Duration::from_secs(10);
 /// 02: the worst case from the deadline.
@@ -94,6 +99,7 @@ impl Check for Quick {
         Box::pin(async move {
             let mut finding = Finding::pass("4 CPUs");
             if self.loud {
+                finding = Finding::pass(format!("4 CPUs, password={CANARY}"));
                 // 60 keys of 2 KiB each: about 120 KiB, past the 64 KiB of a Linux pipe.
                 let words = "alpha beta gamma delta ".repeat(90);
                 let observed: serde_json::Map<String, serde_json::Value> = (0..60)
@@ -209,9 +215,10 @@ fn run_watchdog_child() {
         return;
     };
     let dir = work_dir();
-    let (families, json): (rdy_cli::FamiliesFn, bool) = match scenario.as_str() {
-        "spin" => (spin_families, false),
-        "pipe" => (pipe_families, true),
+    let (families, json, deadline): (rdy_cli::FamiliesFn, bool, Duration) = match scenario.as_str()
+    {
+        "spin" => (spin_families, false, SPIN_DEADLINE),
+        "pipe" => (pipe_families, true, PIPE_DEADLINE),
         other => panic!("unknown scenario {other}"),
     };
     let spec = dir.join("spec.yaml");
@@ -229,7 +236,7 @@ fn run_watchdog_child() {
     }
     let mut hooks = RunHooks::default();
     hooks.families = Some(families);
-    hooks.deadline = Some(DEADLINE);
+    hooks.deadline = Some(deadline);
     // What `main` does: a single-threaded runtime, the process streams, then the exit code. The watchdog
     // is the one the command starts, with the real effects.
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -265,13 +272,16 @@ fn find_report(parent: &Path) -> Result<PathBuf, Box<dyn Error>> {
 struct Outcome {
     status: std::process::ExitStatus,
     took: Duration,
+    deadline: Duration,
+    // Read on Unix only (the notice text assert).
+    #[cfg_attr(not(unix), allow(dead_code))]
     stderr: String,
-    stdout_bytes: usize,
+    stdout: String,
     dir: tempfile::TempDir,
 }
 
 /// Starts the child, never reads its stdout until it is gone, and waits for it.
-fn run_child(scenario: &str, spec: &str) -> Result<Outcome, Box<dyn Error>> {
+fn run_child(scenario: &str, spec: &str, deadline: Duration) -> Result<Outcome, Box<dyn Error>> {
     let dir = tempfile::tempdir()?;
     std::fs::create_dir(dir.path().join("out"))?;
     std::fs::write(dir.path().join("spec.yaml"), spec)?;
@@ -308,30 +318,32 @@ fn run_child(scenario: &str, spec: &str) -> Result<Outcome, Box<dyn Error>> {
         pipe.read_to_end(&mut raw)?;
         stderr = String::from_utf8_lossy(&common::without_fd_warning(&raw)).into_owned();
     }
-    let mut stdout_bytes = 0;
+    let mut stdout = String::new();
     if let Some(mut pipe) = child.stdout.take() {
         let mut raw = Vec::new();
         pipe.read_to_end(&mut raw)?;
-        stdout_bytes = raw.len();
+        stdout = String::from_utf8_lossy(&raw).into_owned();
     }
     Ok(Outcome {
         status,
         took,
+        deadline,
         stderr,
-        stdout_bytes,
+        stdout,
         dir,
     })
 }
 
 fn assert_ended_by_the_watchdog(outcome: &Outcome) {
+    let deadline = outcome.deadline;
     assert_eq!(outcome.status.code(), Some(70), "{:?}", outcome.status);
     assert!(
-        outcome.took < DEADLINE + EXIT_BOUND,
-        "took {:?} for a {DEADLINE:?} deadline",
+        outcome.took < deadline + EXIT_BOUND,
+        "took {:?} for a {deadline:?} deadline",
         outcome.took
     );
     assert!(
-        outcome.took >= DEADLINE + GRACE,
+        outcome.took >= deadline + GRACE,
         "the watchdog fires at the deadline plus 10 s, not at {:?}",
         outcome.took
     );
@@ -381,15 +393,16 @@ fn status_of<'a>(doc: &'a serde_json::Value, id: &str) -> Result<&'a str, Box<dy
 #[test]
 fn a_check_that_never_yields_ends_in_exit_70_with_an_incomplete_report_and_no_child_left()
 -> Result<(), Box<dyn Error>> {
-    let outcome = run_child("spin", SPIN_SPEC)?;
+    let outcome = run_child("spin", SPIN_SPEC, SPIN_DEADLINE)?;
     assert_ended_by_the_watchdog(&outcome);
     let doc = read_partial(&outcome)?;
     let checks = doc["checks"].as_array().ok_or("no checks")?;
     assert_eq!(checks.len(), 3);
     // The one that spins is a timeout. The quick one finished, but the scheduler task that tells the
-    // board is on the same single thread as the spinner, so on a loaded machine the spinner can start
-    // first and the quick one still counts as running. Either is a correct snapshot; the finished
-    // result being kept is proved in the pipe run below and in the engine tests.
+    // board is on the same single thread as the spinner, so the spinner can start first and the quick
+    // one still counts as running. On Windows that is always so: with no sleeper to wait for, the spinner
+    // starts at once and `host.cpu` is always a timeout. Either is a correct snapshot; a finished result
+    // being kept is proved in the pipe run below and in the engine tests.
     let cpu = status_of(&doc, "host.cpu")?;
     assert!(cpu == "pass" || cpu == "timeout", "{cpu}");
     assert_eq!(status_of(&doc, "host.disk")?, "timeout");
@@ -404,17 +417,33 @@ fn a_check_that_never_yields_ends_in_exit_70_with_an_incomplete_report_and_no_ch
 #[test]
 fn a_json_run_into_a_pipe_nobody_reads_ends_in_exit_70_with_an_incomplete_report()
 -> Result<(), Box<dyn Error>> {
-    let outcome = run_child("pipe", PIPE_SPEC)?;
+    let outcome = run_child("pipe", PIPE_SPEC, PIPE_DEADLINE)?;
     assert_ended_by_the_watchdog(&outcome);
-    // The pipe really was full: the child wrote until it blocked.
+    // The pipe really was full: the child wrote until it blocked. (A Windows pipe buffer is smaller and
+    // its blocking differs, so the size is checked on Unix only.)
+    #[cfg(unix)]
     assert!(
-        outcome.stdout_bytes >= 16 * 1024,
+        outcome.stdout.len() >= 16 * 1024,
         "only {} bytes reached the pipe",
-        outcome.stdout_bytes
+        outcome.stdout.len()
     );
     let doc = read_partial(&outcome)?;
     // The run itself had finished, so the check has its real result, in a report marked incomplete.
     assert_eq!(status_of(&doc, "host.cpu")?, "pass");
+    // The secret in the check's message was hidden when the result was kept, is hidden in the partial
+    // report, and never reached the pipe or the file.
+    let report = find_report(&outcome.dir.path().join("out"))?;
+    let raw = std::fs::read_to_string(report)?;
+    assert!(!raw.contains(CANARY), "the secret is in the partial report");
+    assert!(
+        !outcome.stdout.contains(CANARY),
+        "the secret reached the pipe"
+    );
+    assert!(
+        doc["redaction"]["total"].as_u64().unwrap_or(0) > 0,
+        "the redaction counts are lost: {}",
+        doc["redaction"]
+    );
     Ok(())
 }
 

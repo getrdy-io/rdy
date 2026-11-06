@@ -302,7 +302,7 @@ With `--json`, stdout holds one JSON document and a final newline: UTF-8, no BOM
 | --- | --- |
 | `run` exits 0, 1 or 2 | The Report (`kind: Report`) |
 | exit 64 | An ErrorOutput (`kind: Error`, `verdict: null`, `complete: false`), with `file`, `line`, `column` where known |
-| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report with `complete: false`. The error text is on stderr. There is no `.json` file |
+| exit 70, a verdict exists, the files could not be written at the end (full disk) | The Report as printed before the files were written (M1-176, PC-50): it can say `complete: true`, and the exit code 70 is the authority. Without `--json`, nothing. The error text is on stderr. There is no `.json` file |
 | exit 70, the watchdog fired | Nothing, or a cut-off document. Do not parse it. The Report with `complete: false` is in the report folder, if the folder exists and `--no-report` was not given (5.2) |
 | exit 70, no verdict (`internal`, `interrupted`, `report_write` before any check, or from `report` or `bundle`) | An ErrorOutput |
 | `verify` accepts the spec / `spec lint` / `version` | Verification / LintReport (`kind: Lint`, exit 0, 1 or 2) / version object (4.3) |

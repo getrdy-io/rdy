@@ -237,9 +237,12 @@ Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
     good, so the state is still `Running` and the watchdog still owns the report), moves the state to
     `Writing`, writes the files, sets `Done` with the exit code, prints the stderr summary, kills any
     leftover process groups (`entry::run_live`) and exits; nothing waits on a runtime drop. `rdy run`
-    starts the watchdog before it reads the spec and arms it once the plan exists: `Engine::execute`
-    builds the `Board` (one slot per spec entry, plan skips already in it) from `RunOptions::watch`
-    (M1-176). The
+    gets a watchdog that `entry::run_live` started before the runtime. It plans first (pure), makes the
+    folder, builds the `Board` with `Engine::board` (one slot per spec entry, plan skips already in it)
+    and arms the watchdog right after the folder exists, before the host and needs probes, so a hang
+    anywhere after the folder leaves a `complete: false` report (M1-176). `Engine::execute` then gives
+    the board its way to map an end (`RunOptions::board`). The library `run` used by tests starts its
+    own watchdog and disarms it when it returns; commands other than `run` disarm it at once.
     kube exec plugin is not ours to track (residual).
 - **Ctrl-C in M1.** The first Ctrl-C cancels the run token: checks abort, child process groups are
   killed, and the CLI exits 70 with "interrupted, no report written". Writing the partial report with
