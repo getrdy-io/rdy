@@ -1,0 +1,12 @@
+schema = 1
+name = "pass"
+summary = "Parameters set live and at boot in two directories, a limit set by a drop-in"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

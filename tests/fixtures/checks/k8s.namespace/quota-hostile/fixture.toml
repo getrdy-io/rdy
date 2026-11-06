@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-quota-hostile"
+summary = "A quota with a hostile name and an amount that is not one"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

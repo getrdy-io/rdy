@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "id": "host.firewall",
+    "open_inbound": [
+      6443,
+      10250
+    ]
+  },
+  "result": {
+    "expected": {
+      "open_inbound": [
+        6443,
+        10250
+      ]
+    },
+    "fix": "Run `firewall-cmd --list-all --zone=public` and check that 6443/tcp and 10250/tcp is accepted from the nodes that need it. If it is not, run `firewall-cmd --permanent --zone=public --add-port=6443/tcp --add-port=10250/tcp && firewall-cmd --reload`.",
+    "level": "warn",
+    "message": "Cannot confirm 6443/tcp and 10250/tcp in firewalld zone public: the zone has 1 rich rule(s) and firewalld rich rules are not evaluated (for example: ipv4, source address, port 6443/tcp, drop).",
+    "notes": [
+      "firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read",
+      "zone public has 1 rich rule(s)"
+    ],
+    "observed": {
+      "active": [
+        {
+          "interface": "eth0",
+          "manager": "firewalld",
+          "ports": {
+            "10250": {
+              "detail": "the zone has 1 rich rule(s) and firewalld rich rules are not evaluated (for example: ipv4, source address, port 6443/tcp, drop)",
+              "verdict": "unknown"
+            },
+            "6443": {
+              "detail": "the zone has 1 rich rule(s) and firewalld rich rules are not evaluated (for example: ipv4, source address, port 6443/tcp, drop)",
+              "verdict": "unknown"
+            }
+          },
+          "zone": "public"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

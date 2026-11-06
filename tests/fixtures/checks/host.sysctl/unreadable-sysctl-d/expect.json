@@ -1,0 +1,35 @@
+{
+  "entry": {
+    "expect": {
+      "vm.max_map_count": ">=262144"
+    },
+    "id": "host.sysctl"
+  },
+  "result": {
+    "expected": {
+      "parameters": {
+        "vm.max_map_count": ">=262144"
+      }
+    },
+    "fix": "Run rdy as root, or read the files under `/etc/sysctl.d/` by hand.",
+    "level": "warn",
+    "message": "`vm.max_map_count` is `262144`, as needed, but whether it survives a reboot is not verified: /etc/sysctl.d could not be read (permission denied).",
+    "notes": [
+      "Read 0 sysctl configuration file(s), in boot order.",
+      "Not read: /etc/sysctl.d could not be read (permission denied)."
+    ],
+    "observed": {
+      "parameters": {
+        "vm.max_map_count": {
+          "live": "262144",
+          "persisted": null,
+          "state": "persist_unknown"
+        }
+      }
+    },
+    "partial": {
+      "missing": [],
+      "note": "Not verified: /etc/sysctl.d could not be read (permission denied)."
+    }
+  }
+}
