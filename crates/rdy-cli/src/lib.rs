@@ -44,6 +44,8 @@ pub mod prompt;
 pub mod redaction;
 #[doc(hidden)]
 pub mod registry;
+#[doc(hidden)]
+pub mod rig;
 mod run_cmd;
 
 #[doc(hidden)]
@@ -68,6 +70,7 @@ use rdy_engine::probe::{Backend, ProbeHub};
 use rdy_spec::result::{ExitCode, VersionInfo};
 
 pub use hooks::{FamiliesFn, RunHooks};
+pub use rig::Rig;
 
 /// Exit code for success.
 pub const EXIT_OK: u8 = ExitCode::Ready.code();
@@ -131,8 +134,42 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
+    // The watchdog of this call. It does what the binary's does while the run lasts, and it is disarmed
+    // when the run returns, so a test process never carries one that fires later (M1-176).
+    let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    let deadline = hooks
+        .deadline
+        .unwrap_or(rdy_engine::sched::DEFAULT_DEADLINE);
+    let Ok(rig) = Rig::start(std::time::Instant::now(), deadline) else {
+        let json = error::wants_json(&args);
+        return exit_code_of(emit(&CliError::bug(), json, stdout, stderr));
+    };
+    let code = run_watched(args, backend, hooks, rig.clone(), stdout, stderr).await;
+    rig.disarm();
+    code
+}
+
+/// Like [`run`], with a watchdog the caller started ([`Rig::start`]) before the async runtime.
+///
+/// The binary calls this from [`entry::main_code`] with [`RunHooks::default`] and a [`Rig`] with the
+/// default deadline, and never disarms the rig: after the report is written the watchdog stays as a
+/// backstop (02 "Watchdog"). Commands other than `rdy run` disarm it at once, because some of them wait
+/// for a person.
+#[doc(hidden)]
+pub async fn run_watched<I, T>(
+    args: I,
+    backend: Arc<dyn Backend>,
+    hooks: RunHooks,
+    rig: Rig,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> ExitCode
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
     let families = hooks.families.unwrap_or(registry::registry);
-    let code = run_code(args, backend, hooks, families, stdout, stderr).await;
+    let code = run_code(args, backend, hooks, rig, families, stdout, stderr).await;
     exit_code_of(code)
 }
 
@@ -145,6 +182,7 @@ async fn run_code<I, T>(
     args: I,
     backend: Arc<dyn Backend>,
     hooks: RunHooks,
+    rig: Rig,
     make_registry: fn() -> Result<rdy_engine::family::Registry, rdy_engine::family::RegistryError>,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
@@ -166,6 +204,10 @@ where
         .and_then(|matches| Cli::from_arg_matches(&matches));
     match parsed {
         Ok(cli) => {
+            if !matches!(cli.command, Commands::Run(_)) {
+                // Some commands wait for a person (a password, a yes). A watchdog must not end those.
+                rig.disarm();
+            }
             if !reads_the_machine(&cli.command) {
                 tracing::debug!(command = %command_path(&args), json, "command parsed");
                 return dispatch(&cli.command, json, stdout, stderr);
@@ -204,6 +246,7 @@ where
                                 privilege,
                                 hooks,
                                 registry,
+                                rig,
                             };
                             run_cmd::run(run_args, cx, json, stdout, stderr).await
                         }
