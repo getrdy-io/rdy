@@ -206,6 +206,13 @@ This file is the corrections list.
   by security-reviewer. If neither exists, rust-architect writes an ADR first. The review and any ADR come out
   of M2-004's 5 h. The host.time_sync half of M2-004 is check-author's work. `ci/check-crate-deps.toml`
   does not change, because the call sits in rdy-engine and host.time_sync reaches it through the Probe.
+- **Correction-36, k8s.namespace follow-ups (M2-116 and M2-117, not M1).** A `LimitRange` `Container`
+  default limit below `container_max_memory` is a note in M1, not a block, because the spec cannot say that
+  the product sets requests without limits. M1-161's builder chose this and k8s-expert confirmed it on
+  PR #32, which edits 03 to match. M2-116 adds the spec key, owned by rust-architect, before rdy-spec's
+  first crates.io release. M2-117 makes k8s.namespace work on OpenShift without cluster-scoped reads:
+  `AppliedClusterResourceQuota` instead of `ClusterResourceQuota`, and the project GET when
+  `get namespaces` is Forbidden. Its two new guard reads need a security-reviewer review.
 
 ## CLAUDE.md edits
 
