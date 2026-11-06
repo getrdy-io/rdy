@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-limit-cut"
+summary = "A limit range list with a second page"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

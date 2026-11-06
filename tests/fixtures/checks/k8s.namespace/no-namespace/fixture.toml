@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-no-namespace"
+summary = "The spec names no namespace, so no request is sent"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

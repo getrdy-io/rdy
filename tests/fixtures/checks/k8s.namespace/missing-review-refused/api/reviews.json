@@ -1,0 +1,13 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "namespaces"
+        }
+      },
+      "refuse": 403
+    }
+  ]
+}
