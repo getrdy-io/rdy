@@ -43,6 +43,8 @@ use crate::redact::RuleCounts;
 use crate::sched::{DEFAULT_DEADLINE, DEFAULT_JOBS, End, Planned, Scheduler};
 
 #[cfg(test)]
+mod hosts_tests;
+#[cfg(test)]
 mod tests;
 
 /// What shapes one run.
@@ -189,7 +191,9 @@ impl Engine {
             };
             let info = built.check.info();
             let ctx = CheckContext::new(entry.key.clone(), os, available.iter().cloned());
-            let mut run = Planned::new(Arc::from(built.check), entry.key);
+            // The check's probe gets the hosts its own entry lists, and no others (INV-11). Without this a
+            // real run refuses every connect and datagram (M1-095).
+            let mut run = Planned::new(Arc::from(built.check), entry.key).with_hosts(built.hosts);
             if let Some(timeout) = spec_timeout(spec_entry) {
                 run = run.with_timeout(timeout);
             }
