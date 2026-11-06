@@ -213,6 +213,12 @@ This file is the corrections list.
   first crates.io release. M2-117 makes k8s.namespace work on OpenShift without cluster-scoped reads:
   `AppliedClusterResourceQuota` instead of `ClusterResourceQuota`, and the project GET when
   `get namespaces` is Forbidden. Its two new guard reads need a security-reviewer review.
+- **Correction-37, host.time_sync commands and peers (applied, M1).** 03 named `chronyc -n -c -t 3 tracking`, but
+  chronyc has no `-t` option, so that form fails on every host. 03 now says `chronyc -n -c tracking`, and PR #35
+  fixes the command table. A command limit equal to the check limit let a hung `timedatectl` throw away a
+  good SNTP sample. Each form now has 3 s inside the 5 s budget, and a timed-out command keeps the SNTP
+  verdict with a note. 05 INV-11 names local IPC of allowlisted commands as a third exception, M1-128
+  allows those destinations, and 05 Appendix A T5 accepts unauthenticated SNTP.
 
 ## CLAUDE.md edits
 
