@@ -1,0 +1,11 @@
+polarity = "negative"
+since = "m1"
+rulesets = ["report"]
+rules = []
+exclusions = ["shell_reference", "command_substitution", "template"]
+secrets = []
+controls = [
+  ["shell_reference", "password: ${DB_PASSWORD}", "password: canaryCtl11", "canaryCtl11"],
+  ["command_substitution", "token: $(cat /etc/acme/token-file)", "token: canaryCtl12", "canaryCtl12"],
+  ["template", "secret: {{ .Values.dbSecret }}", "secret: canaryCtl13", "canaryCtl13"],
+]

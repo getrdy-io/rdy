@@ -1,0 +1,67 @@
+{
+  "entry": {
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "rhel",
+        "versions": [
+          "8",
+          "9"
+        ]
+      },
+      {
+        "id": "ubuntu",
+        "versions": [
+          "22.04"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "any",
+      "supported": [
+        {
+          "id": "rhel",
+          "versions": [
+            "8",
+            "9"
+          ]
+        },
+        {
+          "id": "ubuntu",
+          "versions": [
+            "22.04"
+          ]
+        }
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Rocky Linux 9.3 (Blue Onyx) on x86_64 meets the spec.",
+    "notes": [
+      "rocky is a rebuild, so the supported list was matched through ID_LIKE."
+    ],
+    "observed": {
+      "arch": "x86_64",
+      "container": [],
+      "fips": false,
+      "init": "systemd",
+      "kernel": "5.14.0-362.8.1.el9_3.x86_64",
+      "os": {
+        "id": "rocky",
+        "id_like": [
+          "rhel",
+          "centos",
+          "fedora"
+        ],
+        "name": "Rocky Linux",
+        "pretty_name": "Rocky Linux 9.3 (Blue Onyx)",
+        "source": "/etc/os-release",
+        "version_id": "9.3"
+      },
+      "wsl": false
+    },
+    "partial": null
+  }
+}

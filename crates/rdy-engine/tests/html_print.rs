@@ -158,6 +158,9 @@ fn visible_text(template: &str) -> String {
         let end = if rest.starts_with("<style") {
             // The CSS is not text: skip to the end of the element.
             rest.find("</style>").map_or(rest.len(), |at| at + 8)
+        } else if rest.starts_with("<script") {
+            // The embedded result (M1-078) is a data block, not text: skip to the end of the element.
+            rest.find("</script>").map_or(rest.len(), |at| at + 9)
         } else {
             rest.find(close).map_or(rest.len(), |at| at + close.len())
         };

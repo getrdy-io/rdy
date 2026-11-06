@@ -739,6 +739,7 @@ Threat model R1 and INV-07: every side effect goes through the probe facade, whi
 | --- | --- |
 | `exec` | `program`, `argv`, `exit`, `stdout_bytes`, `truncated` |
 | `read`, `read_dir`, `stat` | `path`, and `bytes`, `truncated` or `entries` |
+| `read_link` | `path` (the link, never what it points to; M1-169) |
 | `env` | `name` (never the value) |
 | `lookup`, `dns` | `host`, `answers`; or `server`, `name`, `rtype` |
 | `connect`, `tls` | `host`, `port`, `addr`, `via_proxy`; or `host`, `sni`. A UDP exchange is a `connect` with `proto: udp` and `bytes` (the reply) |
@@ -749,13 +750,13 @@ Threat model R1 and INV-07: every side effect goes through the probe facade, whi
 Every string passes the redactor. Bodies are never recorded. **Retention:** `exec`, `connect`, `tls`,
 `http`, `dns`, `lookup` and `kube` entries are kept except in the last resort below; they are bounded already by the 256 host and
 port pairs a spec may name (2.1) and the fixed command set. A `denied` entry is never dropped for another kind
-of entry. A `denied` or `failed` `read`, `read_dir` or `stat` is written as it happens up to 20 times per check,
+of entry. A `denied` or `failed` `read`, `read_dir`, `read_link` or `stat` is written as it happens up to 20 times per check,
 kind, rule or error and parent directory, and a `denied` call of any other kind up to 20 times per check, kind,
 rule and target (program, host or path); the calls after that fold into one `coalesced` entry that carries a `count` and the `rule` or
 `error` (the entry takes the `seq` of the first call it folds, so `seq` has a gap). A check holds at most 1000
 entries. When a check reaches that quota, the log reaches 5000 entries, or the document its size cap,
-retention drops, in order: a new `ok` `read`, `read_dir` or `stat`, then the `ok` ones already held, then
-`failed` `read`, `read_dir`, `stat` and `coalesced` entries; `actions_truncated` is true, and `actions_dropped`
+retention drops, in order: a new `ok` `read`, `read_dir`, `read_link` or `stat`, then the `ok` ones already held, then
+`failed` `read`, `read_dir`, `read_link`, `stat` and `coalesced` entries; `actions_truncated` is true, and `actions_dropped`
 gives a count per kind. Only when nothing above can go does the log drop another kept entry (never a `denied`
 one if any other can go), with a `tracing` warning; that is a bug in a check or a spec far outside the limits.
 A `denied` call keeps at most 100 distinct targets apart per check, kind and rule; the calls to any more fold
@@ -765,7 +766,7 @@ its check at 1000 entries or the log at 5000 displaces `ok` and `failed` file en
 of its own check only, never another check's `exec`, `connect` or `http` entry; if there is none, the new
 entry is dropped and counted. So a `denied` entry is lost only when a check or the whole log is full of
 `denied` entries and the check has no spare entry of its own to give up.
-An `ok` `read`, `read_dir` or `stat` is written up to 200 times per check, kind and parent directory; the calls
+An `ok` `read`, `read_dir`, `read_link` or `stat` is written up to 200 times per check, kind and parent directory; the calls
 after that fold into one `coalesced` entry with outcome `ok`, and that entry is dropped with the `ok` reads.
 When retention drops a `coalesced` entry, `actions_dropped` adds its `count` to the kind in its `of`, not one to `coalesced`.
 Both slashes and backslashes end a directory, so Windows paths fold per directory too.

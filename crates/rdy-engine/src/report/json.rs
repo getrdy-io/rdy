@@ -20,10 +20,10 @@
 //!   because those are not results. So a large real cluster still gives a report that validates.
 //! - **The 2 MiB cap.** The whole document is at most [`MAX_REPORT_BYTES`], measured on the final bytes
 //!   after the escapes. Past that, the writer works in two stages. First it sheds entries of the action
-//!   log in the order the log itself keeps (01 section 5.4): the newest `ok` `read`, `read_dir` and
-//!   `stat`, then `failed` ones, then other entries. `denied` entries (refused calls) are never shed to
-//!   make room. `actions_truncated` and `actions_dropped` say what went. Past 5000 entries the same
-//!   order applies. If the report is still too big, it sets `observed` and `expected` to `null` on the
+//!   log in the order the log itself keeps (01 section 5.4): the newest `ok` `read`, `read_dir`,
+//!   `read_link` and `stat`, then `failed` ones, then other entries. `denied` entries (refused calls)
+//!   are never shed to make room. `actions_truncated` and `actions_dropped` say what went. Past 5000
+//!   entries the same order applies. If the report is still too big, it sets `observed` and `expected` to `null` on the
 //!   checks that hold the most of them, largest first, and sets their `truncated` flag. The verdict, the
 //!   status, the message and the fix of a check are never cut. If it is still too big with all of that
 //!   cleared, [`JsonError::TooLarge`] names the largest checks and nothing is written.
@@ -123,8 +123,12 @@ pub enum JsonError {
 /// cannot close the element, and because it is the same bytes as the `.json` file, a hash of one is a
 /// hash of the other. The text ends with one newline.
 ///
-/// This is the only value a template may print unescaped (an askama safe marker belongs on this type
-/// alone). Any other string can hold `</script>` or `<!--`.
+/// **Safe only as the text of a `<script type="application/json">` element.** The escapes cover `<`,
+/// `>`, `&` and the line separators, and nothing else: a `"` is still a `"`, so in an HTML attribute value
+/// or any other context the text can break out. The HTML renderer prints it as that element's text and
+/// nowhere else, through a private wrapper that carries the one askama safe marker (M1-078). This type
+/// itself is not marked safe, so a caller that puts it in a template gets it escaped like any string.
+/// Any other string can hold `</script>` or `<!--`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HtmlSafeJson(String);
 

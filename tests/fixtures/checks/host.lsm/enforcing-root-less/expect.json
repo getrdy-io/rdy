@@ -1,0 +1,50 @@
+{
+  "entry": {
+    "id": "host.lsm",
+    "selinux": {
+      "allow": [
+        "enforcing"
+      ],
+      "watch": [
+        "acme_t"
+      ]
+    }
+  },
+  "result": {
+    "expected": {
+      "selinux": {
+        "allow": [
+          "enforcing"
+        ],
+        "denials_max": 0,
+        "denials_window": "24h",
+        "watch": [
+          "acme_t"
+        ]
+      }
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "SELinux is enforcing. AppArmor is off.",
+    "notes": [],
+    "observed": {
+      "apparmor": {
+        "state": "disabled"
+      },
+      "selinux": {
+        "configured": "enforcing",
+        "denials": {
+          "inspected": false,
+          "why": "needs root"
+        },
+        "state": "enforcing"
+      }
+    },
+    "partial": {
+      "missing": [
+        "Root"
+      ],
+      "note": "SELinux denials were not inspected: the audit log needs root."
+    }
+  }
+}

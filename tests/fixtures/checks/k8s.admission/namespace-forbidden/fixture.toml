@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-namespace-forbidden"
+summary = "The identity may not read the namespace"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

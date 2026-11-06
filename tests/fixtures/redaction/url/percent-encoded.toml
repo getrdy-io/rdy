@@ -1,0 +1,6 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["url_userinfo"]
+forms = ["percent_encoded"]
+secrets = ["${SYN:pct_pw}"]

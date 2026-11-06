@@ -210,6 +210,8 @@ open_enum! {
         Read => "read",
         /// A directory was listed.
         ReadDir => "read_dir",
+        /// A symbolic link was read (where it points, not what it points at).
+        ReadLink => "read_link",
         /// A path was inspected.
         Stat => "stat",
         /// An environment variable name was read.

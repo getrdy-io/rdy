@@ -1,0 +1,6 @@
+{
+  "AccessKeyId": "[REDACTED:aws_access_key_id:~1]",
+  "SecretAccessKey": "[REDACTED:aws_secret_access_key:~2]",
+  "SessionToken": "[REDACTED:aws_session_token:~3]",
+  "Expiration": "2026-11-04T10:15:00Z"
+}

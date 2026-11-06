@@ -36,6 +36,12 @@ value = "5.15.90.1"
 reason = "A WSL2 kernel version with four parts (5.15.90.1-microsoft-standard-WSL2), not an address; host.os parses it"
 
 [[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/host.os/ubuntu-wsl/expect.json"
+value = "5.15.90.1"
+reason = "The same WSL2 kernel version, quoted in the reviewed result (observed.kernel), not an address"
+
+[[allow]]
 rule = "host"
 path = "tests/fixtures/checks/k8s.version/gke/api/nodes.json"
 value = "cloud.google.com"
@@ -70,3 +76,13 @@ reason = "The ceph-csi rbd driver name (openshift-storage.rbd.csi.ceph.com), not
 rule = "host"
 value = "cephfs.csi.ceph.com"
 reason = "The ceph-csi CephFS driver name (openshift-storage.cephfs.csi.ceph.com), not a host a test contacts (k8s.storageclass)"
+
+[[allow]]
+rule = "host"
+value = "kyverno.io"
+reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"
+
+[[allow]]
+rule = "host"
+value = "policies.kyverno.io"
+reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"

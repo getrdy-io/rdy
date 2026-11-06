@@ -1,0 +1,4 @@
+{
+  "client_secret": "${SYN:client_secret}",
+  "client_id": "rdy-cli"
+}
