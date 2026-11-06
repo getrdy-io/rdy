@@ -560,7 +560,7 @@ fn a_hung_tool_never_turns_the_check_into_a_timeout() {
 }
 
 #[test]
-fn a_silent_server_and_two_hung_tools_still_answer_inside_the_budget() {
+fn a_silent_server_and_two_hung_tools_still_answer_and_chronyc_is_not_run() {
     let run = run_case("silent-server-and-hung-tools");
     assert!(matches!(run.end, End::Done(_)), "{:?}", run.end);
     let finding = run.finding();
@@ -577,7 +577,7 @@ fn a_silent_server_and_two_hung_tools_still_answer_inside_the_budget() {
         finding
             .notes
             .iter()
-            .any(|n| n == "chronyc gave no answer: it timed out."),
+            .any(|n| n.starts_with("chronyc gave no answer: it was not run")),
         "{:?}",
         finding.notes
     );

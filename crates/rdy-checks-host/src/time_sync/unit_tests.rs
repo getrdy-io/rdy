@@ -368,7 +368,7 @@ mod round_trip {
 
     fn host() -> impl Strategy<Value = String> {
         prop_oneof![
-            "[a-z][a-z0-9-]{0,12}(\\.[a-z]{2,6}){1,3}",
+            "[a-z]([a-z0-9-]{0,10}[a-z0-9])?(\\.[a-z]{2,6}){1,3}",
             (any::<u8>(), any::<u8>(), any::<u8>(), 1_u8..=254)
                 .prop_map(|(a, b, c, d)| format!("{a}.{b}.{c}.{d}")),
             proptest::array::uniform4(any::<u16>())
@@ -390,16 +390,18 @@ mod round_trip {
             let entry: CheckSpec =
                 serde_json::from_value(json!({"id": "host.time_sync", "ntp_servers": [text]}))
                     .expect("an entry");
-            if let CheckParams::HostTimeSync(params) = entry.decode_params() {
-                let check = TimeSync::from_params(&params);
-                let expected = usize::from(params.ntp_servers.is_some());
-                prop_assert_eq!(check.servers().len(), expected);
-                if let Some(list) = &params.ntp_servers {
-                    for (server, target) in list.iter().zip(check.servers()) {
-                        prop_assert_eq!(server.target(), target);
-                        prop_assert_eq!(target.port(), port.unwrap_or(123));
-                    }
-                }
+            // An input that does not decode is a failure, not a skipped case.
+            let CheckParams::HostTimeSync(params) = entry.decode_params() else {
+                return Err(TestCaseError::fail(format!("{text} did not decode")));
+            };
+            let Some(list) = &params.ntp_servers else {
+                return Err(TestCaseError::fail(format!("{text} gave no server list")));
+            };
+            let check = TimeSync::from_params(&params);
+            prop_assert_eq!(check.servers().len(), 1);
+            for (server, target) in list.iter().zip(check.servers()) {
+                prop_assert_eq!(server.target(), target);
+                prop_assert_eq!(target.port(), port.unwrap_or(123));
             }
         }
     }

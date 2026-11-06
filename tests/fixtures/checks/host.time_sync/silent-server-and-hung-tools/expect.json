@@ -17,11 +17,11 @@
     "notes": [
       "`192.0.2.10`: no reply within 3 s.",
       "timedatectl gave no answer: it timed out.",
-      "chronyc gave no answer: it timed out."
+      "chronyc gave no answer: it was not run, because no time was left in the check budget."
     ],
     "observed": {
       "chrony": null,
-      "chronyc": "unusable: it timed out",
+      "chronyc": "unusable: it was not run, because no time was left in the check budget",
       "ntp_enabled": null,
       "offset_seconds": null,
       "offset_source": null,
