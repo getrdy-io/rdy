@@ -22,7 +22,9 @@ use std::panic::{self, AssertUnwindSafe};
 
 use rdy_engine::exec;
 
+use crate::cli::ColorChoice;
 use crate::error::{CliError, emit, wants_json};
+use crate::style::{StyleEnv, use_color};
 use crate::{EXIT_INTERNAL, RunHooks, logging, panic_hook, redaction, run, startup};
 
 /// Runs rdy as the binary does and returns the exit code.
@@ -59,10 +61,49 @@ pub fn main_code() -> u8 {
     // (codes become console calls where needed). Whether a line has codes at all is decided by the
     // command from `--color`, `NO_COLOR` and the stream, and `style::write_styled` strips them when not.
     // `AutoStream::auto` is never used, so no variable decides whether colour is on (M1-086).
-    let mut stderr = anstream::AutoStream::always(io::stderr());
+    //
+    // When colour is off the stream is `never`, so a Windows console's mode is not touched either: only
+    // `always` calls `enable_ansi_colors`. The choice here is read from the raw arguments and the
+    // variables by the same rule as the command ([`style::use_color`]); a mistake in this guess cannot
+    // colour a line, because the command strips the codes itself when its own decision is "off".
+    let mut stderr = if wants_color(&args) {
+        anstream::AutoStream::always(io::stderr())
+    } else {
+        anstream::AutoStream::never(io::stderr())
+    };
     guarded(json, &mut io::stdout(), &mut stderr, |stdout, stderr| {
         run_live(args, json, stdout, stderr)
     })
+}
+
+/// Whether stderr should be set up for colour: `--color` (the last one wins), else the variables and the
+/// stream, by [`style::use_color`].
+fn wants_color(args: &[OsString]) -> bool {
+    let mut choice = ColorChoice::Auto;
+    let mut at = 0;
+    while let Some(arg) = args.get(at) {
+        let text = arg.to_string_lossy();
+        let value = if let Some(value) = text.strip_prefix("--color=") {
+            Some(value.to_owned())
+        } else if text == "--color" {
+            at += 1;
+            args.get(at).map(|v| v.to_string_lossy().into_owned())
+        } else {
+            None
+        };
+        match value.as_deref() {
+            Some("always") => choice = ColorChoice::Always,
+            Some("never") => choice = ColorChoice::Never,
+            Some("auto") => choice = ColorChoice::Auto,
+            _ => {}
+        }
+        at += 1;
+    }
+    use_color(
+        choice,
+        &StyleEnv::from_process(),
+        io::IsTerminal::is_terminal(&io::stderr()),
+    )
 }
 
 /// Builds the live backend and the runtime, runs the command and returns its exit code.

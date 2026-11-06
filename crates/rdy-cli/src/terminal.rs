@@ -33,7 +33,7 @@
 
 use std::fmt::Write as _;
 
-use rdy_engine::summary::{last_line, summary_line};
+use rdy_engine::summary::summary_line;
 use rdy_spec::result::{
     Bucket, CheckResult, FixSource, Need, Report, Signature, SignatureState, SkipKind, Status,
     TrustSource, Verdict, group_by_bucket, verdict,
@@ -291,7 +291,7 @@ fn verdict_line(report: &Report, styler: Styler) -> String {
         Verdict::ReadyWithWarnings => Role::VerdictWarnings,
         _ => Role::VerdictNotReady,
     };
-    styler.paint_built(role, &Built::engine_line(&last_line(&report.checks)))
+    styler.paint_built(role, &Built::verdict(&report.checks))
 }
 
 /// `rdy <version>` and the labelled lines (07 section 2.1).
@@ -398,18 +398,23 @@ fn proxy_value(report: &Report) -> Option<String> {
     (!shown.is_empty()).then(|| shown.join(", "))
 }
 
-/// `scheme://host:port` for `scheme://user:pass@host:port/path`. The report is redacted already; this
-/// is the second guard for the one place a password can sit.
+/// `scheme://host:port` for `scheme://user:pass@host:port/path`, and `host:port` for `user:pass@host:port`.
+/// The report is redacted already; this is the second guard for the one place a password can sit.
 fn strip_userinfo(url: &str) -> String {
-    let Some((scheme, rest)) = url.split_once("://") else {
-        return url.to_owned();
+    // A schemeless `user:pass@host:3128` has the same userinfo to strip.
+    let (scheme, rest) = match url.split_once("://") {
+        Some((scheme, rest)) => (Some(scheme), rest),
+        None => (None, url),
     };
     let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let (authority, tail) = rest.split_at(end);
     let host = authority
         .rsplit_once('@')
         .map_or(authority, |(_, host)| host);
-    format!("{scheme}://{host}{tail}")
+    match scheme {
+        Some(scheme) => format!("{scheme}://{host}{tail}"),
+        None => format!("{host}{tail}"),
+    }
 }
 
 /// The cluster line value. See the module text.

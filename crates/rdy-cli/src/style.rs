@@ -19,7 +19,7 @@
 //!
 //! **Run-time text.** [`Styler::paint`] takes `&'static str`, so a line with a count or a product name
 //! in it cannot go through it. [`Built`] is the second path (M1-086). It can only be made by two
-//! functions, [`Built::engine_line`] for the words and counts of `rdy_engine::summary` and
+//! functions, [`Built::verdict`] for the verdict line of `rdy_engine::summary` and
 //! [`Built::product`] for a product name that passed the name rule, and [`Styler::paint_built`] styles
 //! it. Nothing else can be styled.
 //!
@@ -31,7 +31,10 @@
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
 
+use rdy_engine::summary::last_line;
 use rdy_engine::text::escape_untrusted;
+use rdy_spec::result::CheckResult;
+use rdy_spec::spec::ProductSlug;
 use unicode_width::UnicodeWidthStr;
 
 use crate::cli::ColorChoice;
@@ -271,26 +274,28 @@ impl Styler {
 /// Text that rdy built at run time and may style (M1-086, backlog correction-27).
 ///
 /// There are two ways to make one, and each holds only rdy's words, counts and a checked name. It has
-/// no `From<String>` and no public field, so a message or a fix from the machine or the spec cannot
-/// become one. Text of that kind goes through [`untrusted`] and is never styled.
+/// no `From<String>` and no public field, and no constructor takes a string from outside, so a message
+/// or a fix from the machine or the spec cannot become one. Text of that kind goes through [`untrusted`]
+/// and is never styled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Built(String);
 
 impl Built {
-    /// A line made by `rdy_engine::summary` (a verdict line such as `NOT READY: 2 required checks
-    /// were not run`). Those lines hold rdy's words and counts only. The text is escaped anyway.
+    /// The verdict line for `checks` (`NOT READY: 2 required checks were not run`), made here by
+    /// `rdy_engine::summary::last_line`, so the text is rdy's words and counts and nothing else.
     #[must_use]
-    pub fn engine_line(line: &str) -> Self {
-        Self(untrusted(line))
+    pub(crate) fn verdict(checks: &[CheckResult]) -> Self {
+        Self(last_line(checks))
     }
 
     /// `prefix`, the product name and `suffix`, such as `fix from acme-platform:` for the prefix
-    /// `fix from ` and the suffix `:`. Gives `None` unless `product` is a valid product name (a
-    /// lowercase letter or digit, then up to 62 lowercase letters, digits and hyphens: the rule of the
-    /// spec's `metadata.product`), so the name cannot hold anything that looks like another word.
+    /// `fix from ` and the suffix `:`. Gives `None` unless `product` is a valid product name (the rule
+    /// of the spec's `metadata.product`, [`ProductSlug`]) and is not `rdy`, so a vendor cannot make its
+    /// own fix look like rdy's (`fix from rdy:` is rdy's own text).
     #[must_use]
     pub fn product(prefix: &'static str, product: &str, suffix: &'static str) -> Option<Self> {
-        is_product_name(product).then(|| Self(format!("{prefix}{product}{suffix}")))
+        (product != "rdy" && ProductSlug::new(product).is_ok())
+            .then(|| Self(format!("{prefix}{product}{suffix}")))
     }
 
     /// The text, for measuring its width.
@@ -298,17 +303,6 @@ impl Built {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-}
-
-/// True for `^[a-z0-9][a-z0-9-]{0,62}$`.
-fn is_product_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let first_ok = chars
-        .next()
-        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
-    first_ok
-        && name.len() <= 63
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Writes `text` to `out`: with its colour codes when `color`, and with every escape sequence stripped

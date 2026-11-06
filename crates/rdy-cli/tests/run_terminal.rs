@@ -113,6 +113,8 @@ fn hooks(terminal: bool) -> RunHooks {
     hooks.families = Some(reader_registry);
     hooks.stderr_terminal = Some(terminal);
     hooks.stderr_columns = Some(100);
+    // Not the developer's NO_COLOR or CLICOLOR_FORCE.
+    hooks.style_env = Some(rdy_cli::style::StyleEnv::default());
     hooks
 }
 

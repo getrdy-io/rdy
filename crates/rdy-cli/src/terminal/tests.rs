@@ -20,7 +20,12 @@ fn fixtures() -> PathBuf {
 }
 
 fn sample(name: &str) -> Report {
-    let path = fixtures().join(format!("results/samples/{name}.json"));
+    let file = match name {
+        "ready" => "b1-ready",
+        "ready-with-warnings" => "b2-ready-with-warnings",
+        _ => "b3-not-ready",
+    };
+    let path = fixtures().join(format!("results/plan-07/{file}.json"));
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
     serde_json::from_str(&text)
@@ -401,6 +406,98 @@ fn assert_safe(text: &str) {
     }
 }
 
+/// CSI, OSC 8 and OSC 0 with BEL and with ST, a C1 introducer and the isolates, then a plain tail.
+const PAYLOAD: &str = "\u{1b}[31m\u{1b}]8;;http://x.example\u{7}\u{1b}]0;title\u{1b}\\\u{9b}31m\u{2066}\u{2067}\u{2068}\u{2069}z";
+
+/// A report with the payload in every string field the renderer reads.
+fn everywhere() -> Report {
+    let p = |tail: &str| format!("{PAYLOAD}{tail}");
+    let mut report = sample("not-ready");
+    report.producer.version = p("");
+    report.spec.product = p("");
+    report.spec.version = Some(p(""));
+    report.signature = {
+        let mut sig = Signature::bare(rdy_spec::result::SignatureState::Verified);
+        sig.key_id = Some(p(""));
+        sig.key_fingerprint = Some(p(""));
+        sig.product = Some(p(""));
+        sig.signed_at = Some(p(""));
+        sig.trust_source = Some(TrustSource::Flag);
+        sig
+    };
+    report.host.hostname = p("");
+    report.host.arch = p("");
+    report.host.os.id = Some(p(""));
+    report.host.os.version = Some(p(""));
+    report.identity.user = Some(p(""));
+    let mut kube = rdy_spec::result::KubeIdentity::default();
+    kube.context = Some(p(""));
+    kube.server = Some(p(""));
+    kube.user = Some(p(""));
+    kube.exec_plugin = Some(p(""));
+    report.identity.kube = Some(kube);
+    let mut proxy = rdy_spec::result::Proxy::default();
+    proxy.https = Some(p(""));
+    proxy.http = Some(format!("{}:3128", p("")));
+    report.proxy = Some(proxy);
+    for cap in &mut report.capabilities {
+        cap.detail = Some(p(""));
+    }
+    for check in &mut report.checks {
+        check.key = p(&check.key);
+        check.message = p(&check.message);
+        check.fix = Some(p(""));
+    }
+    report
+}
+
+#[test]
+fn a_payload_in_every_field_prints_as_text_with_colour_on_and_off() {
+    for enabled in [false, true] {
+        let styler = Styler::new(enabled);
+        let mut report = everywhere();
+        // The flags line, with the network off.
+        report.run.options.network = false;
+        report.run.options.kube_context = Some(PAYLOAD.to_owned());
+        for trust in [TrustSource::Flag, TrustSource::User] {
+            report.signature.trust_source = Some(trust);
+            let files = vec![PAYLOAD.to_owned(), "spec.yaml".to_owned()];
+            let view = View {
+                report: &report,
+                spec_arg: PAYLOAD,
+                folder: Some(PAYLOAD),
+                files: &files,
+                note: Some(PAYLOAD),
+                kubeconfig: Some(PAYLOAD),
+                styler,
+                width: 100,
+            };
+            assert_safe(&render(&view));
+            if let Some(text) = banner(&report.signature, PAYLOAD, styler) {
+                assert_safe(&text);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_payload_in_the_tip_and_the_unsigned_banner_prints_as_text() {
+    let mut report = based_on_ready(
+        "acme-platform",
+        ">=4.2",
+        "0.1.0",
+        vec![needs_root(PAYLOAD), needs_root("host.lsm")],
+    );
+    report.signature.trust_source = Some(TrustSource::User);
+    report.signature.product = Some(PAYLOAD.to_owned());
+    for enabled in [false, true] {
+        let styler = Styler::new(enabled);
+        assert_safe(&full(&report, PAYLOAD, "./f", false, styler, 100));
+        report.signature = Signature::unsigned();
+        assert_safe(&banner(&report.signature, PAYLOAD, styler).unwrap_or_default());
+    }
+}
+
 #[test]
 fn text_from_the_report_is_escaped_with_colour_off_and_on() {
     let report = hostile();
@@ -443,6 +540,18 @@ fn untrusted_text_is_never_styled() {
     let at = out.find(host).unwrap_or_else(|| panic!("{out}"));
     assert_eq!(&out[at - 8..at], "host    ", "{out:?}");
     assert!(out[at + host.len()..].starts_with("   "), "{out:?}");
+}
+
+#[test]
+fn a_product_named_rdy_never_makes_its_fix_look_like_rdys() {
+    let mut report = sample("ready-with-warnings");
+    report.spec.product = "rdy".to_owned();
+    let out = plain(&report, "x.yaml", "./f", false);
+    assert!(
+        out.contains("fix from the spec file (not verified): Free space"),
+        "{out}"
+    );
+    assert!(!out.contains("fix from rdy:"), "{out}");
 }
 
 #[test]
@@ -865,6 +974,14 @@ fn strip_userinfo_keeps_the_host_and_the_path() {
         "http://proxy.example:3128/x@y"
     );
     assert_eq!(strip_userinfo("proxy.example:3128"), "proxy.example:3128");
+    assert_eq!(
+        strip_userinfo("u:p@proxy.example:3128"),
+        "proxy.example:3128"
+    );
+    assert_eq!(
+        strip_userinfo("u:p@proxy.example:3128/x"),
+        "proxy.example:3128/x"
+    );
 }
 
 #[test]

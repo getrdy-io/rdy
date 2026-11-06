@@ -8,6 +8,8 @@
 //! stdout, so the golden `report.json` is what a user's pipe gets. The human output on stderr is the
 //! golden `terminal.txt`.
 //!
+//! The run plans for the OS it runs on, so the caller skips an environment of another OS (`main`).
+//!
 //! What the run does not do yet: `--jobs` is recorded but not applied until M1-059, so the harness
 //! writes the requested value into the report's `run.options.jobs`, and the golden does not change when
 //! that lands. A fixture that sets `kube = true` gets no cluster until M1-107, because `rdy run` builds
@@ -148,6 +150,7 @@ pub fn run_env(env: &str, jobs: usize) -> Result<EnvRun, String> {
             report.exit_code
         ));
     }
+    // Remove this overwrite when M1-059 (PR #39, `--jobs` applied) is on main: the run then records it.
     report.run.options.jobs = u32::try_from(jobs).unwrap_or(u32::MAX);
 
     let violations = violations(&report)?;

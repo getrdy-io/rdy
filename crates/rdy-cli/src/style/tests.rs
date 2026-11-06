@@ -339,9 +339,17 @@ proptest! {
 
 // ---- run-time text and the writer (M1-086) ---------------------------------------------------------
 
+fn not_run() -> Vec<rdy_spec::result::CheckResult> {
+    use rdy_spec::result::{CheckResult, Severity, SkipKind};
+    vec![
+        CheckResult::skipped("host.cpu", "host", Severity::Block, SkipKind::NotInBuild),
+        CheckResult::skipped("host.disk", "host", Severity::Block, SkipKind::NotInBuild),
+    ]
+}
+
 #[test]
 fn built_text_is_styled_only_when_colour_is_on() {
-    let line = Built::engine_line("NOT READY: 2 required checks were not run");
+    let line = Built::verdict(&not_run());
     assert_eq!(
         Styler::new(true).paint_built(Role::VerdictNotReady, &line),
         "\x1b[1;31mNOT READY: 2 required checks were not run\x1b[0m"
@@ -350,12 +358,6 @@ fn built_text_is_styled_only_when_colour_is_on() {
         Styler::new(false).paint_built(Role::VerdictNotReady, &line),
         "NOT READY: 2 required checks were not run"
     );
-}
-
-#[test]
-fn an_engine_line_is_escaped_so_a_raw_escape_never_gets_styled() {
-    let line = Built::engine_line("a\x1b[2Jb\u{202e}");
-    assert_eq!(line.as_str(), "a\\x1b[2Jb\\u{202e}");
 }
 
 #[test]
@@ -369,12 +371,15 @@ fn only_a_valid_product_name_can_label_a_fix() {
         "acme platform",
         "acme\u{1b}",
         "acme\u{202e}",
+        "rdy",
         "a.b",
         &"a".repeat(64),
     ] {
         assert!(Built::product("", bad, "").is_none(), "{bad:?}");
     }
     assert!(Built::product("", &"a".repeat(63), "").is_some());
+    // Only rdy's own text says `fix from rdy:`; `rdy-tools` is a different name and is fine.
+    assert!(Built::product("", "rdy-tools", "").is_some());
 }
 
 #[test]

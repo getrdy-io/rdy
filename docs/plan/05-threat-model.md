@@ -459,10 +459,11 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
   - Purpose: strip colour codes when colour is off, and turn them into console calls where a Windows
     console needs it (07 section 6). It replaces `atty`, which `deny.toml` bans; the TTY checks stay on
     `std::io::IsTerminal`.
-  - Maintainers: the `rust-cli` GitHub organisation (`rust-cli/anstyle`, the same repository for all but
-    two of the crates); `utf8parse` is from `alacritty/vte`; `is_terminal_polyfill` is from
-    `polyfill-rs`. The crates.io owner lists were not re-read in this PR (no network tool for it); the
-    reviewer confirms them.
+  - Maintainers (crates.io owners, confirmed in review, SEC-42): `anstream`, `anstyle-parse`,
+    `anstyle-query`, `anstyle-wincon` and `colorchoice` are owned by `epage` and
+    `github:rust-cli:maintainers`. `utf8parse` is owned by `jwilm`, `chrisduerr` and
+    `github:alacritty:publishers`. `is_terminal_polyfill` and `once_cell_polyfill` are owned by `epage`
+    alone, so they are single-maintainer crates; both are tiny and every bump is seen in the lock file.
   - `unsafe`: yes, in small places, read in this PR. `anstream`: `from_utf8_unchecked` in the strip
     adapter, over bytes the parser already proved to be UTF-8. `anstyle`: one block in `color.rs`.
     `anstyle-parse`: a `MaybeUninit` table and a `transmute` of state numbers. `utf8parse`: one
@@ -470,11 +471,14 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     console calls through `windows-sys`. Our crates keep `#![forbid(unsafe_code)]`.
   - `build.rs`: none in any of them. License: MIT OR Apache-2.0 for all eight (`utf8parse` lists Apache-2.0
     first). Allowed in `deny.toml`.
+  - Guard: `clippy.toml` bans `AutoStream::auto`, `AutoStream::new`, `anstream::stdout`, `anstream::stderr`
+    and `ColorChoice::write_global`, so no second place can decide colour.
   - How rdy uses it, and what stays true: rdy decides colour once, in `style::use_color`, and never gives
     anstream the choice `Auto`. `AutoStream::always` wraps stderr in `entry.rs` (the Windows console half),
     and `style::write_styled` calls `anstream::adapter::strip_str` when colour is off. The `auto` feature is
     on only so that `AutoStream::always` can check that the stream is a console before it switches to
-    console calls. Nothing calls `AutoStream::auto`, `choice` or `current_choice`, so no variable decides
+    console calls. When colour is off the entry wraps stderr with `AutoStream::never`, so a Windows console's
+    mode is not changed (only `always` calls `enable_ansi_colors`). Nothing calls `AutoStream::auto`, `choice` or `current_choice`, so no variable decides
     whether colour is on. On Windows only, `AutoStream::always` reads `TERM` to choose between console
     calls and passing the codes through; that changes how the codes are drawn, never whether they are. Untrusted text is escaped by `style::untrusted` before it is written, so the strip
     pass never has to remove a sequence that came from the machine or the spec.

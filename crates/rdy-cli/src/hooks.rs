@@ -41,4 +41,22 @@ pub struct RunHooks {
     /// The width of the terminal on stderr, for the wrap width. `None` asks the process. A test pins it
     /// so that `COLUMNS` and the size of the developer's terminal cannot change a golden.
     pub stderr_columns: Option<usize>,
+    /// The colour and width variables (`NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`, `TERM`, `COLUMNS`).
+    /// `None` reads them from the process, which is what the binary does. A test pins it, so the
+    /// developer's own variables cannot change a `--color auto` check.
+    pub style_env: Option<crate::style::StyleEnv>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RunHooks;
+
+    /// The binary passes the default, and the default steers nothing about how output looks.
+    #[test]
+    fn the_output_hooks_default_to_none() {
+        let hooks = RunHooks::default();
+        assert!(hooks.stderr_terminal.is_none());
+        assert!(hooks.stderr_columns.is_none());
+        assert!(hooks.style_env.is_none());
+    }
 }

@@ -66,7 +66,10 @@ struct Look {
 
 impl Look {
     fn new(choice: ColorChoice, hooks: &RunHooks) -> Self {
-        let env = StyleEnv::from_process();
+        let env = hooks
+            .style_env
+            .clone()
+            .unwrap_or_else(StyleEnv::from_process);
         let terminal = hooks
             .stderr_terminal
             .unwrap_or_else(|| std::io::IsTerminal::is_terminal(&std::io::stderr()));

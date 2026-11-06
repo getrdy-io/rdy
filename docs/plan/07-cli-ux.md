@@ -158,6 +158,9 @@ a bucket. Read the bucket from the result; never recompute it. One entry per che
   signature is verified and the key is pinned (`trust_source` is `system` or `user`); otherwise it is `the
   spec file (not verified)`, because an unsigned or one-run-key spec can carry any text under any name (01
   section 2.6). The terminal shows the vendor's fix only; the HTML adds rdy's text below it.
+- A status this version does not know prints as `UNKNOWN` (it counts as not run). The key column is
+  at most 40 cells wide: a longer key is printed whole and its message follows it, and the lines under
+  it hang at the column of the 40 cell case.
 - Lines wrap at word boundaries with a hanging indent under the message. Width is the terminal width, or
   `COLUMNS`, or 100, clamped to 60 to 100. `error:` and `fix:` lines in errors never wrap.
 

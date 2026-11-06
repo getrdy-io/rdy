@@ -51,7 +51,7 @@ tests/fixtures/
   envs/<env>/                    one whole environment plus a spec to run against it
   redaction/<category>/<case>.{in,expected,toml}
   results/<rdy-version>/*.json   result files from released versions, append only
-  results/samples/*.json         the three reports of 07 Appendix B (ready, ready-with-warnings, not-ready)
+  results/plan-07/b*.json        the three reports of 07 Appendix B (ready, ready-with-warnings, not-ready)
   terminal/*.txt                 what the terminal renderer prints for the samples and for 07 C.12 to C.14
   reports/*.json                 sample reports that engine tests put their own action log into
   reports/golden/*.{json,html}   reports as the JSON writer and the HTML renderer emit them, compared byte for byte
@@ -62,7 +62,7 @@ tests/fixtures/
   canary/                        files that guard line endings on Windows
 ```
 
-What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `results/samples/`, `terminal/` (six cases), `summary/` (nine cases), `specs/` (`invalid/`,
+What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `results/plan-07/`, `terminal/` (six cases), `summary/` (nine cases), `specs/` (`invalid/`,
 `malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (12 cases), `host.firewall/` (17 cases and the `envs/base-firewalld` and `envs/base-ufw` bases), `host.disk/` (15 cases), the twelve machines of
 `host.os/`, `host.security_agents/` (18 cases), `host.sysctl/` (23 cases, each with an `expect.json`), the `host.lsm/` cases, `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
@@ -104,7 +104,7 @@ The rest arrives with the tickets that need it. The names above are fixed now so
 | `redaction/<category>/<case>.in`, `.expected`, `.toml` | Input, expected output and the rule setup for a redaction case | By hand only. `UPDATE_GOLDENS` never touches it |
 | `summary/<case>.txt` | Two lines: the summary line and the last line a set of check results gets (01 section 5.3). Compared by `rdy_engine::summary` unit tests | By hand, or `UPDATE_GOLDENS=1` |
 | `results/<rdy-version>/*.json` | Result files written by released versions. They must stay parseable | Append only. Never edited |
-| `results/samples/*.json` | The three reports of 07 Appendix B: `ready.json` (B.1, C.17), `ready-with-warnings.json` (B.2, C.18) and `not-ready.json` (B.3, 2.7). Not written by a released binary: B.2 is B.1 with the patch of B.2 applied. The terminal renderer reads them (M1-086) and the golden HTML and JSON tests reuse them (M1-083) | By hand, when Appendix B changes |
+| `results/plan-07/b1-ready.json`, `b2-ready-with-warnings.json`, `b3-not-ready.json` | The three reports of 07 Appendix B (B.1 with C.17, B.2 with C.18, B.3 with 2.7). Not written by a released binary: B.2 is B.1 with the patch of B.2 applied. The terminal renderer reads them (M1-086) and the golden HTML and JSON tests reuse them (M1-083) | By hand, when Appendix B changes |
 | `terminal/*.txt` | The human output of `rdy run` for the samples above and for 07 C.12, C.13 and C.14: banner, header, checks, summary, report folder and verdict, at width 100 with no colour. A test also compares each file with the console block of its section in `docs/plan/07-cli-ux.md`, so the plan and the code cannot drift | `UPDATE_GOLDENS=1`, then read the diff and fix 07 the same way |
 | `reports/*.json` | A valid sample report (`not-ready-7.2.json` is the 01 section 7.2 sample). A test replaces its `actions` and checks the result against the schema | By hand, when the sample in 01 changes |
 | `reports/golden/*.json`, `reports/golden/*.html` | A report exactly as `rdy_engine::report::write_json` writes it (`not-ready-hostile-host.json`: the sample with a `</script>` hostname and out-of-order maps), or as `render_html` renders it (`not-ready-hostile-host.html`: the page of that same report, so its `data-sha256` is the SHA-256 of the `.json` golden and its embedded element holds that file's bytes, SEC-64; `not-ready-7.2.html`: the 01 section 7.2 sample; `five-sections-exec-plugin.html`: the sample plus a check that does not apply here, so all five sections show, and `identity.kube.exec_plugin` set to `aws`). Compared byte for byte, and the goldens check lists them. The linux-x64 CI leg also runs every `*.html` golden through the Nu HTML Checker (`scripts/validate-html.sh`, `--Werror`) | `UPDATE_GOLDENS=1`, then read the diff |
