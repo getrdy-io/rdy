@@ -1,0 +1,48 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "docker"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "docker"
+      ],
+      "storage_driver": null
+    },
+    "fix": "Set `\"exec-opts\": [\"native.cgroupdriver=systemd\"]` in /etc/docker/daemon.json, then run `systemctl restart docker`.",
+    "level": "fail",
+    "message": "docker 24.0.7 uses the cgroupfs cgroup driver but the kubelet uses systemd.",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "read",
+          "cgroup_driver": "cgroupfs",
+          "cgroup_driver_source": "docker info",
+          "config_version": null,
+          "d_type": true,
+          "installed": false,
+          "proxy": null,
+          "rootless": false,
+          "rootless_socket": false,
+          "runtime": "docker",
+          "socket": "/var/run/docker.sock",
+          "socket_present": true,
+          "storage_driver": "overlay2",
+          "storage_driver_source": "docker info",
+          "version": "24.0.7"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

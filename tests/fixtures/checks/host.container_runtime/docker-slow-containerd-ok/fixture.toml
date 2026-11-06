@@ -1,0 +1,12 @@
+schema = 1
+name = "docker-slow-containerd-ok"
+summary = "A Docker daemon that never answers next to a healthy containerd"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

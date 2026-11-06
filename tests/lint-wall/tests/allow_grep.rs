@@ -162,6 +162,11 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &[&str], &str)] = &[
         "embeds the expect.json goldens of tests/fixtures/checks/host.disk, because a check crate test may not read files",
     ),
     (
+        "crates/rdy-checks-host/src/container_runtime/tests.rs",
+        &["../../../../tests/fixtures/checks/host.container_runtime/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/host.container_runtime, because a check crate test may not read files",
+    ),
+    (
         "crates/rdy-checks-host/src/family/tests.rs",
         &["../../../../examples/specs/acme-platform.yaml"],
         "embeds examples/specs/acme-platform.yaml for a test",
@@ -182,6 +187,11 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &[&str], &str)] = &[
             "../../../../tests/fixtures/envs/base-firewalld/",
         ],
         "embeds recorded text from tests/fixtures/checks/host.firewall and the envs/base-firewalld base for the parser tests",
+    ),
+    (
+        "crates/rdy-checks-host/src/ports/tests.rs",
+        &["../../../../tests/fixtures/checks/host.ports/"],
+        "embeds the expect.json goldens of tests/fixtures/checks/host.ports, because a check crate test may not read files",
     ),
     (
         "crates/rdy-checks-k8s/src/client/guard/tests/parser.rs",

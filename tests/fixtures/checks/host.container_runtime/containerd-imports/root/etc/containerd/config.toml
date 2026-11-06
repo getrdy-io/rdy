@@ -1,0 +1,2 @@
+version = 2
+imports = ["/etc/containerd/conf.d/*.toml"]

@@ -1,0 +1,12 @@
+schema = 1
+name = "podman-no-dtype"
+summary = "Podman storage on an xfs volume made without ftype"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false
