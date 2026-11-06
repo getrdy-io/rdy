@@ -218,6 +218,8 @@ impl ReportParent {
 #[derive(Debug)]
 pub struct OutputDir {
     dir: Dir,
+    /// The parent the folder was made in, held so the folder can be taken away through it.
+    parent: Dir,
     /// The folder name, also the stem of the report file names.
     name: String,
     /// `parent/name`, for messages only. Nothing is ever opened by this path.
@@ -280,7 +282,18 @@ impl OutputDir {
                 .map_err(|e| open_error("open the report folder", parent_dir, &name, &path, e))
                 .and_then(|dir| harden(&dir, &path).map(|()| dir));
             return match opened {
-                Ok(dir) => Ok(Self { dir, name, path }),
+                Ok(dir) => match parent_dir.try_clone() {
+                    Ok(parent) => Ok(Self {
+                        dir,
+                        parent,
+                        name,
+                        path,
+                    }),
+                    Err(e) => {
+                        let _ = parent_dir.remove_dir(&name);
+                        Err(ReportError::io("hold the report folder's parent", &path, e))
+                    }
+                },
                 Err(err) => {
                     // Best effort: take away the empty folder this call made. It fails harmlessly
                     // if the name was swapped for something else in the meantime.
@@ -300,6 +313,50 @@ impl OutputDir {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Removes the folder if it is empty, through the held parent handle and not by path. On Unix it
+    /// first checks that the name in the parent is still the folder this value holds (same device and
+    /// inode), so a folder swapped in under the name is never touched. `unlinkat` with `AT_REMOVEDIR`
+    /// refuses a folder that holds anything, so a report is never lost. True if the folder is gone.
+    ///
+    /// Best effort, for a run that stops before it writes a file (Ctrl-C). On Windows this value's own
+    /// open handle makes the removal fail; [`OutputDir::into_removed_if_empty`] closes it first.
+    #[must_use]
+    pub fn remove_if_empty(&self) -> bool {
+        self.is_still_named() && self.parent.remove_dir(&self.name).is_ok()
+    }
+
+    /// Like [`OutputDir::remove_if_empty`], and closes the folder's own handle first, so it also works on
+    /// Windows. For the last holder of the folder.
+    #[must_use]
+    pub fn into_removed_if_empty(self) -> bool {
+        let named = self.is_still_named();
+        let Self {
+            dir, parent, name, ..
+        } = self;
+        drop(dir);
+        named && parent.remove_dir(&name).is_ok()
+    }
+
+    /// Whether the name in the parent is still this folder. Always true on Windows, where the removal
+    /// of a folder that is open or not empty fails anyway.
+    fn is_still_named(&self) -> bool {
+        #[cfg(unix)]
+        {
+            use cap_std::fs::MetadataExt as _;
+            let (Ok(mine), Ok(named)) = (
+                self.dir.dir_metadata(),
+                self.parent.symlink_metadata(&self.name),
+            ) else {
+                return false;
+            };
+            mine.dev() == named.dev() && mine.ino() == named.ino()
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
     }
 
     /// The folder name, `rdy-report-<product>-<time>` with `-2` to `-9` when the name was taken.
