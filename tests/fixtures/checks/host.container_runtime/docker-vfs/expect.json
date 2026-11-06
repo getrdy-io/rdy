@@ -1,0 +1,49 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "docker"
+    ],
+    "storage_driver": "overlay2"
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "docker"
+      ],
+      "storage_driver": "overlay2"
+    },
+    "fix": "Set `\"storage-driver\": \"overlay2\"` in /etc/docker/daemon.json, then run `systemctl restart docker`. Existing images are not moved.",
+    "level": "fail",
+    "message": "docker 24.0.7 uses the vfs storage driver, the spec needs overlay2.",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "read",
+          "cgroup_driver": "systemd",
+          "cgroup_driver_source": "docker info",
+          "config_version": null,
+          "d_type": null,
+          "installed": false,
+          "proxy": null,
+          "rootless": false,
+          "rootless_socket": false,
+          "runtime": "docker",
+          "socket": "/var/run/docker.sock",
+          "socket_present": true,
+          "storage_driver": "vfs",
+          "storage_driver_source": "docker info",
+          "version": "24.0.7"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

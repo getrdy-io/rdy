@@ -1,0 +1,12 @@
+schema = 1
+name = "docker-dtype-and-containerd"
+summary = "Docker without d_type next to a healthy containerd"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

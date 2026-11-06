@@ -1,0 +1,12 @@
+schema = 1
+name = "docker-hung"
+summary = "The same hung daemon, with a spec timeout of 1s that ends the check before the request limit"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false
