@@ -85,6 +85,11 @@ fn run_live(
     let Ok(rig) = Rig::start(origin, DEFAULT_DEADLINE) else {
         return emit(&CliError::bug(), json, stdout, stderr);
     };
+    // Ctrl-C and SIGTERM (M1-058): installed before the runtime and before any prompt, so a signal never
+    // finds the default action and a password prompt never loses its terminal settings.
+    if rig.watch_signals(json).is_err() {
+        return emit(&CliError::bug(), json, stdout, stderr);
+    }
     #[expect(
         clippy::disallowed_methods,
         reason = "INV-07: this is the one call of live_backend outside the engine. The binary reads the real machine, and a check only ever gets the Probe it is handed (ADR 0014)"
@@ -104,7 +109,7 @@ fn run_live(
             args,
             backend,
             RunHooks::default(),
-            rig,
+            rig.clone(),
             stdout,
             stderr,
         ))
@@ -114,6 +119,8 @@ fn run_live(
     // and it is lock-free (M1-176). It sets the shutdown flag for good, which is right here: the process
     // is about to exit. The watchdog does the same if the run hangs.
     exec::kill_all_groups();
+    // A signal may have taken over while the run was ending: its exit 70 wins.
+    rig.wait_for_interrupt();
     match ran {
         Ok(code) => code.code(),
         Err(payload) => panic::resume_unwind(payload),

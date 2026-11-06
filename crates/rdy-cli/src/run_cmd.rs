@@ -27,7 +27,11 @@
 //! nothing is on stdout. With `--json` stdout already holds the whole document, printed before the
 //! files (see 5 above), so a second one would not be one document (PC-50 in 13).
 //!
-//! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), Ctrl-C (M1-058),
+//! **Ctrl-C (M1-058).** The signal thread of [`crate::interrupt`] shares the write state and the weak
+//! folder handle with this module. A signal that wins the claim kills the groups, removes the folder if
+//! it is empty and exits 70 with no report. The run never sees it.
+//!
+//! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095),
 //! `--jobs` (M1-059), the kube flags (M1-107), `--key` and the full unsigned banner (M1-126) and the
 //! terminal renderer (M1-086). The one-line [`UNSIGNED_WARNING`] is here until M1-126 replaces it.
 
@@ -133,6 +137,8 @@ async fn execute(
             command: "run with a one-run key",
         }));
     }
+    // From here a signal says "No report was written" (M1-058).
+    rig.interrupt.set_run();
     let name = args.spec.to_string_lossy().into_owned();
     let loaded = load_spec(args, &name, &privilege)?;
 
@@ -148,6 +154,10 @@ async fn execute(
     let started_at = clock();
     let product = loaded.spec().metadata.product.as_str().to_owned();
     let dir = open_report_dir(args, &product, started_at)?.map(Arc::new);
+    if let Some(dir) = &dir {
+        // Weak, like the watchdog's: a signal removes the folder when it is still empty.
+        rig.interrupt.set_folder(Arc::downgrade(dir));
+    }
 
     let mut options = EngineOptions::new();
     options.network = !args.no_network;
@@ -350,7 +360,7 @@ fn assemble(
 /// Removes the report folder when nothing was written into it. A folder that holds a file stays, and so
 /// does one that cannot be removed: this is a best-effort tidy, and the run's own error is what counts.
 /// The handle is dropped first, because Windows cannot remove a folder that is still open.
-fn discard_if_empty(dir: Option<Arc<OutputDir>>) {
+pub(crate) fn discard_if_empty(dir: Option<Arc<OutputDir>>) {
     if let Some(dir) = dir {
         let path = dir.path().to_owned();
         drop(dir);

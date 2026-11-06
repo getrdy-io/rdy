@@ -26,7 +26,9 @@
 //! raises SIGINT on Ctrl-C while the terminal is still in raw mode, which leaves the user's shell
 //! with echo off. Here the signal key is switched off for the read, so Ctrl-C arrives as a byte,
 //! the guard restores the terminal, and the prompt returns [`Cancelled`](PromptError::Cancelled).
-//! A signal sent from outside (such as `kill -INT`) is not caught here. The Ctrl-C ticket owns that.
+//! A signal sent from outside (such as `kill -INT` or SIGTERM) is caught by the signal thread
+//! (`crate::interrupt`, M1-058). It calls `restore_terminal` with the settings saved here, so echo
+//! is back before rdy exits 70.
 //!
 //! A declined question is not an error here: [`Prompter::confirm`] returns `Ok(false)`. The caller
 //! decides what that means. `trust add` prints `Not trusted. Nothing was changed.` and exits 64
@@ -213,6 +215,43 @@ impl Terminal for StdTerminal {
     }
 }
 
+/// The terminal settings saved before a hidden read, while one is in progress.
+#[cfg(unix)]
+static SAVED_SETTINGS: std::sync::Mutex<Option<rustix::termios::Termios>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(unix)]
+fn saved_settings() -> std::sync::MutexGuard<'static, Option<rustix::termios::Termios>> {
+    SAVED_SETTINGS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Puts the terminal back as it was before a hidden read, when one is in progress. True if it did.
+///
+/// For the signal thread ([`crate::interrupt`]): a signal that arrives during the read ends the process
+/// while the guard of [`read_hidden_tty`] cannot run, and the shell would be left with echo off. Safe to
+/// call at any time; it does nothing when no hidden read is under way. Not on Windows, where the
+/// console is not changed by this module (`rpassword` restores it).
+#[cfg(unix)]
+pub(crate) fn restore_terminal() -> bool {
+    use rustix::termios::{OptionalActions, tcsetattr};
+    let saved = saved_settings().take();
+    match saved {
+        Some(settings) => {
+            let _ = tcsetattr(io::stdin(), OptionalActions::Now, &settings);
+            true
+        }
+        None => false,
+    }
+}
+
+/// See the Unix version: Windows does nothing here.
+#[cfg(not(unix))]
+pub(crate) fn restore_terminal() -> bool {
+    false
+}
+
 /// Read a password from stdin with echo and the signal keys off (Unix).
 ///
 /// The terminal is set to non-canonical mode with ECHO, ECHONL, ICANON and ISIG off, so each key
@@ -232,6 +271,7 @@ fn read_hidden_tty() -> Result<Secret, PromptError> {
         fn drop(&mut self) {
             // Nothing useful can be done if this fails while unwinding or returning.
             let _ = tcsetattr(self.fd, OptionalActions::Now, &self.saved);
+            *saved_settings() = None;
         }
     }
 
@@ -244,6 +284,8 @@ fn read_hidden_tty() -> Result<Secret, PromptError> {
     hidden.special_codes[SpecialCodeIndex::VMIN] = 1;
     hidden.special_codes[SpecialCodeIndex::VTIME] = 0;
     // The guard goes first, so a failure half way through `tcsetattr` is also undone.
+    // The signal thread puts these back if a signal ends the process during the read (`restore_terminal`).
+    *saved_settings() = Some(saved.clone());
     let restore = Restore { fd: &stdin, saved };
     tcsetattr(&stdin, OptionalActions::Now, &hidden).map_err(|e| PromptError::Io(e.into()))?;
 
