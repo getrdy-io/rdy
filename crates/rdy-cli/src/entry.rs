@@ -55,12 +55,14 @@ pub fn main_code() -> u8 {
     panic_hook::install();
     let args: Vec<OsString> = std::env::args_os().collect();
     let json = wants_json(&args);
-    guarded(
-        json,
-        &mut io::stdout(),
-        &mut io::stderr(),
-        |stdout, stderr| run_live(args, json, stdout, stderr),
-    )
+    // stderr goes through anstream with the choice fixed to "always": the Windows console half of colour
+    // (codes become console calls where needed). Whether a line has codes at all is decided by the
+    // command from `--color`, `NO_COLOR` and the stream, and `style::write_styled` strips them when not.
+    // `AutoStream::auto` is never used, so no variable decides whether colour is on (M1-086).
+    let mut stderr = anstream::AutoStream::always(io::stderr());
+    guarded(json, &mut io::stdout(), &mut stderr, |stdout, stderr| {
+        run_live(args, json, stdout, stderr)
+    })
 }
 
 /// Builds the live backend and the runtime, runs the command and returns its exit code.

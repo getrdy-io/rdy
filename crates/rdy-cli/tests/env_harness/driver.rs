@@ -1,33 +1,28 @@
-//! Runs one fixture environment through the engine and returns its report (M1-075).
+//! Runs one fixture environment through `rdy_cli::run` and returns its report and its terminal text
+//! (M1-075, M1-086).
 //!
-//! This is the engine-level driver: it loads `envs/<name>`, parses the env's spec, plans it against the
-//! registered families, runs the plan through `TestRun::scheduler` on a paused clock and builds a
-//! `Report` with the engine's own mapping (`map_outcome`, `timeout_result`, the verdict rule of
-//! `Report::new`). Nothing here reads the real machine: the environment is a `Replay`.
+//! The environment is a `Replay` machine, so nothing here reads the real one. `run_env` calls
+//! `rdy_cli::run` in process with the hooks a user cannot reach (the clock, the run id and the deadline
+//! pinned by the manifest's `[run]` table, and the harness families), exactly as `rdy run <spec>
+//! --allow-unsigned --json --no-report --color never` would. The report is read back from the `--json`
+//! stdout, so the golden `report.json` is what a user's pipe gets. The human output on stderr is the
+//! golden `terminal.txt`.
 //!
-//! It stands where `rdy_cli::run` will stand. `rdy run` is not wired yet, so the harness cannot call it.
-//! M1-086 swaps the body of `run_env` for `rdy_cli::run` with the same `Replay`, reads the report from
-//! `--json` stdout and regenerates host-min's golden from it. M1-086 adds `golden/terminal.txt` (backlog
-//! correction-29). The tests in `main` do not change. Until then the mapping below is the engine's, and the
-//! three things it does not map (a panic, a cancel, a per-check `timeout:` in the spec) stop the
-//! driver with a message instead of guessing.
+//! What the run does not do yet: `--jobs` is recorded but not applied until M1-059, so the harness
+//! writes the requested value into the report's `run.options.jobs`, and the golden does not change when
+//! that lands. A fixture that sets `kube = true` gets no cluster until M1-107, because `rdy run` builds
+//! no Kubernetes client yet.
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rdy_engine::check::{BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckOutcome, Os};
-use rdy_engine::outcome::{map_outcome, run_deadline_result, timeout_result};
-use rdy_engine::plan::{PlanAction, RunPlan};
-use rdy_engine::probe::ActionLogOutput;
-use rdy_engine::sched::{End, Planned, Ran};
-use rdy_engine::testing::{Fixture, TestRun, fixtures_dir, manifest_violations};
-use rdy_spec::result::{
-    CheckResult, Host, HostOs, HostOsFamily, Identity, Producer, Report, Run, RunOptions,
-    Signature, SpecRef,
-};
+use rdy_cli::RunHooks;
+use rdy_engine::check::Os;
+use rdy_engine::probe::{NativeCall, NativeValue, UnameInfo};
+use rdy_engine::testing::{Fixture, Replay, TestRun, fixtures_dir, manifest_violations};
+use rdy_spec::result::Report;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use super::families;
 
@@ -36,8 +31,11 @@ const DEFAULT_DEADLINE_MS: u64 = 300_000;
 
 /// What the driver returns.
 pub struct EnvRun {
-    /// The report, with the clock, run id and host pinned and the action log inside.
+    /// The report, as `rdy run --json` printed it, with the clock, run id and host pinned.
     pub report: Report,
+    /// The human output on stderr, without colour, with the spec path shown as `spec.yaml` and the version
+    /// as `<version>`.
+    pub terminal: String,
     /// One line per refusal that shows a check went beyond its declared `CheckInfo`. Empty when none did.
     pub violations: Vec<String>,
 }
@@ -77,8 +75,9 @@ pub fn run_env(env: &str, jobs: usize) -> Result<EnvRun, String> {
         .spec
         .as_deref()
         .ok_or_else(|| format!("{name} has no `spec` in fixture.toml"))?;
-    let spec_bytes = std::fs::read(root.join("envs").join(env).join(spec_file))
-        .map_err(|e| format!("{name}/{spec_file}: {e}"))?;
+    let spec_path = root.join("envs").join(env).join(spec_file);
+    let spec_arg = spec_path.to_string_lossy().into_owned();
+    let spec_bytes = std::fs::read(&spec_path).map_err(|e| format!("{name}/{spec_file}: {e}"))?;
     let spec =
         rdy_spec::parse_unverified(&spec_bytes).map_err(|e| format!("{name}/{spec_file}: {e}"))?;
     if spec.checks.iter().any(|entry| entry.timeout.is_some()) {
@@ -87,98 +86,158 @@ pub fn run_env(env: &str, jobs: usize) -> Result<EnvRun, String> {
         ));
     }
 
-    let os = fixture.os();
-    let available = fixture.available_needs();
-    let deadline = Duration::from_millis(manifest.run.deadline_ms.unwrap_or(DEFAULT_DEADLINE_MS));
-    let registry = families::registry().map_err(|e| e.to_string())?;
-    let plan = Arc::new(registry.plan(&spec, os, rdy_spec::VERSION));
+    let pins = &manifest.run;
+    let mut hooks = RunHooks::default();
+    hooks.clock = Some(pinned_time(
+        pins.clock.as_deref().unwrap_or("2026-01-01T00:00:00Z"),
+    )?);
+    hooks.run_id = Some(
+        pins.run_id
+            .clone()
+            .unwrap_or_else(|| "00000000-0000-4000-8000-000000000000".to_owned()),
+    );
+    hooks.deadline = Some(Duration::from_millis(
+        pins.deadline_ms.unwrap_or(DEFAULT_DEADLINE_MS),
+    ));
+    hooks.families = Some(families::registry);
+    // The terminal text is a golden: no colour and one width, whatever runs the test.
+    hooks.stderr_terminal = Some(false);
+    hooks.stderr_columns = Some(100);
 
-    let mut planned = Vec::new();
-    for (at, entry) in plan.entries().iter().enumerate() {
-        if let PlanAction::Run(built) = &entry.action {
-            let shared = Shared {
-                plan: Arc::clone(&plan),
-                at,
-                info: built.check.info(),
-            };
-            planned.push(
-                Planned::new(Arc::new(shared), entry.key.clone()).with_hosts(built.hosts.clone()),
-            );
-        }
+    let machine = machine(&fixture, env);
+    let jobs_arg = jobs.to_string();
+    let mut args = vec![
+        "rdy",
+        "run",
+        &spec_arg,
+        "--allow-unsigned",
+        "--json",
+        "--no-report",
+        "--color",
+        "never",
+        "--jobs",
+        &jobs_arg,
+    ];
+    if !manifest.caps.network {
+        args.push("--no-network");
     }
 
-    let test_run = TestRun::for_fixture(&fixture);
-    let scheduler = test_run
-        .scheduler(jobs, os, available.iter().cloned())
-        .with_deadline(deadline);
+    // A paused clock, so a source that hangs for an hour costs no real time.
     let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
+        .enable_all()
         .start_paused(true)
         .build()
         .map_err(|e| format!("cannot build a runtime: {e}"))?;
-    let (ran, host_os) = runtime.block_on(async {
-        let host_os = host_os(&test_run, os).await;
-        (scheduler.run(planned).await, host_os)
-    });
-
-    let mut ran = ran.into_iter();
-    let mut results = Vec::new();
-    for entry in plan.entries() {
-        if let Some(skipped) = entry.skip_result() {
-            results.push(skipped);
-            continue;
-        }
-        let one = ran
-            .next()
-            .ok_or_else(|| format!("{name}: the scheduler returned fewer results than checks"))?;
-        let spec_entry = spec
-            .checks
-            .get(entry.index)
-            .ok_or_else(|| format!("{name}: plan entry {} has no spec entry", entry.index))?;
-        let PlanAction::Run(built) = &entry.action else {
-            return Err(format!("{name}: {} is neither run nor skipped", entry.key));
-        };
-        let info = built.check.info();
-        let ctx = test_run.context(&entry.key, os, available.iter().cloned());
-        results.push(result_of(info, spec_entry, &ctx, one, deadline)?);
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = runtime
+        .block_on(rdy_cli::run(
+            args,
+            Arc::new(machine),
+            hooks,
+            &mut out,
+            &mut err,
+        ))
+        .code();
+    let stdout = String::from_utf8(out).map_err(|e| format!("{name}: stdout is not UTF-8: {e}"))?;
+    let stderr = String::from_utf8(err).map_err(|e| format!("{name}: stderr is not UTF-8: {e}"))?;
+    let mut report: Report = serde_json::from_str(&stdout)
+        .map_err(|e| format!("{name}: stdout is not a report ({e}). stderr:\n{stderr}"))?;
+    if code != report.exit_code {
+        return Err(format!(
+            "{name}: rdy run exited {code} but the report says {}. stderr:\n{stderr}",
+            report.exit_code
+        ));
     }
+    report.run.options.jobs = u32::try_from(jobs).unwrap_or(u32::MAX);
 
-    let log = test_run.action_log();
-    let violations = violations(&plan, &log);
+    let violations = violations(&report)?;
+    // Two things differ between machines and releases: where the checkout is, and the version of rdy.
+    let version_line = format!("rdy {}", report.producer.version);
+    let terminal: String = stderr
+        .replace(&spec_arg, "spec.yaml")
+        .split_inclusive('\n')
+        .map(|line| {
+            if line.trim_end_matches('\n') == version_line {
+                "rdy <version>\n"
+            } else {
+                line
+            }
+        })
+        .collect();
+    Ok(EnvRun {
+        report,
+        terminal,
+        violations,
+    })
+}
 
-    let pins = &manifest.run;
-    let started = pinned_time(pins.clock.as_deref().unwrap_or("2026-01-01T00:00:00Z"));
-    let run = Run::new(
-        pins.run_id
-            .as_deref()
-            .unwrap_or("00000000-0000-4000-8000-000000000000"),
-        &started,
-        &started,
-        0,
-        run_options(jobs, deadline, manifest.caps.network),
-    );
-    let mut spec_ref = SpecRef::new(
-        spec.metadata.product.as_str(),
-        format!("{:x}", Sha256::digest(&spec_bytes)),
-        spec_file,
-        u64::try_from(spec_bytes.len()).unwrap_or(u64::MAX),
-    );
-    spec_ref.version.clone_from(&spec.metadata.version);
-    let mut host = Host::new(format!("{env}.example"), host_os, manifest.arch.as_str());
-    host.container = false;
-    let root_run = manifest.caps.root;
-    let identity = Identity::new(Some(if root_run { 0 } else { 1000 }), None, root_run);
-    let mut report = Report::new(
-        Producer::new("0.0.0-test", rdy_spec::VERSION, "x86_64-unknown-linux-musl"),
-        run,
-        spec_ref,
-        Signature::unsigned(),
-        host,
-        identity,
-        results,
-    );
-    log.apply(&mut report);
-    Ok(EnvRun { report, violations })
+/// The fixture's machine with what `rdy run` asks of it before any check: the privilege files for the
+/// manifest's `root`, the host name and the kernel.
+fn machine(fixture: &Fixture, env: &str) -> Replay {
+    let manifest = fixture.manifest();
+    let id: u32 = if manifest.caps.root { 0 } else { 1000 };
+    let ids = [id; 4];
+    let mut replay = fixture.replay().clone();
+    replay = match fixture.os() {
+        Os::Macos => replay.ids(ids, ids),
+        Os::Windows => replay,
+        _ => replay
+            .file(
+                "/proc/self/status",
+                format!(
+                    "Name:\trdy\nUid:\t{id}\t{id}\t{id}\t{id}\nGid:\t{id}\t{id}\t{id}\t{id}\n\
+                     CapEff:\t0000000000000000\nCapPrm:\t0000000000000000\nCapAmb:\t0000000000000000\n"
+                ),
+            )
+            .file("/proc/self/auxv", auxv()),
+    };
+    let mut uname = UnameInfo::default();
+    "Linux".clone_into(&mut uname.sysname);
+    "5.14.0-362.el9.x86_64".clone_into(&mut uname.release);
+    "#1 SMP".clone_into(&mut uname.version);
+    manifest.arch.clone_into(&mut uname.machine);
+    replay
+        .native(
+            NativeCall::Hostname,
+            NativeValue::Hostname(format!("{env}.example")),
+        )
+        .native(NativeCall::Uname, NativeValue::Uname(uname))
+}
+
+/// An auxiliary vector with `AT_PHDR`, `AT_SECURE` off, and `AT_NULL`.
+fn auxv() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for (key, value) in [(3_usize, 0x5555_0000_usize), (23, 0), (0, 0)] {
+        bytes.extend(key.to_ne_bytes());
+        bytes.extend(value.to_ne_bytes());
+    }
+    bytes
+}
+
+/// A pinned clock such as `2026-11-02T09:00:00Z` (or with milliseconds) as a `SystemTime`.
+fn pinned_time(clock: &str) -> Result<SystemTime, String> {
+    let bad = || format!("the pinned clock {clock:?} is not like 2026-11-02T09:00:00Z");
+    let text = clock.strip_suffix('Z').ok_or_else(bad)?;
+    let (date, time) = text.split_once('T').ok_or_else(bad)?;
+    let (time, millis) = match time.split_once('.') {
+        Some((time, fraction)) => (time, fraction.parse::<u64>().map_err(|_| bad())?),
+        None => (time, 0),
+    };
+    let number = |part: Option<&str>| part.and_then(|p| p.parse::<i64>().ok()).ok_or_else(bad);
+    let mut d = date.split('-');
+    let (year, month, day) = (number(d.next())?, number(d.next())?, number(d.next())?);
+    let mut t = time.split(':');
+    let (hour, minute, second) = (number(t.next())?, number(t.next())?, number(t.next())?);
+    // Days since 1970-01-01 (the civil-from-days algorithm, inverted).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let seconds =
+        u64::try_from(days * 86_400 + hour * 3_600 + minute * 60 + second).map_err(|_| bad())?;
+    Ok(UNIX_EPOCH + Duration::from_secs(seconds) + Duration::from_millis(millis))
 }
 
 /// The report as the golden holds it: normalised first by the caller, keys sorted at every level, two
@@ -205,139 +264,25 @@ fn sorted(value: Value) -> Value {
     }
 }
 
-/// The result entry for one scheduled check, by the engine's own mapping.
-fn result_of(
-    info: &'static CheckInfo,
-    spec_entry: &rdy_spec::spec::CheckSpec,
-    ctx: &CheckContext,
-    ran: Ran,
-    deadline: Duration,
-) -> Result<CheckResult, String> {
-    let millis = |d: Duration| u64::try_from(d.as_millis()).unwrap_or(u64::MAX);
-    match ran.end {
-        End::Done(outcome) => Ok(map_outcome(
-            info,
-            spec_entry,
-            ctx,
-            *outcome,
-            millis(ran.started),
-            millis(ran.elapsed),
-        )),
-        End::TimedOut { after } => Ok(timeout_result(
-            &template(info, spec_entry, ctx),
-            after,
-            ran.started,
-        )),
-        End::RunDeadline => Ok(run_deadline_result(
-            &template(info, spec_entry, ctx),
-            deadline,
-        )),
-        End::Panicked { .. } | End::Cancelled => Err(format!(
-            "{}: the driver does not map a panic or a cancel yet (M1-057)",
-            ran.key
-        )),
-        _ => Err(format!("{}: an end this driver does not know", ran.key)),
-    }
-}
-
-/// A result of the same entry, from which the not-run constructors keep the identity only.
-fn template(
-    info: &'static CheckInfo,
-    spec_entry: &rdy_spec::spec::CheckSpec,
-    ctx: &CheckContext,
-) -> CheckResult {
-    map_outcome(
-        info,
-        spec_entry,
-        ctx,
-        Err(CheckError::Unsupported("template")),
-        0,
-        0,
-    )
-}
-
-/// Refusals that show a check went beyond its `CheckInfo`, per check.
-fn violations(plan: &RunPlan, log: &ActionLogOutput) -> Vec<String> {
+/// Refusals that show a check went beyond its `CheckInfo`, per check, read from the report's action log.
+fn violations(report: &Report) -> Result<Vec<String>, String> {
+    let registry = families::registry().map_err(|e| e.to_string())?;
     let mut found = Vec::new();
-    for entry in plan.entries() {
-        let PlanAction::Run(built) = &entry.action else {
+    for check in &report.checks {
+        let Some(info) = registry.infos().find(|info| info.id == check.id) else {
             continue;
         };
-        let mut own = log.clone();
-        own.actions
-            .retain(|action| action.check.as_deref() == Some(entry.key.as_str()));
-        for line in manifest_violations(built.check.info(), &own) {
-            found.push(format!("{}: {line}", entry.key));
+        // An empty log of the harness's kind, with this check's entries put in.
+        let mut own = TestRun::new(Replay::new()).action_log();
+        own.actions = report
+            .actions
+            .iter()
+            .filter(|action| action.check.as_deref() == Some(check.key.as_str()))
+            .cloned()
+            .collect();
+        for line in manifest_violations(info, &own) {
+            found.push(format!("{}: {line}", check.key));
         }
     }
-    found
-}
-
-/// A pinned clock as the wire writes it, with milliseconds.
-fn pinned_time(clock: &str) -> String {
-    match clock.strip_suffix('Z') {
-        Some(head) if !head.contains('.') => format!("{head}.000Z"),
-        _ => clock.to_owned(),
-    }
-}
-
-fn run_options(jobs: usize, deadline: Duration, network: bool) -> RunOptions {
-    let mut options = RunOptions::new(
-        u32::try_from(jobs).unwrap_or(u32::MAX),
-        u64::try_from(deadline.as_millis()).unwrap_or(u64::MAX),
-    );
-    options.allow_unsigned = true;
-    options.network = network;
-    options
-}
-
-/// The host's OS from the machine's own `/etc/os-release`, read through the run-level probe like any
-/// other fact. A machine with no readable file gets the family alone.
-async fn host_os(run: &TestRun, os: Os) -> HostOs {
-    let family = match os {
-        Os::Macos => HostOsFamily::Macos,
-        Os::Windows => HostOsFamily::Windows,
-        _ => HostOsFamily::Linux,
-    };
-    let mut host_os = HostOs::new(family);
-    let probe = run.run_probe(os);
-    if let Ok(file) = probe.read(Path::new("/etc/os-release")).await {
-        let text = String::from_utf8_lossy(&file.bytes).into_owned();
-        let field = |key: &str| {
-            text.lines().find_map(|line| {
-                let value = line.strip_prefix(key)?.strip_prefix('=')?;
-                Some(value.trim().trim_matches('"').to_owned())
-            })
-        };
-        host_os.id = field("ID");
-        host_os.version = field("VERSION_ID");
-        host_os.pretty_name = field("PRETTY_NAME");
-    }
-    host_os
-}
-
-/// A check of the plan, shared so the scheduler (which wants an `Arc<dyn Check>`) can own it while the
-/// plan keeps the built check. `RunPlan` has no way to hand its checks out by value.
-struct Shared {
-    plan: Arc<RunPlan>,
-    at: usize,
-    info: &'static CheckInfo,
-}
-
-impl Check for Shared {
-    fn info(&self) -> &'static CheckInfo {
-        self.info
-    }
-
-    fn run<'a>(&'a self, ctx: &'a CheckContext) -> BoxFuture<'a, CheckOutcome> {
-        match self.plan.entries().get(self.at).map(|entry| &entry.action) {
-            Some(PlanAction::Run(built)) => built.check.run(ctx),
-            _ => Box::pin(async {
-                Err(CheckError::Failed {
-                    message: "the plan holds no check at this position".to_owned(),
-                    hint: String::new(),
-                })
-            }),
-        }
-    }
+    Ok(found)
 }

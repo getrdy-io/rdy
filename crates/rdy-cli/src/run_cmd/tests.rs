@@ -352,13 +352,6 @@ fn the_access_rule_residual_note_is_for_windows_with_out_dir_and_for_every_macos
     }
 }
 
-#[test]
-fn the_unsigned_warning_names_no_flag_and_one_line() {
-    assert!(super::UNSIGNED_WARNING.starts_with("warning: this spec is not signed."));
-    assert!(!super::UNSIGNED_WARNING.contains("--"));
-    assert!(!super::UNSIGNED_WARNING.contains('\n'));
-}
-
 // --- the report writer's errors ---
 
 /// A writer that refuses every byte.
@@ -515,12 +508,22 @@ fn write_failed() -> CliError {
 }
 
 fn fail(json: bool, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+    let output = super::Out {
+        json,
+        look: super::Look {
+            color: false,
+            width: 100,
+        },
+        spec: "acme.yaml".to_owned(),
+        kubeconfig: None,
+        out_dir_given: false,
+    };
     super::fail_after_verdict(
         &write_failed(),
         small_report(),
         rdy_engine::redact::RuleCounts::default(),
         &redactor(),
-        json,
+        &output,
         out,
         err,
     )
@@ -535,10 +538,15 @@ fn files_that_cannot_be_written_still_print_the_report_as_incomplete_and_exit_70
     assert_eq!(doc["kind"], "Report");
     assert_eq!(doc["complete"], false);
     let stderr = String::from_utf8(err).expect("utf-8");
+    // The whole result prints, with no folder line, the verdict is the last line of it, and the error
+    // follows (07 section 4.1).
     assert!(
-        stderr.starts_with(
-            "0 blocks, 0 warnings, 1 passed\nerror: cannot write the report files to "
-        ),
+        stderr.contains("\n0 blocks, 0 warnings, 1 passed\n"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("Report written"), "{stderr}");
+    assert!(
+        stderr.contains("\nREADY\nerror: cannot write the report files to "),
         "{stderr}"
     );
     assert!(stderr.contains("\nfix: make room"), "{stderr}");

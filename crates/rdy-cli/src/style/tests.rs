@@ -336,3 +336,54 @@ proptest! {
         prop_assert!(display_width(&cut(&text, max)) <= max);
     }
 }
+
+// ---- run-time text and the writer (M1-086) ---------------------------------------------------------
+
+#[test]
+fn built_text_is_styled_only_when_colour_is_on() {
+    let line = Built::engine_line("NOT READY: 2 required checks were not run");
+    assert_eq!(
+        Styler::new(true).paint_built(Role::VerdictNotReady, &line),
+        "\x1b[1;31mNOT READY: 2 required checks were not run\x1b[0m"
+    );
+    assert_eq!(
+        Styler::new(false).paint_built(Role::VerdictNotReady, &line),
+        "NOT READY: 2 required checks were not run"
+    );
+}
+
+#[test]
+fn an_engine_line_is_escaped_so_a_raw_escape_never_gets_styled() {
+    let line = Built::engine_line("a\x1b[2Jb\u{202e}");
+    assert_eq!(line.as_str(), "a\\x1b[2Jb\\u{202e}");
+}
+
+#[test]
+fn only_a_valid_product_name_can_label_a_fix() {
+    let label = Built::product("fix from ", "acme-platform", ":").map(|b| b.as_str().to_owned());
+    assert_eq!(label.as_deref(), Some("fix from acme-platform:"));
+    for bad in [
+        "",
+        "-acme",
+        "Acme",
+        "acme platform",
+        "acme\u{1b}",
+        "acme\u{202e}",
+        "a.b",
+        &"a".repeat(64),
+    ] {
+        assert!(Built::product("", bad, "").is_none(), "{bad:?}");
+    }
+    assert!(Built::product("", &"a".repeat(63), "").is_some());
+}
+
+#[test]
+fn write_styled_keeps_codes_when_on_and_strips_them_when_off() {
+    let text = "\x1b[1;31mNOT READY\x1b[0m and \x1b[2Jmore\n";
+    let mut on = Vec::new();
+    write_styled(&mut on, true, text).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(on, text.as_bytes());
+    let mut off = Vec::new();
+    write_styled(&mut off, false, text).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(String::from_utf8_lossy(&off), "NOT READY and more\n");
+}

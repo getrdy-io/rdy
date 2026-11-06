@@ -23,6 +23,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true, features = ["std"] }
+anstream = { workspace = true, features = ["auto", "wincon"] }
 blake2 = { workspace = true }
 clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context", "env"] }
 ct-codecs = { workspace = true }

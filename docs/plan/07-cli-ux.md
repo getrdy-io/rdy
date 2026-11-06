@@ -2331,14 +2331,14 @@ host    acme-vm-03.corp.example   rhel 9.4   x86_64
 user    jdoe (not root)
 
   SKIP     host.cpu     Not run. This version of rdy has no host checks yet. (required)
-                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
-                        how to go on.
+                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor how
+                        to go on.
   SKIP     host.memory  Not run. This version of rdy has no host checks yet. (required)
-                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
-                        how to go on.
+                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor how
+                        to go on.
   SKIP     host.disk    Not run. This version of rdy has no host checks yet. (required)
-                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor
-                        how to go on.
+                        fix from rdy: Install a newer rdy. If there is none yet, ask the vendor how
+                        to go on.
 
 0 blocks, 0 warnings, 0 passed, 3 required checks not run
 
@@ -2813,6 +2813,10 @@ could not verify or write.
   `Command::get_matches` and `Error::exit` are banned by clippy `disallowed-methods`" and the test.
 - docs/plan/01-spec-format.md section 5.3 ticket "Summary line grammar and nothing-verified last line": its
   samples are the ones in 2.4. Fix: the exit test also covers the `(1 timed out)` and `(1 failed)` suffixes.
+- This file, C.12 (found by M1-086): the three `fix from rdy:` lines were wrapped one word early, as if they
+  stood at column 29 as in 2.7, but C.12 has an 11 character key column and the message column is 24. By the
+  rule of 2.2 (wrap before the word that would pass the width) `how` stays on the first line. Fixed in
+  place: the golden `tests/fixtures/terminal/not-ready-nothing-ran.txt` and the renderer follow the rule.
 
 ## Decisions needing an ADR
 

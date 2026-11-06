@@ -17,12 +17,19 @@
 //!   and never splits an escape. rdy's own static text is ASCII, and the cut marker is `...`, never an
 //!   ellipsis character.
 //!
-//! Writing the coloured text to the stream is the renderer's job. On Windows it must go through
-//! `anstream`, which turns the codes into console calls where it can and strips them elsewhere (07
-//! section 6). This module only builds the strings.
+//! **Run-time text.** [`Styler::paint`] takes `&'static str`, so a line with a count or a product name
+//! in it cannot go through it. [`Built`] is the second path (M1-086). It can only be made by two
+//! functions, [`Built::engine_line`] for the words and counts of `rdy_engine::summary` and
+//! [`Built::product`] for a product name that passed the name rule, and [`Styler::paint_built`] styles
+//! it. Nothing else can be styled.
+//!
+//! **Writing.** [`write_styled`] strips the codes with `anstream` when colour is off, and the process
+//! entry wraps stderr in `anstream::AutoStream::always`, which turns the codes into console calls where
+//! a Windows console needs it (07 section 6). The choice is `Always` or `Never`, taken from
+//! [`use_color`], never `Auto`, so no variable decides whether colour is on.
 
 use std::ffi::OsString;
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Write};
 
 use rdy_engine::text::escape_untrusted;
 use unicode_width::UnicodeWidthStr;
@@ -237,8 +244,8 @@ impl Styler {
     /// machine or the spec goes through [`untrusted`] and is never styled (07 section 6). Style the
     /// parts of a line separately, and put the untrusted part between them.
     ///
-    /// Text that rdy builds at run time, such as a verdict line with a count in it, cannot go through
-    /// here yet. M1-086 adds a trusted-dynamic path for it (backlog correction-27).
+    /// Text that rdy builds at run time, such as a verdict line with a count in it, goes through
+    /// [`paint_built`](Self::paint_built).
     #[must_use]
     pub fn paint(self, role: Role, word: &'static str) -> String {
         if self.enabled && !word.is_empty() {
@@ -247,6 +254,87 @@ impl Styler {
             word.to_owned()
         }
     }
+
+    /// Wraps run-time text that rdy built from its own words in the codes of `role`, or returns it
+    /// unchanged when colour is off. This is [`paint`](Self::paint) for [`Built`], which holds no
+    /// control character and no text of the machine or the spec.
+    #[must_use]
+    pub fn paint_built(self, role: Role, text: &Built) -> String {
+        if self.enabled && !text.0.is_empty() {
+            format!("\x1b[{}m{}{RESET}", role.sgr(), text.0)
+        } else {
+            text.0.clone()
+        }
+    }
+}
+
+/// Text that rdy built at run time and may style (M1-086, backlog correction-27).
+///
+/// There are two ways to make one, and each holds only rdy's words, counts and a checked name. It has
+/// no `From<String>` and no public field, so a message or a fix from the machine or the spec cannot
+/// become one. Text of that kind goes through [`untrusted`] and is never styled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Built(String);
+
+impl Built {
+    /// A line made by `rdy_engine::summary` (a verdict line such as `NOT READY: 2 required checks
+    /// were not run`). Those lines hold rdy's words and counts only. The text is escaped anyway.
+    #[must_use]
+    pub fn engine_line(line: &str) -> Self {
+        Self(untrusted(line))
+    }
+
+    /// `prefix`, the product name and `suffix`, such as `fix from acme-platform:` for the prefix
+    /// `fix from ` and the suffix `:`. Gives `None` unless `product` is a valid product name (a
+    /// lowercase letter or digit, then up to 62 lowercase letters, digits and hyphens: the rule of the
+    /// spec's `metadata.product`), so the name cannot hold anything that looks like another word.
+    #[must_use]
+    pub fn product(prefix: &'static str, product: &str, suffix: &'static str) -> Option<Self> {
+        is_product_name(product).then(|| Self(format!("{prefix}{product}{suffix}")))
+    }
+
+    /// The text, for measuring its width.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// True for `^[a-z0-9][a-z0-9-]{0,62}$`.
+fn is_product_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let first_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    first_ok
+        && name.len() <= 63
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Writes `text` to `out`: with its colour codes when `color`, and with every escape sequence stripped
+/// by anstream's `strip_str` when not.
+///
+/// The choice is yes or no and nothing else. anstream's own `Auto` would read `NO_COLOR` and ask the
+/// stream, and rdy decides that once, in [`use_color`], so the answer is the same for every stream it
+/// writes. Text that holds a raw escape, which rdy never builds, is stripped when `color` is off.
+///
+/// The Windows console half sits one step out: the process entry hands this function stderr wrapped in
+/// `anstream::AutoStream::always`, which turns the codes into console calls where the console needs it
+/// and passes them through elsewhere ([`crate::entry`]). A caller with a plain buffer gets the codes
+/// as they are.
+///
+/// # Errors
+///
+/// The error of the write or the flush.
+pub fn write_styled<W: Write + ?Sized>(out: &mut W, color: bool, text: &str) -> io::Result<()> {
+    if color {
+        out.write_all(text.as_bytes())?;
+    } else {
+        for piece in anstream::adapter::strip_str(text) {
+            out.write_all(piece.as_bytes())?;
+        }
+    }
+    out.flush()
 }
 
 /// Text from the machine or the spec, made safe to print: control characters become `\x1b`

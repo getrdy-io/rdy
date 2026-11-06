@@ -1,0 +1,23 @@
+WARNING: KEY NOT PINNED
+This spec was checked with a key given on the command line (fingerprint 4d2a7c0e...0a1c).
+rdy cannot tell whose key that is.
+Every report from this run is marked KEY NOT PINNED.
+
+rdy 0.1.0
+spec    acme-edge >=1.0   (acme-edge.yaml)
+sig     verified, key 9F3A6C21D4E87B05, key given with --key, not pinned, signed 2027-03-02
+host    acme-vm-03.corp.example   rhel 9.4   x86_64
+user    jdoe (not root)
+
+  PASS     host.cpu     4 vCPUs found, 2 needed
+  PASS     host.memory  7.6 GiB found, 4 GiB needed
+
+0 blocks, 0 warnings, 2 passed
+
+Report written to ./rdy-report-acme-edge-20270309T112240Z/
+  rdy-report-acme-edge-20270309T112240Z.html
+  rdy-report-acme-edge-20270309T112240Z.json
+  spec.yaml
+  spec.yaml.minisig
+WARNING: KEY NOT PINNED
+READY

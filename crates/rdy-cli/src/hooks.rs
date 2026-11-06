@@ -34,4 +34,11 @@ pub struct RunHooks {
     /// test gives its own, to run a check that declares a secret variable or counts that it ran. It
     /// changes nothing about the privilege gate, which runs on the machine's snapshot.
     pub families: Option<FamiliesFn>,
+    /// Whether stderr is a terminal, for the colour rule of 07 section 6 (rule 5). `None` asks the
+    /// process, which is what the binary does. A test that runs `--color auto` pins it, so a developer's
+    /// terminal cannot colour a golden.
+    pub stderr_terminal: Option<bool>,
+    /// The width of the terminal on stderr, for the wrap width. `None` asks the process. A test pins it
+    /// so that `COLUMNS` and the size of the developer's terminal cannot change a golden.
+    pub stderr_columns: Option<usize>,
 }
