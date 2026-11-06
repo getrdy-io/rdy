@@ -1,0 +1,43 @@
+{
+  "entry": {
+    "id": "host.firewall",
+    "open_inbound": [
+      6443,
+      10250
+    ]
+  },
+  "result": {
+    "expected": {
+      "open_inbound": [
+        6443,
+        10250
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "firewalld zone public allows 6443/tcp and 10250/tcp inbound.",
+    "notes": [
+      "firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read"
+    ],
+    "observed": {
+      "active": [
+        {
+          "interface": "eth0",
+          "manager": "firewalld",
+          "ports": {
+            "10250": {
+              "detail": "ports: 10250/tcp",
+              "verdict": "open"
+            },
+            "6443": {
+              "detail": "ports: 6443/tcp",
+              "verdict": "open"
+            }
+          },
+          "zone": "public"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

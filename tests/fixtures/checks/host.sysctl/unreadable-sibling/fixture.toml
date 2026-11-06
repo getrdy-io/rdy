@@ -1,0 +1,12 @@
+schema = 1
+name = "unreadable-sibling"
+summary = "The value is set in a readable file and another file in the directory cannot be read"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -61,8 +61,8 @@ tests/fixtures/
 ```
 
 What exists today: `allow.toml`, `signed/`, `minisign-c/`, `wycheproof/`, `canary/`, `reports/`, `summary/` (nine cases), `specs/` (`invalid/`,
-`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (12 cases), `host.firewall/` (18 cases), `host.disk/` (15 cases), the twelve machines of
-`host.os/`, `host.security_agents/` (18 cases), the `host.lsm/` cases, `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
+`malformed/`), and under `checks/` the cases `host.memory/pass`, `host.cpu/` (12 cases), `host.firewall/` (17 cases and the `envs/base-firewalld` and `envs/base-ufw` bases), `host.disk/` (15 cases), the twelve machines of
+`host.os/`, `host.security_agents/` (18 cases), `host.sysctl/` (23 cases, each with an `expect.json`), the `host.lsm/` cases, `_policy/symlink-to-shadow`, `_policy/fd-walk`, `_loader/manifest-entries`, the `_cgroup`
 cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 18 clusters (`eks`, `gke`, `aks`,
 `openshift`, `openshift-forbidden`, `openshift-updating`, `k3s`, `rke2`, `kind`, `vanilla`, `missing-apis`,
 `nodes-forbidden`, `skew`, `paged`, `unreadable-version`, `apis-unreadable-openshift`, `apis-unreadable-forbidden`,
@@ -102,7 +102,7 @@ The rest arrives with the tickets that need it. The names above are fixed now so
 | `summary/<case>.txt` | Two lines: the summary line and the last line a set of check results gets (01 section 5.3). Compared by `rdy_engine::summary` unit tests | By hand, or `UPDATE_GOLDENS=1` |
 | `results/<rdy-version>/*.json` | Result files written by released versions. They must stay parseable | Append only. Never edited |
 | `reports/*.json` | A valid sample report (`not-ready-7.2.json` is the 01 section 7.2 sample). A test replaces its `actions` and checks the result against the schema | By hand, when the sample in 01 changes |
-| `reports/golden/*.json`, `reports/golden/*.html` | A report exactly as `rdy_engine::report::write_json` writes it (`not-ready-hostile-host.json`: the sample with a `</script>` hostname and out-of-order maps), or as `render_html` renders it (`not-ready-7.2.html`: the 01 section 7.2 sample; `five-sections-exec-plugin.html`: the sample plus a check that does not apply here, so all five sections show, and `identity.kube.exec_plugin` set to `aws`). Compared byte for byte, and the goldens check lists them. The linux-x64 CI leg also runs every `*.html` golden through the Nu HTML Checker (`scripts/validate-html.sh`, `--Werror`) | `UPDATE_GOLDENS=1`, then read the diff |
+| `reports/golden/*.json`, `reports/golden/*.html` | A report exactly as `rdy_engine::report::write_json` writes it (`not-ready-hostile-host.json`: the sample with a `</script>` hostname and out-of-order maps), or as `render_html` renders it (`not-ready-hostile-host.html`: the page of that same report, so its `data-sha256` is the SHA-256 of the `.json` golden and its embedded element holds that file's bytes, SEC-64; `not-ready-7.2.html`: the 01 section 7.2 sample; `five-sections-exec-plugin.html`: the sample plus a check that does not apply here, so all five sections show, and `identity.kube.exec_plugin` set to `aws`). Compared byte for byte, and the goldens check lists them. The linux-x64 CI leg also runs every `*.html` golden through the Nu HTML Checker (`scripts/validate-html.sh`, `--Werror`) | `UPDATE_GOLDENS=1`, then read the diff |
 | `specs/valid/`, `specs/malformed/` | Parser corpus. Each malformed file is one way a spec can be wrong | By hand |
 | `signed/` | One signed spec. See `signed/README.md` | Never. New cases get new files |
 | `minisign-c/` | A key with a published test password and a signature, both made by C minisign 0.11. See `minisign-c/README.md` | Never |
@@ -559,8 +559,8 @@ and addresses. It fails on:
   and reserved (`240.0.0.0/4`, which holds netmasks). An IPv4-mapped address counts as its IPv4 address;
 - a bad manifest, a missing `origin` or one outside the four, a duplicate argv, native call or API request,
   and every other refusal of `Fixture::load`. The lint calls the loader. It has no second parser. The
-  `host.firewall` cases name a sibling `base` that the loader cannot find yet. The `LOADER_PENDING` row in
-  the lint excuses that one error and nothing else; M1-117 moves the bases to `envs/` and removes the row;
+  `host.firewall` cases name a `base`, and the loader looks it up under `envs/`, so the two firewall bases
+  (`base-firewalld`, `base-ufw`) live in `envs/` (M1-174). They have no `spec`, so the env harness skips them;
 - a case or environment directory without a `fixture.toml`. A `checks/_<name>/` helper directory (`_policy`,
   `_loader`, `_cgroup`) is checked like any other, so a new one needs no change to the lint;
 - a missing required case. The list is `REQUIRED` in the lint: `checks/_policy/symlink-to-shadow` (its
@@ -596,9 +596,23 @@ with no `spec` is a base that other environments build on, and is skipped. Not b
 | no-privilege partial | the check has a `Root` want | `caps.root = false` and `result.partial` set |
 | Timeout | the check declares a command, a peer or a `statfs` prefix | `result.timed_out_ms`, and a `blackhole` or a `delay_ms` of at least the check's timeout in the case |
 
-The `result` object of an `expect.json` is what the check returned in the case: its finding, or the end the
-scheduler gave it. The rule reads three fields and ignores the rest (`host.disk` writes the rest, and a
-Rust test compares it):
+An `expect.json` has two keys, `entry` and `result`, with sorted keys, two-space indent and a final newline:
+
+```json
+{
+  "entry": { "id": "host.memory", "min": "32Gi" },
+  "result": { "level": "pass", "message": "31.3 GiB found, 32 GiB needed, inside the 5% tolerance", "...": "..." }
+}
+```
+
+`entry` is the spec entry the check runs with. `result` is what the check returned in the case: its finding,
+an `{"error": "<text>"}` when it returned an error, or `{"timed_out_ms": <ms>}` when the scheduler ended it at
+its deadline. The finding form holds `level`, `message`, `observed`, `expected`, `fix`, `notes` and
+`partial` (`missing` needs and a `note`). `rdy_engine::testing::assert_cases(id, build)` runs every directory
+under `checks/<id>/` through the scheduler on a paused clock, with the case's OS and needs, and compares the
+bytes through `assert_golden`. A new case directory is a new test case with no code change. A directory with
+no `expect.json`, or that does not answer `<id>`, fails the test. The completeness rule reads three fields
+of `result` and ignores the rest:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -611,7 +625,19 @@ A hang is a `blackhole`, or a `delay_ms` at or above the check's default timeout
 
 A missing class that `PENDING` (in `main.rs`) does not list is a failure. Each `PENDING` row names the
 check, the classes and the ticket that owes them. A row for a class that is no longer missing is a failure
-too. A new family adds its row in `crates/rdy-cli/tests/env_harness/families.rs`.
+too. `PENDING` has been empty since M1-174. A new family adds its row in
+`crates/rdy-cli/tests/env_harness/families.rs`.
+
+**Known gaps.** Two cases bless behaviour that check-author found wrong against 03:
+`host.memory/cgroup-unreadable` and `host.security_agents/unreadable-comm`. Each has a `README.md` that says
+so. Both belong to M1-177. Whoever fixes the check regenerates the `expect.json` on purpose.
+
+**Reviewing an `expect.json`.** Read the level and the message of every new case before you accept it.
+The level must be the one the case is named for (a `pass` case that says `warn` is a bug in the check or
+in the entry, not a golden to accept). `UPDATE_GOLDENS=1` rewrites `result` and keeps `entry`, so a change
+to what a case is asked is an edit to `entry` by hand. A check that reads the wall clock (`host.lsm` counts
+its denial window back from it) is built with the clock pinned in the test; a result that changes with the
+date is a flaky test.
 
 ## Recording (M2)
 

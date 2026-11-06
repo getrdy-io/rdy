@@ -472,3 +472,21 @@ fn rustls_config_builder_dangerous() {
 fn rustls_client_config_dangerous() {
     let _ = rustls::ClientConfig::dangerous;
 }
+
+// ---- askama --------------------------------------------------------------------------------------
+// These print a value without escaping it. Only the `EmbeddedJson` marker of the HTML report may (M1-078).
+
+fn type_askama_safe(_: Option<askama::filters::Safe<String>>) {}
+fn type_askama_unsafe(_: Option<askama::filters::Unsafe<String>>) {}
+fn type_askama_maybe_safe(_: Option<askama::filters::MaybeSafe<String>>) {}
+fn type_askama_html_safe(_: Option<&dyn askama::filters::HtmlSafe>) {}
+fn type_askama_html_safe_output(_: Option<askama::filters::HtmlSafeOutput<String>>) {}
+fn askama_safe() {
+    let _ = askama::filters::safe::<String, askama::filters::Html>;
+}
+fn askama_escape() {
+    let _ = askama::filters::escape::<String, askama::filters::Html>;
+}
+fn askama_e() {
+    let _ = askama::filters::e::<String, askama::filters::Html>;
+}
