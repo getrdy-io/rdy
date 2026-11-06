@@ -1,0 +1,54 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/constraints.gatekeeper.sh/v1beta1"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIResourceList",
+    "apiVersion": "v1",
+    "groupVersion": "constraints.gatekeeper.sh/v1beta1",
+    "resources": [
+      {
+        "name": "k8sallowedrepos",
+        "singularName": "k8sallowedrepo",
+        "namespaced": false,
+        "kind": "K8sAllowedRepos",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8sallowedrepos/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sAllowedRepos",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8srequiredlabels",
+        "singularName": "k8srequiredlabel",
+        "namespaced": false,
+        "kind": "K8sRequiredLabels",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8srequiredlabels/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sRequiredLabels",
+        "verbs": [
+          "get"
+        ]
+      }
+    ]
+  }
+}

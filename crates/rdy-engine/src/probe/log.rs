@@ -206,6 +206,9 @@ struct Folded {
 #[derive(Default)]
 struct State {
     next_seq: u64,
+    /// How many of the entries begun were set-up entries ([`ActionLog::begin_setup`]), which do not
+    /// count for [`ActionLog::has_entries`].
+    setup: u64,
     entries: BTreeMap<u64, Action>,
     all: Tiers,
     checks: HashMap<Option<String>, CheckSlots>,
@@ -334,9 +337,21 @@ impl ActionLog {
         }
     }
 
-    /// Whether any entry was begun, finished or not. `ProbeHub::set_proxy` refuses once this is true.
+    /// Opens a set-up entry: a run-level entry that the engine writes itself, from fixed text, before
+    /// the run starts. It is a normal entry in every way but one: [`ActionLog::has_entries`] does not
+    /// count it, so `ProbeHub::set_proxy` still works after it. Its fields must be text the engine
+    /// owns (a declared variable name), never text from a spec, a file or the network, because it can be
+    /// written before the proxy password joins the known-secret set.
+    pub(crate) fn begin_setup(&self, kind: ActionKind, fields: Map<String, Value>) -> Pending {
+        self.state().setup += 1;
+        self.begin(None, kind, fields)
+    }
+
+    /// Whether any entry but a set-up one was begun, finished or not. `ProbeHub::set_proxy` refuses
+    /// once this is true.
     pub(crate) fn has_entries(&self) -> bool {
-        self.state().next_seq > 0
+        let state = self.state();
+        state.next_seq > state.setup
     }
 
     /// The path as the log shows it: `~/rest` under the home directory, else as given. Use it for every

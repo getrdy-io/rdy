@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-kyverno"
+summary = "Kyverno 1.12 to 1.19: kyverno.io prefers v2 and keeps ClusterPolicy in v1, and the CEL group is served"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

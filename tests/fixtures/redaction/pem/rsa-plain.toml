@@ -1,0 +1,6 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["pem_private_key"]
+forms = ["plain"]
+secrets = ["${SYN:pem_rsa_begin}", "${SYN:rsa_body_1}", "${SYN:rsa_body_2}", "${SYN:pem_rsa_end}"]

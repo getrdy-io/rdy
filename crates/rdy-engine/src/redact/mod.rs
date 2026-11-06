@@ -100,6 +100,16 @@ pub(crate) fn worth_registering(value: &str) -> bool {
 #[cfg(any(test, feature = "testing"))]
 pub const PANIC_TRIGGER: &str = "__rdy_redactor_panic__";
 
+/// The names of the built-in rules, in table order.
+///
+/// The redaction corpus gate (M1-063) reads it, so a rule added to the table fails the gate until it has
+/// a positive case. Only built with the `testing` feature (or in this crate's own tests).
+#[cfg(any(test, feature = "testing"))]
+#[must_use]
+pub fn built_in_rule_names() -> Vec<&'static str> {
+    BUILT_IN.iter().map(|rule| rule.name).collect()
+}
+
 /// The rule name used when a string had to be replaced whole because redaction failed.
 const FAIL_CLOSED_RULE: &str = "redactor_error";
 

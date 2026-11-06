@@ -3188,7 +3188,7 @@ dependencies = [
  "anyhow",
  "clap",
  "jsonschema",
- "rdy-checks-host",
+ "rdy",
  "rdy-engine",
  "rdy-spec",
  "serde-saphyr 2.0.0",

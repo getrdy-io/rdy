@@ -226,8 +226,8 @@ async fn an_unrecorded_argv_fails_with_not_recorded() {
 
 #[test]
 fn a_link_local_answer_loads_so_the_address_rule_can_run_in_every_net_fixture() {
-    // The address rule (`is_forbidden`) and the facade lookup that applies it are M1-094. What this
-    // ticket owes them is a fixture that records the forbidden answer as it is.
+    // The loader records the forbidden answer as it is. The facade's address rule refuses it when a
+    // check looks the name up (`Probe::lookup`, M1-094, in `probe/net/lookup/tests.rs`).
     let fixture = load(&[(
         "net.json",
         r#"{"dns": {"Metadata.acme.example": ["169.254.169.254", "fd00:ec2::254"],

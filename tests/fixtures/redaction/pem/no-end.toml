@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["pem_private_key"]
+forms = ["no_end"]
+secrets = ["${SYN:pem_rsa_begin}", "${SYN:rsa_body_1}", "${SYN:rsa_body_2}"]
+note = "A cut-off log: no END line. The block runs to the end of the input (04 Appendix B), so the final newline goes with it."

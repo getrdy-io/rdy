@@ -103,28 +103,33 @@ fn m1_support_is_full_on_linux_and_not_yet_elsewhere() {
 }
 
 #[test]
-fn on_linux_every_host_check_is_planned_to_run() {
+fn on_linux_every_real_host_check_is_planned_to_run_and_every_stub_is_not_in_build() {
     let plan = plan(Os::Linux);
     assert_eq!(plan.entries().len(), 13);
-    assert_eq!(plan.runnable().count(), 13);
+    let stubs = HostFamily::stub_ids();
+    assert_eq!(plan.runnable().count(), 13 - stubs.len());
     for entry in plan.entries() {
-        assert!(skip_kind(&plan, &entry.key).is_none(), "{}", entry.key);
+        let want = stubs
+            .contains(&entry.id.as_str())
+            .then_some(SkipKind::NotInBuild);
+        assert_eq!(skip_kind(&plan, &entry.key), want, "{}", entry.key);
     }
 }
 
 #[test]
-fn on_macos_and_windows_every_host_check_is_not_yet_on_os() {
+fn on_macos_and_windows_no_host_check_runs() {
     for os in [Os::Macos, Os::Windows] {
         let plan = plan(os);
         assert_eq!(plan.entries().len(), 13);
         assert_eq!(plan.runnable().count(), 0);
         for entry in plan.entries() {
-            assert_eq!(
-                skip_kind(&plan, &entry.key),
-                Some(SkipKind::NotYetOnOs),
-                "{}",
-                entry.key
-            );
+            // A stub has no code on any OS. A real check has no data source on these two yet.
+            let want = if HostFamily::stub_ids().contains(&entry.id.as_str()) {
+                SkipKind::NotInBuild
+            } else {
+                SkipKind::NotYetOnOs
+            };
+            assert_eq!(skip_kind(&plan, &entry.key), Some(want), "{}", entry.key);
             let result = entry.skip_result().expect("a skip result");
             assert!(result.message.starts_with("Not run."), "{}", result.message);
         }
@@ -201,9 +206,8 @@ fn build_refuses_an_id_the_family_does_not_have() {
 }
 
 #[test]
-fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
-    // Delete an id here in the ticket that writes its real check. When the list is empty, the
-    // registering ticket (M1-057) may wire the family into the CLI.
+fn these_ids_are_still_stubs_and_the_planner_skips_them() {
+    // Delete an id here in the ticket that writes its real check.
     assert_eq!(
         HostFamily::stub_ids(),
         [
@@ -218,6 +222,25 @@ fn these_ids_are_still_stubs_so_the_family_stays_out_of_the_cli() {
     let listed: Vec<&str> = HostFamily.checks().iter().map(|info| info.id).collect();
     for id in HostFamily::stub_ids() {
         assert!(listed.contains(id), "{id} is not a host check");
+    }
+}
+
+#[test]
+fn a_registered_host_family_never_plans_a_stub_to_run() {
+    let mut registry = Registry::new();
+    registry.register(HostFamily).expect("the family registers");
+    let mut spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    spec.checks = HostFamily::stub_ids()
+        .iter()
+        .map(|id| serde_json::from_value(json!({ "id": id })).expect("an entry"))
+        .collect();
+    let plan = registry.plan(&spec, Os::Linux, "0.1.0");
+    assert_eq!(plan.entries().len(), HostFamily::stub_ids().len());
+    for entry in plan.entries() {
+        match &entry.action {
+            PlanAction::Skip(skip) => assert_eq!(skip.kind, SkipKind::NotInBuild, "{}", entry.id),
+            _ => panic!("{} would run as a stub", entry.id),
+        }
     }
 }
 
