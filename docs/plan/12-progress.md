@@ -365,7 +365,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-174 | todo | | Expected results for the host check fixture cases | added 2026-10-30 (correction-29, PR #145 review)
 
-- M1-175 | todo | | Kubernetes family builds every k8s check from its parameters | added 2026-10-30 (correction-32, PR #151 review)
+- M1-175 | todo | | Kubernetes family builds every k8s check from its parameters | added 2026-10-30 (correction-32, PR #151 review); backlog corrected 2026-11-06 (correction-36): also builds k8s.namespace from `CheckParams::K8sNamespace`, seven results, 1.5 h; that item moves to M1-161 if M1-161 is not merged first (PR #32 reviews)
 
 - M1-176 | todo | | The watchdog in `rdy run` | added 2026-10-30 (correction-33, PR #154 reviews)
 
