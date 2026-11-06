@@ -17,6 +17,8 @@
 //! For a whole check against a recorded machine, [`run_fixture`] loads a fixture, refuses one that does
 //! not answer the check, runs the check against it and returns a [`FixtureRun`]. Then
 //! [`FixtureRun::assert_within_manifest`] proves the check stayed inside its declaration.
+//! `assert_cases` (feature `runtime`) runs every fixture case of a check through the scheduler and compares
+//! it with the case's reviewed `expect.json`.
 //! `FakeCheck` (feature `runtime`) is a scripted check for scheduler tests, and [`normalize`] scrubs a report so two runs
 //! of one environment compare equal. [`golden::assert_golden`] compares output with a golden file and writes it
 //! under `UPDATE_GOLDENS=1`.
@@ -30,6 +32,8 @@ pub use crate::probe::replay::{
 };
 
 #[cfg(feature = "runtime")]
+mod expect;
+#[cfg(feature = "runtime")]
 mod fake;
 mod fixture_run;
 pub mod golden;
@@ -37,6 +41,8 @@ mod normalize;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "runtime")]
+pub use expect::{assert_cases, assert_cases_in, expect_bytes, render, run_case, sorted};
 #[cfg(feature = "runtime")]
 pub use fake::{FAKE_INFO, Fake, FakeCheck, Release};
 pub use fixture_run::{
@@ -58,6 +64,32 @@ use crate::redact::{Redactor, TagKey};
 #[must_use]
 pub fn fixtures_dir() -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
+}
+
+/// The names of the fixture cases of one check, read from its folder under `checks/` in [`fixtures_dir`],
+/// sorted.
+///
+/// A test that runs every case of a check reads the list here, so a new case cannot skip it. A test is
+/// not a check, so it may read the directory itself.
+///
+/// # Panics
+///
+/// When the check has no fixture folder or it cannot be read.
+#[must_use]
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a missing fixture folder fails the test with a message"
+)]
+pub fn fixture_cases(check: &str) -> Vec<String> {
+    let folder = fixtures_dir().join("checks").join(check);
+    let mut cases: Vec<String> = std::fs::read_dir(&folder)
+        .expect("the fixture folder reads")
+        .map(|entry| entry.expect("a directory entry"))
+        .filter(|entry| entry.file_type().expect("a file type").is_dir())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    cases.sort();
+    cases
 }
 
 /// One fixture run: a replay backend, a probe hub and the action log they write.

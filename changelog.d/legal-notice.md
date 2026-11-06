@@ -1,0 +1,1 @@
+- Add `NOTICE` and `TRADEMARKS.md`. The copyright holder is Apostolic Path LLC. The names "Rdy" and "rdy" and the logo are trademarks, and a fork must use another name. Every release archive and every published crate now carries `NOTICE` next to `LICENSE`, as Apache-2.0 section 4(d) asks. The license itself has not changed.

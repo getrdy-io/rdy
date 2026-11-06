@@ -96,6 +96,8 @@ jobs:
       # Same for the k8s.storageclass fixtures.
       - name: k8s.storageclass fixtures are current
         run: python3 -I scripts/gen-k8s-storageclass-fixtures.py --check
+      - name: k8s.admission fixtures are current
+        run: python3 -I scripts/gen-k8s-admission-fixtures.py --check
       # The schema generator is the optional `schema` feature of rdy-spec. It pulls in schemars and
       # serde_json/preserve_order, which must stay out of the shipped binary (ADR 0019).
       - name: The binary does not build the schema generator
@@ -112,6 +114,11 @@ jobs:
           tree="$(cargo tree --locked -p rdy -e normal,features --target x86_64-unknown-linux-gnu)"
           if printf '%s\n' "$tree" | grep -E 'rdy-engine feature "(testing|loopback)"'; then
             echo "::error::the rdy binary would build the rdy-engine testing or loopback feature"
+            exit 1
+          fi
+          # The `testing` feature turns on tokio's `test-util` (the paused clock of the fixture runs).
+          if printf '%s\n' "$tree" | grep -E 'tokio feature "test-util"'; then
+            echo "::error::the rdy binary would build tokio's test-util feature"
             exit 1
           fi
           # The loopback servers make certificates with rcgen. Nothing in the shipped tree may use it

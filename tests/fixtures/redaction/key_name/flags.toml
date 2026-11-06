@@ -1,0 +1,7 @@
+polarity = "positive"
+since = "m1"
+rulesets = ["report"]
+rules = ["secret_by_key"]
+forms = ["flag"]
+secrets = ["hunter2", "hunter3"]
+note = "The flag with = is last on its line. M1-060 reads its value to the end of the line, so a flag after it would be hidden too. That over-redaction is not pinned here."

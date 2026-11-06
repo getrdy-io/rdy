@@ -146,10 +146,11 @@ token afterwards. `11-backlog.md` treats it as that hand step before the go, out
 
 ### 5. Trademark search
 
-Still to run: the USPTO export for RDY, READY and REDY, then an intent-to-use filing in classes 9 and 42,
-and the Wisconsin LLC name check. The winget id `RdyLabs.Rdy` and any copy naming "Rdy Labs LLC" wait for
-it (rv06-code). Taken: documents say "Rdy" and "entity pending", and nothing is filed. Filing may cost fees
-and counsel time.
+Still to run: the USPTO export for RDY, READY and REDY, then an intent-to-use filing in classes 9 and 42.
+The legal entity that owns the code, the copyright and the marks is Apostolic Path LLC (founder decision
+2026-10-30). It replaces "Rdy Labs LLC (pending)", so the old Wisconsin name check for that LLC no longer
+applies. The winget publisher id (earlier drafts said `RdyLabs.Rdy`) waits on the founder, who picks it (rv06-code).
+Taken: nothing is filed. Filing may cost fees and counsel time.
 
 ### 6. macOS notarization and Windows signing (M3)
 
@@ -195,6 +196,23 @@ This file is the corrections list.
   reqwest with the platform verifier, which ADR 0014 rejects. Not resolved here. Before M2-026 starts,
   rust-architect writes one ADR that picks the upload stack, its verifier and its `deny.toml` entry,
   reviewed by security-reviewer (`reviews/adr-and-00-review-by-security-reviewer.md`, CF-03).
+- **Correction-35, the adjtimex source (blocks the adjtimex half of M2-004, not M1).** M1-148 and 03 read
+  `adjtimex(2)` through `native`, but the closed `NativeCall` enum has no variant for it, rustix 1.1.6 has no
+  `clock_adjtime` or `adjtimex`, and `forbid(unsafe_code)` rules out a raw call. Correction-35 moves the
+  variant, its policy row, snapshot, 05 row, Live and Replay arms, `native/adjtimex.json` and the "`EPERM` is
+  partial" clause to M2-004 (3.5 h to 5 h). M1-148 takes the sync state from `timedatectl` and `chronyc` and
+  the offset from its SNTP client. Before M2-004 starts, rust-engineer names the Live source: a safe wrapper
+  in a rustix release, or another crate that passes the new-dependency review (05 T5, `deny.toml`), reviewed
+  by security-reviewer. If neither exists, rust-architect writes an ADR first. The review and any ADR come out
+  of M2-004's 5 h. The host.time_sync half of M2-004 is check-author's work. `ci/check-crate-deps.toml`
+  does not change, because the call sits in rdy-engine and host.time_sync reaches it through the Probe.
+- **Correction-36, k8s.namespace follow-ups (M2-116 and M2-117, not M1).** A `LimitRange` `Container`
+  default limit below `container_max_memory` is a note in M1, not a block, because the spec cannot say that
+  the product sets requests without limits. M1-161's builder chose this and k8s-expert confirmed it on
+  PR #32, which edits 03 to match. M2-116 adds the spec key, owned by rust-architect, before rdy-spec's
+  first crates.io release. M2-117 makes k8s.namespace work on OpenShift without cluster-scoped reads:
+  `AppliedClusterResourceQuota` instead of `ClusterResourceQuota`, and the project GET when
+  `get namespaces` is Forbidden. Its two new guard reads need a security-reviewer review.
 
 ## CLAUDE.md edits
 

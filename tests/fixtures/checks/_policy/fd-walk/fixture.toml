@@ -1,0 +1,12 @@
+schema = 1
+name = "fd-walk"
+summary = "A /proc tree with the links host.ports reads: the network namespace, socket fds, a file and a pipe fd, and a pid whose fd directory a user may not search"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = []
+
+[caps]
+root = false
+network = false
+kube = false

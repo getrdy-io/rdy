@@ -10,8 +10,10 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// Whether `addr` is in a range that no call may reach: 169.254.0.0/16 (link-local and the cloud
-/// metadata address), 100.100.100.200/32, fe80::/10, fd00:ec2::/64, and the IPv4-mapped,
-/// IPv4-compatible and `64:ff9b::/96` forms of each IPv4 range.
+/// metadata address), 100.100.100.200/32 (Alibaba Cloud metadata), 168.63.129.16/32 (the Azure
+/// host-services address, M1-094), fe80::/10, fd00:ec2::/64 (AWS IPv6 metadata), fd20:ce::254/128 (GCP
+/// IPv6 metadata, M1-094), and the IPv4-mapped, IPv4-compatible and `64:ff9b::/96` forms of each IPv4
+/// range.
 pub(crate) fn is_forbidden(addr: IpAddr) -> bool {
     match addr {
         IpAddr::V4(v4) => forbidden_v4(v4),
@@ -34,8 +36,20 @@ pub(crate) fn is_unusable_peer(addr: IpAddr) -> bool {
 }
 
 fn forbidden_v4(addr: Ipv4Addr) -> bool {
-    addr.is_link_local() || addr == Ipv4Addr::new(100, 100, 100, 200)
+    addr.is_link_local() || addr == ALIYUN_METADATA || addr == AZURE_HOST_SERVICES
 }
+
+/// The Alibaba Cloud metadata address.
+const ALIYUN_METADATA: Ipv4Addr = Ipv4Addr::new(100, 100, 100, 200);
+
+/// The Azure host-services address (WireServer and the virtual DNS address). Its HTTP side serves the
+/// VM agent's extension settings and certificates, so it is refused like the metadata addresses. No
+/// check has a reason to reach it: the system resolver may use it, but that is the OS, not a facade
+/// connect. The decision and its residual are in 05 (M1-094).
+const AZURE_HOST_SERVICES: Ipv4Addr = Ipv4Addr::new(168, 63, 129, 16);
+
+/// The GCP IPv6 metadata address `fd20:ce::254`.
+const GCP_METADATA_V6: Ipv6Addr = Ipv6Addr::new(0xfd20, 0x00ce, 0, 0, 0, 0, 0, 0x0254);
 
 fn unusable_v4(addr: Ipv4Addr) -> bool {
     addr.is_unspecified() || addr.is_multicast() || addr.is_broadcast()
@@ -49,6 +63,10 @@ fn forbidden_v6(addr: Ipv6Addr) -> bool {
     }
     // fd00:ec2::/64
     if segments[..4] == [0xfd00, 0x0ec2, 0, 0] {
+        return true;
+    }
+    // fd20:ce::254/128
+    if addr == GCP_METADATA_V6 {
         return true;
     }
     embedded_v4(addr).is_some_and(forbidden_v4)
@@ -84,6 +102,12 @@ mod tests {
             "fe80::1",
             "febf::1",
             "fd00:ec2::254",
+            "fd20:ce::254",
+            "FD20:00CE:0:0:0:0:0:0254",
+            "168.63.129.16",
+            "::ffff:168.63.129.16",
+            "::168.63.129.16",
+            "64:ff9b::a83f:8110",
             "::ffff:169.254.169.254",
             "::169.254.169.254",
             "64:ff9b::a9fe:a9fe",
@@ -107,6 +131,12 @@ mod tests {
             "2001:db8::1",
             "fec0::1",
             "fd00:ec3::1",
+            "fd20:ce::255",
+            "fd20:cf::254",
+            "fd20:ce::1:254",
+            "168.63.129.15",
+            "168.63.129.17",
+            "168.63.128.16",
             "::ffff:10.0.0.1",
             "64:ff9b::808:808",
         ] {

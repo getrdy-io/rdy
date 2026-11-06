@@ -1,0 +1,36 @@
+{
+  "entry": {
+    "flags": [
+      "avx2"
+    ],
+    "id": "host.cpu",
+    "min": 4
+  },
+  "result": {
+    "expected": {
+      "flags": [
+        "avx2"
+      ],
+      "min": 4
+    },
+    "fix": "The CPU shows no avx2. In your own hypervisor, set the VM CPU model to host passthrough (libvirt `<cpu mode='host-passthrough'/>`), turn off VMware EVC masking, or on Hyper-V run `Set-VMProcessor -VMName <name> -CompatibilityForMigrationEnabled $false` on the hypervisor. In a public cloud the CPU model is fixed: pick an instance type whose CPU has it.",
+    "level": "fail",
+    "message": "8 vCPUs found, 4 needed; missing CPU flags: avx2",
+    "notes": [],
+    "observed": {
+      "allowed_cores": 8,
+      "arch": "x86_64",
+      "effective_cores": 8.0,
+      "flags": {
+        "avx2": false
+      },
+      "hypervisor": true,
+      "logical_cores": 8,
+      "physical_cores": 4,
+      "quota_cores": null,
+      "virtualization": "vm",
+      "x86_64_level": 1
+    },
+    "partial": null
+  }
+}

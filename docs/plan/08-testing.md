@@ -197,7 +197,7 @@ command. It fails on:
   case, a non-passing case, a no-privilege `partial` case where a root-optional need exists, and a `Timeout`
   case where it declares a command, a peer or a `statfs` prefix. A case counts through its `expect.json`
   (`result.level`, `result.partial`, `result.timed_out_ms`). A `PENDING` list in the test names what is still
-  owed and by which ticket, and a row that is no longer true is a failure; a missing
+  owed and by which ticket (empty since M1-174), and a row that is no longer true is a failure; a missing
   `checks/_policy/symlink-to-shadow` stays in the lint file.
 
 Two deviations, decided in the M1-050 review. The host rule uses a short list of country codes and common
@@ -247,7 +247,9 @@ Windows marks host checks `not_yet_on_os`, a pure unit test with no I/O.
 ## 3. Golden tests
 
 **What is golden.** Per environment: `report.json` (the `--json` stdout), `report.html` and `terminal.txt`
-(stderr with colour off and width 100), captured from the in-process run. Per check case: `expect.json`.
+(stderr with colour off and width 100), captured from the in-process run. Per check case: `expect.json`, an
+`entry` (the spec entry the check runs with) and a `result` (the finding, error or timeout), compared by
+`rdy_engine::testing::assert_cases` through the scheduler on a paused clock.
 Redaction expectations are goldens too. HTML goldens exist for `all-pass`, `warnings-only` and `all-block`
 only. Goldens sit next to what they describe, so a reviewer sees input and output in one diff.
 
@@ -464,6 +466,8 @@ and a golden diff that code-reviewer has read first.
 ```
 
 Built in memory. The tree holds no symlinks, no special modes and no name with `:`, `[` or `]`.
+`Probe::read_link` serves `symlinks` (M1-169): it returns the target text as recorded, applies the read policy to the
+link's real path, and in `/proc/<pid>/fd` returns only a `socket:[N]` target. `checks/_policy/fd-walk` is the case.
 `unreadable` simulates a no-privilege run.
 
 **`commands/*.json`** (any slug): `{ "argv": ["/usr/bin/chronyc", "-n", "-c", "tracking"], "stdout": "...",
@@ -732,7 +736,7 @@ below are coarse and move to 11-backlog.md when it is merged.
 - [M1] Fixture envs warnings-only, all-block and no-privileges | owner: qa-engineer | est: 3h | depends on: Fixture env all-pass | exit test: exit codes 1, 2 and 2 with goldens, `no-privileges` shows `partial` results and `missing_need` skips, and its verdict reason is `required_check_not_run`.
 - [M1] Timeouts env and scheduler timeout, deadline and cancellation tests under paused time | owner: qa-engineer | est: 4h | depends on: Fixture env all-pass; Family limits, run deadline and Ctrl-C cancellation | exit test: the `timeouts` env runs in process under paused time at `jobs = 1` and `jobs = 8`, every hung source gives `Timeout`, the run ends inside `deadline_ms` in virtual time, cancellation gives `interrupted: true` with `skip_kind: cancelled`, and only the `Fake::Block` test uses real time with a 1 s upper bound.
 - [M1] Property tests for rdy_spec::parse | owner: qa-engineer | est: 3h | depends on: Wire serde-saphyr behind rdy_spec::parse with size, depth, alias and duplicate-key limits | exit test: the section 4 table holds, 10,000 cases for never-panics and limits and 256 for the rest, with a fixed seed on PRs, committed regressions, `max_shrink_time` 30 s and the suite under 60 s on linux-x64.
-- [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: SEC-25 Build minimal redactor for reports and evidence; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: 60 synthetic cases across the M1 categories pass with zero misses, secrets built from parts, and `UPDATE_GOLDENS=1` leaves `tests/fixtures/redaction/**` untouched.
+- [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: SEC-25 Build minimal redactor for reports and evidence; Golden helper with UPDATE_GOLDENS, missing-golden failure and orphan check | exit test: 28 synthetic cases (04 Appendix D; the rest of SEC-26 moves to SEC-44, M2-061) pass with zero misses, secrets built from parts, and `UPDATE_GOLDENS=1` leaves `tests/fixtures/redaction/**` untouched.
 - [M1] Keep golden result files per released version and parse them in CI | owner: qa-engineer | est: 1h | depends on: Golden tests for JSON and HTML reports | exit test: `tests/fixtures/results/0.1.0-alpha.1/` parses with the current rdy-engine on every leg, and a modified file under an older version directory fails the lint.
 - [M1] Nextest ci profile, cargo test --doc in CI and PR template | owner: qa-engineer | est: 1h | depends on: CI test matrix on five native runners with ci-ok gate and static-musl proof (ADR 0006) | exit test: a test that fails once in three runs is not retried, `cargo test --doc` runs on linux-x64, and `.github/pull_request_template.md` carries Appendix E.
 - [M1] Hand-written compatibility page with the day-one rows | owner: docs-writer | est: 1h | depends on: Fixture env all-pass | exit test: `docs/compatibility.md` lists the Appendix B rows with the four state words and each fixture row shows its origin.

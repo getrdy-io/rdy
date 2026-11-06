@@ -37,7 +37,7 @@ pub(crate) fn run(path: &Path, json: bool, stdout: &mut dyn Write, stderr: &mut 
 
 /// Reads the spec file: a regular file, at most one byte over the limit so that an oversized file is
 /// told as a finding without reading all of it.
-fn read_spec(path: &Path, name: &str) -> Result<Vec<u8>, CliError> {
+pub(crate) fn read_spec(path: &Path, name: &str) -> Result<Vec<u8>, CliError> {
     let unreadable = |err: &std::io::Error| CliError::spec_unreadable(name, err);
     let meta = std::fs::metadata(path).map_err(|e| unreadable(&e))?;
     if !meta.is_file() {

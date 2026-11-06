@@ -232,3 +232,34 @@ fn a_refused_run_never_opens_the_spec_path() {
         .unwrap_or_else(|| panic!("run did not return: the spec path was opened"));
     assert_eq!(code, ExitCode::Internal);
 }
+
+/// M1-094: a spec that names 65 distinct hosts is refused through the real entry point. `spec lint`
+/// reports a spec error as a finding, so the exit is 2 and not 64 (07 section C.8). The 64 comes from
+/// the commands that load the spec (`run`, `verify` and `spec sign`); the mapping from
+/// `SpecError::TooManyHosts` is pinned in `error::tests::a_spec_with_more_than_64_hosts_exits_64`.
+#[test]
+fn a_spec_with_65_hosts_is_a_lint_error_with_the_fix_hint() {
+    for name in [
+        "too-many-endpoints.yaml",
+        "too-many-hosts-across-checks.yaml",
+    ] {
+        let spec = format!(
+            "{}/../../tests/fixtures/specs/invalid/{name}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let ran = call(common::unprivileged(), &["spec", "lint", &spec]);
+        assert_eq!(ran.code, ExitCode::Blockers, "{name}: {}", ran.stderr);
+        assert!(ran.stdout.is_empty(), "{name}: {}", ran.stdout);
+        assert!(
+            ran.stderr.contains("65 endpoints. The limit is 64"),
+            "{name}: {}",
+            ran.stderr
+        );
+        assert!(
+            ran.stderr
+                .contains("fix: remove hosts, or split the spec in two"),
+            "{name}: {}",
+            ran.stderr
+        );
+    }
+}

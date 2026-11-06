@@ -129,7 +129,9 @@ fn a_typo_id_is_unknown_check_and_not_a_parse_error() {
     );
     assert_eq!(
         typo.fix.as_deref(),
-        Some("Tell the vendor. The spec may have a typo, or it may need a newer rdy than 0.1.0.")
+        Some(
+            "Tell the vendor. The spec may have a typo (did you mean 'host.memory'?), or it may need a newer rdy than 0.1.0."
+        )
     );
 
     let nobody = skip(&plan, "upload.now");
@@ -137,6 +139,53 @@ fn a_typo_id_is_unknown_check_and_not_a_parse_error() {
     assert_eq!(
         nobody.message,
         "Not run. No version of rdy has checks named upload."
+    );
+    // Nothing near: no parenthesis.
+    assert_eq!(
+        nobody.fix.as_deref(),
+        Some("Tell the vendor. The spec may have a typo.")
+    );
+}
+
+#[test]
+fn a_typo_in_an_unreserved_family_gets_a_hint_in_the_short_sentence() {
+    let mut spec = acme();
+    spec.checks.push(entry(json!({"id": "hots.cpu", "min": 1})));
+    let plan = host_only().plan(&spec, Os::Linux, VERSION);
+    let typo = skip(&plan, "hots.cpu");
+    assert_eq!(typo.kind, SkipKind::UnknownCheck);
+    assert_eq!(
+        typo.message,
+        "Not run. No version of rdy has checks named hots."
+    );
+    assert_eq!(
+        typo.fix.as_deref(),
+        Some("Tell the vendor. The spec may have a typo (did you mean 'host.cpu'?).")
+    );
+}
+
+#[test]
+fn a_mistyped_field_of_a_known_check_gets_the_near_field_in_its_fix() {
+    let mut spec = acme();
+    spec.checks
+        .push(entry(json!({"id": "host.cpu", "name": "typo", "mn": 1})));
+    spec.checks.push(entry(
+        json!({"id": "host.memory", "name": "far", "zzzzzz": 1}),
+    ));
+    let plan = host_only().plan(&spec, Os::Linux, VERSION);
+    let near = skip(&plan, "host.cpu/typo");
+    assert_eq!(near.kind, SkipKind::UnsupportedSpec);
+    assert_eq!(
+        near.fix.as_deref(),
+        Some(
+            "Tell the vendor. The spec may have a typo (did you mean 'min'?), or it may need a newer rdy than 0.1.0."
+        )
+    );
+    // A field with nothing near it: no hint.
+    let far = skip(&plan, "host.memory/far");
+    assert_eq!(
+        far.fix.as_deref(),
+        Some("Tell the vendor. The spec may have a typo, or it may need a newer rdy than 0.1.0.")
     );
 }
 
@@ -631,6 +680,54 @@ fn a_family_that_builds_the_wrong_check_fails_closed_with_a_fixed_message() {
     let fix = s.fix.expect("a fix");
     assert!(!fix.contains("newer rdy"), "{fix}");
     assert!(fix.contains("bug"), "{fix}");
+}
+
+#[test]
+fn an_id_a_family_lists_as_not_built_is_skipped_and_never_built() {
+    use crate::check::CheckInfo;
+    use crate::family::tests::{Fake, HOST_CPU, HOST_MEMORY};
+    static LIST: [&CheckInfo; 2] = [&HOST_CPU, &HOST_MEMORY];
+    static BUILT: AtomicUsize = AtomicUsize::new(0);
+    struct Stubby;
+    impl crate::family::Family for Stubby {
+        fn name(&self) -> &'static str {
+            "host"
+        }
+        fn checks(&self) -> &'static [&'static CheckInfo] {
+            &LIST
+        }
+        fn not_built(&self) -> &'static [&'static str] {
+            &["host.memory"]
+        }
+        fn build(
+            &self,
+            _: &CheckSpec,
+            _: rdy_spec::check::CheckParams,
+            _: &Spec,
+        ) -> Result<crate::family::Built, crate::family::BuildError> {
+            BUILT.fetch_add(1, Ordering::SeqCst);
+            Ok(crate::family::Built::new(Box::new(Fake(&HOST_CPU))))
+        }
+    }
+    let mut registry = Registry::new();
+    registry.register(Stubby).expect("registers");
+    let plan = plan(
+        &registry,
+        vec![
+            entry(json!({"id": "host.cpu", "min": 4})),
+            entry(json!({"id": "host.memory", "min": "1Gi"})),
+        ],
+        Os::Linux,
+    );
+    assert!(runs(&plan, "host.cpu"));
+    let s = skip(&plan, "host.memory");
+    assert_eq!(s.kind, SkipKind::NotInBuild);
+    assert_eq!(
+        s.message,
+        "Not run. This version of rdy does not have the check host.memory yet."
+    );
+    assert_eq!(s.fix.as_deref(), Some(NEWER_RDY));
+    assert_eq!(BUILT.load(Ordering::SeqCst), 1, "only host.cpu is built");
 }
 
 fn egress(endpoint: &str) -> CheckSpec {
