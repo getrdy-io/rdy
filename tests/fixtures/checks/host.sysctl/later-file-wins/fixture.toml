@@ -1,0 +1,12 @@
+schema = 1
+name = "later-file-wins"
+summary = "A file that sorts later, in a lower directory, sets the value back at boot"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

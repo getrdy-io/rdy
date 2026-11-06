@@ -1,0 +1,12 @@
+schema = 1
+name = "unreadable-sysctl-d"
+summary = "The live value is right and /etc/sysctl.d cannot be read"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

@@ -1,0 +1,50 @@
+{
+  "entry": {
+    "apparmor": {
+      "allow": [
+        "enabled"
+      ],
+      "require_profiles": [
+        "acme-agent"
+      ]
+    },
+    "id": "host.lsm"
+  },
+  "result": {
+    "expected": {
+      "apparmor": {
+        "allow": [
+          "enabled"
+        ],
+        "require_profiles": [
+          "acme-agent"
+        ]
+      }
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "SELinux is disabled. AppArmor is on.",
+    "notes": [],
+    "observed": {
+      "apparmor": {
+        "required_profiles": {
+          "loaded": null,
+          "required": [
+            "acme-agent"
+          ]
+        },
+        "state": "enabled"
+      },
+      "selinux": {
+        "configured": null,
+        "state": "disabled"
+      }
+    },
+    "partial": {
+      "missing": [
+        "Root"
+      ],
+      "note": "The AppArmor profile list was not read: it needs root."
+    }
+  }
+}

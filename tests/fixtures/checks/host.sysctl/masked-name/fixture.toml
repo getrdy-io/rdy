@@ -1,0 +1,12 @@
+schema = 1
+name = "masked-name"
+summary = "A file in /usr/lib/sysctl.d sets the value and a file of the same name in /etc/sysctl.d hides it"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

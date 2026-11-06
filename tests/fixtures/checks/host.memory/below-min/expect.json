@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "id": "host.memory",
+    "min": "32Gi"
+  },
+  "result": {
+    "expected": {
+      "band_bytes": 1717986918,
+      "min_available_bytes": 17179869184,
+      "min_bytes": 34359738368,
+      "swap": "any"
+    },
+    "fix": "24 GiB RAM, 32 GiB needed. Add RAM or pick a larger node class. A nominal 32 GiB machine shows about 31 GiB, so ask for a size class, not an exact number.",
+    "level": "fail",
+    "message": "24 GiB found, 32 GiB needed",
+    "notes": [],
+    "observed": {
+      "available_bytes": 22528000000,
+      "available_effective_bytes": 22528000000,
+      "available_estimated": false,
+      "cgroup_hierarchy": null,
+      "cgroup_limit_at": null,
+      "cgroup_limit_bytes": null,
+      "cgroup_swap_limit_bytes": null,
+      "effective_bytes": 25769803776,
+      "swap_total_bytes": 0,
+      "swap_used_bytes": 0,
+      "total_bytes": 25769803776
+    },
+    "partial": null
+  }
+}
