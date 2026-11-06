@@ -991,6 +991,27 @@ mod live {
     }
 
     #[tokio::test]
+    async fn udp_to_a_closed_port_is_refused_not_a_hang() {
+        // This is what `localhost` gives when it resolves to ::1 first and nothing listens there.
+        let closed = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
+        let port = closed.local_addr().expect("addr").port();
+        drop(closed);
+        let hub = hub(Sockets::new());
+        let text = format!("127.0.0.1:{port}");
+        let probe = probe(&hub, time_sync(), Os::Linux, &[&text]);
+        short(&probe);
+        let error = probe
+            .udp_exchange(&target(&text), &request(), 48)
+            .await
+            .expect_err("nothing listens");
+        assert!(
+            matches!(error, ProbeError::ConnectionRefused | ProbeError::Timeout),
+            "{error:?}"
+        );
+        assert_ne!(only(&hub).outcome, ActionOutcome::Denied);
+    }
+
+    #[tokio::test]
     async fn a_name_is_resolved_for_the_spec_host_only() {
         // `localhost` resolves through the system resolver to loopback.
         let server = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
@@ -1006,11 +1027,15 @@ mod live {
         let probe = probe(&hub, time_sync(), Os::Linux, &[&text]);
         short(&probe);
         // `localhost` may resolve to ::1 first on some machines, where nothing listens. Either way the
-        // call ends in a reply or a timeout, never a hang, and never a denial.
+        // call ends in a reply, a timeout or a refusal (the kernel answers a connected UDP socket with
+        // ICMP port unreachable, which reads as `ConnectionRefused`), never a hang, and never a denial.
         match probe.udp_exchange(&target(&text), &request(), 48).await {
             Ok(reply) => assert_eq!(reply.bytes.len(), 48),
             Err(error) => assert!(
-                matches!(error, ProbeError::Timeout | ProbeError::Io(_)),
+                matches!(
+                    error,
+                    ProbeError::Timeout | ProbeError::ConnectionRefused | ProbeError::Io(_)
+                ),
                 "{error:?}"
             ),
         }
