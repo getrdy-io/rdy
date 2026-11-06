@@ -126,9 +126,9 @@ pub struct Report {
     pub actions_dropped: BTreeMap<String, u64>,
     /// What the redactor changed in this report.
     pub redaction: Redaction,
-    /// `false` when rdy could not finish the run (exit 70). The exit code is the authority, not this
-    /// field. A report printed on stdout before the files were written can say `true` while the exit
-    /// code is 70, because writing the files failed after it was printed.
+    /// `false` when rdy could not finish the run (exit 70). A report printed on stdout before the files
+    /// were written can say `true` while the exit code is 70, because writing the files failed after it
+    /// was printed. Check the exit code before you trust this field.
     pub complete: bool,
     /// `true` when the run was cancelled (Ctrl-C).
     pub interrupted: bool,

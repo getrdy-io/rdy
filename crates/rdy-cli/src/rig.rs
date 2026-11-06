@@ -17,6 +17,7 @@ use crate::redaction;
 #[doc(hidden)]
 pub struct Rig {
     pub(crate) origin: Instant,
+    pub(crate) deadline: Duration,
     pub(crate) state: Arc<WriteState>,
     pub(crate) watchdog: Arc<Watchdog>,
 }
@@ -42,6 +43,7 @@ impl Rig {
         ))?;
         Ok(Self {
             origin,
+            deadline,
             state,
             watchdog: Arc::new(watchdog),
         })

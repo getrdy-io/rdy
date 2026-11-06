@@ -91,6 +91,24 @@ fn the_shipped_binary_ends_a_json_run_into_an_unread_pipe_with_exit_70_and_a_par
             .unwrap_or_else(|e| panic!("cannot read stderr: {e}"));
     }
     let stderr = String::from_utf8_lossy(&common::without_fd_warning(&stderr)).into_owned();
+
+    // The pipe really was full: the process wrote until it blocked. A Linux pipe holds 64 KiB; the
+    // other systems hold less, so this is a floor there.
+    let mut stdout = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        pipe.read_to_end(&mut stdout)
+            .unwrap_or_else(|e| panic!("cannot read stdout: {e}"));
+    }
+    let floor = if cfg!(target_os = "linux") {
+        64 * 1024
+    } else {
+        16 * 1024
+    };
+    assert!(
+        stdout.len() >= floor,
+        "only {} bytes reached the pipe, so it may not have blocked",
+        stdout.len()
+    );
     assert!(
         stderr.contains("error: the run did not finish, so rdy stopped itself."),
         "stderr: {stderr}"

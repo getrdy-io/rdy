@@ -1498,7 +1498,7 @@
           "$ref": "#/$defs/Redaction"
         },
         "complete": {
-          "description": "`false` when rdy could not finish the run (exit 70). The exit code is the authority, not this field. A report printed on stdout before the files were written can say `true` while the exit code is 70, because writing the files failed after it was printed.",
+          "description": "`false` when rdy could not finish the run (exit 70). A report printed on stdout before the files were written can say `true` while the exit code is 70, because writing the files failed after it was printed. Check the exit code before you trust this field.",
           "type": "boolean"
         },
         "interrupted": {

@@ -44,7 +44,7 @@ use rdy_engine::privilege::Privilege;
 use rdy_engine::probe::{NativeCall, NativeValue, Probe, ProbeHub};
 use rdy_engine::redact::{RedactedReport, Redactor, RuleCounts};
 use rdy_engine::report::{JsonError, write_json};
-use rdy_engine::sched::{DEFAULT_DEADLINE, cap_jobs};
+use rdy_engine::sched::cap_jobs;
 use rdy_engine::summary::{last_line, summary_line};
 use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
@@ -121,9 +121,10 @@ async fn execute(
     // The watchdog was started before the runtime, from the first thing `main` did. The scheduler counts
     // from the same origin (M1-176, 02 "Watchdog").
     let origin = rig.origin;
+    // The rig's deadline, so the watchdog and the scheduler cannot count different ones.
+    let deadline = rig.deadline;
     let state = Arc::clone(&rig.state);
     let clock = || hooks.clock.unwrap_or_else(SystemTime::now);
-    let deadline = hooks.deadline.unwrap_or(DEFAULT_DEADLINE);
 
     if args.key.is_some() {
         // The one-run key and its banner are M1-126. Ignoring the flag would run a spec the user did
@@ -262,10 +263,10 @@ async fn execute(
             // A folder with nothing in it is not a report. One with a file in it stays, for the user.
             discard_if_empty(dir);
             state.finish(crate::EXIT_INTERNAL);
-            // With `--json` the document is on stdout already, so only the summary and the error follow,
-            // on stderr.
+            // With `--json` the document is on stdout already, so only the summary, a plain note and the
+            // error follow, on stderr.
             Ok(fail_after_verdict(
-                &error, report, counts, &redactor, false, stdout, stderr,
+                &error, report, counts, &redactor, false, json, stdout, stderr,
             ))
         }
     }
@@ -358,16 +359,26 @@ fn discard_if_empty(dir: Option<Arc<OutputDir>>) {
     }
 }
 
+/// Printed on stderr when the JSON report is already on stdout and the files could not be written.
+/// stdout may say `complete: true`; this line says what the exit code means (PC-50, 07 section 4.1).
+pub(crate) const FILES_NOT_WRITTEN_NOTE: &str =
+    "error: report files not written. The JSON on stdout is complete but the exit code is 70.";
+
 /// The files could not be written, but the verdict exists. The result still prints (07 section 4.1): the
 /// Report with `complete: false` on stdout with `--json`, the summary on stderr, then the error. The
 /// exit code is 70. If the report cannot be printed either (it is over the cap, or stdout is closed),
 /// stdout gets the error object instead.
+///
+/// `on_stdout` is true when the document is already on stdout (printed before the files, PC-50): a
+/// plain note then goes to stderr between the summary and the error.
+#[allow(clippy::too_many_arguments)]
 fn fail_after_verdict(
     error: &CliError,
     mut report: Report,
     counts: RuleCounts,
     redactor: &Redactor,
     json: bool,
+    on_stdout: bool,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> u8 {
@@ -379,6 +390,9 @@ fn fail_after_verdict(
             .is_some_and(|report| print_json(report, stdout).is_ok());
     if let Some(report) = &incomplete {
         print_summary(report, stderr);
+    }
+    if on_stdout {
+        let _ = writeln!(stderr, "{FILES_NOT_WRITTEN_NOTE}");
     }
     emit(error, json && !printed, stdout, stderr)
 }

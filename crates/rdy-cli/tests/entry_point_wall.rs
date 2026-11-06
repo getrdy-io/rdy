@@ -143,9 +143,10 @@ enum Use {
     Steers(&'static str),
 }
 
-/// Whether `line` has `hooks.field` followed by `=` that is not `==` or `=>`.
+/// Whether `line` has `.field` on any receiver followed by `=` that is not `==` or `=>`. A renamed
+/// variable (`h.clock = ..`) must not slip past, so the receiver is not checked.
 fn assigns_field(line: &str, field: &str) -> bool {
-    let needle = format!("hooks.{field}");
+    let needle = format!(".{field}");
     line.match_indices(&needle).any(|(at, _)| {
         let rest = &line[at + needle.len()..];
         if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
@@ -194,6 +195,10 @@ fn only_the_entry_point_builds_run_hooks_and_only_as_the_default() {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         for line in &code {
+            // The one assignment to a field of that name that is not a hook: the engine's run options.
+            if name == "run_cmd.rs" && line.trim() == "options.deadline = deadline;" {
+                continue;
+            }
             match run_hooks_use(line) {
                 Some(Use::Builds) => builds.push((name.clone(), line.trim().to_owned())),
                 Some(Use::Steers(why)) => steers.push((name.clone(), why, line.trim().to_owned())),
@@ -241,6 +246,8 @@ fn the_run_hooks_scan_sees_what_it_must() {
     assert!(steers("hooks.clock = Some(now);"));
     assert!(steers("hooks.deadline  = Some(d);"));
     assert!(steers("hooks.run_id=None;"));
+    assert!(steers("h.clock = Some(now);"));
+    assert!(steers("self.families =  None;"));
     assert!(steers("fn tweak(h: &mut RunHooks) {"));
     assert!(steers("let h: RunHooks = Default::default();"));
     assert!(steers("impl RunHooks {"));
