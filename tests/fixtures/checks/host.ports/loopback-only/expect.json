@@ -1,0 +1,59 @@
+{
+  "entry": {
+    "free": [
+      6443
+    ],
+    "id": "host.ports"
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 6443
+        }
+      ],
+      "udp_free": []
+    },
+    "fix": "Port 6443/tcp is held by `envoy` (pid 1200). Stop it, or change the product's port setting.",
+    "level": "warn",
+    "message": "Port 6443/tcp is held on 127.0.0.1 by `envoy` (pid 1200). The product binds every address, so its bind will probably fail.",
+    "notes": [],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 3,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [
+            {
+              "address": "127.0.0.1",
+              "allowed": false,
+              "family": "ipv4",
+              "owner": {
+                "name": "envoy",
+                "pid": 1200,
+                "unit": null
+              },
+              "owner_unknown": null
+            }
+          ],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "in_use",
+          "unverified": null
+        }
+      ],
+      "udp": []
+    },
+    "partial": null
+  }
+}

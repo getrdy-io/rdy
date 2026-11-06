@@ -447,7 +447,7 @@ impl Scan {
 
 /// The process name in the bytes of `/proc/<pid>/comm`: the text up to the first newline. `None` when it
 /// is empty.
-fn comm_of(bytes: &[u8]) -> Option<String> {
+pub(crate) fn comm_of(bytes: &[u8]) -> Option<String> {
     let line = bytes.split(|b| *b == b'\n').next().unwrap_or_default();
     let text = String::from_utf8_lossy(line);
     let text = text.trim_matches('\0');
