@@ -196,6 +196,16 @@ This file is the corrections list.
   reqwest with the platform verifier, which ADR 0014 rejects. Not resolved here. Before M2-026 starts,
   rust-architect writes one ADR that picks the upload stack, its verifier and its `deny.toml` entry,
   reviewed by security-reviewer (`reviews/adr-and-00-review-by-security-reviewer.md`, CF-03).
+- **Correction-35, the adjtimex source (blocks the adjtimex half of M2-004, not M1).** M1-148 and 03 read
+  `adjtimex(2)` through `native`, but the closed `NativeCall` enum has no variant for it, rustix 1.1.6 has no
+  `clock_adjtime` or `adjtimex`, and `forbid(unsafe_code)` rules out a raw call. Correction-35 moves the
+  variant, its policy row, snapshot, 05 row, Live and Replay arms, `native/adjtimex.json` and the "`EPERM` is
+  partial" clause to M2-004 (3.5 h to 5 h). M1-148 takes the sync state from `timedatectl` and `chronyc` and
+  the offset from its SNTP client. Before M2-004 starts, rust-engineer names the Live source: a safe wrapper
+  in a rustix release, or another crate that passes the new-dependency review (05 T5, `deny.toml`), reviewed
+  by security-reviewer. If neither exists, rust-architect writes an ADR first. The review and any ADR come out
+  of M2-004's 5 h. The host.time_sync half of M2-004 is check-author's work. `ci/check-crate-deps.toml`
+  does not change, because the call sits in rdy-engine and host.time_sync reaches it through the Probe.
 
 ## CLAUDE.md edits
 
