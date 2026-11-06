@@ -1312,10 +1312,17 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | `apps` `deployments` | LIST in `kube-system` only | `k8s.nodes`: `cluster-autoscaler` presence by name |
 | `security.openshift.io` `securitycontextconstraints` | LIST | `k8s.admission`: SCCs |
 | `config.openshift.io` `clusterversions` | GET name `version` | `k8s.version`: OpenShift version |
+| `admissionregistration.k8s.io` `validatingwebhookconfigurations`, `mutatingwebhookconfigurations` | LIST | `k8s.admission` (M1-160): each webhook's name, `failurePolicy`, rules, selectors, `matchConditions` and backend kind; the CA bundle is dropped |
+| `admissionregistration.k8s.io` `validatingadmissionpolicies`, `validatingadmissionpolicybindings` | LIST | `k8s.admission` (M1-160): name, match constraints, actions; the CEL is dropped |
+| core `services` | LIST in a namespace, `fieldSelector` must include `metadata.name` | `k8s.admission` (M1-160): the type of the one Service a `Fail` webhook names |
+| `discovery.k8s.io` `endpointslices` | LIST in a namespace (the check adds the `kubernetes.io/service-name` label) | `k8s.admission` (M1-160): ready endpoints behind a webhook Service |
+| `kyverno.io` `clusterpolicies` (`v1`); `policies.kyverno.io` `validatingpolicies`, `imagevalidatingpolicies` (`v1`, `v1beta1`) | LIST | `k8s.admission` (M1-160): policy names, actions and match filters |
+| `constraints.gatekeeper.sh` every resource (`v1beta1`; resource `*` in the table, ADR 0042) | LIST | `k8s.admission` (M1-160): constraint names, `enforcementAction` and match; parameters dropped |
 
-5. **`M1_LATE`**, enabled only with the checks that need it: `admissionregistration.k8s.io` webhook
-   configurations, `validatingadmissionpolicies` and bindings; core `services`; `discovery.k8s.io`
-   `endpointslices`; Kyverno and Gatekeeper policy objects; ConfigMap GET of `kube-system/kubeadm-config`
+5. **`M1_LATE`**, enabled only with the checks that need it. Built with M1-160 and moved into the table
+   above: `admissionregistration.k8s.io` webhook configurations, `validatingadmissionpolicies` and bindings;
+   core `services`; `discovery.k8s.io` `endpointslices`; Kyverno and Gatekeeper policy objects. Still to
+   come: ConfigMap GET of `kube-system/kubeadm-config`
    by name; the resources of `k8s.crds`, `k8s.ingress`, `k8s.cni`, `k8s.dns` and
    `k8s.device_plugins`. Each joins with the same citation rule.
 6. **Projections.** `pods`, `events` and `deployments` deserialize into minimal structs (resources,

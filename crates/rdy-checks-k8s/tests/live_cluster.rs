@@ -42,6 +42,10 @@
 //! - The OpenShift reads (`securitycontextconstraints` list, `clusterversions/version` get). A kind
 //!   cluster does not serve them, so the test asks the server's access review whether the role allows
 //!   them. That catches a typo in the rule, not a missing API.
+//! - The policy lists of Kyverno and Gatekeeper (M1-160: `clusterpolicies`, `validatingpolicies`,
+//!   `imagevalidatingpolicies` and any constraint kind). Their groups are not on a kind cluster either, so
+//!   the test asks the access review, with a constraint kind that only the `*` rule of the role can admit.
+//!   The webhook, admission policy, Service and EndpointSlice lists are served by kind and run for real.
 //! - The in-cluster path (a pod's service account). The job runs rdy outside the cluster.
 //! - The optional `kube-system` Role: the deployments list runs, and a 403 there means the optional
 //!   Role was not applied.
@@ -59,13 +63,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use k8s_openapi::api::admissionregistration::v1::{
+    MutatingWebhookConfiguration, ValidatingAdmissionPolicy, ValidatingAdmissionPolicyBinding,
+    ValidatingWebhookConfiguration,
+};
 use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
     SelfSubjectRulesReview, SelfSubjectRulesReviewSpec,
 };
 use k8s_openapi::api::core::v1::{
-    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret,
+    Event, LimitRange, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret, Service,
 };
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::storage::v1::{CSIDriver, CSINode, StorageClass};
 use kube::api::{DeleteParams, ListParams, PostParams};
 use rdy_checks_k8s::client::{Connected, Env, GuardError, KubeOptions, load};
@@ -402,6 +411,36 @@ const GRANTED: &[(&str, &str, &str, &str)] = &[
     ("list", "", "events", ""),
     ("list", "", "resourcequotas", ""),
     ("list", "", "limitranges", ""),
+    ("list", "", "services", ""),
+    (
+        "list",
+        "admissionregistration.k8s.io",
+        "validatingwebhookconfigurations",
+        "",
+    ),
+    (
+        "list",
+        "admissionregistration.k8s.io",
+        "mutatingwebhookconfigurations",
+        "",
+    ),
+    (
+        "list",
+        "admissionregistration.k8s.io",
+        "validatingadmissionpolicies",
+        "",
+    ),
+    (
+        "list",
+        "admissionregistration.k8s.io",
+        "validatingadmissionpolicybindings",
+        "",
+    ),
+    ("list", "discovery.k8s.io", "endpointslices", ""),
+    ("list", "kyverno.io", "clusterpolicies", ""),
+    ("list", "policies.kyverno.io", "validatingpolicies", ""),
+    ("list", "policies.kyverno.io", "imagevalidatingpolicies", ""),
+    ("list", "constraints.gatekeeper.sh", "*", ""),
     ("get", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "storageclasses", ""),
     ("list", "storage.k8s.io", "csinodes", ""),
@@ -551,6 +590,52 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         false,
         &client.all::<Namespace>().get("kube-system").await,
     );
+    // k8s.admission (M1-160). The Service is asked for by name, as the check asks, and the slices by label.
+    assert_served(
+        "validatingwebhookconfigurations",
+        false,
+        &client
+            .all::<ValidatingWebhookConfiguration>()
+            .list(&all)
+            .await,
+    );
+    assert_served(
+        "mutatingwebhookconfigurations",
+        false,
+        &client
+            .all::<MutatingWebhookConfiguration>()
+            .list(&all)
+            .await,
+    );
+    assert_served(
+        "validatingadmissionpolicies",
+        false,
+        &client.all::<ValidatingAdmissionPolicy>().list(&all).await,
+    );
+    assert_served(
+        "validatingadmissionpolicybindings",
+        false,
+        &client
+            .all::<ValidatingAdmissionPolicyBinding>()
+            .list(&all)
+            .await,
+    );
+    assert_served(
+        "services",
+        false,
+        &client
+            .namespaced::<Service>("default")
+            .list(&all.clone().fields("metadata.name=kubernetes"))
+            .await,
+    );
+    assert_served(
+        "endpointslices",
+        false,
+        &client
+            .namespaced::<EndpointSlice>("default")
+            .list(&all.clone().labels("kubernetes.io/service-name=kubernetes"))
+            .await,
+    );
     assert_served(
         "deployments (needs the optional kube-system Role)",
         false,
@@ -599,6 +684,30 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             None,
             Some("version"),
         ),
+        // The engines' groups are not on a kind cluster either. The Gatekeeper kind is one the rule's
+        // wildcard has to admit.
+        ("list", "kyverno.io", "clusterpolicies", None, None),
+        (
+            "list",
+            "policies.kyverno.io",
+            "validatingpolicies",
+            None,
+            None,
+        ),
+        (
+            "list",
+            "policies.kyverno.io",
+            "imagevalidatingpolicies",
+            None,
+            None,
+        ),
+        (
+            "list",
+            "constraints.gatekeeper.sh",
+            "k8srequiredlabels",
+            None,
+            None,
+        ),
     ];
     let allowed_count = must_allow.len();
     for ask in must_allow {
@@ -623,6 +732,35 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             "clusterversions",
             None,
             Some("other"),
+        ),
+        // The M1-160 lists are lists only: no get by name, no write, and the wildcard group is not writable.
+        (
+            "delete",
+            "admissionregistration.k8s.io",
+            "validatingwebhookconfigurations",
+            None,
+            None,
+        ),
+        (
+            "get",
+            "admissionregistration.k8s.io",
+            "validatingwebhookconfigurations",
+            None,
+            Some("x"),
+        ),
+        (
+            "create",
+            "constraints.gatekeeper.sh",
+            "k8srequiredlabels",
+            None,
+            None,
+        ),
+        (
+            "get",
+            "constraints.gatekeeper.sh",
+            "k8srequiredlabels",
+            None,
+            Some("x"),
         ),
         // Escalation paths: minting tokens, running commands in pods, acting as someone else and
         // granting roles.
@@ -696,10 +834,10 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         "{error:?}"
     );
 
-    // 4. One log entry per call: /version, the 12 `assert_served` reads of step 1 (add one here when a
+    // 4. One log entry per call: /version, the 18 `assert_served` reads of step 1 (add one here when a
     //    read is added), one rules review per namespace asked, the access reviews of step 2 (counted from
     //    their tables), and two refusals.
     let log = run.action_log().actions;
-    let expected = 1 + 12 + rules_answers.len() + allowed_count + denied_count + 2;
+    let expected = 1 + 18 + rules_answers.len() + allowed_count + denied_count + 2;
     assert_eq!(log.len(), expected, "{log:#?}");
 }

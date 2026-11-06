@@ -115,7 +115,20 @@ fn the_role_never_writes_reads_secrets_or_uses_a_wildcard() {
     let docs = documents();
     let text = serde_json::to_string(&docs).expect("json");
     assert!(!text.contains("secrets"), "the role must not name Secrets");
-    assert!(!text.contains('*'), "the role must not use a wildcard");
+    // The one wildcard is the list of every Gatekeeper constraint kind (ADR 0042). Anything else with a `*`
+    // fails.
+    let without_gatekeeper = text.replace(
+        r#"{"apiGroups":["constraints.gatekeeper.sh"],"resources":["*"],"verbs":["list"]}"#,
+        "",
+    );
+    assert_ne!(
+        text, without_gatekeeper,
+        "the Gatekeeper rule is there, as one rule"
+    );
+    assert!(
+        !without_gatekeeper.contains('*'),
+        "the role must not use a wildcard but the Gatekeeper constraints rule"
+    );
     for kind in ["ClusterRole", "Role"] {
         for (_, grant) in grants(&docs, kind) {
             let verb = grant.split(' ').nth(1).expect("verb");

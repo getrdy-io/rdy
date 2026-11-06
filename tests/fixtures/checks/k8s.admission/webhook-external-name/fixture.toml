@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-webhook-external-name"
+summary = "A Fail webhook whose Service is of type ExternalName"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

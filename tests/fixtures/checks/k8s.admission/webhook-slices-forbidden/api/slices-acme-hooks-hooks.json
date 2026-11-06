@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/discovery.k8s.io/v1/namespaces/acme-hooks/endpointslices",
+    "query": "labelSelector=kubernetes.io/service-name=hooks&limit=500"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "endpointslices is forbidden: User \"acme-reader\" cannot list resource \"endpointslices\" at the cluster scope",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}

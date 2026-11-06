@@ -1,0 +1,209 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/kyverno.io/v1/clusterpolicies",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "kyverno.io/v1",
+    "kind": "ClusterPolicyList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "kyverno.io/v1",
+        "kind": "ClusterPolicy",
+        "metadata": {
+          "name": "require-owner"
+        },
+        "spec": {
+          "validationFailureAction": "Enforce",
+          "background": true,
+          "rules": [
+            {
+              "name": "check-owner",
+              "match": {
+                "any": [
+                  {
+                    "resources": {
+                      "kinds": [
+                        "Pod"
+                      ],
+                      "namespaces": [
+                        "acme-*"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "validate": {
+                "message": "needs a label",
+                "pattern": {
+                  "metadata": {
+                    "labels": {
+                      "owner": "?*"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "kyverno.io/v1",
+        "kind": "ClusterPolicy",
+        "metadata": {
+          "name": "audit-only"
+        },
+        "spec": {
+          "validationFailureAction": "Audit",
+          "background": true,
+          "rules": [
+            {
+              "name": "check-owner",
+              "match": {
+                "any": [
+                  {
+                    "resources": {
+                      "kinds": [
+                        "Pod"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "validate": {
+                "message": "needs a label",
+                "pattern": {
+                  "metadata": {
+                    "labels": {
+                      "owner": "?*"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "kyverno.io/v1",
+        "kind": "ClusterPolicy",
+        "metadata": {
+          "name": "deployments-only"
+        },
+        "spec": {
+          "validationFailureAction": "Enforce",
+          "background": true,
+          "rules": [
+            {
+              "name": "check-owner",
+              "match": {
+                "any": [
+                  {
+                    "resources": {
+                      "kinds": [
+                        "Deployment"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "validate": {
+                "message": "needs a label",
+                "pattern": {
+                  "metadata": {
+                    "labels": {
+                      "owner": "?*"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "kyverno.io/v1",
+        "kind": "ClusterPolicy",
+        "metadata": {
+          "name": "other-namespace"
+        },
+        "spec": {
+          "validationFailureAction": "Enforce",
+          "background": true,
+          "rules": [
+            {
+              "name": "check-owner",
+              "match": {
+                "any": [
+                  {
+                    "resources": {
+                      "kinds": [
+                        "Pod"
+                      ],
+                      "namespaces": [
+                        "other-*"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "validate": {
+                "message": "needs a label",
+                "pattern": {
+                  "metadata": {
+                    "labels": {
+                      "owner": "?*"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "kyverno.io/v1",
+        "kind": "ClusterPolicy",
+        "metadata": {
+          "name": "rule-level-enforce"
+        },
+        "spec": {
+          "validationFailureAction": "Audit",
+          "background": true,
+          "rules": [
+            {
+              "name": "check-owner",
+              "match": {
+                "any": [
+                  {
+                    "resources": {
+                      "kinds": [
+                        "Pod"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "validate": {
+                "message": "needs a label",
+                "pattern": {
+                  "metadata": {
+                    "labels": {
+                      "owner": "?*"
+                    }
+                  }
+                },
+                "failureAction": "Enforce"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

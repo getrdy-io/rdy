@@ -160,6 +160,12 @@ fn split_term(term: &str) -> Option<(&str, &str, &str)> {
     Some((key, op, value))
 }
 
+/// The `resource` of an [`ALLOWED`] entry that admits every resource of its group and version. Used once:
+/// a Gatekeeper constraint kind is a CRD that each `ConstraintTemplate` creates, so its plural name cannot
+/// be listed ahead of time (ADR 0042). Every GET shape of such an entry is still a list, never a secret,
+/// and the group holds nothing but constraints.
+pub const ANY_RESOURCE: &str = "*";
+
 /// One resource the M1 checks read (02 Appendix B, section 4). There is no `secrets` entry, and a test
 /// keeps it that way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,7 +174,7 @@ pub struct Allowed {
     pub group: &'static str,
     /// The API version.
     pub version: &'static str,
-    /// The plural resource name.
+    /// The plural resource name, or [`ANY_RESOURCE`].
     pub resource: &'static str,
     /// The GET shapes allowed for it.
     pub access: &'static [Access],
@@ -293,6 +299,114 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::List],
         checks: &["k8s.admission"],
         reads: "the OpenShift SCCs",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "validatingwebhookconfigurations",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "each webhook's name, failurePolicy, rules, selectors, matchConditions and backend (service name or URL kind); the CA bundle is dropped",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "mutatingwebhookconfigurations",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "the same fields of the mutating webhooks",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "validatingadmissionpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "name, match constraints, match conditions and failurePolicy; the CEL expressions are dropped",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "validatingadmissionpolicybindings",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy name, validation actions and match resources",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "",
+        version: "v1",
+        resource: "services",
+        access: &[Access::ListInNamespace(Only::Any)],
+        checks: &["k8s.admission"],
+        reads: "the type of the one Service a Fail webhook names, found with a metadata.name field selector",
+        field_selector: FieldSelector::Key("metadata.name"),
+    },
+    Allowed {
+        group: "discovery.k8s.io",
+        version: "v1",
+        resource: "endpointslices",
+        access: &[Access::ListInNamespace(Only::Any)],
+        checks: &["k8s.admission"],
+        reads: "the ready condition of the endpoints behind one webhook Service, found by its service-name label",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "kyverno.io",
+        version: "v1",
+        resource: "clusterpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, failure actions and match filters; the rules' bodies are dropped",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1",
+        resource: "validatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1",
+        resource: "imagevalidatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1beta1",
+        resource: "validatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1beta1",
+        resource: "imagevalidatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "constraints.gatekeeper.sh",
+        version: "v1beta1",
+        resource: ANY_RESOURCE,
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "constraint names, enforcementAction and match; the parameters are dropped",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -514,10 +628,7 @@ pub(crate) fn target_of(path: &str) -> Target {
     let Ok(info) = request_info(&segments) else {
         return Target::Unknown;
     };
-    ALLOWED
-        .iter()
-        .find(|e| e.group == info.group && e.version == info.version && e.resource == info.resource)
-        .map_or(Target::Unknown, Target::Entry)
+    entry_of(&info).map_or(Target::Unknown, Target::Entry)
 }
 
 /// The one path with `secrets` in it that is allowed: a GET of the namespace called `secrets`.
@@ -831,6 +942,16 @@ pub(super) fn request_info<'a>(segments: &[&'a str]) -> Result<RequestInfo<'a>, 
     })
 }
 
+/// The entry of [`ALLOWED`] that names the group, version and resource of `info`. An entry with
+/// [`ANY_RESOURCE`] admits every resource of its group and version.
+fn entry_of(info: &RequestInfo<'_>) -> Option<&'static Allowed> {
+    ALLOWED.iter().find(|e| {
+        e.group == info.group
+            && e.version == info.version
+            && (e.resource == info.resource || e.resource == ANY_RESOURCE)
+    })
+}
+
 fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'static str> {
     if is_discovery(segments) {
         return Ok(());
@@ -839,9 +960,7 @@ fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'st
     if info.subresource.is_some() {
         return Err(RULE_SUBRESOURCE);
     }
-    let Some(entry) = ALLOWED.iter().find(|e| {
-        e.group == info.group && e.version == info.version && e.resource == info.resource
-    }) else {
+    let Some(entry) = entry_of(&info) else {
         return Err(RULE_NOT_ALLOWED);
     };
     let allowed = entry

@@ -78,7 +78,7 @@ cases and the `_kube` cases (`cluster`, `denied`). `checks/k8s.version/` holds 1
 `as-allowed`, `as-forbidden`, `as-refused`, `namespace-missing`, `namespace-forbidden`, `at-the-cap`,
 `as-at-the-cap`, `hostile-reasons`), `generated` by `scripts/gen-k8s-rbac-fixtures.py` (`--check` fails on
 drift and on a file the script did not write).
-`checks/k8s.admission/` holds 28 clusters (`restricted`, `baseline`, `privileged`, `warn-audit`, `no-labels`,
+`checks/k8s.admission/` holds 54 clusters (the 28 below, and 26 for webhooks, `ValidatingAdmissionPolicy` and the engines' policies: `webhook-*` (fail-empty, default-fail, ready, not-ready, mutating, service-missing, match-conditions, object-selector, url, external-name, ignore, not-matching, slices-forbidden, services-forbidden, many-services), `webhooks-forbidden`, `vap-*` (deny, warn-only, not-matching, other-namespace, bindings-forbidden, not-served, forbidden), `engine-policies`, `engine-policies-forbidden`, `kyverno-exception-only`; the generator also writes an empty list of each new kind into every older cluster) (`restricted`, `baseline`, `privileged`, `warn-audit`, `no-labels`,
 `no-metadata-labels`, `invalid-labels`, `invalid-warn`, `namespace-missing`, `namespace-forbidden`,
 `no-namespace`, `apis-forbidden`, the OpenShift cases `openshift`, `openshift-enforce`,
 `openshift-sync-off`, `openshift-scc-forbidden`, `openshift-scc-cut`, `openshift-hostile-range`, `openshift-and-engine`, and the

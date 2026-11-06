@@ -1,0 +1,73 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/constraints.gatekeeper.sh/v1beta1/k8srequiredlabels",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "constraints.gatekeeper.sh/v1beta1",
+    "kind": "K8sRequiredLabelsList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "constraints.gatekeeper.sh/v1beta1",
+        "kind": "K8sRequiredLabels",
+        "metadata": {
+          "name": "labels-everywhere"
+        },
+        "spec": {
+          "match": {
+            "kinds": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "kinds": [
+                  "Pod"
+                ]
+              }
+            ]
+          },
+          "parameters": {
+            "labels": [
+              "owner"
+            ]
+          },
+          "enforcementAction": "deny"
+        }
+      },
+      {
+        "apiVersion": "constraints.gatekeeper.sh/v1beta1",
+        "kind": "K8sRequiredLabels",
+        "metadata": {
+          "name": "labels-other"
+        },
+        "spec": {
+          "match": {
+            "kinds": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "kinds": [
+                  "Pod"
+                ]
+              }
+            ],
+            "namespaces": [
+              "other"
+            ]
+          },
+          "parameters": {
+            "labels": [
+              "owner"
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

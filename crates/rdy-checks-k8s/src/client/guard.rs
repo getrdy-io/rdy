@@ -45,10 +45,10 @@ pub(super) use rules::impersonation_allowed;
 #[cfg(not(test))]
 use rules::log_path;
 pub use rules::{
-    ALLOWED, Access, Allowed, FieldSelector, ImpersonateAs, ImpersonateError, Only, RULE_BODY,
-    RULE_GET_BODY, RULE_HEADER, RULE_IMPERSONATE, RULE_METHOD, RULE_NOT_ALLOWED, RULE_PATH_SHAPE,
-    RULE_POST_QUERY, RULE_POST_TARGET, RULE_QUERY, RULE_REVIEW_BODY, RULE_SECRETS, RULE_SELECTOR,
-    RULE_SUBRESOURCE, RULE_UPGRADE, SELF_SUBJECT_REVIEW_BODY,
+    ALLOWED, ANY_RESOURCE, Access, Allowed, FieldSelector, ImpersonateAs, ImpersonateError, Only,
+    RULE_BODY, RULE_GET_BODY, RULE_HEADER, RULE_IMPERSONATE, RULE_METHOD, RULE_NOT_ALLOWED,
+    RULE_PATH_SHAPE, RULE_POST_QUERY, RULE_POST_TARGET, RULE_QUERY, RULE_REVIEW_BODY, RULE_SECRETS,
+    RULE_SELECTOR, RULE_SUBRESOURCE, RULE_UPGRADE, SELF_SUBJECT_REVIEW_BODY,
 };
 pub(super) use rules::{BodyView, judge};
 use rules::{bad_header, is_group, is_version};
@@ -436,6 +436,17 @@ impl ReadOnlyClient {
         K::DynamicType: Default,
     {
         kube::Api::all(self.client.clone())
+    }
+
+    /// An API handle for a cluster-scoped resource that is known only at run time, such as a Gatekeeper
+    /// constraint kind. The guard judges every request it makes like any other, so the group, version and
+    /// plural name must name an [`ALLOWED`] entry or the request is refused.
+    #[must_use]
+    pub fn all_dynamic(
+        &self,
+        resource: &kube::core::ApiResource,
+    ) -> kube::Api<kube::core::DynamicObject> {
+        kube::Api::all_with(self.client.clone(), resource)
     }
 
     /// An API handle for a namespaced resource in `namespace`.
