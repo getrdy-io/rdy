@@ -202,12 +202,7 @@ fn no_raw_json_key_is_visible_text_in_the_template() -> TestResult {
     )?;
     let text = visible_text(&template);
     // The scan sees real words: the labels of 01 section 6 are there.
-    for label in [
-        "Requires:",
-        "Fix:",
-        "More from rdy:",
-        "Run and spec details",
-    ] {
+    for label in ["Requires:", "More from rdy:", "Run and spec details"] {
         assert!(text.contains(label), "{label:?} is not in {text}");
     }
     assert_eq!(raw_keys(&text), Vec::<String>::new());
@@ -242,7 +237,9 @@ fn no_raw_json_key_is_visible_text_in_the_goldens() -> TestResult {
         let html = std::fs::read_to_string(&path)?;
         let text = rendered_text(&html);
         assert!(text.contains("Run and spec details"), "{name}: {text}");
-        assert!(text.contains("Fix:"), "{name}");
+        // The fix label is "From <product>:" or "From rdy:" (M1-080), so the product is cut out of it.
+        assert!(text.contains("From"), "{name}");
+        assert!(!text.contains("Fix:"), "{name}");
         assert_eq!(raw_keys(&text), Vec::<String>::new(), "{name}");
     }
     Ok(())

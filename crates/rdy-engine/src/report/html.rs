@@ -36,8 +36,12 @@
 //! and replaces every variable of the dark palette, with no backgrounds. No raw JSON key is visible
 //! text in the template (a test scans it).
 //!
-//! Left to later tickets: the fix source label and the action log table (M1-080), Found and Needed, the
-//! footer link and the fixed banner in print (M1-081).
+//! **Fix label and action log (M1-080).** A fix says who wrote it ("From acme-platform" only for a verified
+//! signature with a pinned key). The last section is the action log as one table, built from the report
+//! the JSON holds, so its "N more entries are in the embedded JSON" line is true. The whole page is at most
+//! 5 MiB: past that, rows of the table are cut and the checks and the JSON never are.
+//!
+//! Left to later tickets: Found and Needed, the footer link and the fixed banner in print (M1-081).
 
 use crate::redact::RedactedReport;
 use crate::report::JsonError;
@@ -48,6 +52,10 @@ mod view;
 
 use askama::Template as _;
 use view::View;
+
+/// The most bytes a page may hold: 5 MiB (07 D.4). The JSON inside it is at most 2 MiB, so the cap only
+/// ever cuts rows of the action table.
+const MAX_PAGE_BYTES: usize = 5 * 1024 * 1024;
 
 /// Why a report could not be rendered as HTML.
 ///
@@ -77,5 +85,37 @@ pub enum HtmlError {
 /// [`HtmlError::Render`] if the template engine fails, which is a bug. [`HtmlError::Json`] if the JSON
 /// writer refuses the report (more than 256 results, or too large with nothing left to cut).
 pub fn render_html(report: &RedactedReport) -> Result<String, HtmlError> {
-    View::new(report)?.render().map_err(|_| HtmlError::Render)
+    fit_page(&mut View::new(report)?, MAX_PAGE_BYTES)
+}
+
+/// Renders `view`. Over `max` bytes, the action table is cut to the most rows that fit and the page is
+/// rendered again. The checks and the embedded JSON are never cut (07 D.4).
+fn fit_page(view: &mut View, max: usize) -> Result<String, HtmlError> {
+    let page = view.render().map_err(|_| HtmlError::Render)?;
+    if page.len() <= max {
+        return Ok(page);
+    }
+    let all = view.actions.rows.clone();
+    let (mut fits, mut over) = (0, all.len());
+    // `fits` rows are known to fit once the loop settles; `over` rows are known not to (or all of them).
+    while fits < over {
+        let middle = fits + (over - fits).div_ceil(2);
+        view.actions.keep_first(&all, middle);
+        let size = view.render().map_err(|_| HtmlError::Render)?.len();
+        if size <= max {
+            fits = middle;
+        } else {
+            over = middle - 1;
+        }
+    }
+    view.actions.keep_first(&all, fits);
+    let page = view.render().map_err(|_| HtmlError::Render)?;
+    // With no rows left the page is the checks plus the embedded JSON. The JSON is at most 2 MiB and the
+    // checks are at most 256 results with the same bounded text, so this holds for the real cap. A smaller
+    // `max` (the tests) can be below that floor.
+    debug_assert!(
+        max < MAX_PAGE_BYTES || page.len() <= max,
+        "a page with no action rows is over the cap"
+    );
+    Ok(page)
 }

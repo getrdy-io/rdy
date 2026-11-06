@@ -308,6 +308,24 @@ pub fn live_groups() -> usize {
 /// process", which means the group is already gone.
 ///
 /// Callers must hold the leader unreaped, so the group id cannot have been reused.
+///
+/// **The watchdog and the reap (M1-043 carry, closed in M1-176).** [`kill_all_groups`] reads a slot and
+/// calls this function while the run's own task may be ending the same group. They cannot overlap:
+///
+/// 1. The run's task kills the group, then frees the slot, and only then reaps the leader
+///    (`Tracked::end_group`, proved by `the_slot_is_freed_after_the_kill_and_before_the_reap`).
+/// 2. `Registry::kill_all` claims a slot before it kills: it changes the pid to the pid with the
+///    `KILLING` bit set, runs `leader_unreaped` and the kill, and changes it back. `Registry::release`
+///    waits while the bit is set, so the run's task cannot free the slot, and so cannot reap the leader,
+///    while a kill is in flight (`a_release_waits_for_a_kill_in_flight`). The wait is one syscall long.
+///    A `kill_all` that reads the slot after the release finds zero and does nothing.
+/// 3. A leader that was reaped earlier, by the kernel when `SIGCHLD` is ignored, say, is skipped by
+///    `leader_unreaped` (`the_group_of_a_reaped_leader_is_not_signalled`), and `ensure_sigchld_handled`
+///    prevents the kernel reap anyway.
+///
+/// So a group id the kill reaches always belongs to a leader that is still there, as a zombie at worst.
+/// Mind the reach of that signal: a process group is named by its leader's pid, and as root `kill(-pgid)`
+/// reaches the group of any user. That is why the group must be proved ours at the moment of the kill.
 #[cfg(unix)]
 fn kill_group(pid: u32) {
     use rustix::process::{Signal, kill_process_group};
@@ -402,6 +420,13 @@ static REGISTRY: Registry<REGISTRY_SLOTS> = Registry::new();
 /// A slot value for "claimed, pid not known yet". No process id equals it, so `kill_all` skips it.
 const RESERVED: u32 = u32::MAX;
 
+/// Set on a slot's pid while `kill_all` is killing that group. No process id has the top bit (pids are
+/// below 2^22), and `RESERVED` is checked first.
+const KILLING: u32 = 0x8000_0000;
+
+/// How long `kill_all` waits in all for slots that are claimed and have no pid yet.
+const RESERVED_WAIT: Duration = Duration::from_millis(50);
+
 /// A fixed set of atomic slots holding the pids of live process groups, plus the shutdown flag. Zero
 /// means free. Every access is `SeqCst`: a slot store then a flag load, against a flag store then
 /// slot loads, must not both miss each other.
@@ -432,9 +457,24 @@ impl<const N: usize> Registry<N> {
         }
     }
 
+    /// Frees a slot. Waits while `kill_all` is killing the group of that slot, so the caller never
+    /// reaps the leader under a kill in flight. The wait is one syscall long.
     fn release(&self, index: usize) {
-        if let Some(slot) = self.slots.get(index) {
-            slot.store(0, Ordering::SeqCst);
+        let Some(slot) = self.slots.get(index) else {
+            return;
+        };
+        loop {
+            let now = slot.load(Ordering::SeqCst);
+            if now != RESERVED && now & KILLING != 0 {
+                std::thread::yield_now();
+                continue;
+            }
+            if slot
+                .compare_exchange(now, 0, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                return;
+            }
         }
     }
 
@@ -442,13 +482,30 @@ impl<const N: usize> Registry<N> {
         self.shutdown.load(Ordering::SeqCst)
     }
 
-    /// Sets the shutdown flag, then kills every registered group.
+    /// Sets the shutdown flag, then kills every registered group. A slot that is claimed and has no pid
+    /// yet is waited for, 50 ms in all: its owner checks the flag right after it registers the pid and
+    /// kills the group itself, so this is a second line.
     fn kill_all(&self, kill: fn(u32)) {
         self.shutdown.store(true, Ordering::SeqCst);
+        let give_up = std::time::Instant::now() + RESERVED_WAIT;
         for slot in &self.slots {
-            let pid = slot.load(Ordering::SeqCst);
-            if pid != 0 && pid != RESERVED {
+            let mut pid = slot.load(Ordering::SeqCst);
+            while pid == RESERVED && std::time::Instant::now() < give_up {
+                std::thread::yield_now();
+                pid = slot.load(Ordering::SeqCst);
+            }
+            if pid == 0 || pid == RESERVED || pid & KILLING != 0 {
+                continue;
+            }
+            // Claim the slot for the kill. If the owner freed it in the meantime, the swap fails and
+            // there is nothing to kill.
+            if slot
+                .compare_exchange(pid, pid | KILLING, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
                 kill(pid);
+                let _ =
+                    slot.compare_exchange(pid | KILLING, pid, Ordering::SeqCst, Ordering::SeqCst);
             }
         }
     }
