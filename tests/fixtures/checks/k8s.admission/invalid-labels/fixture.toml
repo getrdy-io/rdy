@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-invalid-labels"
+summary = "An enforce label that is not a level, and warn and audit labels that are not levels"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

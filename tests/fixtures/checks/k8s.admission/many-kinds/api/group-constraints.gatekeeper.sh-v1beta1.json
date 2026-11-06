@@ -1,0 +1,334 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/constraints.gatekeeper.sh/v1beta1"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIResourceList",
+    "apiVersion": "v1",
+    "groupVersion": "constraints.gatekeeper.sh/v1beta1",
+    "resources": [
+      {
+        "name": "k8scheck00",
+        "singularName": "k8scheck00",
+        "namespaced": false,
+        "kind": "K8sCheck00",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck00/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck00",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck01",
+        "singularName": "k8scheck01",
+        "namespaced": false,
+        "kind": "K8sCheck01",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck01/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck01",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck02",
+        "singularName": "k8scheck02",
+        "namespaced": false,
+        "kind": "K8sCheck02",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck02/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck02",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck03",
+        "singularName": "k8scheck03",
+        "namespaced": false,
+        "kind": "K8sCheck03",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck03/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck03",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck04",
+        "singularName": "k8scheck04",
+        "namespaced": false,
+        "kind": "K8sCheck04",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck04/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck04",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck05",
+        "singularName": "k8scheck05",
+        "namespaced": false,
+        "kind": "K8sCheck05",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck05/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck05",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck06",
+        "singularName": "k8scheck06",
+        "namespaced": false,
+        "kind": "K8sCheck06",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck06/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck06",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck07",
+        "singularName": "k8scheck07",
+        "namespaced": false,
+        "kind": "K8sCheck07",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck07/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck07",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck08",
+        "singularName": "k8scheck08",
+        "namespaced": false,
+        "kind": "K8sCheck08",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck08/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck08",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck09",
+        "singularName": "k8scheck09",
+        "namespaced": false,
+        "kind": "K8sCheck09",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck09/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck09",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck10",
+        "singularName": "k8scheck10",
+        "namespaced": false,
+        "kind": "K8sCheck10",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck10/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck10",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "k8scheck11",
+        "singularName": "k8scheck11",
+        "namespaced": false,
+        "kind": "K8sCheck11",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "k8scheck11/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "K8sCheck11",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "evil1",
+        "singularName": "evil1",
+        "namespaced": false,
+        "kind": "Evil\u001b[2JKind",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "evil1/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "Evil\u001b[2JKind",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "evil2",
+        "singularName": "evil2",
+        "namespaced": false,
+        "kind": "`rm -rf /`",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "evil2/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "`rm -rf /`",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "evil3",
+        "singularName": "evil3",
+        "namespaced": false,
+        "kind": "A\u202eB",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "evil3/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "A\u202eB",
+        "verbs": [
+          "get"
+        ]
+      },
+      {
+        "name": "evil4",
+        "singularName": "evil4",
+        "namespaced": false,
+        "kind": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "evil4/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL",
+        "verbs": [
+          "get"
+        ]
+      }
+    ]
+  }
+}

@@ -26,6 +26,7 @@ use std::fmt;
 use std::io::{self, Write};
 
 use rdy_engine::privilege::PrivilegeError;
+use rdy_engine::report::JsonError;
 use rdy_spec::result::{ExitCode, Verdict};
 use rdy_spec::sig::SignatureError;
 use rdy_spec::{ScalarError, SpecError};
@@ -248,6 +249,13 @@ pub enum InternalKind {
     /// rdy carries more privilege than the user who started it, or could not prove that it does not
     /// (INV-10). It is raised before the spec is read. The engine's text is fixed and holds no input.
     Privilege(PrivilegeError),
+    /// The run could not promise to hide the value of an environment variable a check reads, because
+    /// the known-secret set refused it (too short, too long or no room). The names come from the
+    /// checks' own declarations. No value is held here (ADR 0015 decision 3).
+    SecretRefused {
+        /// The variable names.
+        names: Vec<String>,
+    },
     /// The command exists in the tree but a later ticket builds it.
     NotImplemented {
         /// The command as typed in the tree, such as `spec lint`. Always a name from the command tree.
@@ -312,6 +320,15 @@ pub enum CliError {
         /// Why, in plain words.
         reason: ReportReason,
     },
+    /// The report writer refused: the report is too big to write, or the stream it writes to broke
+    /// (M1-057). The text is the writer's own, split into the message and its fix.
+    #[error("{message}")]
+    ReportWriter {
+        /// What happened, from the writer.
+        message: String,
+        /// What to do, from the writer.
+        fix: String,
+    },
     /// Ctrl-C in M1 (07 section 5.1).
     #[error("interrupted. No report was written.")]
     Interrupted,
@@ -339,6 +356,10 @@ fn internal_message(kind: &InternalKind) -> String {
         InternalKind::NoRandomness => "the system could not give random bytes".to_owned(),
         InternalKind::FileWrite { path, reason } => format!("cannot write {path} ({reason})"),
         InternalKind::Privilege(error) => error.message(),
+        InternalKind::SecretRefused { names } => format!(
+            "rdy cannot promise to keep the value of {} out of its output",
+            names.join(", ")
+        ),
         InternalKind::NotImplemented { command } => {
             format!("rdy {command} is not yet implemented in this build")
         }
@@ -371,6 +392,30 @@ impl CliError {
             file: Some(file.into()),
             source,
         }
+    }
+
+    /// The report writer refused, with its own words (code `report_write`, exit 70).
+    ///
+    /// Only the two refusals a run can cause map here: a report that is too big even with its action
+    /// log shed ([`JsonError::TooLarge`]) and an output that cannot be written ([`JsonError::Io`]). Every
+    /// other writer error is a bug in rdy, so `None` is returned and the caller uses [`CliError::bug`].
+    ///
+    /// The writer ends its message with `Fix: <what to do>`. That part becomes the fix line, so the
+    /// terminal and the JSON object show the fix once, in the place every other error has it.
+    #[must_use]
+    pub fn report_writer(error: &JsonError) -> Option<Self> {
+        if !matches!(error, JsonError::TooLarge { .. } | JsonError::Io(_)) {
+            return None;
+        }
+        let text = error.to_string();
+        let (message, fix) = match text.split_once(" Fix: ") {
+            Some((message, fix)) => (message, fix),
+            None => (text.as_str(), "check that the output is open and has room"),
+        };
+        Some(Self::ReportWriter {
+            message: message.trim_end_matches('.').to_owned(),
+            fix: fix.trim_end_matches('.').to_owned(),
+        })
     }
 
     /// A bug, with the standard hint.
@@ -425,7 +470,7 @@ impl CliError {
             Self::Scalar { .. } => ErrorCode::SpecInvalid,
             Self::Prompt(err) => prompt_code(err),
             Self::TrustStore(err) => err.code(),
-            Self::ReportWrite { .. } => ErrorCode::ReportWrite,
+            Self::ReportWrite { .. } | Self::ReportWriter { .. } => ErrorCode::ReportWrite,
             Self::Interrupted => ErrorCode::Interrupted,
             Self::Internal(_) => ErrorCode::Internal,
         }
@@ -483,6 +528,7 @@ impl CliError {
                 }
             }
             .to_owned(),
+            Self::ReportWriter { fix, .. } => fix.clone(),
             Self::Interrupted => "run rdy again and let it finish".to_owned(),
             Self::Internal(InternalKind::Bug) => BUG_HINT.to_owned(),
             Self::Internal(InternalKind::OutputClosed) => {
@@ -497,6 +543,10 @@ impl CliError {
                     .to_owned()
             }
             Self::Internal(InternalKind::Privilege(error)) => error.hint().to_owned(),
+            Self::Internal(InternalKind::SecretRefused { names }) => format!(
+                "unset {}, or give it a value of 6 bytes to 64 KiB, then run rdy again",
+                names.join(" and ")
+            ),
             Self::Internal(InternalKind::NotImplemented { .. }) => {
                 "use a later release of rdy, listed at https://github.com/getrdy-io/rdy/releases"
                     .to_owned()

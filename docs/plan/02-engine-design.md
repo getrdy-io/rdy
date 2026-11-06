@@ -465,8 +465,16 @@ tests policy.
 - The host must be in the calling check's own host set. The spec may name at most 64 distinct hosts
   (rdy-spec validation, exit 64).
 - One `is_forbidden(IpAddr)` refuses, literal or resolved: 169.254.0.0/16, 100.100.100.200/32,
-  fe80::/10, fd00:ec2::/64, and the IPv4-mapped, IPv4-compatible and `64:ff9b::/96` forms of each IPv4
-  range. A table test backs it.
+  168.63.129.16/32 (Azure host services, M1-094), fe80::/10, fd00:ec2::/64, fd20:ce::254/128 (GCP IPv6
+  metadata, M1-094), and the IPv4-mapped, IPv4-compatible and `64:ff9b::/96` forms of each IPv4 range.
+  A table test backs it. `Probe::lookup(host)` (M1-094) resolves one of the check's own spec hosts,
+  refuses the whole call if any answer is in the table, and logs one `lookup` entry with `host` and an
+  `answers` count; `tcp`, `tls_chain`, `http` and `udp_exchange` apply the same table.
+- One narrow door in the table (planned, M1-155): the `SystemResolver` peer class may reach 168.63.129.16
+  on port 53 (UDP and TCP), and only when the address came from the OS nameserver list (`resolv.conf` or
+  the platform's equivalent), because it is the nameserver on every Azure VM. A spec host on any port, and
+  ports 80 and 32526 (the WireServer ports), stay refused. Until the class is built, a check that wants
+  to query such a nameserver reports Skipped, "nameserver in a refused range".
 - `tcp` tries each address with a 250 ms stagger and a per-attempt timeout, and reports every attempt.
   Checks cannot pick addresses.
 - Proxied path: the facade writes CONNECT (8 KiB head cap, own timeout, Basic auth from `ProxyUrl`,
@@ -1047,6 +1055,20 @@ impl Engine {
     pub async fn run(&self, spec: &LoadedSpec, out: &OutputDir, opts: RunOptions)
         -> Result<RedactedReport, EngineError>;
 }
+// As built in M1-057 (`rdy_engine::engine`, feature `runtime`), the engine does the middle of the run and the
+// CLI keeps the edges, because the CLI alone knows the facts of the run (producer, host, identity from the
+// privilege snapshot, signature) and owns the folder and the streams:
+//   Engine::new(registry: Registry, hub: ProbeHub)       // the hub is built from the run's redactor first
+//   Engine::plan(&self, spec: &LoadedSpec, os: Os, rdy_version: &str) -> RunPlan
+//   Engine::execute(&self, spec: &LoadedSpec, plan: RunPlan, privilege: &Privilege, opts: &RunOptions) -> Executed
+//   Executed { results: Vec<CheckResult> /* redacted, spec order */, capabilities, log: ActionLogOutput, counts: RuleCounts }
+//   RunOptions { jobs, deadline, network, spec_arg /* fills <spec> in the root fix */, origin }
+// The CLI builds the Report from `results` and its own facts, then calls `redact_report_counted(report,
+// counts)` and the writers. `Family::not_built(&self) -> &'static [&'static str]` (default empty) lists the
+// ids of a family that are stubs: the planner skips each as `not_in_build`, so `HostFamily` is registered
+// while it still has stubs. `ProbeHub::add_declared_env_secrets(names)` registers the values of the secret-named
+// variables the checks declare, before the first log event, and returns the names the set refused. It records the declared names (never a value) as one run-level `env` entry, a set-up entry that `set_proxy` does not count.
+// Not built here: cancel and progress (M1-058, M1-086), the proxy (M1-097), the hosts of a check (M1-095).
 
 // probe
 impl Probe {

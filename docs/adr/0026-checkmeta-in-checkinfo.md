@@ -43,6 +43,10 @@ registered in the CLI while its checks are stubs.
 5. Until M1-057, the family list lives in `xtask` (`checks::registry`). M1-057 moves it into `rdy_cli`
    and points `xtask` at that function, so the docs and the binary read one registry. This ADR does not
    register `HostFamily` in the CLI.
+   **As built (M1-057).** `rdy_cli::registry::registry()` is that function, and `xtask checks` calls it.
+   `HostFamily` is registered: `Family::not_built` lists its stubs and the planner skips each as
+   `not_in_build`, so no stub runs on a customer's machine. A result with no fix of its own and no spec
+   `fix` shows `CheckMeta.remediation` (`rdy_engine::outcome`).
 
 ## Consequences
 

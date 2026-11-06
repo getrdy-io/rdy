@@ -288,6 +288,8 @@ async fn forbidden_literals_and_answers_are_refused_before_any_send() {
             "224.0.0.1:123",
             "[64:ff9b::a9fe:a9fe]:123",
             "100.100.100.200:123",
+            "[fd20:ce::254]:123",
+            "168.63.129.16:123",
         ],
     );
     for server in [
@@ -298,6 +300,8 @@ async fn forbidden_literals_and_answers_are_refused_before_any_send() {
         "224.0.0.1:123",
         "[64:ff9b::a9fe:a9fe]:123",
         "100.100.100.200:123",
+        "[fd20:ce::254]:123",
+        "168.63.129.16:123",
     ] {
         let error = probe
             .udp_exchange(&target(server), &request(), 48)

@@ -12,9 +12,10 @@
 //! source is not built, the check is `NotYet` on that OS, and the planner skips it with
 //! `skip_kind: not_yet_on_os` before it runs.
 //!
-//! Rule: do not register [`HostFamily`] in the CLI while [`HostFamily::stub_ids`] is not empty. On Linux
-//! a stub reports `error` with `check_failed`, which reads as a fault on the customer's machine. The
-//! registering ticket (M1-057) must first drop the stubs or have the engine add a `not_in_build` skip.
+//! Rule: a stub must never run on a customer's machine. On Linux it would report `error` with
+//! `check_failed`, which reads as a fault there. [`HostFamily`] lists its stubs in
+//! `Family::not_built`, so the planner skips each as `not_in_build` and `rdy run` registers the
+//! family (M1-057).
 //!
 //! The OS comes from the run, never from the compiler. The planner takes it as an argument and the
 //! stubs read it from `CheckContext::os`, so a Linux fixture runs the Linux code on every CI leg. When
