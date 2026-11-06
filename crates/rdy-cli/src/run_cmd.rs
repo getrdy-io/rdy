@@ -21,7 +21,7 @@
 //! 4.1) and the exit code is 70. If even that cannot be written, stdout gets the error object.
 //!
 //! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), Ctrl-C (M1-058),
-//! `--jobs` (M1-059), the kube flags (M1-107), `--key` and the full unsigned banner (M1-126) and the
+//! the kube flags (M1-107), `--key` and the full unsigned banner (M1-126) and the
 //! terminal renderer (M1-086). The one-line [`UNSIGNED_WARNING`] is here until M1-126 replaces it.
 
 use std::io::Write;
@@ -36,7 +36,7 @@ use rdy_engine::privilege::Privilege;
 use rdy_engine::probe::{NativeCall, NativeValue, Probe, ProbeHub};
 use rdy_engine::redact::{RedactedReport, Redactor, RuleCounts};
 use rdy_engine::report::{JsonError, write_json};
-use rdy_engine::sched::{DEFAULT_DEADLINE, cap_jobs};
+use rdy_engine::sched::{DEFAULT_DEADLINE, DEFAULT_JOBS, MAX_JOBS, cap_jobs};
 use rdy_engine::summary::{last_line, summary_line};
 use rdy_spec::result::{
     Host, HostOs, HostOsFamily, Producer, Report, Run, RunOptions, Signature, SpecRef,
@@ -115,6 +115,8 @@ async fn execute(
             command: "run with a one-run key",
         }));
     }
+    // A bad `--jobs` is a usage error and comes before the spec is read.
+    let jobs = jobs_from(args.jobs)?;
     let name = args.spec.to_string_lossy().into_owned();
     let loaded = load_spec(args, &name, &privilege)?;
 
@@ -131,7 +133,11 @@ async fn execute(
     let product = loaded.spec().metadata.product.as_str().to_owned();
     let dir = open_report_dir(args, &product, started_at)?;
 
+    if let Some(note) = jobs.note {
+        let _ = writeln!(stderr, "{note}");
+    }
     let mut options = EngineOptions::new();
+    options.jobs = jobs.count;
     options.network = !args.no_network;
     options.deadline = hooks.deadline.unwrap_or(DEFAULT_DEADLINE);
     options.spec_arg = shell_word(&name);
@@ -200,6 +206,37 @@ async fn execute(
             ))
         }
     }
+}
+
+/// What `--jobs` came to.
+struct Jobs {
+    /// How many checks run at once.
+    count: usize,
+    /// The stderr line that says the request was lowered. `None` when it was not.
+    note: Option<String>,
+}
+
+/// Reads `--jobs` (07, `rdy run` flags). Zero is a usage error. Above [`MAX_JOBS`] is capped, with a
+/// note. Not given means the default.
+fn jobs_from(requested: Option<u32>) -> Result<Jobs, CliError> {
+    let Some(asked) = requested else {
+        return Ok(Jobs {
+            count: DEFAULT_JOBS,
+            note: None,
+        });
+    };
+    if asked == 0 {
+        return Err(CliError::usage(
+            "--jobs must be 1 or more",
+            format!("use a number from 1 to {MAX_JOBS}, for example --jobs {DEFAULT_JOBS}"),
+        ));
+    }
+    let asked = usize::try_from(asked).unwrap_or(usize::MAX);
+    let count = cap_jobs(asked);
+    let note = (count < asked).then(|| {
+        format!("note: --jobs {asked} is more than the limit of {MAX_JOBS}, so rdy runs {count} checks at once")
+    });
+    Ok(Jobs { count, note })
 }
 
 /// Removes the report folder when nothing was written into it. A folder that holds a file stays, and so
