@@ -1,0 +1,51 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "min_version": "1.28",
+    "runtime": [
+      "crio"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": "1.28",
+      "runtime": [
+        "CRI-O"
+      ],
+      "storage_driver": null
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "CRI-O 1.29.1 is running.",
+    "notes": [
+      "CRI-O: the CRI-O configuration is not read, so its cgroup and storage drivers are unknown"
+    ],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "not asked",
+          "cgroup_driver": null,
+          "cgroup_driver_source": null,
+          "config_version": null,
+          "d_type": null,
+          "installed": true,
+          "proxy": null,
+          "rootless": null,
+          "rootless_socket": false,
+          "runtime": "CRI-O",
+          "socket": "/var/run/crio/crio.sock",
+          "socket_present": true,
+          "storage_driver": null,
+          "storage_driver_source": null,
+          "version": "1.29.1"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

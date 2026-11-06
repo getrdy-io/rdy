@@ -688,7 +688,7 @@ M1 redactor: six tickets, 14.5 hours, plus a 0.5-hour clause on SEC-31 (15 hours
 - [M1] Redact then cap every Report string and return RedactedReport | owner: rust-engineer | est: 2.5h | depends on: SEC-25 Minimal redactor for evidence, errors and logs; Map outcomes to CheckResult with fix source, partial and needs | exit test: a PEM key across a 64 KiB cap is fully redacted, 01's sample reports 7.2 to 7.4 round-trip byte-identical apart from planted canaries, `by_rule` is the same with RUST_LOG unset and at trace, the watchdog report is redacted, and an error exits 70 with no report.
 - [M1] Redacting tracing writer and panic hook and CLI error text | owner: rust-engineer | est: 2h | depends on: SEC-25 Minimal redactor for evidence, errors and logs | exit test: canaries in env, kubeconfig, command output and a tracing field never reach stderr at RUST_LOG=trace (the proxy URL canary moves to M1-060, PC-43).
 - [M1] SEC-26 M1 redaction corpus | owner: qa-engineer | est: 3h | depends on: M1 redaction rules for URLs and auth headers and AWS keys and PEM keys and JWTs and rdy tokens and key names | exit test: the 28 cases run in `cargo test` on five legs and the harness fails on a survivor or a rule or syntax form with no positive case.
-- Fold, +0.5h on "SEC-31 Docs security page and verify-first install": list the M1 rules, what stays (hostnames, addresses, encoded values, the verified spec copy) and the placeholder format.
+- Fold, +0.5h on "SEC-31 Docs security page and verify-first install": list the M1 rules, what stays (hostnames, addresses, encoded values, the verified spec copy, the spec path as typed in the root fix) and the placeholder format.
 
 M2 and later (coarser; split to four hours or less when M2 is planned):
 

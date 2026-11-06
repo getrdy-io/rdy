@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-terminating"
+summary = "A namespace that is being deleted, with its deletion conditions; nothing else is asked"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -1,0 +1,54 @@
+{
+  "entry": {
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "rhel",
+        "versions": [
+          "8",
+          "9"
+        ]
+      },
+      {
+        "id": "ubuntu",
+        "versions": [
+          "22.04"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "any",
+      "supported": [
+        {
+          "id": "rhel",
+          "versions": [
+            "8",
+            "9"
+          ]
+        },
+        {
+          "id": "ubuntu",
+          "versions": [
+            "22.04"
+          ]
+        }
+      ]
+    },
+    "fix": "Check that `/etc/os-release` exists and is readable, or ask the vendor whether this OS is supported.",
+    "level": "warn",
+    "message": "Cannot tell which OS this is: neither /etc/os-release nor /usr/lib/os-release exists. The spec supports rhel 8 or 9, ubuntu 22.04.",
+    "notes": [],
+    "observed": {
+      "arch": "x86_64",
+      "container": [],
+      "fips": false,
+      "init": "other",
+      "kernel": "5.10.0-1-generic",
+      "os": null,
+      "wsl": false
+    },
+    "partial": null
+  }
+}

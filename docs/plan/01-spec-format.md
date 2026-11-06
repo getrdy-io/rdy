@@ -491,7 +491,8 @@ pinned for the product, or given with `--key`, exits 64 even with the flag (ADR 
 including a valid signature by an unpinned key. An unsigned spec containing `custom.exec` exits 64 from M4
 (ADR 0005). Expired specs are refused regardless. **No hint, fix line or error message ever names
 `--allow-unsigned` or `--key`** (threat model T2); the flags are documented on
-`https://docs.getrdy.io/unsigned`.
+`https://docs.getrdy.io/unsigned`. The banner and its `sig` header line may name the flag that allowed the
+run, because that is the loud warning of product rule 3 (07 rule 8).
 
 **Banner rule:** show a banner unless `signature.state` is `verified` and `trust_source` is `system` or
 `user`. Both banners print on stderr before any check runs, red when colour is on, and again, first line
@@ -586,7 +587,7 @@ bounds (readers ignore unknown keys, 3.4); `findings` in a lint report 258; `ide
 
 ### 5.1 Host identity
 
-Included: `hostname` (as the OS reports it; an M2 option replaces it), `host_id`, `os` (`family`, `id`,
+Included: `hostname` (as the OS reports it; an M2 option replaces it; the stand-in `unknown` in a report with `complete: false` means the host was not read, 07 section 5.2), `host_id`, `os` (`family`, `id`,
 `version`, `pretty_name`), `kernel`, `arch`, `virtualization` (`none`, `vm`, `unknown`), `container`
 (rdy ran in a container or WSL). `identity` adds `euid`, the local login name and the kube identity (ADR
 0012), so the reader knows who ran it and against which cluster, with any kubeconfig credential plugin

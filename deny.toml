@@ -103,11 +103,20 @@ deny = [
     { crate = "tokio-rustls", wrappers = ["hyper-rustls", "rdy-checks-k8s", "rdy-engine"], reason = "02 lint wall: TLS goes through the probe or kube; rdy-checks-k8s uses it in its test server only; rdy-engine uses it for the facade's TLS (M1-092) and in its `loopback` test servers (ADR 0035)" },
     # askama builds the HTML report (M1-077, 05 dependency record, SEC-149-2). Only the engine renders a
     # report. A check crate never needs a template engine, so it stays off every check crate.
-    { crate = "askama", wrappers = ["rdy-engine"], reason = "05 dependency record: only rdy-engine renders the HTML report; no check crate" },
+    { crate = "askama", wrappers = ["rdy-engine", "rdy-lint-wall"], reason = "05 dependency record: only rdy-engine renders the HTML report; no check crate. rdy-lint-wall names its Safe items so the lint wall can prove they are banned (M1-078)" },
     { crate = "askama_macros", wrappers = ["askama"], reason = "05 dependency record: reached through askama only" },
     { crate = "askama_derive", wrappers = ["askama_macros"], reason = "05 dependency record: reached through askama only" },
     { crate = "askama_parser", wrappers = ["askama_derive"], reason = "05 dependency record: reached through askama only" },
 ]
+
+# askama is built with `derive` and `std` only (`alloc` comes with `std`). Its other features add filters
+# that print output without escaping (`serde_json`, `urlencode`) or read a config file (`config`), and the
+# default set turns two of them on (M1-078, SEC-19-3). `exact` fails the build on any other feature.
+[[bans.features]]
+crate = "askama"
+exact = true
+allow = ["alloc", "derive", "std"]
+reason = "05 dependency record: no json or urlencode filter, no askama.toml; scripts/check-html-escapes.sh checks the manifests too"
 
 [sources]
 unknown-registry = "deny"
