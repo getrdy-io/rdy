@@ -5,7 +5,7 @@
 //!
 //! 1. Read the spec file and, when there is one, its `.minisig` sidecar. Verify, then parse
 //!    ([`rdy_spec::load`], INV-01). A spec that fails stops here with exit 64 and no folder.
-//! 2. When the spec is unsigned, say so on stderr ([`UNSIGNED_WARNING`], product rule 3). Then make the
+//! 2. When the spec is not signed by a pinned key, print its banner on stderr (`terminal::banner`, product rule 3). Then make the
 //!    report folder, right after verification and before any check (ADR 0016). `--no-report` makes none.
 //!    The run id is made before the folder, so a failure to make it leaves no folder. A failure after the
 //!    folder exists removes it again when it is still empty.
@@ -17,8 +17,9 @@
 //! 4. Build the report from the results and the facts of the run (producer, run, spec, signature,
 //!    host, identity from the privilege snapshot), redact the whole of it and write it.
 //! 5. Print, then write the files: with `--json` the document goes to stdout first, then the state
-//!    moves to `Writing`, the files are written and `finish` stores the exit code. The short result
-//!    goes to stderr last. The full terminal layout is M1-086. Stdout comes first because it is the
+//!    moves to `Writing`, the files are written and `finish` stores the exit code. The human result
+//!    goes to stderr last ([`crate::terminal`], M1-086): the header, the checks sorted by bucket with
+//!    their fixes, the summary, the report folder and the verdict. Stdout comes first because it is the
 //!    one write that can block for good: while it does, the watchdog still owns the report.
 //!
 //! **Exit codes.** A verdict gives 0, 1 or 2. A spec problem gives 64. A folder that cannot be made, a
@@ -28,8 +29,8 @@
 //! files (see 5 above), so a second one would not be one document (PC-50 in 13).
 //!
 //! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), Ctrl-C (M1-058),
-//! `--jobs` (M1-059), the kube flags (M1-107), `--key` and the full unsigned banner (M1-126) and the
-//! terminal renderer (M1-086). The one-line [`UNSIGNED_WARNING`] is here until M1-126 replaces it.
+//! `--jobs` (M1-059), the kube flags (M1-107) and `--key` (M1-126). `--quiet` and `--verbose` (M1-143)
+//! and the live progress line (M1-142) change the output later; this is the plain run.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -45,30 +46,58 @@ use rdy_engine::probe::{NativeCall, NativeValue, Probe, ProbeHub};
 use rdy_engine::redact::{RedactedReport, Redactor, RuleCounts};
 use rdy_engine::report::{JsonError, write_json};
 use rdy_engine::sched::cap_jobs;
-use rdy_engine::summary::{last_line, summary_line};
 use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
     CheckResult, Host, HostOs, HostOsFamily, Producer, Report, Run, RunOptions, Signature, SpecRef,
 };
-use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, SignatureState, TrustStore};
+use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, TrustStore};
 use rdy_spec::{LoadedSpec, VerifiedSpecBytes, load};
 
-use crate::cli::{COMMIT, RunArgs, TARGET};
-use crate::error::{
-    CliError, InternalKind, IoReason, ReportStep, emit, escape_untrusted, shell_word,
-};
+use crate::cli::{COMMIT, ColorChoice, RunArgs, TARGET};
+use crate::error::{CliError, InternalKind, IoReason, ReportStep, emit, shell_word};
 use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
 use crate::rig::Rig;
 use crate::signing::files::{FileError, read_public};
+use crate::style::{StyleEnv, Styler, stderr_columns, use_color, wrap_width, write_styled};
+use crate::terminal::{View, banner, render};
 use crate::trust::{self, Layout, Vars};
 use crate::{lint, redaction};
 
-/// Printed on stderr, once, before the report folder is made, when the spec has no signature and the
-/// run goes on because of `--allow-unsigned` (product rule 3, "says so loudly"). It names no flag and no
-/// spec text. M1-126 replaces it with the full banner.
-pub(crate) const UNSIGNED_WARNING: &str =
-    "warning: this spec is not signed. rdy cannot tell who wrote it or if it was changed.";
+/// How the human output looks: decided once, from `--color`, the environment and the stream.
+#[derive(Debug, Clone, Copy)]
+struct Look {
+    /// Whether stderr gets colour codes.
+    color: bool,
+    /// The wrap width, 60 to 100.
+    width: usize,
+}
+
+impl Look {
+    fn new(choice: ColorChoice, hooks: &RunHooks) -> Self {
+        let env = hooks
+            .style_env
+            .clone()
+            .unwrap_or_else(StyleEnv::from_process);
+        let terminal = hooks
+            .stderr_terminal
+            .unwrap_or_else(|| std::io::IsTerminal::is_terminal(&std::io::stderr()));
+        let columns = hooks.stderr_columns.or_else(stderr_columns);
+        Self {
+            color: use_color(choice, &env, terminal),
+            width: wrap_width(columns, &env),
+        }
+    }
+
+    fn styler(self) -> Styler {
+        Styler::new(self.color)
+    }
+}
+
+/// Writes `text` to stderr as the run's look says. A closed stderr is not an error of the run.
+fn say(stderr: &mut dyn Write, look: Look, text: &str) {
+    let _ = write_styled(stderr, look.color, text);
+}
 
 /// What `rdy run` needs from the entry point: everything built before the spec is read.
 pub(crate) struct RunContext {
@@ -83,6 +112,8 @@ pub(crate) struct RunContext {
     pub(crate) hooks: RunHooks,
     /// The families of this build.
     pub(crate) registry: Registry,
+    /// The `--color` choice.
+    pub(crate) color: ColorChoice,
     /// The watchdog and the write state, started before the runtime (M1-176).
     pub(crate) rig: Rig,
 }
@@ -116,8 +147,10 @@ async fn execute(
         privilege,
         hooks,
         registry,
+        color,
         rig,
     } = cx;
+    let look = Look::new(color, &hooks);
     // The watchdog was started before the runtime, from the first thing `main` did. The scheduler counts
     // from the same origin (M1-176, 02 "Watchdog").
     let origin = rig.origin;
@@ -136,8 +169,14 @@ async fn execute(
     let name = args.spec.to_string_lossy().into_owned();
     let loaded = load_spec(args, &name, &privilege)?;
 
-    if matches!(loaded.signature(), SignatureState::Unsigned) {
-        let _ = writeln!(stderr, "{UNSIGNED_WARNING}");
+    // The banner comes before any check (01 section 4.7). The path is shown as typed, redacted first.
+    let out = Out::new(args, look, &name);
+    if let Some(text) = banner(
+        &Signature::from(loaded.signature()),
+        &out.spec,
+        look.styler(),
+    ) {
+        say(stderr, look, &format!("{text}\n"));
     }
 
     // Before the folder: a failure here must not leave one behind.
@@ -242,7 +281,7 @@ async fn execute(
     state.claim_or_park();
     let files = match &dir {
         Some(dir) => write_files(dir, &loaded, &redacted),
-        None => Ok(()),
+        None => Ok(Vec::new()),
     };
     if let Err(error) = printed {
         // The report exists and stdout cannot take it. The files were still written; the error is what
@@ -254,9 +293,14 @@ async fn execute(
         return Ok(emit(&error, false, stdout, stderr));
     }
     match files {
-        Ok(()) => {
+        Ok(files) => {
             state.finish(redacted.exit_code);
-            print_result(&redacted, dir.as_deref(), args, stderr);
+            out.print(
+                &redacted,
+                dir.as_deref().map(OutputDir::path),
+                &files,
+                stderr,
+            );
             Ok(redacted.exit_code)
         }
         Err(error) => {
@@ -266,7 +310,7 @@ async fn execute(
             // With `--json` the document is on stdout already, so only the summary, a plain note and the
             // error follow, on stderr.
             Ok(fail_after_verdict(
-                &error, report, counts, &redactor, false, json, stdout, stderr,
+                &error, report, counts, &redactor, &out, false, json, stdout, stderr,
             ))
         }
     }
@@ -377,6 +421,7 @@ fn fail_after_verdict(
     mut report: Report,
     counts: RuleCounts,
     redactor: &Redactor,
+    out: &Out,
     json: bool,
     on_stdout: bool,
     stdout: &mut dyn Write,
@@ -389,7 +434,8 @@ fn fail_after_verdict(
             .as_ref()
             .is_some_and(|report| print_json(report, stdout).is_ok());
     if let Some(report) = &incomplete {
-        print_summary(report, stderr);
+        // No folder line: the files are the thing that failed.
+        out.print(report, None, &[], stderr);
     }
     if on_stdout {
         let _ = writeln!(stderr, "{FILES_NOT_WRITTEN_NOTE}");
@@ -452,16 +498,23 @@ fn read_sidecar(args: &RunArgs) -> Result<Option<Vec<u8>>, CliError> {
     }
 }
 
-/// Writes the spec copy and the JSON report into the folder.
+/// Writes the spec copy and the JSON report into the folder and returns the names of the files, in the
+/// order the terminal lists them.
 fn write_files(
     dir: &OutputDir,
     loaded: &LoadedSpec,
     report: &RedactedReport,
-) -> Result<(), CliError> {
+) -> Result<Vec<String>, CliError> {
     let failed = |error| report_error(ReportStep::WriteFiles, dir.path(), error);
-    dir.write_spec(loaded.verified_bytes()).map_err(failed)?;
-    dir.write_json(report).map_err(failed)?;
-    Ok(())
+    let mut written = dir.write_spec(loaded.verified_bytes()).map_err(failed)?;
+    written.push(dir.write_json(report).map_err(failed)?);
+    let mut names: Vec<String> = written
+        .iter()
+        .filter_map(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    Ok(names)
 }
 
 /// Writes the report as JSON to stdout and flushes it, so a closed or full pipe shows up here and not
@@ -477,24 +530,58 @@ fn writer_error(error: JsonError) -> CliError {
     CliError::report_writer(&error).unwrap_or_else(CliError::bug)
 }
 
-/// The summary, where the report went, and the verdict, on stderr. The full layout is M1-086.
-fn print_result(
-    report: &RedactedReport,
-    written: Option<&OutputDir>,
-    args: &RunArgs,
-    stderr: &mut dyn Write,
-) {
-    print_summary(report, stderr);
-    if let Some(dir) = written {
-        let folder = dir.path().display().to_string();
-        let line =
-            redaction::redact_text_then(&format!("Report written to {folder}/"), escape_untrusted);
-        let _ = writeln!(stderr, "{line}");
-        if let Some(note) = residual_note(current_os(), args.out_dir.is_some()) {
-            let _ = writeln!(stderr, "{note}");
+/// What the human output needs from the command line, decided once.
+struct Out {
+    /// Colour and width.
+    look: Look,
+    /// The spec path as typed, redacted.
+    spec: String,
+    /// The `--kubeconfig` value, redacted.
+    kubeconfig: Option<String>,
+    /// `--out-dir` was given (it decides the Windows note).
+    out_dir_given: bool,
+}
+
+impl Out {
+    fn new(args: &RunArgs, look: Look, name: &str) -> Self {
+        // The spec, the kubeconfig and the folder are typed by the user. They are redacted here and
+        // escaped by the renderer.
+        Self {
+            look,
+            spec: redaction::redact_text(name),
+            kubeconfig: args
+                .kubeconfig
+                .as_ref()
+                .map(|path| redaction::redact_text(&path.display().to_string())),
+            out_dir_given: args.out_dir.is_some(),
         }
     }
-    let _ = writeln!(stderr, "{}", last_line(&report.checks));
+
+    /// The human result on stderr: header, checks, summary, report folder and verdict (07 section 2).
+    /// The verdict is the last line. `folder` is `None` for `--no-report` and after a failed write.
+    fn print(
+        &self,
+        report: &RedactedReport,
+        folder: Option<&std::path::Path>,
+        files: &[String],
+        stderr: &mut dyn Write,
+    ) {
+        let folder = folder.map(|path| redaction::redact_text(&path.display().to_string()));
+        let note = folder
+            .as_ref()
+            .and_then(|_| residual_note(current_os(), self.out_dir_given));
+        let view = View {
+            report,
+            spec_arg: &self.spec,
+            folder: folder.as_deref(),
+            files,
+            note,
+            kubeconfig: self.kubeconfig.as_deref(),
+            styler: self.look.styler(),
+            width: self.look.width,
+        };
+        say(stderr, self.look, &render(&view));
+    }
 }
 
 /// The access-rule residual of ADR 0016 decision 7, for the OS that has one. The `Report` has no `notes`
@@ -513,10 +600,6 @@ fn residual_note(os: Os, out_dir_given: bool) -> Option<&'static str> {
         ),
         _ => None,
     }
-}
-
-fn print_summary(report: &RedactedReport, stderr: &mut dyn Write) {
-    let _ = writeln!(stderr, "{}", summary_line(&report.checks));
 }
 
 /// The rdy build that writes the report.
