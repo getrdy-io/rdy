@@ -62,8 +62,6 @@ pub(super) enum Answer {
 pub(super) struct Create {
     pub(super) via: Via,
     pub(super) answer: Answer,
-    /// True when the cluster serves `project.openshift.io`, so it is OpenShift.
-    pub(super) openshift: bool,
 }
 
 /// What was read, before any judgement.
@@ -237,6 +235,13 @@ struct Sink {
 }
 
 impl Sink {
+    /// Adds a by-hand line to the fix once, however many needs lead to it.
+    fn fix_once(&mut self, line: String) {
+        if !self.fixes_unverified.contains(&line) {
+            self.fixes_unverified.push(line);
+        }
+    }
+
     fn grant(&mut self, grant: &'static Grant) {
         if !self.grants.iter().any(|have| have.text == grant.text) {
             self.grants.push(grant);
@@ -277,12 +282,10 @@ pub(super) fn judge(params: &K8sNamespace, found: &Gathered) -> Finding {
         quota_rows,
         default_rows,
     } = sink;
-    notes.push(if found.create.as_ref().is_some_and(|create| create.openshift) {
-        "Only the ResourceQuota and LimitRange objects of the namespace are read. An OpenShift ClusterResourceQuota is not evaluated."
-            .to_owned()
-    } else {
-        "Only the ResourceQuota and LimitRange objects of the namespace are read.".to_owned()
-    });
+    notes.push(
+        "Only the ResourceQuota and LimitRange objects of the namespace are read. On OpenShift, a ClusterResourceQuota is not evaluated."
+            .to_owned(),
+    );
     issues.sort_by_key(|issue| (std::cmp::Reverse(rank(issue.level)), issue.fill));
     let level = issues.first().map_or(Level::Pass, |issue| issue.level);
     let message = match issues.first() {
@@ -521,8 +524,7 @@ fn judge_quotas(ns: &str, quotas: &Read<Page<Quota>>, needs: &[QuotaNeed], sink:
                         shown(&quota.name),
                         shown(&need.resource)
                     ));
-                    sink.fixes_unverified
-                        .push(fix::check_quota(&quota.name, ns));
+                    sink.fix_once(fix::check_quota(&quota.name, ns));
                     scoped_partial = true;
                     continue;
                 }
@@ -539,8 +541,7 @@ fn judge_quotas(ns: &str, quotas: &Read<Page<Quota>>, needs: &[QuotaNeed], sink:
                         shown(hard_text),
                         used_text.map_or_else(|| "not reported".to_owned(), |text| shown(text))
                     ));
-                    sink.fixes_unverified
-                        .push(fix::check_quota(&quota.name, ns));
+                    sink.fix_once(fix::check_quota(&quota.name, ns));
                     continue;
                 };
                 evaluated += 1;

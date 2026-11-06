@@ -14,7 +14,8 @@
 //!   in `project.openshift.io`. When that is denied on OpenShift, a second review asks `create namespaces`,
 //!   because hardened clusters drop the self-provisioner role and grant plain `create namespaces`.
 //!
-//! That is six requests at most, two of them reviews (POST). Nothing is created.
+//! That is four requests at most (missing: the namespace, `/apis` and two reviews; present: the namespace and two
+//! lists), two of them reviews (POST). Nothing is created.
 //!
 //! How the rules of 03 apply:
 //!
@@ -42,7 +43,7 @@
 //! `get namespaces`), quotas or limit ranges it may not list (grants `list resourcequotas` and
 //! `list limitranges`). A grant missing for a list the spec has no need for is only a note.
 //!
-//! Not read: OpenShift `ClusterResourceQuota`, quotas of other namespaces, storage-class-scoped quota keys
+//! Not read: OpenShift `ClusterResourceQuota` (a note says so on every result), quotas of other namespaces, storage-class-scoped quota keys
 //! (`<class>.storageclass.storage.k8s.io/...`), `maxLimitRequestRatio` of limit ranges, and priority-class
 //! quotas.
 
@@ -378,7 +379,6 @@ async fn read_create(
             list.groups.iter().any(|group| group.name == PROJECT_GROUP)
         })?
     };
-    let openshift = matches!(projects, Read::Ok(true));
     let via = match projects {
         Read::Ok(true) => Via::ProjectRequests,
         Read::Ok(false) => Via::Namespaces { sure: true },
@@ -388,7 +388,6 @@ async fn read_create(
         return Ok(Create {
             via,
             answer: Answer::Unknown(Read::<()>::OutOfTime.why()),
-            openshift,
         });
     }
     let first = match via {
@@ -398,35 +397,24 @@ async fn read_create(
         Via::Namespaces { .. } => review(mapper, client, None, "namespaces").await?,
     };
     if via != Via::ProjectRequests || !matches!(first, Answer::NotAllowed(_)) {
-        return Ok(Create {
-            via,
-            answer: first,
-            openshift,
-        });
+        return Ok(Create { via, answer: first });
     }
     // Project requests are denied. Plain `create namespaces` may still be granted.
     if out_of_time(ctx) {
         return Ok(Create {
             via,
             answer: Answer::Unknown(Read::<()>::OutOfTime.why()),
-            openshift,
         });
     }
     Ok(match review(mapper, client, None, "namespaces").await? {
         Answer::Allowed => Create {
             via: Via::Namespaces { sure: true },
             answer: Answer::Allowed,
-            openshift,
         },
-        Answer::NotAllowed(_) => Create {
-            via,
-            answer: first,
-            openshift,
-        },
+        Answer::NotAllowed(_) => Create { via, answer: first },
         unknown @ Answer::Unknown(_) => Create {
             via,
             answer: unknown,
-            openshift,
         },
     })
 }

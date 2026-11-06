@@ -387,6 +387,24 @@ reviews(
     ],
 )
 
+case("missing-denied-no-reason", "A missing namespace that the identity may not create; the server sent no reason")
+namespace("missing-denied-no-reason", code=404)
+apis("missing-denied-no-reason")
+reviews("missing-denied-no-reason", [resource_row("create", "namespaces", allowed=False, reason="")])
+
+case("missing-openshift-refused", "OpenShift: a missing namespace; the access review itself is refused")
+namespace("missing-openshift-refused", code=404)
+apis("missing-openshift-refused", OPENSHIFT)
+reviews(
+    "missing-openshift-refused",
+    [
+        {
+            "spec": {"resourceAttributes": {"verb": "create", "resource": "projectrequests", "group": "project.openshift.io"}},
+            "refuse": 403,
+        }
+    ],
+)
+
 case("missing-apis-forbidden", "A missing namespace; the group list may not be read, so OpenShift is not known")
 namespace("missing-apis-forbidden", code=404)
 apis("missing-apis-forbidden", code=403)

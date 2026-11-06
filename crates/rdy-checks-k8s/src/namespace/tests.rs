@@ -309,9 +309,9 @@ async fn a_scoped_quota_next_to_a_roomy_one_says_only_the_unscoped_ones_leave_ro
         "Namespace acme-system exists and is active; the unscoped quotas leave room for what the product needs"
     );
     assert!(finding.partial.is_some(), "{finding:?}");
-    // No OpenShift evidence on this cluster, so the note about cluster quotas is not made.
+    // The note about cluster quotas is made on every result, since an existing namespace never shows OpenShift.
     assert!(
-        !notes(&finding).contains("ClusterResourceQuota"),
+        notes(&finding).contains("On OpenShift, a ClusterResourceQuota is not evaluated."),
         "{}",
         notes(&finding)
     );
@@ -337,7 +337,7 @@ async fn openshift_uses_the_project_request_review() {
     assert_eq!(finding.observed["create"]["via"], "projectrequests");
     assert_eq!(finding.observed["create"]["answer"], "allowed");
     assert!(finding.partial.is_none(), "{finding:?}");
-    assert!(notes(&finding).contains("An OpenShift ClusterResourceQuota is not evaluated."));
+    assert!(notes(&finding).contains("On OpenShift, a ClusterResourceQuota is not evaluated."));
     // The table holds only the project request row, so a `create namespaces` review would have been a 501.
     let requests = rig.requests();
     assert_eq!(
@@ -489,6 +489,50 @@ async fn openshift_without_the_right_to_request_a_project_blocks_with_oc() {
 }
 
 #[tokio::test]
+async fn an_openshift_review_that_is_refused_is_partial_with_the_oc_check() {
+    let rig = rig("missing-openshift-refused");
+    let finding = rig.finding(json!({})).await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert_eq!(finding.observed["create"]["via"], "projectrequests");
+    assert_eq!(finding.observed["create"]["answer"], "unknown");
+    let fix = fix_of(&finding);
+    assert!(
+        fix.contains("`oc auth can-i create projectrequests`"),
+        "{fix}"
+    );
+    assert_eq!(engine(&rig, finding, None).status, Status::Warn);
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_denied_review_with_no_reason_still_blocks_and_adds_no_cluster_note() {
+    let rig = rig("missing-denied-no-reason");
+    let finding = rig.finding(json!({})).await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert!(
+        !notes(&finding).contains("The cluster said"),
+        "{}",
+        notes(&finding)
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn one_quota_that_is_scoped_for_two_needs_gets_one_check_line() {
+    let rig = rig("quota-scoped");
+    let finding = rig
+        .finding(json!({"quota_needs": {"requests.cpu": 16, "cpu": 8}}))
+        .await;
+    let fix = fix_of(&finding);
+    assert_eq!(
+        fix.matches("Check quota `high-priority` by hand").count(),
+        1,
+        "{fix}"
+    );
+    rig.audit();
+}
+
+#[tokio::test]
 async fn openshift_with_plain_create_namespaces_and_no_project_requests_passes() {
     let rig = rig("missing-openshift-namespaces");
     let finding = rig.finding(json!({})).await;
@@ -505,7 +549,7 @@ async fn openshift_with_plain_create_namespaces_and_no_project_requests_passes()
     assert_eq!(finding.observed["create"]["via"], "namespaces");
     assert_eq!(finding.observed["create"]["answer"], "allowed");
     assert!(finding.partial.is_none(), "{finding:?}");
-    assert!(notes(&finding).contains("An OpenShift ClusterResourceQuota is not evaluated."));
+    assert!(notes(&finding).contains("On OpenShift, a ClusterResourceQuota is not evaluated."));
     let requests = rig.requests();
     assert_eq!(
         requests,
@@ -859,7 +903,7 @@ async fn a_default_limit_below_the_need_is_a_note_not_a_finding() {
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
     let notes = notes(&finding);
     assert!(
-        notes.contains("gives a container that sets no memory resources a request and a limit of 512Mi both (its defaultRequest is unset). A product container that needs 16Gi and sets nothing is OOM-killed at runtime, not refused at admission."),
+        notes.contains("gives a container that sets no memory resources both a request and a limit of 512Mi (its defaultRequest is unset). A product container that needs 16Gi and sets nothing is OOM-killed at runtime, not refused at admission."),
         "{notes}"
     );
     assert!(
@@ -989,7 +1033,7 @@ async fn a_hostile_limit_range_is_made_safe() {
 async fn every_request_is_bounded_and_every_cluster_is_audited() {
     // The cases are the directories of the fixture folder, so a new case cannot skip the audit.
     let cases = rdy_engine::testing::fixture_cases("k8s.namespace");
-    assert!(cases.len() >= 31, "the cases were found: {cases:?}");
+    assert!(cases.len() >= 33, "the cases were found: {cases:?}");
     for case in cases.iter().map(String::as_str) {
         let rig = rig(case);
         let mut spec = json!({
@@ -1011,8 +1055,8 @@ async fn every_request_is_bounded_and_every_cluster_is_audited() {
         );
         let requests = rig.requests();
         assert!(
-            requests.len() <= 6,
-            "{case}: at most six requests: {requests:?}"
+            requests.len() <= 4,
+            "{case}: at most four requests: {requests:?}"
         );
         // GET, except the access reviews (two at most), which carry no query and go to the review path.
         for (method, path) in &requests {

@@ -105,7 +105,7 @@ pub(super) fn limit_default(
     let name = object(name);
     let given = match default_request {
         Some(request) => format!("a request of {request} and a limit of {default}"),
-        None => format!("a request and a limit of {default} both (its defaultRequest is unset)"),
+        None => format!("both a request and a limit of {default} (its defaultRequest is unset)"),
     };
     format!(
         "LimitRange `{name}` in `{namespace}` gives a container that sets no memory resources {given}. A product container that needs {need} and sets nothing is OOM-killed at runtime, not refused at admission. One that sets a request of {need} and no limit gets {default} as its limit, and the pod is rejected. Set memory requests and limits on the product's containers (ask the vendor for chart values), or ask an admin to raise the default: `kubectl edit limitrange {name} -n {namespace}`."

@@ -85,8 +85,8 @@ drift and on a file the script did not write).
 policy engine cases `kyverno`, `kyverno-legacy-only`, `kyverno-no-legacy`, `kyverno-v1-forbidden`, `gatekeeper`, `both-engines`, `engine-forbidden`,
 `many-kinds`, `hostile-kinds`), `generated` by `scripts/gen-k8s-admission-fixtures.py` (`--check` fails on
 drift and on a file the script did not write).
-`checks/k8s.namespace/` holds 31 clusters (`active-plain`, `terminating`, `namespace-forbidden`,
-`namespace-named-secrets`, `no-namespace`, the missing-namespace cases `missing-creatable`, `missing-denied`,
+`checks/k8s.namespace/` holds 33 clusters (`active-plain`, `terminating`, `namespace-forbidden`,
+`namespace-named-secrets`, `no-namespace`, the missing-namespace cases `missing-creatable`, `missing-denied`, `missing-denied-no-reason`, `missing-openshift-refused`,
 `missing-openshift`, `missing-openshift-denied`, `missing-openshift-namespaces`, `missing-apis-forbidden`, `missing-review-refused`, the quota
 cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`, `quota-scoped-and-short`, `quota-scoped-and-roomy`,
 `quota-unused`, `quota-forbidden`, `quota-cut`, `quota-hostile`, and the limit range cases `limit-low`,
