@@ -164,6 +164,42 @@ impl Check for OsCheck {
     }
 }
 
+/// The OS facts `rdy run` puts in `report.host.os` (01 section 5.1).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct OsFacts {
+    /// `ID`, lower case, such as `rhel`.
+    pub id: String,
+    /// `VERSION_ID`, such as `9.4`. `None` for a rolling release.
+    pub version: Option<String>,
+    /// `PRETTY_NAME`, as the file has it. The report redactor runs over it with the rest of the report.
+    pub pretty_name: Option<String>,
+}
+
+/// Reads `/etc/os-release`, else `/usr/lib/os-release`, through `probe` and parses it with the parser
+/// `host.os` uses. Meant for the run-level probe (`check: null`), which has no `reads` prefixes and
+/// keeps the denylist. `None` when neither file can be read or holds a release: the report keeps the
+/// fields null and the header prints the OS family alone. No error escapes, because a host fact is
+/// never worth ending a run for.
+pub async fn read_os_facts(probe: &rdy_engine::probe::Probe) -> Option<OsFacts> {
+    for path in [OS_RELEASE, OS_RELEASE_USR] {
+        let Ok(file) = probe.read(Path::new(path)).await else {
+            continue;
+        };
+        let Ok(text) = probe.file_text(&file) else {
+            continue;
+        };
+        if let Some(release) = release::parse(&text) {
+            return Some(OsFacts {
+                id: release.id,
+                version: release.version_id,
+                pretty_name: release.pretty_name,
+            });
+        }
+    }
+    None
+}
+
 /// What reading one source gave.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Got<T> {

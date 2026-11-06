@@ -609,3 +609,63 @@ fn the_plain_note_is_not_printed_when_nothing_is_on_stdout() {
     let stderr = String::from_utf8(err).expect("utf-8");
     assert!(!stderr.contains("report files not written"), "{stderr}");
 }
+
+// M1-180: the OS fields of `report.host` come from os-release through the run-level probe.
+
+const RHEL_94: &str = "NAME=\"Red Hat Enterprise Linux\"\nVERSION=\"9.4 (Plow)\"\nID=\"rhel\"\nID_LIKE=\"fedora\"\nVERSION_ID=\"9.4\"\nPRETTY_NAME=\"Red Hat Enterprise Linux 9.4 (Plow)\"\n";
+
+fn host_of(machine: Replay) -> Host {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let probe = rdy_engine::testing::TestRun::new(machine).run_probe(rdy_engine::check::Os::Linux);
+    runtime.block_on(super::host_facts(&probe))
+}
+
+#[test]
+fn host_os_is_filled_from_etc_os_release() {
+    let host = host_of(Replay::new().file("/etc/os-release", RHEL_94));
+    assert_eq!(host.os.id.as_deref(), Some("rhel"));
+    assert_eq!(host.os.version.as_deref(), Some("9.4"));
+    assert_eq!(
+        host.os.pretty_name.as_deref(),
+        Some("Red Hat Enterprise Linux 9.4 (Plow)")
+    );
+}
+
+#[test]
+fn host_os_falls_back_to_usr_lib_os_release() {
+    let host = host_of(Replay::new().file("/usr/lib/os-release", RHEL_94));
+    assert_eq!(host.os.id.as_deref(), Some("rhel"));
+    assert_eq!(host.os.version.as_deref(), Some("9.4"));
+}
+
+#[test]
+fn host_os_stays_null_when_no_os_release_exists_or_it_is_unreadable() {
+    for machine in [
+        Replay::new(),
+        Replay::new().unreadable("/etc/os-release"),
+        Replay::new().file("/etc/os-release", "nothing useful here\n"),
+    ] {
+        let host = host_of(machine);
+        assert_eq!(host.os.id, None);
+        assert_eq!(host.os.version, None);
+        assert_eq!(host.os.pretty_name, None);
+    }
+}
+
+#[test]
+fn host_os_pretty_name_is_redacted() {
+    let text = "ID=acme\nVERSION_ID=1\nPRETTY_NAME=\"Acme canary-os-pretty-3321\"\n";
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let run = rdy_engine::testing::TestRun::new(Replay::new().file("/etc/os-release", text));
+    assert!(run.add_known_secret("canary-os-pretty-3321"));
+    let probe = run.run_probe(rdy_engine::check::Os::Linux);
+    let host = runtime.block_on(super::host_facts(&probe));
+    let pretty = host.os.pretty_name.expect("a pretty name");
+    assert!(!pretty.contains("canary-os-pretty-3321"), "{pretty}");
+}
