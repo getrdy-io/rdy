@@ -181,7 +181,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-082 | todo | | HTML structure test: headings, landmarks, tables and links
 
-- M1-083 | PR #TBD | | none. The three fixtures sit in `tests/fixtures/results/plan-07/` (no released version exists yet; M2-001 adds `0.1.0/`). Goldens are `reports/golden/results-*` (JSON and HTML in separate files); a fourth page, `results-secrets-redacted.html`, shows a run with a machine id, cut secrets and a known secret. Static checks run on every golden page.
+- M1-083 | [#41](https://github.com/getrdy-io/rdy/pull/41) | 2026-11-06 | none. The three fixtures sit in `tests/fixtures/results/plan-07/` (no released version exists yet; M2-001 adds `0.1.0/`). Goldens are `reports/golden/results-*` (JSON and HTML in separate files); a fourth page, `results-secrets-redacted.html`, shows a run with a machine id, cut secrets and a known secret. Static checks run on every golden page.
 
 - M1-084 | [#89](https://github.com/getrdy-io/rdy/pull/89) | 2026-10-29 | Enum values, a table per oneOf option and per check id (allOf if/then), the Example column (YAML, read back to the same value) and the missing-description failure. Every check parameter row now has a description, and each of the 17 check ids has an example. Deferred: the render does not validate examples, the test suite does, because a normal `jsonschema` dependency fails the license policy (ADR 0034; 09 section 5 says otherwise). No example on the top-level spec yet. The result reference waits for M1-085 | backlog corrected 2026-10-29 (correction-12): title says oneOf or allOf if/then variants, since check parameters are `allOf` with if/then (PR #80 review)
 
