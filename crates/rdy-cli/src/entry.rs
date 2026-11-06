@@ -86,6 +86,10 @@ fn run_live(args: Vec<OsString>, json: bool, stdout: &mut dyn Write, stderr: &mu
         runtime.block_on(run(args, backend, RunHooks::default(), stdout, stderr))
     }));
     runtime.shutdown_background();
+    // No child process outlives the run. Every command ends its own group, so this is a second line,
+    // and it is lock-free (M1-176). It sets the shutdown flag for good, which is right here: the process
+    // is about to exit. The watchdog does the same if the run hangs.
+    exec::kill_all_groups();
     match ran {
         Ok(code) => code.code(),
         Err(payload) => panic::resume_unwind(payload),

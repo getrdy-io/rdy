@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rdy_spec::LoadedSpec;
-use rdy_spec::result::{Capability, CheckResult, Severity, Status};
+use rdy_spec::result::{Capability, CheckResult, Report, Severity, Status};
 use rdy_spec::spec::{CheckSpec, Lenient};
 
 use crate::check::{CheckContext, CheckInfo, Finding, Need, Os};
@@ -40,7 +40,8 @@ use crate::plan::{PlanAction, RunPlan};
 use crate::privilege::{Privilege, capabilities};
 use crate::probe::{ActionLogOutput, ProbeHub};
 use crate::redact::RuleCounts;
-use crate::sched::{DEFAULT_DEADLINE, DEFAULT_JOBS, End, Planned, Scheduler};
+use crate::sched::{DEFAULT_DEADLINE, DEFAULT_JOBS, End, Observer, Planned, Ran, Scheduler};
+use crate::watchdog::Board;
 
 #[cfg(test)]
 mod tests;
@@ -61,6 +62,58 @@ pub struct RunOptions {
     pub spec_arg: String,
     /// The instant the deadline is counted from. `None` counts from the start of the run.
     pub origin: Option<std::time::Instant>,
+    /// Gives the watchdog its board (M1-176). `None` runs without one.
+    pub watch: Option<Watch>,
+}
+
+/// What the watchdog needs from a run, and where to send it (M1-176).
+///
+/// [`Engine::execute`] builds a [`Board`] once the plan is made and before the first check starts: one
+/// slot per spec entry, in spec order, with the results of the entries the plan skipped already in it.
+/// It tells the board about every start and end, and passes it to `on_board` so the caller can arm the
+/// watchdog ([`crate::watchdog::Watchdog::arm`]).
+#[derive(Clone)]
+pub struct Watch {
+    /// The report without its results: the producer, the run, the spec, the host and so on. A partial
+    /// report is this plus the board's results.
+    pub base: Report,
+    /// Called once with the board, before the first check starts.
+    pub on_board: Arc<dyn Fn(Arc<Board>) + Send + Sync>,
+}
+
+impl std::fmt::Debug for Watch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Watch").finish_non_exhaustive()
+    }
+}
+
+/// Sends the scheduler's positions to the board's slots. The scheduler counts only the checks it runs;
+/// the board has a slot for every spec entry.
+struct SlotObserver {
+    board: Arc<Board>,
+    slot_of: Vec<usize>,
+}
+
+impl Observer for SlotObserver {
+    fn started(&self, index: usize, at: Duration, timeout: Duration) {
+        if let Some(slot) = self.slot_of.get(index) {
+            self.board.started(*slot, at, timeout);
+        }
+    }
+
+    fn finished(&self, index: usize, ran: &Ran) {
+        if let Some(slot) = self.slot_of.get(index) {
+            self.board.finished(*slot, ran);
+        }
+    }
+}
+
+/// What the board keeps of one scheduled check to map its end by itself.
+struct Owned {
+    info: &'static CheckInfo,
+    spec_entry: CheckSpec,
+    ctx: CheckContext,
+    template: CheckResult,
 }
 
 impl RunOptions {
@@ -73,6 +126,7 @@ impl RunOptions {
             network: true,
             spec_arg: "<spec>".to_owned(),
             origin: None,
+            watch: None,
         }
     }
 }
@@ -203,13 +257,82 @@ impl Engine {
             items.push(item);
         }
 
+        // The board for the watchdog, when the caller wants one.
+        let observer = options.watch.as_ref().map(|watch| {
+            let mut templates: Vec<CheckResult> = Vec::with_capacity(slots.len());
+            let mut owned: Vec<Option<Owned>> = Vec::with_capacity(slots.len());
+            let mut slot_of: Vec<usize> = Vec::new();
+            let mut kept = items.iter();
+            for (slot, entry) in slots.iter().enumerate() {
+                match entry {
+                    Slot::Skipped(result) => {
+                        templates.push((**result).clone());
+                        owned.push(None);
+                    }
+                    Slot::Ran(template) => {
+                        templates.push((**template).clone());
+                        owned.push(kept.next().map(|item| Owned {
+                            info: item.info,
+                            spec_entry: item.spec_entry.clone(),
+                            ctx: item.ctx.clone(),
+                            template: (**template).clone(),
+                        }));
+                        slot_of.push(slot);
+                    }
+                }
+            }
+            let deadline = options.deadline;
+            let spec_arg = options.spec_arg.clone();
+            let board = Arc::new(Board::new(
+                watch.base.clone(),
+                templates,
+                self.hub.redactor().clone(),
+                deadline,
+                Box::new(move |slot, ran| {
+                    let Some(Some(owned)) = owned.get(slot) else {
+                        // The scheduler only reports the slots it was given, so this cannot happen. If
+                        // it did, the entry would count as not run, never as passed.
+                        return unfinished_result(&identity("", "", "", &Severity::Block));
+                    };
+                    let mut result = map_end(
+                        owned.info,
+                        &owned.spec_entry,
+                        &owned.ctx,
+                        &owned.template,
+                        ran.clone(),
+                        deadline,
+                    );
+                    fill_spec_arg(&mut result, &spec_arg);
+                    result
+                }),
+            ));
+            for (slot, entry) in slots.iter().enumerate() {
+                if let Slot::Skipped(result) = entry {
+                    let mut result = (**result).clone();
+                    fill_spec_arg(&mut result, &options.spec_arg);
+                    board.record(slot, result);
+                }
+            }
+            (board, slot_of)
+        });
+
         let mut scheduler = Scheduler::new(options.jobs, os, available)
             .with_deadline(options.deadline)
             .with_probes(self.hub.clone());
         if let Some(origin) = options.origin {
             scheduler = scheduler.with_origin(origin);
         }
-        let ran = scheduler.run(planned).await;
+        let ran = match (&observer, options.watch.as_ref()) {
+            (Some((board, slot_of)), Some(watch)) => {
+                (watch.on_board)(Arc::clone(board));
+                let observer = SlotObserver {
+                    board: Arc::clone(board),
+                    slot_of: slot_of.clone(),
+                };
+                scheduler.run_observed(planned, Arc::new(observer)).await
+            }
+            _ => scheduler.run(planned).await,
+        };
 
         // One result per item, in order. A result the scheduler did not hand back is "not finished", never
         // a missing entry.
@@ -221,20 +344,14 @@ impl Engine {
                 let Some(ran) = ran.next() else {
                     return unfinished_result(&template);
                 };
-                match ran.end {
-                    End::Done(outcome) => map_outcome(
-                        item.info,
-                        item.spec_entry,
-                        &item.ctx,
-                        *outcome,
-                        millis(ran.started),
-                        millis(ran.elapsed),
-                    ),
-                    End::TimedOut { after } => timeout_result(&template, after, ran.started),
-                    End::Panicked { .. } => panicked_result(&template),
-                    End::RunDeadline => run_deadline_result(&template, options.deadline),
-                    End::Cancelled => cancelled_result(&template),
-                }
+                map_end(
+                    item.info,
+                    item.spec_entry,
+                    &item.ctx,
+                    &template,
+                    ran,
+                    options.deadline,
+                )
             })
             .collect();
 
@@ -316,6 +433,31 @@ fn spec_timeout(entry: &CheckSpec) -> Option<Duration> {
         .as_ref()
         .and_then(Lenient::valid)
         .map(|timeout| timeout.as_duration().to_std())
+}
+
+/// Turns how a scheduled check ended into its result.
+fn map_end(
+    info: &'static CheckInfo,
+    spec_entry: &CheckSpec,
+    ctx: &CheckContext,
+    template: &CheckResult,
+    ran: Ran,
+    deadline: Duration,
+) -> CheckResult {
+    match ran.end {
+        End::Done(outcome) => map_outcome(
+            info,
+            spec_entry,
+            ctx,
+            *outcome,
+            millis(ran.started),
+            millis(ran.elapsed),
+        ),
+        End::TimedOut { after } => timeout_result(template, after, ran.started),
+        End::Panicked { .. } => panicked_result(template),
+        End::RunDeadline => run_deadline_result(template, deadline),
+        End::Cancelled => cancelled_result(template),
+    }
 }
 
 /// Puts the user's own spelling of the spec file where the root fix says `<spec>`.

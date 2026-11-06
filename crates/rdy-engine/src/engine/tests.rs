@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rdy_spec::result::{Bucket, ErrorKind, FixSource, Need as WireNeed, SkipKind, Status};
+use rdy_spec::result::{Bucket, ErrorKind, FixSource, Need as WireNeed, Report, SkipKind, Status};
 use rdy_spec::sig::{Policy, TrustStore};
 use rdy_spec::spec::{CheckSpec, Spec};
 
@@ -377,4 +377,79 @@ fn a_refused_declared_secret_is_reported_and_counted() {
         1,
         "the refusal is counted"
     );
+}
+
+fn watch_base() -> Report {
+    use rdy_spec::result::{
+        Host, HostOs, HostOsFamily, Identity, Producer, Run, RunOptions as WireOptions, Signature,
+        SpecRef,
+    };
+    Report::new(
+        Producer::new("0.1.0", "0.1.0", "x86_64-unknown-linux-musl"),
+        Run::new(
+            "00000000-0000-4000-8000-000000000000",
+            "2027-02-08T10:00:00.000Z",
+            "2027-02-08T10:05:00.000Z",
+            300_000,
+            WireOptions::new(8, 300_000),
+        ),
+        SpecRef::new("acme", "0".repeat(64), "spec.yaml", 10),
+        Signature::unsigned(),
+        Host::new("build-01", HostOs::new(HostOsFamily::Linux), "x86_64"),
+        Identity::new(Some(1000), None, false),
+        Vec::new(),
+    )
+}
+
+type BoardSlot = Arc<std::sync::Mutex<Option<Arc<Board>>>>;
+
+fn watching(slot: &BoardSlot) -> Option<Watch> {
+    let keep = Arc::clone(slot);
+    Some(Watch {
+        base: watch_base(),
+        on_board: Arc::new(move |board| {
+            *keep.lock().expect("lock") = Some(board);
+        }),
+    })
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_watchdog_board_gets_a_slot_per_entry_and_holds_what_the_final_results_hold() {
+    let slot = BoardSlot::default();
+    let mut options = RunOptions::new();
+    options.spec_arg = "'my specs/a.yaml'".to_owned();
+    options.watch = watching(&slot);
+    let done = run_with(Replay::new(), false, &options).await;
+    let board = slot
+        .lock()
+        .expect("lock")
+        .take()
+        .expect("the board was handed over before the run");
+    // The scheduler runs six checks; the board has all seven slots, the plan's skip included, and each
+    // result sits where its entry is.
+    let (report, _counts) = board.partial_report(Duration::from_secs(1));
+    assert!(!report.complete);
+    assert_eq!(report.checks, done.results);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_skipped_entry_before_a_ran_check_keeps_its_own_slot() {
+    // `net.egress` first: the scheduler's index 0 is the second spec entry, and must land in slot 1.
+    let text = "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: net.egress\n    endpoints: [\"registry.acme.example:443\"]\n  - id: host.memory\n    min: 1Gi\n";
+    let slot = BoardSlot::default();
+    let mut options = RunOptions::new();
+    options.watch = watching(&slot);
+    let engine = engine(Replay::new());
+    let spec = loaded(text);
+    let plan = engine.plan(&spec, Os::Linux, "0.1.0");
+    let done = engine
+        .execute(&spec, plan, &privilege(false), &options)
+        .await;
+    let board = slot.lock().expect("lock").take().expect("a board");
+    let (report, _counts) = board.partial_report(Duration::from_secs(1));
+    let keys: Vec<&str> = report.checks.iter().map(|r| r.key.as_str()).collect();
+    assert_eq!(keys, ["net.egress", "host.memory"]);
+    assert_eq!(report.checks[0].status, Status::Skipped);
+    assert_eq!(report.checks[1].status, Status::Block);
+    assert_eq!(report.checks, done.results);
 }

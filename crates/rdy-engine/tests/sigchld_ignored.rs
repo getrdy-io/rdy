@@ -37,6 +37,20 @@ fn sigchld_child() {
             .expect("SigIgn line");
         assert!(mask & (1 << 16) != 0, "SIGCHLD is not ignored: {mask:x}");
     }
+    // The same proof by behaviour, which holds on every Unix (macOS has no /proc, M1-176). With SIGCHLD
+    // ignored the kernel reaps a child itself when it exits, so waiting for it fails with ECHILD after the
+    // exit. With a handler (or the default action) the wait would return the status. This runs before
+    // the runner, which replaces the ignore with a handler on its first command.
+    let mut probe = std::process::Command::new("/bin/sh")
+        .args(["-c", "exit 0"])
+        .spawn()
+        .expect("a probe child");
+    let error = probe
+        .wait()
+        .expect_err("SIGCHLD is ignored, so the kernel reaps the child and wait must fail");
+    // ECHILD is 10 on Linux and on macOS.
+    assert_eq!(error.raw_os_error(), Some(10), "{error:?}");
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()

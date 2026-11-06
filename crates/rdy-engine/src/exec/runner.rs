@@ -308,6 +308,23 @@ pub fn live_groups() -> usize {
 /// process", which means the group is already gone.
 ///
 /// Callers must hold the leader unreaped, so the group id cannot have been reused.
+///
+/// **The watchdog and the reap (M1-043 carry, closed in M1-176).** [`kill_all_groups`] reads a slot and
+/// calls this function while the run's own task may be ending the same group. It cannot misfire:
+///
+/// 1. The run's task kills the group, then frees the slot, and only then reaps the leader
+///    (`Tracked::end_group`, proved by `the_slot_is_freed_after_the_kill_and_before_the_reap`). So a
+///    slot that still holds the pid means the leader has not been reaped yet, or is being reaped after
+///    the slot was read.
+/// 2. If the leader is reaped between the slot read and this call, `leader_unreaped` sees `ECHILD` and
+///    the signal is skipped (`the_group_of_a_reaped_leader_is_not_signalled`). That also covers a kernel
+///    that reaps by itself because `SIGCHLD` is ignored, which `ensure_sigchld_handled` prevents anyway.
+/// 3. What is left is a reap between `leader_unreaped` and the `kill` call, a few instructions apart,
+///    followed by the kernel giving the same number to a new process group before the signal lands. A
+///    group id is the leader's pid, and pids are handed out in turn up to `pid_max` (32768 or more,
+///    4194304 on 64-bit Linux by default), so the number comes back only after the counter wraps. That
+///    cannot happen inside that gap. The worst case is also bounded: the signal goes to a group of
+///    this user, in a process that is itself ending the run.
 #[cfg(unix)]
 fn kill_group(pid: u32) {
     use rustix::process::{Signal, kill_process_group};

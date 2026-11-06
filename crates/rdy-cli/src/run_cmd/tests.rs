@@ -317,14 +317,14 @@ fn an_empty_report_folder_is_removed_and_one_with_a_file_stays() {
 
     let empty = made("20270309T101502Z");
     let empty_path = empty.path().to_owned();
-    super::discard_if_empty(Some(empty));
+    super::discard_if_empty(Some(std::sync::Arc::new(empty)));
     assert!(!empty_path.exists(), "the empty folder stayed");
 
     let full = made("20270309T101503Z");
     let full_path = full.path().to_owned();
     let redacted = redactor().redact_report(small_report()).expect("redacts");
     full.write_json(&redacted).expect("a file");
-    super::discard_if_empty(Some(full));
+    super::discard_if_empty(Some(std::sync::Arc::new(full)));
     assert!(full_path.exists(), "the folder with a file went");
     assert!(std::fs::read_dir(&full_path).expect("a folder").count() > 0);
 

@@ -4,6 +4,9 @@
 //! - `crates/rdy-cli/src`, outside `#[cfg(test)]` items, never names `Replay` or `testing`.
 //! - `live_backend` appears outside test code in `src/entry.rs` only (INV-07). The lint wall allows the
 //!   one `expect(clippy::disallowed_methods)` there and in no other file of this crate.
+//! - `RunHooks` is built in exactly one place, `src/entry.rs`, and only as `RunHooks::default()`
+//!   (SEC-154, M1-176). The hooks are how a test steers a run (the clock, the deadline, the families),
+//!   so the shipped binary must never build any other value.
 //! - The normal `rdy-engine` dependency does not turn on `testing`. CI's `cargo tree` step checks the
 //!   built graph on every push; this is the same rule at the manifest.
 //!
@@ -123,6 +126,54 @@ fn only_the_entry_point_builds_the_live_backend() {
         }
     }
     assert_eq!(found, [Some("entry.rs".to_owned())]);
+}
+
+/// Whether `line` builds a `RunHooks`: a path call (`RunHooks::default()`, `RunHooks::new(..)`), a
+/// struct literal (`RunHooks { .. }`) or a tuple call. The type's own definition and `impl` blocks are
+/// not builds, and neither is a mention in a signature or a `use`.
+fn builds_run_hooks(line: &str) -> bool {
+    let line = line.trim_start();
+    if line.starts_with("pub struct RunHooks") || line.starts_with("impl RunHooks") {
+        return false;
+    }
+    ["RunHooks::", "RunHooks {", "RunHooks("]
+        .iter()
+        .any(|pattern| line.contains(pattern))
+}
+
+#[test]
+fn only_the_entry_point_builds_run_hooks_and_only_as_the_default() {
+    let mut builds = Vec::new();
+    for (path, code) in shipped_files() {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        for line in code.iter().filter(|line| builds_run_hooks(line)) {
+            builds.push((name.clone(), line.trim().to_owned()));
+        }
+    }
+    assert_eq!(
+        builds.len(),
+        1,
+        "RunHooks is built in more than one place: {builds:?}"
+    );
+    let (name, line) = &builds[0];
+    assert_eq!(name, "entry.rs", "{builds:?}");
+    assert!(line.contains("RunHooks::default()"), "{builds:?}");
+}
+
+#[test]
+fn the_run_hooks_scan_sees_what_it_must() {
+    assert!(builds_run_hooks(
+        "    runtime.block_on(run(args, backend, RunHooks::default(), out))"
+    ));
+    assert!(builds_run_hooks("let hooks = RunHooks { clock: None };"));
+    assert!(builds_run_hooks("let hooks = RunHooks::new();"));
+    assert!(!builds_run_hooks("use crate::hooks::RunHooks;"));
+    assert!(!builds_run_hooks("    hooks: RunHooks,"));
+    assert!(!builds_run_hooks("pub struct RunHooks {"));
+    assert!(!builds_run_hooks("impl RunHooks {"));
 }
 
 #[test]

@@ -9,16 +9,22 @@
 //!    report folder, right after verification and before any check (ADR 0016). `--no-report` makes none.
 //!    The run id is made before the folder, so a failure to make it leaves no folder. A failure after the
 //!    folder exists removes it again when it is still empty.
-//! 3. Plan, probe the needs, run the checks, map and redact each result ([`Engine::execute`]).
+//! 3. Plan, probe the needs, run the checks, map and redact each result ([`Engine::execute`]). The
+//!    watchdog (M1-176) is started first of all and armed with the folder and the run board as soon as
+//!    the plan exists, so a check that never yields, or a stdout nobody reads, ends in exit 70 with a
+//!    `complete: false` report in the folder (07 section 5.2).
 //! 4. Build the report from the results and the facts of the run (producer, run, spec, signature,
 //!    host, identity from the privilege snapshot), redact the whole of it and write it.
-//! 5. Write the files, then print: with `--json` the same bytes as the `.json` file on stdout, and a
-//!    short result on stderr. The full terminal layout is M1-086.
+//! 5. Print, then write the files: with `--json` the document goes to stdout first, then the state
+//!    moves to `Writing`, the files are written and `finish` stores the exit code. The short result
+//!    goes to stderr last. The full terminal layout is M1-086. Stdout comes first because it is the
+//!    one write that can block for good: while it does, the watchdog still owns the report.
 //!
 //! **Exit codes.** A verdict gives 0, 1 or 2. A spec problem gives 64. A folder that cannot be made, a
 //! report that cannot be written and a bug give 70. When the files cannot be written after the
-//! verdict exists, the result still prints (stdout gets the Report with `complete: false`, 07 section
-//! 4.1) and the exit code is 70. If even that cannot be written, stdout gets the error object.
+//! verdict exists, the exit code is 70 and the summary and the error go to stderr. Without `--json`
+//! nothing is on stdout. With `--json` stdout already holds the whole document, printed before the
+//! files (see 5 above), so a second one would not be one document (PC-50 in 13).
 //!
 //! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), Ctrl-C (M1-058),
 //! `--jobs` (M1-059), the kube flags (M1-107), `--key` and the full unsigned banner (M1-126) and the
@@ -26,23 +32,25 @@
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::{Instant, SystemTime};
+use std::sync::{Arc, Weak};
+use std::time::{Duration, Instant, SystemTime};
 
 use rdy_engine::check::{Os, current_os};
-use rdy_engine::engine::{Engine, RunOptions as EngineOptions};
+use rdy_engine::engine::{Engine, RunOptions as EngineOptions, Watch};
 use rdy_engine::family::Registry;
-use rdy_engine::output::{OutputDir, report_time};
+use rdy_engine::output::{OutputDir, ReportError, report_time};
 use rdy_engine::privilege::Privilege;
 use rdy_engine::probe::{NativeCall, NativeValue, Probe, ProbeHub};
 use rdy_engine::redact::{RedactedReport, Redactor, RuleCounts};
 use rdy_engine::report::{JsonError, write_json};
 use rdy_engine::sched::{DEFAULT_DEADLINE, cap_jobs};
 use rdy_engine::summary::{last_line, summary_line};
+use rdy_engine::watchdog::{Board, ReportSink, Timing, Watchdog, WatchdogConfig, WriteState};
 use rdy_spec::result::{
-    Host, HostOs, HostOsFamily, Producer, Report, Run, RunOptions, Signature, SpecRef,
+    CheckResult, Host, HostOs, HostOsFamily, Producer, Report, Run, RunOptions, Signature, SpecRef,
 };
 use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, SignatureState, TrustStore};
-use rdy_spec::{LoadedSpec, load};
+use rdy_spec::{LoadedSpec, VerifiedSpecBytes, load};
 
 use crate::cli::{COMMIT, RunArgs, TARGET};
 use crate::error::{
@@ -107,6 +115,21 @@ async fn execute(
         registry,
     } = cx;
     let clock = || hooks.clock.unwrap_or_else(SystemTime::now);
+    let deadline = hooks.deadline.unwrap_or(DEFAULT_DEADLINE);
+
+    // The watchdog is a plain OS thread, so a check that never yields cannot stop it, and it counts
+    // from the same origin as the scheduler (M1-176, 02 "Watchdog"). A run with no watchdog is not
+    // allowed: if the thread cannot start, the run does not either.
+    let state = Arc::new(WriteState::new());
+    let watchdog = Arc::new(
+        Watchdog::start(WatchdogConfig::new(
+            origin,
+            deadline,
+            Arc::clone(&state),
+            redactor.clone(),
+        ))
+        .map_err(|_| CliError::bug())?,
+    );
 
     if args.key.is_some() {
         // The one-run key and its banner are M1-126. Ignoring the flag would run a spec the user did
@@ -129,20 +152,15 @@ async fn execute(
     };
     let started_at = clock();
     let product = loaded.spec().metadata.product.as_str().to_owned();
-    let dir = open_report_dir(args, &product, started_at)?;
+    let dir = open_report_dir(args, &product, started_at)?.map(Arc::new);
 
     let mut options = EngineOptions::new();
     options.network = !args.no_network;
-    options.deadline = hooks.deadline.unwrap_or(DEFAULT_DEADLINE);
+    options.deadline = deadline;
     options.spec_arg = shell_word(&name);
     options.origin = Some(origin);
 
     let host = host_facts(&hub.run_probe()).await;
-    let engine = Engine::new(registry, hub);
-    let plan = engine.plan(&loaded, current_os(), env!("CARGO_PKG_VERSION"));
-    let executed = engine.execute(&loaded, plan, &privilege, &options).await;
-
-    let finished_at = clock();
     let mut run_options = RunOptions::new(
         u32::try_from(cap_jobs(options.jobs)).unwrap_or(1),
         u64::try_from(options.deadline.as_millis()).unwrap_or(u64::MAX),
@@ -151,22 +169,52 @@ async fn execute(
     run_options.network = options.network;
     // Recorded only. The flag does nothing until M1-107 builds the Kubernetes family.
     run_options.kube_context.clone_from(&args.kube_context);
-    let run = Run::new(
+
+    // The watchdog can write a partial report only when there is a folder to write it in
+    // (`--no-report` has none, and then a hung run ends with exit 70 and no report, 07 section 5.2).
+    // It gets the folder through a weak handle, so a folder removed after a failure is not held open.
+    if let Some(dir) = &dir {
+        // The report as it stands at the watchdog's firing time: the run is over, as far as the report
+        // can tell, and the checks are whatever the board has by then.
+        let fires_at = started_at + deadline + Timing::DEFAULT.grace;
+        let base = assemble(
+            &loaded,
+            args,
+            &privilege,
+            host.clone(),
+            make_run(
+                run_id.clone(),
+                started_at,
+                fires_at,
+                deadline + Timing::DEFAULT.grace,
+                run_options.clone(),
+            ),
+            Vec::new(),
+        );
+        let sink: Arc<dyn ReportSink> = Arc::new(FolderSink {
+            dir: Arc::downgrade(dir),
+            spec: loaded.verified_bytes().clone(),
+        });
+        let armed = watchdog_arm(Arc::clone(&watchdog), sink);
+        options.watch = Some(Watch {
+            base,
+            on_board: Arc::new(armed),
+        });
+    }
+
+    let engine = Engine::new(registry, hub);
+    let plan = engine.plan(&loaded, current_os(), env!("CARGO_PKG_VERSION"));
+    let executed = engine.execute(&loaded, plan, &privilege, &options).await;
+
+    let finished_at = clock();
+    let run = make_run(
         run_id,
-        report_time(started_at),
-        report_time(finished_at),
-        u64::try_from(origin.elapsed().as_millis()).unwrap_or(u64::MAX),
+        started_at,
+        finished_at,
+        origin.elapsed(),
         run_options,
     );
-    let mut report = Report::new(
-        producer(),
-        run,
-        spec_ref(&loaded, &args.spec),
-        Signature::from(loaded.signature()),
-        host,
-        privilege.identity(),
-        executed.results,
-    );
+    let mut report = assemble(&loaded, args, &privilege, host, run, executed.results);
     report.capabilities = executed.capabilities;
     executed.log.apply(&mut report);
     let counts = executed.counts;
@@ -179,33 +227,117 @@ async fn execute(
         }
     };
 
-    // Files first, so the "Report written to" line is true when it prints.
+    // The order is the watchdog's contract (M1-043, M1-176). Stdout first: it is the one write that can
+    // block for good, on a pipe nobody reads, and while it blocks the state is still `Running`, so the
+    // watchdog can write the partial report and end the run. Then the claim, then the files, then
+    // `finish`. After `finish` the watchdog is only a backstop with the stored exit code.
+    let printed = if json {
+        print_json(&redacted, stdout).map_err(writer_error)
+    } else {
+        Ok(())
+    };
+    state.claim_or_park();
     let files = match &dir {
         Some(dir) => write_files(dir, &loaded, &redacted),
         None => Ok(()),
     };
+    if let Err(error) = printed {
+        // The report exists and stdout cannot take it. The files were still written; the error is what
+        // the user sees.
+        if files.is_err() {
+            discard_if_empty(dir);
+        }
+        state.finish(crate::EXIT_INTERNAL);
+        return Err(error);
+    }
     match files {
         Ok(()) => {
-            if json {
-                print_json(&redacted, stdout).map_err(writer_error)?;
-            }
-            print_result(&redacted, dir.as_ref(), args, stderr);
+            state.finish(redacted.exit_code);
+            print_result(&redacted, dir.as_deref(), args, stderr);
             Ok(redacted.exit_code)
         }
         Err(error) => {
             // A folder with nothing in it is not a report. One with a file in it stays, for the user.
             discard_if_empty(dir);
+            state.finish(crate::EXIT_INTERNAL);
+            // With `--json` the document is on stdout already, so only the summary and the error follow,
+            // on stderr.
             Ok(fail_after_verdict(
-                &error, report, counts, &redactor, json, stdout, stderr,
+                &error, report, counts, &redactor, false, stdout, stderr,
             ))
         }
     }
 }
 
+/// What the watchdog writes into the report folder when it has to: the spec copy and the partial
+/// report. The folder is held weakly, so it is not kept open after the run has dropped it.
+struct FolderSink {
+    dir: Weak<OutputDir>,
+    spec: VerifiedSpecBytes,
+}
+
+impl ReportSink for FolderSink {
+    fn write(&self, report: &RedactedReport) -> Result<(), ReportError> {
+        let Some(dir) = self.dir.upgrade() else {
+            return Ok(());
+        };
+        dir.write_spec(&self.spec)?;
+        dir.write_json(report)?;
+        Ok(())
+    }
+}
+
+/// The callback for [`Watch::on_board`]: arms the watchdog with the board and the sink.
+fn watchdog_arm(
+    watchdog: Arc<Watchdog>,
+    sink: Arc<dyn ReportSink>,
+) -> impl Fn(Arc<Board>) + Send + Sync {
+    move |board| {
+        watchdog.arm(board, Arc::clone(&sink));
+    }
+}
+
+/// The `run` block of the report.
+fn make_run(
+    id: String,
+    started_at: SystemTime,
+    finished_at: SystemTime,
+    took: Duration,
+    options: RunOptions,
+) -> Run {
+    Run::new(
+        id,
+        report_time(started_at),
+        report_time(finished_at),
+        u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
+        options,
+    )
+}
+
+/// The report from the facts of the run and its `results`.
+fn assemble(
+    loaded: &LoadedSpec,
+    args: &RunArgs,
+    privilege: &Privilege,
+    host: Host,
+    run: Run,
+    results: Vec<CheckResult>,
+) -> Report {
+    Report::new(
+        producer(),
+        run,
+        spec_ref(loaded, &args.spec),
+        Signature::from(loaded.signature()),
+        host,
+        privilege.identity(),
+        results,
+    )
+}
+
 /// Removes the report folder when nothing was written into it. A folder that holds a file stays, and so
 /// does one that cannot be removed: this is a best-effort tidy, and the run's own error is what counts.
 /// The handle is dropped first, because Windows cannot remove a folder that is still open.
-fn discard_if_empty(dir: Option<OutputDir>) {
+fn discard_if_empty(dir: Option<Arc<OutputDir>>) {
     if let Some(dir) = dir {
         let path = dir.path().to_owned();
         drop(dir);

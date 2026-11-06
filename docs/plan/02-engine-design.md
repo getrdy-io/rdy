@@ -233,8 +233,13 @@ Headline (cli-ux to confirm): `NOT READY: 1 blocker, 2 required checks not run`.
     non-blocking write, or nothing.
   - **Too early.** Before the output directory exists, it exits 70 with no report.
   - **Exit bound.** Worst case: deadline plus 22 s.
-  - On the normal path the CLI moves the state to `Writing`, writes, flushes, sets `Done`, kills any
-    leftover process groups and calls `std::process::exit(code)`; nothing waits on a runtime drop. The
+  - On the normal path the CLI prints `--json` stdout and flushes it (the one write that can block for
+    good, so the state is still `Running` and the watchdog still owns the report), moves the state to
+    `Writing`, writes the files, sets `Done` with the exit code, prints the stderr summary, kills any
+    leftover process groups (`entry::run_live`) and exits; nothing waits on a runtime drop. `rdy run`
+    starts the watchdog before it reads the spec and arms it once the plan exists: `Engine::execute`
+    builds the `Board` (one slot per spec entry, plan skips already in it) from `RunOptions::watch`
+    (M1-176). The
     kube exec plugin is not ours to track (residual).
 - **Ctrl-C in M1.** The first Ctrl-C cancels the run token: checks abort, child process groups are
   killed, and the CLI exits 70 with "interrupted, no report written". Writing the partial report with

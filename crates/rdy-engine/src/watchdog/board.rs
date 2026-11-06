@@ -20,8 +20,8 @@ use crate::redact::{Redactor, RuleCounts};
 use crate::sched::{Observer, Ran};
 
 /// How the board turns an end into a result. It gets the check's index and what the scheduler saw.
-/// The engine ([`crate::engine`], M1-057) maps ends itself and does not use the board yet. The watchdog
-/// wiring gives it the same mapping.
+/// [`crate::engine::Engine::execute`] builds the board for a run (M1-176) and gives it the same mapping
+/// it uses for the final results, so a partial report reads like the full one.
 pub type MapRan = Box<dyn Fn(usize, &Ran) -> CheckResult + Send + Sync>;
 
 /// How long `snapshot` sleeps between two `try_lock` calls.
@@ -186,10 +186,20 @@ impl Observer for Board {
     }
 
     fn finished(&self, index: usize, ran: &Ran) {
+        if index >= self.templates.len() {
+            return;
+        }
+        self.record(index, (self.map)(index, ran));
+    }
+}
+
+impl Board {
+    /// Keeps the finished `result` of slot `index`, redacted. For a result that does not come from the
+    /// scheduler, such as a check the plan skipped. An index past the last slot is ignored.
+    pub fn record(&self, index: usize, result: CheckResult) {
         let Some(template) = self.templates.get(index) else {
             return;
         };
-        let result = (self.map)(index, ran);
         // Redacted before the lock is taken: a slow redaction must not make the watchdog's `try_lock`
         // fail. Only the counts and the result go in under the lock.
         let mut counts = RuleCounts::default();
