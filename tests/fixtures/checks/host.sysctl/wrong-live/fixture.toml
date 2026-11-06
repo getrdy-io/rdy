@@ -1,0 +1,12 @@
+schema = 1
+name = "wrong-live"
+summary = "vm.max_map_count is the kernel default and no file sets it"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

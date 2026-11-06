@@ -1,0 +1,5 @@
+{
+  "unreadable": [
+    "proc/sys/vm/max_map_count"
+  ]
+}

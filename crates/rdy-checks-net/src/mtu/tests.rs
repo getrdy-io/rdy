@@ -626,8 +626,64 @@ fn a_link_into_sys_devices_is_read_through_and_nothing_else_there_is_readable() 
         .block_on(probe.read(Path::new("/sys/class/net/eth0/mtu")))
         .expect("the link is followed");
     assert_eq!(mtu.bytes, b"1500\n");
-    // A path through the link to a file of another shape is refused by the real-path rule.
+    // A text path with a `..` component is refused by the `..` rule before any link is followed. It is
+    // not the real-path rule that stops it.
     let other =
         runtime.block_on(probe.read(Path::new("/sys/class/net/eth0/../../virtual/dmi/id/x")));
-    assert!(other.is_err());
+    assert!(matches!(other, Err(ProbeError::Denied { .. })), "{other:?}");
+}
+
+#[test]
+fn a_link_out_of_the_class_is_denied_end_to_end() {
+    // SEC-28-2: `sys/class/net/evil` leads to `/sys/devices/virtual/dmi/id`, where the file exists. A
+    // read through the link resolves to `/sys/devices/virtual/dmi/id/board_asset_tag`, which has the
+    // class `dmi` and not `net`, so the real-path rule refuses it. `device` leads from a class device to
+    // its parent, whose `vpd` page is a file of the wrong shape.
+    let fixture = load("hostile-links");
+    let test_run = TestRun::for_fixture(&fixture);
+    let ctx = test_run.context_for(&INFO, "net.mtu", Os::Linux, Vec::<Need>::new());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    let probe = ctx.probe();
+    for path in [
+        "/sys/class/net/evil/board_asset_tag",
+        "/sys/class/net/eth0/device/vpd",
+    ] {
+        let refused = runtime.block_on(probe.read(Path::new(path)));
+        assert!(
+            matches!(refused, Err(ProbeError::Denied { .. })),
+            "{path}: {refused:?}"
+        );
+    }
+    // The control: the honest link in the same tree still reads.
+    let mtu = runtime
+        .block_on(probe.read(Path::new("/sys/class/net/eth0/mtu")))
+        .expect("the honest link is followed");
+    assert_eq!(mtu.bytes, b"1500\n");
+    // Neither refused read touched the file behind the link.
+    let log = test_run.action_log();
+    assert!(
+        log.actions
+            .iter()
+            .filter(|action| action.outcome == ActionOutcome::Denied)
+            .count()
+            >= 2,
+        "{:?}",
+        log.actions
+    );
+}
+
+#[test]
+fn the_check_stops_with_a_denial_on_a_hostile_link_and_leaks_nothing() {
+    // The check lists `evil` like any interface. Its files are denied, and a denial is not a soft read
+    // error (`soft`): the check ends with the policy error, which names the path and not its content.
+    let ran = run(&load("hostile-links"), check(&json!({"id": "net.mtu"})));
+    let error = ran.outcome().as_ref().expect_err("a denial ends the check");
+    assert!(
+        matches!(error, CheckError::Probe(ProbeError::Denied { .. })),
+        "{error:?}"
+    );
+    assert!(!error.to_string().contains("ASSET"), "{error}");
 }

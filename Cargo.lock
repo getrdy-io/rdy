@@ -1895,6 +1895,7 @@ dependencies = [
 name = "rdy-lint-wall"
 version = "0.0.0"
 dependencies = [
+ "askama",
  "clap",
  "proc-macro2",
  "rdy-engine",
@@ -3196,8 +3197,7 @@ dependencies = [
  "anyhow",
  "clap",
  "jsonschema",
- "rdy-checks-host",
- "rdy-checks-net",
+ "rdy",
  "rdy-engine",
  "rdy-spec",
  "serde-saphyr 2.0.0",

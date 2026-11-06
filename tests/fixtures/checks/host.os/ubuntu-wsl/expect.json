@@ -1,0 +1,65 @@
+{
+  "entry": {
+    "id": "host.os",
+    "supported": [
+      {
+        "id": "rhel",
+        "versions": [
+          "8",
+          "9"
+        ]
+      },
+      {
+        "id": "ubuntu",
+        "versions": [
+          "22.04"
+        ]
+      }
+    ]
+  },
+  "result": {
+    "expected": {
+      "fips": "any",
+      "supported": [
+        {
+          "id": "rhel",
+          "versions": [
+            "8",
+            "9"
+          ]
+        },
+        {
+          "id": "ubuntu",
+          "versions": [
+            "22.04"
+          ]
+        }
+      ]
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Ubuntu 22.04.3 LTS on x86_64 meets the spec.",
+    "notes": [
+      "rdy is running under WSL. The kernel is Microsoft's and the distribution is the WSL one."
+    ],
+    "observed": {
+      "arch": "x86_64",
+      "container": [],
+      "fips": false,
+      "init": "other",
+      "kernel": "5.15.90.1-microsoft-standard-WSL2",
+      "os": {
+        "id": "ubuntu",
+        "id_like": [
+          "debian"
+        ],
+        "name": "Ubuntu",
+        "pretty_name": "Ubuntu 22.04.3 LTS",
+        "source": "/etc/os-release",
+        "version_id": "22.04"
+      },
+      "wsl": true
+    },
+    "partial": null
+  }
+}

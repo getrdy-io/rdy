@@ -1,0 +1,48 @@
+{
+  "entry": {
+    "id": "host.firewall",
+    "open_inbound": [
+      6443,
+      10250
+    ]
+  },
+  "result": {
+    "expected": {
+      "open_inbound": [
+        6443,
+        10250
+      ]
+    },
+    "fix": "Run rdy as root so it can read the ufw rules, or check by hand that 6443/tcp and 10250/tcp is open.",
+    "level": "warn",
+    "message": "Cannot confirm 6443/tcp and 10250/tcp in ufw: ufw is enabled and its rules need root to read.",
+    "notes": [
+      "ufw is enabled"
+    ],
+    "observed": {
+      "active": [
+        {
+          "interface": null,
+          "manager": "ufw",
+          "ports": {
+            "10250": {
+              "detail": "ufw is enabled and its rules need root to read",
+              "verdict": "unknown"
+            },
+            "6443": {
+              "detail": "ufw is enabled and its rules need root to read",
+              "verdict": "unknown"
+            }
+          },
+          "zone": null
+        }
+      ]
+    },
+    "partial": {
+      "missing": [
+        "Root"
+      ],
+      "note": "The firewall rules were not inspected."
+    }
+  }
+}
