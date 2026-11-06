@@ -383,3 +383,10 @@ the corrections log of `11-backlog.md`.
   check survived (M1-179, `core: no`), so host.time_sync needs no `PENDING` row. The watchdog's partial report
   keeps the action log in M2 (M2-118), and host.time_sync asks its servers at once in M2 (M2-119). M1-130 takes
   three carries from PR #34. No test-pinned document changed.
+- **Correction-39, what `--no-network` means.** rdy and its children open only `AF_UNIX` sockets.
+  That local IPC still runs: the commands 05 INV-11 names and rdy's own `Probe::unix_get` to a
+  socket a check declares (INV-28). INV-11's exception now covers exactly `chronyc`, `timedatectl`
+  and `firewall-cmd`. Under `--no-network` `chronyc` is not run, because its loopback UDP is an
+  `AF_INET` socket. The facade refuses `tcp`, `udp` and lookups with `RULE_NO_NETWORK` (M1-059).
+  M1-059's strace test flags any family but `AF_UNIX`, and M1-128 limits the `AF_UNIX`
+  destinations.
