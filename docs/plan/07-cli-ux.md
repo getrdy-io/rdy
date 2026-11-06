@@ -29,7 +29,9 @@ Founder decision of 2026-10-28: M1 is extended, not cut. Every M1 ticket stays. 
 6. **clap's own errors exit 64, not 2.** In rdy, 2 means NOT READY.
 7. **No colour-only meaning, no Unicode except the spinner.** Every status is a word. Static text is ASCII.
 8. **No hint, fix or suggestion names `--allow-unsigned` or `run --key`** (01 section 4.7), including the
-   did-you-mean for a mistyped flag. Secrets never go on argv.
+   did-you-mean for a mistyped flag. The rule covers hint, fix and error lines. The banner and the `sig`
+   header line may name the flag that allowed the run (`UNSIGNED (allowed by --allow-unsigned)`), because
+   that is the loud warning of product rule 3. Secrets never go on argv.
 9. **The watchdog never touches stdout.** If a run hangs, `--json` stdout may be empty. The partial Report is
    in the report folder (5.2).
 10. **The HTML report** puts the banner, the verdict and the blocks first, reads in DOM order, prints with
@@ -131,7 +133,7 @@ files indented under it (not with `--no-report`); (8) the banner's first line ag
 | --- | --- |
 | `spec` | `<product> <version>   (<file as typed>)`, with `, revision N` when the spec has a `serial` |
 | `sig` | `verified, key <id>, <trust>, signed <date>` with `<trust>` one of `trusted by you`, `trusted on this machine`, `key given with --key, not pinned`; or `UNSIGNED (allowed by --allow-unsigned)` |
-| `host`, `user`, `proxy` | `<hostname>   <os> <version>   <arch>`; `<login> (root)` or `(not root)`; the proxy in effect with user info stripped, left out when none |
+| `host`, `user`, `proxy` | `<hostname>   <os> <version>   <arch>`, where `<os> <version>` are `os.id` and `os.version` of the report (M1-180), and the OS family alone (`linux`) when they are null; `<login> (root)` or `(not root)`; the proxy in effect with user info stripped, left out when none |
 | `cluster` | `<context>, <server>, user <kubeconfig user>`, plus `, credential plugin: <name>` and `, TLS verification is OFF` when they apply. The user is the entry name in the kubeconfig. The identity the API server sees comes later (ADR 0031). Printed before the first request, so the user sees which cluster rdy is about to touch. `no kubeconfig found` when none, with the hint `Pass --kubeconfig <file> or set KUBECONFIG.` (on Linux it adds where k3s, RKE2 and kubeadm keep a root-only kubeconfig: copy it to `~/.kube/config` and `chmod 600` it; the JSON sample in appendix C shows the short form). `ignored: --no-network is set` with `--no-network`, plus `(--kube-context <name> was given)` when a kube flag was passed. Left out when the spec has no Kubernetes checks |
 | `limits` (M2) | `20 s per check (set by --timeout)`. Left out without `--timeout` |
 

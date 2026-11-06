@@ -393,3 +393,11 @@ the corrections log of `11-backlog.md`.
   `AF_INET` socket. The facade refuses `tcp`, `udp` and lookups with `RULE_NO_NETWORK` (M1-059).
   M1-059's strace test flags any family but `AF_UNIX`, and M1-128 limits the `AF_UNIX`
   destinations.
+- **Correction-40, the unsigned banner may name its flag.** M1-126's exit test banned `--allow-unsigned` from
+  every stderr line, but the unsigned banner's `sig` line names it on purpose: it is the loud warning of
+  product rule 3. The rule now covers fix, hint and error lines (M1-126, 07 rule 8, 01 section 4.7). PR #42 also re-wraps
+  07 C.12 to 07's own wrap rule.
+- **Correction-41, host facts and a reserved product name.** No row filled `report.host.os` from os-release,
+  so the header printed `linux`. New M1-180 (core) does it, and the env goldens and README transcripts depend
+  on it. A product named `rdy` would print `fix from rdy:` like rdy's own lines; M2-120 makes `ProductSlug`
+  refuse it before rdy-spec's first crates.io release. The renderer refuses it in M1 (PR #42).
