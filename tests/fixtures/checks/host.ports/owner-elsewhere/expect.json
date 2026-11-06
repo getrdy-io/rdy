@@ -1,0 +1,58 @@
+{
+  "entry": {
+    "free": [
+      6443
+    ],
+    "id": "host.ports"
+  },
+  "result": {
+    "expected": {
+      "allow_owner": [],
+      "free": [
+        {
+          "bind": "public",
+          "port": 6443
+        }
+      ],
+      "udp_free": []
+    },
+    "fix": "To see the holder, run `ss -ltnp 'sport = :6443'` as root.",
+    "level": "fail",
+    "message": "Port 6443/tcp is in use on 0.0.0.0. rdy could not identify the holder: no process that rdy can see holds it, so it may belong to another PID namespace.",
+    "notes": [],
+    "observed": {
+      "container": null,
+      "ephemeral_range": [
+        32768,
+        60999
+      ],
+      "netns": "net:[4026531992]",
+      "processes_walked": 2,
+      "reserved_ports": "",
+      "tcp": [
+        {
+          "bind": "public",
+          "ephemeral": false,
+          "holders": [
+            {
+              "address": "0.0.0.0",
+              "allowed": false,
+              "family": "ipv4",
+              "owner": null,
+              "owner_unknown": "no process that rdy can see holds it, so it may belong to another PID namespace"
+            }
+          ],
+          "holders_not_shown": 0,
+          "port": 6443,
+          "state": "in_use",
+          "unverified": null
+        }
+      ],
+      "udp": []
+    },
+    "partial": {
+      "missing": [],
+      "note": "rdy could not identify the process that holds a port."
+    }
+  }
+}

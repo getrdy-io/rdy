@@ -1,0 +1,12 @@
+schema = 1
+name = "docker-old-version"
+summary = "Docker 20.10.5"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.container_runtime"]
+
+[caps]
+root = true
+network = false
+kube = false

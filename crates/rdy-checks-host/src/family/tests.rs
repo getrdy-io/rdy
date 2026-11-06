@@ -210,13 +210,7 @@ fn these_ids_are_still_stubs_and_the_planner_skips_them() {
     // Delete an id here in the ticket that writes its real check.
     assert_eq!(
         HostFamily::stub_ids(),
-        [
-            "host.ports",
-            "host.time_sync",
-            "host.container_runtime",
-            "host.cgroups",
-            "host.kernel",
-        ]
+        ["host.time_sync", "host.cgroups", "host.kernel",]
     );
     let listed: Vec<&str> = HostFamily.checks().iter().map(|info| info.id).collect();
     for id in HostFamily::stub_ids() {
@@ -426,4 +420,36 @@ fn host_sysctl_builds_the_real_check_and_it_gives_a_finding() {
         "{}",
         finding.message
     );
+}
+
+#[test]
+fn host_ports_builds_the_real_check_from_a_spec_entry() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(json!({
+        "id": "host.ports",
+        "free": [6443, {"port": 9100, "bind": "loopback"}, 6443],
+        "udp_free": [8472],
+        "allow_owner": ["acme-controller-manager"]
+    }))
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.ports");
+    assert_eq!(built.check.info().summary, "Required ports free");
+    assert!(!HostFamily::stub_ids().contains(&"host.ports"));
+    // The only check that walks the fd directories of other processes (ADR 0040).
+    assert!(
+        built
+            .check
+            .info()
+            .reads
+            .contains(&rdy_engine::check::FD_WALK)
+    );
+    let ports = Ports::from_params(match &entry.decode_params() {
+        CheckParams::HostPorts(p) => p,
+        other => panic!("not host.ports: {other:?}"),
+    });
+    assert_eq!(ports.tcp_ports(), [6443, 9100]);
+    assert_eq!(ports.udp_ports(), [8472]);
 }

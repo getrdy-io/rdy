@@ -669,3 +669,60 @@ fn host_os_pretty_name_is_redacted() {
     let pretty = host.os.pretty_name.expect("a pretty name");
     assert!(!pretty.contains("canary-os-pretty-3321"), "{pretty}");
 }
+
+fn host_and_log(machine: Replay) -> (Host, Vec<rdy_spec::result::Action>) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let os = machine.os();
+    let run = rdy_engine::testing::TestRun::new(machine);
+    let probe = run.run_probe(os);
+    let host = runtime.block_on(super::host_facts(&probe));
+    (host, run.action_log().actions)
+}
+
+fn reads_of_os_release(log: &[rdy_spec::result::Action]) -> usize {
+    log.iter()
+        .filter(|a| format!("{a:?}").contains("os-release"))
+        .count()
+}
+
+#[test]
+fn host_os_is_not_read_on_windows_or_macos_and_logs_no_read() {
+    for os in [rdy_engine::check::Os::Windows, rdy_engine::check::Os::Macos] {
+        let machine = Replay::for_os(os).file("/etc/os-release", RHEL_94);
+        let (host, log) = host_and_log(machine);
+        assert_eq!(host.os.id, None, "{os:?}");
+        assert_eq!(reads_of_os_release(&log), 0, "{os:?}: {log:?}");
+    }
+}
+
+#[test]
+fn a_link_to_a_denied_file_gives_null_and_a_denied_entry() {
+    let machine = Replay::new()
+        .symlink("/etc/os-release", "/etc/shadow")
+        .file("/etc/shadow", "ID=leak\n");
+    let (host, log) = host_and_log(machine);
+    assert_eq!(host.os.id, None);
+    assert!(
+        log.iter()
+            .any(|a| a.outcome == rdy_spec::result::ActionOutcome::Denied),
+        "{log:?}"
+    );
+}
+
+#[test]
+fn an_empty_os_release_gives_null() {
+    let host = host_of(Replay::new().file("/etc/os-release", ""));
+    assert_eq!(host.os.id, None);
+}
+
+#[test]
+fn etc_os_release_wins_over_usr_lib() {
+    let machine = Replay::new()
+        .file("/etc/os-release", RHEL_94)
+        .file("/usr/lib/os-release", "ID=ubuntu\nVERSION_ID=\"22.04\"\n");
+    let host = host_of(machine);
+    assert_eq!(host.os.id.as_deref(), Some("rhel"));
+}

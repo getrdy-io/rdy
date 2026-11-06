@@ -1,0 +1,49 @@
+{
+  "entry": {
+    "cgroup_driver": "systemd",
+    "id": "host.container_runtime",
+    "runtime": [
+      "podman"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": "systemd",
+      "min_version": null,
+      "runtime": [
+        "podman"
+      ],
+      "storage_driver": null
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "podman 4.9.4 is running (cgroup driver systemd, storage driver overlay).",
+    "notes": [],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "read",
+          "cgroup_driver": "systemd",
+          "cgroup_driver_source": "podman info",
+          "config_version": null,
+          "d_type": true,
+          "installed": false,
+          "proxy": null,
+          "rootless": false,
+          "rootless_socket": false,
+          "runtime": "podman",
+          "socket": "/run/podman/podman.sock",
+          "socket_present": true,
+          "storage_driver": "overlay",
+          "storage_driver_source": "podman info",
+          "version": "4.9.4"
+        }
+      ]
+    },
+    "partial": null
+  }
+}

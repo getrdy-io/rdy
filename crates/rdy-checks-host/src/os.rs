@@ -178,10 +178,14 @@ pub struct OsFacts {
 
 /// Reads `/etc/os-release`, else `/usr/lib/os-release`, through `probe` and parses it with the parser
 /// `host.os` uses. Meant for the run-level probe (`check: null`), which has no `reads` prefixes and
-/// keeps the denylist. `None` when neither file can be read or holds a release: the report keeps the
+/// keeps the denylist. `None` on any OS but Linux, without a read, and when neither file can be read or holds a release: the report keeps the
 /// fields null and the header prints the OS family alone. No error escapes, because a host fact is
 /// never worth ending a run for.
 pub async fn read_os_facts(probe: &rdy_engine::probe::Probe) -> Option<OsFacts> {
+    // Only Linux has the file. Elsewhere a read would log a denied or missing entry in every report.
+    if probe.os() != Os::Linux {
+        return None;
+    }
     for path in [OS_RELEASE, OS_RELEASE_USR] {
         let Ok(file) = probe.read(Path::new(path)).await else {
             continue;

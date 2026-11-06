@@ -1,0 +1,55 @@
+{
+  "entry": {
+    "id": "host.container_runtime",
+    "runtime": [
+      "docker"
+    ]
+  },
+  "result": {
+    "expected": {
+      "cgroup_driver": null,
+      "min_version": null,
+      "runtime": [
+        "docker"
+      ],
+      "storage_driver": null
+    },
+    "fix": "Run `systemctl restart docker` and check `systemctl status docker`.",
+    "level": "warn",
+    "message": "docker has a socket at /var/run/docker.sock but nothing answers on it.",
+    "notes": [
+      "docker has a proxy set in a systemd drop-in. Image pulls go through it, so check that it can reach the registry and that no_proxy lists the cluster addresses."
+    ],
+    "observed": {
+      "kubelet": {
+        "cgroup_driver": "systemd",
+        "config_present": true
+      },
+      "runtimes": [
+        {
+          "api": "not listening",
+          "cgroup_driver": null,
+          "cgroup_driver_source": null,
+          "config_version": null,
+          "d_type": null,
+          "installed": false,
+          "proxy": {
+            "http": "http://[REDACTED:url_userinfo:2e238d70]@proxy.acme.example:3128",
+            "https": null,
+            "no_proxy": "localhost,.cluster.local",
+            "source": "a systemd drop-in"
+          },
+          "rootless": null,
+          "rootless_socket": false,
+          "runtime": "docker",
+          "socket": "/var/run/docker.sock",
+          "socket_present": true,
+          "storage_driver": null,
+          "storage_driver_source": null,
+          "version": null
+        }
+      ]
+    },
+    "partial": null
+  }
+}
