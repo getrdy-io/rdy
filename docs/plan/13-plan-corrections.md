@@ -392,5 +392,5 @@ the corrections log of `11-backlog.md`.
   destinations.
 - **Correction-40, the unsigned banner may name its flag.** M1-126's exit test banned `--allow-unsigned` from
   every stderr line, but the unsigned banner's `sig` line names it on purpose: it is the loud warning of
-  product rule 3. The rule now covers fix, hint and error lines (M1-126, 07 rule 8). PR #42 also re-wraps
+  product rule 3. The rule now covers fix, hint and error lines (M1-126, 07 rule 8, 01 section 4.7). PR #42 also re-wraps
   07 C.12 to 07's own wrap rule.

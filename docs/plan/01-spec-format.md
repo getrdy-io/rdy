@@ -491,7 +491,8 @@ pinned for the product, or given with `--key`, exits 64 even with the flag (ADR 
 including a valid signature by an unpinned key. An unsigned spec containing `custom.exec` exits 64 from M4
 (ADR 0005). Expired specs are refused regardless. **No hint, fix line or error message ever names
 `--allow-unsigned` or `--key`** (threat model T2); the flags are documented on
-`https://docs.getrdy.io/unsigned`.
+`https://docs.getrdy.io/unsigned`. The banner and its `sig` header line may name the flag that allowed the
+run, because that is the loud warning of product rule 3 (07 rule 8).
 
 **Banner rule:** show a banner unless `signature.state` is `verified` and `trust_source` is `system` or
 `user`. Both banners print on stderr before any check runs, red when colour is on, and again, first line
