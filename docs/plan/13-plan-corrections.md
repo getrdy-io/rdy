@@ -203,7 +203,8 @@ This file is the corrections list.
   partial" clause to M2-004 (3.5 h to 5 h). M1-148 takes the sync state from `timedatectl` and `chronyc` and
   the offset from its SNTP client. Before M2-004 starts, rust-engineer names the Live source: a safe wrapper
   in a rustix release, or another crate that passes the new-dependency review (05 T5, `deny.toml`), reviewed
-  by security-reviewer. If neither exists, rust-architect writes an ADR first. `ci/check-crate-deps.toml`
+  by security-reviewer. If neither exists, rust-architect writes an ADR first. The review and any ADR come out
+  of M2-004's 5 h. The host.time_sync half of M2-004 is check-author's work. `ci/check-crate-deps.toml`
   does not change, because the call sits in rdy-engine and host.time_sync reaches it through the Probe.
 
 ## CLAUDE.md edits
