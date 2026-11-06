@@ -163,7 +163,7 @@ const INCLUDE_DATA_ALLOWED: &[(&str, &[&str], &str)] = &[
     ),
     (
         "crates/rdy-checks-host/src/container_runtime/tests.rs",
-        "../../../../tests/fixtures/checks/host.container_runtime/",
+        &["../../../../tests/fixtures/checks/host.container_runtime/"],
         "embeds the expect.json goldens of tests/fixtures/checks/host.container_runtime, because a check crate test may not read files",
     ),
     (
