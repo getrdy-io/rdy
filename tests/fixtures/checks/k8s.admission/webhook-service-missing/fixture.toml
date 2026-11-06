@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-webhook-service-missing"
+summary = "A Fail webhook whose Service does not exist"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

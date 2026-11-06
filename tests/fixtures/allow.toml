@@ -86,3 +86,8 @@ reason = "An API group name of an admission policy engine that discovery lists, 
 rule = "host"
 value = "policies.kyverno.io"
 reason = "An API group name of an admission policy engine that discovery lists, not a host a test contacts (k8s.admission)"
+
+[[allow]]
+rule = "host"
+value = "metadata.name"
+reason = "The label key kubernetes.io/metadata.name that the API server sets on every namespace; the lint reads the part after the slash as a host. Global on purpose: it appears in the namespace.json and webhook selectors of more than 25 k8s.admission clusters, and one entry per file would be longer than the fixtures it excuses"

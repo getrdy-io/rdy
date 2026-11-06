@@ -233,12 +233,18 @@ fn path_for(entry: &Allowed, access: &Access) -> String {
         Only::Any => "x".to_owned(),
         Only::Name(name) => (*name).to_owned(),
     };
+    // An entry for every resource of its group is tried with one resource name.
+    let resource = if entry.resource == ANY_RESOURCE {
+        "k8srequiredlabels"
+    } else {
+        entry.resource
+    };
     match access {
-        Access::List => format!("{prefix}/{}", entry.resource),
+        Access::List => format!("{prefix}/{resource}"),
         Access::ListInNamespace(only) => {
-            format!("{prefix}/namespaces/{}/{}", name(only), entry.resource)
+            format!("{prefix}/namespaces/{}/{resource}", name(only))
         }
-        Access::Get(only) => format!("{prefix}/{}/{}", entry.resource, name(only)),
+        Access::Get(only) => format!("{prefix}/{resource}/{}", name(only)),
     }
 }
 
@@ -260,9 +266,15 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
                 let selector = match entry.field_selector {
                     FieldSelector::Key(key) => format!("{key}%21%3Dx"),
                     FieldSelector::Equals(key, value) => format!("{key}%3D{value}"),
+                    FieldSelector::LabelEquals(key) => format!("{key}%3Dx"),
                     FieldSelector::NotRequired => unreachable!("handled above"),
                 };
-                let ok = format!("{path}?&fieldSelector={selector}&limit=500");
+                let query = if matches!(entry.field_selector, FieldSelector::LabelEquals(_)) {
+                    "labelSelector"
+                } else {
+                    "fieldSelector"
+                };
+                let ok = format!("{path}?&{query}={selector}&limit=500");
                 assert_eq!(judge_get(&ok), Ok(()), "{ok}");
             }
         }
@@ -283,6 +295,91 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
                 assert_eq!(judge_get(&path), Err(RULE_NOT_ALLOWED), "{path}");
             }
         }
+    }
+}
+
+#[test]
+fn the_gatekeeper_entry_admits_a_list_of_any_constraint_kind_and_nothing_else() {
+    // ADR 0042: one entry with ANY_RESOURCE, list only, one version.
+    let group = "/apis/constraints.gatekeeper.sh/v1beta1";
+    for kind in ["k8srequiredlabels", "k8sallowedrepos", "anything9"] {
+        assert_eq!(judge_get(&format!("{group}/{kind}")), Ok(()), "{kind}");
+        assert_eq!(
+            judge_get(&format!("{group}/{kind}?limit=500")),
+            Ok(()),
+            "{kind}"
+        );
+    }
+    for (path, rule) in [
+        // A get by name, a namespaced list, another version, another group.
+        (format!("{group}/k8srequiredlabels/x"), RULE_NOT_ALLOWED),
+        (
+            format!("{group}/namespaces/x/k8srequiredlabels"),
+            RULE_NOT_ALLOWED,
+        ),
+        (
+            "/apis/constraints.gatekeeper.sh/v1alpha1/k8srequiredlabels".to_owned(),
+            RULE_NOT_ALLOWED,
+        ),
+        (
+            "/apis/constraints.gatekeeper.sh/v1/k8srequiredlabels".to_owned(),
+            RULE_NOT_ALLOWED,
+        ),
+        (
+            "/apis/templates.gatekeeper.sh/v1/constrainttemplates".to_owned(),
+            RULE_NOT_ALLOWED,
+        ),
+        (
+            "/apis/constraints.gatekeeper.shx/v1beta1/k8srequiredlabels".to_owned(),
+            RULE_NOT_ALLOWED,
+        ),
+        // A subresource, a Secret, and a path that is not a plain name.
+        (
+            format!("{group}/k8srequiredlabels/x/status"),
+            RULE_SUBRESOURCE,
+        ),
+        (format!("{group}/secrets"), RULE_SECRETS),
+        (format!("{group}/*"), RULE_PATH_SHAPE),
+        (format!("{group}/a%2fb"), RULE_PATH_SHAPE),
+    ] {
+        assert_eq!(judge_get(&path), Err(rule), "{path}");
+    }
+    // The wildcard is for that one entry: no other entry uses it.
+    let wild: Vec<&str> = ALLOWED
+        .iter()
+        .filter(|entry| entry.resource == ANY_RESOURCE)
+        .map(|entry| entry.group)
+        .collect();
+    assert_eq!(wild, ["constraints.gatekeeper.sh"]);
+}
+
+#[test]
+fn an_endpoint_slice_list_must_name_one_service_by_label() {
+    // F2 of the PR #48 security review: without the label a list would return every slice of a namespace.
+    let base = "/apis/discovery.k8s.io/v1/namespaces/x/endpointslices";
+    for query in [
+        "",
+        "?limit=5",
+        "?labelSelector=app%3Dx",
+        "?labelSelector=kubernetes.io%2Fservice-name",
+        "?labelSelector=kubernetes.io%2Fservice-name%3D",
+        "?labelSelector=kubernetes.io%2Fservice-name%21%3Dx",
+        "?labelSelector=xkubernetes.io%2Fservice-name%3Dhooks",
+        "?labelSelector=kubernetes.io%2Fservice-name-other%3Dhooks",
+        "?fieldSelector=metadata.name%3Dhooks",
+    ] {
+        assert_eq!(
+            judge_get(&format!("{base}{query}")),
+            Err(RULE_SELECTOR),
+            "{query}"
+        );
+    }
+    for query in [
+        "?labelSelector=kubernetes.io%2Fservice-name%3Dhooks",
+        "?labelSelector=kubernetes.io%2Fservice-name%3D%3Dhooks&limit=500",
+        "?labelSelector=app%3Dx%2Ckubernetes.io%2Fservice-name%3Dhooks",
+    ] {
+        assert_eq!(judge_get(&format!("{base}{query}")), Ok(()), "{query}");
     }
 }
 

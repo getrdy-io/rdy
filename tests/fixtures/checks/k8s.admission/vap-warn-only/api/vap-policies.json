@@ -1,0 +1,52 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/admissionregistration.k8s.io/v1/validatingadmissionpolicies",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicyList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "admissionregistration.k8s.io/v1",
+        "kind": "ValidatingAdmissionPolicy",
+        "metadata": {
+          "name": "require-labels"
+        },
+        "spec": {
+          "failurePolicy": "Fail",
+          "matchConstraints": {
+            "resourceRules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CREATE",
+                  "UPDATE"
+                ],
+                "resources": [
+                  "pods"
+                ]
+              }
+            ]
+          },
+          "validations": [
+            {
+              "expression": "has(object.metadata.labels.owner)",
+              "message": "needs an owner label"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis"
+  },
+  "status": 200,
+  "body": {
+    "kind": "APIGroupList",
+    "apiVersion": "v1",
+    "groups": [
+      {
+        "name": "apps",
+        "versions": [
+          {
+            "groupVersion": "apps/v1",
+            "version": "v1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "apps/v1",
+          "version": "v1"
+        }
+      },
+      {
+        "name": "batch",
+        "versions": [
+          {
+            "groupVersion": "batch/v1",
+            "version": "v1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "batch/v1",
+          "version": "v1"
+        }
+      },
+      {
+        "name": "networking.k8s.io",
+        "versions": [
+          {
+            "groupVersion": "networking.k8s.io/v1",
+            "version": "v1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "networking.k8s.io/v1",
+          "version": "v1"
+        }
+      },
+      {
+        "name": "rbac.authorization.k8s.io",
+        "versions": [
+          {
+            "groupVersion": "rbac.authorization.k8s.io/v1",
+            "version": "v1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "rbac.authorization.k8s.io/v1",
+          "version": "v1"
+        }
+      },
+      {
+        "name": "storage.k8s.io",
+        "versions": [
+          {
+            "groupVersion": "storage.k8s.io/v1",
+            "version": "v1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "storage.k8s.io/v1",
+          "version": "v1"
+        }
+      },
+      {
+        "name": "kyverno.io",
+        "versions": [
+          {
+            "groupVersion": "kyverno.io/v2",
+            "version": "v2"
+          },
+          {
+            "groupVersion": "kyverno.io/v1",
+            "version": "v1"
+          },
+          {
+            "groupVersion": "kyverno.io/v2beta1",
+            "version": "v2beta1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "kyverno.io/v2",
+          "version": "v2"
+        }
+      },
+      {
+        "name": "policies.kyverno.io",
+        "versions": [
+          {
+            "groupVersion": "policies.kyverno.io/v1",
+            "version": "v1"
+          },
+          {
+            "groupVersion": "policies.kyverno.io/v1beta1",
+            "version": "v1beta1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "policies.kyverno.io/v1",
+          "version": "v1"
+        }
+      },
+      {
+        "name": "templates.gatekeeper.sh",
+        "versions": [
+          {
+            "groupVersion": "templates.gatekeeper.sh/v1",
+            "version": "v1"
+          },
+          {
+            "groupVersion": "templates.gatekeeper.sh/v1beta1",
+            "version": "v1beta1"
+          },
+          {
+            "groupVersion": "templates.gatekeeper.sh/v1alpha1",
+            "version": "v1alpha1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "templates.gatekeeper.sh/v1",
+          "version": "v1"
+        }
+      },
+      {
+        "name": "constraints.gatekeeper.sh",
+        "versions": [
+          {
+            "groupVersion": "constraints.gatekeeper.sh/v1beta1",
+            "version": "v1beta1"
+          },
+          {
+            "groupVersion": "constraints.gatekeeper.sh/v1alpha1",
+            "version": "v1alpha1"
+          }
+        ],
+        "preferredVersion": {
+          "groupVersion": "constraints.gatekeeper.sh/v1beta1",
+          "version": "v1beta1"
+        }
+      }
+    ]
+  }
+}

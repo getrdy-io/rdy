@@ -1,0 +1,49 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/discovery.k8s.io/v1/namespaces/acme-hooks/endpointslices",
+    "query": "labelSelector=kubernetes.io/service-name=hooks4&limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "discovery.k8s.io/v1",
+    "kind": "EndpointSliceList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "discovery.k8s.io/v1",
+        "kind": "EndpointSlice",
+        "metadata": {
+          "name": "hooks4-x7k2p",
+          "namespace": "acme-hooks",
+          "labels": {
+            "kubernetes.io/service-name": "hooks4"
+          }
+        },
+        "addressType": "IPv4",
+        "endpoints": [
+          {
+            "addresses": [
+              "10.0.0.5"
+            ],
+            "nodeName": "acme-node-1",
+            "conditions": {
+              "ready": true,
+              "serving": true,
+              "terminating": false
+            }
+          }
+        ],
+        "ports": [
+          {
+            "name": "https",
+            "port": 8443,
+            "protocol": "TCP"
+          }
+        ]
+      }
+    ]
+  }
+}

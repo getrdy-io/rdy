@@ -1,0 +1,30 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/admissionregistration.k8s.io/v1/validatingadmissionpolicybindings",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "admissionregistration.k8s.io/v1",
+    "kind": "ValidatingAdmissionPolicyBindingList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "admissionregistration.k8s.io/v1",
+        "kind": "ValidatingAdmissionPolicyBinding",
+        "metadata": {
+          "name": "require-labels-acme"
+        },
+        "spec": {
+          "policyName": "require-labels",
+          "validationActions": [
+            "Deny"
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -126,17 +126,31 @@ pub enum FieldSelector {
     Key(&'static str),
     /// This exact term, with `=` or `==` (`involvedObject.kind=PersistentVolumeClaim`).
     Equals(&'static str, &'static str),
+    /// The `labelSelector` (not the field selector) must hold a term `key=value` or `key==value` on this
+    /// key, with a value. Used for `endpointslices`, so a list names one Service and not every slice.
+    LabelEquals(&'static str),
 }
 
 impl FieldSelector {
-    /// True when `decoded` (the value of the `fieldSelector` key) meets the requirement.
-    fn met_by(self, decoded: Option<&str>) -> bool {
+    /// True when `decoded` (the value of the `fieldSelector` key) and `labels` (the value of the
+    /// `labelSelector` key) meet the requirement.
+    fn met_by(self, decoded: Option<&str>, labels: Option<&str>) -> bool {
+        if let Self::LabelEquals(key) = self {
+            return labels
+                .into_iter()
+                .flat_map(|text| text.split(','))
+                .any(|term| {
+                    term.strip_prefix(key)
+                        .and_then(|rest| rest.strip_prefix("==").or_else(|| rest.strip_prefix('=')))
+                        .is_some_and(|value| !value.is_empty())
+                });
+        }
         let mut terms = decoded
             .into_iter()
             .flat_map(|text| text.split(','))
             .filter_map(split_term);
         match self {
-            Self::NotRequired => true,
+            Self::NotRequired | Self::LabelEquals(_) => true,
             Self::Key(key) => terms.any(|(k, _, _)| k == key),
             Self::Equals(key, value) => {
                 terms.any(|(k, op, v)| k == key && matches!(op, "=" | "==") && v == value)
@@ -160,6 +174,12 @@ fn split_term(term: &str) -> Option<(&str, &str, &str)> {
     Some((key, op, value))
 }
 
+/// The `resource` of an [`ALLOWED`] entry that admits every resource of its group and version. Used once:
+/// a Gatekeeper constraint kind is a CRD that each `ConstraintTemplate` creates, so its plural name cannot
+/// be listed ahead of time (ADR 0042). Every GET shape of such an entry is still a list, never a secret,
+/// and the group holds nothing but constraints.
+pub const ANY_RESOURCE: &str = "*";
+
 /// One resource the M1 checks read (02 Appendix B, section 4). There is no `secrets` entry, and a test
 /// keeps it that way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,7 +188,7 @@ pub struct Allowed {
     pub group: &'static str,
     /// The API version.
     pub version: &'static str,
-    /// The plural resource name.
+    /// The plural resource name, or [`ANY_RESOURCE`].
     pub resource: &'static str,
     /// The GET shapes allowed for it.
     pub access: &'static [Access],
@@ -293,6 +313,132 @@ pub const ALLOWED: &[Allowed] = &[
         access: &[Access::List],
         checks: &["k8s.admission"],
         reads: "the OpenShift SCCs",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "validatingwebhookconfigurations",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "each webhook's name, failurePolicy, rules, selectors, matchConditions and backend (service name or URL kind); the CA bundle is dropped",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "mutatingwebhookconfigurations",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "the same fields of the mutating webhooks",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "validatingadmissionpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "name, match constraints, match conditions and whether it has validations; the CEL expressions are dropped",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "admissionregistration.k8s.io",
+        version: "v1",
+        resource: "validatingadmissionpolicybindings",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy name, validation actions and match resources",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "",
+        version: "v1",
+        resource: "services",
+        access: &[Access::ListInNamespace(Only::Any)],
+        checks: &["k8s.admission"],
+        reads: "the type of the one Service a Fail webhook names, found with a metadata.name field selector",
+        field_selector: FieldSelector::Key("metadata.name"),
+    },
+    Allowed {
+        group: "discovery.k8s.io",
+        version: "v1",
+        resource: "endpointslices",
+        access: &[Access::ListInNamespace(Only::Any)],
+        checks: &["k8s.admission"],
+        reads: "the ready condition of the endpoints behind one webhook Service, found by its service-name label",
+        field_selector: FieldSelector::LabelEquals("kubernetes.io/service-name"),
+    },
+    Allowed {
+        group: "kyverno.io",
+        version: "v1",
+        resource: "clusterpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, failure actions and match filters; the rules' bodies are dropped",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1",
+        resource: "validatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1",
+        resource: "imagevalidatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1beta1",
+        resource: "validatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1beta1",
+        resource: "imagevalidatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1alpha1",
+        resource: "validatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints (Kyverno 1.14 and 1.15)",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "policies.kyverno.io",
+        version: "v1alpha1",
+        resource: "imagevalidatingpolicies",
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "policy names, validation actions and match constraints (Kyverno 1.14 and 1.15)",
+        field_selector: FieldSelector::NotRequired,
+    },
+    Allowed {
+        group: "constraints.gatekeeper.sh",
+        version: "v1beta1",
+        resource: ANY_RESOURCE,
+        access: &[Access::List],
+        checks: &["k8s.admission"],
+        reads: "constraint names, enforcementAction and match; the parameters are dropped",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -471,8 +617,12 @@ pub(crate) fn judge(
         if !matches!(body, BodyView::Empty) {
             return Err(RULE_GET_BODY);
         }
-        let field_selector = check_query(uri.query())?;
-        check_get(&segments, field_selector.as_deref())
+        let (field_selector, label_selector) = check_query(uri.query())?;
+        check_get(
+            &segments,
+            field_selector.as_deref(),
+            label_selector.as_deref(),
+        )
     } else {
         check_post(&segments, uri.query(), body)
     }
@@ -514,10 +664,7 @@ pub(crate) fn target_of(path: &str) -> Target {
     let Ok(info) = request_info(&segments) else {
         return Target::Unknown;
     };
-    ALLOWED
-        .iter()
-        .find(|e| e.group == info.group && e.version == info.version && e.resource == info.resource)
-        .map_or(Target::Unknown, Target::Entry)
+    entry_of(&info).map_or(Target::Unknown, Target::Entry)
 }
 
 /// The one path with `secrets` in it that is allowed: a GET of the namespace called `secrets`.
@@ -617,15 +764,15 @@ fn path_segments(uri: &Uri) -> Result<Vec<&str>, &'static str> {
 /// Allows the keys `limit`, `continue`, `labelSelector` and `fieldSelector`, once each, with plain
 /// values. Every value is decoded once, as the server does, and the decoded text is checked: a `continue`
 /// token, a label selector and a field selector each have a short character set, so a `%26`, `%00`, `%25`
-/// or `%5C` cannot carry anything the raw text hid. Returns the decoded `fieldSelector` for the selector
-/// rule of the resource.
-fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
+/// or `%5C` cannot carry anything the raw text hid. Returns the decoded `fieldSelector` and `labelSelector`
+/// for the selector rule of the resource.
+fn check_query(query: Option<&str>) -> Result<(Option<String>, Option<String>), &'static str> {
     // kube writes a bare `?` when there are no parameters, and a `&` before the first one (`?&limit=5`).
     let Some(query) = query
         .map(|query| query.strip_prefix('&').unwrap_or(query))
         .filter(|query| !query.is_empty())
     else {
-        return Ok(None);
+        return Ok((None, None));
     };
     if query.len() > MAX_QUERY {
         return Err(RULE_QUERY);
@@ -636,6 +783,7 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
         return Err(RULE_QUERY);
     }
     let mut field_selector = None;
+    let mut label_selector = None;
     // A key twice is ambiguous: the server reads the first, a proxy may read the last.
     let mut seen: Vec<&str> = Vec::new();
     for pair in query.split('&') {
@@ -657,7 +805,9 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
             }
             "labelSelector" => {
                 check_query_value(value)?;
-                check_label_selector(&decode_query_value(value)?)?;
+                let decoded = decode_query_value(value)?;
+                check_label_selector(&decoded)?;
+                label_selector = Some(decoded);
             }
             "fieldSelector" => {
                 check_query_value(value)?;
@@ -668,7 +818,7 @@ fn check_query(query: Option<&str>) -> Result<Option<String>, &'static str> {
             _ => return Err(RULE_QUERY),
         }
     }
-    Ok(field_selector)
+    Ok((field_selector, label_selector))
 }
 
 /// The longest decoded `continue` token, label selector or field selector.
@@ -831,7 +981,21 @@ pub(super) fn request_info<'a>(segments: &[&'a str]) -> Result<RequestInfo<'a>, 
     })
 }
 
-fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'static str> {
+/// The entry of [`ALLOWED`] that names the group, version and resource of `info`. An entry with
+/// [`ANY_RESOURCE`] admits every resource of its group and version.
+fn entry_of(info: &RequestInfo<'_>) -> Option<&'static Allowed> {
+    ALLOWED.iter().find(|e| {
+        e.group == info.group
+            && e.version == info.version
+            && (e.resource == info.resource || e.resource == ANY_RESOURCE)
+    })
+}
+
+fn check_get(
+    segments: &[&str],
+    field_selector: Option<&str>,
+    label_selector: Option<&str>,
+) -> Result<(), &'static str> {
     if is_discovery(segments) {
         return Ok(());
     }
@@ -839,9 +1003,7 @@ fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'st
     if info.subresource.is_some() {
         return Err(RULE_SUBRESOURCE);
     }
-    let Some(entry) = ALLOWED.iter().find(|e| {
-        e.group == info.group && e.version == info.version && e.resource == info.resource
-    }) else {
+    let Some(entry) = entry_of(&info) else {
         return Err(RULE_NOT_ALLOWED);
     };
     let allowed = entry
@@ -857,7 +1019,7 @@ fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'st
         return Err(RULE_NOT_ALLOWED);
     }
     // A list (no name) must carry the field selector its entry names. A get by name needs none.
-    if info.name.is_none() && !entry.field_selector.met_by(field_selector) {
+    if info.name.is_none() && !entry.field_selector.met_by(field_selector, label_selector) {
         return Err(RULE_SELECTOR);
     }
     Ok(())

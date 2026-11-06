@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/policies.kyverno.io/v1/validatingpolicies",
+    "query": "limit=500"
+  },
+  "status": 403,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "validatingpolicies.policies.kyverno.io is forbidden: User \"acme-reader\" cannot list resource \"validatingpolicies.policies.kyverno.io\" at the cluster scope",
+    "reason": "Forbidden",
+    "details": {},
+    "code": 403
+  }
+}
