@@ -38,7 +38,7 @@ The order of the 2026-10-31 list comes first, then the PRs opened in this sessio
    `fix-39b.md` in this folder: host.time_sync treats `RULE_NO_NETWORK` as soft and skips chronyc offline,
    `ProbeHub` fails closed, direct http and tls offline tests, the Denied entry wording, and an exhaustive
    match. Then merge main and wait for `ci-ok`.
-7. #45 M1-095 (net.egress). Approved by code and security. Main was merged in at 42fdf1e, before #42 landed.
+7. #45 M1-095 (net.egress). Approved by code and security. Main was merged in (head 42fdf1e) before #42 landed.
    Merge main again and wait for `ci-ok`. After #39 and #45 are both in, rerun the `root_*` `--no-network`
    strace test with net registered.
 8. #47 M1-058 (Ctrl-C). Approved by code and security at 4d689ca. Needs a main merge and `ci-ok`. Nit:
