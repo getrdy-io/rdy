@@ -19,7 +19,8 @@ install day, on a call, with the customer watching.
 
 rdy moves that discovery earlier. The vendor writes down what the product needs, as a short YAML
 file called a spec, and signs it. The customer's platform or IT engineer runs one command. They get a
-list of what is wrong, with a fix under each problem, and a report to send back. Today the report is JSON, and HTML is next.
+list of what is wrong, with a fix under each problem, and a report to send back. Today the report is JSON,
+and HTML is next.
 
 You might be reading this because a vendor sent you a spec and asked you to run it. Or you are a
 sales engineer who is tired of finding out about the proxy on install day. Both are the audience.
@@ -31,7 +32,8 @@ It needs [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 
 PATH. Without it, the script stops and installs nothing. It checks the signature of the checksum file
 and the sha256 of the archive before it installs anything. It never runs `sudo`. It writes one file,
 `rdy`, to `$HOME/.local/bin`, or to the folder in `RDY_INSTALL_DIR`. As root, it refuses unless you
-pass `--allow-root`, and then it writes `/usr/local/bin/rdy`. On Windows, download the `.zip` from the
+pass `--allow-root`, and then it writes `/usr/local/bin/rdy`,
+unless `RDY_INSTALL_DIR` is set. On Windows, download the `.zip` from the
 release page and check its sha256 by hand.
 
 There is no tagged release yet. When there is one, the command is this, with the version filled in:
@@ -42,7 +44,8 @@ curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL \
 "$HOME/.local/bin/rdy" run <spec-from-your-vendor>.yaml
 ```
 
-Root shells need `sh -s -- --allow-root` after the pipe. A shorter `getrdy.io/install` address comes
+Root shells need `sh -s -- --allow-root` after the pipe, and then run `/usr/local/bin/rdy`, not
+`"$HOME/.local/bin/rdy"`. A shorter `getrdy.io/install` address comes
 later, in M2.
 
 Until then, build from source ([below](#build-from-source)).
