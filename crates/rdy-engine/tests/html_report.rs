@@ -1047,5 +1047,11 @@ fn the_table_lists_what_the_embedded_json_holds() -> TestResult {
         section.matches("<tr><th scope=\"row\">").count(),
         held.min(1000)
     );
+    let more = held.saturating_sub(1000);
+    if more > 0 {
+        assert!(section.contains(&format!("<p>{more} more entries are in the embedded JSON.")));
+    }
+    // The writer shed entries, so the page says the log was cut.
+    assert!(section.contains("rdy left some entries out of its own log"));
     Ok(())
 }

@@ -109,5 +109,13 @@ fn fit_page(view: &mut View, max: usize) -> Result<String, HtmlError> {
         }
     }
     view.actions.keep_first(&all, fits);
-    view.render().map_err(|_| HtmlError::Render)
+    let page = view.render().map_err(|_| HtmlError::Render)?;
+    // With no rows left the page is the checks plus the embedded JSON. The JSON is at most 2 MiB and the
+    // checks are at most 256 results with the same bounded text, so this holds for the real cap. A smaller
+    // `max` (the tests) can be below that floor.
+    debug_assert!(
+        max < MAX_PAGE_BYTES || page.len() <= max,
+        "a page with no action rows is over the cap"
+    );
+    Ok(page)
 }

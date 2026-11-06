@@ -158,3 +158,60 @@ fn a_refusal_cut_by_the_page_cap_is_not_called_listed() {
     assert!(!page.contains("Every refused call"));
     assert!(page.contains("are in the embedded JSON.</p>"));
 }
+
+/// A cap below the page with no rows cuts every row, and the page still says how many it left out.
+#[test]
+fn a_cap_that_cuts_every_row_still_counts_them() {
+    let report = report_with_actions(50, &[]);
+    let mut view = super::view::View::new(&report).expect("the report is fine");
+    let page = super::fit_page(&mut view, 1).expect("renders");
+    assert_eq!(rows_in(&page), 0);
+    assert!(page.contains("<p>50 more entries are in the embedded JSON."));
+    assert!(!page.contains("recorded nothing"));
+    assert!(!page.contains("<caption>What rdy recorded"));
+}
+
+/// A log with no entries says so. That line is only for a log that really is empty.
+#[test]
+fn an_empty_log_says_nothing_was_recorded() {
+    let report = report_with_actions(0, &[]);
+    let page = super::render_html(&report).expect("renders");
+    assert!(page.contains("rdy recorded nothing in this run."));
+    assert!(!page.contains("more entries are in the embedded JSON"));
+}
+
+/// Nearly the biggest report the JSON writer accepts: 256 results with 7 notes of 1 KiB each (about 1.8 MiB
+/// of JSON). The page, with the checks shown twice (as text and in the JSON), is under the real cap with
+/// no row cut, and the `debug_assert` in `fit_page` runs.
+#[test]
+fn a_report_near_the_json_cap_is_under_the_page_cap() {
+    use crate::redact::{Redactor, TagKey};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/reports/not-ready-7.2.json");
+    let text = std::fs::read_to_string(path).expect("the sample report is in the repo");
+    let mut doc: serde_json::Value = serde_json::from_str(&text).expect("the sample is JSON");
+    let template = doc["checks"][0].clone();
+    let note = "a note with some words ".repeat(44);
+    let checks = doc["checks"].as_array_mut().expect("checks is a list");
+    checks.clear();
+    for number in 0..256 {
+        let mut check = template.clone();
+        check["key"] = serde_json::json!(format!("host.cpu{number}"));
+        check["id"] = serde_json::json!("host.cpu");
+        check["notes"] = serde_json::json!(vec![note.clone(); 7]);
+        check["observed"] = serde_json::Value::Null;
+        check["expected"] = serde_json::Value::Null;
+        checks.push(check);
+    }
+    let report = serde_json::from_value(doc).expect("a report");
+    let report = Redactor::new(TagKey::fixed([5; 32]))
+        .redact_report(report)
+        .expect("redacts");
+    let page = super::render_html(&report).expect("renders");
+    assert!(
+        page.len() > 3_000_000,
+        "{} bytes is not a big page",
+        page.len()
+    );
+    assert!(page.len() <= super::MAX_PAGE_BYTES, "{} bytes", page.len());
+}

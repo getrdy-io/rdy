@@ -110,9 +110,10 @@
 {%- if !actions.dropped.is_empty() %}
 <p>{% for part in actions.dropped %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
 {%- endif %}
-{%- if actions.rows.is_empty() %}
+{%- if actions.rows.is_empty() && actions.more == 0 %}
 <p>rdy recorded nothing in this run.</p>
-{%- else %}
+{%- endif %}
+{%- if !actions.rows.is_empty() %}
 <table>
 <caption>What rdy recorded, in order</caption>
 <thead>
@@ -124,9 +125,9 @@
 {%- endfor %}
 </tbody>
 </table>
+{%- endif %}
 {%- if actions.more > 0 %}
 <p>{{ actions.more }} more {% if actions.more == 1 %}entry is{% else %}entries are{% endif %} in the embedded JSON.{% if !actions.refusals_cut %} Every refused call in the log is listed above.{% endif %}</p>
-{%- endif %}
 {%- endif %}
 </section>
 </main>
