@@ -259,7 +259,8 @@ fn read_link_through_anchor(parent: &Path, name: &OsStr, guard: &ReadGuard) -> i
     let real_parent = fs::readlink(fd_link(&anchor), Vec::new()).map_err(proc_error)?;
     let real_parent = PathBuf::from(std::ffi::OsString::from_vec(real_parent.into_bytes()));
     // A directory with no names left reads "... (deleted)", which would hide the end of its name.
-    if fs::fstat(&anchor)?.st_nlink == 0 {
+    let anchor_stat = fs::fstat(&anchor)?;
+    if anchor_stat.st_nlink == 0 {
         return Err(refused(RULE_CHANGED));
     }
     // `d_path` names the directory in the mount namespace of its mount. A directory that came from
@@ -267,7 +268,6 @@ fn read_link_through_anchor(parent: &Path, name: &OsStr, guard: &ReadGuard) -> i
     // the rules do not know, so the name is only used after it is shown to lead to this inode on a
     // procfs that is not under another name (SEC-153-1).
     let named = fs::statat(CWD, &real_parent, AtFlags::SYMLINK_NOFOLLOW);
-    let anchor_stat = fs::fstat(&anchor)?;
     let on_proc = fs::fstatfs(&anchor)?.f_type == fs::PROC_SUPER_MAGIC;
     confirm_real_parent(&anchor_stat, named, on_proc, &real_parent)?;
     let real = real_parent.join(name);
