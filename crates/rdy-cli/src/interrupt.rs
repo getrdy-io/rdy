@@ -19,9 +19,10 @@
 //! 5. **Remove the report folder** if nothing was written into it (`OutputDir::remove_if_empty`, through
 //!    the held parent handle, on a helper thread with a bound; a folder that holds a file stays). The
 //!    folder is held weakly, as the watchdog holds it.
-//! 6. **Print the two lines**, and with `--json` the `ErrorOutput` with code `interrupted`, then exit 70
+//! 6. **Put the terminal back again and flush the typed-ahead keys**, right before the text, then
+//!    **print the two lines**, and with `--json` the `ErrorOutput` with code `interrupted`, then exit 70
 //!    (`Effects::exit`, which aborts after 1 s if the exit blocks; core dumps are off, see
-//!    [`crate::startup::harden_process`]). Once the JSON document has started on stdout
+//!    `startup::harden_process`). Once the JSON document has started on stdout
 //!    (`Interrupt::set_stdout_used`), the error goes to stderr only, so stdout holds one document.
 //!
 //! The text is written with `write_raw_bounded`, the watchdog's own helper, so a full pipe or a held
@@ -43,7 +44,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use rdy_engine::output::OutputDir;
-use rdy_engine::watchdog::{Effects, ProcessEffects, RawStream, WriteState, write_raw_bounded};
+use rdy_engine::watchdog::{
+    Effects, Phase, ProcessEffects, RawStream, WriteState, write_raw_bounded,
+};
 
 use crate::error::{CliError, emit};
 use crate::prompt::{Cancel, PromptError};
@@ -140,9 +143,10 @@ impl Interrupt {
         }
         let forced = if state.claim() {
             false
-        } else if self.lost_claim.swap(true, Ordering::SeqCst) {
+        } else if state.phase() == Phase::Writing && self.lost_claim.swap(true, Ordering::SeqCst) {
             // The second signal, and the report write has not finished: stop now, and leave the folder
-            // to whoever is writing into it.
+            // to whoever is writing into it. A report that is `Done` is never turned into exit 70: the
+            // main thread is about to exit with its code.
             true
         } else {
             // The report is being written. It ends the process within its own bounds.
@@ -170,6 +174,10 @@ impl Interrupt {
             // The cursor is after the prompt, or after the `^C` the terminal echoed.
             err.push(b'\n');
         }
+        // The last thing before the text: put the terminal back again and drop what was typed during the
+        // kill and the folder removal, so those keys neither echo nor reach the shell (security review).
+        let restored_again = restore();
+        let _ = restored_again;
         // Once the document has started on stdout, nothing more goes there.
         let to_stdout = json && !self.stdout_used.load(Ordering::SeqCst);
         emit(&error, to_stdout, &mut out, &mut err);

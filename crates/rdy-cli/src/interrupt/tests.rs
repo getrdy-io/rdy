@@ -177,6 +177,25 @@ fn a_signal_while_the_report_is_being_written_is_ignored() {
 }
 
 #[test]
+fn two_signals_after_the_report_is_done_do_not_turn_it_into_exit_70() {
+    let interrupt = Interrupt::default();
+    interrupt.set_run();
+    let state = WriteState::new();
+    assert!(state.claim());
+    state.finish(2);
+    let fx = Recorder::default();
+    let written = Written::default();
+
+    assert!(!interrupt.handle(&state, false, false, &fx, &no_terminal, &written.put()));
+    assert!(!interrupt.handle(&state, false, false, &fx, &no_terminal, &written.put()));
+
+    assert_eq!(fx.kills.load(Ordering::SeqCst), 0);
+    assert_eq!(fx.exit.load(Ordering::SeqCst), 0);
+    assert_eq!(written.err(), "");
+    assert_eq!(interrupt.exit.load(Ordering::SeqCst), super::FREE);
+}
+
+#[test]
 fn a_second_signal_is_ignored_and_does_not_clear_the_flag() {
     let interrupt = Interrupt::default();
     let state = WriteState::new();

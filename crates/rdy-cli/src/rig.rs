@@ -67,6 +67,7 @@ impl Rig {
     /// For the main thread, once it has the code to exit with: takes the exit. After this a signal is
     /// ignored. If a signal got there first, waits for it to end the process with 70, so that is the
     /// only code the shell sees. False if that wait ran out.
+    #[must_use]
     pub fn claim_exit(&self) -> bool {
         self.interrupt.claim_exit()
     }

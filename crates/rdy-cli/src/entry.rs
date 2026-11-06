@@ -123,7 +123,8 @@ fn run_live(
     exec::kill_all_groups();
     // Take the exit: from here a signal is ignored. If one got there first, its exit 70 wins and this
     // waits for it (M1-058, security review S4).
-    rig.claim_exit();
+    // A false answer (the wait ran out) changes nothing: the run exits with its own code.
+    let _ = rig.claim_exit();
     match ran {
         Ok(code) => code.code(),
         Err(payload) => panic::resume_unwind(payload),

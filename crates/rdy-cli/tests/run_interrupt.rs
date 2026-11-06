@@ -30,6 +30,9 @@ use rustix::process::{Pid, Signal};
 
 mod common;
 
+/// One test at a time: rexpect forks, and a fork in a busy multi-threaded process is not safe.
+static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const CHILD_ENV: &str = "RDY_RUN_INTERRUPT_CHILD";
 const DIR_ENV: &str = "RDY_RUN_INTERRUPT_DIR";
 const UNSIGNED: &str =
@@ -181,7 +184,7 @@ fn run_interrupt_child() {
         ))
         .code();
     // What `main` does at the end: a signal that took over has the last word on the exit code.
-    rig.claim_exit();
+    let _ = rig.claim_exit();
     std::process::exit(i32::from(code));
 }
 
@@ -292,6 +295,9 @@ fn assert_interrupted_cleanly(outcome: &Outcome) -> Result<(), Box<dyn Error>> {
 #[test]
 fn ctrl_c_at_a_terminal_aborts_with_the_two_lines_at_column_0_exit_70_no_folder_no_child_left()
 -> Result<(), Box<dyn Error>> {
+    let _guard = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = tempfile::tempdir()?;
     std::fs::create_dir(dir.path().join("out"))?;
     std::fs::write(dir.path().join("spec.yaml"), SPEC)?;
@@ -347,6 +353,9 @@ fn ctrl_c_at_a_terminal_aborts_with_the_two_lines_at_column_0_exit_70_no_folder_
 
 #[test]
 fn sigterm_does_the_same() -> Result<(), Box<dyn Error>> {
+    let _guard = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let outcome = interrupt_child("text", Signal::TERM)?;
     assert_interrupted_cleanly(&outcome)?;
     assert_eq!(outcome.stdout, "");
@@ -355,6 +364,9 @@ fn sigterm_does_the_same() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn with_json_stdout_is_an_error_output_with_code_interrupted() -> Result<(), Box<dyn Error>> {
+    let _guard = ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let outcome = interrupt_child("json", Signal::INT)?;
     assert_interrupted_cleanly(&outcome)?;
     let doc: serde_json::Value = serde_json::from_str(&outcome.stdout)?;

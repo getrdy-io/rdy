@@ -255,7 +255,11 @@ pub(crate) fn restore_terminal() -> bool {
             let _ = tcflush(io::stdin(), QueueSelector::IFlush);
             true
         }
-        TerminalState::Idle | TerminalState::Closed => false,
+        TerminalState::Idle | TerminalState::Closed => {
+            // Already restored, or nothing was hidden: keys typed since are still thrown away.
+            let _ = tcflush(io::stdin(), QueueSelector::IFlush);
+            false
+        }
     }
 }
 
@@ -311,9 +315,10 @@ fn read_hidden_tty() -> Result<Secret, PromptError> {
         hidden.special_codes[SpecialCodeIndex::VTIME] = 0;
         // The signal thread puts these back if a signal ends the process during the read.
         *state = TerminalState::Hidden(saved.clone());
-        let restore = Restore { fd: &stdin, saved };
         let changed = tcsetattr(&stdin, OptionalActions::Now, &hidden);
         drop(state);
+        // Built after the lock is let go: a drop of `Restore` takes the lock itself.
+        let restore = Restore { fd: &stdin, saved };
         if let Err(e) = changed {
             // The guard goes first, so a failure half way through `tcsetattr` is also undone.
             drop(restore);
