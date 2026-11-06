@@ -498,7 +498,7 @@ tests policy.
   `ProxyError::TooLate` once the action log has an entry or a check probe was opened, because the log
   redacts when an entry is written. Call it after `ProbeHub::new` and before `Privilege::snapshot` (the
   first probe read). The call checks, in order: the declared peer classes (`SpecHosts`, and `Proxy` for a proxied
-  call), the check's own host set (`Planned::with_hosts`, from `Built::hosts`; M1-095 feeds it from `PlanEntry::hosts()`), a forbidden literal
+  call), the check's own host set (`Planned::with_hosts`, from `Built::hosts`; `Engine::execute` feeds it from the plan since M1-095), a forbidden literal
   (before the proxy is even called), then the resolved answers (any forbidden answer refuses the whole
   call). Attempts run IPv6 first with families alternating, at most 4, 250 ms apart or at once after a
   failure, 3 s each. The log entry is a `connect` with `host`, `port`, `via_proxy` (no userinfo) and
@@ -1078,7 +1078,7 @@ impl Engine {
 // ids of a family that are stubs: the planner skips each as `not_in_build`, so `HostFamily` is registered
 // while it still has stubs. `ProbeHub::add_declared_env_secrets(names)` registers the values of the secret-named
 // variables the checks declare, before the first log event, and returns the names the set refused. It records the declared names (never a value) as one run-level `env` entry, a set-up entry that `set_proxy` does not count.
-// Not built here: cancel and progress (M1-058, M1-086), the proxy (M1-097), the hosts of a check (M1-095).
+// Not built here: cancel and progress (M1-058, M1-086), the proxy (M1-097), the hosts of a check (M1-095, done: `Engine::execute` passes `Built::hosts` to `Planned::with_hosts`).
 
 // probe
 impl Probe {

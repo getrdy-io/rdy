@@ -58,6 +58,19 @@ fn text(bytes: Vec<u8>) -> String {
 
 /// Runs `rdy_cli::run` on `machine` with `hooks`.
 fn call(machine: Replay, hooks: RunHooks, args: &[&str]) -> Ran {
+    // The example spec lists net.egress. A test run is offline: the check skips as `missing_need` and
+    // no lookup or socket is made (M1-095).
+    let offline = args.first() == Some(&"run") && !args.contains(&"--no-network");
+    let args: Vec<&str> = args
+        .iter()
+        .copied()
+        .chain(offline.then_some("--no-network"))
+        .collect();
+    call_as_given(machine, hooks, &args)
+}
+
+/// Like [`call`], with the arguments exactly as given.
+fn call_as_given(machine: Replay, hooks: RunHooks, args: &[&str]) -> Ran {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -126,7 +139,8 @@ fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
     assert_eq!(u64::from(ran.code), doc["exit_code"].as_u64().unwrap_or(99));
     assert!(matches!(ran.code, 1 | 2), "{}", ran.code);
 
-    // One result per spec entry, in spec order, and the ones no family builds are skipped.
+    // One result per spec entry, in spec order. The run is offline, so net.egress is skipped for the
+    // missing `network` need, and the ones no family builds are skipped as not in the build.
     let keys: Vec<&str> = doc["checks"]
         .as_array()
         .unwrap_or_else(|| panic!("no checks"))
@@ -146,7 +160,10 @@ fn a_run_writes_a_private_report_folder_and_prints_the_same_report_on_stdout() {
             "aws.iam"
         ]
     );
-    for check in &doc["checks"].as_array().cloned().unwrap_or_default()[3..] {
+    let checks = doc["checks"].as_array().cloned().unwrap_or_default();
+    assert_eq!(checks[3]["status"], "skipped", "{}", checks[3]);
+    assert_eq!(checks[3]["skip_kind"], "missing_need", "{}", checks[3]);
+    for check in &checks[4..] {
         assert_eq!(check["status"], "skipped", "{check}");
         assert_eq!(check["skip_kind"], "not_in_build", "{check}");
     }
@@ -353,9 +370,12 @@ fn the_deadline_hook_sets_the_recorded_deadline() {
 // --- the built binary, on the real machine ---
 
 fn rdy(args: &[&str]) -> Output {
+    // Offline, as in `call`: the example spec's net.egress must not look anything up (M1-095).
+    let offline = args.first() == Some(&"run") && !args.contains(&"--no-network");
     common::quiet(
         Command::new(env!("CARGO_BIN_EXE_rdy"))
             .args(args)
+            .args(offline.then_some("--no-network"))
             .env_remove("RDY_PROGRESS")
             .env_remove("RUST_LOG")
             .output()
@@ -427,9 +447,12 @@ fn the_binary_runs_a_signed_spec_whose_key_the_user_pinned() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/signed");
     let home = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let with_home = |args: &[&str]| -> Output {
+        // Offline: the signed example lists net.egress, which must look nothing up (M1-095).
+        let offline = args.first() == Some(&"run") && !args.contains(&"--no-network");
         common::quiet(
             Command::new(env!("CARGO_BIN_EXE_rdy"))
                 .args(args)
+                .args(offline.then_some("--no-network"))
                 .env("HOME", home.path())
                 .env_remove("XDG_CONFIG_HOME")
                 .env_remove("RDY_PROGRESS")
@@ -546,9 +569,12 @@ fn a_signed_spec_prints_no_unsigned_warning() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/signed");
     let home = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let with_home = |args: &[&str]| -> Output {
+        // Offline: the signed example lists net.egress, which must look nothing up (M1-095).
+        let offline = args.first() == Some(&"run") && !args.contains(&"--no-network");
         common::quiet(
             Command::new(env!("CARGO_BIN_EXE_rdy"))
                 .args(args)
+                .args(offline.then_some("--no-network"))
                 .env("HOME", home.path())
                 .env_remove("XDG_CONFIG_HOME")
                 .env_remove("RDY_PROGRESS")
@@ -754,4 +780,66 @@ fn an_unknown_id_and_an_unknown_field_carry_the_did_you_mean_hint_of_skip_why() 
         },
     );
     assert!(fix.contains("(did you mean 'min'?)"), "{fix}");
+}
+
+/// `rdy run` plans `net.egress` with the family's hosts and the run's probe reaches them: the check
+/// connects to its own endpoint over the scripted machine, and the report says so (M1-095).
+#[test]
+fn a_run_reaches_the_endpoints_the_net_egress_entry_lists() {
+    let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
+    let spec = dir.path().join("egress.yaml");
+    std::fs::write(
+        &spec,
+        "apiVersion: rdy/v1\nkind: Readiness\nmetadata:\n  product: acme\nchecks:\n  - id: net.egress\n    endpoints: [\"web.acme.test:8080\"]\n",
+    )
+    .unwrap_or_else(|e| panic!("cannot write the spec: {e}"));
+    let machine = common::unprivileged()
+        .host(
+            "web.acme.test",
+            ["192.0.2.1"
+                .parse()
+                .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))],
+        )
+        .tcp(
+            "192.0.2.1:8080"
+                .parse()
+                .unwrap_or_else(|e| panic!("addr: {e}")),
+            rdy_engine::testing::TcpScript::Serve("web".to_owned()),
+        )
+        .serve_duplex("web", |_server| async {});
+    let out = dir.path().join("out");
+    std::fs::create_dir(&out).unwrap_or_else(|e| panic!("cannot make the out dir: {e}"));
+    let ran = call_as_given(
+        machine,
+        pinned(),
+        &[
+            "run",
+            &spec.to_string_lossy(),
+            "--allow-unsigned",
+            "--json",
+            "--out-dir",
+            &out.to_string_lossy(),
+        ],
+    );
+    let doc = parse(&ran.stdout);
+    assert_valid(&doc);
+    assert_eq!(ran.code, 0, "{}", ran.stderr);
+    let check = &doc["checks"][0];
+    assert_eq!(check["id"], "net.egress", "{check}");
+    assert_eq!(check["status"], "pass", "{check}");
+    assert_eq!(
+        check["observed"]["endpoints"][0]["result"], "reached",
+        "{check}"
+    );
+    // The log shows the check's own calls: a lookup and a connect, and nothing denied.
+    let mine: Vec<&Value> = doc["actions"]
+        .as_array()
+        .map(|all| all.iter().filter(|a| a["check"] == "net.egress").collect())
+        .unwrap_or_default();
+    let kinds: Vec<&str> = mine.iter().filter_map(|a| a["kind"].as_str()).collect();
+    assert!(
+        kinds.contains(&"lookup") && kinds.contains(&"connect"),
+        "{kinds:?}"
+    );
+    assert!(mine.iter().all(|a| a["outcome"] == "ok"), "{mine:?}");
 }

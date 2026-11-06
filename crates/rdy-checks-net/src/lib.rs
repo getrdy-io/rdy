@@ -1,6 +1,9 @@
 //! The `net.*` check family.
 //!
-//! Internal to rdy. No API stability promise. This is a skeleton for now.
+//! Internal to rdy. No API stability promise.
+//!
+//! Built so far: `net.egress` (staged: lookup, dual-stack connect, TLS and ALPN, M1-095). Every call
+//! goes through the probe facade, which owns the sockets, the address policy and the trust roots.
 
 #![forbid(unsafe_code)]
 // A check writes its answer in a Finding, never to the terminal (M1-044, 02 "Lint wall"). The print macros
@@ -15,3 +18,9 @@
     clippy::disallowed_macros
 )]
 #![warn(missing_docs)]
+
+mod egress;
+mod family;
+
+pub use egress::EgressCheck;
+pub use family::NetFamily;

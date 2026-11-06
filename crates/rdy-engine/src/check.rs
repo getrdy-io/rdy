@@ -563,6 +563,15 @@ impl CheckContext {
         self.available.contains(need)
     }
 
+    /// Runs `work` for at most `limit` and returns `None` when the limit passed first. The work is
+    /// dropped at that point, so a check that holds its state outside the future keeps what it had
+    /// gathered. The scheduler's own timeout still applies. A check uses this to give one endpoint or
+    /// one object a budget of its own, so a slow one cannot take the whole check's time.
+    #[cfg(feature = "runtime")]
+    pub async fn within<F: Future>(&self, limit: Duration, work: F) -> Option<F::Output> {
+        tokio::time::timeout(limit, work).await.ok()
+    }
+
     /// How long this check has left before the scheduler gives up on it.
     ///
     /// It reaches zero at the timeout and stays there. A check uses it to size its own work, for

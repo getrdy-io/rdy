@@ -11,6 +11,8 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use super::{UdpReply, UnixResponse};
 use crate::probe::ProbeError;
@@ -19,10 +21,17 @@ use crate::probe::replay::{DnsAnswer, Replay, Unrecorded};
 /// How a recorded datagram server answers: bytes back, or `None` for a server that stays silent.
 type Responder = Arc<dyn Fn(&[u8]) -> Option<Vec<u8>> + Send + Sync>;
 
+/// The first answer, the later answer and the lookups so far of a rebinding name.
+type Rebind = (Vec<IpAddr>, Vec<IpAddr>, Arc<AtomicUsize>);
+
 /// The recorded names, datagram servers and unix socket replies of a [`Replay`].
 #[derive(Clone, Default)]
 pub(crate) struct ReplayNet {
     names: HashMap<String, DnsAnswer>,
+    /// Names whose answer changes after the first lookup: `(first, later, lookups so far)`.
+    rebinding: HashMap<String, Rebind>,
+    /// Names whose lookup waits first, on the tokio clock.
+    delays: HashMap<String, Duration>,
     udp: HashMap<SocketAddr, Responder>,
     unix: HashMap<(PathBuf, String), (u16, Vec<u8>)>,
 }
@@ -48,9 +57,21 @@ impl ReplayNet {
         self.names.get(&host.to_ascii_lowercase())
     }
 
+    /// How long a lookup of `host` waits before it answers.
+    pub(crate) fn delay(&self, host: &str) -> Duration {
+        self.delays
+            .get(&host.to_ascii_lowercase())
+            .copied()
+            .unwrap_or_default()
+    }
+
     /// What a lookup of `host` gives. A name the fixture does not hold is "not recorded": nothing says
     /// the name does not exist, so the test fails loudly. A recorded `NXDOMAIN` is "not found".
     pub(crate) fn resolve(&self, host: &str) -> io::Result<Vec<IpAddr>> {
+        if let Some((first, later, seen)) = self.rebinding.get(&host.to_ascii_lowercase()) {
+            let n = seen.fetch_add(1, Ordering::SeqCst);
+            return Ok(if n == 0 { first.clone() } else { later.clone() });
+        }
         match self.name(host) {
             Some(DnsAnswer::Addrs(addrs)) => Ok(addrs.clone()),
             Some(DnsAnswer::NxDomain) => Err(io::Error::new(
@@ -92,6 +113,35 @@ impl ReplayNet {
 }
 
 impl Replay {
+    /// Makes every lookup of `name` wait `delay` on the tokio clock before it answers, as a slow
+    /// resolver does. Under paused time the wait costs nothing and a timing reads the exact delay.
+    #[must_use]
+    pub fn lookup_delay(mut self, name: &str, delay: Duration) -> Self {
+        self.net.delays.insert(name.to_ascii_lowercase(), delay);
+        self
+    }
+
+    /// Adds a name that answers `first` to its first lookup and `later` to every lookup after it, as a
+    /// DNS rebinding attack does: a public address for the check's vetting lookup, a metadata address
+    /// for the connect-time lookup. The facade must refuse the second answer on its own.
+    #[must_use]
+    pub fn host_rebinding(
+        mut self,
+        name: &str,
+        first: impl IntoIterator<Item = IpAddr>,
+        later: impl IntoIterator<Item = IpAddr>,
+    ) -> Self {
+        self.net.rebinding.insert(
+            name.to_ascii_lowercase(),
+            (
+                first.into_iter().collect(),
+                later.into_iter().collect(),
+                Arc::new(AtomicUsize::new(0)),
+            ),
+        );
+        self
+    }
+
     /// Adds a name that `udp_exchange` can resolve. A name that is not added is "not recorded". Names
     /// compare without regard to case. A fixture's `net.json` fills the same table.
     #[must_use]

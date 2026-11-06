@@ -92,6 +92,9 @@ cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`
 `quota-unused`, `quota-forbidden`, `quota-cut`, `quota-hostile`, and the limit range cases `limit-low`,
 `limit-pod-low`, `limit-default-low`, `limit-default-request`, `limit-ok`, `limit-forbidden`, `limit-cut`, `limit-hostile`), `generated`
 by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a file the script did not write).
+`checks/net.egress/` holds six scripted `net.json` cases (M1-095): `pass-plain`, `dual-dead-v6-refused`, `dual-silent-v6`, `blackhole`,
+`refused` and `nxdomain`. They have no `expect.json` yet: the tests register the `web` server in code (a `serve` entry needs one), which
+`assert_cases` cannot do, so the check's own tests assert the results (the completeness rule for `net` comes with M1-117).
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
 `terminating` case without a quota list proves the check does not list one. `envs/host-min/` is the smallest environment (M1-075): a
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id and a `golden/report.json`.

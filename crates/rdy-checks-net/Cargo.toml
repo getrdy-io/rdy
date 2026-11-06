@@ -9,5 +9,19 @@ repository.workspace = true
 homepage.workspace = true
 include = ["src/**", "Cargo.toml", "LICENSE", "NOTICE", "clippy.toml"]
 
+[dependencies]
+# Probes the endpoints of one check at once on the check's own task: `buffered` polls them in place, so a
+# check starts no task or thread of its own (02 lint wall). In the allowlist of ci/check-crate-deps.toml.
+futures-util = { workspace = true, features = ["alloc"] }
+rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0" }
+rdy-spec = { path = "../rdy-spec", version = "0.1.0-alpha.0" }
+serde_json = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+# The test run applies the real probe policy and writes the real action log. `loopback` adds the TLS server
+# with a generated CA, the dual-stack case and the reset-after-hello server (ADR 0035).
+rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["testing", "loopback"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }
+
 [lints]
 workspace = true

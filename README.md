@@ -103,6 +103,7 @@ vulnerability, read [`SECURITY.md`](SECURITY.md).
 | Host | CPU, memory, disk, OS, SELinux and AppArmor, firewall | Built (Linux), not reachable from `rdy run` yet |
 | Host | ports | Coming before 0.1.0 |
 | Host | kernel, cgroups, time sync, sysctl, container runtime | Planned after 0.1.0 |
+| Network | egress (lookup, connect, TLS) | Built. Direct only: no HTTP request and no proxy yet |
 | Network | egress through a proxy, proxy settings, TLS interception | Coming before 0.1.0. The probe layer under them is built |
 | Network | DNS, registry, MTU, bandwidth | Planned after 0.1.0 |
 | Kubernetes | access, version, storage classes, RBAC for the install identity | Built, not reachable from `rdy run` yet |
@@ -164,13 +165,15 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
 - Host checks on Linux (CPU, memory, disk, OS, SELinux and AppArmor), and Kubernetes version, storage
   class and RBAC checks. These are tested against recorded fixtures. They are not reachable from the
   command line yet.
+- The `net.egress` check (name lookup, connect to every address, TLS and ALPN, direct). It is wired
+  into `rdy run`.
 
 **Next**
 
 - Wiring `rdy run` end to end: load the spec, run the checks, write the reports, set the exit code.
 - The human terminal output and the HTML report.
-- Host ports, the egress, proxy and TLS interception checks, and Kubernetes nodes and Pod Security
-  admission.
+- Host ports, the proxy and TLS interception checks, the egress HTTP request and proxy path, and
+  Kubernetes nodes and Pod Security admission.
 
 **Before 0.1.0**
 

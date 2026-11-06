@@ -22,7 +22,8 @@ fn rdy(spec: &Path, out: &Path, rust_log: Option<&str>) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_rdy"));
     cmd.arg("run")
         .arg(spec)
-        .args(["--allow-unsigned", "--json", "--out-dir"])
+        // Offline: the example spec lists net.egress, which must look nothing up (M1-095).
+        .args(["--no-network", "--allow-unsigned", "--json", "--out-dir"])
         .arg(out)
         .env_remove("RDY_PROGRESS")
         .env_remove("RUST_LOG");
