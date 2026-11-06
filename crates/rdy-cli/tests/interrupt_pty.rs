@@ -121,3 +121,32 @@ fn sigint_at_a_password_prompt_restores_the_terminal_and_exits_70() {
 fn sigterm_at_a_password_prompt_restores_the_terminal_and_exits_70() {
     check_text_run(Signal::TERM);
 }
+
+/// Core dumps are off while rdy waits at a prompt (security review S3): the exit can end in SIGABRT
+/// (the 1 s fallback), and a core file would hold secrets. Linux only: it reads `/proc/<pid>/limits`.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_core_file_limit_is_zero_while_rdy_waits() {
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pid_file = dir.path().join("pid");
+    let out_file = dir.path().join("stdout.txt");
+    let mut session = on_pty(dir.path(), &pid_file, &out_file);
+    session
+        .exp_string("Password for the new secret key (input hidden): ")
+        .expect("the password prompt");
+    let pid: i32 = std::fs::read_to_string(&pid_file)
+        .expect("pid file")
+        .trim()
+        .parse()
+        .expect("pid");
+    let limits = std::fs::read_to_string(format!("/proc/{pid}/limits")).expect("limits");
+    let line = limits
+        .lines()
+        .find(|l| l.starts_with("Max core file size"))
+        .expect("a core file size line");
+    let numbers: Vec<&str> = line.split_whitespace().skip(4).take(2).collect();
+    assert_eq!(numbers, ["0", "0"], "{line}");
+    rustix::process::kill_process(Pid::from_raw(pid).expect("pid"), Signal::TERM).expect("signal");
+    let _ = session.exp_eof();
+}

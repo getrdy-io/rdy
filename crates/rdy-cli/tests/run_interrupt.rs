@@ -88,8 +88,9 @@ impl Check for Sleeper {
             let pid_file = work_dir().join("sleeper.pid");
             let spec = ExecSpec::new("/bin/sh", Duration::from_secs(600)).args([
                 "-c",
-                // The shell's own pid is the group id. The pid file comes last: the parent waits for it.
-                "echo $$ > \"$0.pgid\"; sleep 600 & echo $! > \"$0\"; wait",
+                // The shell's own pid is the group id. The pid file comes last: the parent waits for it. Both are
+                // written to a temp name and moved into place, so a reader never sees half a number.
+                "echo $$ > \"$0.pgid.tmp\" && mv \"$0.pgid.tmp\" \"$0.pgid\"; sleep 600 & echo $! > \"$0.tmp\" && mv \"$0.tmp\" \"$0\"; wait",
                 &pid_file.to_string_lossy(),
             ]);
             let _ = exec::run(spec).await;
@@ -180,7 +181,7 @@ fn run_interrupt_child() {
         ))
         .code();
     // What `main` does at the end: a signal that took over has the last word on the exit code.
-    rig.wait_for_interrupt();
+    rig.claim_exit();
     std::process::exit(i32::from(code));
 }
 
@@ -285,12 +286,62 @@ fn assert_interrupted_cleanly(outcome: &Outcome) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// The text scenario at a terminal: the Ctrl-C key (the byte 0x03 on a pty with the signal key on) makes
+/// the terminal send SIGINT to the foreground group, as a person's Ctrl-C does. The terminal echoes
+/// `^C`, and `error:` must start at column 0 after it (07 section 5.1).
 #[test]
-fn sigint_once_aborts_with_the_two_lines_exit_70_no_folder_and_no_child_left()
+fn ctrl_c_at_a_terminal_aborts_with_the_two_lines_at_column_0_exit_70_no_folder_no_child_left()
 -> Result<(), Box<dyn Error>> {
-    let outcome = interrupt_child("text", Signal::INT)?;
-    assert_interrupted_cleanly(&outcome)?;
-    assert_eq!(outcome.stdout, "", "text mode prints nothing on stdout");
+    let dir = tempfile::tempdir()?;
+    std::fs::create_dir(dir.path().join("out"))?;
+    std::fs::write(dir.path().join("spec.yaml"), SPEC)?;
+    let mut cmd = Command::new("sh");
+    // Echo on, as a login shell has it: rexpect starts its terminals with echo off.
+    cmd.arg("-c")
+        .arg("stty echo && exec \"$0\" \"$@\"")
+        .arg(std::env::current_exe()?)
+        .args([
+            "run_interrupt_child",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD_ENV, "text")
+        .env(DIR_ENV, dir.path())
+        .env_remove("RUST_LOG");
+    let mut session = rexpect::session::spawn_command(cmd, Some(30_000))
+        .map_err(|e| format!("cannot start the child on a pty: {e:?}"))?;
+    let started = Instant::now();
+    let pid_file = dir.path().join("sleeper.pid");
+    while !pid_file.exists() {
+        if started.elapsed() > HARD_LIMIT {
+            return Err("the sleeper never started".into());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(std::fs::read_dir(dir.path().join("out"))?.count(), 1);
+    session
+        .send_control('c')
+        .map_err(|e| format!("cannot send Ctrl-C: {e:?}"))?;
+    let seen = session
+        .exp_eof()
+        .map_err(|e| format!("the child did not end: {e:?}"))?;
+    let status = session
+        .process()
+        .wait()
+        .map_err(|e| format!("cannot wait: {e:?}"))?;
+    assert!(
+        matches!(status, rexpect::process::WaitStatus::Exited(_, 70)),
+        "{status:?}: {seen:?}"
+    );
+    assert!(
+        seen.contains(
+            "^C\r\nerror: interrupted. No report was written.\r\nfix: run rdy again and let it finish\r\n"
+        ),
+        "error: must start at column 0 after the echoed ^C: {seen:?}"
+    );
+    assert_eq!(std::fs::read_dir(dir.path().join("out"))?.count(), 0);
+    gone::wait_gone(&pid_file)?;
     Ok(())
 }
 

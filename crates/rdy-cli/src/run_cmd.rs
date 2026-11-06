@@ -244,6 +244,10 @@ async fn execute(
     // block for good, on a pipe nobody reads, and while it blocks the state is still `Running`, so the
     // watchdog can write the partial report and end the run. Then the claim, then the files, then
     // `finish`. After `finish` the watchdog is only a backstop with the stored exit code.
+    if json {
+        // From the first byte of the document, a signal writes to stderr only (C4).
+        rig.interrupt.set_stdout_used();
+    }
     let printed = if json {
         print_json(&redacted, stdout).map_err(writer_error)
     } else {
@@ -359,13 +363,33 @@ fn assemble(
 
 /// Removes the report folder when nothing was written into it. A folder that holds a file stays, and so
 /// does one that cannot be removed: this is a best-effort tidy, and the run's own error is what counts.
-/// The handle is dropped first, because Windows cannot remove a folder that is still open.
+/// The removal goes through the folder's held parent handle ([`OutputDir::remove_if_empty`]), not by
+/// path. When this is the last holder of the folder, the handle is closed first, because Windows cannot
+/// remove a folder that is still open.
 pub(crate) fn discard_if_empty(dir: Option<Arc<OutputDir>>) {
     if let Some(dir) = dir {
-        let path = dir.path().to_owned();
-        drop(dir);
-        // `remove_dir` only removes an empty folder, and does not follow a link.
-        let _ = std::fs::remove_dir(path);
+        let _ = match Arc::try_unwrap(dir) {
+            Ok(owned) => owned.into_removed_if_empty(),
+            Err(shared) => shared.remove_if_empty(),
+        };
+    }
+}
+
+/// [`discard_if_empty`] on a helper thread, waited for at most `limit`, for the signal path: a removal
+/// on a hung mount must not hold up the exit.
+pub(crate) fn discard_bounded(dir: Option<Arc<OutputDir>>, limit: Duration) {
+    let Some(dir) = dir else {
+        return;
+    };
+    let (done, wait) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("rdy-interrupt-remove".into())
+        .spawn(move || {
+            discard_if_empty(Some(dir));
+            let _ = done.send(());
+        });
+    if spawned.is_ok() {
+        let _ = wait.recv_timeout(limit);
     }
 }
 

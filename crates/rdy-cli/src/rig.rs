@@ -64,10 +64,11 @@ impl Rig {
         interrupt::watch(Arc::clone(&self.interrupt), Arc::clone(&self.state), json)
     }
 
-    /// For the main thread, once it has the code to exit with: waits for the signal thread to end the
-    /// process when a signal has taken over, so the exit code is 70 and nothing else.
-    pub fn wait_for_interrupt(&self) {
-        self.interrupt.wait_for_exit();
+    /// For the main thread, once it has the code to exit with: takes the exit. After this a signal is
+    /// ignored. If a signal got there first, waits for it to end the process with 70, so that is the
+    /// only code the shell sees. False if that wait ran out.
+    pub fn claim_exit(&self) -> bool {
+        self.interrupt.claim_exit()
     }
 
     /// Ends the watchdog without it acting. The binary never calls this on a run: the backstop after

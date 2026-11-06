@@ -36,6 +36,8 @@ pub fn main_code() -> u8 {
     // First, before any file is created or descriptor opened: a private umask, and the descriptors
     // the parent left open (they would reach every child command).
     exec::harden_umask();
+    // No core dump can hold a secret, whatever ends the process (M1-058).
+    startup::harden_process();
     let inherited = exec::inherited_fds();
     let redactor = match redaction::init() {
         Ok(redactor) => redactor.clone(),
@@ -119,8 +121,9 @@ fn run_live(
     // and it is lock-free (M1-176). It sets the shutdown flag for good, which is right here: the process
     // is about to exit. The watchdog does the same if the run hangs.
     exec::kill_all_groups();
-    // A signal may have taken over while the run was ending: its exit 70 wins.
-    rig.wait_for_interrupt();
+    // Take the exit: from here a signal is ignored. If one got there first, its exit 70 wins and this
+    // waits for it (M1-058, security review S4).
+    rig.claim_exit();
     match ran {
         Ok(code) => code.code(),
         Err(payload) => panic::resume_unwind(payload),
