@@ -18,6 +18,7 @@ use crate::lsm::{self, Lsm};
 use crate::memory::{self, Memory};
 use crate::os::{self, OsCheck};
 use crate::security_agents::{self, SecurityAgents};
+use crate::sysctl::{self, Sysctl};
 use crate::time_sync::{self, TimeSync};
 
 #[cfg(test)]
@@ -83,16 +84,6 @@ static PORTS: CheckInfo = info(
     5,
     ROOT,
 );
-static SYSCTL: CheckInfo = info(
-    "host.sysctl",
-    "Kernel parameters and limits",
-    CheckMeta {
-        title: "Kernel parameters and limits",
-        remediation: "Set the value now with `sysctl -w vm.max_map_count=262144`, using the parameter and value from the result. Then persist it in a file under `/etc/sysctl.d/` and run `sysctl --system`. `sysctl -p` does not read `sysctl.d`. For file limits, set `LimitNOFILE=` in the service unit.",
-    },
-    2,
-    &[],
-);
 static CONTAINER_RUNTIME: CheckInfo = info(
     "host.container_runtime",
     "Docker, containerd, Podman, CRI-O",
@@ -135,7 +126,7 @@ static CHECKS: [&CheckInfo; 13] = [
     &firewall::INFO,
     &time_sync::INFO,
     &cpu::INFO,
-    &SYSCTL,
+    &sysctl::INFO,
     &CONTAINER_RUNTIME,
     &CGROUPS,
     &os::INFO,
@@ -148,7 +139,7 @@ static CHECKS: [&CheckInfo; 13] = [
 ///
 /// `host.cpu` ([`CpuCheck`]), `host.disk` ([`Disk`]), `host.firewall` ([`Firewall`]), `host.lsm` ([`Lsm`]),
 /// `host.memory` ([`Memory`]), `host.os` ([`OsCheck`]), `host.security_agents` ([`SecurityAgents`]) and
-/// `host.time_sync` ([`TimeSync`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
+/// `host.time_sync` ([`TimeSync`]) and `host.sysctl` ([`Sysctl`]) are real. The others are stubs for now ([`HostFamily::stub_ids`]).
 ///
 /// On Linux a stub that ran would report `error` with `check_failed`, which reads as a fault on the
 /// customer's machine. So the family lists its stubs in [`Family::not_built`] and the planner skips each
@@ -169,9 +160,8 @@ impl HostFamily {
 }
 
 /// The checks that have no code yet. `build` returns a [`Stub`] for each.
-static STUBS: [&str; 5] = [
+static STUBS: [&str; 4] = [
     "host.ports",
-    "host.sysctl",
     "host.container_runtime",
     "host.cgroups",
     "host.kernel",
@@ -217,6 +207,9 @@ impl Family for HostFamily {
             let check = TimeSync::from_params(time_sync);
             let hosts = HostSet::new(check.servers().iter().cloned());
             return Ok(Built::new(Box::new(check)).with_hosts(hosts));
+        }
+        if let CheckParams::HostSysctl(sysctl) = &params {
+            return Ok(Built::new(Box::new(Sysctl::new(sysctl))));
         }
         if let CheckParams::HostOs(os) = &params {
             return Ok(Built::new(Box::new(OsCheck::from_params(os))));

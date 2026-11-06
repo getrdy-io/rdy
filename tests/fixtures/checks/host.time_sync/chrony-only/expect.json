@@ -30,7 +30,6 @@
       "timedatectl": "not installed",
       "timezone": null
     },
-    "partial": null,
-    "status": "pass"
+    "partial": null
   }
 }

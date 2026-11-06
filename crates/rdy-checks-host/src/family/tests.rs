@@ -212,7 +212,6 @@ fn these_ids_are_still_stubs_and_the_planner_skips_them() {
         HostFamily::stub_ids(),
         [
             "host.ports",
-            "host.sysctl",
             "host.container_runtime",
             "host.cgroups",
             "host.kernel",
@@ -415,4 +414,47 @@ fn host_time_sync_builds_the_real_check_with_the_ntp_servers_as_its_hosts() {
         .expect("the entry builds");
     assert!(built.hosts.is_empty());
     assert!(!HostFamily::stub_ids().contains(&"host.time_sync"));
+}
+
+#[test]
+fn host_sysctl_builds_the_real_check_and_it_gives_a_finding() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "host.sysctl", "expect": {"vm.max_map_count": ">=262144"}}),
+    )
+    .expect("an entry");
+    let built = HostFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("the entry builds");
+    assert_eq!(built.check.info().id, "host.sysctl");
+    assert_eq!(built.check.info().summary, "Kernel parameters and limits");
+    assert!(!HostFamily::stub_ids().contains(&"host.sysctl"));
+    assert!(built.check.info().commands.is_empty());
+
+    // A stub reports the same id, so run it: only the real check ends in a finding.
+    let fixture = rdy_engine::testing::Fixture::load(
+        &rdy_engine::testing::fixtures_dir(),
+        "checks/host.sysctl/not-persisted",
+    )
+    .expect("the fixture loads");
+    let run = rdy_engine::testing::TestRun::for_fixture(&fixture);
+    let ctx = run.context_for(
+        built.check.info(),
+        "host.sysctl",
+        Os::Linux,
+        Vec::<rdy_engine::check::Need>::new(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("a runtime");
+    let finding = runtime
+        .block_on(built.check.run(&ctx))
+        .expect("the real check ends in a finding, not an error");
+    assert_eq!(finding.level, rdy_engine::check::Level::Warn);
+    assert!(
+        finding.message.contains("is not persisted"),
+        "{}",
+        finding.message
+    );
 }

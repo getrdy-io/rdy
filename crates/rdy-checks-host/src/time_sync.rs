@@ -1,9 +1,10 @@
 //! `host.time_sync`: is the clock synchronized, and how far is it from a reference.
 //!
-//! Linux only in M1. Three sources, all read-only and all asked at the same time:
+//! Linux only in M1. Three sources, all read-only, asked one after the other with SNTP first and each
+//! cut to the time left in the check budget:
 //!
 //! - `timedatectl show` (systemd 239 and later), else `timedatectl status`, for the sync flag;
-//! - `chronyc -n -c -t 3 tracking`, for chrony's state and its own offset;
+//! - `chronyc -n -c tracking`, for chrony's state and its own offset;
 //! - an SNTP exchange with each server in the spec's `ntp_servers`, for an offset measured by rdy.
 //!
 //! There are no default servers: offline first means no surprise traffic. With no `ntp_servers` rdy sends
@@ -37,11 +38,9 @@ use rdy_spec::check::HostTimeSync;
 
 use crate::family::OS;
 use crate::text::{short, soft};
-use join::{join_all, join2};
 use judge::{Attempt, Facts, Limits, Tool};
 use sntp::{Fixed, Request};
 
-mod join;
 mod judge;
 mod parse;
 mod sntp;
@@ -55,8 +54,20 @@ mod unit_tests;
 const NO_SOURCE: &str =
     "this check reads Linux time sync state and has no data source on this OS yet";
 
+/// Why a step was not run.
+const NO_TIME: &str = "it was not run, because no time was left in the check budget";
+
 /// The most bytes of a reply that are read. A time packet is 48.
 const MAX_REPLY: usize = 128;
+
+/// Kept back from the check's budget, so the check's own cut comes before the engine's timer.
+const MARGIN: Duration = Duration::from_millis(250);
+
+/// The least time a command step is given. Below it the step is not run.
+const MIN_STEP: Duration = Duration::from_millis(100);
+
+/// What the probe gives one SNTP exchange (`UDP_TIMEOUT`).
+const SNTP_WINDOW: Duration = Duration::from_secs(3);
 
 /// The port that applies when the spec names none.
 const DEFAULT_PORT: u16 = 123;
@@ -112,13 +123,12 @@ impl TimeSync {
     /// A check for these parameters.
     #[must_use]
     pub fn from_params(params: &HostTimeSync) -> Self {
+        // `NtpServer::target` is the parsed host and port, so no server can be dropped here.
         let servers = params
             .ntp_servers
             .iter()
             .flatten()
-            .filter_map(|server| {
-                Target::parse(&format!("{}:{}", server.host(), server.port_or_default())).ok()
-            })
+            .map(|server| server.target().clone())
             .collect();
         Self {
             max_skew: params.max_skew.as_ref().map(rdy_spec::Duration::to_std),
@@ -157,28 +167,49 @@ impl TimeSync {
         if ctx.os() != Os::Linux {
             return Err(CheckError::Unsupported(NO_SOURCE));
         }
-        let (timedatectl, (chronyc, servers)) =
-            join2(timedatectl(ctx), join2(chronyc(ctx), self.ask_all(ctx))).await;
+        // One after the other, each cut to the time left in the check's budget minus a margin, so the
+        // check always answers before the engine's own timer. The SNTP exchange goes first, so a
+        // `timedatectl` that hangs cannot throw away a good offset (03 host.time_sync, Needs).
+        let servers = self.ask_all(ctx).await?;
+        let timedatectl = timedatectl(ctx).await?;
+        let chronyc = chronyc(ctx).await?;
         let facts = Facts {
-            timedatectl: timedatectl?,
-            chronyc: chronyc?,
-            servers: servers?,
+            timedatectl,
+            chronyc,
+            servers,
         };
         Ok(judge::judge(&facts, self.limits()))
     }
 
-    /// Asks every server at once. The answers keep the spec order.
+    /// Asks the servers in spec order and stops at the first good reply. A server after that one, or
+    /// one the budget does not reach, is "not measured".
     async fn ask_all(&self, ctx: &CheckContext) -> Result<Vec<(String, Attempt)>, CheckError> {
-        let asked = join_all(self.servers.iter().map(|s| self.ask(ctx, s)).collect()).await;
-        let mut out = Vec::with_capacity(asked.len());
-        for (server, attempt) in self.servers.iter().zip(asked) {
-            out.push((server_text(server), attempt?));
+        let mut out = Vec::with_capacity(self.servers.len());
+        let mut answered = false;
+        for server in &self.servers {
+            let text = server_text(server);
+            if answered {
+                out.push((
+                    text,
+                    Attempt::NotAsked("an earlier server already answered"),
+                ));
+                continue;
+            }
+            let attempt = self.ask(ctx, server).await?;
+            answered = matches!(attempt, Attempt::Sample(_));
+            out.push((text, attempt));
         }
         Ok(out)
     }
 
     /// One exchange with one server.
     async fn ask(&self, ctx: &CheckContext, server: &Target) -> Result<Attempt, CheckError> {
+        // The probe gives one exchange up to 3 s. Do not start one the budget cannot hold.
+        if slice(ctx).is_none_or(|left| left < SNTP_WINDOW) {
+            return Ok(Attempt::NotAsked("no time left in the check budget"));
+        }
+        // T1 is read here, before the probe looks up a server name, so for a name the round trip
+        // includes the lookup. The judge records half of it as the error bound of the offset.
         let Some(t1) = sntp::fixed_from((self.clock)()) else {
             return Ok(Attempt::Failed(
                 "the local clock is set before 1970".to_owned(),
@@ -225,6 +256,14 @@ impl Check for TimeSync {
     }
 }
 
+/// The time a step may use: what is left of the check's budget minus the margin. `None` when that is
+/// under [`MIN_STEP`].
+fn slice(ctx: &CheckContext) -> Option<Duration> {
+    ctx.remaining()
+        .checked_sub(MARGIN)
+        .filter(|left| *left >= MIN_STEP)
+}
+
 /// The server as the text shows it: the host, and the port when it is not 123.
 fn server_text(server: &Target) -> String {
     if server.port() == DEFAULT_PORT {
@@ -237,6 +276,10 @@ fn server_text(server: &Target) -> String {
 /// A random 64 bit transmit timestamp. The standard library seeds `RandomState` from the operating
 /// system, so the value cannot be guessed by a host that cannot read this process. The counter and the
 /// local time only keep two requests in one process apart.
+///
+/// `getrandom` is pinned in the workspace but `ci/check-crate-deps.toml` does not allow it for
+/// `rdy-checks-host`, and a new dependency for eight random bytes is not worth the review. 64 bits of a
+/// keyed hash are enough for the one job: an off-path sender must guess the value to be believed.
 fn nonce(t1: Fixed) -> u64 {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let count = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -251,6 +294,8 @@ enum Ran {
     Absent,
     /// It did not answer in time.
     Hung,
+    /// There was no time left to start it.
+    NoTime,
     /// It ran and the result is not usable. The text says why.
     Odd(String),
 }
@@ -265,9 +310,14 @@ async fn run_tool(
         hint: "Tell the vendor which rdy version this is.".to_owned(),
     };
     let entry = table::entry(program).ok_or_else(failed)?;
+    let Some(left) = slice(ctx) else {
+        return Ok(Ran::NoTime);
+    };
+    // The table form has its own limit (3 s). `at_most` only lowers it, to the time the budget has left.
     let cmd = entry
         .cmd_for(ctx.os(), form, &[])
-        .map_err(|e| CheckError::Probe(ProbeError::Table(e)))?;
+        .map_err(|e| CheckError::Probe(ProbeError::Table(e)))?
+        .at_most(left);
     let out = match ctx.probe().exec(cmd).await {
         Ok(out) => out,
         Err(error) => {
@@ -301,7 +351,9 @@ async fn timedatectl(ctx: &CheckContext) -> Result<Tool<parse::Timedate>, CheckE
             }
         }
         Ran::Absent => return Ok(Tool::Absent),
+        // `status` waits on the same bus, so it is not tried after a `show` that timed out.
         Ran::Hung => return Ok(Tool::Unusable("it timed out".to_owned())),
+        Ran::NoTime => return Ok(Tool::Unusable(NO_TIME.to_owned())),
         Ran::Odd(_) => {}
     }
     Ok(match run_tool(ctx, "timedatectl", "status").await? {
@@ -311,6 +363,7 @@ async fn timedatectl(ctx: &CheckContext) -> Result<Tool<parse::Timedate>, CheckE
         },
         Ran::Absent => Tool::Absent,
         Ran::Hung => Tool::Unusable("it timed out".to_owned()),
+        Ran::NoTime => Tool::Unusable(NO_TIME.to_owned()),
         Ran::Odd(why) => Tool::Unusable(why),
     })
 }
@@ -324,6 +377,7 @@ async fn chronyc(ctx: &CheckContext) -> Result<Tool<parse::Tracking>, CheckError
         },
         Ran::Absent => Tool::Absent,
         Ran::Hung => Tool::Unusable("it timed out".to_owned()),
+        Ran::NoTime => Tool::Unusable(NO_TIME.to_owned()),
         Ran::Odd(why) => Tool::Unusable(format!("chronyd may not be running ({why})")),
     })
 }

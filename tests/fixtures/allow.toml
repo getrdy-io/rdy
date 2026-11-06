@@ -36,6 +36,12 @@ value = "5.15.90.1"
 reason = "A WSL2 kernel version with four parts (5.15.90.1-microsoft-standard-WSL2), not an address; host.os parses it"
 
 [[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/host.os/ubuntu-wsl/expect.json"
+value = "5.15.90.1"
+reason = "The same WSL2 kernel version, quoted in the reviewed result (observed.kernel), not an address"
+
+[[allow]]
 rule = "host"
 path = "tests/fixtures/checks/k8s.version/gke/api/nodes.json"
 value = "cloud.google.com"
@@ -86,3 +92,9 @@ rule = "ip"
 path = "tests/fixtures/checks/host.time_sync/refused-range/expect.json"
 value = "169.254.169.123"
 reason = "The Amazon time address, named as the spec entry that host.time_sync must refuse; the golden records it, no test sends a packet to it"
+
+[[allow]]
+rule = "ip"
+path = "tests/fixtures/checks/host.time_sync/named-server-metadata/net.json"
+value = "169.254.169.123"
+reason = "The resolver answer that host.time_sync must refuse (the Amazon time address behind a name); no test sends a packet to it"

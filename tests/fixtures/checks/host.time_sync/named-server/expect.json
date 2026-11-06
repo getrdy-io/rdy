@@ -15,7 +15,7 @@
     "level": "pass",
     "message": "Clock is synchronized, 500 ms behind `time.acme.example`.",
     "notes": [
-      "`time.acme.example`: stratum 2, round trip under 1 ms."
+      "`time.acme.example`: stratum 2, round trip under 1 ms, offset known to within under 1 ms."
     ],
     "observed": {
       "chrony": {
@@ -33,6 +33,7 @@
       "servers": [
         {
           "delay_seconds": 0.0,
+          "error_bound_seconds": 0.0,
           "offset_seconds": 0.5,
           "result": "ok",
           "server": "time.acme.example",
@@ -43,7 +44,6 @@
       "timedatectl": "ok",
       "timezone": "Etc/UTC"
     },
-    "partial": null,
-    "status": "pass"
+    "partial": null
   }
 }

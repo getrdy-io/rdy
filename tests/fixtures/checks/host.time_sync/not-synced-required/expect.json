@@ -27,7 +27,6 @@
       "timedatectl": "ok",
       "timezone": "Etc/UTC"
     },
-    "partial": null,
-    "status": "block"
+    "partial": null
   }
 }

@@ -8,6 +8,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rdy_engine::check::{CheckOutcome, Finding, Level, Need, Os};
@@ -16,6 +17,7 @@ use rdy_engine::outcome::map_outcome;
 use rdy_engine::probe::ActionLogOutput;
 use rdy_engine::probe::sock::{RULE_UDP_ADDRESS, RULE_UDP_HOST};
 use rdy_engine::sched::{End, Planned};
+use rdy_engine::testing::expect_bytes;
 use rdy_engine::testing::golden::assert_golden;
 use rdy_engine::testing::{Fixture, Replay, TestRun, assert_within_manifest, fixtures_dir};
 use rdy_spec::check::CheckParams;
@@ -61,6 +63,9 @@ const CASES: &[(&str, &str)] = &[
     expect!("named-server"),
     expect!("second-server"),
     expect!("hung-chronyc"),
+    expect!("hung-timedatectl"),
+    expect!("silent-server-and-hung-tools"),
+    expect!("named-server-metadata"),
 ];
 
 /// 2026-11-02 09:00:00 UTC, the pinned local clock.
@@ -93,6 +98,8 @@ fn servers(case: &str) -> Vec<(&'static str, Server)> {
             vec![("192.0.2.10:123", Server::Offset(400.0))]
         }
         "warn-offset" => vec![("192.0.2.10:123", Server::Offset(-12.0))],
+        "hung-timedatectl" => vec![("192.0.2.10:123", Server::Offset(400.0))],
+        "silent-server-and-hung-tools" => vec![("192.0.2.10:123", Server::Silent)],
         "echo-mismatch" => vec![("192.0.2.10:123", Server::BadEcho)],
         "silent-server" => vec![("192.0.2.10:123", Server::Silent)],
         "named-server" => vec![("192.0.2.20:123", Server::Offset(0.5))],
@@ -185,12 +192,31 @@ impl Run {
 /// nothing.
 fn run_with(fixture: &Fixture, check: TimeSync, list: &[(&str, Server)], give_hosts: bool) -> Run {
     let replay = add_servers(fixture.replay().clone(), list);
+    run_replay(fixture, check, replay, give_hosts)
+}
+
+/// Like `run_with`, with the replay already holding its servers.
+fn run_replay(fixture: &Fixture, check: TimeSync, replay: Replay, give_hosts: bool) -> Run {
+    run_replay_within(fixture, check, replay, give_hosts, None)
+}
+
+/// Like `run_replay`, with the spec's `timeout` for the check.
+fn run_replay_within(
+    fixture: &Fixture,
+    check: TimeSync,
+    replay: Replay,
+    give_hosts: bool,
+    timeout: Option<Duration>,
+) -> Run {
     let test_run = TestRun::new(replay);
     let scheduler = test_run.scheduler(1, fixture.os(), fixture.available_needs());
     let hosts = HostSet::new(check.servers().iter().cloned());
     let mut planned = Planned::new(Arc::new(check), "host.time_sync");
     if give_hosts {
         planned = planned.with_hosts(hosts.clone());
+    }
+    if let Some(timeout) = timeout {
+        planned = planned.with_timeout(timeout);
     }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
@@ -214,14 +240,6 @@ fn run_case(case: &str) -> Run {
     )
 }
 
-fn level_word(level: Level) -> &'static str {
-    match level {
-        Level::Pass => "pass",
-        Level::Warn => "warn",
-        Level::Fail => "fail",
-    }
-}
-
 /// The result as the engine maps it, for the status.
 fn mapped(entry: &Value, outcome: CheckOutcome) -> rdy_spec::result::CheckResult {
     let spec: CheckSpec = serde_json::from_value(entry.clone()).expect("a check entry");
@@ -230,58 +248,14 @@ fn mapped(entry: &Value, outcome: CheckOutcome) -> rdy_spec::result::CheckResult
     map_outcome(&INFO, &spec, &ctx, outcome, 0, 0)
 }
 
-/// The result as the goldens hold it.
-fn render(entry: &Value, end: &End) -> Value {
-    match end {
-        End::TimedOut { after } => json!({ "timed_out_ms": after.as_millis() }),
-        End::Done(done) => match done.as_ref() {
-            Ok(finding) => {
-                let result = mapped(entry, Ok(finding.clone()));
-                json!({
-                    "level": level_word(finding.level),
-                    "status": serde_json::to_value(&result.status).expect("a status"),
-                    "message": finding.message,
-                    "observed": finding.observed,
-                    "expected": finding.expected,
-                    "fix": finding.fix,
-                    "notes": finding.notes,
-                    "partial": finding.partial.as_ref().map(|p| json!({
-                        "missing": p.missing.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>(),
-                        "note": p.note,
-                    })),
-                })
-            }
-            Err(error) => json!({ "error": error.to_string() }),
-        },
-        other => panic!("unexpected end: {other:?}"),
-    }
-}
-
-/// The value with every object's keys in order. The goldens have sorted keys, and a build where
-/// another crate turns on serde_json's `preserve_order` would otherwise write them in insertion order.
-fn sorted(value: Value) -> Value {
-    match value {
-        Value::Object(map) => {
-            let mut entries: Vec<(String, Value)> = map.into_iter().collect();
-            entries.sort_by(|a, b| a.0.cmp(&b.0));
-            Value::Object(entries.into_iter().map(|(k, v)| (k, sorted(v))).collect())
-        }
-        Value::Array(items) => Value::Array(items.into_iter().map(sorted).collect()),
-        other => other,
-    }
-}
-
 #[test]
 fn every_case_matches_its_golden() {
     for (case, _) in CASES {
         let entry = entry_of(case);
         let result = run_case(case);
-        let actual = json!({ "entry": entry, "result": render(&entry, &result.end) });
-        let mut bytes = serde_json::to_string_pretty(&sorted(actual)).expect("json");
-        bytes.push('\n');
         assert_golden(
             fixtures_dir().join(format!("checks/host.time_sync/{case}/expect.json")),
-            bytes,
+            expect_bytes(&entry, &result.end),
         );
     }
 }
@@ -319,6 +293,10 @@ fn the_levels_are_what_the_catalog_says() {
     assert_eq!(level_of("no-sources"), Level::Warn);
     assert_eq!(level_of("named-server"), Level::Pass);
     assert_eq!(level_of("second-server"), Level::Pass);
+    assert_eq!(level_of("hung-chronyc"), Level::Pass);
+    assert_eq!(level_of("hung-timedatectl"), Level::Fail);
+    assert_eq!(level_of("silent-server-and-hung-tools"), Level::Warn);
+    assert_eq!(level_of("named-server-metadata"), Level::Pass);
 }
 
 fn status_of(case: &str) -> Status {
@@ -329,6 +307,8 @@ fn status_of(case: &str) -> Status {
 #[test]
 fn the_engine_maps_the_levels_to_block_warn_and_pass() {
     assert_eq!(status_of("offset-400s"), Status::Block);
+    assert_eq!(status_of("hung-timedatectl"), Status::Block);
+    assert_eq!(status_of("silent-server-and-hung-tools"), Status::Warn);
     assert_eq!(status_of("recommended-skew-only"), Status::Block);
     assert_eq!(status_of("not-synced-required"), Status::Block);
     assert_eq!(status_of("warn-offset"), Status::Warn);
@@ -515,7 +495,7 @@ fn a_silent_server_is_a_warning_inside_the_check_timeout() {
 }
 
 #[test]
-fn servers_are_asked_together_and_the_first_good_one_in_spec_order_is_used() {
+fn servers_are_asked_in_spec_order_and_the_first_good_one_is_used() {
     let run = run_case("second-server");
     let finding = run.finding();
     assert_eq!(finding.observed["servers"][0]["result"], "failed");
@@ -539,14 +519,171 @@ fn systemd_219_falls_back_to_timedatectl_status() {
 }
 
 #[test]
-fn a_hung_chronyc_ends_in_a_timeout_at_the_check_default() {
+fn a_hung_tool_never_turns_the_check_into_a_timeout() {
+    // Correction-37: each command form has 3 s and is cut to the budget left, so the check answers
+    // before the engine's 5 s timer, and the SNTP verdict is kept.
     let run = run_case("hung-chronyc");
-    assert_eq!(
-        run.end,
-        End::TimedOut {
-            after: Duration::from_secs(5)
-        }
+    assert_eq!(run.finding().level, Level::Pass);
+    assert!(
+        run.finding()
+            .notes
+            .iter()
+            .any(|n| n == "chronyc gave no answer: it timed out."),
+        "{:?}",
+        run.finding().notes
     );
+
+    let run = run_case("hung-timedatectl");
+    let finding = run.finding();
+    assert_eq!(finding.level, Level::Fail, "the 400 s offset still blocks");
+    assert_eq!(finding.observed["offset_seconds"], json!(400.0));
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n == "timedatectl gave no answer: it timed out."),
+        "{:?}",
+        finding.notes
+    );
+    // `status` is not tried after a `show` that timed out.
+    let td = run
+        .log
+        .actions
+        .iter()
+        .filter(|a| a.fields.get("program").and_then(Value::as_str) == Some("timedatectl"))
+        .count();
+    assert_eq!(td, 1);
+    assert_eq!(
+        mapped(&entry_of("hung-timedatectl"), run.outcome().clone()).status,
+        Status::Block
+    );
+}
+
+#[test]
+fn a_silent_server_and_two_hung_tools_still_answer_inside_the_budget() {
+    let run = run_case("silent-server-and-hung-tools");
+    assert!(matches!(run.end, End::Done(_)), "{:?}", run.end);
+    let finding = run.finding();
+    assert_eq!(finding.level, Level::Warn);
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n == "timedatectl gave no answer: it timed out."),
+        "{:?}",
+        finding.notes
+    );
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n == "chronyc gave no answer: it timed out."),
+        "{:?}",
+        finding.notes
+    );
+}
+
+#[test]
+fn a_step_the_budget_cannot_hold_is_not_started() {
+    // A 3.3 s check limit: timedatectl takes its 3 s, 0.3 s is left, less the 250 ms margin is under
+    // the 100 ms minimum, so chronyc is not run. The check still answers.
+    let fixture = load("silent-server-and-hung-tools");
+    let replay = add_servers(
+        fixture.replay().clone(),
+        &servers("silent-server-and-hung-tools"),
+    );
+    let check = time_sync(&entry_of("silent-server-and-hung-tools"));
+    let run = run_replay_within(
+        &fixture,
+        check,
+        replay,
+        true,
+        Some(Duration::from_millis(3300)),
+    );
+    let finding = run.finding();
+    assert_eq!(finding.level, Level::Warn);
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.starts_with("chronyc gave no answer: it was not run")),
+        "{:?}",
+        finding.notes
+    );
+    let chronyc_runs = run
+        .log
+        .actions
+        .iter()
+        .filter(|a| a.fields.get("program").and_then(Value::as_str) == Some("chronyc"))
+        .count();
+    assert_eq!(chronyc_runs, 0);
+}
+
+#[test]
+fn later_servers_are_not_measured_once_one_answers() {
+    let fixture = load("synced");
+    let second = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&second);
+    let replay = add_servers(
+        fixture.replay().clone(),
+        &[("192.0.2.10:123", Server::Offset(0.5))],
+    )
+    .udp_server("192.0.2.12:123".parse().expect("an address"), move |sent| {
+        seen.fetch_add(1, Ordering::SeqCst);
+        reply_to(sent, now_fixed(), 0b00_100_100, 2)
+    });
+    let entry = json!({"id": "host.time_sync", "ntp_servers": ["192.0.2.10", "192.0.2.12"]});
+    let run = run_replay(&fixture, time_sync(&entry), replay, true);
+    let finding = run.finding();
+    assert_eq!(finding.observed["servers"][0]["result"], "ok");
+    assert_eq!(finding.observed["servers"][1]["result"], "not_measured");
+    assert_eq!(second.load(Ordering::SeqCst), 0);
+    assert_eq!(run.connects().len(), 1);
+}
+
+#[test]
+fn two_requests_never_carry_the_same_transmit_timestamp() {
+    assert_ne!(nonce(1), nonce(1));
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..1000 {
+        assert!(seen.insert(nonce(now_fixed())));
+    }
+}
+
+#[test]
+fn a_refused_address_gets_no_packet_even_with_a_listening_server() {
+    // A responder sits on the refused address. It must see nothing: the facade refuses first.
+    for (case, addr, name) in [
+        ("refused-range", "169.254.169.123:123", "literal v4"),
+        ("refused-range-v6", "[fd00:ec2::123]:123", "literal v6"),
+        (
+            "named-server-metadata",
+            "169.254.169.123:123",
+            "a name that resolves there",
+        ),
+    ] {
+        let fixture = load(case);
+        let hits = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&hits);
+        let replay =
+            fixture
+                .replay()
+                .clone()
+                .udp_server(addr.parse().expect("an address"), move |sent| {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    reply_to(sent, now_fixed(), 0b00_100_100, 2)
+                });
+        let run = run_replay(&fixture, time_sync(&entry_of(case)), replay, true);
+        assert_eq!(hits.load(Ordering::SeqCst), 0, "{name}");
+        let connects = run.connects();
+        assert_eq!(connects.len(), 1, "{name}");
+        assert_eq!(connects[0].outcome, ActionOutcome::Denied, "{name}");
+        assert_eq!(
+            run.finding().observed["servers"][0]["result"],
+            "refused_range",
+            "{name}"
+        );
+    }
 }
 
 #[test]

@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "id": "host.time_sync",
+    "ntp_servers": [
+      "192.0.2.10"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": false
+    },
+    "fix": "Install chrony (`dnf install chrony && systemctl enable --now chronyd`), or run `timedatectl status` and check that systemd-timesyncd or chronyd is running. Inside a container the host clock applies, so run rdy on the host.",
+    "level": "warn",
+    "message": "Clock sync state could not be read.",
+    "notes": [
+      "`192.0.2.10`: no reply within 3 s.",
+      "timedatectl gave no answer: it timed out.",
+      "chronyc gave no answer: it timed out."
+    ],
+    "observed": {
+      "chrony": null,
+      "chronyc": "unusable: it timed out",
+      "ntp_enabled": null,
+      "offset_seconds": null,
+      "offset_source": null,
+      "reference": null,
+      "servers": [
+        {
+          "result": "silent",
+          "server": "192.0.2.10"
+        }
+      ],
+      "state": "unknown",
+      "timedatectl": "unusable: it timed out",
+      "timezone": null
+    },
+    "partial": {
+      "missing": [],
+      "note": "neither timedatectl nor chronyc gave a sync state"
+    }
+  }
+}

@@ -3,6 +3,29 @@
     "id": "host.time_sync"
   },
   "result": {
-    "timed_out_ms": 5000
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": false
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Clock is synchronized. Offset not measured: the spec lists no ntp_servers.",
+    "notes": [
+      "chronyc gave no answer: it timed out."
+    ],
+    "observed": {
+      "chrony": null,
+      "chronyc": "unusable: it timed out",
+      "ntp_enabled": true,
+      "offset_seconds": null,
+      "offset_source": null,
+      "reference": null,
+      "servers": [],
+      "state": "synchronized",
+      "timedatectl": "ok",
+      "timezone": "Etc/UTC"
+    },
+    "partial": null
   }
 }

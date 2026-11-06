@@ -15,7 +15,7 @@
     "level": "pass",
     "message": "Clock is synchronized, 12 ms behind `192.0.2.10`.",
     "notes": [
-      "`192.0.2.10`: stratum 2, round trip under 1 ms."
+      "`192.0.2.10`: stratum 2, round trip under 1 ms, offset known to within under 1 ms."
     ],
     "observed": {
       "chrony": {
@@ -33,6 +33,7 @@
       "servers": [
         {
           "delay_seconds": 0.0,
+          "error_bound_seconds": 0.0,
           "offset_seconds": 0.012,
           "result": "ok",
           "server": "192.0.2.10",
@@ -43,7 +44,6 @@
       "timedatectl": "ok",
       "timezone": "Etc/UTC"
     },
-    "partial": null,
-    "status": "pass"
+    "partial": null
   }
 }

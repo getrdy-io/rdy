@@ -24,6 +24,9 @@ pub(crate) const DEFAULT_MAX_SKEW: f64 = 300.0;
 /// The warn level when the spec sets no `recommended_skew`.
 pub(crate) const DEFAULT_RECOMMENDED_SKEW: f64 = 5.0;
 
+/// A half round trip above this many seconds is called out: the offset cannot be better than that.
+const LONG_BOUND: f64 = 1.0;
+
 /// How long one server gets, for the text. The probe's own limit is the same.
 const SNTP_WAIT: &str = "3 s";
 
@@ -61,6 +64,8 @@ pub(crate) enum Attempt {
     Silent,
     /// The lookup or the socket failed. The text says how.
     Failed(String),
+    /// Not asked: an earlier server answered, or the check budget had no room.
+    NotAsked(&'static str),
 }
 
 /// Everything the sources gave.
@@ -434,14 +439,28 @@ fn notes_of(facts: &Facts, state: State) -> Vec<String> {
         let who = code(server);
         match attempt {
             Attempt::Sample(sample) => {
+                let bound = sample.delay / 2.0;
+                let long = if bound > LONG_BOUND {
+                    ". The round trip is long, so the offset is uncertain"
+                } else {
+                    ""
+                };
                 notes.push(format!(
-                    "{who}: stratum {}, round trip {}.",
+                    "{who}: stratum {}, round trip {}, offset known to within {}{long}.",
                     sample.stratum,
-                    seconds_text(sample.delay)
+                    seconds_text(sample.delay),
+                    seconds_text(bound),
                 ));
             }
             Attempt::Refused => {
-                let tail = if matches!(facts.chronyc, Tool::Got(_)) {
+                // Only when the offset in use really is chronyc's: it must track a real source, and no
+                // other server gave a sample.
+                let uses_chrony = matches!(&facts.chronyc, Tool::Got(c) if c.synchronized)
+                    && !facts
+                        .servers
+                        .iter()
+                        .any(|(_, a)| matches!(a, Attempt::Sample(_)));
+                let tail = if uses_chrony {
                     ". Using the offset from chronyc instead."
                 } else {
                     "."
@@ -451,6 +470,7 @@ fn notes_of(facts: &Facts, state: State) -> Vec<String> {
                 ));
             }
             Attempt::Silent => notes.push(format!("{who}: no reply within {SNTP_WAIT}.")),
+            Attempt::NotAsked(why) => notes.push(format!("{who}: not measured, {why}.")),
             Attempt::Rejected(why) => notes.push(format!("{who}: {why}.")),
             Attempt::Failed(why) => notes.push(format!("{who}: {why}.")),
         }
@@ -528,6 +548,7 @@ fn server_json(server: &str, attempt: &Attempt) -> Value {
             "result": "ok",
             "offset_seconds": round6(s.offset),
             "delay_seconds": round6(s.delay),
+            "error_bound_seconds": round6(s.delay / 2.0),
             "stratum": s.stratum,
         }),
         Attempt::Rejected(why) => json!({
@@ -539,6 +560,9 @@ fn server_json(server: &str, attempt: &Attempt) -> Value {
             "detail": "offset not measured, server in a refused range",
         }),
         Attempt::Silent => json!({"server": server, "result": "silent"}),
+        Attempt::NotAsked(why) => {
+            json!({"server": server, "result": "not_measured", "detail": why})
+        }
         Attempt::Failed(why) => json!({"server": server, "result": "failed", "detail": why}),
     }
 }

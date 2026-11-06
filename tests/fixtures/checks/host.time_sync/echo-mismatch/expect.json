@@ -38,7 +38,6 @@
     "partial": {
       "missing": [],
       "note": "the clock offset was not measured"
-    },
-    "status": "warn"
+    }
   }
 }

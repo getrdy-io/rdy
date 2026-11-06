@@ -114,7 +114,8 @@ pub(crate) struct Tracking {
     /// How far the system clock is from NTP time, in seconds, always positive. The sign in the CSV is
     /// not used, because its direction is not stated in the CSV form.
     pub offset: f64,
-    /// The leap status text, such as `Normal` or `Not synchronised`.
+    /// The leap status, one of chrony's four values: `Normal`, `Insert second`, `Delete second` or
+    /// `Not synchronised`. Anything else is `unknown`.
     pub leap: String,
     /// Whether chronyd is tracking a real source: the leap status is not "not synchronised", the
     /// stratum is 1 to 15 and the reference is not chronyd's own local clock.
@@ -123,7 +124,7 @@ pub(crate) struct Tracking {
     pub local_reference: bool,
 }
 
-/// Parses the one line of `chronyc -n -c -t 3 tracking`.
+/// Parses the one line of `chronyc -n -c tracking`.
 ///
 /// The fields are: reference ID, reference name, stratum, reference time, system time, last offset, RMS
 /// offset, frequency, residual frequency, skew, root delay, root dispersion, update interval, leap status.
@@ -140,10 +141,10 @@ pub(crate) fn tracking(text: &str) -> Option<Tracking> {
     if !offset.is_finite() {
         return None;
     }
-    let leap = fields[13].to_owned();
+    let leap = leap_status(fields[13]);
     let local_reference = ref_id == LOCAL_REFERENCE;
-    let not_synced = leap.to_ascii_lowercase().starts_with("not sync");
-    let reference = (!fields[1].is_empty() && fields[1].len() <= 255).then(|| fields[1].to_owned());
+    let not_synced = leap == "Not synchronised";
+    let reference = printable(fields[1]);
     Some(Tracking {
         reference,
         stratum,
@@ -152,6 +153,26 @@ pub(crate) fn tracking(text: &str) -> Option<Tracking> {
         local_reference,
         leap,
     })
+}
+
+/// chrony's leap status as one of its four values. The US spelling is read as the same value. Text from
+/// the machine that is anything else is `unknown`, so it never reaches a report.
+fn leap_status(text: &str) -> String {
+    match text.to_ascii_lowercase().as_str() {
+        "normal" => "Normal",
+        "insert second" => "Insert second",
+        "delete second" => "Delete second",
+        "not synchronised" | "not synchronized" => "Not synchronised",
+        _ => "unknown",
+    }
+    .to_owned()
+}
+
+/// Printable ASCII, 1 to 64 characters. A reference name that is not that is dropped.
+fn printable(text: &str) -> Option<String> {
+    let ok =
+        !text.is_empty() && text.len() <= 64 && text.bytes().all(|b| (0x21..=0x7e).contains(&b));
+    ok.then(|| text.to_owned())
 }
 
 #[cfg(test)]
@@ -248,6 +269,41 @@ mod tests {
         let t = tracking(&line).expect("parsed");
         assert!(t.local_reference);
         assert!(!t.synchronized);
+    }
+
+    #[test]
+    fn the_leap_status_is_one_of_four_values_or_unknown() {
+        for (text, want) in [
+            ("Normal", "Normal"),
+            ("Insert second", "Insert second"),
+            ("Delete second", "Delete second"),
+            ("Not synchronised", "Not synchronised"),
+            ("Not synchronized", "Not synchronised"),
+            ("Evil\u{1b}[2J", "unknown"),
+            ("", "unknown"),
+        ] {
+            let line = SYNCED.replace("Normal", text);
+            assert_eq!(tracking(&line).expect("parsed").leap, want, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_reference_name_is_printable_ascii_up_to_64_characters() {
+        let long = "a".repeat(65);
+        let ok = "a".repeat(64);
+        for (name, want) in [
+            ("time.example", Some("time.example")),
+            (ok.as_str(), Some(ok.as_str())),
+            (long.as_str(), None),
+            ("a b", None),
+            ("caf\u{e9}", None),
+            ("x\u{1b}[2J", None),
+            ("", None),
+        ] {
+            let line = SYNCED.replace("time.example", name);
+            let got = tracking(&line).expect("parsed").reference;
+            assert_eq!(got.as_deref(), want, "{name:?}");
+        }
     }
 
     #[test]

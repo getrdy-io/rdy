@@ -1,0 +1,12 @@
+schema = 1
+name = "priority-order"
+summary = "The same file name in /run, /usr/local/lib and /usr/lib, and in /etc and /run"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.sysctl"]
+
+[caps]
+root = false
+network = false
+kube = false

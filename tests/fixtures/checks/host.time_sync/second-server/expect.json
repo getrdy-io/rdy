@@ -17,7 +17,7 @@
     "message": "Clock is synchronized, 250 ms ahead of `192.0.2.11:1123`.",
     "notes": [
       "`gone.acme.example`: the name did not resolve.",
-      "`192.0.2.11:1123`: stratum 2, round trip under 1 ms."
+      "`192.0.2.11:1123`: stratum 2, round trip under 1 ms, offset known to within under 1 ms."
     ],
     "observed": {
       "chrony": null,
@@ -34,6 +34,7 @@
         },
         {
           "delay_seconds": 0.0,
+          "error_bound_seconds": 0.0,
           "offset_seconds": -0.25,
           "result": "ok",
           "server": "192.0.2.11:1123",
@@ -44,7 +45,6 @@
       "timedatectl": "ok",
       "timezone": "Etc/UTC"
     },
-    "partial": null,
-    "status": "pass"
+    "partial": null
   }
 }

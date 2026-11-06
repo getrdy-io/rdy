@@ -15,7 +15,7 @@
     "level": "warn",
     "message": "Clock is 12 s ahead of `192.0.2.10`, over the 5 s recommended limit.",
     "notes": [
-      "`192.0.2.10`: stratum 2, round trip under 1 ms."
+      "`192.0.2.10`: stratum 2, round trip under 1 ms, offset known to within under 1 ms."
     ],
     "observed": {
       "chrony": {
@@ -33,6 +33,7 @@
       "servers": [
         {
           "delay_seconds": 0.0,
+          "error_bound_seconds": 0.0,
           "offset_seconds": -12.0,
           "result": "ok",
           "server": "192.0.2.10",
@@ -43,7 +44,6 @@
       "timedatectl": "ok",
       "timezone": "Etc/UTC"
     },
-    "partial": null,
-    "status": "warn"
+    "partial": null
   }
 }

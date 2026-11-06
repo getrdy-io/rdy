@@ -1,0 +1,12 @@
+schema = 1
+name = "hung-timedatectl"
+summary = "timedatectl never returns (a stalled D-Bus activation); the SNTP offset of 400 s still blocks"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.time_sync"]
+
+[caps]
+root = false
+network = true
+kube = false

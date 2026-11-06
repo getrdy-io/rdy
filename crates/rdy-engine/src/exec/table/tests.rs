@@ -586,7 +586,7 @@ fn a_form_renders_the_way_appendix_a_writes_it() {
         render("firewall-cmd", "list-all"),
         "--list-all --zone=<zone>"
     );
-    assert_eq!(render("chronyc", "tracking"), "-n -c -t 3 tracking");
+    assert_eq!(render("chronyc", "tracking"), "-n -c tracking");
     assert_eq!(
         render("timedatectl", "show"),
         "show -p NTPSynchronized -p NTP -p Timezone"

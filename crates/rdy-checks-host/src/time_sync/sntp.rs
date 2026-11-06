@@ -5,10 +5,12 @@
 //!
 //! A reply is accepted only when all of these hold:
 //!
-//! - it is at least 48 bytes and its mode is 4 (server). Mode 5 (broadcast), 3 (client), 1 and 2
-//!   (symmetric) and 6 and 7 (control and private) are refused;
+//! - it is at least 48 bytes;
 //! - its origin timestamp equals the random transmit timestamp we sent. That is the only proof the reply
-//!   answers this request and not a packet an attacker made up or replayed;
+//!   answers this request and not a packet an attacker made up or replayed. It is checked before any
+//!   other field;
+//! - its mode is 4 (server). Mode 5 (broadcast), 3 (client), 1 and 2 (symmetric) and 6 and 7 (control and
+//!   private) are refused;
 //! - the stratum is 1 to 15. Stratum 0 is a kiss-o'-death or an unspecified server, and 16 or more is a
 //!   server that is not synchronized;
 //! - the leap indicator is not 3 (the server's own clock is unsynchronized);
@@ -127,14 +129,14 @@ pub(crate) fn judge(request: &Request, reply: &[u8], t4: Fixed) -> Result<Sample
     let Some(head) = reply.get(..PACKET) else {
         return Err(Reject::Short(reply.len()));
     };
+    // The echo comes first, before every other field, so a packet that did not come from the server
+    // cannot make rdy print anything specific about the server (not even its mode).
+    if head[24..32] != request.nonce {
+        return Err(Reject::Echo);
+    }
     let mode = head[0] & 0b111;
     if mode != 4 {
         return Err(Reject::Mode(mode));
-    }
-    // The echo comes before every other field, so a packet that did not come from the server cannot
-    // make rdy print anything specific about the server.
-    if head[24..32] != request.nonce {
-        return Err(Reject::Echo);
     }
     let stratum = head[1];
     if stratum == 0 {
@@ -395,20 +397,60 @@ pub(crate) mod tests {
         assert!(judge(&request, &bytes, NOW).is_ok());
     }
 
+    /// The first second of NTP era 1: 2036-02-07 06:28:16 UTC.
+    const ERA_1: i128 = 2_085_978_496;
+
+    fn wire_seconds(bytes: &[u8]) -> u32 {
+        u32::from_be_bytes([bytes[40], bytes[41], bytes[42], bytes[43]])
+    }
+
     #[test]
-    fn the_era_wraps_after_2036_without_a_bogus_offset() {
-        // 2040-01-01 00:00:00 UTC is past the first NTP era. The seconds field wraps to a small number.
-        let late: Fixed = 2_208_988_800_i128 + 2_000_000_000 + 400_000_000;
-        let local = (late - NTP_TO_UNIX) << 32;
+    fn a_client_just_before_the_2036_wrap_and_a_server_just_after_agree() {
+        let local = (ERA_1 - 1) << 32;
+        let request = Request::new(9, local);
+        let bytes = reply(&request, local + (2_i128 << 32), SERVER_V4, 2);
+        // The server's seconds field has wrapped to a small number.
+        assert_eq!(wire_seconds(&bytes), 1);
+        let sample = judge(&request, &bytes, local).expect("a valid reply");
+        assert!((sample.offset - 2.0).abs() < 1e-6, "{sample:?}");
+    }
+
+    #[test]
+    fn a_client_just_after_the_2036_wrap_and_a_server_just_before_agree() {
+        let local = (ERA_1 + 1) << 32;
+        let request = Request::new(9, local);
+        let bytes = reply(&request, local - (3_i128 << 32), SERVER_V4, 2);
+        assert!(
+            wire_seconds(&bytes) > u32::MAX - 10,
+            "{}",
+            wire_seconds(&bytes)
+        );
+        let sample = judge(&request, &bytes, local).expect("a valid reply");
+        assert!((sample.offset + 3.0).abs() < 1e-6, "{sample:?}");
+    }
+
+    #[test]
+    fn a_clock_in_2046_gets_the_right_offset() {
+        // Well into era 1, the wire seconds are far below the Unix seconds.
+        let local: Fixed = (ERA_1 + 300_000_000) << 32;
         let request = Request::new(9, local);
         let bytes = reply(&request, local + (400_i128 << 32), SERVER_V4, 2);
-        let wire_secs = u32::from_be_bytes([bytes[40], bytes[41], bytes[42], bytes[43]]);
         assert!(
-            i128::from(wire_secs) < late,
-            "the wire seconds wrapped: {wire_secs}"
+            i128::from(wire_seconds(&bytes)) < ERA_1,
+            "{}",
+            wire_seconds(&bytes)
         );
         let sample = judge(&request, &bytes, local).expect("a valid reply");
         assert!((sample.offset - 400.0).abs() < 1e-6, "{sample:?}");
+    }
+
+    #[test]
+    fn the_echo_is_judged_before_the_mode() {
+        // A packet that does not echo is "Echo" whatever else it says, so a forged packet shows nothing.
+        let request = Request::new(7, NOW);
+        let mut bytes = reply(&request, NOW, 0b00_100_101, 0);
+        bytes[27] ^= 1;
+        assert_eq!(judge(&request, &bytes, NOW), Err(Reject::Echo));
     }
 
     #[test]

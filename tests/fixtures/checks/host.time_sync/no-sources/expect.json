@@ -27,7 +27,6 @@
     "partial": {
       "missing": [],
       "note": "neither timedatectl nor chronyc gave a sync state"
-    },
-    "status": "warn"
+    }
   }
 }

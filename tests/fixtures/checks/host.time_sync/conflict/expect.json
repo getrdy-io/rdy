@@ -35,7 +35,6 @@
     "partial": {
       "missing": [],
       "note": "the sync state is not settled"
-    },
-    "status": "warn"
+    }
   }
 }

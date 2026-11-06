@@ -279,3 +279,128 @@ fn the_offset_of_a_chronyd_without_a_source_is_not_used() {
     assert_eq!(finding.message, "Clock is not synchronized.");
     assert_eq!(finding.observed["offset_seconds"], json!(null));
 }
+
+#[test]
+fn the_chronyc_tail_is_only_said_when_chronyc_gave_the_offset() {
+    // chronyc has no source: its offset is not used, so the note must not claim it.
+    let f = facts(
+        synced_td(),
+        chrony(false, 0.0),
+        vec![("169.254.169.123", Attempt::Refused)],
+    );
+    let finding = judge(&f, DEFAULTS());
+    let note = finding.notes.first().expect("a note");
+    assert!(!note.contains("Using the offset from chronyc"), "{note}");
+    // chronyc is absent: the same.
+    let f = facts(
+        synced_td(),
+        Tool::Absent,
+        vec![("169.254.169.123", Attempt::Refused)],
+    );
+    assert!(!judge(&f, DEFAULTS()).notes[0].contains("Using the offset from chronyc"));
+    // chronyc is synchronized and gave the offset: said.
+    let f = facts(
+        synced_td(),
+        chrony(true, 0.001),
+        vec![("169.254.169.123", Attempt::Refused)],
+    );
+    assert!(judge(&f, DEFAULTS()).notes[0].ends_with("Using the offset from chronyc instead."));
+}
+
+#[test]
+fn the_error_bound_is_half_the_round_trip_and_a_long_one_is_called_out() {
+    let slow = Attempt::Sample(Sample {
+        offset: 0.2,
+        delay: 3.0,
+        stratum: 2,
+    });
+    let f = facts(synced_td(), Tool::Absent, vec![("ntp.acme.example", slow)]);
+    let finding = judge(&f, DEFAULTS());
+    assert_eq!(
+        finding.observed["servers"][0]["error_bound_seconds"],
+        json!(1.5)
+    );
+    let note = &finding.notes[0];
+    assert!(note.contains("known to within 1.5 s"), "{note}");
+    assert!(note.contains("uncertain"), "{note}");
+    // A short trip is not called out.
+    let f = facts(
+        synced_td(),
+        Tool::Absent,
+        vec![("ntp.acme.example", sample(0.2))],
+    );
+    assert!(!judge(&f, DEFAULTS()).notes[0].contains("uncertain"));
+}
+
+#[test]
+fn a_server_not_asked_is_a_note_and_not_an_offset() {
+    let f = facts(
+        synced_td(),
+        Tool::Absent,
+        vec![
+            ("a.acme.example", sample(0.0)),
+            (
+                "b.acme.example",
+                Attempt::NotAsked("an earlier server already answered"),
+            ),
+        ],
+    );
+    let finding = judge(&f, DEFAULTS());
+    assert_eq!(finding.level, Level::Pass);
+    assert_eq!(finding.observed["servers"][1]["result"], "not_measured");
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.contains("not measured, an earlier server already answered")),
+        "{:?}",
+        finding.notes
+    );
+}
+
+mod round_trip {
+    use proptest::prelude::*;
+    use rdy_spec::check::CheckParams;
+    use rdy_spec::spec::CheckSpec;
+    use serde_json::json;
+
+    use crate::time_sync::TimeSync;
+
+    fn host() -> impl Strategy<Value = String> {
+        prop_oneof![
+            "[a-z][a-z0-9-]{0,12}(\\.[a-z]{2,6}){1,3}",
+            (any::<u8>(), any::<u8>(), any::<u8>(), 1_u8..=254)
+                .prop_map(|(a, b, c, d)| format!("{a}.{b}.{c}.{d}")),
+            proptest::array::uniform4(any::<u16>())
+                .prop_map(|g| format!("[{:x}:{:x}:{:x}:{:x}::1]", g[0], g[1], g[2], g[3])),
+        ]
+    }
+
+    proptest! {
+        /// Every server the spec accepts becomes one target with the same host and port.
+        #[test]
+        fn every_accepted_server_becomes_a_target(
+            host in host(),
+            port in proptest::option::of(1_u16..=65535),
+        ) {
+            let text = match port {
+                Some(p) => format!("{host}:{p}"),
+                None => host.clone(),
+            };
+            let entry: CheckSpec =
+                serde_json::from_value(json!({"id": "host.time_sync", "ntp_servers": [text]}))
+                    .expect("an entry");
+            if let CheckParams::HostTimeSync(params) = entry.decode_params() {
+                let check = TimeSync::from_params(&params);
+                let expected = usize::from(params.ntp_servers.is_some());
+                prop_assert_eq!(check.servers().len(), expected);
+                if let Some(list) = &params.ntp_servers {
+                    for (server, target) in list.iter().zip(check.servers()) {
+                        prop_assert_eq!(server.target(), target);
+                        prop_assert_eq!(target.port(), port.unwrap_or(123));
+                    }
+                }
+            }
+        }
+    }
+}

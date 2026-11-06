@@ -1,0 +1,41 @@
+{
+  "entry": {
+    "expect": {
+      "net.ipv4.conf.eth0.rp_filter": 1,
+      "net.ipv4.conf.lo.rp_filter": 1
+    },
+    "id": "host.sysctl"
+  },
+  "result": {
+    "expected": {
+      "parameters": {
+        "net.ipv4.conf.eth0.rp_filter": "1",
+        "net.ipv4.conf.lo.rp_filter": "1"
+      }
+    },
+    "fix": "Persist `net.ipv4.conf.lo.rp_filter` with `echo 'net.ipv4.conf.lo.rp_filter = 1' | sudo tee -a /etc/sysctl.d/99-rdy.conf`. Then run `sysctl --system` to apply the files. `sysctl -p` does not read `sysctl.d`.",
+    "level": "warn",
+    "message": "`net.ipv4.conf.lo.rp_filter` is `1`, as needed, but it is not persisted: no file in a `sysctl.d` directory sets it, so a reboot loses it.",
+    "notes": [
+      "Read 1 sysctl configuration file(s), in boot order."
+    ],
+    "observed": {
+      "parameters": {
+        "net.ipv4.conf.eth0.rp_filter": {
+          "live": "1",
+          "persisted": {
+            "file": "/etc/sysctl.d/10-net.conf",
+            "value": "1"
+          },
+          "state": "ok"
+        },
+        "net.ipv4.conf.lo.rp_filter": {
+          "live": "1",
+          "persisted": null,
+          "state": "not_persisted"
+        }
+      }
+    },
+    "partial": null
+  }
+}
