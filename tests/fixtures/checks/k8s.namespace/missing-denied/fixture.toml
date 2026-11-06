@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-missing-denied"
+summary = "A missing namespace that the identity may not create"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true

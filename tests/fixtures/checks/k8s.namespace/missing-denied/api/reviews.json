@@ -1,0 +1,16 @@
+{
+  "access": [
+    {
+      "spec": {
+        "resourceAttributes": {
+          "verb": "create",
+          "resource": "namespaces"
+        }
+      },
+      "status": {
+        "allowed": false,
+        "reason": "RBAC: no rule allows \"create\" on \"namespaces\" for User \"acme-installer\""
+      }
+    }
+  ]
+}

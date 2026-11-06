@@ -48,14 +48,16 @@ kind: ClusterRole
 metadata:
   name: rdy-readonly
 rules:
-  # k8s.admission, k8s.storageclass, k8s.rbac: the target namespace and its Pod Security labels.
+  # k8s.admission, k8s.storageclass, k8s.rbac, k8s.namespace: the target namespace, its Pod Security labels
+  # and its phase.
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get"]
   # k8s.nodes, k8s.version: capacity, conditions, taints, labels, providerID, kubelet version.
   # k8s.nodes: pod requests, node name and phase. k8s.storageclass: claims and their events.
+  # k8s.namespace: the quotas and limit ranges of the target namespace.
   - apiGroups: [""]
-    resources: ["nodes", "pods", "persistentvolumeclaims", "events"]
+    resources: ["nodes", "pods", "persistentvolumeclaims", "events", "resourcequotas", "limitranges"]
     verbs: ["list"]
   # k8s.storageclass: classes, the default marker, provisioners and registered drivers.
   - apiGroups: ["storage.k8s.io"]

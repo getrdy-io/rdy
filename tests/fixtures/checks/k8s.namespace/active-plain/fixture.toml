@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-namespace-active-plain"
+summary = "An active namespace with no quota and no limit range"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.namespace"]
+
+[caps]
+root = false
+network = true
+kube = true
