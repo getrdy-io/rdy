@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cgroups-v1-hierarchy-not-mounted"
+summary = "RHEL 8 on cgroup v1 where the blkio hierarchy is not mounted where rdy can see it"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false

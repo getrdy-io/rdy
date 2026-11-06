@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cgroups-v1-hinted-command-line"
+summary = "RHEL 9 on cgroup v1 with systemd.unified_cgroup_hierarchy=0 on the command line"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false

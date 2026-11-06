@@ -1,0 +1,34 @@
+{
+  "entry": {
+    "id": "host.cgroups",
+    "version": "v2"
+  },
+  "result": {
+    "expected": {
+      "controllers": [],
+      "version": "v2"
+    },
+    "fix": "Run `grubby --update-kernel=ALL --args=\"systemd.unified_cgroup_hierarchy=1\"` and reboot.",
+    "level": "fail",
+    "message": "cgroup v1 in use, v2 needed",
+    "notes": [
+      "The kernel command line has `systemd.unified_cgroup_hierarchy=0`. Change that word instead of adding a second one."
+    ],
+    "observed": {
+      "cmdline": [
+        "systemd.unified_cgroup_hierarchy=0"
+      ],
+      "controllers": {},
+      "controllers_available": [
+        "cpu",
+        "cpuacct",
+        "memory",
+        "pids"
+      ],
+      "controllers_enabled": null,
+      "layout": "v1",
+      "proc_cgroups": {}
+    },
+    "partial": null
+  }
+}

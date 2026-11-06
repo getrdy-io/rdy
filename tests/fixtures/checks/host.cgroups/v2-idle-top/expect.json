@@ -1,0 +1,66 @@
+{
+  "entry": {
+    "controllers": [
+      "cpu",
+      "memory",
+      "pids"
+    ],
+    "id": "host.cgroups",
+    "version": "v2"
+  },
+  "result": {
+    "expected": {
+      "controllers": [
+        "cpu",
+        "memory",
+        "pids"
+      ],
+      "version": "v2"
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "cgroup v2 in use, controllers `cpu`, `memory` and `pids` available",
+    "notes": [
+      "Offered by the kernel but not yet enabled for child cgroups at the top of the tree: `memory` and `pids`. systemd turns a controller on when a unit needs it."
+    ],
+    "observed": {
+      "cmdline": [],
+      "controllers": {
+        "cpu": "ok",
+        "memory": "ok",
+        "pids": "ok"
+      },
+      "controllers_available": [
+        "cpu",
+        "cpuset",
+        "hugetlb",
+        "io",
+        "memory",
+        "misc",
+        "pids",
+        "rdma"
+      ],
+      "controllers_enabled": [
+        "cpu",
+        "cpuset",
+        "io"
+      ],
+      "layout": "v2",
+      "proc_cgroups": {
+        "cpu": {
+          "enabled": true,
+          "hierarchy": 0
+        },
+        "memory": {
+          "enabled": true,
+          "hierarchy": 0
+        },
+        "pids": {
+          "enabled": true,
+          "hierarchy": 0
+        }
+      }
+    },
+    "partial": null
+  }
+}

@@ -1,0 +1,4 @@
+21 28 0:5 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
+22 28 0:6 / /sys rw,nosuid,nodev,noexec,relatime shared:2 - sysfs sysfs rw
+23 22 0:22 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime shared:3 - cgroup2 cgroup2 rw,nsdelegate
+24 23 0:23 / /sys/fs/cgroup/systemd rw,nosuid,nodev,noexec,relatime shared:5 - cgroup cgroup rw,xattr,name=systemd

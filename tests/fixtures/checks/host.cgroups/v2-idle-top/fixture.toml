@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cgroups-v2-idle-top"
+summary = "RHEL 9 on cgroup v2 where memory and pids are offered but not yet enabled at the top"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false

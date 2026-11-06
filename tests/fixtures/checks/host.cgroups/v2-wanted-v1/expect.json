@@ -1,0 +1,40 @@
+{
+  "entry": {
+    "id": "host.cgroups",
+    "version": "v1"
+  },
+  "result": {
+    "expected": {
+      "controllers": [],
+      "version": "v1"
+    },
+    "fix": "Add `systemd.unified_cgroup_hierarchy=0` to the kernel command line in your boot loader's configuration and reboot. systemd 256 and 257 also need `SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1` on the command line. systemd 258 and later, and RHEL 10, have no cgroup v1. Use an OS release that still has it.",
+    "level": "fail",
+    "message": "cgroup v2 in use, v1 needed",
+    "notes": [],
+    "observed": {
+      "cmdline": [],
+      "controllers": {},
+      "controllers_available": [
+        "cpu",
+        "cpuset",
+        "hugetlb",
+        "io",
+        "memory",
+        "misc",
+        "pids",
+        "rdma"
+      ],
+      "controllers_enabled": [
+        "cpu",
+        "cpuset",
+        "io",
+        "memory",
+        "pids"
+      ],
+      "layout": "v2",
+      "proc_cgroups": {}
+    },
+    "partial": null
+  }
+}

@@ -1,0 +1,7 @@
+21 28 0:5 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
+22 28 0:6 / /sys rw,nosuid,nodev,noexec,relatime shared:2 - sysfs sysfs rw
+23 22 0:20 / /sys/fs/cgroup ro,nosuid,nodev,noexec shared:4 - tmpfs tmpfs ro,mode=755
+24 23 0:21 / /sys/fs/cgroup/unified rw,nosuid,nodev,noexec,relatime shared:5 - cgroup2 cgroup2 rw,nsdelegate
+25 23 0:22 / /sys/fs/cgroup/systemd rw,nosuid,nodev,noexec,relatime shared:6 - cgroup cgroup rw,xattr,name=systemd
+26 23 0:23 / /sys/fs/cgroup/cpu,cpuacct rw,nosuid,nodev,noexec,relatime shared:7 - cgroup cgroup rw,cpu,cpuacct
+27 23 0:24 / /sys/fs/cgroup/memory rw,nosuid,nodev,noexec,relatime shared:8 - cgroup cgroup rw,memory

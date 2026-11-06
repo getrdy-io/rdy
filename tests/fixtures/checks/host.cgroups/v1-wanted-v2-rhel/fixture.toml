@@ -1,0 +1,12 @@
+schema = 1
+name = "host-cgroups-v1-wanted-v2-rhel"
+summary = "RHEL 8 on cgroup v1 where the spec needs v2"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.cgroups"]
+
+[caps]
+root = false
+network = false
+kube = false

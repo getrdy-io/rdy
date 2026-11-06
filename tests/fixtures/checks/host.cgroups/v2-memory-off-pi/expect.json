@@ -1,0 +1,56 @@
+{
+  "entry": {
+    "controllers": [
+      "cpu",
+      "memory"
+    ],
+    "id": "host.cgroups"
+  },
+  "result": {
+    "expected": {
+      "controllers": [
+        "cpu",
+        "memory"
+      ],
+      "version": "any"
+    },
+    "fix": "Add `cgroup_memory=1 cgroup_enable=memory` to the single line in `/boot/firmware/cmdline.txt` (`/boot/cmdline.txt` before Debian 12) and reboot.",
+    "level": "fail",
+    "message": "cgroup v2 in use, controller `memory` is missing",
+    "notes": [
+      "`memory` is missing: it is turned off in the kernel (`/proc/cgroups` says enabled 0)."
+    ],
+    "observed": {
+      "cmdline": [],
+      "controllers": {
+        "cpu": "ok",
+        "memory": "missing"
+      },
+      "controllers_available": [
+        "cpu",
+        "cpuset",
+        "hugetlb",
+        "io",
+        "pids"
+      ],
+      "controllers_enabled": [
+        "cpu",
+        "cpuset",
+        "io",
+        "pids"
+      ],
+      "layout": "v2",
+      "proc_cgroups": {
+        "cpu": {
+          "enabled": true,
+          "hierarchy": 0
+        },
+        "memory": {
+          "enabled": false,
+          "hierarchy": 0
+        }
+      }
+    },
+    "partial": null
+  }
+}

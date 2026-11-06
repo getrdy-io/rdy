@@ -1,0 +1,68 @@
+{
+  "entry": {
+    "controllers": [
+      "cpu",
+      "memory",
+      "pids"
+    ],
+    "id": "host.cgroups",
+    "version": "v2"
+  },
+  "result": {
+    "expected": {
+      "controllers": [
+        "cpu",
+        "memory",
+        "pids"
+      ],
+      "version": "v2"
+    },
+    "fix": "Run `grubby --update-kernel=ALL --remove-args=\"cgroup_disable=memory\"` and reboot.",
+    "level": "fail",
+    "message": "cgroup v2 in use, controller `memory` is missing",
+    "notes": [
+      "`memory` is missing: it is turned off in the kernel (`cgroup_disable=memory` is on the command line)."
+    ],
+    "observed": {
+      "cmdline": [
+        "cgroup_disable=memory"
+      ],
+      "controllers": {
+        "cpu": "ok",
+        "memory": "missing",
+        "pids": "ok"
+      },
+      "controllers_available": [
+        "cpu",
+        "cpuset",
+        "hugetlb",
+        "io",
+        "misc",
+        "pids",
+        "rdma"
+      ],
+      "controllers_enabled": [
+        "cpu",
+        "cpuset",
+        "io",
+        "pids"
+      ],
+      "layout": "v2",
+      "proc_cgroups": {
+        "cpu": {
+          "enabled": true,
+          "hierarchy": 0
+        },
+        "memory": {
+          "enabled": false,
+          "hierarchy": 0
+        },
+        "pids": {
+          "enabled": true,
+          "hierarchy": 0
+        }
+      }
+    },
+    "partial": null
+  }
+}

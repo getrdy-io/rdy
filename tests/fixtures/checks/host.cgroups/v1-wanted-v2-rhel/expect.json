@@ -1,0 +1,56 @@
+{
+  "entry": {
+    "controllers": [
+      "cpu",
+      "memory",
+      "pids"
+    ],
+    "id": "host.cgroups",
+    "version": "v2"
+  },
+  "result": {
+    "expected": {
+      "controllers": [
+        "cpu",
+        "memory",
+        "pids"
+      ],
+      "version": "v2"
+    },
+    "fix": "Run `grubby --update-kernel=ALL --args=\"systemd.unified_cgroup_hierarchy=1\"` and reboot.",
+    "level": "fail",
+    "message": "cgroup v1 in use, v2 needed",
+    "notes": [],
+    "observed": {
+      "cmdline": [],
+      "controllers": {
+        "cpu": "ok",
+        "memory": "ok",
+        "pids": "ok"
+      },
+      "controllers_available": [
+        "cpu",
+        "cpuacct",
+        "memory",
+        "pids"
+      ],
+      "controllers_enabled": null,
+      "layout": "v1",
+      "proc_cgroups": {
+        "cpu": {
+          "enabled": true,
+          "hierarchy": 7
+        },
+        "memory": {
+          "enabled": true,
+          "hierarchy": 5
+        },
+        "pids": {
+          "enabled": true,
+          "hierarchy": 6
+        }
+      }
+    },
+    "partial": null
+  }
+}
