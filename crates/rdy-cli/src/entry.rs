@@ -121,60 +121,6 @@ fn color_choice(args: &[OsString]) -> ColorChoice {
     choice
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn args(list: &[&str]) -> Vec<OsString> {
-        list.iter().map(OsString::from).collect()
-    }
-
-    #[test]
-    fn the_color_flag_is_read_in_both_forms_and_the_last_one_wins() {
-        assert_eq!(color_choice(&args(&["rdy", "run", "x"])), ColorChoice::Auto);
-        assert_eq!(
-            color_choice(&args(&["rdy", "run", "--color=never", "x"])),
-            ColorChoice::Never
-        );
-        assert_eq!(
-            color_choice(&args(&["rdy", "--color", "always", "run"])),
-            ColorChoice::Always
-        );
-        assert_eq!(
-            color_choice(&args(&["rdy", "--color", "always", "run", "--color=never"])),
-            ColorChoice::Never
-        );
-        assert_eq!(
-            color_choice(&args(&["rdy", "--color=never", "--color", "auto"])),
-            ColorChoice::Auto
-        );
-    }
-
-    #[test]
-    fn a_trailing_or_unknown_color_changes_nothing() {
-        assert_eq!(
-            color_choice(&args(&["rdy", "--color=never", "run", "--color"])),
-            ColorChoice::Never
-        );
-        assert_eq!(
-            color_choice(&args(&["rdy", "--color", "always", "--color=purple"])),
-            ColorChoice::Always
-        );
-    }
-
-    #[test]
-    fn nothing_after_a_double_dash_is_a_flag() {
-        assert_eq!(
-            color_choice(&args(&["rdy", "run", "--", "--color=always"])),
-            ColorChoice::Auto
-        );
-        assert_eq!(
-            color_choice(&args(&["rdy", "--color=never", "--", "--color", "always"])),
-            ColorChoice::Never
-        );
-    }
-}
-
 /// Builds the live backend and the runtime, runs the command and returns its exit code.
 ///
 /// A runtime that cannot start is an internal error. The runtime is shut down without waiting: a
@@ -250,5 +196,59 @@ where
             }));
             emit(&CliError::bug(), json, stdout, stderr)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<OsString> {
+        list.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn the_color_flag_is_read_in_both_forms_and_the_last_one_wins() {
+        assert_eq!(color_choice(&args(&["rdy", "run", "x"])), ColorChoice::Auto);
+        assert_eq!(
+            color_choice(&args(&["rdy", "run", "--color=never", "x"])),
+            ColorChoice::Never
+        );
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color", "always", "run"])),
+            ColorChoice::Always
+        );
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color", "always", "run", "--color=never"])),
+            ColorChoice::Never
+        );
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color=never", "--color", "auto"])),
+            ColorChoice::Auto
+        );
+    }
+
+    #[test]
+    fn a_trailing_or_unknown_color_changes_nothing() {
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color=never", "run", "--color"])),
+            ColorChoice::Never
+        );
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color", "always", "--color=purple"])),
+            ColorChoice::Always
+        );
+    }
+
+    #[test]
+    fn nothing_after_a_double_dash_is_a_flag() {
+        assert_eq!(
+            color_choice(&args(&["rdy", "run", "--", "--color=always"])),
+            ColorChoice::Auto
+        );
+        assert_eq!(
+            color_choice(&args(&["rdy", "--color=never", "--", "--color", "always"])),
+            ColorChoice::Never
+        );
     }
 }
