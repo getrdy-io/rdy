@@ -1,0 +1,85 @@
+{
+  "entry": {
+    "expect": {
+      "kernel.shmmax": ">=4294967296",
+      "net.ipv4.ip_forward": 1,
+      "net.ipv4.tcp_rmem": "4096 131072 6291456",
+      "vm.max_map_count": ">=262144"
+    },
+    "id": "host.sysctl",
+    "limits": {
+      "nofile": ">=65536"
+    }
+  },
+  "result": {
+    "expected": {
+      "limits": {
+        "nofile": ">=65536"
+      },
+      "parameters": {
+        "kernel.shmmax": ">=4294967296",
+        "net.ipv4.ip_forward": "1",
+        "net.ipv4.tcp_rmem": "4096 131072 6291456",
+        "vm.max_map_count": ">=262144"
+      }
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "4 kernel parameters have the wanted value and are set at boot. Services get an open files limit of 1048576 (`DefaultLimitNOFILE=1048576` in `/etc/systemd/system.conf.d/10-acme.conf`).",
+    "notes": [
+      "Read 2 sysctl configuration file(s), in boot order.",
+      "rdy's own open files limit is 1024 (soft) and 524288 (hard). That is a shell limit and does not apply to services."
+    ],
+    "observed": {
+      "limits": {
+        "nofile": {
+          "default_limit_nofile": "1048576",
+          "file": "/etc/systemd/system.conf.d/10-acme.conf",
+          "file_max": 9223372036854775807,
+          "hard": 1048576,
+          "nr_open": 1048576,
+          "shell_limit": {
+            "hard": 524288,
+            "soft": 1024
+          },
+          "soft": 1048576
+        }
+      },
+      "parameters": {
+        "kernel.shmmax": {
+          "live": "18446744073709551615",
+          "persisted": {
+            "file": "/usr/lib/sysctl.d/50-acme-net.conf",
+            "value": "18446744073709551615"
+          },
+          "state": "ok"
+        },
+        "net.ipv4.ip_forward": {
+          "live": "1",
+          "persisted": {
+            "file": "/etc/sysctl.d/90-acme.conf",
+            "value": "1"
+          },
+          "state": "ok"
+        },
+        "net.ipv4.tcp_rmem": {
+          "live": "4096 131072 6291456",
+          "persisted": {
+            "file": "/usr/lib/sysctl.d/50-acme-net.conf",
+            "value": "4096 131072 6291456"
+          },
+          "state": "ok"
+        },
+        "vm.max_map_count": {
+          "live": "1048576",
+          "persisted": {
+            "file": "/etc/sysctl.d/90-acme.conf",
+            "value": "1048576"
+          },
+          "state": "ok"
+        }
+      }
+    },
+    "partial": null
+  }
+}
