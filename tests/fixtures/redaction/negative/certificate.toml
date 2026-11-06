@@ -1,0 +1,6 @@
+polarity = "negative"
+since = "m1"
+rulesets = ["report"]
+rules = []
+secrets = []
+note = "A public certificate is not a secret. Scanners that match the PEM marker alone would flag it."

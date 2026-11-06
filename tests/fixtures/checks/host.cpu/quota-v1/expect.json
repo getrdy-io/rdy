@@ -1,0 +1,30 @@
+{
+  "entry": {
+    "id": "host.cpu",
+    "min": 2
+  },
+  "result": {
+    "expected": {
+      "min": 2
+    },
+    "fix": "A cgroup CPU quota caps rdy at 1.5 vCPUs. Raise it to 2 or more: `--cpus` for Docker, `resources.limits.cpu` for a pod, or `CPUQuota=` in the systemd unit. Or resize the instance.",
+    "level": "fail",
+    "message": "1.5 vCPUs found, 2 needed (a cgroup CPU quota limits the 8 CPUs of the host)",
+    "notes": [
+      "The CPU quota is 150000/100000 microseconds, set at cgroup /system.slice/acme.slice."
+    ],
+    "observed": {
+      "allowed_cores": 8,
+      "arch": "x86_64",
+      "effective_cores": 1.5,
+      "flags": {},
+      "hypervisor": true,
+      "logical_cores": 8,
+      "physical_cores": 4,
+      "quota_cores": 1.5,
+      "virtualization": "vm",
+      "x86_64_level": 4
+    },
+    "partial": null
+  }
+}

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-hostile-kinds"
+summary = "Kyverno serving kinds with escape bytes, a backtick and an overlong name"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

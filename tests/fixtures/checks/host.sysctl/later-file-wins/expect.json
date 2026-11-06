@@ -1,0 +1,34 @@
+{
+  "entry": {
+    "expect": {
+      "vm.max_map_count": ">=262144"
+    },
+    "id": "host.sysctl"
+  },
+  "result": {
+    "expected": {
+      "parameters": {
+        "vm.max_map_count": ">=262144"
+      }
+    },
+    "fix": "Do not edit `/usr/lib/sysctl.d/90-hardening.conf`: an update or a reboot puts it back. Override it. Persist `vm.max_map_count` with `echo 'vm.max_map_count = 262144' | sudo tee -a /etc/sysctl.d/99-rdy.conf`. Then run `sysctl --system` to apply the files. `sysctl -p` does not read `sysctl.d`.",
+    "level": "warn",
+    "message": "`vm.max_map_count` is `262144`, as needed, but `/usr/lib/sysctl.d/90-hardening.conf` sets it to `65530` at boot, so a reboot changes it.",
+    "notes": [
+      "Read 2 sysctl configuration file(s), in boot order."
+    ],
+    "observed": {
+      "parameters": {
+        "vm.max_map_count": {
+          "live": "262144",
+          "persisted": {
+            "file": "/usr/lib/sysctl.d/90-hardening.conf",
+            "value": "65530"
+          },
+          "state": "persisted_wrong"
+        }
+      }
+    },
+    "partial": null
+  }
+}

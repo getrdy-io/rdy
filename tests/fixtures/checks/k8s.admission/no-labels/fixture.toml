@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-no-labels"
+summary = "A namespace with no Pod Security label at all, so the cluster default applies"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

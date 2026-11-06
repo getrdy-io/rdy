@@ -140,6 +140,13 @@ pub trait Family: Send + Sync + 'static {
     /// The static facts of every check this family builds.
     fn checks(&self) -> &'static [&'static CheckInfo];
 
+    /// The ids in [`Family::checks`] that have no code yet. The planner skips each as `not_in_build`
+    /// before it builds anything, so a family with a stub can be registered in the CLI and the stub
+    /// never runs on a customer's machine. The default is none.
+    fn not_built(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Builds the check for `entry`.
     ///
     /// `params` are the entry's decoded parameters, and always the variant of an id in

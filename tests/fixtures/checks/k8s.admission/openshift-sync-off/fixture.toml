@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-openshift-sync-off"
+summary = "OpenShift where label sync is switched off, so the warn and audit labels are the namespace's own"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

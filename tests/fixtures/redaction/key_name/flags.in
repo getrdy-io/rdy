@@ -1,0 +1,2 @@
+mysql --host db --password=hunter2
+mysql --password hunter3 --host db

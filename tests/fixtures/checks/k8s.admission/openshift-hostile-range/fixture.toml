@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-openshift-hostile-range"
+summary = "OpenShift with a UID range annotation that is not a range"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

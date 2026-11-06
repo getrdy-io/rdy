@@ -1,0 +1,48 @@
+{
+  "entry": {
+    "id": "host.lsm",
+    "selinux": {
+      "allow": [
+        "enforcing"
+      ],
+      "watch": [
+        "acme_t"
+      ]
+    }
+  },
+  "result": {
+    "expected": {
+      "selinux": {
+        "allow": [
+          "enforcing"
+        ],
+        "denials_max": 0,
+        "denials_window": "24h",
+        "watch": [
+          "acme_t"
+        ]
+      }
+    },
+    "fix": "Run rdy on the host, not inside a container, or run `getenforce` on the host.",
+    "level": "warn",
+    "message": "SELinux is not visible from here, so its mode and denials cannot be checked.",
+    "notes": [
+      "SELinux is not visible: /sys/fs/selinux is covered by a tmpfs mount, which is how a container runtime hides it."
+    ],
+    "observed": {
+      "apparmor": {
+        "state": "disabled"
+      },
+      "selinux": {
+        "configured": null,
+        "denials": {
+          "inspected": false,
+          "why": "not visible"
+        },
+        "state": "not visible",
+        "why": "/sys/fs/selinux is covered by a tmpfs mount, which is how a container runtime hides it"
+      }
+    },
+    "partial": null
+  }
+}

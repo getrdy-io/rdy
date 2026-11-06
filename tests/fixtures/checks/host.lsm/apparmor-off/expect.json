@@ -1,0 +1,45 @@
+{
+  "entry": {
+    "apparmor": {
+      "allow": [
+        "enabled"
+      ],
+      "require_profiles": [
+        "acme-agent"
+      ]
+    },
+    "id": "host.lsm"
+  },
+  "result": {
+    "expected": {
+      "apparmor": {
+        "allow": [
+          "enabled"
+        ],
+        "require_profiles": [
+          "acme-agent"
+        ]
+      }
+    },
+    "fix": "Turn AppArmor on with `systemctl enable --now apparmor`. If the kernel has it off, add `apparmor=1 security=apparmor` to the kernel command line and reboot.",
+    "level": "fail",
+    "message": "AppArmor is disabled, and the spec allows enabled.",
+    "notes": [],
+    "observed": {
+      "apparmor": {
+        "required_profiles": {
+          "loaded": null,
+          "required": [
+            "acme-agent"
+          ]
+        },
+        "state": "disabled"
+      },
+      "selinux": {
+        "configured": null,
+        "state": "disabled"
+      }
+    },
+    "partial": null
+  }
+}
