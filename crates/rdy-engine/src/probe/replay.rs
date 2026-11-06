@@ -831,9 +831,18 @@ impl Backend for Replay {
         to: SocketAddr,
         payload: &'a [u8],
         max_reply: usize,
-        _timeout: Duration,
+        timeout: Duration,
     ) -> BoxFuture<'a, Result<UdpReply, ProbeError>> {
-        Box::pin(async move { self.net.udp(to, payload, max_reply) })
+        Box::pin(async move {
+            let answer = self.net.udp(to, payload, max_reply);
+            // A silent server takes the whole timeout, as a live one does, so a check that budgets its
+            // time sees the same order of events. It costs nothing on a paused clock. Without feature
+            // `runtime` there is no clock and the timeout is immediate.
+            if matches!(answer, Err(ProbeError::Timeout)) {
+                let _ = pause(timeout).await;
+            }
+            answer
+        })
     }
 
     fn unix_get<'a>(

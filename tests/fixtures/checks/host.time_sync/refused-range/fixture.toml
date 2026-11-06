@@ -1,0 +1,12 @@
+schema = 1
+name = "refused-range"
+summary = "The only time server is the Amazon time address, which rdy refuses; chrony gives the offset"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.time_sync"]
+
+[caps]
+root = false
+network = true
+kube = false

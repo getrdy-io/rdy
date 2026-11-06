@@ -1,0 +1,43 @@
+{
+  "entry": {
+    "id": "host.time_sync",
+    "ntp_servers": [
+      "fd00:ec2::123"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": false
+    },
+    "fix": "rdy does not query link-local or cloud metadata time addresses. Name a time server outside those ranges in `ntp_servers`, or run `chronyc tracking` and read the offset by hand.",
+    "level": "warn",
+    "message": "Offset not measured, server in a refused range.",
+    "notes": [
+      "`[fd00:ec2::123]`: offset not measured, server in a refused range."
+    ],
+    "observed": {
+      "chrony": null,
+      "chronyc": "not installed",
+      "ntp_enabled": true,
+      "offset_seconds": null,
+      "offset_source": null,
+      "reference": null,
+      "servers": [
+        {
+          "detail": "offset not measured, server in a refused range",
+          "result": "refused_range",
+          "server": "[fd00:ec2::123]"
+        }
+      ],
+      "state": "synchronized",
+      "timedatectl": "ok",
+      "timezone": "Etc/UTC"
+    },
+    "partial": {
+      "missing": [],
+      "note": "the clock offset was not measured"
+    }
+  }
+}

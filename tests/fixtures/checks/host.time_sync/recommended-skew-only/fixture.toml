@@ -1,0 +1,12 @@
+schema = 1
+name = "recommended-skew-only"
+summary = "Same machine as offset-400s, with only recommended_skew 600s: the 300 s block level still applies"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.time_sync"]
+
+[caps]
+root = false
+network = true
+kube = false

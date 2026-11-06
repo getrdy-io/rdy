@@ -642,9 +642,9 @@ static COMMANDS: &[CommandEntry] = &[
                     lit("-p"),
                     lit("Timezone"),
                 ],
-                SECS_5,
+                SECS_3,
             ),
-            form("status", &[lit("status")], SECS_5),
+            form("status", &[lit("status")], SECS_3),
         ],
     },
     CommandEntry {
@@ -656,8 +656,8 @@ static COMMANDS: &[CommandEntry] = &[
         env: &[],
         forms: &[form(
             "tracking",
-            &[lit("-n"), lit("-c"), lit("-t"), lit("3"), lit("tracking")],
-            SECS_5,
+            &[lit("-n"), lit("-c"), lit("tracking")],
+            SECS_3,
         )],
     },
     CommandEntry {

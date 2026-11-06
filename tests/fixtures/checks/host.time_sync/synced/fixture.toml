@@ -1,0 +1,12 @@
+schema = 1
+name = "synced"
+summary = "RHEL 9 VM with chrony, synchronized, one reachable time server 12 ms off"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.time_sync"]
+
+[caps]
+root = false
+network = true
+kube = false

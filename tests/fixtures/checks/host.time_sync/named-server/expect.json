@@ -1,0 +1,49 @@
+{
+  "entry": {
+    "id": "host.time_sync",
+    "ntp_servers": [
+      "time.acme.example"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": false
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Clock is synchronized, 500 ms behind `time.acme.example`.",
+    "notes": [
+      "`time.acme.example`: stratum 2, round trip under 1 ms, offset known to within under 1 ms."
+    ],
+    "observed": {
+      "chrony": {
+        "leap": "Normal",
+        "offset_seconds": 0.000012,
+        "reference": "192.0.2.30",
+        "stratum": 3,
+        "synchronized": true
+      },
+      "chronyc": "ok",
+      "ntp_enabled": true,
+      "offset_seconds": 0.5,
+      "offset_source": "sntp",
+      "reference": "time.acme.example",
+      "servers": [
+        {
+          "delay_seconds": 0.0,
+          "error_bound_seconds": 0.0,
+          "offset_seconds": 0.5,
+          "result": "ok",
+          "server": "time.acme.example",
+          "stratum": 2
+        }
+      ],
+      "state": "synchronized",
+      "timedatectl": "ok",
+      "timezone": "Etc/UTC"
+    },
+    "partial": null
+  }
+}

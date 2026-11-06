@@ -142,7 +142,12 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
 /// Empty since M1-174: every implemented check has its cases, each with a reviewed `expect.json`. A
 /// check merged without its cases goes here with the ticket that owes them, and the stale-row finding
 /// forces the row out when they land.
-const PENDING: &[Pending] = &[];
+const PENDING: &[Pending] = &[Pending {
+    check: "host.time_sync",
+    classes: &[Class::Timeout],
+    owner: "M1-179",
+    why: "M1-179 makes the harness accept a hang the check survived (a delay or blackhole at least the check timeout in the case files, and an expect.json that holds a finding) as the Timeout class. By design (correction-37) no hang ends host.time_sync in a Timeout: each step is cut to the budget left, so a hung timedatectl or chronyc gives a bounded finding. The hung-chronyc, hung-timedatectl and silent-server-and-hung-tools cases prove that",
+}];
 
 #[test]
 fn every_implemented_check_has_its_fixture_cases() -> TestResult {

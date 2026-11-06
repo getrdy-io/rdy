@@ -1,0 +1,12 @@
+schema = 1
+name = "chrony-only"
+summary = "A container image with chrony and no timedatectl; the offset comes from chronyc"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.time_sync"]
+
+[caps]
+root = false
+network = true
+kube = false
