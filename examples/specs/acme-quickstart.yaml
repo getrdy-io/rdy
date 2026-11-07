@@ -3,8 +3,10 @@
 # This is the spec the README and the quickstart use, so a laptop can reach
 # a real result in a few seconds.
 #
-# Expect net.egress to BLOCK on the first run: registry.acme.example is a
-# made-up name that does not resolve. To see READY, copy this file and point
+# Expect NOT READY on the first run. net.egress is required, and the current
+# build of rdy has no net checks yet, so it reports that check as not run.
+# Once the net checks land, registry.acme.example (a made-up name that does
+# not resolve) will BLOCK. To see READY then, copy this file and point
 # net.egress at a host you can reach, for example github.com:443.
 #
 # This file is unsigned. Run it with --allow-unsigned; rdy prints a warning.
