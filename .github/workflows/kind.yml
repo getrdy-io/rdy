@@ -97,7 +97,7 @@ jobs:
           shared-key: kind
           save-if: ${{ github.ref == 'refs/heads/main' && matrix.minor == '1.37' }}
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         with:
           tool: cargo-nextest@0.9.149
           # A missing prebuilt binary fails the step. It never falls back to `cargo install`.
