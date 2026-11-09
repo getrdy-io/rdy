@@ -74,7 +74,7 @@ proptest = { version = "1.5", default-features = false }
 # The Kubernetes client (M1-102, ADR 0010 and ADR 0031). Exact pins: the kube client and config types are
 # on the check-crate deny list (02 Appendix A), and that list was checked against this version, so every
 # bump is reviewed by hand. kube 4.2.0 depends on k8s-openapi 0.28, so they move together.
-kube = { version = "=4.2.0", default-features = false }
+kube = { version = "=5.0.0", default-features = false }
 k8s-openapi = { version = "=0.28.0", default-features = false }
 # Token and key values of a kubeconfig, read only to hand them to the known-secret set (M1-102, M1-061).
 # Already in the tree through kube; the version is the one kube-client uses.
