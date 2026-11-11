@@ -7,7 +7,8 @@
 #
 # What this identity can still see: Pod and Deployment specs. Listing pods, events and deployments
 # returns literal environment variable values, and those often hold credentials. rdy keeps only
-# resources, node name and phase, and drops the rest. The token is still a credential, so keep it short
+# resources, node name and phase, and drops the rest. Webhook configurations carry a CA bundle (a public
+# certificate) and policies carry rules: rdy keeps names, match rules and actions only. The token is still a credential, so keep it short
 # lived (the command below asks for one hour) and delete the namespace when you are done.
 #
 # The rules below are the list in crates/rdy-checks-k8s/src/client/guard/rules.rs (ALLOWED). A test
@@ -56,8 +57,9 @@ rules:
   # k8s.nodes, k8s.version: capacity, conditions, taints, labels, providerID, kubelet version.
   # k8s.nodes: pod requests, node name and phase. k8s.storageclass: claims and their events.
   # k8s.namespace: the quotas and limit ranges of the target namespace.
+  # k8s.admission: the Service behind an admission webhook that fails closed (its type only).
   - apiGroups: [""]
-    resources: ["nodes", "pods", "persistentvolumeclaims", "events", "resourcequotas", "limitranges"]
+    resources: ["nodes", "pods", "persistentvolumeclaims", "events", "resourcequotas", "limitranges", "services"]
     verbs: ["list"]
   # k8s.storageclass: classes, the default marker, provisioners and registered drivers.
   - apiGroups: ["storage.k8s.io"]
@@ -74,6 +76,33 @@ rules:
     resources: ["clusterversions"]
     resourceNames: ["version"]
     verbs: ["get"]
+  # k8s.admission: admission webhooks and ValidatingAdmissionPolicy (names, match rules, failure policy and
+  # selectors; CA bundles and CEL expressions are dropped), and the endpoints behind a webhook Service
+  # (whether any is ready).
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations", "mutatingwebhookconfigurations", "validatingadmissionpolicies", "validatingadmissionpolicybindings"]
+    verbs: ["list"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list"]
+  # k8s.admission: the policies of Kyverno and Gatekeeper, to name the ones that reject pods. Rules,
+  # parameters and CEL expressions are dropped. These groups exist only when the engine is installed.
+  - apiGroups: ["kyverno.io"]
+    resources: ["clusterpolicies"]
+    verbs: ["list"]
+  - apiGroups: ["policies.kyverno.io"]
+    resources: ["validatingpolicies", "imagevalidatingpolicies"]
+    verbs: ["list"]
+  # The one wildcard in this file (ADR 0042). Each Gatekeeper ConstraintTemplate creates a constraint kind
+  # with a name the template author chooses, so the kinds cannot be listed here. Nothing stops a cluster
+  # admin adding another CRD to this group. A list returns whole objects: Gatekeeper parameters, the
+  # audit messages in status.violations (they can quote fields of audited objects) and Kyverno
+  # ClusterPolicy rules (generate.data often holds registry credentials) are readable with this token,
+  # though rdy drops them while reading. Keep the token short lived. For a stricter role, replace "*"
+  # with your plurals from: kubectl get crd -l gatekeeper.sh/constraint=yes
+  - apiGroups: ["constraints.gatekeeper.sh"]
+    resources: ["*"]
+    verbs: ["list"]
   # k8s.access, k8s.rbac: who am I, may I do this, what may I do. Nothing is stored.
   - apiGroups: ["authentication.k8s.io"]
     resources: ["selfsubjectreviews"]

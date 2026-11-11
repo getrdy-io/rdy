@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-vap-not-served"
+summary = "A cluster older than 1.30: ValidatingAdmissionPolicy v1 is not served"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

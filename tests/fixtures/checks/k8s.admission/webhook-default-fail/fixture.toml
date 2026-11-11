@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-admission-webhook-default-fail"
+summary = "A webhook with no failurePolicy (the v1 default is Fail) and no endpoint"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.admission"]
+
+[caps]
+root = false
+network = true
+kube = true

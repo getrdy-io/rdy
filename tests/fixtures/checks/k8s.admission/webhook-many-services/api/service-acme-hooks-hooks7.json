@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/namespaces/acme-hooks/services",
+    "query": "fieldSelector=metadata.name=hooks7&limit=2"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "v1",
+    "kind": "ServiceList",
+    "metadata": {
+      "resourceVersion": "1000"
+    },
+    "items": [
+      {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+          "name": "hooks7",
+          "namespace": "acme-hooks"
+        },
+        "spec": {
+          "type": "ClusterIP",
+          "ports": [
+            {
+              "port": 443
+            }
+          ],
+          "selector": {
+            "app": "hooks7"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -18,10 +18,13 @@ use rdy_engine::text::escape_untrusted;
 use rdy_spec::check::K8sAdmission;
 use serde_json::{Value, json};
 
-use super::Read;
 use super::engines::{Found, KYVERNO_GROUP};
-use super::fix;
 use super::level::{Label, Labels, Need, Standard};
+use super::matching::NsLabels;
+use super::policies::EnginePolicies;
+use super::vap::Policies;
+use super::webhooks::Webhooks;
+use super::{Read, fix, policies, vap, webhooks};
 
 /// The longest text from the server that goes into a sentence, in characters.
 const SHOWN: usize = 64;
@@ -30,6 +33,8 @@ const SHOWN: usize = 64;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct NsFacts {
     pub(super) labels: Labels,
+    /// Every label of the namespace, for the selectors of webhooks and policies.
+    pub(super) all_labels: std::collections::BTreeMap<String, String>,
     /// `openshift.io/sa.scc.uid-range`, when it has the shape of one.
     pub(super) uid_range: Option<String>,
     /// True when the namespace sets `security.openshift.io/scc.podSecurityLabelSync` to `false`, so
@@ -61,30 +66,80 @@ pub(super) struct Gathered {
     pub(super) scc: Option<Read<bool>>,
     /// True when the server says it is RKE2.
     pub(super) rke2: bool,
+    /// Admission webhooks and the Services behind them (M1-160).
+    pub(super) webhooks: Webhooks,
+    /// `ValidatingAdmissionPolicy` objects and their bindings (M1-160).
+    pub(super) policies: Policies,
+    /// The policy objects of the engines (M1-160).
+    pub(super) engine_policies: EnginePolicies,
+}
+
+impl Gathered {
+    /// The labels of the namespace, when they were read.
+    pub(super) fn ns_labels(&self) -> NsLabels {
+        match &self.ns {
+            Some(Read::Ok(facts)) => Some(facts.all_labels.clone()),
+            _ => None,
+        }
+    }
 }
 
 /// One thing that can reject the product's pods.
-struct Issue {
-    level: Level,
-    message: String,
-    fix: String,
+pub(super) struct Issue {
+    pub(super) level: Level,
+    pub(super) message: String,
+    pub(super) fix: String,
 }
 
 /// A permission the identity lacked: the wire text, and the command that checks it.
-struct Grant {
-    text: &'static str,
-    can_i: &'static str,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Grant {
+    pub(super) text: String,
+    pub(super) can_i: String,
 }
 
-const GET_NAMESPACES: Grant = Grant {
-    text: "get namespaces",
-    can_i: "`kubectl auth can-i get namespaces`",
-};
+impl Grant {
+    pub(super) fn new(text: String, can_i: String) -> Self {
+        Self { text, can_i }
+    }
 
-const GET_APIS: Grant = Grant {
-    text: "get /apis",
-    can_i: "`kubectl auth can-i get /apis`",
-};
+    /// The right to list `resource` of `group` (empty for the core group).
+    pub(super) fn list(resource: &str, group: &str) -> Self {
+        let full = if group.is_empty() {
+            resource.to_owned()
+        } else {
+            format!("{resource}.{group}")
+        };
+        Self {
+            text: format!("list {full}"),
+            can_i: format!("`kubectl auth can-i list {full}`"),
+        }
+    }
+}
+
+/// What one part of the judgement adds to the finding: issues, notes, what was not read and the grants
+/// that would let it be read.
+#[derive(Default)]
+pub(super) struct Part {
+    pub(super) issues: Vec<Issue>,
+    pub(super) notes: Vec<String>,
+    pub(super) unverified: Vec<String>,
+    pub(super) grants: Vec<Grant>,
+}
+
+fn get_namespaces() -> Grant {
+    Grant::new(
+        "get namespaces".to_owned(),
+        "`kubectl auth can-i get namespaces`".to_owned(),
+    )
+}
+
+fn get_apis() -> Grant {
+    Grant::new(
+        "get /apis".to_owned(),
+        "`kubectl auth can-i get /apis`".to_owned(),
+    )
+}
 
 /// Text from the server, safe for a terminal and for a sentence, and cut short.
 pub(super) fn shown(text: &str) -> String {
@@ -140,7 +195,7 @@ pub(super) fn judge(params: &K8sAdmission, need: Option<&Need>, found: &Gathered
             unverified.push(format!(
                 "the Pod Security labels of namespace {ns_text} were not read: the identity may not read it"
             ));
-            grants.push(GET_NAMESPACES);
+            grants.push(get_namespaces());
         }
         (Some(_), Some(Read::Missing)) => {
             quiet.push(format!("namespace {ns_text} does not exist yet"));
@@ -171,7 +226,7 @@ pub(super) fn judge(params: &K8sAdmission, need: Option<&Need>, found: &Gathered
                 other.why()
             ));
             if matches!(other, Read::Forbidden) {
-                grants.push(GET_APIS);
+                grants.push(get_apis());
             }
         }
     }
@@ -272,10 +327,19 @@ pub(super) fn judge(params: &K8sAdmission, need: Option<&Need>, found: &Gathered
     } else if matches!(found.groups, Read::Ok(())) && found.openshift == Openshift::No {
         quiet.push("no policy engine or OpenShift found".to_owned());
     }
-    notes.push(
-        "Admission webhooks and ValidatingAdmissionPolicy are not evaluated by this version."
-            .to_owned(),
-    );
+
+    // ---- webhooks, ValidatingAdmissionPolicy and the engines' policies (M1-160) ----------------------------
+    let labels = found.ns_labels();
+    for mut part in [
+        webhooks::judge(&found.webhooks, &labels, ns),
+        vap::judge(&found.policies, &labels, ns),
+        policies::judge(&found.engine_policies, ns),
+    ] {
+        issues.append(&mut part.issues);
+        notes.append(&mut part.notes);
+        unverified.append(&mut part.unverified);
+        grants.append(&mut part.grants);
+    }
 
     // ---- The finding -----------------------------------------------------------------------------------
     issues.sort_by_key(|issue| std::cmp::Reverse(rank(issue.level)));
@@ -294,9 +358,15 @@ pub(super) fn judge(params: &K8sAdmission, need: Option<&Need>, found: &Gathered
     let mut finding = Finding::new(level, message);
     let mut fixes: Vec<String> = issues.iter().map(|issue| issue.fix.clone()).collect();
     fixes.extend(fixes_unverified);
+    let mut seen: Vec<String> = Vec::new();
+    grants.retain(|grant| {
+        let new = !seen.contains(&grant.text);
+        seen.push(grant.text.clone());
+        new
+    });
     if !grants.is_empty() {
-        let can_i: Vec<String> = grants.iter().map(|g| g.can_i.to_owned()).collect();
-        let wanted: Vec<String> = grants.iter().map(|g| g.text.to_owned()).collect();
+        let can_i: Vec<String> = grants.iter().map(|g| g.can_i.clone()).collect();
+        let wanted: Vec<String> = grants.iter().map(|g| g.text.clone()).collect();
         fixes.push(fix::grants(&can_i, &wanted));
     }
     if !fixes.is_empty() {
@@ -311,7 +381,7 @@ pub(super) fn judge(params: &K8sAdmission, need: Option<&Need>, found: &Gathered
     if !unverified.is_empty() {
         finding = finding.with_partial(
             Partial::new(Vec::new(), unverified.join("; "))
-                .with_missing_grants(grants.iter().map(|g| g.text.to_owned()).collect()),
+                .with_missing_grants(grants.iter().map(|g| g.text.clone()).collect()),
         );
     }
     finding
@@ -443,6 +513,7 @@ fn judge_labels(need: &Need, facts: &NsFacts, ns: &str, found: &Gathered, out: &
 }
 
 fn observed(need: Option<&Need>, found: &Gathered) -> Value {
+    let ns_labels = found.ns_labels();
     let (state, labels) = match &found.ns {
         None => ("not_named", None),
         Some(Read::Ok(facts)) => ("read", Some(facts)),
@@ -497,6 +568,9 @@ fn observed(need: Option<&Need>, found: &Gathered) -> Value {
         "uid_range": labels.and_then(|facts| facts.uid_range.clone()),
         "scc_on_cluster": scc,
         "policy_engines": engines,
+        "webhooks": webhooks::observed(&found.webhooks, &ns_labels),
+        "validating_admission_policies": vap::observed(&found.policies, &ns_labels),
+        "engine_policies": policies::observed(&found.engine_policies),
     })
 }
 
