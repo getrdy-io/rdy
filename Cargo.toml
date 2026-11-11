@@ -63,7 +63,7 @@ blake2 = { version = "=0.10.6", default-features = false }
 # Secret key files and signing (M1-125, ADR 0022). `scrypt` and `ct-codecs` are the crates stock minisign
 # tooling in Rust uses for the same format. `getrandom` makes the keys. Exact pins (ADR 0018): they touch
 # secret bytes, so every bump is reviewed by hand.
-scrypt = { version = "=0.11.0", default-features = false }
+scrypt = { version = "=0.12.0", default-features = false }
 ct-codecs = { version = "=1.1.8", default-features = false, features = ["std"] }
 getrandom = { version = "=0.4.3", default-features = false }
 # Test-only: signs synthetic specs the way stock minisign does, and generates property-test cases.
