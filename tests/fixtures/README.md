@@ -99,6 +99,7 @@ A case holds only the files its check asks for: a request the case does not hold
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id, a `golden/report.json` (the `--json` stdout
 of `rdy_cli::run`) and a `golden/terminal.txt` (its stderr, M1-086).
 `redaction/` holds the M1 corpus: 44 cases in ten categories, `FLOOR` (28) and `synthetic.toml` (M1-063).
+`results/plan-07/` holds 07 Appendix B.1 to B.3 as result files (M1-083); `reports/golden/results-*` are their JSON and HTML goldens, and `results-secrets-redacted.html` is the page of a run holding a machine id, cut secrets and a known secret.
 The rest arrives with the tickets that need it. The names above are fixed now so nobody invents another.
 
 | Path | What it is | Who edits it |
