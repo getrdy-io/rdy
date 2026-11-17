@@ -16,6 +16,14 @@
 //! when the first one failed and the time left covers its worst case and the endpoints still queued
 //! (a follow-up should carry the attempts in `NetFailure::NotConnected` and drop the second call).
 //!
+//! **Through the proxy (M1-097).** When the run has a proxy and the endpoint's route says so, the name is
+//! not looked up here (names resolve at the proxy) and every connection goes through the facade's own
+//! `CONNECT`. An `http://` URL is the exception: it is not tunnelled, because a proxy that allows
+//! `CONNECT` only to port 443 would answer a tunnel to port 80 or 8080 with a false 403. Its HTTP stage
+//! sends the absolute-form request to the proxy and is the whole test. The attempts of a proxied
+//! endpoint are the proxy's own addresses, so the report names them `proxy_attempts`, and a failure to
+//! connect is `proxy_unreachable`, never `refused` or `blackhole` for the endpoint.
+//!
 //! **Time.** Each endpoint has a budget of [`ENDPOINT_BUDGET`] (10 s, 03 "Needs"), cut short so that
 //! [`RESERVE`] of the check's time is always left to write the result. The budget is enforced with
 //! `CheckContext::within`: when it runs out, the endpoint is a `timeout` failure that keeps the stages it
@@ -137,15 +145,23 @@ pub(super) struct HttpView {
     pub(super) total: Duration,
     /// The statuses the spec accepts, or empty for the default (see [`HttpView::accepted`]).
     pub(super) expected: Vec<u16>,
+    /// `true` when the request went through the proxy.
+    pub(super) via_proxy: bool,
+    /// The host a redirect points at, from its `Location`: host only, never followed.
+    pub(super) location_host: Option<String>,
 }
 
 impl HttpView {
     /// Whether `status` counts as reachable: one of the listed statuses, or with none listed, 2xx, 3xx
-    /// and 4xx except 407. A 4xx proves the path works. A 407 is an intercepting proxy that answered on
+    /// and 4xx except 407, and except 403 through the proxy. A 4xx proves the path works. A 407 is an intercepting proxy that answered on
     /// the direct route, and a 5xx says the server or a proxy in front is failing, so both fail.
     pub(super) fn accepted(&self) -> bool {
         if self.expected.is_empty() {
-            (200..500).contains(&self.status) && self.status != 407
+            // A 403 through the proxy is most likely the proxy's own allow list: it fails, as
+            // `proxy_403`, unless the spec lists 403 (the server really answers it).
+            (200..500).contains(&self.status)
+                && self.status != 407
+                && !(self.via_proxy && self.status == 403)
         } else {
             self.expected.contains(&self.status)
         }
@@ -190,6 +206,9 @@ pub(super) struct Probed {
     pub(super) tls: Option<TlsView>,
     /// The HTTP stage, for a URL endpoint that got that far.
     pub(super) http: Option<HttpView>,
+    /// The proxy the endpoint was tried through, as `http://host:port` with no user info. `None` for a
+    /// direct endpoint.
+    pub(super) via_proxy: Option<String>,
     pub(super) ending: Ending,
 }
 
@@ -205,6 +224,7 @@ impl Probed {
             connect: None,
             tls: None,
             http: None,
+            via_proxy: None,
             ending: Ending::NotTried("not started"),
         }
     }
@@ -226,7 +246,8 @@ impl Probed {
     /// no route or a full attempt timeout counts: an attempt the race cut is slow and not known to be
     /// dead (see [`Probed::slow`]).
     pub(super) fn fell_through(&self) -> Vec<(&'static str, String)> {
-        if self.ending != Ending::Reached {
+        // The attempts of a proxied endpoint are the proxy's, not the endpoint's.
+        if self.ending != Ending::Reached || self.via_proxy.is_some() {
             return Vec::new();
         }
         self.attempts
@@ -240,7 +261,7 @@ impl Probed {
     /// before another family connected. That is a note and not a warning: a slow path that works is not
     /// a fault.
     pub(super) fn slow(&self) -> Vec<(&'static str, u64)> {
-        if self.ending != Ending::Reached {
+        if self.ending != Ending::Reached || self.via_proxy.is_some() {
             return Vec::new();
         }
         self.attempts
@@ -277,8 +298,16 @@ impl Probed {
             "endpoint": self.label(),
             "optional": self.optional,
             "tls": self.tls_wanted,
-            "attempts": attempts,
         });
+        // Through the proxy the attempts are the proxy's own addresses, so they have their own name.
+        match &self.via_proxy {
+            Some(origin) => {
+                out["route"] = json!("proxy");
+                out["proxy"] = json!(origin);
+                out["proxy_attempts"] = json!(attempts);
+            }
+            None => out["attempts"] = json!(attempts),
+        }
         if let Some((took, v4, v6)) = self.lookup {
             out["lookup"] = json!({ "ms": ms(took), "ipv4": v4, "ipv6": v6 });
         }
@@ -303,6 +332,9 @@ impl Probed {
                 "total_ms": ms(http.total),
                 "expect_status": http.expected,
             });
+            if let Some(host) = &http.location_host {
+                out["http_stage"]["location_host"] = json!(host);
+            }
         }
         match &self.ending {
             Ending::Reached => out["result"] = json!("reached"),
@@ -328,8 +360,9 @@ pub(super) fn wants_tls(spec: &Endpoint) -> bool {
     }
 }
 
-/// Probes one endpoint directly and returns what each stage showed. `queued` is how many rounds of
-/// endpoints are still waiting behind this one.
+/// Probes one endpoint, direct or through `proxy` (its origin, from [`Probe::proxy_origin`]), and
+/// returns what each stage showed. `queued` is how many rounds of endpoints are still waiting behind
+/// this one.
 ///
 /// # Errors
 ///
@@ -340,9 +373,11 @@ pub(super) async fn probe(
     spec: &Endpoint,
     trust: Trust,
     queued: usize,
+    proxy: Option<String>,
 ) -> Result<Probed, CheckError> {
     let tls_wanted = wants_tls(spec);
     let mut out = Probed::new(spec, tls_wanted);
+    out.via_proxy = proxy;
     let left = ctx.remaining();
     if left < RESERVE + MIN_TO_START {
         out.ending = Ending::NotTried(OUT_OF_TIME);
@@ -396,10 +431,13 @@ async fn http_stage(
         Some("bundled") => Roots::Bundled,
         _ => Roots::System,
     };
-    let request = HttpProbe::new(spec.target.clone(), method).roots(roots);
+    let route = route_of(out);
+    let request = HttpProbe::new(spec.target.clone(), method)
+        .roots(roots)
+        .route(route);
     match ctx.probe().http(request).await {
         Ok(reply) => finish_http(out, spec, method, &reply),
-        Err(error) => out.ending = Ending::Failed(Class::of_error(error)?, None),
+        Err(error) => out.ending = failed(error)?,
     }
     Ok(())
 }
@@ -416,13 +454,33 @@ fn finish_http(out: &mut Probed, spec: &Endpoint, method: HttpMethod, reply: &Ht
             .as_ref()
             .map(|list| list.iter().map(|s| s.get()).collect())
             .unwrap_or_default(),
+        via_proxy: out.via_proxy.is_some(),
+        location_host: reply.location_host.clone(),
     };
     out.ending = if view.accepted() {
         Ending::Reached
+    } else if view.via_proxy && view.status == 403 {
+        // The proxy's allow list is the likely cause. The fix says what to do if it was the server.
+        Ending::Failed(Class::ProxyForbidden, Some("request".to_owned()))
     } else {
         Ending::Failed(Class::HttpStatus, Some(view.status.to_string()))
     };
     out.http = Some(view);
+}
+
+/// The route of an endpoint's calls: through the proxy when the run chose it for this endpoint.
+fn route_of(out: &Probed) -> Route {
+    if out.via_proxy.is_some() {
+        Route::ViaProxy
+    } else {
+        Route::Direct
+    }
+}
+
+/// How an endpoint ends when a probe call fails.
+fn failed(error: ProbeError) -> Result<Ending, CheckError> {
+    let (class, detail) = Class::of_error(error)?;
+    Ok(Ending::Failed(class, detail))
 }
 
 /// Why an endpoint that never started was not tried.
@@ -438,9 +496,12 @@ async fn stages(
 ) -> Result<(), CheckError> {
     let tls_wanted = out.tls_wanted;
     let target = &spec.target;
+    let route = route_of(out);
+    let via_proxy = route == Route::ViaProxy;
 
-    // Stage 1: lookup.
-    if let Host::Name(name) = target.host() {
+    // Stage 1: lookup. Through a proxy the name resolves at the proxy, so this machine does not look it
+    // up: it may not be able to, and the answer would not be the proxy's.
+    if !via_proxy && let Host::Name(name) = target.host() {
         let before = ctx.remaining();
         let answers = ctx.probe().lookup(name).await;
         let took = before.saturating_sub(ctx.remaining());
@@ -450,16 +511,27 @@ async fn stages(
                 out.lookup = Some((took, ips.len() - v6, v6));
             }
             Err(error) => {
-                out.ending = Ending::Failed(Class::of_error(error)?, None);
+                out.ending = failed(error)?;
                 return Ok(());
             }
         }
     }
 
+    // A plain `http://` URL through the proxy is not tunnelled: the HTTP stage sends the absolute form
+    // to the proxy and is the whole test. A `CONNECT` to port 80 or 8080 is refused by a proxy that
+    // allows tunnels only to port 443, which would be a false `proxy_403`.
+    if via_proxy && target.scheme() == Some("http") && !tls_wanted {
+        out.ending = Ending::Reached;
+        return Ok(());
+    }
+
     // Stages 2 and 3: connect, then TLS.
     if tls_wanted {
-        match ctx.probe().tls_chain(target, Route::Direct).await {
+        match ctx.probe().tls_chain(target, route).await {
             Ok(chain) => finish_tls(out, &chain, trust),
+            Err(ProbeError::Net(NetFailure::NotConnected { .. })) if via_proxy => {
+                out.ending = Ending::Failed(Class::ProxyUnreachable, None);
+            }
             Err(ProbeError::Net(NetFailure::NotConnected { outcome, .. })) => {
                 out.ending = Ending::Failed(Class::of_connect(outcome), None);
                 // The attempts name the dead family. Ask for them only when the worst case of the call
@@ -472,14 +544,14 @@ async fn stages(
                 }
                 out.ending = Ending::Failed(Class::of_connect(outcome), first_silent(out));
             }
-            Err(error) => out.ending = Ending::Failed(Class::of_error(error)?, None),
+            Err(error) => out.ending = failed(error)?,
         }
         return Ok(());
     }
 
-    match ctx.probe().tcp(target, Route::Direct).await {
+    match ctx.probe().tcp(target, route).await {
         Ok(report) => finish_tcp(out, &report),
-        Err(error) => out.ending = Ending::Failed(Class::of_error(error)?, None),
+        Err(error) => out.ending = failed(error)?,
     }
     Ok(())
 }
@@ -499,6 +571,11 @@ fn finish_tcp(out: &mut Probed, report: &TcpReport) {
     out.connect = connect_time(report);
     if report.connected {
         out.ending = Ending::Reached;
+        return;
+    }
+    // Through the proxy the attempts were to the proxy, so the endpoint's own class cannot be told.
+    if out.via_proxy.is_some() {
+        out.ending = Ending::Failed(Class::ProxyUnreachable, None);
         return;
     }
     let all_silent = !report.attempts.is_empty()

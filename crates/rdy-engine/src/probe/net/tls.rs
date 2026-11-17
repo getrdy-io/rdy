@@ -212,7 +212,7 @@ impl Probe {
         let provider = provider();
 
         // Connect first: a host that cannot be reached does not cost a read of the OS store.
-        let Dialed { report, stream } = self.dial(hub, target, proxy).await?;
+        let Dialed { report, stream } = self.dial(hub, target, proxy, true).await?;
         let Some(stream) = stream else {
             return Err(ProbeError::Net(report.not_connected(&what)));
         };

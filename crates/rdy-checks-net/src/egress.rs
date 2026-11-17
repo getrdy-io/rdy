@@ -19,9 +19,25 @@
 //!    request, and an `expect_status` on it is noted as ignored. The URL's path and query go to the
 //!    facade and never into the finding; the action log keeps the path and never the query.
 //!
-//! What this version does not do yet: the proxy path (M1-097), redirect and `Date` evidence, issuer
-//! names (M1-099). An endpoint whose `via_proxy` is `proxy_only` is not tried, and the result says so
-//! and is partial.
+//! **Through the proxy (M1-097).** The run has at most one proxy, read from `HTTPS_PROXY` or
+//! `HTTP_PROXY` (either case) by `rdy run`. `via_proxy: direct` never uses it. `proxy_only` uses it, and
+//! with none set the endpoint is not tried and the result is partial. `auto`, the default, goes through
+//! the proxy when the run has one and direct when it has none: that is what a product started from the
+//! same shell does. A `host:port` or `https` endpoint is tunnelled with the facade's own `CONNECT` and
+//! then verified end to end. An `http://` URL is sent to the proxy in the absolute form, with no tunnel,
+//! because a proxy that allows `CONNECT` only to port 443 would answer a tunnel to another port with a
+//! false 403. The name is not looked up here, because names resolve at the proxy. Classes: `proxy_403`
+//! (the endpoint is not on the allow list), `proxy_407` (credentials wanted or rejected, or Negotiate or
+//! NTLM, which rdy never attempts), `proxy_refused` (another status to the tunnel), `proxy_bad_reply`
+//! and `proxy_unreachable` (no connection to the proxy itself). The proxy password never reaches a
+//! finding: the evidence names the proxy as `http://host:port`.
+//!
+//! **Redirects.** A redirect is never followed. The host of an absolute `Location` is in the evidence
+//! (`http_stage.location_host`), and when it is not an endpoint of this check a note says to add it.
+//!
+//! What this version does not do yet: `Date` evidence, issuer names (M1-099), and the sentence that says
+//! the other path works when `auto` fails (the direct retry after a proxy failure), which waits for the
+//! `NO_PROXY` rules of M1-098.
 //!
 //! **Levels.** An endpoint that cannot be reached fails the check, or warns when it is `optional`. A
 //! connect slower than `max_latency` (2 s by default) warns. A dead address of one family in front of a
@@ -85,7 +101,7 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
     statfs: &[],
     env: &[],
     commands: &[],
-    peers: &[PeerClass::SpecHosts],
+    peers: &[PeerClass::SpecHosts, PeerClass::Proxy],
 };
 
 /// `net.egress`, built from its spec entry.
@@ -130,21 +146,26 @@ impl Check for EgressCheck {
             let entry_route = self.params.via_proxy;
             let trust = self.params.trust;
             let total = self.params.endpoints.len();
-            let pending: Vec<BoxFuture<'a, Result<Probed, CheckError>>> = self
-                .params
-                .endpoints
-                .iter()
-                .enumerate()
-                .map(|(at, spec)| -> BoxFuture<'a, Result<Probed, CheckError>> {
-                    // Rounds of endpoints that wait behind this one, for the budget of its extra call.
-                    let queued = (total - at - 1) / PARALLEL;
-                    if routes_direct(spec, entry_route) {
-                        Box::pin(probe(ctx, spec, trust, queued))
-                    } else {
-                        Box::pin(std::future::ready(Ok(Probed::not_tried(spec, PROXY_LATER))))
-                    }
-                })
-                .collect();
+            let proxy = ctx.probe().proxy_origin();
+            let pending: Vec<BoxFuture<'a, Result<Probed, CheckError>>> =
+                self.params
+                    .endpoints
+                    .iter()
+                    .enumerate()
+                    .map(|(at, spec)| -> BoxFuture<'a, Result<Probed, CheckError>> {
+                        // Rounds of endpoints that wait behind this one, for the budget of its extra call.
+                        let queued = (total - at - 1) / PARALLEL;
+                        match route_of(spec, entry_route, proxy.as_deref()) {
+                            Routing::Direct => Box::pin(probe(ctx, spec, trust, queued, None)),
+                            Routing::Proxy(origin) => {
+                                Box::pin(probe(ctx, spec, trust, queued, Some(origin.to_owned())))
+                            }
+                            Routing::NoProxy => Box::pin(std::future::ready(Ok(
+                                Probed::not_tried(spec, NO_PROXY_SET),
+                            ))),
+                        }
+                    })
+                    .collect();
             let probed: Vec<Result<Probed, CheckError>> =
                 stream::iter(pending).buffered(PARALLEL).collect().await;
             let probed: Vec<Probed> = probed.into_iter().collect::<Result<_, _>>()?;
@@ -153,12 +174,28 @@ impl Check for EgressCheck {
     }
 }
 
-/// Why a proxy-only endpoint is not tried.
-const PROXY_LATER: &str = "this version of rdy does not send a check through a proxy yet";
+/// Why a proxy-only endpoint is not tried when the run has no proxy.
+const NO_PROXY_SET: &str = "the endpoint is proxy_only and no proxy is set for this run; set HTTPS_PROXY or HTTP_PROXY before running rdy";
 
-/// Whether the endpoint is tried directly. `auto` and `direct` are; `proxy_only` is not tried yet.
-fn routes_direct(spec: &Endpoint, entry: ViaProxy) -> bool {
-    spec.via_proxy.unwrap_or(entry) != ViaProxy::ProxyOnly
+/// How an endpoint is reached.
+enum Routing<'p> {
+    /// Straight to the host.
+    Direct,
+    /// Through the run's proxy, named by its origin.
+    Proxy(&'p str),
+    /// The spec says proxy only and the run has no proxy.
+    NoProxy,
+}
+
+/// The route of an endpoint: its own `via_proxy`, else the entry's. `auto` takes the proxy when the run
+/// has one, because that is the path the product takes when it is started from the same shell.
+fn route_of<'p>(spec: &Endpoint, entry: ViaProxy, proxy: Option<&'p str>) -> Routing<'p> {
+    match (spec.via_proxy.unwrap_or(entry), proxy) {
+        (ViaProxy::Direct, _) => Routing::Direct,
+        (ViaProxy::ProxyOnly, None) => Routing::NoProxy,
+        (_, Some(origin)) => Routing::Proxy(origin),
+        (_, None) => Routing::Direct,
+    }
 }
 
 impl EgressCheck {
@@ -204,6 +241,14 @@ impl EgressCheck {
                             notes.push(text);
                         }
                     }
+                    if let Some(host) = p.http.as_ref().and_then(|h| h.location_host.as_deref())
+                        && !listed(&self.params, host)
+                    {
+                        notes.push(format!(
+                            "{} redirects to {host}, which rdy did not follow. Add {host}:443 to the endpoints to test it.",
+                            p.label()
+                        ));
+                    }
                     let fell = p.fell_through();
                     if let Some((family, why)) = fell.first() {
                         warns.push(format!(
@@ -230,6 +275,12 @@ impl EgressCheck {
             }
         }
 
+        if let Some(origin) = probed.iter().find_map(|p| p.via_proxy.as_deref()) {
+            notes.push(format!(
+                "{} endpoint(s) were tried through the proxy {origin}. A name resolves at the proxy, not on this machine.",
+                probed.iter().filter(|p| p.via_proxy.is_some()).count()
+            ));
+        }
         let total = probed.len();
         let observed = json!({
             "endpoints": probed.iter().map(Probed::json).collect::<Vec<_>>(),
@@ -314,6 +365,14 @@ impl EgressCheck {
         }
         finding
     }
+}
+
+/// Whether `host` is the host of one of the check's endpoints.
+fn listed(params: &NetEgress, host: &str) -> bool {
+    params
+        .endpoints
+        .iter()
+        .any(|e| e.target.host().to_string().eq_ignore_ascii_case(host))
 }
 
 /// "failed" when every endpoint in the list got an answer that was wrong (an HTTP status or a reply that is

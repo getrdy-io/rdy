@@ -85,7 +85,7 @@ mod tls;
 pub use super::AttemptOutcome;
 pub use http::{
     BODY_TIMEOUT, HttpMethod, HttpOutcome, HttpProbe, HttpTiming, HttpTls, MAX_BODY,
-    REPORTED_HEADERS, RESPONSE_TIMEOUT, RULE_HTTP_NOT_URL, RULE_HTTP_PLAIN_VIA_PROXY,
+    REPORTED_HEADERS, RESPONSE_TIMEOUT, RULE_HTTP_NOT_URL,
 };
 pub use lookup::{MAX_ANSWERS, RULE_LOOKUP_HOST};
 pub(super) use tls::TlsState;
@@ -251,7 +251,7 @@ impl Probe {
         };
 
         let result = self
-            .unless_ended(&what, self.dial(hub, target, proxy))
+            .unless_ended(&what, self.dial(hub, target, proxy, true))
             .await
             .map(|dialed| dialed.report);
         match result {
@@ -277,6 +277,14 @@ impl Probe {
                 );
             }),
         }
+    }
+
+    /// The run's proxy as `http://host:port`, with no user name or password, or `None` when the run has
+    /// none. A check reads this to choose its route (`auto` goes through a proxy when the run has one)
+    /// and to name the proxy in a fix. It holds nothing secret and writes no log entry.
+    #[must_use]
+    pub fn proxy_origin(&self) -> Option<String> {
+        self.hub.as_ref()?.proxy.get().map(ProxyUrl::origin)
     }
 
     /// The policy before any lookup or connection.
@@ -309,11 +317,15 @@ impl Probe {
 
     /// Resolves, vets and connects. Through a proxy the connection is to the proxy, and the `CONNECT`
     /// follows. The stream comes back open on success, for the TLS and HTTP calls.
+    ///
+    /// With `open_tunnel` false the connection to the proxy is returned as it is, with no `CONNECT`: the
+    /// caller writes an absolute-form request on it (a plain `http://` call, M1-097).
     async fn dial(
         &self,
         hub: &ProbeHub,
         target: &Target,
         proxy: Option<&ProxyUrl>,
+        open_tunnel: bool,
     ) -> Result<Dialed, ProbeError> {
         let what = host_port(target);
         let (host, port) = match proxy {
@@ -358,7 +370,7 @@ impl Probe {
                 }),
             };
         };
-        if let Some(proxy) = proxy {
+        if let Some(proxy) = proxy.filter(|_| open_tunnel) {
             let status = tunnel(
                 &mut stream,
                 proxy,

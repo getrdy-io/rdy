@@ -94,6 +94,9 @@ fn every_cli_error() -> Vec<CliError> {
         CliError::Internal(InternalKind::SecretRefused {
             names: vec![s("API_TOKEN")],
         }),
+        CliError::Internal(InternalKind::ProxySecretRefused {
+            var: s("HTTPS_PROXY"),
+        }),
         CliError::Internal(InternalKind::Privilege(PrivilegeError::Refused(vec![
             Refusal::AtSecure,
         ]))),

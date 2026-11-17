@@ -119,6 +119,20 @@ impl TestRun {
         self
     }
 
+    /// The same run with a proxy set, as `rdy run` sets it from `HTTPS_PROXY`.
+    ///
+    /// # Panics
+    ///
+    /// If `text` is not a usable proxy URL or its password is refused: a test of that is a test of
+    /// [`ProbeHub::set_proxy_text`].
+    #[must_use]
+    pub fn with_proxy(self, text: &str) -> Self {
+        self.hub
+            .set_proxy_text(text)
+            .unwrap_or_else(|e| panic!("the test proxy URL is not usable: {e}"));
+        self
+    }
+
     /// A run over the machine of a loaded fixture (08 section 2).
     #[must_use]
     pub fn for_fixture(fixture: &Fixture) -> Self {

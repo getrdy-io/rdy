@@ -21,9 +21,11 @@ use tempfile::TempDir;
 use super::*;
 use crate::check::{CheckInfo, CheckMeta, Os, OsSupport, PeerClass, Support};
 use crate::family::HostSet;
+use crate::probe::ProxyChallenge;
 use crate::probe::net::tests::assert_matches_result_schema;
 use crate::probe::net::{AttemptOutcome, RULE_PROXY_UNDECLARED, RULE_TCP_ADDRESS, RULE_TCP_HOST};
 use crate::probe::net::{NoRoots, TrustFailure, TrustStore, TrustVerdict};
+use crate::probe::proxy::challenge_of;
 use crate::probe::replay::{Fixture, NativeFailure, Replay, TcpScript};
 use crate::probe::{
     Backend, NativeCall, NativeValue, StoreKind, StoreOrigin, StoreSource, SystemRoots,
@@ -997,22 +999,138 @@ async fn the_proxy_credentials_reach_the_proxy_and_never_the_origin_or_the_log()
 }
 
 #[tokio::test]
-async fn plain_http_through_the_proxy_is_refused_before_a_byte_is_sent() {
+async fn plain_http_through_the_proxy_uses_the_absolute_form_and_no_connect() {
     let server = plain_server(Reply::Ok).await;
     let at = hosts_of(&server);
-    let proxy = ConnectProxy::start_with_routes(ProxyMode::Ok, &[(&at, server.addr())])
+    let proxy = ConnectProxy::start_forwarding(ProxyMode::Ok, &[(&at, server.addr())])
+        .await
+        .expect("proxy");
+    let hub = hub_over(proxied(proxy.addr(), None));
+    hub.set_proxy_text("http://svc:longer-canary-pw@proxy.acme.test:3128")
+        .expect("proxy");
+    let outcome = probe(&hub, &[&at])
+        .http(get(http_url(&server, "/health?token=q-canary")).route(Route::ViaProxy))
+        .await
+        .expect("through the proxy");
+    assert_eq!(outcome.status, 200);
+    assert!(outcome.connect.via_proxy);
+    assert_eq!(outcome.connect.proxy_status, None, "no CONNECT was sent");
+
+    // The proxy saw the absolute URL and the credential, and no CONNECT.
+    assert!(proxy.requests().is_empty(), "{:?}", proxy.requests());
+    let seen = proxy.plain_requests();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].target, format!("http://{at}/health?token=q-canary"));
+    let encoded = base64(b"svc:longer-canary-pw");
+    assert_eq!(
+        seen[0].proxy_authorization.as_deref(),
+        Some(format!("Basic {encoded}").as_str())
+    );
+    // The origin got the origin form and no proxy credential.
+    let origin = server.requests();
+    assert_eq!(origin.len(), 1);
+    assert_eq!(origin[0].target, "/health?token=q-canary");
+    assert_eq!(origin[0].header("proxy-authorization"), None);
+    assert!(!format!("{origin:?}").contains("longer-canary-pw"));
+    // The log names the proxy without user info, and neither the password nor the query is in it.
+    let log = of_kind(&hub, ActionKind::Http);
+    assert_eq!(
+        field(&log[0], "via_proxy"),
+        Some(&Value::from("http://proxy.acme.test:3128"))
+    );
+    for secret in ["longer-canary-pw", encoded.as_str(), "q-canary"] {
+        assert!(!log_text(&hub).contains(secret), "{secret} is in the log");
+        assert!(
+            !format!("{outcome:?}").contains(secret),
+            "{secret} is in the outcome"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_407_to_the_absolute_form_is_typed_with_its_challenge() {
+    for (mode, challenge, sent) in [
+        (ProxyMode::Basic407, ProxyChallenge::Basic, true),
+        (ProxyMode::Negotiate407, ProxyChallenge::Negotiate, true),
+    ] {
+        let server = plain_server(Reply::Ok).await;
+        let at = hosts_of(&server);
+        let proxy = ConnectProxy::start_forwarding(mode, &[(&at, server.addr())])
+            .await
+            .expect("proxy");
+        let hub = hub_over(proxied(proxy.addr(), None));
+        hub.set_proxy_text("http://svc:longer-canary-pw@proxy.acme.test:3128")
+            .expect("proxy");
+        let error = probe(&hub, &[&at])
+            .http(get(http_url(&server, "/")).route(Route::ViaProxy))
+            .await
+            .expect_err("407");
+        match error {
+            ProbeError::Net(NetFailure::ProxyAuthRequired {
+                challenge: got,
+                sent_credentials,
+                ..
+            }) => assert_eq!((got, sent_credentials), (challenge, sent)),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(server.accepted(), 0, "the origin was never reached");
+        assert!(!log_text(&hub).contains("longer-canary-pw"));
+    }
+}
+
+#[tokio::test]
+async fn a_403_to_the_absolute_form_is_data_and_not_an_error() {
+    let server = plain_server(Reply::Ok).await;
+    let at = hosts_of(&server);
+    let proxy = ConnectProxy::start_forwarding(ProxyMode::Forbidden, &[(&at, server.addr())])
         .await
         .expect("proxy");
     let hub = hub_over(proxied(proxy.addr(), None));
     hub.set_proxy_text("http://proxy.acme.test:3128")
         .expect("proxy");
-    let error = probe(&hub, &[&at])
+    let outcome = probe(&hub, &[&at])
         .http(get(http_url(&server, "/")).route(Route::ViaProxy))
         .await
-        .expect_err("not built yet");
-    assert_eq!(denied_rule(&error), RULE_HTTP_PLAIN_VIA_PROXY);
-    assert_eq!(proxy.accepted(), 0);
-    assert_eq!(server.accepted(), 0);
+        .expect("a status");
+    assert_eq!(outcome.status, 403);
+    assert!(outcome.connect.via_proxy);
+}
+
+#[tokio::test]
+async fn a_302_through_the_proxy_records_the_location_host_and_is_not_followed() {
+    let server = plain_server(Reply::Redirect(
+        "http://second.acme.example:8080/next?t=canary".to_owned(),
+    ))
+    .await;
+    let at = hosts_of(&server);
+    let proxy = ConnectProxy::start_forwarding(ProxyMode::Ok, &[(&at, server.addr())])
+        .await
+        .expect("proxy");
+    let hub = hub_over(proxied(proxy.addr(), None));
+    hub.set_proxy_text("http://proxy.acme.test:3128")
+        .expect("proxy");
+    let outcome = probe(&hub, &[&at])
+        .http(get(http_url(&server, "/")).route(Route::ViaProxy))
+        .await
+        .expect("a redirect");
+    assert_eq!(outcome.status, 302);
+    assert_eq!(
+        outcome.location_host.as_deref(),
+        Some("second.acme.example")
+    );
+    assert_eq!(server.requests().len(), 1, "no second request");
+    assert_eq!(proxy.plain_requests().len(), 1);
+}
+
+#[tokio::test]
+async fn the_proxy_challenge_of_a_reply_is_read_from_every_header() {
+    assert_eq!(
+        challenge_of(["Negotiate", "Basic realm=\"x\""]),
+        ProxyChallenge::Basic
+    );
+    assert_eq!(challenge_of(["NTLM"]), ProxyChallenge::Ntlm);
+    assert_eq!(challenge_of(["Digest"]), ProxyChallenge::Other);
+    assert_eq!(challenge_of(std::iter::empty()), ProxyChallenge::None);
 }
 
 #[tokio::test]
@@ -1629,7 +1747,7 @@ fn the_host_header_and_the_logged_url_follow_the_target() {
         ("https://a.acme.test?x=1", "/?x=1"),
         ("https://a.acme.test/a/b?x=1", "/a/b?x=1"),
     ] {
-        let request = build_request(&target(text), HttpMethod::Get).expect("a request");
+        let request = build_request(&target(text), HttpMethod::Get, None).expect("a request");
         assert_eq!(request.uri().to_string(), path, "{text}");
     }
 }

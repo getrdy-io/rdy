@@ -229,6 +229,16 @@ where
             // A new hub forbids the network. Only `rdy run` may open sockets, and only without
             // `--no-network`; the engine sets the same value again from the run options.
             hub.set_network(matches!(&cli.command, Commands::Run(run) if !run.no_network));
+            // `rdy run`: the proxy of the process environment (`HTTPS_PROXY`, `HTTP_PROXY`, either case)
+            // goes into the hub now: after `ProbeHub::new`, before the privilege snapshot (the first
+            // probe read, after which `set_proxy` is `TooLate`) and before anything is printed or
+            // written, so its password is in the known-secret set before any string can hold it. A URL
+            // that does not parse is exit 64; a password the set refuses is exit 70 (M1-097).
+            if matches!(&cli.command, Commands::Run(_))
+                && let Err(failure) = hub.set_proxy_from_env()
+            {
+                return emit(&CliError::proxy_env(failure), json, stdout, stderr);
+            }
             // `rdy run`: the check families, and the value of every secret-named environment variable
             // they declare, go into the known-secret set before the first log event below and before
             // any check starts (M1-057, ADR 0015 decision 3). A value the set refuses ends the run.

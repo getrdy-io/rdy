@@ -6,7 +6,7 @@
 
 use rdy_engine::check::{CheckError, Os};
 use rdy_engine::probe::net::TrustFailure;
-use rdy_engine::probe::{AttemptOutcome, NetFailure, ProbeError};
+use rdy_engine::probe::{AttemptOutcome, NetFailure, ProbeError, ProxyChallenge};
 
 /// Why one endpoint could not be reached, by stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,12 +47,22 @@ pub(crate) enum Class {
     HttpStatus,
     /// The server accepted the connection and did not answer HTTP.
     HttpFailed,
+    /// The proxy answered 403: the endpoint is not on its allow list.
+    ProxyForbidden,
+    /// The proxy answered 407: it wants credentials rdy did not send, or rejected the ones it sent.
+    ProxyAuthRequired,
+    /// The proxy answered another status than 2xx, 403 or 407 to the tunnel.
+    ProxyRefused,
+    /// The proxy answered something that is not HTTP, or the reply was cut off.
+    ProxyBadReply,
+    /// rdy could not open a connection to the proxy itself.
+    ProxyUnreachable,
 }
 
 impl Class {
     /// Every class, for the tests that audit all the words.
     #[cfg(test)]
-    pub(crate) const ALL: [Class; 18] = [
+    pub(crate) const ALL: [Class; 23] = [
         Self::Dns,
         Self::Refused,
         Self::Blackhole,
@@ -71,6 +81,11 @@ impl Class {
         Self::Timeout,
         Self::HttpStatus,
         Self::HttpFailed,
+        Self::ProxyForbidden,
+        Self::ProxyAuthRequired,
+        Self::ProxyRefused,
+        Self::ProxyBadReply,
+        Self::ProxyUnreachable,
     ];
 
     /// The id written to the report.
@@ -94,6 +109,11 @@ impl Class {
             Self::Timeout => "timeout",
             Self::HttpStatus => "http_status",
             Self::HttpFailed => "http_failed",
+            Self::ProxyForbidden => "proxy_403",
+            Self::ProxyAuthRequired => "proxy_407",
+            Self::ProxyRefused => "proxy_refused",
+            Self::ProxyBadReply => "proxy_bad_reply",
+            Self::ProxyUnreachable => "proxy_unreachable",
         }
     }
 
@@ -120,10 +140,14 @@ impl Class {
         }
     }
 
-    /// The class of a probe error, or the check error to end the check with when the error says the
-    /// test or the build is wrong and not the network (a fixture with no recorded answer).
-    pub(crate) fn of_error(error: ProbeError) -> Result<Self, CheckError> {
-        Ok(match error {
+    /// The class of a probe error and its detail, or the check error to end the check with when the
+    /// error says the test or the build is wrong and not the network (a fixture with no recorded
+    /// answer, a proxied call when the run has no proxy).
+    ///
+    /// The detail is a fixed word or a status code that the fix text reads: for `proxy_407` it is
+    /// `negotiate`, `rejected` or `needed`, and for `proxy_refused` the status.
+    pub(crate) fn of_error(error: ProbeError) -> Result<(Self, Option<String>), CheckError> {
+        let class = match error {
             ProbeError::Denied { .. } => Self::RefusedByPolicy,
             ProbeError::Timeout => Self::Timeout,
             ProbeError::Net(failure) => match failure {
@@ -134,6 +158,28 @@ impl Class {
                 NetFailure::TlsUntrusted { failure, .. } => Self::of_trust(failure),
                 NetFailure::HttpFailed { .. } => Self::HttpFailed,
                 NetFailure::NoTrustRoots { .. } => Self::NoTrustStore,
+                NetFailure::ProxyForbidden { .. } => Self::ProxyForbidden,
+                NetFailure::ProxyAuthRequired {
+                    challenge,
+                    sent_credentials,
+                    ..
+                } => {
+                    let word = match (challenge, sent_credentials) {
+                        (ProxyChallenge::Negotiate | ProxyChallenge::Ntlm, _) => "negotiate",
+                        (_, true) => "rejected",
+                        (_, false) => "needed",
+                    };
+                    return Ok((Self::ProxyAuthRequired, Some(word.to_owned())));
+                }
+                NetFailure::ProxyRefused { status, .. } => {
+                    return Ok((Self::ProxyRefused, Some(status.to_string())));
+                }
+                NetFailure::ProxyBadReply { .. } => Self::ProxyBadReply,
+                // The check picks the proxy route only when the run has a proxy, so this is a bug in
+                // the build or the test and not something the network did.
+                other @ NetFailure::NoProxy => {
+                    return Err(CheckError::Probe(ProbeError::Net(other)));
+                }
                 _ => Self::TlsFailed,
             },
             // The OS refused a socket call, or the resolver failed in its own way.
@@ -141,7 +187,8 @@ impl Class {
                 Self::ConnectFailed
             }
             other => return Err(CheckError::Probe(other)),
-        })
+        };
+        Ok((class, None))
     }
 
     /// The `Fix:` text for `host` and `port` on `os`. `detail` is the address that did not answer for a blackhole, or the status for
@@ -245,6 +292,39 @@ impl Class {
             Self::HttpFailed => format!(
                 "{at} accepted the connection and did not answer HTTP correctly. Check that the port serves HTTP and not another protocol, and that the scheme in the spec (http or https) matches it. A TLS port reached with `http://` gives this."
             ),
+            Self::ProxyForbidden => {
+                if detail == Some("request") {
+                    format!(
+                        "The proxy answered 403 to the request for {at}. Ask the proxy team to add {host} to the allow list. If the server itself answers 403 there, add 403 to `expect_status` on the endpoint."
+                    )
+                } else {
+                    let ports = if port == 443 {
+                        String::new()
+                    } else {
+                        format!(
+                            " A proxy that allows tunnels only to port 443 refuses tcp/{port}: ask for that port too."
+                        )
+                    };
+                    format!(
+                        "The proxy refused CONNECT to {at}. Ask the proxy team to add it to the allow list.{ports}"
+                    )
+                }
+            }
+            Self::ProxyAuthRequired => match detail {
+                Some("negotiate") => format!(
+                    "The proxy wants integrated sign-in (Negotiate or NTLM) for {at}, which rdy does not attempt. Ask the proxy team to allow {host} without sign-in from this machine."
+                ),
+                Some("rejected") => "The proxy rejected the user name or password in the proxy URL (407). Check them, and write special characters as percent escapes (an at sign is %40). Then run rdy again with the corrected `HTTPS_PROXY`.".to_owned(),
+                _ => "The proxy wants a user name and password (407). Put them in the proxy URL, as in `HTTPS_PROXY=http://user:password@proxy.example:3128`, then run rdy again.".to_owned(),
+            },
+            Self::ProxyRefused => {
+                let status = detail.unwrap_or("an error status");
+                format!(
+                    "The proxy answered {status} to the tunnel for {at}. Ask the proxy team why it will not open it. 502 and 504 usually mean the proxy cannot reach {host}, so check DNS and the route on the proxy."
+                )
+            }
+            Self::ProxyBadReply => "The proxy address did not answer like an HTTP proxy. Check that `HTTPS_PROXY` points at the proxy's HTTP port, not a TLS, SOCKS or other port.".to_owned(),
+            Self::ProxyUnreachable => "rdy could not connect to the proxy. Check the host and port in `HTTPS_PROXY` or `HTTP_PROXY`, and that a firewall lets this machine reach the proxy. If the product does not use a proxy here, unset both variables.".to_owned(),
             Self::Timeout => format!(
                 "A step for {at} ran out of time. Run again, and if it repeats check the nameservers this machine uses and the path to {host}."
             ),

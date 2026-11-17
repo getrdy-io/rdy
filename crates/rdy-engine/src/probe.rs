@@ -84,8 +84,8 @@ pub use policy::{RULE_FD_TARGET, ReadGuard, Refused};
 #[cfg(feature = "testing")]
 pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, is_fd_dir, is_fd_link};
 pub use proxy::{
-    DEFAULT_PROXY_PORT, MAX_CONNECT_HEAD, NetFailure, ProxyChallenge, ProxyError, ProxyUrl,
-    ProxyUrlError,
+    DEFAULT_PROXY_PORT, MAX_CONNECT_HEAD, NetFailure, PROXY_ENV, ProxyChallenge, ProxyEnvError,
+    ProxyError, ProxyUrl, ProxyUrlError,
 };
 
 pub use attempt::AttemptOutcome;
@@ -899,6 +899,51 @@ impl ProbeHub {
     /// [`ProbeHub::set_proxy`]. No error holds any part of the text.
     pub fn set_proxy_text(&self, text: &str) -> Result<(), ProxyError> {
         self.set_proxy(ProxyUrl::parse(text)?)
+    }
+
+    /// Reads the proxy for this run from the process environment and sets it as
+    /// [`ProbeHub::set_proxy_text`] does (M1-097). The first variable of [`PROXY_ENV`] that is set to a
+    /// non-blank value wins, in that order: `HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, `http_proxy`.
+    /// A run has one proxy, so `HTTP_PROXY` serves `https` calls too when it is the only one set.
+    /// `NO_PROXY`, `ALL_PROXY` and a PAC file are not read here.
+    ///
+    /// The run calls this right after [`ProbeHub::new`], before `Privilege::snapshot` and before
+    /// anything is printed or written, so the password is in the known-secret set before any string
+    /// that could hold it exists. It reads the backend directly, because the read belongs to the run
+    /// and not to a check. When a variable is set it records the four names (never a value) as one
+    /// run-level `env` entry; with none set it records nothing. That entry is a set-up entry: it does not
+    /// count for the `TooLate` rule of [`ProbeHub::set_proxy`].
+    ///
+    /// Returns the name of the variable the proxy came from, or `None` when none is set.
+    ///
+    /// # Errors
+    ///
+    /// [`ProxyEnvError`] names the variable and holds the [`ProxyError`]. No error holds any part of the
+    /// value.
+    pub fn set_proxy_from_env(&self) -> Result<Option<&'static str>, ProxyEnvError> {
+        let found = PROXY_ENV.iter().find_map(|name| {
+            self.backend
+                .env(name)
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| (*name, value))
+        });
+        // A run with no proxy variable writes no entry, so its log is the same as before.
+        let Some((var, value)) = found else {
+            return Ok(None);
+        };
+        let mut fields = Map::new();
+        fields.insert("name".to_owned(), cut_names(&PROXY_ENV).into());
+        let setup = self.log.begin_setup(ActionKind::Env, fields);
+        let result = self
+            .set_proxy_text(&value)
+            .map(|()| Some(var))
+            .map_err(|error| ProxyEnvError { var, error });
+        setup.finish(if result.is_ok() {
+            ActionOutcome::Ok
+        } else {
+            ActionOutcome::Failed
+        });
+        result
     }
 
     /// The probe for run-level work on this OS, which the log records with `check: null`. The

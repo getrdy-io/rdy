@@ -25,8 +25,14 @@
 //! `User-Agent`, `Accept: */*` and `Connection: close`. No credentials, no cookies, no body, no
 //! compression offer.
 //!
-//! **Not built here.** A plain `http://` target through the proxy needs the absolute form of the request
-//! line, which M1-097 builds; until then the call is refused. HTTP/2 is not spoken: the ALPN offer is
+//! **Through the proxy (M1-097).** An `https://` target is tunnelled with the facade's own `CONNECT` and
+//! then verified end to end. A plain `http://` target is not tunnelled: the request goes to the proxy in
+//! the absolute form (`GET http://host:port/path HTTP/1.1`) with the proxy's Basic
+//! `Proxy-Authorization`, because a proxy that allows `CONNECT` only to port 443 would answer a tunnel to
+//! port 80 or 8080 with a false 403. The credential goes on that one request, to the proxy, and nowhere
+//! else; the header value is marked sensitive and never logged. A 407 on that request is
+//! [`NetFailure::ProxyAuthRequired`], as for a `CONNECT`. A 403 and any other status are data, because
+//! a 403 may be the server's own answer: the check decides. HTTP/2 is not spoken: the ALPN offer is
 //! `http/1.1` alone.
 //!
 //! **Failures.** Each class a check reports has its own value: [`NetFailure::Dns`], the refusals of the
@@ -62,6 +68,7 @@ use super::{
 };
 use super::{fail_net, proxy_for, settle};
 use crate::probe::log::Pending;
+use crate::probe::proxy::{ProxyChallenge, ProxyUrl, challenge_of};
 use crate::probe::refuse;
 use crate::probe::sock::host_port;
 
@@ -110,10 +117,6 @@ pub const REPORTED_HEADERS: [&str; 6] = [
 
 /// The rule of a call whose target is a `host:port` and not an `http://` or `https://` URL.
 pub const RULE_HTTP_NOT_URL: &str = "the target is not an http:// or https:// URL";
-
-/// The rule of a plain `http://` call through the proxy, which needs the absolute form (M1-097).
-pub const RULE_HTTP_PLAIN_VIA_PROXY: &str =
-    "plain http through the proxy is not built yet (it needs the absolute form, M1-097)";
 
 /// The method of an HTTP probe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,6 +229,9 @@ pub struct HttpOutcome {
     /// The host of the `Location` header, when it is an absolute URL: no scheme, port, path, query or
     /// user info. The facade did not follow it.
     pub location_host: Option<String>,
+    /// What the reply's `Proxy-Authenticate` headers offer. [`ProxyChallenge::None`] when there are
+    /// none. Only a reply that came through the proxy can carry one that means anything.
+    pub proxy_challenge: ProxyChallenge,
     /// How many body bytes were counted and discarded, at most [`MAX_BODY`].
     pub body_bytes: usize,
     /// `true` when the facade stopped before the end of the body: the cap, the time limit or a read error.
@@ -288,9 +294,6 @@ impl Probe {
         if let Err(rule) = self.admit_tcp(&target, route) {
             return Err(refuse(entry, rule, &what));
         }
-        if route == Route::ViaProxy && target.scheme() == Some("http") {
-            return Err(refuse(entry, RULE_HTTP_PLAIN_VIA_PROXY, &what));
-        }
         let proxy = match proxy_for(hub, route, &mut entry) {
             Ok(proxy) => proxy,
             Err(failure) => return Err(fail_net(entry, failure)),
@@ -323,7 +326,10 @@ impl Probe {
         let what = host_port(target);
         // Everything that can be wrong with the call itself is found before a connection opens: a
         // request that cannot be sent, a store that is missing, a name TLS cannot carry.
-        let request = build_request(target, method).map_err(|reason| failed(&what, reason))?;
+        // A plain `http://` call through the proxy is not tunnelled: the proxy gets the request itself.
+        let plain_via_proxy = proxy.filter(|_| target.scheme() == Some("http"));
+        let request = build_request(target, method, plain_via_proxy)
+            .map_err(|reason| failed(&what, reason))?;
         let strict = if target.scheme() == Some("https") {
             Some(self.strict_tls(hub, target, roots).await?)
         } else {
@@ -331,7 +337,9 @@ impl Probe {
         };
 
         let started = Instant::now();
-        let Dialed { report, stream } = self.dial(hub, target, proxy).await?;
+        let Dialed { report, stream } = self
+            .dial(hub, target, proxy, plain_via_proxy.is_none())
+            .await?;
         // Through a proxy the connected address is the proxy's, and the log shows the target.
         if let Some(addr) = report.addr.filter(|_| !report.via_proxy) {
             entry.set("addr", addr.ip().to_string());
@@ -367,8 +375,18 @@ impl Probe {
             &what,
         )
         .await?;
+        if let Some(proxy) = plain_via_proxy
+            && reply.status == 407
+        {
+            return Err(ProbeError::Net(NetFailure::ProxyAuthRequired {
+                target: what,
+                challenge: reply.proxy_challenge,
+                sent_credentials: proxy.has_credentials(),
+            }));
+        }
         Ok(HttpOutcome {
             status: reply.status,
+            proxy_challenge: reply.proxy_challenge,
             headers: reply.headers,
             location_host: reply.location_host,
             body_bytes: reply.body_bytes,
@@ -388,6 +406,7 @@ impl Probe {
 /// What the reply showed.
 struct Reply {
     status: u16,
+    proxy_challenge: ProxyChallenge,
     headers: Vec<(&'static str, String)>,
     location_host: Option<String>,
     body_bytes: usize,
@@ -422,6 +441,13 @@ async fn converse(
         let first_byte = sent.elapsed();
         let status = response.status().as_u16();
         let headers = reported_headers(response.headers());
+        let proxy_challenge = challenge_of(
+            response
+                .headers()
+                .get_all(header::PROXY_AUTHENTICATE)
+                .iter()
+                .filter_map(|value| value.to_str().ok()),
+        );
         let location_host = response
             .headers()
             .get(header::LOCATION)
@@ -430,6 +456,7 @@ async fn converse(
         let (body_bytes, body_cut) = discard(response.into_body(), body_limit).await;
         Ok(Reply {
             status,
+            proxy_challenge,
             headers,
             location_host,
             body_bytes,
@@ -484,8 +511,13 @@ async fn discard(body: hyper::body::Incoming, limit: Duration) -> (usize, bool) 
     (counted.min(MAX_BODY), cut)
 }
 
-/// The request line and headers. `Err` is a fixed phrase.
-fn build_request(target: &Target, method: HttpMethod) -> Result<Request<NoBody>, &'static str> {
+/// The request line and headers. `Err` is a fixed phrase. With `via` (a plain `http://` call through
+/// the proxy) the request target is the absolute URL and the request carries the proxy's credential.
+fn build_request(
+    target: &Target,
+    method: HttpMethod,
+    via: Option<&ProxyUrl>,
+) -> Result<Request<NoBody>, &'static str> {
     let tail = target.path_and_query().unwrap_or_default();
     let path = if tail.is_empty() {
         "/".to_owned()
@@ -494,16 +526,30 @@ fn build_request(target: &Target, method: HttpMethod) -> Result<Request<NoBody>,
     } else {
         tail.to_owned()
     };
-    let uri: hyper::Uri = path.parse().map_err(|_| "the URL path cannot be sent")?;
-    let host =
-        HeaderValue::from_str(&host_header(target)).map_err(|_| "the host cannot be sent")?;
-    Request::builder()
+    let authority = host_header(target);
+    let uri = if via.is_some() {
+        format!("http://{authority}{path}")
+    } else {
+        path
+    };
+    let uri: hyper::Uri = uri.parse().map_err(|_| "the URL path cannot be sent")?;
+    let host = HeaderValue::from_str(&authority).map_err(|_| "the host cannot be sent")?;
+    let mut request = Request::builder()
         .method(method.as_str())
         .uri(uri)
         .header(header::HOST, host)
         .header(header::USER_AGENT, USER_AGENT)
         .header(header::ACCEPT, "*/*")
-        .header(header::CONNECTION, "close")
+        .header(header::CONNECTION, "close");
+    if let Some(proxy) = via
+        && let Some(value) = proxy.authorization()
+    {
+        let mut value =
+            HeaderValue::from_str(&value).map_err(|_| "the proxy credentials cannot be sent")?;
+        value.set_sensitive(true);
+        request = request.header(header::PROXY_AUTHORIZATION, value);
+    }
+    request
         .body(NoBody)
         .map_err(|_| "the request cannot be built")
 }

@@ -64,7 +64,7 @@ rdy-engine = { path = "../rdy-engine", version = "0.1.0-alpha.0", features = ["t
 sha2 = { workspace = true, features = ["std"] }
 tempfile = { workspace = true }
 # `test-util` gives the harness a paused clock, so a hung source costs no real time.
-tokio = { workspace = true, features = ["rt", "macros", "time", "test-util"] }
+tokio = { workspace = true, features = ["rt", "macros", "time", "test-util", "io-util"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 rexpect.workspace = true
