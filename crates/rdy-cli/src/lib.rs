@@ -27,6 +27,7 @@ pub mod entry;
 #[doc(hidden)]
 pub mod error;
 mod hooks;
+mod interrupt;
 #[doc(hidden)]
 pub mod lint;
 #[doc(hidden)]

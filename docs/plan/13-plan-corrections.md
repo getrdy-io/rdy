@@ -451,6 +451,14 @@ the corrections log of `11-backlog.md`.
   says that a `--verbose` line written into a full stderr pipe blocks the run, and the watchdog ends it with
   exit 70 and a partial report. M1-143 builds 02's `on_progress` seam with `Progress::Finished` only; M2-124
   adds the started and phase events on it, and M2-017 depends on M2-124.
+- **Correction-45, `rdy run` writes the HTML report, and M1-100 takes PR #71's deferrals.** 01 section 5.5,
+  02 "Output and reports" and 07 sections 2.1 and 5.2 put a `.html` next to the `.json` in every report folder,
+  and the `rdy` and `rdy run` help says the run writes one. No ticket wired it: M1-057 writes the JSON only,
+  and the HTML tickets build and test the renderer. New M1-181 (core, week 19) writes the page through
+  `OutputDir::write_html`, with the `.json` written last, and the watchdog writes the INCOMPLETE page by the
+  same rules. M1-138 depends on it. PR #71 (M1-099) left `expected_issuer` and `pin_sha256`, the
+  generated-chain fixture rig and the Timeout case to M1-100, whose exit test did not hold them. M1-100 now
+  does all three (3.5 h), and M1-101 moves to week 21. No test-pinned document changed.
 - **Correction-46, the 03 sections of net.egress and net.dns, two `PENDING` rows and the non-dumpable order.**
   PR #74 (M1-096) and PR #72 (M1-153) change their own 03 sections after review. The 03 text lands with each
   PR; this entry records and approves it. net.egress with no `expect_status`: 2xx, 3xx and 4xx count as

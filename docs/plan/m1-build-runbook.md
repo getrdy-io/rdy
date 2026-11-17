@@ -215,8 +215,9 @@ main). No document may name a person as owner, and no document may mention the f
 - #44 M1-124, #43 correction-40, #46 correction-41, #23 M1-150, #25 M1-072, #42 M1-086.
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
-M1-177 and M1-178, which makes 180. Totals after correction-34 and correction-44: M1 180 tickets, 396.5 h,
-332 h core; M2 128 tickets, 458.5 h; all milestones 408 tickets, 1368.5 h, 1304 h core.
+M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
+correction-45: M1 181 tickets, 400 h, 335.5 h core; M2 128 tickets, 458.5 h; all milestones 409 tickets,
+1372 h, 1307.5 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -237,6 +238,9 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - 44: records #68's decisions (M1-143). The run header prints at the end, so `--verbose` event lines come
   before it. `--verbose` turns the live line off (M1-142's exit test), in the second of #60 and #68 to merge.
   A full stderr pipe under `--verbose` ends in the watchdog (07 5.2). New M2-128 moves the header earlier.
+- 45: new core M1-181: `rdy run` writes the HTML report next to the JSON, and M1-138 depends on it. M1-100
+  takes #71's deferrals (pins, the generated-chain rig, the Timeout case) and grows to 3.5 h. M1-101 moves
+  to week 21.
 - 46: records and approves the 03 changes of #74 (net.egress status with no `expect_status`: 403 warns, 407
   and 5xx fail) and #72 (net.dns needs `Network`, refused-range `getent` answers block, 9 s per name).
   The second of #70 and #74, and of #70 and #72, to merge deletes that check's `PENDING` row (M1-179).
@@ -253,7 +257,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next PR is #51 (#50 is this pause-state PR).
 - The next free ADR is 0046. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163) and ADR 0045 in #64 (M1-164).
-- The next ticket ids are M1-182 and M2-129 (#73 takes M1-181), and the next correction is 47.
+- The next ticket ids are M1-182 and M2-129, and the next correction is 47.
 - The next plan-correction row is PC-53. PC-50 to PC-52 are on main, from M1-176.
 
 **Process lessons from this session.**
