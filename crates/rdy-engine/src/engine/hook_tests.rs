@@ -66,7 +66,8 @@ impl Family for ProbingFamily {
             (ctx.announce)("acme-prod, https://k8s.acme.example:6443");
             self.given.lock().expect("lock").push(format!(
                 "{:?} {:?} {}",
-                ctx.kubeconfig.map(|path| path.to_string_lossy().into_owned()),
+                ctx.kubeconfig
+                    .map(|path| path.to_string_lossy().into_owned()),
                 ctx.kube_context,
                 ctx.checks.len()
             ));

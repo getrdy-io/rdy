@@ -27,7 +27,11 @@ fn every_kube_entry_fails_clippy() {
         .map(|entry| entry.path)
         .filter(|path| path.starts_with("kube::"))
         .collect();
-    assert_eq!(wanted.len(), 18, "the use file proves 18 kube entries: {wanted:?}");
+    assert_eq!(
+        wanted.len(),
+        18,
+        "the use file proves 18 kube entries: {wanted:?}"
+    );
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let output = Command::new(cargo)
@@ -81,8 +85,15 @@ fn every_kube_entry_fails_clippy() {
             stray.push(message["rendered"].as_str().unwrap_or(text).to_owned());
         }
     }
-    assert!(!output.status.success(), "clippy passed over the use file, but every use must fail");
-    assert!(stray.is_empty(), "stray clippy output:\n{}", stray.join("\n"));
+    assert!(
+        !output.status.success(),
+        "clippy passed over the use file, but every use must fail"
+    );
+    assert!(
+        stray.is_empty(),
+        "stray clippy output:\n{}",
+        stray.join("\n")
+    );
 
     let mut failures = Vec::new();
     let text = std::fs::read_to_string(root().join(USE_FILE)).expect("the use file");
@@ -92,18 +103,25 @@ fn every_kube_entry_fails_clippy() {
         }
         let n = index as u64 + 1;
         if !reported.iter().any(|(_, at)| *at == n || *at + 1 == n) {
-            failures.push(format!("{USE_FILE}:{n}: no disallowed report: {}", line.trim()));
+            failures.push(format!(
+                "{USE_FILE}:{n}: no disallowed report: {}",
+                line.trim()
+            ));
         }
     }
     let seen: BTreeSet<&str> = reported.iter().map(|(path, _)| path.as_str()).collect();
     for path in &wanted {
         if !seen.contains(path.as_str()) {
-            failures.push(format!("`{path}` is a kube entry that nothing in the use file reaches"));
+            failures.push(format!(
+                "`{path}` is a kube entry that nothing in the use file reaches"
+            ));
         }
     }
     for (path, _) in &reported {
         if !wanted.contains(path) {
-            failures.push(format!("reported `{path}`, which is not a kube entry of the k8s clippy.toml"));
+            failures.push(format!(
+                "reported `{path}`, which is not a kube entry of the k8s clippy.toml"
+            ));
         }
     }
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));

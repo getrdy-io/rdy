@@ -176,7 +176,8 @@ async fn eks_v1_29_4_parses_to_1_29_and_passes_when_the_apis_are_served() {
     );
     // Every request is a GET, except the one review, which is a POST (the guard allows only that one).
     assert!(rig.requests().iter().all(|(method, path, outcome)| {
-        *outcome == ActionOutcome::Ok && (method == "GET" || (method == "POST" && path == NODES_REVIEW))
+        *outcome == ActionOutcome::Ok
+            && (method == "GET" || (method == "POST" && path == NODES_REVIEW))
     }));
     rig.audit();
 }
@@ -359,7 +360,13 @@ async fn missing_apis_say_why() {
     // The core document lists Pod; version v2 of the core group is not a thing and needs no request.
     assert_eq!(
         rig.paths(),
-        ["/apis", NODES_REVIEW, "/api/v1/nodes", "/apis/batch/v1", "/api/v1"]
+        [
+            "/apis",
+            NODES_REVIEW,
+            "/api/v1/nodes",
+            "/apis/batch/v1",
+            "/api/v1"
+        ]
     );
     rig.audit();
 }
@@ -506,7 +513,11 @@ async fn a_forbidden_node_list_is_partial_with_the_grant_and_never_blocks() {
     assert!(finding.observed.get("nodes_read").is_none());
     // The review said no, so no list request was sent: the group list and the review are all there is.
     assert_eq!(rig.paths(), ["/apis", NODES_REVIEW]);
-    assert!(rig.requests().iter().all(|(_, _, outcome)| *outcome == ActionOutcome::Ok));
+    assert!(
+        rig.requests()
+            .iter()
+            .all(|(_, _, outcome)| *outcome == ActionOutcome::Ok)
+    );
     // A required check with a partial pass is a warning, never a block.
     let result = map_outcome(
         &INFO,

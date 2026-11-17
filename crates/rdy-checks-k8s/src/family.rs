@@ -35,8 +35,8 @@ use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::access::{AccessCheck, Dial, DialOutcome, Dialed};
 use crate::client::{
-    ConnectionFacts, Env, ImpersonateAs, ImpersonationError, KubeError, KubeOptions, ReadOnlyClient,
-    ServerVersion, from_kube_error, load,
+    ConnectionFacts, Env, ImpersonateAs, ImpersonationError, KubeError, KubeOptions,
+    ReadOnlyClient, ServerVersion, from_kube_error, load,
 };
 use crate::cluster::Cluster;
 use crate::registry;
@@ -315,7 +315,10 @@ impl Family for K8sFamily {
         kube.server = Some(line.server().to_owned());
         kube.user_verified = verified.is_some();
         kube.user = verified.or_else(|| line.user().map(str::to_owned));
-        kube.exec_plugin = line.plugin().filter(|name| is_plugin_name(name)).map(str::to_owned);
+        kube.exec_plugin = line
+            .plugin()
+            .filter(|name| is_plugin_name(name))
+            .map(str::to_owned);
         kube.insecure_tls = line.tls_verification_off();
         Some(kube)
     }
@@ -335,7 +338,9 @@ impl Family for K8sFamily {
             CheckParams::K8sAccess(params) => AccessCheck::new(&params, holder as Arc<dyn Dial>)
                 .map(|check| Built::new(Box::new(check)).with_hosts(HostSet::empty()))
                 .map_err(|_| {
-                    BuildError::Unsupported("the `expect` pattern is not a valid pattern".to_owned())
+                    BuildError::Unsupported(
+                        "the `expect` pattern is not a valid pattern".to_owned(),
+                    )
                 }),
             _ => Err(BuildError::Unsupported(
                 "not a k8s check this rdy can build".to_owned(),

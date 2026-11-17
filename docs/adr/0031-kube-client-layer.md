@@ -142,7 +142,14 @@ kubeconfig read needed a settled path.
   plugin canary and environment tests use shell scripts and run on Unix only. The distribution kubeconfig
   paths in hints appear on Linux only (07).
 - Carried to M1-107 (correction-12): `.cmd` plugin tests for Windows, and resolving a bare plugin command
-  name against `PATH` for the `exec` action-log entry.
+  name against `PATH` for the `exec` action-log entry. Built in M1-107: `Env` carries `PATH` and `PATHEXT`,
+  `PluginExec::command` is the file found there, and the entry is `exec` with `form: delegated`.
+- Built in M1-107: with no CA in the kubeconfig the client takes its roots from the facade's `SystemRoots`
+  (decision 9 follow-up). When the facade has none (an empty or unreadable store, an OS with no source yet) kube
+  stays on its bundled `webpki-roots`, so neither `rustls-platform-verifier` nor `rustls-native-certs` is reached.
+  `Loaded::known_secrets()` now holds the inline credentials of every user entry, not only the chosen one. The
+  plugin's own token is not in it: kube 4.2.0 runs the plugin inside `ClientBuilder::try_from` and does not expose
+  the token, so the redactor's token shapes cover it.
 - Credential plugin tests that use shell scripts run on Unix only. Windows gets `.cmd` plugin tests in
   M1-107 or M1-108.
 - A kube bump needs a manual re-read of 02 Appendix A, of the error mapping in `client/error.rs`, and of

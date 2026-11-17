@@ -48,8 +48,8 @@ use rdy_engine::report::{JsonError, write_json};
 use rdy_engine::sched::{DEFAULT_JOBS, MAX_JOBS, cap_jobs};
 use rdy_engine::watchdog::{ReportSink, Timing};
 use rdy_spec::result::{
-    CheckResult, Host, HostOs, HostOsFamily, Identity, Producer, Report, Run, RunOptions, Signature,
-    SpecRef,
+    CheckResult, Host, HostOs, HostOsFamily, Identity, Producer, Report, Run, RunOptions,
+    Signature, SpecRef,
 };
 use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, TrustStore};
 use rdy_spec::{LoadedSpec, VerifiedSpecBytes, load};
@@ -212,7 +212,13 @@ async fn execute(
     // stderr before its first request (ADR 0031 decision 4). The line is redacted like every other.
     options.kubeconfig.clone_from(&args.kubeconfig);
     options.kube_context.clone_from(&args.kube_context);
-    options.announce = Some(rdy_engine::engine::Announce::new(announce_cluster));
+    let announced: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let sink = Arc::clone(&announced);
+    options.announce = Some(rdy_engine::engine::Announce::new(move |line| {
+        sink.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(line.to_owned());
+    }));
 
     let engine = Engine::new(registry, hub);
     let plan = engine.plan(&loaded, current_os(), env!("CARGO_PKG_VERSION"));
@@ -257,7 +263,16 @@ async fn execute(
         board.set_host(host.clone());
     }
     options.board = board;
-    let executed = engine.execute(&loaded, plan, &privilege, &options).await;
+    // The family's line is written after the poll that announced it and before the poll that can send the
+    // first request: the client is built on the blocking pool, so that poll returns first (ADR 0031
+    // decision 4). The stderr of the command is not `'static`, so the line goes through this buffer.
+    let mut execute = std::pin::pin!(engine.execute(&loaded, plan, &privilege, &options));
+    let executed = std::future::poll_fn(|cx| {
+        let polled = execute.as_mut().poll(cx);
+        print_announced(&announced, stderr);
+        polled
+    })
+    .await;
     // A family's probe ended the run: no check ran. No report is written for a run that did not start.
     if let Some(fatal) = executed.fatal {
         discard_if_empty(dir);
@@ -278,7 +293,14 @@ async fn execute(
     );
     let mut identity_privilege = privilege.identity();
     identity_privilege.kube = executed.kube;
-    let mut report = assemble(&loaded, args, identity_privilege, host, run, executed.results);
+    let mut report = assemble(
+        &loaded,
+        args,
+        identity_privilege,
+        host,
+        run,
+        executed.results,
+    );
     report.capabilities = executed.capabilities;
     executed.log.apply(&mut report);
     let counts = executed.counts;
@@ -444,14 +466,22 @@ fn assemble(
     )
 }
 
-/// Prints the cluster line to stderr. The Kubernetes family calls it once, before the first request, with
-/// the context, server and user (ADR 0031 decision 4). The text passes the redactor and the terminal
-/// escaper, and a failed write is not an error: the line is a courtesy, and the report says the same.
-fn announce_cluster(line: &str) {
-    let text = redaction::redact_text_then(&format!("Cluster: {line}"), |text| {
-        rdy_engine::text::escape_untrusted(text)
-    });
-    let _ = writeln!(std::io::stderr(), "{text}");
+/// Writes the lines a family announced since the last call, to stderr. The Kubernetes family announces the
+/// cluster line (context, server, user) once, before its first request. The text passes the redactor and
+/// the terminal escaper, and a failed write is not an error: the line is a courtesy, and the report says
+/// the same.
+fn print_announced(announced: &std::sync::Mutex<Vec<String>>, stderr: &mut dyn Write) {
+    let lines = std::mem::take(
+        &mut *announced
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for line in lines {
+        let text = redaction::redact_text_then(&format!("Cluster: {line}"), |text| {
+            rdy_engine::text::escape_untrusted(text)
+        });
+        let _ = writeln!(stderr, "{text}");
+    }
 }
 
 /// Removes the report folder when nothing was written into it. A folder that holds a file stays, and so

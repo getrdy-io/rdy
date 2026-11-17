@@ -919,3 +919,122 @@ mod plugin {
         connected.expect("the client was built while the runtime thread stayed free");
     }
 }
+
+// ---- the proxy variables a cluster must not use (05 INV-11, ADR 0037, M1-107) --------------------------------
+
+#[tokio::test]
+async fn http_proxy_is_never_used_for_an_https_api_server() {
+    const NAME: &str = "http_proxy_is_never_used_for_an_https_api_server";
+    if !is_child() {
+        // Only the `HTTP_PROXY` spellings and `ALL_PROXY` are set. None of them may carry the token of an
+        // https cluster, whatever the run's one proxy (which `rdy run` sets from them) does for a probe.
+        let mut vars = vec![
+            ("HTTP_PROXY", "http://proxy.acme.example:3128"),
+            ("ALL_PROXY", "http://proxy.acme.example:3128"),
+            // A build machine may set these. Empty is unset, so only the variables above are in play.
+            ("HTTPS_PROXY", ""),
+            ("https_proxy", ""),
+        ];
+        if !cfg!(windows) {
+            vars.push(("http_proxy", "http://proxy.acme.example:3128"));
+        }
+        run_child(NAME, &vars);
+        return;
+    }
+    let env = Env::from_process();
+    assert!(env.https_proxy.is_none(), "only HTTPS_PROXY is read");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("kubeconfig");
+    std::fs::write(
+        &path,
+        kubeconfig("https://k8s.acme.example:6443", &token("t")),
+    )
+    .expect("write");
+    let loaded = load(&KubeOptions::new(TIMEOUT).kubeconfig(&path), &env)
+        .await
+        .expect("load");
+    assert!(!loaded.proxy().is_proxied());
+    assert_eq!(loaded.proxy().describe(), None);
+}
+
+#[test]
+fn a_bare_plugin_name_is_the_file_found_on_path_for_the_exec_entry() {
+    use rdy_checks_k8s::client::resolve_plugin;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let other = tempfile::tempdir().expect("tempdir");
+    let name = if cfg!(windows) {
+        "get-token.cmd"
+    } else {
+        "get-token"
+    };
+    std::fs::write(dir.path().join(name), "x").expect("write");
+    let path = std::env::join_paths([other.path(), dir.path()]).expect("join");
+    let pathext = std::ffi::OsString::from(".exe;.cmd");
+
+    let found = resolve_plugin(
+        "get-token",
+        Some(path.as_os_str()),
+        Some(pathext.as_os_str()),
+    );
+    let dir_text = dir.path().display().to_string();
+    assert!(
+        found.starts_with(&dir_text) && found.contains("get-token"),
+        "{found}"
+    );
+    // A name found nowhere stays bare, so the entry claims no path rdy did not see. So does no PATH.
+    assert_eq!(
+        resolve_plugin("nope-token", Some(path.as_os_str()), None),
+        "nope-token"
+    );
+    assert_eq!(resolve_plugin("get-token", None, None), "get-token");
+    // A command with a directory in it is shown as written, never searched.
+    assert_eq!(
+        resolve_plugin("./get-token", Some(path.as_os_str()), None),
+        "./get-token"
+    );
+}
+
+/// A credential plugin that is a `.cmd` file runs on Windows the way a script runs on Unix (ADR 0031,
+/// correction-12). It prints an `ExecCredential` and the token reaches the API request.
+#[cfg(windows)]
+mod windows_plugin {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_cmd_plugin_gives_the_token_and_none_of_its_output_is_logged() {
+        let _ = logs();
+        let api = MockApi::start(Mode::Version).await;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plugin = dir.path().join("get-token.cmd");
+        std::fs::write(
+            &plugin,
+            "@echo off\r\necho {\"apiVersion\":\"client.authentication.k8s.io/v1\",\"kind\":\"ExecCredential\",\"status\":{\"token\":\"WIN-PLUGIN-TOKEN\"}}\r\n",
+        )
+        .expect("write the .cmd plugin");
+        let user = format!(
+            "    exec:\n      apiVersion: client.authentication.k8s.io/v1\n      command: {}\n",
+            plugin.display()
+        );
+        let loaded = load_text(dir.path(), &api.url(), &user, TIMEOUT).await;
+        assert_eq!(loaded.line().plugin(), Some("get-token.cmd"));
+
+        loaded
+            .connect(&common::run_probe(), |_| {})
+            .await
+            .expect("connect through a .cmd plugin");
+
+        let requests = api.requests();
+        assert!(
+            requests[0]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer win-plugin-token"),
+            "{}",
+            requests[0]
+        );
+        assert!(
+            !logs().contains("WIN-PLUGIN-TOKEN"),
+            "the token reached the log"
+        );
+    }
+}

@@ -170,6 +170,15 @@ Rules:
 - Plan, then probe, then run. All probes run concurrently before the first check, each under its own
   timeout, and their results go into `capabilities` with a hint.
 - With `--no-network`, `kube_context` is unavailable and no kube client is built.
+- **As built in M1-107.** The hook is `Family::probe(FamilyProbe) -> Result<Vec<Capability>, FamilyFatal>` (default:
+  nothing), with `Family::probe_timed_out()` and `Family::kube_identity(&[CheckResult])` beside it. `Engine::execute`
+  calls it once per family that has a runnable check in the plan, so a spec with no `k8s.*` check reads no kubeconfig
+  and sends no request. The engine holds the 10 s limit (`FAMILY_PROBE_LIMIT`) with a tokio timer, so a plugin that
+  waits for a login is abandoned on the blocking pool and never holds a worker; the runtime shuts down without waiting
+  for it. A `FamilyFatal` (a kubeconfig or proxy secret the known-secret set refused) runs no check and exits 70.
+  The run's `read` entries (the kubeconfig files) and the one `exec` entry (`form: delegated`, the file found on
+  `PATH` for a bare name) come from `Probe::record_run_read` and `Probe::record_run_exec`. The cluster line goes to
+  stderr through `RunOptions::announce`, after the secrets are registered and before the client is built.
 - The kube probe sends its first request (which may run an exec credential plugin that waits for an SSO
   login) from a `spawn_blocking` thread through the runtime handle, under a 10 s timer held by the
   scheduler. A stuck plugin costs one abandoned blocking thread, never a worker.

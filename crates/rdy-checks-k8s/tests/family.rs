@@ -96,7 +96,10 @@ async fn the_line_comes_before_the_first_request_every_secret_is_known_and_the_f
     let dir = tempfile::tempdir().expect("tempdir");
     // A second user that the context does not use: its token is a secret too.
     let others = "- name: other\n  user:\n    token: OTHER-USER-TOKEN-CANARY\n    password: OTHER-USER-PASSWORD\n";
-    let path = write(dir.path(), &kubeconfig(&format!("http://{addr}"), others, ""));
+    let path = write(
+        dir.path(),
+        &kubeconfig(&format!("http://{addr}"), others, ""),
+    );
     let run = TestRun::new(Replay::new());
     let lines = Arc::clone(&events);
     let announce = move |line: &str| lines.lock().expect("events").push(format!("line: {line}"));
@@ -138,7 +141,11 @@ async fn the_line_comes_before_the_first_request_every_secret_is_known_and_the_f
     assert_eq!(kube.user.as_deref(), Some("usr"));
     assert!(!kube.user_verified);
     // A spec with only these checks reads nothing else: no `exec` entry without a plugin.
-    assert!(log.actions.iter().all(|entry| entry.kind != ActionKind::Exec));
+    assert!(
+        log.actions
+            .iter()
+            .all(|entry| entry.kind != ActionKind::Exec)
+    );
 }
 
 #[tokio::test]
@@ -240,7 +247,8 @@ fn a_plugin_that_waits_for_a_login_makes_the_cluster_unavailable_and_does_not_ke
         plugin.display()
     );
     // The token line follows the exec block, which is not valid for one user: use a plugin-only user.
-    let text = kubeconfig("http://127.0.0.1:9", "", &exec).replace("    token: CHOSEN-TOKEN-CANARY\n", "");
+    let text =
+        kubeconfig("http://127.0.0.1:9", "", &exec).replace("    token: CHOSEN-TOKEN-CANARY\n", "");
     let path = write(dir.path(), &text);
 
     // The runtime the CLI builds: one thread, and shut down without waiting for the blocking pool.
@@ -258,7 +266,10 @@ fn a_plugin_that_waits_for_a_login_makes_the_cluster_unavailable_and_does_not_ke
         // The engine's timer, as `Engine::execute` holds it. The engine's limit is 10 s. This one is short
         // and on a real clock, because tokio's paused clock does not advance while a blocking task waits.
         let ended = tokio::time::timeout(Duration::from_millis(300), family.probe(ctx)).await;
-        assert!(ended.is_err(), "the probe must still be waiting for the plugin");
+        assert!(
+            ended.is_err(),
+            "the probe must still be waiting for the plugin"
+        );
         family.probe_timed_out();
         (
             vec![family.kube_identity(&[]).is_none()],

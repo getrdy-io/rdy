@@ -338,7 +338,10 @@ impl Check for Counting {
     }
 }
 
-pub(super) struct CountingFamily(pub(super) &'static str, pub(super) &'static [&'static CheckInfo]);
+pub(super) struct CountingFamily(
+    pub(super) &'static str,
+    pub(super) &'static [&'static CheckInfo],
+);
 
 impl Family for CountingFamily {
     fn name(&self) -> &'static str {

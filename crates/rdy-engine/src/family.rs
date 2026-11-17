@@ -16,8 +16,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use rdy_spec::Target;
-use rdy_spec::result::{Capability, CheckResult, KubeIdentity};
 use rdy_spec::check::CheckParams;
+use rdy_spec::result::{Capability, CheckResult, KubeIdentity};
 use rdy_spec::spec::{CheckSpec, Spec};
 
 use crate::check::{BoxFuture, Check, CheckInfo};

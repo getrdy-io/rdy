@@ -764,7 +764,11 @@ fn an_unknown_issuer_blocks_and_the_hint_depends_on_the_kubeconfig_ca() {
         "{}",
         ran.fix()
     );
-    assert!(has(ran.fix(), "read from this machine's store"), "{}", ran.fix());
+    assert!(
+        has(ran.fix(), "read from this machine's store"),
+        "{}",
+        ran.fix()
+    );
     // A CA that does not match: a proxy that re-signs TLS is the other suspect.
     let with = facts(
         &kubeconfig(

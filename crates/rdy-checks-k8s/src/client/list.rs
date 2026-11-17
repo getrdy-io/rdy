@@ -26,10 +26,7 @@ pub(crate) struct Listed<K> {
     /// The objects, in page order, at most [`MAX_ITEMS`].
     pub(crate) items: Vec<K>,
     /// How many times the walk started over after a `410 Gone`: 0 or 1.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "only the paging tests read it")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "only the paging tests read it"))]
     pub(crate) restarts: u32,
     /// The server had more than [`MAX_ITEMS`] objects, and the rest was not read.
     pub(crate) partial: bool,
@@ -93,3 +90,6 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
