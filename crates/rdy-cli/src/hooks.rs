@@ -46,6 +46,12 @@ pub struct RunHooks {
     /// `None` reads them from the process, which is what the binary does. A test pins it, so the
     /// developer's own variables cannot change a `--color auto` check.
     pub style_env: Option<crate::style::StyleEnv>,
+    /// The progress variables (`TERM`, `RUST_LOG`, the locale, `WT_SESSION`, `TERM_PROGRAM`). `None` reads
+    /// them from the process. A test pins it, so the developer's own variables cannot change a run.
+    pub progress_env: Option<crate::progress::ProgressEnv>,
+    /// Where the live progress line draws. `None` is the real stderr, which is what the binary does. A
+    /// test gives a buffer and pins `stderr_terminal` to see the line without a pty.
+    pub progress_capture: Option<crate::progress::ProgressCapture>,
 }
 
 #[cfg(test)]
@@ -65,6 +71,8 @@ mod tests {
             stderr_terminal,
             stderr_columns,
             style_env,
+            progress_env,
+            progress_capture,
         } = RunHooks::default();
         assert!(clock.is_none());
         assert!(run_id.is_none());
@@ -73,5 +81,7 @@ mod tests {
         assert!(stderr_terminal.is_none());
         assert!(stderr_columns.is_none());
         assert!(style_env.is_none());
+        assert!(progress_env.is_none());
+        assert!(progress_capture.is_none());
     }
 }

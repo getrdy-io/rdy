@@ -39,6 +39,8 @@ pub mod panic_hook;
 pub mod password;
 
 #[doc(hidden)]
+pub mod progress;
+#[doc(hidden)]
 pub mod prompt;
 #[doc(hidden)]
 pub mod redaction;
@@ -250,6 +252,8 @@ where
                                 hooks,
                                 registry,
                                 color: cli.global.color,
+                                progress: cli.global.progress,
+                                quiet: cli.global.quiet,
                                 rig,
                             };
                             run_cmd::run(run_args, cx, json, stdout, stderr).await

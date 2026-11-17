@@ -30,7 +30,8 @@
 //!
 //! **Not here.** The proxy (M1-097), the hosts of a check's spec entry (M1-095), Ctrl-C (M1-058),
 //! `--jobs` (M1-059), the kube flags (M1-107) and `--key` (M1-126). `--quiet` and `--verbose` (M1-143)
-//! and the live progress line (M1-142) change the output later; this is the plain run.
+//! change the output later. The live progress line (M1-142, [`crate::progress`]) is on stderr while the checks
+//! run and is cleared before the check list.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -53,10 +54,11 @@ use rdy_spec::result::{
 use rdy_spec::sig::{MAX_SIGNATURE_BYTES, Policy, TrustStore};
 use rdy_spec::{LoadedSpec, VerifiedSpecBytes, load};
 
-use crate::cli::{COMMIT, ColorChoice, RunArgs, TARGET};
+use crate::cli::{COMMIT, ColorChoice, ProgressChoice, RunArgs, TARGET};
 use crate::error::{CliError, InternalKind, IoReason, ReportStep, emit, shell_word};
 use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
+use crate::progress::{Progress, ProgressEnv, Target, frames, live_line_allowed};
 use crate::rig::Rig;
 use crate::signing::files::{FileError, read_public};
 use crate::style::{StyleEnv, Styler, stderr_columns, use_color, wrap_width, write_styled};
@@ -114,6 +116,10 @@ pub(crate) struct RunContext {
     pub(crate) registry: Registry,
     /// The `--color` choice.
     pub(crate) color: ColorChoice,
+    /// The `--progress` choice (and `RDY_PROGRESS`).
+    pub(crate) progress: ProgressChoice,
+    /// `--quiet`.
+    pub(crate) quiet: bool,
     /// The watchdog and the write state, started before the runtime (M1-176).
     pub(crate) rig: Rig,
 }
@@ -148,6 +154,8 @@ async fn execute(
         hooks,
         registry,
         color,
+        progress,
+        quiet,
         rig,
     } = cx;
     let look = Look::new(color, &hooks);
@@ -241,12 +249,18 @@ async fn execute(
         board
     });
 
+    // The live line (07 section 3, M1-142) starts after the banner and the folder, and it is cleared
+    // before anything else is written to stderr: right after the checks, and on any early return, since
+    // it clears itself when dropped.
+    let mut live = start_progress(progress, quiet, &hooks, plan.runnable().count());
+
     let host = host_facts(&engine.hub().run_probe()).await;
     if let Some(board) = &board {
         board.set_host(host.clone());
     }
     options.board = board;
     let executed = engine.execute(&loaded, plan, &privilege, &options).await;
+    live.clear();
 
     let finished_at = clock();
     let run = make_run(
@@ -314,6 +328,25 @@ async fn execute(
             ))
         }
     }
+}
+
+/// Starts the live progress line when the rules of 07 section 3 allow it, else a line that draws nothing.
+fn start_progress(choice: ProgressChoice, quiet: bool, hooks: &RunHooks, total: usize) -> Progress {
+    let env = hooks
+        .progress_env
+        .clone()
+        .unwrap_or_else(ProgressEnv::from_process);
+    let terminal = hooks
+        .stderr_terminal
+        .unwrap_or_else(|| std::io::IsTerminal::is_terminal(&std::io::stderr()));
+    if !live_line_allowed(choice, quiet, &env, terminal) {
+        return Progress::off();
+    }
+    let target = hooks
+        .progress_capture
+        .clone()
+        .map_or(Target::Stderr, Target::Capture);
+    Progress::start(total, frames(&env), target)
 }
 
 /// What the watchdog writes into the report folder when it has to: the spec copy and the partial

@@ -484,6 +484,21 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     calls and passing the codes through; that changes how the codes are drawn, never whether they are. Untrusted text is escaped by `style::untrusted` before it is written, so the strip
     pass never has to remove a sequence that came from the machine or the spec.
 
+- `indicatif` 0.18.6, `console` 0.16.6, `unit-prefix` 0.5.2 and, for Windows, `encode_unicode` (M1-142, 07 D.5).
+  Direct dependencies of the `rdy` binary crate only (`rdy-cli`): `indicatif` without default features, and
+  `console` without default features and only on non-Unix targets, for the console width. **Approval by
+  security-reviewer pending, PR #TBD.** `portable-atomic` was in the tree already.
+  - Purpose: the live progress line (07 section 3) and the Windows console width.
+  - Maintainers: `indicatif` and `console` are in the `console-rs` organisation. `unit-prefix` is hosted on
+    Codeberg (`commons-rs`) and `encode_unicode` is a single-maintainer crate; owners to confirm in review.
+  - `unsafe`: none in `indicatif` and `unit-prefix` (`#![deny(unsafe_code)]`). `console` uses it for terminal
+    and Windows console calls, and `encode_unicode` in a few iterator and trait helpers. Our crates keep `#![forbid(unsafe_code)]`.
+  - `build.rs`: none in the four.
+  - License: MIT for `indicatif`, `console` and `unit-prefix`; Apache-2.0 OR MIT for `encode_unicode`. All allowed in `deny.toml`.
+  - How rdy uses it: the line is drawn only through `ProgressDrawTarget::stderr_with_hz(10)` or `hidden()`
+    (a test uses `term_like`), only after the gate of `rdy_cli::progress::live_line_allowed`, and only on
+    stderr. indicatif's own steady-tick thread is not used.
+
 ## SECURITY.md
 
 `SECURITY.md` at the repo root covers versions, scope, reporting, timelines and safe harbor.
