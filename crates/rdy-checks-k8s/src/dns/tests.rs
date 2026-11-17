@@ -24,6 +24,7 @@ const DEPLOYMENTS: &str = "/apis/apps/v1/namespaces/kube-system/deployments";
 const DAEMONSETS: &str = "/apis/apps/v1/namespaces/kube-system/daemonsets";
 const PODS: &str = "/api/v1/pods";
 const SERVICE: &str = "/api/v1/namespaces/kube-system/services/kube-dns";
+const RKE2_SERVICE: &str = "/api/v1/namespaces/kube-system/services/rke2-coredns-rke2-coredns";
 const CONFIGMAP: &str = "/api/v1/namespaces/kube-system/configmaps/coredns";
 const OS_DAEMONSETS: &str = "/apis/apps/v1/namespaces/openshift-dns/daemonsets";
 const OS_PODS: &str = "/api/v1/pods";
@@ -257,6 +258,11 @@ async fn the_loop_verdict_stands_without_the_loop_plugin_and_says_the_cause_may_
         finding.message
     );
     assert!(
+        finding.message.contains(": likely a forward loop"),
+        "{}",
+        finding.message
+    );
+    assert!(
         notes(&finding).contains("The Corefile has no loop plugin"),
         "{}",
         notes(&finding)
@@ -481,19 +487,51 @@ async fn a_deployment_with_no_replicas_field_wants_one_pod() {
 // ---- the cluster domain ------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn a_cluster_domain_that_is_not_the_one_the_product_expects_blocks() {
+async fn a_cluster_domain_that_is_not_the_default_is_a_note_when_the_spec_names_none() {
     let rig = rig("domain-other");
     let finding = rig.finding().await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        notes(&finding)
+            .contains("The cluster domain is corp.internal, not the default cluster.local"),
+        "{}",
+        notes(&finding)
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_cluster_domain_that_is_not_the_one_the_spec_names_blocks() {
+    let rig = rig("domain-other");
+    let finding = rig
+        .finding_with(json!({"cluster_domain": "cluster.local"}))
+        .await;
     assert_eq!(finding.level, Level::Fail, "{finding:?}");
     assert_eq!(
         finding.message,
-        "The cluster domain is corp.internal, and the product expects cluster.local"
+        "The cluster domain is corp.internal, and the spec expects cluster.local"
     );
     assert!(
         fix_of(&finding).contains("kubelet `--cluster-domain`"),
         "{}",
         fix_of(&finding)
     );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_corefile_zone_that_is_a_shell_command_never_reaches_a_command_span() {
+    let rig = rig("hostile-zone");
+    let finding = rig
+        .finding_with(json!({"cluster_domain": "cluster.local"}))
+        .await;
+    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    let fix = fix_of(&finding);
+    assert!(
+        fix.contains("The cluster domain is `<cluster domain>`"),
+        "{fix}"
+    );
+    assert!(!fix.contains("curl"), "{fix}");
     rig.audit();
 }
 
@@ -581,10 +619,12 @@ async fn a_workload_the_label_selector_returned_by_mistake_is_not_cluster_dns() 
 // ---- the Service -------------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn a_headless_service_blocks() {
+async fn a_headless_service_warns() {
     let rig = rig("service-headless");
     let finding = rig.finding().await;
-    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    // 03 names no level for the Service, so it is a warn, not a block.
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
+    assert_eq!(engine(&rig, finding.clone(), None).status, Status::Warn);
     assert_eq!(
         finding.message,
         "Service kube-dns in kube-system has no ClusterIP, so pods have no DNS address"
@@ -594,14 +634,16 @@ async fn a_headless_service_blocks() {
 }
 
 #[tokio::test]
-async fn a_missing_service_blocks() {
+async fn a_service_that_is_not_there_is_unverified_not_a_block() {
     let rig = rig("service-missing");
     let finding = rig.finding().await;
-    assert_eq!(finding.level, Level::Fail, "{finding:?}");
-    assert_eq!(
-        finding.message,
-        "Service kube-dns does not exist in kube-system, so pods have no DNS address"
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        partial_note(&finding).contains("no Service named kube-dns exists in kube-system"),
+        "{}",
+        partial_note(&finding)
     );
+    assert!(fix_of(&finding).contains("`kubectl -n kube-system get services`"));
     rig.audit();
 }
 
@@ -625,7 +667,30 @@ async fn a_service_with_no_port_53_is_a_note() {
     let finding = rig.finding().await;
     assert_eq!(finding.level, Level::Pass, "{finding:?}");
     assert!(
-        notes(&finding).contains("lists no port 53"),
+        notes(&finding).contains("lists no UDP port 53"),
+        "{}",
+        notes(&finding)
+    );
+    assert!(
+        notes(&finding).contains("lists no TCP port 53"),
+        "{}",
+        notes(&finding)
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn a_service_with_no_tcp_port_53_is_a_note_that_says_rdy_tests_neither() {
+    let rig = rig("service-no-tcp");
+    let finding = rig.finding().await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        !notes(&finding).contains("no UDP port 53"),
+        "{}",
+        notes(&finding)
+    );
+    assert!(
+        notes(&finding).contains("lists no TCP port 53. Answers too big for UDP fall back to TCP. rdy does not test either."),
         "{}",
         notes(&finding)
     );
@@ -635,10 +700,10 @@ async fn a_service_with_no_port_53_is_a_note() {
 // ---- nothing, or nothing readable --------------------------------------------------------------------------
 
 #[tokio::test]
-async fn no_dns_and_no_service_blocks_after_looking_in_openshift_dns_too() {
+async fn no_dns_and_no_service_warns_after_looking_in_openshift_dns_too() {
     let rig = rig("no-dns");
     let finding = rig.finding().await;
-    assert_eq!(finding.level, Level::Fail, "{finding:?}");
+    assert_eq!(finding.level, Level::Warn, "{finding:?}");
     assert!(
         finding.message.starts_with("No cluster DNS was found"),
         "{}",
@@ -648,7 +713,13 @@ async fn no_dns_and_no_service_blocks_after_looking_in_openshift_dns_too() {
     // No pod list: with no DNS workload there is nothing to explain.
     assert_eq!(
         rig.paths(),
-        [DEPLOYMENTS, DAEMONSETS, OS_DAEMONSETS, SERVICE]
+        [
+            DEPLOYMENTS,
+            DAEMONSETS,
+            OS_DAEMONSETS,
+            OS_DAEMONSETS,
+            SERVICE
+        ]
     );
     rig.audit();
 }
@@ -754,6 +825,11 @@ async fn rke2_is_found_by_label_not_by_the_name_coredns() {
         "rke2-coredns-rke2-coredns"
     );
     assert_eq!(finding.observed["workloads"][0]["engine"], "CoreDNS");
+    // RKE2 names its Service after its Deployment, so `kube-dns` is asked first and then that name.
+    assert_eq!(
+        finding.observed["service"]["name"],
+        "rke2-coredns-rke2-coredns"
+    );
     assert_eq!(finding.observed["service"]["cluster_ip"], "10.43.0.10");
     // The ConfigMap `coredns` does not exist on RKE2: a note, never a block.
     assert!(
@@ -762,7 +838,31 @@ async fn rke2_is_found_by_label_not_by_the_name_coredns() {
         notes(&finding)
     );
     assert!(finding.partial.is_none(), "{finding:?}");
-    assert_eq!(rig.paths(), KUBEADM);
+    assert_eq!(
+        rig.paths(),
+        [
+            DEPLOYMENTS,
+            DAEMONSETS,
+            PODS,
+            SERVICE,
+            RKE2_SERVICE,
+            CONFIGMAP
+        ]
+    );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn rke2_with_neither_service_is_unverified_not_a_block() {
+    let rig = rig("rke2-no-service");
+    let finding = rig.finding().await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        partial_note(&finding)
+            .contains("no Service named kube-dns or rke2-coredns-rke2-coredns exists"),
+        "{}",
+        partial_note(&finding)
+    );
     rig.audit();
 }
 
@@ -836,14 +936,25 @@ async fn openshift_with_a_missing_pod_blocks_and_names_its_commands() {
 }
 
 #[tokio::test]
-async fn openshift_with_no_dns_service_blocks() {
+async fn openshift_with_no_dns_service_is_unverified_not_a_block() {
     let rig = rig("openshift-service-missing");
     let finding = rig.finding().await;
-    assert_eq!(finding.level, Level::Fail, "{finding:?}");
-    assert_eq!(
-        finding.message,
-        "Service dns-default does not exist in openshift-dns, so pods have no DNS address"
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert!(
+        partial_note(&finding).contains("no Service named dns-default exists in openshift-dns"),
+        "{}",
+        partial_note(&finding)
     );
+    rig.audit();
+}
+
+#[tokio::test]
+async fn openshift_is_found_by_name_when_its_labels_drift() {
+    let rig = rig("openshift-labels-drift");
+    let finding = rig.finding().await;
+    assert_eq!(finding.level, Level::Pass, "{finding:?}");
+    assert_eq!(finding.observed["workloads"][0]["name"], "dns-default");
+    assert_eq!(finding.observed["namespace"], "openshift-dns");
     rig.audit();
 }
 
@@ -862,6 +973,12 @@ async fn an_openshift_crash_loop_has_no_corefile_to_call_a_loop() {
             .contains("has no Corefile that rdy reads, so a forward loop cannot be told"),
         "{}",
         notes(&finding)
+    );
+    // The logs command names the DNS namespace, not kube-system.
+    assert!(
+        fix_of(&finding).contains("`kubectl -n openshift-dns logs ds/dns-default --previous`"),
+        "{}",
+        fix_of(&finding)
     );
     rig.audit();
 }
@@ -947,4 +1064,36 @@ async fn env_values_and_other_configmap_keys_never_reach_the_finding() {
         assert!(!all.contains("KEY-MUST-NOT-APPEAR"), "{case}: {all}");
         rig.audit();
     }
+}
+
+#[tokio::test]
+async fn a_last_run_dated_after_the_clock_is_skew_and_no_evidence() {
+    let rig = rig("crashloop-skew");
+    let finding = rig.finding().await;
+    assert_eq!(
+        finding.message,
+        "CoreDNS Deployment coredns in kube-system has 1 of 2 pods ready"
+    );
+    assert!(
+        notes(&finding).contains("(clock skew)"),
+        "{}",
+        notes(&finding)
+    );
+    assert!(!fix_of(&finding).contains("plugin/loop"));
+    rig.audit();
+}
+
+#[tokio::test]
+async fn grants_in_both_namespaces_name_both_role_files() {
+    let rig = rig_with("both-forbidden", true);
+    let finding = rig.finding().await;
+    let fix = fix_of(&finding);
+    assert!(
+        fix.contains(
+            "The roles in examples/rbac/rdy-readonly.yaml and examples/rbac/rdy-readonly-openshift-dns.yaml have them."
+        ),
+        "{fix}"
+    );
+    assert!(grants(&finding).contains(&"list daemonsets in openshift-dns".to_owned()));
+    rig.audit();
 }

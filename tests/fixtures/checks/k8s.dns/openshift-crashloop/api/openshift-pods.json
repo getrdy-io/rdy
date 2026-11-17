@@ -16,10 +16,13 @@
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {
-          "name": "dns-default-0",
+          "name": "dns-default-x7k2p",
           "namespace": "openshift-dns",
           "labels": {
             "dns.operator.openshift.io/daemonset-dns": "default"
+          },
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"env\":[{\"name\":\"ACME_TOKEN\",\"value\":\"ENV-VALUE-MUST-NOT-APPEAR\"}],\"data\":{\"extra.override\":\"KEY-MUST-NOT-APPEAR\"}}"
           }
         },
         "spec": {

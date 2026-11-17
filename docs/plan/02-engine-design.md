@@ -1313,7 +1313,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | `storage.k8s.io` `csidrivers` | LIST | `k8s.storageclass`: driver objects |
 | `apps` `deployments` | LIST in `kube-system` only | `k8s.nodes`: `cluster-autoscaler` presence by name; `k8s.dns`: replicas, ready count and container names of the DNS Deployment, by label |
 | `apps` `daemonsets` | LIST in `kube-system` and `openshift-dns` only | `k8s.dns`: desired and ready counts and container names of the DNS and NodeLocal DNSCache daemon sets, by label |
-| core `services` | GET `kube-system/kube-dns` and `openshift-dns/dns-default`, by name | `k8s.dns`: ClusterIP and ports |
+| core `services` | GET `kube-system/kube-dns`, `kube-system/rke2-coredns-rke2-coredns` (RKE2 names its Service after its Deployment) and `openshift-dns/dns-default`, by name | `k8s.dns`: ClusterIP and ports |
 | core `configmaps` | GET `kube-system/coredns`, by name | `k8s.dns`: the `Corefile` key only (ADR 0043) |
 | `security.openshift.io` `securitycontextconstraints` | LIST | `k8s.admission`: SCCs |
 | `config.openshift.io` `clusterversions` | GET name `version` | `k8s.version`: OpenShift version |

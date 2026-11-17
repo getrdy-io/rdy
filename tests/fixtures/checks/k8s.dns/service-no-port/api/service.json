@@ -9,7 +9,10 @@
     "kind": "Service",
     "metadata": {
       "name": "kube-dns",
-      "namespace": "kube-system"
+      "namespace": "kube-system",
+      "annotations": {
+        "kubectl.kubernetes.io/last-applied-configuration": "{\"env\":[{\"name\":\"ACME_TOKEN\",\"value\":\"ENV-VALUE-MUST-NOT-APPEAR\"}],\"data\":{\"extra.override\":\"KEY-MUST-NOT-APPEAR\"}}"
+      }
     },
     "spec": {
       "type": "ClusterIP",
@@ -18,9 +21,9 @@
       },
       "ports": [
         {
-          "name": "p9153",
+          "name": "tcp-9153",
           "port": 9153,
-          "protocol": "UDP"
+          "protocol": "TCP"
         }
       ],
       "clusterIP": "10.96.0.10",

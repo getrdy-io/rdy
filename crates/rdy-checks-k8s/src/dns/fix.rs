@@ -4,8 +4,8 @@
 //! A workload or pod name comes from the server: it goes into a command only when it has the shape of a
 //! Kubernetes name, and is a placeholder otherwise. Nothing else the server sent is repeated here.
 
+use super::OPENSHIFT_DNS;
 use super::objects::Workload;
-use super::{KUBE_SYSTEM, OPENSHIFT_DNS};
 
 /// The longest object name.
 const MAX_NAME: usize = 253;
@@ -51,10 +51,10 @@ pub(super) fn none_found() -> String {
     "No cluster DNS was found. Check that it is installed: `kubectl -n kube-system get deployments,daemonsets,services`, and on OpenShift `oc -n openshift-dns get daemonsets,services`. Install CoreDNS with your distribution's DNS add-on (`kubeadm init phase addon coredns` on a kubeadm cluster).".to_owned()
 }
 
-/// The line for a DNS workload that is there, with no Service to reach it.
-pub(super) fn no_service(namespace: &str, service: &str) -> String {
+/// The line for a DNS workload that is there, with no Service rdy knows the name of.
+pub(super) fn no_service(namespace: &str) -> String {
     format!(
-        "Pods get their DNS server from the Service `{service}`. Check it: `kubectl -n {namespace} get service {service}`. A cluster without it needs its DNS add-on repaired."
+        "Pods get their DNS server from a Service. Find it: `kubectl -n {namespace} get services`."
     )
 }
 
@@ -75,16 +75,28 @@ pub(super) fn forward_loop(workload: &Workload) -> String {
 }
 
 /// The line for a crash loop whose cause is not the loop.
-pub(super) fn crash_logs(workload: &Workload) -> String {
+pub(super) fn crash_logs(namespace: &str, workload: &Workload) -> String {
     let name = object(&workload.name);
     let short = workload.kind.short();
-    format!("Read why it stops: `kubectl -n {KUBE_SYSTEM} logs {short}/{name} --previous`.")
+    format!("Read why it stops: `kubectl -n {namespace} logs {short}/{name} --previous`.")
+}
+
+/// A zone or domain from a Corefile or the spec, as it may appear in a command: a DNS name, else a
+/// placeholder. A quoted Corefile word can hold anything.
+pub(super) fn dns_name(text: &str) -> &str {
+    if is_name(text) {
+        text
+    } else {
+        "<cluster domain>"
+    }
 }
 
 /// The fix for a cluster domain that is not the one the spec wants.
 pub(super) fn domain(have: &str, want: &str) -> String {
+    let have = dns_name(have);
+    let want = dns_name(want);
     format!(
-        "The cluster domain is `{have}` and the product expects `{want}`. Set the product's cluster domain to `{have}` (ask the vendor for the chart value), or change the `kubernetes` line of the `coredns` ConfigMap and kubelet `--cluster-domain` together: `kubectl -n kube-system edit configmap coredns`."
+        "The cluster domain is `{have}` and the spec expects `{want}`. Set the product's cluster domain to `{have}` (ask the vendor for the chart value), or change the `kubernetes` line of the `coredns` ConfigMap and kubelet `--cluster-domain` together: `kubectl -n kube-system edit configmap coredns`."
     )
 }
 
@@ -99,15 +111,20 @@ pub(super) fn look_by_hand(namespace: &str) -> String {
     format!("Look at the DNS pods by hand: `kubectl -n {namespace} get pods -l {label}`.")
 }
 
-/// The fix for permissions the identity lacked: what to ask for, and the commands that check each.
-pub(super) fn grants(commands: &[String], wanted: &[String], openshift: bool) -> String {
-    let file = if openshift {
-        "examples/rbac/rdy-readonly-openshift-dns.yaml"
-    } else {
-        "examples/rbac/rdy-readonly.yaml"
+/// The fix for permissions the identity lacked: what to ask for, and the commands that check each. The
+/// role files that hold them are named for the namespaces the grants are in.
+pub(super) fn grants(commands: &[String], wanted: &[String]) -> String {
+    let openshift = wanted.iter().any(|grant| grant.contains(OPENSHIFT_DNS));
+    let main = wanted.iter().any(|grant| !grant.contains(OPENSHIFT_DNS));
+    let files = match (main, openshift) {
+        (true, true) => {
+            "The roles in examples/rbac/rdy-readonly.yaml and examples/rbac/rdy-readonly-openshift-dns.yaml have them."
+        }
+        (false, true) => "The role in examples/rbac/rdy-readonly-openshift-dns.yaml has them.",
+        _ => "The role in examples/rbac/rdy-readonly.yaml has them.",
     };
     format!(
-        "Ask the cluster admin to grant this identity: {}. Check each with {}. The role in {file} has them.",
+        "Ask the cluster admin to grant this identity: {}. Check each with {}. {files}",
         wanted.join(", "),
         commands.join(", ")
     )

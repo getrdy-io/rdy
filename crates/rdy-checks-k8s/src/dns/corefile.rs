@@ -187,6 +187,39 @@ mod tests {
         assert_eq!(file.cluster_zones, ["cluster.local"]);
     }
 
+    /// The shape AKS ships: `import` lines at depth 0 and inside the block, a `{$VAR}` placeholder, and a
+    /// forward to the node's resolv.conf.
+    const AKS: &str = "\
+.:53 {
+    errors
+    ready
+    health {
+      lameduck 5s
+    }
+    kubernetes cluster.local in-addr.arpa ip6.arpa {
+      pods insecure
+      fallthrough in-addr.arpa ip6.arpa
+      ttl 30
+    }
+    prometheus :9153
+    forward . /etc/resolv.conf
+    cache 30
+    loop
+    reload
+    loadbalance
+    import custom/*.override
+}
+import custom/*.server
+";
+
+    #[test]
+    fn the_aks_corefile_with_import_lines_at_both_depths_reads_the_same() {
+        let file = parse(AKS);
+        assert!(file.forwards_to_resolv_conf);
+        assert!(file.loop_plugin);
+        assert_eq!(file.cluster_zones, ["cluster.local"]);
+    }
+
     #[test]
     fn explicit_upstreams_are_not_resolv_conf() {
         let file = parse(".:53 {\n  forward . 10.0.0.2 10.0.0.3\n  loop\n}\n");

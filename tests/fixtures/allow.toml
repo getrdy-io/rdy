@@ -96,3 +96,8 @@ reason = "The IPv4 reverse zone that the kubernetes plugin line of a Corefile na
 rule = "host"
 value = "ip6.arpa"
 reason = "The IPv6 reverse zone that the kubernetes plugin line of a Corefile names (k8s.dns fixtures); a reserved zone, not a host a test contacts"
+
+[[allow]]
+rule = "host"
+value = "metadata.name"
+reason = "The field selector key `metadata.name` in a recorded list request of the k8s.dns fixtures; a Kubernetes field path, not a host"

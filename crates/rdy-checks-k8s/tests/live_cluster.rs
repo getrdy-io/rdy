@@ -488,6 +488,7 @@ const KUBE_SYSTEM_ROLE: &[(&str, &str, &str, &str)] = &[
     ("list", "apps", "deployments", ""),
     ("list", "apps", "daemonsets", ""),
     ("get", "", "services", "kube-dns"),
+    ("get", "", "services", "rke2-coredns-rke2-coredns"),
     ("get", "", "configmaps", "coredns"),
 ];
 
@@ -689,7 +690,7 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
             .all::<SelfSubjectRulesReview>()
             .create(&PostParams::default(), &rules)
             .await;
-        served(&mut reads, "selfsubjectrulesreviews", false, &answer);
+        assert_served("selfsubjectrulesreviews", false, &answer);
         rules_answers.push((namespace, answer.expect("served, checked above")));
     }
 
@@ -700,6 +701,13 @@ async fn the_readonly_role_serves_every_allowed_read_and_nothing_else() {
         ("list", "", "nodes", None, None),
         // k8s.dns: the Service and the ConfigMap, by name, in kube-system only (the optional Role).
         ("get", "", "services", Some("kube-system"), Some("kube-dns")),
+        (
+            "get",
+            "",
+            "services",
+            Some("kube-system"),
+            Some("rke2-coredns-rke2-coredns"),
+        ),
         (
             "get",
             "",

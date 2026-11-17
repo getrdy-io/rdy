@@ -11,7 +11,8 @@
 //!   CoreDNS, under the same label;
 //! - when `kube-system` holds no cluster DNS workload, the same in `openshift-dns` (the `dns-default`
 //!   DaemonSet of the OpenShift DNS operator, found by the operator's own label);
-//! - the Service by name: `kube-dns` in `kube-system`, or `dns-default` in `openshift-dns`;
+//! - the Service by name: `kube-dns` in `kube-system` (or, for RKE2's Deployment, the Service of the same
+//!   name as the Deployment), or `dns-default` in `openshift-dns`;
 //! - the ConfigMap `coredns` in `kube-system`, only when the workload there is CoreDNS: its `Corefile` key
 //!   and nothing else. Distributions that name the ConfigMap otherwise are not read (a note says so).
 //!
@@ -20,8 +21,10 @@
 //!
 //! The rules (03):
 //!
-//! - A cluster DNS workload with fewer ready pods than wanted (or none wanted) blocks. No workload and no
-//!   Service blocks. A Service with no ClusterIP (headless) or one that is missing blocks.
+//! - 03 has two blocks: a cluster DNS workload with fewer ready pods than wanted (or none wanted), and loop
+//!   evidence. Everything else the check finds is a warn or a note: no workload and no Service, a headless
+//!   Service, and a cluster domain that is not the default (a block only when the spec names
+//!   `cluster_domain`). A Service that cannot be found under either name is unverified, not a block.
 //! - The loop cannot be read from the API: the guard refuses `pods/log`. The loop verdict is restart
 //!   evidence plus the Corefile: a pod in `CrashLoopBackOff` whose last run ended in the last hour, and a
 //!   root-zone `forward . /etc/resolv.conf`. Lifetime restart counts alone are never evidence. A last run
@@ -35,7 +38,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::jiff::Timestamp;
 use kube::api::ListParams;
 use rdy_engine::check::{
@@ -60,8 +62,8 @@ mod unit_tests;
 
 use judge::{Gathered, Place, ServiceFacts};
 use objects::{
-    DnsConfigMap, DnsDaemonSet, DnsDeployment, DnsPod, Workload, corefile_of, daemon_set_of,
-    deployment_of, pod_of,
+    DnsConfigMap, DnsDaemonSet, DnsDeployment, DnsPod, DnsService, Workload, corefile_of,
+    daemon_set_of, deployment_of, pod_of, service_of,
 };
 
 /// The most objects one list asks for. A longer list is read as its first page and the rest is "not read".
@@ -73,6 +75,8 @@ pub(crate) const KUBE_SYSTEM: &str = "kube-system";
 pub(crate) const OPENSHIFT_DNS: &str = "openshift-dns";
 /// The ConfigMap with the Corefile.
 pub(crate) const COREFILE_MAP: &str = "coredns";
+/// RKE2 names its DNS Service after its Deployment. The one name besides `kube-dns` that the guard allows.
+pub(crate) const RKE2_SERVICE: &str = "rke2-coredns-rke2-coredns";
 
 /// Label selectors. A distribution that labels its DNS another way is found by its Service only.
 const KUBE_DNS_LABEL: &str = "k8s-app=kube-dns";
@@ -91,7 +95,7 @@ pub(crate) static INFO: CheckInfo = CheckInfo {
     summary: "Cluster DNS runs, has a ClusterIP, serves the cluster domain and shows no forward loop",
     meta: CheckMeta {
         title: "Cluster DNS",
-        remediation: "Find out why the cluster DNS pods are not ready with `kubectl -n kube-system get pods -l k8s-app=kube-dns` and `kubectl -n kube-system describe pods -l k8s-app=kube-dns`. If CoreDNS crash-loops and forwards to `/etc/resolv.conf`, change the forward in the coredns ConfigMap (`kubectl -n kube-system edit configmap coredns`) to the node's real upstream resolvers.",
+        remediation: "Find out why the cluster DNS pods are not ready with `kubectl -n kube-system get pods -l k8s-app=kube-dns` and `kubectl -n kube-system describe pods -l k8s-app=kube-dns`. If CoreDNS crash-loops and forwards to `/etc/resolv.conf`, change the forward in its Corefile to the node's real upstream resolvers (the fix text of this check names the command for your cluster).",
     },
     needs: &[Need::KubeContext],
     wants: &[],
@@ -188,10 +192,14 @@ impl DnsCheck {
             .get(chosen)
             .map_or(KUBE_SYSTEM, |place| place.namespace);
 
-        let service = if out_of_time(ctx) {
-            Read::OutOfTime
+        let workload_name = places
+            .get(chosen)
+            .and_then(|place| place.cluster_workloads().next())
+            .map(|workload| workload.name.clone());
+        let (service, service_names) = if out_of_time(ctx) {
+            (Read::OutOfTime, Vec::new())
         } else {
-            read_service(&mapper, &client, namespace).await?
+            read_service(&mapper, &client, namespace, workload_name.as_deref()).await?
         };
 
         // The Corefile is the CoreDNS Corefile of kube-system. kube-dns has none, and OpenShift's is owned by
@@ -213,6 +221,7 @@ impl DnsCheck {
             places,
             chosen,
             service,
+            service_names,
             corefile,
         })
     }
@@ -258,7 +267,7 @@ async fn read_place(
             },
         )?,
     };
-    let daemon_sets = if out_of_time(ctx) {
+    let mut daemon_sets = if out_of_time(ctx) {
         Read::OutOfTime
     } else {
         read(
@@ -273,6 +282,38 @@ async fn read_place(
             },
         )?
     };
+    // The OpenShift DNS operator's labels are unconfirmed and may drift. When the label list is readable
+    // and empty, ask once more by the name `dns-default`, which the operator has used throughout.
+    if which == Which::OpenShift
+        && matches!(&daemon_sets, Read::Ok(list) if list.items.is_empty())
+        && !out_of_time(ctx)
+    {
+        daemon_sets = read(
+            mapper,
+            client
+                .namespaced::<DnsDaemonSet>(namespace)
+                .list(
+                    &ListParams::default()
+                        .fields("metadata.name=dns-default")
+                        .limit(PAGE),
+                )
+                .await,
+            |list| {
+                let cut = has_more(&list.metadata);
+                let items = list
+                    .items
+                    .into_iter()
+                    .map(daemon_set_of)
+                    .filter(|workload| workload.name == "dns-default")
+                    .map(|mut workload| {
+                        workload.role = objects::Role::Cluster;
+                        workload
+                    })
+                    .collect();
+                objects_page(items, cut)
+            },
+        )?;
+    }
     // Pods are read for a workload to explain. With no cluster DNS workload found there is nothing to explain,
     // so the pod list is not asked. The one exception is kube-system when a list there was refused: the
     // workload may exist, and its pods may still be readable.
@@ -325,33 +366,49 @@ fn objects_page(items: Vec<Workload>, cut: bool) -> judge::Workloads {
     judge::Workloads { items, cut }
 }
 
-/// The DNS Service by name: `kube-dns` in `kube-system`, `dns-default` in `openshift-dns`.
+/// The DNS Service by name: `kube-dns` in `kube-system`, `dns-default` in `openshift-dns`. RKE2 names its
+/// Service after its Deployment, so when `kube-dns` is not there and the workload is that one, the one
+/// other name the guard allows is asked. Returns the answer and the names asked.
 async fn read_service(
     mapper: Mapper<'_>,
     client: &ReadOnlyClient,
     namespace: &str,
-) -> Result<Read<ServiceFacts>, CheckError> {
-    let name = if namespace == OPENSHIFT_DNS {
+    workload: Option<&str>,
+) -> Result<(Read<ServiceFacts>, Vec<String>), CheckError> {
+    let first = if namespace == OPENSHIFT_DNS {
         "dns-default"
     } else {
         "kube-dns"
     };
+    let mut asked = vec![first.to_owned()];
+    let mut answer = read_service_named(mapper, client, namespace, first).await?;
+    if matches!(answer, Read::Missing) && namespace == KUBE_SYSTEM && workload == Some(RKE2_SERVICE)
+    {
+        asked.push(RKE2_SERVICE.to_owned());
+        answer = read_service_named(mapper, client, namespace, RKE2_SERVICE).await?;
+    }
+    Ok((answer, asked))
+}
+
+async fn read_service_named(
+    mapper: Mapper<'_>,
+    client: &ReadOnlyClient,
+    namespace: &str,
+    name: &str,
+) -> Result<Read<ServiceFacts>, CheckError> {
     read(
         mapper,
-        client.namespaced::<Service>(namespace).get(name).await,
+        client.namespaced::<DnsService>(namespace).get(name).await,
         |service| {
-            let spec = service.spec.unwrap_or_default();
-            let ip = spec.cluster_ip.unwrap_or_default();
+            let parts = service_of(service);
             ServiceFacts {
                 name: name.to_owned(),
                 namespace: namespace.to_owned(),
-                headless: ip == "None",
-                cluster_ip: (!ip.is_empty() && ip != "None").then_some(ip),
-                dns_port: spec
-                    .ports
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|port| port.port == 53),
+                headless: parts.cluster_ip == "None",
+                cluster_ip: (!parts.cluster_ip.is_empty() && parts.cluster_ip != "None")
+                    .then_some(parts.cluster_ip),
+                udp_53: parts.udp_53,
+                tcp_53: parts.tcp_53,
             }
         },
     )

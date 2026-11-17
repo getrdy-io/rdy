@@ -1,6 +1,6 @@
 # ADR 0043: `k8s.dns` reads the cluster DNS by label, the Corefile from one named ConfigMap, and the OpenShift namespace through a second role file
 
-- Status: Proposed (security-reviewer and k8s-expert review it in the M1-162 PR)
+- Status: Accepted, security-reviewed (PR #62)
 - Date: 2026-11-17
 
 ## Context
@@ -28,7 +28,9 @@ table, the example role, the kind job's grant list and its request count togethe
 4. **One ConfigMap, `get` only.** Only `kube-system/coredns`, and only its `Corefile` key is deserialized;
    every other key is dropped while parsing. A distribution that names the ConfigMap otherwise (RKE2) gets
    a note and no loop verdict. That is the safe side: no verdict is never a false block. A second name
-   would be a second grant, so it needs its own decision.
+   would be a second grant, so it needs its own decision. The Service has one such second name, because
+   RKE2 names it after its Deployment: `rke2-coredns-rke2-coredns` is asked only when `kube-dns` is not
+   there and the workload carries that name.
 5. **Cut-down types for everything.** Pods, Deployments, DaemonSets and the ConfigMap are read into types
    that name the few fields used (02 Appendix B rule 6), so env values, args and pod specs never become
    strings in rdy.
@@ -38,6 +40,12 @@ table, the example role, the kind job's grant list and its request count togethe
 
 ## Consequences
 
+- `list daemonsets` and `list deployments` in `kube-system` let the token holder read every DaemonSet and
+  Deployment spec there, env values included. rdy drops them while parsing, but the grant is the grant.
+  The cluster-scope `list pods` has the same reach and is accepted. Both appear in `missing_grants` when
+  absent, and the kube-system Role stays optional.
+- The old Role `rdy-readonly-deployments` is orphaned by the rename and must be deleted by hand (the role
+  file header and the changelog say how).
 - The kube-system Role of the main file grows from one rule to three, and is renamed
   `rdy-readonly-kube-system`. It stays optional.
 - The kind job grants and checks the same four rules, and runs `k8s.dns` as the read-only identity.

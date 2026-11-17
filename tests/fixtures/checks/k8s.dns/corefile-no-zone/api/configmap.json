@@ -9,7 +9,10 @@
     "kind": "ConfigMap",
     "metadata": {
       "name": "coredns",
-      "namespace": "kube-system"
+      "namespace": "kube-system",
+      "annotations": {
+        "kubectl.kubernetes.io/last-applied-configuration": "{\"env\":[{\"name\":\"ACME_TOKEN\",\"value\":\"ENV-VALUE-MUST-NOT-APPEAR\"}],\"data\":{\"extra.override\":\"KEY-MUST-NOT-APPEAR\"}}"
+      }
     },
     "data": {
       "Corefile": ".:53 {\n    forward . 10.0.0.2\n}\n",

@@ -15,6 +15,9 @@ use crate::namespace::Read;
 /// A crash is "recent" when the last run of the container ended within this many seconds.
 pub(super) const RECENT: i64 = 3600;
 
+/// How far in the future a last run may end before the clocks are called skewed, in seconds.
+pub(super) const SKEW: i64 = 300;
+
 /// The longest text from the server that goes into a sentence, in characters.
 const SHOWN: usize = 64;
 
@@ -82,8 +85,10 @@ pub(super) struct ServiceFacts {
     pub(super) cluster_ip: Option<String>,
     /// True when `clusterIP` is `None` (headless).
     pub(super) headless: bool,
-    /// True when a port 53 is listed.
-    pub(super) dns_port: bool,
+    /// True when port 53 is listed for UDP.
+    pub(super) udp_53: bool,
+    /// True when port 53 is listed for TCP.
+    pub(super) tcp_53: bool,
 }
 
 /// What was read, before any judgement.
@@ -94,6 +99,8 @@ pub(super) struct Gathered {
     /// The index of the place that holds the DNS (the first, when none does).
     pub(super) chosen: usize,
     pub(super) service: Read<ServiceFacts>,
+    /// The Service names that were asked, in order.
+    pub(super) service_names: Vec<String>,
     /// The Corefile: `None` when it is not asked for (not CoreDNS in `kube-system`), `Some(Ok(None))` for a
     /// ConfigMap with no `Corefile` key.
     pub(super) corefile: Option<Read<Option<Corefile>>>,
@@ -113,6 +120,7 @@ fn shown(text: &str) -> String {
 
 /// One thing that stops the install.
 struct Issue {
+    level: Level,
     message: String,
     fix: String,
 }
@@ -126,7 +134,8 @@ struct Sink {
     quiet: Vec<String>,
     /// `(what to ask for, the command that checks it)`.
     grants: Vec<(String, String)>,
-    openshift_grant: bool,
+    /// True when the loop evidence has no `loop` plugin in the Corefile.
+    no_loop_plugin: bool,
 }
 
 impl Sink {
@@ -199,7 +208,6 @@ fn judge_extra_places(found: &Gathered, sink: &mut Sink) {
                     format!("list daemonsets in {ns}"),
                     format!("`kubectl auth can-i list daemonsets -n {ns}`"),
                 );
-                sink.openshift_grant = true;
             }
             // The namespace is not there: not an OpenShift cluster, and nothing is missing.
             Read::Ok(_) | Read::Missing => {}
@@ -233,7 +241,6 @@ fn judge_workloads(place: &Place, found: &Gathered, sink: &mut Sink) {
                     format!("list {what} in {ns}"),
                     format!("`kubectl auth can-i list {what} -n {ns}`"),
                 );
-                sink.openshift_grant |= ns == OPENSHIFT_DNS;
             }
             other => sink
                 .unverified
@@ -250,6 +257,7 @@ fn judge_workloads(place: &Place, found: &Gathered, sink: &mut Sink) {
         let all_read = found.places.iter().all(Place::readable);
         if all_read && !service_there {
             sink.issues.push(Issue {
+                level: Level::Warn,
                 message: "No cluster DNS was found: no workload with the label k8s-app=kube-dns in kube-system or openshift-dns, and no DNS Service".to_owned(),
                 fix: fix::none_found(),
             });
@@ -267,6 +275,7 @@ fn judge_workloads(place: &Place, found: &Gathered, sink: &mut Sink) {
         let kind = workload.kind.word();
         if workload.desired == 0 {
             sink.issues.push(Issue {
+                level: Level::Fail,
                 message: format!(
                     "{what} {kind} {name} in {ns} wants no pods, so nothing answers DNS"
                 ),
@@ -274,6 +283,7 @@ fn judge_workloads(place: &Place, found: &Gathered, sink: &mut Sink) {
             });
         } else if workload.ready < workload.desired {
             sink.issues.push(Issue {
+                level: Level::Fail,
                 message: format!(
                     "{what} {kind} {name} in {ns} has {} of {} pods ready",
                     workload.ready, workload.desired
@@ -342,21 +352,22 @@ fn judge_pods(place: &Place, sink: &mut Sink) -> Vec<Crash> {
 
 fn judge_service(place: &Place, found: &Gathered, sink: &mut Sink) {
     let ns = place.namespace;
-    let name = if ns == OPENSHIFT_DNS {
-        "dns-default"
-    } else {
-        "kube-dns"
-    };
+    let first = found
+        .service_names
+        .first()
+        .map_or("kube-dns", String::as_str);
     match &found.service {
         Read::Ok(service) => {
             if service.headless || service.cluster_ip.is_none() {
+                // 03 names no level for the Service, so it is a warn.
                 sink.issues.push(Issue {
+                    level: Level::Warn,
                     message: format!(
                         "Service {} in {} has no ClusterIP, so pods have no DNS address",
                         shown(&service.name),
                         shown(&service.namespace)
                     ),
-                    fix: fix::headless(ns, name),
+                    fix: fix::headless(ns, fix::object(&service.name)),
                 });
                 return;
             }
@@ -365,33 +376,43 @@ fn judge_service(place: &Place, found: &Gathered, sink: &mut Sink) {
                 shown(&service.name),
                 shown(service.cluster_ip.as_deref().unwrap_or_default())
             ));
-            if !service.dns_port {
+            if !service.udp_53 {
                 sink.notes.push(format!(
-                    "Service {} lists no port 53.",
+                    "Service {} lists no UDP port 53.",
+                    shown(&service.name)
+                ));
+            }
+            if !service.tcp_53 {
+                sink.notes.push(format!(
+                    "Service {} lists no TCP port 53. Answers too big for UDP fall back to TCP. rdy does not test either.",
                     shown(&service.name)
                 ));
             }
         }
         Read::Missing => {
-            // With no workload either, the "none found" issue already says it.
+            // With no workload either, the "none found" issue already says it. With one, the Service may
+            // carry a name rdy does not ask for, so it is not a finding: it is unverified.
             if place.has_cluster_workload() {
-                sink.issues.push(Issue {
-                    message: format!(
-                        "Service {name} does not exist in {ns}, so pods have no DNS address"
-                    ),
-                    fix: fix::no_service(ns, name),
-                });
+                let names = found
+                    .service_names
+                    .iter()
+                    .map(|name| shown(name))
+                    .collect::<Vec<_>>()
+                    .join(" or ");
+                sink.unverified.push(format!(
+                    "whether the DNS Service has a ClusterIP was not read: no Service named {names} exists in {ns}"
+                ));
+                sink.fix_once(fix::no_service(ns));
             }
         }
         Read::Forbidden => {
             sink.unverified.push(format!(
-                "whether the DNS Service has a ClusterIP was not read: the identity may not get service {name} in {ns}"
+                "whether the DNS Service has a ClusterIP was not read: the identity may not get service {first} in {ns}"
             ));
             sink.grant(
-                format!("get service {name} in {ns}"),
-                format!("`kubectl auth can-i get services/{name} -n {ns}`"),
+                format!("get service {first} in {ns}"),
+                format!("`kubectl auth can-i get services/{first} -n {ns}`"),
             );
-            sink.openshift_grant |= ns == OPENSHIFT_DNS;
         }
         other => sink.unverified.push(format!(
             "whether the DNS Service has a ClusterIP was not read: {}",
@@ -412,8 +433,21 @@ fn judge_corefile(
     domain_asked: bool,
     sink: &mut Sink,
 ) -> Vec<Crash> {
-    let recent: Vec<&Crash> = crashes
+    // A last run that ended in the future by more than the allowed skew means the clocks disagree: it is no
+    // evidence either way.
+    let (skewed, dated): (Vec<&Crash>, Vec<&Crash>) = crashes
         .iter()
+        .partition(|crash| crash.ended_ago.is_some_and(|age| age < -SKEW));
+    for crash in &skewed {
+        sink.notes.push(format!(
+            "Container {} of pod {} reports a last run that ends after the time on this machine (clock skew), so it is not counted as evidence.",
+            shown(&crash.container),
+            shown(&crash.pod)
+        ));
+    }
+    let recent: Vec<&Crash> = dated
+        .iter()
+        .copied()
         .filter(|crash| crash.ended_ago.is_some_and(|age| age <= RECENT))
         .collect();
     // An OOM kill is a memory limit problem, not a loop.
@@ -423,7 +457,7 @@ fn judge_corefile(
         .partition(|crash| crash.reason.as_deref() == Some("OOMKilled"));
     let workload = place.cluster_workloads().next();
 
-    for crash in crashes.iter().filter(|crash| !recent.contains(crash)) {
+    for crash in dated.iter().filter(|crash| !recent.contains(crash)) {
         sink.notes.push(format!(
             "Container {} of pod {} waits in CrashLoopBackOff, but its last run ended {}, so it is not counted as recent evidence.",
             shown(&crash.container),
@@ -450,7 +484,7 @@ fn judge_corefile(
                     .to_owned(),
             );
             if let Some(workload) = workload {
-                sink.fix_once(fix::crash_logs(workload));
+                sink.fix_once(fix::crash_logs(place.namespace, workload));
             }
         }
         if domain_asked {
@@ -475,14 +509,15 @@ fn judge_corefile(
                         .to_owned(),
                 );
                 if let Some(workload) = workload {
-                    sink.fix_once(fix::crash_logs(workload));
+                    sink.fix_once(fix::crash_logs(place.namespace, workload));
                 }
             }
             judge_domain(file, want_domain, domain_asked, sink);
             if file.forwards_to_resolv_conf {
                 if !looping.is_empty() && !file.loop_plugin {
                     // CoreDNS stops itself on a loop only through the `loop` plugin. Without it the crash has
-                    // another cause too, so the verdict stays (03) and the note says so.
+                    // another cause too, so the verdict stays (03), says "likely", and a note says why.
+                    sink.no_loop_plugin = true;
                     sink.notes.push(
                         "The Corefile has no loop plugin, so CoreDNS would not stop itself on a forward loop: the crash may have another cause."
                             .to_owned(),
@@ -502,7 +537,7 @@ fn judge_corefile(
         }
         Read::Missing => {
             sink.notes.push(
-                "ConfigMap coredns was not found in kube-system, so the Corefile was not read. Some distributions name it differently, and rdy reads only this one."
+                "ConfigMap coredns was not found in kube-system, so the Corefile was not read. Some distributions name it differently, and rdy reads only this one (RKE2 sets its Corefile through a HelmChartConfig for rke2-coredns)."
                     .to_owned(),
             );
             unread_corefile(&looping, domain_asked, want_domain, sink);
@@ -572,16 +607,26 @@ fn judge_domain(file: &Corefile, want: &str, asked: bool, sink: &mut Sink) {
     if file.cluster_zones.iter().any(|zone| zone == want) {
         sink.quiet
             .push(format!("cluster domain is {}", shown(want)));
-    } else {
-        let have = file.cluster_zones.first().map_or("", String::as_str);
+        return;
+    }
+    let have = file.cluster_zones.first().map_or("", String::as_str);
+    if asked {
+        // The spec names the domain, so a different one is a block (03).
         sink.issues.push(Issue {
+            level: Level::Fail,
             message: format!(
-                "The cluster domain is {}, and the product expects {}",
+                "The cluster domain is {}, and the spec expects {}",
                 shown(have),
                 shown(want)
             ),
-            fix: fix::domain(&shown(have), &shown(want)),
+            fix: fix::domain(have, want),
         });
+    } else {
+        sink.notes.push(format!(
+            "The cluster domain is {}, not the default {}. If the product is installed for it, name it in the spec with cluster_domain.",
+            shown(have),
+            shown(want)
+        ));
     }
 }
 
@@ -609,27 +654,39 @@ fn finish(
     if let Some(crash) = loop_evidence.first() {
         let workload = place.cluster_workloads().next();
         let ago = crash.ended_ago.map_or_else(String::new, age_text);
+        let likely = if sink.no_loop_plugin { "likely " } else { "" };
         let message = format!(
-            "The cluster DNS is crash-looping and its Corefile forwards to /etc/resolv.conf: a forward loop (container {} of pod {}, last run ended {ago})",
+            "The cluster DNS is crash-looping and its Corefile forwards to /etc/resolv.conf: {likely}a forward loop (container {} of pod {}, last run ended {ago})",
             shown(&crash.container),
             shown(&crash.pod)
         );
         let fix = workload.map_or_else(String::new, fix::forward_loop);
-        sink.issues.insert(0, Issue { message, fix });
+        sink.issues.insert(
+            0,
+            Issue {
+                level: Level::Fail,
+                message,
+                fix,
+            },
+        );
     }
     let Sink {
-        issues,
+        mut issues,
         mut notes,
         unverified,
         fixes_unverified,
         quiet,
         grants,
-        openshift_grant,
+        ..
     } = sink;
-    let level = if issues.is_empty() {
+    // The blocks lead, then the warnings; the order inside each is the order they were found in.
+    issues.sort_by_key(|issue| issue.level != Level::Fail);
+    let level = if issues.iter().any(|issue| issue.level == Level::Fail) {
+        Level::Fail
+    } else if issues.is_empty() {
         Level::Pass
     } else {
-        Level::Fail
+        Level::Warn
     };
     let message = match issues.first() {
         Some(first) if issues.len() > 1 => format!(
@@ -645,7 +702,7 @@ fn finish(
     if !grants.is_empty() {
         let can_i: Vec<String> = grants.iter().map(|(_, c)| c.clone()).collect();
         let wanted: Vec<String> = grants.iter().map(|(w, _)| w.clone()).collect();
-        fixes.push(fix::grants(&can_i, &wanted, openshift_grant));
+        fixes.push(fix::grants(&can_i, &wanted));
     }
     let mut finding = Finding::new(level, message);
     if !fixes.is_empty() {

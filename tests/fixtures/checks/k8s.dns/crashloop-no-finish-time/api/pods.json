@@ -20,6 +20,9 @@
           "namespace": "kube-system",
           "labels": {
             "k8s-app": "kube-dns"
+          },
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"env\":[{\"name\":\"ACME_TOKEN\",\"value\":\"ENV-VALUE-MUST-NOT-APPEAR\"}],\"data\":{\"extra.override\":\"KEY-MUST-NOT-APPEAR\"}}"
           }
         },
         "spec": {
@@ -60,6 +63,9 @@
           "namespace": "kube-system",
           "labels": {
             "k8s-app": "kube-dns"
+          },
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"env\":[{\"name\":\"ACME_TOKEN\",\"value\":\"ENV-VALUE-MUST-NOT-APPEAR\"}],\"data\":{\"extra.override\":\"KEY-MUST-NOT-APPEAR\"}}"
           }
         },
         "spec": {

@@ -8,10 +8,11 @@
 //! guard allows.
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time};
 use kube::core::NamespaceResourceScope;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 /// The most containers kept of one workload or pod.
 pub(super) const MAX_CONTAINERS: usize = 8;
@@ -52,6 +53,27 @@ macro_rules! namespaced_resource {
     };
 }
 
+/// The three metadata fields the check uses. Annotations are never read: `last-applied-configuration` holds
+/// the whole applied object, env values and every ConfigMap key included.
+#[derive(Debug, Default, Deserialize)]
+struct Meta {
+    name: Option<String>,
+    namespace: Option<String>,
+    labels: Option<BTreeMap<String, String>>,
+}
+
+/// Reads `metadata` into an `ObjectMeta` that holds only name, namespace and labels, so `kube::Resource`
+/// still works and nothing else of the metadata becomes a string.
+fn meta<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ObjectMeta, D::Error> {
+    let meta = Option::<Meta>::deserialize(deserializer)?.unwrap_or_default();
+    Ok(ObjectMeta {
+        name: meta.name,
+        namespace: meta.namespace,
+        labels: meta.labels,
+        ..ObjectMeta::default()
+    })
+}
+
 /// A container of a pod template: its name only.
 #[derive(Debug, Clone, Default, Deserialize)]
 struct Named {
@@ -90,7 +112,7 @@ fn names(template: Option<TemplateNames>) -> Vec<String> {
 /// A Deployment: replicas wanted and ready, and the container names.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(super) struct DnsDeployment {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "meta")]
     metadata: ObjectMeta,
     #[serde(default)]
     spec: Option<DeploymentSpec>,
@@ -118,7 +140,7 @@ namespaced_resource!(DnsDeployment, "Deployment", "apps", "v1", "deployments");
 /// A DaemonSet: nodes wanted and ready, and the container names.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(super) struct DnsDaemonSet {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "meta")]
     metadata: ObjectMeta,
     #[serde(default)]
     spec: Option<DaemonSetSpec>,
@@ -260,7 +282,7 @@ pub(super) fn daemon_set_of(object: DnsDaemonSet) -> Workload {
 /// A pod: its name and the states of its containers. The spec is never read.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(super) struct DnsPod {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "meta")]
     metadata: ObjectMeta,
     #[serde(default)]
     status: Option<PodStatus>,
@@ -386,7 +408,7 @@ pub(super) fn pod_of(object: DnsPod, now: i64) -> PodFacts {
 /// The ConfigMap of the Corefile: the one key `Corefile`, and nothing else of the map.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub(super) struct DnsConfigMap {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "meta")]
     metadata: ObjectMeta,
     #[serde(default)]
     data: Option<CorefileData>,
@@ -411,4 +433,62 @@ pub(super) fn corefile_of(object: DnsConfigMap) -> Option<String> {
         text.truncate(end);
     }
     Some(text)
+}
+
+// ---- Service ----------------------------------------------------------------------------------------------
+
+/// The DNS Service: the cluster IP and the ports, and nothing else (no selector, no annotations).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(super) struct DnsService {
+    #[serde(default, deserialize_with = "meta")]
+    metadata: ObjectMeta,
+    #[serde(default)]
+    spec: Option<ServiceSpec>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ServiceSpec {
+    #[serde(rename = "clusterIP")]
+    cluster_ip: Option<String>,
+    #[serde(default)]
+    ports: Vec<ServicePort>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct ServicePort {
+    #[serde(default)]
+    port: i64,
+    protocol: Option<String>,
+}
+
+namespaced_resource!(DnsService, "Service", "", "v1", "services");
+
+/// What the check keeps of the Service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ServiceParts {
+    pub(super) cluster_ip: String,
+    /// True when port 53 is listed for UDP.
+    pub(super) udp_53: bool,
+    /// True when port 53 is listed for TCP.
+    pub(super) tcp_53: bool,
+}
+
+/// The Service as the check keeps it. A port with no protocol is TCP, as the server defaults it.
+pub(super) fn service_of(object: DnsService) -> ServiceParts {
+    let spec = object.spec.unwrap_or_default();
+    let has = |wanted: &str| {
+        spec.ports.iter().any(|port| {
+            port.port == 53
+                && port
+                    .protocol
+                    .as_deref()
+                    .unwrap_or("TCP")
+                    .eq_ignore_ascii_case(wanted)
+        })
+    };
+    ServiceParts {
+        udp_53: has("UDP"),
+        tcp_53: has("TCP"),
+        cluster_ip: spec.cluster_ip.unwrap_or_default(),
+    }
 }

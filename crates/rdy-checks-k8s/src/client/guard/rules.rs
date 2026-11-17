@@ -316,6 +316,11 @@ pub const ALLOWED: &[Allowed] = &[
                 namespace: "kube-system",
                 name: "kube-dns",
             },
+            // RKE2 names its DNS Service after its Deployment.
+            Access::GetIn {
+                namespace: "kube-system",
+                name: "rke2-coredns-rke2-coredns",
+            },
             Access::GetIn {
                 namespace: "openshift-dns",
                 name: "dns-default",

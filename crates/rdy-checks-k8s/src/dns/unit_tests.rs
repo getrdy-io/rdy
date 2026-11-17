@@ -4,8 +4,8 @@ use serde_json::json;
 
 use super::fix::{is_name, object};
 use super::objects::{
-    DnsConfigMap, DnsDaemonSet, DnsDeployment, DnsPod, Kind, MAX_COREFILE, Role, corefile_of,
-    daemon_set_of, deployment_of, pod_of,
+    DnsConfigMap, DnsDaemonSet, DnsDeployment, DnsPod, DnsService, Kind, MAX_COREFILE, Role,
+    corefile_of, daemon_set_of, deployment_of, pod_of, service_of,
 };
 
 fn parse<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
@@ -134,4 +134,55 @@ fn only_names_in_the_shape_of_a_kubernetes_name_go_into_a_command() {
         assert_eq!(object(bad), "<name>");
     }
     assert!(!is_name(&"a".repeat(254)));
+}
+
+/// `kubectl apply` stores the whole applied object in this annotation: env values, every ConfigMap key.
+fn annotated(kind_fields: serde_json::Value) -> serde_json::Value {
+    let mut value = kind_fields;
+    value["metadata"] = json!({
+        "name": "x",
+        "namespace": "kube-system",
+        "labels": {"k8s-app": "kube-dns"},
+        "annotations": {"kubectl.kubernetes.io/last-applied-configuration": "ENV-VALUE"},
+        "managedFields": [{"manager": "ENV-VALUE"}],
+    });
+    value
+}
+
+#[test]
+fn no_annotation_or_other_metadata_is_held() {
+    let deployment: DnsDeployment = parse(annotated(json!({"spec": {"replicas": 2}})));
+    assert!(!format!("{deployment:?}").contains("ENV-VALUE"));
+    let daemon_set: DnsDaemonSet = parse(annotated(json!({"status": {"numberReady": 1}})));
+    assert!(!format!("{daemon_set:?}").contains("ENV-VALUE"));
+    let map: DnsConfigMap = parse(annotated(json!({"data": {"Corefile": ".:53 {\n}\n"}})));
+    assert!(!format!("{map:?}").contains("ENV-VALUE"));
+    let pod: DnsPod = parse(annotated(json!({"status": {"containerStatuses": []}})));
+    assert!(!format!("{pod:?}").contains("ENV-VALUE"));
+    assert!(pod.is_in("kube-system"));
+    let service: DnsService = parse(annotated(json!({"spec": {"clusterIP": "10.0.0.10"}})));
+    assert!(!format!("{service:?}").contains("ENV-VALUE"));
+    // The labels survive, so the role of a workload is still read.
+    assert_eq!(deployment_of(deployment).role, Role::Cluster);
+}
+
+#[test]
+fn a_service_keeps_the_address_and_the_port_53_protocols_only() {
+    let service: DnsService = parse(json!({
+        "metadata": {"name": "kube-dns"},
+        "spec": {
+            "clusterIP": "10.0.0.10",
+            "selector": {"a": "ENV-VALUE"},
+            "ports": [
+                {"name": "dns", "port": 53, "protocol": "UDP"},
+                {"name": "metrics", "port": 9153, "protocol": "TCP"},
+                {"port": 53}
+            ]
+        }
+    }));
+    assert!(!format!("{service:?}").contains("ENV-VALUE"));
+    let parts = service_of(service);
+    assert_eq!(parts.cluster_ip, "10.0.0.10");
+    // A port with no protocol is TCP, the server's default.
+    assert!(parts.udp_53 && parts.tcp_53);
 }

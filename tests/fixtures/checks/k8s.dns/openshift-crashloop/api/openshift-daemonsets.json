@@ -20,18 +20,21 @@
           "namespace": "openshift-dns",
           "labels": {
             "dns.operator.openshift.io/owning-dns": "default"
+          },
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"env\":[{\"name\":\"ACME_TOKEN\",\"value\":\"ENV-VALUE-MUST-NOT-APPEAR\"}],\"data\":{\"extra.override\":\"KEY-MUST-NOT-APPEAR\"}}"
           }
         },
         "spec": {
           "selector": {
             "matchLabels": {
-              "dns.operator.openshift.io/owning-dns": "default"
+              "dns.operator.openshift.io/daemonset-dns": "default"
             }
           },
           "template": {
             "metadata": {
               "labels": {
-                "k8s-app": "kube-dns"
+                "dns.operator.openshift.io/daemonset-dns": "default"
               }
             },
             "spec": {
