@@ -330,7 +330,9 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
   (`check: null`).
 - The kube exec credential plugin gets an `exec` entry with the resolved plugin path and redacted args,
   outcome `delegated`, note "run by the kube client, output not captured, may run again on token
-  refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01.)
+  refresh". The kubeconfig read gets a `read` entry. (`delegated` is a new outcome value for 01, added by
+  M2-138. Until then rdy-spec has no such value, so M1-107 writes the plugin's own outcome and a
+  `form: delegated` field.)
 - Coalescing (past 200 per check, per directory) folds only `read`, `read_dir`, `read_link` and `stat` entries with
   outcome `ok`, `failed` or `denied`. The 2 MiB truncation (the JSON writer, M1-055) sheds `ok` file
   entries first, then `failed` ones, then `exec`, `connect`, `tls`, `http`, `dns`, `kube` and `native`
