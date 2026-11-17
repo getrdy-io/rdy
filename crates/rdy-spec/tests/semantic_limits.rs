@@ -59,7 +59,7 @@ fn a_spec_of_257_checks_is_refused_with_the_count_and_the_limit() {
             limit: 256
         }
     );
-    assert_eq!(e.to_string(), "257 checks. The limit is 256");
+    assert_eq!(e.to_string(), "257 checks. The limit is 256.");
     assert_eq!(e.fix(), "split the spec in two, or remove checks.");
     assert_printable(&e);
 }
@@ -111,7 +111,7 @@ fn sixty_five_endpoints_in_one_check_are_refused() {
             limit: 64
         }
     );
-    assert_eq!(e.to_string(), "65 endpoints. The limit is 64");
+    assert_eq!(e.to_string(), "65 endpoints. The limit is 64.");
     assert_printable(&e);
 }
 
@@ -142,7 +142,7 @@ fn host_and_port_pairs_are_counted_across_checks() {
         }
     );
     assert_eq!(MAX_ENDPOINTS, 256);
-    assert_eq!(e.to_string(), "257 host and port pairs. The limit is 256");
+    assert_eq!(e.to_string(), "257 host and port pairs. The limit is 256.");
     assert_eq!(
         e.fix(),
         "remove endpoints, or split the spec in two. A host and port counts once, however many checks name it."
