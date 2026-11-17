@@ -318,6 +318,9 @@ Shape and kinds are 01 section 5.4. Rules the engine keeps:
 
 - The facade writes every entry; checks cannot skip it. Run-level work (snapshot, machine id, hostname,
   os-release, command stats, kubeconfig read) is logged with `check: null`.
+- A `denied` entry is a call the facade refused, not a connection. Under `--no-network` every network
+  call is logged as `denied` with `RULE_NO_NETWORK`, including a `connect`, `tls`, `http` or `dns` entry,
+  so "nothing connected" is tested as "no `connect` entry whose outcome is not `denied`".
 - `exec` entries record the resolved absolute path and `argv` as a JSON array of strings, redacted.
 - Kube entries open in the guard's `call` through `Probe::kube_call(method, path, via_proxy)` (M1-103) and are
   closed by the response future: `answered(status)`, `refused(rule)` or `failed(phrase)`. The path has no

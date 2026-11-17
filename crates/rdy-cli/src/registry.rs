@@ -32,6 +32,26 @@ pub fn registry() -> Result<Registry, RegistryError> {
 mod tests {
     use super::registry;
 
+    /// Checks that reach a network peer and handle the facade's `--no-network` refusal themselves
+    /// instead of naming the `network` need. Add the id here with the reason in the check.
+    /// `host.time_sync` keeps its `timedatectl` verdict and says the offset was not measured
+    /// (correction-39), so it must run offline.
+    const HANDLES_REFUSAL: &[&str] = &["host.time_sync"];
+
+    #[test]
+    fn every_check_that_reaches_the_network_gates_on_it() {
+        let registry = registry().expect("the registry builds");
+        for info in registry.infos() {
+            assert!(
+                !info.reaches_network()
+                    || info.gates_on_network()
+                    || HANDLES_REFUSAL.contains(&info.id),
+                "{} reaches the network and declares no network or kube_context need",
+                info.id
+            );
+        }
+    }
+
     #[test]
     fn the_registry_builds_and_holds_the_host_and_net_families() {
         let registry = registry().expect("the registry builds");

@@ -25,7 +25,9 @@ fn redactor() -> Redactor {
 }
 
 fn hub(replay: Replay) -> ProbeHub {
-    ProbeHub::new(Arc::new(replay), redactor())
+    let hub = ProbeHub::new(Arc::new(replay), redactor());
+    hub.set_network(true);
+    hub
 }
 
 fn field<'a>(action: &'a Action, name: &str) -> Option<&'a Value> {
@@ -992,7 +994,9 @@ mod commands {
     fn recording_hub() -> (ProbeHub, Arc<Recorder>) {
         let recorder = Arc::new(Recorder::default());
         let backend: Arc<dyn Backend> = recorder.clone();
-        (ProbeHub::new(backend, redactor()), recorder)
+        let hub = ProbeHub::new(backend, redactor());
+        hub.set_network(true);
+        (hub, recorder)
     }
 
     #[tokio::test]
@@ -1326,6 +1330,7 @@ mod commands {
     #[tokio::test(start_paused = true)]
     async fn a_command_dropped_before_it_finished_is_logged_as_a_timeout() {
         let hub = ProbeHub::new(Arc::new(Hanging), redactor());
+        hub.set_network(true);
         let probe = hub.check_probe("net.dns", Os::Linux, None);
         let outcome =
             tokio::time::timeout(Duration::from_secs(1), probe.exec(getent("acme.example"))).await;
