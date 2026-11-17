@@ -1,0 +1,47 @@
+{
+  "entry": {
+    "id": "net.mtu",
+    "min_mtu": 1500
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": 1500,
+      "overhead": null,
+      "overlay": null,
+      "underlay": "ipv4",
+      "warn_below": null
+    },
+    "fix": "Raise the MTU of `eth1` and of the switch ports it connects to, to 1500 or more. Set it in your network configuration (netplan, NetworkManager or the ifcfg files) so it survives a reboot.",
+    "level": "warn",
+    "message": "`eth1` has MTU 1400, and 1500 is needed.",
+    "notes": [],
+    "observed": {
+      "container_interfaces": 0,
+      "default_family": "ipv4",
+      "default_interface": "eth1",
+      "default_mtu": 1400,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": 1500,
+          "name": "eth0",
+          "state": "up"
+        },
+        {
+          "kind": "ethernet",
+          "mtu": 1400,
+          "name": "eth1",
+          "state": "up"
+        }
+      ],
+      "interfaces_down": 0,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": null,
+      "overlay": null,
+      "pod_mtu": null
+    },
+    "partial": null
+  }
+}

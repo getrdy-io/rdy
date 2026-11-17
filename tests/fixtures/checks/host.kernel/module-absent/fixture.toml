@@ -1,0 +1,12 @@
+schema = 1
+name = "module-absent"
+summary = "ip_vs is not loaded, not built in and not in modules.dep"
+origin = "hand"
+os = "linux"
+arch = "x86_64"
+answers = ["host.kernel"]
+
+[caps]
+root = false
+network = false
+kube = false

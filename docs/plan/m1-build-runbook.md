@@ -215,8 +215,9 @@ main). No document may name a person as owner, and no document may mention the f
 - #44 M1-124, #43 correction-40, #46 correction-41, #23 M1-150, #25 M1-072, #42 M1-086.
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
-M1-177 and M1-178, which makes 180. Totals on main: M1 178 tickets, 391 h, 328 h core. All milestones: 398
-tickets, 1349 h. Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
+M1-177 and M1-178, which makes 180. Totals after correction-34 and correction-42: M1 180 tickets, 396.5 h,
+332 h core; M2 125 tickets, 454 h; all milestones 405 tickets, 1364 h, 1299.5 h core.
+Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
 - 35: M1-148 drops adjtimex. `NativeCall::Adjtimex` moves to M2-004.
@@ -229,6 +230,8 @@ tickets, 1349 h. Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`
   IPC is named. chronyc does not run offline. The facade refuses network calls.
 - 40: the unsigned banner may name `--allow-unsigned`. M1-126's rule covers only hint, fix and error lines.
 - 41: new core M1-180 (`report.host.os` from os-release) and M2-120 (`ProductSlug` refuses `rdy`).
+- 42: the print banners stay in the flow with the title in the top margin of every page; the HTML size cap
+  cuts action rows, then Found and Needed lines. M1-175 builds k8s.dns. New M2-121 to M2-125.
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -239,9 +242,9 @@ tickets, 1349 h. Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`
 
 **Numbers.**
 - The next PR is #51 (#50 is this pause-state PR).
-- The next free ADR is 0043. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
-  security.
-- The next ticket ids are M1-181 and M2-121, and the next correction is 42.
+- The next free ADR is 0044. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
+  security. ADR 0043 is in #62 (M1-162).
+- The next ticket ids are M1-181 and M2-126, and the next correction is 43.
 - The next plan-correction row is PC-53. PC-50 to PC-52 are on main, from M1-176.
 
 **Process lessons from this session.**
@@ -361,12 +364,12 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
   - qa (PC-52): the M1-043 macOS SIGCHLD carry stays open. The ECHILD probe failed on macos-x64, so it is gated
     to Linux.
   - M1-179: deletes the host.time_sync PENDING row in the env harness that #35 adds.
-  - Follow-ups with no ticket yet:
-    - net.mtu: a per-interface note on a hostile link, instead of ending the check (M2).
-    - A per-response byte cap in the k8s client, for example 16 MiB, with a cut list reported as partial
+  - Follow-ups that correction-42 gave ids:
+    - M2-121, net.mtu: a per-interface note on a hostile link, instead of ending the check.
+    - M2-122: a per-response byte cap in the k8s client, 16 MiB, with a cut list reported as partial
       (#48 F3).
-    - `NetFailure::NotConnected` carries the connect attempts, so net.egress needs no second tcp call (#45).
-    The next correction should give each an id.
+    - M2-123: `NetFailure::NotConnected` carries the connect attempts, so net.egress needs no second tcp
+      call (#45).
 
 ## For the founder
 

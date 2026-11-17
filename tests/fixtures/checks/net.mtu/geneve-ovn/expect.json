@@ -1,0 +1,44 @@
+{
+  "entry": {
+    "id": "net.mtu",
+    "min_mtu": 1400,
+    "overlay": "geneve"
+  },
+  "result": {
+    "expected": {
+      "clamp_above": 1500,
+      "min_mtu": 1400,
+      "overhead": 50,
+      "overlay": "geneve",
+      "underlay": "ipv4",
+      "warn_below": null
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "`eth0` has MTU 1500, which leaves 1450 for the pod network after 50 bytes of Geneve, and 1400 is needed.",
+    "notes": [
+      "OVN-Kubernetes reserves 100 bytes for Geneve, which would leave 1400 for the pod network."
+    ],
+    "observed": {
+      "container_interfaces": 0,
+      "default_family": "ipv4",
+      "default_interface": "eth0",
+      "default_mtu": 1500,
+      "interfaces": [
+        {
+          "kind": "ethernet",
+          "mtu": 1500,
+          "name": "eth0",
+          "state": "up"
+        }
+      ],
+      "interfaces_down": 0,
+      "interfaces_not_read": 0,
+      "interfaces_not_shown": 0,
+      "overhead": 50,
+      "overlay": "geneve",
+      "pod_mtu": 1450
+    },
+    "partial": null
+  }
+}
