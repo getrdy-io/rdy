@@ -47,6 +47,10 @@ zeroize = { workspace = true }
 [target.'cfg(not(unix))'.dependencies]
 rpassword.workspace = true
 
+# `GetFileType` through a safe wrapper: a spec or key file must be a disk file (M1-183). No `unsafe` here.
+[target.'cfg(windows)'.dependencies]
+winapi-util = { workspace = true }
+
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["std", "fs", "process", "termios"] }
 
@@ -68,6 +72,10 @@ tokio = { workspace = true, features = ["rt", "macros", "time", "test-util"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 rexpect.workspace = true
+
+# A named pipe server for the Windows spec-read test (M1-183).
+[target.'cfg(windows)'.dev-dependencies]
+tokio = { workspace = true, features = ["rt", "net"] }
 
 [lints]
 workspace = true
