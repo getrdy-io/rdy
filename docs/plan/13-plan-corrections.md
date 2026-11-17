@@ -595,3 +595,23 @@ the corrections log of `11-backlog.md`.
   parameters, which is M1-175, so that proof moves to M1-175's exit test. M1-113 keeps
   `Cluster::read_only_as` and `Cluster::is_openshift`, tested through the family holder. No 03 `###`
   heading or Appendix A row changed, and no test-pinned text changed.
+- **Correction-56, the family namespace in M1, the k8s registrations of M1-162 to M1-165, and the
+  autoscaler status ConfigMap.** From the reviews of the M1-175 build and the M1-113 k8s review.
+  Correction 49 is PR #85. `rdy run` has no source for the Kubernetes family namespace in M1: rdy/v1 has
+  no `k8s:` block (03's "Spec block" was never in 01), 07 puts `--namespace` on `rdy bundle` only, and the
+  client never uses the kubeconfig's namespace (ADR 0031 decision 12). So k8s.storageclass never reads
+  claim evidence, k8s.ingress and k8s.cni read no Service or NetworkPolicy of the install namespace, and
+  k8s.admission and k8s.namespace fall back to the entry's own `namespace`. M1 adds no key and no flag.
+  03 says what M1 does in a "Not in M1" note under the Spec block and in the k8s.storageclass,
+  k8s.admission and k8s.namespace sections; its flag sentence now names `--kubeconfig` and
+  `--kube-context` (correction-07 asked for it); 07's kube flag row says `rdy run` has no `--namespace`.
+  The k8s.admission line also loses a wrong grant: a spec with no namespace is partial with a fix, not
+  `get namespaces`. ADR 0049 (Proposed) chooses the M2 source: a top-level `k8s:` block with one key,
+  `namespace`, and no run flag, because the namespace decides what the checks judge and M2-126 pins reads
+  to the namespaces the spec names. New M2-142 (3 h) builds it, with cli-ux and security review. M1-162 to
+  M1-165 now register their check in the family (M1-175's `build_check` arm, registry info, family test
+  counts) if M1-175 merges first, as M1-175's progress line defers. New M2-143 (3 h): k8s.nodes reads
+  `kube-system/cluster-autoscaler-status` by name, so GKE Standard and AKS managed autoscalers soften a
+  node shortfall; one guarded GET, a cut-down type, the 03 grant text, the role, the kind job, a new ADR
+  (ADR 0043 decision 4) and a security review. No M1 hours change. No 03 `###` heading or Appendix A row
+  changed, and no test-pinned text changed.
