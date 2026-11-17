@@ -528,14 +528,17 @@ the corrections log of `11-backlog.md`.
   is PR #85. The JSON writer leaves Cc, Cf and zero-width characters live. 05 T3 and T4 do not promise the
   JSON rule for 0.1.0, and M1-141 escapes them in the page, so new M2-131 (2 h) writes them as `\uXXXX` and
   05 T3 says any renderer of result JSON, the portal included, applies the same rule. New M2-132 (1 h) puts
-  `unicode-bidi: isolate-override; direction: ltr` on the fix and builtin-fix `<bdi>`. The `FixText` rustdoc
-  says controls are stripped, but `FixText::new` checks only the length; the HTML and the terminal escape
-  them today. New M2-133 (1.5 h) refuses them at parse, because the signature covers the text as written.
+  `unicode-bidi: isolate-override; direction: ltr` on the fix and builtin-fix `<bdi>`. Right-to-left letters
+  reorder text with no control character, but fix text comes from the signed spec and a copy gives the
+  logical order, so it stays M2. 01 sections 2.6 and 6 and the `FixText` rustdoc say controls are stripped
+  before the text is printed, but the HTML and the terminal show them as escapes, and `FixText::new` checks
+  only the length. New M2-133 (1.5 h) refuses them at parse in `rdy spec lint`, `rdy spec sign`, `rdy verify`
+  and `rdy run`, because the signature covers the text as written.
   M1-100 cannot delete the net.tls_intercept `PENDING` row: each host is cut to its own budget, so a hung
   handshake gives a bounded warning, not `Timeout`. The row is narrowed to `Timeout` and moves to M1-179; the
   second of PR #91 and PR #70 to merge deletes it. A pin matches the leaf only (SEC-100-1), and a pin equal
-  to a later certificate is partial until new M2-135 (2.5 h) records the verified path. `root_sha256` is
-  the last certificate's hash only when it is self-signed; new M2-136 (1.5 h) finds the real anchor through
-  `TrustStore` root subjects. New M2-134 (2 h) reports the Java `cacerts` and `NODE_EXTRA_CA_CERTS` stores.
+  to a later certificate is partial until new M2-135 (2.5 h) records the verified path. `last_sha256` is
+  always the last certificate's hash, and `root_sha256` is null when that certificate is not self-signed;
+  new M2-136 (1.5 h) replaces `root_sha256` with the real anchor's, through `TrustStore` root subjects. New M2-134 (2 h) reports the Java `cacerts` and `NODE_EXTRA_CA_CERTS` stores.
   03 net.tls_intercept's Source line says so; PR #91 edits its Thresholds line. No new M1 ticket. No
   test-pinned document changed.
