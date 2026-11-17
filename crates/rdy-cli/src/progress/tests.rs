@@ -145,7 +145,7 @@ fn the_frames_are_ten_braille_or_four_ascii() {
 #[tokio::test(start_paused = true)]
 async fn a_run_under_250_ms_draws_nothing() {
     let capture = ProgressCapture::default();
-    let mut line = Progress::start(3, &ASCII, Target::Capture(capture.clone()));
+    let mut line = Progress::start(3, &ASCII, Target::CaptureUnlimited(capture.clone()));
     sleep(Duration::from_millis(249)).await;
     line.clear();
     assert_eq!(capture.text(), "");
@@ -157,7 +157,7 @@ async fn a_run_under_250_ms_draws_nothing() {
 #[tokio::test(start_paused = true)]
 async fn a_slow_run_draws_one_line_and_clears_it() {
     let capture = ProgressCapture::default();
-    let mut line = Progress::start(3, &ASCII, Target::Capture(capture.clone()));
+    let mut line = Progress::start(3, &ASCII, Target::CaptureUnlimited(capture.clone()));
     sleep(Duration::from_millis(600)).await;
     let drawn = capture.text();
     assert!(drawn.contains("Running 3 checks"), "{drawn:?}");
@@ -175,7 +175,7 @@ async fn a_slow_run_draws_one_line_and_clears_it() {
 #[tokio::test(start_paused = true)]
 async fn elapsed_time_shows_after_two_seconds() {
     let capture = ProgressCapture::default();
-    let mut line = Progress::start(2, &BRAILLE, Target::Capture(capture.clone()));
+    let mut line = Progress::start(2, &BRAILLE, Target::CaptureUnlimited(capture.clone()));
     sleep(Duration::from_millis(4_050)).await;
     line.clear();
     let drawn = capture.text();
@@ -187,7 +187,7 @@ async fn elapsed_time_shows_after_two_seconds() {
 async fn dropping_the_line_clears_it() {
     let capture = ProgressCapture::default();
     {
-        let _line = Progress::start(2, &ASCII, Target::Capture(capture.clone()));
+        let _line = Progress::start(2, &ASCII, Target::CaptureUnlimited(capture.clone()));
         sleep(Duration::from_millis(500)).await;
     }
     assert!(capture.cleared(), "{:?}", capture.text());
@@ -197,5 +197,43 @@ async fn dropping_the_line_clears_it() {
 async fn the_off_line_draws_nothing() {
     let mut line = Progress::off();
     sleep(Duration::from_secs(1)).await;
+    line.clear();
+}
+
+#[test]
+fn the_template_has_no_style_spec() {
+    // A placeholder with `:` or `.` would be styled, and a styled template makes `console` read the colour
+    // variables and, on Windows, change the console mode (SEC-60-1).
+    let mut rest = TEMPLATE;
+    let mut placeholders = 0;
+    while let Some(start) = rest.find('{') {
+        let end = rest[start..].find('}').map_or(rest.len(), |e| start + e);
+        let name = &rest[start + 1..end];
+        assert!(!name.contains([':', '.']), "{name}");
+        placeholders += 1;
+        rest = &rest[end..];
+    }
+    assert_eq!(placeholders, 2);
+    assert!(ProgressStyle::with_template(TEMPLATE).is_ok());
+}
+
+#[tokio::test(start_paused = true)]
+async fn nothing_is_drawn_at_exactly_250_ms_and_a_frame_is_at_251() {
+    let capture = ProgressCapture::default();
+    let mut line = Progress::start(3, &ASCII, Target::CaptureUnlimited(capture.clone()));
+    sleep(Duration::from_millis(250)).await;
+    for _ in 0..5 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(capture.text(), "", "at exactly 250 ms");
+    sleep(Duration::from_millis(1)).await;
+    for _ in 0..5 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        capture.text().contains("Running 3 checks"),
+        "{:?}",
+        capture.text()
+    );
     line.clear();
 }

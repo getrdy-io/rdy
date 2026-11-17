@@ -52,6 +52,9 @@ pub struct RunHooks {
     /// Where the live progress line draws. `None` is the real stderr, which is what the binary does. A
     /// test gives a buffer and pins `stderr_terminal` to see the line without a pty.
     pub progress_capture: Option<crate::progress::ProgressCapture>,
+    /// The quiet time before the first frame of the live line. `None` is 250 ms. A test that must see
+    /// "a run ends before the first frame" gives a long one, so a slow machine cannot make it flaky.
+    pub progress_first_frame: Option<Duration>,
 }
 
 #[cfg(test)]
@@ -73,6 +76,7 @@ mod tests {
             style_env,
             progress_env,
             progress_capture,
+            progress_first_frame,
         } = RunHooks::default();
         assert!(clock.is_none());
         assert!(run_id.is_none());
@@ -83,5 +87,6 @@ mod tests {
         assert!(style_env.is_none());
         assert!(progress_env.is_none());
         assert!(progress_capture.is_none());
+        assert!(progress_first_frame.is_none());
     }
 }

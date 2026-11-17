@@ -484,20 +484,33 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     calls and passing the codes through; that changes how the codes are drawn, never whether they are. Untrusted text is escaped by `style::untrusted` before it is written, so the strip
     pass never has to remove a sequence that came from the machine or the spec.
 
-- `indicatif` 0.18.6, `console` 0.16.6, `unit-prefix` 0.5.2 and, for Windows, `encode_unicode` (M1-142, 07 D.5).
-  Direct dependencies of the `rdy` binary crate only (`rdy-cli`): `indicatif` without default features, and
-  `console` without default features and only on non-Unix targets, for the console width. **Approval by
-  security-reviewer pending, PR #TBD.** `portable-atomic` was in the tree already.
+- `indicatif` 0.18.6, `console` 0.16.6, `unit-prefix` 0.5.2 and, for Windows, `encode_unicode` 1.0.0 (M1-142,
+  07 D.5). `indicatif` is a direct dependency of the `rdy` binary crate (`rdy-cli`), without default features.
+  `console` is in the binary on all five targets, because `indicatif` depends on it with `std` and
+  `ansi-parsing`; `rdy-cli` names it directly on non-Unix targets only, for the console width. `portable-atomic`
+  was in the tree already. **Approved by security-reviewer, PR #60 (SEC-60-1 to SEC-60-3 fixed).** RustSec was
+  clean on 2026-11-17.
   - Purpose: the live progress line (07 section 3) and the Windows console width.
-  - Maintainers: `indicatif` and `console` are in the `console-rs` organisation. `unit-prefix` is hosted on
-    Codeberg (`commons-rs`) and `encode_unicode` is a single-maintainer crate; owners to confirm in review.
-  - `unsafe`: none in `indicatif` and `unit-prefix` (`#![deny(unsafe_code)]`). `console` uses it for terminal
-    and Windows console calls, and `encode_unicode` in a few iterator and trait helpers. Our crates keep `#![forbid(unsafe_code)]`.
+  - Maintainers (crates.io owners): `indicatif` and `console` by mitsuhiko and djc, `unit-prefix` by
+    decathorpe, `encode_unicode` by tormol (last release 2022-08-07; Windows only, with its `ascii` feature
+    off).
+  - `unsafe`: `indicatif` has none but does not declare `deny(unsafe_code)`. `unit-prefix` has
+    `#![deny(unsafe_code)]`. `console` uses it for terminal and Windows console calls, and `encode_unicode` in
+    a few iterator and trait helpers. Our crates keep `#![forbid(unsafe_code)]`.
   - `build.rs`: none in the four.
-  - License: MIT for `indicatif`, `console` and `unit-prefix`; Apache-2.0 OR MIT for `encode_unicode`. All allowed in `deny.toml`.
+  - License: MIT for `indicatif`, `console` and `unit-prefix`; Apache-2.0 OR MIT for `encode_unicode`. All
+    allowed in `deny.toml`.
+  - Features: `deny.toml` holds `indicatif` to no features and `console` to `alloc`, `ansi-parsing` and `std`
+    (`exact = true`, SEC-60-3).
   - How rdy uses it: the line is drawn only through `ProgressDrawTarget::stderr_with_hz(10)` or `hidden()`
-    (a test uses `term_like`), only after the gate of `rdy_cli::progress::live_line_allowed`, and only on
-    stderr. indicatif's own steady-tick thread is not used.
+    (tests use `term_like` and `term_like_with_hz`), only after the gate of
+    `rdy_cli::progress::live_line_allowed`, and only on stderr. indicatif's own steady-tick thread is not
+    used. The template is a constant with no style spec, so `console` never reads `NO_COLOR` or `CLICOLOR`
+    for it and never changes the Windows console mode (a test holds this). The other ways to draw
+    (`ProgressDrawTarget::{stdout, stdout_with_hz, stderr, term}`, `ProgressBar::{new, new_spinner,
+    enable_steady_tick, println, suspend}`, `MultiProgress::new`, `console::Term::{stdout, buffered_stdout}`,
+    `console::set_colors_enabled{,_stderr}`) are on the clippy `disallowed-methods` wall, root and check
+    crates, and the lint-wall crate proves each one fires (SEC-60-1).
 
 ## SECURITY.md
 

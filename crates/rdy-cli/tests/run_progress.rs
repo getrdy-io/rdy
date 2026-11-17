@@ -112,6 +112,16 @@ fn env(vars: &[(&str, &str)]) -> ProgressEnv {
 }
 
 fn run(families: rdy_cli::FamiliesFn, terminal: bool, env: ProgressEnv, args: &[&str]) -> Ran {
+    run_after(None, families, terminal, env, args)
+}
+
+fn run_after(
+    first_frame: Option<Duration>,
+    families: rdy_cli::FamiliesFn,
+    terminal: bool,
+    env: ProgressEnv,
+    args: &[&str],
+) -> Ran {
     let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("no temp dir: {e}"));
     let path = dir.path().join("acme.yaml");
     std::fs::write(&path, SPEC).unwrap_or_else(|e| panic!("cannot write the spec: {e}"));
@@ -125,6 +135,7 @@ fn run(families: rdy_cli::FamiliesFn, terminal: bool, env: ProgressEnv, args: &[
     hooks.style_env = Some(rdy_cli::style::StyleEnv::default());
     hooks.progress_env = Some(env);
     hooks.progress_capture = Some(capture.clone());
+    hooks.progress_first_frame = first_frame;
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -202,8 +213,16 @@ fn braille_is_drawn_when_the_locale_is_utf8() {
 }
 
 #[test]
-fn a_fast_run_draws_nothing() {
-    let ran = run(fast_registry, true, env(&[]), &[]);
+fn a_run_that_ends_before_the_first_frame_draws_nothing() {
+    // The first frame is an hour away, so how fast this machine is cannot matter. The 250 ms rule is
+    // proved on a paused clock in `src/progress/tests.rs`.
+    let ran = run_after(
+        Some(Duration::from_secs(3600)),
+        fast_registry,
+        true,
+        env(&[]),
+        &[],
+    );
     assert_eq!(ran.code, 0, "{}", ran.stderr);
     assert_eq!(ran.drawn, "");
 }

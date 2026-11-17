@@ -68,6 +68,8 @@ tokio = { workspace = true, features = ["rt", "macros", "time", "test-util"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 rexpect.workspace = true
+# The pty tests of the progress line give stderr a pty and keep stdout a pipe (M1-142).
+rustix = { workspace = true, features = ["std", "fs", "pty", "termios"] }
 
 [lints]
 workspace = true

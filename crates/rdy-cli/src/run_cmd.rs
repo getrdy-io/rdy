@@ -58,7 +58,7 @@ use crate::cli::{COMMIT, ColorChoice, ProgressChoice, RunArgs, TARGET};
 use crate::error::{CliError, InternalKind, IoReason, ReportStep, emit, shell_word};
 use crate::hooks::RunHooks;
 use crate::output::{open_report_dir, report_error};
-use crate::progress::{Progress, ProgressEnv, Target, frames, live_line_allowed};
+use crate::progress::{FIRST_FRAME, Progress, ProgressEnv, Target, frames, live_line_allowed};
 use crate::rig::Rig;
 use crate::signing::files::{FileError, read_public};
 use crate::style::{StyleEnv, Styler, stderr_columns, use_color, wrap_width, write_styled};
@@ -346,7 +346,12 @@ fn start_progress(choice: ProgressChoice, quiet: bool, hooks: &RunHooks, total: 
         .progress_capture
         .clone()
         .map_or(Target::Stderr, Target::Capture);
-    Progress::start(total, frames(&env), target)
+    Progress::start_after(
+        hooks.progress_first_frame.unwrap_or(FIRST_FRAME),
+        total,
+        frames(&env),
+        target,
+    )
 }
 
 /// What the watchdog writes into the report folder when it has to: the spec copy and the partial

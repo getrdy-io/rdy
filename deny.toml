@@ -118,6 +118,20 @@ exact = true
 allow = ["alloc", "derive", "std"]
 reason = "05 dependency record: no json or urlencode filter, no askama.toml; scripts/check-html-escapes.sh checks the manifests too"
 
+# The live progress line (M1-142, SEC-60-3). indicatif keeps no default feature (no `wasmbind`, no
+# `unicode-width`, no `tokio`, no `rayon`); console keeps what indicatif needs and nothing else.
+[[bans.features]]
+crate = "indicatif"
+exact = true
+allow = []
+reason = "05 dependency record: no default features; the line is one ASCII or Braille spinner on stderr"
+
+[[bans.features]]
+crate = "console"
+exact = true
+allow = ["alloc", "ansi-parsing", "std"]
+reason = "05 dependency record: what indicatif needs; no unicode-width, no windows-console-colors"
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"

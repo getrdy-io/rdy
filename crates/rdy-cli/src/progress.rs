@@ -36,6 +36,11 @@ pub const FRAME_EVERY: Duration = Duration::from_millis(100);
 /// The elapsed time shows from this point.
 pub const SHOW_ELAPSED_AFTER: Duration = Duration::from_secs(2);
 
+/// The line template. It has no style spec (`{spinner:.green}` and the like): a styled template makes the
+/// `console` crate read `NO_COLOR` and `CLICOLOR` and, on Windows, change the console mode without
+/// restoring it (SEC-60-1). A test holds this.
+pub const TEMPLATE: &str = "{spinner} {wide_msg}";
+
 /// The Braille spinner of 07 D.1.
 pub const BRAILLE: [&str; 10] = [
     "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
@@ -216,17 +221,23 @@ impl TermLike for ProgressCapture {
 pub enum Target {
     /// The real stderr, at most 10 frames a second.
     Stderr,
-    /// A test's buffer.
+    /// A test's buffer, with the same 10 frames a second limit as the real stderr (counted in real time).
     Capture(ProgressCapture),
+    /// A test's buffer with no rate limit, for a test on a paused clock: indicatif's limiter counts real
+    /// time, and a paused test passes seconds in no time. The ticker paces the frames.
+    CaptureUnlimited(ProgressCapture),
 }
 
 impl Target {
     fn draw_target(&self) -> ProgressDrawTarget {
         match self {
             Self::Stderr => ProgressDrawTarget::stderr_with_hz(10),
-            // No rate limit here: the limiter counts real time, and a test runs on a paused clock. The
-            // ticker already paces the frames.
-            Self::Capture(capture) => ProgressDrawTarget::term_like(Box::new(capture.clone())),
+            Self::Capture(capture) => {
+                ProgressDrawTarget::term_like_with_hz(Box::new(capture.clone()), 10)
+            }
+            Self::CaptureUnlimited(capture) => {
+                ProgressDrawTarget::term_like(Box::new(capture.clone()))
+            }
         }
     }
 }
@@ -252,26 +263,47 @@ impl Progress {
     /// with time enabled.
     #[must_use]
     pub fn start(total: usize, frames: &'static [&'static str], target: Target) -> Self {
+        Self::start_after(FIRST_FRAME, total, frames, target)
+    }
+
+    /// Like [`Progress::start`], with the quiet time before the first frame given. The binary always uses
+    /// [`FIRST_FRAME`]; a test that needs a run to end first gives a long one.
+    #[must_use]
+    pub fn start_after(
+        first_frame: Duration,
+        total: usize,
+        frames: &'static [&'static str],
+        target: Target,
+    ) -> Self {
         let bar = ProgressBar::with_draw_target(None, ProgressDrawTarget::hidden());
         let mut strings: Vec<&str> = frames.to_vec();
         // indicatif takes the last string as the one for a finished bar. It is never drawn.
         strings.push(" ");
-        bar.set_style(
-            ProgressStyle::with_template("{spinner} {wide_msg}")
-                .unwrap_or_else(|_| ProgressStyle::default_spinner())
-                .tick_strings(&strings),
-        );
-        bar.set_message(message(total, Duration::ZERO));
+        // The template is a constant that a test parses. The default styles are coloured, so a failure
+        // here keeps indicatif's plain default rather than falling back to one of them.
+        if let Ok(style) = ProgressStyle::with_template(TEMPLATE) {
+            bar.set_style(style.tick_strings(&strings));
+        }
+        let mut shown = message(total, Duration::ZERO);
+        bar.set_message(shown.clone());
         let handle = bar.clone();
         let started = Instant::now();
         let ticker = tokio::spawn(async move {
-            sleep(FIRST_FRAME).await;
+            // Strictly over the delay: a run that ends at exactly 250 ms draws nothing.
+            sleep(first_frame + Duration::from_millis(1)).await;
             handle.set_draw_target(target.draw_target());
             let mut every = interval(FRAME_EVERY);
             every.set_missed_tick_behavior(MissedTickBehavior::Skip);
             loop {
                 every.tick().await;
-                handle.set_message(message(total, started.elapsed()));
+                // Only our own text goes here (a count and seconds). Any text from the spec or the
+                // machine, such as a check name, must pass `style::untrusted` and the width cap first
+                // (SEC-60-4).
+                let text = message(total, started.elapsed());
+                if text != shown {
+                    handle.set_message(text.clone());
+                    shown = text;
+                }
                 handle.tick();
             }
         });
