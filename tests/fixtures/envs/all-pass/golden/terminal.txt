@@ -7,10 +7,10 @@ Every report from this run is marked UNSIGNED SPEC.
 rdy <version>
 spec    acme-platform >=1.0   (spec.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
-host    all-pass.example   rhel 9.2   x86_64
+host    all-pass.example   rhel 9.3   x86_64
 user    uid 0 (root)
 
-  PASS     host.os                 Red Hat Enterprise Linux 9.2 (Plow) on x86_64 meets the spec.
+  PASS     host.os                 Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.
   PASS     host.memory             31.3 GiB found, 32 GiB needed, inside the 5% tolerance
   PASS     host.cpu                8 vCPUs found, 8 needed
   PASS     host.disk               `/var/lib/acme` has 100 GiB free on `/var` (xfs). 20 GiB is
@@ -31,10 +31,11 @@ user    uid 0 (root)
   PASS     host.security_agents    No known security software process was found among 6 processes.
   PASS     host.container_runtime  containerd 1.7.13 is running (cgroup driver systemd, storage
                                    driver overlayfs).
+  PASS     host.firewall           firewalld zone public allows 6443/tcp and 10250/tcp inbound.
   PASS     net.egress              1 of 1 endpoints reachable
   PASS     net.mtu                 `eth0` has MTU 1500.
 
-0 blocks, 0 warnings, 14 passed
+0 blocks, 0 warnings, 15 passed
 
 WARNING: UNSIGNED SPEC
 READY

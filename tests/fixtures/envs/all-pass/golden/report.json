@@ -154,7 +154,7 @@
     },
     {
       "at_ms": 0,
-      "bytes": 661,
+      "bytes": 665,
       "check": "host.memory",
       "duration_ms": 0,
       "kind": "read",
@@ -289,7 +289,7 @@
     },
     {
       "at_ms": 0,
-      "bytes": 661,
+      "bytes": 665,
       "check": "host.cpu",
       "duration_ms": 0,
       "kind": "read",
@@ -362,7 +362,7 @@
     },
     {
       "at_ms": 0,
-      "bytes": 661,
+      "bytes": 665,
       "check": "host.disk",
       "duration_ms": 0,
       "kind": "read",
@@ -447,7 +447,7 @@
     },
     {
       "at_ms": 0,
-      "bytes": 661,
+      "bytes": 665,
       "check": "host.cgroups",
       "duration_ms": 0,
       "kind": "read",
@@ -1048,7 +1048,7 @@
     },
     {
       "at_ms": 0,
-      "bytes": 168,
+      "bytes": 120,
       "check": "host.container_runtime",
       "duration_ms": 0,
       "kind": "read",
@@ -1114,6 +1114,128 @@
       "seq": 104
     },
     {
+      "at_ms": 0,
+      "bytes": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "path": "/run/firewalld",
+      "seq": 105
+    },
+    {
+      "argv": [
+        "--state"
+      ],
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "exit": 0,
+      "form": "state",
+      "kind": "exec",
+      "outcome": "ok",
+      "program": "firewall-cmd",
+      "seq": 106,
+      "stdout_bytes": 8,
+      "truncated": false
+    },
+    {
+      "argv": [
+        "--get-active-zones"
+      ],
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "exit": 0,
+      "form": "active-zones",
+      "kind": "exec",
+      "outcome": "ok",
+      "program": "firewall-cmd",
+      "seq": 107,
+      "stdout_bytes": 55,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 227,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/net/route",
+      "seq": 108,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "bytes": 144,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/proc/net/ipv6_route",
+      "seq": 109,
+      "truncated": false
+    },
+    {
+      "argv": [
+        "--list-all",
+        "--zone=public"
+      ],
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "exit": 0,
+      "form": "list-all",
+      "kind": "exec",
+      "outcome": "ok",
+      "program": "firewall-cmd",
+      "seq": 110,
+      "stdout_bytes": 248,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/etc/firewalld/services/ssh.xml",
+      "seq": 111
+    },
+    {
+      "at_ms": 0,
+      "bytes": 217,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "path": "/usr/lib/firewalld/services/ssh.xml",
+      "seq": 112,
+      "truncated": false
+    },
+    {
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/etc/firewalld/direct.xml",
+      "seq": 113
+    },
+    {
+      "at_ms": 0,
+      "check": "host.firewall",
+      "duration_ms": 0,
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "kind": "read",
+      "outcome": "failed",
+      "path": "/etc/ufw/ufw.conf",
+      "seq": 114
+    },
+    {
       "answers": 1,
       "at_ms": 0,
       "check": "net.egress",
@@ -1121,7 +1243,7 @@
       "host": "web.acme.test",
       "kind": "lookup",
       "outcome": "ok",
-      "seq": 105
+      "seq": 115
     },
     {
       "addr": "192.0.2.1",
@@ -1132,18 +1254,18 @@
       "kind": "connect",
       "outcome": "ok",
       "port": 8080,
-      "seq": 106,
+      "seq": 116,
       "via_proxy": null
     },
     {
       "at_ms": 0,
-      "bytes": 175,
+      "bytes": 227,
       "check": "net.mtu",
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/net/route",
-      "seq": 107,
+      "seq": 117,
       "truncated": false
     },
     {
@@ -1154,7 +1276,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/proc/net/ipv6_route",
-      "seq": 108,
+      "seq": 118,
       "truncated": false
     },
     {
@@ -1165,7 +1287,7 @@
       "kind": "read_dir",
       "outcome": "ok",
       "path": "/sys/class/net",
-      "seq": 109
+      "seq": 119
     },
     {
       "at_ms": 0,
@@ -1175,7 +1297,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/sys/class/net/eth0/mtu",
-      "seq": 110,
+      "seq": 120,
       "truncated": false
     },
     {
@@ -1186,7 +1308,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/sys/class/net/eth0/operstate",
-      "seq": 111,
+      "seq": 121,
       "truncated": false
     },
     {
@@ -1197,7 +1319,7 @@
       "kind": "read",
       "outcome": "ok",
       "path": "/sys/class/net/eth0/type",
-      "seq": 112,
+      "seq": 122,
       "truncated": false
     }
   ],
@@ -1242,7 +1364,7 @@
       "fix_source": null,
       "id": "host.os",
       "key": "host.os",
-      "message": "Red Hat Enterprise Linux 9.2 (Plow) on x86_64 meets the spec.",
+      "message": "Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.",
       "name": null,
       "needs": [],
       "notes": [],
@@ -1258,9 +1380,9 @@
             "fedora"
           ],
           "name": "Red Hat Enterprise Linux",
-          "pretty_name": "Red Hat Enterprise Linux 9.2 (Plow)",
+          "pretty_name": "Red Hat Enterprise Linux 9.3 (Plow)",
           "source": "/etc/os-release",
-          "version_id": "9.2"
+          "version_id": "9.3"
         },
         "wsl": false
       },
@@ -1878,6 +2000,49 @@
       "bucket": "passed",
       "duration_ms": 0,
       "expected": {
+        "open_inbound": [
+          6443,
+          10250
+        ]
+      },
+      "family": "host",
+      "fix": null,
+      "fix_source": null,
+      "id": "host.firewall",
+      "key": "host.firewall",
+      "message": "firewalld zone public allows 6443/tcp and 10250/tcp inbound.",
+      "name": null,
+      "needs": [
+        {
+          "hard": false,
+          "met": true,
+          "name": null,
+          "need": "root"
+        }
+      ],
+      "notes": [
+        "firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read"
+      ],
+      "observed": {
+        "active": [
+          {
+            "interface": "eth0",
+            "manager": "firewalld",
+            "ports": "[truncated]",
+            "zone": "public"
+          }
+        ]
+      },
+      "partial": null,
+      "severity": "block",
+      "started_ms": 0,
+      "status": "pass",
+      "truncated": true
+    },
+    {
+      "bucket": "passed",
+      "duration_ms": 0,
+      "expected": {
         "max_latency_ms": 2000,
         "trust": "system"
       },
@@ -1974,8 +2139,8 @@
     "os": {
       "family": "linux",
       "id": "rhel",
-      "pretty_name": "Red Hat Enterprise Linux 9.2 (Plow)",
-      "version": "9.2"
+      "pretty_name": "Red Hat Enterprise Linux 9.3 (Plow)",
+      "version": "9.3"
     }
   },
   "identity": {
@@ -1995,11 +2160,9 @@
   },
   "proxy": null,
   "redaction": {
-    "by_rule": {
-      "secret_by_key": 1
-    },
+    "by_rule": {},
     "ruleset": "report",
-    "total": 1
+    "total": 0
   },
   "run": {
     "duration_ms": 0,
@@ -2031,8 +2194,8 @@
     "file_name": "spec.yaml",
     "product": "acme-platform",
     "serial": null,
-    "sha256": "619010169f58aefc8c300a938d872e9da909350de557dfa6ff437e9712f5c991",
-    "size_bytes": 1598,
+    "sha256": "5a59a4ac4a75c9a34123c4125a60f99879d48ee41fcf9f020a89885d1b8201b6",
+    "size_bytes": 1672,
     "version": ">=1.0"
   },
   "summary": {
@@ -2040,11 +2203,11 @@
     "error": 0,
     "not_applicable": 0,
     "optional_not_run": 0,
-    "pass": 14,
+    "pass": 15,
     "required_not_run": 0,
     "skipped": 0,
     "timeout": 0,
-    "total": 14,
+    "total": 15,
     "warn": 0
   },
   "verdict": "ready",

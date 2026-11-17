@@ -1,6 +1,6 @@
-22 1 253:0 / / rw,relatime shared:1 - xfs /dev/mapper/rl-root rw,seclabel
+22 1 253:0 / / rw,relatime shared:1 - xfs /dev/mapper/rhel-root rw,seclabel
 23 22 0:5 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
-24 22 253:1 / /var rw,relatime shared:5 - xfs /dev/mapper/rl-var rw,seclabel
+24 22 253:1 / /var rw,relatime shared:5 - xfs /dev/mapper/rhel-var rw,seclabel
 25 22 0:30 / /tmp rw,nosuid,nodev,noexec,relatime shared:6 - tmpfs tmpfs rw,size=4194304k
 26 22 0:6 / /dev rw,nosuid shared:2 - devtmpfs devtmpfs rw,seclabel
 27 22 0:22 / /sys rw,nosuid,nodev,noexec,relatime shared:13 - sysfs sysfs rw,seclabel

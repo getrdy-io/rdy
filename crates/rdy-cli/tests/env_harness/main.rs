@@ -29,7 +29,9 @@ use rdy_engine::check::{CheckInfo, CheckMeta, Need, OsSupport, Support, Want, cu
 use rdy_engine::family::{BuildError, Built, Family};
 use rdy_engine::summary::last_line;
 use rdy_engine::testing::golden::assert_golden;
-use rdy_engine::testing::{Fixture, fixtures_dir, normalize, normalize_across_jobs};
+use rdy_engine::testing::{
+    Fixture, assert_static_html, fixtures_dir, normalize, normalize_across_jobs,
+};
 use rdy_spec::check::CheckParams;
 use rdy_spec::spec::{CheckSpec, Spec};
 use serde_json::Value;
@@ -67,10 +69,15 @@ fn host_min_is_found() -> TestResult {
 /// all-pass env passes: no skip, no partial result, so the golden cannot hide a check that did not run.
 #[test]
 fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
+    // The run plans for the OS it runs on, so a Linux env cannot run on a macOS or Windows leg.
+    if Fixture::load(&fixtures_dir(), "envs/all-pass")?.os() != current_os() {
+        eprintln!("env_harness: skipping all-pass: it is a Linux machine");
+        return Ok(());
+    }
     let run = driver::run_env("all-pass", 1)?;
     assert_eq!(run.report.exit_code, 0);
     let ids: Vec<&str> = run.report.checks.iter().map(|c| c.id.as_str()).collect();
-    assert_eq!(ids.len(), 14, "checks that ran: {ids:?}");
+    assert_eq!(ids.len(), 15, "checks that ran: {ids:?}");
     for check in &run.report.checks {
         assert_eq!(
             check.status,
@@ -177,9 +184,12 @@ fn every_env_gives_its_exit_code_and_its_golden_and_the_same_report_at_any_jobs(
         // 08 section 3: HTML goldens exist for these envs only. The page is rendered from the normalised
         // report, as `render_html` gets it in a run, through a redactor with a fixed tag key.
         if HTML_ENVS.contains(&env.as_str()) {
+            let html = driver::report_html(&golden)?;
+            // The ADR 0003 static checks (CSP, no off-file src or href, one script, the data hash).
+            assert_static_html(&format!("env {env}"), &html)?;
             assert_golden(
                 fixtures_dir().join(format!("envs/{env}/golden/report.html")),
-                driver::report_html(&golden)?,
+                html,
             );
         } else {
             assert!(

@@ -10,10 +10,8 @@
 //!
 //! The run plans for the OS it runs on, so the caller skips an environment of another OS (`main`).
 //!
-//! What the run does not do yet: `--jobs` is recorded but not applied until M1-059, so the harness
-//! writes the requested value into the report's `run.options.jobs`, and the golden does not change when
-//! that lands. A fixture that sets `kube = true` gets no cluster until M1-107, because `rdy run` builds
-//! no Kubernetes client yet.
+//! `--jobs` is applied by the run (M1-059) and recorded in `run.options.jobs`. A fixture that sets
+//! `kube = true` gets no cluster until M1-107, because `rdy run` builds no Kubernetes client yet.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -144,7 +142,7 @@ pub fn run_env(env: &str, jobs: usize) -> Result<EnvRun, String> {
         .code();
     let stdout = String::from_utf8(out).map_err(|e| format!("{name}: stdout is not UTF-8: {e}"))?;
     let stderr = String::from_utf8(err).map_err(|e| format!("{name}: stderr is not UTF-8: {e}"))?;
-    let mut report: Report = serde_json::from_str(&stdout)
+    let report: Report = serde_json::from_str(&stdout)
         .map_err(|e| format!("{name}: stdout is not a report ({e}). stderr:\n{stderr}"))?;
     if code != report.exit_code {
         return Err(format!(
@@ -152,8 +150,6 @@ pub fn run_env(env: &str, jobs: usize) -> Result<EnvRun, String> {
             report.exit_code
         ));
     }
-    // Remove this overwrite when M1-059 (PR #39, `--jobs` applied) is on main: the run then records it.
-    report.run.options.jobs = u32::try_from(jobs).unwrap_or(u32::MAX);
 
     let violations = violations(&report)?;
     // Two things differ between machines and releases: where the checkout is, and the version of rdy.
@@ -192,7 +188,7 @@ fn machine(fixture: &Fixture, env: &str) -> Replay {
                 format!(
                     "Name:\trdy\nUid:\t{id}\t{id}\t{id}\t{id}\nGid:\t{id}\t{id}\t{id}\t{id}\n\
                      CapEff:\t0000000000000000\nCapPrm:\t0000000000000000\nCapAmb:\t0000000000000000\n{}",
-                    own_status_lines(env)
+                    own_status_lines(fixture, env)
                 ),
             )
             .file("/proc/self/auxv", auxv()),
@@ -216,12 +212,16 @@ fn machine(fixture: &Fixture, env: &str) -> Replay {
 /// The lines of the env's own `root/proc/self/status` that are not about who the process is: the CPU and
 /// memory-node affinity that `host.cpu` reads. The identity lines always come from the manifest's `root`,
 /// so a fixture cannot disagree with its own caps.
-fn own_status_lines(env: &str) -> String {
-    let path = fixtures_dir().join(format!("envs/{env}/root/proc/self/status"));
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return String::new();
-    };
-    text.lines()
+fn own_status_lines(fixture: &Fixture, env: &str) -> String {
+    // The merged view: the env's own file wins over its base's, as the loader merges them.
+    let mut dirs = vec![env.to_owned()];
+    dirs.extend(fixture.manifest().base.clone());
+    let text = dirs.iter().find_map(|dir| {
+        std::fs::read_to_string(fixtures_dir().join(format!("envs/{dir}/root/proc/self/status")))
+            .ok()
+    });
+    text.unwrap_or_default()
+        .lines()
         .filter(|line| line.starts_with("Cpus_allowed") || line.starts_with("Mems_allowed"))
         .map(|line| format!("{line}\n"))
         .collect()
@@ -277,10 +277,22 @@ pub fn report_json(report: &Report) -> Result<String, String> {
 
 /// The HTML page of a normalised report, as the golden `report.html` holds it. The redactor's tag key is
 /// fixed, so the page is the same on every run.
+///
+/// The page's redaction block is asserted equal to the one in `report.json`. The run's redactor counts
+/// what it replaced while checks complete, and the final walk over the finished report finds nothing more
+/// (replacing is idempotent), so an env with no secret in it has zero in both and an env that has one
+/// fails here until the counts are carried over.
 pub fn report_html(report: &Report) -> Result<String, String> {
     let redacted = Redactor::new(TagKey::fixed([5; 32]))
         .redact_report(report.clone())
         .map_err(|e| e.to_string())?;
+    let ours = serde_json::to_value(&redacted.redaction).map_err(|e| e.to_string())?;
+    let theirs = serde_json::to_value(&report.redaction).map_err(|e| e.to_string())?;
+    if ours != theirs {
+        return Err(format!(
+            "the page's redaction block {ours} differs from report.json's {theirs}"
+        ));
+    }
     render_html(&redacted).map_err(|e| e.to_string())
 }
 

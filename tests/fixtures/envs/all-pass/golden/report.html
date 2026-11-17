@@ -152,7 +152,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <header>
 <h1><span class="visually-hidden">Verdict: </span><span class="verdict-ready">READY</span></h1>
 <p>For <bdi>acme-platform</bdi> <bdi>&#62;=1.0</bdi>, on <bdi>all-pass.example</bdi></p>
-<p class="summary">0 blocks, 0 warnings, 14 passed</p>
+<p class="summary">0 blocks, 0 warnings, 15 passed</p>
 <p class="no-blocks">No blocks.</p>
 <p>Run <bdi>2026-11-02 09:00:00 UTC</bdi> with rdy <bdi>&#60;version&#62;</bdi> (root)</p>
 <p class="legend">BLOCK: fix before install. WARN: fix if you can. SKIP: rdy could not check it.</p>
@@ -162,7 +162,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <nav aria-label="Sections">
 <p class="label">Jump to:</p>
 <ul>
-<li><a href="#passed">Passed (14)</a></li>
+<li><a href="#passed">Passed (15)</a></li>
 <li><a href="#capabilities">What rdy could use on this machine</a></li>
 <li><a href="#details">Run and spec details</a></li>
 <li><a href="#actions">What rdy read and contacted</a></li>
@@ -173,7 +173,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <h2 id="passed">Passed</h2>
 <article class="check status-pass" id="check-0">
 <h3><span class="status">PASS</span> <span class="id"><bdi>host.os</bdi></span></h3>
-<p class="text"><bdi>Red Hat Enterprise Linux 9.2 (Plow) on x86_64 meets the spec.</bdi></p>
+<p class="text"><bdi>Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.</bdi></p>
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-1">
@@ -242,12 +242,19 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <p class="muted">Took 0 ms</p>
 </article>
 <article class="check status-pass" id="check-12">
+<h3><span class="status">PASS</span> <span class="id"><bdi>host.firewall</bdi></span></h3>
+<p class="text"><bdi>firewalld zone public allows 6443/tcp and 10250/tcp inbound.</bdi></p>
+<p>Requires: root (available)</p>
+<p class="text muted"><bdi>firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read</bdi></p>
+<p class="muted">Took 0 ms</p>
+</article>
+<article class="check status-pass" id="check-13">
 <h3><span class="status">PASS</span> <span class="id"><bdi>net.egress</bdi></span></h3>
 <p class="text"><bdi>1 of 1 endpoints reachable</bdi></p>
 <p>Requires: network access (available)</p>
 <p class="muted">Took 0 ms</p>
 </article>
-<article class="check status-pass" id="check-13">
+<article class="check status-pass" id="check-14">
 <h3><span class="status">PASS</span> <span class="id"><bdi>net.mtu</bdi></span></h3>
 <p class="text"><bdi>`eth0` has MTU 1500.</bdi></p>
 <p class="muted">Took 0 ms</p>
@@ -288,13 +295,13 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <dt>Spec file</dt>
 <dd><bdi>spec.yaml</bdi></dd>
 <dt>Spec SHA-256</dt>
-<dd><bdi>619010169f58aefc8c300a938d872e9da909350de557dfa6ff437e9712f5c991</bdi></dd>
+<dd><bdi>5a59a4ac4a75c9a34123c4125a60f99879d48ee41fcf9f020a89885d1b8201b6</bdi></dd>
 <dt>Signature</dt>
 <dd><bdi>Not signed</bdi></dd>
 <dt>Hostname</dt>
 <dd><bdi>all-pass.example</bdi></dd>
 <dt>Operating system</dt>
-<dd><bdi>Red Hat Enterprise Linux 9.2 (Plow)</bdi></dd>
+<dd><bdi>Red Hat Enterprise Linux 9.3 (Plow)</bdi></dd>
 <dt>Kernel</dt>
 <dd><bdi>5.14.0-362.el9.x86_64</bdi></dd>
 <dt>Architecture</dt>
@@ -326,7 +333,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <tr><th scope="row">13</th><td><bdi>host.os</bdi></td><td>Checked an environment variable name</td><td><bdi>KUBERNETES_SERVICE_HOST</bdi></td><td>Done</td></tr>
 <tr><th scope="row">14</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/meminfo</bdi></td><td>Done, 442 bytes</td></tr>
 <tr><th scope="row">15</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
-<tr><th scope="row">16</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 661 bytes</td></tr>
+<tr><th scope="row">16</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
 <tr><th scope="row">17</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
 <tr><th scope="row">18</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
 <tr><th scope="row">19</th><td><bdi>host.memory</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/memory.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
@@ -339,14 +346,14 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <tr><th scope="row">26</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/devices/system/cpu/online</bdi></td><td>Done, 4 bytes</td></tr>
 <tr><th scope="row">27</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/status</bdi></td><td>Done, 172 bytes</td></tr>
 <tr><th scope="row">28</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
-<tr><th scope="row">29</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 661 bytes</td></tr>
+<tr><th scope="row">29</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
 <tr><th scope="row">30</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
 <tr><th scope="row">31</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
 <tr><th scope="row">32</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/cpu.max</bdi></td><td>Done, 11 bytes</td></tr>
 <tr><th scope="row">33</th><td><bdi>host.cpu</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cpu.max</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
 <tr><th scope="row">34</th><td><bdi>host.cpu</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
 <tr><th scope="row">35</th><td><bdi>host.disk</bdi></td><td>Made a system call</td><td><bdi>statvfs</bdi> <bdi>/var/lib/acme</bdi></td><td>Done</td></tr>
-<tr><th scope="row">36</th><td><bdi>host.disk</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 661 bytes</td></tr>
+<tr><th scope="row">36</th><td><bdi>host.disk</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
 <tr><th scope="row">37</th><td><bdi>host.kernel</bdi></td><td>Made a system call</td><td><bdi>uname</bdi></td><td>Done</td></tr>
 <tr><th scope="row">38</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/etc/os-release</bdi></td><td>Done, 192 bytes</td></tr>
 <tr><th scope="row">39</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/proc/modules</bdi></td><td>Done, 208 bytes</td></tr>
@@ -354,7 +361,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <tr><th scope="row">41</th><td><bdi>host.kernel</bdi></td><td>Read a file</td><td><bdi>/lib/modules/5.14.0-362.el9.x86_64/modules.builtin</bdi></td><td>Done, 59 bytes</td></tr>
 <tr><th scope="row">42</th><td><bdi>host.kernel</bdi></td><td>Looked at a path</td><td><bdi>/sys/kernel/btf/vmlinux</bdi></td><td>Done, 26 bytes</td></tr>
 <tr><th scope="row">43</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/self/cgroup</bdi></td><td>Done, 45 bytes</td></tr>
-<tr><th scope="row">44</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 661 bytes</td></tr>
+<tr><th scope="row">44</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/proc/self/mountinfo</bdi></td><td>Done, 665 bytes</td></tr>
 <tr><th scope="row">45</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cgroup.controllers</bdi></td><td>Done, 44 bytes</td></tr>
 <tr><th scope="row">46</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/cgroup.subtree_control</bdi></td><td>Done, 19 bytes</td></tr>
 <tr><th scope="row">47</th><td><bdi>host.cgroups</bdi></td><td>Read a file</td><td><bdi>/sys/fs/cgroup/system.slice/acme.slice/acme-api.service/cgroup.controllers</bdi></td><td>Done, 19 bytes</td></tr>
@@ -409,20 +416,30 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <tr><th scope="row">96</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/733/comm</bdi></td><td>Done, 5 bytes</td></tr>
 <tr><th scope="row">97</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/901/comm</bdi></td><td>Done, 11 bytes</td></tr>
 <tr><th scope="row">98</th><td><bdi>host.security_agents</bdi></td><td>Read a file</td><td><bdi>/proc/902/comm</bdi></td><td>Done, 8 bytes</td></tr>
-<tr><th scope="row">99</th><td><bdi>host.container_runtime</bdi></td><td>Read a file</td><td><bdi>/var/lib/kubelet/config.yaml</bdi></td><td>Done, 168 bytes</td></tr>
+<tr><th scope="row">99</th><td><bdi>host.container_runtime</bdi></td><td>Read a file</td><td><bdi>/var/lib/kubelet/config.yaml</bdi></td><td>Done, 120 bytes</td></tr>
 <tr><th scope="row">100</th><td><bdi>host.container_runtime</bdi></td><td>Checked an environment variable name</td><td><bdi>XDG_RUNTIME_DIR</bdi></td><td>Done</td></tr>
 <tr><th scope="row">101</th><td><bdi>host.container_runtime</bdi></td><td>Looked at a path</td><td><bdi>/run/containerd/containerd.sock</bdi></td><td>Done, 0 bytes</td></tr>
 <tr><th scope="row">102</th><td><bdi>host.container_runtime</bdi></td><td>Ran a command</td><td><bdi>containerd</bdi> <bdi>--version</bdi></td><td>Done, exit code 0</td></tr>
 <tr><th scope="row">103</th><td><bdi>host.container_runtime</bdi></td><td>Read a file</td><td><bdi>/etc/containerd/config.toml</bdi></td><td>Done, 536 bytes</td></tr>
 <tr><th scope="row">104</th><td><bdi>host.container_runtime</bdi></td><td>Listed a folder</td><td><bdi>/etc/systemd/system/containerd.service.d</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
-<tr><th scope="row">105</th><td><bdi>net.egress</bdi></td><td>Looked up a host name</td><td><bdi>web.acme.test</bdi></td><td>Done</td></tr>
-<tr><th scope="row">106</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>web.acme.test</bdi>:<bdi>8080</bdi></td><td>Done</td></tr>
-<tr><th scope="row">107</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/proc/net/route</bdi></td><td>Done, 175 bytes</td></tr>
-<tr><th scope="row">108</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/proc/net/ipv6_route</bdi></td><td>Done, 144 bytes</td></tr>
-<tr><th scope="row">109</th><td><bdi>net.mtu</bdi></td><td>Listed a folder</td><td><bdi>/sys/class/net</bdi></td><td>Done, 2 entries</td></tr>
-<tr><th scope="row">110</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/mtu</bdi></td><td>Done, 5 bytes</td></tr>
-<tr><th scope="row">111</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/operstate</bdi></td><td>Done, 3 bytes</td></tr>
-<tr><th scope="row">112</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/type</bdi></td><td>Done, 2 bytes</td></tr>
+<tr><th scope="row">105</th><td><bdi>host.firewall</bdi></td><td>Looked at a path</td><td><bdi>/run/firewalld</bdi></td><td>Done, 0 bytes</td></tr>
+<tr><th scope="row">106</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--state</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">107</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--get-active-zones</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">108</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/proc/net/route</bdi></td><td>Done, 227 bytes</td></tr>
+<tr><th scope="row">109</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/proc/net/ipv6_route</bdi></td><td>Done, 144 bytes</td></tr>
+<tr><th scope="row">110</th><td><bdi>host.firewall</bdi></td><td>Ran a command</td><td><bdi>firewall-cmd</bdi> <bdi>--list-all</bdi> <bdi>--zone=public</bdi></td><td>Done, exit code 0</td></tr>
+<tr><th scope="row">111</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/firewalld/services/ssh.xml</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">112</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/usr/lib/firewalld/services/ssh.xml</bdi></td><td>Done, 217 bytes</td></tr>
+<tr><th scope="row">113</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/firewalld/direct.xml</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">114</th><td><bdi>host.firewall</bdi></td><td>Read a file</td><td><bdi>/etc/ufw/ufw.conf</bdi></td><td>Failed: <bdi>not found. Fix: check that the file, directory or program exists on this machine</bdi></td></tr>
+<tr><th scope="row">115</th><td><bdi>net.egress</bdi></td><td>Looked up a host name</td><td><bdi>web.acme.test</bdi></td><td>Done</td></tr>
+<tr><th scope="row">116</th><td><bdi>net.egress</bdi></td><td>Opened a connection</td><td><bdi>web.acme.test</bdi>:<bdi>8080</bdi></td><td>Done</td></tr>
+<tr><th scope="row">117</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/proc/net/route</bdi></td><td>Done, 227 bytes</td></tr>
+<tr><th scope="row">118</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/proc/net/ipv6_route</bdi></td><td>Done, 144 bytes</td></tr>
+<tr><th scope="row">119</th><td><bdi>net.mtu</bdi></td><td>Listed a folder</td><td><bdi>/sys/class/net</bdi></td><td>Done, 2 entries</td></tr>
+<tr><th scope="row">120</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/mtu</bdi></td><td>Done, 5 bytes</td></tr>
+<tr><th scope="row">121</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/operstate</bdi></td><td>Done, 3 bytes</td></tr>
+<tr><th scope="row">122</th><td><bdi>net.mtu</bdi></td><td>Read a file</td><td><bdi>/sys/class/net/eth0/type</bdi></td><td>Done, 2 bytes</td></tr>
 </tbody>
 </table>
 </section>
@@ -430,7 +447,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
 <footer>
 <p>rdy <bdi>&#60;version&#62;</bdi></p>
 </footer>
-<script type="application/json" id="rdy-result" data-sha256="e7a139b942cc2d73bcc31ed2d7e590e9ba321b78f31ef7414157d62c08ca29bb">{
+<script type="application/json" id="rdy-result" data-sha256="6e1707a35b3756c3ca3427c75a8b57f0f8a492dea7897d7e282cf17c2e43d38d">{
   "api_version": "rdy/v1",
   "kind": "Report",
   "producer": {
@@ -456,9 +473,9 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
   "spec": {
     "product": "acme-platform",
     "version": "\u003e=1.0",
-    "sha256": "619010169f58aefc8c300a938d872e9da909350de557dfa6ff437e9712f5c991",
+    "sha256": "5a59a4ac4a75c9a34123c4125a60f99879d48ee41fcf9f020a89885d1b8201b6",
     "file_name": "spec.yaml",
-    "size_bytes": 1598,
+    "size_bytes": 1672,
     "serial": null,
     "expires": null,
     "contact": null,
@@ -480,8 +497,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
     "os": {
       "family": "linux",
       "id": "rhel",
-      "version": "9.2",
-      "pretty_name": "Red Hat Enterprise Linux 9.2 (Plow)"
+      "version": "9.3",
+      "pretty_name": "Red Hat Enterprise Linux 9.3 (Plow)"
     },
     "kernel": "5.14.0-362.el9.x86_64",
     "arch": "x86_64",
@@ -514,8 +531,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
   "verdict_reason": null,
   "exit_code": 0,
   "summary": {
-    "total": 14,
-    "pass": 14,
+    "total": 15,
+    "pass": 15,
     "warn": 0,
     "block": 0,
     "skipped": 0,
@@ -534,7 +551,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "severity": "block",
       "status": "pass",
       "bucket": "passed",
-      "message": "Red Hat Enterprise Linux 9.2 (Plow) on x86_64 meets the spec.",
+      "message": "Red Hat Enterprise Linux 9.3 (Plow) on x86_64 meets the spec.",
       "fix": null,
       "fix_source": null,
       "observed": {
@@ -549,9 +566,9 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
             "fedora"
           ],
           "name": "Red Hat Enterprise Linux",
-          "pretty_name": "Red Hat Enterprise Linux 9.2 (Plow)",
+          "pretty_name": "Red Hat Enterprise Linux 9.3 (Plow)",
           "source": "/etc/os-release",
-          "version_id": "9.2"
+          "version_id": "9.3"
         },
         "wsl": false
       },
@@ -1180,6 +1197,49 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "duration_ms": 0
     },
     {
+      "key": "host.firewall",
+      "id": "host.firewall",
+      "name": null,
+      "family": "host",
+      "severity": "block",
+      "status": "pass",
+      "bucket": "passed",
+      "message": "firewalld zone public allows 6443/tcp and 10250/tcp inbound.",
+      "fix": null,
+      "fix_source": null,
+      "observed": {
+        "active": [
+          {
+            "interface": "eth0",
+            "manager": "firewalld",
+            "ports": "[truncated]",
+            "zone": "public"
+          }
+        ]
+      },
+      "expected": {
+        "open_inbound": [
+          6443,
+          10250
+        ]
+      },
+      "needs": [
+        {
+          "need": "root",
+          "name": null,
+          "hard": false,
+          "met": true
+        }
+      ],
+      "partial": null,
+      "truncated": true,
+      "notes": [
+        "firewalld policies, direct rules added only at runtime and rules written outside firewalld are not read"
+      ],
+      "started_ms": 0,
+      "duration_ms": 0
+    },
+    {
       "key": "net.egress",
       "id": "net.egress",
       "name": null,
@@ -1428,7 +1488,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "bytes": 661,
+      "bytes": 665,
       "path": "/proc/self/mountinfo",
       "truncated": false
     },
@@ -1563,7 +1623,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "bytes": 661,
+      "bytes": 665,
       "path": "/proc/self/mountinfo",
       "truncated": false
     },
@@ -1636,7 +1696,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "bytes": 661,
+      "bytes": 665,
       "path": "/proc/self/mountinfo",
       "truncated": false
     },
@@ -1721,7 +1781,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "bytes": 661,
+      "bytes": 665,
       "path": "/proc/self/mountinfo",
       "truncated": false
     },
@@ -2322,7 +2382,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "bytes": 168,
+      "bytes": 120,
       "path": "/var/lib/kubelet/config.yaml",
       "truncated": false
     },
@@ -2384,6 +2444,128 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
     },
     {
       "seq": 105,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "stat",
+      "outcome": "ok",
+      "bytes": 0,
+      "path": "/run/firewalld"
+    },
+    {
+      "seq": 106,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "exec",
+      "outcome": "ok",
+      "argv": [
+        "--state"
+      ],
+      "exit": 0,
+      "form": "state",
+      "program": "firewall-cmd",
+      "stdout_bytes": 8,
+      "truncated": false
+    },
+    {
+      "seq": 107,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "exec",
+      "outcome": "ok",
+      "argv": [
+        "--get-active-zones"
+      ],
+      "exit": 0,
+      "form": "active-zones",
+      "program": "firewall-cmd",
+      "stdout_bytes": 55,
+      "truncated": false
+    },
+    {
+      "seq": 108,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 227,
+      "path": "/proc/net/route",
+      "truncated": false
+    },
+    {
+      "seq": 109,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 144,
+      "path": "/proc/net/ipv6_route",
+      "truncated": false
+    },
+    {
+      "seq": 110,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "exec",
+      "outcome": "ok",
+      "argv": [
+        "--list-all",
+        "--zone=public"
+      ],
+      "exit": 0,
+      "form": "list-all",
+      "program": "firewall-cmd",
+      "stdout_bytes": 248,
+      "truncated": false
+    },
+    {
+      "seq": 111,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/etc/firewalld/services/ssh.xml"
+    },
+    {
+      "seq": 112,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "ok",
+      "bytes": 217,
+      "path": "/usr/lib/firewalld/services/ssh.xml",
+      "truncated": false
+    },
+    {
+      "seq": 113,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/etc/firewalld/direct.xml"
+    },
+    {
+      "seq": 114,
+      "check": "host.firewall",
+      "at_ms": 0,
+      "duration_ms": 0,
+      "kind": "read",
+      "outcome": "failed",
+      "error": "not found. Fix: check that the file, directory or program exists on this machine",
+      "path": "/etc/ufw/ufw.conf"
+    },
+    {
+      "seq": 115,
       "check": "net.egress",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2393,7 +2575,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "host": "web.acme.test"
     },
     {
-      "seq": 106,
+      "seq": 116,
       "check": "net.egress",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2405,18 +2587,18 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "via_proxy": null
     },
     {
-      "seq": 107,
+      "seq": 117,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
       "kind": "read",
       "outcome": "ok",
-      "bytes": 175,
+      "bytes": 227,
       "path": "/proc/net/route",
       "truncated": false
     },
     {
-      "seq": 108,
+      "seq": 118,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2427,7 +2609,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 109,
+      "seq": 119,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2437,7 +2619,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "path": "/sys/class/net"
     },
     {
-      "seq": 110,
+      "seq": 120,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2448,7 +2630,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 111,
+      "seq": 121,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,
@@ -2459,7 +2641,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--rule);
       "truncated": false
     },
     {
-      "seq": 112,
+      "seq": 122,
       "check": "net.mtu",
       "at_ms": 0,
       "duration_ms": 0,

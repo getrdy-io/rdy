@@ -1,5 +1,6 @@
 {
   "dirs": [
+    "run/firewalld",
     "run/systemd/system"
   ],
   "symlinks": {

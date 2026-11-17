@@ -26,8 +26,10 @@ use jsonschema::Validator;
 use rdy_engine::check::Os;
 use rdy_engine::probe::{MAX_READ, NativeCall, ProbeError};
 use rdy_engine::redact::{RedactedReport, Redactor, TagKey};
-use rdy_engine::report::{json_bytes, read_report, render_html, write_json};
-use rdy_engine::testing::{Replay, TestRun, fixtures_dir, golden::assert_golden, normalize};
+use rdy_engine::report::{json_bytes, render_html, write_json};
+use rdy_engine::testing::{
+    Replay, TestRun, assert_static_html, fixtures_dir, golden::assert_golden, normalize,
+};
 use rdy_spec::result::Report;
 use serde_json::{Value, json};
 
@@ -41,9 +43,6 @@ const CASES: [(&str, &str); 3] = [
 ];
 
 const OPEN: &str = "<script type=\"application/json\" id=\"rdy-result\" data-sha256=\"";
-
-const CSP: &str = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; \
-                   style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'\">";
 
 /// A hostname that tries to close the element, open another and end the line in a script.
 const HOSTILE: &str = "</script><img onerror=x>&amp;\u{2028}end</SCRIPT x><!--<ScRiPt>\u{2029}";
@@ -124,14 +123,6 @@ fn embedded(html: &str) -> TestResult<(String, String)> {
     Ok((hash, html[text_start..text_start + end].to_owned()))
 }
 
-/// The value of attribute `name` in the start tag text `tag`, if it has one.
-fn attribute(tag: &str, name: &str) -> Option<String> {
-    let needle = format!(" {name}=\"");
-    let start = tag.find(&needle)? + needle.len();
-    let end = tag[start..].find('"')?;
-    Some(tag[start..start + end].to_owned())
-}
-
 /// Whether `lower` (already lower-cased) has a `src` attribute: the word `src` that starts at a boundary
 /// (not after a letter, digit, `-` or `_`) and is followed by `=` after any whitespace. Runs of tabs,
 /// newlines, form feeds and spaces count as one space first, so `<img\n src\t=` is found.
@@ -156,124 +147,6 @@ fn has_src_attribute(lower: &str) -> bool {
             .next_back()
             .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     })
-}
-
-/// The hrefs a page may hold besides `#id` links, written out in full. The footer links of 07 D.4 are
-/// added here, exactly, when the page gets a footer. Until then the page links nowhere outside itself, and
-/// a new off-file `href` fails every page check.
-const OUTSIDE_HREFS: [&str; 0] = [];
-
-/// The static checks of ADR 0003 on one page. `what` names the page in a failure.
-///
-/// The page is lower-cased first, so `<LINK` and `URL(` count. The `<svg` ban below is for text from the
-/// machine; ADR 0003's inline logo is not on the page yet, and when it lands this check names it.
-fn assert_static(what: &str, html: &str) -> TestResult {
-    assert!(html.starts_with("<!DOCTYPE html>"), "{what}: no doctype");
-    assert!(html.contains("<html lang=\"en\">"), "{what}: no lang=en");
-    assert_eq!(html.matches(CSP).count(), 1, "{what}: the CSP is not exact");
-    assert_eq!(
-        html.matches("Content-Security-Policy").count(),
-        1,
-        "{what}: a second CSP"
-    );
-    let head_at = html.find("<head>").ok_or("no head")?;
-    let csp_at = html.find(CSP).ok_or("no csp")?;
-    let style_at = html.find("<style").ok_or("no style")?;
-    let head_end = html.find("</head>").ok_or("no head end")?;
-    assert!(
-        head_at < csp_at && csp_at < style_at && style_at < head_end,
-        "{what}: the CSP is not inside the head before the style"
-    );
-    let body_at = html.find("<body>").ok_or("no body")?;
-    assert!(head_end < body_at, "{what}: the head ends after the body");
-
-    let lower = html.to_ascii_lowercase();
-    let (head, body) = lower.split_at(lower.find("<body>").ok_or("no body")?);
-    for forbidden in [
-        "<link",
-        "<script",
-        "@import",
-        "url(",
-        "srcset",
-        "formaction",
-        "<base",
-        "<area",
-        "xlink:href",
-        "http://",
-        "https://",
-    ] {
-        assert!(
-            !head.contains(forbidden),
-            "{what}: {forbidden:?} is in the head"
-        );
-    }
-    for forbidden in [
-        "<link",
-        "srcset",
-        "formaction",
-        "<base",
-        "<area",
-        "xlink:href",
-        "url(",
-    ] {
-        assert!(
-            !body.contains(forbidden),
-            "{what}: {forbidden:?} is in the body"
-        );
-    }
-    assert!(!has_src_attribute(&lower), "{what}: a src attribute");
-    // Text from the machine is escaped, so none of it opens a tag that loads or runs anything.
-    for forbidden in [
-        "<img",
-        "<iframe",
-        "<object",
-        "<embed",
-        "<form",
-        "<svg",
-        "javascript:",
-        "http-equiv=\"refresh",
-    ] {
-        assert!(
-            !lower.contains(forbidden),
-            "{what}: {forbidden:?} is on the page"
-        );
-    }
-    // Every anchor is `#id` or one of the exact outside links, which say `rel="noopener noreferrer"`.
-    let mut rest = lower.as_str();
-    while let Some(at) = rest.find("<a") {
-        rest = &rest[at + 2..];
-        match rest.chars().next() {
-            Some(c) if c.is_ascii_whitespace() => {}
-            Some(c) if c.is_ascii_alphanumeric() || c == '-' => continue,
-            other => panic!("{what}: an anchor tag continues with {other:?}"),
-        }
-        let tag = format!(" {}", &rest[..rest.find('>').unwrap_or(rest.len())]);
-        let tag = tag.replace(['\t', '\n', '\r', '\u{c}'], " ");
-        let href = attribute(&tag, "href").ok_or("a link has no href")?;
-        if !href.starts_with('#') {
-            assert!(
-                OUTSIDE_HREFS.contains(&href.as_str()),
-                "{what}: an outside link that is not allowed: {href}"
-            );
-            assert_eq!(
-                attribute(&tag, "rel").as_deref(),
-                Some("noopener noreferrer"),
-                "{what}: an outside link has no rel: {tag}"
-            );
-        }
-    }
-    // One script element, case blind, and it is the data block.
-    assert_eq!(lower.matches("<script").count(), 1, "{what}: scripts");
-    assert_eq!(lower.matches("</script").count(), 1, "{what}: script ends");
-    assert!(html[body_at..].contains(OPEN), "{what}: no data block");
-    let (hash, text) = embedded(html)?;
-    assert_eq!(hash, sha256_hex(text.as_bytes()), "{what}: hash");
-    assert!(
-        !text.contains(['<', '>', '&', '\u{2028}', '\u{2029}']),
-        "{what}: the data block is not escaped"
-    );
-    read_report(text.as_bytes())?;
-    Ok(())
 }
 
 // ---- JSON ----
@@ -370,7 +243,7 @@ fn render_html_on_each_result_fixture_matches_its_golden() -> TestResult {
     for (stem, golden) in CASES {
         let report = redact(fixture_doc(stem)?)?;
         let html = render_html(&report)?;
-        assert_static(stem, &html)?;
+        assert_static_html(stem, &html)?;
         assert_golden(golden_dir().join(format!("{golden}.html")), html.as_bytes());
         // The page carries the bytes of the JSON golden, and the hash is theirs.
         let json = std::fs::read(golden_dir().join(format!("{golden}.json")))?;
@@ -390,7 +263,7 @@ fn every_golden_page_passes_the_static_checks() -> TestResult {
         let path = entry?.path();
         if path.extension().and_then(|e| e.to_str()) == Some("html") {
             let html = std::fs::read_to_string(&path)?;
-            assert_static(&path.display().to_string(), &html)?;
+            assert_static_html(&path.display().to_string(), &html)?;
             seen.push(
                 path.file_name()
                     .and_then(|n| n.to_str())
@@ -426,7 +299,7 @@ fn a_hostile_hostname_round_trips_on_each_result_fixture() -> TestResult {
         doc["host"]["hostname"] = json!(HOSTILE);
         let report = redact(doc)?;
         let html = render_html(&report)?;
-        assert_static(stem, &html)?;
+        assert_static_html(stem, &html)?;
         let (_, text) = embedded(&html)?;
         let back: Value = serde_json::from_str(&text)?;
         assert_eq!(back["host"]["hostname"], HOSTILE, "{stem}");
@@ -757,7 +630,7 @@ async fn a_fixture_run_with_a_machine_id_cut_secrets_and_a_known_secret_leaves_n
     }
     assert!(html.contains("[REDACTED:known_secret"));
     assert!(html.contains("web-01 token="));
-    assert_static("leaky run", &html)?;
+    assert_static_html("leaky run", &html)?;
     assert_valid("leaky run", &json)?;
     Ok(())
 }
@@ -772,7 +645,7 @@ async fn the_page_of_the_run_with_secrets_matches_its_golden() -> TestResult {
     for needle in &needles {
         assert!(!html.contains(needle.as_str()), "{needle} is on the page");
     }
-    assert_static("leaky run", &html)?;
+    assert_static_html("leaky run", &html)?;
     assert_golden(
         golden_dir().join("results-secrets-redacted.html"),
         html.as_bytes(),

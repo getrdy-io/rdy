@@ -59,6 +59,9 @@ checks:
     cgroup_driver: systemd
     storage_driver: overlay2
     severity: block
+  - id: host.firewall
+    open_inbound: [6443, 10250]
+    severity: block
   - id: net.egress
     endpoints: ["web.acme.test:8080"]
     severity: block
