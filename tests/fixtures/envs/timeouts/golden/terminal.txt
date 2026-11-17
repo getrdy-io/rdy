@@ -7,7 +7,7 @@ Every report from this run is marked UNSIGNED SPEC.
 rdy <version>
 spec    acme-platform >=1.0   (spec.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
-host    timeouts.example   linux   x86_64
+host    timeouts.example   rhel 9.2   x86_64
 user    uid 1000 (not root)
 
   BLOCK    net.egress  1 of 1 endpoints unreachable: hole.acme.test:8080 (blackhole)

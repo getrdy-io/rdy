@@ -1,6 +1,6 @@
 schema = 1
 name = "timeouts"
-summary = "An NFS mount whose statvfs never returns and an endpoint that never answers; both checks time out"
+summary = "An NFS mount whose statvfs never returns: host.disk times out, and net.egress blocks on a black-hole endpoint"
 origin = "hand"
 os = "linux"
 arch = "x86_64"

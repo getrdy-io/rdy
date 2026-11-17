@@ -110,9 +110,12 @@ fn all_pass_passes_every_check_and_memory_carries_its_note() -> TestResult {
 ///
 /// A hung `statvfs` ends `host.disk` in `timeout` at the facade's 5 s limit. A black-hole endpoint does not
 /// give `timeout`: `net.egress` cuts each endpoint to its own budget by design (03), so the check returns
-/// a bounded `block` that names the black hole. The whole run ends inside `deadline_ms` in virtual time
-/// (the report's own durations, read before the golden normaliser zeroes them), so no real sleep and no
-/// real socket is involved, and a slow runner cannot change the result.
+/// a bounded `block` that names the black hole. The run ends inside `deadline_ms` in virtual time. The end
+/// is read from the checks' own `started_ms + duration_ms`, which come from the paused tokio clock, before
+/// the golden normaliser zeroes them (`run.duration_ms` is wall clock and proves nothing here). No real
+/// sleep and no real socket is involved, so a slow runner cannot change the result. At `jobs = 1` the
+/// checks run one after the other, so virtual time is the sum (5 s, then the black hole's 3 s). At
+/// `jobs = 8` both start at once.
 #[test]
 fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestResult {
     use rdy_spec::result::Status;
@@ -152,13 +155,29 @@ fn timeouts_env_ends_inside_its_deadline_in_virtual_time_at_any_jobs() -> TestRe
             egress.message
         );
         assert!(egress.message.contains("blackhole"), "{}", egress.message);
-        // Virtual time: the paused clock jumped to each timer, so the run took the longest wait, not the sum
-        // of the waits, and never reached the deadline.
+        let end = report
+            .checks
+            .iter()
+            .map(|c| c.started_ms + c.duration_ms)
+            .max()
+            .unwrap_or(0);
+        let deadline = report.run.options.deadline_ms;
         assert!(
-            report.run.duration_ms <= 20_000,
-            "jobs {jobs}: the run took {} ms of virtual time, past deadline_ms",
-            report.run.duration_ms
+            (5000..=deadline).contains(&end),
+            "jobs {jobs}: the checks ended at {end} ms of virtual time, deadline_ms is {deadline}"
         );
+        // The jobs differ: one at a time the black hole waits behind the hung statvfs, eight at once both
+        // start together. Not asserted against 5000: the scheduler's origin is a real instant.
+        if jobs == 1 {
+            assert!(egress.started_ms > 0, "jobs 1: net.egress started at 0 ms");
+        } else {
+            assert!(
+                disk.started_ms < 100 && egress.started_ms < 100,
+                "jobs {jobs}: started at {} and {} ms",
+                disk.started_ms,
+                egress.started_ms
+            );
+        }
         assert!(!report.interrupted, "jobs {jobs}");
         assert_eq!(report.verdict.as_str(), "not_ready", "jobs {jobs}");
         assert_eq!(report.exit_code, 2, "jobs {jobs}");
