@@ -493,7 +493,7 @@ the corrections log of `11-backlog.md`.
   regenerates its goldens (4 h); the item moves to M1-117 if M1-117 is not merged first. M1-175 gets a
   missing comma (PR #79 review). No test-pinned document changed.
 - **Correction-50, `--key` needs a signature, the unknown-key line, the proxy carries of M1-097, the `timeouts`
-  env, and one M2 ticket.** From the reviews of PR #84 (M1-126) and of the M1-097 and M1-119 builds.
+  env, and M2-037.** From the reviews of PR #84 (M1-126) and of the M1-097 and M1-119 builds.
   Correction-49 is PR #85. A `--key` run of a spec with no signature exits 64 even with `--allow-unsigned`,
   with its own first line (01 section 4.7). The `spec_key_unknown` line shows the key id and no fingerprint,
   because the sidecar carries only the key id, and its fix says to compare the vendor's fingerprint, because
@@ -506,5 +506,6 @@ the corrections log of `11-backlog.md`.
   only the hung statvfs gives Timeout; the black-hole endpoint gives a bounded Block, because net.egress cuts
   each endpoint to its own budget. k8s.version never calls `/version`, so M1-119 proves a slow cluster at
   family level by delaying `GET /apis`, and the slow `/version` case in the CLI env moves to M1-107. 08 says
-  the same. The real-time `Fake::Block` test is M1-051's and is built. New M2-131 (qa-engineer) takes the
-  cancellation tests of 08 section 5. 07 C.5 changed, but no test reads it; no 01 block changed.
+  the same. The real-time `Fake::Block` test is M1-051's and is built. M2-037 takes the cancellation tests of
+  08 section 5: running checks marked cancelled, the drop guard that counts live futures, and the verdict
+  rule (4 h). 07 C.5 changed, but no test reads it; no 01 block changed.

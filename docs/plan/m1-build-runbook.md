@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-50: M1 181 tickets, 400.5 h, 336 h core; M2 131 tickets, 466 h; all milestones 412 tickets,
-1380 h, 1315.5 h core.
+correction-50: M1 181 tickets, 400.5 h, 336 h core; M2 130 tickets, 465.5 h; all milestones 411 tickets,
+1379.5 h, 1315 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -250,7 +250,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - 50: `--key` needs a signature; the unknown-key line shows the key id, not a fingerprint (01, 07 C.5). The
   `--allow-unsigned` page is M1-181's. 05 Surface 2 lists the `--key` file swap for M1-132. M1-098 builds
   the `auto` "direct works, proxy fails" sentence. M1-107 never uses an `HTTP_PROXY` proxy for https and
-  takes the slow `/version` case of `timeouts`. The black hole gives Block. New M2-131: cancellation tests.
+  takes the slow `/version` case of `timeouts`. The black hole gives Block. M2-037 takes the cancellation tests (4 h).
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -264,7 +264,7 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - The next free ADR is 0047. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
   security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
   in #78 (M1-165).
-- The next ticket ids are M1-182 and M2-132, and the next correction is 51 (49 is in #85).
+- The next ticket ids are M1-182 and M2-131, and the next correction is 51 (49 is in #85).
 - The next plan-correction row is PC-54. PC-50 to PC-52 are on main, from M1-176, and PC-53 from correction-48.
 
 **Process lessons from this session.**
@@ -401,8 +401,6 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
       `cni.toml` entries still marked `verified = false` against a live cluster (#78 reviews).
   - Follow-ups that correction-48 gave ids:
     - M2-130: a `RunHooks` OS override, so the env harness runs every env on every leg (#80 review).
-  - Follow-ups that correction-50 gave ids:
-    - M2-131: the cancellation tests of 08 section 5 (M1-119 review).
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
     "correction-50".
   - M1-107 (correction-48): if #80 (M1-117) is merged, add k8s.version and the `api/` tree to `all-pass`,
