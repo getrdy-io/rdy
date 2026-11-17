@@ -662,7 +662,8 @@ async fn without_the_network_the_check_ends_with_a_missing_need_and_opens_no_soc
 /// The server notes a handshake a moment after the client has closed.
 async fn settle(web: &HttpServer) {
     for _ in 0..3000 {
-        if web.handshakes() >= 1 && !web.sni_seen().is_empty() {
+        // `finished` comes after the last byte the server reads, so `application_bytes` is final.
+        if web.handshakes() >= 1 && !web.sni_seen().is_empty() && web.finished() >= 1 {
             return;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -728,6 +729,7 @@ async fn pinned_leaf_without_its_key(version: TlsVersion) {
     let ran = run_with(run, extra).await;
     let finding = ran.finding();
     assert_eq!(ran.host(0)["class"], "not_tested", "{}", finding.message);
+    assert_eq!(ran.host(0)["reason"], "the TLS handshake did not complete");
     assert!(
         ran.host(0).get("pin_sha256_matches").is_none(),
         "{}",

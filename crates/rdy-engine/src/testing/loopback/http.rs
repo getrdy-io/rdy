@@ -213,6 +213,7 @@ impl HttpOptions {
 #[derive(Debug, Default)]
 struct Shared {
     accepted: AtomicUsize,
+    finished: AtomicUsize,
     handshakes: AtomicUsize,
     application_bytes: AtomicUsize,
     sni: Mutex<Vec<Option<String>>>,
@@ -288,6 +289,13 @@ impl HttpServer {
         self.shared.accepted.load(Ordering::SeqCst)
     }
 
+    /// Connections the server has finished with, after the last byte it will read from them. A test
+    /// waits on it before it reads `application_bytes`, which is counted while a connection is read.
+    #[must_use]
+    pub fn finished(&self) -> usize {
+        self.shared.finished.load(Ordering::SeqCst)
+    }
+
     /// TLS handshakes that finished.
     #[must_use]
     pub fn handshakes(&self) -> usize {
@@ -330,8 +338,19 @@ async fn handle(
     date: String,
 ) {
     shared.accepted.fetch_add(1, Ordering::SeqCst);
+    serve_one(stream, &shared, acceptor, &reply, &date).await;
+    shared.finished.fetch_add(1, Ordering::SeqCst);
+}
+
+async fn serve_one(
+    stream: TcpStream,
+    shared: &Shared,
+    acceptor: Option<TlsAcceptor>,
+    reply: &Reply,
+    date: &str,
+) {
     match acceptor {
-        None => exchange(stream, &shared, &reply, &date).await,
+        None => exchange(stream, shared, reply, date).await,
         Some(acceptor) => {
             let Ok(tls) = acceptor.accept(stream).await else {
                 return;
@@ -343,7 +362,7 @@ async fn handle(
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(name);
-            exchange(tls, &shared, &reply, &date).await;
+            exchange(tls, shared, reply, date).await;
         }
     }
 }

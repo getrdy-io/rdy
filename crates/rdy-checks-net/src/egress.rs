@@ -278,15 +278,16 @@ impl EgressCheck {
         if let Some(fix) = fixes(os, &unreachable) {
             finding = finding.with_fix(fix);
         }
+        // A handshake that finished says nothing about revocation. Said once per result (SF-01), first, because a report keeps only the first
+        // notes and an endpoint list can fill the rest.
+        if probed.iter().any(|p| p.tls.is_some()) {
+            finding = finding.with_note(REVOCATION_NOTE);
+        }
         for warn in &warns {
             finding = finding.with_note(warn.clone());
         }
         for note in notes {
             finding = finding.with_note(note);
-        }
-        // A handshake that finished says nothing about revocation. Said once per result (SF-01).
-        if probed.iter().any(|p| p.tls.is_some()) {
-            finding = finding.with_note(REVOCATION_NOTE);
         }
         if !not_tried.is_empty() {
             // One sentence per reason, in the order the reasons first appear.

@@ -777,10 +777,16 @@ async fn forged_handshake_fails(version: TlsVersion) {
         .tls_chain(&target(&at), Route::Direct)
         .await
         .expect_err("no chain from a server without the leaf's key");
+    // The failure is the signature check, not a missing scheme or a refused certificate.
     assert!(
-        matches!(error, ProbeError::Net(NetFailure::TlsFailed { .. })),
+        matches!(
+            error,
+            ProbeError::Net(NetFailure::TlsFailed { reason, .. })
+                if reason == "the server's certificate could not be used to check its signature"
+        ),
         "{error:?}"
     );
+    assert_eq!(server.accepted(), 1);
     assert_eq!(server.application_bytes(), 0);
 }
 

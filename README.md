@@ -241,7 +241,7 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
 
 - Registering the Kubernetes checks in `rdy run`.
 - The HTML report from `rdy run`.
-- The egress HTTP request and proxy path, the proxy check, TLS interception evidence, and Kubernetes nodes.
+- The egress path through a proxy, the proxy check, and Kubernetes nodes.
 
 **Before 0.1.0**
 
