@@ -373,7 +373,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-178 | todo | | `SysctlName::canonical` by the first separator | added 2026-10-30 (correction-34, PR #20 review)
 
-- M1-179 | PR #TBD | | none
+- M1-179 | [#70](https://github.com/getrdy-io/rdy/pull/70) | 2026-11-17 | none
 
 - M1-180 | todo | | `rdy run` fills `report.host.os` from os-release | added 2026-11-06 (correction-41, PR #42 reviews)
 
