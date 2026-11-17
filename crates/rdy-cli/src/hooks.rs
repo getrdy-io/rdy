@@ -46,13 +46,17 @@ pub struct RunHooks {
     /// `None` reads them from the process, which is what the binary does. A test pins it, so the
     /// developer's own variables cannot change a `--color auto` check.
     pub style_env: Option<crate::style::StyleEnv>,
+    /// Makes the write of the report files fail with "disk full" after the verdict exists, so a test
+    /// can reach the exit 70 path of 07 section 4.1 without a full disk. It has no effect with
+    /// `--no-report`. `false` (the default) writes the files.
+    pub fail_files: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::RunHooks;
 
-    /// The default is "no hook": every field is `None`, so the shipped binary (which passes the default
+    /// The default is "no hook": every field is `None` or `false`, so the shipped binary (which passes the default
     /// and nothing else, SEC-154) changes nothing about a run. The pattern names every field, so a new
     /// one does not compile until it is listed here.
     #[test]
@@ -65,6 +69,7 @@ mod tests {
             stderr_terminal,
             stderr_columns,
             style_env,
+            fail_files,
         } = RunHooks::default();
         assert!(clock.is_none());
         assert!(run_id.is_none());
@@ -73,5 +78,6 @@ mod tests {
         assert!(stderr_terminal.is_none());
         assert!(stderr_columns.is_none());
         assert!(style_env.is_none());
+        assert!(!fail_files);
     }
 }
