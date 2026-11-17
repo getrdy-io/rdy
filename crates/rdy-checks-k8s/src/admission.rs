@@ -11,9 +11,9 @@
 //! - `GET /apis/<group>/<version>` for each engine group that is served, to name the kinds it serves
 //!   (at most four requests), and `GET /apis/kyverno.io/v1` when that group lists `v1`, `v1` is not the
 //!   preferred version and the preferred version did not show `ClusterPolicy` or `Policy` (one more
-//!   request): the server prefers `v2`, which holds `PolicyException` and never the legacy kinds. That
-//!   `v1` read is skipped when the preferred version was forbidden, because `v1` would say the same, and
-//!   the legacy kinds are then unknown (the command to list them stays in the fix);
+//!   request): the server prefers `v2`, which holds `PolicyException` and never the legacy kinds. When the
+//!   preferred version of a group may not be read, `v1` is not asked either: the answer would be the same
+//!   refusal, and the legacy kinds are left unknown;
 //! - on OpenShift, when the spec names an `scc`: the `SecurityContextConstraints` list, one page, for the
 //!   names only;
 //! - (M1-160) the validating and the mutating webhook configurations, one page each; for each `Fail`

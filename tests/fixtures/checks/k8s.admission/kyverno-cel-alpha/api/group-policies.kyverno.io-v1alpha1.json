@@ -48,6 +48,26 @@
         "verbs": [
           "get"
         ]
+      },
+      {
+        "name": "imagevalidatingpolicies",
+        "singularName": "imagevalidatingpolicie",
+        "namespaced": false,
+        "kind": "ImageValidatingPolicy",
+        "verbs": [
+          "get",
+          "list",
+          "watch"
+        ]
+      },
+      {
+        "name": "imagevalidatingpolicies/status",
+        "singularName": "",
+        "namespaced": false,
+        "kind": "ImageValidatingPolicy",
+        "verbs": [
+          "get"
+        ]
       }
     ]
   }

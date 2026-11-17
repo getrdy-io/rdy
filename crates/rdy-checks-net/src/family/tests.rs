@@ -61,8 +61,8 @@ fn every_info_is_filed_under_net_with_a_timeout() {
         assert_eq!(info.family, "net");
         let timeout = info.default_timeout.expect("a timeout from the catalog");
         assert!(timeout.as_secs() >= 1 && timeout <= rdy_engine::check::MAX_TIMEOUT);
-        // net.egress and net.tls_intercept need the network (`--no-network` skips them as `missing_need`).
-        // net.mtu reads the interface table and net.proxy reads the environment, so they need nothing.
+        // net.egress and net.tls_intercept need the network (`--no-network` skips them as `missing_need`);
+        // net.proxy and net.mtu read local data and need nothing.
         let expected: &[Need] = if matches!(info.id, "net.egress" | "net.tls_intercept") {
             &[Need::Network]
         } else {

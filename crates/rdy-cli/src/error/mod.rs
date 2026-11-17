@@ -272,11 +272,6 @@ pub enum InternalKind {
         /// How to fix it.
         hint: String,
     },
-    /// The command exists in the tree but a later ticket builds it.
-    NotImplemented {
-        /// The command as typed in the tree, such as `spec lint`. Always a name from the command tree.
-        command: &'static str,
-    },
 }
 
 /// Every failure that ends a command with exit 64 or 70 and no verdict.
@@ -388,9 +383,6 @@ fn internal_message(kind: &InternalKind) -> String {
             "rdy cannot promise to keep the password in the proxy URL of {var} out of its output"
         ),
         InternalKind::FamilyFatal { message, .. } => message.clone(),
-        InternalKind::NotImplemented { command } => {
-            format!("rdy {command} is not yet implemented in this build")
-        }
     }
 }
 
@@ -699,10 +691,6 @@ impl CliError {
                 "use a proxy password of 6 bytes or more in {var}, or take the user name and password out of it, then run rdy again"
             ),
             Self::Internal(InternalKind::FamilyFatal { hint, .. }) => hint.clone(),
-            Self::Internal(InternalKind::NotImplemented { .. }) => {
-                "use a later release of rdy, listed at https://github.com/getrdy-io/rdy/releases"
-                    .to_owned()
-            }
         }
     }
 

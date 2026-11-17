@@ -1272,48 +1272,14 @@ async fn openshift_with_the_sync_off_and_no_labels_says_the_cluster_default_appl
 // ---- every ALLOWED entry of this check is hit (M1-115) --------------------------------------------------------
 
 /// The `ALLOWED` entries that cite this check and that no fixture run reads yet.
-// The Kyverno image policy kinds (M1-160, ADR 0042). No fixture case serves them yet, so the entries stay
-// listed here until a case does. The fixture generator is the place to add one.
-const NOT_READ_YET: &[&str] = &[
-    "policies.kyverno.io/v1/imagevalidatingpolicies",
-    "policies.kyverno.io/v1beta1/validatingpolicies",
-    "policies.kyverno.io/v1beta1/imagevalidatingpolicies",
-    "policies.kyverno.io/v1alpha1/imagevalidatingpolicies",
-];
+const NOT_READ_YET: &[&str] = &[];
 
 #[test]
 fn every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run() {
     // The fixture tests below run their own runtime on this thread and audit when their rig drops, which
     // records each (entry, check) pair a recorded request hit.
     crate::client::mock::hits::clear();
-    a_named_scc_on_the_cluster_passes_and_says_how_to_bind_it();
-    late::a_fail_webhook_with_an_empty_endpointslice_blocks();
-    late::a_webhook_with_no_failure_policy_fails_closed();
-    late::ready_unset_means_ready_and_one_ready_endpoint_is_enough();
-    late::endpoints_that_are_all_not_ready_block();
-    late::a_mutating_webhook_blocks_the_same_way();
-    late::a_service_that_does_not_exist_blocks_and_its_slices_are_not_asked();
-    late::match_conditions_make_the_empty_backend_a_warning_that_says_not_evaluated();
-    late::an_object_selector_makes_the_empty_backend_a_warning_too();
-    late::a_url_webhook_is_an_external_backend_not_verified();
-    late::an_external_name_service_is_not_verified();
-    late::a_webhook_that_fails_open_is_listed_and_never_judged();
-    late::webhooks_that_do_not_match_a_pod_create_here_are_not_judged();
-    late::forbidden_webhook_lists_give_partial_with_both_grants();
-    late::forbidden_endpoint_slices_are_not_evaluated_and_never_a_block();
-    late::forbidden_services_are_not_evaluated_and_never_a_block();
-    late::at_most_eight_services_are_read();
-    late::a_denying_binding_that_matches_pods_warns_by_name();
-    late::bindings_that_only_warn_or_do_not_match_reject_nothing();
-    late::a_cluster_that_does_not_serve_the_policy_api_has_none();
-    late::forbidden_policy_lists_give_partial_with_the_grant();
-    late::the_policies_of_both_engines_are_named();
-    late::forbidden_policy_lists_of_the_engines_are_partial_and_never_a_block();
-    late::a_kyverno_group_that_serves_only_policy_exceptions_lists_no_policy();
-    late::an_engine_whose_kinds_could_not_be_read_lists_no_policy();
-    late::at_most_six_constraint_kinds_are_listed_and_real_kinds_come_first();
-    late::kyverno_cel_policies_are_read_in_v1alpha1_too();
-    late::across_the_fixture_set_the_check_makes_no_call_that_is_not_a_get();
+    every_request_is_a_get_and_every_cluster_is_audited();
     assert_eq!(
         crate::client::mock::hits::unhit("k8s.admission"),
         NOT_READ_YET,

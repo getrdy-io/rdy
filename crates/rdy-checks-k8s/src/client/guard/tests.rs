@@ -299,32 +299,6 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
 }
 
 #[test]
-fn a_key_selector_needs_a_term_on_its_key() {
-    // No entry uses `FieldSelector::Key` until the pod list returns (M1-159), so the rule is tested on
-    // the type. The text is the decoded `fieldSelector` value.
-    let phase = FieldSelector::Key("status.phase");
-    for text in [
-        "status.phase!=Succeeded,status.phase!=Failed",
-        "status.phase=Running",
-        "status.phase==Running",
-        "spec.nodeName=n1,status.phase!=Failed",
-        "status.phase!=Failed,spec.nodeName=n1",
-    ] {
-        assert!(phase.met_by(Some(text), None), "{text}");
-    }
-    for text in [
-        "spec.nodeName=n1",
-        "metadata.name=status.phase",
-        "xstatus.phase=Running",
-        "status.phasex=Running",
-        "",
-    ] {
-        assert!(!phase.met_by(Some(text), None), "{text}");
-    }
-    assert!(!phase.met_by(None, None));
-}
-
-#[test]
 fn the_gatekeeper_entry_admits_a_list_of_any_constraint_kind_and_nothing_else() {
     // ADR 0042: one entry with ANY_RESOURCE, list only, one version.
     let group = "/apis/constraints.gatekeeper.sh/v1beta1";
@@ -412,6 +386,32 @@ fn an_endpoint_slice_list_must_name_one_service_by_label() {
 }
 
 #[test]
+fn a_key_selector_needs_a_term_on_its_key() {
+    // No entry uses `FieldSelector::Key("status.phase")` until the pod list returns (M1-159), so the
+    // rule is tested on the type. The text is the decoded `fieldSelector` value.
+    let phase = FieldSelector::Key("status.phase");
+    for text in [
+        "status.phase!=Succeeded,status.phase!=Failed",
+        "status.phase=Running",
+        "status.phase==Running",
+        "spec.nodeName=n1,status.phase!=Failed",
+        "status.phase!=Failed,spec.nodeName=n1",
+    ] {
+        assert!(phase.met_by(Some(text), None), "{text}");
+    }
+    for text in [
+        "spec.nodeName=n1",
+        "metadata.name=status.phase",
+        "xstatus.phase=Running",
+        "status.phasex=Running",
+        "",
+    ] {
+        assert!(!phase.met_by(Some(text), None), "{text}");
+    }
+    assert!(!phase.met_by(None, None));
+}
+
+#[test]
 fn an_event_list_needs_the_pvc_field_selector() {
     let events = "/api/v1/namespaces/app/events";
     for query in [
@@ -445,9 +445,6 @@ fn a_raw_semicolon_in_the_query_is_refused() {
     // Go's `URL.Query()` drops a pair that holds a raw `;`, so the server would list without the
     // selector that the guard saw.
     for uri in [
-        "/api/v1/pods?&fieldSelector=status.phase%21%3DFailed;&limit=500",
-        "/api/v1/pods?fieldSelector=status.phase%21%3DFailed;",
-        "/api/v1/pods?fieldSelector=status.phase%21%3DFailed&limit=5;00",
         "/api/v1/namespaces/app/events?&fieldSelector=involvedObject.kind%3DPersistentVolumeClaim;&limit=500",
         "/api/v1/namespaces/app/events?fieldSelector=involvedObject.kind%3DPersistentVolumeClaim;x",
         "/api/v1/nodes?labelSelector=a;",

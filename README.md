@@ -233,12 +233,9 @@ format (`rdy/v1`) can still change before 1.0, and the changelog will say so.
   signature and refuses a bad one.
 - The check engine: scheduler, timeouts, privilege negotiation, the probe layer that all side effects go
   through, and redaction of secrets in reports.
-- The JSON report and the verdict logic.
-- Host checks on Linux (CPU, memory, disk, OS, SELinux and AppArmor), and Kubernetes version, storage
-  class and RBAC checks. These are tested against recorded fixtures. They are not reachable from the
-  command line yet.
-- The `net.egress` check (name lookup, connect to every address, TLS and ALPN, and the HTTP status of a
-  URL endpoint, direct). It is wired into `rdy run`.
+- The JSON report, the verdict logic and the HTML report renderer.
+- Kubernetes version, storage class, access, RBAC and Pod Security checks. These are tested against
+  recorded fixtures. They are not registered in `rdy run` yet.
 
 **Next**
 
