@@ -89,7 +89,7 @@ fi
 # fake rdy answers `rdy version`.
 rm -f "$STUB_LOG"
 rc=0
-sh "$runner" --tag v9.9.9 > "$work/out5" 2> "$work/err5" || rc=$?
+sh "$runner" --tag v9.9.9 --page "$page" > "$work/out5" 2> "$work/err5" || rc=$?
 want_url='https://github.com/getrdy-io/rdy/releases/download/v9.9.9/install.sh'
 if [ "$rc" = 0 ] && grep -qx "rdy 9.9.9-stub" "$work/out5" && grep -q "PASS for v9.9.9" "$work/err5" \
     && grep -q -- "$want_url" "$STUB_LOG"; then
@@ -114,10 +114,10 @@ else
     fail "a page with no install-only block fails (rc=$rc)"
 fi
 
-# 7. A block that fails fails the run. The fence that is not install-only is never run.
-cat > "$work/failing.md" <<'EOF'
+# 7. The fence that is not install-only is never run: the install-only block passes and the run passes.
+cat > "$work/mixed.md" <<'EOF'
 ```sh install-only
-false
+true
 ```
 
 ```sh
@@ -125,8 +125,22 @@ exit 9
 ```
 EOF
 rc=0
-sh "$runner" --tag v9.9.9 --page "$work/failing.md" > /dev/null 2> "$work/err7" || rc=$?
-if [ "$rc" = 1 ] && grep -q 'FAIL for v9.9.9' "$work/err7"; then
+sh "$runner" --tag v9.9.9 --page "$work/mixed.md" > /dev/null 2> "$work/err7" || rc=$?
+if [ "$rc" = 0 ] && grep -q 'PASS for v9.9.9' "$work/err7"; then
+    pass "a fence that is not install-only is never run"
+else
+    fail "a fence that is not install-only is never run (rc=$rc)"
+fi
+
+# 7b. A failing install-only block fails the run.
+cat > "$work/failing.md" <<'EOF'
+```sh install-only
+false
+```
+EOF
+rc=0
+sh "$runner" --tag v9.9.9 --page "$work/failing.md" > /dev/null 2> "$work/err7b" || rc=$?
+if [ "$rc" = 1 ] && grep -q 'FAIL for v9.9.9' "$work/err7b"; then
     pass "a failing install-only block fails the run"
 else
     fail "a failing install-only block fails the run (rc=$rc)"

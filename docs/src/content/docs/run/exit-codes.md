@@ -35,16 +35,22 @@ case $code in
 esac
 ```
 
-## Exit 70 and the output
+## Exit 70
+
+Exit 70 means rdy could not deliver its result. Read the error and its fix, then run again. Exit 70 is not a verdict on the host.
+
+Ctrl-C also exits 70. A loop in a script should stop on 70. Bash does not stop a `for` loop on Ctrl-C by itself, because rdy exits normally and does not die by the signal.
 
 Exit 70 can come with output that is cut short. If you use `--json`, do not parse stdout after a 70. Use the exit code.
 
 When stdout holds a complete result and the files could not be written, rdy exits 70. The result on stdout can still say `complete: true`. In a script, trust the exit code.
 
-## Exit 64 and clap
+## Usage errors
 
-Usage errors from the command line exit 64, the same as other input errors. A bad flag does not exit 2.
+A bad flag, a missing value or a spec that must change exits 64. That includes a spec with no signature, unless you pass `--allow-unsigned`. A bad flag never exits 2.
 
 ## install.sh uses its own codes
 
-The install script has three codes of its own: 0 installed, 1 failed and installed nothing, 64 bad usage. See [Install](/install/).
+The install script has three codes of its own: 0 installed, 1 failed and installed nothing, 64 bad usage. See [Install](../install.md).
+
+<!-- M3: the Starlight site links to these pages with root-relative paths. Convert the links to /x/ then. -->

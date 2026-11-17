@@ -710,6 +710,8 @@ before".
 | Decide whether the `kind` workflow gates merges (join `ci-ok`) or stays a separate job that must be green on the release commit, and accept or amend ADR 0039 (supported Kubernetes minors and the gate) | M1-108 | M1-138 | Write the decision and the date in the Done log, and set ADR 0039's status. |
 | Confirm the storage provisioner table `crates/rdy-checks-k8s/data/provisioners.toml` against each driver's own docs (access modes, binding, zonal), using the `source` link on each entry | M1-110 | M1-138 | Write "provisioners.toml confirmed", the date and any entries changed in the Done log. |
 | Approve the security-agent seed list `crates/rdy-checks-host/data/agents.toml` (process names and sources) | M1-146 | M1 complete | Write "agents.toml seed list approved" and the date in the Done log. |
+| Run `workflow_dispatch` on `install-blocks` (`.github/workflows/install-blocks.yml`) after the first release is published. The `blocks` job must pass: the install-only blocks of the install page run on the release's `install.sh` in a fresh container | M1-133 | 0.1.0 published (M1-138) | Paste the run URL and the `install-blocks: PASS for <tag>` line into the Done log. ADR 0047 |
+| Add the 302 rule for `https://docs.getrdy.io/unsigned` to the docs host, exact path, to the target in `docs/redirects.txt`. Then run `curl -sSI https://docs.getrdy.io/unsigned` | M1-133 | 0.1.0 published (M1-138) | The status is 302 and the location is the GitHub page. Paste the output into the Done log. ADR 0047 |
 
 ## How to work the backlog
 

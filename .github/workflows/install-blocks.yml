@@ -15,8 +15,7 @@
 # is a decision for the founder (ADR 0047).
 #
 # Same rules as ci.yml: every `uses:` is pinned to a full commit SHA, the token is read-only, no pull_request_target.
-# The container image is the one exception: it is pinned by tag, not by digest, because the digest could not be
-# read when this file was written. The founder pins it by digest before this job becomes a gate (ADR 0047).
+# The container image is pinned by digest, as ci.yml pins ALPINE_IMAGE.
 
 name: install-blocks
 
@@ -28,6 +27,7 @@ on:
       - "scripts/install-blocks.sh"
       - "scripts/test-install-blocks.sh"
       - "scripts/install-release-tool.sh"
+      - ".github/release-tools.txt"
   schedule:
     - cron: "20 7 * * 1"
   workflow_dispatch:
@@ -87,7 +87,8 @@ jobs:
     timeout-minutes: 15
     # A fresh container, not the runner image. The runner has cosign and gh, a fresh Ubuntu does not.
     container:
-      image: ubuntu:24.04
+      # ubuntu:24.04 index digest, read from the registry on 2026-11-17. Bump it by hand, as ci.yml does.
+      image: ubuntu:24.04@sha256:73b999393d07f2bf65a40373778a44dc9a6d54ad7718d29247d8ff9413c4d6a8
     permissions:
       contents: read
     env:

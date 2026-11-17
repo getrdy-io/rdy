@@ -1,6 +1,6 @@
 # ADR 0047: Install-only blocks run against the newest published release, and the `/unsigned` redirect is a declared file
 
-- Status: Proposed (M1-133). Needs security-reviewer on the workflow and the redirect, and code-reviewer, before merge.
+- Status: Accepted (M1-133). Written for PR #85. Its security and code review findings are fixed in that PR.
 - Date: 2026-11-17
 
 ## Context
@@ -37,10 +37,10 @@ redirect config come in M3 (09). So a redirect in M1 is a hosting step, and the 
    template for the `install.sh` URL in the test path. The blocks read `$RDY_INSTALL_URL`. The page shows the
    URL pattern in prose, not in a block, so a reader sees a real address and no placeholder.
 
-4. **The blocks run in a fresh container as a user with no rights.** The job uses `ubuntu:24.04`. It installs
+4. **The blocks run in a fresh container as a user with no rights.** The job uses `ubuntu:24.04`, pinned by digest. It installs
    `curl` and CA certificates, which the image lacks, then cosign from `.github/release-tools.txt`
    (sha256 checked). The blocks run as `tester`, with `env -i` and a fixed `PATH`. That is what a customer on
-   a clean host has. Nothing runs as root, and the install page says the script refuses root.
+   a clean host has. No block runs as root, and the install page says the script refuses root.
 
 5. **The workflow is not in `ci-ok`.** It reads a published release. A release outage must not block merges
    (the same reasoning as `kind.yml`, ADR 0039). It runs on PRs that touch the install page or these scripts,
@@ -51,33 +51,36 @@ redirect config come in M3 (09). So a redirect in M1 is a hosting step, and the 
    the runner, so a broken block fails a test, not only the weekly job.
 
 7. **The redirect is a declared file.** `docs/redirects.txt` lists each path that the binary prints, and the
-   file it redirects to. The founder adds each line as a 301 rule on the docs host. The target is a file at
-   `main` until 0.1.0, then the tag. `crates/rdy-cli/tests/docs_pages.rs` fails when a docs URL in
-   `crates/` has no page and no line here, or when a target is not a file of this repo. It cannot test the
-   host, so the founder checks the redirect by hand after each change (below).
+   file it redirects to. The founder adds each line as a rule on the docs host. The rule matches the exact
+   path only: no query and no sub-path are passed through. The rule is a 302 until the target moves to a
+   release tag, then the founder may make it a 301. The target is a file at `main` until 0.1.0, then the tag.
+   `crates/rdy-cli/tests/docs_pages.rs` fails when a docs URL in `crates/` has no page and no line here.
+   It also fails when a target is not a file of this repo, when its ref is not `main` or a release tag, or
+   when its path holds `..`, a query, a fragment or a percent escape. The test cannot reach the host, so the
+   founder checks the redirect by hand after each change (below). The `v*` tag ruleset in
+   `docs/security/github-settings.md` section 5 stops anyone from moving a tag that a redirect names.
 
-8. **Exit codes come from the enum.** The exit codes page lists the rows of `ExitCode`, and the test fails when
-   they differ. Exits 0, 1 and 2 are proved by the fixture goldens, and 64 and 70 by `exit_code_goldens.rs`.
+8. **Exit codes are pinned by a list in the test.** The exit codes page must list the five codes that
+   `ExitCode` has today. The test cannot see a new variant of an `#[non_exhaustive]` enum, so a reviewer adds
+   the code to the list in `every_exit_code` and to the page. No `rdy-spec` API changes for this. Exits 0, 1
+   and 2 are proved by the fixture goldens, and 64 and 70 by `exit_code_goldens.rs`.
 
 ## Consequences
 
 - Until 0.1.0, the install job prints SKIPPED. That is intended, and the step summary says so.
 - After 0.1.0, a broken `install.sh` or a broken block fails the weekly job within a week. A PR that touches
   the page or these scripts runs the job at once.
-- The container tag is not pinned by digest. This is a deviation from the pinning rule that applies to `uses:`.
-  The founder pins it by digest before the job becomes a gate. The job does not hold a secret and it has
-  `contents: read` only, so the exposure is a changed base image, not a token.
 - The releases API returns the newest release by creation time. A release that is published and then
   withdrawn is a manual fix on GitHub.
 
 ## Founder steps
 
-1. Add the redirect `https://docs.getrdy.io/unsigned` to the docs host as a 301 to the target in
-   `docs/redirects.txt`. Check it with `curl -sSI https://docs.getrdy.io/unsigned`: the status is 301 and the
-   location is the GitHub page. After 0.1.0, change the target to the tag, in the same PR.
-2. Pin `ubuntu:24.04` by digest in `.github/workflows/install-blocks.yml`, or decide the tag is enough.
-3. Decide whether `install-blocks` joins `ci-ok`. The default here is no.
-4. After 0.1.0 is published, run the workflow by hand (`workflow_dispatch`). The blocks job must pass. Paste the
+1. Add the redirect `https://docs.getrdy.io/unsigned` to the docs host, as a 302 with an exact path match, to the
+   target in `docs/redirects.txt`. Check it with `curl -sSI https://docs.getrdy.io/unsigned`: the status is 302
+   and the location is the GitHub page. Check that the `v*` tag ruleset in `docs/security/github-settings.md`
+   section 5 is active. After 0.1.0, change the target to the tag, in the same PR, and make the rule a 301.
+2. Decide whether `install-blocks` joins `ci-ok`. The default here is no.
+3. After 0.1.0 is published, run the workflow by hand (`workflow_dispatch`). The blocks job must pass. Paste the
    run URL into the Done log.
 
 ## Alternatives considered

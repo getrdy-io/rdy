@@ -68,13 +68,11 @@ resolve_tag() {
         echo "SKIPPED: $REPO has no published release yet. The install-only blocks need a release to run against. Nothing was tested." >&2
         return 0
     fi
-    case $found in
-        *[!A-Za-z0-9.+-]* | '')
-            echo "error: the release tag '$found' has characters the install check does not accept." >&2
-            echo "fix: check the release on github.com and remove it if it is wrong." >&2
-            return 1
-            ;;
-    esac
+    if ! printf '%s' "$found" | grep -Eq "$TAG_PATTERN"; then
+        echo "error: the release tag '$found' is not in the shape the install check accepts (v0.1.0 or v0.1.0-alpha.3)." >&2
+        echo "fix: check the release on github.com and remove it if it is wrong." >&2
+        return 1
+    fi
     echo "tag=$found"
 }
 
