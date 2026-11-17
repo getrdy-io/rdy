@@ -103,9 +103,17 @@ impl TestRun {
     #[must_use]
     pub fn new(replay: Replay) -> Self {
         let redactor = Redactor::new(TagKey::fixed([7; 32]));
-        Self {
-            hub: ProbeHub::new(Arc::new(replay), redactor),
-        }
+        let hub = ProbeHub::new(Arc::new(replay), redactor);
+        // The rig allows the network, as a plain run does. `TestRun::offline` is `--no-network`.
+        hub.set_network(true);
+        Self { hub }
+    }
+
+    /// The same run with `--no-network`: the facade refuses every network call and command.
+    #[must_use]
+    pub fn offline(self) -> Self {
+        self.hub.set_network(false);
+        self
     }
 
     /// A run over the machine of a loaded fixture (08 section 2).
