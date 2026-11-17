@@ -3,4 +3,4 @@ since = "m1"
 rulesets = ["report"]
 rules = ["jwt"]
 forms = ["text"]
-secrets = ["${SYN:eks_token}", "${SYN:gke_token}"]
+secrets = ["${SYN:eks_token}", "${SYN:gke_token}", "${SYN:gke_sa_token}"]

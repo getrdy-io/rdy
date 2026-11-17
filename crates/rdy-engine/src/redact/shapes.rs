@@ -49,7 +49,7 @@ static EKS_TOKEN: LazyLock<Result<Regex, regex::Error>> =
 
 /// A Google OAuth access token, which `gke-gcloud-auth-plugin` prints: `ya29.` and base64url text.
 static GOOGLE_ACCESS_TOKEN: LazyLock<Result<Regex, regex::Error>> =
-    LazyLock::new(|| Regex::new(r"ya29\.[A-Za-z0-9_-]{16,}"));
+    LazyLock::new(|| Regex::new(r"ya29\.[A-Za-z0-9._-]{16,}"));
 
 /// Pushes every match of `pattern`. A pattern that failed to compile (a bug a unit test catches) removes
 /// the whole text.

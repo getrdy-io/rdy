@@ -1445,25 +1445,38 @@ fn plugin_file(command: &str) -> Option<String> {
 /// when kube starts it: the first regular file wins. On Windows each extension of `pathext` is tried too
 /// (`.cmd`, `.exe`). A name that is found nowhere stays bare, so the entry never claims a path rdy did
 /// not see.
+///
+/// The text is not escaped: escape it before it is shown. [`find_plugin`] has the path itself.
 #[must_use]
 pub fn resolve_plugin(
     command: &str,
     path: Option<&std::ffi::OsStr>,
     pathext: Option<&std::ffi::OsStr>,
 ) -> String {
+    find_plugin(command, path, pathext)
+        .map_or_else(|| command.to_owned(), |found| found.display().to_string())
+}
+
+/// The file a bare plugin `command` is, searched as [`resolve_plugin`] says. `None` for a command with a
+/// directory in it and for a name found nowhere.
+fn find_plugin(
+    command: &str,
+    path: Option<&std::ffi::OsStr>,
+    pathext: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
     if command.is_empty() || command.contains(['/', '\\']) || Path::new(command).is_absolute() {
-        return command.to_owned();
+        return None;
     }
+    // Windows tries the `PATHEXT` extensions before the bare name, as the shell does.
     let extensions: Vec<String> = if cfg!(windows) {
-        let mut all = vec![String::new()];
-        all.extend(
-            pathext
-                .map(|value| value.to_string_lossy().into_owned())
-                .unwrap_or_default()
-                .split(';')
-                .filter(|ext| !ext.is_empty())
-                .map(str::to_owned),
-        );
+        let mut all: Vec<String> = pathext
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_default()
+            .split(';')
+            .filter(|ext| !ext.is_empty())
+            .map(str::to_owned)
+            .collect();
+        all.push(String::new());
         all
     } else {
         vec![String::new()]
@@ -1475,11 +1488,11 @@ pub fn resolve_plugin(
         for extension in &extensions {
             let candidate = dir.join(format!("{command}{extension}"));
             if fs::metadata(&candidate).is_ok_and(|meta| meta.is_file() && is_executable(&meta)) {
-                return escape(&candidate.display().to_string());
+                return Some(candidate);
             }
         }
     }
-    command.to_owned()
+    None
 }
 
 /// Whether a file can be started. On Unix it needs an execute bit, as `execvp` does; other systems start
@@ -1520,9 +1533,9 @@ fn pin_plugin_path(config: &mut Config, env: &Env) {
         .and_then(|entry| entry.get("value"))
         .map(OsString::from);
     let path = own_path.as_deref().or(env.path.as_deref());
-    let found = resolve_plugin(&command, path, env.pathext.as_deref());
-    if found != command && Path::new(&found).is_absolute() {
-        exec.command = Some(found);
+    // kube gets the real path, never the escaped text of the log.
+    if let Some(found) = find_plugin(&command, path, env.pathext.as_deref()) {
+        exec.command = Some(found.to_string_lossy().into_owned());
     }
 }
 
@@ -1531,11 +1544,11 @@ fn plugin_exec_of(config: &Config, env: &Env) -> Option<PluginExec> {
     let exec = config.auth_info.exec.as_ref()?;
     Some(PluginExec {
         // A bare name is the file the OS will find on `PATH`, so the entry names that file.
-        command: resolve_plugin(
+        command: escape(&resolve_plugin(
             exec.command.as_deref()?,
             env.path.as_deref(),
             env.pathext.as_deref(),
-        ),
+        )),
         args: exec
             .args
             .as_deref()

@@ -277,7 +277,7 @@ async fn a_plugin_token_is_a_known_secret_before_the_first_request_leaves_and_th
     let plugin = plugin_script(
         dir.path(),
         &format!(
-            "touch {}\nprintf '%s' '{{\"apiVersion\":\"client.authentication.k8s.io/v1\",\"kind\":\"ExecCredential\",\"status\":{{\"token\":\"k8s-aws-v1.aHR0cHM6Ly9zdHMuY2FuYXJ5LWVrcy1wcmVzaWduZWQ\"}}}}'\n",
+            "touch {}\nprintf '%s' '{{\"apiVersion\":\"client.authentication.k8s.io/v1\",\"kind\":\"ExecCredential\",\"status\":{{\"token\":\"plain-canary-plugin-token-0042xyz\"}}}}'\n",
             marker.display()
         ),
     );
@@ -304,11 +304,12 @@ async fn a_plugin_token_is_a_known_secret_before_the_first_request_leaves_and_th
     // request was sent: the layer registers, then forwards.
     let heads = heads.lock().expect("heads").clone();
     assert!(
-        heads[0].contains("authorization: bearer k8s-aws-v1.ahr0chm6"),
+        heads[0].contains("authorization: bearer plain-canary-plugin-token-0042xyz"),
         "{heads:?}"
     );
-    let shown = run.redact("k8s-aws-v1.aHR0cHM6Ly9zdHMuY2FuYXJ5LWVrcy1wcmVzaWduZWQ");
-    assert!(!shown.contains("aHR0cHM6"), "{shown}");
+    let shown = run.redact("plain-canary-plugin-token-0042xyz");
+    // No redaction rule matches this shape, so only the layer's registration can hide it.
+    assert!(!shown.contains("plain-canary"), "{shown}");
     // The plugin is in the log once, with the way it ended.
     let log = run.action_log();
     let exec: Vec<_> = log
@@ -383,19 +384,47 @@ async fn the_identity_is_verified_only_when_the_identity_review_answered() {
     assert_eq!(unverified.user.as_deref(), Some("usr"));
 }
 
+/// The runtime the CLI builds, shut down without waiting for the blocking pool: the plugin sleeps 600 s and
+/// rdy still ends at once.
 #[cfg(unix)]
-#[tokio::test]
-async fn a_plugin_that_waits_for_a_login_makes_the_cluster_unavailable_names_the_plugin_and_does_not_keep_the_process_from_ending()
- {
+#[test]
+fn a_plugin_that_waits_for_a_login_makes_the_cluster_unavailable_and_rdy_still_exits_promptly() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let started = std::time::Instant::now();
+    let pid_file = runtime.block_on(plugin_waits_for_a_login());
+    runtime.shutdown_background();
+    let took = started.elapsed();
+    // The plugin is still running here (it sleeps 600 s). End it, so nothing is left behind, and never
+    // wait for it.
+    if let Ok(pid) = std::fs::read_to_string(&pid_file) {
+        let _ = std::process::Command::new("kill").arg(pid.trim()).status();
+    }
+    assert!(
+        took < Duration::from_secs(20),
+        "rdy waited for the plugin: {took:?}"
+    );
+}
+
+#[cfg(unix)]
+async fn plugin_waits_for_a_login() -> std::path::PathBuf {
+    let _keep = ();
+    plugin_waits_inner().await
+}
+
+#[cfg(unix)]
+async fn plugin_waits_inner() -> std::path::PathBuf {
     let dir = tempfile::tempdir().expect("tempdir");
     let marker = dir.path().join("plugin-ran");
     let pid_file = dir.path().join("plugin-pid");
     let plugin = plugin_script(
         dir.path(),
         &format!(
-            "touch {}\necho $$ > {}\nexec sleep 600\n",
-            marker.display(),
-            pid_file.display()
+            "echo $$ > {}\ntouch {}\nexec sleep 600\n",
+            pid_file.display(),
+            marker.display()
         ),
     );
     let text = kubeconfig("http://127.0.0.1:9", "", &exec_user(&plugin))
@@ -440,8 +469,8 @@ async fn a_plugin_that_waits_for_a_login_makes_the_cluster_unavailable_names_the
         .collect();
     assert_eq!(exec.len(), 1, "{:?}", log.actions);
     assert_eq!(exec[0].outcome, rdy_spec::result::ActionOutcome::Timeout);
-    // End the orphan: nothing else would.
-    if let Ok(pid) = std::fs::read_to_string(&pid_file) {
-        let _ = std::process::Command::new("kill").arg(pid.trim()).status();
-    }
+    // The caller ends the orphan after the runtime is gone.
+    // The temp dir goes with `dir`, so the pid file path is returned as text first.
+    std::mem::forget(dir);
+    pid_file
 }

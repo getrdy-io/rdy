@@ -184,7 +184,7 @@ Rules:
   stderr through `RunOptions::announce`, after the secrets are registered and before the client is built.
 - The kube probe sends its first request (which may run an exec credential plugin that waits for an SSO
   login) from a `spawn_blocking` thread through the runtime handle, under a 10 s timer held by the
-  scheduler. A stuck plugin costs one abandoned blocking thread, never a worker.
+  engine. A stuck plugin costs one abandoned blocking thread, never a worker.
 - A token refresh later in the run runs the plugin inside kube. Checked against kube 4.2.0 (M1-102,
   `auth/mod.rs`, `to_header`): the refresh runs `auth_exec` on `tokio::task::spawn_blocking`, so a stuck
   refresh holds one blocking thread and the one request that waited for it, never a worker. The

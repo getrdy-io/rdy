@@ -360,6 +360,9 @@ pub(crate) fn no_proxy_entry(list: &str, host: &str, port: u16) -> Option<String
     match NoProxy::parse(list).exempts(host, port)? {
         Exemption::Entry(entry) => Some(entry),
         Exemption::All => Some("*".to_owned()),
+        // A loopback host is exempt too, but `resolve` judges it first and names it in its own words
+        // ("loopback addresses never use a proxy"), so it never reaches here as an entry. `Exemption` is
+        // non-exhaustive, so a later kind also falls here and reads as "no entry".
         _ => None,
     }
 }
