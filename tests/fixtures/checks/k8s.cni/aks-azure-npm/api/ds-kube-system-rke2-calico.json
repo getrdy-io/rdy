@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/apps/v1/namespaces/kube-system/daemonsets/rke2-calico"
+  },
+  "status": 404,
+  "body": {
+    "kind": "Status",
+    "apiVersion": "v1",
+    "metadata": {},
+    "status": "Failure",
+    "message": "daemonsets.apps \"rke2-calico\" not found",
+    "reason": "NotFound",
+    "details": {
+      "name": "rke2-calico",
+      "kind": "daemonsets.apps"
+    },
+    "code": 404
+  }
+}

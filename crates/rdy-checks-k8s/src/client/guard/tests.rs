@@ -239,6 +239,9 @@ fn path_for(entry: &Allowed, access: &Access) -> String {
             format!("{prefix}/namespaces/{}/{}", name(only), entry.resource)
         }
         Access::Get(only) => format!("{prefix}/{}/{}", entry.resource, name(only)),
+        Access::GetIn { namespace, name } => {
+            format!("{prefix}/namespaces/{namespace}/{}/{name}", entry.resource)
+        }
     }
 }
 
@@ -247,7 +250,7 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
     for entry in ALLOWED {
         for access in entry.access {
             let path = path_for(entry, access);
-            if matches!(access, Access::Get(_))
+            if matches!(access, Access::Get(_) | Access::GetIn { .. })
                 || entry.field_selector == FieldSelector::NotRequired
             {
                 assert_eq!(judge_get(&path), Ok(()), "{path}");
@@ -272,6 +275,10 @@ fn every_allowed_shape_passes_and_a_neighbour_does_not() {
             Access::List,
             Access::ListInNamespace(Only::Any),
             Access::Get(Only::Any),
+            Access::GetIn {
+                namespace: "x",
+                name: "x",
+            },
         ];
         for access in all {
             let listed = entry

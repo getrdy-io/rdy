@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-aks-azure-npm"
+summary = "AKS with the Azure network policy manager"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

@@ -204,7 +204,7 @@ type Mapper<'a> = &'a (dyn Fn(&kube::Error) -> KubeError + Sync);
 /// Sorts the result of one request. A refusal for this identity, a missing object and another status of the
 /// server are answers. The guard's refusal of a path through a namespace called `secrets` is one too.
 /// Anything else (the network, the credentials) fails the check.
-fn read<T, U>(
+pub(crate) fn read<T, U>(
     mapper: Mapper<'_>,
     result: Result<T, kube::Error>,
     map: impl FnOnce(T) -> U,
@@ -225,7 +225,7 @@ fn read<T, U>(
 }
 
 /// True when too little of the check's time is left to ask the cluster another question.
-fn out_of_time(ctx: &CheckContext) -> bool {
+pub(crate) fn out_of_time(ctx: &CheckContext) -> bool {
     ctx.remaining() < MIN_LEFT
 }
 
@@ -358,7 +358,7 @@ async fn read_limits(
 }
 
 /// True when a list says there is a next page.
-fn has_more(meta: &k8s_openapi::apimachinery::pkg::apis::meta::v1::ListMeta) -> bool {
+pub(crate) fn has_more(meta: &k8s_openapi::apimachinery::pkg::apis::meta::v1::ListMeta) -> bool {
     meta.continue_
         .as_deref()
         .is_some_and(|token| !token.is_empty())

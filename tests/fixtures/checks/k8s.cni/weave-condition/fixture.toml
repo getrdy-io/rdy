@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-weave-condition"
+summary = "Weave Net names itself in the node condition"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

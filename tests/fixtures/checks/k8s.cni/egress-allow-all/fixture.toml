@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-egress-allow-all"
+summary = "An egress policy that selects every pod and allows every destination"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

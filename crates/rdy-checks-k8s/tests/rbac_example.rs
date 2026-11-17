@@ -16,14 +16,30 @@ use std::path::Path;
 use rdy_checks_k8s::client::guard::{ALLOWED, Access, Only};
 use serde_json::Value;
 
-/// The documents of the example, parsed.
+/// The example files, under `examples/rbac/`: the main one, and the optional `k8s.cni` file (M1-165), which
+/// is read together with it.
+const FILES: [&str; 2] = ["rdy-readonly.yaml", "rdy-readonly-cni.yaml"];
+
+/// The documents of the example files, parsed.
 fn documents() -> Vec<Value> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/rbac/rdy-readonly.yaml");
-    let text = std::fs::read_to_string(path).expect("examples/rbac/rdy-readonly.yaml exists");
-    text.split("\n---\n")
-        .map(|doc| serde_saphyr::from_str::<Value>(doc).expect("valid YAML"))
-        .collect()
+    let mut out = Vec::new();
+    for file in FILES {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/rbac")
+            .join(file);
+        let text = std::fs::read_to_string(path).expect("the example file exists");
+        out.extend(
+            text.split("\n---\n")
+                .map(|doc| serde_saphyr::from_str::<Value>(doc).expect("valid YAML")),
+        );
+    }
+    out
 }
+
+/// A resource whose list is granted by a Role of the install namespace (a template with a placeholder),
+/// not by the cluster role: `(group, resource, placeholder)`.
+const TARGET_NAMESPACE_ROLES: &[(&str, &str, &str)] =
+    &[("networking.k8s.io", "networkpolicies", "<target-namespace>")];
 
 /// `group/resource verb` for every rule of the documents of `kind`, and the namespace of the role.
 fn grants(docs: &[Value], kind: &str) -> BTreeSet<(Option<String>, String)> {
@@ -73,7 +89,22 @@ fn needed() -> BTreeSet<(Option<String>, String)> {
                 Access::Get(Only::Any) => ("get", None, String::new()),
                 // A get of one name is granted by name, so the role cannot read any other object.
                 Access::Get(Only::Name(name)) => ("get", None, format!(" name={name}")),
-                Access::ListInNamespace(Only::Any) => ("list", None, String::new()),
+                Access::ListInNamespace(Only::Any) => {
+                    let template = TARGET_NAMESPACE_ROLES
+                        .iter()
+                        .find(|(g, r, _)| *g == entry.group && *r == entry.resource);
+                    (
+                        "list",
+                        template.map(|(_, _, placeholder)| (*placeholder).to_owned()),
+                        String::new(),
+                    )
+                }
+                // One object of one namespace: a Role of that namespace, granted by name.
+                Access::GetIn { namespace, name } => (
+                    "get",
+                    Some((*namespace).to_owned()),
+                    format!(" name={name}"),
+                ),
                 Access::ListInNamespace(Only::Name(ns)) => {
                     ("list", Some((*ns).to_owned()), String::new())
                 }
@@ -147,7 +178,7 @@ fn every_binding_points_at_a_role_in_the_file() {
         .iter()
         .filter(|d| d["kind"] == "ClusterRoleBinding" || d["kind"] == "RoleBinding")
         .collect();
-    assert_eq!(bindings.len(), 2);
+    assert_eq!(bindings.len(), 7);
     for binding in bindings {
         let role = (
             binding["roleRef"]["kind"]

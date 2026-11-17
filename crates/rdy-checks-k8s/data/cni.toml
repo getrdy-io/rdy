@@ -1,0 +1,227 @@
+# The network plugin table behind k8s.cni (M1-165, docs/plan/03-check-catalog.md Appendix B).
+#
+# k8s.cni names the plugin from three signals, cheapest first: the NetworkUnavailable reason a node
+# reports, the API groups the cluster serves, then one DaemonSet read by name. This table says which
+# signal means which plugin, and whether the plugin enforces NetworkPolicy.
+#
+# [[cni]]
+#   id            short id, lower case. Unique.
+#   name          the name the report shows.
+#   family        plugins of one family are the same plugin to the check: GKE Dataplane V2 (anetd) is Cilium,
+#                 and `rke2-cilium` is Cilium. Two families together are an ambiguous answer, except Flannel
+#                 with Calico, which is Canal (the "canal" entry, found by its DaemonSet, is its own family
+#                 and is also what the pair resolves to).
+#   node_reasons  reasons of the node condition NetworkUnavailable that name the plugin. `RouteCreated` is the
+#                 cloud route controller and names no plugin, so it is not here.
+#   crd_groups    API groups the plugin installs. Read from `GET /apis`, never from CustomResourceDefinition
+#                 objects.
+#   network_types OpenShift `Network` `status.networkType` values, which name the plugin on OpenShift.
+#   daemonsets    "namespace/name" of the node agent DaemonSet, read by name when no cheaper signal named the
+#                 plugin. At most 4 per entry. The guard (`ALLOWED`) and examples/rbac/rdy-readonly-cni.yaml
+#                 list the same pairs, and a test holds the three in step.
+#   enforces      "yes": the plugin enforces NetworkPolicy. "no": it does not (Flannel alone). "env": it does
+#                 when a setting on its DaemonSet says so (the AWS VPC CNI, `ENABLE_NETWORK_POLICY`).
+#   pod_cidr      "node": the pod ranges are the `spec.podCIDRs` of the nodes. "own": the plugin allocates
+#                 pod addresses from its own pool (a Calico IPPool, a Cilium cluster pool, the VPC), so the
+#                 node field says nothing.
+#   source        https URL of the public page the entry came from.
+#   checked_on    YYYY-MM-DD, the day someone read that page.
+#
+# The file holds no free text. The check prints fixed words and the names it finds.
+
+schema = 1
+
+[[cni]]
+id = "calico"
+name = "Calico"
+family = "calico"
+node_reasons = ["CalicoIsUp"]
+crd_groups = ["crd.projectcalico.org", "projectcalico.org"]
+network_types = []
+daemonsets = ["kube-system/calico-node", "calico-system/calico-node"]
+enforces = "yes"
+pod_cidr = "own"
+source = "https://docs.tigera.io/calico/latest/about"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "rke2-calico"
+name = "Calico (RKE2)"
+family = "calico"
+node_reasons = []
+crd_groups = []
+network_types = []
+daemonsets = ["kube-system/rke2-calico"]
+enforces = "yes"
+pod_cidr = "own"
+source = "https://docs.rke2.io/networking/basic_network_options"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "cilium"
+name = "Cilium"
+family = "cilium"
+node_reasons = ["CiliumIsUp"]
+crd_groups = ["cilium.io"]
+network_types = []
+daemonsets = ["kube-system/cilium"]
+enforces = "yes"
+pod_cidr = "own"
+source = "https://docs.cilium.io/en/stable/overview/intro/"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "rke2-cilium"
+name = "Cilium (RKE2)"
+family = "cilium"
+node_reasons = []
+crd_groups = []
+network_types = []
+daemonsets = ["kube-system/rke2-cilium"]
+enforces = "yes"
+pod_cidr = "own"
+source = "https://docs.rke2.io/networking/basic_network_options"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "anetd"
+name = "GKE Dataplane V2"
+family = "cilium"
+node_reasons = []
+crd_groups = []
+network_types = []
+daemonsets = ["kube-system/anetd"]
+enforces = "yes"
+pod_cidr = "node"
+source = "https://cloud.google.com/kubernetes-engine/docs/concepts/dataplane-v2"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "flannel"
+name = "Flannel"
+family = "flannel"
+node_reasons = ["FlannelIsUp"]
+crd_groups = []
+network_types = []
+daemonsets = ["kube-flannel/kube-flannel-ds", "kube-system/kube-flannel-ds"]
+enforces = "no"
+pod_cidr = "node"
+source = "https://github.com/flannel-io/flannel"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "canal"
+name = "Canal (Flannel and Calico)"
+family = "canal"
+node_reasons = []
+crd_groups = []
+network_types = []
+daemonsets = ["kube-system/canal", "kube-system/rke2-canal"]
+enforces = "yes"
+pod_cidr = "node"
+source = "https://docs.tigera.io/calico/latest/getting-started/kubernetes/flannel/install-for-flannel"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "aws-vpc-cni"
+name = "AWS VPC CNI"
+family = "aws-vpc-cni"
+node_reasons = []
+crd_groups = []
+network_types = []
+daemonsets = ["kube-system/aws-node"]
+enforces = "env"
+pod_cidr = "own"
+source = "https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy-configure.html"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "azure-npm"
+name = "Azure Network Policy Manager"
+family = "azure-npm"
+node_reasons = []
+crd_groups = []
+network_types = []
+daemonsets = ["kube-system/azure-npm"]
+enforces = "yes"
+pod_cidr = "own"
+source = "https://learn.microsoft.com/en-us/azure/aks/use-network-policies"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "weave"
+name = "Weave Net"
+family = "weave"
+node_reasons = ["WeaveIsUp"]
+crd_groups = []
+network_types = []
+daemonsets = ["kube-system/weave-net"]
+enforces = "yes"
+pod_cidr = "own"
+source = "https://github.com/rajch/weave"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "antrea"
+name = "Antrea"
+family = "antrea"
+node_reasons = []
+crd_groups = ["crd.antrea.io"]
+network_types = []
+daemonsets = ["kube-system/antrea-agent"]
+enforces = "yes"
+pod_cidr = "node"
+source = "https://antrea.io/docs/"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "kube-router"
+name = "kube-router"
+family = "kube-router"
+node_reasons = []
+crd_groups = []
+network_types = []
+daemonsets = ["kube-system/kube-router"]
+enforces = "yes"
+pod_cidr = "node"
+source = "https://www.kube-router.io/"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "kube-ovn"
+name = "Kube-OVN"
+family = "kube-ovn"
+node_reasons = []
+crd_groups = ["kubeovn.io"]
+network_types = []
+daemonsets = ["kube-system/kube-ovn-cni"]
+enforces = "yes"
+pod_cidr = "own"
+source = "https://kubeovn.github.io/docs/stable/en/"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "ovn-kubernetes"
+name = "OVN-Kubernetes"
+family = "ovn-kubernetes"
+node_reasons = []
+crd_groups = ["k8s.ovn.org"]
+network_types = ["OVNKubernetes"]
+daemonsets = []
+enforces = "yes"
+pod_cidr = "own"
+source = "https://ovn-kubernetes.io/"
+checked_on = "2026-11-17"
+
+[[cni]]
+id = "openshift-sdn"
+name = "OpenShift SDN (end of life)"
+family = "openshift-sdn"
+node_reasons = []
+crd_groups = []
+network_types = ["OpenShiftSDN"]
+daemonsets = []
+enforces = "yes"
+pod_cidr = "own"
+source = "https://docs.openshift.com/container-platform/latest/networking/cluster-network-operator.html"
+checked_on = "2026-11-17"

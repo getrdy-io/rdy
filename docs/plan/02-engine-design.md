@@ -1311,7 +1311,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | Group, resource | Verbs and scope | Check: what it reads |
 | --- | --- | --- |
 | core `namespaces` | GET by name | `k8s.admission`: PSA labels; `k8s.storageclass`, `k8s.rbac`, `k8s.namespace`: namespace exists; `k8s.namespace`: phase and deletion conditions |
-| core `nodes` | LIST | `k8s.nodes`: allocatable, conditions, taints, labels; `k8s.version`: `providerID`, `kubeletVersion` |
+| core `nodes` | LIST | `k8s.nodes`: allocatable, conditions, taints, labels; `k8s.version`: `providerID`, `kubeletVersion`; `k8s.cni`: the `NetworkUnavailable` reason, `spec.podCIDRs` and `kubeletVersion` (annotations and labels dropped while parsing) |
 | core `pods` | LIST, cluster-wide or by `spec.nodeName`, with a `status.phase` field selector | `k8s.nodes`: requests, `nodeName`, phase only |
 | core `persistentvolumeclaims` | LIST in the target namespace | `k8s.storageclass`: Pending claims older than 5 minutes |
 | core `resourcequotas` | LIST in the target namespace | `k8s.namespace`: `hard`, `used` and scopes |
@@ -1323,12 +1323,16 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | `apps` `deployments` | LIST in `kube-system` only | `k8s.nodes`: `cluster-autoscaler` presence by name |
 | `security.openshift.io` `securitycontextconstraints` | LIST | `k8s.admission`: SCCs |
 | `config.openshift.io` `clusterversions` | GET name `version` | `k8s.version`: OpenShift version |
+| `config.openshift.io` `networks` | GET name `cluster` | `k8s.cni`: the network type and the pod and service ranges (optional file `rdy-readonly-cni.yaml`) |
+| `networking.k8s.io` `networkpolicies` | LIST in the target namespace | `k8s.cni`: pod selector shape, policy types and the shape of the egress rules; names only, no labels or annotations (optional Role of the install namespace) |
+| `networking.k8s.io` `servicecidrs` | LIST, at `v1` and at `v1beta1` | `k8s.cni`: the service ranges (optional file) |
+| `apps` `daemonsets` | GET by name in one namespace, 16 pairs: 14 in `kube-system`, `calico-system/calico-node`, `kube-flannel/kube-flannel-ds` | `k8s.cni`: ready counts, and `ENABLE_NETWORK_POLICY` of `aws-node` (every other env value, args and annotations dropped while parsing); optional Roles with `resourceNames`, no list (ADR 0046) |
+| core `configmaps` | GET `kube-system/kubeadm-config`, by name | `k8s.cni`: the `ClusterConfiguration` key only (the service range) |
 
 5. **`M1_LATE`**, enabled only with the checks that need it: `admissionregistration.k8s.io` webhook
    configurations, `validatingadmissionpolicies` and bindings; core `services`; `discovery.k8s.io`
-   `endpointslices`; Kyverno and Gatekeeper policy objects; ConfigMap GET of `kube-system/kubeadm-config`
-   by name; the resources of `k8s.crds`, `k8s.ingress`, `k8s.cni`, `k8s.dns` and
-   `k8s.device_plugins`. Each joins with the same citation rule.
+   `endpointslices`; Kyverno and Gatekeeper policy objects; the resources of `k8s.crds`, `k8s.ingress`,
+   `k8s.dns` and `k8s.device_plugins`. Each joins with the same citation rule.
 6. **Projections.** `pods`, `events` and `deployments` deserialize into minimal structs (resources,
    `nodeName`, phase, reason, name), so env values and args are never even held as strings. ConfigMap
    lists must use an `Accept` header for `PartialObjectMetadataList`, and a response of any other

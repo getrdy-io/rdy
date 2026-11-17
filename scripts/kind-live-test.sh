@@ -14,6 +14,10 @@
 #      comments of that file say, then checks with `kubectl auth can-i` that it is read-only.
 #   3. Runs the ignored tests of crates/rdy-checks-k8s/tests/live_cluster.rs with cargo-nextest.
 #
+# It also applies examples/rbac/rdy-readonly-cni.yaml (the reads of k8s.cni, rendered for rdy-live). It
+# creates the namespaces calico-system and kube-flannel when they do not exist, because the Roles of that
+# file live there, and deletes only the ones it created.
+#
 # It deletes the namespaces rdy-live and rdy-system and the rdy-readonly roles, before and after. So it
 # refuses to run unless the current context is named kind-* and its API server is on this machine
 # (127.0.0.1, localhost or [::1], where kind puts it), or RDY_LIVE_ALLOW_ANY_CLUSTER=1 is set.
@@ -56,6 +60,8 @@ cargo nextest --version > /dev/null 2>&1 || usage "cargo-nextest was not found. 
 root=$(cd "$(dirname "$0")/.." && pwd)
 rbac="$root/examples/rbac/rdy-readonly.yaml"
 [ -f "$rbac" ] || die "$rbac is missing. Run this from a full clone of the repository."
+cni="$root/examples/rbac/rdy-readonly-cni.yaml"
+[ -f "$cni" ] || die "$cni is missing. Run this from a full clone of the repository."
 
 context=$(k config current-context) || die "kubectl has no current context in $KUBECONFIG."
 server=$(k config view --minify -o jsonpath='{.clusters[0].cluster.server}') ||
@@ -79,7 +85,15 @@ esac
 echo "cluster: context $context, server host $host, expected minor $RDY_LIVE_EXPECT_MINOR"
 
 work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/rdy-live.XXXXXX")
+# The k8s.cni file, with its install namespace placeholder set to the live namespace. `created` lists the
+# namespaces of that file that this run made, so only those are deleted.
+sed -e "s/<target-namespace>/$NS/g" "$cni" > "$work/cni.yaml"
+created=""
 cleanup() {
+    k delete -f "$work/cni.yaml" --ignore-not-found --wait=false > /dev/null 2>&1 || true
+    for ns in $created; do
+        k delete namespace "$ns" --ignore-not-found --wait=false > /dev/null 2>&1 || true
+    done
     k delete -f "$rbac" --ignore-not-found --wait=false > /dev/null 2>&1 || true
     k delete namespace "$NS" --ignore-not-found --wait=false > /dev/null 2>&1 || true
     rm -rf "$work"
@@ -88,6 +102,7 @@ trap cleanup EXIT
 
 # Start clean, so a second run on the same cluster proves the same thing. The namespace deletes wait,
 # so the create below does not race a namespace that is still terminating.
+kw delete -f "$work/cni.yaml" --ignore-not-found > /dev/null 2>&1 || true
 kw delete -f "$rbac" --ignore-not-found > /dev/null
 kw delete namespace "$NS" --ignore-not-found > /dev/null
 
@@ -159,6 +174,14 @@ echo "  pod that meets restricted admitted"
 
 echo "step 2: the rdy-readonly service account"
 k apply -f "$rbac" > /dev/null
+# The k8s.cni Roles. Two of them live in namespaces a kind cluster does not have, so make those first.
+for ns in calico-system kube-flannel; do
+    if ! k get namespace "$ns" > /dev/null 2>&1; then
+        k create namespace "$ns" > /dev/null
+        created="$created $ns"
+    fi
+done
+k apply -f "$work/cni.yaml" > /dev/null
 token=$(k -n rdy-system create token rdy-readonly --duration 1h)
 ca_data=$(k config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
 [ -n "$ca_data" ] || die "the admin kubeconfig has no certificate-authority-data for its cluster. kind writes it; for another cluster, set up the read-only kubeconfig by hand."

@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-cni-no-plugin"
+summary = "Nothing names a plugin and no DaemonSet of the list exists (a kind-style cluster)"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.cni"]
+
+[caps]
+root = false
+network = true
+kube = true

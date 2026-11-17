@@ -1,0 +1,55 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/apis/networking.k8s.io/v1/namespaces/acme-system/networkpolicies",
+    "query": "limit=500"
+  },
+  "status": 200,
+  "body": {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicyList",
+    "metadata": {
+      "resourceVersion": "9001",
+      "continue": "page-2"
+    },
+    "items": [
+      {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+          "name": "allow-dns",
+          "namespace": "acme-system",
+          "labels": {},
+          "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"note\": \"ENV-VALUE-MARKER-4f9c2a7e1b3d\"}"
+          }
+        },
+        "spec": {
+          "podSelector": {},
+          "policyTypes": [
+            "Egress"
+          ],
+          "egress": [
+            {
+              "to": [
+                {
+                  "namespaceSelector": {
+                    "matchLabels": {
+                      "kubernetes.io/metadata.name": "kube-system"
+                    }
+                  }
+                }
+              ],
+              "ports": [
+                {
+                  "protocol": "UDP",
+                  "port": 53
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

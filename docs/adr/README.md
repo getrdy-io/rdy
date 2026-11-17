@@ -46,6 +46,7 @@ to `Superseded by NNNN`. Owner: rust-architect. Each ADR stays under one page.
 | [0039](0039-kind-job-supported-minors-and-gate.md) | The kind job runs the oldest and newest Kubernetes minors that upstream still patches, in a separate workflow that does not gate merges | Proposed, for the founder to decide the gate |
 | [0040](0040-read-link-and-the-fd-walk.md) | The facade reads links with `read_link`, judges the link where it sits, and opens `/proc/<pid>/fd` to a declared walk that returns sockets only | Accepted, security-reviewed (PR #10, was #153) |
 | [0041](0041-repository-recreated-pr-numbers-restarted.md) | Repository recreated on 2026-10-30; PR numbers restarted | Accepted, code-reviewed (PR #16) |
+| [0046](0046-k8s-cni-signals-by-cost-and-optional-reads.md) | `k8s.cni` names the plugin from signals that need no grant first, reads DaemonSets only by name, and keeps every new grant in an optional file | Accepted, pending review (M1-165) |
 
 Status values: `Proposed`, `Accepted`, `Superseded by NNNN`, `Rejected`. All twelve were revised on
 2026-10-28 after the security-reviewer and cli-ux reviews in `docs/plan/reviews/`.
