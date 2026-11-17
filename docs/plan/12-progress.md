@@ -377,7 +377,7 @@ The build process, the implementer brief and the state at each pause are in `m1-
 
 - M1-180 | [#49](https://github.com/getrdy-io/rdy/pull/49) | 2026-11-06 | Live macOS and Windows runs keep the fields null until M2-005; added 2026-11-06 (correction-41, PR #42 reviews)
 
-- M1-181 | todo | | `rdy run` writes the HTML report next to the JSON | added 2026-11-17 (correction-45); backlog corrected 2026-11-17 (correction-50): the page of an `--allow-unsigned` run shows the UNSIGNED SPEC banner, the HTML half of M1-126's "both reports say unsigned" (PR #84 review); built, PR #TBD, stacked on M1-082 (PR #86). `OutputDir::write_html` takes an `HtmlPage` (`render_page`), a new type so only a rendered page is written. Carried: the HTML half of M1-126's banners (correction-50), a test on the written page for the UNSIGNED SPEC and KEY NOT PINNED banners, once PR #84 merges. The structure rules run over the written page of the host-min env (Linux only; other legs skip it like the env goldens)
+- M1-181 | [#88](https://github.com/getrdy-io/rdy/pull/88) | 2026-11-17 | `rdy run` writes the HTML report next to the JSON | added 2026-11-17 (correction-45); backlog corrected 2026-11-17 (correction-50): the page of an `--allow-unsigned` run shows the UNSIGNED SPEC banner, the HTML half of M1-126's "both reports say unsigned" (PR #84 review); built. `OutputDir::write_html` takes an `HtmlPage` (`render_page`), a new type so only a rendered page is written. Carried: the HTML half of M1-126's banners (correction-50), a test on the written page for the UNSIGNED SPEC and KEY NOT PINNED banners, once PR #84 merges. The structure rules run over the written page of the host-min env (Linux only; other legs skip it like the env goldens)
 
 ## Summary
 
