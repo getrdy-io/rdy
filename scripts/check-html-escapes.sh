@@ -151,7 +151,16 @@ tscan() {
 # here and say so in review. `json_sha256` and `x.json_len` do not count (the word must stand alone), so
 # `{{ json ~ json }}` and `{% let a = json %}{{ json }}` each count 2. The count is made over the template
 # without the allowed line, and the allowed line adds its one `json` in the tag. awk runs under LC_ALL=C.
-# A `{% raw %}` block fails too, though the plain count makes it dead weight: it is cheap and clear.
+# A `{% raw %}` block fails too, though the plain count makes it dead weight: it is cheap and clear. So do
+# `{% macro %}`, `{% import %}`, `{% extends %}`, `{% call %}` and any `{% include %}` but the one stylesheet.
+#
+# The allowed line must be a line of its own (leading whitespace allowed, nothing else), and the text before
+# it must not end inside an open tag (the last `<` before it has a `>` after it), so it cannot be the value
+# of an attribute. Residual: an attribute opened several lines earlier whose `>` sits in a string or in a
+# tag of the template (`{% if a > b %}`) hides the open tag from this check. The `<script>` tag on the line
+# itself, the CSP (no `script-src`) and the review of the template cover that.
+#
+# EmbeddedJson (the wrapper that is printed raw) may be named only on its known lines of view.rs.
 count_json() {
   LC_ALL=C awk '
     BEGIN { RS = "\001"; total = 0 }
@@ -165,26 +174,72 @@ count_json() {
   '
 }
 JSON_LINE='<script type="application/json" id="rdy-result" data-sha256="{{ json_sha256 }}">{{ json }}</script>'
+INCLUDE_OK='^[{]%[-+~]?[[:space:]]*include[[:space:]]+"report[.]css"[[:space:]]*[-+~]?%[}]$'
 json_uses=0
 json_line_found=0
 first_template=""
 while IFS= read -r file; do
   [ -n "$file" ] || continue
   [ -n "$first_template" ] || first_template=$file
-  # Every `json` outside the allowed line, then the allowed line's own one.
-  other=$(grep -Fxv -- "$JSON_LINE" "$file" | tr '\n\r\t' '   ' | count_json)
-  copies=$(grep -Fxc -- "$JSON_LINE" "$file")
+  # The allowed line is a line of its own: leading whitespace, then exactly that text and nothing else.
+  # Every `json` outside it is counted, then its own one.
+  other=$(awk -v line="$JSON_LINE" '{ t = $0; sub(/^[ \t]+/, "", t); if (t != line) print }' "$file" | tr '\n\r\t' '   ' | count_json)
+  # copies: how many allowed lines. inside: how many of them follow text that ends inside an open tag (a
+  # `<` with no `>` after it), where the line would be an attribute value and not element text.
+  info=$(awk -v line="$JSON_LINE" '
+    {
+      t = $0
+      sub(/^[ \t]+/, "", t)
+      if (t == line) { copies++; if (open) inside++; next }
+      for (i = 1; i <= length($0); i++) {
+        c = substr($0, i, 1)
+        if (c == "<") open = 1
+        else if (c == ">") open = 0
+      }
+    }
+    END { print copies + 0, inside + 0 }
+  ' "$file")
+  copies=${info%% *}
+  inside=${info#* }
   n=$(( ${other:-0} + ${copies:-0} ))
+  if [ "${inside:-0}" -gt 0 ]; then
+    printf '%s\t%s\t%s\t%s\n' "$file" 0 "the line that prints the embedded result follows text that ends inside an open tag" "(open tag)" >>"$tmp/hits"
+  fi
+  joined=$(tr '\n\r\t' '   ' <"$file")
+  if printf '%s\n' "$joined" | grep -Eq '[{]%[-+~]?[[:space:]]*(macro|import|extends|call)([^A-Za-z0-9_]|$)'; then
+    printf '%s\t%s\t%s\t%s\n' "$file" 0 "macro, import, extends and call tags move template text where this scan cannot follow it, and the templates do not use them" "{% macro %}" >>"$tmp/hits"
+  fi
+  # The one include the templates use. Any other include could pull in a file this scan does not read.
+  printf '%s\n' "$joined" | grep -Eo '[{]%[-+~]?[[:space:]]*include([^A-Za-z0-9_][^%]*)?%[}]' | grep -Ev "$INCLUDE_OK" | while IFS= read -r part; do
+    printf '%s\t%s\t%s\t%s\n' "$file" 0 "an include other than the one stylesheet is not allowed" "$part" >>"$tmp/hits"
+  done
   if tr '\n\r\t' '   ' <"$file" | grep -Eq '[{]%[-+~]?[[:space:]]*raw([^A-Za-z0-9_]|$)'; then
     printf '%s\t%s\t%s\t%s\n' "$file" 0 "a raw block hides template text from this scan, and the templates do not use one" "{% raw %}" >>"$tmp/hits"
   fi
   json_uses=$((json_uses + n))
-  if grep -Fxq -- "$JSON_LINE" "$file"; then
-    json_line_found=$((json_line_found + 1))
-  fi
+  json_line_found=$((json_line_found + ${copies:-0}))
 done <"$tmp/templates"
 if [ "$json_uses" -ne 1 ] || [ "$json_line_found" -ne 1 ]; then
   printf '%s\t%s\t%s\t%s\n' "${first_template:-$root/crates}" 0 "the embedded result must be named in a template exactly once, on the line: $JSON_LINE" "found $json_uses use(s) of the word json and $json_line_found copy(ies) of that line" >>"$tmp/hits"
+fi
+
+# The wrapper that is printed raw may be named only on its known lines of view.rs. A use anywhere else under
+# report/html/ could print it where the template does not expect it. Word match, so `EmbeddedJsonX` is not it.
+if [ -d "$root/crates/rdy-engine/src/report/html" ]; then
+  find "$root/crates/rdy-engine/src/report/html" -type f -name '*.rs' | while IFS= read -r file; do
+    grep -nw EmbeddedJson "$file" 2>/dev/null | while IFS= read -r match; do
+      text=$(printf '%s' "${match#*:}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      ok=no
+      if [ "${file#"$root"/}" = "$ALLOWED_FILE" ]; then
+        case $text in
+        'pub json: EmbeddedJson,' | 'let json = EmbeddedJson(json);' | 'pub(super) struct EmbeddedJson(HtmlSafeJson);' | 'impl std::fmt::Display for EmbeddedJson {' | "$ALLOWED_LINE") ok=yes ;;
+        esac
+      fi
+      if [ "$ok" = no ]; then
+        printf '%s\t%s\t%s\t%s\n' "$file" "${match%%:*}" "EmbeddedJson may be named only on its known lines in $ALLOWED_FILE" "$text" >>"$tmp/hits"
+      fi
+    done
+  done
 fi
 
 # Rust sources.

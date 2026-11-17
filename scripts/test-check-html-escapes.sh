@@ -180,6 +180,56 @@ expect "template: stringify! with a block comment does not hide a json" 1 "found
 fresh
 printf '%s\n' '{{ stringify!(r"\") }}{% let a = json %}{{ stringify!(r"\") }}<p title="{{ a }}">' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: stringify! with a raw string ending in a backslash does not hide a json" 1 "found 2 use(s) of the word json"
+T="$tmp/repo/crates/rdy-engine/templates/report.html"
+fresh
+printf '%s\n' '{% macro m(a) %}{{ a }}{% endmacro %}' >>"$T"
+expect "template: a macro tag fails" 1 "macro, import, extends and call"
+fresh
+printf '%s\n' '{% import "x.html" as x %}' >>"$T"
+expect "template: an import tag fails" 1 "macro, import, extends and call"
+fresh
+printf '%s\n' '{%- extends "base.html" %}' >>"$T"
+expect "template: an extends tag fails" 1 "macro, import, extends and call"
+fresh
+printf '%s\n' '{% call m() %}' >>"$T"
+expect "template: a call tag fails" 1 "macro, import, extends and call"
+fresh
+printf '%s\n' '{% include "other.html" %}' >>"$T"
+expect "template: an include of another file fails" 1 "an include other than"
+fresh
+printf '%s\n' '{%- include "report.css" %}' '{% include "report.css" %}' >>"$T"
+expect "template: the stylesheet include passes" 0 "ok:"
+fresh
+printf '%s\n' '{% include "report.css" ~ x %}' >>"$T"
+expect "template: the stylesheet include with an extra expression fails" 1 "an include other than"
+fresh
+printf '%s\n' '<p>x</p>' "    $JSON_LINE" >"$T"
+expect "template: the allowed line indented passes" 0 "ok:"
+fresh
+printf '%s\n' "<p>x</p>" "x$JSON_LINE" >"$T"
+expect "template: text before the allowed line on its line fails" 1 "exactly once"
+fresh
+printf '%s\n' "<p>x</p>" "$JSON_LINE x" >"$T"
+expect "template: text after the allowed line on its line fails" 1 "exactly once"
+fresh
+printf '%s\n' '<a title="' '' "$JSON_LINE" >"$T"
+expect "template: the allowed line right after an open tag fails" 1 "open tag"
+fresh
+printf '%s\n' '<a title="x">y</a>' '' "$JSON_LINE" >"$T"
+expect "template: the allowed line after closed tags passes" 0 "ok:"
+V="$tmp/repo/$VIEW"
+fresh
+printf '%s\n' 'fn f(a: EmbeddedJson) {}' >>"$V"
+expect "rust: EmbeddedJson on another line of view.rs fails" 1 "EmbeddedJson may be named only"
+fresh
+printf '%s\n' 'struct EmbeddedJson;' >"$tmp/repo/crates/rdy-engine/src/report/html/other.rs"
+expect "rust: EmbeddedJson in another file of report/html fails" 1 "EmbeddedJson may be named only"
+fresh
+printf '%s\n' 'struct EmbeddedJsonX;' 'fn embedded_json() {}' >"$tmp/repo/crates/rdy-engine/src/report/html/other.rs"
+expect "rust: names that only start with EmbeddedJson pass" 0 "ok:"
+fresh
+printf '%s\n' 'pub json: EmbeddedJson,' 'let json = EmbeddedJson(json);' 'pub(super) struct EmbeddedJson(HtmlSafeJson);' 'impl std::fmt::Display for EmbeddedJson {' >>"$V"
+expect "rust: the known EmbeddedJson lines of view.rs pass" 0 "ok:"
 fresh
 printf '%s\n' '{% raw %}{{ "{% endraw %}<p title={{ json }}>{% raw %}" }}{% endraw %}' >>"$tmp/repo/crates/rdy-engine/templates/report.html"
 expect "template: a raw block with a quote that hides a json fails" 1 "raw block"
