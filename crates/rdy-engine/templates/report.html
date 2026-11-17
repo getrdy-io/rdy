@@ -8,6 +8,9 @@
 <title>rdy report: {{ verdict_word }}, {{ title_product }}</title>
 <style>
 {%- include "report.css" %}
+{%- if let Some(mark) = print_mark %}
+@page { margin-top: 2cm; @top-center { content: "{{ mark }}"; font: bold 10pt system-ui, sans-serif; color: #000000; } }
+{%- endif %}
 </style>
 </head>
 <body>
@@ -61,9 +64,41 @@
 {%- if let Some(more) = check.builtin_fix %}
 <p class="text"><span class="label">More from rdy:</span> <bdi>{{ more }}</bdi></p>
 {%- endif %}
+{%- if !check.found.is_empty() %}
+<div class="facts">
+<p class="label">Found</p>
+<dl>
+{%- for fact in check.found %}
+<dt><bdi>{{ fact.label }}</bdi></dt>
+{%- for line in fact.lines %}
+<dd>{% for part in line %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</dd>
+{%- endfor %}
+{%- endfor %}
+</dl>
+</div>
+{%- endif %}
+{%- if !check.needed.is_empty() %}
+<div class="facts">
+<p class="label">Needed</p>
+<dl>
+{%- for fact in check.needed %}
+<dt><bdi>{{ fact.label }}</bdi></dt>
+{%- for line in fact.lines %}
+<dd>{% for part in line %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</dd>
+{%- endfor %}
+{%- endfor %}
+</dl>
+</div>
+{%- endif %}
+{%- if check.facts_more > 0 %}
+<p class="muted">{{ check.facts_more }} more {% if check.facts_more == 1 %}line is{% else %}lines are{% endif %} in the embedded JSON.</p>
+{%- endif %}
 {%- for need in check.requires %}
 <p>Requires: {% for part in need %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
 {%- endfor %}
+{%- if let Some(by) = check.required_by %}
+<p>{% for part in by %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
+{%- endif %}
 {%- if let Some(partial) = check.partial %}
 <p>{% for part in partial.summary %}{% if part.untrusted %}<bdi>{{ part.text }}</bdi>{% else %}{{ part.text }}{% endif %}{% endfor %}</p>
 {%- if !partial.note.is_empty() %}
@@ -132,7 +167,9 @@
 </section>
 </main>
 <footer>
-<p>rdy <bdi>{{ rdy_version }}</bdi></p>
+<p>Made with Rdy. Use Rdy for your product: <a href="{{ product_link }}" rel="noopener noreferrer">{{ product_link }}</a></p>
+<p>This link carries the product name and nothing else.</p>
+<p>rdy <bdi>{{ rdy_version }}</bdi> | source: <a href="https://github.com/getrdy-io/rdy" rel="noopener noreferrer">https://github.com/getrdy-io/rdy</a></p>
 </footer>
 <script type="application/json" id="rdy-result" data-sha256="{{ json_sha256 }}">{{ json }}</script>
 </body>
