@@ -101,7 +101,7 @@ fn find_scheme_less_proxy(text: &str, out: &mut Vec<Range<usize>>) {
             };
             let value = after_colon.trim_start_matches([' ', '\t']);
             if value.starts_with('"') {
-                hits.push(text.len() - value.len() + 1);
+                hits.push(text.len() - value.len());
             }
         }
     }
@@ -110,16 +110,14 @@ fn find_scheme_less_proxy(text: &str, out: &mut Vec<Range<usize>>) {
         if start < done {
             continue;
         }
-        let value = &text[start..];
-        let end = value
-            .find(|c: char| {
-                c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '`' | '<' | '>')
-            })
-            .unwrap_or(value.len())
-            .min(MAX_AUTHORITY);
-        let value = &value[..floor_boundary(value, end)];
-        done = start + value.len();
-        if value.contains("://") || value.contains(":\\/") {
+        let (span, scanned_to) = proxy_value(text, start);
+        done = scanned_to;
+        let value = &text[span.clone()];
+        // Only a value that opens with a scheme is the scheme form's. `svc:\/pw@h` is not one.
+        if SCHEME
+            .as_ref()
+            .is_ok_and(|re| re.find(value).is_some_and(|m| m.start() == 0))
+        {
             continue;
         }
         let at = value.rfind('@');
@@ -128,9 +126,33 @@ fn find_scheme_less_proxy(text: &str, out: &mut Vec<Range<usize>>) {
             continue;
         };
         if !is_single_placeholder(&value[..userinfo_end]) {
-            out.push(start..start + userinfo_end);
+            out.push(span.start..span.start + userinfo_end);
         }
     }
+}
+
+/// The span of the value that starts at `start`, at most `MAX_AUTHORITY` bytes, and where the scan
+/// stopped.
+///
+/// A value that opens with `"` or `'` skips it and ends at the same quote, white space or a control
+/// character. Any other value ends at white space, a control character, `"`, a backtick, `<` or `>`,
+/// so a `'` in an unquoted password stays inside it.
+fn proxy_value(text: &str, start: usize) -> (Range<usize>, usize) {
+    let window_end = floor_boundary(text, (start + MAX_AUTHORITY).min(text.len()));
+    let window = &text[start..window_end];
+    let (quote, body_offset) = match window.chars().next() {
+        Some(q @ ('"' | '\'')) => (Some(q), 1),
+        _ => (None, 0),
+    };
+    let body = &window[body_offset..];
+    let end = body
+        .find(|c: char| match quote {
+            Some(q) => c == q || c.is_whitespace() || c.is_control(),
+            None => c.is_whitespace() || c.is_control() || matches!(c, '"' | '`' | '<' | '>'),
+        })
+        .unwrap_or(body.len());
+    let from = start + body_offset;
+    (from..from + end, from + end)
 }
 
 /// The largest char boundary of `text` that is at most `at`.
@@ -336,6 +358,15 @@ mod tests {
             (r#"{"https-proxy":"svc:pw@proxy:3128"}"#, "svc:pw"),
             (r#""HttpProxy" : "svc:pw@proxy:3128","#, "svc:pw"),
             (r#""HttpsProxy":"svc:p/w@proxy:3128""#, "svc:p/w"),
+            // A quote around the value, and a quote or a space inside it.
+            ("http_proxy=\"svc:pw@p:3128\"", "svc:pw"),
+            ("export HTTPS_PROXY='svc:pw@p:3128'", "svc:pw"),
+            ("Environment=HTTP_PROXY=\"svc:pw@h:1\"", "svc:pw"),
+            ("HTTPS_PROXY=svc:it'spw@proxy:3128", "svc:it'spw"),
+            (r#"{"http-proxy": "svc:it'spw@proxy:3128"}"#, "svc:it'spw"),
+            // Not a scheme: a backslash slash, and a scheme after the userinfo.
+            ("HTTP_PROXY=svc:\\/pw@proxy:3128", "svc:\\/pw"),
+            ("HTTP_PROXY=svc:pw@proxy:3128/?u=http://x", "svc:pw"),
             (r#""HttpProxy":"svc:pw\u0040proxy:3128""#, "svc:pw"),
         ] {
             assert_eq!(found(text), [want], "{text}");
@@ -353,6 +384,8 @@ mod tests {
             "the proxy svc:pw@proxy:3128 is down",
             "HTTP_PROXY=",
             "HTTP_PROXY=@proxy:3128",
+            // A space in a password ends the value (05 I1). The check-side guarantee covers it.
+            "HTTP_PROXY='svc:p w@h:1'",
         ] {
             assert!(found(text).is_empty(), "{text}: {:?}", found(text));
         }
@@ -365,6 +398,30 @@ mod tests {
         let ph = "[REDACTED:url_userinfo:1a2b3c4d]";
         assert!(found(&format!("HTTPS_PROXY={ph}@proxy:3128")).is_empty());
         assert!(found(&format!(r#""HttpProxy":"{ph}@proxy:3128""#)).is_empty());
+    }
+
+    #[test]
+    fn a_proxy_value_is_read_inside_a_window_so_the_work_is_bounded() {
+        // Hits more than the window apart, with no white space: each scan stops at the window.
+        let filler = "a".repeat(MAX_AUTHORITY * 2);
+        let text = format!("_proxy={filler}_proxy={filler}_proxy=x:y@h");
+        let mut start = 7;
+        let mut scans = 0;
+        loop {
+            let (span, to) = proxy_value(&text, start);
+            assert!(to - start <= MAX_AUTHORITY, "{}", to - start);
+            assert!(span.len() <= MAX_AUTHORITY);
+            scans += 1;
+            match text[to..].find("_proxy=") {
+                Some(i) => start = to + i + 7,
+                None => break,
+            }
+        }
+        assert_eq!(scans, 3);
+        assert_eq!(found(&text), ["x:y"]);
+        // A wide char at the window edge is not cut.
+        let text = format!("_proxy={}@h", "é".repeat(MAX_AUTHORITY));
+        let _ = found(&text);
     }
 
     #[test]

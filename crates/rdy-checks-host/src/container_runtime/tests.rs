@@ -55,6 +55,8 @@ const CASES: &[(&str, &str)] = &[
     expect!("docker-proxy-no-scheme"),
     expect!("docker-dropin-no-scheme"),
     expect!("docker-daemon-json-no-scheme"),
+    expect!("docker-daemon-json-socks-proxy"),
+    expect!("docker-dropin-space-in-password"),
     expect!("docker-rootless"),
     expect!("docker-podman-shim"),
     expect!("podman-ok"),
@@ -323,6 +325,8 @@ fn the_levels_are_what_the_catalog_says() {
         ("docker-proxy-no-scheme", Level::Pass),
         ("docker-dropin-no-scheme", Level::Warn),
         ("docker-daemon-json-no-scheme", Level::Warn),
+        ("docker-daemon-json-socks-proxy", Level::Warn),
+        ("docker-dropin-space-in-password", Level::Warn),
         ("docker-rootless", Level::Pass),
         ("docker-podman-shim", Level::Fail),
         ("podman-ok", Level::Pass),
@@ -960,6 +964,43 @@ fn the_whole_result_is_searched_for_secrets() {
         assert_eq!(proxy["http"], "http://proxy.acme.example:3128", "{case}");
         assert_eq!(proxy["http_credentials"], true, "{case}");
     }
+    // `/info` has both fields.
+    let result = run("docker-proxy-no-scheme");
+    let proxy = &result.finding().observed["runtimes"][0]["proxy"];
+    assert_eq!(proxy["https"], "http://proxy.acme.example:3128");
+    assert_eq!(proxy["https_credentials"], true);
+    // A password the redactor does not read (a space ends the value it reads): the check still stores
+    // only the origin and a flag. A socks5 proxy is kept as its evidence URL, with a note that names
+    // the source and not the text.
+    let result = run("docker-dropin-space-in-password");
+    let everything = format!("{:?} {:?} {:?}", result.end, result.result(), result.log);
+    for planted in ["CANARY-PW", NOSCHEME_USER] {
+        assert!(
+            !everything.contains(planted),
+            "space case: {planted} leaked"
+        );
+    }
+    let proxy = &result.finding().observed["runtimes"][0]["proxy"];
+    assert_eq!(proxy["http"], "http://proxy.acme.example:3128");
+    assert_eq!(proxy["http_credentials"], true);
+    let result = run("docker-daemon-json-socks-proxy");
+    let everything = format!("{:?} {:?} {:?}", result.end, result.result(), result.log);
+    for planted in ["SOCKS-CANARY-PW", NOSCHEME_USER] {
+        assert!(
+            !everything.contains(planted),
+            "socks case: {planted} leaked"
+        );
+    }
+    let finding = result.finding();
+    let proxy = &finding.observed["runtimes"][0]["proxy"];
+    assert_eq!(proxy["https"], "socks5://proxy.acme.example:1080");
+    assert!(
+        finding.notes.iter().any(|n| n.contains(
+            "The https proxy in /etc/docker/daemon.json is not an http://host:port address"
+        )),
+        "{:?}",
+        finding.notes
+    );
     // The config with the password still parses, so the case is judged on its cgroup driver.
     let result = run("containerd-registry-auth");
     assert_eq!(result.finding().level, Level::Pass);

@@ -482,7 +482,10 @@ the choices the table leaves open.
   with no scheme (`svc:pw@proxy.acme.test:3128`) is read after a key that ends in `_proxy=` (any case,
   also inside `Environment=`) and after the JSON keys `"http-proxy":`, `"https-proxy":`, `"HttpProxy":`
   and `"HttpsProxy":` (M1-182). The userinfo ends at the last `@` of the value. A value with no `@`
-  stays. Any other key, and free text, is not read (05 I1).
+  stays. A value that opens with `"` or `'` ends at the same quote or at white space. Any other value
+  ends at white space, a control character, `"`, a backtick, `<` or `>`, so a `'` stays inside it. The
+  scan reads at most 16 KiB. Only a value that opens with a scheme is left to the scheme form. Any other
+  key, and free text, is not read (05 I1).
 - **`auth_header`** keeps the scheme and replaces the credential after it (`Authorization: Basic
   <credential>`; one word is all credential). A quoted value runs to its closing quote, a header inside
   a quoted word (`-H 'Authorization: ...'`) to that quote, anything else to the end of the line or a
