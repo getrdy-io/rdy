@@ -6,13 +6,16 @@
 //! for the engine. A line is written as soon as its check ends, on a pipe too, so a run that hangs still
 //! shows what finished. The lines are text on stderr only. Nothing goes to stdout.
 
-use std::future::{Future, poll_fn};
+use std::future::poll_fn;
 use std::io::Write;
 use std::pin::pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Waker;
 
-use rdy_engine::engine::FinishHook;
+use rdy_engine::engine::{Engine, Executed, FinishHook, RunOptions as EngineOptions};
+use rdy_engine::plan::RunPlan;
+use rdy_engine::privilege::Privilege;
+use rdy_spec::LoadedSpec;
 
 use super::{Look, say};
 use crate::redaction;
@@ -62,30 +65,61 @@ impl EventQueue {
     }
 }
 
-/// Awaits `work` and writes the queue's lines to `stderr` while it runs. When any line was written, one
-/// blank line follows, so the lines are a block of their own above the report text.
-pub(super) async fn drive<F: Future>(
-    work: F,
-    queue: &EventQueue,
-    look: Look,
-    stderr: &mut dyn Write,
-) -> F::Output {
-    let mut work = pin!(work);
-    let mut written = false;
-    let output = poll_fn(|cx| {
-        for line in queue.take(Some(cx.waker())) {
-            say(stderr, look, &line);
+/// The engine as `rdy run` calls it. Without `--verbose` it is the engine. With it, [`Narrated::execute`]
+/// also writes the queue's lines to stderr while the checks run.
+pub(super) struct Narrated<'a> {
+    engine: Engine,
+    events: Option<(EventQueue, Look, &'a mut dyn Write)>,
+}
+
+impl<'a> Narrated<'a> {
+    /// With `verbose`, puts the finish hook in `options` and keeps `stderr` for the lines.
+    pub(super) fn new(
+        engine: Engine,
+        verbose: bool,
+        look: Look,
+        options: &mut EngineOptions,
+        stderr: &'a mut dyn Write,
+    ) -> Self {
+        let events = verbose.then(|| {
+            let queue = EventQueue::default();
+            options.on_finish = Some(queue.hook(look.styler()));
+            (queue, look, stderr)
+        });
+        Self { engine, events }
+    }
+
+    /// [`Engine::execute`]. When any line was written, one blank line follows, so the lines are a block of
+    /// their own above the report text.
+    pub(super) async fn execute(
+        &mut self,
+        spec: &LoadedSpec,
+        plan: RunPlan,
+        privilege: &Privilege,
+        options: &EngineOptions,
+    ) -> Executed {
+        let work = self.engine.execute(spec, plan, privilege, options);
+        let Some((queue, look, stderr)) = self.events.as_mut() else {
+            return work.await;
+        };
+        let (queue, look) = (&*queue, *look);
+        let mut work = pin!(work);
+        let mut written = false;
+        let output = poll_fn(|cx| {
+            for line in queue.take(Some(cx.waker())) {
+                say(&mut **stderr, look, &line);
+                written = true;
+            }
+            work.as_mut().poll(cx)
+        })
+        .await;
+        for line in queue.take(None) {
+            say(&mut **stderr, look, &line);
             written = true;
         }
-        work.as_mut().poll(cx)
-    })
-    .await;
-    for line in queue.take(None) {
-        say(stderr, look, &line);
-        written = true;
+        if written {
+            say(&mut **stderr, look, "\n");
+        }
+        output
     }
-    if written {
-        say(stderr, look, "\n");
-    }
-    output
 }

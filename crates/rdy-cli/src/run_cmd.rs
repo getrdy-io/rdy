@@ -249,20 +249,16 @@ async fn execute(
         board.set_host(host.clone());
     }
     options.board = board;
-    // `--verbose` prints one line as each check ends, live and on any stream (07 C.2).
-    let executed = if detail == Detail::Verbose {
-        let queue = events::EventQueue::default();
-        options.on_finish = Some(queue.hook(look.styler()));
-        events::drive(
-            engine.execute(&loaded, plan, &privilege, &options),
-            &queue,
-            look,
-            stderr,
-        )
-        .await
-    } else {
-        engine.execute(&loaded, plan, &privilege, &options).await
-    };
+    // `--verbose` prints one line as each check ends, live and on any stream (07 C.2). The call below
+    // is the engine's, through a wrapper that does that.
+    let mut engine = events::Narrated::new(
+        engine,
+        detail == Detail::Verbose,
+        look,
+        &mut options,
+        &mut *stderr,
+    );
+    let executed = engine.execute(&loaded, plan, &privilege, &options).await;
 
     let finished_at = clock();
     let run = make_run(
