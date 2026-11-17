@@ -439,3 +439,23 @@ the corrections log of `11-backlog.md`.
   leave 03 saying so. M1-175 also builds k8s.crds and k8s.ingress, ten k8s ids in all, still 1.5 h. Two
   verdicts go to the founder (decision 8). New M2-126 pins the two namespaced Role reads to the spec's
   namespaces, and new M2-127 builds the pty probe examples once in CI before nextest.
+- **Correction-44, the order of the run header, `--verbose` and the live line, and one M2 ticket.** From the
+  reviews of PR #68 (M1-143). PR #68 edits 07 C.1, C.2, 2.8, 3 and A.3, 02's `RunOptions` lines and M2-017's
+  dependencies; this entry records those decisions. The header prints at the end of the run, because it
+  holds facts known only then (the `needs` row). With `--verbose` the event lines print live after the
+  banner and before the header, one blank line follows them, and then come the header and the list (C.2).
+  07's rule for the M1-142 code now says so, and that "the header prints once before progress starts" is not
+  met until new M2-128 moves the header before progress (which also prints the `cluster` row before the first
+  Kubernetes request, as 07 section 2.1 says). `--verbose` turns the live line off: M1-142's exit test says
+  `quiet or verbose`, and the code lands with whichever of PR #60 and PR #68 merges second. 07 section 5.2
+  says that a `--verbose` line written into a full stderr pipe blocks the run, and the watchdog ends it with
+  exit 70 and a partial report. M1-143 builds 02's `on_progress` seam with `Progress::Finished` only; M2-124
+  adds the started and phase events on it, and M2-017 depends on M2-124.
+- **Correction-45, `rdy run` writes the HTML report, and M1-100 takes PR #71's deferrals.** 01 section 5.5,
+  02 "Output and reports" and 07 sections 2.1 and 5.2 put a `.html` next to the `.json` in every report folder,
+  and the `rdy` and `rdy run` help says the run writes one. No ticket wired it: M1-057 writes the JSON only,
+  and the HTML tickets build and test the renderer. New M1-181 (core, week 19) writes the page through
+  `OutputDir::write_html`, with the `.json` written last, and the watchdog writes the INCOMPLETE page by the
+  same rules. M1-138 depends on it. PR #71 (M1-099) left `expected_issuer` and `pin_sha256`, the
+  generated-chain fixture rig and the Timeout case to M1-100, whose exit test did not hold them. M1-100 now
+  does all three (3.5 h), and M1-101 moves to week 21. No test-pinned document changed.
