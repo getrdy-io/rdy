@@ -195,8 +195,7 @@ fn mkfifo(path: &std::path::Path) {
 }
 
 /// Runs `rdy spec sign <fifo> --secret-key <fifo>` on its own thread and gives the exit code if the
-/// call returns within `limit`. `spec sign` opens its spec path, so on a FIFO with no writer it blocks
-/// for ever. A call that never returns leaves its thread blocked in `open`; the test process ends it.
+/// call returns within `limit`.
 #[cfg(unix)]
 fn sign_a_fifo(machine: Replay, fifo: &str, limit: std::time::Duration) -> Option<ExitCode> {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -208,10 +207,10 @@ fn sign_a_fifo(machine: Replay, fifo: &str, limit: std::time::Duration) -> Optio
     rx.recv_timeout(limit).ok()
 }
 
-/// A spec path that is a FIFO with no writer: opening it blocks for ever. The gate must refuse first,
-/// so `run` returns. The control shows the FIFO does block: with no privilege the same call does not
-/// return. Without it, a command that refused a FIFO before opening it would pass this test for the wrong
-/// reason (`spec lint` does that).
+/// A spec path that is a FIFO with no writer. The gate must refuse first, so `run` returns exit 70
+/// without opening the path. The control is the exit code: since M1-183 every spec read refuses a FIFO
+/// without blocking, so an unprivileged call returns 64 (`spec_unreadable`) where the gate returns 70.
+/// A command that opened the path before the gate would give 64 here, not 70.
 #[cfg(unix)]
 #[test]
 fn a_refused_run_never_opens_the_spec_path() {
@@ -222,10 +221,11 @@ fn a_refused_run_never_opens_the_spec_path() {
     mkfifo(&fifo);
     let path = fifo.to_string_lossy().into_owned();
 
-    let blocked = sign_a_fifo(common::unprivileged(), &path, Duration::from_secs(2));
+    let control = sign_a_fifo(common::unprivileged(), &path, Duration::from_secs(10));
     assert_eq!(
-        blocked, None,
-        "the control returned, so `spec sign` does not block on a FIFO and this test proves nothing"
+        control,
+        Some(ExitCode::Usage),
+        "an ordinary call refuses the FIFO as an unreadable spec"
     );
 
     let code = sign_a_fifo(privileged(), &path, Duration::from_secs(10))

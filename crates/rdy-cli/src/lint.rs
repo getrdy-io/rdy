@@ -9,14 +9,14 @@
 //!   finding (exit 2), because the person running lint wants to know what is wrong with the file. A file
 //!   that cannot be read is exit 64.
 
-use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 
 use rdy_spec::MAX_SPEC_BYTES;
 use rdy_spec::lint::{LintReport, lint_bytes};
 
 use crate::error::{CliError, IoReason, emit, escape_untrusted};
+use crate::signing::files::{self, FileError};
 
 /// Runs `rdy spec lint` on the file at `path` and returns the exit code.
 pub(crate) fn run(path: &Path, json: bool, stdout: &mut dyn Write, stderr: &mut dyn Write) -> u8 {
@@ -35,23 +35,43 @@ pub(crate) fn run(path: &Path, json: bool, stdout: &mut dyn Write, stderr: &mut 
     report.exit_code().code()
 }
 
-/// Reads the spec file: a regular file, at most one byte over the limit so that an oversized file is
-/// told as a finding without reading all of it.
+/// Reads the spec file for every command that reads one (`rdy run`, `rdy verify`, `rdy spec lint` and
+/// `rdy spec sign`): a regular file, at most one byte over the limit so that an oversized file is told
+/// as a finding without reading all of it.
+///
+/// The file goes through the opened-file checks of `signing::files` (M1-183): a `stat` that follows a
+/// link, a non-blocking open that never becomes the terminal, then a type and a device and inode compare
+/// on the open handle. A named pipe or a device is refused with exit 64 and never waited on, whether it
+/// is at the path or is swapped in after the `stat`.
 pub(crate) fn read_spec(path: &Path, name: &str) -> Result<Vec<u8>, CliError> {
-    let unreadable = |err: &std::io::Error| CliError::spec_unreadable(name, err);
-    let meta = std::fs::metadata(path).map_err(|e| unreadable(&e))?;
-    if !meta.is_file() {
-        return Err(CliError::SpecUnreadable {
-            path: name.to_owned(),
-            reason: IoReason::NotAFile,
-        });
+    files::read_public_prefix(path, MAX_SPEC_BYTES + 1)
+        .map(|(bytes, _)| bytes)
+        .map_err(|err| spec_file_error(name, &err))
+}
+
+/// [`read_spec`] with a hook between the `stat` and the open, for the tests of the swap.
+#[cfg(test)]
+pub(crate) fn read_spec_between(
+    path: &Path,
+    name: &str,
+    between: &dyn Fn(),
+) -> Result<Vec<u8>, CliError> {
+    files::read_public_prefix_between(path, MAX_SPEC_BYTES + 1, between)
+        .map(|(bytes, _)| bytes)
+        .map_err(|err| spec_file_error(name, &err))
+}
+
+/// A spec file that cannot be read is `spec_unreadable`, exit 64.
+fn spec_file_error(name: &str, err: &FileError) -> CliError {
+    let reason = match err {
+        FileError::Unreadable { reason } => *reason,
+        // A link is followed, so these are a pipe, a device, a folder, or one swapped in after the stat.
+        _ => IoReason::NotAFile,
+    };
+    CliError::SpecUnreadable {
+        path: name.to_owned(),
+        reason,
     }
-    let file = File::open(path).map_err(|e| unreadable(&e))?;
-    let mut bytes = Vec::new();
-    file.take(MAX_SPEC_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| unreadable(&e))?;
-    Ok(bytes)
 }
 
 /// The text report of 07 section C.8. Every line ends in a newline.
@@ -165,5 +185,30 @@ t.yaml: 2 errors, 1 warning
         let out = json_text(&r);
         assert!(out.contains("a\\u003cb\\u003e\\u0026.yaml"), "{out}");
         assert!(out.ends_with("}\n"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod swap_tests {
+    use super::*;
+    use crate::error::ErrorCode;
+
+    #[test]
+    fn a_pipe_swapped_in_after_the_stat_is_spec_unreadable() {
+        let d = tempfile::tempdir().expect("tempdir");
+        let path = d.path().join("s.yaml");
+        std::fs::write(&path, "a: 1").expect("write");
+        let p = path.clone();
+        let hook = move || {
+            std::fs::remove_file(&p).expect("rm");
+            let made = std::process::Command::new("mkfifo")
+                .arg(&p)
+                .status()
+                .expect("mkfifo");
+            assert!(made.success());
+        };
+        let err = read_spec_between(&path, "s.yaml", &hook).unwrap_err();
+        assert_eq!(err.code(), ErrorCode::SpecUnreadable);
+        assert!(!err.hint().is_empty());
     }
 }

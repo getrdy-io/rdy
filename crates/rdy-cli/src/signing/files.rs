@@ -102,6 +102,45 @@ pub fn read_private(path: &Path, cap: usize) -> Result<Zeroizing<Vec<u8>>, FileE
 ///
 /// [`FileError::Unreadable`], [`FileError::NotRegular`] or [`FileError::TooLarge`].
 pub fn read_public(path: &Path, cap: usize) -> Result<Vec<u8>, FileError> {
+    let (bytes, truncated) = read_checked(path, cap, &|| {})?;
+    if truncated {
+        return Err(FileError::TooLarge);
+    }
+    Ok(bytes)
+}
+
+/// Like [`read_public`], with the same checks on the open handle, but a file longer than `limit` is not
+/// an error: the first `limit` bytes come back and the flag says whether there were more. `rdy spec
+/// lint` reads one byte past the spec limit this way, so it can tell an oversized file as a finding
+/// without reading all of it (M1-183).
+///
+/// # Errors
+///
+/// [`FileError::Unreadable`] or [`FileError::NotRegular`].
+pub fn read_public_prefix(path: &Path, limit: usize) -> Result<(Vec<u8>, bool), FileError> {
+    read_checked(path, limit, &|| {})
+}
+
+/// [`read_public_prefix`] with `between` called after the `stat` and before the open, where a swap would
+/// land. Tests use it to put a named pipe or a device at the path at exactly that point.
+///
+/// # Errors
+///
+/// [`FileError::Unreadable`] or [`FileError::NotRegular`].
+#[cfg(test)]
+pub(crate) fn read_public_prefix_between(
+    path: &Path,
+    limit: usize,
+    between: &dyn Fn(),
+) -> Result<(Vec<u8>, bool), FileError> {
+    read_checked(path, limit, between)
+}
+
+fn read_checked(
+    path: &Path,
+    limit: usize,
+    between: &dyn Fn(),
+) -> Result<(Vec<u8>, bool), FileError> {
     let unreadable = |err: &io::Error| FileError::Unreadable {
         reason: crate::error::IoReason::from_io(err),
     };
@@ -109,6 +148,7 @@ pub fn read_public(path: &Path, cap: usize) -> Result<Vec<u8>, FileError> {
     if !seen.is_file() {
         return Err(FileError::NotRegular);
     }
+    between();
     let mut file = open_public(path).map_err(|err| unreadable(&err))?;
     let opened = file.metadata().map_err(|err| unreadable(&err))?;
     if !opened.is_file() || !same_file(&seen, &opened) {
@@ -116,13 +156,12 @@ pub fn read_public(path: &Path, cap: usize) -> Result<Vec<u8>, FileError> {
     }
     let mut buf = Vec::new();
     (&mut file)
-        .take(cap as u64 + 1)
+        .take(limit as u64 + 1)
         .read_to_end(&mut buf)
         .map_err(|err| unreadable(&err))?;
-    if buf.len() > cap {
-        return Err(FileError::TooLarge);
-    }
-    Ok(buf)
+    let truncated = buf.len() > limit;
+    buf.truncate(limit);
+    Ok((buf, truncated))
 }
 
 /// Unix: the handle is the file that `stat` looked at.

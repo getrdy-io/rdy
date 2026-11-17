@@ -274,3 +274,54 @@ fn a_handle_that_is_not_the_file_stat_saw_is_refused() {
     assert!(!same_file(&seen, &other));
     assert!(same_file(&seen, &same));
 }
+
+#[cfg(unix)]
+fn swap_for<'a>(path: &'a Path, make: impl Fn(&Path) + 'a) -> impl Fn() + 'a {
+    move || {
+        std::fs::remove_file(path).expect("remove");
+        make(path);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_named_pipe_swapped_in_after_the_stat_is_refused_and_never_waited_on() {
+    let d = dir();
+    let path = d.path().join("spec.yaml");
+    std::fs::write(&path, "a: 1").expect("write");
+    let hook = swap_for(&path, |p| {
+        let made = std::process::Command::new("mkfifo")
+            .arg(p)
+            .status()
+            .expect("mkfifo runs");
+        assert!(made.success());
+    });
+    let err = read_public_prefix_between(&path, 64, &hook).unwrap_err();
+    assert!(matches!(err, FileError::NotRegular), "{err:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_device_swapped_in_after_the_stat_is_refused_but_was_opened() {
+    // The residual of 05 Surface 2: the open of a swapped-in device has happened by the time the compare
+    // refuses it. The read never happens, so no bytes are taken from it.
+    let d = dir();
+    let path = d.path().join("spec.yaml");
+    std::fs::write(&path, "a: 1").expect("write");
+    let hook = swap_for(&path, |p| {
+        std::os::unix::fs::symlink("/dev/zero", p).expect("symlink");
+    });
+    let err = read_public_prefix_between(&path, 64, &hook).unwrap_err();
+    assert!(matches!(err, FileError::NotRegular), "{err:?}");
+}
+
+#[test]
+fn the_prefix_reader_cuts_at_the_limit_and_says_so() {
+    let d = dir();
+    let path = d.path().join("big");
+    std::fs::write(&path, vec![b'x'; 100]).expect("write");
+    let (bytes, more) = read_public_prefix(&path, 65).expect("read");
+    assert_eq!((bytes.len(), more), (65, true));
+    let (bytes, more) = read_public_prefix(&path, 100).expect("read");
+    assert_eq!((bytes.len(), more), (100, false));
+}

@@ -188,6 +188,7 @@ STRIDE table: Appendix B.
 
 ### Residual risks
 
+- `read_public` checks the path with `stat` and refuses a device or a named pipe, but a device swapped in between the `stat` and the open is still opened (without blocking) before the compare of type, device and inode refuses it. Every spec read uses it (M1-183). The window needs write rights on the spec folder, and a person who has those can run as that user anyway. Under `sudo` an open can have side effects on some devices. Accepted: closing it needs `O_PATH` or `openat2`, which `std` does not give without `unsafe`.
 - Key distribution is manual in M1. Pinning the wrong key trusts the wrong vendor.
 - No revocation in v1 (ADR 0002). A leaked key stays trusted until removed by hand.
 - From M2, the portal is in the trust chain. The bounded sentence is what limits a compromised portal.
@@ -280,7 +281,7 @@ Each is a statement that CI tests. The ticket in the test column carries it.
 | Id | Invariant | Test |
 |---|---|---|
 | INV-01 | No spec byte reaches the YAML parser before verification succeeds, except under `--allow-unsigned` or `rdy spec lint`. | Parser spy: a tampered spec is never parsed (M1-120). |
-| INV-02 | Spec (1 MiB), `.minisig` (4 KiB) and `trust.yaml` (256 KiB) are read through `take(limit + 1)`. Oversize exits 64. | Oversize files, a FIFO and `/dev/zero` each exit 64 within 1 s. |
+| INV-02 | Spec (1 MiB), `.minisig` (4 KiB) and `trust.yaml` (256 KiB) are read through `take(limit + 1)`. Oversize exits 64. | Oversize files exit 64. A FIFO at the path, a FIFO swapped in after the stat (test hook) and `/dev/zero` each exit 64 within 1 s for `rdy run`, `rdy verify` and `rdy spec sign` (M1-183). |
 | INV-03 | A spec verifies only if its key id is pinned for the trusted-comment product and `metadata.product` matches. | Unpinned id gives "unknown key"; a key pinned for A fails on B; a comment and metadata mismatch fails. |
 | INV-04 | With euid 0, only the system store is read, and it is refused unless root-owned, not group or world writable, and not a symlink. | Run under `sudo` in CI with `HOME` and `XDG_CONFIG_HOME` set to a user dir holding a pin; the pin is ignored. A `strace -f` of the load shows no call that mentions that home, and a control run with a user layout does (`root_trust_strace.rs`, SEC-60 M1-122). Bad owner, mode and symlink cases exit 64 (M1-121). |
 | INV-05 | `--allow-unsigned` is read from argv only. `RDY_ALLOW_UNSIGNED=1` and an `allow_unsigned` config key have no effect. An unsigned run says `signature: unsigned` in JSON and HTML. A present but failing signature exits 64 with or without the flag. | Integration tests and golden output (M1-126, SEC-59 M1-130). |

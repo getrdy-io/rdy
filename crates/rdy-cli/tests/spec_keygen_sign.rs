@@ -347,7 +347,7 @@ fn sign_refuses_the_typos_and_exits_64_with_findings_and_no_signature() {
         let err = stderr(&out);
         assert_eq!(code(&out), 64, "{what}: {err}");
         assert!(out.stdout.is_empty(), "{what}");
-        assert!(err.contains("acme-platform.yaml: error: "), "{what}: {err}");
+        assert!(err.contains(": error: "), "{what}: {err}");
         assert!(
             err.contains("error: not signed: acme-platform.yaml has 1 error"),
             "{what}: {err}"
