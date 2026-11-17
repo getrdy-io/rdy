@@ -46,7 +46,7 @@ cannot check, so each milestone also gets an engineering "done" test (proposed, 
 | Milestone | Scope (plan) | Exit test (plan, exact) | Engineering done test (proposed) |
 | --- | --- | --- | --- |
 | M0 Validate | 15 interviews, 5 design partners signed, landing page waitlist live | 5 vendors agree to run the alpha on a real POC | Not engineering. Go or no-go on Nov 20, 2026. |
-| M1 CLI alpha | Spec format, host, network and Kubernetes checks, HTML and JSON report, signed specs | One design partner catches a real install blocker with it | On all five targets, the replay fixture envs exit 0, 1 and 2 on the ready, warning and not-ready fixtures and write JSON and HTML into a new report directory; the shipped binary exits 0, 1 and 2 live in the real-binary smoke (net-only signed specs on loopback); an unsigned spec exits 64; a tampered spec exits 64 even with `--allow-unsigned`; every "0.1.0 gate" security ticket is closed. |
+| M1 CLI alpha | Spec format, host, network and Kubernetes checks, HTML and JSON report, signed specs | One design partner catches a real install blocker with it | On the two Linux targets, the replay fixture envs exit 0, 1 and 2 on the ready, warning and not-ready fixtures and write JSON and HTML into a new report directory (macOS and Windows skip Linux envs until M2-130, correction-48); on all five targets, the shipped binary exits 0, 1 and 2 live in the real-binary smoke (net-only signed specs on loopback); an unsigned spec exits 64; a tampered spec exits 64 even with `--allow-unsigned`; every "0.1.0 gate" security ticket is closed. |
 | M2 Portal MVP | Share links, results dashboard, redacted bundles, bundle viewer, Slack alerts | Design partners run it on 20 prospect environments | `rdy run <product>` with the token from `RDY_TOKEN`, `--token-file` or a prompt (never argv) fetches a signed spec from staging, the redaction golden suite passes, nothing uploads without the flag or a yes. |
 | M3 Launch | AWS account checks, Stripe billing, docs, public open-source launch, Team tier on sale | First 10 paying vendors | AWS checks pass against recorded fixtures, the docs site builds its reference from the schema, `rdy-spec` and `rdy-engine` are 1.0. |
 | M4 Business tier | GPU and AI checks, CRM sync, analytics, custom-branded CLI, SSO | First Business-tier deal | GPU checks pass on fixtures and one real node, branded report renders from data, data store checks ship, `custom.exec` runs only with hash-bound consent. |
@@ -91,8 +91,8 @@ no`. A tagged binary ships every week.
 
 | | Tickets | Hours |
 | --- | --- | --- |
-| M1, all | 181 | 400 |
-| M1, core | 150 | 335.5 |
+| M1, all | 181 | 400.5 |
+| M1, core | 150 | 336 |
 | M1, `core: no` (the cut list) | 31 | 64.5 |
 
 The KICKOFF budget, six weeks at 10 to 15 hours, is 60 to 90 hours. Core alone is more than three times
@@ -125,7 +125,7 @@ and Dec 28 run at half capacity.
 | 17 | Mar 15 to Mar 21, 2027 | 13 | 14 | 4 Network checks | M1-091 to M1-095, M1-141 | `v0.1.0-alpha.16`: facade TCP, TLS and HTTP; net.egress direct with the address policy |
 | 18 | Mar 22 to Mar 28, 2027 | 13 | 15 | 3 Host checks, HTML report; 4 Network checks | M1-096 to M1-100, M1-073, M1-180 | `v0.1.0-alpha.17`: net.egress through the customer's proxy, net.proxy, net.tls_intercept; host.os on Linux |
 | 19 | Mar 29 to Apr 4, 2027 | 13 | 15 | 3 Host checks, HTML report; 5 Kubernetes checks | M1-102 to M1-104, M1-072, M1-181 | `v0.1.0-alpha.18`: kube client with context, server and user shown; read-only guard with path parser and resource allowlist; host.ports on Linux; `rdy run` writes the HTML report next to the JSON |
-| 20 | Apr 5 to Apr 11, 2027 | 13 | 14 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |
+| 20 | Apr 5 to Apr 11, 2027 | 13 | 14.5 | 5 Kubernetes checks | M1-105 to M1-109 | `v0.1.0-alpha.19`: k8s.version, k8s.access; kind job in CI |
 | 21 | Apr 12 to Apr 18, 2027 | 13 | 15 | 4 Network checks; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-110 to M1-115, M1-101 | `v0.1.0-alpha.20`: k8s.storageclass, k8s.rbac, k8s.nodes, k8s.admission (PSA); k8s review closed; TLS verifier review closed |
 | 22 | Apr 19 to Apr 25, 2027 | 13 | 15 | 3 Host checks, HTML report; 5 Kubernetes checks; 6 Signing, `rdy verify`, 0.1.0 | M1-116 to M1-120, M1-175 | `v0.1.0-alpha.21`: family pages; fixture envs for every verdict; timeouts env; signatures verified before parsing |
 | 23 | Apr 26 to May 2, 2027 | 13 | 15 | 6 Signing, `rdy verify`, 0.1.0 | M1-121, M1-122, M1-124, M1-125, M1-174, M1-177 | `v0.1.0-alpha.22`: trust store; `rdy spec keygen`, `rdy spec sign` |
