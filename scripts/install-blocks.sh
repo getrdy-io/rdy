@@ -25,6 +25,8 @@ export LC_ALL
 REPO='getrdy-io/rdy'
 RELEASE_BASE="https://github.com/$REPO/releases/download"
 TAG_PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+NL='
+'
 
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/.." && pwd)
@@ -56,6 +58,18 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
+# tag_ok <tag>: true only for a tag of the TAG_PATTERN shape with no newline and no other control character.
+# grep checks one line at a time, so the newline and the other control characters are refused first.
+tag_ok() {
+    case $1 in
+        *"$NL"*) return 1 ;;
+    esac
+    if printf '%s' "$1" | LC_ALL=C grep -q '[^[:print:]]'; then
+        return 1
+    fi
+    printf '%s' "$1" | grep -Eq "$TAG_PATTERN"
+}
+
 resolve_tag() {
     # REST, not `gh release list`: the list command uses GraphQL, which some hosts cannot reach. The API
     # returns the newest release first. The jq filter drops drafts, then keeps the first tag name.
@@ -68,7 +82,7 @@ resolve_tag() {
         echo "SKIPPED: $REPO has no published release yet. The install-only blocks need a release to run against. Nothing was tested." >&2
         return 0
     fi
-    if ! printf '%s' "$found" | grep -Eq "$TAG_PATTERN"; then
+    if ! tag_ok "$found"; then
         echo "error: the release tag '$found' is not in the shape the install check accepts (v0.1.0 or v0.1.0-alpha.3)." >&2
         echo "fix: check the release on github.com and remove it if it is wrong." >&2
         return 1
@@ -93,7 +107,7 @@ extract_blocks() {
 }
 
 run_blocks() {
-    if ! printf '%s' "$tag" | grep -Eq "$TAG_PATTERN"; then
+    if ! tag_ok "$tag"; then
         echo "error: '$tag' is not a release tag such as v0.1.0 or v0.1.0-alpha.3." >&2
         echo "fix: pass --tag with a tag from the releases page." >&2
         return 1

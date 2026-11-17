@@ -155,6 +155,18 @@ else
     fail "a tag with path characters is refused (rc=$rc)"
 fi
 
+# 8b. A tag with a newline or another control character is refused, even when its first line looks right.
+# The newline case matters: grep reads one line at a time, so only the explicit check catches it.
+for bad_tag in "$(printf 'v9.9.9\nv1.0.0')" "$(printf 'v9.9.9\t')" "$(printf 'v9.9.9\033')"; do
+    rc=0
+    sh "$runner" --tag "$bad_tag" > /dev/null 2> "$work/err8b" || rc=$?
+    if [ "$rc" = 1 ] && grep -q 'is not a release tag' "$work/err8b"; then
+        pass "a tag with a control character is refused"
+    else
+        fail "a tag with a control character is refused (rc=$rc)"
+    fi
+done
+
 # 9. Usage errors exit 64.
 rc=0
 sh "$runner" --bogus > /dev/null 2>&1 || rc=$?

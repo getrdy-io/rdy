@@ -69,7 +69,7 @@ A root install goes to `/usr/local/bin`. The script never runs `sudo`. It never 
 Use this route when the host has no network, or when you do not want to run a script.
 
 1. On a connected machine, make one empty folder. Download every file of the release into it. That is `SHA256SUMS`, `SHA256SUMS.sigstore.json` and every archive. Do not use the files from another folder.
-2. Check the folder against the signature. Use a checkout of `main` that you have read. Run `scripts/verify-release.sh --dir <folder> <tag>`. The script needs every file that `SHA256SUMS` lists. The [release steps in RELEASING.md](https://github.com/getrdy-io/rdy/blob/main/RELEASING.md#every-release) describe the script and its output.
+2. Check the folder against the signature. Use a checkout of `main` that you have read. Run `scripts/verify-release.sh --dir <folder> <tag>`. The script needs every file that `SHA256SUMS` lists. The script is a POSIX shell script, so run it with a POSIX shell such as `sh` or `dash`, not bash-only syntax. The [release steps in RELEASING.md](https://github.com/getrdy-io/rdy/blob/main/RELEASING.md#every-release) describe the script and its output.
 3. Copy the folder to the host. On the host, check each file against `SHA256SUMS`. Run one of these from the folder:
 
    ```sh
@@ -86,7 +86,7 @@ A failed check means a file changed. Do not use it. Get the release again.
 
 The Windows install script ships in M3. In M1, install by hand from the zip. Use PowerShell.
 
-1. On a connected machine, download the zip, `SHA256SUMS` and `SHA256SUMS.sigstore.json` into one empty folder.
+1. On a connected machine, download every file of the release into one empty folder: the zip, `SHA256SUMS`, `SHA256SUMS.sigstore.json` and every other archive that `SHA256SUMS` lists.
 2. Check the folder with `scripts/verify-release.sh --dir <folder> <tag>`, as in step 2 above. That script runs under bash, so use Git Bash or WSL on that machine.
 3. Copy the folder to the Windows host. Compare the hash of the zip with its line in `SHA256SUMS`:
 

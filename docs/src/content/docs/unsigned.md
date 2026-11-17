@@ -80,7 +80,7 @@ Check a spec with your vendor's key on Windows in these steps.
 2. Put the spec, its `.minisig` file and the key file in one folder. Open a terminal in that folder.
 3. Check the signature. Compare the fingerprint that rdy prints with the vendor's.
 
-```sh pending=M1-126
+```powershell pending=M1-126
 rdy verify --key acme-platform.pub acme-platform.yaml
 ```
 
@@ -88,7 +88,7 @@ Exit 0 means the signature is good for that key. If the fingerprints differ, do 
 
 4. Run the spec with the same key:
 
-```sh pending=M1-126
+```powershell pending=M1-126
 rdy run --key acme-platform.pub acme-platform.yaml
 ```
 
@@ -96,4 +96,4 @@ Every run with `--key` prints `WARNING: KEY NOT PINNED`. That warning is expecte
 
 Do not delete or rename the `.minisig` file to use `--allow-unsigned`. That removes the only check.
 
-A plain `rdy verify` or `rdy run` without `--key` reads the trust store. If the store file is there, that run exits 64. Ask an administrator to remove the file, then run again.
+A plain `rdy verify` or `rdy run` without `--key` reads the trust store. If the store file is there, that run exits 64. Ask an administrator to remove the file. Until then, run again with `--key`.
