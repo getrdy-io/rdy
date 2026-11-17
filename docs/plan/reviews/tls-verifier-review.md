@@ -63,7 +63,7 @@ check that the pin rule depends on.
 
 | ID | Severity | Where | One line | Status | Owner |
 | --- | --- | --- | --- | --- | --- |
-| SF-01 | Should fix | `crates/rdy-engine/src/probe/net/tls.rs:76`; `crates/rdy-checks-net/src/tls_intercept.rs:497` to `:504` | No report says "no revocation check", which ADR 0014, 02 and 05 promise | open | M1-096 (fold) |
+| SF-01 | Should fix | `crates/rdy-engine/src/probe/net/tls.rs:76`; `crates/rdy-checks-net/src/tls_intercept.rs:497` to `:504` | No report says "no revocation check", which ADR 0014, 02 and 05 promise | open | M1-184 (correction 55) |
 | SF-02 | Should fix | `crates/rdy-engine/src/probe/net/tls/record.rs:275` to `:291`; `crates/rdy-engine/src/probe/net/tls/tests.rs:322` | No test proves the recording handshake checks the server's signature against the leaf | open | M1-184 (new, proposed; an M1-138 dependency, correction 55) |
 | N-01 | Nit | `crates/rdy-checks-net/src/tls_intercept/evidence.rs:221` to `:229` | A doubled separator after the home prefix shows the user name | open | M2-134 (fold) |
 | N-02 | Nit | `crates/rdy-checks-net/src/tls_intercept/evidence.rs:57`, `:71`, `:111` | "Self-signed" is a name equality, not a signature check | open | M2-136 (fold) |
@@ -88,8 +88,8 @@ None.
 - Fix: every `net.egress` result with at least one TLS stage, and every `net.tls_intercept` result with
   at least one chain, carries the note `REVOCATION_NOTE` once per result, not once per endpoint or host.
   A test asserts it on a public chain for each.
-- Owner: fold into M1-096 (check-author), which already opens the `net.egress` result. Add M1-100 to its
-  dependencies for the `net.tls_intercept` half.
+- Owner: M1-184 (rust-engineer). This review proposed a fold into M1-096; correction 55 put it in
+  M1-184 instead, with M1-100 as a dependency.
 
 **SF-02. No test proves the server must hold the leaf's key.**
 - Problem: the recording verifier accepts every chain (`record.rs:251` to `:273`). The only thing that ties
@@ -247,11 +247,11 @@ unauthenticated name match and only the pin proves anything. Accepted.
 - docs/plan/03-check-catalog.md, `net.tls_intercept` Thresholds: add "Until M2-135, a CA pin is at best a
   warning, and a middlebox this machine trusts can append the pinned CA, so pin the leaf or set
   `forbid_interception` to block." (AR-01)
-- docs/plan/11-backlog.md, M1-096 row: add the SF-01 clause (Folds, below) and M1-100 to its dependencies.
+- docs/plan/11-backlog.md: correction 55 put the SF-01 clause in M1-184, not the M1-096 row.
 - docs/plan/11-backlog.md: add M1-184 (below), and add it to the dependencies of M1-138 (correction 55).
 - docs/plan/11-backlog.md, M1-116 row: the network page says the AR-01 sentence (Folds, below).
 - docs/plan/05-threat-model.md (mine), "TLS" bullet: AR-01 is recorded, and "the report says so" now says
-  "from M1-096" (SF-01), on this branch.
+  "from M1-184" (SF-01), on this branch.
 
 ## Tickets implied
 
@@ -261,7 +261,7 @@ Folds (extra exit-test clauses on existing tickets):
 
 | Existing ticket | Added clause | +h |
 | --- | --- | --- |
-| [M1] M1-096 net.egress HTTP stage and failure classes | SF-01: every `net.egress` result with a TLS stage and every `net.tls_intercept` result with a chain carries the note `no revocation check` (`REVOCATION_NOTE`) once per result, not once per endpoint or host, and a test asserts it for each on a public chain (adds M1-100 as a dependency) | 0.25 |
+| [M1] M1-184 (proposed as a fold into M1-096; correction 55 moved it) | SF-01: every `net.egress` result with a TLS stage and every `net.tls_intercept` result with a chain carries the note `no revocation check` (`REVOCATION_NOTE`) once per result, not once per endpoint or host, and a test asserts it for each on a public chain (adds M1-100 as a dependency) | 0.25 |
 | [M1] M1-138 Tag and release 0.1.0 | SF-02: M1-184 joins the dependencies (correction 55). The leaf pin is now the advice for blocking, and the signature check it rests on has no test until M1-184 lands | 0 |
 | [M1] M1-116 Check family renderer and the host, network and Kubernetes pages | AR-01: the network page says a CA pin is at best a warning until M2-135, so pin the leaf or set `forbid_interception` to block | 0.1 |
 | [M2] M2-134 net.tls_intercept reports the Java and Node stores | N-01: a doubled separator after any usual home prefix does not show the user name | 0.1 |
