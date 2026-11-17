@@ -1,0 +1,43 @@
+{
+  "entry": {
+    "id": "host.time_sync",
+    "ntp_servers": [
+      "192.0.2.10"
+    ]
+  },
+  "result": {
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": false
+    },
+    "fix": "Check that UDP port 123 is open to the time server (`chronyc sources -v` shows whether chrony reaches its sources), or name another server in `ntp_servers`.",
+    "level": "warn",
+    "message": "Offset not measured: no time server gave a usable reply.",
+    "notes": [
+      "`192.0.2.10`: the reply did not echo the request, so it was ignored."
+    ],
+    "observed": {
+      "chrony": null,
+      "chronyc": "not installed",
+      "ntp_enabled": true,
+      "offset_seconds": null,
+      "offset_source": null,
+      "reference": null,
+      "servers": [
+        {
+          "detail": "the reply did not echo the request, so it was ignored",
+          "result": "rejected",
+          "server": "192.0.2.10"
+        }
+      ],
+      "state": "synchronized",
+      "timedatectl": "ok",
+      "timezone": "Etc/UTC"
+    },
+    "partial": {
+      "missing": [],
+      "note": "the clock offset was not measured"
+    }
+  }
+}

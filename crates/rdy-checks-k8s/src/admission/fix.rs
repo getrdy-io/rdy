@@ -124,6 +124,28 @@ pub(super) fn grants(commands: &[String], wanted: &[String]) -> String {
     )
 }
 
+/// The fix for a webhook that fails closed and has nothing behind it. Every name is a Kubernetes name or a
+/// placeholder (`webhooks::safe_name`), so it is safe in a command.
+pub(super) fn webhook(
+    kind: super::webhooks::ConfigKind,
+    config: &str,
+    service_namespace: &str,
+    service: &str,
+) -> String {
+    let resource = kind.resource();
+    format!(
+        "A webhook that fails closed (`failurePolicy: Fail`) with no ready backend rejects every request it matches. See what is behind it: `kubectl get endpointslices -n {service_namespace} -l kubernetes.io/service-name={service}` and `kubectl get pods -n {service_namespace}`. Ask the platform team to restore the backend, or, if the software that owns it is gone, to remove the stale configuration (`kubectl get {resource} {config}` shows it)."
+    )
+}
+
+/// The fix for `ValidatingAdmissionPolicy` bindings that deny.
+pub(super) fn admission_policies(namespace: Option<&str>) -> String {
+    let ns = ns_arg(namespace);
+    format!(
+        "Ask the platform team what these policies check. List them with `kubectl get validatingadmissionpolicies,validatingadmissionpolicybindings`. Test the vendor's manifests before install day with a server-side dry run, which creates nothing: `kubectl apply --dry-run=server -n {ns} -f <manifest>`."
+    )
+}
+
 /// The fix for a spec that names no namespace, so the labels were not read.
 pub(super) fn name_the_namespace() -> &'static str {
     "Name the install namespace in the `k8s.admission` entry (`namespace: <name>`), so its Pod Security labels can be read."

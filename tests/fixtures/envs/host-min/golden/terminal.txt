@@ -7,7 +7,7 @@ Every report from this run is marked UNSIGNED SPEC.
 rdy <version>
 spec    acme-min >=1.0   (spec.yaml)
 sig     UNSIGNED (allowed by --allow-unsigned)
-host    host-min.example   linux   x86_64
+host    host-min.example   rhel 9.2   x86_64
 user    uid 1000 (not root)
 
   PASS     host.memory  31.3 GiB found, 16 GiB needed

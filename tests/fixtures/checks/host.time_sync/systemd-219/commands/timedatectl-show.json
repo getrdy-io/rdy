@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "/usr/bin/timedatectl",
+    "show",
+    "-p",
+    "NTPSynchronized",
+    "-p",
+    "NTP",
+    "-p",
+    "Timezone"
+  ],
+  "stdout": "",
+  "stderr": "Unknown operation show.\n",
+  "exit": 1,
+  "delay_ms": 0
+}

@@ -1,0 +1,31 @@
+{
+  "entry": {
+    "id": "host.time_sync"
+  },
+  "result": {
+    "expected": {
+      "max_skew_seconds": 300.0,
+      "recommended_skew_seconds": 5.0,
+      "require_sync": false
+    },
+    "fix": null,
+    "level": "pass",
+    "message": "Clock is synchronized. Offset not measured: the spec lists no ntp_servers.",
+    "notes": [
+      "chronyc gave no answer: chronyd may not be running (it exited with code 1)."
+    ],
+    "observed": {
+      "chrony": null,
+      "chronyc": "unusable: chronyd may not be running (it exited with code 1)",
+      "ntp_enabled": true,
+      "offset_seconds": null,
+      "offset_source": null,
+      "reference": null,
+      "servers": [],
+      "state": "synchronized",
+      "timedatectl": "ok",
+      "timezone": "Etc/UTC"
+    },
+    "partial": null
+  }
+}
