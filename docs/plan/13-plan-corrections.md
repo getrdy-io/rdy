@@ -629,5 +629,8 @@ the corrections log of `11-backlog.md`.
   removed in 1.22 (SF-03). New M2-145 (1 h) adds AKS `managed-csi` and a vSphere or Longhorn class
   fixture to k8s.storageclass (SF-04). The review's folds onto M2-125 (SF-06) and M2-126 (SF-05) are
   already in those rows, so they are not filed. M1-116's row now says the Kubernetes page gives each check
-  an API reads line from the guard's `ALLOWED` table, with a test. No M1 hours change. No 03 `###`
-  heading or Appendix A row changed, and no test-pinned text changed.
+  an API reads line from the guard's `ALLOWED` table, with a test. SF-02: PRs #62, #64, #65 and #78 add
+  duplicate `ALLOWED` entries and #62 and #78 both add `Access::GetIn`, so M1-115's one-entry-per-resource
+  guard test fails once they land. Each of M1-162 to M1-165 now folds its entries into those on main, adds
+  `Access::GetIn` only if no earlier PR did, and copies the pair test, +0.5 h each. Weeks 29 and 30 go to
+  13.5 h. No 03 `###` heading or Appendix A row changed, and no test-pinned text changed.

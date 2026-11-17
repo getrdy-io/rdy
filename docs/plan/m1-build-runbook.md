@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-57: M1 184 tickets, 406.5 h, 342 h core; M2 145 tickets, 492.75 h; all milestones 429 tickets,
-1412.75 h, 1348.25 h core.
+correction-57: M1 184 tickets, 408.5 h, 342 h core; M2 145 tickets, 492.75 h; all milestones 429 tickets,
+1414.75 h, 1348.25 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -278,8 +278,9 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 - 57: no new M1 ticket. M1-159 adds back the k8s.nodes `pods` `ALLOWED` entry, its role rule, the
   `live_cluster.rs` read and 03's "wants list on nodes and pods", which M1-115 removes as unused, with a
   fixture that reads the pair, and depends on M1-115. M1-116's Kubernetes page lists each check's API
-  reads from `ALLOWED`. New M2-144 (k8s.version `v1beta1` rows by kind) and M2-145 (AKS and vSphere or
-  Longhorn storage class fixtures).
+  reads from `ALLOWED`. M1-162 to M1-165 fold their duplicate `ALLOWED` entries and `Access::GetIn` so
+  M1-115's one-entry guard test passes, and copy its pair test (+0.5 h each). New M2-144 (k8s.version
+  `v1beta1` rows by kind) and M2-145 (AKS and vSphere or Longhorn storage class fixtures).
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -509,7 +510,12 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     `every_allowed_entry_that_cites_this_check_is_read_by_a_fixture_run`.
   - M1-115's PR (correction-57): SF-01's "M1-159 adds the entry, the grant, a fixture and the pair test
     back" is now in M1-159's row. SF-03 and SF-04 are M2-144 and M2-145; SF-05 and SF-06 stay with M2-126
-    and M2-125. The review's SF-02 fold (+0.5 h each on M1-162 to M1-165) is not filed by correction-57.
+    and M2-125. The SF-02 fold is in the rows of M1-162 to M1-165 (+0.5 h each).
+  - #62, #64, #65 and #78 (M1-162 to M1-165, correction-57): fold the duplicate `services`, `configmaps`
+    and `apps/v1` `daemonsets` entries into one entry each, add `Access::GetIn` only in the first of #62
+    and #78 to merge, and copy M1-115's pair test into the module, so
+    `allowed_has_one_entry_per_group_version_and_resource` passes. Each PR adds "backlog corrected
+    2026-11-17 (correction-57)" to its progress line.
   - M1-116's PR (correction-57): add "backlog corrected 2026-11-17 (correction-57)" to its progress line
     for the Kubernetes page API reads line.
   - After #84, M1-097's PR and M1-119's PR merge, change "correction-49" in their progress lines to
