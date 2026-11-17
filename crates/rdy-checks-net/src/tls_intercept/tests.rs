@@ -12,11 +12,11 @@ use std::time::Duration;
 use rdy_engine::check::{Check, CheckContext, CheckOutcome, Finding, Level, Need, Os};
 use rdy_engine::family::HostSet;
 use rdy_engine::outcome::map_outcome;
-use rdy_engine::probe::net::{TrustFailure, TrustVerdict};
+use rdy_engine::probe::net::{REVOCATION_NOTE, TrustFailure, TrustVerdict};
 use rdy_engine::probe::{
     NativeCall, NativeValue, NoRoots, StoreKind, StoreOrigin, StoreSource, SystemRoots,
 };
-use rdy_engine::testing::loopback::{HttpOptions, HttpServer, TestCa, Validity};
+use rdy_engine::testing::loopback::{HttpOptions, HttpServer, TestCa, TlsVersion, Validity};
 use rdy_engine::testing::{
     Fixture, Replay, TcpScript, TestRun, assert_within_manifest, fixtures_dir,
 };
@@ -304,6 +304,8 @@ async fn a_chain_the_public_roots_validate_passes_and_sends_no_application_data(
     assert_eq!(web.handshakes(), 1, "one handshake per host");
     assert_eq!(web.application_bytes(), 0, "zero application bytes");
     assert_eq!(web.sni_seen(), vec![Some(NAME.to_owned())]);
+    assert_eq!(notes_of(finding, REVOCATION_NOTE), 1, "{:?}", finding.notes);
+    assert_eq!(notes_of_result(&ran.result(), REVOCATION_NOTE), 1);
 }
 
 #[tokio::test]
@@ -362,6 +364,10 @@ async fn a_chain_nobody_trusts_blocks_as_an_unknown_ca() {
     let fix = ran.finding().fix.as_deref().expect("a fix");
     assert!(fix.contains("update-ca-certificates"), "{fix}");
     assert!(fix.contains(NAME), "{fix}");
+    // The chain is untrusted, and the probe still sends nothing after the handshake.
+    settle(&web).await;
+    assert_eq!(web.application_bytes(), 0, "zero application bytes");
+    assert_eq!(notes_of(ran.finding(), REVOCATION_NOTE), 1);
 }
 
 #[tokio::test]
@@ -447,6 +453,7 @@ async fn a_host_that_cannot_be_reached_is_not_tested_and_is_never_a_pass() {
     assert_eq!(finding.level, Level::Warn, "{}", finding.message);
     assert_eq!(ran.host(0)["class"], "not_tested");
     assert!(finding.partial.is_some());
+    assert_eq!(notes_of(finding, REVOCATION_NOTE), 0, "no chain, no note");
     assert!(
         finding.message.contains("no host could be tested"),
         "{}",
@@ -661,6 +668,85 @@ async fn settle(web: &HttpServer) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("the server never recorded the handshake");
+}
+
+fn notes_of(finding: &Finding, note: &str) -> usize {
+    finding.notes.iter().filter(|n| *n == note).count()
+}
+
+fn notes_of_result(result: &CheckResult, note: &str) -> usize {
+    result.notes.iter().filter(|n| *n == note).count()
+}
+
+#[tokio::test]
+async fn the_revocation_note_is_said_once_for_many_hosts() {
+    const OTHER: &str = "api.acme.test";
+    let ca = TestCa::root("Acme Test Public Root");
+    let web = HttpServer::start(
+        HttpOptions::tls(&ca.issue(&[NAME, OTHER], Validity::Always)).alpn(&["http/1.1"]),
+    )
+    .await
+    .expect("a server");
+    let replay =
+        machine(NAME, web.addr(), Vec::new()).host(OTHER, ["127.0.0.1".parse().expect("ip")]);
+    let run = TestRun::new(replay);
+    run.trust_as_public(&der(&ca));
+    let port = web.addr().port();
+    let hosts = json!({"hosts": [format!("{NAME}:{port}"), format!("{OTHER}:{port}")]});
+    let ran = run_with(run, hosts).await;
+    assert_eq!(
+        ran.finding().level,
+        Level::Pass,
+        "{}",
+        ran.finding().message
+    );
+    assert_eq!(
+        ran.finding().observed["hosts"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        notes_of(ran.finding(), REVOCATION_NOTE),
+        1,
+        "{:?}",
+        ran.finding().notes
+    );
+}
+
+/// A server that presents the vendor's pinned leaf A but signs with key B (M1-184, SF-02). The chain
+/// is one the run trusts as public, so only the missing key can stop the pin from being met.
+async fn pinned_leaf_without_its_key(version: TlsVersion) {
+    let ca = TestCa::root("Acme Test Public Root");
+    let a = ca.issue(&[NAME], Validity::Always);
+    let b = ca.issue(&[NAME], Validity::Always);
+    let web = HttpServer::start(HttpOptions::tls_signing_with_another_key(&a, &b, version))
+        .await
+        .expect("a server");
+    let run = TestRun::new(machine(NAME, web.addr(), Vec::new()));
+    run.trust_as_public(&der(&ca));
+    let mut extra = hosts_of(NAME, &web);
+    extra["pin_sha256"] = json!([hex_of(a.chain()[0].as_ref())]);
+    let ran = run_with(run, extra).await;
+    let finding = ran.finding();
+    assert_eq!(ran.host(0)["class"], "not_tested", "{}", finding.message);
+    assert!(
+        ran.host(0).get("pin_sha256_matches").is_none(),
+        "{}",
+        ran.host(0)
+    );
+    assert_ne!(finding.level, Level::Pass, "{}", finding.message);
+    assert_ne!(ran.result().status, Status::Pass);
+    assert_eq!(notes_of(finding, REVOCATION_NOTE), 0, "no chain, no note");
+    assert_eq!(web.application_bytes(), 0);
+}
+
+#[tokio::test]
+async fn a_leaf_pin_is_not_met_by_a_tls13_server_without_the_leafs_key() {
+    pinned_leaf_without_its_key(TlsVersion::Tls13).await;
+}
+
+#[tokio::test]
+async fn a_leaf_pin_is_not_met_by_a_tls12_server_without_the_leafs_key() {
+    pinned_leaf_without_its_key(TlsVersion::Tls12).await;
 }
 
 // ---- evidence (M1-100) --------------------------------------------------------------------------

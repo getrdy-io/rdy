@@ -147,6 +147,10 @@ async fn a_reachable_endpoint_passes_with_a_timing_for_each_stage() {
     assert_eq!(e["attempts"][0]["outcome"], "connected");
     assert_eq!(e["tls"], false, "port 8080 is plain TCP");
     assert!(e.get("tls_stage").is_none());
+    assert!(
+        !finding.notes.iter().any(|n| n == REVOCATION_NOTE),
+        "no TLS stage, no revocation note"
+    );
     let result = ran.result();
     assert_eq!(result.status, Status::Pass);
     assert!(result.fix.is_none());
@@ -507,6 +511,30 @@ async fn a_trusted_chain_completes_with_protocol_alpn_and_depth_and_sends_no_app
     assert_eq!(server.application_bytes(), 0, "no HTTP request is sent");
     assert_eq!(server.sni_seen(), vec![Some("web.acme.test".to_owned())]);
     assert_eq!(ran.result().status, Status::Pass);
+    // The handshake ran, so the result says it checked no revocation, once (SF-01).
+    let said = |notes: &[String]| notes.iter().filter(|n| *n == REVOCATION_NOTE).count();
+    assert_eq!(said(&ran.finding().notes), 1, "{:?}", ran.finding().notes);
+    assert_eq!(said(&ran.result().notes), 1);
+}
+
+#[tokio::test]
+async fn the_revocation_note_is_said_once_for_many_tls_endpoints() {
+    let ca = TestCa::root("Acme Test Root");
+    let server = tls_server(&ca, "web.acme.test", Validity::Always).await;
+    let replay = machine("web.acme.test", server.addr(), Some(vec![der(&ca)]));
+    let target = format!("web.acme.test:{}", server.addr().port());
+    let endpoints = json!([
+        {"target": target, "tls": true},
+        {"target": target, "tls": true, "optional": true},
+    ]);
+    let ran = run_on(replay, endpoints, json!({}), NET).await;
+    assert!(ran.finding().observed["endpoints"][1]["tls_stage"].is_object());
+    let notes = &ran.finding().notes;
+    assert_eq!(
+        notes.iter().filter(|n| *n == REVOCATION_NOTE).count(),
+        1,
+        "{notes:?}"
+    );
 }
 
 #[tokio::test]
@@ -890,7 +918,13 @@ async fn a_status_outside_expect_status_fails_and_one_inside_passes() {
         ran.endpoint(0)["http_stage"]["expect_status"],
         json!([200, 401])
     );
-    assert!(ran.finding().notes.is_empty(), "{:?}", ran.finding().notes);
+    // The only note is the one every TLS result carries (SF-01).
+    assert_eq!(
+        ran.finding().notes,
+        [REVOCATION_NOTE],
+        "{:?}",
+        ran.finding().notes
+    );
 }
 
 #[tokio::test]
@@ -1148,7 +1182,8 @@ async fn with_no_expect_status_401_404_and_other_4xx_pass_with_a_note_and_2xx_wi
         )
         .await;
         assert_eq!(ran.finding().level, Level::Pass, "{status}");
-        assert_eq!(!ran.finding().notes.is_empty(), noted, "{status}");
+        let about_status = ran.finding().notes.iter().any(|n| n != REVOCATION_NOTE);
+        assert_eq!(about_status, noted, "{status}");
     }
 }
 

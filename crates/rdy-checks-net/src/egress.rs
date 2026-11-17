@@ -41,6 +41,7 @@ use rdy_engine::check::{
     BoxFuture, Check, CheckContext, CheckError, CheckInfo, CheckMeta, CheckOutcome, Finding, Need,
     Os, OsSupport, PeerClass, Support,
 };
+use rdy_engine::probe::net::REVOCATION_NOTE;
 use rdy_spec::check::{Endpoint, NetEgress, ViaProxy};
 use serde_json::json;
 
@@ -282,6 +283,10 @@ impl EgressCheck {
         }
         for note in notes {
             finding = finding.with_note(note);
+        }
+        // A handshake that finished says nothing about revocation. Said once per result (SF-01).
+        if probed.iter().any(|p| p.tls.is_some()) {
+            finding = finding.with_note(REVOCATION_NOTE);
         }
         if !not_tried.is_empty() {
             // One sentence per reason, in the order the reasons first appear.
