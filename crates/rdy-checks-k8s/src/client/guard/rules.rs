@@ -114,6 +114,9 @@ pub enum Access {
     /// One object of a cluster-scoped resource by name, or a `Namespace` by name:
     /// `/<prefix>/<resource>/<name>`.
     Get(Only),
+    /// One object of a namespaced resource, by name, in the namespaces `Only` admits:
+    /// `/<prefix>/namespaces/<namespace>/<resource>/<name>`. The name is any valid name.
+    GetInNamespace(Only),
 }
 
 /// The field selector a list of a resource must carry. The value is decoded once and split on `,`. A
@@ -281,9 +284,12 @@ pub const ALLOWED: &[Allowed] = &[
         group: "apps",
         version: "v1",
         resource: "deployments",
-        access: &[Access::ListInNamespace(Only::Name("kube-system"))],
-        checks: &["k8s.nodes"],
-        reads: "the cluster-autoscaler deployment by name",
+        access: &[
+            Access::ListInNamespace(Only::Name("kube-system")),
+            Access::GetInNamespace(Only::Any),
+        ],
+        checks: &["k8s.nodes", "k8s.crds"],
+        reads: "k8s.nodes: the cluster-autoscaler deployment by name. k8s.crds: one operator deployment by name in the namespace the spec names (replicas, ready count, image tags, the version label; env, args and annotations are dropped while parsing)",
         field_selector: FieldSelector::NotRequired,
     },
     Allowed {
@@ -851,6 +857,7 @@ fn check_get(segments: &[&str], field_selector: Option<&str>) -> Result<(), &'st
             (Access::List, None, None) => true,
             (Access::ListInNamespace(only), Some(namespace), None) => only.admits(namespace),
             (Access::Get(only), None, Some(name)) => only.admits(name),
+            (Access::GetInNamespace(only), Some(namespace), Some(_)) => only.admits(namespace),
             _ => false,
         });
     if !allowed {

@@ -94,6 +94,13 @@ cases `quota-short`, `quota-roomy`, `quota-two`, `quota-aliases`, `quota-scoped`
 `quota-unused`, `quota-forbidden`, `quota-cut`, `quota-hostile`, and the limit range cases `limit-low`,
 `limit-pod-low`, `limit-default-low`, `limit-default-request`, `limit-ok`, `limit-forbidden`, `limit-cut`, `limit-hostile`), `generated`
 by `scripts/gen-k8s-namespace-fixtures.py` (`--check` fails on drift and on a file the script did not write).
+`checks/k8s.crds/` holds 28 clusters (the definition cases `crds-present`, `crd-group-missing`, `crd-version-old`, `crd-not-in-group`,
+`crd-any-version`, `crd-discovery-forbidden`, `crd-document-forbidden`, `crd-document-gone`, the operator cases `operator-ready`,
+`operator-not-ready`, `operator-partly-ready`, `operator-scaled-to-zero`, `operator-missing`, `operator-forbidden`, `operator-old`,
+`operator-prerelease`, `operator-equal`, `operator-digest-label`, `operator-label-differs`, `operator-latest`, `operator-sidecar`,
+`operator-ambiguous`, `operator-registry-port`, `operator-hostile`, and `everything-wrong`, `warn-only`, `two-groups`, `namespace-secrets`),
+`generated` by `scripts/gen-k8s-crds-fixtures.py` (`--check` fails on drift and on a file the script did not write). The Deployments
+carry annotations and environment values with markers that no result may hold.
 A case holds only the files its check asks for: a request the case does not hold fails the run, so a
 `terminating` case without a quota list proves the check does not list one. `envs/host-min/` is the smallest environment (M1-075): a
 RHEL 9 VM, `host.memory` only, with a pinned clock and run id, a `golden/report.json` (the `--json` stdout

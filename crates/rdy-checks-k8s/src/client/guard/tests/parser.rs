@@ -670,9 +670,10 @@ fn the_table_judges_the_parsed_parts_not_the_text() {
             Err(RULE_NOT_ALLOWED),
         ),
         ("/apis/apps/v1/namespaces/kube-system/deployments", Ok(())),
+        ("/apis/apps/v1/namespaces/kube-system/deployments/d", Ok(())),
         (
-            "/apis/apps/v1/namespaces/kube-system/deployments/d",
-            Err(RULE_NOT_ALLOWED),
+            "/apis/apps/v1/namespaces/cert-manager/deployments/cert-manager",
+            Ok(()),
         ),
         ("/api/v1/namespaces/x", Ok(())),
         ("/api/v1/namespaces/x/persistentvolumeclaims", Ok(())),

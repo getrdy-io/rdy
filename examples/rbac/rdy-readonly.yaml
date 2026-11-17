@@ -5,9 +5,10 @@
 # is sent. This file is the second line: even if the guard had a bug, this identity could not write,
 # and it cannot read Secret objects.
 #
-# What this identity can still see: Pod and Deployment specs. Listing pods, events and deployments
-# returns literal environment variable values, and those often hold credentials. rdy keeps only
-# resources, node name and phase, and drops the rest. The token is still a credential, so keep it short
+# What this identity can still see: Pod and Deployment specs. Listing pods, events and deployments, or
+# getting an operator deployment, returns literal environment variable values, and those often hold
+# credentials. rdy keeps only resources, node name and phase (and for an operator deployment its replica
+# counts, image tags and version label), and drops the rest. The token is still a credential, so keep it short
 # lived (the command below asks for one hour) and delete the namespace when you are done.
 #
 # The rules below are the list in crates/rdy-checks-k8s/src/client/guard/rules.rs (ALLOWED). A test
@@ -59,6 +60,12 @@ rules:
   - apiGroups: [""]
     resources: ["nodes", "pods", "persistentvolumeclaims", "events", "resourcequotas", "limitranges"]
     verbs: ["list"]
+  # k8s.crds: the operator Deployments the spec names, read one by name. rdy keeps the replica counts, the
+  # image tags and the version label, and drops the environment, the arguments and the annotations. To
+  # read operators in fewer namespaces, move this rule into a Role in each of those namespaces.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]
   # k8s.storageclass: classes, the default marker, provisioners and registered drivers.
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]

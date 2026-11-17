@@ -1311,7 +1311,7 @@ Global rules, because `call` runs on kube's buffer worker without a check id.
 | `storage.k8s.io` `storageclasses` | LIST, GET by name | `k8s.storageclass`: classes, default marker, provisioner |
 | `storage.k8s.io` `csinodes` | LIST | `k8s.storageclass`: `spec.drivers[].name` |
 | `storage.k8s.io` `csidrivers` | LIST | `k8s.storageclass`: driver objects |
-| `apps` `deployments` | LIST in `kube-system` only | `k8s.nodes`: `cluster-autoscaler` presence by name |
+| `apps` `deployments` | LIST in `kube-system` only; GET by name in any namespace | `k8s.nodes`: `cluster-autoscaler` presence by name; `k8s.crds`: one operator Deployment named by the spec (replicas, ready count, image tags, `app.kubernetes.io/version`; env, args and annotations are dropped while parsing) |
 | `security.openshift.io` `securitycontextconstraints` | LIST | `k8s.admission`: SCCs |
 | `config.openshift.io` `clusterversions` | GET name `version` | `k8s.version`: OpenShift version |
 

@@ -73,6 +73,12 @@ fn needed() -> BTreeSet<(Option<String>, String)> {
                 Access::Get(Only::Any) => ("get", None, String::new()),
                 // A get of one name is granted by name, so the role cannot read any other object.
                 Access::Get(Only::Name(name)) => ("get", None, format!(" name={name}")),
+                // A get of any name in a namespace the spec names: a ClusterRole rule (a Role in each
+                // namespace is the narrower choice the example's comment points out).
+                Access::GetInNamespace(Only::Any) => ("get", None, String::new()),
+                Access::GetInNamespace(Only::Name(ns)) => {
+                    ("get", Some((*ns).to_owned()), String::new())
+                }
                 Access::ListInNamespace(Only::Any) => ("list", None, String::new()),
                 Access::ListInNamespace(Only::Name(ns)) => {
                     ("list", Some((*ns).to_owned()), String::new())

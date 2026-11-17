@@ -1,0 +1,12 @@
+schema = 1
+name = "k8s-crds-operator-hostile"
+summary = "An operator whose tag and label carry terminal escapes and a command"
+origin = "generated"
+os = "linux"
+arch = "x86_64"
+answers = ["k8s.crds"]
+
+[caps]
+root = false
+network = true
+kube = true
