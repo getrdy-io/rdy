@@ -21,7 +21,7 @@ pub(crate) fn is_forbidden(addr: IpAddr) -> bool {
     }
 }
 
-/// Whether a datagram must never be sent to `addr`: [`is_forbidden`], or an unspecified, multicast or
+/// Whether a datagram must never be sent to `addr`: `is_forbidden` (link-local, the cloud metadata addresses and the other forbidden ranges), or an unspecified, multicast or
 /// broadcast address (including the same addresses in an embedded IPv4 form).
 pub fn is_unusable_peer(addr: IpAddr) -> bool {
     if is_forbidden(addr) {
