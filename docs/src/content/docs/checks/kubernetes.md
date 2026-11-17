@@ -11,7 +11,7 @@ rdy reads the cluster through the kubeconfig you give it, or the one on your mac
 
 The Remediation text is the general fix for the check. A finding can carry a more specific fix of its own. When it does, rdy prints that fix instead. Where the fix names a command, run it against the same cluster you checked.
 
-The Reads line lists the API paths each check reads. It is one list for every operating system. rdy does not yet list the reads for each system on its own.
+The API reads line lists each Kubernetes API resource the check reads, the verbs it uses and what rdy keeps from the response. The Reads line lists local paths. Kubernetes checks read no local paths, so it says none. Neither list splits by operating system. The API reads line does not list the three self-review requests that `k8s.access` and `k8s.rbac` send, so those checks may show none.
 
 ## `k8s.access` Cluster access
 
@@ -34,6 +34,23 @@ Point rdy at the right cluster with `--kubeconfig <file>` and `--kube-context <n
 - **Timeout:** 30 s
 - **Systems:** Linux: full. macOS: full. Windows: full.
 - **Reads:** none
+- **API reads:**
+  - `v1 namespaces` (get): Pod Security labels; whether the target namespace exists; its phase and deletion conditions
+  - `security.openshift.io/v1 securitycontextconstraints` (list): the OpenShift SCCs
+  - `admissionregistration.k8s.io/v1 validatingwebhookconfigurations` (list): each webhook's name, failurePolicy, rules, selectors, matchConditions and backend (service name or URL kind); the CA bundle is dropped
+  - `admissionregistration.k8s.io/v1 mutatingwebhookconfigurations` (list): the same fields of the mutating webhooks
+  - `admissionregistration.k8s.io/v1 validatingadmissionpolicies` (list): name, match constraints, match conditions and whether it has validations; the CEL expressions are dropped
+  - `admissionregistration.k8s.io/v1 validatingadmissionpolicybindings` (list): policy name, validation actions and match resources
+  - `v1 services` (list in a namespace): the type of the one Service a Fail webhook names, found with a metadata.name field selector
+  - `discovery.k8s.io/v1 endpointslices` (list in a namespace): the ready condition of the endpoints behind one webhook Service, found by its service-name label
+  - `kyverno.io/v1 clusterpolicies` (list): policy names, failure actions and match filters; the rules' bodies are dropped
+  - `policies.kyverno.io/v1 validatingpolicies` (list): policy names, validation actions and match constraints
+  - `policies.kyverno.io/v1 imagevalidatingpolicies` (list): policy names, validation actions and match constraints
+  - `policies.kyverno.io/v1beta1 validatingpolicies` (list): policy names, validation actions and match constraints
+  - `policies.kyverno.io/v1beta1 imagevalidatingpolicies` (list): policy names, validation actions and match constraints
+  - `policies.kyverno.io/v1alpha1 validatingpolicies` (list): policy names, validation actions and match constraints (Kyverno 1.14 and 1.15)
+  - `policies.kyverno.io/v1alpha1 imagevalidatingpolicies` (list): policy names, validation actions and match constraints (Kyverno 1.14 and 1.15)
+  - `constraints.gatekeeper.sh/v1beta1 *` (list): constraint names, enforcementAction and match; the parameters are dropped
 
 **Remediation**
 
@@ -47,6 +64,10 @@ Set the Pod Security level of the install namespace to what the product needs: `
 - **Timeout:** 15 s
 - **Systems:** Linux: full. macOS: full. Windows: full.
 - **Reads:** none
+- **API reads:**
+  - `v1 namespaces` (get): Pod Security labels; whether the target namespace exists; its phase and deletion conditions
+  - `v1 resourcequotas` (list in a namespace): hard, used and scopes of the quotas in the target namespace
+  - `v1 limitranges` (list in a namespace): the memory max, min and default of the container and pod items in the target namespace
 
 **Remediation**
 
@@ -60,6 +81,9 @@ Ask the platform team for a namespace the product can install into. Create it wi
 - **Timeout:** 30 s
 - **Systems:** Linux: full. macOS: full. Windows: full.
 - **Reads:** none
+- **API reads:**
+  - `v1 nodes` (list): allocatable, conditions, taints, labels; providerID and kubeletVersion
+  - `apps/v1 deployments` (list in a namespace): the cluster-autoscaler deployment by name
 
 **Remediation**
 
@@ -73,6 +97,8 @@ Add nodes the product can use. Only Ready, uncordoned Linux nodes without an unt
 - **Timeout:** 30 s
 - **Systems:** Linux: full. macOS: full. Windows: full.
 - **Reads:** none
+- **API reads:**
+  - `v1 namespaces` (get): Pod Security labels; whether the target namespace exists; its phase and deletion conditions
 
 **Remediation**
 
@@ -86,6 +112,13 @@ Ask the cluster admin to bind a role that grants the listed permissions to the i
 - **Timeout:** 30 s
 - **Systems:** Linux: full. macOS: full. Windows: full.
 - **Reads:** none
+- **API reads:**
+  - `v1 namespaces` (get): Pod Security labels; whether the target namespace exists; its phase and deletion conditions
+  - `v1 persistentvolumeclaims` (list in a namespace): Pending claims older than 5 minutes in the target namespace
+  - `v1 events` (list in a namespace): ProvisioningFailed and WaitForFirstConsumer reasons for claims
+  - `storage.k8s.io/v1 storageclasses` (list, get): classes, the default marker, the provisioner
+  - `storage.k8s.io/v1 csinodes` (list): spec.drivers[].name
+  - `storage.k8s.io/v1 csidrivers` (list): driver objects
 
 **Remediation**
 
@@ -99,6 +132,9 @@ Mark one StorageClass as the default: `kubectl patch storageclass <name> -p '{"m
 - **Timeout:** 10 s
 - **Systems:** Linux: full. macOS: full. Windows: full.
 - **Reads:** none
+- **API reads:**
+  - `v1 nodes` (list): allocatable, conditions, taints, labels; providerID and kubeletVersion
+  - `config.openshift.io/v1 clusterversions` (get): the OpenShift version
 
 **Remediation**
 
