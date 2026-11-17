@@ -508,9 +508,11 @@ the compile error on the exhaustive `match` in `NativeCall::policy` is the first
     used. The template is a constant with no style spec, so `console` never reads `NO_COLOR` or `CLICOLOR`
     for it and never changes the Windows console mode (a test holds this). The other ways to draw
     (`ProgressDrawTarget::{stdout, stdout_with_hz, stderr, term}`, `ProgressBar::{new, new_spinner,
-    enable_steady_tick, println, suspend}`, `MultiProgress::new`, `console::Term::{stdout, buffered_stdout}`,
+    enable_steady_tick, println, suspend}`, `MultiProgress::new` and the type `MultiProgress` (so `default()` is covered too, since a trait method cannot be named on its own),
+    `ProgressIterator::{progress, progress_count, progress_with_style}`, `console::Term::{stdout, buffered_stdout}`,
     `console::set_colors_enabled{,_stderr}`) are on the clippy `disallowed-methods` wall, root and check
-    crates, and the lint-wall crate proves each one fires (SEC-60-1).
+    crates, and the lint-wall crate proves each one fires (SEC-60-1). `ProgressDrawTarget::stdout_nohz` and
+    `stderr_nohz` do not exist in indicatif 0.18, so they have no entry.
 
 ## SECURITY.md
 

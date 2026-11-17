@@ -526,6 +526,15 @@ fn indicatif_progress_bar_suspend() {
 fn indicatif_multi_progress_new() {
     let _ = indicatif::MultiProgress::new;
 }
+fn indicatif_progress_iterator_progress() {
+    let _ = <std::vec::IntoIter<u8> as indicatif::ProgressIterator>::progress;
+}
+fn indicatif_progress_iterator_progress_count() {
+    let _ = <std::vec::IntoIter<u8> as indicatif::ProgressIterator>::progress_count;
+}
+fn indicatif_progress_iterator_progress_with_style() {
+    let _ = <std::vec::IntoIter<u8> as indicatif::ProgressIterator>::progress_with_style;
+}
 fn console_term_stdout() {
     let _ = console::Term::stdout;
 }
@@ -542,6 +551,7 @@ fn console_set_colors_enabled_stderr() {
 // ---- askama --------------------------------------------------------------------------------------
 // These print a value without escaping it. Only the `EmbeddedJson` marker of the HTML report may (M1-078).
 
+fn type_indicatif_multi_progress(_: Option<indicatif::MultiProgress>) {}
 fn type_askama_safe(_: Option<askama::filters::Safe<String>>) {}
 fn type_askama_unsafe(_: Option<askama::filters::Unsafe<String>>) {}
 fn type_askama_maybe_safe(_: Option<askama::filters::MaybeSafe<String>>) {}

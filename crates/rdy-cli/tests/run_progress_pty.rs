@@ -58,11 +58,7 @@ fn build_probe(dir: &Path) {
             cargo.args(["--profile", profile]);
         }
     }
-    let target = std::env::var("CARGO_BUILD_TARGET").ok().or_else(|| {
-        let name = dir.parent()?.file_name()?.to_str()?;
-        (name.matches('-').count() >= 2).then(|| name.to_string())
-    });
-    if let Some(target) = target {
+    if let Ok(target) = std::env::var("CARGO_BUILD_TARGET") {
         cargo.args(["--target", &target]);
     }
     assert!(cargo.status().expect("run cargo").success());
@@ -100,13 +96,14 @@ fn run(on_pty: bool, term: Option<&str>, env: &[(&str, &str)], args: &[&str]) ->
     }
 
     let master = if on_pty {
-        let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).expect("openpt");
+        let master =
+            openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC).expect("openpt");
         grantpt(&master).expect("grantpt");
         unlockpt(&master).expect("unlockpt");
         let name = ptsname(&master, Vec::new()).expect("ptsname");
         let slave = open(
             name.as_c_str(),
-            OFlags::RDWR | OFlags::NOCTTY,
+            OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
             Mode::empty(),
         )
         .expect("open the pty slave");
@@ -159,6 +156,17 @@ fn on_a_terminal_the_line_is_cleared_before_the_check_list() {
     assert!(
         last_clear < first_check,
         "the last clear must come before the first check line: {text:?}"
+    );
+    // indicatif writes the clear before every redraw, so the position of the last clear proves nothing
+    // alone. What follows it, up to the first check line, must hold no frame text: the line really ended.
+    let between = &text[last_clear + CLEAR.len()..first_check];
+    assert!(
+        !between.contains("Running"),
+        "a frame is left between the last clear and the check list: {between:?}"
+    );
+    assert!(
+        !between.replace("\r\n", "").contains('\r'),
+        "a redraw is left between the last clear and the check list: {between:?}"
     );
     // Nothing of the spinner after the check list starts.
     assert!(!text[first_check..].contains("Running 1 check"), "{text:?}");

@@ -31,6 +31,7 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 
 disallowed-types = [
+    { path = "indicatif::MultiProgress", reason = "draws on stderr and takes over the screen, and `default()` cannot be named on its own; rdy draws one line through progress::Progress (M1-142)", allow-invalid = true },
     # Kube, outside src/client/.
     { path = "kube::Client", reason = "only src/client/ builds a client; checks get the guarded ReadOnlyClient (ADR 0010)" },
     { path = "kube::Config", reason = "only src/client/ builds a kube config (ADR 0010)" },
@@ -113,6 +114,9 @@ disallowed-methods = [
     { path = "console::Term::buffered_stdout", reason = "a terminal handle on stdout, which is data", allow-invalid = true },
     { path = "console::set_colors_enabled", reason = "sets a process-wide colour choice; colour is decided once in use_color", allow-invalid = true },
     { path = "console::set_colors_enabled_stderr", reason = "sets a process-wide colour choice; colour is decided once in use_color", allow-invalid = true },
+    { path = "indicatif::ProgressIterator::progress", reason = "builds a bar that draws on stderr at once, past our gate; use progress::Progress", allow-invalid = true },
+    { path = "indicatif::ProgressIterator::progress_count", reason = "builds a bar that draws on stderr at once, past our gate; use progress::Progress", allow-invalid = true },
+    { path = "indicatif::ProgressIterator::progress_with_style", reason = "builds a bar that draws on stderr at once, past our gate; use progress::Progress", allow-invalid = true },
     { path = "rdy_spec::load_at", reason = "only tests may pass a clock; use rdy_spec::load", allow-invalid = true },
     # Process.
     { path = "std::process::Command::new", reason = "a check runs a command only through Probe::exec, which logs it and applies the check's declaration (ADR 0014)" },
