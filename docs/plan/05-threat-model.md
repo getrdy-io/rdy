@@ -203,7 +203,10 @@ STRIDE table: Appendix B.
   refuses any store and has no user store, until the ACL rules land (M2-105, ADR 0027).
 - A `--key` file has no owner check, also when root reads it. A user who can write a shared folder can
   swap the key file before a root run. The mitigation is the KEY NOT PINNED banner, which prints the
-  fingerprint of the key that was used. M1-132 reviews this (PR #84 security review, F7).
+  short form of the fingerprint of the key that was used (PR #84 security review, F7). The full
+  fingerprint is in the JSON report and in `rdy verify --key`. That is the value to compare, never the
+  short form (signing review SF-02). Accepted for M1 by the M1-132 signing review (AR-01). M2-034's TTY
+  confirmation is the next control.
 
 ## Surface 3: install script and release pipeline
 
