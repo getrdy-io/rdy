@@ -38,7 +38,7 @@ use rdy_engine::probe::net::{
     HttpMethod, HttpOutcome, HttpProbe, Roots, Route, STAGGER, TcpAttempt, TcpReport, TlsChain,
     TrustVerdict,
 };
-use rdy_engine::probe::{AttemptOutcome, NetFailure, NoRoots, ProbeError};
+use rdy_engine::probe::{AttemptOutcome, Exemption, NetFailure, NoRoots, ProbeError};
 use rdy_spec::check::{Endpoint, HttpMethod as SpecMethod, Trust};
 use rdy_spec::scalar::Host;
 use serde_json::{Value, json};
@@ -215,6 +215,11 @@ pub(super) struct Probed {
     pub(super) via_proxy: Option<String>,
     /// The environment variable the proxy was read from, when known.
     pub(super) proxy_var: Option<&'static str>,
+    /// Why the endpoint went direct although the run has a proxy: the `NO_PROXY` entry or the loopback
+    /// rule, as a sentence.
+    pub(super) exempt: Option<String>,
+    /// An `auto` endpoint failed through the proxy and a direct connect to it worked.
+    pub(super) direct_works: bool,
     pub(super) ending: Ending,
 }
 
@@ -232,6 +237,8 @@ impl Probed {
             http: None,
             via_proxy: None,
             proxy_var: None,
+            exempt: None,
+            direct_works: false,
             ending: Ending::NotTried("not started"),
         }
     }
@@ -315,6 +322,13 @@ impl Probed {
             }
             None => out["attempts"] = json!(attempts),
         }
+        if let Some(why) = &self.exempt {
+            out["route"] = json!("direct");
+            out["exempted_by"] = json!(why);
+        }
+        if self.direct_works {
+            out["direct_works"] = json!(true);
+        }
         if let Some((took, v4, v6)) = self.lookup {
             out["lookup"] = json!({ "ms": ms(took), "ipv4": v4, "ipv6": v6 });
         }
@@ -380,13 +394,13 @@ pub(super) async fn probe(
     spec: &Endpoint,
     trust: Trust,
     queued: usize,
-    proxy: Option<String>,
-    proxy_var: Option<&'static str>,
+    way: Way,
 ) -> Result<Probed, CheckError> {
     let tls_wanted = wants_tls(spec);
     let mut out = Probed::new(spec, tls_wanted);
-    out.via_proxy = proxy;
-    out.proxy_var = proxy_var;
+    out.via_proxy = way.proxy;
+    out.proxy_var = way.proxy_var;
+    out.exempt = way.exempt.map(|why| why.to_string());
     let left = ctx.remaining();
     if left < RESERVE + MIN_TO_START {
         out.ending = Ending::NotTried(OUT_OF_TIME);
@@ -415,7 +429,52 @@ pub(super) async fn probe(
             }
         }
     }
+    // An `auto` endpoint that failed through the proxy gets one direct connect, so the result can say
+    // that the other path works (03: "direct works, proxy fails"). It runs only when the worst case of
+    // the call fits in what is left after the rounds still queued, as the second connect above does.
+    if way.auto && matches!(&out.ending, Ending::Failed(class, _) if class.is_proxy()) {
+        let behind = SECOND_CONNECT * u32::try_from(queued).unwrap_or(u32::MAX);
+        if ctx.remaining() >= RESERVE + SECOND_CONNECT + behind
+            && let Ok(report) = ctx.probe().tcp(&spec.target, Route::Direct).await
+        {
+            out.direct_works = report.connected;
+        }
+    }
     Ok(out)
+}
+
+/// How an endpoint is reached, decided before its probe starts.
+pub(super) struct Way {
+    /// The proxy origin, when the endpoint goes through the run's proxy.
+    proxy: Option<String>,
+    /// The variable the proxy was read from.
+    proxy_var: Option<&'static str>,
+    /// The route is `auto` and the endpoint took the proxy for that reason.
+    auto: bool,
+    /// Why an `auto` endpoint goes direct although the run has a proxy.
+    exempt: Option<Exemption>,
+}
+
+impl Way {
+    /// A direct endpoint. `exempt` is `NO_PROXY` or the loopback rule when the run has a proxy.
+    pub(super) fn direct(exempt: Option<Exemption>) -> Self {
+        Self {
+            proxy: None,
+            proxy_var: None,
+            auto: false,
+            exempt,
+        }
+    }
+
+    /// An endpoint through the proxy `origin`.
+    pub(super) fn proxy(origin: String, var: Option<&'static str>, auto: bool) -> Self {
+        Self {
+            proxy: Some(origin),
+            proxy_var: var,
+            auto,
+            exempt: None,
+        }
+    }
 }
 
 /// Sends the request of a URL endpoint and judges the status against `expect_status`. A redirect is

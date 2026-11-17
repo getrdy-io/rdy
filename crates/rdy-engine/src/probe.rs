@@ -80,12 +80,15 @@ pub use native::{
     MAX_ROOT_BYTES, MAX_SYSTEM_ROOTS, MachineId, NativeCall, NativeValue, RULE_MACHINE_ID,
     Resource, RlimitInfo, StatvfsInfo, StoreKind, StoreOrigin, StoreSource, SystemRoots, UnameInfo,
 };
+pub use no_proxy::{
+    Exemption, MAX_ENTRIES as MAX_NO_PROXY_ENTRIES, MAX_ENTRY_CHARS, MAX_LIST_BYTES, NoProxy,
+};
 pub use policy::{RULE_FD_TARGET, ReadGuard, Refused};
 #[cfg(feature = "testing")]
 pub(crate) use policy::{RULE_OUTSIDE_READS, RULE_OUTSIDE_STATFS, is_fd_dir, is_fd_link};
 pub use proxy::{
-    DEFAULT_PROXY_PORT, MAX_CONNECT_HEAD, NetFailure, PROXY_ENV, ProxyChallenge, ProxyEnvError,
-    ProxyError, ProxyUrl, ProxyUrlError,
+    ALL_PROXY_ENV, DEFAULT_PROXY_PORT, EnvConflict, MAX_CONNECT_HEAD, NO_PROXY_ENV, NetFailure,
+    PROXY_ENV, ProxyChallenge, ProxyEnvError, ProxyError, ProxyUrl, ProxyUrlError, env_conflicts,
 };
 
 pub use attempt::AttemptOutcome;
@@ -102,6 +105,7 @@ mod log;
 mod native;
 #[cfg(any(feature = "runtime", feature = "loopback"))]
 pub mod net;
+mod no_proxy;
 mod policy;
 mod proxy;
 #[cfg(any(test, feature = "testing"))]
@@ -692,6 +696,10 @@ pub struct ProbeHub {
     proxy: Arc<OnceLock<ProxyUrl>>,
     /// The environment variable the proxy was read from, when it came from `set_proxy_from_env`.
     proxy_source: Arc<OnceLock<&'static str>>,
+    /// The `NO_PROXY` list of the process environment and the variable it came from (M1-098).
+    no_proxy: Arc<OnceLock<(NoProxy, &'static str)>>,
+    /// The proxy variables that are set in two spellings that differ (M1-098).
+    env_conflicts: Arc<OnceLock<Vec<EnvConflict>>>,
     /// Whether sockets are allowed. `false` is `--no-network`: the facade refuses every lookup, TCP,
     /// UDP and network command. A new hub starts with `false`. Clones of the hub share it.
     network: Arc<AtomicBool>,
@@ -722,6 +730,8 @@ impl ProbeHub {
             log: ActionLog::new(redactor, None, Limits::default()),
             proxy: Arc::new(OnceLock::new()),
             proxy_source: Arc::new(OnceLock::new()),
+            no_proxy: Arc::new(OnceLock::new()),
+            env_conflicts: Arc::new(OnceLock::new()),
             network: Arc::new(AtomicBool::new(false)),
             checks_started: Arc::new(AtomicBool::new(false)),
             #[cfg(any(feature = "runtime", feature = "loopback"))]
@@ -908,13 +918,15 @@ impl ProbeHub {
     /// [`ProbeHub::set_proxy_text`] does (M1-097). The first variable of [`PROXY_ENV`] that is set to a
     /// non-blank value wins, in that order: `HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, `http_proxy`.
     /// A run has one proxy, so `HTTP_PROXY` serves `https` calls too when it is the only one set.
-    /// `NO_PROXY`, `ALL_PROXY` and a PAC file are not read here.
+    /// It reads `NO_PROXY` (else `no_proxy`) too, as [`NoProxy`] (M1-098), so `Probe::route_for` can send
+    /// an exempt host direct, and it records which proxy variables are set in two spellings that differ
+    /// ([`env_conflicts`]). `ALL_PROXY` and a PAC file are not read here: `net.proxy` reports them.
     ///
     /// The run calls this right after [`ProbeHub::new`], before `Privilege::snapshot` and before
     /// anything is printed or written, so the password is in the known-secret set before any string
     /// that could hold it exists. It reads the backend directly, because the read belongs to the run
-    /// and not to a check. When a variable is set it records the four names (never a value) as one
-    /// run-level `env` entry; with none set it records nothing. That entry is a set-up entry: it does not
+    /// and not to a check. When a proxy or `NO_PROXY` variable is set it records the eight names (never a
+    /// value) as one run-level `env` entry; with none set it records nothing. That entry is a set-up entry: it does not
     /// count for the `TooLate` rule of [`ProbeHub::set_proxy`].
     ///
     /// Every other variable that is set and parses has its password added to the known-secret set too,
@@ -927,22 +939,57 @@ impl ProbeHub {
     /// [`ProxyEnvError`] names the variable and holds the [`ProxyError`]. No error holds any part of the
     /// value.
     pub fn set_proxy_from_env(&self) -> Result<Option<&'static str>, ProxyEnvError> {
-        let set: Vec<(&'static str, String)> = PROXY_ENV
-            .iter()
-            .filter_map(|name| {
-                self.backend
-                    .env(name)
-                    .filter(|value| !value.trim().is_empty())
-                    .map(|value| (*name, value))
-            })
-            .collect();
-        // A run with no proxy variable writes no entry, so its log is the same as before.
-        let Some((var, value)) = set.first().cloned() else {
-            return Ok(None);
+        let read = |names: &[&'static str]| -> Vec<(&'static str, String)> {
+            names
+                .iter()
+                .filter_map(|name| {
+                    self.backend
+                        .env(name)
+                        .filter(|value| !value.trim().is_empty())
+                        .map(|value| (*name, value))
+                })
+                .collect()
         };
+        let set = read(&PROXY_ENV);
+        let listed = read(&NO_PROXY_ENV);
+        // `ALL_PROXY` is not used by a run, but `net.proxy` reports it, so its password is hidden too.
+        let all = read(&ALL_PROXY_ENV);
+        // A run with none of the variables writes no entry, so its log is the same as before.
+        if set.is_empty() && listed.is_empty() && all.is_empty() {
+            return Ok(None);
+        }
+        // The `NO_PROXY` list holds no secret and the conflicts hold names only, so both are kept
+        // before the proxy is parsed: a refused proxy still leaves them for a run that goes on.
+        if let Some((var, value)) = listed.first() {
+            let _ = self.no_proxy.set((NoProxy::parse(value), *var));
+        }
+        let _ = self
+            .env_conflicts
+            .set(env_conflicts(|name| self.backend.env(name)));
         let mut fields = Map::new();
-        fields.insert("name".to_owned(), cut_names(&PROXY_ENV).into());
+        let names: Vec<&str> = PROXY_ENV
+            .iter()
+            .chain(&ALL_PROXY_ENV)
+            .chain(&NO_PROXY_ENV)
+            .copied()
+            .collect();
+        fields.insert("name".to_owned(), cut_names(&names).into());
         let setup = self.log.begin_setup(ActionKind::Env, fields);
+        let Some((var, value)) = set.first().cloned() else {
+            let refused = self.hide_secrets_of(&all);
+            setup.finish(if refused.is_some() {
+                ActionOutcome::Failed
+            } else {
+                ActionOutcome::Ok
+            });
+            return match refused {
+                Some(var) => Err(ProxyEnvError {
+                    var,
+                    error: ProxyError::SecretRefused,
+                }),
+                None => Ok(None),
+            };
+        };
         let mut result = self
             .set_proxy_text(&value)
             .map(|()| Some(var))
@@ -955,7 +1002,7 @@ impl ProbeHub {
         // alone: only the variable the run uses is an error. A refusal is an error for its variable, and it
         // replaces a parse error of the chosen one, because the run may go on (`--no-network`) and the
         // password must not stay unhidden.
-        for (other, text) in set.iter().skip(1) {
+        for (other, text) in set.iter().skip(1).chain(all.iter()) {
             if text == &value {
                 continue;
             }
@@ -982,6 +1029,22 @@ impl ProbeHub {
             ActionOutcome::Failed
         });
         result
+    }
+
+    /// Adds the secrets of each proxy URL in `vars` that parses to the known-secret set. Returns the
+    /// first variable whose secret the set refused, after trying them all.
+    fn hide_secrets_of(&self, vars: &[(&'static str, String)]) -> Option<&'static str> {
+        let mut refused = None;
+        for (var, text) in vars {
+            if let Ok(parsed) = ProxyUrl::parse(text) {
+                for secret in parsed.secrets() {
+                    if !self.add_known_secret(&secret) {
+                        refused.get_or_insert(*var);
+                    }
+                }
+            }
+        }
+        refused
     }
 
     /// The probe for run-level work on this OS, which the log records with `check: null`. The

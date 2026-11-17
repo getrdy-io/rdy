@@ -100,6 +100,17 @@ It is a probe call like any other: it writes one `native` entry (`api: system_ro
 and a call after the check ended is denied and logged. (f) A connection that ends after the reply head
 does not lose the status: the head is data, and the body is cut (`body_cut`).
 
+**Amendment (M1-098).** Three additions to decision 2, all inside the peers INV-11 already lists. (a)
+`Probe::proxy_reach` opens one TCP connection to the run's proxy and closes it, with no `CONNECT` and no
+byte written. It needs `PeerClass::Proxy` and no spec host, the proxy's name is the one name resolved here,
+and the address rule of decision 2 applies to it (`RULE_PROXY_ADDRESS`). `--no-network` refuses it. (b)
+`rdy_engine::probe::NoProxy` is the one `NO_PROXY` matcher (Go's `httpproxy` rules plus CIDR entries, the
+loopback rule, bounded at 256 entries and 8 KiB). `ProbeHub::set_proxy_from_env` reads `NO_PROXY` (else
+`no_proxy`) with the proxy, and `Probe::route_for` gives a host `Route::Direct` when the list or the loopback
+rule exempts it, else `Route::ViaProxy` when the run has a proxy. `proxy_only` ignores the list. The k8s
+client moves onto the same matcher in M1-107. (c) The hub also records which proxy variables are set in two
+spellings that differ (`env_conflicts`, names only) and hides the password of an `ALL_PROXY` URL.
+
 ## Consequences
 
 - One place enforces peers, the address rule, caps and the log, and Replay drives all of it.

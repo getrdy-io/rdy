@@ -69,7 +69,10 @@ use super::addr::is_unusable_peer;
 use super::log::Pending;
 use super::proxy::{ProxyUrl, parse_connect_head};
 use super::sock::host_port;
-use super::{Backend, NetFailure, Probe, ProbeError, ProbeHub, RULE_NO_NETWORK, refuse, settle};
+use super::{
+    Backend, EnvConflict, Exemption, NetFailure, NoProxy, Probe, ProbeError, ProbeHub,
+    RULE_NO_NETWORK, refuse, settle,
+};
 use crate::check::PeerClass;
 
 mod http;
@@ -144,6 +147,16 @@ pub enum Route {
     Direct,
     /// Through the run's proxy, with a `CONNECT` written by the facade.
     ViaProxy,
+}
+
+/// How `auto` reaches a host: the route, and why a host goes direct although the run has a proxy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AutoRoute {
+    /// `Route::ViaProxy` when the run has a proxy and nothing exempts the host, else `Route::Direct`.
+    pub route: Route,
+    /// Why the host goes direct although the run has a proxy: `NO_PROXY`, or the loopback rule.
+    pub exempt: Option<Exemption>,
 }
 
 /// One connection attempt to one address.
@@ -293,6 +306,129 @@ impl Probe {
     #[must_use]
     pub fn proxy_source(&self) -> Option<&'static str> {
         self.hub.as_ref()?.proxy_source.get().copied()
+    }
+
+    /// How `auto` reaches `target`: through the run's proxy when it has one, unless `NO_PROXY` exempts
+    /// the host (M1-098). The route a product started from this shell would take, which is what
+    /// `net.egress` tests with `via_proxy: auto`. It writes no log entry and reads nothing: the list was
+    /// read once by `ProbeHub::set_proxy_from_env`.
+    ///
+    /// A run with no proxy is [`Route::Direct`] with no exemption. A host that `NO_PROXY` or the
+    /// loopback rule exempts is [`Route::Direct`] with the [`Exemption`] that did it.
+    #[must_use]
+    pub fn route_for(&self, target: &Target) -> AutoRoute {
+        let direct = |exempt| AutoRoute {
+            route: Route::Direct,
+            exempt,
+        };
+        let Some(hub) = self.hub.as_ref().filter(|hub| hub.proxy.get().is_some()) else {
+            return direct(None);
+        };
+        let exempt = match hub.no_proxy.get() {
+            Some((list, _)) => list.exempts(&target.host().to_string(), target.port()),
+            // With no list, only the loopback rule applies.
+            None => NoProxy::default().exempts(&target.host().to_string(), target.port()),
+        };
+        match exempt {
+            Some(why) => direct(Some(why)),
+            None => AutoRoute {
+                route: Route::ViaProxy,
+                exempt: None,
+            },
+        }
+    }
+
+    /// The `NO_PROXY` list of the run and the variable it came from (`NO_PROXY` or `no_proxy`), or
+    /// `None` when neither is set. It is read once, by `ProbeHub::set_proxy_from_env`. The list can name
+    /// internal hosts: show an entry only where a customer needs it.
+    #[must_use]
+    pub fn no_proxy(&self) -> Option<(NoProxy, &'static str)> {
+        self.hub.as_ref()?.no_proxy.get().cloned()
+    }
+
+    /// The proxy variables that were set in two spellings that differ when the run started, by name.
+    /// Empty when `ProbeHub::set_proxy_from_env` did not run. It never holds a value.
+    #[must_use]
+    pub fn proxy_env_conflicts(&self) -> Vec<EnvConflict> {
+        self.hub
+            .as_ref()
+            .and_then(|hub| hub.env_conflicts.get().cloned())
+            .unwrap_or_default()
+    }
+
+    /// Opens one TCP connection to the run's proxy itself and closes it, with no `CONNECT` and no byte
+    /// written (M1-098). It answers "can this machine reach the proxy", which is what `net.proxy` needs
+    /// and no spec host is involved. The check must declare [`PeerClass::Proxy`]. The proxy's name is
+    /// resolved here (it is the one name that is not resolved at the proxy) and every answer in a
+    /// refused range refuses the call, as for a proxied call. The log has one `connect` entry for the
+    /// proxy's host and port, with `via_proxy` null and the connected address.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeError::Denied`] for an undeclared peer class, `--no-network` and a call after the check
+    /// ended; [`ProbeError::Net`] with [`NetFailure::NoProxy`] when the run has no proxy, or a name that
+    /// did not resolve. A proxy that refuses, resets or stays silent is `Ok` with the outcome in the
+    /// report.
+    pub async fn proxy_reach(&self) -> Result<TcpReport, ProbeError> {
+        let Some(proxy) = self.hub.as_ref().and_then(|hub| hub.proxy.get()) else {
+            // The entry below needs a hub, so a probe without one is refused by `begin`.
+            let (_, entry) = self.begin(ActionKind::Connect, Map::new(), "the proxy")?;
+            return Err(fail_net(entry, NetFailure::NoProxy));
+        };
+        let what = format!("{}:{}", proxy.host(), proxy.port());
+        let mut fields = Map::new();
+        fields.insert("host".to_owned(), proxy.host().to_string().into());
+        fields.insert("port".to_owned(), proxy.port().into());
+        fields.insert("via_proxy".to_owned(), Value::Null);
+        fields.insert("addr".to_owned(), Value::Null);
+        let (hub, mut entry) = self.begin(ActionKind::Connect, fields, &what)?;
+        if self.offline() {
+            return Err(refuse(entry, RULE_NO_NETWORK, &what));
+        }
+        let declared = self
+            .scope
+            .info
+            .is_some_and(|info| info.peers.contains(&PeerClass::Proxy));
+        if !declared {
+            return Err(refuse(entry, RULE_PROXY_UNDECLARED, &what));
+        }
+        // The proxy is dialled as a target of its own: the call has the proxy's address rule and no
+        // spec-host rule, and no tunnel is opened.
+        let Ok(target) = Target::parse(&what) else {
+            return Err(fail_net(
+                entry,
+                NetFailure::Dns {
+                    host: proxy.host().to_string(),
+                },
+            ));
+        };
+        let result = self
+            .unless_ended(&what, self.dial(hub, &target, Some(proxy), false))
+            .await
+            .map(|dialed| dialed.report);
+        match result {
+            Ok(report) => {
+                entry.set(
+                    "addr",
+                    report
+                        .addr
+                        .map_or(Value::Null, |a| a.ip().to_string().into()),
+                );
+                if report.connected {
+                    entry.finish(ActionOutcome::Ok);
+                } else {
+                    entry.set("error", report.failure());
+                    entry.finish(if report.failure_outcome() == AttemptOutcome::TimedOut {
+                        ActionOutcome::Timeout
+                    } else {
+                        ActionOutcome::Failed
+                    });
+                }
+                Ok(report)
+            }
+            Err(ProbeError::Net(failure)) => Err(fail_net(entry, failure)),
+            Err(error) => settle::<TcpReport>(entry, Err(error), |_, _| {}),
+        }
     }
 
     /// The policy before any lookup or connection.

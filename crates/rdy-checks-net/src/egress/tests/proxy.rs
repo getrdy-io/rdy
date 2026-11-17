@@ -560,8 +560,191 @@ async fn a_direct_http_endpoint_sends_no_proxy_credential_when_a_proxy_is_set() 
     assert_secrets_absent(&ran);
 }
 
+// ---- NO_PROXY (M1-098) -------------------------------------------------------------------------------
+
+/// The machine of the NO_PROXY tests: the proxy of `through`, the `HTTPS_PROXY` and `NO_PROXY` of the
+/// environment, and the name `direct.acme.test` that points straight at `direct`.
+fn with_no_proxy(
+    proxy: &ConnectProxy,
+    direct: &HttpServer,
+    no_proxy: &str,
+    extra: &[(&str, &str)],
+) -> Replay {
+    let mut replay = through(proxy, None)
+        .env("HTTPS_PROXY", PROXY_URL)
+        .env("NO_PROXY", no_proxy)
+        .host("direct.acme.test", ["192.0.2.60".parse().expect("ip")])
+        .tcp(
+            format!("192.0.2.60:{}", direct.addr().port())
+                .parse()
+                .expect("addr"),
+            TcpScript::Serve("direct".to_owned()),
+        )
+        .serve_tcp("direct", direct.addr());
+    for (name, value) in extra {
+        replay = replay.env(name, value);
+    }
+    replay
+}
+
 #[tokio::test]
-async fn no_proxy_is_reported_as_not_applied_without_its_value() {
+async fn a_no_proxy_host_connects_direct_while_the_other_hosts_use_the_proxy() {
+    let direct = HttpServer::start(HttpOptions::plain())
+        .await
+        .expect("direct server");
+    let via = HttpServer::start(HttpOptions::plain())
+        .await
+        .expect("proxied server");
+    let via_at = format!("via.acme.test:{}", via.addr().port());
+    let direct_at = format!("direct.acme.test:{}", direct.addr().port());
+    let proxy = ConnectProxy::start_with_routes(ProxyMode::Ok, &[(&via_at, via.addr())])
+        .await
+        .expect("proxy");
+    let replay = with_no_proxy(&proxy, &direct, "internal.example, direct.acme.test", &[]);
+    let ran = run_from_env(replay, json!([direct_at, via_at]), json!({}), NET).await;
+    let finding = ran.finding();
+    assert_eq!(finding.level, Level::Pass, "{}", finding.message);
+    // The NO_PROXY host: direct. It was looked up here, connected on its own address, and the report says
+    // which entry sent it direct.
+    let d = ran.endpoint(0);
+    assert_eq!(d["endpoint"], direct_at.as_str());
+    assert_eq!(d["route"], "direct");
+    assert_eq!(
+        d["exempted_by"],
+        "NO_PROXY entry \"direct.acme.test\" covers the host"
+    );
+    assert!(d["lookup"].is_object() && d["attempts"].is_array(), "{d}");
+    assert_eq!(d["attempts"][0]["outcome"], "connected");
+    assert!(d.get("proxy").is_none(), "{d}");
+    // The other host: through the proxy, with a CONNECT and no local lookup.
+    let v = ran.endpoint(1);
+    assert_eq!(v["route"], "proxy");
+    assert_eq!(v["proxy"], PROXY_ORIGIN);
+    assert!(v.get("exempted_by").is_none(), "{v}");
+    // The proxy saw one CONNECT, for the other host only.
+    let connects = proxy.requests();
+    assert_eq!(connects.len(), 1, "{connects:?}");
+    assert_eq!(connects[0].target, via_at);
+    // The log: the NO_PROXY host was looked up here and the proxied one was not.
+    let lookups: Vec<String> = ran
+        .run
+        .action_log()
+        .actions
+        .iter()
+        .filter(|a| a.kind == rdy_spec::result::ActionKind::Lookup)
+        .map(|a| a.fields["host"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(lookups, ["direct.acme.test"]);
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.contains(&direct_at) && n.contains("went direct, not through the proxy")),
+        "{:?}",
+        finding.notes
+    );
+    // The list is shown only as the one entry that matched, never whole.
+    ran.assert_no_secret("internal.example");
+    assert_secrets_absent(&ran);
+}
+
+#[tokio::test]
+async fn a_star_a_cidr_and_loopback_send_hosts_direct_and_a_narrow_entry_does_not() {
+    let server = HttpServer::start(HttpOptions::plain())
+        .await
+        .expect("server");
+    let proxy = ConnectProxy::start(ProxyMode::Ok).await.expect("proxy");
+    let port = server.addr().port();
+    for (list, host, direct) in [
+        ("*", "direct.acme.test", true),
+        ("192.0.2.0/24", "192.0.2.60", true),
+        ("192.0.2.0/24", "direct.acme.test", false),
+        ("other.acme.test", "direct.acme.test", false),
+        (".acme.test", "direct.acme.test", true),
+        ("", "127.0.0.1", true),
+    ] {
+        let at = format!("{host}:{port}");
+        let replay = with_no_proxy(&proxy, &server, list, &[])
+            .host("127.0.0.1", ["127.0.0.1".parse().expect("ip")])
+            .tcp(
+                format!("127.0.0.1:{port}").parse().expect("addr"),
+                TcpScript::Serve("direct".to_owned()),
+            )
+            .tcp(
+                format!("192.0.2.60:{port}").parse().expect("addr"),
+                TcpScript::Serve("direct".to_owned()),
+            );
+        let ran = run_from_env(replay, json!([at]), json!({}), NET).await;
+        let route = ran.endpoint(0)["route"].as_str().map(str::to_owned);
+        if direct {
+            assert_eq!(route.as_deref(), Some("direct"), "{list:?} {host}");
+        } else {
+            assert_eq!(route.as_deref(), Some("proxy"), "{list:?} {host}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn proxy_only_and_direct_ignore_no_proxy_as_the_spec_asks() {
+    let direct = HttpServer::start(HttpOptions::plain())
+        .await
+        .expect("server");
+    let at = format!("direct.acme.test:{}", direct.addr().port());
+    let proxy = ConnectProxy::start_with_routes(ProxyMode::Ok, &[(&at, direct.addr())])
+        .await
+        .expect("proxy");
+    // `proxy_only` takes the proxy although NO_PROXY lists the host.
+    let replay = with_no_proxy(&proxy, &direct, "direct.acme.test", &[]);
+    let ran = run_from_env(replay, json!([at]), json!({"via_proxy": "proxy_only"}), NET).await;
+    assert_eq!(ran.endpoint(0)["route"], "proxy");
+    assert_eq!(proxy.requests().len(), 1);
+    // `direct` never takes it, and says nothing about NO_PROXY.
+    let replay = with_no_proxy(&proxy, &direct, "", &[]);
+    let ran = run_from_env(replay, json!([at]), json!({"via_proxy": "direct"}), NET).await;
+    assert!(
+        ran.endpoint(0).get("route").is_none(),
+        "{}",
+        ran.endpoint(0)
+    );
+    assert!(ran.endpoint(0).get("exempted_by").is_none());
+    assert_eq!(proxy.requests().len(), 1, "no new CONNECT");
+}
+
+#[tokio::test]
+async fn no_proxy_in_either_case_is_read_and_a_blank_one_is_not() {
+    let direct = HttpServer::start(HttpOptions::plain())
+        .await
+        .expect("server");
+    let at = format!("direct.acme.test:{}", direct.addr().port());
+    let proxy = ConnectProxy::start(ProxyMode::Ok).await.expect("proxy");
+    let lower = through(&proxy, None)
+        .env("HTTPS_PROXY", PROXY_URL)
+        .env("no_proxy", "direct.acme.test")
+        .host("direct.acme.test", ["192.0.2.60".parse().expect("ip")])
+        .tcp(
+            format!("192.0.2.60:{}", direct.addr().port())
+                .parse()
+                .expect("addr"),
+            TcpScript::Serve("direct".to_owned()),
+        )
+        .serve_tcp("direct", direct.addr());
+    let ran = run_from_env(lower, json!([at]), json!({}), NET).await;
+    assert_eq!(ran.endpoint(0)["route"], "direct");
+    // A blank NO_PROXY exempts nothing: the endpoint takes the proxy.
+    let blank = through(&proxy, None)
+        .env("HTTPS_PROXY", PROXY_URL)
+        .env("NO_PROXY", "   ");
+    let ran = run_from_env(blank, json!([at]), json!({}), NET).await;
+    assert_eq!(ran.endpoint(0)["route"], "proxy");
+    assert!(
+        !ran.finding().notes.iter().any(|n| n.contains("NO_PROXY")),
+        "{:?}",
+        ran.finding().notes
+    );
+}
+
+#[tokio::test]
+async fn two_spellings_of_the_proxy_that_differ_are_noted_by_name_only() {
     let server = HttpServer::start(HttpOptions::plain())
         .await
         .expect("server");
@@ -569,40 +752,83 @@ async fn no_proxy_is_reported_as_not_applied_without_its_value() {
     let proxy = ConnectProxy::start_with_routes(ProxyMode::Ok, &[(&at, server.addr())])
         .await
         .expect("proxy");
-    for name in ["NO_PROXY", "no_proxy"] {
-        let replay = through(&proxy, None).env(name, "internal-canary.example,10.0.0.0/8");
-        let ran = run_via(replay, json!([at]), json!({}), NET, Some(PROXY_URL)).await;
-        assert!(
-            ran.finding()
-                .notes
-                .iter()
-                .any(|n| n.starts_with("NO_PROXY is set, and this build of rdy does not apply it")),
-            "{name}: {:?}",
-            ran.finding().notes
+    let replay = through(&proxy, None)
+        .env("HTTPS_PROXY", PROXY_URL)
+        .env("https_proxy", "http://other-canary.acme.test:8080");
+    let ran = run_from_env(replay, json!([at]), json!({}), NET).await;
+    let note = ran
+        .finding()
+        .notes
+        .iter()
+        .find(|n| n.starts_with("HTTPS_PROXY and https_proxy are both set and differ"))
+        .unwrap_or_else(|| panic!("no conflict note: {:?}", ran.finding().notes));
+    assert!(note.contains("rdy used HTTPS_PROXY"), "{note}");
+    // The other value is never shown: only the proxy the run used is named, as an origin.
+    ran.assert_no_secret("other-canary");
+    assert_secrets_absent(&ran);
+    // The same value in both spellings is no conflict.
+    let same = through(&proxy, None)
+        .env("HTTPS_PROXY", PROXY_URL)
+        .env("https_proxy", PROXY_URL);
+    let ran = run_from_env(same, json!([at]), json!({}), NET).await;
+    assert!(
+        !ran.finding().notes.iter().any(|n| n.contains("both set")),
+        "{:?}",
+        ran.finding().notes
+    );
+}
+
+#[tokio::test]
+async fn direct_works_and_proxy_fails_is_said_for_an_auto_endpoint_and_for_no_other() {
+    let server = HttpServer::start(HttpOptions::plain())
+        .await
+        .expect("server");
+    let at = format!("direct.acme.test:{}", server.addr().port());
+    let proxy = ConnectProxy::start(ProxyMode::Forbidden)
+        .await
+        .expect("proxy");
+    let machine = || with_no_proxy(&proxy, &server, "internal.example", &[]);
+    let ran = run_from_env(machine(), json!([at]), json!({}), NET).await;
+    let finding = ran.finding();
+    assert_eq!(ran.endpoint(0)["class"], "proxy_403");
+    assert_eq!(ran.endpoint(0)["direct_works"], true);
+    assert!(
+        finding
+            .notes
+            .iter()
+            .any(|n| n.contains("direct works, proxy fails") && n.contains(PROXY_ORIGIN)),
+        "{:?}",
+        finding.notes
+    );
+    let fix = finding.fix.as_deref().expect("a fix");
+    assert!(
+        fix.contains("add direct.acme.test to NO_PROXY so the product connects direct"),
+        "{fix}"
+    );
+    assert_secrets_absent(&ran);
+    // `proxy_only` fails the same way and the direct path is not tried: the spec asked for the proxy.
+    let ran = run_from_env(
+        machine(),
+        json!([at]),
+        json!({"via_proxy": "proxy_only"}),
+        NET,
+    )
+    .await;
+    assert_eq!(ran.endpoint(0)["class"], "proxy_403");
+    assert!(ran.endpoint(0).get("direct_works").is_none());
+    // Where the direct connect fails too, nothing is said.
+    let broken = through(&proxy, None)
+        .env("HTTPS_PROXY", PROXY_URL)
+        .host("direct.acme.test", ["192.0.2.60".parse().expect("ip")])
+        .tcp(
+            format!("192.0.2.60:{}", server.addr().port())
+                .parse()
+                .expect("addr"),
+            TcpScript::Refused,
         );
-        ran.assert_no_secret("internal-canary");
-    }
-    // Blank, or no proxy in use: no note.
-    for (env, proxied) in [("   ", true), ("internal.example", false)] {
-        let replay = through(&proxy, None).env("NO_PROXY", env);
-        let proxy_text = proxied.then_some(PROXY_URL);
-        let ran = run_via(
-            replay
-                .host("db.acme.test", ["127.0.0.1".parse().expect("ip")])
-                .tcp(server.addr(), TcpScript::Serve("web".to_owned()))
-                .serve_tcp("web", server.addr()),
-            json!([at]),
-            json!({}),
-            NET,
-            proxy_text,
-        )
-        .await;
-        assert!(
-            !ran.finding().notes.iter().any(|n| n.contains("NO_PROXY")),
-            "{env:?}: {:?}",
-            ran.finding().notes
-        );
-    }
+    let ran = run_from_env(broken, json!([at]), json!({}), NET).await;
+    assert_eq!(ran.endpoint(0)["class"], "proxy_403");
+    assert!(ran.endpoint(0).get("direct_works").is_none());
 }
 
 #[tokio::test]
@@ -679,4 +905,13 @@ async fn a_redirect_to_a_plain_http_host_suggests_port_80() {
         "{:?}",
         ran.finding().notes
     );
+}
+
+#[test]
+fn the_new_evidence_keys_do_not_read_as_secret_names() {
+    // The redactor replaces the value of a key such as `bypass` or `credentials` (it did for the first
+    // name chosen for the NO_PROXY reason), so the keys of M1-098 are checked against the same rule.
+    for key in ["exempted_by", "direct_works", "route", "proxy"] {
+        assert!(!rdy_engine::redact::is_secret_name(key), "{key}");
+    }
 }

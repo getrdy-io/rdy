@@ -21,6 +21,8 @@ use tempfile::TempDir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::*;
+
+mod no_proxy;
 use crate::check::{CheckInfo, CheckMeta, Os, OsSupport, Support};
 use crate::family::HostSet;
 use crate::probe::proxy::ProxyChallenge;

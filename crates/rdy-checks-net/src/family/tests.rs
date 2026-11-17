@@ -41,9 +41,9 @@ fn skip_kind(plan: &RunPlan, key: &str) -> Option<SkipKind> {
 }
 
 #[test]
-fn the_family_lists_net_egress_and_net_mtu_and_registers_once() {
+fn the_family_lists_its_checks_and_registers_once() {
     let ids: Vec<&str> = NetFamily.checks().iter().map(|info| info.id).collect();
-    assert_eq!(ids, ["net.egress", "net.mtu"]);
+    assert_eq!(ids, ["net.egress", "net.proxy", "net.mtu"]);
     let mut twice = registry();
     assert_eq!(
         twice.register(NetFamily).map(|_| ()),
@@ -67,8 +67,37 @@ fn every_info_is_filed_under_net_with_a_timeout() {
         };
         assert_eq!(info.needs, expected, "{} needs", info.id);
     }
-    // 03 gives net.mtu 3 seconds.
+    // 03 gives net.mtu 3 seconds and net.proxy 5.
     assert_eq!(mtu::INFO.default_timeout.map(|d| d.as_secs()), Some(3));
+    assert_eq!(proxy::INFO.default_timeout.map(|d| d.as_secs()), Some(5));
+}
+
+#[test]
+fn net_proxy_runs_on_every_os_and_is_partial_where_only_the_environment_is_read() {
+    let entries = [json!({"id": "net.proxy", "required_no_proxy": [".svc"]})];
+    for os in [Os::Linux, Os::Macos, Os::Windows] {
+        let planned = plan(os, &entries);
+        assert_eq!(planned.runnable().count(), 1, "{os:?}");
+        assert_eq!(skip_kind(&planned, "net.proxy"), None, "{os:?}");
+    }
+    assert_eq!(proxy::INFO.os.on(Os::Linux), Support::Full);
+    for os in [Os::Macos, Os::Windows] {
+        assert!(proxy::INFO.os.on(os).partial_note().is_some(), "{os:?}");
+    }
+}
+
+#[test]
+fn net_proxy_builds_from_its_params_and_has_no_spec_hosts() {
+    let spec: Spec = parse_unverified(ACME.as_bytes()).expect("the example spec parses");
+    let entry: CheckSpec = serde_json::from_value(
+        json!({"id": "net.proxy", "required_no_proxy": [".svc"], "daemons_need_proxy": true}),
+    )
+    .expect("an entry");
+    let built = NetFamily
+        .build(&entry, entry.decode_params(), &spec)
+        .expect("it builds");
+    assert_eq!(built.check.info().id, "net.proxy");
+    assert!(built.hosts.is_empty(), "the proxy is not a spec host");
 }
 
 #[test]
