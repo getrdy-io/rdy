@@ -216,8 +216,8 @@ main). No document may name a person as owner, and no document may mention the f
 
 **Progress.** 119 of 178 M1 tickets are merged on main: 111 of 148 core and 8 of 30 non-core. #24 adds
 M1-177 and M1-178, which makes 180, and correction-45 adds M1-181. Totals after correction-34 and
-correction-45: M1 181 tickets, 400 h, 335.5 h core; M2 128 tickets, 458.5 h; all milestones 409 tickets,
-1372 h, 1307.5 h core.
+correction-47: M1 181 tickets, 400 h, 335.5 h core; M2 129 tickets, 461.5 h; all milestones 410 tickets,
+1375 h, 1310.5 h core.
 Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Corrections filed in this session:**
@@ -245,6 +245,9 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
   and 5xx fail) and #72 (net.dns needs `Network`, refused-range `getent` answers block, 9 s per name).
   The second of #70 and #74, and of #70 and #72, to merge deletes that check's `PENDING` row (M1-179).
   M2-060 sets non-dumpable right after the privilege gate, before any password prompt (#47 security).
+- 47: records and approves the 03 changes of #78 (k8s.cni reads DaemonSets by name only, unknown is partial,
+  default-deny is 03's). M1-175 builds k8s.cni. New M2-129: plugin pod restarts, ready below desired and a
+  live check of the unverified `cni.toml` entries.
 
 **Open PRs at the pause.** The order and what each still needs are in `pending-fixes.md`:
 - #26, #27, #28 and #24 come first, from the 2026-10-31 list.
@@ -255,9 +258,10 @@ Recompute with `python3 -I totals.py < docs/plan/11-backlog.md`.
 
 **Numbers.**
 - The next PR is #51 (#50 is this pause-state PR).
-- The next free ADR is 0046. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
-  security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163) and ADR 0045 in #64 (M1-164).
-- The next ticket ids are M1-182 and M2-129, and the next correction is 47.
+- The next free ADR is 0047. ADR 0042 (the Gatekeeper constraints list wildcard) is in #48, accepted by
+  security. ADR 0043 is in #62 (M1-162), ADR 0044 in #65 (M1-163), ADR 0045 in #64 (M1-164) and ADR 0046
+  in #78 (M1-165).
+- The next ticket ids are M1-182 and M2-130, and the next correction is 48.
 - The next plan-correction row is PC-53. PC-50 to PC-52 are on main, from M1-176.
 
 **Process lessons from this session.**
@@ -389,6 +393,13 @@ Review findings that belong to a later ticket. Give each note to that ticket's i
     - M2-127: CI builds the pty probe examples once before nextest (#66 review).
   - Follow-ups that correction-44 gave ids:
     - M2-128: the run header prints before progress starts, so 07's M1-142 rule holds (#68 reviews).
+  - Follow-ups that correction-47 gave ids:
+    - M2-129: k8s.cni reports crash-looping and not-ready plugin pods, and k8s-expert checks the
+      `cni.toml` entries still marked `verified = false` against a live cluster (#78 reviews).
+  - M1-115 (correction-47): 13 of the 15 `cni.toml` entries from #78 are `verified = false` (all but Flannel
+    and the AWS VPC CNI): their names come from memory of the projects' manifests. Read each entry's
+    `source` page. Where the page shows the names, set `verified = true` and `checked_on`. Leave the rest
+    for M2-129.
   - Whichever of #60 (M1-142) and #68 (M1-143) merges second passes `quiet or verbose` to
     `live_line_allowed` and updates the run_cmd.rs docs sentence on `--quiet` and `--verbose`.
 

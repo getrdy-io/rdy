@@ -478,4 +478,26 @@ the corrections log of `11-backlog.md`.
   row. From the PR #47 security review: M2-060 sets the process non-dumpable in every command right after
   the privilege gate passes, before any password prompt and never earlier, because the gate reads
   `/proc/self/auxv` and start-up lists `/proc/self/fd` first. M2-104 lists descriptors before the flag or
-  uses `close_range`. 04 says so. No test-pinned document changed, and no estimate.
+  uses `close_range`. 04 section 3.4 says so; 04 Appendix B untouched. No test-pinned text changed, and no
+  estimate.
+- **Correction-47, the 03 section of k8s.cni, and one M2 ticket.** PR #78 (M1-165) changes its own 03
+  section after the code-reviewer, security-reviewer and k8s-expert reviews. The 03 text lands with the PR;
+  this entry approves it. k8s.cni never lists DaemonSets, because a DaemonSet holds env values. It reads 16
+  namespace and name pairs by name through optional Roles (`examples/rbac/rdy-readonly-cni.yaml`, ADR 0046):
+  14 in `kube-system`, `calico-system/calico-node` and `kube-flannel/kube-flannel-ds`. A namespace other than
+  `kube-system` is read by `GET` first, and its pair is skipped on a 404. DaemonSets are read only when the
+  node condition, the API groups and the OpenShift `Network` object did not name the plugin, or for the AWS
+  VPC CNI. OpenShift is named by `Network` `status.networkType`. Crash-loop restart evidence is not read in
+  M1, and ready below desired is not reported. Unknown, unreadable or two plugins is partial with the grants
+  named, never a block. Flannel with Calico is Canal, which enforces. A policy plugin on top of a base plugin
+  is the policy plugin (each `cni.toml` entry is base, policy or full); Azure CNI alone does not enforce.
+  Flannel on k3s is partial, because rdy cannot read `--disable-network-policy`. The AWS VPC CNI follows
+  `ENABLE_NETWORK_POLICY`, and is partial when it is absent. Pod ranges come from `Node.spec.podCIDRs` only
+  for a node-IPAM plugin or the OpenShift `Network` object; otherwise the pod side of `avoid_cidrs` is
+  partial. Default-deny egress is 03's definition: a policy that selects all pods and governs egress with no
+  rules. It warns only with `needs_egress`; otherwise, and on a plugin that does not enforce, it is a note.
+  Every result notes that only namespace `NetworkPolicy` objects are read. M1-165 must leave 03 saying so.
+  M1-175 also builds k8s.cni, eleven k8s ids in all, still 1.5 h. New M2-129 reads the plugin pods' restart
+  evidence with k8s.dns's pod read, reports ready below desired, and has k8s-expert confirm the 13 `cni.toml`
+  entries marked `verified = false` against a live cluster. M1-115's reviewer reads their source pages first.
+  No test-pinned document changed.
