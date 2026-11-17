@@ -132,6 +132,32 @@ fn attribute(tag: &str, name: &str) -> Option<String> {
     Some(tag[start..start + end].to_owned())
 }
 
+/// Whether `lower` (already lower-cased) has a `src` attribute: the word `src` that starts at a boundary
+/// (not after a letter, digit, `-` or `_`) and is followed by `=` after any whitespace. Runs of tabs,
+/// newlines, form feeds and spaces count as one space first, so `<img\n src\t=` is found.
+fn has_src_attribute(lower: &str) -> bool {
+    let mut text = String::with_capacity(lower.len());
+    let mut space = false;
+    for c in lower.chars() {
+        if c.is_ascii_whitespace() {
+            space = true;
+        } else {
+            if space {
+                text.push(' ');
+            }
+            space = false;
+            text.push(c);
+        }
+    }
+    let text = text.replace(" =", "=");
+    text.match_indices("src=").any(|(at, _)| {
+        !text[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    })
+}
+
 /// The hrefs a page may hold besides `#id` links, written out in full. The footer links of 07 D.4 are
 /// added here, exactly, when the page gets a footer. Until then the page links nowhere outside itself, and
 /// a new off-file `href` fails every page check.
@@ -168,7 +194,6 @@ fn assert_static(what: &str, html: &str) -> TestResult {
         "<script",
         "@import",
         "url(",
-        " src=",
         "srcset",
         "formaction",
         "<base",
@@ -184,7 +209,6 @@ fn assert_static(what: &str, html: &str) -> TestResult {
     }
     for forbidden in [
         "<link",
-        " src=",
         "srcset",
         "formaction",
         "<base",
@@ -197,6 +221,7 @@ fn assert_static(what: &str, html: &str) -> TestResult {
             "{what}: {forbidden:?} is in the body"
         );
     }
+    assert!(!has_src_attribute(&lower), "{what}: a src attribute");
     // Text from the machine is escaped, so none of it opens a tag that loads or runs anything.
     for forbidden in [
         "<img",
@@ -588,7 +613,8 @@ async fn leaky_doc(with_actions: bool) -> TestResult<(Value, Vec<String>)> {
         let secret = &secrets[*index];
         let file = probe.read(Path::new(path)).await?;
         assert!(file.truncated_tail, "{name}: the cap did not cut the file");
-        // CONTROL: the bytes the facade read hold the secret, so a clean page is the redactor's doing.
+        // CONTROL: the bytes the facade read hold the secret, or the part of it the cap left inside. So a
+        // clean result below is the work of the facade and the redactor, not of a file that never had it.
         let raw = String::from_utf8_lossy(&file.bytes);
         let held = if *k == 0 { secret.secret.len() } else { *k };
         assert!(
@@ -604,6 +630,31 @@ async fn leaky_doc(with_actions: bool) -> TestResult<(Value, Vec<String>)> {
             "{name}: no needle is inside the cap"
         );
         let shown = probe.file_text(&file)?;
+        if *k == 0 {
+            // A whole secret is in the raw bytes before redaction. The report's rules remove it later, and
+            // the tags asserted in the leak test show they did.
+            assert!(
+                raw.contains(&secret.secret),
+                "{name}: the whole {} is not in the raw bytes",
+                secret.kind
+            );
+        } else {
+            // A cut secret is gone from the shown text already. For the aws key and the url that is the
+            // facade dropping the partial last line of a cut file. For the private key it is the key guard
+            // removing an unterminated block through the end. No rule of the report is involved.
+            assert!(
+                !shown.contains(&secret.secret[..held]),
+                "{name}: the cut {} is in the shown text",
+                secret.kind
+            );
+            for needle in &secret.needles {
+                assert!(
+                    !shown.contains(needle.as_str()),
+                    "{name}: a fragment of the {} is in the shown text: {needle}",
+                    secret.kind
+                );
+            }
+        }
         // The member name is plain on purpose: a name like `key` makes the report walk replace the whole
         // value, and the rule's own tag would never be seen.
         observed.insert(format!("case {number}"), json!(evidence_of(&shown)));
@@ -715,4 +766,27 @@ async fn the_page_of_the_run_with_secrets_matches_its_golden() -> TestResult {
         html.as_bytes(),
     );
     Ok(())
+}
+
+/// The `src` check sees an attribute split by any whitespace, and leaves words that only end in `src`.
+#[test]
+fn the_src_check_normalises_whitespace_and_keeps_its_boundary() {
+    for found in [
+        "<img src=\"x\">",
+        "<img\nsrc=\"x\">",
+        "<img\tsrc\t=\"x\">",
+        "<img\u{c}src\n=x>",
+        "<img alt=a\r\n  src = x>",
+        "<img\"src=x",
+    ] {
+        assert!(has_src_attribute(found), "{found:?}");
+    }
+    for clean in [
+        "<p>data-src=1</p>",
+        "<p>resrc=1</p>",
+        "<p>src</p>",
+        "<p>_src=</p>",
+    ] {
+        assert!(!has_src_attribute(clean), "{clean:?}");
+    }
 }
