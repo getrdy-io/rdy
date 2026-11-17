@@ -14,7 +14,7 @@ pub mod html;
 pub mod json;
 
 #[cfg(feature = "html")]
-pub use html::{HtmlError, render_html};
+pub use html::{HtmlError, HtmlPage, render_html, render_page};
 pub use json::{
     HtmlSafeJson, JsonError, MAX_REPORT_BYTES, json_bytes, read_report, read_report_from,
     write_json,

@@ -1,0 +1,21 @@
+{
+  "host": "web.acme.test",
+  "chain": "machine_only",
+  "home": "/data/homes/canary-user-7f3a",
+  "sources": [
+    {
+      "kind": "bundle",
+      "location": "/home/canary-user-7f3a/certs/inspection.pem",
+      "env": "SSL_CERT_FILE"
+    },
+    {
+      "kind": "directory",
+      "location": "/data/homes/canary-user-7f3a/trust",
+      "env": "SSL_CERT_DIR"
+    },
+    {
+      "kind": "bundle",
+      "location": "/etc/ssl/certs/ca-certificates.crt"
+    }
+  ]
+}
